@@ -50,7 +50,7 @@ describe('the board gateway', () => {
   it('should read one card by id', async () => {
     const { client, calls } = recording(cardResponse());
     await new ClientBoardGateway(client).card('F412');
-    should(calls[0]).eql({ route: 'GET /v1/board/cards/:cardId', init: { params: { cardId: 'F412' } } });
+    should(calls[0]).eql({ route: 'GET /v1/board/tasks/:taskId', init: { params: { taskId: 'F412' } } });
   });
 
   it('should post a create without naming any ferret: the credential is the actor', async () => {
@@ -62,15 +62,15 @@ describe('the board gateway', () => {
       visibility: 'private',
     } as const;
     await new ClientBoardGateway(client).create(request as never);
-    should(calls[0]).eql({ route: 'POST /v1/board/cards', init: { body: request } });
+    should(calls[0]).eql({ route: 'POST /v1/board/tasks', init: { body: request } });
   });
 
   it('should post an action to the card', async () => {
     const { client, calls } = recording(cardResponse(card({ laneId: 'implement' })));
     await new ClientBoardGateway(client).act('F412', { action: 'move', to: 'implement' } as never);
     should(calls[0]).eql({
-      route: 'POST /v1/board/cards/:cardId',
-      init: { params: { cardId: 'F412' }, body: { action: 'move', to: 'implement' } },
+      route: 'POST /v1/board/tasks/:taskId',
+      init: { params: { taskId: 'F412' }, body: { action: 'move', to: 'implement' } },
     });
   });
 

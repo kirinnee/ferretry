@@ -28,7 +28,7 @@ describe('cardOrigin: the owner asked', () => {
     ['the owner made it from a chat', by({ kind: 'owner' }, `session:${LEAD}`)],
     ['the daemon started a session the owner briefed', by({ kind: 'daemon' }, 'owner')],
     ['a helper recorded words relayed from the owner', by(ferret(CHILD), 'owner via lead denisha, turn-001')],
-    ['a ferret recorded an owner reopen', by(ferret(CHILD), 'the owner (fy card reopen)')],
+    ['a ferret recorded an owner reopen', by(ferret(CHILD), 'the owner (fy task reopen)')],
     ['a top-level ferret recorded its own chat', by(ferret(LEAD), `session:${LEAD}`)],
     ['a ferret recorded another owner-started chat', by(ferret(CHILD), `session:${LEAD} (denisha brief)`)],
     ['a top-level ferret wrote a brief path as the source', by(ferret(LEAD), '/tmp/briefs/kt-board-v3.md')],
@@ -104,7 +104,7 @@ describe('cardAskedBy: a person asked', () => {
   it.each([
     ['the Board page filed it as the owner', by({ kind: 'owner' }, 'owner (board)')],
     ['a ferret recorded words relayed from the owner', by(ferret(CHILD), 'owner via lead denisha, turn-001')],
-    ['a ferret recorded an owner reopen', by(ferret(CHILD), 'the owner (fy card reopen)')],
+    ['a ferret recorded an owner reopen', by(ferret(CHILD), 'the owner (fy task reopen)')],
     ['the daemon started a session the owner briefed', by({ kind: 'daemon' }, 'owner')],
     [
       'a lead brief carries the owner as its source',

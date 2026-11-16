@@ -39,7 +39,7 @@ const scripted = (
         readonly headers?: Readonly<Record<string, string>>;
       },
     ) => {
-      const cardId = init?.params?.cardId;
+      const cardId = init?.params?.taskId;
       const found = cards.find(each => each.id === cardId);
       if (route.startsWith('POST ')) {
         sent.push({
@@ -52,17 +52,17 @@ const scripted = (
           throw Object.assign(new Error(options.refuse.message), { status: options.refuse.status });
       }
       switch (route) {
-        case 'GET /v1/board/cards/:cardId':
+        case 'GET /v1/board/tasks/:taskId':
           if (found === undefined) throw Object.assign(new Error('no such card'), { status: 404 });
           return { card: found, laneSet };
         case 'GET /v1/board/ids':
           return { ids: cards.map(each => each.id) };
-        case 'POST /v1/board/cards/:cardId': {
+        case 'POST /v1/board/tasks/:taskId': {
           const body = init?.body as { readonly action: string; readonly to?: string };
           return { card: { ...found, ...(body.action === 'move' ? { laneId: body.to } : {}) }, laneSet };
         }
-        case 'POST /v1/board/cards/:cardId/start':
-          return { card: cardId, ferret: 'mvuc7tsf-0c3d50df', started: options.started ?? true };
+        case 'POST /v1/board/tasks/:taskId/start':
+          return { task: cardId, ferret: 'mvuc7tsf-0c3d50df', started: options.started ?? true };
         default:
           throw new Error(`no route ${route}`);
       }
@@ -121,7 +121,7 @@ describe('agenda.card-answer: Done · closes is the board’s own Done', () => {
 
     expect(await answer.done('F1')).toEqual({ ok: true });
     expect(sent).toHaveLength(1);
-    expect(sent[0]?.route).toBe('POST /v1/board/cards/:cardId');
+    expect(sent[0]?.route).toBe('POST /v1/board/tasks/:taskId');
     expect(sent[0]?.cardId).toBe('F1');
     expect(sent[0]?.body).toEqual({ action: 'move', to: 'closed' });
   });
@@ -226,7 +226,7 @@ describe('agenda.card-answer: a notice’s Start and Close', () => {
       ok: true,
       value: { started: false, ferret: 'mvuc7tsf-0c3d50df' },
     });
-    expect(sent).toEqual([{ route: 'POST /v1/board/cards/:cardId/start', cardId: 'F1', key: 'click-1' }]);
+    expect(sent).toEqual([{ route: 'POST /v1/board/tasks/:taskId/start', cardId: 'F1', key: 'click-1' }]);
   });
 
   it('closes a card with the board’s drop and the owner’s reason', async () => {
@@ -289,7 +289,7 @@ describe('agenda.card-reference: `&F12` proves against this machine’s cards', 
   });
 
   it('opens the card’s page, on the daemon the hook was built for', () => {
-    expect(referenceOver(scripted([]).client).href('f12')).toBe('/d/daemon%2Flaptop/card/F12');
+    expect(referenceOver(scripted([]).client).href('f12')).toBe('/d/daemon%2Flaptop/task/F12');
   });
 
   it('opens the daemon’s board, never a made-up page, for something that is not a card id', () => {
@@ -302,7 +302,7 @@ describe('agenda.card-reference: `&F12` proves against this machine’s cards', 
     const location = (globalThis as { location?: unknown }).location;
     Object.defineProperty(globalThis, 'location', { configurable: true, value: { pathname: '/d/elsewhere/agenda' } });
     try {
-      expect(referenceOver(scripted([]).client).href('F12')).toBe('/d/daemon%2Flaptop/card/F12');
+      expect(referenceOver(scripted([]).client).href('F12')).toBe('/d/daemon%2Flaptop/task/F12');
     } finally {
       Object.defineProperty(globalThis, 'location', { configurable: true, value: location });
     }

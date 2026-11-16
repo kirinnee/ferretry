@@ -204,7 +204,7 @@ describe('board provides the & reference menu (reference.catalog)', () => {
     expect(catalog([]).demand).toEqual(route?.capability as never);
     expect(catalog([]).demand).toEqual(cap('fleet', 'use'));
     // …and the card list a caller reaches from a single card is asked the same, so no read here is easier than a route.
-    const card = manifest.actions.routes.find(each => each.key === 'GET /v1/board/cards');
+    const card = manifest.actions.routes.find(each => each.key === 'GET /v1/board/tasks');
     expect(card?.capability).toEqual(route?.capability as never);
   });
 

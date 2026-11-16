@@ -109,7 +109,7 @@ describe('creating a card', () => {
     ]);
     should(response.laneSet?.projectId).equal(PROJECT);
     should(ports.focus.focused.get('lead')).eql({ id: 'F1' });
-    should(ports.changes.events).eql([{ ferret: 'lead', event: { projectId: PROJECT, cardIds: ['F1'] } }]);
+    should(ports.changes.events).eql([{ ferret: 'lead', event: { projectId: PROJECT, taskIds: ['F1'] } }]);
   });
 
   it('should number cards per kind across the machine', async () => {
@@ -998,7 +998,7 @@ describe('everything else on a card', () => {
 
     // Assert
     should(stale.code).equal('version-conflict');
-    should(stale.message).match(/changed since you read it: read it again \(card show F\d+ --yaml\)/u);
+    should(stale.message).match(/changed since you read it: read it again \(task show F\d+ --yaml\)/u);
     should(stored(ports).summary).equal('read, then written');
   });
 
@@ -1007,10 +1007,10 @@ describe('everything else on a card', () => {
     const { ports, service } = serviceWith([card({ assignee: 'child' })]);
 
     // Act
-    await service.act('F1', action({ action: 'edit', howToTest: '1. Run fy card show F1' }), child);
+    await service.act('F1', action({ action: 'edit', howToTest: '1. Run fy task show F1' }), child);
 
     // Assert
-    should(stored(ports).howToTest).equal('1. Run fy card show F1');
+    should(stored(ports).howToTest).equal('1. Run fy task show F1');
   });
 
   it('should claim and release files', async () => {
@@ -2055,7 +2055,7 @@ describe("relocating a removed lane's cards", () => {
       actor: { kind: 'daemon' },
     });
     should(stored(ports, 'F3').laneId).equal('review');
-    should(ports.changes.events).eql([{ ferret: 'lead', event: { projectId: PROJECT, cardIds: ['F1'] } }]);
+    should(ports.changes.events).eql([{ ferret: 'lead', event: { projectId: PROJECT, taskIds: ['F1'] } }]);
   });
 
   it('should leave a card that moved away, or was refiled, before its turn', async () => {

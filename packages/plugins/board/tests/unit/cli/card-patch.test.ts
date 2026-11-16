@@ -5,7 +5,7 @@ import { patchYaml } from '../../../cli/lib/patch-document.ts';
 import { card } from './fixtures.ts';
 
 const task = card({
-  title: 'Patch-edit agenda and cards',
+  title: 'Patch-edit agenda and tasks',
   summary: 'Ferrets send one patch',
   premise: '- Many flags today',
   howToTest: '1. Run it',
@@ -18,7 +18,7 @@ const parsed = (text: string) => {
   return result.patch;
 };
 
-describe('card show --yaml', () => {
+describe('task show --yaml', () => {
   it('should print the revision (the newest history seq) and every field a patch changes', () => {
     // Act
     const document = cardPatchDocument(task);
@@ -26,7 +26,7 @@ describe('card show --yaml', () => {
     // Assert
     should(document).deepEqual({
       revision: 1,
-      title: 'Patch-edit agenda and cards',
+      title: 'Patch-edit agenda and tasks',
       summary: 'Ferrets send one patch',
       premise: '- Many flags today',
       context: '',
@@ -88,7 +88,7 @@ describe('task patch', () => {
     const wrong = parseCardPatch('revision: 1\nlaneId: done\nassignee: me\ntitle: null', 'f1.yaml');
 
     // Assert
-    should(!missing.ok && missing.problems[0]).match(/^revision: required — read the whole card first/u);
+    should(!missing.ok && missing.problems[0]).match(/^revision: required — read the whole task first/u);
     const problems = wrong.ok ? '' : wrong.problems.join('\n');
     should(problems).match(/laneId: not a field a patch changes \(it takes: revision, title, summary/u);
     should(problems).match(/assignee: not a field a patch changes/u);
@@ -96,7 +96,7 @@ describe('task patch', () => {
   });
 });
 
-describe('card patch: the card progress merges by key', () => {
+describe('task patch: the task progress merges by key', () => {
   const withProgress = card({ progress: { now: 'designing', doneSoFar: '- the schema', next: '1. the CLI' } });
 
   it('should print the progress whole and send only the parts that changed', () => {
@@ -112,7 +112,7 @@ describe('card patch: the card progress merges by key', () => {
     should(plan).deepEqual({ kind: 'edit', request: { action: 'edit', revision: 1, progress: { now: 'testing' } } });
   });
 
-  it('should read a card with no progress as empty parts, and send nothing when the parts already match', () => {
+  it('should read a task with no progress as empty parts, and send nothing when the parts already match', () => {
     // Act
     const fresh = composeCardPatch(task, parsed('revision: 1\nprogress:\n  next: "1. ship"\n  now: ""'));
     const same = composeCardPatch(withProgress, parsed('revision: 1\nprogress:\n  now: designing'));
@@ -133,7 +133,7 @@ describe('card patch: the card progress merges by key', () => {
   });
 });
 
-describe('card patch: a file that parses but is not a value', () => {
+describe('task patch: a file that parses but is not a value', () => {
   /** Five lines whose aliases would expand to a hundred thousand nodes: YAML the reader refuses to build. */
   const ALIAS_BOMB = [
     'revision: 1',

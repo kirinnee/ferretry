@@ -6,7 +6,7 @@ import { card, MemoryBoardStore, world } from './support.ts';
 /**
  * `card.moving` is asked at the board service's ONE write, so every path that changes a card's lane — an owner's
  * act, a daemon trigger (the watcher, a release), a gate answer, a refile, the sweep — is asked, not only the route's
- * move; and `board.card-moved` is told once the move landed.
+ * move; and `board.task-moved` is told once the move landed.
  */
 const setup = (verdict: (input: CardMoveInput) => { allow: true } | { allow: false; reason: string }) => {
   const store = new MemoryBoardStore([card({ laneId: 'implement' })]);
@@ -41,7 +41,7 @@ describe('card.moving at the one write of a card', () => {
     should(moved).be.empty();
   });
 
-  it('should ask it of the owner’s move and tell board.card-moved once the move landed', async () => {
+  it('should ask it of the owner’s move and tell board.task-moved once the move landed', async () => {
     const { asked, moved, service } = setup(() => ({ allow: true }));
 
     await service.act('F1', { action: 'move', to: 'review', reason: 'ready' }, { kind: 'owner' });
@@ -92,7 +92,7 @@ describe('an answer to a `card` entry that is not a gate’s', () => {
 });
 
 describe('a move that cannot be announced or no longer matches what an answer expected', () => {
-  it('should keep the move and warn when board.card-moved throws', async () => {
+  it('should keep the move and warn when board.task-moved throws', async () => {
     const store = new MemoryBoardStore([card({ laneId: 'implement' })]);
     const ports = world({
       store,

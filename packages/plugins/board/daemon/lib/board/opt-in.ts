@@ -90,7 +90,7 @@ export const offBoardRefusal = (board: string, problem?: string): string =>
   [
     `The ${board} board is off, so this work needs no card: put only what the owner must decide or do on your agenda (fy agenda add …).`,
     problem === undefined ? undefined : `The approval does not count: ${problem}.`,
-    `To track it anyway, ask first: ${TRACK_ASK_COMMAND} — then, once the owner says Yes, fy card new … --approval <ask>.`,
+    `To track it anyway, ask first: ${TRACK_ASK_COMMAND} — then, once the owner says Yes, fy task new … --approval <ask>.`,
   ]
     .filter((line): line is string => line !== undefined)
     .join(' ');

@@ -62,15 +62,15 @@ export function umbrellaSignals(shape: UmbrellaShape): string[] {
 /** The refusal's words: why, then the ways out, each a command. */
 export function umbrellaRefusal(signals: readonly string[], binary: string): string {
   return [
-    `This looks like an umbrella card (${signals.join('; ')}), and nothing was created.`,
-    'A card shows the progress of one outcome; its asks ride its agenda. An umbrella shows no progress and hides each',
+    `This looks like an umbrella task (${signals.join('; ')}), and nothing was created.`,
+    'A task shows the progress of one outcome; its asks ride its agenda. An umbrella shows no progress and hides each',
     "part's asks. Instead:",
-    `  ${binary} card new … (one card per outcome)`,
-    `  ${binary} card new … --parent F12   it is one part of a bigger card`,
-    `  ${binary} card new … --related F12  add it to a related card as a note, creating nothing`,
-    `  ${binary} card new … --broad "<why this must be one card>"`,
+    `  ${binary} task new … (one task per outcome)`,
+    `  ${binary} task new … --parent F12   it is one part of a bigger task`,
+    `  ${binary} task new … --related F12  add it to a related task as a note, creating nothing`,
+    `  ${binary} task new … --broad "<why this must be one task>"`,
   ].join('\n');
 }
 
 /** One line printed when a card with the owner's words is filed under a parent: a sub-card is private. */
-export const SUB_CARD_ASK_WARNING = 'this card will be private (a sub-card); drop --parent so the owner sees it';
+export const SUB_CARD_ASK_WARNING = 'this task will be private (a sub-task); drop --parent so the owner sees it';

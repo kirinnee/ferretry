@@ -153,7 +153,7 @@ describe('claiming a card', () => {
     const byDaemon = await refusal(service.act('F1', claim, { kind: 'daemon' }));
 
     // Assert
-    should(byOwner.message).equal("claim is a ferret's: &F1 is taken with `fy card assign &F1 <ferret>`");
+    should(byOwner.message).equal("claim is a ferret's: &F1 is taken with `fy task assign &F1 <ferret>`");
     should(byDaemon.code).equal('forbidden');
   });
 
@@ -170,7 +170,7 @@ describe('claiming a card', () => {
 
     // Assert
     should(mine.message).equal('&F1 is already yours');
-    should(owned.message).equal('you own &F2: take it with `fy card assign &F2 child`');
+    should(owned.message).equal('you own &F2: take it with `fy task assign &F2 child`');
   });
 
   it('should let the claimer move the card it now holds, and journal the move as the ferret’s', async () => {
@@ -268,7 +268,7 @@ describe('what a refused helper is told about a card its lead holds', () => {
     // Assert
     for (const error of refused) {
       should(error.message).match(
-        /^You are a helper, so you can't .+\. You may .+\. Your lead holds this card: claim it first: fy card claim &F1$/u,
+        /^You are a helper, so you can't .+\. You may .+\. Your lead holds this card: claim it first: fy task claim &F1$/u,
       );
       should(error.message).not.containEql('fy send');
     }
@@ -291,7 +291,7 @@ describe('what a refused helper is told about a card its lead holds', () => {
     ];
 
     // Assert
-    for (const error of refused) should(error.message).endWith('your lead holds it: claim it first: fy card claim &F1');
+    for (const error of refused) should(error.message).endWith('your lead holds it: claim it first: fy task claim &F1');
   });
 
   it('should keep telling the helper to ask its lead for a card it cannot claim', async () => {
@@ -316,7 +316,7 @@ describe('what a refused helper is told about a card its lead holds', () => {
       const error = await refusal(service.act('F1', assignTo('grandchild'), ferret('child')));
 
       // Assert
-      should(error.message).endWith('Your lead holds this card: claim it first: fy card claim &F1');
+      should(error.message).endWith('Your lead holds this card: claim it first: fy task claim &F1');
     });
 
     for (const [name, assignee] of [
@@ -353,10 +353,10 @@ describe('what a refused helper is told about a card its lead holds', () => {
 
   it('should word the tail from the claim command when one is given', async () => {
     // Act
-    const message = await subFerretRefusal(DIRECTORY, 'child', 'move cards', undefined, 'fy card claim &F7');
+    const message = await subFerretRefusal(DIRECTORY, 'child', 'move cards', undefined, 'fy task claim &F7');
 
     // Assert
-    should(message).endWith('Your lead holds this card: claim it first: fy card claim &F7');
+    should(message).endWith('Your lead holds this card: claim it first: fy task claim &F7');
   });
 });
 

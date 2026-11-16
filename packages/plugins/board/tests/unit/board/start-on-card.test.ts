@@ -592,7 +592,7 @@ describe('the brief of a ferret started on a card', () => {
     should(brief).containEql('How to test:\nrun the suite');
     should(brief).containEql('Progress:\nNow:\nhalf way\n\nDone so far:\n- the route');
     should(brief).not.containEql('Next:');
-    should(brief).containEql('`fy card note`');
+    should(brief).containEql('`fy task note`');
   });
 
   it('should carry the owner’s clarifications and name the ferrets in the history it shows', () => {

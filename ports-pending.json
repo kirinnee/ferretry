@@ -2,9 +2,9 @@
   "format": 1,
   "unwired": [
     {
-      "seam": "hook:card.moving",
+      "seam": "hook:task.moving",
       "card": "&F1787",
-      "why": "Extension point: no plugin reacts when a card moves, which is fine until one needs to."
+      "why": "Extension point: no plugin reacts when a task moves, which is fine until one needs to."
     },
     {
       "seam": "hook:message.before-send",

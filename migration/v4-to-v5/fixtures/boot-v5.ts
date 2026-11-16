@@ -28,7 +28,7 @@
  */
 import { FerretSummarySchema } from '@ferretry/core-ferrets/contract';
 import { DAEMON_RUN_FILE, DaemonRunSchema } from '@ferretry/kernel/contract';
-import { CardResponseSchema } from '@ferretry/plugin-board/contract';
+import { readCard } from '@ferretry/plugin-board/contract';
 import { ProjectListSchema } from '@ferretry/plugin-projects/contract';
 import { spawn, type Subprocess } from 'bun';
 import { appendFileSync, existsSync } from 'node:fs';
@@ -462,7 +462,7 @@ async function checkProjects(url: string, bearer: string): Promise<void> {
 async function checkCards(url: string, bearer: string): Promise<void> {
   for (const card of made.cards ?? [])
     await checked('board', `card ${card.id}`, async () => {
-      const { card: view } = CardResponseSchema.parse(await get(url, bearer, `/v1/board/cards/${card.id}`));
+      const { card: view } = readCard(await get(url, bearer, `/v1/board/tasks/${card.id}`));
       if (view.id !== card.id) fail(`card ${card.id}: v5 answered card ${view.id}`);
       if (view.laneId !== card.lane) fail(`card ${card.id}: it was in lane ${card.lane}; v5 has it in ${view.laneId}`);
       if (card.dependsOn !== undefined && !JSON.stringify(view.dependsOn).includes(`"${card.dependsOn}"`))

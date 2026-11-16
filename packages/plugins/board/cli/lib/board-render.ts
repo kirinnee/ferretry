@@ -115,7 +115,7 @@ function groupBoard(response: BoardResponse, projects: readonly BoardProject[]):
 
 const headerLine = (response: BoardResponse, projects: readonly BoardProject[], label: string): string => {
   const scope = response.projectId === null ? label : (projects.find(p => p.id === response.projectId)?.name ?? label);
-  return `${scope} — ${String(response.cards.length)} cards · ${countsLine(response.counts)}`;
+  return `${scope} — ${String(response.cards.length)} tasks · ${countsLine(response.counts)}`;
 };
 
 const quarantineNotes = (response: BoardResponse): string[] =>
@@ -150,8 +150,8 @@ export function renderBoard(
       }
     }
   }
-  if (response.cards.length === 0) lines.push('', 'no cards match');
-  if (response.nextCursor !== null) lines.push('', 'more cards exist than this page holds');
+  if (response.cards.length === 0) lines.push('', 'no tasks match');
+  if (response.nextCursor !== null) lines.push('', 'more tasks exist than this page holds');
   lines.push(...quarantineNotes(response));
   return lines.join('\n');
 }
@@ -183,7 +183,7 @@ export function renderBoardMarkdown(
       }
     }
   }
-  if (response.cards.length === 0) lines.push('', 'No cards match.');
+  if (response.cards.length === 0) lines.push('', 'No tasks match.');
   return lines.join('\n');
 }
 
