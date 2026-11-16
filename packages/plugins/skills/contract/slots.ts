@@ -13,8 +13,14 @@
 /** In the Skills tab's header, beside the "active in this ferret" line. */
 export const SKILLS_ADD_SLOT = 'skills.add' as const;
 
+/**
+ * On each skill's row in the Skills tab, at the end of the row's first line (after Open). A plugin that knows more about
+ * where a skill came from or can go puts its own controls there: Catalogs draws "from Ines · v2", Publish and Uninstall.
+ */
+export const SKILLS_ROW_SLOT = 'skills.row' as const;
+
 /** Every slot Skills' panel offers, in one list a test can pair against the panels other plugins contribute. */
-export const SKILLS_SLOTS = [SKILLS_ADD_SLOT] as const;
+export const SKILLS_SLOTS = [SKILLS_ADD_SLOT, SKILLS_ROW_SLOT] as const;
 export type SkillsSlot = (typeof SKILLS_SLOTS)[number];
 
 /** What the slot hands its panels, besides the shell's `subject` (the ferret). */
@@ -29,6 +35,33 @@ export interface SkillsAddSlotProps {
   readonly runtime?: string;
   /** Where the skills the ferret sees come from ('project', 'user', 'ferretry'), once each: whether an install makes a new skills folder. */
   readonly scopes: readonly string[];
+}
+
+/** What the row slot hands its panels, besides the shell's `subject` (the ferret): the one skill the row draws. */
+export interface SkillsRowSlotProps {
+  /** The ferret whose Skills tab this is. */
+  readonly ferret: string;
+  /** The skill's name. */
+  readonly name: string;
+  /** What the row shows and inserts: `/name` for Claude, `$name` for Codex. */
+  readonly invocation: string;
+  /** Absolute path of its SKILL.md: the one thing that names this skill among same-named ones. */
+  readonly path: string;
+  /** Where it comes from ('project', 'user', 'ferretry'). */
+  readonly scope: string;
+}
+
+/** A narrowing for the row slot's panels, as {@link isSkillsAddSlotProps} is for the header's. */
+export function isSkillsRowSlotProps(props: unknown): props is SkillsRowSlotProps {
+  if (typeof props !== 'object' || props === null) return false;
+  const candidate = props as Record<string, unknown>;
+  return (
+    typeof candidate.ferret === 'string' &&
+    typeof candidate.name === 'string' &&
+    typeof candidate.invocation === 'string' &&
+    typeof candidate.path === 'string' &&
+    typeof candidate.scope === 'string'
+  );
 }
 
 /** A narrowing for a contributing panel: the props are untyped at the shell, so the panel checks what it reads. */

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { registerComposerQuoteTarget } from '@ferretry/app';
+import { WithSlotPanels } from '@ferretry/app/testing';
+import { isSkillsRowSlotProps, SKILLS_ROW_SLOT } from '../../../contract/index.ts';
 import { createSkillsPanel } from '../../../app/views/skills-panel.tsx';
 import { asView, click, closeAll, pageText, q, settle, show } from './dom-support.tsx';
 import { ferretInventory, refusal, scripted, skill } from './skills-support.ts';
@@ -133,6 +135,46 @@ describe('DOM tests: the Skills panel of a ferret', () => {
     answer = ferretInventory([skill('review')]);
     await click(q('[data-context-retry]'), 'Try again');
     await settle(() => q('[data-context-list="skills"]') !== null, 'the list after retrying');
+  });
+
+  it('offers the skills.row slot on every skill’s row, with that skill’s own data', async () => {
+    const { Panel } = panelFor({ [INVENTORY]: ferretInventory(SKILLS, { harness: 'codex' }) });
+    const placed = {
+      plugin: 'catalogs',
+      id: 'skills-row',
+      view: (props: Record<string, unknown>) => <i data-test-row={JSON.stringify(props)} />,
+    };
+    await show(
+      <WithSlotPanels slots={{ [SKILLS_ROW_SLOT]: [placed] }}>
+        <Panel subject="f1" />
+      </WithSlotPanels>,
+    );
+    await settle(() => q('[data-test-row]') !== null, 'a row slot');
+    const rows = [...document.querySelectorAll('[data-test-row]')].map(node =>
+      JSON.parse(node.getAttribute('data-test-row') ?? ''),
+    );
+    expect(rows.map(row => [row.name, row.invocation, row.scope, row.ferret])).toEqual([
+      ['review', '$review', 'project', 'f1'],
+      ['summary', '$summary', 'user', 'f1'],
+      ['summary', '$summary', 'ferretry', 'f1'],
+    ]);
+    expect(rows.every(row => isSkillsRowSlotProps(row))).toBe(true);
+    expect(rows[2]?.path).toBe('/fy/summary/SKILL.md');
+    // The slot sits on the row's first line, beside Open, not under the description.
+    expect(q('[data-context-skill-scope="project"] > div [data-test-row]')).not.toBeNull();
+  });
+
+  it('offers no row slot to a client the shell did not bind to a daemon', async () => {
+    const world = scripted({ [INVENTORY]: ferretInventory([skill('review')]) });
+    const Panel = asView(createSkillsPanel({ call: world.client.call }));
+    const placed = { plugin: 'catalogs', id: 'skills-row', view: () => <i data-test-row="" /> };
+    await show(
+      <WithSlotPanels slots={{ [SKILLS_ROW_SLOT]: [placed] }}>
+        <Panel subject="f1" />
+      </WithSlotPanels>,
+    );
+    await settle(() => q('[data-context-list="skills"]') !== null, 'the skills list');
+    expect(q('[data-test-row]')).toBeNull();
   });
 
   it('asks for a ferret when the shell names none', async () => {

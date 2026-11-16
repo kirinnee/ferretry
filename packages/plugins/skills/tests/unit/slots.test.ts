@@ -1,10 +1,25 @@
 import { describe, expect, it } from 'bun:test';
-import { isSkillsAddSlotProps, SKILLS_ADD_SLOT, SKILLS_SLOTS } from '../../contract/index.ts';
+import {
+  isSkillsAddSlotProps,
+  isSkillsRowSlotProps,
+  SKILLS_ADD_SLOT,
+  SKILLS_ROW_SLOT,
+  SKILLS_SLOTS,
+} from '../../contract/index.ts';
 
-describe('the slot Skills offers', () => {
-  it('is named in `<plugin>.<name>` form and listed', () => {
+describe('the slots Skills offers', () => {
+  it('are named in `<plugin>.<name>` form and listed', () => {
     expect(SKILLS_ADD_SLOT).toBe('skills.add');
-    expect([...SKILLS_SLOTS]).toEqual([SKILLS_ADD_SLOT]);
+    expect(SKILLS_ROW_SLOT).toBe('skills.row');
+    expect([...SKILLS_SLOTS]).toEqual([SKILLS_ADD_SLOT, SKILLS_ROW_SLOT]);
+  });
+
+  it('a row panel accepts the one skill the row hands it and refuses anything short of it', () => {
+    const props = { ferret: 'f1', name: 'review', invocation: '/review', path: '/s/review/SKILL.md', scope: 'user' };
+    expect(isSkillsRowSlotProps(props)).toBe(true);
+    for (const key of Object.keys(props)) expect(isSkillsRowSlotProps({ ...props, [key]: 3 })).toBe(false);
+    expect(isSkillsRowSlotProps({ ferret: 'f1' })).toBe(false);
+    expect(isSkillsRowSlotProps(null)).toBe(false);
   });
 
   it('a panel accepts the props the Skills tab hands it and refuses anything short of them', () => {

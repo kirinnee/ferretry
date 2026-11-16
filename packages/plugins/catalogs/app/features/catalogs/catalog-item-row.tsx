@@ -67,7 +67,13 @@ export interface CatalogItemRowProps {
   readonly label: string;
   /** What Publish points at, and what a catalog's items are matched against. */
   readonly source: CatalogItemSource;
-  readonly scope: RowScope;
+  /** Required unless `controls`: the row's own scope chip. */
+  readonly scope?: RowScope;
+  /**
+   * The host already draws the name, scope and description (Skills' row does): draw only what catalogs add — the
+   * "v3" / "from Ines · v2" chip and the ⋯ — to sit at the end of the host's line.
+   */
+  readonly controls?: boolean;
   /** One line under the name. The whole text is the row's tooltip. */
   readonly description?: string;
   /** "Overridden by a Project skill": a quiet line under the description. */
@@ -96,6 +102,7 @@ export function CatalogItemRow({
   label,
   source,
   scope,
+  controls = false,
   description,
   note,
   onUse,
@@ -249,25 +256,32 @@ export function CatalogItemRow({
   };
 
   const nameClass = 'flex min-w-0 flex-col items-start gap-0.5 rounded-control px-xs py-xs text-left';
+  const chipNodes = (
+    <>
+      {chips.version === null ? null : (
+        <span className="fy-info-chip" data-tone="muted" data-row-version="">
+          {chips.version}
+        </span>
+      )}
+      {chips.from === null ? null : (
+        <span className="fy-info-chip" data-tone="accent" title={chips.from.title} data-row-from="">
+          {chips.from.text}
+        </span>
+      )}
+    </>
+  );
   const nameBlock = (
     <>
       <span className="flex max-w-full min-w-0 flex-wrap items-center gap-x-xs gap-y-0.5">
         <span className="min-w-0 truncate font-mono text-cell text-fg" data-row-label="">
           {label}
         </span>
-        <span className="fy-info-chip" data-tone={scope.tone} title={scope.title} data-row-scope="">
-          {scope.label}
-        </span>
-        {chips.version === null ? null : (
-          <span className="fy-info-chip" data-tone="muted" data-row-version="">
-            {chips.version}
+        {scope === undefined ? null : (
+          <span className="fy-info-chip" data-tone={scope.tone} title={scope.title} data-row-scope="">
+            {scope.label}
           </span>
         )}
-        {chips.from === null ? null : (
-          <span className="fy-info-chip" data-tone="accent" title={chips.from.title} data-row-from="">
-            {chips.from.text}
-          </span>
-        )}
+        {chipNodes}
       </span>
       {description === undefined ? null : (
         <span className="block max-w-full truncate text-meta text-muted" title={description} data-row-description="">
@@ -284,8 +298,16 @@ export function CatalogItemRow({
 
   return (
     <div className="flex min-w-0 flex-col" data-catalog-item-row={itemName} data-catalog-item-kind={kind}>
-      <div className={cn('flex min-w-0 flex-wrap items-start gap-x-xs gap-y-0', dimmed && 'opacity-70')}>
-        {onUse === undefined ? (
+      <div
+        className={cn(
+          'flex min-w-0 flex-wrap gap-x-xs gap-y-0',
+          controls ? 'items-center' : 'items-start',
+          dimmed && 'opacity-70',
+        )}
+      >
+        {controls ? (
+          chipNodes
+        ) : onUse === undefined ? (
           <div className={cn(nameClass, 'min-h-row min-w-[8rem] flex-1')}>{nameBlock}</div>
         ) : (
           <button
