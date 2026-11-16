@@ -409,3 +409,100 @@ describe('reading the live file and the shards', () => {
     should((await new StateQueueStore(noisy, 4).messages(F1)).map(entry => entry.id)).eql(['a', 'b']);
   });
 });
+
+describe('a live file changed by somebody else', () => {
+  const line = (event: QueueEvent): string => JSON.stringify({ format: 1, ...event });
+  const text = (...events: QueueEvent[]): string => events.map(event => `${line(event)}\n`).join('');
+  const states = async (store: StateQueueStore) => (await store.messages(F1)).map(entry => [entry.id, entry.state]);
+
+  it('should read it again when it was replaced with as many bytes as before', async () => {
+    const { fs, store } = world();
+    fs.seed(LIVE, text(enqueued('aa'), enqueued('bb')));
+    should(await states(store)).eql([
+      ['aa', 'queued'],
+      ['bb', 'queued'],
+    ]);
+
+    // Same length, other content, written the way the state port replaces a file: a new file in the old one's place.
+    fs.seed(LIVE, text(enqueued('cc'), enqueued('dd')));
+
+    should(await states(store)).eql([
+      ['cc', 'queued'],
+      ['dd', 'queued'],
+    ]);
+  });
+
+  it('should read it again when it shrank, and when it was rewritten to a header and nothing else', async () => {
+    const { fs, port, store } = world();
+    fs.seed(LIVE, text(enqueued('a'), enqueued('b'), moved('a', 'typing')));
+    should(await states(store)).eql([
+      ['a', 'typing'],
+      ['b', 'queued'],
+    ]);
+
+    fs.seed(LIVE, text(enqueued('a')));
+    should(await states(store)).eql([['a', 'queued']]);
+
+    await port.write(QUEUE_STATE, [{ v: 1, kind: 'segment', base: 50, accepted: 9, carried: [] }] as never, F1);
+    should(await states(store)).eql([]);
+  });
+
+  it('should never keep a torn final line, and read it once it is whole', async () => {
+    const { fs, store } = world();
+    const whole = line(enqueued('b'));
+    fs.seed(LIVE, `${text(enqueued('a'))}${whole.slice(0, 20)}`);
+    should(await states(store)).eql([['a', 'queued']]);
+
+    fs.seed(LIVE, `${text(enqueued('a'))}${whole}\n`);
+    should(await states(store)).eql([
+      ['a', 'queued'],
+      ['b', 'queued'],
+    ]);
+  });
+
+  it('should still read a final line that is whole but has no newline', async () => {
+    const { fs, store } = world();
+    fs.seed(LIVE, `${text(enqueued('a'))}${line(enqueued('b'))}`);
+
+    should(await states(store)).eql([
+      ['a', 'queued'],
+      ['b', 'queued'],
+    ]);
+  });
+
+  it('should answer a log removed after it was read as empty, and one written again from scratch', async () => {
+    const { fs, port, store } = world();
+    await store.append(F1, enqueued('a'));
+    should(await states(store)).eql([['a', 'queued']]);
+
+    await port.remove(QUEUE_STATE, F1);
+    should(await states(store)).eql([]);
+
+    fs.seed(LIVE, text(enqueued('z')));
+    should(await states(store)).eql([['z', 'queued']]);
+  });
+
+  it('should answer two reads made at once with the same messages', async () => {
+    const { fs, store } = world();
+    fs.seed(LIVE, text(enqueued('a'), moved('a', 'typing')));
+
+    const [first, second] = await Promise.all([store.messages(F1), store.messages(F1)]);
+
+    should(first).eql(second);
+    should(first.map(entry => [entry.id, entry.state])).eql([['a', 'typing']]);
+  });
+
+  it('should keep every answer right when many ferrets are read, appended to and read again', async () => {
+    const { store } = world(4);
+    const ferrets = Array.from({ length: 20 }, (_, n) => parseSessionId(`g${n}`));
+    for (const ferret of ferrets)
+      for (const event of [enqueued('a'), moved('a', 'cancelled'), enqueued('b')]) await store.append(ferret, event);
+    for (const ferret of ferrets) await store.append(ferret, moved('b', 'typing'));
+
+    for (const ferret of ferrets)
+      should((await store.messages(ferret)).map(entry => [entry.id, entry.state])).eql([
+        ['a', 'cancelled'],
+        ['b', 'typing'],
+      ]);
+  });
+});
