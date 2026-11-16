@@ -295,7 +295,7 @@ describe('the file body', () => {
 });
 
 describe('the open-file rail', () => {
-  it('activates and closes by full path while showing only the base name', async () => {
+  it('S-0167 activates and closes by full path while showing only the base name', async () => {
     const actions: string[] = [];
     const view = await mount(
       <OpenFileTabs

@@ -311,7 +311,7 @@ describe('SessionWorkerRuntime — when it looks', () => {
     should(looks().length).equal(1);
   });
 
-  it('should look after the pane drew, settled and throttled, and once on the backstop', async () => {
+  it('J-0176 should look after the pane drew, settled and throttled, and once on the backstop', async () => {
     // Arrange
     const { attach, advance, looks, pane, stats } = await rig();
     await attach();

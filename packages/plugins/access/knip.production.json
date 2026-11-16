@@ -1,12 +1,5 @@
 {
   "entry": [],
   "project": ["**/*.{ts,tsx}", "!tests/**"],
-  "ignore": [
-    "app/harness/pair-from-menu.tsx",
-    "cli/lib/grants/commands.ts",
-    "cli/lib/grants/controller.ts",
-    "cli/lib/grants/gateway.ts",
-    "cli/lib/grants/ports.ts",
-    "cli/lib/grants/render.ts"
-  ]
+  "ignore": ["app/harness/pair-from-menu.tsx"]
 }
