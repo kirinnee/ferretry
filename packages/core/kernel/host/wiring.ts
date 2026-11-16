@@ -7,6 +7,7 @@ import { bunSpawn, bunWebSockets, bunWorkers, globalFetch } from './adapters/pro
 import { scratchPort } from './scratch.ts';
 import { nodeHostFacts } from './adapters/host-facts.ts';
 import { nodeSelfCounters } from './adapters/self-counters.ts';
+import { configTreeEvents, type FileEvents, nodeFileEvents } from './adapters/file-events.ts';
 import { launchGuardFor } from './adapters/launch-guard.ts';
 import { NodeGzip } from './adapters/node-gzip.ts';
 import { updateHostFor } from './adapters/update-host.ts';
@@ -117,7 +118,18 @@ export function stateOpener(
   };
 }
 
-export function configService(home: string, fs: StateFs, clock: Clock, log: Log, binary: string) {
+/**
+ * The config service over the home's files. With `fileEvents` the watcher reads the tree when a folder reports an
+ * event (and on its slow backstop); without, it polls every second, as a suite with no platform watcher does.
+ */
+export function configService(
+  home: string,
+  fs: StateFs,
+  clock: Clock,
+  log: Log,
+  binary: string,
+  fileEvents?: FileEvents,
+) {
   return (
     declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[],
     judge?: ConfigJudge,
@@ -139,7 +151,10 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
       status: () => service.status(),
       reload: () => service.reload(),
       publishSchemas: () => service.publishSchemas(),
-      startWatching: () => service.startWatching(),
+      startWatching: () =>
+        service.startWatching(
+          fileEvents === undefined ? undefined : configTreeEvents(fileEvents, () => service.directories()),
+        ),
       onStateChange: listener => service.onStateChange(listener),
     };
   };
@@ -165,13 +180,15 @@ export function realAdapters(
   const clock = systemClock();
   const log = scopedLog(logSink, 'kernel');
   const stateFs = createNodeHostFs();
+  const fileEvents = nodeFileEvents(clock);
   return {
     clock,
     logSink,
     fs: nodeFs(random),
     random,
     state: stateOpener(home, stateFs, clock, log.child('state')),
-    config: configService(home, stateFs, clock, log.child('config'), options.binary),
+    config: configService(home, stateFs, clock, log.child('config'), options.binary, fileEvents),
+    fileEvents,
     spawn: bunSpawn(
       options.childEnv ?? {},
       undefined,
