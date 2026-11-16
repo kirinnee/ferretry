@@ -35,6 +35,7 @@ import {
   QueueChanged,
   QuestionAnswered,
   QuestionAsked,
+  PromptAskRefSchema,
   QuestionSchema,
   ReferenceCatalog,
   RELATED_SEARCHED_AUDIT,
@@ -522,6 +523,7 @@ export default definePlugin({
   hooks: {
     takes: [
       { hook: AskSources, key: 'question', schema: QuestionSchema },
+      { hook: AskSources, key: 'prompt', schema: PromptAskRefSchema },
       { hook: SitrepLines, priority: 50 },
       // A ferret that stops has its unlocked attachments zeroed; every change of state is a look for `turn.ended`.
       { hook: FerretChanged },

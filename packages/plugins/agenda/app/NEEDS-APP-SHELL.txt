@@ -18,4 +18,4 @@ app/features/settings/notification-filter-settings.tsx | the sentence says "…i
 app/components/agenda-message.tsx | GAP(agenda): the compact card an agenda message reads as is Agenda's to draw in Conversation's conversation.row slot (Conversation's chat/seam.ts AgendaMessageOr draws the words until then); nothing mounts it yet
 app/features/agenda/agenda-line.tsx, app/lib/agenda-chat.ts | mounted by app/views/agenda-line-panel.tsx in conversation.above-composer (see GAP(agenda-chat-slot) above)
 app/lib/answer-chip.ts | the "re:" chips prefix a reply typed in the host-bound composer AgendaInboxComposer draws; nothing binds one (Conversation's panel prefixes the ask's reference itself)
-app/lib/agenda-source-refs.ts | GAP(agenda-harness-prompt) the harness-prompt asks are unported until Conversation provides the transcript seams; they need the reserved sourceRef grammar
+app/lib/agenda-source-refs.ts | GAP(agenda-harness-prompt) the turn-end and rest nudges are unported (transcript seams, Asks resting items); they need the reserved sourceRef grammar
