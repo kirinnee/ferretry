@@ -99,6 +99,18 @@ function validatePath(def: StateFileDef): void {
     );
 }
 
+/** The text of a jsonl file made of `value`, an array of records, each line encoded and bounded as an append would. */
+function jsonlRecords(def: StateFileDef, value: unknown): string {
+  if (!Array.isArray(value)) throw new TypeError(`state ${def.name}: a jsonl file is written from an array of records`);
+  return value
+    .map(record => {
+      const line = encodeDocument(def, record, false);
+      assertRecordSize(line);
+      return `${line}\n`;
+    })
+    .join('');
+}
+
 export function createStatePort(options: StatePortOptions): HostStatePort {
   const { home, pluginId, fs } = options;
   const root = pluginStateRoot(home, pluginId);
@@ -295,11 +307,16 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
 
     async write<Shape>(def: StateFileDef<string, Shape>, value: Shape, name?: string): Promise<void> {
       const at = locate(def, name);
-      if (def.store === 'jsonl' || def.store === 'sqlite' || def.store === 'sqlite-cache')
+      if (def.store === 'sqlite' || def.store === 'sqlite-cache')
         throw new TypeError(`state ${def.name}: a ${def.store} file is not written with write()`);
+      // A jsonl file is replaced WHOLE from its records, atomically and on the same chain as its appends: the one way a
+      // log is compacted (a rotation) without a reader ever seeing half of it.
+      const records = def.store === 'jsonl' ? jsonlRecords(def, value) : undefined;
       await serial.run(at.path, async () => {
         await guardWrite(def, at);
-        if (def.store === 'json') await fs.writeAtomic(at.path, `${encodeDocument(def, value, true)}\n`, fileMode(def));
+        if (records !== undefined) await fs.writeAtomic(at.path, records, fileMode(def));
+        else if (def.store === 'json')
+          await fs.writeAtomic(at.path, `${encodeDocument(def, value, true)}\n`, fileMode(def));
         else {
           if (!(value instanceof Uint8Array) && typeof value !== 'string')
             throw new TypeError(`state ${def.name}: a ${def.store} file holds bytes`);

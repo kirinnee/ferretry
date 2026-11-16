@@ -22,6 +22,16 @@ this page, which is still how a message reaches the pane.
 - **Log** — `channel/queue.jsonl` beside the session, append-only and flushed to disk before an accept
   answers (`FileSessionQueueStore`). The queue is the fold of that log (`foldQueue`), which applies only a
   move that is legal from where the message stands, so a replayed or stale line changes nothing.
+  **5.0 rotates it** (`StateQueueStore`, `lib/rotation.ts`): `queue.jsonl` is a short LIVE SEGMENT, and at 2,000
+  events its finished messages (`read`, `cancelled`, `failed`) are sealed into an immutable shard,
+  `queue-shards/<ferret>~<through>.json`, while its open ones are carried in the new segment's first line,
+  `{"kind":"segment","base":N,"accepted":M,"carried":[…]}`. `base` is how many events came before the segment, so a
+  message's `version` (the position of its latest change) and its place in the list survive any number of rotations
+  unchanged; a file with no header is a segment at base 0, so every log written before rotation reads as it did.
+  The shard is written first and the live file replaced second, both atomically, and a reader uses only shards at or
+  before the live `base`: a crash between the two leaves the old segment authoritative. A rotation runs under the
+  per-ferret queue lock every append already holds. (Why: one ferret's log reached 29.5 MB / 228,788 lines for 1,727
+  messages and every look re-read all of it, several times, every five seconds.)
 - **Order** — a person's message first, then a ferret's, then the daemon's; acceptance order within each;
   one message (or one combined delivery, [below](#labels-and-combined-delivery)) typing at a time
   (`planDelivery`). The daemon's notice may pass a ferret message that is still being HELD for combining —

@@ -312,6 +312,41 @@ describe('StatePort: jsonl files', () => {
     const { port } = memoryStore();
     await expect(port.read(logFile)).rejects.toBeInstanceOf(TypeError);
   });
+
+  test('write() replaces a jsonl file whole from its records, and appends go on after it', async () => {
+    const { port, fs, path } = memoryStore();
+    await port.append(logFile, { count: 1 });
+    await port.append(logFile, { count: 2 });
+    await port.append(logFile, { count: 3 });
+
+    await port.write(logFile, [{ count: 9 }] as never);
+
+    expect(fs.snapshot().get(path('log.jsonl'))).toBe('{"format":1,"count":9}\n');
+    await port.append(logFile, { count: 10 });
+    const got: unknown[] = [];
+    for await (const entry of port.lines(logFile)) got.push(entry);
+    expect(got).toEqual([{ count: 9 }, { count: 10 }]);
+    await port.write(logFile, [] as never);
+    expect(fs.snapshot().get(path('log.jsonl'))).toBe('');
+  });
+
+  test('write() on a jsonl file refuses what is not an array of valid, bounded records, and changes nothing', async () => {
+    const big = defineState({
+      name: 'big',
+      path: 'big.jsonl',
+      store: 'jsonl',
+      format: 1,
+      schema: z.strictObject({ text: z.string() }),
+    });
+    const { port, fs, path } = memoryStore({ files: [logFile, big] });
+    await port.append(logFile, { count: 1 });
+
+    await expect(port.write(logFile, { count: 2 } as never)).rejects.toBeInstanceOf(TypeError);
+    await expect(port.write(logFile, [{ count: 'x' }] as never)).rejects.toBeInstanceOf(TypeError);
+    await expect(port.write(big, [{ text: 'x'.repeat(1 << 20) }] as never)).rejects.toThrow('exceeds the maximum');
+
+    expect(fs.snapshot().get(path('log.jsonl'))).toBe('{"format":1,"count":1}\n');
+  });
 });
 
 describe('StatePort: records() and tail() check each line on its own', () => {

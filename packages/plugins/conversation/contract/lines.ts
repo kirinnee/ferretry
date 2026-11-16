@@ -70,6 +70,39 @@ export const QueueEventSchema = z.discriminatedUnion('kind', [
 ]);
 export type QueueEvent = z.infer<typeof QueueEventSchema>;
 
+/**
+ * A message that outlived the segment it was accepted in: the message WITH its `version` (the fold's 1-based position
+ * of its latest change — required here, since it can no longer be recomputed from lines that were rotated away) and its
+ * `order`, the 0-based index of when it was first accepted, so a list stays "in the order first accepted".
+ */
+export const SegmentMessageSchema = z.strictObject({
+  order: NonNegativeInteger,
+  message: QueuedMessageSchema.required({ version: true }),
+});
+export type SegmentMessage = z.infer<typeof SegmentMessageSchema>;
+
+/**
+ * The FIRST line of a rotated `queue.jsonl` (a live SEGMENT). A queue is a log that is rotated, so it never grows
+ * without bound: when the live segment reaches its limit, its FINAL messages are sealed into a shard
+ * (`QueueShardSchema`) and its OPEN ones are carried here, whole.
+ *
+ * - `base`: how many events came before this segment. The event on line `i` after the header (1-based) is at position
+ *   `base + i`, which is a message's `version` — so versions survive a rotation unchanged.
+ * - `accepted`: how many messages were first accepted before this segment (the next message's `order`).
+ * - `carried`: every message that was still open, exactly as it stood (state, wait reason, `deliveredAs`, version).
+ *
+ * A file with no header is a segment with base 0, nothing accepted and nothing carried: every log written before
+ * rotation existed reads exactly as it did.
+ */
+export const QueueSegmentHeaderSchema = z.strictObject({
+  v: z.literal(1),
+  kind: z.literal('segment'),
+  base: NonNegativeInteger,
+  accepted: NonNegativeInteger,
+  carried: z.array(SegmentMessageSchema),
+});
+export type QueueSegmentHeader = z.infer<typeof QueueSegmentHeaderSchema>;
+
 // sends.jsonl ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** A fate as the ledger writes it: the wire's, and `withdrawn` (nothing was ever typed; the id may start over). */

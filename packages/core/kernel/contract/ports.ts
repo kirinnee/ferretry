@@ -148,6 +148,10 @@ export const MAX_STATE_TAIL_BYTES = 64 * 1024 * 1024;
  */
 export interface StatePort {
   read<Shape>(file: StateFileDef<string, Shape>, name?: string): Promise<StateRead<Shape>>;
+  /**
+   * Replaces a file whole, atomically. A `jsonl` file takes an ARRAY of records (one line each, as `append` writes them)
+   * and is swapped in on the same chain as its appends, so a log can be compacted without a reader seeing half of it.
+   */
   write<Shape>(file: StateFileDef<string, Shape>, value: Shape, name?: string): Promise<void>;
   /**
    * Read-modify-write on one serialization chain per file. `fn` may be async (it runs inside the chain). Returning
