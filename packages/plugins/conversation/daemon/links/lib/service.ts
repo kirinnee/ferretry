@@ -206,7 +206,10 @@ export class LinkService {
         result.refused.push({ id: item.id, code: 'already_kept', reason: `Ferret ${owner} already keeps it.` });
         continue;
       }
-      const copy = item.copy === true;
+      // A conversation of the owner's computer is ALWAYS copied into the harness's pool first and the ferret resumes the
+      // copy: the original keeps working in the owner's own terminal and is never shared with a ferret (one writer per file).
+      // (`item.copy` is kept on the request for older callers; it no longer changes anything.)
+      const copy = true;
       if (copy) {
         const copied = await this.needs.copier
           .copy({

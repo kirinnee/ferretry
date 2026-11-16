@@ -2,20 +2,3 @@
 # Each moves its budget to <package>/tests/perf/ and keeps its correctness checks in unit at a small size; then
 # its line goes. A listed file that no longer holds a budget, or a budget in an unlisted file, fails the gate.
 # This list only shrinks; empty means the unit tier holds no timing claim.
-packages/plugins/logins/tests/unit/contract/login-env.test.ts
-packages/plugins/logins/tests/unit/contract/secret-shape.test.ts
-packages/plugins/logins/tests/unit/credentials/yaml-bounds.test.ts
-packages/plugins/runtimes/tests/unit/daemon/catalog-redaction.test.ts
-packages/plugins/runtimes/tests/unit/daemon/net-batch2.test.ts
-packages/plugins/runtimes/tests/unit/daemon/net-command-value.test.ts
-packages/plugins/runtimes/tests/unit/daemon/net-component-text.test.ts
-packages/plugins/runtimes/tests/unit/daemon/net-linear.test.ts
-packages/plugins/runtimes/tests/unit/daemon/net-text-values.test.ts
-packages/plugins/runtimes/tests/unit/daemon/profile-diamond-paths.test.ts
-packages/plugins/runtimes/tests/unit/daemon/profile-layers.test.ts
-packages/plugins/runtimes/tests/unit/daemon/resolved-view.test.ts
-packages/plugins/runtimes/tests/unit/lib/account-layering-expansion.test.ts
-packages/plugins/runtimes/tests/unit/lib/account-scope-memo.test.ts
-packages/plugins/usage/tests/unit/app/fixtures/performance-fixture.ts
-packages/plugins/usage/tests/unit/app/usage-file-bounds.test.ts
-packages/plugins/usage/tests/unit/cli/budget-bounds.test.ts

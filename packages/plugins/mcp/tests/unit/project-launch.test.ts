@@ -80,6 +80,9 @@ function kernelRoots(
   trace: RootTrace,
 ) {
   return {
+    historyPool: () => {
+      throw new Error('the fixture has no history pool');
+    },
     root: (name: string, scope?: { readonly ferret?: FerretId; readonly subfolder?: string }): RootHandle => {
       const base =
         name === 'imports' ? (scope?.subfolder ?? '/nowhere') : (folders.get(scope?.ferret as FerretId) ?? '/nowhere');
@@ -123,6 +126,7 @@ function kernelRoots(
         copyShared: missing('copy a shared folder'),
         linkCredential: missing('link a credential'),
         linkHistory: missing('link a history entry'),
+        moveToHistoryPool: missing('link a history entry'),
         ensurePrivateDirectory: missing('make a folder'),
         makeDirectory: missing('make a folder'),
         list: missing('list a folder'),

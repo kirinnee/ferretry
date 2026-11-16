@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { openTranscriptBytes } from '@ferretry/core-ferrets/contract';
 import type {
+  ConversationImport,
   FoundConversation,
   Harness,
   HarnessTailRecord,
@@ -11,13 +12,15 @@ import type {
   TurnUsage,
 } from '@ferretry/core-ferrets/contract';
 import type { FencedPath, FerretId, KernelPorts, RootHandle } from '@ferretry/kernel/contract';
-import { seconds, type Instant, type JsonValue } from '@ferretry/std';
+import { err, ok, seconds, type Instant, type JsonValue, type Result } from '@ferretry/std';
 import { CODEX_ROLLOUTS, type CodexRolloutBinding as Binding } from '../../contract/index.ts';
 import { CodexTranscriptParser } from '../lib/transcript/codex.ts';
 import { ProofCache } from '../lib/transcript/proof-cache.ts';
 import { selectCodexRollout } from '../lib/transcript/rollout.ts';
 import { markCutWindow, tailRecordOf } from '../lib/transcript/tail-record.ts';
 
+/** The largest rollout copy-on-link copies: a copy is held whole in memory (the owner's rollouts are tens of MB at most). */
+const MAX_IMPORT_BYTES = 256 * 1024 * 1024;
 const MAX_ROLLOUTS = 4_000;
 const MAX_DIRECTORIES = 8_000;
 /**
@@ -93,6 +96,25 @@ function metadata(text: string): { id: string; cwd: string } | undefined {
 }
 
 /**
+ * What a walk of the SHARED pool reads (a pool holds every ferret's rollouts, thousands of them): rollouts under day
+ * folders from `since` on (Codex files them `sessions/YYYY/MM/DD/`), or the one file for `id`. Neither makes a walk
+ * incomplete: a rollout it never opens is one that cannot matter to the question asked.
+ */
+interface WalkFilter {
+  readonly since?: string | undefined;
+  readonly id?: string | undefined;
+}
+
+/** Whether a folder below `sessions` (`2026`, `2026/11`, `2026/11/16`) can hold a day on or after `since` (`YYYY-MM-DD`). */
+function dayWanted(below: string, since: string | undefined): boolean {
+  if (since === undefined) return true;
+  const parts = below.split('/');
+  if (parts.length > 3 || !parts.every(part => /^\d+$/u.test(part))) return true;
+  const key = parts.join('-');
+  return key >= since.slice(0, key.length);
+}
+
+/**
  * Today's sessions walk (`node-codex-rollout-index.ts`): only real folders and real `.jsonl` files, each named entry
  * taken as it IS (`RootHandle.entries`, never followed), so a symbolic link — `rollout-alias.jsonl -> auth.json`, or a
  * folder link back up the home — is skipped and never opened. Every path is checked again by the root port on read.
@@ -109,6 +131,7 @@ async function walkRollouts(
   root: RootHandle,
   directory: string,
   absent?: () => Promise<boolean>,
+  only?: WalkFilter,
 ): Promise<{ readonly found: readonly Rollout[]; readonly complete: boolean }> {
   const pending = [directory];
   const found: Rollout[] = [];
@@ -134,11 +157,15 @@ async function walkRollouts(
       if (name.includes('/') || name === '.' || name === '..') continue;
       const childRelative = relative === '' ? name : `${relative}/${name}`;
       if (entry.kind === 'directory') {
+        if (!dayWanted(childRelative.slice(directory === '' ? 0 : directory.length + 1), only?.since)) continue;
         pending.push(childRelative);
         continue;
       }
       // A link, a device or anything else is not a rollout: only a plain file is ever opened.
       if (entry.kind !== 'file' || !name.endsWith('.jsonl')) continue;
+      // Codex names a rollout `rollout-<time>-<id>.jsonl`: a walk for ONE conversation opens only the files that say it.
+      // (The header is still what proves it; a name is never identity.)
+      if (only?.id !== undefined && !name.endsWith(`-${only.id}.jsonl`)) continue;
       const child = root.resolve(childRelative);
       if (!child.ok) {
         complete = false;
@@ -168,6 +195,38 @@ export class CodexRollouts {
   }
 
   /**
+   * Where this ferret's rollouts are read: the ferret's own `sessions` folder, or, when that name is the link to the
+   * shared pool (the root never follows a link out of a home), the pool's `sessions` through the pool's own handle. The
+   * relative paths are the same either way (`sessions/YYYY/MM/DD/rollout-….jsonl`).
+   */
+  private async sessions(
+    ferret: FerretId,
+  ): Promise<{ readonly root: RootHandle; readonly directory: string; readonly pooled: boolean }> {
+    const own = this.owner(ferret);
+    const at = own.resolve('sessions');
+    // A name that cannot be looked at is not the pool's link: the ferret's own folder is then what is read (and refused).
+    const linked = at.ok
+      ? await Promise.resolve()
+          .then(async () => (await own.lstat(at.value))?.kind === 'symlink')
+          .catch(() => false)
+      : false;
+    if (linked) {
+      // The link is the pool's only when the pool can be reached: a plugin with no pool reads the ferret's own folder, which
+      // refuses a link (nothing is read through it).
+      try {
+        return { root: this.kernel.roots.historyPool(), directory: 'sessions', pooled: true };
+      } catch {
+        /* fall through to the ferret's own folder */
+      }
+    }
+    return {
+      root: this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` }),
+      directory: '',
+      pooled: false,
+    };
+  }
+
+  /**
    * Whether this ferret's `sessions` folder is PROVED absent, from the listings above it: the ferret's home is not in the
    * agent homes, or `sessions` is not in the ferret's home. Any listing that fails is no proof (`false`).
    */
@@ -191,6 +250,11 @@ export class CodexRollouts {
     return read.value;
   }
 
+  /** The first day (`YYYY-MM-DD`) a rollout this launch writes can be filed under: two days back, whatever the zone. */
+  private sinceDay(): string {
+    return new Date(Date.parse(this.kernel.clock.now()) - 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  }
+
   /** Save the pre-launch baseline; after restart it is still excluded. Resume uses the supplied native id. */
   async launched(spec: LaunchSpec, native?: string): Promise<void> {
     const owner = this.owner(spec.ferret);
@@ -200,8 +264,19 @@ export class CodexRollouts {
       throw new Error('Codex rollout ownership could not be placed in the ferret home');
     // A new launch (a resume names its own conversation) may prove another rollout: forget the one remembered.
     this.forget(spec.ferret);
-    const root = this.kernel.roots.root('agent-homes', { subfolder: `${spec.ferret}/sessions` });
-    const existing = await walkRollouts(root, '', async () => await this.sessionsAbsent(spec.ferret));
+    const where = await this.sessions(spec.ferret);
+    // The shared pool holds every ferret's rollouts: a new conversation can only be among the last days' (a day or two of
+    // slack for the clock's zone), and a resume names its conversation, so neither reads the pool whole.
+    const since = where.pooled && native === undefined ? this.sinceDay() : undefined;
+    const existing =
+      where.pooled && native !== undefined
+        ? { found: [], complete: true }
+        : await walkRollouts(
+            where.root,
+            where.directory,
+            where.pooled ? async () => false : async () => await this.sessionsAbsent(spec.ferret),
+            { since },
+          );
     await this.kernel.state.write(
       CODEX_ROLLOUTS,
       {
@@ -211,6 +286,7 @@ export class CodexRollouts {
         // Whether that baseline saw EVERY rollout already there: one it missed (a folder or a header it could not read)
         // is not excluded, and the correlation marker is per HOME, so it could later pass for this launch's.
         baselineComplete: existing.complete,
+        ...(since === undefined ? {} : { since }),
         ...(native === undefined ? {} : { native }),
       },
       spec.ferret,
@@ -224,8 +300,15 @@ export class CodexRollouts {
    */
   async has(ferret: FerretId, native: string): Promise<boolean | undefined> {
     try {
-      const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
-      const walked = await walkRollouts(root, '', async () => await this.sessionsAbsent(ferret));
+      const where = await this.sessions(ferret);
+      // A pooled ferret resumes a conversation any ferret on this harness wrote: it is looked for in the pool, by the one
+      // id (the file name narrows the walk; the header still proves it).
+      const walked = await walkRollouts(
+        where.root,
+        where.directory,
+        where.pooled ? async () => false : async () => await this.sessionsAbsent(ferret),
+        where.pooled ? { id: native } : undefined,
+      );
       if (walked.found.some(rollout => rollout.id === native)) return true;
       return walked.complete ? false : undefined;
     } catch {
@@ -271,7 +354,7 @@ export class CodexRollouts {
     ferret: FerretId,
     remembered = false,
   ): Promise<{ readonly root: RootHandle; readonly rollout: Rollout } | undefined> {
-    const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
+    const root = (await this.sessions(ferret)).root;
     const known = remembered ? this.#proved.fresh(ferret, Date.parse(this.kernel.clock.now())) : undefined;
     if (known !== undefined) {
       const stat = await root.stat(known.file).catch(() => undefined);
@@ -286,7 +369,8 @@ export class CodexRollouts {
     ferret: FerretId,
     strict = false,
   ): Promise<{ readonly root: RootHandle; readonly rollout: Rollout; readonly binding: Binding } | undefined> {
-    const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
+    const where = await this.sessions(ferret);
+    const root = where.root;
     this.#proved.forget(ferret);
     const binding = await this.binding(ferret);
     if (binding === undefined) return undefined;
@@ -296,7 +380,14 @@ export class CodexRollouts {
     // everything, and only by a walk now that sees everything, so a rollout either one missed cannot be passed over or
     // taken for this launch's. The transcript reader keeps its own (unrecorded) proof.
     if (strict && binding.native === undefined && binding.baselineComplete !== true) return undefined;
-    const walked = await walkRollouts(root, '', async () => await this.sessionsAbsent(ferret));
+    // In the shared pool a conversation this launch named is looked for by its id alone, and a new one only among the
+    // days since the launch: other ferrets' rollouts are never candidates (and the correlation marker is per HOME).
+    const walked = await walkRollouts(
+      root,
+      where.directory,
+      where.pooled ? async () => false : async () => await this.sessionsAbsent(ferret),
+      where.pooled ? { since: binding.since, id: binding.native } : undefined,
+    );
     if (strict && !walked.complete) return undefined;
     const candidates = walked.found;
     let chosen: Rollout | undefined;
@@ -510,6 +601,43 @@ export class CodexRollouts {
       return await this.kernel.redaction.read(scope => JSON.parse(scope.text(JSON.stringify(turns))) as TurnUsage[]);
     },
   };
+
+  /**
+   * Copy-on-link (docs/design/shared-history.md, 3.2): the owner's own `~/.codex/sessions/YYYY/MM/DD/rollout-…-<id>.jsonl`
+   * copied into the shared pool at the same relative path, so a ferret started on it resumes the copy. The original is read
+   * through the read-only `harness-history` root and is never written, linked or locked; the copy is written whole and only
+   * if the pool has nothing at that name. The rollout's own header must name the id (a file name is never identity).
+   */
+  async import(input: ConversationImport): Promise<Result<void, { readonly reason: string }>> {
+    const refuse = (reason: string): Result<void, { readonly reason: string }> => err({ reason });
+    const named = new RegExp(`^sessions/\\d{4}/\\d{2}/\\d{2}/rollout-[^/]*-${input.id}\\.jsonl$`, 'u');
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(input.id) || !named.test(input.source))
+      return refuse('That is not a Codex rollout file of this id.');
+    try {
+      const directory = await this.historyDirectory();
+      if (directory === undefined || !directory.startsWith('/'))
+        return refuse("Codex's history folder is not known on this machine.");
+      const history = this.kernel.roots.root('harness-history', { subfolder: directory });
+      const from = history.resolve(input.source);
+      const pool = this.kernel.roots.historyPool();
+      const to = pool.resolve(input.source);
+      if (!from.ok || !to.ok) return refuse('That rollout file is outside the folders Ferretry may use.');
+      if ((await pool.lstat(to.value)) !== undefined) return ok(undefined);
+      const found = await history.stat(from.value);
+      if (found?.kind !== 'file') return refuse('That rollout file is not there any more.');
+      if (found.size > MAX_IMPORT_BYTES) return refuse('That rollout file is too large to copy (over 256 MB).');
+      const head = await window(history, from.value, 0, HEAD_BYTES);
+      if (head === undefined || metadata(head)?.id !== input.id)
+        return refuse('That rollout file does not belong to that conversation.');
+      const folder = pool.resolve(input.source.slice(0, input.source.lastIndexOf('/')));
+      if (!folder.ok) return refuse('That rollout file is outside the folders Ferretry may use.');
+      await pool.makeDirectory(folder.value, { mode: 0o700 });
+      await pool.writeBytes(to.value, await history.readBytes(from.value, MAX_IMPORT_BYTES), { exclusive: true });
+      return ok(undefined);
+    } catch {
+      return refuse('The rollout could not be copied.');
+    }
+  }
 
   readonly conversations: Harness['conversations'] = {
     list: async folder => {

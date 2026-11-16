@@ -5,11 +5,7 @@
  * writer, and the files' own values are compared before and after.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
-import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
-import type { ConfigCollectionDef, ConfigWriteAllDocument, KernelPorts } from '@ferretry/kernel/contract';
-import { testHost } from '@ferretry/kernel/testing';
-import { fakeLoginChanges, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
+import type { ConfigWriteAllDocument, KernelPorts } from '@ferretry/kernel/contract';
 import should from 'should';
 import {
   layerNameRefusal,
@@ -17,95 +13,13 @@ import {
   PROFILE_ITEMS,
   RUNTIME_ITEMS,
   RuntimeIdSchema,
-  RuntimesPort,
-  type RuntimesApi,
 } from '../../../contract/index.ts';
-import { type RuntimesAssembly, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
+import { lattice, owner, stopWorlds, world } from '../../support/profile-layers-world.ts';
 
-const stoppers: (() => Promise<void>)[] = [];
-afterEach(async () => {
-  for (const stop of stoppers.splice(0)) await stop();
-});
+afterEach(stopWorlds);
 
-const owner = { governed: false, decide: () => ({ allowed: true, refusal: 'granted' }) };
 const denied = { governed: true, decide: () => ({ allowed: false, refusal: 'forbidden' }) };
 const needsPasskey = { governed: true, decide: () => ({ allowed: false, refusal: 'step-up-required' }) };
-
-const FILES = {
-  runtimes: {
-    work: { login: 'claude-you', profile: 'a', agent: true },
-    other: { login: 'claude-you', profile: 'c' },
-  },
-  profiles: {
-    a: { contents: ['instructions/notes', 'mcp/shared'] },
-    b: { contents: ['mcp/shared', 'skills/pdf'] },
-    c: { contents: ['skills/pdf'] },
-  },
-  'model-sets': { fast: { models: ['m1'], default: 'm1' } },
-};
-
-interface World {
-  readonly kernel: KernelPorts;
-  readonly port: RuntimesApi;
-  /** Every document handed to `writeAll`, one array per call. */
-  readonly writes: (readonly ConfigWriteAllDocument[])[];
-  readonly values: (def: ConfigCollectionDef<unknown>) => string;
-  /** The catalogue's one-at-a-time section, the one every apply runs in (the very one `changeProfileLayers` must use). */
-  readonly section: <T>(act: () => Promise<T>) => Promise<T>;
-}
-
-interface WorldOptions {
-  /** `false`: the profile files cannot be read (no etag seam). */
-  readonly etag?: boolean;
-  /** Runs right AFTER a profile's etag was read and BEFORE anything is written: a concurrent edit lands here. */
-  readonly afterEtag?: (profile: string, kernel: KernelPorts) => Promise<void>;
-}
-
-async function world(files: Record<string, unknown> = FILES, options: WorldOptions = {}): Promise<World> {
-  const seen: { kernel?: KernelPorts; section?: World['section'] } = {};
-  const host = await testHost({
-    plugins: [
-      runtimesDaemon(ctx => {
-        seen.kernel = ctx.kernel;
-        const assembly: RuntimesAssembly = unavailableAssembly(ctx);
-        seen.section = async act => await assembly.catalog.serialise(act);
-        // The testing host's own etag of a stored profile: its value's JSON, as its writes answer it.
-        return options.etag === false
-          ? assembly
-          : {
-              ...assembly,
-              profileEtag: async name => {
-                // A profile with no file is `'absent'`, as the port's contract says (`ProfileLayerDeps.etag`).
-                const etag =
-                  JSON.stringify(
-                    ctx.kernel.config.collection(PROFILE_ITEMS as unknown as ConfigCollectionDef<unknown>).get(name),
-                  ) ?? 'absent';
-                await options.afterEtag?.(name, ctx.kernel);
-                return etag;
-              },
-            };
-      }),
-    ] as never,
-    fakes: { ferrets: new FakeFerrets(), logins: fakeLogins([]), loginChanges: fakeLoginChanges() },
-    gate: new StandInAdmission(() => ownerStanding()),
-    config: files,
-  });
-  stoppers.push(async () => await host.stop());
-  const kernel = seen.kernel as KernelPorts;
-  const writes: (readonly ConfigWriteAllDocument[])[] = [];
-  const real = kernel.config.writeAll.bind(kernel.config);
-  (kernel.config as { writeAll: typeof kernel.config.writeAll }).writeAll = async documents => {
-    writes.push(documents);
-    return await real(documents);
-  };
-  return {
-    kernel,
-    port: host.provided(RuntimesPort),
-    section: act => (seen.section as World['section'])(act),
-    writes,
-    values: def => JSON.stringify([...kernel.config.collection(def).entries()]),
-  };
-}
 
 const names = (documents: readonly ConfigWriteAllDocument[]): (string | undefined)[] =>
   documents.map(document => document.name);
@@ -335,7 +249,7 @@ describe('R2 changeProfileLayers — add', () => {
 
   it('R2 should answer a sentence, never a success, when the profile files cannot be read', async () => {
     // Arrange
-    const { port: runtimes, writes } = await world(FILES, { etag: false });
+    const { port: runtimes, writes } = await world(undefined, { etag: false });
 
     // Act
     const outcome = await runtimes.changeProfileLayers({ kind: 'add', profile: 'c', layer: 'mcp/x' }, owner);
@@ -756,7 +670,7 @@ describe('R2 changeProfileLayers — remove-everywhere is all or nothing', () =>
       kernel,
       port: runtimes,
       writes,
-    } = await world(FILES, {
+    } = await world(undefined, {
       afterEtag: async (profile, ports) => {
         if (profile === 'b')
           await ports.config.write(PROFILE_ITEMS as never, 'b', {
@@ -884,20 +798,6 @@ describe('R2 layers — a lattice of shared bases', () => {
   const mcpNames = (layers: readonly string[]): readonly string[] =>
     layers.filter(layer => layer.startsWith('mcp/')).map(layer => layer.slice(4));
 
-  /** Two profiles per level, each naming BOTH profiles of the next level and one item of its own. */
-  const lattice = (depth: number): Record<string, { contents: string[] }> => {
-    const profiles: Record<string, { contents: string[] }> = {};
-    for (let level = 0; level <= depth; level++)
-      for (const side of ['a', 'b'])
-        profiles[`${side}${String(level)}`] = {
-          contents:
-            level === depth
-              ? [`mcp/${side}${String(level)}`]
-              : [`profile/a${String(level + 1)}`, `profile/b${String(level + 1)}`, `mcp/${side}${String(level)}`],
-        };
-    return profiles;
-  };
-
   /** The rule as a person states it: expand every base where it stands (every path), keep each item at its newest place. */
   const naive = (profiles: Record<string, { contents: string[] }>, name: string): readonly string[] => {
     const seen: string[] = [];
@@ -952,51 +852,39 @@ describe('R2 layers — a lattice of shared bases', () => {
     );
   });
 
-  it('R2 should resolve a 20-deep lattice (about a million paths) at once', async () => {
+  it('R2 should resolve a 4-deep lattice once per item', async () => {
     // Arrange
     const { port: runtimes } = await world({
       runtimes: { work: { login: 'claude-you', profile: 'a0', agent: true } },
-      profiles: lattice(20),
+      profiles: lattice(4),
     });
 
     // Act
-    const started = performance.now();
     const layers = await runtimes.layers(runtime);
-    const took = performance.now() - started;
 
-    // Assert — all 41 items reachable from a0 (every profile but b0) once, a0's own item last; an expansion per path
-    // would take minutes.
-    should(layers?.mcp.length).equal(41);
-    should(new Set(layers?.mcp).size).equal(41);
+    // Assert — all 9 items reachable from a0 (every profile but b0) once, a0's own item last. The 20-deep lattice, whose
+    // expansion per path would take minutes, is tests/perf/daemon/profile-layers.test.ts.
+    should(layers?.mcp.length).equal(9);
+    should(new Set(layers?.mcp).size).equal(9);
     should(layers?.mcp.at(-1)).equal('a0');
-    should(took).be.below(1000);
   });
 
-  it('R2 should list the profiles and change one of a 20-deep lattice (about a million paths) at once', async () => {
+  it('R2 should list the profiles and change one of a 4-deep lattice', async () => {
     // Arrange
     const { port: runtimes } = await world({
       runtimes: { work: { login: 'claude-you', profile: 'a0', agent: true } },
-      profiles: lattice(20),
+      profiles: lattice(4),
     });
 
     // Act
-    const listedAt = performance.now();
     const listed = await runtimes.profiles();
-    const listedTook = performance.now() - listedAt;
-    const addedAt = performance.now();
     const added = await runtimes.changeProfileLayers({ kind: 'add', profile: 'a0', layer: 'mcp/extra' }, owner);
-    const addedTook = performance.now() - addedAt;
-    const removedAt = performance.now();
     const removed = await runtimes.changeProfileLayers({ kind: 'remove-everywhere', layer: 'mcp/extra' }, owner);
-    const removedTook = performance.now() - removedAt;
 
     // Assert
-    should(listed.length).equal(42);
+    should(listed.length).equal(10);
     should(added).deepEqual({ kind: 'written', profiles: ['a0'] });
     should(removed).deepEqual({ kind: 'written', profiles: ['a0'] });
-    should(listedTook).be.below(1000);
-    should(addedTook).be.below(1000);
-    should(removedTook).be.below(1000);
   });
 
   it('R2 should refuse a loop with the exact path, however deep the way into it', async () => {

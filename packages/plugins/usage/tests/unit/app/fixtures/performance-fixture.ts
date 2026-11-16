@@ -158,8 +158,8 @@ export const harnessPerformanceClient = (windowMs = 1_500): PerformanceClient =>
 
 /** This browser's recorder, with a minute of an idle fleet page's reads already on it. */
 export const harnessRecorder = (): PerformanceRecorder => {
-  const recorder = new PerformanceRecorder({ now: () => performance.now() });
-  const at = performance.now();
+  const recorder = new PerformanceRecorder({ now: () => performance.now() }); // not-a-budget: the recorder's injected clock for the harness, nothing is bounded
+  const at = performance.now(); // not-a-budget: a timestamp for the seeded reads, nothing is bounded
   const reads: readonly (readonly [string, number, number])[] = [
     ['GET /v1/sessions', 116, 25_600],
     ['GET /v1/sessions', 98, 25_600],

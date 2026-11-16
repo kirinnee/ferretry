@@ -1,3 +1,4 @@
+import { tmuxStartDirectory } from './format-escape.ts';
 import { sessionTarget, TmuxAddressError } from './address.ts';
 import type { TmuxLaunch } from './contracts.ts';
 import { CONTROL_SUBSCRIPTION_NAMES } from './control-protocol.ts';
@@ -137,7 +138,7 @@ function environmentArgument(name: string, value: string): readonly string[] {
 }
 
 export function newSessionArguments(launch: TmuxLaunch): readonly string[] {
-  const args = ['new-session', '-d', '-s', sessionTarget(launch.session), '-c', launch.cwd];
+  const args = ['new-session', '-d', '-s', sessionTarget(launch.session), '-c', tmuxStartDirectory(launch.cwd)];
   if (launch.width !== undefined) args.push('-x', String(launch.width));
   if (launch.height !== undefined) args.push('-y', String(launch.height));
   // Sorted so one launch produces one argv: the caller hands over a record, and an argv that
