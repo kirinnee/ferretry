@@ -143,6 +143,38 @@ describe('CFG-LEAK-R the cutter, case by case', () => {
   });
 });
 
+describe('CFG-LEAK-R -p<password>: the stuck reading is judged first', () => {
+  test('a value stuck to -p is hidden even when a longer flag glued to its value also parses', () => {
+    expect(shown('-pabc=def12345')).toEqual([`-p${HIDDEN_VALUE_TEXT}`]);
+    expect(shown("-p'a b'")).toEqual([`-p${HIDDEN_VALUE_TEXT}`]);
+    expect(shown(`-p${VALUE}`)).toEqual([`-p${HIDDEN_VALUE_TEXT}`]);
+    expect(shown('-pabc=def12345').join(' ')).not.toContain('def12345');
+  });
+
+  test('-port 80 (two words) and --password=$X read as they always did', () => {
+    expect(shown('-port', '80')).toEqual(['-port', '80']);
+    expect(shown('--password=$X')).toEqual(['--password=$X']);
+    expect(shown('-password=$X')).toEqual(['-password=$X']);
+    expect(shown('-p$X')).toEqual(['-p$X']);
+    expect(shown("-p'short'")).toEqual(["-p'short'"]);
+    expect(shown(`-P${VALUE}`)).toEqual([`-P${VALUE}`]);
+  });
+
+  test.each([
+    '-pmonkey=abc1',
+    '-pturkey=12345',
+    '-pPassword=abc',
+    '-ptoken=x1',
+    '-p_auth=xyz12',
+    '-pmy.secret=a',
+    '-pmonkey abc',
+    '-password=abc',
+    '-pmonkey=abcdefgh1',
+  ])('%s is cut whole from the letter on, never shown beside the cut value', word => {
+    expect(shown(word)).toEqual([`-p${HIDDEN_VALUE_TEXT}`]);
+  });
+});
+
 describe('the name and value tests', () => {
   test('looksSecret: a secret name or a token prefix with a long value; a short value or a reference is none', () => {
     expect(looksSecret('API_KEY', VALUE)).toBe(true);
