@@ -23,6 +23,21 @@ const FERRET_READS = [
   'GET /v1/restarts',
   'GET /v1/ferrets/:ferretId/handover',
   'GET /v1/ferrets/:ferretId/relaunch-settings',
+  // Declared by PLUGIN manifests (Conversation, Packs, Lessons): `declaredRoute` loads every manifest, so the same table
+  // holds them. What a ferret said, was sent, asked or reported, and the directory that names every ferret.
+  'GET /v1/ferrets/:ferretId/logs',
+  'GET /v1/ferrets/:ferretId/log-page',
+  'GET /v1/ferrets/:ferretId/log-search',
+  'GET /v1/ferrets/:ferretId/messages',
+  'GET /v1/ferrets/:ferretId/question',
+  'GET /v1/ferrets/:ferretId/sends',
+  'GET /v1/ferrets/:ferretId/queue',
+  'GET /v1/ferrets/:ferretId/sends/:sendId',
+  'GET /v1/ferrets/:ferretId/handoffs/:name',
+  'GET /v1/ferrets/:ferretId/transcript-images/:handle',
+  'GET /v1/ferrets/:ferretId/attachments/:attachmentId',
+  'GET /v1/ferrets/:ferretId/result',
+  'GET /v1/lessons/directory',
 ] as const;
 
 const NO_FLEET_USE: CapabilityGrants = {

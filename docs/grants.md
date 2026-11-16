@@ -230,13 +230,19 @@ the login it runs on, where its transcript lives (with the daemon's attribution 
 id. So `GET /v1/ferrets`, `GET /v1/ferrets/:ferretId`, `GET /v1/ferrets/by-request/:requestId`,
 `GET /v1/archived-sessions`, `GET /v1/ferrets/:ferretId/pins`, `GET /v1/restarts`,
 `GET /v1/ferrets/:ferretId/handover`, `GET /v1/ferrets/:ferretId/relaunch-settings` and the `GET /v1/events` journal
-stream all ask `fleet.use`, and a remote caller whose `fleet.use` is narrowed is refused (a device: 403
-`grant_device_not_granted`) before anything is read. (4.x left every one of them ungoverned, and this page said so; a device the owner had
+stream all ask `fleet.use`. So does what a ferret SAID, was SENT, ASKED or REPORTED: `GET /v1/ferrets/:ferretId/logs`,
+`/log-page`, `/log-search`, `/messages` (its transcript), `/transcript-images/:handle`, `/question` (the pending
+question), `/sends`, `/sends/:sendId`, `/queue`, `/handoffs/:name`, `/attachments/:attachmentId` and `/result` (what a
+finished ferret reported), and `GET /v1/lessons/directory`, which names every ferret's id, name and folder. A remote caller whose `fleet.use` is narrowed is refused (a device: 403
+`grant_device_not_granted`) before anything is read. (4.x left every one of them that it had ungoverned, and this page said so; a device the owner had
 narrowed off fleet use still read the whole fleet.) The gate is the **device's** only: a ferret's own credential is never
 grant-governed (`presentation.local`) and the host's admin token over loopback is ungoverned, so the owner's `fy` and
 the app of a device holding `fleet.use` (every default device, and a `--limited` one) read exactly what they did.
+This list is what that change touched and no more: it says nothing about any other route that names a ferret (the
+asks and agenda reads, `/v1/gc`, the skills inventory, `/v1/projects`, `/v1/links/history`, `/v1/renders`), which are
+neither opened nor closed by it.
 **Declared GAP — what an agent reads of ANOTHER ferret is 4.x's and is not fenced here.** A ferret calling these routes
-gets the full record, archive, pin board and journal of an unrelated ferret, as 4.x gave it: `fy ps -a`, `fy status <id>`,
+gets the full record, archive, pin board, journal, transcript, question and result of an unrelated ferret, as 4.x gave it: `fy ps -a`, `fy status <id>`,
 `fy wait <peer>` and `fy ask` rely on it to resolve and address peers and other projects' leads (`fy send` resolves a
 callsign inside the daemon and does not call these routes). Only the move reads (`handover`, `relaunch-settings`),
 the subtree and the live/transcript follow keep a ferret to itself and its helpers. Fencing the rest by lineage, or
