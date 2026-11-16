@@ -171,13 +171,21 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
    * (Codex's database of conversations, `CODEX_SQLITE_HOME`) when `sessions` is pooled too. Never a reason to refuse a
    * launch: whatever stays the ferret's own is said in one sentence and the launch goes on.
    */
+  /** Pooling is a convenience: saying so in the log can never fail a launch. */
+  const say = (message: string): void => {
+    try {
+      kernel.log.warn(message);
+    } catch {
+      /* a composition without a log says nothing */
+    }
+  };
   const poolHistory = async (ferret: FerretId): Promise<string | undefined> => {
     const pooled = await poolHomeHistory({ roots: kernel.roots, ferret, entries: CODEX_HISTORY_ENTRIES });
     if (pooled.conflicts.length > 0)
-      kernel.log.warn(
+      say(
         `Ferret ${ferret}: ${pooled.conflicts.length} file(s) it already had were kept in the pool's .conflicts folder because the shared pool already held a file of that name.`,
       );
-    if (pooled.sentence !== undefined) kernel.log.warn(pooled.sentence);
+    if (pooled.sentence !== undefined) say(pooled.sentence);
     // The database indexes the rollouts: shared only with the rollouts it indexes.
     if (!pooled.linked.includes('sessions')) return undefined;
     try {
@@ -187,7 +195,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
       await pool.makeDirectory(sqlite.value, { mode: 0o700 });
       return sqlite.value;
     } catch {
-      kernel.log.warn('This ferret goes on with its own Codex database because the shared one could not be made.');
+      say('This ferret goes on with its own Codex database because the shared one could not be made.');
       return undefined;
     }
   };

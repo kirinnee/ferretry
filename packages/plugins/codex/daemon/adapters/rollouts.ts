@@ -204,8 +204,21 @@ export class CodexRollouts {
   ): Promise<{ readonly root: RootHandle; readonly directory: string; readonly pooled: boolean }> {
     const own = this.owner(ferret);
     const at = own.resolve('sessions');
-    if (at.ok && (await own.lstat(at.value).catch(() => undefined))?.kind === 'symlink')
-      return { root: this.kernel.roots.historyPool(), directory: 'sessions', pooled: true };
+    // A name that cannot be looked at is not the pool's link: the ferret's own folder is then what is read (and refused).
+    const linked = at.ok
+      ? await Promise.resolve()
+          .then(async () => (await own.lstat(at.value))?.kind === 'symlink')
+          .catch(() => false)
+      : false;
+    if (linked) {
+      // The link is the pool's only when the pool can be reached: a plugin with no pool reads the ferret's own folder, which
+      // refuses a link (nothing is read through it).
+      try {
+        return { root: this.kernel.roots.historyPool(), directory: 'sessions', pooled: true };
+      } catch {
+        /* fall through to the ferret's own folder */
+      }
+    }
     return {
       root: this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` }),
       directory: '',

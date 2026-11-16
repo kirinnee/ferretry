@@ -248,8 +248,10 @@ export function harnessHomeCases(): void {
       await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
       await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
 
-      expect(warned).toHaveLength(1);
-      expect(warned[0]).toContain('no configuration port');
+      // (A composition with no pool also says, once, that the ferret goes on with its own history.)
+      const said = warned.filter(message => !message.includes('its own history'));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain('no configuration port');
     });
 
     test('no settings item and no server writes no config.toml at all, as before', async () => {
@@ -396,9 +398,10 @@ export function harnessHomeCases(): void {
       await harness.prepareHome(spec('f2', home));
 
       expect(await kind(join(home, 'auth.json'))).toBe('absent');
-      expect(warned).toHaveLength(1);
-      expect(warned[0]).toContain('auth.json was a file, not the login’s link');
-      expect(warned[0]).not.toContain('a stale copy');
+      const said = warned.filter(message => !message.includes('its own history'));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain('auth.json was a file, not the login’s link');
+      expect(said[0]).not.toContain('a stale copy');
     });
 
     test('a stale FILE is replaced by the link when a credential is given', async () => {
