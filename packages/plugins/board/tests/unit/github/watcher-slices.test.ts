@@ -10,10 +10,8 @@ import manifest from '../../../manifest.ts';
 import { card, FakeLanes, lanes, NOW, PROJECT, world } from '../board/support.ts';
 import { answer, prNode, prUrl, REPO } from './support.ts';
 
-/** A board as large as the owner's real one can grow to (the 3,600 cards of the stall report). */
-const CARDS = 3_600;
-/** The longest the daemon may go without answering anything else: one slice of one tick may not hold the loop longer. */
-const LONGEST_SLICE_MS = 100;
+/** A board small enough that time is irrelevant; the perf tier holds the 3,600-card slice budget. */
+const CARDS = 30;
 
 const stateFile = (name: string) => manifest.data.state.find(candidate => candidate.name === name) as never;
 
@@ -33,8 +31,8 @@ const linked = (number: number): PrLink => ({
 /** What real I/O does: the loop gets a turn before the call answers. */
 const afterIo = async (): Promise<void> => await new Promise<void>(resolve => setImmediate(resolve));
 
-describe('GitHubWatcher: one tick on a very large board', () => {
-  it(`should never hold the event loop for ${String(LONGEST_SLICE_MS)} ms in one slice with ${String(CARDS)} watched cards whose PRs all changed`, async () => {
+describe('GitHubWatcher: one tick over many changed cards', () => {
+  it(`writes every one of ${String(CARDS)} watched cards whose PRs all changed`, async () => {
     // The real card store over an in-memory state folder: its schema checks and copies cost what they cost in the daemon.
     const store = new KernelCardStore(
       new MemoryStateFolder().port([stateFile('cards'), stateFile('counters')]),
@@ -95,30 +93,8 @@ describe('GitHubWatcher: one tick on a very large board', () => {
       version: '4.114.0',
     });
 
-    // Every unit file runs in ONE bun process, so by now the heap holds what thousands of earlier files left. A
-    // major garbage collection is a stop-the-world pause proportional to that heap, and one that happens to fall in
-    // the tick is charged to the tick although the tick did not cause it (CI, 5.0 tip 40006c8d4d: 304 ms and 378 ms
-    // with this file after the whole suite, 39-45 ms alone). Collect first, outside the measured window, so the
-    // window holds only what the tick itself does. Measured with this file alone and a 230 MB heap of unrelated
-    // live objects: 387 ms without this call (the pause lands inside the tick), 29 ms with it (the call itself
-    // takes ~650 ms, unmeasured). A tick that really holds the loop still fails: see the mutation in the commit.
-    Bun.gc(true);
-
-    // The longest the loop waited for a turn while the tick ran: the longest stretch of synchronous work in it.
-    let running = true;
-    let longest = 0;
-    const watching = (async () => {
-      while (running) {
-        const at = performance.now();
-        await afterIo();
-        longest = Math.max(longest, performance.now() - at);
-      }
-    })();
     const report = await watcher.tick();
-    running = false;
-    await watching;
 
     should(report.written).have.length(CARDS);
-    should(longest).be.below(LONGEST_SLICE_MS);
-  }, 60_000);
+  });
 });

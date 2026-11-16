@@ -2,6 +2,7 @@
 
 import type { PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { WardenConfigSurface } from '../features/warden/warden-config-card.tsx';
+import { WardenDialogRules } from '../features/warden/warden-dialog-rules.tsx';
 import { useCurrentDaemon } from '../hooks/use-warden-daemons.ts';
 import { useWardenReach } from '../hooks/use-warden-reach.ts';
 import { DaemonReachContext, WardenClientContext } from '../lib/warden-client-context.tsx';
@@ -16,6 +17,7 @@ export function createWardenSettings(client: PluginClient) {
       <DaemonReachContext.Provider value={reach}>
         <WardenClientContext.Provider value={factory}>
           <WardenConfigSurface connection={connection} unavailable="message" onNavigate={navigate} />
+          <WardenDialogRules connection={connection} />
         </WardenClientContext.Provider>
       </DaemonReachContext.Provider>
     );

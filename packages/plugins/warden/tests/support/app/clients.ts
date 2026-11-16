@@ -17,5 +17,11 @@ export const fakeWardenClient = (overrides: Partial<WardenClient> = {}): WardenC
   config: async () => ({ config: wardenConfig(), accounts: [], warnings: [] }),
   updateConfig: async () => ({ config: wardenConfig(), accounts: [], warnings: [] }),
   nameJevKey: async () => ({ config: wardenConfig(), accounts: [], warnings: [], jevKey: 'named' }),
+  dialogRules: async () => ({ builtIn: [], taught: [], pending: [] }),
+  learnDialog: async request => ({
+    proposal: { ferret: request.ferret, title: 'a screen', rows: [], held: false },
+    saved: false,
+    heldFor: [],
+  }),
   ...overrides,
 });

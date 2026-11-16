@@ -53,7 +53,7 @@ export const installManualClock = (): ManualClock => {
     performanceNow: Object.getOwnPropertyDescriptor(performance, 'now'),
   };
   const dateOrigin = real.dateNow();
-  const performanceOrigin = performance.now();
+  const performanceOrigin = performance.now(); // not-a-budget: records the real clock origin the manual clock replaces
   const scheduled = new Map<number, Scheduled>();
   let now = 0;
   let nextId = 1;

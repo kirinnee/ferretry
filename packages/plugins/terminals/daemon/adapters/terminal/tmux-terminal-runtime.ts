@@ -10,6 +10,7 @@ import {
   terminalTmuxSessionName,
 } from '../../lib/terminal/runtime-policy.ts';
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
+import { tmuxStartDirectory } from '../../lib/tmux/format-escape.ts';
 import { isTmuxServerAbsent } from '../../lib/tmux/server-absent.ts';
 
 const ID_OPTION = '@fy_terminal_id';
@@ -171,7 +172,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       '-s',
       tmuxSession,
       '-c',
-      input.cwd,
+      tmuxStartDirectory(input.cwd),
       '-x',
       String(input.size.cols),
       '-y',
