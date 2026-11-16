@@ -836,15 +836,25 @@ later than it would have; that is the whole cost. `scripts/validate/action-pins.
 `.github/actions/` as well as `.github/workflows/`, so the pin inside the action is held to the same rules
 as any other.
 
-**Measured (2026-11-16, kirinnee/ferretry PR #1685).** The Nix step of a Namespace job, in-log time from the
-action's first line to the end of `nix-realise.sh`: **4.5 s before, 2.35 s warm after** (Nix bootstrapped from
-the persisted `/nix` in 0.5 s instead of a 1.6 s install; `print-dev-env` 1.5 s instead of 2.9 s from the
-persisted `~/.cache/nix`). It is warm only once a run that **may commit the volume** has finished: the
-volume is committed by `main` only (`nscloud-cache-allow-commit-from-main`), so on `rebuild/5.0-after` pull requests
-every Namespace job takes the **cold** path (the installer over the forked volume: about 11 s plus 3.6 s to
-realise, **15 s against 6 s**) until `main` has run this action once. On GitHub-hosted Linux and macOS the
-setup action is no faster than the installer it replaced (29 to 36 s against 27 to 29 s on Linux; 89 to
-149 s against 87 to 110 s on macOS-15).
+**Measured (2026-11-16, kirinnee/ferretry PR #1685): not faster.** The step's wall clock, `install-nix` job step
+(runs 43811296541, 43812003432, 43815920654 for the PR; 43813618380 to 43815564405 for a controlled old-against-new
+harness on the same runner shapes):
+
+| Where                                                                            | Before (cachix + `nix-realise.sh`) | After (`setup-nix` + `nix-realise.sh`) |
+| -------------------------------------------------------------------------------- | ---------------------------------- | -------------------------------------- |
+| Namespace, warm volume                                                           | 4 to 6 s                           | 5 s (n=2)                              |
+| Namespace, volume without the new layout (every PR run until `main` commits one) | 5 to 6 s                           | 15 to 22 s (n=5)                       |
+| GitHub-hosted Linux                                                              | 22 to 29 s                         | 22 to 36 s (n=8)                       |
+| macOS-15 hosted                                                                  | 87 to 110 s                        | 89 to 149 s (n=4)                      |
+
+Warm, the action itself is faster (Nix bootstrapped from the persisted `/nix` in 0.5 s instead of a 1.6 s install;
+`print-dev-env` 1.5 s instead of 2.9 s from the persisted `~/.cache/nix`), but the runner spends about 2.6 s at the
+start of the step downloading the seven actions the composite names (`setup-nix` twice, `nix-installer-action@main`,
+`nscloud-cache-action`, `checkout`, `create-github-app-token`), which cancels it. The warm path also exists only once a
+run that **may commit the volume** has finished: `main` alone commits (`nscloud-cache-allow-commit-from-main`), so on
+`rebuild/5.0-after` pull requests every Namespace job takes the installer path over the forked volume (about 11 s to
+install plus 3.6 s to realise) until `main` has run this action. durian-shell's dev-shell cache hit (0.19 s) did not
+beat sourcing the env `nix-realise.sh` printed (0.21 s), so it is not used.
 
 **A declared GAP in the pin rule.** The SHA pins what `install-nix` names, not what `setup-nix` runs: its
 composite step calls `DeterminateSystems/nix-installer-action@main` and `namespacelabs/nscloud-cache-action@v1`
