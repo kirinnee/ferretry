@@ -41,8 +41,8 @@ describe('K18 whichForCommand: the handle’s PATH only, failing closed', () => 
       expect(await whichForCommand('claude', path, probe(['/usr/bin/claude']))).toEqual({ kind: 'unprovable' });
   });
 
-  test('found on the handle’s PATH, or absent, with which’s rules (name grammar, relative entries dropped)', async () => {
-    const path = `bin:/${SENTINEL}/a:/opt/fake`;
+  test('found on the handle’s PATH, or absent, with which’s rules (name grammar)', async () => {
+    const path = `/${SENTINEL}/a:/opt/fake`;
     expect(await whichForCommand('claude', path, probe(['/opt/fake/claude', 'bin/claude']))).toEqual({
       kind: 'found',
       path: '/opt/fake/claude',
@@ -54,10 +54,35 @@ describe('K18 whichForCommand: the handle’s PATH only, failing closed', () => 
       });
   });
 
-  test('the 64-folder bound holds on a handle’s PATH too', async () => {
-    const folders = Array.from({ length: MAX_SEARCH_DIRECTORIES + 1 }, (_, index) => `/d${String(index)}`);
-    const last = `${folders.at(-1)}/claude`;
-    expect(await whichForCommand('claude', folders.join(':'), probe([last]))).toEqual({ kind: 'absent' });
+  test('a PATH past the 64-folder bound is unprovable: a shell would search the folders this lookup skips', async () => {
+    const filler = Array.from({ length: MAX_SEARCH_DIRECTORIES }, (_, index) => `/d${String(index)}`);
+    const real = '/home/me/.nix-profile/bin';
+    // 64 missing folders, then the one holding the command: the old lookup said `absent`, the shell finds it.
+    expect(await whichForCommand('claude', [...filler, real].join(':'), probe([`${real}/claude`]))).toEqual({
+      kind: 'unprovable',
+    });
+    expect(await whichForCommand('claude', [...filler, real].join(':'), probe([]))).toEqual({ kind: 'unprovable' });
+    // Exactly the bound is searched to the end, so a miss is a miss and a hit is a hit.
+    expect(await whichForCommand('claude', filler.join(':'), probe([]))).toEqual({ kind: 'absent' });
+    expect(await whichForCommand('claude', filler.join(':'), probe(['/d63/claude']))).toEqual({
+      kind: 'found',
+      path: '/d63/claude',
+    });
+    // Duplicates count once: 70 entries over 64 unique folders are still searched completely.
+    expect(await whichForCommand('claude', [...filler, ...filler.slice(0, 6)].join(':'), probe([]))).toEqual({
+      kind: 'absent',
+    });
+  });
+
+  test('a PATH with ANY entry the lookup would drop is unprovable, whether or not another folder holds the command', async () => {
+    const found = probe(['/a/claude']);
+    for (const path of ['/a:', '/a::/b', ':/a', 'rel:/a', '.:/a', '/a:..', '/a:./x', '/a:/b/../c', '/a:/b\0c'])
+      expect(await whichForCommand('claude', path, found)).toEqual({ kind: 'unprovable' });
+    for (const path of ['/a:', '/a::/b', 'rel:/a', '.:/a'])
+      expect(await whichForCommand('claude', path, probe([]))).toEqual({ kind: 'unprovable' });
+    // A clean PATH of the same folders is still answered.
+    expect(await whichForCommand('claude', '/a:/b', found)).toEqual({ kind: 'found', path: '/a/claude' });
+    expect(await whichForCommand('claude', '/a:/b', probe([]))).toEqual({ kind: 'absent' });
   });
 
   test('the PATH itself never comes back: an absent answer names no folder of it', async () => {
