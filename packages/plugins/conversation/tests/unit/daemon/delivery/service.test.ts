@@ -946,6 +946,23 @@ describe('re-attempting a send under its original id', () => {
     should(record).match({ fate: 'queued', attempt: 2 });
   });
 
+  it("types a send nothing was ever typed for only at an idle prompt, never into a busy pane's queue", async () => {
+    // The queue types a long body as a pointer to a fresh file the ledger does not name: the tracker could not prove
+    // that copy, and would type the body again. A kept, untyped send waits out the turn instead.
+    const { service, terminal, ledger } = await settled('accepted', { untyped: true }, [
+      pane({ promptReady: true }),
+      pane({ activeWork: true }),
+    ]);
+
+    const withheld = await service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((error: unknown) => error);
+
+    should(withheld).be.instanceof(SendRetypeWithheld);
+    should((withheld as SendRetypeWithheld).reason).equal('busy');
+    should(terminal.calls).not.containEql('queue');
+    should(terminal.typed).be.empty();
+    should(ledger.only()).containEql({ fate: 'accepted', untyped: true, attempt: 1 });
+  });
+
   it('stays accepted when the busy pane did not prove it is holding the retype', async () => {
     const { service, terminal } = await settled('queued', {}, [
       pane({ promptReady: true }),

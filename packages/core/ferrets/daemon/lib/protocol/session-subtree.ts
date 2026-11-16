@@ -11,7 +11,7 @@
  * from the registry's `parent` links, never from a request.
  */
 import { z } from 'zod';
-import type { FerretIngestEvidence } from '../../../contract/index.ts';
+import type { FerretIngestEvidence, FerretLiveRead } from '../../../contract/index.ts';
 import { PrChecksSchema, PrStateSchema } from './board.ts';
 import { InstantSchema, PositiveIntegerSchema } from './common.ts';
 import type { SessionConfig, SessionState, SessionView } from './session.ts';
@@ -145,5 +145,17 @@ export function ingestEvidence(
     startedAt: state.startedAt ?? null,
     contextWindow: state.contextWindow ?? null,
     contextEndPercent: state.contextPercent ?? null,
+  };
+}
+
+/**
+ * What `GET /v1/ferrets/:ferretId/live` serves: the turns and the context of the ferret's own state document, as they
+ * stand now. A ferret whose documents did not parse (`undefined`) states nothing, and nothing is `null`, never zero.
+ */
+export function liveRead(evidence: FerretIngestEvidence | undefined): FerretLiveRead {
+  return {
+    turns: evidence?.turns ?? null,
+    contextPercent: evidence?.contextEndPercent ?? null,
+    contextWindow: evidence?.contextWindow ?? null,
   };
 }

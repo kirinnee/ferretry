@@ -1,6 +1,6 @@
 /** S10 — Install on /shared asks the shell which machine, and everything rides the machine the person picked. */
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
-import type { ChosenDaemon, DaemonlessPorts } from '@ferretry/app';
+import type { ChooseDaemonOptions, ChosenDaemon, DaemonlessPorts } from '@ferretry/app';
 import { ensureDom, mount } from '@ferretry/app/testing';
 import { act, Suspense } from 'react';
 import { NOT_PAIRED_NOTE } from '../../../app/features/shared/shared-screens-model.ts';
@@ -54,6 +54,15 @@ describe('S10 installChooser', () => {
     expect(typeof client?.request).toBe('function');
   });
 
+  it('asks with answerAloneWhenOne, so the shell skips the picker when only one machine qualifies', async () => {
+    const options: (ChooseDaemonOptions | undefined)[] = [];
+    await installChooser(async (_purpose, given) => {
+      options.push(given);
+      return undefined;
+    })();
+    expect(options).toEqual([{ answerAloneWhenOne: true }]);
+  });
+
   it('a cancel answers undefined and builds no host', async () => {
     expect(await installChooser(async () => undefined)()).toBeUndefined();
   });
@@ -89,7 +98,11 @@ describe('S10 /shared', () => {
   });
 
   /** `/shared` with one publisher sharing one item, opened to its sheet. */
-  async function openedItem(ports: DaemonlessPorts) {
+  async function openedItem(
+    ports: DaemonlessPorts,
+    chooseDaemon: (purpose: string, options?: ChooseDaemonOptions) => Promise<ChosenDaemon | undefined> = async () =>
+      undefined,
+  ) {
     const shared = await sharedItemFixture();
     const entry = shared.entries.find(candidate => candidate.itemId === shared.skill.itemId);
     if (entry === undefined) throw new Error('no entry');
@@ -105,7 +118,7 @@ describe('S10 /shared', () => {
     const Shared = createSharedScreen(ports);
     const view = await mount(
       <Suspense fallback={null}>
-        <Shared params={{}} location={() => ''} navigate={() => undefined} chooseDaemon={async () => undefined} />
+        <Shared params={{}} location={() => ''} navigate={() => undefined} chooseDaemon={chooseDaemon} />
       </Suspense>,
     );
     await settle();
@@ -139,6 +152,59 @@ describe('S10 /shared', () => {
     await act(async () => paired.pair());
     expect(q('[data-shared-not-paired]')).toBeNull();
     expect(q('[data-shared-install-button]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  /**
+   * The shell's contract for the question, in miniature: with `answerAloneWhenOne` and exactly one qualifying machine it
+   * answers at once; otherwise it draws a picker (counted) that the person answers by hand.
+   */
+  function shellOf(qualifying: readonly ChosenDaemon[]) {
+    const seen = { pickers: 0, questions: 0, answerPicker: undefined as (() => void) | undefined };
+    const chooseDaemon = (_purpose: string, options?: ChooseDaemonOptions): Promise<ChosenDaemon | undefined> => {
+      seen.questions += 1;
+      const only = qualifying.length === 1 ? qualifying[0] : undefined;
+      if (options?.answerAloneWhenOne === true && only !== undefined) return Promise.resolve(only);
+      seen.pickers += 1;
+      return new Promise(resolve => {
+        seen.answerPicker = () => resolve(qualifying[1]);
+      });
+    };
+    return { seen, chooseDaemon };
+  }
+
+  it('s10 with ONE paired machine, Install runs on THAT machine at once after the click, with no picker', async () => {
+    calls.length = 0;
+    const shell = shellOf([picked]);
+    const view = await openedItem(pairedPorts(1).ports, shell.chooseDaemon);
+    await click(q('[data-shared-item]'));
+    // Nothing is asked, let alone installed, before the click.
+    expect(shell.seen.questions).toBe(0);
+    expect(calls).toEqual([]);
+    await click(q('[data-shared-install-button]'));
+    await settle();
+    expect(shell.seen).toMatchObject({ questions: 1, pickers: 0 });
+    // The install sheet took over and reads THAT machine's projects through its own client.
+    expect(q('[data-shared-install-button]')).toBeNull();
+    expect(calls).toContain('GET /v1/projects');
+    await view.unmount();
+  });
+
+  it('s10 with TWO paired machines, Install shows the picker and installs nothing until one is chosen', async () => {
+    calls.length = 0;
+    const other: ChosenDaemon = { ...picked, daemon: 'fy_daemon_gamma', machine: 'Laptop' };
+    const shell = shellOf([other, picked]);
+    const view = await openedItem(pairedPorts(2).ports, shell.chooseDaemon);
+    await click(q('[data-shared-item]'));
+    await click(q('[data-shared-install-button]'));
+    await settle();
+    expect(shell.seen).toMatchObject({ questions: 1, pickers: 1 });
+    expect(q('[data-shared-install-button]')).not.toBeNull();
+    expect(calls).toEqual([]);
+    await act(async () => shell.seen.answerPicker?.());
+    await settle();
+    expect(q('[data-shared-install-button]')).toBeNull();
+    expect(calls).toContain('GET /v1/projects');
     await view.unmount();
   });
 

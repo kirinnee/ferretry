@@ -73,6 +73,7 @@ describe('DOM tests: a /name or $name reference', () => {
           daemon={daemon}
           ferret={ferret}
           showPanel={panel => shown.push(panel)}
+          shows={() => true}
         >
           <Reference value={{ name: '/deploy', ...reference }} />
         </FerretWorkspaceActionsProvider>

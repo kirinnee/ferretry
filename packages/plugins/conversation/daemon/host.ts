@@ -30,6 +30,7 @@ import {
   QUESTION_STATE,
   type Question,
   type SendRecord,
+  STUCK_FRAME_STATES,
   type SendResult,
   TurnEnded,
 } from '../contract/index.ts';
@@ -110,6 +111,7 @@ import {
   SEND_UNAVAILABLE,
   terminalSeam,
   Unconfirmed,
+  UnreadableComposer,
 } from './harness-seam.ts';
 import { startupParkedPending } from './delivery/lib/service.ts';
 import { type DeliveredAttachment, deliveredFilename, messageWithAttachments } from './attachments/lib/delivery.ts';
@@ -621,6 +623,37 @@ export function buildConversationA(deps: {
       return await lookAtPane.heldAt(id, own?.matchText ?? text);
     },
   };
+  /**
+   * ONE SNAPSHOT of the screen a stuck send met, so the cause can be found afterwards: v4 retried a message for six and a
+   * half hours against a frame nobody kept. The runner's capture is MASKED; it is written `0600` to the ferret's own
+   * folder as `stuck-frame-1.txt`, the two before it moved to `-2` and `-3` and anything older dropped. Its text never
+   * leaves this machine: only its path is logged. `undefined` when the pane could not be captured or the file written.
+   */
+  const keepStuckFrame = async (
+    ferret: SessionId,
+    record: { readonly sendId: string },
+    waitedMs: number,
+  ): Promise<string | undefined> => {
+    const captured = await (await ferrets.harness?.(ferret))?.form?.capture();
+    if (captured === undefined || !captured.ok) return undefined;
+    const frame = captured.value;
+    const header = [
+      `stuck send ${record.sendId} to ferret ${ferret}, said stuck at ${kernel.clock.now()} after ${Math.round(waitedMs / 1000)} s`,
+      `alive=${frame.alive} dead=${frame.dead} promptReady=${frame.promptReady} activeWork=${frame.activeWork} ` +
+        `blocking=${frame.blocking ?? 'none'} cursor=${frame.cursorX ?? '?'},${frame.cursorY ?? '?'} (zero-based, on the visible frame)`,
+      '--- visible frame (masked) ---',
+    ].join('\n');
+    const [newest, middle, oldest] = STUCK_FRAME_STATES;
+    for (const [from, to] of [
+      [middle, oldest],
+      [newest, middle],
+    ] as const) {
+      const kept = await kernel.state.read(from, ferret);
+      if (kept.ok && kept.value !== undefined) await kernel.state.write(to, kept.value, ferret);
+    }
+    await kernel.state.write(newest, new TextEncoder().encode(`${header}\n${frame.visible}\n`), ferret);
+    return kernel.state.pathOf(newest, ferret);
+  };
   const failureNotifier = new AgentSendFailureNotifier(
     {
       send: async request =>
@@ -669,6 +702,35 @@ export function buildConversationA(deps: {
         notify: async (sender, recipient, record) => {
           kernel.log.info('send.failed', { ferret: recipient, sendId: record.sendId, sender, fate: record.fate });
           await failureNotifier.notify(sender, recipient, record);
+        },
+      },
+      // A send the tracker could not type for `stuckAlarmMs` is said LOUDLY, once: a warning in the daemon's log
+      // naming the ferret, the send and the wait. Ids and numbers only, never the message or the screen. The row's
+      // `stuckAt` is what the person who sent it sees; the tries go on.
+      alarm: {
+        stuck: async (recipient, record, waitedMs) => {
+          const snapshot = await keepStuckFrame(recipient, record, waitedMs).catch(() => undefined);
+          kernel.log.warn(
+            `a message to ferret ${recipient} is STUCK: nothing could be typed for it for ${Math.round(waitedMs / 1000)} s, ` +
+              "because the agent's input box could not be proven empty. Ferretry keeps trying every " +
+              `${Math.round(defaultSendTrackerSettings.untypedLookMs / 1000)} s; the ferret's terminal shows what is in the way` +
+              (snapshot === undefined
+                ? ' (no snapshot of its screen could be kept)'
+                : `; the screen it met is kept at ${snapshot}`),
+            { ferret: recipient, sendId: record.sendId, senderKind: record.senderKind ?? 'unknown', waitedMs },
+          );
+          // An agent has nobody watching its row: it is told, once, that its message is kept and still tried.
+          if (record.senderKind === 'agent' && record.from !== undefined)
+            await failureNotifier
+              .notifyStuck(record.from, recipient, record, waitedMs)
+              // Ids only: a refusal's sentence can quote the sender's own draft, and a log line never carries screen text.
+              .catch(() =>
+                kernel.log.warn('the sender of a stuck send could not be told', {
+                  ferret: recipient,
+                  sendId: record.sendId,
+                  sender: record.from ?? 'unknown',
+                }),
+              );
         },
       },
       scheduler,
@@ -1120,6 +1182,16 @@ export function buildConversationA(deps: {
             throw new SessionSendError('failed', `${error.message}. ${UNSETTLED_SENTENCE}`);
           });
         throw new SessionSendError('unconfirmed', error.message, undefined, request.sendId);
+      }
+      // NEVER DROPPED: a box that could not be proven empty typed nothing, and nothing has changed by refusing. The
+      // owner's message and a ferret's are KEPT open as `untyped`, and the tracker types them the first time the box
+      // reads clear — saying so out loud past its stuck limit. The Warden re-plans its own and a daemon notice ends here.
+      if (error instanceof UnreadableComposer && request.warden !== true && request.notice !== true) {
+        const kept = await ledger.settle(ferret, request.sendId, { untyped: true }).catch(() => undefined);
+        if (kept !== undefined) {
+          await sendRepository.journal(ferret, 'control.send_deferred', { sendId: request.sendId, outcome: 'untyped' });
+          return { ferret, disposition: 'queued', sendId: request.sendId, fate: 'accepted', waitReason: 'unreadable' };
+        }
       }
       await ledger.withdraw(ferret, request.sendId, 'nothing was typed').catch(() => undefined);
       throw error;
