@@ -39,7 +39,7 @@ describe('feature registry', () => {
     expect(text).toBeDefined();
     const imports = [...(text ?? '').matchAll(/from '([^']+)'/g)].map(match => match[1]);
     expect(imports).toEqual(['../features/alpha-one.feature.ts', '../features/zeta.feature.ts']);
-    expect(text).toContain('export default [feature_alpha_one, feature_zeta] as const;');
+    expect(text).toContain('export default [\n  feature_alpha_one,\n  feature_zeta,\n] as const;');
   });
 
   test('a package with no feature file gets no registry', async () => {
