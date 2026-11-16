@@ -237,7 +237,7 @@ export class RestartService {
         });
       };
       if (subject.id === request.caller) wait('own-session');
-      else if (!subject.idle) wait('mid-turn');
+      else if (!subject.idle && request.when !== 'now') wait('mid-turn');
       else {
         try {
           await this.ports.restart(subject.id, origin, requestedBy);

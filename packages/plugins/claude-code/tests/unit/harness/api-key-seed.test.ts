@@ -86,6 +86,7 @@ describe('the launch argv', () => {
       binary: '/opt/bin/claude',
       home: '/state/claude-code/agent-homes/f1',
       permissionMode: 'auto',
+      questionTool: false,
       hasMcp: false,
       conversation: { kind: 'new', id: 'c-1' },
     });
@@ -106,6 +107,7 @@ describe('the launch argv', () => {
       binary: '/a/claude',
       home: '/h/one',
       permissionMode: 'auto',
+      questionTool: false,
       hasMcp: false,
       conversation: { kind: 'new', id: 'c-1' },
     });
@@ -113,6 +115,7 @@ describe('the launch argv', () => {
       binary: '/b/claude',
       home: '/h/two',
       permissionMode: 'skip',
+      questionTool: false,
       hasMcp: true,
       model: 'claude-opus-5-5',
       conversation: { kind: 'resume', id: 'c-2' },
