@@ -624,3 +624,21 @@ describe('the plain values a transcript is made of', () => {
     ]);
   });
 });
+
+describe('codex-protocol-send: a message handed in through `codex queue` is an ordinary user turn', () => {
+  const BANNER =
+    '[message · action from ferret torrey (session mvtorre1-a41c8b02) — not from the owner] To reply: fy send torrey "<reply>"\n';
+
+  test('the rollout user item yields a user/message event whose text is exactly what was queued, banner included', () => {
+    const queued = `${BANNER}Review is done — three findings.`;
+    const result = item({ type: 'message', role: 'user', content: [{ type: 'input_text', text: queued }] });
+    expect(result.issues).toEqual([]);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ kind: 'message', role: 'user', text: queued });
+  });
+
+  test('an owner send (no banner) is the same event with the bare text', () => {
+    const result = item({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Please land it.' }] });
+    expect(result.events[0]).toMatchObject({ kind: 'message', role: 'user', text: 'Please land it.' });
+  });
+});
