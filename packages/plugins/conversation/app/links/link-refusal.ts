@@ -1,47 +1,10 @@
 /**
- * The small pieces the links surfaces draw with: one note (today's `SetupNote`, Ferrets' setup UI) and the guarded
- * call that turns a refusal into the sentence a person reads (today's `useSetupAccess` and `changeRefusalSentence`,
- * narrowed to what a links read or keep can meet). GAP(ferrets): the setup UI is Ferrets' until its app half ports.
+ * The guarded call that turns a refusal into the sentence a person reads (today's `useSetupAccess` and
+ * `changeRefusalSentence`, narrowed to what a links read or keep can meet).
  */
 
 import { DaemonCallError } from '@ferretry/app';
-import { cn } from '@ferretry/app/ui';
-import type { ReactNode } from 'react';
 import { z } from 'zod';
-
-export function LinkNote({
-  tone = 'pend',
-  title,
-  children,
-  name,
-  live = false,
-}: {
-  readonly tone?: 'ok' | 'warn' | 'err' | 'pend';
-  readonly title?: ReactNode;
-  readonly children?: ReactNode;
-  readonly name?: string;
-  /** Spoken when it appears: a result or a state change the person is waiting for. */
-  readonly live?: boolean;
-}) {
-  return (
-    <div
-      role={live ? 'status' : undefined}
-      data-setup-note={name}
-      data-tone={tone}
-      className={cn(
-        'kt-panel flex min-w-0 flex-col gap-1 p-panel',
-        tone === 'ok' && 'border-ok',
-        tone === 'warn' && 'border-warn',
-        tone === 'err' && 'border-err',
-      )}
-    >
-      {title === undefined ? null : <p className="m-0 text-row font-semibold text-fg">{title}</p>}
-      {children === undefined ? null : (
-        <div className="flex min-w-0 flex-col gap-1 text-cell leading-base text-muted">{children}</div>
-      )}
-    </div>
-  );
-}
 
 const NO_ANSWER = 'This machine didn’t answer, so nothing was changed. Check it is awake and try again.';
 
@@ -69,7 +32,7 @@ export type Guarded<T> =
   | { readonly kind: 'refused'; readonly sentence: string };
 
 /** Runs one call and answers its value, or the sentence for its refusal; never throws. */
-export const guarded = async <T,>(work: () => Promise<T>): Promise<Guarded<T>> => {
+export const guarded = async <T>(work: () => Promise<T>): Promise<Guarded<T>> => {
   try {
     return { kind: 'done', value: await work() };
   } catch (error) {

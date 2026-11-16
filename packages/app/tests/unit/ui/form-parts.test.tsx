@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { failureMessage, FormFailure, FormField, FormFoot } from '../../../../app/features/header/form-parts.tsx';
-import { mount, must, type Mounted } from '../support/dom.ts';
+import { failureMessage, FormFailure, FormField, FormFoot } from '../../../src/ui/form-parts.tsx';
+import { mount, must, type Mounted } from '../../support/dom.ts';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {

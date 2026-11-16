@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { displayCallsign, shortFerretId } from '../../../../app/lib/callsign.ts';
+import { shortFerretId } from '../../app/lib/callsign.ts';
+import { displayCallsign } from '../../contract/index.ts';
 
 describe('displayCallsign', () => {
   it('title-cases every hyphen-separated segment', () => {

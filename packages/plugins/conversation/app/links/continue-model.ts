@@ -18,7 +18,7 @@
 
 import type { FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { LinkableConversation, LinkQuery } from '../../contract/index.ts';
-import { displayCallsign } from './callsign.ts';
+import { displayCallsign } from '@ferretry/core-ferrets/contract';
 import type { HarnessKey } from './link-words.ts';
 import {
   type DateFilter,
