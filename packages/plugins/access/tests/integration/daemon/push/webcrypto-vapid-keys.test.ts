@@ -3,7 +3,7 @@ import { describe, it } from 'bun:test';
 
 import should from 'should';
 import { PushKeysFile } from '../../../../contract/index.ts';
-import { StateVapidKeys } from '../../../../daemon/adapters/push/index.ts';
+import { StateVapidKeys } from '../../../../daemon/adapters/push/webcrypto-vapid-keys.ts';
 import { refused } from './support.ts';
 
 /** A VAPID public key is an uncompressed P-256 point: one tag byte plus two 32-byte coordinates. */

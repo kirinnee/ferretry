@@ -3,7 +3,7 @@ import { describe, it } from 'bun:test';
 
 import should from 'should';
 import { PushKeysFile } from '../../../../contract/index.ts';
-import { StateVapidKeys } from '../../../../daemon/adapters/push/index.ts';
+import { StateVapidKeys } from '../../../../daemon/adapters/push/webcrypto-vapid-keys.ts';
 import { expect } from 'bun:test';
 import { state as kernelState } from '@ferretry/kernel/host';
 import { PushError } from '../../../../daemon/lib/push/index.ts';

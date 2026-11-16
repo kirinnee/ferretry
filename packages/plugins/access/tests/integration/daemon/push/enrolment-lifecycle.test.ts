@@ -3,8 +3,11 @@ import { describe, it } from 'bun:test';
 
 import should from 'should';
 import { DevicesFile, PushFile, PushKeysFile } from '../../../../contract/index.ts';
-import { NodePairingCryptography, StatePairingRepository } from '../../../../daemon/adapters/pairing/index.ts';
-import { StatePushRepository, StateVapidKeys, WebPushFetchTransport } from '../../../../daemon/adapters/push/index.ts';
+import { NodePairingCryptography } from '../../../../daemon/adapters/pairing/node-pairing-cryptography.ts';
+import { StatePairingRepository } from '../../../../daemon/adapters/pairing/state-pairing-repository.ts';
+import { StatePushRepository } from '../../../../daemon/adapters/push/state-push-repository.ts';
+import { WebPushFetchTransport } from '../../../../daemon/adapters/push/web-push-transport.ts';
+import { StateVapidKeys } from '../../../../daemon/adapters/push/webcrypto-vapid-keys.ts';
 import {
   type CapabilityGuard,
   DEFAULT_CAPABILITY_GRANTS,
