@@ -52,6 +52,8 @@ export interface CodexHarnessOptions {
       readonly spawn: Pick<KernelPorts['spawn'], 'run'>;
     }>;
   readonly permissionMode?: () => HarnessConfig['permissionMode'];
+  /** `HarnessConfig.questionTool` now: absent reads as off, so no ferret is given the question tool unless opted in. */
+  readonly questionTool?: () => HarnessConfig['questionTool'];
   /**
    * The settings components the launching runtime's profile selects (`selectedComponents`): only those items reach its
    * home, as v4's profile resolution gave `adaptProfile` only the resolved profile's. No runtime selects none.
@@ -145,7 +147,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
         harnessFlags: [
           ...codexFixedArguments(permissionMode, spec.folder),
           ...codexCorrelationArguments(spec.home),
-          ...codexQuestionArguments(spec.mode),
+          ...codexQuestionArguments(spec.mode, options.questionTool?.() ?? false),
         ],
         ...(resume === undefined ? {} : { resume }),
         ...(spec.model === undefined ? {} : { model: spec.model }),
