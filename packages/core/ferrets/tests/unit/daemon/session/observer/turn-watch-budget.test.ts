@@ -25,7 +25,7 @@ describe('the inline turn watch look counts on 3 panes (RULING #44)', () => {
     const looks = await looksOver(fleet, () => undefined);
 
     should(looks).be.belowOrEqual(IDLE_LOOKS_CEILING);
-    should(looks).be.above(0);
+    should(looks).be.above(FERRETS);
     should(fleet.harness.reads).be.belowOrEqual(FERRETS);
   });
 

@@ -27,4 +27,19 @@ describe('ruling #45 (a): one look before deliver, so a send to a working ferret
     );
     expect(Date.now() - began).toBeLessThan(1_000);
   });
+
+  test('m2 a pane parked on a permission prompt answers not_ready dialog in under 1 s: nothing typed, the readiness wait never entered', async () => {
+    const w = await world();
+    const id = await started(w);
+    const handle = w.registry.get(id as never)?.handle as RunnerHandle;
+    w.runner.screens.set(handle, { ...WORKING, permission: true });
+    waitsOutItsReadiness(w);
+    const seam = await w.service.harness(id as never);
+
+    const began = Date.now();
+    expect(await within(1_000, seam!.deliver({ text: 'FIXTURE words to a parked ferret' }))).toEqual(
+      err({ refused: 'not_ready', why: 'dialog' }),
+    );
+    expect(Date.now() - began).toBeLessThan(1_000);
+  });
 });

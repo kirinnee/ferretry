@@ -1,6 +1,6 @@
 /**
  * `readConfigText` reads a file at the size limit in ONE pass, whatever its aliases do, and refuses a `%` directive
- * flood without parsing it. The answers are the unit tier's (`tests/unit/yaml-text.test.ts`), at a small size.
+ * flood without parsing it. The answers are checked here at the original size, and the unit tier's (`tests/unit/yaml-text.test.ts`) at a small one.
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
@@ -43,38 +43,54 @@ describe('readConfigText — a file at the size limit is read in ONE pass, whate
 });
 
 const FLOOD_FAST_MS = 250;
-const FLOOD = '%\n'.repeat(131_072);
+const FLOOD_LINES = 131_072;
+const DIRECTIVE_SENTENCE = 'a % directive line is not one YAML knows';
+const DIRECTIVE_CAP = 64;
+
+/** The value a text means, failing the test when the text does not parse. */
+const meaningOf = (text: string): unknown => {
+  const read = readConfigText(text);
+  if (!read.ok) throw new Error(`expected the text to parse: ${JSON.stringify(read.errors)}`);
+  return read.read.value;
+};
 
 describe('the % directive guard — a flood is refused without parsing it', () => {
-  it('should refuse a flood of bare % lines inside the bound', () => {
+  it('should refuse a flood of bare % lines in one fixed sentence at the first line past the cap, inside the bound', () => {
+    // Arrange
+    const flood = '%\n'.repeat(FLOOD_LINES);
+
     // Act
     const started = performance.now();
-    readConfigText(FLOOD);
+    const actual = readConfigText(flood);
     const elapsed = performance.now() - started;
 
     // Assert
+    should(actual.ok).be.false();
+    if (actual.ok) return;
+    should(actual.errors).deepEqual([
+      { message: DIRECTIVE_SENTENCE, position: { line: DIRECTIVE_CAP + 1, column: 1 } },
+    ]);
     should(elapsed).be.below(FLOOD_FAST_MS);
   });
 
-  it('should refuse to set a key in a flood inside the bound', () => {
+  it('should refuse to set a key in a flood, in the same fixed sentence, inside the bound', () => {
     // Act
     const started = performance.now();
-    try {
-      setConfigKey(FLOOD, 'a', 1);
-    } catch {
-      // the refusal itself is the unit tier's claim
-    }
+    const act = () => setConfigKey('%\n'.repeat(FLOOD_LINES), 'a', 1);
 
     // Assert
+    should(act).throw(`the file does not parse: ${DIRECTIVE_SENTENCE}`);
     should(performance.now() - started).be.below(FLOOD_FAST_MS);
   });
 
-  it('should replace a flood whole when an edit is made to it inside the bound', () => {
+  it('should replace a flood whole when an edit is made to it, inside the bound', () => {
     // Act
     const started = performance.now();
-    editConfigText(FLOOD, { a: 1 }, {}, MODELINE);
+    const actual = editConfigText('%\n'.repeat(FLOOD_LINES), { a: 1 }, {}, MODELINE);
 
     // Assert
+    should(meaningOf(actual)).deepEqual({ a: 1 });
+    should(actual).not.containEql('%\n');
     should(performance.now() - started).be.below(FLOOD_FAST_MS);
   });
 });

@@ -22,7 +22,8 @@ import { maskGrid, maskLines, VaultRedaction } from '../../../../daemon/lib/secr
 import { SecretDirectory } from '../../../../daemon/lib/secrets/vault.ts';
 import { SecretStoreError } from '../../../../daemon/lib/secrets/types.ts';
 
-import { dense, PIN, source } from './read-scope-fixtures.ts';
+import { coverageOf } from '../../../../daemon/lib/secrets/policy.ts';
+import { counted, dense, PIN, source } from './read-scope-fixtures.ts';
 /**
  * The parts vault-a added around today's code: the kernel-bound `Redaction` (today's `SecretRedactor.batch` as one
  * read-scoped redactor), the `ChildEnvironment` handle table (lead decision 9) and the `OutputGuard` registry.
@@ -122,14 +123,34 @@ describe('the read-scoped redaction', () => {
 
 describe('F-0326 #U4 masking a busy screen', () => {
   // The cost of masking a dense 200×2000 screen is `tests/perf/daemon/secrets/read-scope.test.ts`'s; here a small one.
-  it('F-0326 #U4 lines mask every dense match', () => {
+  it('F-0326 #U4 lines mask every dense match, reading each match range a bounded number of times', () => {
     const lines = Array.from({ length: 5 }, () => dense(50));
-    should(maskLines(lines, [PIN])).deepEqual(lines.map(() => '**** '.repeat(10)));
+    let probe: ReturnType<typeof counted> | undefined;
+    const cover = (text: string) => {
+      probe = counted(coverageOf(text, [PIN]));
+      return probe.ranges;
+    };
+
+    const masked = maskLines(lines, [PIN], cover);
+
+    // 5 rows of 50: 50 ranges, each read a bounded number of times, never once per character.
+    should(masked).deepEqual(lines.map(() => '**** '.repeat(10)));
+    should(probe?.ranges.length).equal(50);
+    should(probe?.reads()).be.belowOrEqual(2 * 50);
   });
 
-  it('F-0326 #U4 cells mask every dense match', () => {
+  it('F-0326 #U4 cells mask every dense match, reading each match range a bounded number of times', () => {
     const grid = { columns: 50, rows: Array.from({ length: 5 }, () => [...dense(50)]) };
-    should(maskGrid(grid, [PIN]).rows.map(row => row.join(''))).deepEqual(grid.rows.map(() => '**** '.repeat(10)));
+    let probe: ReturnType<typeof counted> | undefined;
+    const cover = (text: string) => {
+      probe = counted(coverageOf(text, [PIN]));
+      return probe.ranges;
+    };
+
+    const masked = maskGrid(grid, [PIN], cover);
+
+    should(masked.rows.map(row => row.join(''))).deepEqual(grid.rows.map(() => '**** '.repeat(10)));
+    should(probe?.reads()).be.belowOrEqual(2 * 50);
   });
 
   it('F-0326 #U4 a small screen dense with a 4-character value is masked whole through a read', async () => {

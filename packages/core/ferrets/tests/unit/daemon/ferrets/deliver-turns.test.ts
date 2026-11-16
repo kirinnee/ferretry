@@ -772,22 +772,22 @@ describe('FerretHarness.queue: the runner’s own queue, never wrapped in a seco
 describe('ruling #45 (a): one look before deliver, so a send to a working ferret is answered busy at once', () => {
   /** A screen as the runner's `look` reads it: today's `activeWork` (the harness's working line) and no prompt. */
   const WORKING: RunnerLook = { frame: 'working', working: true, atPrompt: false, permission: false };
-  /** The delivery's own readiness wait, standing in for its ~27 s: it never answers within the test's window. */
-  const waitsOutItsReadiness = (w: World): void => {
-    w.runner.deliver = async () => await new Promise<never>(() => undefined);
+  /** The delivery's own readiness wait must never be entered: a delivery that reaches it fails the test at once. */
+  const failsIfReadinessEntered = (w: World): void => {
+    w.runner.deliver = async () => {
+      throw new Error('the readiness wait was entered');
+    };
   };
-  const within = async <T>(ms: number, work: Promise<T>): Promise<T | 'timed out'> =>
-    await Promise.race([work, new Promise<'timed out'>(resolve => setTimeout(() => resolve('timed out'), ms))]);
 
   test('ruling #45 send to a working ferret answers busy, nothing typed, the readiness wait never entered', async () => {
     const w = await world();
     const id = await started(w);
     const handle = w.registry.get(id as never)?.handle as RunnerHandle;
     w.runner.screens.set(handle, WORKING);
-    waitsOutItsReadiness(w);
+    failsIfReadinessEntered(w);
     const seam = await w.service.harness(id as never);
 
-    expect(await within(1_000, seam!.deliver({ text: 'FIXTURE report to a busy lead' }))).toEqual(
+    expect(await seam!.deliver({ text: 'FIXTURE report to a busy lead' })).toEqual(
       err({ refused: 'not_ready', why: 'busy' }),
     );
     expect(w.runner.looked).toEqual([handle]);
@@ -799,10 +799,10 @@ describe('ruling #45 (a): one look before deliver, so a send to a working ferret
     const id = await started(w);
     const handle = w.registry.get(id as never)?.handle as RunnerHandle;
     w.runner.screens.set(handle, { ...WORKING, permission: true });
-    waitsOutItsReadiness(w);
+    failsIfReadinessEntered(w);
     const seam = await w.service.harness(id as never);
 
-    expect(await within(1_000, seam!.deliver({ text: 'FIXTURE words to a parked ferret' }))).toEqual(
+    expect(await seam!.deliver({ text: 'FIXTURE words to a parked ferret' })).toEqual(
       err({ refused: 'not_ready', why: 'dialog' }),
     );
     expect(w.runner.looked).toEqual([handle]);
