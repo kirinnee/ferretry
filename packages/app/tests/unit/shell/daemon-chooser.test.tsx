@@ -173,7 +173,12 @@ const settle = async (): Promise<void> => {
 };
 
 /** d1 runs Asker; d2 (the locked one) runs it too; d3 has Asker turned off. */
-function setup(made: PasskeyProvision, down: readonly string[] = [], slow: readonly string[] = []) {
+function setup(
+  made: PasskeyProvision,
+  down: readonly string[] = [],
+  slow: readonly string[] = [],
+  bad: { readonly unreadable?: readonly string[]; readonly refused?: readonly string[] } = {},
+) {
   const accessApp = provideToShell(implementApp(accessManifest, { build: () => ({}) }), { passkey: () => made });
   const surfaces: SurfaceEntry[] = [...CORE, entry(askManifest, askerApp), entry(accessManifest, accessApp)];
   const transports = new Map<string, FakeTransport>();
@@ -182,6 +187,11 @@ function setup(made: PasskeyProvision, down: readonly string[] = [], slow: reado
     if (known !== undefined) return known;
     let previews = 0;
     const made = new FakeTransport((request: TransportRequest) => {
+      // A machine whose plugin list cannot be read (connected, inventory unreadable), or that refused this device (4403).
+      if (request.path === '/v1/plugins' && bad.refused?.includes(daemon) === true)
+        throw Object.assign(new Error('device refused'), { name: 'RelaySessionError', code: 4403 });
+      if (request.path === '/v1/plugins' && bad.unreadable?.includes(daemon) === true)
+        return json({ error: 'broken', code: 'internal' }, 500);
       if (request.path === '/v1/plugins')
         return json(inventoryOf(surfaces, daemon === 'd3' ? { asker: { on: false } } : {}));
       if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
@@ -530,10 +540,10 @@ describe('S10 answerAloneWhenOne: the shell answers alone only when exactly one 
     await click(view, '[data-chooser-cancel]');
   };
 
-  test('one qualifying machine (the others down or plugin off) is answered at once, with no picker', async () => {
+  test('ONE machine paired at all, and it qualifies, is answered at once, with no picker', async () => {
     go('/ask');
-    // d1 runs Asker; d2 is unreachable; d3 has Asker turned off.
-    const { app, transportOf, runtime } = setup(provision().made, ['d2']);
+    const { app, daemons, transportOf, runtime } = setup(provision().made);
+    pairOnly(daemons, ['d1']);
     const view = await mount(app);
     await settle();
     await warm(view);
@@ -544,15 +554,14 @@ describe('S10 answerAloneWhenOne: the shell answers alone only when exactly one 
     // The answer carries THAT machine's own client, and it is the machine on screen.
     await chosen.client.call('GET /v1/asker/preview');
     expect(transportOf('d1').paths()).toContain('GET /v1/asker/preview');
-    expect(transportOf('d3').paths()).not.toContain('GET /v1/asker/preview');
     expect(runtime.passkeyOnScreen.chosen()).toBe('d1');
     await view.unmount();
   });
 
-  test('the one machine need not be the page’s selected one', async () => {
+  test('the one paired machine need not be the first, nor the one the page started on', async () => {
     go('/ask');
-    const { app, daemons, transportOf } = setup(provision().made, ['d1']);
-    daemons.select('d1');
+    const { app, daemons, transportOf } = setup(provision().made);
+    pairOnly(daemons, ['d2']);
     const view = await mount(app);
     await settle();
     await warm(view);
@@ -564,35 +573,92 @@ describe('S10 answerAloneWhenOne: the shell answers alone only when exactly one 
     await view.unmount();
   });
 
-  test('a lone machine whose plugin is off, or that is down, is never the one', async () => {
+  /** Two machines paired, the second in a state that is not "qualifying": the person is still ASKED (v4 counted both). */
+  const pairedPair = async (
+    options: Parameters<typeof setup>[1],
+    slow: Parameters<typeof setup>[2],
+    bad: Parameters<typeof setup>[3],
+    keep: readonly string[],
+  ) => {
     go('/ask');
-    const { app, daemons } = setup(provision().made, ['d1', 'd2']);
-    pairOnly(daemons, ['d1', 'd2', 'd3']);
-    const view = await mount(app);
+    const parts = setup(provision().made, options, slow, bad);
+    pairOnly(parts.daemons, keep);
+    const view = await mount(parts.app);
     await settle();
     await warm(view);
-    // d1 and d2 are down and d3 has the plugin off: nobody qualifies, so the person is told so and asked.
     const asked = await ask(ALONE);
+    return { view, asked };
+  };
+
+  test('two paired and the second UNREADABLE (plugin list failed): the picker, not the first machine alone', async () => {
+    const { view, asked } = await pairedPair([], [], { unreadable: ['d2'] }, ['d1', 'd2']);
     expect(asked.value).toBe('pending');
-    expect(view.container.querySelector('[data-chooser-none]')).not.toBeNull();
+    expect(view.container.querySelector('[data-chooser-machine="d1"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-chooser-machine="d2"]')).toBeNull();
     await click(view, '[data-chooser-cancel]');
-    expect(asked.value).toBeUndefined();
     await view.unmount();
   });
 
-  test('a machine still connecting is unknown, not down: the shell asks rather than guess the one', async () => {
-    go('/ask');
-    // d1 qualifies; d2 never finishes connecting; d3 has the plugin off.
-    const { app } = setup(provision().made, [], ['d2']);
-    const view = await mount(app);
-    await settle();
-    await warm(view);
-    const asked = await ask(ALONE);
+  test('two paired and the second UNREACHABLE: the picker', async () => {
+    const { view, asked } = await pairedPair(['d2'], [], {}, ['d1', 'd2']);
+    expect(asked.value).toBe('pending');
+    expect(view.container.querySelector('[data-chooser-machine="d1"]')).not.toBeNull();
+    await click(view, '[data-chooser-cancel]');
+    await view.unmount();
+  });
+
+  test('two paired and the second REFUSED this device: the picker', async () => {
+    const { view, asked } = await pairedPair([], [], { refused: ['d2'] }, ['d1', 'd2']);
+    expect(asked.value).toBe('pending');
+    expect(view.container.querySelector('[data-chooser-machine="d1"]')).not.toBeNull();
+    await click(view, '[data-chooser-cancel]');
+    await view.unmount();
+  });
+
+  test('two paired and the second has the plugin OFF (a read verdict): the picker', async () => {
+    const { view, asked } = await pairedPair([], [], {}, ['d1', 'd3']);
+    expect(asked.value).toBe('pending');
+    expect(view.container.querySelector('[data-chooser-machine="d1"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-chooser-machine="d3"]')).toBeNull();
+    await click(view, '[data-chooser-machine="d1"]');
+    expect((asked.value as ChosenDaemon).daemon).toBe('d1');
+    await view.unmount();
+  });
+
+  test('two paired and the second still CONNECTING: the picker', async () => {
+    const { view, asked } = await pairedPair([], ['d2'], {}, ['d1', 'd2']);
     expect(asked.value).toBe('pending');
     expect(view.container.querySelector('[data-chooser-machine="d1"]')).not.toBeNull();
     await click(view, '[data-chooser-machine="d1"]');
     expect((asked.value as ChosenDaemon).daemon).toBe('d1');
     await view.unmount();
+  });
+
+  test('one paired machine that does not qualify (down, plugin off, connecting, unreadable) is never the one', async () => {
+    const lone = async (
+      options: Parameters<typeof setup>[1],
+      slow: Parameters<typeof setup>[2],
+      bad: Parameters<typeof setup>[3],
+      keep: string,
+    ) => {
+      go('/ask');
+      const parts = setup(provision().made, options, slow, bad);
+      pairOnly(parts.daemons, [keep]);
+      const view = await mount(parts.app);
+      await settle();
+      await warm(view);
+      const asked = await ask(ALONE);
+      expect(asked.value).toBe('pending');
+      expect(view.container.querySelector('[data-chooser-none]')).not.toBeNull();
+      await click(view, '[data-chooser-cancel]');
+      expect(asked.value).toBeUndefined();
+      await view.unmount();
+    };
+    await lone(['d1'], [], {}, 'd1');
+    await lone([], [], {}, 'd3');
+    await lone([], ['d1'], {}, 'd1');
+    await lone([], [], { unreadable: ['d1'] }, 'd1');
+    await lone([], [], { refused: ['d1'] }, 'd1');
   });
 
   test('two qualifying machines still ask', async () => {

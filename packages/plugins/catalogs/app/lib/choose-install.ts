@@ -12,8 +12,8 @@ export const INSTALL_ON_WHICH = 'Install on which machine?';
  * the person picked. Everything the install reads or sends rides that machine's Catalogs client, and the project list
  * is that machine's own, read through the same client. A cancel answers `undefined`; nothing is installed.
  *
- * With exactly ONE paired machine that qualifies, the shell answers with it and draws no picker (`answerAloneWhenOne`,
- * v4's single-machine Install). It runs only after the person's Install click, and on THAT machine's own client.
+ * With exactly ONE machine paired at all, and it qualifies, the shell answers with it and draws no picker
+ * (`answerAloneWhenOne`, v4's single-machine Install); a second paired machine in any state asks. It runs only after the person's Install click, and on THAT machine's own client.
  */
 export const installChooser =
   (

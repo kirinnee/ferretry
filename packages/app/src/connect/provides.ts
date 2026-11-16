@@ -246,10 +246,11 @@ export interface DaemonlessScreenProps {
    * choice itself. The chosen machine counts as the machine on screen until this screen unmounts, so its reads are not
    * left waiting for a passkey.
    *
-   * Opt-in per call (`options.answerAloneWhenOne`): when EXACTLY ONE paired machine qualifies (reachable, with this
-   * plugin on: the machines the picker would list), the shell answers with it at once and draws no picker. Zero or
-   * two-or-more machines, a machine not yet answered (still connecting, so unknown rather than down), or the option
-   * left off, ask as ever. The caller's own click still starts the question.
+   * Opt-in per call (`options.answerAloneWhenOne`): when EXACTLY ONE machine is paired at all (v4's rule) and it
+   * qualifies (connected, inventory read, this plugin on: a machine the picker would list), the shell answers with it
+   * at once and draws no picker. A second paired machine in any state (connecting, unreachable, refused, unreadable,
+   * plugin off), a lone machine that does not qualify yet, or the option left off, ask as ever. The caller's own click
+   * still starts the question.
    */
   readonly chooseDaemon: (purpose: string, options?: ChooseDaemonOptions) => Promise<ChosenDaemon | undefined>;
 }

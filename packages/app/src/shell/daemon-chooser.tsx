@@ -13,9 +13,10 @@ import type { ShellRuntime } from './runtime.ts';
  * own client on it. Nothing is chosen for the person: it never resolves without a click, and a cancel (or leaving the
  * screen) answers `undefined`.
  *
- * ONE EXCEPTION, opt-in per call: `answerAloneWhenOne` answers with the only qualifying machine at once, no picker (the
- * qualifying rule is the picker's own, and a machine not yet answered counts as unknown, so the picker asks). Only `/shared` Install asks it; a question without it always draws the picker,
- * even with one machine. The click that opened the question is still the person's.
+ * ONE EXCEPTION, opt-in per call: `answerAloneWhenOne` answers at once, no picker, only when exactly ONE machine is
+ * paired at all (v4's rule: it counted every connection record) and it qualifies by the picker's own rule (connected,
+ * inventory read, plugin on). A second paired machine in ANY state asks. Only `/shared` Install asks it; a question
+ * without it always draws the picker, even with one machine. The click that opened the question is still the person's.
  *
  * The picker is a REAL OVERLAY: the app's `BottomSheet` (scrim, focus trap, Escape), portalled to the frame root and
  * painted above every plugin overlay. A plugin's own sheet is a `fixed` `z-40` overlay inside its screen's subtree
@@ -50,22 +51,6 @@ export interface DaemonChooser {
 function qualifying(runtime: ShellRuntime, plugin: string) {
   const everyone = runtime.daemons.snapshot().daemons;
   return { everyone, machines: everyone.filter(paired => runtime.client(paired.daemon, plugin) !== undefined) };
-}
-
-/**
- * Whether every paired machine has been ANSWERED yet. A machine's connection opens on the first look at it, so a
- * machine still connecting (or connected but with its plugin list unread) is UNKNOWN, not "down": counting it out
- * would let `answerAloneWhenOne` pick "the only one" while another machine was about to qualify. Asking here also
- * starts any connection not yet opened, so the next question finds it settled.
- */
-function allSettled(runtime: ShellRuntime, plugin: string, everyone: readonly { readonly daemon: string }[]): boolean {
-  return everyone.every(paired => {
-    const connection = runtime.connection(paired.daemon);
-    if (connection.kind === 'connecting') return false;
-    if (connection.kind !== 'connected') return true;
-    const standing = runtime.standing(paired.daemon, plugin);
-    return !(standing.state === 'blocked' && standing.reason === 'unread');
-  });
 }
 
 /** The answer for one machine with this plugin's own client on it; `undefined` when either is not there to take. */
@@ -103,8 +88,9 @@ export function useDaemonChooser(plugin: string): DaemonChooser {
         // several ask as ever. The caller's own click started this question; nothing here acts without it.
         if (options?.answerAloneWhenOne === true) {
           const { everyone, machines } = qualifying(runtime, plugin);
-          // A machine not yet answered is unknown: ask, as ever, rather than guess the one.
-          const only = machines.length === 1 && allSettled(runtime, plugin, everyone) ? machines[0] : undefined;
+          // v4's rule: alone only when ONE machine is paired at all. Any second paired machine, whatever its state
+          // (connecting, unreachable, refused, unreadable, plugin off), could be the one the person means: ask.
+          const only = everyone.length === 1 && machines.length === 1 ? machines[0] : undefined;
           const alone = only === undefined ? undefined : answerFor(runtime, plugin, only.daemon);
           if (alone !== undefined) {
             releases.current.push(runtime.passkeyOnScreen.choose(alone.daemon));
