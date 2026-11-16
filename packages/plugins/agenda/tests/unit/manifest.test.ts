@@ -18,6 +18,7 @@ describe('agenda manifest', () => {
       ['seen.json', 1],
       ['buzzes.jsonl', 1],
       ['modes.json', 1],
+      ['nudges.json', 1],
     ]);
     expect(manifest.words.map(word => word.word)).toEqual(['agenda', 'buzz']);
   });

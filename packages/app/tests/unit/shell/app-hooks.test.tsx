@@ -136,6 +136,20 @@ describe('an app hook another half offers', () => {
     await view.unmount();
   });
 
+  test('read from a named plugin is the value only when that plugin IS the one provider', async () => {
+    const provider = providerOf('provider', 'hello from the provider');
+    const { view, runtime } = await draw([
+      ...CORE,
+      entry(offererManifest, offererApp, 'h-offerer'),
+      entry(provider.manifest, provider.app, 'h-provider'),
+    ]);
+
+    expect(runtime.appHook('d1', HOOK, 'provider')).toEqual({ words: 'hello from the provider' });
+    expect(runtime.appHook('d1', HOOK, 'offerer')).toBeUndefined();
+    expect(runtime.appHook('d1', HOOK)).toEqual({ words: 'hello from the provider' });
+    await view.unmount();
+  });
+
   test('is nothing when no half provides it', async () => {
     const { view, said } = await draw([...CORE, entry(offererManifest, offererApp, 'h-offerer')]);
     expect(said()).toBe('no greeting');

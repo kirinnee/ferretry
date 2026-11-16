@@ -6,7 +6,9 @@
 
 import type { ScreenProps } from '@ferretry/kernel/manifest';
 import { MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
-import { useCardBoards } from '../features/agenda/agenda-board-hooks.tsx';
+import { useCallback } from 'react';
+import { useAgendaReferenceFacts } from '../hooks/use-agenda-reference-facts.ts';
+import { AgendaBoardProviders, useAgendaBoardHooks, useCardBoards } from '../features/agenda/agenda-board-hooks.tsx';
 import { AgendaCardConversation } from '../features/agenda/agenda-conversation-slot.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { useAskFocus } from '../features/agenda/use-ask-focus.ts';
@@ -25,9 +27,15 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
   return function AgendaScreen(_props: ScreenProps) {
     const { navigate } = useRouter();
     const links = useAgendaLinks();
+    const go = useCallback((to: string) => navigate(to), [navigate]);
+    // Board's hooks for THIS machine, over the whole page: the list's cards of this machine keep their proofs
+    // (`&F12` through the hook, `:agent` through the facts below). The machine-wide page mixes ferrets, so it proves
+    // `:agent` only (`!A3` and `@file` need one ferret's own page). A card of ANOTHER machine is drawn without them.
+    const board = useAgendaBoardHooks(daemon);
+    const references = useAgendaReferenceFacts(runtime, go);
     // Board's hooks per OPEN CARD's machine (the Inbox is every machine's): Done · closes, a notice's Start and Close,
-    // Edit's lane editor and `&F12` proof.
-    const { laneEditor, cardBoard } = useCardBoards(to => navigate(to));
+    // Edit's lane editor and `&F12` proof. Each strips the page's proofs before it adds its own machine's.
+    const { laneEditor, cardBoard } = useCardBoards(go);
     // Told on the OPENED CARD's machine (it may be another machine's, from the fleet Inbox), never the page's.
     const itemOpened = useItemOpened({ daemon, client: runtime.client }, fleet);
     const inbox = useRuntimeInbox(runtime, laneEditor, fleet);
@@ -35,39 +43,41 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
     // A machine ask's push opens `/agenda?ask=A3`: the page opens that ask's card once it is among the open ones.
     const asked = useAskFocus();
     return (
-      <AgendaClientContext.Provider value={runtime.client}>
-        <AgendaInboxContext.Provider value={inbox}>
-          {itemOpened.host}
-          <AgendaInboxPage
-            cardBoard={cardBoard}
-            inbox={inbox}
-            phone={phone}
-            clearPort={runtime.clearPort}
-            onNavigate={to => navigate(to)}
-            open={
-              asked?.target == null
-                ? null
-                : {
-                    daemonId: daemon,
-                    sessionId: MACHINE_AGENDA_ID,
-                    id: asked.target,
-                    settled: inbox.settled === true,
-                  }
-            }
-            // An ask that is no longer open ends the request: the address drops `?ask=` and the page stays on the list.
-            onOpenSettled={opened => {
-              if (!opened) navigate(links.agenda(daemon), { replace: true });
-            }}
-            from={inboxSourceFromSearch(window.location.search)}
-            onClearFrom={() => navigate(links.agenda(daemon), { replace: true })}
-            onItemOpened={card => itemOpened.onOpened(card.daemonId, card.view.config.id, card.item.id)}
-            readConversation={inboxConversationReader({ daemon, client: runtime.client }, fleet)}
-            renderComposer={(card, answerForm) => (
-              <AgendaCardConversation answerForm={answerForm} card={card} inbox={inbox} />
-            )}
-          />
-        </AgendaInboxContext.Provider>
-      </AgendaClientContext.Provider>
+      <AgendaBoardProviders hooks={board} onNavigate={go} references={references}>
+        <AgendaClientContext.Provider value={runtime.client}>
+          <AgendaInboxContext.Provider value={inbox}>
+            {itemOpened.host}
+            <AgendaInboxPage
+              cardBoard={cardBoard}
+              inbox={inbox}
+              phone={phone}
+              clearPort={runtime.clearPort}
+              onNavigate={to => navigate(to)}
+              open={
+                asked?.target == null
+                  ? null
+                  : {
+                      daemonId: daemon,
+                      sessionId: MACHINE_AGENDA_ID,
+                      id: asked.target,
+                      settled: inbox.settled === true,
+                    }
+              }
+              // An ask that is no longer open ends the request: the address drops `?ask=` and the page stays on the list.
+              onOpenSettled={opened => {
+                if (!opened) navigate(links.agenda(daemon), { replace: true });
+              }}
+              from={inboxSourceFromSearch(window.location.search)}
+              onClearFrom={() => navigate(links.agenda(daemon), { replace: true })}
+              onItemOpened={card => itemOpened.onOpened(card.daemonId, card.view.config.id, card.item.id)}
+              readConversation={inboxConversationReader({ daemon, client: runtime.client }, fleet)}
+              renderComposer={(card, answerForm) => (
+                <AgendaCardConversation answerForm={answerForm} card={card} inbox={inbox} />
+              )}
+            />
+          </AgendaInboxContext.Provider>
+        </AgendaClientContext.Provider>
+      </AgendaBoardProviders>
     );
   };
 }

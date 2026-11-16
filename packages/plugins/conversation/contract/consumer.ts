@@ -5,10 +5,14 @@ import type { ConversationApi, ConversationCaller } from './port.ts';
 /** The one consumer that may speak as Ferretry's Warden, or press a ferret's composer through the port. */
 export const WARDEN_PLUGIN = 'warden';
 
+/** The one consumer that may speak as Ferretry's Agenda (its turn-end nudge). */
+export const AGENDA_PLUGIN = 'agenda';
+
 /**
  * Conversation as ONE consumer sees it (§7.4): the kernel builds this once per plugin that needs the port
  * (`perNeeder`), from that plugin's manifest id, so the id is not something a caller passes or can swap for another's.
  *
+ * - `{ kind: 'agenda' }` on `send` is accepted only from Agenda's own plugin, by the same rule.
  * - `{ kind: 'warden' }` on `send` and `resubmitStuck` is accepted only from the Warden's own plugin. Any other
  *   consumer naming it is refused `forbidden` BEFORE the core is called, so nothing is typed, recorded or read, and a
  *   plugin can never have its words ledgered as the daemon's.
@@ -20,6 +24,7 @@ export const WARDEN_PLUGIN = 'warden';
  */
 export function conversationFor(consumer: string, core: ConversationApi): ConversationApi {
   const warden = consumer === WARDEN_PLUGIN;
+  const agenda = consumer === AGENDA_PLUGIN;
   const resubmit = core.resubmitStuck?.bind(core);
   const refused = (what: string) => err({ code: 'forbidden', message: `only Ferretry's Warden may ${what}` });
   return {
@@ -27,7 +32,9 @@ export function conversationFor(consumer: string, core: ConversationApi): Conver
     send: (ferret, caller, request) =>
       caller.kind === 'warden' && !warden
         ? Promise.resolve(refused('speak as the Warden'))
-        : core.send(ferret, caller, request),
+        : caller.kind === 'agenda' && !agenda
+          ? Promise.resolve(err({ code: 'forbidden', message: "only Ferretry's Agenda may speak as the Agenda" }))
+          : core.send(ferret, caller, request),
     ...(resubmit === undefined
       ? {}
       : {
