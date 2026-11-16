@@ -2,8 +2,11 @@ import { describe, it } from 'bun:test';
 import type { PairedDaemon } from '@ferretry/app';
 import { decodeClientRecord, SESSION_PROTOCOL_ID } from '@ferretry/kernel/session';
 import should from 'should';
-import { accessClaims } from '../../../app/connect.ts';
+import { accessClaims, accessForget } from '../../../app/connect.ts';
 import { DeviceKeyUnreadableError } from '../../../app/lib/device-keys.ts';
+import { DaemonPushDevices } from '../../../app/lib/push-enrolment.ts';
+import { browserPushHost } from '../../../app/lib/push-host.ts';
+import { daemonId } from '../../../app/shell-pairing.ts';
 import { MemoryDeviceKeyStore, testDeviceKeyCrypto, type TestKeyHandle } from '../../support/app/device-keys.ts';
 
 const DAEMON = `fy_daemon_${'a'.repeat(43)}`;
@@ -146,5 +149,38 @@ describe('the device claims Access provides the app shell', () => {
 
     should(store.keys.has(DAEMON)).be.false();
     should(store.pending.has(DAEMON)).be.false();
+  });
+});
+
+describe('what Access forgets when this browser stops being paired to a machine (S12)', () => {
+  const OTHER = `fy_daemon_${'z'.repeat(43)}`;
+
+  it('drops the push device id of the unpaired machine and no other machine’s', () => {
+    const devices = new DaemonPushDevices();
+    devices.remember(daemonId(DAEMON), 'push-device-a');
+    devices.remember(daemonId(OTHER), 'push-device-b');
+
+    accessForget(() => devices)(DAEMON);
+
+    should(devices.get(daemonId(DAEMON))).be.null();
+    should(devices.get(daemonId(OTHER))).equal('push-device-b');
+  });
+
+  it('is a no-op for a machine this browser holds no push device for', () => {
+    const devices = new DaemonPushDevices();
+    devices.remember(daemonId(OTHER), 'push-device-b');
+
+    accessForget(() => devices)(DAEMON);
+
+    should(devices.get(daemonId(OTHER))).equal('push-device-b');
+  });
+
+  it('reaches the page’s own push device memory by default', () => {
+    const { devices } = browserPushHost();
+    devices.remember(daemonId(DAEMON), 'push-device-a');
+
+    accessForget()(DAEMON);
+
+    should(devices.get(daemonId(DAEMON))).be.null();
   });
 });
