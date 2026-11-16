@@ -971,6 +971,9 @@ describe('the session index is rebuilt at boot (BG-049, J-0159)', () => {
     let h = await ferretsHost([]);
     const folder = h.state('ferrets');
     const written = await generatedFleet(60, folder);
+    // An append records no journal version; the rebuild reads each journal in full and does. One reconcile puts the
+    // "before" rows on the same footing, so the comparison is of what the daemon had, version included.
+    await written.storage.reconcile();
     const sessionsBefore = sessionRows(folder);
     const eventsBefore = eventRows(folder);
     expect(sessionsBefore).toHaveLength(60);
