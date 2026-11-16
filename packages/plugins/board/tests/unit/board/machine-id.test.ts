@@ -11,8 +11,8 @@ describe('D2 #13 the machine a card is made on', () => {
 
     const stored = JSON.parse(host.state('board').files.get(`cards/${made.id}.json`) ?? '{}') as { machineId?: string };
     expect(stored.machineId).toBe(TEST_IDENTITY.daemonId);
-    const read = await host.request('GET', `/v1/board/cards/${made.id}`, { headers: as('owner') });
-    expect(read.json<{ card: { machineId: string } }>().card.machineId).toBe(TEST_IDENTITY.daemonId);
+    const read = await host.request('GET', `/v1/board/tasks/${made.id}`, { headers: as('owner') });
+    expect(read.json<{ task: { machineId: string } }>().task.machineId).toBe(TEST_IDENTITY.daemonId);
   });
 
   test('is nothing at all where the kernel has no identity port yet: no stand-in id is ever read', () => {

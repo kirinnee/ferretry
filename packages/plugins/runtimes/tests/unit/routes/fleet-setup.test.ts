@@ -116,7 +116,7 @@ const post = async (hosted: Hosted, path: string, body?: unknown) =>
   await hosted.host.request('POST', path, body === undefined ? {} : { body });
 
 describe('the fleet setup mount', () => {
-  it('should answer the two reads through the shared schema and never let one be cached', async () => {
+  it('R-0092 should answer the two reads through the shared schema and never let one be cached', async () => {
     // Arrange
     const { assembly, calls } = stub();
     const { host } = await hostRuntimes(assembly);

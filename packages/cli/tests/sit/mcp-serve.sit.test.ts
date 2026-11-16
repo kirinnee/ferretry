@@ -132,7 +132,7 @@ describe('fy mcp serve (SIT)', () => {
     should(JSON.stringify(byId(1).result)).not.containEql('claude/channel');
     should(seen.filter(request => request.body.includes('channel_'))).eql([]);
     const names = (byId(2).result.tools as { name: string }[]).map(tool => tool.name);
-    for (const name of ['terminal_open', 'instructions', 'card_progress', 'config_read'])
+    for (const name of ['terminal_open', 'instructions', 'task_progress', 'card_progress', 'config_read'])
       should(names).containEql(name);
     for (const name of ['secure_copy', 'secure_list', 'secure_discard', 'secure_paste']) should(names).containEql(name);
     for (const name of ['task_plan', 'account_propose']) should(names).containEql(name);

@@ -299,7 +299,7 @@ describe('InlineObserverHost — facts', () => {
 });
 
 describe('InlineObserverHost — armed', () => {
-  it('should observe the whole fleet on its own 2 s tick once armed, arm it once, and stop it on close', async () => {
+  it('J-0106 should observe the whole fleet on its own 2 s tick once armed, arm it once, and stop it on close', async () => {
     // Arrange
     const subject = await world();
     await subject.storage.writeState(A, { id: A, status: 'running', turn: 1 });

@@ -21,8 +21,8 @@ const CARD = cardResponse(card({ id: 'F7' }), laneSet());
 const BASE = {
   'GET /v1/board/projects': PROJECTS,
   'GET /v1/ferrets': [{ id: DENISHA, name: 'denisha' }],
-  'GET /v1/board/cards/:cardId': CARD,
-  'POST /v1/board/cards/:cardId': CARD,
+  'GET /v1/board/tasks/:taskId': CARD,
+  'POST /v1/board/tasks/:taskId': CARD,
 };
 const LANES = { ...BASE, 'GET /v1/board/projects/:projectId/lanes': project() };
 const CHANGE = { 'POST /v1/board/projects/:projectId/lanes': { laneSet: laneSet({ version: 4 }), ask: 'raised' } };
@@ -45,7 +45,7 @@ interface Row {
   readonly undeclared?: boolean;
 }
 
-const WRITE = 'POST /v1/board/cards/:cardId';
+const WRITE = 'POST /v1/board/tasks/:taskId';
 
 const ROWS: readonly Row[] = [
   { id: 'V-0085', verb: 'board', answers: { ...BASE, 'GET /v1/board': response() }, route: 'GET /v1/board' },
@@ -99,7 +99,7 @@ const ROWS: readonly Row[] = [
   },
   {
     id: 'V-0456',
-    verb: 'card adopt',
+    verb: 'task adopt',
     args: ['F7'],
     options: { reason: 'its ferret ended' },
     route: WRITE,
@@ -107,22 +107,22 @@ const ROWS: readonly Row[] = [
   },
   {
     id: 'V-0457',
-    verb: 'card assign',
+    verb: 'task assign',
     args: ['F7', 'denisha'],
     route: WRITE,
     body: { action: 'assign', assignee: DENISHA },
   },
   {
     id: 'V-0458',
-    verb: 'card block',
+    verb: 'task block',
     args: ['F7', 'waiting', 'on', 'infra'],
     route: WRITE,
     body: { action: 'block', reason: 'waiting on infra' },
   },
-  { id: 'V-0459', verb: 'card claim', args: ['F7'], route: WRITE, body: { action: 'claim' } },
+  { id: 'V-0459', verb: 'task claim', args: ['F7'], route: WRITE, body: { action: 'claim' } },
   {
     id: 'V-0460',
-    verb: 'card clarify',
+    verb: 'task clarify',
     args: ['F7', 'also', 'the', 'header'],
     options: { source: 'chat://2' },
     route: WRITE,
@@ -130,16 +130,16 @@ const ROWS: readonly Row[] = [
   },
   {
     id: 'V-0461',
-    verb: 'card new',
+    verb: 'task new',
     args: ['Rename', 'widget'],
     options: { kind: 'feature', ask: 'rename it', 'ask-source': 'chat://1', new: true },
-    answers: { ...BASE, 'POST /v1/board/cards': CARD },
-    route: 'POST /v1/board/cards',
+    answers: { ...BASE, 'POST /v1/board/tasks': CARD },
+    route: 'POST /v1/board/tasks',
     body: { title: 'Rename widget' },
   },
   {
     id: 'V-0462',
-    verb: 'card depend',
+    verb: 'task depend',
     args: ['F7', '&F2'],
     options: { until: 'released' },
     route: WRITE,
@@ -147,7 +147,7 @@ const ROWS: readonly Row[] = [
   },
   {
     id: 'V-0463',
-    verb: 'card drop',
+    verb: 'task drop',
     args: ['F7'],
     options: { reason: 'moot' },
     route: WRITE,
@@ -155,17 +155,17 @@ const ROWS: readonly Row[] = [
   },
   {
     id: 'V-0464',
-    verb: 'card edit',
+    verb: 'task edit',
     args: ['F7'],
     options: { title: 'New title' },
     route: WRITE,
     body: { action: 'edit', title: 'New title' },
   },
-  { id: 'V-0465', verb: 'card file', args: ['F7', 'src/a.ts'], route: WRITE, body: { action: 'file' } },
-  { id: 'V-0466', verb: 'card focus', args: ['F7'], route: WRITE, body: { action: 'focus' } },
+  { id: 'V-0465', verb: 'task file', args: ['F7', 'src/a.ts'], route: WRITE, body: { action: 'file' } },
+  { id: 'V-0466', verb: 'task focus', args: ['F7'], route: WRITE, body: { action: 'focus' } },
   {
     id: 'V-0467',
-    verb: 'card link',
+    verb: 'task link',
     args: ['F7'],
     options: { branch: 'feat/x' },
     route: WRITE,
@@ -173,7 +173,7 @@ const ROWS: readonly Row[] = [
   },
   {
     id: 'V-0468',
-    verb: 'card merge-gate',
+    verb: 'task merge-gate',
     args: ['https://github.com/kirinnee/ferretry/pull/42'],
     answers: {
       'GET /v1/board/merge-gate': { pr: 'https://github.com/o/r/pull/1', unit: [], waits: [], unreadable: [] },
@@ -182,7 +182,7 @@ const ROWS: readonly Row[] = [
   },
   {
     id: 'V-0469',
-    verb: 'card move',
+    verb: 'task move',
     args: ['F7', 'implement'],
     options: { reason: 'started' },
     route: WRITE,
@@ -190,15 +190,15 @@ const ROWS: readonly Row[] = [
   },
   {
     id: 'V-0470',
-    verb: 'card note',
+    verb: 'task note',
     args: ['F7', 'a', 'note'],
     route: WRITE,
     body: { action: 'note', text: 'a note' },
   },
-  { id: 'V-0471', verb: 'card order', args: ['F7', '3'], route: WRITE, body: { action: 'order', order: 3 } },
+  { id: 'V-0471', verb: 'task order', args: ['F7', '3'], route: WRITE, body: { action: 'order', order: 3 } },
   {
     id: 'V-0472',
-    verb: 'card patch',
+    verb: 'task patch',
     args: ['F7'],
     options: { file: '/f7.yaml' },
     route: WRITE,
@@ -206,7 +206,7 @@ const ROWS: readonly Row[] = [
   },
   {
     id: 'V-0473',
-    verb: 'card refile',
+    verb: 'task refile',
     args: ['F7'],
     options: { project: 'Other' },
     route: WRITE,
@@ -214,7 +214,7 @@ const ROWS: readonly Row[] = [
   },
   {
     id: 'V-0474',
-    verb: 'card reopen',
+    verb: 'task reopen',
     args: ['F7'],
     options: { to: 'todo', ask: 'it broke again' },
     route: WRITE,
@@ -222,16 +222,16 @@ const ROWS: readonly Row[] = [
   },
   {
     id: 'V-0475',
-    verb: 'card reparent',
+    verb: 'task reparent',
     args: ['F7'],
     options: { parent: '&F2' },
     route: WRITE,
     body: { action: 'reparent' },
   },
-  { id: 'V-0476', verb: 'card show', args: ['F7'], route: 'GET /v1/board/cards/:cardId' },
+  { id: 'V-0476', verb: 'task show', args: ['F7'], route: 'GET /v1/board/tasks/:taskId' },
   {
     id: 'V-0477',
-    verb: 'card skip',
+    verb: 'task skip',
     args: ['no', 'card', 'needed'],
     answers: { 'POST /v1/board/skip': { ferret: DENISHA, skip: { reason: 'no card needed', at: AT } } },
     route: 'POST /v1/board/skip',
@@ -239,14 +239,14 @@ const ROWS: readonly Row[] = [
   },
   {
     id: 'V-0478',
-    verb: 'card trigger',
+    verb: 'task trigger',
     args: ['F7', 'deploy.done'],
     route: WRITE,
     body: { action: 'trigger', event: 'deploy.done' },
   },
   {
     id: 'V-0479',
-    verb: 'card unblock',
+    verb: 'task unblock',
     args: ['F7'],
     options: { reason: 'cleared' },
     route: WRITE,
@@ -254,7 +254,7 @@ const ROWS: readonly Row[] = [
   },
   {
     id: 'V-0480',
-    verb: 'card undepend',
+    verb: 'task undepend',
     args: ['F7', '&F2'],
     options: { reason: 'moot' },
     route: WRITE,
@@ -291,10 +291,10 @@ describe('board command parity', () => {
     for (const verb of ['board workflow show', 'board workflow edit']) expect(declared.has(verb)).toBe(true);
   });
 
-  test('V-0455 fy card is the group of every card verb, one per thing fy task had, none of it under the old name', () => {
-    const card = [...declared].filter(verb => verb.startsWith('card '));
-    expect(card.length).toBeGreaterThanOrEqual(25);
-    expect([...declared].filter(verb => verb.startsWith('task'))).toEqual([]);
+  test('V-0455 fy task is the group of every task verb, one per thing fy task had; the old fy card is the shell’s hidden alias, not a verb line here', () => {
+    const task = [...declared].filter(verb => verb.startsWith('task '));
+    expect(task.length).toBeGreaterThanOrEqual(25);
+    expect([...declared].filter(verb => /^card\b/u.test(verb))).toEqual([]);
   });
 
   test('V-0086 fy board import is removed by design: it is neither declared nor answered (clean slate)', async () => {
@@ -302,22 +302,22 @@ describe('board command parity', () => {
     await expect(run('board import', { answers: BASE })).rejects.toThrow(/does not implement/u);
   });
 
-  test('V-0461 fy card new is the renamed fy task create: the old name is gone', async () => {
-    expect(declared.has('card create')).toBe(false);
-    await expect(run('card create', { answers: BASE })).rejects.toThrow(/does not implement/u);
+  test('V-0461 fy task new is the renamed fy task create: the old name is gone', async () => {
+    expect(declared.has('task create')).toBe(false);
+    await expect(run('task create', { answers: BASE })).rejects.toThrow(/does not implement/u);
   });
 
-  test('V-0455 fy card has no verb that answers an ask: the agenda asks, the card shows (#1552)', () => {
-    expect([...declared].filter(verb => /answer|ask/u.test(verb))).toEqual([]);
+  test('V-0455 fy task has no verb that answers an ask: the agenda asks, the task shows (#1552)', () => {
+    expect([...declared].filter(verb => /\b(answer|ask)\b/u.test(verb))).toEqual([]);
   });
 
-  test('V-0464 fy card progress writes the progress the status flags of fy task edit wrote, as one edit with a progress partial', async () => {
-    const result = await run('card progress', { args: ['F7'], options: { now: 'testing' }, answers: BASE });
+  test('V-0464 fy task progress writes the progress the status flags of fy task edit wrote, as one edit with a progress partial', async () => {
+    const result = await run('task progress', { args: ['F7'], options: { now: 'testing' }, answers: BASE });
     expect(result.code).toBe(0);
     expect(bodyOf(result.calls.find(call => call.route.startsWith('POST '))?.init)).toEqual({
       action: 'edit',
       progress: { now: 'testing' },
     });
-    expect(declared.has('card progress')).toBe(true);
+    expect(declared.has('task progress')).toBe(true);
   });
 });

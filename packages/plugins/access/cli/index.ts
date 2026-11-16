@@ -26,7 +26,7 @@ import { BINARY_NAME, ExitStatus } from './shell.ts';
  * name) come from `shell.ts`, and the `--open` browser launcher, the redirect sweep, the QR encoder and the
  * terminal width from `adapters/`, as today. Each is a port the kernel's CLI context still has to offer.
  *
- * `fy daemon config` (`lib/grants`) is not wired: the manifest declares no such verb and its routes are Gate's.
+ * `fy daemon config` is not Access's: it lives in Gate (`core/gate`), which owns the grants routes.
  */
 export default implementCli(manifest, {
   build(ctx) {

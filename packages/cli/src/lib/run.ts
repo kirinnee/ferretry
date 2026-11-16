@@ -238,6 +238,9 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
   let resolved = resolveVerb(table, tokens);
   for (let hops = 0; resolved.kind === 'verb' && resolved.entry.alias !== undefined; hops += 1) {
     if (hops >= 4) throw new ShellError(`the alias "${resolved.entry.line}" runs another alias too many times`);
+    // A hidden alias is an old spelling: it runs, and says on stderr what replaced it.
+    if (resolved.entry.hidden === true)
+      io.err(`\`${identity.binary} ${resolved.entry.line}\` is now \`${identity.binary} ${resolved.entry.alias}\`\n`);
     tokens = expandAlias(resolved.entry, resolved.rest) ?? tokens;
     resolved = resolveVerb(table, tokens);
   }

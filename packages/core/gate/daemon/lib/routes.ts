@@ -68,6 +68,19 @@ const securityCallerOf = (call: CallContext): SecurityCaller => {
   };
 };
 
+/** Rows Board wrote before its noun became `task` say `card.…`; they read as the kind that replaced them. */
+const FORMER_AUDIT_KINDS: Readonly<Record<string, string>> = {
+  'card.created': 'task.created',
+  'card.acted': 'task.acted',
+  'card.started': 'task.started',
+};
+
+/** One audit row as it is read: its kind spelled the way it is spelled now. */
+const auditRowAsRead = <Row extends { readonly event: string }>(row: Row): Row => {
+  const now = FORMER_AUDIT_KINDS[row.event];
+  return now === undefined ? row : { ...row, event: now };
+};
+
 export interface GateRouteDeps {
   readonly audit: { recent(limit: number, keptOffset: number): Promise<AuditReading> };
   readonly security: SecuritySettingsService;
@@ -87,8 +100,8 @@ export function gateRoutes(deps: GateRouteDeps) {
       const reading = await deps.audit.recent(query.data.limit, query.data.keptOffset);
       return jsonResponse(
         AuditViewSchema.parse({
-          records: reading.records.map(({ format: _format, ...record }) => record),
-          kept: reading.kept.map(({ format: _format, ...record }) => record),
+          records: reading.records.map(({ format: _format, ...record }) => auditRowAsRead(record)),
+          kept: reading.kept.map(({ format: _format, ...record }) => auditRowAsRead(record)),
           keptTotal: reading.keptTotal,
           unreadable: reading.unreadable,
         }),

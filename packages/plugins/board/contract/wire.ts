@@ -1112,7 +1112,7 @@ export const laneEditProblems = (
  */
 export const BoardChangedSchema = z.strictObject({
   projectId: BoardProjectIdSchema,
-  cardIds: z.array(CardIdSchema).min(1),
+  taskIds: z.array(CardIdSchema).min(1),
 });
 export type BoardChangedEvent = z.infer<typeof BoardChangedSchema>;
 
@@ -1233,7 +1233,16 @@ export const BoardConfigSchema = z.strictObject({
 export type BoardConfig = z.infer<typeof BoardConfigSchema>;
 
 // ─── the `card_progress` agent tool ──────────────────────────────────────────────────────────────────────────────
-/** What a ferret hands `card_progress`: the card and the parts of its progress it rewrites (the rest are kept). */
+/** What a ferret hands `task_progress`: the task and the parts of its progress it rewrites (the rest are kept). */
+export const TaskProgressToolInputSchema = z.strictObject({
+  task: CardIdSchema,
+  now: z.string().max(MAX_PROGRESS_PART_LENGTH).optional(),
+  doneSoFar: z.string().max(MAX_PROGRESS_PART_LENGTH).optional(),
+  next: z.string().max(MAX_PROGRESS_PART_LENGTH).optional(),
+});
+export type TaskProgressToolInput = z.infer<typeof TaskProgressToolInputSchema>;
+
+/** What a ferret's old instructions hand `card_progress`, the old name of `task_progress`: the same input under the old key. */
 export const CardProgressToolInputSchema = z.strictObject({
   card: CardIdSchema,
   now: z.string().max(MAX_PROGRESS_PART_LENGTH).optional(),

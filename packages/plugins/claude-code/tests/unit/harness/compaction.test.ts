@@ -75,7 +75,7 @@ describe('the compaction hooks in the fixed layer', () => {
     should(CLAUDE_COMPACTION_HOOKS.SessionStart).have.length(1);
   });
 
-  it('prints, after a compaction, the task, the card, the agenda and the owed messages with the 5.0 verbs and this ferret’s id', async () => {
+  it('prints, after a compaction, the task, the board task, the agenda and the owed messages with the 5.0 verbs and this ferret’s id', async () => {
     const { code, out, err } = await run(CLAUDE_REABSORB_COMMAND, { FY_SESSION_ID: 'sess-42', FY_TOKEN: SECRET });
     should(code).equal(0);
     should(err).equal('');
@@ -84,7 +84,7 @@ describe('the compaction hooks in the fixed layer', () => {
       'session sess-42',
       'fy logs sess-42 --turn 1',
       'assigned task',
-      'fy card show <card id>',
+      'fy task show <task id>',
       'fy board status',
       'fy agenda ls',
       'fy agenda show <id>',
@@ -105,13 +105,13 @@ describe('the compaction hooks in the fixed layer', () => {
 
   it('names only verbs the 5.0 manifests declare, and exactly the ones it should', async () => {
     const declared = await declaredVerbs();
-    for (const real of ['card show', 'board status', 'agenda ls', 'agenda show', 'logs', 'transcript', 'reply'])
+    for (const real of ['task show', 'board status', 'agenda ls', 'agenda show', 'logs', 'transcript', 'reply'])
       should(declared.has(real)).equal(true);
-    should(declared.has('task show')).equal(false);
+    should(declared.has('task zap')).equal(false);
     const { found, unknown } = namedVerbs(CLAUDE_REABSORB_LINES, declared);
     should(unknown).eql([]);
-    should(found).eql(['agenda ls', 'agenda show', 'board status', 'card show', 'logs', 'reply', 'transcript']);
-    should(namedVerbs(['run fy task show now'], declared).unknown).eql(['task show now']);
+    should(found).eql(['agenda ls', 'agenda show', 'board status', 'logs', 'reply', 'task show', 'transcript']);
+    should(namedVerbs(['run fy task zap now'], declared).unknown).eql(['task zap now']);
     should(namedVerbs(CLAUDE_KEEP_LINES, declared).found).eql([]);
   });
 

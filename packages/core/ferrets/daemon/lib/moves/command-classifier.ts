@@ -8,6 +8,7 @@ import {
   fyGlobalFlags,
   fySendHoldingFlags,
   fySendVerb,
+  fyVerbOldSpellings,
   fyVerbsWithSubverbs,
   harmlessRedirect,
   httpHeads,
@@ -317,13 +318,14 @@ function classifyFy(values: readonly string[]): InflightVerdict {
   const index = headIndex(values, 'fy');
   let position = index + 1;
   while (fyGlobalFlags.has(values[position] ?? '')) position++;
-  const verb = values[position] ?? '';
+  const typed = values[position] ?? '';
+  const verb = fyVerbOldSpellings.get(typed) ?? typed;
   const rest = values.slice(position + 1);
   if (verb === fySendVerb)
     return [...fyOptionNames(rest)].some(name => fySendHoldingFlags.has(`--${name}`)) ? 'unknown' : 're_armable';
   if (!fyVerbsWithSubverbs.has(verb)) return safeFyVerbLines.includes(verb) ? 'safe_to_kill' : 'unknown';
-  // `guide` / `card`: the first word that is not an option is the sub-verb, so `guide --json accept r` is `guide accept`.
-  // No sub-verb is the bare verb, safe only where the bare verb is listed (`guide` is, `card` is not).
+  // `guide` / `task`: the first word that is not an option is the sub-verb, so `guide --json accept r` is `guide accept`.
+  // No sub-verb is the bare verb, safe only where the bare verb is listed (`guide` is, `task` is not).
   const sub = rest.find(value => !value.startsWith('-'));
   return safeFyVerbLines.includes(sub === undefined ? verb : `${verb} ${sub}`) ? 'safe_to_kill' : 'unknown';
 }

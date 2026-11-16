@@ -3,11 +3,13 @@
     "tests/**/*.test.{ts,tsx}",
     "tests/**/fixtures/**/*.{ts,tsx}",
     "app/surfaces.tsx",
-    "daemon/features/*.feature.ts"
+    "daemon/features/*.feature.ts",
+    "manifest/actions/*.actions.ts"
   ],
   "project": ["**/*.{ts,tsx}"],
   "allowed": {
     "entry:app/surfaces.tsx": "loaded lazily by `import(`./${\"surfaces\"}.tsx`)` in app/index.ts, a template import knip cannot follow.",
-    "entry:daemon/features/*.feature.ts": "a Conversation feature is listed by the generator into the git-ignored daemon/generated/features.ts (scripts/gen/registries.ts), which knip does not read, so each feature file is an entry by its name: a new feature adds one file and edits no list (docs/standards/architecture). Not a pending-port gap."
+    "entry:daemon/features/*.feature.ts": "a Conversation feature is listed by the generator into the git-ignored daemon/generated/features.ts (scripts/gen/registries.ts), which knip does not read, so each feature file is an entry by its name: a new feature adds one file and edits no list (docs/standards/architecture). Not a pending-port gap.",
+    "entry:manifest/actions/*.actions.ts": "a Conversation manifest fragment (one feature's routes, sockets, tools, verbs, app actions and events) is listed by the generator into the git-ignored manifest/generated/actions.ts (scripts/gen/registries.ts), which knip does not read, so each fragment file is an entry by its name: a new feature adds one file and edits no list."
   }
 }

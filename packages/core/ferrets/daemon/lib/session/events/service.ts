@@ -26,7 +26,7 @@ export const EVENT_STREAM_MAX_BUFFER_BYTES = 1_024 * 1_024;
  */
 export const LIVE_SAMPLE_MS = 500;
 
-export const FLEET_EVENT_STREAM_CLOSES = {
+const FLEET_EVENT_STREAM_CLOSES = {
   clientFrame: { code: 1008, reason: 'event stream is server-only' },
   evidence: { code: 1011, reason: 'event evidence unavailable' },
   slowReader: { code: 1013, reason: 'event stream reader fell behind' },

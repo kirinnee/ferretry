@@ -5,6 +5,7 @@
  */
 import { expect, it } from 'bun:test';
 import { registry } from '../../src/generated/commands.ts';
+import { renderRootHelp, verbsUnder } from '../../src/lib/help.ts';
 import { buildVerbTable, expandAlias, resolveVerb, type VerbEntry } from '../../src/lib/verbs.ts';
 
 const table = buildVerbTable(registry);
@@ -81,4 +82,20 @@ it('the old spellings are the shell’s own, add no verb conflict, and leave the
   expect(runs(['tunnel', 'status'])).toMatchObject({ line: 'tunnel status', owner: 'connections' });
   expect(runs(['update'])).toMatchObject({ line: 'update', owner: 'shell' });
   expect(runs(['onboard'])).toMatchObject({ line: 'onboard', owner: 'onboarding' });
+});
+
+it('O18 fy card is the hidden old spelling of fy task: every sub-verb runs the task verb, and no help lists it', () => {
+  expect(runs(['card', 'show', 'F1'])).toEqual({ line: 'task show', owner: 'board', rest: ['F1'] });
+  expect(runs(['card', 'note', 'F1', 'a', 'note'])).toEqual({
+    line: 'task note',
+    owner: 'board',
+    rest: ['F1', 'a', 'note'],
+  });
+  const old = table.entries.find(entry => entry.line === 'card');
+  expect(old).toMatchObject({ owner: 'shell', alias: 'task', hidden: true });
+  expect(table.conflicts).toEqual([]);
+  const help = renderRootHelp('fy', table, {});
+  expect(help).not.toMatch(/^ +card\b/mu);
+  expect(help).toMatch(/^ +task show\b/mu);
+  expect(verbsUnder(table, ['card'])).toEqual([]);
 });

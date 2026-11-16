@@ -50,7 +50,7 @@ export function parseCardPatch(
     return {
       ok: false,
       problems: [
-        'revision: required — read the whole card first (card show <id> --yaml prints it), so no part is left out of date',
+        'revision: required — read the whole task first (task show <id> --yaml prints it), so no part is left out of date',
       ],
     };
   }

@@ -20,7 +20,7 @@ export interface StoredSessionEvent {
  * Every event the journal holds was written by this daemon, so its source is the daemon: it is taken
  * from the envelope rather than invented. See `FyEventSchema`.
  */
-export const JOURNAL_EVENT_SOURCE = 'daemon';
+const JOURNAL_EVENT_SOURCE = 'daemon';
 
 /** A stored event in the protocol's envelope. */
 export function journalEventToFyEvent(event: StoredSessionEvent): FyEvent {

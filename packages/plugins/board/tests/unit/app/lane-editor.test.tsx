@@ -517,7 +517,7 @@ describe('the stage of a lane', () => {
       ...must(view.container.querySelector('[data-lane-triggers="implement"]'), 'triggers').querySelectorAll('button'),
     ];
     expect(chips).toHaveLength(10);
-    const reported = chips.filter(chip => chip.textContent?.includes('reported with fy card trigger'));
+    const reported = chips.filter(chip => chip.textContent?.includes('reported with fy task trigger'));
     expect(reported.map(chip => chip.textContent?.split(' · ')[0])).toEqual([
       'a reviewer approves the PR',
       'a deploy is reported done',

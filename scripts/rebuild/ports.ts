@@ -158,7 +158,7 @@ const KINDS: Record<string, { offers: string[]; adds: string[] }> = {
   conversation: { offers: ['hooks `message.before-send`, `turn.ended`'], adds: ['ask source `question`', 'view'] },
   agenda: { offers: [], adds: ['view'] },
   projects: { offers: [], adds: ['view', 'command'] },
-  board: { offers: ['hook `card.moving` (decide)'], adds: ['ask source `card`', 'view'] },
+  board: { offers: ['hook `task.moving` (decide)'], adds: ['ask source `card`', 'view'] },
   packs: { offers: [], adds: ['view'] },
   warden: { offers: [], adds: ['view'] },
   usage: { offers: [], adds: ['view'] },
