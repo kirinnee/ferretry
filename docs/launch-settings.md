@@ -16,6 +16,15 @@ when a ferret is created).
 | Passive learning, per ferret (Actions)                            | re-instructs the running ferret with a queued message ([lessons.md](lessons.md))         |
 | Warden, speed-up keys, secrets in the secret store                | the daemon reads them when it uses them, never the CLI                                   |
 
+The model, effort and fast switches go through `POST /v1/ferrets/:id/runtime` (Runtimes mounts it, Ferrets serves it over the
+ferret's own harness). **A person may switch any ferret; a ferret may switch only itself and its helpers (its descendants), never its lead** — anyone else
+is refused `403 forbidden`. A harness that cannot be switched while it runs answers `422 runtime_control_unsupported`.
+
+Which models a ferret may be switched to is what **the runtime it was started on** serves, read from the ferret's own record
+(never from the request). Claude Code switches by typed command, so a request names a model **or** an effort **or** fast mode,
+not two of them; a model the runtime does not serve is refused unless its catalog takes custom ids. A ferret with no recorded
+runtime, or whose runtime serves no model, answers `503 runtime_catalog_unavailable` rather than guessing.
+
 ## On restart
 
 Everything the CLI itself reads at launch. **Restart CLI** (Actions, or Info › Runtime's Settings row), a

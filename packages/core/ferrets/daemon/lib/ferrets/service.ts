@@ -6,6 +6,11 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { applicableInstructions, sectionDigests } from './launch-sections.ts';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { openHarness } from './harness-facade.ts';
+import type { FerretsCore } from './core.ts';
+import { compactAt, setCompactAt } from './compact-at.ts';
+import { agentControl, effectiveLimits, revokeToken, turnUsage } from './insights.ts';
+import { repointRuntime, runtimeRecords } from './runtime-records.ts';
+import { lastSnapshot, prompt, turnObserved, turns } from './turns.ts';
 import { KeyedSerialExecutor } from './serial.ts';
 import type { SerialExecutor } from '../ports.ts';
 import { ConversationLeaseHeldError } from '../../../contract/conversation-lease.ts';
@@ -68,12 +73,11 @@ import type {
   StartOptions,
   StartRequest,
 } from '../../../contract/index.ts';
-import { type CompactAt, CompactAtSchema } from '../../../contract/view/compact-at.ts';
+import type { CompactAt } from '../../../contract/view/compact-at.ts';
 import { claimStartName, displayAgentName, type SessionNameClaims } from '../names/session-names.ts';
 import { normalizeCallsign } from '../names/policy.ts';
 import type { NameAllocationErrorCode } from '../names/types.ts';
 import type { SystemCallsignPrefix } from '../protocol/system-callsigns.ts';
-import { queuedPayloadFile } from '../protocol/turn-handoff.ts';
 import {
   diedParked,
   FerretDetailsSchema,
@@ -85,17 +89,13 @@ import {
   type FerretDetails,
 } from '../../../contract/index.ts';
 import { effectiveMode, type FerretRegistry, type FerretFilter } from '../registry/registry.ts';
+import { STOP_UNCONFIRMED, withStampedLabel } from './restart-guards.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { resumeTurnAuthor } from '../session/resume/policy.ts';
 import type { ResumeActor } from '../session/resume/types.ts';
 import type { SessionEffectAdmission } from '../session/effects/types.ts';
 import { SessionMoveError } from '../runtime/mounts/session-move.ts';
-import {
-  type AgentControl,
-  effectiveAgentControl,
-  type LimitsFile,
-  NO_AGENT_CONTROL,
-} from '../../../contract/index.ts';
+import type { AgentControl, LimitsFile } from '../../../contract/index.ts';
 import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../tokens/tokens.ts';
 import type { SessionSpawnRequest } from '../session/provenance/types.ts';
 import {
@@ -182,6 +182,12 @@ export interface FerretsPorts {
    * fixture, where the token directory alone is the fact.
    */
   cutOffMark?: SessionCutOffMark;
+  /**
+   * Whether the ferret's session document says its last stop was never confirmed (`kill_failed`): its old pane may
+   * still be alive, so a resume refuses until a stop succeeds (`restart-guards.ts`). A read that fails rejects, and the
+   * resume refuses. Unbound only in a unit fixture, where no document says so.
+   */
+  stopUnconfirmed?(ferret: FerretId): Promise<boolean>;
   harness(key: HarnessKey): Harness | undefined;
   harnessKeys(): readonly HarnessKey[];
   runner(): Runner | undefined;
@@ -339,11 +345,14 @@ const loginEnvAllowed = (name: string): boolean => !LOGIN_ENV_RESERVED.has(name)
  * `carry` is handed the ferret's id and NOTHING the registry says about it: the label and parent a resume restamps
  * from are the ones the ferret's own session document holds (today's `recordRelaunchProvenance`), because a move, a
  * handover or an owner's edit may have changed either there since the record was written.
+ *
+ * Both answer the label the stamp FORCED onto the ferret (the Warden's, for everything below it: today's
+ * `resolveSpawnLabel`), or nothing when none was; the launch carries it to the ferret's record (`withStampedLabel`).
  */
 export interface FerretSessionPort {
   prepare(ferret: FerretId): Promise<void>;
-  stamp(request: SessionSpawnRequest): Promise<void>;
-  carry(ferret: FerretId): Promise<void>;
+  stamp(request: SessionSpawnRequest): Promise<string | undefined | void>;
+  carry(ferret: FerretId): Promise<string | undefined | void>;
   /**
    * A start's prompt, written as the ferret's assigned task (`turns/turn-001.md`), after `prepare` and before the stamp,
    * so the ferret's session document counts the turn it already holds. Answers the pointer typed into the new pane once
@@ -414,6 +423,11 @@ export interface FerretSessionPort {
    * and writing atomically. The value reaching it has already been parsed by the service.
    */
   setCompactAt?(ferret: FerretId, value: 'auto' | number | undefined): Promise<void>;
+  /**
+   * Sets (or, for `false`, takes off) the `stalled` health mark in the ferret's state document under the storage's locked
+   * read-modify-write, changing no other field. Answers whether the document changed.
+   */
+  markStalled?(ferret: FerretId, stalled: boolean): Promise<boolean>;
   /**
    * What the session config says about the runtime this ferret launched as (`agent`, `command[0]`), or `undefined` when
    * the document is missing or is not an object. Rejects when it cannot be read.
@@ -641,7 +655,8 @@ export interface ServiceResumeOptions extends Omit<ResumeOptions, 'actor'> {
   readonly confirmRestore?: () => void;
   /**
    * Replace a LIVE pane instead of keeping the ferret running as it is: the pane is stopped and the ferret relaunched
-   * through the ordinary launch (new token, harness home, environment). Only a move sets it.
+   * through the ordinary launch (new token, harness home, environment). A move sets it, and so does the Warden's own
+   * resume (`ResumeOptions.replaceLiveTerminal`, checked at the port).
    */
   readonly replaceLiveTerminal?: boolean;
   /**
@@ -745,12 +760,25 @@ export class FerretsService implements FerretsApi {
     { readonly pinnedAt: string; readonly summary: FerretSummary }
   >();
 
+  /** What the members that live outside this file (`runtime-records.ts`, `compact-at.ts`, `turns.ts`, `insights.ts`) read. */
+  readonly core: FerretsCore;
+
   constructor(
     private readonly registry: FerretRegistry,
     private readonly tokens: FerretTokenDirectory,
     private readonly ports: FerretsPorts,
   ) {
     this.serial = ports.serial ?? new KeyedSerialExecutor();
+    this.core = {
+      registry,
+      tokens,
+      ports,
+      serial: this.serial,
+      requireMayTouch: (caller, target) => this.requireMayTouch(caller, target),
+      requireTokens: () => this.requireTokens(),
+      write: async (record, previous, change) => await this.write(record, previous, change),
+      saveDetails: async (ferret, details) => await this.saveDetails(ferret, details),
+    };
   }
 
   /**
@@ -869,6 +897,17 @@ export class FerretsService implements FerretsApi {
       if (sources.length > 0) found.push({ harness: key, sources });
     }
     return found;
+  }
+
+  /**
+   * The Warden's stalled mark (`FerretsApi.markStalled`), on a ferret that is running only: a stopped or unknown one is a
+   * no-op. Answers whether the state document changed; a Ferrets with no session files marks nothing.
+   */
+  async markStalled(ferret: FerretId, stalled: boolean): Promise<boolean> {
+    await this.ports.ready?.();
+    const record = this.registry.get(ferret);
+    if (record === undefined || record.state === 'stopped') return false;
+    return (await this.ports.session?.markStalled?.(ferret, stalled)) ?? false;
   }
 
   /** The handle `ferret.json` keeps while the ferret runs; a stop clears it. */
@@ -1374,6 +1413,15 @@ export class FerretsService implements FerretsApi {
     return undefined;
   }
 
+  /** Why a resume is refused over a stop nobody confirmed (`restart-guards.ts`), or `undefined`: a read that fails refuses too. */
+  private async stopUnconfirmedRefusal(ferret: FerretId): Promise<string | undefined> {
+    try {
+      return (await this.ports.stopUnconfirmed?.(ferret)) === true ? STOP_UNCONFIRMED(ferret) : undefined;
+    } catch {
+      return `whether the last stop of ${ferret} was confirmed could not be read, so it was not resumed`;
+    }
+  }
+
   private async resumeHeld(
     ferret: FerretId,
     message: string | undefined,
@@ -1383,6 +1431,8 @@ export class FerretsService implements FerretsApi {
     const found = this.registry.get(ferret);
     if (found === undefined) return failed('refused', `no ferret ${ferret}`);
     if (options.expect !== undefined && !options.expect(found)) return failed('refused', NO_LONGER_OWED);
+    const unconfirmed = await this.stopUnconfirmedRefusal(ferret);
+    if (unconfirmed !== undefined) return failed('refused', unconfirmed);
     // A plain resume of a running ferret is the send shortcut: nothing to relaunch. Only a move gives it up, and then
     // the live pane is stopped first (never a second pane beside it).
     const replacing = found.state !== 'stopped';
@@ -1566,54 +1616,24 @@ export class FerretsService implements FerretsApi {
     return ok((await this.get(ferret)) as FerretSummary);
   }
 
-  /**
-   * What a ferret may control (today's `AccountModelAgentControlPolicy`, over `limits.yaml`): read fresh for every
-   * call, so a change applies to its very next action with no restart and no cache. An unknown ferret controls nothing.
-   */
+  /** What a ferret may control: `limits.yaml` read fresh (the body is in `insights.ts`). */
   async agentControl(ferret: FerretId): Promise<AgentControl> {
-    await this.ports.ready?.();
-    if (this.registry.get(ferret) === undefined) return NO_AGENT_CONTROL;
-    return effectiveAgentControl(this.ports.limits?.());
+    return await agentControl(this.core, ferret);
   }
 
-  /**
-   * What a ferret spent, read through the harness its record names. `undefined` (PARTIAL, never zero) for a ferret this
-   * daemon does not know, a harness that is off, and a reader that throws: its error text can carry a path or a line of
-   * the transcript, so none is passed on.
-   */
+  /** What a ferret spent, through its harness; PARTIAL (`undefined`), never zero (`insights.ts`). */
   async turnUsage(ferret: FerretId, since?: Instant): Promise<readonly TurnUsage[] | undefined> {
-    await this.ports.ready?.();
-    const record = this.registry.get(ferret);
-    if (record === undefined) return undefined;
-    try {
-      return await this.ports.harness(record.harness)?.usage.turns(ferret, since);
-    } catch {
-      return undefined;
-    }
+    return await turnUsage(this.core, ferret, since);
   }
 
-  /**
-   * `limits.yaml` as it is in effect now: the kernel's config file, read fresh on every call, so a launch reads the file
-   * as it stands (a broken file reads its last good version). No limits port bound: the empty file, so the defaults.
-   */
+  /** `limits.yaml` as it is in effect now (`insights.ts`). */
   async effectiveLimits(): Promise<LimitsFile> {
-    return this.ports.limits?.() ?? {};
+    return await effectiveLimits(this.core);
   }
 
-  /** Revokes a ferret's token (owner only at the route); it can no longer call the daemon until it restarts. */
+  /** Revokes a ferret's token (owner only at the route; `insights.ts`). */
   async revokeToken(ferret: FerretId): Promise<boolean> {
-    return await this.serial.run(ferret, async () => {
-      await this.ports.ready?.();
-      this.requireTokens();
-      const revoked = this.tokens.holds(ferret);
-      this.tokens.cutOff(ferret, this.ports.now());
-      await this.ports.saveTokens(this.tokens.snapshot());
-      // The session document's mark follows, in the same queue: the lifecycle's rotation reads it, and no launch of
-      // either kind may hand the ferret a credential again. A failure here is the owner's to see; the directory's
-      // cut-off above already holds, and a launch reads both.
-      await this.ports.cutOffMark?.cutOff(ferret);
-      return revoked;
-    });
+    return await revokeToken(this.core, ferret);
   }
 
   /**
@@ -1763,177 +1783,47 @@ export class FerretsService implements FerretsApi {
 
   /** The harness seam: the pane side of message delivery, built in `harness-facade.ts` from what Ferrets holds here. */
   async harness(ferret: FerretId, caller?: FerretId): Promise<FerretHarness | undefined> {
-    const deps = {
-      registry: this.registry,
-      ports: this.ports,
-      requireMayTouch: (c: FerretId | undefined, t: FerretId) => this.requireMayTouch(c, t),
-    };
-    return await openHarness(deps, ferret, caller);
+    return await openHarness(this.core, ferret, caller);
   }
 
-  /**
-   * A ferret's turn documents, bound to that ferret (`FerretsApi.turns`). The same `mayTouch` rule as `harness`: a
-   * ferret reads only its own and its helpers', so no agent reads another's turns. Unbound session files: none.
-   */
+  /** A ferret's turn documents, bound to it (`turns.ts`). */
   async turns(ferret: FerretId, caller?: FerretId): Promise<FerretTurns | undefined> {
-    await this.ports.ready?.();
-    if (this.registry.get(ferret) === undefined) return undefined;
-    this.requireMayTouch(caller, ferret);
-    const session = this.ports.session;
-    const writeTurn = session?.writeTurn?.bind(session);
-    const queued = session?.queued?.bind(session);
-    const clearMarkers = session?.clearMarkers?.bind(session);
-    return {
-      list: async options => (await session?.turns?.(ferret, { strict: options?.strict === true })) ?? [],
-      // Unbound session files: no member, so a caller that needs one answers its own "cannot write" (never an inline paste).
-      ...(writeTurn === undefined
-        ? {}
-        : {
-            write: async (request: { readonly document: string; readonly by?: FerretTurnAuthor }) =>
-              await writeTurn(ferret, request.document, request.by),
-          }),
-      ...(queued === undefined
-        ? {}
-        : {
-            writeQueued: async (sendId: string, payload: string) => {
-              if (queuedPayloadFile(sendId) === undefined)
-                throw new Error('a send id outside the queued-message grammar names no file');
-              return await queued(ferret, payload, sendId);
-            },
-          }),
-      ...(clearMarkers === undefined ? {} : { clearMarkers: async () => await clearMarkers(ferret) }),
-    };
+    return await turns(this.core, ferret, caller);
   }
 
-  /**
-   * What the ferret's pane is asking right now (`FerretsApi.prompt`), masked. The same `mayTouch` rule as `harness`.
-   * `undefined` for a ferret this daemon does not know; `{}` when nothing is recorded or it could not be read.
-   */
+  /** What the ferret's pane is asking right now (`turns.ts`). */
   async prompt(ferret: FerretId, caller?: FerretId): Promise<FerretPrompt | undefined> {
-    await this.ports.ready?.();
-    if (this.registry.get(ferret) === undefined) return undefined;
-    this.requireMayTouch(caller, ferret);
-    return (await this.ports.promptState?.(ferret).catch(() => undefined)) ?? {};
+    return await prompt(this.core, ferret, caller);
   }
 
-  /**
-   * A ferret's OWN compaction trigger (`FerretsApi.compactAt`): its session config's, else the one its start asked.
-   * `undefined` for a ferret this daemon does not know or one that follows its login. The same `mayTouch` rule as `harness`.
-   */
+  /** A ferret's OWN compaction trigger (`compact-at.ts`). */
   async compactAt(ferret: FerretId, caller?: FerretId): Promise<CompactAt | undefined> {
-    await this.ports.ready?.();
-    if (this.registry.get(ferret) === undefined) return undefined;
-    this.requireMayTouch(caller, ferret);
-    return (
-      (await this.ports.session?.compactAt?.(ferret).catch(() => undefined)) ??
-      this.registry.detailsOf(ferret)?.options?.compactAt
-    );
+    return await compactAt(this.core, ferret, caller);
   }
 
-  /**
-   * Records a ferret's own compaction trigger (`FerretsApi.setCompactAt`). Fails closed: a value the schema cannot parse
-   * (below the floor, not `auto`, not an integer) is refused before anything is written, an unknown ferret is 404, a
-   * caller that may not touch it is 403, and a Ferrets with no session files cannot record one (503). A clear (`undefined`)
-   * also drops the start's own value, so the login's default applies again.
-   */
+  /** Records a ferret's own compaction trigger (`compact-at.ts`). */
   async setCompactAt(ferret: FerretId, value: unknown, caller?: FerretId): Promise<void> {
-    await this.ports.ready?.();
-    if (this.registry.get(ferret) === undefined) throw new ApiError(404, `no ferret ${ferret}`, 'not-found');
-    this.requireMayTouch(caller, ferret);
-    const parsed = value === undefined ? undefined : CompactAtSchema.safeParse(value);
-    if (parsed !== undefined && !parsed.success)
-      throw new ApiError(400, parsed.error.issues[0]?.message ?? 'not a compact-at value', 'invalid_compact_at');
-    const write = this.ports.session?.setCompactAt?.bind(this.ports.session);
-    if (write === undefined)
-      throw new ApiError(503, "this ferret's session files are unavailable", 'plugin_unavailable');
-    await write(ferret, parsed?.data);
-    // A clear is the person's deliberate "follow the login again": the start's own value (`options.compactAt`) is what
-    // `compactAt` and every launch fall back to when the session config says none, so it goes too, or the start value
-    // would come back after a clear. Every other option and detail keeps its value.
-    if (parsed === undefined) {
-      const before = this.registry.detailsOf(ferret);
-      if (before?.options?.compactAt !== undefined) {
-        const { compactAt: _start, ...options } = before.options;
-        await this.saveDetails(ferret, { ...before, options });
-      }
-    }
+    await setCompactAt(this.core, ferret, value, caller);
   }
 
-  /** Every ferret and the runtime it launched as (`FerretsApi.runtimeRecords`): the record, with the session config's words. */
+  /** Every ferret and the runtime it launched as (`runtime-records.ts`). */
   async runtimeRecords(): Promise<readonly FerretRuntimeRecord[]> {
-    await this.ports.ready?.();
-    const read = this.ports.session?.runtimeFacts?.bind(this.ports.session);
-    const rows = await Promise.all(
-      this.registry.list().map(async (ferret): Promise<FerretRuntimeRecord | undefined> => {
-        const facts = await read?.(ferret.id).catch(() => undefined);
-        const agent = facts?.agent ?? ferret.runtime;
-        if (agent === undefined) return undefined;
-        return {
-          id: ferret.id,
-          name: ferret.name,
-          harness: ferret.harness === 'codex' ? 'codex' : 'claude',
-          agent,
-          ...(facts?.executable === undefined ? {} : { executable: facts.executable }),
-          state: ferret.state,
-        };
-      }),
-    );
-    return rows.filter(row => row !== undefined);
+    return await runtimeRecords(this.core);
   }
 
-  /**
-   * Re-points every ferret on a renamed runtime (`FerretsApi.repointRuntime`). Each ferret is rewritten on its own mutation
-   * lane, so a start, stop or resume of it is never interleaved: the record's `runtime` through the ordinary durable write,
-   * the session config's `agent` and `command[0]` through the session storage's locked read-modify-write. A ferret that
-   * does not name the old runtime is not written at all, and one that cannot be rewritten is skipped, never reported moved.
-   */
+  /** Re-points every ferret on a renamed runtime (`runtime-records.ts`). */
   async repointRuntime(rename: FerretRuntimeRename): Promise<number> {
-    await this.ports.ready?.();
-    let moved = 0;
-    for (const { id } of this.registry.list()) {
-      try {
-        const done = await this.serial.run(id, async () => {
-          const configMoved = (await this.ports.session?.repointRuntime?.(id, rename)) ?? false;
-          const record = this.registry.get(id);
-          if (record?.runtime !== rename.from) return configMoved;
-          await this.write({ ...record, runtime: rename.to }, record.state, 'moved');
-          return true;
-        });
-        if (done) moved += 1;
-      } catch {
-        // One ferret that cannot be rewritten still resolves through the runtime's former names; the rest still move.
-      }
-    }
-    return moved;
+    return await repointRuntime(this.core, rename);
   }
 
-  /**
-   * The ferret's stored last screen (`FerretsApi.lastSnapshot`), masked again on this read. The same `mayTouch` rule as
-   * `harness`, checked BEFORE the file is touched. `undefined` for a ferret this daemon does not know, with no stored
-   * screen, or when it cannot be read or masked (fail closed: never the raw text).
-   */
+  /** The ferret's stored last screen, masked again on this read (`turns.ts`). */
   async lastSnapshot(ferret: FerretId, caller?: FerretId): Promise<string | undefined> {
-    await this.ports.ready?.();
-    if (this.registry.get(ferret) === undefined) return undefined;
-    this.requireMayTouch(caller, ferret);
-    return await this.ports.storedLastSnapshot?.(ferret).catch(() => undefined);
+    return await lastSnapshot(this.core, ferret, caller);
   }
 
-  /**
-   * The turn watch recorded a turn change (U4): a `working` turn makes the ferret `working`, a `your-turn` or a
-   * `needs-input` makes it `idle`, and `ferret.changed {change: 'state'}` follows the durable write (what
-   * Conversation's `turn.ended` reads). Only a ferret that is already `working` or `idle` moves: a start's
-   * `starting` is the start's to settle, and a stop has the last word. On the ferret's own lane, so it never races a
-   * start, stop or resume; its handle stays as it was.
-   */
+  /** The turn watch recorded a turn change (`turns.ts`). */
   async turnObserved(ferret: FerretId, turn: 'working' | 'your-turn' | 'needs-input'): Promise<void> {
-    await this.serial.run(ferret, async () => {
-      const record = this.registry.get(ferret);
-      if (record === undefined || (record.state !== 'working' && record.state !== 'idle')) return;
-      const state: FerretState = turn === 'working' ? 'working' : 'idle';
-      if (record.state === state) return;
-      await this.write({ ...record, state, stateAt: this.ports.now() }, record.state, 'state');
-    });
+    await turnObserved(this.core, ferret, turn);
   }
 
   async move(
@@ -1980,6 +1870,12 @@ export class FerretsService implements FerretsApi {
     const marked: FerretSummary = { ...summary, pinnedAt: pinnedAt as Instant };
     this.marked.set(summary, { pinnedAt, summary: marked });
     return marked;
+  }
+
+  /** The label the spawn stamp forced is the record's too (`withStampedLabel`); a ferret that already says it is left alone. */
+  private async carryLabel(ferret: FerretId, label: string | undefined | void): Promise<void> {
+    const details = withStampedLabel(this.registry.detailsOf(ferret), label ?? undefined);
+    if (details !== undefined) await this.saveDetails(ferret, details);
   }
 
   private async saveDetails(ferret: FerretId, details: FerretDetails): Promise<void> {
@@ -2359,15 +2255,21 @@ export class FerretsService implements FerretsApi {
         requestedByHuman: record.parent === undefined,
         ...(notInWardenTree === true ? { notInWardenTree: true as const } : {}),
       };
+      let forced: string | undefined | void;
       try {
-        await session.stamp(request);
+        forced = await session.stamp(request);
       } catch {
         return failed('failed', 'where this ferret came from could not be recorded, so it was not started');
       }
+      // The document is the label's authority; a record that cannot take it now takes it at the next resume.
+      await this.carryLabel(record.id, forced).catch(() => undefined);
       return ok(first);
     } else {
       // A resume that cannot bring the stamp forward leaves the one on disk exactly as it was (it only ever strengthens).
-      await session.carry(record.id).catch(() => undefined);
+      await session
+        .carry(record.id)
+        .then(async label => await this.carryLabel(record.id, label))
+        .catch(() => undefined);
       // The new turn is durable and the old turn's markers are gone BEFORE the relaunch (today's revive): a `done` left
       // by the previous turn would end the new one the moment it started.
       if (revive !== undefined && session.revive !== undefined)

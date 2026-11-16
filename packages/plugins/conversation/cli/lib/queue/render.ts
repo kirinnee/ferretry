@@ -20,6 +20,7 @@ const WAITING: Readonly<Record<QueueWaitReason, string>> = {
   draft: 'its box holds a draft',
   unreadable: "its screen can't be read",
   stopped: 'the ferret is not running',
+  compacting: 'the ferret is compacting its context',
 };
 
 /** The longest stretch of a message shown on its line. */

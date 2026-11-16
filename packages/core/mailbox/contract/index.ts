@@ -11,6 +11,7 @@ export * from './port.ts';
 export * from './protocol-names.ts';
 export * from './lib/queue/answer.ts';
 export * from './lib/queue/delivery.ts';
+export * from './lib/queue/lane.ts';
 export * from './lib/queue/model.ts';
 export * from './lib/queue/page.ts';
 export * from './lib/queue/policy.ts';

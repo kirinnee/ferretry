@@ -119,6 +119,7 @@ const WAIT_REASON_NOTES: Readonly<Record<QueueWaitReason, string>> = {
   draft: 'its input box holds unsent text',
   unreadable: 'its screen cannot be read',
   stopped: 'it is not running',
+  compacting: 'the agent is compacting its context',
 };
 
 /**

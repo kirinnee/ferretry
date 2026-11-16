@@ -16,10 +16,12 @@ import type {
   HarnessInstall,
   HarnessLaunchSettings,
   HarnessMissing,
+  HarnessRuntimeSwitch,
   HomePlan,
   LaunchSpec,
   Runner,
   RunnerHandle,
+  RuntimeSwitchPane,
   RunSpec,
   Started,
   StartRefusal,
@@ -78,6 +80,8 @@ export interface CodexHarnessOptions {
   readonly locate: () => Promise<HarnessLocation>;
   readonly probe: HarnessProbe;
   readonly update: HarnessUpdateSubsystem & { settled(): Promise<void> };
+  /** Changing a running ferret's model, effort or fast mode (`Harness.runtimeSwitch`); absent: it cannot be switched live. */
+  readonly runtimeSwitch?: (pane: RuntimeSwitchPane) => HarnessRuntimeSwitch;
 }
 
 /** A ferret id is one plain name before it names a folder (the S45 grammar Claude Code's home uses too). */
@@ -517,6 +521,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
       return sources;
     },
 
+    ...(options.runtimeSwitch === undefined ? {} : { runtimeSwitch: options.runtimeSwitch }),
     transcript: rollouts.transcript,
     transcriptStamp: rollouts.stamp,
     transcriptTail: rollouts.tail,

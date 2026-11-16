@@ -4,6 +4,8 @@ import {
   type DeliveryOutcome,
   FORM_KEYS,
   type FormKey,
+  PICKER_KEYS,
+  type PickerKey,
   HARNESS_STOP_KEYS,
   type RunnerFormCapture,
   type QueueOutcome,
@@ -580,6 +582,18 @@ export class TmuxRunner implements Runner {
   async formKey(handle: RunnerHandle, key: FormKey): Promise<void> {
     if (!(FORM_KEYS as readonly string[]).includes(key))
       throw new TypeError('that key is not one a form is driven with');
+    const pane = await this.guardedPane(handle);
+    try {
+      await new TmuxController(pane.port).sendKey(pane.session, key);
+    } catch (error) {
+      throw typedNotLost(error, { ...pane.written(), typings: 0 });
+    }
+  }
+
+  /** Live model switch: ONE row digit of the closed {@link PICKER_KEYS}, guarded exactly as {@link TmuxRunner.formKey}. */
+  async pickerKey(handle: RunnerHandle, key: PickerKey): Promise<void> {
+    if (!(PICKER_KEYS as readonly string[]).includes(key))
+      throw new TypeError('that key is not one a model picker is driven with');
     const pane = await this.guardedPane(handle);
     try {
       await new TmuxController(pane.port).sendKey(pane.session, key);

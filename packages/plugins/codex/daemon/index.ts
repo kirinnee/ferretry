@@ -1,5 +1,7 @@
+import type { RuntimeModelChoice } from '@ferretry/core-ferrets/contract';
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import { milliseconds } from '@ferretry/std';
 import { selectedComponents } from '@ferretry/plugin-runtimes/contract';
 import manifest from '../manifest.ts';
 import {
@@ -24,9 +26,9 @@ import { packageRunner } from './adapters/package-run.ts';
 import { HostCodexProbe } from './adapters/probe.ts';
 import { CodexAppServerCatalog } from './adapters/app-server-catalog.ts';
 import { HeldFastCatalog } from './adapters/held-catalog.ts';
-import { codexUpdateRoutes, HarnessUpdateService, locateCodex } from './lib/index.ts';
+import { codexRuntimeSwitch, codexUpdateRoutes, HarnessUpdateService, locateCodex } from './lib/index.ts';
 import { codexDoctor } from './lib/doctor.ts';
-import { fastStartDecision } from './lib/fast-mode.ts';
+import { CATALOG_LOADING, CODEX_NOT_FOUND, fastStartDecision } from './lib/fast-mode.ts';
 import { codexHooksSource, codexSettingsSource } from './lib/profile-components.ts';
 import { codexProjectApprovals } from './lib/project-approvals.ts';
 
@@ -174,6 +176,24 @@ export default implementDaemon(manifest, {
         },
         'harnesses:codex': codexHarness({
           kernel,
+          // Changing a running ferret's model, effort or fast mode. The models are the held catalog's (the same list a fast
+          // start is judged against), read without spawning anything; a catalog not yet held is a stated failure, never an
+          // empty list. GAP(codex): that catalog is read without the ferret's login, so it is the list Codex advertises to
+          // nobody in particular, not this account's own.
+          runtimeSwitch: codexRuntimeSwitch({
+            choices: {
+              get: async () => {
+                await catalog.loaded();
+                catalog.refreshIfStale();
+                const held = catalog.held();
+                if (held === undefined) throw new Error(catalog.binaryMissing() ? CODEX_NOT_FOUND : CATALOG_LOADING);
+                // Never changed by anyone after it is read, so the contract's mutable arrays are safe to hand it.
+                return held as readonly RuntimeModelChoice[];
+              },
+            },
+            sleeper: { sleep: async delay => await kernel.clock.sleep(milliseconds(delay)) },
+            binaryName: 'fy',
+          }),
           selected: async runtime => await selectedComponents(ctx.uses.runtimes.current(), runtime),
           locate,
           probe,

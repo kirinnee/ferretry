@@ -1121,6 +1121,18 @@ describe('a composer that already holds unsent text', () => {
     should((refused as Error).message).containEql(`"${'x'.repeat(40)}…"`);
   });
 
+  it("types nothing into a compacting pane: the send waits for it, it does not ride the busy turn's queue", async () => {
+    const compacting = pane({ activeWork: true, compacting: true });
+    const { service, ledger, terminal } = parts(target(), [compacting, compacting]);
+
+    const refused = await service.send(request()).catch((error: unknown) => error);
+
+    should(refused).be.instanceof(SendNotReady);
+    should((refused as SendNotReady).reason).equal('compacting');
+    should(terminal.typed).be.empty();
+    should(ledger.records.size).equal(0);
+  });
+
   it('withdraws a fresh send the terminal refused before typing, on both transports', async () => {
     const idle = parts(target(), [pane({ promptReady: true })]);
     idle.terminal.occupied = 'hi';

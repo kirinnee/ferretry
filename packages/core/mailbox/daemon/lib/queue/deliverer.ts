@@ -11,7 +11,7 @@ import {
   reasonForWaiting,
 } from '../../../contract/index.ts';
 import type { QueueEvent } from '../../../contract/index.ts';
-import { deliveryOrder, planDelivery } from '../../../contract/index.ts';
+import { deliveryOrder, planDelivery, promotedToUrgent } from '../../../contract/index.ts';
 import type { SessionQueueStore } from '../../../contract/index.ts';
 import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from '../../../contract/index.ts';
 
@@ -93,6 +93,14 @@ export interface QueueDeliveryPorts {
 export interface QueueDeliverySettings extends QueueCoalesceSettings {
   /** How soon a session with a message waiting or unproven is looked at again. */
   readonly lookMs: number;
+  /**
+   * How soon a session with a message GATED on its screen (a draft, a dialog, a question, a launch, a compaction) is
+   * looked at again: a person clearing a draft writes nothing the daemon hears, so the look is what notices. One screen
+   * read per gated agent per interval, and only for agents with a gated message (R6).
+   */
+  readonly gatedLookMs: number;
+  /** After this long gated on the SAME reasons the look backs off to `lookMs`: a long wait is not worth a read a second. */
+  readonly gatedBackoffAfterMs: number;
   /** How long a delivered message is watched for its read tick before the session stops being looked at. */
   readonly readWatchMs: number;
   /** Messages handed over in one look, so a long queue cannot hold the lock for ever. */
@@ -109,11 +117,16 @@ export interface QueueDeliverySettings extends QueueCoalesceSettings {
 export const defaultQueueDeliverySettings: QueueDeliverySettings = {
   ...defaultQueueCoalesceSettings,
   lookMs: 5_000,
+  gatedLookMs: 1_000,
+  gatedBackoffAfterMs: 120_000,
   readWatchMs: 60 * 60_000,
   perLook: 8,
   drainMs: 15_000,
   recheckMs: 60_000,
 };
+
+/** Waits a look cannot clear sooner: the screen is unreadable (its own backoff) or the session is stopped (a state change frees it). */
+const SLOW_GATES: ReadonlySet<QueueWaitReason> = new Set(['unreadable', 'stopped']);
 
 export class QueueDeliverer {
   /** Sessions with something open, the only ones a state change makes this look at. */
@@ -138,6 +151,8 @@ export class QueueDeliverer {
    * tried again as soon as before; from the second in a row each wait is `lookMs`, doubling, up to `recheckMs`.
    */
   private readonly unreadable = new Map<SessionId, { readonly at: number; readonly refusals: number }>();
+  /** Sessions with a message gated on its screen: the reasons it has waited on, and since when (the 1 s look's clock). */
+  private readonly gated = new Map<SessionId, { readonly reasons: string; readonly since: number }>();
   private stopped = false;
 
   constructor(
@@ -201,13 +216,41 @@ export class QueueDeliverer {
     const now = Date.parse(this.ports.clock.now());
     const polls = more || remaining.some(message => this.unsettled(message));
     const holdEndsIn = this.earliestHold(remaining, now);
+    const lookMs = this.lookEvery(id, remaining, now);
     if (polls || holdEndsIn !== undefined) {
       this.open.add(id);
-      const delay = polls
-        ? Math.min(this.settings.lookMs, holdEndsIn ?? Infinity)
-        : (holdEndsIn ?? this.settings.lookMs);
+      const delay = polls ? Math.min(lookMs, holdEndsIn ?? Infinity) : (holdEndsIn ?? lookMs);
       this.ports.scheduler.schedule(id, delay, () => void this.look(id).catch(() => undefined));
     } else this.open.delete(id);
+  }
+
+  /**
+   * How soon to look again: `gatedLookMs` while a message is gated on the screen, `lookMs` otherwise and once the
+   * same gate has held for `gatedBackoffAfterMs`. `unreadable` and `stopped` are not screen gates a look can clear
+   * (the first has its own backoff, the second waits for a state change), so they never earn the fast look.
+   */
+  private lookEvery(id: SessionId, messages: readonly QueuedMessage[], now: number): number {
+    const reasons = [
+      ...new Set(
+        messages.flatMap(message =>
+          message.state === 'queued' && message.waitReason !== undefined && !SLOW_GATES.has(message.waitReason)
+            ? [message.waitReason]
+            : [],
+        ),
+      ),
+    ]
+      .toSorted()
+      .join(',');
+    if (reasons === '') {
+      this.gated.delete(id);
+      return this.settings.lookMs;
+    }
+    const last = this.gated.get(id);
+    const since = last?.reasons === reasons ? last.since : now;
+    if (last?.reasons !== reasons) this.gated.set(id, { reasons, since });
+    return now - since >= this.settings.gatedBackoffAfterMs
+      ? this.settings.lookMs
+      : Math.min(this.settings.gatedLookMs, this.settings.lookMs);
   }
 
   /** Milliseconds until the soonest hold on a still-waiting ferret message ends; `undefined` when none is held. */
@@ -273,6 +316,15 @@ export class QueueDeliverer {
       await this.waiting(id, messages, 'unreadable');
       return false;
     }
+    // An action or fyi that answers what its receiver waits on goes as urgent: said once on the row, so the person
+    // sees why it jumped ahead, and kept on it (its lane never changes).
+    for (const message of messages)
+      if (
+        message.state === 'queued' &&
+        message.promoted === undefined &&
+        promotedToUrgent(message, view.target, this.settings)
+      )
+        await this.append(id, { v: 1, kind: 'promoted', at: this.ports.clock.now(), id: message.id, to: 'urgent' });
     const plan = planDelivery(messages, view, this.ports.clock.now(), this.settings);
     if (plan === undefined) return false;
     if (plan.kind === 'hold') {
@@ -326,7 +378,8 @@ export class QueueDeliverer {
         failure: error instanceof Error ? error.message : String(error),
       }),
     );
-    if (outcome.kind === 'refused' && outcome.untilPrompt === true)
+    // A compaction ends by itself and says so on the screen: the next look (1 s) sees it, so it earns no promptless backoff.
+    if (outcome.kind === 'refused' && outcome.untilPrompt === true && outcome.reason !== 'compacting')
       this.promptless.set(id, {
         at: Date.parse(this.ports.clock.now()),
         reason: outcome.reason,

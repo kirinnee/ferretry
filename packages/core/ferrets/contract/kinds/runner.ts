@@ -139,6 +139,15 @@ export type AttachRefusal = 'gone' | 'not-a-ferret' | 'mismatch' | 'unsupported'
  * The value of `runners:<key>`. `attach` adopts an existing live process or pane by its handle WITHOUT restarting it
  * (spine D15): the 5.0 switch hands v5 the handles of running ferrets from outside the product.
  */
+/** The pane behind a handle, as {@link Runner.identify} reads it. Values-free: ids and instants, no path, no text. */
+export interface RunnerPaneIdentity {
+  readonly handle: RunnerHandle;
+  /** The pane's root process; absent for a dead pane the runner keeps. */
+  readonly pid?: number;
+  /** That root's start (procfs starttime, or `ps` lstart): with the handle and pid it is the pane's identity. */
+  readonly processStart?: string;
+}
+
 export interface Runner {
   readonly key: RunnerKey;
   start(spec: RunSpec): Promise<Result<RunningFerret, StartRefusal>>;
@@ -190,6 +199,28 @@ export interface Runner {
    * harness only: it is never logged, stored or quoted in any answer. A handle with nothing behind it answers `''`.
    */
   lastScreen?(handle: RunnerHandle): Promise<string>;
+  /**
+   * Additive (c58-37, Restart CLI and Move): the pane behind `handle` RIGHT NOW, read-only (unlike {@link Runner.attach},
+   * which adopts and remembers). It is what a move addresses a pane by: the triple handle, pid and start, because pane ids
+   * restart with the runner's server and pids are reused, so a bare handle could name another pane later. `'gone'` ONLY when
+   * the pane is PROVED absent; `undefined` when the runner cannot tell, which a caller must treat as unknown, never as
+   * gone. It never writes, and it names no path, credential or screen text. Absent: the runner cannot say, and a move
+   * finds the pane unknown (it refuses unless the person forces it).
+   */
+  identify?(handle: RunnerHandle): Promise<RunnerPaneIdentity | 'gone' | undefined>;
+  /**
+   * Additive (c58-37, the Warden's "ask to stop background jobs"): ONE signal to ONE pid, delivered only if that pid, with
+   * this start, descends from this pane's root at the moment of the call. `false`: not delivered (not a descendant, the
+   * pid was reused, it is protected, or the pane is gone). Never init, the daemon or its parents. It is the narrowest
+   * kill there is: the runner proves descent, so core holds no capability to signal an arbitrary pid. Absent: nothing is
+   * signalled, and the job's own pane is left to the person.
+   */
+  signalDescendant?(
+    handle: RunnerHandle,
+    pid: number,
+    start: string | undefined,
+    signal: 'SIGTERM' | 'SIGKILL',
+  ): Promise<boolean>;
   /**
    * Additive (U4, today's `StorageTurnPorts.pane` over `PaneFrames`): ONE look at the live ferret pane behind `handle`,
    * read as turn evidence, for Ferrets' turn watch. The runner reads the pane inside `kernel.act(terminal %n, 'read')`
@@ -247,6 +278,12 @@ export interface Runner {
    * {@link RunnerDeliveryFailure} as `deliver` does. Absent: the form cannot be driven.
    */
   formKey?(handle: RunnerHandle, key: FormKey): Promise<void>;
+  /**
+   * Additive (live model switch): ONE row digit of {@link PICKER_KEYS} typed at the pane for a numbered model picker,
+   * guarded exactly as {@link Runner.formKey} is. A SEPARATE member, never a widening of {@link FORM_KEYS}. Absent: a
+   * numbered picker cannot be driven.
+   */
+  pickerKey?(handle: RunnerHandle, key: PickerKey): Promise<void>;
   /** Additive (structured questions): `text` pasted into the pane as one bracketed paste; guarded as {@link Runner.formKey}. */
   formPaste?(handle: RunnerHandle, text: string): Promise<void>;
   /**
@@ -331,10 +368,20 @@ export type RunnerComposerSubmitted = 'submitted' | 'holding' | 'absent';
 
 /**
  * The closed set of keys a structured-question form is driven with (today's v4 driver sends exactly these). A key
- * outside it cannot be named, so the form seam can never be used to type an arbitrary key: no `C-c`, no `y`.
+ * outside it cannot be named, so the form seam can never be used to type an arbitrary key: no `C-c`, no `y`, and NO
+ * DIGIT: a digit CONFIRMS a permission prompt's row the moment it is pressed, so no navigation-only caller can name one.
  */
 export const FORM_KEYS = ['Enter', 'Escape', 'Tab', 'Up', 'Down', 'Left', 'Right', 'Space'] as const;
 export type FormKey = (typeof FORM_KEYS)[number];
+
+/**
+ * The closed set of keys a numbered model picker is driven with: the digit of the row to choose. It is a set of its OWN,
+ * pressed through its own runner member ({@link Runner.pickerKey}), so a caller that drives a form or a permission prompt
+ * through {@link FORM_KEYS} can never name a digit. Its one caller reads the picker's rows off the pane and re-verifies the
+ * row immediately before each press.
+ */
+export const PICKER_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
+export type PickerKey = (typeof PICKER_KEYS)[number];
 
 /**
  * ONE capture of a ferret's pane for the structured-question driver (today's `PaneState`): the visible screen and the

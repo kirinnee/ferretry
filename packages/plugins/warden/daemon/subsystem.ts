@@ -436,6 +436,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
         conversation,
         new StuckInputList(new StateMachineMembers(kernel.state, INPUT_STUCK_REF), machineNotices, nowIso),
         { record: (type, data) => kernel.log.info(type, data) },
+        ferrets,
       ),
       stuckInbox: conversationStuckInbox(
         conversation,

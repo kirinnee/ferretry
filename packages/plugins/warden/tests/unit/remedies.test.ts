@@ -14,7 +14,7 @@ import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { err, ok, type Result } from '@ferretry/std';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
-import { createWardenRemedies, RESTART_STOP_REASON } from '../../daemon/remedies.ts';
+import { createWardenRemedies } from '../../daemon/remedies.ts';
 import { WARDEN_SWEEP_ORIGIN } from '../../daemon/lib/index.ts';
 
 /** Ferrets' fake with the additives it does not model: the options a resume carries, what it decided, and the move. */
@@ -26,14 +26,17 @@ class AdditiveFerrets extends FakeFerrets {
   /** Run just before the resume decides: a start or a stop that lands between the Warden's read and its resume. */
   beforeResume: ((ferret: FerretId) => void) | undefined;
 
-  /** Models Ferrets' `decided` answer as its service gives it: a stopped ferret relaunches, any other is left running. */
+  /**
+   * Models Ferrets' `decided` answer as its service gives it: a stopped ferret relaunches, a live one is left running
+   * unless the resume asks to replace its pane (`replaceLiveTerminal`), which relaunches it.
+   */
   override async resume(ferret: FerretId, message: string | undefined, options: ResumeOptions) {
     const { decided, ...recorded } = options;
     this.resumeOptions.push(recorded);
     this.beforeResume?.(ferret);
     const before = (await this.get(ferret))?.state;
     const resumed = await super.resume(ferret, message, options);
-    if (resumed.ok) decided?.(before === 'stopped' ? 'relaunching' : 'running');
+    if (resumed.ok) decided?.(before === 'stopped' || options.replaceLiveTerminal === true ? 'relaunching' : 'running');
     return resumed;
   }
 
@@ -106,7 +109,7 @@ describe('the Warden stops a ferret', () => {
 });
 
 describe('the Warden restarts a ferret (today’s authorizeResume under the automatic policy)', () => {
-  it('should stop it with the Warden reason, then resume it', async () => {
+  it('should be ONE resume that replaces the live pane, with no stop of its own', async () => {
     // Arrange
     const { ferrets, remedies, acted } = subject();
     ferrets.add({ id: ferretId('f1'), state: 'working' });
@@ -115,9 +118,42 @@ describe('the Warden restarts a ferret (today’s authorizeResume under the auto
     await remedies.restart('f1', undefined, AGENT_ORIGIN);
 
     // Assert
-    should(ferrets.stops).eql([{ ferret: 'f1', how: 'now', reason: RESTART_STOP_REASON }]);
+    should(ferrets.stops).eql([]);
     should(ferrets.resumes).eql([{ ferret: 'f1' }]);
+    should(ferrets.resumeOptions).eql([
+      { origin: AGENT_ORIGIN, automatic: true, actor: 'warden', replaceLiveTerminal: true },
+    ]);
     should(acted).eql(['f1 restart done']);
+  });
+
+  it('should carry the message as the relaunch’s own turn, never typed a second time', async () => {
+    // Arrange
+    const { ferrets, remedies, conversation } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'working' });
+    const sent: unknown[] = [];
+    (conversation as { send: ConversationApi['send'] }).send = async (...args) => {
+      sent.push(args);
+      return err({ code: 'unavailable', message: 'unused' } as never);
+    };
+
+    // Act
+    await remedies.restart('f1', 'you were stuck', AGENT_ORIGIN);
+
+    // Assert
+    should(ferrets.resumes).eql([{ ferret: 'f1', message: 'you were stuck' }]);
+    should(sent).eql([]);
+  });
+
+  it('should leave a plain resume without the flag', async () => {
+    // Arrange
+    const { ferrets, remedies } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+
+    // Act
+    await remedies.resume('f1', undefined, AGENT_ORIGIN);
+
+    // Assert
+    should(ferrets.resumeOptions).eql([{ origin: AGENT_ORIGIN, automatic: true, actor: 'warden' }]);
   });
 
   it('should refuse a live ferret holding an unanswered question of its own, and stop nothing', async () => {
@@ -312,6 +348,42 @@ describe('a resume Ferrets did not answer cleanly', () => {
     should((revived as { caveat?: string }).caveat).containEql('counts as a revive');
   });
 
+  it('should answer ok false, never a revive, when Ferrets answered 503 helper_admission_unavailable (Packs gave no answer: nothing was written or launched)', async () => {
+    // Arrange: the 503 is thrown from start.decide, before the relaunch is committed (no `decided` is told).
+    const { ferrets, resume, acted } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.resume = async () =>
+      await Promise.reject(
+        Object.assign(new Error('Packs did not answer for this helper, so it is not started'), {
+          name: 'ApiError',
+          status: 503,
+          code: 'helper_admission_unavailable',
+        }),
+      );
+
+    // Act
+    const refused = await resume('f1', 'carry on', AGENT_ORIGIN);
+
+    // Assert: not counted (no cooldown, no crash_repeat, no breaker); the sentence is Ferrets' own.
+    should(refused).eql({ ok: false, reason: 'Packs did not answer for this helper, so it is not started' });
+    should(acted).eql([]);
+  });
+
+  it('should still count a revive for any other 503, whose code does not say nothing started', async () => {
+    // Arrange
+    const { ferrets, resume } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.resume = async () =>
+      await Promise.reject(Object.assign(new Error('busy'), { status: 503, code: 'unavailable' }));
+
+    // Act
+    const revived = await resume('f1', 'carry on', AGENT_ORIGIN);
+
+    // Assert
+    should(revived.ok).be.true();
+    should((revived as { caveat?: string }).caveat).containEql('counts as a revive');
+  });
+
   it('should answer ok false when Ferrets itself refused the resume (nothing started)', async () => {
     // Arrange
     const { ferrets, resume } = subject();
@@ -404,7 +476,7 @@ describe('the Warden’s resumes are automatic and its own (ResumeOptions.automa
     // Assert
     should(ferrets.resumeOptions).eql([
       { origin: AGENT_ORIGIN, automatic: true, actor: 'warden' },
-      { origin: AGENT_ORIGIN, automatic: true, actor: 'warden' },
+      { origin: AGENT_ORIGIN, automatic: true, actor: 'warden', replaceLiveTerminal: true },
       { origin: AGENT_ORIGIN, automatic: true, actor: 'warden' },
     ]);
   });
