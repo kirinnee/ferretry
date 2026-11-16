@@ -1,5 +1,5 @@
 /**
- * WHAT A FERRET DOES AFTER ITS CONTEXT IS COMPACTED (c58-o13, owner words on !A527: "inject compaction rule to include
+ * WHAT A CLAUDE FERRET DOES AFTER ITS CONTEXT IS COMPACTED (c58-o13, owner words on !A527: "inject compaction rule to include
  * agenda, tasks features so that they KNOW to re-absorb all the current task and agenda").
  *
  * A compaction keeps a summary and drops the rest, so a ferret can lose its assigned task, its card, its open agenda
@@ -16,30 +16,19 @@
  * ferret-specific value is `FY_SESSION_ID`, which every launch hands the pane; nothing secret is read or printed.
  */
 
+import { COMPACTION_KEEP_LINES, COMPACTION_REABSORB_LINES } from '@ferretry/core-ferrets/contract';
+
 /** The matcher that fires a `SessionStart` hook only for the start a compaction makes. */
 export const CLAUDE_COMPACT_MATCHER = 'compact';
 
 /** `printf` argument for the session id: the launch's own, or a plain word when a pane has none. */
 const SESSION = '"${FY_SESSION_ID:-<your session id>}"';
 
-/** What the ferret reads again after a compaction. `%s` is its session id (the same argument, twice). */
-export const CLAUDE_REABSORB_LINES = [
-  'You were just compacted, so part of your earlier context is gone. This is session %s.',
-  'Before you continue, take back in everything you still owe:',
-  '1. Your assignment: read your first turn again with `fy logs %s --turn 1`; it names the turn file to read and follow.',
-  '2. Your board task, if you have one: `fy task show <task id>` (add --yaml for the editable form); if you do not know the id, `fy board status` says whether the board is on.',
-  '3. Your open agenda items: `fy agenda ls`, then `fy agenda show <id>` for each.',
-  '4. Messages you still owe a reply to: `fy transcript %s --tail`, then answer with `fy reply <id> <text>`.',
-  'Then carry on with your next step. Do not ask the owner for what your assignment or agenda already says.',
-] as const;
+/** What the ferret reads again after a compaction: the one text every harness hands its ferret. `%s` is its session id (the same argument, three times). */
+export const CLAUDE_REABSORB_LINES = COMPACTION_REABSORB_LINES;
 
 /** What the summary must keep, printed before the compaction. */
-export const CLAUDE_KEEP_LINES = [
-  'When you summarise this conversation, keep: your assignment and how far you are; your task id and its status',
-  '(now, done so far, next); your open agenda item ids; every message you still owe a reply to and who sent it;',
-  'and the branch and PR links you own. After the compaction you will be told to read the assignment, the task, the agenda and',
-  'the owed messages again, so the summary must name where each one is.',
-] as const;
+export const CLAUDE_KEEP_LINES = COMPACTION_KEEP_LINES;
 
 const print = (lines: readonly string[], args: string): string => `printf '${lines.join('\\n')}\\n' ${args}; exit 0`;
 

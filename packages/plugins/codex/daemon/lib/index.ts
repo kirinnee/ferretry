@@ -17,6 +17,7 @@ export * from './quirk-service.ts';
 export * from './quirks.ts';
 export * from './runtime-switch.ts';
 export * from './startup.ts';
+export * from './compact-prompt.ts';
 export * from './launch.ts';
 export * from './update/index.ts';
 export * from './routes.ts';
