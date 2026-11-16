@@ -2,7 +2,7 @@
  * Parity rows T-0039 … T-0042 (docs/design/rebuild-parity.tsv): today's four secure-copy agent tools. Each is declared by
  * the manifest AND answered by the daemon half, through the test host, as the ferret that calls it. What each one does
  * (the sealed value, the paste, the takeover, the sentinel's absence) is `daemon/secure-copy/composition.test.ts`.
- * `account_propose` (T-0002) and `task_plan` (T-0043) are the same, below; what each one does is `daemon/lib/proposal-tools.test.ts`.
+ * `account_propose` (T-0002) and `signin_plan` (T-0043, old name `task_plan`) are the same, below; what each one does is `daemon/lib/proposal-tools.test.ts`.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
@@ -67,11 +67,21 @@ describe("today's secure-copy agent tools", () => {
     await proves('account_propose', true);
   });
 
-  test('T-0043 task_plan (task.plan) is declared and answered by the daemon half', async () => {
-    await proves('task_plan', true);
+  test('T-0043 signin_plan (task.plan) is declared and answered by the daemon half', async () => {
+    await proves('signin_plan', true);
   });
 
-  test.each(['account_propose', 'task_plan'])(
+  test('T-0043 task_plan, the old name of signin_plan, is declared and answers identically', async () => {
+    host = await built();
+
+    const named = await host.tool('signin_plan', {}, { as: ferret('F1') });
+    const old = await host.tool('task_plan', {}, { as: ferret('F1') });
+
+    expect(manifest.actions.agentTools.filter(tool => tool.name === 'task_plan')).toHaveLength(1);
+    expect(old).toEqual(named);
+  });
+
+  test.each(['account_propose', 'signin_plan', 'task_plan'])(
     '%s asks for a ferret only: a person’s call is refused in a sentence',
     async name => {
       // Arrange

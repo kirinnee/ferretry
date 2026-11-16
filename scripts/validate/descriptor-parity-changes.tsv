@@ -307,6 +307,7 @@ route	GET /v1/sessions/:sessionId/tasks	removed	legacy task listing deleted with
 route	POST /v1/imports/conversations/adopt	removed	imports are links (design §1.4): adopting a conversation is keeping it, POST /v1/links/conversations/keep; descriptor fields unchanged
 tool	task_progress	added	new in 5.0: writes one task's progress (design §3.3)
 tool	card_progress	added	new in 5.0 as the first name of task_progress; kept as its old name on the same handler (O18)
+tool	signin_plan	added	the new name of task_plan (O18, owner !A539): task_plan stays as the old name on the same handler
 route	GET /v1/learning/config	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
 route	GET /v1/lessons/config	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
 route	PATCH /v1/learning/config	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged

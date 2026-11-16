@@ -112,7 +112,7 @@ const ACCOUNT_DEFAULTS_FILE = 'accounts.yaml';
 /**
  * What a ferret is told when it tries to set a place's default account: only the owner does, and how a ferret asks.
  */
-const ACCOUNT_DEFAULT_OWNER_ONLY = `${ownerOnlyWords('chooses the default account for a place')}: say which account and why on an agenda card, or, where "Ferretry settings" is on, write the line with config_write to ${ACCOUNT_DEFAULTS_FILE}, where it waits for them`;
+const ACCOUNT_DEFAULT_OWNER_ONLY = `${ownerOnlyWords('chooses the default account for a place')}: say which account and why on an agenda item, or, where "Ferretry settings" is on, write the line with config_write to ${ACCOUNT_DEFAULTS_FILE}, where it waits for them`;
 
 /** A domain failure's HTTP answer. A damaged store is a 500: the caller did nothing wrong. */
 const STORE_STATUS: Readonly<Record<SecretStoreError['failure'], number>> = {
@@ -161,7 +161,7 @@ function ownerOnly(call: Call, act: string): void {
   if (!isFerretCall(call)) return;
   throw new ApiError(
     403,
-    `a ferret cannot ${act}; the owner does. To get a value into the store, ask the owner with an input request (they see a card and type it), or paste a sealed copy into the store (secure copy). Both show the owner a card.`,
+    `a ferret cannot ${act}; the owner does. To get a value into the store, ask the owner with an input request (they see an input and type it), or paste a sealed copy into the store (secure copy). Both show the owner an input.`,
     'forbidden',
   );
 }

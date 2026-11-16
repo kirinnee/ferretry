@@ -408,7 +408,7 @@ function DefaultsTab({ signIn, account, accounts, defaults, ops, busy, error }: 
                 <p className="m-0 break-words text-ui font-medium text-fg">{key}</p>
                 <p className="m-0 break-words text-meta text-muted" data-accounts-default-current="">
                   {current === undefined
-                    ? 'No default: the card lists accounts in its own order.'
+                    ? 'No default: the sign-in item lists accounts in its own order.'
                     : mine
                       ? `${account.label} is listed first.`
                       : `${label(current)} is listed first.`}
