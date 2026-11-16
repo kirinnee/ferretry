@@ -231,7 +231,8 @@ export class Dispatcher {
     return this.routes.routes;
   }
 
-  async dispatch(request: ApiRequest): Promise<ApiResponse> {
+  async dispatch(incoming: ApiRequest): Promise<ApiResponse> {
+    const request = this.stamped(incoming);
     if (request.principal?.kind === 'member') return await this.dispatchMember(request);
     const found = this.routes.lookup(request.method, request.path);
     if (found.kind !== 'matched') {
@@ -322,7 +323,13 @@ export class Dispatcher {
     }
   }
 
-  private async dispatchMember(request: ApiRequest): Promise<ApiResponse> {
+  /** The call with the serving build named on it; a caller cannot supply one. */
+  private stamped(request: ApiRequest): ApiRequest {
+    return { ...request, build: this.bindings.version };
+  }
+
+  private async dispatchMember(incoming: ApiRequest): Promise<ApiResponse> {
+    const request = this.stamped(incoming);
     const found = this.members.lookup(request.method, request.path);
     const admission = this.bindings.admission();
     if (found.kind !== 'matched' || admission === undefined)

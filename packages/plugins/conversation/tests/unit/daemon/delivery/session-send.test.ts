@@ -408,10 +408,11 @@ describe('the ledger and the queue are conditional reads', () => {
     path: string,
     headers: Record<string, string> = {},
     query: Record<string, string> = {},
+    build?: string,
   ) => {
     const route = routes.find(each => each.method === 'GET' && each.path === path);
     if (route === undefined) throw new Error(`no route ${path}`);
-    return await route.handle(callOf({ params: ID, headers, query }));
+    return await route.handle(callOf({ params: ID, headers, query, ...(build === undefined ? {} : { build }) }));
   };
 
   for (const [name, path] of [
@@ -444,6 +445,16 @@ describe('the ledger and the queue are conditional reads', () => {
 
         expect(changed.status).toBe(200);
         expect(changed.headers.get('etag')).not.toBe(tag);
+      });
+
+      it('names the daemon build: the same log under another build is a 200 with the body, under the same build a 304', async () => {
+        const { routes } = stamped();
+        const held = (await get(routes, path, {}, {}, '5.0.0')).headers.get('etag') as string;
+        expect((await get(routes, path, { 'if-none-match': held }, {}, '5.0.0')).status).toBe(304);
+        const upgraded = await get(routes, path, { 'if-none-match': held }, {}, '5.0.1');
+        expect(upgraded.status).toBe(200);
+        expect(upgraded.body).not.toBe('');
+        expect(upgraded.headers.get('etag')).not.toBe(held);
       });
 
       it('gives another page of the same log its own tag, so a page never answers for another', async () => {

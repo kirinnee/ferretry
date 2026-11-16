@@ -11,6 +11,8 @@ export interface CallSpec {
   /** A body sent as written, for a body that is not JSON. */
   readonly rawBody?: string;
   readonly actor?: string;
+  /** The daemon build the dispatcher would stamp on the request. */
+  readonly build?: string;
   /** Gate's whole standing (actor, credential, …), built with Gate's own testing helpers; wins over `actor`. */
   readonly standing?: CallStanding;
 }
@@ -26,6 +28,7 @@ export const callOf = (spec: CallSpec = {}): RouteContext => {
     ),
     headers: new Map(Object.entries(spec.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value])),
     text: async () => text,
+    ...(spec.build === undefined ? {} : { build: spec.build }),
   } as unknown as ApiRequest;
   return {
     request,

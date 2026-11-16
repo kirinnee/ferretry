@@ -448,4 +448,16 @@ describe('the dispatcher tells Gate about audited calls (Admission.recorded)', (
     );
     expect(response.status).toBe(200);
   });
+
+  test('stamps its build on the request a handler sees, and a caller cannot name one', async () => {
+    let seen: string | undefined;
+    const spy = mounted('/v1/board', {
+      handle: async call => {
+        seen = call.request.build;
+        return jsonResponse({});
+      },
+    });
+    await dispatcher([spy]).dispatch({ ...request('GET', '/v1/board'), build: 'forged' });
+    expect(seen).toBe('5.0.0');
+  });
 });
