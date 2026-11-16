@@ -13,7 +13,8 @@
  *
  *   1. reads the ferret's live frame and confirms the screen is still up (the recorded dialog can lag the pane, and Esc
  *      on a pane that moved on would interrupt a turn), the rule's fixed phrase is on it, and the runner's own reader
- *      says a dialog or prompt blocks it;
+ *      says the KIND the rule presses on blocks it (a `choose` rule: a dialog; Esc on a permission prompt: a permission
+ *      prompt), because the recorded words can name a screen that has since been replaced by another kind;
  *   2. plans the keys. No plan (a row that grants, a cursor it cannot read, no such row) leaves the dialog to the notice;
  *   3. moves the cursor, reads again and checks it is on the row — and only then confirms. Esc needs no cursor;
  *   4. writes ONE journal line (ferret, harness, kind, rule id): no agenda card, no pane text.
@@ -44,9 +45,17 @@ const CURSOR_SETTLE_MS = 200;
 /** One read of a ferret's live frame: only what the clear decides on. Never logged, never stored. */
 export interface ClearFrame {
   readonly visible: string;
-  /** The runner's own reader says a permission prompt or a dialog blocks the frame. */
-  readonly blocking: boolean;
+  /** The runner's own reader says which kind blocks the frame (its closed code), or that nothing does. */
+  readonly blocking: 'permission' | 'dialog' | false;
 }
+
+/**
+ * Whether the runner's reader agrees the live frame is the KIND of screen the rule presses on. The record lags the pane,
+ * so a different kind of screen can be up by now; a `choose` rule presses on a dialog only, an Esc rule on a permission
+ * prompt on a permission prompt only.
+ */
+const blocksAs = (rule: DialogRule, dialog: ClearableDialogWords, frame: ClearFrame): boolean =>
+  frame.blocking === ('press' in rule.action && dialog.kind === 'permission' ? 'permission' : 'dialog');
 
 export interface DialogClearPorts {
   /** The rules in effect right now: the built-in tables and the ones the owner taught. */
@@ -101,7 +110,7 @@ export class WardenDialogClear {
           const frame = await this.ports.frame(sessionId);
           const reported = memory[sessionId]?.[1] === FAILED;
           next[sessionId] = reported ? [dialog.id, FAILED] : [dialog.id];
-          if (frame !== undefined && frame.blocking && frameShows(rule, dialog, frame.visible)) {
+          if (frame !== undefined && blocksAs(rule, dialog, frame) && frameShows(rule, dialog, frame.visible)) {
             if (!reported) {
               next[sessionId] = [dialog.id, FAILED];
               this.ports.record('fleet.warden_dialog_clear_failed', {
@@ -137,7 +146,8 @@ export class WardenDialogClear {
     rule: DialogRule,
   ): Promise<'sent' | 'failed' | 'stale'> {
     const frame = await this.ports.frame(sessionId);
-    if (frame === undefined || !frame.blocking || !frameShows(rule, dialog, frame.visible)) return 'stale';
+    if (frame === undefined || !blocksAs(rule, dialog, frame) || !frameShows(rule, dialog, frame.visible))
+      return 'stale';
     const plan = planKeys(rule, dialog, frame.visible);
     if (typeof plan === 'string') {
       this.ports.record('fleet.warden_dialog_clear_skipped', {
@@ -153,7 +163,8 @@ export class WardenDialogClear {
       await this.ports.sleep(CURSOR_SETTLE_MS);
       const after = await this.ports.frame(sessionId);
       // Enter confirms whichever row the cursor is on: it must be positively on the one the rule chose.
-      if (after === undefined || !after.blocking || cursorRow(after.visible, dialog) !== plan.row) return 'failed';
+      if (after === undefined || !blocksAs(rule, dialog, after) || cursorRow(after.visible, dialog) !== plan.row)
+        return 'failed';
     }
     if (!(await this.ports.key(sessionId, plan.confirm))) return 'failed';
     this.ports.record('fleet.warden_dialog_autocleared', {

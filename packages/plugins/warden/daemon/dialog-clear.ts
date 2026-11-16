@@ -33,9 +33,7 @@ export function ferretClearPane(
     words: async sessionId => dialogWordsOf(await ferrets.prompt?.(sessionId as FerretId).catch(() => undefined)),
     frame: async (sessionId): Promise<ClearFrame | undefined> => {
       const read = await (await form(sessionId))?.capture().catch(() => undefined);
-      return read?.ok === true
-        ? { visible: read.value.visible, blocking: read.value.blocking !== undefined }
-        : undefined;
+      return read?.ok === true ? { visible: read.value.visible, blocking: read.value.blocking ?? false } : undefined;
     },
     key: async (sessionId, key) => {
       const typed = await (await form(sessionId))?.key(key).catch(() => undefined);

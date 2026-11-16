@@ -148,7 +148,7 @@ function stand(
     frame: async () =>
       'frame' in options
         ? options.frame
-        : { visible: frameOf(unknown(), 1, [`  Authorization: Bearer ${SECRET}`]), blocking: true },
+        : { visible: frameOf(unknown(), 1, [`  Authorization: Bearer ${SECRET}`]), blocking: 'dialog' },
     // The Vault-value masker, as the kernel's stand-in does it: a known value becomes `*`s of the same width.
     mask: async text => text.replaceAll(SECRET, '*'.repeat(SECRET.length)),
     saveFrame: async (_ferret, masked) => {
@@ -268,7 +268,7 @@ describe('the owner’s yes', () => {
       frame: async () =>
         state.gone
           ? { visible: '\n  ❯ \n', blocking: false }
-          : { visible: frameOf(screen, state.cursor), blocking: true },
+          : { visible: frameOf(screen, state.cursor), blocking: 'dialog' },
       key: async (_session, key) => {
         state.pressed.push(key);
         if (key === 'Down') state.cursor += 1;

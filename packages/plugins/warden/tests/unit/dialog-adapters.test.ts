@@ -74,7 +74,7 @@ describe('a ferret’s own pane', () => {
     );
 
     // Assert
-    should(await shown.frame('f1')).eql({ visible: 'the screen', blocking: true });
+    should(await shown.frame('f1')).eql({ visible: 'the screen', blocking: 'dialog' });
     should(await open.frame('f1')).eql({ visible: 'prompt', blocking: false });
   });
 
