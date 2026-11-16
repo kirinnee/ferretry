@@ -121,7 +121,7 @@ Leases live at `fleet/shared/<harness>/.leases`.
   source inode at home, the launch is refused with a clear retry sentence instead of silently starting a new conversation.
   A per-entry `.history-pool-pending-<entry>` marker preserves that refusal across retries; a retry completes the remaining
   leaves and links the entry before clearing it. A pre-pool Codex home's own SQLite index becomes unused on its first
-  pooled launch; it is not copied into the pool.
+  pooled launch; it is not copied into the pool. A pooled sessions home refuses its launch if the shared SQLite folder cannot be prepared; it never falls back to a stale local database.
 
 ### 3.2 The owner's default homes: read, never written
 

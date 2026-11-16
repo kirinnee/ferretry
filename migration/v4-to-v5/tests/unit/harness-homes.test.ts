@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { chmod, mkdir, readFile, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { harnessHomesStep } from '../../src/steps/harness-homes.ts';
@@ -12,7 +13,7 @@ afterEach(async () => {
   await f.clean();
 });
 
-test('copies opaque transcripts, sqlite and user state byte for byte with modes and times', async () => {
+test('copies opaque transcripts and user state byte for byte with modes and times', async () => {
   await f.put('fleet/manifest.json', {
     version: 1,
     accounts: [{ id: RUNTIME, kind: 'codex', home: join(f.from, 'fleet/homes', RUNTIME) }],
@@ -42,7 +43,7 @@ test('copies opaque transcripts, sqlite and user state byte for byte with modes 
   expect(await readFile(join(f.to, 'state/codex/agent-homes', RUNTIME, '.claude.json'), 'utf8')).toContain(
     'FAKE-PRIVATE-STATE',
   );
-  expect(await stat(join(f.to, 'state/codex/history-pool/sqlite/state.db'))).toBeDefined();
+  expect(await stat(join(f.to, 'state/codex/history-pool/sqlite')).catch(() => undefined)).toBeUndefined();
   expect(
     await stat(join(f.to, 'state/codex/agent-homes', RUNTIME, 'auth.json')).catch(() => undefined),
   ).toBeUndefined();
@@ -116,7 +117,7 @@ test('writes each harness pool to its one history pool, beside agent-homes and n
   expect(await readFile(join(claudePool, 'projects', slug, `${id}.jsonl`), 'utf8')).toContain('FAKE-CLAUDE-TRANSCRIPT');
   expect(await readFile(join(claudePool, 'history.jsonl'), 'utf8')).toContain('FAKE-CLAUDE-HISTORY');
   expect(await readFile(join(codexPool, 'sessions/2026/11/01/rollout-fake.jsonl'), 'utf8')).toContain('FAKE-ROLLOUT');
-  expect(await readFile(join(codexPool, 'sqlite/state.db'), 'utf8')).toContain('FAKE-SQLITE');
+  expect(await stat(join(codexPool, 'sqlite')).catch(() => undefined)).toBeUndefined();
   // v4's lease store is not history: it is never written to the pool.
   expect(await stat(join(claudePool, '.leases')).catch(() => undefined)).toBeUndefined();
   expect(await stat(join(codexPool, '.leases')).catch(() => undefined)).toBeUndefined();
@@ -124,6 +125,46 @@ test('writes each harness pool to its one history pool, beside agent-homes and n
   for (const harness of ['claude-code', 'codex'])
     expect(await stat(join(f.to, 'state', harness, 'agent-homes/_shared')).catch(() => undefined)).toBeUndefined();
   expect(JSON.stringify(report)).not.toContain('FAKE-');
+});
+
+test('omits the v4 Codex SQLite index with absolute rollout paths, including in dry run', async () => {
+  const rollout = 'sessions/2026/11/01/rollout-fake.jsonl';
+  await f.put(`fleet/shared/codex/${rollout}`, 'FAKE-ROLLOUT');
+  const sqlite = join(f.from, 'fleet/shared/codex/sqlite');
+  await mkdir(sqlite, { recursive: true });
+  const database = new Database(join(sqlite, 'state_5.sqlite'));
+  try {
+    database.run('CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)');
+    database.run('INSERT INTO threads VALUES (?, ?)', ['fake-id', `${OLD_HOME}/fleet/shared/codex/${rollout}`]);
+  } finally {
+    database.close();
+  }
+  await f.put('fleet/shared/codex/sqlite/state_5.sqlite-wal', 'FAKE-WAL');
+  await f.put('fleet/shared/codex/sqlite/state_5.sqlite-shm', 'FAKE-SHM');
+  // This omission is specific to the shared Codex index, not an opaque folder named sqlite elsewhere.
+  await f.put('fleet/shared/claude/sqlite/user-state', 'FAKE-CLAUDE-STATE');
+  for (const dryRun of [true, false]) {
+    const report = await harnessHomesStep.run(f.ctx(dryRun));
+    expect(report.status).toBe('converted');
+    expect(report.sealed.map(item => item.file)).toEqual([
+      'state/claude-code/history-pool/sqlite/user-state',
+      `state/codex/history-pool/${rollout}`,
+    ]);
+    expect(report.notCarried.some(item => item.what === 'v4 Codex shared sqlite')).toBe(true);
+    expect(await stat(join(f.to, 'state/codex/history-pool/sqlite')).catch(() => undefined)).toBeUndefined();
+    if (dryRun) expect(await stat(f.to).catch(() => undefined)).toBeUndefined();
+    else expect(await readFile(join(f.to, 'state/codex/history-pool', rollout), 'utf8')).toContain('FAKE-ROLLOUT');
+    expect(JSON.stringify(report)).not.toContain(OLD_HOME);
+  }
+  // The source index is left in the v4 home, untouched.
+  const original = new Database(join(sqlite, 'state_5.sqlite'), { readonly: true });
+  try {
+    expect(original.query('SELECT rollout_path FROM threads').get()).toEqual({
+      rollout_path: `${OLD_HOME}/fleet/shared/codex/${rollout}`,
+    });
+  } finally {
+    original.close();
+  }
 });
 
 test('malformed metadata fails without exposing values', async () => {

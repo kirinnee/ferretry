@@ -1821,19 +1821,38 @@ reach homes, credentials, another plugin's state, or other state of its own plug
 `moveToHistoryPool` door (`not_internal`). It is never either end of `linkTo` or link-mode `copyTree`, nor the place of
 `linkCredential` or link-mode `copyShared` (`link_escape`); copying bytes into it remains allowed.
 
-`RootHandle.moveToHistoryPool(from, pool, to): Promise<void>` moves ONE entry by `rename(2)` from a ferret's home to
+`RootHandle.moveToHistoryPool(from, pool, to): Promise<void>` moves ONE regular-file leaf by atomic no-replace rename from a ferret's home to
 that plugin's minted pool view (a forged view or another plugin's is `not_own`). The source is
 `<agent-homes>/<ferret>/<listed entry>/...`, or the listed entry itself; a home/root name is `not_home`, and the same
 fixed deny list and closed entry list still apply (`denied`, `not_listed`). The target is `<same entry>/...` or
 `.conflicts/<same ferret>/<same entry>/...`; other shapes are `denied`, and `.conflicts` is special only in that first
 position. Parents are made `0700` only inside the pool. Both parents are held through the no-follow descriptor walk,
-then the existing `renameChecked` moves between those descriptors. An existing target is `outside`; a source file
-with another hard link is `hard_link`; a placed credential link, itself or inside a moving folder, is `link_escape`.
+then Linux `renameat2(RENAME_NOREPLACE)` moves between those held parent descriptors. An existing target is
+`HistoryPoolError('exists')`, including one created concurrently: the source stays in place and the target is never replaced.
+Only regular-file leaves move; a folder, link or other kind is `not_file`, and a source file with another hard link is
+`hard_link`. A placed credential is refused by the same placed/private guards. A folder cannot carry an unchecked descendant
+through this door.
 Private-place guards hold at both ends; the pool end reuses `reachHistoryEntry` and its held base, including the
-device/inode check that refuses a real agent home swapped into the pool's place. A leaf link moves as a link,
-without opening its target. Another device is
-`changed`, with no copy fallback. A host without descriptor reach is `no_descriptor_reach`. Refusals move no entry;
-empty target-parent folders already made may remain.
+device/inode check that refuses a real agent home swapped into the pool's place DURING this call. It does not establish
+where an already-planted real folder came from. Another device is `changed`, with no copy fallback. A host without
+atomic descriptor-relative no-replace rename (including macOS today) refuses `no_descriptor_reach`; there is no plain-rename
+fallback. Refusals before the syscall move no file; empty target-parent folders already made may remain. A failed
+post-move proof attempts atomic no-replace restoration; if the source name was taken meanwhile, the file can remain
+in the pool. For a proven hard-linked inode, the kernel instead drops its pool name when restoration fails (another
+name retains the bytes); the identity/link-count look and unlink have the same-user leaf-swap window described below. The harness then keeps its pending marker and refuses this launch rather than resuming from incomplete history.
+
+**Existing homes and interrupted merges.** Before moving any leaf of an entry, the shared harness helper preflights
+all names, kinds, link counts, depth and move count, and performs zero-byte reads through the kernel's private-place guards.
+A preflight refusal moves nothing in that entry and the launch continues on its own history with one sentence. Empty folders
+are recreated in the pool and removed only when empty from the source. Concurrent target creation is a conflict: the leaf
+is kept at `history-pool/.conflicts/<ferret>/<entry>/...` (with a numbered suffix if necessary), never overwritten.
+A pre-pool home's `history.jsonl` is kept WHOLE in `.conflicts`, never concatenated with the pool's history.
+An unexpected failure after a leaf moves refuses the launch with a clear retry sentence, so it cannot silently start a new
+conversation from a half-moved home. A per-entry `.history-pool-pending-<entry>` marker in that home preserves that refusal
+across failed retries; a successful retry finishes the remaining leaves, links the entry, and clears the marker.
+A pre-pool Codex ferret's own SQLite index is no longer used on its first pooled launch: `CODEX_SQLITE_HOME` selects the
+pool's index, which Codex builds from rollouts. A pooled sessions home refuses its launch if the shared SQLite folder cannot be prepared; it never falls back to a stale local database. The v4 migrator likewise omits `fleet/shared/codex/sqlite/` (including its
+WAL/SHM files), whose absolute rollout paths still name v4; it never imports that database into the v5 pool.
 
 **What it does not touch.** `credentialHomeLinkVerdict` is unchanged: `linkTo` and `copyTree` link mode still refuse every
 link into or out of `agent-homes` and `credentials`, the pool link included. The pool is not a credential's place or source:
@@ -1844,11 +1863,13 @@ kernel's own reads and writes never follow a pool link out of the root (`link_es
 
 **Declared gaps.**
 
-- **Move's look-then-rename window.** `moveToHistoryPool` reuses `renameChecked` and its existing GAP: the source guard,
-  the target-absence look and `rename(2)` are separate calls. A same-user writer can swap the source leaf or add a hard
-  link after its last check, or create a target file/empty folder that the rename then replaces. A non-empty target folder is never replaced.
-  This needs `renameat2(RENAME_NOREPLACE)` for the target half; descriptor-held parents prevent a swapped ancestor from
-  redirecting the operation, but do not make the leaf checks conditional on the move.
+- **The source leaf can change after its check.** The history move uses atomic no-replace rename, so the former
+  target-absence look-then-rename gap is closed for this door. A same-user writer can still swap a source leaf or add a
+  hard link between its last proof and the move; a post-move identity/link-count proof attempts a no-replace restoration
+  on mismatch. Descriptor-held parents prevent a swapped ancestor from redirecting the operation, but the syscall is not
+  conditional on the source inode. When a hard-linked target cannot be restored, its pool name is removed only after
+  checking it still names that inode with another link; a same-user writer can replace it between this look and unlink.
+  Generic `RootHandle.rename` retains its separately declared look-then-rename gap.
 
 - **Same-user reach.** The agent runs as the same user, so a ferret on a harness can read, rewrite or delete any pooled
   transcript, and so can poison what another ferret resumes (a rewritten history is read as that ferret's own past). The

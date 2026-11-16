@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   chmod,
+  link,
   lstat,
   mkdir,
   mkdtemp,
@@ -17,13 +18,14 @@ import {
   readlink,
   rm,
   stat,
+  symlink,
   utimes,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { LaunchSpec, Runner } from '@ferretry/core-ferrets/contract';
-import type { FerretId } from '@ferretry/kernel/contract';
+import { LaunchRefusal, type LaunchSpec, type Runner, type RunSpec } from '@ferretry/core-ferrets/contract';
+import type { FencedPath, FerretId, RootsPort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { type Instant, ok } from '@ferretry/std';
 import { nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
@@ -70,9 +72,15 @@ const homeOf = (ferret: string) => join(fyHome, 'state/claude-code/agent-homes',
 const pool = (...parts: string[]) => join(fyHome, 'state/claude-code/history-pool', ...parts);
 
 /** The harness over the real roots; `pooled: false` declares no pool (a plugin the kernel does not let pool). */
-function build(options: { pooled?: boolean } = {}) {
+function build(
+  options: {
+    pooled?: boolean;
+    beforeMove?: (from: FencedPath, to: FencedPath) => void | Promise<void>;
+    afterMove?: () => void;
+  } = {},
+) {
   const fs = nodeFs(() => crypto.randomUUID());
-  const roots = rootsPortFor(
+  const realRoots = rootsPortFor(
     fs,
     { home: fyHome, plugin: 'claude-code', worktrees: join(fixture, 'worktrees') },
     ['agent-homes', 'harness-history'],
@@ -81,6 +89,23 @@ function build(options: { pooled?: boolean } = {}) {
       ? {}
       : { historyPool: POOL_PERMISSION, stateFiles: [CLAUDE_CODE_AGENT_HOMES, CLAUDE_CODE_HISTORY_POOL] },
   );
+  const moves: { from: FencedPath; to: FencedPath }[] = [];
+  const roots: RootsPort = {
+    ...realRoots,
+    root: (name, scope) => {
+      const home = realRoots.root(name, scope);
+      if (name !== 'agent-homes') return home;
+      return {
+        ...home,
+        async moveToHistoryPool(from, pool, to) {
+          moves.push({ from, to });
+          await options.beforeMove?.(from, to);
+          await home.moveToHistoryPool(from, pool, to);
+          options.afterMove?.();
+        },
+      };
+    },
+  };
   const harness = new ClaudeHarness({
     selected: async () => ({ settings: { has: () => true }, hooks: { has: () => true } }) as never,
     roots,
@@ -101,7 +126,7 @@ function build(options: { pooled?: boolean } = {}) {
     historyHome: async () => owner,
     warn: message => void messages.push(message),
   });
-  return { harness, fs };
+  return { harness, fs, moves };
 }
 
 const spec = (ferret: string, more: Record<string, unknown> = {}): LaunchSpec =>
@@ -117,8 +142,15 @@ const spec = (ferret: string, more: Record<string, unknown> = {}): LaunchSpec =>
     ...more,
   }) as unknown as LaunchSpec;
 
-const runner = (): Runner =>
-  ({ key: 'tmux', start: async () => ok({ handle: '%7', startedAt: T }), stop: async () => {} }) as unknown as Runner;
+const runner = (seen: RunSpec[] = []): Runner =>
+  ({
+    key: 'tmux',
+    start: async (spec: RunSpec) => {
+      seen.push(spec);
+      return ok({ handle: '%7', startedAt: T });
+    },
+    stop: async () => {},
+  }) as unknown as Runner;
 
 const exists = async (path: string) => (await lstat(path).catch(() => undefined)) !== undefined;
 
@@ -182,6 +214,190 @@ describe('Claude Code and the shared history pool', () => {
     expect(await readFile(join(homeOf('f1'), 'projects/-work/mine.jsonl'), 'utf8')).toBe('mine\n');
     const started = await harness.start(spec('f1'), runner(), {} as never);
     expect(started.ok).toBe(true);
+  });
+
+  for (const unsafe of ['hardlink', 'stale symlink'] as const) {
+    test(`preflight finds a nested ${unsafe} after a valid transcript before any move, then launches with its own history`, async () => {
+      const project = join(homeOf('f1'), 'projects/-work');
+      await mkdir(join(project, 'z-nested'), { recursive: true });
+      await mkdir(pool('projects/-work/z-nested'), { recursive: true });
+      const transcript = join(project, `${CONVERSATION}.jsonl`);
+      await writeFile(transcript, 'the original conversation\n');
+      const unsafePath = join(project, 'z-nested/unsafe.jsonl');
+      if (unsafe === 'hardlink') {
+        const other = join(fixture, 'synthetic-shared-file');
+        await writeFile(other, 'synthetic linked bytes\n');
+        await link(other, unsafePath);
+      } else await symlink('missing-local.jsonl', unsafePath);
+      const { harness, moves } = build();
+      await harness.prepareHome(spec('f1'));
+      expect(moves).toEqual([]);
+      expect(await readFile(transcript, 'utf8')).toBe('the original conversation\n');
+      expect(await exists(pool(`projects/-work/${CONVERSATION}.jsonl`))).toBe(false);
+      expect((await lstat(join(homeOf('f1'), 'projects'))).isDirectory()).toBe(true);
+      expect(messages.join('\n')).toContain(unsafe === 'hardlink' ? 'hard_link' : 'link_escape');
+      const seen: RunSpec[] = [];
+      const started = await harness.resume(spec('f1'), runner(seen), {} as never, CONVERSATION);
+      expect(started.ok).toBe(true);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.command).toContain(CONVERSATION);
+      expect(moves).toEqual([]);
+      expect(await readFile(transcript, 'utf8')).toBe('the original conversation\n');
+      expect(await exists(join(homeOf('f1'), '.history-pool-pending-projects'))).toBe(false);
+    });
+  }
+
+  test('a transcript backup name containing @ is pooled intact', async () => {
+    const relative = `projects/-work/${CONVERSATION}.jsonl@backup`;
+    await mkdir(join(homeOf('f1'), 'projects/-work'), { recursive: true });
+    await writeFile(join(homeOf('f1'), relative), 'backup conversation\n');
+    const { harness } = build();
+    await harness.prepareHome(spec('f1'));
+    expect(await readFile(pool(relative), 'utf8')).toBe('backup conversation\n');
+    expect((await lstat(join(homeOf('f1'), 'projects'))).isSymbolicLink()).toBe(true);
+    expect(messages).toEqual([]);
+  });
+
+  test('concurrent homes with the same slug and filename preserve both transcripts using conflicts', async () => {
+    const relative = 'projects/-same/same.jsonl';
+    await mkdir(pool('projects/-same'), { recursive: true });
+    for (const ferret of ['f1', 'f2']) {
+      await mkdir(join(homeOf(ferret), 'projects/-same'), { recursive: true });
+      await writeFile(join(homeOf(ferret), relative), `from ${ferret}\n`);
+    }
+    let arrived = 0;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const { harness } = build({
+      beforeMove: async (_from, to) => {
+        if (to !== pool(relative)) return;
+        if (++arrived === 2) release();
+        await gate;
+      },
+    });
+    await Promise.all([harness.prepareHome(spec('f1')), harness.prepareHome(spec('f2'))]);
+    expect(arrived).toBe(2);
+    const kept = [await readFile(pool(relative), 'utf8')];
+    for (const ferret of ['f1', 'f2']) {
+      const conflict = await readFile(pool(`.conflicts/${ferret}/${relative}`), 'utf8').catch(() => undefined);
+      if (conflict !== undefined) kept.push(conflict);
+      expect((await lstat(join(homeOf(ferret), 'projects'))).isSymbolicLink()).toBe(true);
+    }
+    expect(kept.sort()).toEqual(['from f1\n', 'from f2\n']);
+    expect(messages.join('\n')).toContain('kept in the pool');
+  });
+
+  for (const existingJournal of [false, true]) {
+    test(`an own history.jsonl is kept whole in conflicts when the pooled journal ${existingJournal ? 'exists' : 'is absent'}`, async () => {
+      await mkdir(homeOf('f1'), { recursive: true });
+      await writeFile(join(homeOf('f1'), 'history.jsonl'), 'own journal\n');
+      if (existingJournal) await writeFile(pool('history.jsonl'), 'pooled journal\n');
+      const { harness } = build();
+      await harness.prepareHome(spec('f1'));
+      expect(await readFile(pool('history.jsonl'), 'utf8')).toBe(existingJournal ? 'pooled journal\n' : '');
+      expect(await readFile(pool('.conflicts/f1/history.jsonl'), 'utf8')).toBe('own journal\n');
+      expect((await lstat(join(homeOf('f1'), 'history.jsonl'))).isSymbolicLink()).toBe(true);
+    });
+  }
+
+  for (const blockedRetry of [false, true]) {
+    test(`a second move fault refuses launch and ${blockedRetry ? 'a later zero-move preflight refusal keeps the pending marker until retry' : 'the next launch retries to completion'}`, async () => {
+      const project = join(homeOf('f1'), 'projects/-work');
+      await mkdir(project, { recursive: true });
+      await mkdir(pool('projects/-work'), { recursive: true });
+      await writeFile(join(project, 'a.jsonl'), 'first conversation\n');
+      await writeFile(join(project, 'b.jsonl'), 'second conversation\n');
+      let attempts = 0;
+      const { harness } = build({
+        beforeMove: () => {
+          if (++attempts === 2) throw new Error('synthetic second-move fault');
+        },
+      });
+      const seen: RunSpec[] = [];
+      const start = () => harness.start(spec('f1'), runner(seen), {} as never);
+      await expect(start()).rejects.toBeInstanceOf(LaunchRefusal);
+      expect(seen).toEqual([]);
+      expect(attempts).toBe(2);
+      expect(await readFile(pool('projects/-work/a.jsonl'), 'utf8')).toBe('first conversation\n');
+      expect(await readFile(join(project, 'b.jsonl'), 'utf8')).toBe('second conversation\n');
+      const marker = join(homeOf('f1'), '.history-pool-pending-projects');
+      expect(await exists(marker)).toBe(true);
+      if (blockedRetry) {
+        const stale = join(project, 'z-stale.jsonl');
+        await symlink('missing-local.jsonl', stale);
+        await expect(start()).rejects.toBeInstanceOf(LaunchRefusal);
+        expect(seen).toEqual([]);
+        expect(attempts).toBe(2);
+        expect(await exists(marker)).toBe(true);
+        expect(await readFile(join(project, 'b.jsonl'), 'utf8')).toBe('second conversation\n');
+        await rm(stale);
+      }
+      expect((await start()).ok).toBe(true);
+      expect(seen).toHaveLength(1);
+      expect(await readFile(pool('projects/-work/a.jsonl'), 'utf8')).toBe('first conversation\n');
+      expect(await readFile(pool('projects/-work/b.jsonl'), 'utf8')).toBe('second conversation\n');
+      expect((await lstat(join(homeOf('f1'), 'projects'))).isSymbolicLink()).toBe(true);
+      expect(await exists(marker)).toBe(false);
+    });
+  }
+
+  test('a first move that lands then rejects refuses launch, and retry links the preserved transcript and resumes', async () => {
+    const relative = `projects/-work/${CONVERSATION}.jsonl`;
+    await mkdir(join(homeOf('f1'), 'projects/-work'), { recursive: true });
+    await writeFile(join(homeOf('f1'), relative), 'the original conversation\n');
+    let failOnce = true;
+    const { harness, moves } = build({
+      afterMove: () => {
+        if (!failOnce) return;
+        failOnce = false;
+        throw new Error('synthetic rejection after the real move landed');
+      },
+    });
+    const seen: RunSpec[] = [];
+    const resume = () => harness.resume(spec('f1'), runner(seen), {} as never, CONVERSATION);
+    await expect(resume()).rejects.toBeInstanceOf(LaunchRefusal);
+    expect(seen).toEqual([]);
+    expect(moves).toHaveLength(1);
+    expect(await exists(join(homeOf('f1'), relative))).toBe(false);
+    expect(await readFile(pool(relative), 'utf8')).toBe('the original conversation\n');
+    const marker = join(homeOf('f1'), '.history-pool-pending-projects');
+    expect(await exists(marker)).toBe(true);
+    expect((await resume()).ok).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.command).toContain(CONVERSATION);
+    expect(moves).toHaveLength(1);
+    expect((await lstat(join(homeOf('f1'), 'projects'))).isSymbolicLink()).toBe(true);
+    expect(await readFile(join(homeOf('f1'), relative), 'utf8')).toBe('the original conversation\n');
+    expect(await exists(marker)).toBe(false);
+  });
+
+  test('historySources exposes pooled transcripts once through read-only entries, stat and read', async () => {
+    const { harness } = build();
+    await harness.prepareHome(spec('f1'));
+    await harness.prepareHome(spec('f2'));
+    const relative = `projects/-work/${CONVERSATION}.jsonl`;
+    const text = 'pooled conversation\n';
+    await mkdir(join(homeOf('f1'), 'projects/-work'), { recursive: true });
+    await writeFile(join(homeOf('f1'), relative), text);
+    const sources = await harness.historySources();
+    const pools = sources.filter(source => source.kind === 'pool');
+    expect(pools).toHaveLength(1);
+    const source = pools[0];
+    if (source === undefined) throw new Error('the pool history source is missing');
+    expect(source.label).toBe('pool');
+    expect(Object.keys(source.files).sort()).toEqual(['entries', 'read', 'stat']);
+    expect((await source.files.entries('projects/-work')).map(entry => entry.name)).toEqual([`${CONVERSATION}.jsonl`]);
+    expect((await source.files.stat(relative))?.size).toBe(Buffer.byteLength(text));
+    expect(new TextDecoder().decode(await source.files.read(relative, 0, Buffer.byteLength(text)))).toBe(text);
+    const homes = sources.filter(source => source.kind === 'ferret-home');
+    expect(homes).toHaveLength(2);
+    for (const home of homes) {
+      expect(await home.files.entries('projects/-work')).toEqual([]);
+      expect(await home.files.stat(relative)).toBeUndefined();
+      expect(await home.files.read(relative, 0, Buffer.byteLength(text))).toBeUndefined();
+    }
   });
 
   test('hasConversation finds a conversation another ferret wrote, through the pool, and proves an unknown one absent', async () => {

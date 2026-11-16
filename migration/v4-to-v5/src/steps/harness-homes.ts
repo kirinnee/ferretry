@@ -71,6 +71,10 @@ export const harnessHomesStep: Step = {
       why: "generated or transient; v5 regenerates them (v4's .leases is a lease store, not history, so the pool never gets it)",
     },
     {
+      what: 'v4 Codex shared sqlite',
+      why: 'its threads.rollout_path values are absolute v4 paths; v5 rebuilds SQLite from the copied rollouts instead of resuming files in the old home',
+    },
+    {
       what: 'auth.json and .credentials.json in runtime homes',
       why: 'sign-ins belong to Logins, not this step; never opened',
     },
@@ -149,6 +153,8 @@ export const harnessHomesStep: Step = {
           if (!ctx.dryRun) await mkdir(ctx.v5.resolve(to), { mode: 0o700, recursive: true });
           for (const name of (await named(inHome(from), 'cannot be listed', () => readdir(from))).sort()) {
             if (name === '.fy' || name === '.leases' || name === '.migration-progress') continue;
+            // Codex's SQLite is a derived index with absolute v4 rollout paths, not portable history.
+            if (from === join(shared, 'codex') && name === 'sqlite') continue;
             if (runtimeHome && (name === 'auth.json' || name === '.credentials.json')) continue;
             await copyTree(join(from, name), join(to, name), runtimeHome);
           }

@@ -145,10 +145,10 @@ dropped; renders become unsharded `renders/<id>.json` (`StoredRenderMetaSchema`,
 file and line, never by value.
 
 Harness files are copied unopened under `state/<claude-code|codex>/`. Runtime UUID directories go to `agent-homes/<uuid>/`
-and hold runtime-owned files. Each shared transcript pool (`fleet/shared/<claude|codex>`, including Codex SQLite) is
+and hold runtime-owned files. Each shared transcript pool (`fleet/shared/<claude|codex>`, excluding Codex SQLite) is
 written to that harness's ONE history pool, `history-pool/` (a folder beside `agent-homes`, never inside it; the name
 comes from the plugin contract's `historyPool` state): Claude `projects/<slug>/<id>.jsonl`, `sessions/`, `history.jsonl`
-and the rest; Codex `sessions/YYYY/MM/DD/rollout-*.jsonl`, `archived_sessions/`, `history.jsonl` and `sqlite/`. v4's
+and the rest; Codex `sessions/YYYY/MM/DD/rollout-*.jsonl`, `archived_sessions/` and `history.jsonl`. Codex `sqlite/` (including WAL/SHM) is omitted because its absolute rollout paths still name v4; Codex rebuilds its derived index from the copied rollouts. v4's
 `.leases` (a lease store, not history) is not copied. A converted ferret's recorded transcript path points into the
 pool, and the v5 harness links each ferret home to the pool when the ferret starts, so the ferret resumes its
 conversation (!A516). The step only writes the pool; it makes no link. Modes and times of these opaque files are

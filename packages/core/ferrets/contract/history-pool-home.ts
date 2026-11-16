@@ -9,10 +9,12 @@
  *     at a time so two ferrets' `projects/<slug>/` folders merge; a name the pool already has goes to
  *     `.conflicts/<ferret>/<entry>/<path>` (never overwritten, named in the result), and then the link is made.
  *
- * Fail-safe: pooling is a convenience, never a reason a launch fails. Any refusal or fault for an entry leaves that entry
- * exactly as it was, and the launch goes on with the ferret's own history for it; the result says so in ONE sentence.
+ * Each entry is completely preflighted before any leaf moves; known refusals leave it unchanged and launch unpooled.
+ * An unexpected filesystem fault after a move refuses this launch, preserving its conversation instead of starting a
+ * new one. A per-entry marker keeps later launches refusing until an idempotent retry finishes the merge and links it.
  */
-import type { FencedPath, FerretId, RootEntry, RootHandle, RootsPort } from '@ferretry/kernel/contract';
+import type { FencedPath, FerretId, RootHandle, RootsPort } from '@ferretry/kernel/contract';
+import { LaunchRefusal } from './kinds.ts';
 
 /** One entry of a harness home a manifest's `permissions.historyPool.entries` declares. */
 export interface HistoryPoolEntry {
@@ -58,45 +60,62 @@ export async function poolHomeHistory(input: {
   readonly entries: readonly HistoryPoolEntry[];
 }): Promise<PooledHome> {
   const { roots, ferret, entries } = input;
-  const home = roots.root('agent-homes', { ferret, subfolder: ferret });
   const linked: string[] = [];
   const conflicts: string[] = [];
   const unpooled: string[] = [];
   let reason: string | undefined;
-  let moved = 0;
+  const progress = { moved: 0, conflicts, uncertain: false };
+  let home: RootHandle;
+  let homePath: FencedPath;
   let pool: RootHandle;
+  let wasPending = false;
   try {
+    home = roots.root('agent-homes', { ferret, subfolder: ferret });
+    homePath = fenced(home, '');
+    for (const entry of entries) {
+      if ((await home.lstat(fenced(home, `.history-pool-pending-${entry.name}`))) !== undefined) wasPending = true;
+    }
     pool = roots.historyPool();
   } catch (error) {
+    if (wasPending) throw interrupted(error);
     return unpooledAll(error);
   }
-  const homePath = fenced(home, '');
 
   for (const entry of entries) {
+    const before = progress.moved;
+    let marker: FencedPath | undefined;
+    let pending = false;
     try {
+      marker = fenced(home, `.history-pool-pending-${entry.name}`);
+      pending = (await home.lstat(marker)) !== undefined;
       const at = fenced(home, entry.name);
       const found = await home.lstat(at);
       if (found?.kind === 'symlink') {
         linked.push(entry.name);
+        if (pending) await home.remove(marker).catch(() => undefined);
         continue;
       }
       if (found !== undefined) {
-        const budget = { left: MAX_MOVES - moved };
-        const result = await moveIn(home, pool, ferret, entry, budget);
-        moved += result.moved;
-        conflicts.push(...result.conflicts);
-        // Whatever could not be moved (a link inside, a hard-linked file) stays, and then the link is refused `exists`.
+        await moveIn(home, pool, ferret, entry, progress, async () => {
+          if (!pending && marker !== undefined) await home.writeText(marker, 'pending\n', { exclusive: true });
+        });
       }
       await home.linkHistory(homePath, entry.name);
       linked.push(entry.name);
+      await home.remove(marker).catch(() => undefined);
     } catch (error) {
+      if (pending || progress.moved > before || progress.uncertain) {
+        throw interrupted(error);
+      }
+      // No leaf moved: a first-move refusal (for example macOS) can safely use the original home.
+      if (marker !== undefined) await home.remove(marker).catch(() => undefined);
       unpooled.push(entry.name);
       reason ??= poolRefusalWord(error);
     }
   }
   return {
     linked,
-    moved,
+    moved: progress.moved,
     conflicts,
     sentence:
       unpooled.length === 0
@@ -106,6 +125,11 @@ export async function poolHomeHistory(input: {
           : `This ferret goes on with its own ${unpooled.join(', ')} history because pooling it was refused (${reason ?? 'failed'}).`,
   };
 }
+
+const interrupted = (error: unknown): LaunchRefusal =>
+  new LaunchRefusal(
+    `History was being moved into the shared pool and stopped part-way (${poolRefusalWord(error)}); start this ferret again to finish.`,
+  );
 
 const unpooledAll = (error: unknown): PooledHome => ({
   linked: [],
@@ -117,70 +141,120 @@ const unpooledAll = (error: unknown): PooledHome => ({
       : `This ferret goes on with its own history because the shared pool could not be reached (${poolRefusalWord(error)}).`,
 });
 
+/** A local preflight refusal, with the same path-free vocabulary as a kernel refusal. */
+class PreflightRefusal extends Error {
+  constructor(readonly refusal: string) {
+    super(`history preflight refused: ${refusal}`);
+  }
+}
+
 /**
- * Moves what is at `<home>/<entry>` into the pool by rename: a folder the pool does not have goes whole (one rename); a
- * folder both have is merged file by file; a file the pool has is moved to `.conflicts/<ferret>/<entry>/…` under a name
- * nothing holds. An emptied folder is removed. A link, a device or anything else is left where it is.
+ * Preflight the COMPLETE entry before moving any file, including names hidden from `entries` by a private-place guard.
+ * `list` returns those names; looking/opening each one lets the kernel refuse it, rather than silently skipping it.
+ * Only leaves move: no folder can carry an unchecked descendant into the pool. Target conflicts are decided at the
+ * atomic move, not by a look before it, so two homes can merge the same slug at once.
  */
 async function moveIn(
   home: RootHandle,
   pool: RootHandle,
   ferret: FerretId,
   entry: HistoryPoolEntry,
-  budget: { left: number },
-): Promise<{ moved: number; conflicts: string[] }> {
-  const conflicts: string[] = [];
-  let moved = 0;
+  progress: { moved: number; conflicts: string[]; uncertain: boolean },
+  markPending: () => Promise<void>,
+): Promise<void> {
+  const files: string[] = [];
+  const folders: string[] = [];
+  const scan = async (relative: string, depth: number): Promise<void> => {
+    if (depth > MAX_DEPTH) throw new PreflightRefusal('too_many');
+    const name = relative.slice(relative.lastIndexOf('/') + 1);
+    if (name === '' || name.startsWith('.') || name.includes('/') || name.includes('\\') || name.includes('\0'))
+      throw new PreflightRefusal('denied');
+    const here = await home.lstat(fenced(home, relative));
+    if (here === undefined) throw new PreflightRefusal('changed');
+    if (here.kind === 'directory') {
+      for (const child of await home.list(fenced(home, relative))) await scan(`${relative}/${child}`, depth + 1);
+      folders.push(relative); // deepest first, for empty-only removal after every leaf has moved
+    } else if (here.kind === 'file') {
+      if (here.links !== 1) throw new PreflightRefusal('hard_link');
+      files.push(relative);
+      if (files.length > MAX_MOVES - progress.moved) throw new PreflightRefusal('too_many');
+    } else {
+      throw new PreflightRefusal(here.kind === 'symlink' ? 'link_escape' : 'not_file');
+    }
+  };
+  const top = await home.lstat(fenced(home, entry.name));
+  if (top?.kind !== (entry.kind === 'folder' ? 'directory' : 'file')) throw new PreflightRefusal('not_file');
+  await scan(entry.name, 0);
+  // A zero-byte read applies the kernel's private-place and hard-link guards without buffering any transcript.
+  for (const relative of files) await home.readBytes(fenced(home, relative), { offset: 0, length: 0 });
 
-  const conflictTarget = async (relative: string): Promise<string> => {
+  const attemptMove = async (relative: string, target: string): Promise<void> => {
+    const from = fenced(home, relative);
+    const before = await home.fileIdentity(from);
+    try {
+      await home.moveToHistoryPool(from, pool, fenced(pool, target));
+    } catch (error) {
+      // A refusal can follow the syscall (its post-move proof or disk sync failed). Only fall back unpooled when the
+      // original inode is still at the source; otherwise keep the pending marker and refuse even the FIRST move.
+      const after = await home.fileIdentity(from).catch(() => undefined);
+      if (before === undefined || after?.device !== before.device || after.inode !== before.inode) {
+        progress.uncertain = true;
+        throw new PreflightRefusal('changed');
+      }
+      throw error;
+    }
+  };
+  const keepConflict = async (relative: string): Promise<void> => {
+    // NOREPLACE arbitrates conflict names too: another launch can win a name after any look.
     const base = `.conflicts/${ferret}/${relative}`;
     for (let n = 0; n < 1000; n += 1) {
-      const candidate = n === 0 ? base : `${base}.${n + 1}`;
-      if ((await pool.lstat(fenced(pool, candidate))) === undefined) return candidate;
-    }
-    throw new Error('no free conflict name');
-  };
-
-  const move = async (relative: string, target: string): Promise<void> => {
-    if (budget.left <= 0) throw new Error('too many files to move');
-    budget.left -= 1;
-    await home.moveToHistoryPool(fenced(home, relative), pool, fenced(pool, target));
-    moved += 1;
-  };
-
-  const walk = async (relative: string, depth: number): Promise<void> => {
-    if (depth > MAX_DEPTH) return;
-    const there = await pool.lstat(fenced(pool, relative));
-    const here = await home.lstat(fenced(home, relative));
-    if (here === undefined) return;
-    if (here.kind === 'directory') {
-      if (there === undefined) {
-        await move(relative, relative);
+      const target = n === 0 ? base : `${base}.${n + 1}`;
+      try {
+        await attemptMove(relative, target);
+        progress.moved += 1;
+        progress.conflicts.push(target);
         return;
+      } catch (error) {
+        if (poolRefusalWord(error) !== 'exists') throw error;
       }
-      if (there.kind === 'directory') {
-        const children: readonly RootEntry[] = await home.entries(fenced(home, relative));
-        for (const child of children) await walk(`${relative}/${child.name}`, depth + 1);
-        await home.remove(fenced(home, relative), { onlyIfEmpty: true }).catch(() => undefined);
-        return;
-      }
-      const to = await conflictTarget(relative);
-      await move(relative, to);
-      conflicts.push(to);
-      return;
     }
-    if (here.kind === 'file') {
-      if (there === undefined) {
-        await move(relative, relative);
-        return;
-      }
-      const to = await conflictTarget(relative);
-      await move(relative, to);
-      conflicts.push(to);
-    }
-    // A link or another kind: never moved.
+    throw new PreflightRefusal('exists');
   };
-
-  await walk(entry.name, 0);
-  return { moved, conflicts };
+  if (files.length > 0) await markPending();
+  for (const relative of files) {
+    const parts = relative.split('/');
+    // An old history.jsonl is retained whole, never concatenated with the shared history.
+    let conflict = entry.kind === 'file';
+    for (let depth = 1; depth < parts.length && !conflict; depth += 1) {
+      const target = await pool.lstat(fenced(pool, parts.slice(0, depth).join('/')));
+      if (target === undefined) break;
+      conflict = target.kind !== 'directory';
+    }
+    if (conflict) {
+      await keepConflict(relative);
+      continue;
+    }
+    try {
+      await attemptMove(relative, relative);
+      progress.moved += 1;
+    } catch (error) {
+      if (poolRefusalWord(error) !== 'exists') throw error;
+      await keepConflict(relative);
+    }
+  }
+  // Preserve empty directories too, without ever renaming a folder and its unchecked contents.
+  for (const relative of folders) {
+    let blocked = false;
+    const parts = relative.split('/');
+    for (let depth = 1; depth <= parts.length; depth += 1) {
+      const target = await pool.lstat(fenced(pool, parts.slice(0, depth).join('/')));
+      if (target === undefined) break;
+      if (target.kind !== 'directory') {
+        blocked = true;
+        break;
+      }
+    }
+    if (!blocked) await pool.makeDirectory(fenced(pool, relative));
+    await home.remove(fenced(home, relative), { onlyIfEmpty: true });
+  }
 }

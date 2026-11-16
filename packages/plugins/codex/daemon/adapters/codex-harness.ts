@@ -24,7 +24,7 @@ import type {
   Started,
   StartRefusal,
 } from '@ferretry/core-ferrets/contract';
-import { historyFilesOver, materializeSkills, poolHomeHistory } from '@ferretry/core-ferrets/contract';
+import { historyFilesOver, LaunchRefusal, materializeSkills, poolHomeHistory } from '@ferretry/core-ferrets/contract';
 import { codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, tomlDocument, tomlTables } from '../lib/index.ts';
@@ -177,7 +177,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
    * The shared history pool for this ferret's home (docs/design/shared-history.md): each history entry becomes a link to
    * the plugin's one pool, an entry that was a real folder is moved in first, and the answer is the pool's `sqlite` folder
    * (Codex's database of conversations, `CODEX_SQLITE_HOME`) when `sessions` is pooled too. Never a reason to refuse a
-   * launch: whatever stays the ferret's own is said in one sentence and the launch goes on.
+   * launch when no leaf moved: the original history is used with one sentence. An interrupted merge refuses until retried.
    */
   /** Pooling is a convenience: saying so in the log can never fail a launch. */
   const say = (message: string): void => {
@@ -199,12 +199,13 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     try {
       const pool = kernel.roots.historyPool();
       const sqlite = pool.resolve(CODEX_POOL_SQLITE);
-      if (!sqlite.ok) return undefined;
+      if (!sqlite.ok) throw new Error('the shared database path could not be placed');
       await pool.makeDirectory(sqlite.value, { mode: 0o700 });
       return sqlite.value;
     } catch {
-      say('This ferret goes on with its own Codex database because the shared one could not be made.');
-      return undefined;
+      throw new LaunchRefusal(
+        'The shared Codex history database could not be prepared, so this ferret was not started; start it again to retry.',
+      );
     }
   };
 
@@ -484,7 +485,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     /**
      * The past conversations Codex holds, as read-only trees for Conversation's index: the owner's own `~/.codex` (read in
      * place through the `harness-history` root) and each ferret's home under this plugin's `agent-homes`. A link is never
-     * followed, so a home whose history is a link into a pool lists nothing here. Nothing is written.
+     * followed, so a pooled home lists nothing itself; the pool source lists its transcripts once. Nothing is written.
      */
     async historySources(): Promise<readonly HarnessHistorySource[]> {
       const sources: HarnessHistorySource[] = [];
@@ -495,6 +496,11 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
           label: 'owner',
           files: historyFilesOver(kernel.roots.root('harness-history', { subfolder: historyHome })),
         });
+      try {
+        sources.push({ kind: 'pool', label: 'pool', files: historyFilesOver(kernel.roots.historyPool()) });
+      } catch {
+        // A composition without pooling still offers the owner's and individual homes' history.
+      }
       const homes = kernel.roots.root('agent-homes');
       const top = homes.resolve('');
       if (!top.ok) return sources;

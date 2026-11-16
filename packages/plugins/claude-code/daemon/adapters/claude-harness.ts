@@ -187,8 +187,8 @@ export class ClaudeHarness implements Harness {
     // Nothing is written into a home under a folder chain another user could rewrite (v4's checked directory chain, now the
     // kernel's rule).
     await this.requirePrivateChain(home);
-    // The shared history pool: each history entry of the home is a link to the plugin's one pool. Never a reason to refuse
-    // a launch: an entry that cannot be pooled stays the ferret's own and the launch says so.
+    // An entry refused before any move stays this ferret's own. A merge interrupted after a move refuses this launch
+    // until a retry completes it, so a missing local transcript cannot silently become a new conversation.
     await this.poolHistory(spec.ferret);
     // The selected skills: Skills' shared folders linked into `skills/`, the rest of that folder swept (one link rule).
     await materializeSkills(home, spec.parts, []);
@@ -459,7 +459,7 @@ export class ClaudeHarness implements Harness {
   /**
    * The past conversations Claude holds, as read-only trees for Conversation's index: the owner's own home (read in place
    * through the `harness-history` root) and each ferret's home under this plugin's `agent-homes`. A link is never followed,
-   * so a home whose history is a link into a pool lists nothing here. Nothing is written.
+   * so a pooled home lists nothing itself; the pool source lists its transcripts once. Nothing is written.
    */
   async historySources(): Promise<readonly HarnessHistorySource[]> {
     const sources: HarnessHistorySource[] = [];
@@ -470,6 +470,11 @@ export class ClaudeHarness implements Harness {
         label: 'owner',
         files: historyFilesOver(this.deps.roots.root('harness-history', { subfolder: historyHome })),
       });
+    try {
+      sources.push({ kind: 'pool', label: 'pool', files: historyFilesOver(this.deps.roots.historyPool()) });
+    } catch {
+      // A composition without pooling still offers the owner's and individual homes' history.
+    }
     const homes = this.deps.roots.root('agent-homes');
     const top = homes.resolve('');
     if (!top.ok) return sources;
