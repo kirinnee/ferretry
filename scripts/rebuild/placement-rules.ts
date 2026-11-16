@@ -44,6 +44,11 @@ export const RULES: readonly Rule[] = [
   ['!drop:board', 'daemon/.*/legacy-tasks\\.ts$', 'old tasks.json mount'],
   ['!drop:accounts', 'protocol/.*/(?:migrate-login-index|login-index-v1)', 'login index v1->v2 (S69-S75)'],
   ['!drop:kernel', 'protocol/.*/(?:daemon-features|daemon-feature-)', 'feature gates (S133, §9.6 replaces)'],
+  [
+    '!drop:voice',
+    'pwa/(?:src/lib/voice-chat/turn-endpointer|tests/unit/voice-chat/turn-endpointer|harness/turn-endpointer)',
+    'turn endpointer, never mounted (dropped by owner, !A525)',
+  ],
   ['!drop:kernel', 'protocol/.*/version-skew', 'version floor (c52/pr-16)'],
   ['!drop:asks', 'daemon/.*agenda-legacy-archive-contract', 'old agenda archive'],
 

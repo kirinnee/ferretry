@@ -6,6 +6,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { ferretId } from '@ferretry/core-ferrets/contract/testing';
 import should from 'should';
 import {
   documentRevision,
@@ -155,59 +156,26 @@ describe('the runtime-aware account inventory', () => {
 });
 
 describe('runtime session records', () => {
-  it('should skip a record that cannot be rewritten and still move the rest', async () => {
+  const rename = { from: 'old', to: 'new', fromWrapper: '/old', toWrapper: '/new' };
+
+  it('should read the records through the Ferrets port, a ferret state read as the status a session had', async () => {
     // Arrange
-    const written: Record<string, unknown> = {};
-    const configs: Record<string, unknown> = {
-      stuck: { agent: 'old', command: ['/old'] },
-      free: { agent: 'old', command: ['/old'] },
-    };
     const records = new RuntimeSessionRecords({
-      listSessions: () => Object.keys(configs).map(id => ({ id })),
-      readConfig: async id => configs[id],
-      readState: async () => ({ status: 'running' }),
-      updateConfig: async (id, change) => {
-        if (id === 'stuck') throw new Error('the record is locked');
-        written[id] = change(configs[id]);
-      },
-    });
-
-    // Act
-    const moved = await records.renameSessions({ from: 'old', to: 'new', fromWrapper: '/old', toWrapper: '/new' });
-
-    // Assert
-    should(moved).equal(1);
-    should(written).deepEqual({ free: { agent: 'new', command: ['/new'] } });
-  });
-
-  const storage = (configs: Record<string, unknown>, states: Record<string, unknown>) => {
-    const written: Record<string, unknown> = { ...configs };
-    return {
-      written,
-      listSessions: () => Object.keys(configs).map(id => ({ id })),
-      readConfig: async (id: string) => written[id],
-      readState: async (id: string) => {
-        if (!(id in states)) throw new Error('unreadable');
-        return states[id];
-      },
-      updateConfig: async (id: string, change: (current: unknown) => unknown) => {
-        written[id] = change(written[id]);
-      },
-    };
-  };
-
-  it('should leave out a record that cannot be read, rather than failing the card that asked', async () => {
-    // Arrange
-    const records = new RuntimeSessionRecords(
-      storage(
+      runtimeRecords: async () => [
         {
-          one: { agent: 'work', harness: 'claude', name: 'First', command: ['/bin/work'] },
-          two: { agent: 'work', harness: 'claude' },
-          three: { agent: 'work', harness: 'other' },
+          id: ferretId('one'),
+          name: 'First',
+          harness: 'claude',
+          agent: 'work',
+          executable: '/bin/work',
+          state: 'working',
         },
-        { one: { status: 'running' }, three: { status: 'running' } },
-      ),
-    );
+        { id: ferretId('two'), name: 'Second', harness: 'codex', agent: 'play', state: 'stopped' },
+        { id: ferretId('three'), name: 'Third', harness: 'claude', agent: 'play', state: 'idle' },
+        { id: ferretId('four'), name: 'Fourth', harness: 'claude', agent: 'play', state: 'starting' },
+      ],
+      repointRuntime: async () => 0,
+    });
 
     // Act
     const found = await records.sessionRecords();
@@ -215,28 +183,51 @@ describe('runtime session records', () => {
     // Assert
     should(found).deepEqual([
       { id: 'one', name: 'First', harness: 'claude', agent: 'work', executable: '/bin/work', status: 'running' },
+      { id: 'two', name: 'Second', harness: 'codex', agent: 'play', status: 'stopped' },
+      { id: 'three', name: 'Third', harness: 'claude', agent: 'play', status: 'waiting' },
+      { id: 'four', name: 'Fourth', harness: 'claude', agent: 'play', status: 'starting' },
     ]);
   });
 
-  it('should re-point only the records that name the old runtime', async () => {
+  it('should hand a rename to Ferrets as it came and answer how many ferrets moved', async () => {
     // Arrange
-    const store = storage(
-      { one: { agent: 'old', command: ['/old', '-x'] }, two: { agent: 'other' } },
-      { one: { status: 'running' }, two: { status: 'running' } },
-    );
-
-    // Act
-    const moved = await new RuntimeSessionRecords(store).renameSessions({
-      from: 'old',
-      to: 'new',
-      fromWrapper: '/old',
-      toWrapper: '/new',
+    const heard: unknown[] = [];
+    const records = new RuntimeSessionRecords({
+      runtimeRecords: async () => [],
+      repointRuntime: async asked => {
+        heard.push(asked);
+        return 3;
+      },
     });
 
+    // Act
+    const moved = await records.renameSessions(rename);
+
     // Assert
-    should(moved).equal(1);
-    should(store.written.one).deepEqual({ agent: 'new', command: ['/new', '-x'] });
-    should(store.written.two).deepEqual({ agent: 'other' });
+    should(moved).equal(3);
+    should(heard).deepEqual([rename]);
+  });
+
+  it('should let a Ferrets failure reach the caller, which the catalog service answers by not failing the rename', async () => {
+    // Arrange
+    const records = new RuntimeSessionRecords({
+      runtimeRecords: async () => {
+        throw new Error('ferrets is not ready');
+      },
+      repointRuntime: async () => {
+        throw new Error('ferrets is not ready');
+      },
+    });
+
+    // Act and assert
+    await records.sessionRecords().then(
+      () => should.fail('read should have failed', 'rejection'),
+      (error: unknown) => should((error as Error).message).equal('ferrets is not ready'),
+    );
+    await records.renameSessions(rename).then(
+      () => should.fail('rename should have failed', 'rejection'),
+      (error: unknown) => should((error as Error).message).equal('ferrets is not ready'),
+    );
   });
 });
 

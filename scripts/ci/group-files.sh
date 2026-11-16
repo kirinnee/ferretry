@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+#
+# The test files one test GROUP (config/test-groups.json) runs, one `./path` per line on stdout; every message goes to
+# stderr. `test.sh` runs them, and `quick.sh`'s dry run prints them without installing or testing.
+#
+#   group-files.sh <unit|int> <group>
+#
+# THE CHANGED-PLUGIN SCOPE (scripts/ci/scope.ts): quick.sh exports FY_CI_SCOPE_FILE only for a SCOPED decision, and the
+# unit tier is the only tier it ever narrows. Test files of the plugins the decision SKIPPED are dropped; every other
+# file (the selected plugins' and every platform package's) is kept. The count is printed so the run says what it was.
+
+mode="${1:?usage: $0 <unit|int> <group>}"
+group="${2:?usage: $0 <unit|int> <group>}"
+
+root_dir="$(git rev-parse --show-toplevel)"
+cd "${root_dir}"
+
+groups="config/test-groups.json"
+jq -e --arg mode "${mode}" --arg group "${group}" '.[$mode] // [] | any(.name == $group)' "${groups}" >/dev/null ||
+  { echo "❌ ${mode} has no test group ${group} in ${groups}" >&2 && exit 2; }
+# The same files the bunfig's `pathIgnorePatterns` leave the tier, which is why the other tier's
+# directory and SIT are the only exclusions. Bun would also run `*.spec.*`, `*_test.*` and
+# `*_spec.*` files; nothing here is named like that, and a group must not silently skip one.
+other_tier="unit"
+[[ ${mode} == "unit" ]] && other_tier="integration"
+stray="$(find packages -path '*/node_modules' -prune -o -type f \( -name '*.spec.*' -o -name '*_test.*' -o -name '*_spec.*' -o -name '*.test.js' -o -name '*.test.jsx' \) -print | head -n 1)"
+[[ -n ${stray} ]] && echo "❌ test groups only collect *.test.ts(x) files, and Bun would also run ${stray}" >&2 && exit 1
+mapfile -t files < <(
+  find packages -path '*/node_modules' -prune -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) \
+    -not -path "*/tests/${other_tier}/*" -not -path '*/tests/sit/*' -not -path '*/tests/realworld/*' -print | sort |
+    jq -R -r --slurpfile groups "${groups}" --arg mode "${mode}" --arg group "${group}" '
+      . as $file
+      | [$groups[0][$mode][] | select(any(.prefixes[]; . as $prefix | $file | startswith($prefix)))][0].name
+      | select(. == $group) | "./" + $file
+    '
+)
+
+if [[ ${mode} == "unit" && -n ${FY_CI_SCOPE_FILE:-} ]]; then
+  [[ -f ${FY_CI_SCOPE_FILE} && "$(jq -r '.mode' "${FY_CI_SCOPE_FILE}")" == "scoped" ]] ||
+    { echo "❌ FY_CI_SCOPE_FILE (${FY_CI_SCOPE_FILE}) is not a SCOPED decision" >&2 && exit 1; }
+  all_files=${#files[@]}
+  mapfile -t files < <(printf '%s\n' "${files[@]}" | bun scripts/ci/scope.ts filter "${FY_CI_SCOPE_FILE}")
+  echo "📝 SCOPED unit run: ${#files[@]} of ${all_files} unit test files ($((all_files - ${#files[@]})) belong to plugins the scope skipped)" |
+    tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}" >&2
+fi
+[[ ${#files[@]} -eq 0 ]] && echo "❌ ${mode} test group ${group} holds no test files" >&2 && exit 1
+printf '%s\n' "${files[@]}"

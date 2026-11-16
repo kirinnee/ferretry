@@ -136,6 +136,13 @@ group's 100% is exactly what one serial run would conclude. If a file is only co
 groups, the job names it with each group's hit/found count; give it a test in the group that owns
 it. Locally, `task test` still runs each tier serially and judges it the same way.
 
+**A pull request into `rebuild/5.0-after` that only touches plugins runs a SCOPED unit tier** (the changed plugins, their dependents and
+every platform package; `scripts/ci/scope.ts`, [CI/CD](../ci-cd/index.md)). The ledger is then judged for the packages that ran and says
+"SCOPED ... NOT the complete unit production ledger"; the complete ledger is still the `full-ci` run's and `main`'s. A test you write
+for a plugin is picked up with no list to edit: the plugin's folder is the whole contract, so a test that exercises another plugin's
+code must live in a plugin that depends on it (a `package.json` dependency, a manifest `needs`/`uses`, or an `@ferretry/<package>` import
+all count), or its owner's tests will not run when the other plugin changes.
+
 ---
 
 ## Unit Tests (White-Box)
