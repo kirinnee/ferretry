@@ -157,7 +157,7 @@ describe("the owner's Yes", () => {
 describe('the refusal', () => {
   it('should say the board is off, what to do instead and how to ask', () => {
     should(offBoardRefusal('ferretry')).equal(
-      'The ferretry board is off, so this work needs no card: put only what the owner must decide or do in an ask (fy ask …). To track it anyway, ask first: fy ask -k yesno "Track this on the board?" — then, once the owner says Yes, fy card new … --approval ^A<n>.',
+      'The ferretry board is off, so this work needs no card: put only what the owner must decide or do in an ask (fy ask …). To track it anyway, ask first: fy ask -k yesno "Track this on the board?" — then, once the owner says Yes, fy card new … --approval <ask>.',
     );
   });
 

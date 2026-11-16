@@ -23,7 +23,7 @@
  */
 import type { Card } from '../../../contract/index.ts';
 import type { AnsweredAsk } from './ports.ts';
-import { ASK_REFERENCE_SIGIL, askReference } from '@ferretry/core-asks/contract';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /** The question the owner's Yes must answer: "Track this on the board?", in the ferret's words for "this". */
 export const TRACK_QUESTION = /^\s*track\b[^?]*\bon the board\b\s*\??\s*$/iu;
@@ -90,7 +90,7 @@ export const offBoardRefusal = (board: string, problem?: string): string =>
   [
     `The ${board} board is off, so this work needs no card: put only what the owner must decide or do in an ask (fy ask …).`,
     problem === undefined ? undefined : `The approval does not count: ${problem}.`,
-    `To track it anyway, ask first: fy ask -k yesno "Track this on the board?" — then, once the owner says Yes, fy card new … --approval ${askReference('A<n>')}.`,
+    `To track it anyway, ask first: fy ask -k yesno "Track this on the board?" — then, once the owner says Yes, fy card new … --approval <ask>.`,
   ]
     .filter((line): line is string => line !== undefined)
     .join(' ');

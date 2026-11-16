@@ -461,6 +461,6 @@ export default definePlugin({
     ],
   },
 
-  instructions: [{ id: 'notify', text: 'instructions/notify.md', when: { role: 'any' } }],
+  instructions: [{ id: 'notify', text: 'instructions/notify.md', when: { role: 'lead' } }],
   doctor: ['agenda-buzz'],
 });

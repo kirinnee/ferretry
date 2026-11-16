@@ -15,8 +15,8 @@ moves the card ([board.md](board.md#cards-show-progress-their-asks-ride-the-agen
 [notifications.md](notifications.md#agenda-mode)).
 
 **A question the owner asks is answered on the agenda too.** The owner reads the agenda, not every reply, so an answer
-given only in chat can be missed. When the owner asks a question ABOUT an open item ("[re !A163 …] what is X?"), the
-ferret answers ON that item: `fy agenda answer !A163 "<text>"` brings it back to the owner's list, in its old place, with an "Answer to your
+given only in chat can be missed. When the owner asks a question ABOUT an open item ("[re ^A163 …] what is X?"), the
+ferret answers ON that item: `fy agenda answer A163 "<text>"` brings it back to the owner's list, in its old place, with an "Answer to your
 question" block above its own options, which stay visible and answerable. **A question item keeps its own answer shape
 until the ferret closes it with `done`**: the owner's answer rests it, waiting on the ferret ([States](#states)), and
 never closes it. The owner's reply never turns
@@ -694,7 +694,7 @@ The ferret receives the message as
 the ferret (next section). The message itself is the delivery: the ferret reads `[re ^A5 …]` in its chat,
 and the daemon sends nothing else (a `replied` change that no observer reacts to). A notice is never
 referenced. If the ferret finishes a turn without touching a referenced item (an `answer`, `rest`, `edit`, `done`,
-`dismiss` or `surface` naming it), the daemon nudges it once (nudge-once keys on the `[re !A…` opener); after that
+`dismiss` or `surface` naming it), the daemon nudges it once (nudge-once keys on the `[re ^A…` opener); after that
 only the 30-minute silence nudge ([States](#states)) speaks. The turn-end nudge says: "Owner replied about ^A5; it
 rests, waiting on you. Answer on it: `fy agenda answer A5 "<text>"` (back on their list), or `fy agenda done A5`
 when nothing more is expected." It never says it is the ferret's turn to hand the item back.
@@ -916,7 +916,7 @@ A card A5 carries only through its [card ask](#card-asks) can be moved too. A mo
   on the new item.
 
 The app shows both links as references through the one reference renderer: **Split from ^A3 (its title)** on the new
-item and **Split into ^A7 (its title), ^A8 (its title)** on the original, each `!A…` opening as it does in a message.
+item and **Split into ^A7 (its title), ^A8 (its title)** on the original, each `^A…` opening as it does in a message.
 Each target carries its title when the board holds it, so a link never points outside the agenda without saying what it
 points at; a target the board does not hold is the bare id. The app has no split button: a
 split is a ferret's act, and a plain "Split off…" can follow once the owner may split by route.
@@ -1480,7 +1480,7 @@ and a part the item does not carry is not drawn:
   (counted in `cardAsks`, never the one-ask `gateAttached` mirror, so an item from a daemon that keeps none offers
   nothing), one forward option, words written AFTER that ask was raised, and a short approval (yes, ok, go ahead,
   lgtm, ship it…; build words only for OK to build, "works" or "tested" only for Done) or the button's own label. The
-  item's own reference the composer puts in front ("!A304 ok to build!") is set aside, and only that one. Nothing
+  item's own reference the composer puts in front ("^A304 ok to build!") is set aside, and only that one. Nothing
   longer is read, and a ferret reply after the words withdraws the offer.
 - **Opened at its ask.** A Needs-you push, and any link that names the item (`?agenda=A5`), open the view scrolled to
   part 6, "What I need from you", with it focused. Each tap is a new request, so an item already at its ask is brought to it again. An item

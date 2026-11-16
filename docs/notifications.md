@@ -29,7 +29,7 @@ nobody's turn. The summary is the whole notification; `--body` is the longer rea
 Every ferret is told this rule, whatever its mode (`NOTIFY_INSTRUCTION` in `@ferretry/fleet`, quoted
 verbatim; `fy` is the binary name):
 
-> Notify: the owner reads the Inbox, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run `fy notify "<summary>" [--body "<detail>"]`: a quiet Inbox notice. Add `--ping` only when it must reach their phone now. Never notify progress or chatter.
+> Notify: the owner reads their notices, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run `fy notify "<summary>" [--body "<detail>"]`: a quiet notice. Add `--buzz` only when it must reach their phone now. Never notify progress or chatter.
 
 ## When the phone buzzes
 
