@@ -17,13 +17,24 @@ import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 
 import { cancelInput, deliverInput } from '../../lib/input-api.ts';
 import {
   defaultSubmit,
+  differentFromWords,
   expiryWords,
   fieldAttributes,
   fieldProblem,
   fieldsOf,
   type InputCardField,
   inputFailure,
+  offerBody,
+  offerElsewhereWords,
+  offerFillsWords,
+  offerSentWords,
   offersPressEnter,
+  offerWhyWords,
+  offerWords,
+  OTHER_ACCOUNT_WORDS,
+  savedChoices,
+  settledSlotProps,
+  signInNote,
   allowWords,
   pastedWords,
   pasteField,
@@ -40,14 +51,15 @@ import {
   typedBody,
   typedReady,
 } from '../../lib/input-card.ts';
-import type { InputRequestView } from '../../lib/input-wire.ts';
+import type { InputRequest, InputSavedOffer } from '../../../contract/index.ts';
 import { Eye, EyeOff, ShieldAlert, type VaultClient } from '../../shell.tsx';
+import { SettledSlot } from './settled-slot.tsx';
 
 /** The style hook of the input box: a class name, kept as it is (not owner text). */
 const INPUT_CLASS = 'fy-input-card';
 
 export interface InputCardProps {
-  readonly request: InputRequestView;
+  readonly request: InputRequest;
   readonly client: VaultClient;
   /** Who is asking, as the page names the ferret. */
   readonly agentName?: string;
@@ -78,7 +90,7 @@ const useNow = (fixed: number | undefined): number => {
 
 /** What the daemon saw at the target, as one short statement; `undefined` while it looks again. */
 function factsOf(
-  request: InputRequestView,
+  request: InputRequest,
 ): { program: string; verb: string; echo?: string; promptLine?: string } | undefined {
   const seen = request.observed;
   if (seen === undefined) return undefined;
@@ -199,15 +211,49 @@ function FieldInput({
 }
 
 interface FormProps {
-  readonly request: InputRequestView;
+  readonly request: InputRequest;
   readonly fields: readonly InputCardField[];
   readonly client: VaultClient;
   readonly blocked: string | undefined;
   readonly busy: boolean;
   readonly cancel: ReactNode;
-  readonly onSettled: (words: string) => void;
+  /** Sent: the words it settled in, and the saved account the owner tapped (none for a typed value). */
+  readonly onSettled: (words: string, used?: InputSavedOffer) => void;
   readonly onSending: (sending: boolean) => void;
   readonly onRefresh?: (() => void) | undefined;
+}
+
+interface OfferButtonProps {
+  readonly offer: InputSavedOffer;
+  readonly disabled: boolean;
+  readonly onUse: () => void;
+}
+
+/**
+ * ONE SAVED ACCOUNT, one tap. It shows the owner's own words (the account's label and username, what it would type,
+ * why it is first); the value is the daemon's and never reaches this card, so there is nothing here to echo.
+ */
+function OfferButton({ offer, disabled, onUse }: OfferButtonProps) {
+  const why = offerWhyWords(offer);
+  const elsewhere = offerElsewhereWords(offer);
+  const primary = offer.primary === true;
+  return (
+    <button
+      aria-label={`Use ${offerWords(offer)}`}
+      className="kt-btn min-h-[44px] min-w-0 flex-col items-start justify-center text-left"
+      data-input-offer={offer.id}
+      data-input-primary={primary ? '' : undefined}
+      data-variant={primary ? 'primary' : undefined}
+      disabled={disabled}
+      onClick={onUse}
+      type="button"
+    >
+      <span className="min-w-0 break-words font-medium">{offerWords(offer)}</span>
+      <span className="min-w-0 break-words text-meta font-normal" data-input-offer-detail="">
+        {[offerFillsWords(offer), why, elsewhere].filter(each => each !== undefined).join(' · ')}
+      </span>
+    </button>
+  );
 }
 
 function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onSending, onRefresh }: FormProps) {
@@ -218,8 +264,10 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   // A send the daemon never answered keeps its id, so pressing Send again cannot type twice.
-  const pending = useRef<string | null>(null);
+  const pending = useRef<{ readonly key: string; readonly id: string } | null>(null);
   const many = fields.length !== 1;
+  const choices = savedChoices(request);
+  const [showOther, setShowOther] = useState(false);
 
   /** Empties the controlled state AND the DOM nodes: a typed value is not kept one moment past where it is needed. */
   const clear = useCallback((): void => {
@@ -240,10 +288,43 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
   const off = blocked !== undefined || sending || busy;
   const ready = typedReady(fields, values);
 
+  /** A send the daemon never answered keeps its id (so pressing again cannot type twice); another choice takes a new one. */
+  const deliveryIdFor = (key: string): string => {
+    if (pending.current?.key !== key) pending.current = { key, id: crypto.randomUUID() };
+    return pending.current.id;
+  };
+
+  /** A tap on a saved account: the daemon types from it, so nothing is typed here and nothing is sent but its handle. */
+  const tapOffer = async (offer: InputSavedOffer): Promise<void> => {
+    if (off) return;
+    const built = offerBody(request, offer, submit, deliveryIdFor(`offer:${offer.id}:${offer.signIn ?? ''}`));
+    if (!built.ok) {
+      setFailure(built.problem);
+      return;
+    }
+    setFailure(null);
+    setSending(true);
+    onSending(true);
+    clear();
+    try {
+      await deliverInput(client, request, built.body);
+      pending.current = null;
+      onSettled(offerSentWords(request, offer), offer);
+    } catch (cause) {
+      const words = inputFailure(cause, request.target.kind);
+      if (words.definitive) pending.current = null;
+      setFailure(words.text);
+      if (words.kind === 'changed') onRefresh?.();
+    } finally {
+      setSending(false);
+      onSending(false);
+    }
+  };
+
   const send = async (): Promise<void> => {
     if (off) return;
-    pending.current ??= crypto.randomUUID();
-    const built = typedBody({ request, fields, values, submit, deliveryId: pending.current });
+    const deliveryId = deliveryIdFor('typed');
+    const built = typedBody({ request, fields, values, submit, deliveryId });
     if (!built.ok) {
       setFailure(built.problem);
       return;
@@ -279,6 +360,52 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
         if (ready) void send();
       }}
     >
+      {choices === undefined ? null : (
+        <div className="flex min-w-0 flex-col gap-2" data-input-saved="">
+          <p className="m-0 text-cell font-medium text-fg">Use a saved login</p>
+          {signInNote(request) === undefined ? null : (
+            <p className="m-0 text-meta text-muted" data-input-sign-in="">
+              {signInNote(request)}
+            </p>
+          )}
+          {differentFromWords(request) === undefined ? null : (
+            <p className="m-0 text-meta text-warn" data-input-different="" role="status">
+              {differentFromWords(request)}
+            </p>
+          )}
+          {choices.matched.map(offer => (
+            <OfferButton
+              disabled={off}
+              key={offer.id + (offer.signIn ?? '')}
+              offer={offer}
+              onUse={() => void tapOffer(offer)}
+            />
+          ))}
+          {choices.other.length === 0 ? null : showOther ? (
+            <div className="flex min-w-0 flex-col gap-2" data-input-other="">
+              {choices.other.map(offer => (
+                <OfferButton
+                  disabled={off}
+                  key={offer.id + (offer.signIn ?? '')}
+                  offer={offer}
+                  onUse={() => void tapOffer(offer)}
+                />
+              ))}
+            </div>
+          ) : (
+            <button
+              className="kt-btn min-h-[44px] justify-center"
+              data-input-other-toggle=""
+              disabled={off}
+              onClick={() => setShowOther(true)}
+              type="button"
+            >
+              {OTHER_ACCOUNT_WORDS}
+            </button>
+          )}
+          <p className="m-0 text-meta text-faint">Or type it yourself:</p>
+        </div>
+      )}
       {fields.map(field => (
         <FieldInput
           disabled={off}
@@ -330,7 +457,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
 }
 
 interface PasteSectionProps {
-  readonly request: InputRequestView;
+  readonly request: InputRequest;
   readonly client: VaultClient;
   readonly blocked: string | undefined;
   readonly busy: boolean;
@@ -485,6 +612,8 @@ export function InputCard({
   const now = useNow(fixedNow);
   const fields = fieldsOf(request);
   const [settled, setSettled] = useState<string | null>(null);
+  // The saved account the owner tapped, once the card settled on it: the slot after the card is offered for it.
+  const [used, setUsed] = useState<InputSavedOffer | null>(null);
   // The paste section ended the request (a takeover, a gone copy) before the refreshed request arrived.
   const [pasteEnded, setPasteEnded] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -638,9 +767,12 @@ export function InputCard({
       )}
 
       {settled !== null ? (
-        <p className="m-0 text-ui text-fg" data-input-settled="" role="status">
-          {settled}
-        </p>
+        <>
+          <p className="m-0 text-ui text-fg" data-input-settled="" role="status">
+            {settled}
+          </p>
+          {used === null ? null : <SettledSlot slot={settledSlotProps(request, used)} />}
+        </>
       ) : request.source !== undefined ? (
         // A paste of a secure copy has nothing to type: the owner allows it, and the daemon pastes what the request names.
         <>
@@ -684,8 +816,9 @@ export function InputCard({
             fields={fields}
             onRefresh={onRefresh}
             onSending={setSending}
-            onSettled={words => {
+            onSettled={(words, offer) => {
               setSettled(words);
+              setUsed(offer ?? null);
               onDone();
             }}
             request={request}

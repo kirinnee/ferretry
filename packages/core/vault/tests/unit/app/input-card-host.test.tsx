@@ -11,6 +11,7 @@ import {
   pageRequest,
   REQUEST_ID,
   recordingClient,
+  savedRequest,
   terminalRequest,
 } from '../../support/app/input-fixtures.ts';
 
@@ -42,6 +43,34 @@ describe('the input card host', () => {
       });
       expect(mounted.container.querySelector(`[data-input-request="${REQUEST_ID}"]`)).not.toBeNull();
       expect(mounted.container.querySelectorAll('[data-input-value]')).toHaveLength(1);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('draws the saved-login offers of a listed request, read through the contract’s own request shape', async () => {
+    const { mounted } = await host([savedRequest()]);
+    try {
+      expect(mounted.container.querySelector('[data-input-offer="SUDO_KIRIN_BOX"]')).not.toBeNull();
+      expect(mounted.container.querySelector('[data-input-other-toggle]')).not.toBeNull();
+      // No value is anywhere on the card: an offer is a handle and a label.
+      expect(mounted.container.innerHTML).not.toContain(FAKE_VALUE);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('says the app needs updating for a request whose saved offers it cannot read', async () => {
+    const odd = savedRequest({
+      saved: {
+        offers: [{ id: 'SUDO_KIRIN_BOX', label: 'sudo', fills: 'password', matched: true, secret: FAKE_VALUE }],
+      },
+    });
+    const { mounted } = await host([odd]);
+    try {
+      expect(mounted.container.textContent).toContain('needs a newer version of the app');
+      expect(mounted.container.querySelector('[data-input-offer]')).toBeNull();
+      expect(mounted.container.innerHTML).not.toContain(FAKE_VALUE);
     } finally {
       await mounted.unmount();
     }
@@ -80,22 +109,28 @@ describe('the input card host', () => {
     }
   });
 
-  it('draws no field for a sensitivity or target it does not know', async () => {
+  it('reads a sensitivity it does not know as a secret, and draws no field for a target it does not know', async () => {
+    // The contract's reader (a newer daemon's kind is the most careful one): a masked box, never a plain one.
     const odd = terminalRequest({ fields: [{ id: 'value', label: 'Password', sensitivity: 'telepathic' }] });
+    const careful = await host([odd], ask({ kind: 'input' }, '[sudo] password for kirin:'));
+    try {
+      const box = careful.mounted.container.querySelector<HTMLInputElement>('[data-input-value]');
+      expect(box?.type).toBe('password');
+    } finally {
+      await careful.mounted.unmount();
+    }
     const elsewhere = pageRequest({ target: { kind: 'carrier-pigeon', key: 'coop' } });
-    for (const request of [odd, elsewhere]) {
-      const { mounted } = await host([request], ask({ kind: 'input' }, request.prompt));
-      try {
-        expect(mounted.container.querySelector('[data-input-value]')).toBeNull();
-      } finally {
-        await mounted.unmount();
-      }
+    const { mounted } = await host([elsewhere], ask({ kind: 'input' }, elsewhere.prompt));
+    try {
+      expect(mounted.container.querySelector('[data-input-value]')).toBeNull();
+    } finally {
+      await mounted.unmount();
     }
   });
 
   it('draws a paste of a secure copy with no field to type into', async () => {
     const paste = terminalRequest({
-      source: { kind: 'sealed', name: 'SOME_COPY', from: { kind: 'command', program: 'gh' } },
+      source: { kind: 'sealed', name: 'some_copy', from: { kind: 'command', program: 'gh' } },
       target: { kind: 'secret', key: 'SOME_COPY' },
     });
     const { mounted } = await host([paste]);

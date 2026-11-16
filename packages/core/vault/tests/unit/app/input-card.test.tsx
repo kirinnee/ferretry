@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, spyOn } from 'bun:test';
 import { InputCard } from '../../../app/features/input/input-card.tsx';
-import { padInputValue } from '../../../app/lib/input-wire.ts';
+import { padInputValue } from '../../../contract/index.ts';
 import { click, press, settle, typeInto } from '../../support/app/dom-form.ts';
 import { interact, mount, must } from '../../support/app/dom.ts';
 import {
@@ -15,7 +15,12 @@ import {
   terminalRequest,
 } from '../../support/app/input-fixtures.ts';
 
-const DELIVERED = { id: REQUEST_ID, state: 'delivered', submitted: true };
+const DELIVERED = {
+  id: REQUEST_ID,
+  deliveryId: '123e4567-e89b-42d3-a456-426614174000',
+  state: 'delivered',
+  submitted: true,
+};
 const NOW = Date.parse('2026-11-10T00:00:00.000Z');
 
 const q = <T extends Element>(root: ParentNode, selector: string): T => must(root.querySelector<T>(selector), selector);
