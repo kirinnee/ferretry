@@ -135,6 +135,8 @@ const FERRET_TOKEN_VARIABLE = 'FY_SESSION_TOKEN';
 const FERRET_ID_VARIABLE = 'FY_SESSION_ID';
 /** Where Claude Code's question hook records the question it asks (today's `QUESTION_ASKED_FILE_ENV`). */
 export const QUESTION_FILE_VARIABLE = 'FY_QUESTION_FILE';
+/** Where the agent puts media it made to show the person (today's `SESSION_MEDIA_VARIABLE`, docs/hypermedia.md). */
+export const MEDIA_FOLDER_VARIABLE = 'FY_MEDIA_DIR';
 
 /** The reason a stop records when its caller gave none (today's lifecycle `defaultStopReason`). */
 const DEFAULT_STOP_REASON = 'stopped by client';
@@ -428,6 +430,12 @@ export interface FerretSessionPort {
    * Unbound, or a path that cannot be named: the variable is not set, and the hook records nothing.
    */
   questionFile?(ferret: FerretId): Promise<FencedPath>;
+  /**
+   * Additive (F-0327): THIS ferret's MEDIA folder (`media/` in its own session folder), made private if it is missing, and
+   * handed to the pane as `FY_MEDIA_DIR`: where the agent puts what it made to show the person, read back through
+   * `GET /v1/ferrets/:ferretId/fs/file?scope=media`. Unbound, or a folder that cannot be made: the variable is not set.
+   */
+  mediaFolder?(ferret: FerretId): Promise<FencedPath>;
   /**
    * Additive (structured questions): THIS ferret's `question-asked.json` as the hook left it (raw text, bounded) and its
    * modification time; `undefined` when absent, unreadable or over the bound. Reads only. Unbound: no question is seen.
@@ -2764,6 +2772,9 @@ export class FerretsService implements FerretsApi {
     // The ferret's own question file (U4): its folder exists (`prepare` ran first); a path that cannot be named sets nothing.
     const questionFile = await this.ports.session?.questionFile?.(ferret).catch(() => undefined);
     if (questionFile !== undefined) env[QUESTION_FILE_VARIABLE] = questionFile;
+    // The ferret's media folder (F-0327), made if missing; a folder that cannot be made sets nothing.
+    const mediaFolder = await this.ports.session?.mediaFolder?.(ferret).catch(() => undefined);
+    if (mediaFolder !== undefined) env[MEDIA_FOLDER_VARIABLE] = mediaFolder;
     const resolved = await this.ports.vault.childEnvironment(ferret, env);
     if (!resolved.ok) return err(`unknown secrets: ${resolved.error.unknown.join(', ')}`);
     // What this launch told the ferret, kept for `instructions` (persisted, so a restart changes no answer): only the
