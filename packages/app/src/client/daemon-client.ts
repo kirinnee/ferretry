@@ -25,6 +25,7 @@ import {
   DaemonCallError,
   type DaemonTransport,
   DEVICE_REFUSED_CODE,
+  carrierFateOf,
   isCarrierGone,
   isDeviceRefusal,
   type SocketListeners,
@@ -550,7 +551,15 @@ export class DaemonClient {
       return new DaemonCallError(0, DEVICE_REFUSED_CODE, DEVICE_NOT_ACCEPTED_SENTENCE, undefined, undefined, error);
     }
     if (isCarrierGone(error))
-      return new DaemonCallError(0, CARRIER_OUTAGE_CODE, CARRIER_OUTAGE_SENTENCE, undefined, true, error);
+      return new DaemonCallError(
+        0,
+        CARRIER_OUTAGE_CODE,
+        CARRIER_OUTAGE_SENTENCE,
+        undefined,
+        true,
+        error,
+        carrierFateOf(error),
+      );
     return error;
   }
 

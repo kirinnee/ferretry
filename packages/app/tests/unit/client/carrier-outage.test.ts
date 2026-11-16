@@ -9,6 +9,7 @@ import {
   isCarrierGone,
   isCarrierOutage,
   isDeviceRefusal,
+  markCarrierFate,
   SESSION_CONCLUDED_CLOSE_CODE,
   type TransportRequest,
 } from '../../../src/client/transport.ts';
@@ -260,5 +261,27 @@ describe('S12 a daemon that refuses this device', () => {
       .call('GET /v1/board')
       .catch(() => undefined);
     expect(told).toBe(0);
+  });
+});
+
+describe('u2-11 the client carries the transport’s proof of delivery', () => {
+  const outage = async (fate: 'unsent' | 'unknown' | undefined) => {
+    const original = new RelaySessionError('the rendezvous ended this session', 1006);
+    if (fate !== undefined) markCarrierFate(original, fate);
+    const { client } = dying(() => original);
+    await client.start();
+    return (await client
+      .forPackage('board')
+      .call('GET /v1/board')
+      .catch(e => e)) as DaemonCallError;
+  };
+
+  test('an outage proved unsent carries `unsent`; one in doubt carries `unknown`', async () => {
+    expect((await outage('unsent')).delivery).toBe('unsent');
+    expect((await outage('unknown')).delivery).toBe('unknown');
+  });
+
+  test('an outage the transport proved nothing about carries no mark', async () => {
+    expect((await outage(undefined)).delivery).toBeUndefined();
   });
 });
