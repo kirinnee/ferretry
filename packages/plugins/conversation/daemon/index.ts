@@ -166,6 +166,8 @@ export const conversationDaemon = (gate: HarnessGate) =>
           'opening.attachments:opening': openingAttachmentsSource(),
           'ask.delivery:ferret': askDeliveryOf(api),
           'ask.owner-chat:conversation': a.ownerChat,
+          // Where the Mailbox keeps a ferret's queue and send ledger: the files stay in this plugin's folder.
+          'mailbox.host:ferret': a.mailboxHost,
           // The composer's `:` (fleet callsigns) and `@` (one folder of the ferret's files) menus, each declaring the demand
           // its own read route asks (fleet, filesystem); the route asks it of the caller before they run.
           'reference.catalog::': new AgentsReferenceMenu(ctx.needs.ferrets),

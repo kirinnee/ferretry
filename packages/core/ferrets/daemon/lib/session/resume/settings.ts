@@ -14,7 +14,7 @@ export interface SessionResumeSettings {
   readonly controlLaunchWaitMs: number;
   /** What an auto session is told when a resume carries no message of its own. */
   readonly defaultResumePrompt: string;
-  /** Appended to every written turn document, so a revived agent keeps the same protocol. */
+  /** Appended to a written turn document when it is not empty. Empty by default: no protocol line is written. */
   readonly turnProtocolReminder: string;
   /** First backoff step; attempt N waits `base * 2^(N-1)`. */
   readonly retryBackoffBaseMs: number;
@@ -28,7 +28,7 @@ export interface SessionResumeSettings {
 export const defaultSessionResumeSettings: SessionResumeSettings = {
   controlLaunchWaitMs: 60_000,
   defaultResumePrompt: 'Continue the assigned task from where you stopped.',
-  turnProtocolReminder: 'Continue using the same completion and interaction protocol.',
+  turnProtocolReminder: '',
   retryBackoffBaseMs: 2_000,
   retryBackoffMaxMs: 5 * 60_000,
 };

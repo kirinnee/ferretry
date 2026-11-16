@@ -26,6 +26,8 @@ import {
   HYPERMEDIA_CHANGED_AUDIT,
   LINKS_ADOPTED_AUDIT,
   LinkKept,
+  MAILBOX_HOST_KEY,
+  MailboxHosts,
   MESSAGE_SENT_AUDIT,
   MessageBeforeSend,
   MessageSent,
@@ -579,6 +581,9 @@ export default definePlugin({
       // take a plugin's hook, so Ferrets cannot provide them).
       { hook: ReferenceCatalog, key: ':' },
       { hook: ReferenceCatalog, key: '@' },
+      // The queue log and send ledger the Mailbox runs over: the files stay in this plugin's folder (the one provider of this
+      // security-path hook, `takers: ['conversation']`).
+      { hook: MailboxHosts, key: MAILBOX_HOST_KEY },
     ],
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },

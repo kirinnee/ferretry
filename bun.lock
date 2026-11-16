@@ -135,6 +135,16 @@
         "react-test-renderer": "^19.0.0",
       },
     },
+    "packages/core/mailbox": {
+      "name": "@ferretry/core-mailbox",
+      "version": "5.0.0",
+      "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/kernel": "workspace:*",
+        "@ferretry/std": "workspace:*",
+        "zod": "4.4.3",
+      },
+    },
     "packages/core/vault": {
       "name": "@ferretry/core-vault",
       "version": "5.0.0",
@@ -377,6 +387,7 @@
         "@ferretry/core-asks": "workspace:*",
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
+        "@ferretry/core-mailbox": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-claude-code": "workspace:*",
         "@ferretry/std": "workspace:*",
@@ -845,6 +856,8 @@
     "@ferretry/core-ferrets": ["@ferretry/core-ferrets@workspace:packages/core/ferrets"],
 
     "@ferretry/core-gate": ["@ferretry/core-gate@workspace:packages/core/gate"],
+
+    "@ferretry/core-mailbox": ["@ferretry/core-mailbox@workspace:packages/core/mailbox"],
 
     "@ferretry/core-vault": ["@ferretry/core-vault@workspace:packages/core/vault"],
 

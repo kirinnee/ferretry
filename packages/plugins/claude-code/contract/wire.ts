@@ -326,6 +326,12 @@ export const HarnessConfigSchema = z.strictObject({
    */
   questionTool: z.boolean().default(false),
   /**
+   * The full dangerous-rm waiver (`CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS`), so Claude's guard on `rm` stops
+   * no ferret. Default OFF until the owner rules (c58 O11b). Set only when this is true AND the permission mode is
+   * `skip`. A loosening: an agent's edit turning it on is held for the owner.
+   */
+  dangerousRmWaiver: z.boolean().default(false),
+  /**
    * "Ferretry message channel" (docs/claude-channel.md): whether a Claude ferret is launched with Ferretry's own tools server
    * loaded as a development channel, so a message from another ferret or from Ferretry reaches it through the channel instead
    * of being typed into its composer. UNSET (the default), it follows the login each ferret spends: ON for a `claude_max`

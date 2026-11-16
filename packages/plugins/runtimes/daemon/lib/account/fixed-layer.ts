@@ -471,7 +471,7 @@ export const AGENDA_INSTRUCTION = (fy: string): string =>
  * {@link AGENDA_INSTRUCTION}. docs/notifications.md quotes this text verbatim.
  */
 export const NOTIFY_INSTRUCTION = (fy: string): string =>
-  `Notify: the owner reads the Inbox, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run \`${fy} notify "<summary>" [--body "<detail>"]\`: a quiet Inbox notice. Add \`--ping\` only when it must reach their phone now. Never notify progress or chatter.`;
+  `Notify: the owner reads their notices, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run \`${fy} notify "<summary>" [--body "<detail>"]\`: a quiet notice. Add \`--buzz\` only when it must reach their phone now. Never notify progress or chatter.`;
 
 /**
  * BOARD — whether a ferret makes a card at all, and how it works one it has (`board-design.md` §3.2), in every
@@ -483,14 +483,14 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
  * start, a PR, a release); this is the rest, which only the ferret knows. The daemon's turn-end check backs it
  * up on a board that is on (`board/turn-check.ts` in the daemon). The board runs itself (the owner, 2026-11-04: "TASK
  * no longer have user interactivity anymore! agenda tracks all those"): a card never asks — every answer, test and
- * Done rides the card's agenda, which moves the card — and one card is one outcome, never an umbrella (`fy task
- * create` lists the related cards and refuses a broad one without `--broad`). Public cards are the owner's asks, so
+ * Done rides the card's agenda, which moves the card — and one card is one outcome, never an umbrella (`fy card
+ * new` lists the related cards and refuses a broad one without `--broad`). Public cards are the owner's asks, so
  * the board answers "what's the sitrep?"; planning is a phase, not a reason to skip a card; the title and summary say
  * what the work is doing; and the card's `status` (Now / Done so far / Next) is rewritten whole at each step.
  * docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: opt-in, enforced; overrides other task rules. Card only if \`${fy} board status\` is on, under your card (\`--parent\`), or on the owner's Yes (\`--approval !A<n>\`). Public=the owner's asks ("status of all I asked?"): top-level, never \`--private\`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: \`${fy} task show <id> --yaml\`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then \`${fy} task patch <id> --file f\`. \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\`/\`block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
+  `Board: opt-in, enforced; overrides other card rules. Card only if the project\'s board is on (\`${fy} board\`), under your card (\`--parent\`), or on the owner's Yes (\`--approval <ask>\`). Public=the owner's asks ("everything I asked?"): top-level, never \`--private\`; private=your helper cards. Cards (&F<n>) never ask: answers, tests, Done ride the card's ask on the agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a lane. Title+summary=what it's doing (sitrep). Each step: \`${fy} card show <id> --yaml\`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then \`${fy} card patch <id> --file f\`. \`${fy} card move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} card depend\`/\`block\`. Owner's bug: \`${fy} card reopen <id> --to <lane> --ask "<words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon
@@ -507,7 +507,7 @@ export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   [
     `Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (\`${fy} send <lead-callsign> "<message>"\`) only for a result, a blocker or a decision it must make. Label every send: \`--kind blocker\` (stuck until answered; at once), \`--kind action\` (default; to do; batched a minute), \`--kind fyi\` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.`,
-    `With a card: each step, \`${fy} task show <id> --yaml\`, rewrite its status (now/doneSoFar/next, PR links) and howToTest, then \`${fy} task patch <id> --file f\`; \`${fy} task note\` adds history. Link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's card? \`${fy} task claim <id>\`, don't ask. No card? Make none.`,
+    `With a card: each step, \`${fy} card show <id> --yaml\`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then \`${fy} card patch <id> --file f\`; \`${fy} card note\` adds history. Link your PR \`${fy} card link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's card? \`${fy} card claim <id>\`, don't ask. No card? Make none.`,
   ].join('\n');
 
 /** What a lead is told after the base instruction: the notify rule, then the board rules. */

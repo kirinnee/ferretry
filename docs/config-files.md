@@ -913,7 +913,12 @@ so it is **never held**.
 `harness-claude-code.yaml` also takes `channels` (unset by default): whether a Claude ferret gets Ferretry's message
 channel (the tools server loaded as a development channel). Unset, it follows each ferret's login (**on** for a `claude_max`
 login, **off** for every other type or an unreadable one); `true` or `false` wins for every login. Read at each launch;
-not a loosening, so never held ([launch-settings.md](launch-settings.md#the-claude-channel)). Not reached yet, each a declared GAP:
+not a loosening, so never held ([launch-settings.md](launch-settings.md#the-claude-channel)).
+
+`harness-claude-code.yaml` also takes `dangerousRmWaiver: true` (default `false`): with it AND
+bypass mode (`permissionMode: skip`) a launch sets `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`, which waives Claude's
+dangerous-`rm` guard. It is a loosening, so an agent's edit turning it on is **held** for the owner like a looser permission
+mode (docs/harness-dialogs.md). Not reached yet, each a declared GAP:
 
 - `browsers.yaml` (the browser mode, proxy and ports): a new or re-aimed proxy is not held yet; before 5.0 it was.
 - `usage.yaml` (the time zone and the public feed): a time-zone change is not held yet; before 5.0 it was.

@@ -123,7 +123,7 @@ export async function runtimeLink(deps: AccountCommandDeps, invocation: VerbInvo
   const found = scan.harnesses.find(candidate => candidate.harness === harness);
   if (found === undefined || !found.installed) {
     throw new AccountCommandError(
-      `${HARNESS_LABEL[harness]} is not installed on ${scan.machine}. Install it with \`${bin} onboard\`, then link it.`,
+      `${HARNESS_LABEL[harness]} is not installed on ${scan.machine}. Install it with \`${bin} machine install ${harness}\`, then link it.`,
     );
   }
   for (const duplicate of scan.duplicates) {

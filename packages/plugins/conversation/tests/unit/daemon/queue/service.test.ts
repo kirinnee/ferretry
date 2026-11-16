@@ -2,7 +2,8 @@ import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { defaultQueueCoalesceSettings } from '../../../../daemon/queue/lib/settings.ts';
-import { type QueueEvent } from '../../../../daemon/queue/lib/model.ts';
+import { foldQueue, type QueueEvent } from '../../../../daemon/queue/lib/model.ts';
+import type { QueuedMessage } from '../../../../daemon/seams/protocol.ts';
 import { QueueRefused, SessionQueueService } from '../../../../daemon/queue/lib/service.ts';
 import { type SessionQueueStore } from '../../../../daemon/queue/lib/ports.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
@@ -13,8 +14,8 @@ const ID = parseSessionId('session-1');
 class MemoryQueueStore implements SessionQueueStore {
   readonly logs = new Map<string, QueueEvent[]>();
 
-  async read(id: SessionId): Promise<readonly QueueEvent[]> {
-    return [...(this.logs.get(id) ?? [])];
+  async messages(id: SessionId): Promise<readonly QueuedMessage[]> {
+    return foldQueue(this.logs.get(id) ?? []);
   }
 
   async append(id: SessionId, event: QueueEvent): Promise<void> {

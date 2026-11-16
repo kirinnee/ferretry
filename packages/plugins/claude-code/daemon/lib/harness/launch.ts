@@ -1,14 +1,21 @@
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
-import { type HarnessConfig, type HooksItem, launchFlagsKept, type SettingsItem } from '../../../contract/index.ts';
-import { seededCommand } from './api-key-seed.ts';
 import {
   CHANNEL_AGENT_INSTRUCTION,
   CLAUDE_CHANNELS_FLAG,
   channelToolsServer,
-  FERRETRY_MCP_SERVER,
   claudeChannelsFor,
+  FERRETRY_MCP_SERVER,
 } from '@ferretry/plugin-runtimes/contract';
-import { CLAUDE_HOME_ENV, fixedLayer } from './fixed-layer.ts';
+import { type HarnessConfig, type HooksItem, launchFlagsKept, type SettingsItem } from '../../../contract/index.ts';
+import { seededCommand } from './api-key-seed.ts';
+import {
+  CLAUDE_HOME_ENV,
+  CLAUDE_PROMPT_ENV,
+  CLAUDE_RM_WAIVER_ENV,
+  CLAUDE_UNSET_ENV,
+  fixedLayer,
+  rmWaiverApplies,
+} from './fixed-layer.ts';
 import { deepMergeSettings } from './settings.ts';
 import { startupModelArguments } from './startup.ts';
 
@@ -142,6 +149,8 @@ export interface CommandInputs {
   readonly mode?: 'interactive' | 'auto' | undefined;
   /** `HarnessConfig.questionTool`: the opt-in that gives an interactive ferret its question tool back. */
   readonly questionTool: HarnessConfig['questionTool'];
+  /** `HarnessConfig.dangerousRmWaiver`: with bypass mode, the one way the full dangerous-rm waiver is set. */
+  readonly dangerousRmWaiver?: HarnessConfig['dangerousRmWaiver'] | undefined;
   /** The conversation id: assigned at a start (Claude takes `--session-id`), named at a resume. */
   readonly conversation: { readonly kind: 'new' | 'resume'; readonly id: string };
   /** The absolute folders Ferrets lets this ferret read without asking (`LaunchSpec.readable`). */
@@ -169,8 +178,13 @@ export function readAllowArguments(folders: readonly string[]): readonly string[
  * before anything risky) or `bypassPermissions`.
  */
 export function launchCommand(inputs: CommandInputs): readonly string[] {
-  const fixed = Object.entries(CLAUDE_HOME_ENV).map(([name, value]) => `${name}=${value}`);
-  return ['env', `CLAUDE_CONFIG_DIR=${inputs.home}`, ...fixed, ...seededCommand(claudeCommand(inputs))];
+  const waiver = rmWaiverApplies(inputs.dangerousRmWaiver ?? false, inputs.permissionMode) ? CLAUDE_RM_WAIVER_ENV : {};
+  const fixed = Object.entries({ ...CLAUDE_HOME_ENV, ...CLAUDE_PROMPT_ENV, ...waiver }).map(
+    ([name, value]) => `${name}=${value}`,
+  );
+  // `-u` first: `env` takes its options before the assignments.
+  const unset = CLAUDE_UNSET_ENV.flatMap(name => ['-u', name]);
+  return ['env', ...unset, `CLAUDE_CONFIG_DIR=${inputs.home}`, ...fixed, ...seededCommand(claudeCommand(inputs))];
 }
 
 /** Claude itself and its flags: what the seed `exec`s. */
