@@ -1,6 +1,5 @@
 /** One inventory of pending app halves and the precise source exclusions their unfinished ports need. */
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readPendingMerged } from './pending-files.ts';
 
 export interface PendingAppPort {
   readonly plugin: string;
@@ -20,9 +19,9 @@ export interface PendingApps {
 }
 
 export function readPendingApps(root: string): PendingApps {
-  const file = join(root, 'ports-pending.json');
-  if (!existsSync(file)) return { named: new Map(), halves: new Set(), exclusions: [] };
-  const value = JSON.parse(readFileSync(file, 'utf8')) as {
+  const text = readPendingMerged(root);
+  if (text === undefined) return { named: new Map(), halves: new Set(), exclusions: [] };
+  const value = JSON.parse(text) as {
     format?: unknown;
     pendingHalves?: unknown;
     pendingAppPorts?: unknown;
