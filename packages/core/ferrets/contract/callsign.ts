@@ -1,14 +1,12 @@
 /**
- * How a ferret's name is shown to a reader: the display casing of a callsign, from Ferrets' app half.
+ * How a ferret's name is shown to a reader: the ONE display casing of a callsign, exported so no plugin copies it.
  *
- * GAP(ferrets): Ferrets' `displayCallsign` lives in its app half (`app/lib/callsign.ts`) and neither its contract nor
- * `@ferretry/app` exports it, so this is the one copy Conversation needs; delete it once Ferrets' contract exports it.
- *
- * A callsign is stored, searched and routed in its RAW lowercase form and is only Title-cased on the way to a reader's
- * eyes: anything that writes one back into a filter, a URL or a command has broken the contract.
+ * THE CASING CONTRACT lives here. A callsign is stored, searched, routed and commanded in its RAW lowercase form; it is
+ * only Title-cased on the way to a reader's eyes. Anything that writes one back into a filter, a URL or a command has
+ * broken the contract.
  */
 
-/** The prefixes a system ferret may carry (the Warden, Learning, Pack mode). */
+/** The prefixes a system ferret may carry (the Warden, Learning, Pack mode). One per kind of system ferret. */
 const SYSTEM_CALLSIGN_PREFIXES = ['warden', 'learning', 'pack'] as const;
 
 /** Any system callsign, in either case. */
@@ -20,6 +18,9 @@ const sequenceOf = (callsign: string | undefined): number | undefined => {
   const sequence = Number.parseInt(match[2], 16);
   return sequence === 0 ? undefined : sequence;
 };
+
+/** Whether Ferretry named this ferret itself (`warden-00002a`): an identifier, not a first name. */
+const isSystemCallsign = (callsign: string | undefined): boolean => sequenceOf(callsign) !== undefined;
 
 /** `warden-00002a` → `warden-00002A`: the prefix as stored, the hex digits uppercase. Any other name unchanged. */
 const displaySystemCallsign = (callsign: string): string => {
@@ -36,7 +37,7 @@ const displaySystemCallsign = (callsign: string): string => {
 export const displayCallsign = (raw: string | null | undefined): string => {
   const slug = (raw ?? '').trim();
   if (slug === '') return '';
-  if (sequenceOf(slug) !== undefined) return displaySystemCallsign(slug);
+  if (isSystemCallsign(slug)) return displaySystemCallsign(slug);
   return slug
     .split('-')
     .map(segment => (segment === '' ? segment : `${segment[0]?.toUpperCase() ?? ''}${segment.slice(1)}`))

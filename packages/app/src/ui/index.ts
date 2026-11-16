@@ -13,6 +13,7 @@ export * from './command-bar.tsx';
 export * from './command-bar-model.ts';
 export * from './context-menu.tsx';
 export * from './fast-switch.tsx';
+export * from './form-parts.tsx';
 export * from './fullscreen-toggle.tsx';
 export * from './palette-ranking.ts';
 export * from './palette-shortcut.ts';

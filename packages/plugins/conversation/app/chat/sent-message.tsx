@@ -12,7 +12,7 @@
  */
 
 import { useState } from 'react';
-import { displayCallsign } from '../transcript/callsign.ts';
+import { displayCallsign } from '@ferretry/core-ferrets/contract';
 import { clockOfInstant } from '@ferretry/app';
 import type { SentMessage, SentState } from './peer-delivery.ts';
 import type { SendReceiptKind } from './send-receipt-model.ts';

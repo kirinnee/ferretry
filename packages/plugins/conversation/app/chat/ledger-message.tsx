@@ -37,7 +37,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { browserClipboardWriter, type ClipboardWriter } from '@ferretry/app/ui';
 import { useInputModality } from '@ferretry/app/ui';
 import { UPLOAD_DEFERRED_COPY } from '../composer/attachments.ts';
-import { displayCallsign } from '../transcript/callsign.ts';
+import { displayCallsign } from '@ferretry/core-ferrets/contract';
 import { type LedgerBlockPlacement, ledgerPlacementCopy } from './ledger-placement.ts';
 import { clockOfInstant } from '@ferretry/app';
 import { chipFromSender, ferretryChip, stripFraming } from './message-framing.ts';

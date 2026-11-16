@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { DaemonCallError, RelaySessionError } from '@ferretry/app';
 import { z } from 'zod';
-import { guarded, linkRefusalSentence } from '../../../../app/links/link-ui.tsx';
+import { guarded, linkRefusalSentence } from '../../../../app/links/link-refusal.ts';
 
 /** The sentences a failed links read or keep shows, as today's change refusal worded them. */
 

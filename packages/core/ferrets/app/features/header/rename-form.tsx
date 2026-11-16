@@ -8,7 +8,7 @@
 import { type FormEvent, useId, useRef, useState } from 'react';
 import type { FerretSummary } from '../../../contract/index.ts';
 import { shortFerretId } from '../../lib/callsign.ts';
-import { FormFailure, FormField, FormFoot } from './form-parts.tsx';
+import { FormFailure, FormField, FormFoot } from '../../ui.ts';
 import { renameErrorsFor, renamePatch } from './rename-model.ts';
 import type { FerretActionFormHost } from './registry.ts';
 

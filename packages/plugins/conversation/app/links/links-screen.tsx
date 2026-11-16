@@ -12,6 +12,7 @@
  */
 
 import { useOptionalRouter, useScreenHref } from '@ferretry/app';
+import { SetupNote } from '@ferretry/app/ui';
 import { type FerretSummary, FerretSummarySchema } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -20,7 +21,7 @@ import { useConversationClient, useConversationDaemon } from '../client.ts';
 import { ContinueConversation } from './continue-conversation.tsx';
 import { KeepConversations, runtimeSlotField, Segmented } from './conversation-picker.tsx';
 import { HistoryPage, readHistory, readHistoryEntry } from './history-page.tsx';
-import { guarded, LinkNote } from './link-ui.tsx';
+import { guarded } from './link-refusal.ts';
 
 export type LinksPart = 'continue' | 'keep' | 'history';
 
@@ -80,9 +81,9 @@ export function LinksScreen({ initial = 'continue' }: { readonly initial?: Links
 
   if (daemon === undefined || runtimeField === undefined)
     return (
-      <LinkNote tone="warn" name="links-no-daemon">
+      <SetupNote tone="warn" name="links-no-daemon">
         <span>This screen needs a daemon to read conversations from.</span>
-      </LinkNote>
+      </SetupNote>
     );
 
   return (
