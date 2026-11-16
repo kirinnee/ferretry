@@ -173,18 +173,24 @@ describe('fy daemon', () => {
   it('V-0243 fy daemon status --json prints one machine-readable object, with the same exit codes', async () => {
     const up = await run(['daemon', 'status', '--json']);
     expect(up.code).toBe(0);
-    expect(JSON.parse(up.out)).toEqual({
+    // 5.0's keys, kept; today's supervisor keys join them (daemon-status-supervisor.test.ts pins those). This world has no
+    // daemon-control adapters, so the supervisor is named unread rather than guessed.
+    expect(JSON.parse(up.out)).toMatchObject({
       running: true,
       baseUrl: 'http://127.0.0.1:7431',
       version: '5.0.0',
       protocol: 1,
+      reachability: 'serving',
+      orphan: false,
+      supervisor: { manager: 'unknown', state: 'not-reported' },
     });
     const down = await run(['daemon', 'status', '--json'], 'down');
     expect(down.code).toBe(1);
-    expect(JSON.parse(down.out)).toEqual({
+    expect(JSON.parse(down.out)).toMatchObject({
       running: false,
       baseUrl: 'http://127.0.0.1:7431',
       why: 'connection refused',
+      reachability: 'stopped',
     });
   });
 });

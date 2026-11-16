@@ -326,3 +326,29 @@ describe('where a ferret’s agenda file lives', () => {
     should(() => repository.file('../escape')).throw('not a valid agenda session id: ../escape');
   });
 });
+
+describe('the board stamp a conditional read is answered from', () => {
+  it('should be `absent` for a board with no file, and move with every rewrite, without reading the board', async () => {
+    const { repository, files } = await createRepository();
+    should(await repository.stamp('session-1')).equal('absent');
+
+    const raised = await service(repository).raise('session-1', request, {
+      kind: 'agent',
+      sessionId: 'session-1',
+      name: null,
+    });
+    should(raised.ok).be.true();
+    const first = await repository.stamp('session-1');
+    should(first).not.equal('absent');
+    should(await repository.stamp('session-1')).equal(first);
+
+    // A second change is a new file identity, so a poll holding `first` is answered in full.
+    await files.writeAtomic('session-1', 'agenda.json', `${await files.read('session-1', 'agenda.json')}\n `);
+    should(await repository.stamp('session-1')).not.equal(first);
+  });
+
+  it('should refuse a session id that could name a path outside the ledger tree', async () => {
+    const { repository } = await createRepository();
+    await should(repository.stamp('../escape')).be.rejected();
+  });
+});
