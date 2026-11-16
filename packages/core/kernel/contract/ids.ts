@@ -9,8 +9,8 @@ export const PluginIdSchema = z
   .max(40)
   .transform(value => value as PluginId);
 
-/** The five core pieces (§2.2). Only these may provide a kernel-bound port or offer a security-path decide hook. */
-export const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets'] as const;
+/** The core pieces (§2.2): the five and the Mailbox. Only these may provide a kernel-bound port or offer a security-path decide hook. */
+export const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets', 'mailbox'] as const;
 export type CoreId = (typeof CORE_IDS)[number];
 
 /**

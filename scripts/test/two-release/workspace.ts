@@ -22,6 +22,7 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { CORE_IDS, type CoreId } from '../../../packages/core/kernel/contract/ids.ts';
 
 /** The repository root. */
 export const REPO = resolve(import.meta.dir, '..', '..', '..');
@@ -56,12 +57,14 @@ export type VariantName = keyof typeof VARIANTS;
 /** The release version the app and fy are built as; a daemon says its own. */
 export const APP_VERSION = '5.0.0';
 
-const CORE_SHIMS = ['gate', 'asks', 'vault', 'ferrets'] as const;
+// Every core piece but the kernel (which is shimmed apart), so the next core piece cannot be left out of the fixture.
+const CORE_SHIMS = CORE_IDS.filter((id): id is Exclude<CoreId, 'kernel'> => id !== 'kernel');
 const CORE_DIRS: Readonly<Record<string, string>> = {
   gate: 'packages/core/gate',
   asks: 'packages/core/asks',
   vault: 'packages/core/vault',
   ferrets: 'packages/core/ferrets',
+  mailbox: 'packages/core/mailbox',
   access: 'packages/plugins/access',
 };
 
@@ -378,6 +381,7 @@ export function writeWorkspace(root: string, variant: Variant): void {
         asks: ['app'],
         vault: ['app'],
         ferrets: ['app'],
+        mailbox: ['app'],
         access: ['app'],
         connections: ['app'],
       },
