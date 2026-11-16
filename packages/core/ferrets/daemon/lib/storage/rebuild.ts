@@ -29,6 +29,8 @@ interface JournalSource {
     readonly lineAtOffset: number;
   };
   readonly fingerprint: JournalFingerprint;
+  /** The journal file's version etag when it was read whole and undamaged: see {@link IndexedSession.journalVersion}. */
+  readonly version?: string;
 }
 
 export interface SessionSource {
@@ -102,6 +104,7 @@ export function planIndexRebuild(sources: readonly SessionSource[]): RebuildPlan
       lastSequence: scan?.lastSequence ?? 0,
       journalLine: scan?.lineAtOffset ?? 1,
       journal: source.journal?.fingerprint ?? null,
+      journalVersion: source.journal?.version,
     });
   }
 

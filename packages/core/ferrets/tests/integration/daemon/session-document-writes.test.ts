@@ -58,8 +58,17 @@ async function indexed(events: number, wrapState?: (port: StatePort) => StatePor
   await world.storage.writeConfig(ID, sessionConfig(ID));
   await world.storage.writeState(ID, sessionState(ID));
   for (let n = 0; n < events; n++) await world.storage.append(ID, 'note', { n });
+  // An append records no journal version; the first full read of the journal does.
+  await world.storage.syncSession(ID);
   calls.length = 0;
   return { ...world, calls };
+}
+
+/** The row as a writer that does not know the journal's version leaves it: same fields, the version unknown. */
+function forgetJournalVersion(storage: DaemonStorage): void {
+  const row = storage.findSession(ID);
+  if (row?.journal == null) throw new Error('the session should be indexed with a journal');
+  (storage as unknown as { index: SessionIndex }).index.refreshSession({ ...row, journalVersion: undefined });
 }
 
 describe('a config or state write to a session whose journal is indexed', () => {
@@ -87,7 +96,7 @@ describe('a config or state write to a session whose journal is indexed', () => 
     should(calls.at(-1)).equal('replaceSession');
   });
 
-  it('should keep refreshing across appends: an append leaves the journal the index describes', async () => {
+  it('should re-index once after an append (it records no journal version), then refresh again', async () => {
     // Arrange
     const { storage, calls } = await indexed(3);
     await storage.append(ID, 'note', { n: 3 });
@@ -95,9 +104,10 @@ describe('a config or state write to a session whose journal is indexed', () => 
 
     // Act
     await storage.writeState(ID, sessionState(ID, { status: 'thinking' }));
+    await storage.writeState(ID, sessionState(ID, { status: 'waiting' }));
 
-    // Assert
-    should(calls).eql(['refreshSession']);
+    // Assert — the first write reads the journal in full and records its version; the next one needs no read.
+    should(calls).eql(['replaceSession', 'refreshSession']);
     should(storage.findSession(ID)?.lastSequence).equal(4);
   });
 
@@ -117,12 +127,17 @@ describe('a config or state write to a session whose journal is indexed', () => 
   });
 
   it('should re-index the session in full when its indexed row was changed under the storage', async () => {
-    // Arrange — the file is the one the storage recorded, but the row now carries another fingerprint.
+    // Arrange — the file is the one the storage recorded, but the row was rewritten by a writer that did not know the
+    // journal's version (so it records none) and carries another fingerprint.
     const { storage, calls } = await indexed(3);
     const row = storage.findSession(ID);
     if (row?.journal == null) throw new Error('the session should be indexed with a journal');
     const index = (storage as unknown as { index: SessionIndex }).index;
-    index.refreshSession({ ...row, journal: { ...row.journal, size: row.journal.size + 5 } });
+    index.refreshSession({
+      ...row,
+      journal: { ...row.journal, size: row.journal.size + 5 },
+      journalVersion: undefined,
+    });
     calls.length = 0;
 
     // Act
@@ -246,8 +261,10 @@ describe('a journal that cannot be taken as the one the index describes', () => 
       ['replay', (s: Awaited<ReturnType<typeof halfRead>>['storage']) => s.replay(ID)],
     ] as const) {
       it(`should not let a ${path} that hit EIO mid-read leave a proof that the row is whole`, async () => {
-        // Arrange — the path re-indexes the session from two events and a damaged line, then the fault clears.
+        // Arrange — the path re-indexes the session from two events and a damaged line, then the fault clears. A
+        // reconcile reads only a journal whose version its row does not vouch for, so the row forgets it first.
         const { storage, calls, fault } = await halfRead();
+        if (path === 'reconcile') forgetJournalVersion(storage);
         fault.on = true;
         await run(storage);
         should(storage.findSession(ID)?.lastSequence).equal(2);
