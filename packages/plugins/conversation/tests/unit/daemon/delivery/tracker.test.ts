@@ -2,6 +2,7 @@ import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
 import { turnFileInstruction } from '@ferretry/core-mailbox/contract';
 import should from 'should';
+import { CHANNEL_WRITE_BUDGET_MS } from '../../../../contract/wire-channel.ts';
 import { type ClockPort, type SerialExecutor } from '../../../../daemon/seams/ports.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
 import { type SendRecord } from '../../../../daemon/seams/ledger-types.ts';
@@ -131,6 +132,23 @@ class World {
   crashOnCrossOff: number | undefined;
   private crossOffs = 0;
   reading: SendEvidenceReading = { readable: true, inputs: [] };
+  /** Readings handed out first, one per read, before `reading` answers again (the transcript changing between two looks). */
+  readings: SendEvidenceReading[] = [];
+  /** The sends the MCP server said it forwarded through the Claude channel, and the ones the tracker typed instead. */
+  /** Send ids the MCP server CLAIMED, with the instant of the claim (epoch ms). */
+  readonly channelClaims = new Map<string, number>();
+  /** Runs at the start of every transcript read (a claim granted while the tracker reads, say). */
+  onRead: (() => void) | undefined;
+  /** When this daemon booted, as an offset in ms from the epoch the tests use (before every send by default). */
+  channelBootedAt = -60_000;
+  /** Whether the channel was marked broken (a claimed message showed no receipt). */
+  channelBroken = false;
+  /** The sends the transcript showed Claude receiving (told to the channel). */
+  readonly channelReceipts: string[] = [];
+  /** When set, the fall back to typing throws this (a failed bind, a refused question, a crash). */
+  fallBackFails: Error | undefined;
+  readonly fellBack: string[] = [];
+  readonly warned: Array<{ message: string; fields: Readonly<Record<string, unknown>> }> = [];
   readFails = false;
   readonly sinces: string[] = [];
   target: SendTarget | undefined = { id: ID, status: 'running', mode: 'auto', turn: 4 };
@@ -161,6 +179,7 @@ class World {
       runExclusive: async work => await work(),
     };
     const clock: ClockPort = { now: () => new Date(this.nowMs).toISOString() as Instant };
+    const booted = (): number => T0 + this.channelBootedAt;
     this.tracker = new SendTracker(
       {
         ledger: {
@@ -185,8 +204,9 @@ class World {
         evidence: {
           read: async (_id, since) => {
             this.sinces.push(since);
+            this.onRead?.();
             if (this.readFails) throw new Error('transcript gone');
-            return this.reading;
+            return this.readings.shift() ?? this.reading;
           },
         },
         terminal: {
@@ -199,12 +219,27 @@ class World {
             return this.inPane === false ? undefined : this.inPane;
           },
         },
+        warn: (message, fields) => void this.warned.push({ message, fields }),
         repository: {
           read: async () => {
             if (this.targetFails) throw new Error('session file unreadable');
             return this.target;
           },
           journal: async (_id, event, data) => void this.journal.push({ event, data }),
+        },
+        channel: {
+          claimedAt: (_id, sendId) => this.channelClaims.get(sendId),
+          writeBudgetMs: CHANNEL_WRITE_BUDGET_MS,
+          get bootedAt() {
+            return booted();
+          },
+          received: (_id, sendId) => void this.channelReceipts.push(sendId),
+          broken: () => this.channelBroken,
+          fallBackToTyping: async (_id, entry) => {
+            if (this.fallBackFails !== undefined) throw this.fallBackFails;
+            this.fellBack.push(entry.sendId);
+            this.records.set(entry.sendId, { ...entry, path: 'direct', attempt: 1, attemptAt: clock.now() });
+          },
         },
         attempts: {
           reattempt: async (_id, sendId) => {
@@ -2118,5 +2153,378 @@ describe("typing a person's send that nothing was typed for yet", () => {
 
     should(world.only).containEql({ fate: 'timed_out', unaccountedReason: 'ferret_ended' });
     should(world.retyped).be.empty();
+  });
+});
+
+/**
+ * A send handed to a Claude ferret's MCP channel is never typed first; only the transcript says it arrived. The harness's
+ * own RECEIPT (its `enqueue` line, written the instant a channel message arrives even mid-turn) is what stops the clock.
+ * The MCP server's CLAIM is not a receipt: a send with no receipt within the window of its claim (or of the send, when
+ * never claimed) falls back to typing — once, after one more look at the transcript — and a claimed one marks the channel
+ * broken (the port's business; here only that the tracker asks for the fall back).
+ */
+describe('a send handed to the Claude channel', () => {
+  const { channelReceiptMs, channelUnreadableMs, busyExtensionMs, untypedLookMs } = defaultSendTrackerSettings;
+  const channelSend = (overrides: Partial<SendRecord> = {}) =>
+    record({ path: 'channel', senderKind: 'agent', from: SENDER, ...overrides });
+  const WRAPPED = '<channel source="ferretry" send_id="send-1">\nship it now please\n</channel>';
+  /** The busy form: the harness drains the queued channel message as an attachment at the next tool boundary. */
+  const channelDrained = (ms: number) => ({
+    type: 'attachment',
+    uuid: `q-${ms}`,
+    timestamp: at(ms),
+    attachment: {
+      type: 'queued_command',
+      prompt: WRAPPED,
+      commandMode: 'prompt',
+      origin: { kind: 'channel', server: 'ferretry' },
+    },
+  });
+
+  it('is proven delivered by the user entry the channel message becomes, with nothing typed', async () => {
+    const world = new World(channelSend());
+    world.evidence(new ClaudeObservedInputObserver(), [
+      claude.enqueue(WRAPPED, 20),
+      { ...claude.user(WRAPPED, 40, 'u-1'), isMeta: true, origin: { kind: 'channel', server: 'ferretry' } },
+    ]);
+
+    await world.checkAt(2_000);
+
+    should(world.only).match({ fate: 'delivered', evidence: { proof: 'normal-user-record' } });
+    should(world.fellBack).be.empty();
+    should(world.retyped).be.empty();
+    should(world.channelReceipts).eql(['send-1']);
+  });
+
+  describe('two sends with IDENTICAL text', () => {
+    const WRAPPED_2 = '<channel source="ferretry" send_id="send-2">\nship it now please\n</channel>';
+    const twin = () => [channelSend(), channelSend({ sendId: 'send-2' })] as const;
+    const byId = (world: World, sendId: string) => world.records.get(sendId);
+
+    it('never share one receipt: only s1 enqueued -> s1 is received, s2 falls back and is typed once', async () => {
+      const world = new World(...twin());
+      world.evidence(new ClaudeObservedInputObserver(), [claude.enqueue(WRAPPED, 20)]);
+
+      await world.checkAt(2_000);
+      should(byId(world, 'send-1')).containEql({ fate: 'queued', path: 'channel' });
+      should(byId(world, 'send-2')).containEql({ fate: 'accepted', path: 'channel' });
+
+      await world.checkAt(channelReceiptMs);
+      should(world.fellBack).eql(['send-2']);
+      should(byId(world, 'send-1')).containEql({ fate: 'queued', path: 'channel' });
+      should(world.channelReceipts).not.containEql('send-2');
+    });
+
+    it('each is received by its OWN enqueue line when both were enqueued: neither is typed', async () => {
+      const world = new World(...twin());
+      world.evidence(new ClaudeObservedInputObserver(), [claude.enqueue(WRAPPED, 20), claude.enqueue(WRAPPED_2, 30)]);
+
+      await world.checkAt(2_000);
+      await world.checkAt(channelReceiptMs + 1_000);
+
+      should(byId(world, 'send-1')).containEql({ fate: 'queued', path: 'channel' });
+      should(byId(world, 'send-2')).containEql({ fate: 'queued', path: 'channel' });
+      should(world.fellBack).be.empty();
+      should(world.channelReceipts).containEql('send-1').and.containEql('send-2');
+    });
+
+    it('are delivered only by their own user entry: s2 does not take s1’s delivery', async () => {
+      const world = new World(...twin());
+      world.evidence(new ClaudeObservedInputObserver(), [
+        claude.enqueue(WRAPPED, 20),
+        { ...claude.user(WRAPPED, 40, 'u-1'), isMeta: true, origin: { kind: 'channel', server: 'ferretry' } },
+      ]);
+
+      await world.checkAt(2_000);
+
+      should(byId(world, 'send-1')).containEql({ fate: 'delivered' });
+      should(byId(world, 'send-2')).containEql({ fate: 'accepted' });
+      await world.checkAt(channelReceiptMs);
+      should(world.fellBack).eql(['send-2']);
+    });
+
+    it('a typed send with the same text never takes a channel message’s proof for its own', async () => {
+      const world = new World(record({ sendId: 'send-9', acceptedAt: at(0) }));
+      world.evidence(new ClaudeObservedInputObserver(), [
+        { ...claude.user(WRAPPED, 40, 'u-1'), isMeta: true, origin: { kind: 'channel', server: 'ferretry' } },
+      ]);
+
+      await world.checkAt(2_000);
+
+      should(byId(world, 'send-9')).containEql({ fate: 'accepted' });
+    });
+  });
+
+  it('counts the enqueue line as the receipt — queued, never typed — tells the channel, and waits for the delivery', async () => {
+    const world = new World(channelSend());
+    world.evidence(new ClaudeObservedInputObserver(), [claude.enqueue(WRAPPED, 20)]);
+
+    await world.checkAt(2_000);
+    await world.checkAt(channelReceiptMs + 1_000);
+
+    should(world.only).containEql({ fate: 'queued', queueProof: 'transcript' });
+    should(world.fellBack).be.empty();
+    should(world.channelReceipts).eql(['send-1', 'send-1']);
+    should(world.scheduled.at(-1)?.delayMs).equal(busyExtensionMs);
+    // the tool boundary comes and the queued command is drained: delivered
+    world.evidence(new ClaudeObservedInputObserver(), [
+      claude.enqueue(WRAPPED, 20),
+      claude.remove(WRAPPED, 7_000),
+      channelDrained(7_000),
+    ]);
+    await world.checkAt(8_000);
+    should(world.only).containEql({ fate: 'delivered' });
+  });
+
+  it('looks again at the receipt deadline instead of judging a send that is only seconds old', async () => {
+    const world = new World(channelSend());
+
+    await world.checkAt(2_000);
+
+    should(world.only.fate).equal('accepted');
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(channelReceiptMs - 2_000);
+  });
+
+  it('types it ONCE when the deadline passes with no receipt, and looks again within a second', async () => {
+    const world = new World(channelSend());
+
+    await world.checkAt(channelReceiptMs);
+
+    should(world.fellBack).eql(['send-1']);
+    should(world.only.path).equal('direct');
+    should(world.scheduled.at(-1)?.delayMs).equal(untypedLookMs);
+    // the row is a typed send now: it is never handed to the channel path again
+    await world.checkAt(channelReceiptMs + 100);
+    should(world.fellBack).eql(['send-1']);
+  });
+
+  it('a server CLAIM is not a receipt: a claimed send with no enqueue line waits for its own window from the claim, then falls back', async () => {
+    const world = new World(channelSend());
+    world.channelClaims.set('send-1', Date.parse(at(4_000)));
+
+    // The send's own window is over, but the claim is only 6 s old: the push may still be landing.
+    await world.checkAt(channelReceiptMs);
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(4_000 + CHANNEL_WRITE_BUDGET_MS);
+
+    await world.checkAt(4_000 + channelReceiptMs);
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(CHANNEL_WRITE_BUDGET_MS);
+
+    await world.checkAt(4_000 + CHANNEL_WRITE_BUDGET_MS + channelReceiptMs);
+    should(world.fellBack).eql(['send-1']);
+    should(world.channelReceipts).be.empty();
+  });
+
+  it('waits out a late GRANT: the server may still write it for the write budget after the grant, so nothing is typed before grant + budget + window', async () => {
+    const world = new World(channelSend());
+    world.channelClaims.set('send-1', Date.parse(at(9_000)));
+
+    // The receipt window of the claim is over only at 9 s + 2 s budget + 10 s window; one ms short types nothing.
+    await world.checkAt(9_000 + CHANNEL_WRITE_BUDGET_MS + channelReceiptMs - 1);
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(1);
+
+    await world.checkAt(9_000 + CHANNEL_WRITE_BUDGET_MS + channelReceiptMs);
+    should(world.fellBack).eql(['send-1']);
+  });
+
+  it('does not type a send whose claim was granted WHILE the final transcript was being read: it waits for that grant’s own deadline', async () => {
+    const world = new World(channelSend());
+    world.onRead = () => {
+      world.onRead = undefined;
+      world.channelClaims.set('send-1', Date.parse(at(channelReceiptMs)));
+    };
+
+    await world.checkAt(channelReceiptMs);
+
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(CHANNEL_WRITE_BUDGET_MS + channelReceiptMs);
+
+    await world.checkAt(channelReceiptMs + CHANNEL_WRITE_BUDGET_MS + channelReceiptMs);
+    should(world.fellBack).eql(['send-1']);
+  });
+
+  it('a send accepted BEFORE this daemon booted has an unknown claim state: it waits write budget + window from boot, re-reads, and only then types', async () => {
+    const world = new World(channelSend());
+    world.channelBootedAt = 30_000;
+    world.channelBroken = true;
+
+    // Its own window is long over, but a grant by the previous process could still be written: nothing before boot + budget + window.
+    await world.checkAt(30_000 + CHANNEL_WRITE_BUDGET_MS + channelReceiptMs - 1);
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(1);
+
+    const reads = world.sinces.length;
+    await world.checkAt(30_000 + CHANNEL_WRITE_BUDGET_MS + channelReceiptMs);
+    should(world.fellBack).eql(['send-1']);
+    // the transcript was read again at that instant (the guard right before the only typing)
+    should(world.sinces.length).be.greaterThan(reads);
+  });
+
+  it('does not wait out the window for a send the server never claimed once the channel is marked broken', async () => {
+    const world = new World(channelSend());
+    world.channelBroken = true;
+
+    await world.checkAt(2_000);
+
+    should(world.fellBack).eql(['send-1']);
+  });
+
+  it('still waits out the window for a CLAIMED send on a broken channel: the claim might be landing', async () => {
+    const world = new World(channelSend());
+    world.channelBroken = true;
+    world.channelClaims.set('send-1', Date.parse(at(1_500)));
+
+    await world.checkAt(2_000);
+
+    should(world.fellBack).be.empty();
+  });
+
+  it('keeps the send and SAYS so, with ids, when the fall back fails: the row is still a channel row and the next look retries', async () => {
+    const world = new World(channelSend());
+    world.fallBackFails = new Error('bind failed');
+
+    await world.checkAt(channelReceiptMs);
+
+    should(world.fellBack).be.empty();
+    should(world.only.path).equal('channel');
+    should(world.warned).have.length(1);
+    should(world.warned[0]?.fields).eql({ ferret: ID, sendId: 'send-1', error: 'bind failed' });
+    should(world.scheduled.at(-1)?.delayMs).equal(untypedLookMs);
+    // the failure clears (the bind works again): the very next look types it, exactly once
+    world.fallBackFails = undefined;
+    await world.checkAt(channelReceiptMs + untypedLookMs);
+    should(world.fellBack).eql(['send-1']);
+    should(world.only.path).equal('direct');
+  });
+
+  it('says a failure that is not an Error as its text', async () => {
+    const world = new World(channelSend());
+    world.fallBackFails = 'plain failure' as unknown as Error;
+
+    await world.checkAt(channelReceiptMs);
+
+    should(world.warned[0]?.fields.error).equal('plain failure');
+  });
+
+  it('does NOT type when the enqueue line appears between the deadline and the typing: a slow receipt is a receipt', async () => {
+    const world = new World(channelSend());
+    // The first read (the look's own) shows nothing; the one-more look right before typing finds the enqueue line.
+    world.readings = [
+      { readable: true, inputs: [] },
+      { readable: true, inputs: observe(new ClaudeObservedInputObserver(), [claude.enqueue(WRAPPED, 4_900)]) },
+    ];
+
+    await world.checkAt(channelReceiptMs);
+
+    should(world.fellBack).be.empty();
+    should(world.only).containEql({ fate: 'queued', queueProof: 'transcript', path: 'channel' });
+    should(world.channelReceipts).eql(['send-1']);
+  });
+
+  it('does NOT type when the delivered user entry appears between the deadline and the typing', async () => {
+    const world = new World(channelSend());
+    world.readings = [
+      { readable: true, inputs: [] },
+      {
+        readable: true,
+        inputs: observe(new ClaudeObservedInputObserver(), [
+          { ...claude.user(WRAPPED, 4_950, 'late'), isMeta: true, origin: { kind: 'channel', server: 'ferretry' } },
+        ]),
+      },
+    ];
+
+    await world.checkAt(channelReceiptMs);
+
+    should(world.fellBack).be.empty();
+    should(world.only).containEql({ fate: 'delivered' });
+  });
+
+  it('never types on a guess: a transcript the last look cannot read waits, then says it is unconfirmed', async () => {
+    const world = new World(channelSend());
+    world.readings = [
+      { readable: true, inputs: [] },
+      { readable: false, inputs: [] },
+    ];
+
+    await world.checkAt(channelReceiptMs);
+    should(world.fellBack).be.empty();
+    should(world.only.fate).equal('accepted');
+
+    world.readings = [
+      { readable: true, inputs: [] },
+      { readable: false, unbound: true, inputs: [] },
+    ];
+    await world.checkAt(channelUnreadableMs);
+    should(world.only).containEql({ fate: 'unaccounted', unaccountedReason: 'transcript_unbound' });
+    should(world.fellBack).be.empty();
+
+    const other = new World(channelSend());
+    other.readings = [
+      { readable: true, inputs: [] },
+      { readable: false, inputs: [] },
+    ];
+    await other.checkAt(channelUnreadableMs);
+    should(other.only).containEql({ fate: 'unaccounted', unaccountedReason: 'transcript_unreadable' });
+  });
+
+  it('is said unconfirmed at the hold ceiling, whatever the transcript did or did not show', async () => {
+    const world = new World(channelSend({ fate: 'queued', queuedAt: at(20) }));
+
+    await world.checkAt(defaultSendTrackerSettings.holdLimitMs);
+
+    should(world.only).containEql({ fate: 'unaccounted', unaccountedReason: 'timeout' });
+  });
+});
+
+/**
+ * The owner's ruling (2026-11-15): the sender checks EVERY SECOND, and types only into a pane that is not compacting, is
+ * not parked on a dialog or consent prompt, and whose composer is empty. Each condition is the send service's own refusal
+ * (see service.test.ts); here the tracker's cadence is pinned — a withheld try is looked at again within a second and
+ * the send is typed on the first try after the condition clears.
+ */
+describe('the sender checks every second before it types', () => {
+  const { untypedLookMs } = defaultSendTrackerSettings;
+
+  it('looks again every second, not every five', () => {
+    should(untypedLookMs).equal(1_000);
+    should(defaultSendTrackerSettings.deferredNudgeMs).equal(1_000);
+  });
+
+  const holds: ReadonlyArray<readonly [string, SendRetypeWithholding]> = [
+    ['the pane is compacting its context (busy)', 'busy'],
+    ['the pane is parked on a dialog or consent prompt (not at a prompt)', 'busy'],
+  ];
+  for (const [name, reason] of holds) {
+    it(`does NOT type while ${name}, and types within a second of it clearing`, async () => {
+      const world = new World(record({ untyped: true, senderKind: 'agent', from: SENDER }));
+      world.withhold = reason;
+
+      await world.checkAt(untypedLookMs);
+      await world.checkAt(2 * untypedLookMs);
+      should(world.retyped).be.empty();
+      should(world.scheduled.at(-1)?.delayMs).equal(untypedLookMs);
+
+      world.withhold = undefined;
+      await world.checkAt(3 * untypedLookMs);
+      should(world.retyped).eql(['send-1']);
+    });
+  }
+
+  it('does NOT type while the composer holds text, and types within a second of it being empty', async () => {
+    const world = new World(record({ untyped: true }));
+    world.retypeFails = true; // the service refuses with the composer's draft; the tracker treats it as "not yet"
+
+    await world.checkAt(untypedLookMs);
+    await world.checkAt(2 * untypedLookMs);
+    should(world.retyped).be.empty();
+    should(world.only).containEql({ fate: 'accepted', untyped: true });
+    should(world.only.deadlineAt).equal(at(3 * untypedLookMs));
+
+    world.retypeFails = false;
+    await world.checkAt(3 * untypedLookMs);
+    should(world.retyped).eql(['send-1']);
   });
 });

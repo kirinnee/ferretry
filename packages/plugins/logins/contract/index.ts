@@ -131,6 +131,13 @@ export interface LoginLaunchStore {
    * it (never reading or copying it), so Codex signs in and renews through the one file. Absent for a Claude login.
    */
   readonly signInFile?: string;
+  /**
+   * A Claude login's organisation type as its own account file records it (`oauthAccount.organizationType`, e.g.
+   * `claude_max`, `claude_team`, `claude_enterprise`): the one non-secret field Runtimes reads to decide whether the
+   * Claude channel is on by default. Absent when the file names none, cannot be read, or the login is not a Claude one.
+   * Nothing else of the file, and no token, is read or passed on.
+   */
+  readonly organizationType?: string;
 }
 export const LoginsPort = definePort<LoginsApi>('logins');
 

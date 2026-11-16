@@ -44,12 +44,16 @@ test('R-0036 GET /healthz is open to any caller, never stored, and a booted host
     for (const local of [true, false]) {
       const response = await outcome.host.dispatch(request('GET', '/healthz', { local }));
       expect(response.status).toBe(200);
+      expect(response.headers.has('retry-after')).toBe(false);
       expect(JSON.parse(response.body)).toEqual({
         status: 'ok',
         uptimeSeconds: expect.any(Number),
         pid: 4242,
         version: '5.0.0',
         protocol: PROTOCOL,
+        sessionProtocol: 'ferretry-relay/2',
+        boot: { phase: 'ready', step: 'jobs', stepElapsedSeconds: 0, elapsedSeconds: 0 },
+        eventLoop: { lagMs: 0, maxLagMs: 0, stalls: 0 },
       });
     }
   } finally {
@@ -58,18 +62,38 @@ test('R-0036 GET /healthz is open to any caller, never stored, and a booted host
   }
 });
 
-test('R-0036 GET /healthz answers 503 while the daemon is still starting, with the same body shape', async () => {
+test('R-0036 GET /healthz answers 503 while the daemon is still starting, with the same body shape and a retry-after, naming the step it is on and how the loop is doing', async () => {
+  const eventLoop = {
+    lagMs: 300,
+    maxLagMs: 900,
+    stalls: 2,
+    lastStall: {
+      at: '2026-11-06T09:00:01.000Z',
+      durationMs: 300,
+      during: [],
+      innermost: [],
+      stacks: [],
+      cause: 'disk',
+      io: { someAvg10: 40, saturated: true },
+    },
+    io: { someAvg10: 40, saturated: true },
+  };
+  const boot = { phase: 'starting', step: 'state:board', stepElapsedSeconds: 12, elapsedSeconds: 30 };
   const routes = kernelRoutes({
     version: '5.0.0',
-    liveness: () => ({ status: 'starting', uptimeSeconds: 0, pid: 7 }),
+    liveness: () => ({ status: 'starting', uptimeSeconds: 0, pid: 7, boot, eventLoop }),
   } as unknown as KernelHalfSources);
   const response = await routes['GET /healthz']({} as never);
   expect(response.status).toBe(503);
+  expect(response.headers.get('retry-after')).toBe('2');
   expect(JSON.parse(response.body)).toEqual({
     status: 'starting',
     uptimeSeconds: 0,
     pid: 7,
     version: '5.0.0',
     protocol: PROTOCOL,
+    sessionProtocol: 'ferretry-relay/2',
+    boot,
+    eventLoop,
   });
 });

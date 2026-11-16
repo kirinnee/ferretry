@@ -24,6 +24,8 @@ import {
   type AgentConfigToolName,
 } from '../contract/agent-config.ts';
 import type { AdmissionDecision } from '../contract/bound.ts';
+import type { EventLoopView } from './loop-health.ts';
+import { SESSION_PROTOCOL_ID } from './session/wire/constants.ts';
 
 type KernelRouteKey = NonNullable<(typeof kernelManifest)['actions']>['routes'][number]['key'];
 
@@ -58,7 +60,19 @@ export interface KernelHalfSources {
   bus: BusSources;
   /** A fresh diagnosis: every plugin's declared checks are run now. */
   doctor(): Promise<DoctorReport>;
-  liveness(): { readonly status: 'starting' | 'ok'; readonly uptimeSeconds: number; readonly pid: number };
+  /** What `GET /healthz` answers beyond the version: public, so only phase names and numbers (never a path or value). */
+  liveness(): {
+    readonly status: 'starting' | 'ok';
+    readonly uptimeSeconds: number;
+    readonly pid: number;
+    readonly boot: {
+      readonly phase: 'starting' | 'ready';
+      readonly step: string;
+      readonly stepElapsedSeconds: number;
+      readonly elapsedSeconds: number;
+    };
+    readonly eventLoop: EventLoopView;
+  };
   /** What the configuration-file routes act through (`./config/routes.ts`). */
   readonly config: ConfigRouteSources;
   /** What the agent's config door acts through (`./config/agent.ts`). */
@@ -160,11 +174,16 @@ export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<Kernel
         version: sources.version,
         features: [SESSION_CREDENTIAL_FEATURE],
       } satisfies Health),
+    // A starting daemon answers 503 WITH the body (the step it is on and for how long) and `retry-after`, so a person and
+    // `fy daemon status` read what it is doing while every caller that waits for 200 keeps waiting. `sessionProtocol` is how
+    // an app tells an older daemon from no daemon.
     'GET /healthz': async () => {
       const live = sources.liveness();
+      const starting = live.status === 'starting';
       return jsonResponse(
-        { ...live, version: sources.version, protocol: PROTOCOL },
-        live.status === 'starting' ? 503 : 200,
+        { ...live, version: sources.version, protocol: PROTOCOL, sessionProtocol: SESSION_PROTOCOL_ID },
+        starting ? 503 : 200,
+        starting ? { 'retry-after': '2' } : {},
       );
     },
     'GET /v1/plugins': async call => {

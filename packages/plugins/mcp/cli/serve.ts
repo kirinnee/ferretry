@@ -1,6 +1,7 @@
 import type { PluginClient, TerminalIo } from '@ferretry/kernel/manifest';
 import { serveMcpOverStdio } from './adapters/stdio.ts';
-import { clientToolsPort } from './lib/serve/port.ts';
+import { ChannelPump } from './lib/serve/channel.ts';
+import { clientChannelPort, clientToolsPort } from './lib/serve/port.ts';
 import { McpServer } from './lib/serve/server.ts';
 
 /** The server name the runtimes register this server under (the fleet's fixed layer), and the name `initialize` says. */
@@ -15,24 +16,68 @@ export interface ServeContext {
   readonly version: string;
   /** The one line `initialize` carries; every behavioural instruction is in the appended system prompt. */
   readonly instructions: string;
+  /**
+   * The shell's wait, in milliseconds. The channel pump backs off with it; a shell that gives none has no channel (the
+   * tools still work, and the daemon, seeing no poll, types messages instead).
+   */
+  readonly sleep?: ((ms: number) => Promise<void>) | undefined;
+  /**
+   * Whether the launch gave Claude the channel flag: `FERRETRY_CHANNEL` is set ONLY in the `--mcp-config` of a launch whose
+   * argv carries `--dangerously-load-development-channels`. The channel pump runs only then; without it the server is a
+   * plain tools server and never polls, so the daemon never takes it for a listening channel.
+   */
+  readonly channel?: boolean | undefined;
+  /** This process's subscriber id, fresh per process (the daemon fences older subscribers' claims with it). */
+  readonly generation?: string | undefined;
 }
 
 /**
  * `mcp serve`: the agent tools as an MCP server over standard input and output. Its own module, importing neither the
  * manifest nor the servers controller, so the shell can run it without loading the rest of this plugin's CLI half (a
  * ferret keeps one of these for the life of its pane).
+ *
+ * It is also Ferretry's CHANNEL into a Claude Code session ({@link ChannelPump}): once the client says it is initialized,
+ * messages the daemon holds for this session are written to the same output as `notifications/claude/channel`.
  */
-export async function serveTools({ client, io, stdin, version, instructions }: ServeContext): Promise<number> {
+export async function serveTools({
+  client,
+  io,
+  stdin,
+  version,
+  instructions,
+  sleep,
+  channel,
+  generation,
+}: ServeContext): Promise<number> {
   if (stdin === undefined) {
     io.err('this build gives `mcp serve` no standard input to read.\n');
     return 70;
   }
+  const write = (line: string): void => {
+    io.out(line);
+  };
+  const pump =
+    sleep === undefined || channel !== true
+      ? undefined
+      : new ChannelPump(clientChannelPort(client), write, {
+          generation: generation ?? crypto.randomUUID(),
+          sleep,
+          onError: message => {
+            io.err(`${message}\n`);
+          },
+        });
   await serveMcpOverStdio(
-    new McpServer(clientToolsPort(client), { name: SERVER_NAME, version, instructions }),
+    new McpServer(
+      clientToolsPort(client),
+      { name: SERVER_NAME, version, instructions, channel: channel === true },
+      () => {
+        // Never awaited: it ends when stopped, and a poll still waiting at the daemon must not hold the process open.
+        pump?.start().catch(() => undefined);
+      },
+    ),
     stdin(),
-    line => {
-      io.out(line);
-    },
+    write,
   );
+  pump?.stop();
   return 0;
 }

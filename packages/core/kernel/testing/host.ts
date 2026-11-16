@@ -336,6 +336,8 @@ export interface TestHostOptions {
   readonly updateHost?: UpdateHostPort;
   /** What `kernel.timings` answers. Default: the shipped numbers (`DEFAULT_DAEMON_TIMINGS`). */
   readonly timings?: DaemonTimings;
+  /** What `kernel.loop.blockedMs()` answers. Default: 0 (the loop never blocked). */
+  readonly loopBlockedMs?: () => number;
   /** The Vault stand-in for `kernel.secrets` (`resolve` and `send`): name to value. Absent, every declared and configured name is `unknown`. */
   readonly vault?: Readonly<Record<string, string>>;
   /** The contract hash per package, as `kernel.contract.hash()` answers its own plugin (`surface` is `'member'` for the member-surface hash). Default: `unhashed`. */
@@ -2691,6 +2693,7 @@ async function start(world: World): Promise<TestHost> {
         options.processes ?? NO_PROCESS_TABLE,
       ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
+      loop: { blockedMs: options.loopBlockedMs ?? (() => 0) },
       // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in;
       // `send` places the value through this plugin's own fetch guard and `options.fetch`, as the real host does
       secrets: ownSecretsPort(

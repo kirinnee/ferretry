@@ -910,7 +910,14 @@ Both files also take `questionTool: true` (default `false`, owner !A527): by def
 question tool, so none stops on a form only the pane shows and each asks through the agenda; `true` gives an
 **interactive** ferret the tool back (Claude keeps `AskUserQuestion`, Codex gets
 `--enable default_mode_request_user_input`), and an auto ferret never has it. It makes ferrets block rather than act,
-so it is **never held**. `harness-claude-code.yaml` also takes `dangerousRmWaiver: true` (default `false`): with it AND
+so it is **never held**.
+
+`harness-claude-code.yaml` also takes `channels` (unset by default): whether a Claude ferret gets Ferretry's message
+channel (the tools server loaded as a development channel). Unset, it follows each ferret's login (**on** for a `claude_max`
+login, **off** for every other type or an unreadable one); `true` or `false` wins for every login. Read at each launch;
+not a loosening, so never held ([launch-settings.md](launch-settings.md#the-claude-channel)).
+
+`harness-claude-code.yaml` also takes `dangerousRmWaiver: true` (default `false`): with it AND
 bypass mode (`permissionMode: skip`) a launch sets `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`, which waives Claude's
 dangerous-`rm` guard. It is a loosening, so an agent's edit turning it on is **held** for the owner like a looser permission
 mode (docs/harness-dialogs.md). Not reached yet, each a declared GAP:
