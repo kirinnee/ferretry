@@ -165,11 +165,19 @@ const ROWS: readonly Row[] = [
   {
     path: 'claude-code/settings/a.yaml',
     base: 'settings:\n  theme: dark\n',
+    loosening: {
+      text: 'settings:\n  theme: dark\nflags:\n  - --dangerously-skip-permissions\n',
+      sentence: 'a launch flag sets the permission mode (--dangerously-skip-permissions)',
+    },
     secretAdded: 'settings:\n  theme: dark\n  env:\n    TOKEN: ${secret:OWNER_KEY}\n',
   },
   {
     path: 'codex/settings/a.yaml',
     base: 'settings:\n  model: m\n',
+    loosening: {
+      text: 'settings:\n  model: m\nflags:\n  - --sandbox\n  - danger-full-access\n',
+      sentence: 'a launch flag sets the permission mode (--sandbox)',
+    },
     secretAdded: 'settings:\n  model: m\n  env:\n    TOKEN: ${secret:OWNER_KEY}\n',
   },
   {
