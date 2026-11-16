@@ -18,7 +18,7 @@ export default implementDaemon(manifest, {
             requireMailboxHost(source);
             return { state: 'ok', detail: 'Conversation provides the queue and send ledger' };
           } catch {
-            return { state: 'fail', detail: MAILBOX_HOST_MISSING, fix: 'turn Conversation on' };
+            return { state: 'fail', detail: MAILBOX_HOST_MISSING, fix: 'turn Conversation on, or see why it failed' };
           }
         },
       },

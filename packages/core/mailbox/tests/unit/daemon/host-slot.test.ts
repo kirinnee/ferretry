@@ -46,6 +46,10 @@ describe('the mailbox.host slot', () => {
   test('fy doctor fails the mailbox-host row while the slot is empty, with the remedy', async () => {
     expect((await half(HOST).built.doctor['mailbox-host']()).state).toBe('ok');
     const failed = await half('unavailable').built.doctor['mailbox-host']();
-    expect(failed).toEqual({ state: 'fail', detail: MAILBOX_HOST_MISSING, fix: 'turn Conversation on' });
+    expect(failed).toEqual({
+      state: 'fail',
+      detail: MAILBOX_HOST_MISSING,
+      fix: 'turn Conversation on, or see why it failed',
+    });
   });
 });
