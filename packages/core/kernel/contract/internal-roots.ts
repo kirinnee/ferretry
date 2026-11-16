@@ -1,4 +1,4 @@
-import type { RootName } from '../contract/ports.ts';
+import type { RootName } from './ports.ts';
 
 /**
  * The roots the kernel makes under the home, as `<home>/state/<plugin>/<name>`. One fact, two readers: the roots

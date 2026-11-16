@@ -91,6 +91,9 @@ function kernelRoot(
     linkCredential: async () => {
       calls.push('linkCredential');
     },
+    linkHistory: async () => {
+      calls.push('linkHistory');
+    },
     ensurePrivateDirectory: record('ensurePrivateDirectory'),
     makeDirectory: record('makeDirectory'),
     list: record('list'),
