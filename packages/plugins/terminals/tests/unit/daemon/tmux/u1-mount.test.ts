@@ -140,8 +140,10 @@ describe('terminals #23 launch guard armed by hostFacts.launchGuard() (U1 mount)
     expect(started).toEqual({ ok: false, error: 'real_harness' });
     expect(launched(calls)).toEqual([]);
     expect(tmux.calls).toEqual([]);
-    const refusal = half.host.logs.find(entry => entry.level === 'warn' && entry.message.includes('own PATH'));
-    expect(refusal?.message).toContain('the launch sets its own PATH');
+    const refusal = half.host.logs.find(
+      entry => entry.level === 'warn' && entry.message.includes('could not be searched completely'),
+    );
+    expect(refusal?.message).toContain('the launch PATH could not be searched completely');
     expect(refusal?.fields).toEqual({ ferret: FERRET });
   });
 
