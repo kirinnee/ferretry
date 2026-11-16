@@ -228,10 +228,10 @@ function judge(
   changed: readonly string[],
   read: Reader,
   window: ChurnWindow,
-  declare: boolean,
+  useDeclarations: boolean,
   now: string,
 ): Evaluation {
-  const declared = declare ? readDeclared(packageRoots(root), read).entries : [];
+  const declared = useDeclarations ? readDeclared(packageRoots(root), read).entries : [];
   const cache = new Map<string, number | undefined>();
   const lines = (file: string): number | undefined => {
     if (!cache.has(file)) {
