@@ -33,7 +33,10 @@ export const MAX_TMUX_SESSION_NAME_LENGTH = 128;
  *   * `prompt` — the assigned task turn one delivers, when there is one;
  *   * `tmuxSession` — the pane's tmux address, which a reattach finds the pane by;
  *   * `capabilityHash` — SHA-256 of the credential the CURRENT pane holds, never the credential; absent for a stopped
- *     or cut-off ferret (today's `sessionCapabilityHash`, renamed).
+ *     or cut-off ferret (today's `sessionCapabilityHash`, renamed);
+ *   * `pendingMove` — a move's INTENT, written in the same write as its restamp: where it was going, when, and the restamped
+ *     keys as they stood. config.json and the record are two files, so a crash between them leaves config.json naming the
+ *     target while the pane is still on the source; the next boot reads this and puts config.json back (never in the view).
  */
 export const FerretConfigDocumentSchema = z.strictObject({
   ...SessionConfigSchema.shape,
@@ -43,6 +46,14 @@ export const FerretConfigDocumentSchema = z.strictObject({
   capabilityHash: z
     .string()
     .regex(/^[0-9a-f]{64}$/u)
+    .optional(),
+  pendingMove: z
+    .strictObject({
+      from: z.string().min(1),
+      to: z.string().min(1),
+      at: InstantSchema,
+      before: z.record(z.string(), z.unknown()),
+    })
     .optional(),
 });
 export type FerretConfigDocument = z.infer<typeof FerretConfigDocumentSchema>;

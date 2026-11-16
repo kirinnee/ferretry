@@ -26,6 +26,7 @@ import {
 } from '../../../../contract/index.ts';
 import type { RuntimeModelCatalog } from '../../../../contract/view/runtime-control.ts';
 import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
+import { INTERRUPTED_LAUNCH_JOB } from '../../../../daemon/modules/interrupted-launches.ts';
 import { fakeLogins, host } from './route-fixture.ts';
 
 const MAIN = 'claude-main';
@@ -452,6 +453,99 @@ describe('the conversion preview', () => {
       kind: 'refused',
       reason: expect.stringContaining('not built yet'),
     });
+    await h.stop();
+  });
+});
+
+describe('a crash between the config.json restamp and the record being retargeted', () => {
+  /** A move whose pane is released and the process then dies: config.json is restamped, the record is still the source's. */
+  async function crashedMove(start: Record<string, unknown> = { model: SONNET, effort: 'high' }) {
+    const world = await boot({ start });
+    const { h, runner, id } = world;
+    const sourceConfig = configOf(h, id);
+    const stop = runner.stop.bind(runner);
+    // The pane is stopped under the ferret's own queue right after the restamp and before the relaunch retargets the record:
+    // the next write (the record's `stopped`) lands and the process dies.
+    runner.stop = async handle => {
+      h.crashAfterNextWrite();
+      await stop(handle);
+    };
+    await move(h, id, {}).catch(() => undefined);
+    // The runner outlives the "process": the daemon that boots next stops panes as an ordinary one does.
+    runner.stop = stop;
+    return { ...world, sourceConfig };
+  }
+
+  test('the crash leaves config.json on the target while the record is on the source (the state the boot has to settle)', async () => {
+    const { h, id } = await crashedMove();
+
+    expect(configOf(h, id)).toMatchObject({ agent: TWO });
+    expect(recordOf(h, id)).toMatchObject({ runtime: MAIN });
+    await h.stop();
+  });
+
+  test('after the boot both files agree on the SOURCE: the runtime, the model and the move history are the pane’s truth', async () => {
+    const { h, id, sourceConfig } = await crashedMove();
+
+    await h.clock.advance(60_000);
+    const again = await h.restart();
+    await again.runJob(INTERRUPTED_LAUNCH_JOB);
+
+    const config = configOf(again, id);
+    expect(recordOf(again, id)).toMatchObject({ runtime: MAIN, login: 'login-main' });
+    expect(config).toMatchObject({ agent: MAIN, model: SONNET, launchReasoningEffort: 'high' });
+    for (const key of ['agent', 'model', 'modelHint', 'launchModelSource', 'incarnation', 'runtimeGeneration', 'moves'])
+      expect(config[key]).toEqual(sourceConfig[key]);
+    expect(config.move).toBeUndefined();
+    expect(config.pendingMove).toBeUndefined();
+    await again.stop();
+  });
+
+  test('a Restart after the boot relaunches on the source account and keeps config.json on it', async () => {
+    const { h, id, harness } = await crashedMove();
+    await h.clock.advance(60_000);
+    const again = await h.restart();
+    await again.runJob(INTERRUPTED_LAUNCH_JOB);
+    atPrompt(again, id);
+
+    const answer = await move(again, id, { agent: MAIN });
+
+    expect(answer.status).toBe(200);
+    expect(harness.launched.at(-1)).toMatchObject({ runtime: MAIN, login: 'login-main' });
+    expect(configOf(again, id)).toMatchObject({ agent: MAIN, model: SONNET });
+    expect(recordOf(again, id)).toMatchObject({ runtime: MAIN });
+    await again.stop();
+  });
+
+  test('a move that finished is left on the target by the boot: only its intent is dropped', async () => {
+    const { h, id } = await boot();
+    expect((await move(h, id, {})).status).toBe(200);
+    expect(configOf(h, id).pendingMove).toMatchObject({ from: MAIN, to: TWO });
+
+    await h.clock.advance(60_000);
+    const again = await h.restart();
+    await again.runJob(INTERRUPTED_LAUNCH_JOB);
+
+    expect(configOf(again, id)).toMatchObject({ agent: TWO });
+    expect(configOf(again, id).pendingMove).toBeUndefined();
+    expect(recordOf(again, id)).toMatchObject({ runtime: TWO });
+    await again.stop();
+  });
+});
+
+describe('a relaunch that throws something other than a refusal', () => {
+  test('answers a fixed sentence, never the raw message of the fault', async () => {
+    const { h, runner, id } = await boot();
+    // The pane cannot be stopped: the fault escapes the resume as an ordinary Error, which is not a refusal.
+    runner.stop = async () => {
+      throw new Error('kill failed at /home/someone/.secret/path');
+    };
+
+    const answer = await move(h, id, {});
+
+    expect(answer.status).toBeGreaterThanOrEqual(400);
+    expect(JSON.stringify(answer.json())).not.toContain('/home/someone');
+    expect(answer.json<{ error: string }>().error).toContain('the move report and the journal say why');
     await h.stop();
   });
 });
