@@ -23,6 +23,9 @@ export const lastLineLength = (text: string): number => [...text].length;
 export const PackRowStateSchema = z.enum(['running', 'waiting', 'needs-you', 'ended']);
 export type PackRowState = z.infer<typeof PackRowStateSchema>;
 
+/** The task a row's ferret works on: its reference and the lane it sits in. */
+const PackRowTaskSchema = z.strictObject({ ref: z.string().min(1), lane: z.string().min(1).optional() });
+
 export const PackRowSchema = z.strictObject({
   id: z.string().min(1),
   /** The ferret's name. */
@@ -35,9 +38,11 @@ export const PackRowSchema = z.strictObject({
   state: PackRowStateSchema,
   /** The ferret's own state, for a reader who needs more than the four-way row state. */
   ferretState: FerretStateSchema,
-  /** The card it works on (`&F767`) and that card's lane, as its card line says. */
-  card: z.strictObject({ ref: z.string().min(1), lane: z.string().min(1).optional() }).optional(),
-  /** The card's PR — the open one when there are several, else the newest — as the board's PR cache last read it. */
+  /** The task it works on (`&F767`) and that task's lane, as its task line says. */
+  task: PackRowTaskSchema.optional(),
+  /** What `task` was called in a table written before the rename (`oldSpelling`); a reader takes both, the daemon writes `task`. */
+  card: PackRowTaskSchema.optional(),
+  /** The task's PR — the open one when there are several, else the newest — as the board's PR cache last read it. */
   pr: z
     .strictObject({
       number: PositiveIntegerSchema,
@@ -64,6 +69,9 @@ export const PackRowSchema = z.strictObject({
   endedAt: InstantSchema.optional(),
 });
 export type PackRow = z.infer<typeof PackRowSchema>;
+
+/** The task a row names, whichever key the table carried it under (`task`, or the `card` it was called before). */
+export const taskOfRow = (row: PackRow): PackRow['task'] => row.task ?? row.card;
 
 export const PackTableSchema = z.strictObject({
   root: z.strictObject({ id: z.string().min(1), name: z.string().min(1) }),
