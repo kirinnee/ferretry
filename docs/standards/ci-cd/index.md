@@ -103,6 +103,10 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   on its separate runner to 8.371 seconds, so the owner/lead contention rule requires
   this ordering rather than a timeout increase. Its summary names each group's
   slowest test and duration from JUnit, with `unit-timings.tsv` in the part artifact.
+- **One-folder rule.** `one-folder.yaml` runs `scripts/ci/one-folder.ts` on a pull request into `rebuild/5.0-after`: every changed
+  file outside the PR's home package must be named under `## Outside files` in the PR body, with a reason (the rule is
+  [Architecture, "One feature, one folder"](../architecture/index.md)). It is a workflow of its own because it reads the PR body, so
+  an `edited` event re-runs it, which `ci.yaml` (no run on an edit that changed no base; Full CI needs every job it holds) cannot do.
 - **Changed-plugin scope.** A pull request into exactly `rebuild/5.0-after` without the `full-ci` label runs only the
   plugins it changes, the plugins that depend on them, and every platform package's tests (core, app, cli, std), because
   the unit tier was 86% of Quick's median 14 minutes. Everything else - a push, `main`, `rebuild/5.0`, manual dispatch, any
