@@ -16,5 +16,5 @@ export const AUDIT_SKIP = {
 } as const satisfies Readonly<Record<string, AuditDeclaration>>;
 
 export const GUARD_NONE = {
-  none: 'file names and sizes of stopped ferrets, and card titles; no pane, page or vault text',
+  none: 'file names and sizes of stopped ferrets, and task titles; no pane, page or vault text',
 } as const satisfies GuardDeclaration;
