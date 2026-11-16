@@ -1,5 +1,6 @@
 /** @ferretry/core-mailbox/contract — the wire a message to a ferret travels on, its port, events, slot and stored shapes. */
 export * from './codes.ts';
+export * from './delivery-way.ts';
 export * from './events.ts';
 export * from './host.ts';
 export * from './lines.ts';

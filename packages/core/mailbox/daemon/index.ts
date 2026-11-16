@@ -1,6 +1,8 @@
 import { implementDaemon } from '@ferretry/kernel/manifest';
-import { MailboxHosts } from '../contract/index.ts';
+import { DeliveryWays, MailboxHosts } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { paneWayContributions } from './ways/pane-way.ts';
+import { waysDoctor } from './ways/registry.ts';
 import { MAILBOX_HOST_MISSING, type MailboxHostSource, requireMailboxHost } from './lib/host-slot.ts';
 
 /**
@@ -9,10 +11,12 @@ import { MAILBOX_HOST_MISSING, type MailboxHostSource, requireMailboxHost } from
  * a failing `fy doctor` row (`mailbox-host`), and every later use of the host refuses with {@link MAILBOX_HOST_MISSING}.
  */
 export default implementDaemon(manifest, {
-  build: ({ hooks }) => {
+  build: ({ hooks, needs }) => {
     const source: MailboxHostSource = key => hooks.provider(MailboxHosts, key);
     return {
+      hooks: { 'mailbox.delivery-way': () => paneWayContributions(needs.ferrets) },
       doctor: {
+        'mailbox-ways': async () => waysDoctor(() => hooks.contributions(DeliveryWays)),
         'mailbox-host': async () => {
           try {
             requireMailboxHost(source);
