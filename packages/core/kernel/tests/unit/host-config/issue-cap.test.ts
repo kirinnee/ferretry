@@ -26,7 +26,8 @@ import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { filled } from './schema-texts.ts';
 import { captureLog, HOME, manualClock } from './support.ts';
 
-const BOUND_MS = 1500;
+/** Small on purpose: every answer is the same at any size; the cost at the size limit is tests/perf/host-config/issue-cap-bound.test.ts. */
+const SMALL = 16 * 1024;
 
 /** A file whose `env` is a mapping of strings, like `mcp/<name>.yaml`'s, and nothing else. */
 const envDef = defineConfig({
@@ -39,19 +40,9 @@ const envDef = defineConfig({
 /** Fake only: a key shape assembled at run time. */
 const KEYLIKE = `${'sk'}-${'ant'}-${'A1B2'.repeat(10)}`;
 
-/**
- * A check, and the BEST time of a few attempts at it: a bound on the clock measures the box as much as the code
- * (2.2 s under a loaded run, 0.9 s alone), so a quadratic path fails every attempt and a busy moment fails one.
- */
+/** A check of `text` against the one-file definition. */
 function checked(text: string) {
-  let ms = Number.POSITIVE_INFINITY;
-  let result = checkConfigText(envDef, 'voice.yaml', text, 'fy');
-  for (let attempt = 0; attempt < 3 && ms >= BOUND_MS; attempt += 1) {
-    const started = performance.now();
-    result = checkConfigText(envDef, 'voice.yaml', text, 'fy');
-    ms = Math.min(ms, performance.now() - started);
-  }
-  return { result, ms };
+  return { result: checkConfigText(envDef, 'voice.yaml', text, 'fy') };
 }
 
 /** The issues of a refused check, or a failure. */
@@ -63,20 +54,15 @@ function issuesOf(result: ReturnType<typeof checkConfigText>) {
 describe('one answer lists at most MAX_CONFIG_ISSUES problems, and one sentence counts the rest', () => {
   /** `total`: every problem the text holds; `lines`: one per entry line; `undefined`: more than the cap. */
   const cases: readonly (readonly [label: string, text: string, total: number | 'lines' | undefined])[] = [
-    ['syntax errors', filled(CONFIG_FILE_MAX_BYTES, '', () => '"\n'), undefined],
-    ['duplicate keys', filled(CONFIG_FILE_MAX_BYTES, '', () => 'env: {}\n'), CONFIG_FILE_MAX_BYTES / 8 - 1],
-    [
-      'raw secrets',
-      filled(CONFIG_FILE_MAX_BYTES, 'env:\n', index => `  K${index.toString(36)}: ${KEYLIKE}\n`),
-      'lines',
-    ],
-    ['schema issues', filled(CONFIG_FILE_MAX_BYTES, 'env:\n', index => `  K${index.toString(36)}: []\n`), 'lines'],
+    ['syntax errors', filled(SMALL, '', () => '"\n'), undefined],
+    ['duplicate keys', filled(SMALL, '', () => 'env: {}\n'), SMALL / 8 - 1],
+    ['raw secrets', filled(SMALL, 'env:\n', index => `  K${index.toString(36)}: ${KEYLIKE}\n`), 'lines'],
+    ['schema issues', filled(SMALL, 'env:\n', index => `  K${index.toString(36)}: []\n`), 'lines'],
   ];
 
   for (const [label, text, expected] of cases) {
-    test(`T-0033 ${label}: ${String(MAX_CONFIG_ISSUES)} listed, the rest counted, in under ${BOUND_MS} ms`, () => {
-      const { result, ms } = checked(text);
-      expect(ms).toBeLessThan(BOUND_MS);
+    test(`T-0033 ${label}: ${String(MAX_CONFIG_ISSUES)} listed, the rest counted`, () => {
+      const { result } = checked(text);
       const issues = issuesOf(result);
       expect(issues).toHaveLength(MAX_CONFIG_ISSUES + 1);
       // One per line under env (or per line of the file), located: every listed one has a line.
@@ -110,9 +96,8 @@ describe('one answer lists at most MAX_CONFIG_ISSUES problems, and one sentence 
   });
 
   test('a long list of unknown keys names ten of them and counts the rest', () => {
-    const text = filled(CONFIG_FILE_MAX_BYTES, '', index => `zz${index.toString(36)}: 1\n`);
-    const { result, ms } = checked(text);
-    expect(ms).toBeLessThan(BOUND_MS);
+    const text = filled(SMALL, '', index => `zz${index.toString(36)}: 1\n`);
+    const { result } = checked(text);
     const issues = issuesOf(result);
     expect(issues).toHaveLength(1);
     const keys = text.split('\n').length - 1;
@@ -132,15 +117,12 @@ describe('one answer lists at most MAX_CONFIG_ISSUES problems, and one sentence 
 });
 
 describe('locate walks a path one step per part', () => {
-  test('20 000 entries of one mapping, each located, in under the bound and at its own line', () => {
-    const text = filled(CONFIG_FILE_MAX_BYTES, 'a:\n  b:\n', index => `    k${index.toString(36)}: x\n`);
+  test('every entry of one mapping is located at its own line', () => {
+    const text = filled(SMALL, 'a:\n  b:\n', index => `    k${index.toString(36)}: x\n`);
     const read = readConfigText(text);
     if (!read.ok) throw new Error('expected the text to read');
     const entries = text.split('\n').length - 3;
-    expect(entries).toBeGreaterThan(20_000);
-    const started = performance.now();
     for (let index = 0; index < entries; index += 1) read.read.locate(['a', 'b', `k${index.toString(36)}`]);
-    expect(performance.now() - started).toBeLessThan(BOUND_MS);
     expect(read.read.locate(['a', 'b', 'k0'])).toEqual({ line: 3, column: 5 });
     expect(read.read.locate(['a', 'b', `k${(entries - 1).toString(36)}`])).toEqual({ line: entries + 2, column: 5 });
     // A key that is not there: its parent.
@@ -182,11 +164,9 @@ describe('a YAML 1.1 tag is not resolved inside the parse', () => {
     expect(read.read.value).toEqual({ a: '5', b: 5 });
   });
 
-  test('a !!omap of many short keys at the cap reads in under the bound (it took 7–10 s resolved)', () => {
-    const text = `${filled(CONFIG_FILE_MAX_BYTES - 1, 'a: !!omap [', index => `${index.toString(36)}:,`)}]`;
-    const started = performance.now();
+  test('a !!omap of many short keys reads (the cost at the size limit is in the perf tier)', () => {
+    const text = `${filled(SMALL - 1, 'a: !!omap [', index => `${index.toString(36)}:,`)}]`;
     const read = readConfigText(text);
-    expect(performance.now() - started).toBeLessThan(BOUND_MS);
     expect(read.ok).toBe(true);
   });
 });
@@ -317,10 +297,9 @@ describe('only the first MAX_CONFIG_ISSUES syntax errors are built; the rest are
 });
 
 describe('an unknown key is quoted to at most 64 characters, and its length said', () => {
-  test('T-0033 a 250 KiB key is cut in the message and in the fix, and the answer stays small', () => {
-    const key = 'k'.repeat(250 * 1024);
-    const { result, ms } = checked(`? ${key}\n: 1\n`);
-    expect(ms).toBeLessThan(BOUND_MS);
+  test('T-0033 a very long key is cut in the message and in the fix, and the answer stays small', () => {
+    const key = 'k'.repeat(4096);
+    const { result } = checked(`? ${key}\n: 1\n`);
     const [issue] = issuesOf(result);
     const cut = `"${'k'.repeat(64)}…" (${String(key.length)} characters)`;
     expect(issue?.message).toBe(`Unrecognized key: ${cut}`);

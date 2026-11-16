@@ -1,104 +1,20 @@
 /**
- * Every configuration file kind this build declares, checked against its OWN schema at the size cap: each answers
- * within one hard bound at every door a text comes in by — `config_validate`, `config_write` and `config_read` for a
- * file an agent may name, the owner's write and read otherwise, and a reload of it hand-written — and no answer lists
- * more than {@link MAX_CONFIG_ISSUES} problems and one sentence counting the rest. Boot is
- * `../host/config-real-schema-boot.test.ts`.
+ * Every configuration file kind this build declares, checked against its OWN schema on a hostile text: no answer lists
+ * more than {@link MAX_CONFIG_ISSUES} problems and one sentence counting the rest, at every door a text comes in by -
+ * `config_validate`, `config_write` and `config_read` for a file an agent may name, the owner's write and read
+ * otherwise, and a reload of it hand-written. The text here is small; the same sweep at the size cap, with its CPU
+ * bound per door, is `tests/perf/host-config/real-schema-bound.test.ts`. Boot is `../host/config-real-schema-boot.test.ts`.
  *
  * The kinds come from the generated registry: a plugin that declares a new file is swept here without being listed.
  */
 import { describe, expect, test } from 'bun:test';
-import { AgentConfigCallSchema, type AgentConfigCall } from '../../../contract/agent-config.ts';
-import type { ConfigTarget } from '../../../contract/ports.ts';
-import { agentConfig } from '../../../host/config/agent.ts';
 import { countProblems, MAX_CONFIG_ISSUES } from '../../../host/config/check.ts';
-import { createConfigFiles } from '../../../host/config/service.ts';
 import { CONFIG_FILE_MAX_BYTES, configTextTooLarge } from '@ferretry/std/yaml';
-import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
-import { type DeclaredKind, declaredKinds, mcpReviewShapes, sweepTextOf } from './real-schemas.ts';
-import { captureLog, HOME, manualClock } from './support.ts';
+import { type DeclaredKind, mcpReviewShapes, sweepTextOf } from './real-schemas.ts';
+import { call, everyDoor, ferretStanding, KINDS, UNTIMED, world } from './real-schema-doors.ts';
 
-/** A hard bound per call, far above one linear pass: the shapes this guards took 4–16 s at this size. */
-const BOUND_MS = 1500;
-/**
- * What one test may take on the wall clock. A door is bounded by CPU (`BOUND_MS`), but a test samples six doors, and a slow
- * first sample is sampled again from fresh worlds, so on a loaded runner a test that is within every bound can pass bun's
- * 5 s default. This bounds a hang, not a regression; the regression is the CPU bound.
- */
-const TEST_TIMEOUT_MS = 60_000;
-const ferretStanding = { credential: { kind: 'authenticated', tokenClass: 'ferret', ferret: 'wren' } };
-const KINDS = declaredKinds();
-const call = (body: Record<string, unknown>): AgentConfigCall => AgentConfigCallSchema.parse(body);
-
-/** Every kind declared, the swept one's file seeded with `text` before the first load. */
-function world(kind: DeclaredKind, text?: string) {
-  const fs = createMemoryHostFs();
-  if (text !== undefined) fs.seed(`${HOME}/config/${kind.path}`, text);
-  const files = createConfigFiles({
-    home: HOME,
-    fs,
-    clock: manualClock(),
-    log: captureLog(),
-    binary: 'fy',
-    defs: KINDS.map(({ plugin, def }) => ({ plugin, def })),
-  });
-  const agent = agentConfig({
-    writer: () => files.writer(),
-    control: () => ({ allows: async () => true }),
-    status: () => files.status(),
-    home: HOME,
-    binary: 'fy',
-    now: () => '2026-01-01T00:00:00.000Z',
-  });
-  const target: ConfigTarget = {
-    plugin: kind.plugin,
-    def: kind.def,
-    ...(kind.name === undefined ? {} : { name: kind.name }),
-  };
-  return { fs, files, agent, target };
-}
-
-type World = ReturnType<typeof world>;
-
-/**
- * What `act` answers and the CPU the main thread spent on it, in ms (everything here is in memory, so all of it is on the
- * main thread). A bound on the clock measures the box as much as the code, and a call is hundreds of ms, far above the
- * CPU clock's tick.
- */
-async function timed<T>(act: () => Promise<T> | T): Promise<{ readonly ms: number; readonly value: T }> {
-  if (typeof process.threadCpuUsage !== 'function') throw new Error('process.threadCpuUsage is not available');
-  const before = process.threadCpuUsage();
-  const value = await act();
-  const spent = process.threadCpuUsage(before);
-  return { ms: (spent.user + spent.system) / 1_000, value };
-}
-
-/**
- * The BEST of up to three samples (the same shape as `issue-cap.test.ts`): a quadratic path is slow in every sample and
- * fails, a collection or a busy moment on a shared runner lands in one and does not. A further sample is taken only
- * while the best so far fails the bound: a sample that passes cannot be made to pass more, and re-sampling one cost a
- * fresh world and a reload each, enough to cross bun's 5 s test timeout at 750 ms a call
- * (T-0032, 5.7 s on CI). `sample` is told which
- * attempt it is: a later one starts from a world of its own, because a check one load made is remembered and a second
- * call on the same world would measure the memo, not the parse.
- */
-async function bestOf<T>(
-  sample: (attempt: number) => Promise<{ readonly ms: number; readonly value: T }>,
-): Promise<{ readonly ms: number; readonly value: T }> {
-  let best = Number.POSITIVE_INFINITY;
-  let value: T | undefined;
-  for (let attempt = 0; attempt < 3 && best >= BOUND_MS; attempt += 1) {
-    const taken = await sample(attempt);
-    best = Math.min(best, taken.ms);
-    value = taken.value;
-  }
-  return { ms: best, value: value as T };
-}
-
-/** At most the cap's issues and one more, and a count that is every problem. */
-function capped(issues: readonly { readonly message: string }[] | undefined): void {
-  expect((issues ?? []).length).toBeLessThanOrEqual(MAX_CONFIG_ISSUES + 1);
-}
+/** Small enough that the sweep is instant; the mcp shapes below still list more than the cap. */
+const SMALL_BYTES = 16 * 1024;
 
 describe('the kinds swept', () => {
   test('every declared kind is swept, an agent-reachable one among them, and each text is at the cap', () => {
@@ -112,101 +28,22 @@ describe('the kinds swept', () => {
   });
 });
 
-/** Every door, timed, for one kind and one hostile text. */
-async function everyDoor(kind: DeclaredKind, text: string): Promise<void> {
-  const settledText = `${text.slice(0, -1)}\n`;
-  // A world a later sample starts from: the file as the second reload leaves it, loaded.
-  const settled = async (): Promise<World> => {
-    const again = world(kind, settledText);
-    await again.files.reload();
-    return again;
-  };
-  // A reload of the file hand-written (the first load of a home that holds it is what boot runs).
-  const first = world(kind, text);
-  // Every door's CPU, so the slowest can prove the clock reads: a small read or listing is under the clock's 1 ms tick
-  // and may read 0, but the parse of a file at the cap is tens to hundreds of ms.
-  const spent: number[] = [];
-  const within = (ms: number): void => {
-    spent.push(ms);
-    expect(ms).toBeLessThan(BOUND_MS);
-  };
-  within(
-    (await bestOf(async attempt => await timed(() => (attempt === 0 ? first : world(kind, text)).files.reload()))).ms,
-  );
-  let loaded = first;
-  const second = await bestOf(async attempt => {
-    if (attempt === 0) loaded = first;
-    else {
-      loaded = world(kind, text);
-      await loaded.files.reload();
-    }
-    loaded.fs.seed(`${HOME}/config/${kind.path}`, settledText);
-    return await timed(() => loaded.files.reload());
-  });
-  within(second.ms);
-  capped(loaded.files.status().issues.filter(issue => issue.path === kind.path));
-  // Each door below is sampled on the world as it stands, then (if the sample is slow) on a settled one of its own.
-  const door = <T>(act: (at: World) => Promise<T> | T) =>
-    bestOf(async attempt => {
-      const at = attempt === 0 ? loaded : await settled();
-      return await timed(() => act(at));
-    });
-  // A text that is not the one on disk, so no check made of it before is reused.
-  const fresh = `${text.slice(0, -1)} `;
-  if (kind.agentMayName) {
-    const read = await door(at => at.agent.run(call({ tool: 'config.read', path: kind.path }), ferretStanding));
-    within(read.ms);
-    capped(read.value.issues);
-    const validate = await door(at =>
-      at.agent.run(call({ tool: 'config.validate', path: kind.path, text: fresh }), ferretStanding),
-    );
-    within(validate.ms);
-    capped(validate.value.issues);
-    const write = await door(at =>
-      at.agent.run(call({ tool: 'config.write', path: kind.path, text: `${fresh.slice(0, -1)}\t` }), ferretStanding),
-    );
-    within(write.ms);
-    capped(write.value.issues);
-  } else {
-    const read = await door(at => at.files.writer().read(at.target));
-    within(read.ms);
-    capped(read.value?.issues);
-    const write = await door(at => at.files.writer().write(at.target, fresh, { confirmedLoosening: true }));
-    within(write.ms);
-    if (write.value.kind === 'refused') capped(write.value.issues);
-  }
-  // Nothing the listing says grows with the file either.
-  const listing = await door(at => at.agent.run(call({ tool: 'config.read' }), ferretStanding));
-  within(listing.ms);
-  capped(listing.value.issues);
-  // The CPU clock must read something, or every bound above passes on 0.
-  expect(Math.max(...spent)).toBeGreaterThan(0);
-}
-
-describe('every declared kind, its own schema, wrong values at the size cap: every door within the bound', () => {
+describe('every declared kind, its own schema, wrong values: every door answers capped', () => {
   for (const kind of KINDS) {
-    const [label, text] = sweepTextOf(kind, CONFIG_FILE_MAX_BYTES);
-    test(
-      `T-0032 T-0033 T-0034 ${kind.path} (${label}): reload, read, validate and write each under ${BOUND_MS} ms`,
-      async () => {
-        await everyDoor(kind, text);
-      },
-      TEST_TIMEOUT_MS,
-    );
+    const [label, text] = sweepTextOf(kind, SMALL_BYTES);
+    test(`T-0032 T-0033 T-0034 ${kind.path} (${label}): reload, read, validate and write answer within the issue cap`, async () => {
+      await everyDoor(kind, text, UNTIMED);
+    });
   }
 });
 
-describe('review round 7: the real mcp/<name>.yaml at the size cap', () => {
+describe('review round 7: the real mcp/<name>.yaml', () => {
   const mcp = KINDS.find(kind => kind.path === 'mcp/sweep.yaml');
-  for (const [label, text] of mcpReviewShapes(CONFIG_FILE_MAX_BYTES)) {
-    test(
-      `T-0032 T-0033 T-0034 ${label}: every door under ${BOUND_MS} ms, at most ${MAX_CONFIG_ISSUES} problems listed`,
-      async () => {
-        if (mcp === undefined) throw new Error('mcp/<name>.yaml is not declared');
-        await everyDoor(mcp, text);
-      },
-      TEST_TIMEOUT_MS,
-    );
+  for (const [label, text] of mcpReviewShapes(SMALL_BYTES)) {
+    test(`T-0032 T-0033 T-0034 ${label}: every door answers, at most ${MAX_CONFIG_ISSUES} problems listed`, async () => {
+      if (mcp === undefined) throw new Error('mcp/<name>.yaml is not declared');
+      await everyDoor(mcp, text, UNTIMED);
+    });
   }
 
   test('T-0033 an env of many wrong values: the first problems are located, the rest are one counted sentence', async () => {

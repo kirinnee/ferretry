@@ -3,8 +3,10 @@ import type { AsksWardenAgenda } from './asks.ts';
 import {
   type DialogNotice,
   type DialogNoticePort,
+  isTeachable,
   isTerminalStatus,
   permissionAsDialog,
+  teachSentence,
   type WardenFleetSession,
   WatchedDialogSchema,
   WARDEN_LABEL,
@@ -49,7 +51,9 @@ export function agendaDialogNotices(
         sourceRef: notice.ref,
         subject: notice.subject,
         why: notice.why,
-        howToResolve: notice.howToResolve,
+        howToResolve: isTeachable(notice.context)
+          ? `${notice.howToResolve} ${teachSentence(notice.sessionId)}`
+          : notice.howToResolve,
         context: notice.context,
       });
       return write === 'refreshed' ? 'unchanged' : write;

@@ -40,7 +40,7 @@ Leases live at `fleet/shared/<harness>/.leases`.
 
 - The kernel refuses every link inside `agent-homes` except `linkCredential` (`credentialHomeLinkVerdict`,
   `core/kernel/host/shared-credentials.ts`), so no plugin can pool today. Runtimes' apply skips pooling and says so.
-- The v4→5.0 migrator copies the v4 pool to `agent-homes/_shared` (`migration/v4-to-v5/src/steps/harness-homes.ts`),
+- Before PR 3 the v4→5.0 migrator copied the v4 pool to `agent-homes/_shared` (`migration/v4-to-v5/src/steps/harness-homes.ts`),
   but nothing links it, so a converted ferret's `hasConversation` proves the transcript absent and it **starts a new
   conversation** (`core/ferrets/daemon/lib/ferrets/service.ts`, !A516). The same happens to a conversation kept from
   the owner's own `~/.claude`: it lives outside the ferret's home.
@@ -76,7 +76,7 @@ Leases live at `fleet/shared/<harness>/.leases`.
     `kind` `'folder'` or `'file'` so the kernel knows whether to make a `0700` folder or an empty `0600` file on first use.
     `reachFaults` (build graph and boot) refuses an illegal declaration and one without the `agent-homes` root.
   - Refusals are a closed `HistoryPoolError.refusal`: `not_internal`, `not_permitted`, `denied`, `not_listed`, `not_own`,
-    `not_home`, `exists`, plus the roots' own `RootError` for disk facts (`outside`, `link_escape`, `changed`,
+    `not_home`, `exists`, `not_file`, plus the roots' own `RootError` for disk facts (`outside`, `link_escape`, `changed`,
     `hard_link`, `no_descriptor_reach`). `denied` is checked before `not_listed` and holds whatever the manifest declares;
     beyond the fixed names it also refuses any name that looks like a credential (`credential`, `secret`, `token`, `oauth`,
     `passw`) and compares case-insensitively.
@@ -85,22 +85,55 @@ Leases live at `fleet/shared/<harness>/.leases`.
     scoped to one ferret; a home that is not exactly one folder below the top of `agent-homes` is `not_home`.
   - The kernel ensures the pool itself (folder and entry, owner-only) inside the call, after every refusal; there is no
     separate ensure member. A caller that needs the pool before any home exists makes it with its own state port.
+  - **What PR 3 found it still needed:** the door only LINKS. A harness can neither read the pool through a link (the state
+    port refuses Claude's `-home-user-proj` folder names and has no windowed read) nor move files into it, so two more kernel
+    pieces, in their own commit and in `docs/secrets.md` next to the door:
+  - **PR 3:** `RootsPort.historyPool(): RootHandle` gives a synchronous, writable internal view of only that plugin's
+    own opaque, non-private pool; boot now makes its base `0700` before plugin code runs. It reads, lists, writes,
+    copies and supports windowed reads/`openBytes` through the regular fenced no-follow descriptor machinery. It has
+    no history door, can never source or place generic links, and cannot reach other state or a ferret home.
+  - **PR 3:** `RootHandle.moveToHistoryPool(from, pool, to): Promise<void>` moves one regular-file leaf of a listed history entry
+    out of one ferret home into its minted pool view, including `.conflicts/<ferret>/<entry>/...`. Missing pool parents
+    are made `0700`; folders/links/other kinds, hard-linked source files and placed credentials are refused. Linux uses
+    descriptor-relative `renameat2(RENAME_NOREPLACE)`, self-tested in the kernel's native seam: an existing or concurrent
+    target returns `exists` with both transcripts intact. No copy or ordinary rename fallback; a host without atomic
+    no-replace support refuses `no_descriptor_reach`. The old target-absence look-then-move gap is closed for this door;
+    the source-leaf race and attempted no-replace restoration are declared in `docs/secrets.md`.
   - **macOS:** the held-folder steps have no `symlinkat` yet, so a host with no `/proc/self/fd` refuses
-    `no_descriptor_reach`. PR 3 pools on Linux; macOS pooling needs a `symlinkat` step in `FolderSteps` first (open point 4).
-- **Existing homes.** A home whose entry is already a real folder (a 5.0 ferret that ran before this) has its files
-  moved into the pool by rename (same device); a name already in the pool is kept as
-  `history-pool/.conflicts/<ferret>/…` and named in the result, never overwritten. Then the link is made.
+    `no_descriptor_reach`. PR 3 pools on Linux; macOS pooling needs descriptor-relative `symlinkat` and atomic no-replace rename support first.
+- **Existing homes.** A real entry is completely preflighted before any leaf moves: names, kinds, hard-link count,
+  depth, move count, and private-place guards. Files move individually (same device); no whole folder carries unchecked
+  children. A name already in the pool, or created concurrently, is kept as `history-pool/.conflicts/<ferret>/…[.n]`,
+  never overwritten. An old `history.jsonl` goes there whole, never concatenated. Empty folders are recreated in the pool;
+  source folders are removed only when empty. Then the link is made.
 - **Migration.** The v4→5.0 migrator writes the v4 pool to `state/<harness>/history-pool/` instead of
-  `agent-homes/_shared`, so converted ferrets resume their real conversations (fixes !A516).
-- `hasConversation` looks through the pool (one `projects/*/<id>.jsonl` lookup), so a pooled resume is never refused.
+  `agent-homes/_shared`, so converted ferrets resume their real conversations (fixes !A516). It omits v4 Codex SQLite
+  (including WAL/SHM): its absolute rollout paths still point to v4. Codex rebuilds a fresh pool index from rollouts.
+- `hasConversation` looks through the pool (Ferretry's own spelling first, then one `projects/*/<id>.jsonl` lookup per folder),
+  so a pooled resume is never refused. Every other read of a ferret's transcript goes through the same pool handle when its
+  `projects` / `sessions` is the pool's link (the home's root never follows a link out).
+- **Codex** also launches with `CODEX_SQLITE_HOME=<pool>/sqlite` (an `env` prefix beside `CODEX_HOME`), only when its `sessions`
+  is pooled too. Its rollout proof stays per ferret: a NEW conversation is found among the pool's rollouts filed on the last
+  days only (a baseline of those days, and the correlation marker is per home), a RESUMED one by its id alone, so a ferret
+  never adopts another ferret's rollout and a launch never reads the whole pool.
+- **Fail-safe.** A preflight refusal or a first-move refusal that left the source intact launches unpooled with one
+  sentence (including macOS). If a merge stops after moving a file, or a rejected move no longer leaves the original
+  source inode at home, the launch is refused with a clear retry sentence instead of silently starting a new conversation.
+  A per-entry `.history-pool-pending-<entry>` marker preserves that refusal across retries; a retry completes the remaining
+  leaves and links the entry before clearing it. A pre-pool Codex home's own SQLite index becomes unused on its first
+  pooled launch; it is not copied into the pool. A pooled sessions home refuses its launch if the shared SQLite folder cannot be prepared; it never falls back to a stale local database.
 
 ### 3.2 The owner's default homes: read, never written
 
 - `~/.claude` (or `CLAUDE_CONFIG_DIR`) and `~/.codex` (or `CODEX_HOME`) are indexed in place through the existing
   read-only `harness-history` root. Ferretry never writes, links or locks anything there.
+- The copy is the **harness plugin's own act** (`Harness.importConversation`, asked through `FerretsApi.importConversation`,
+  Conversation's alone): the harness reads the owner's history through its read-only `harness-history` root and writes only
+  its own pool, header-checked for Codex, never overwriting a name the pool holds, refused above 256 MiB. Conversation no
+  longer writes an `imports` copy at all. `LinkService.keep` always copies a conversation of the owner's computer first.
 - Linking one of them **copies** its transcript into the pool at the same relative path (`projects/<slug>/<id>.jsonl`;
   Codex `sessions/YYYY/MM/DD/rollout-…-<id>.jsonl`) and the ferret resumes the copy. Copy cost is one file (p50 0.5 MB,
-  p99 12 MB) through `copy_file_range`. The original keeps working in the owner's own terminal; the two continue
+  p99 12 MB), buffered whole in memory with a 256 MiB cap in both harness importers. The original keeps working in the owner's own terminal; the two continue
   separately (a fork), so there are never two writers on one file. The listing shows the pooled copy and says the
   original is also in the owner's own history.
 - **Not in this design (needs the owner):** making the owner's own `claude` / `codex` see the pool (two-way) would mean
@@ -178,8 +211,17 @@ Each PR: Sonnet builder, one gpt-6.1-sol high review, at most 2 fix rounds.
 
 ## 5. Open points
 
-- Two-way default-home sharing (3.2): owner ruled ONE WAY (!A530, 2026-11-16). Ferretry never writes into `~/.claude` or `~/.codex`; no two-way PR.
+- Two-way default-home sharing (3.2) needs an owner ruling.
 - The migrator copies 19 GB; a hard-link or rename import would be faster and use no extra disk. Separate card.
-- Codex `resume <id>` of a copied rollout that its SQLite does not list yet must be proven against the real binary in
-  PR 3 (pooled SQLite should index it; if not, the copy also inserts nothing and the PR says so).
-- macOS pooling needs a descriptor-relative `symlinkat` in `FolderSteps` (PR 2 refuses `no_descriptor_reach` there).
+- **Proven (PR 3, 2026-11-16, codex-cli 0.166.0):** `codex exec resume <id>` with a temp `CODEX_HOME` holding only a COPY of
+  an owner's rollout and a fresh `CODEX_SQLITE_HOME` that had never seen it starts that session (`session id: <id>`); an
+  invented id answers `no rollout found for thread id`. So the copy inserts nothing into SQLite and none is needed. Claude Code
+  2.1.317: `claude --resume <id>` in a temp `CLAUDE_CONFIG_DIR` holding only a copy of `projects/<folder>/<id>.jsonl` resumes it
+  (the unknown id answers `No conversation found with session ID`).
+- `fy link` / keep is still not connected to a ferret start in 5.0 (`packages/plugins/conversation/daemon/reading.ts`
+  `KEEP_PENDING`, card &F3447): the copy seam is built and tested end to end below that line, and starts working the moment keep is wired.
+- macOS pooling needs descriptor-relative `symlinkat` in `FolderSteps` and atomic no-replace rename support; until both exist it refuses `no_descriptor_reach`.
+
+- Claude copy-on-link currently copies only the top-level transcript, not `<id>/subagents` or tool-result assets.
+- An already-pooled copy is retained as it is; re-linking does not refresh it from a newer owner-home transcript. These
+  two copy gaps and `fy link`/keep end-to-end wiring remain outside this PR.

@@ -74,6 +74,7 @@ export function workRoots(folder: string, stateHome: string): RootsPort {
     copyShared: unused('copyShared'),
     linkCredential: unused('linkCredential'),
     linkHistory: unused('linkHistory'),
+    moveToHistoryPool: unused('linkHistory'),
     ensurePrivateDirectory: unused('ensurePrivateDirectory'),
     entries: unused('entries'),
     lstat: unused('lstat'),
@@ -91,6 +92,9 @@ export function workRoots(folder: string, stateHome: string): RootsPort {
     checkPrivateChain: unused('checkPrivateChain'),
   };
   return {
+    historyPool: () => {
+      throw new Error('the fixture has no history pool');
+    },
     root: () => handle,
     share: unused('share'),
     shareCredential: unused('shareCredential'),

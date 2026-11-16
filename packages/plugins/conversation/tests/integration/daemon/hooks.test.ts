@@ -1,3 +1,4 @@
+import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
 import { describe, expect, test } from 'bun:test';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
@@ -47,6 +48,7 @@ describe('message.before-send', () => {
     const host = await testHost({
       plugins: [implementation],
       fakes: {
+        mailbox: new FakeMailboxQueue(),
         ferrets: {
           get: async () => summary('idle'),
           list: async () => [],
@@ -66,6 +68,7 @@ describe('message.before-send', () => {
     const host = await testHost({
       plugins: [implementation],
       fakes: {
+        mailbox: new FakeMailboxQueue(),
         ferrets: {
           get: async () => summary('idle'),
           list: async () => [],
@@ -87,6 +90,7 @@ describe('turn.ended', () => {
     const host = await testHost({
       plugins: [implementation],
       fakes: {
+        mailbox: new FakeMailboxQueue(),
         ferrets: {
           get: async () => summary('working'),
           list: async () => [],
@@ -141,6 +145,7 @@ describe('an answered ask', () => {
   }
   const build = (kernel: never, asks: { get(id: string): Promise<unknown> }) =>
     buildConversationA({
+      mailbox: new FakeMailboxQueue(),
       kernel,
       ferrets: {
         get: async () => summary('idle'),

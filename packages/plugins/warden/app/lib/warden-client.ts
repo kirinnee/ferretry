@@ -5,7 +5,14 @@
  */
 
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { WardenConfigViewSchema } from '../../contract/index.ts';
+import {
+  type DialogLearnAnswer,
+  DialogLearnAnswerSchema,
+  type DialogLearnRequest,
+  type DialogRulesView,
+  DialogRulesViewSchema,
+  WardenConfigViewSchema,
+} from '../../contract/index.ts';
 import type {
   WardenAgendaView,
   WardenConfigPatch,
@@ -34,6 +41,10 @@ export interface WardenClient {
   updateConfig(patch: WardenConfigPatch): Promise<WardenConfigView>;
   /** Names the Jev key in `warden.yaml` (the owner's act; held for the owner otherwise, as `held`). Never a value. */
   nameJevKey(): Promise<WardenConfigView>;
+  /** The screens Ferretry clears by itself, the ones the owner taught it, and the proposals waiting for a yes. */
+  dialogRules(): Promise<DialogRulesView>;
+  /** Propose a rule from a ferret's screen, or (`confirm`) save the one proposed: the owner's yes. */
+  learnDialog(request: DialogLearnRequest): Promise<DialogLearnAnswer>;
 }
 
 /** The Warden client of one daemon, over that daemon's plugin client. */
@@ -49,4 +60,7 @@ export const wardenClientOf = (client: PluginClient): WardenClient => ({
   updateConfig: async patch =>
     WardenConfigViewSchema.parse(await client.call<unknown>('PATCH /v1/warden/config', { body: patch })),
   nameJevKey: async () => WardenConfigViewSchema.parse(await client.call<unknown>('POST /v1/warden/jev-key')),
+  dialogRules: async () => DialogRulesViewSchema.parse(await client.call<unknown>('GET /v1/warden/dialog/rules')),
+  learnDialog: async request =>
+    DialogLearnAnswerSchema.parse(await client.call<unknown>('POST /v1/warden/dialog/learn', { body: request })),
 });
