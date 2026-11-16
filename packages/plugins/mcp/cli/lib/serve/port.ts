@@ -1,5 +1,6 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
+import { type ChannelPort, parseChannelMessages } from './channel.ts';
 import type { McpToolResult, McpToolsPort } from './server.ts';
 import { AGENT_TOOL_DEFAULT_WAIT_MS, AGENT_TOOL_MAX_TOTAL_WAIT_MS, AGENT_TOOL_MAX_WAIT_MS } from './tools.ts';
 
@@ -9,6 +10,8 @@ const ToolResultSchema = z.looseObject({
   isError: z.boolean().optional(),
   data: z.unknown().optional(),
 });
+
+const ClaimSchema = z.looseObject({ claimed: z.boolean(), writeBudgetMs: z.number().positive() });
 
 const matchedOf = (result: McpToolResult): boolean | undefined => {
   const data = result.data;
@@ -75,6 +78,34 @@ export function clientToolsPort(client: PluginClient): McpToolsPort {
       }
       if (name === 'search_work') return await once(name, withWorkKind(args));
       return await once(name, args);
+    },
+  };
+}
+
+/**
+ * The channel pump's one way to the daemon: the same tool door, two tools only this server calls (`channel_poll`,
+ * `channel_claim`; Conversation serves them as the session). A call the daemon refuses, or answers in a shape this build
+ * does not read, throws: the pump backs off (a poll) or writes nothing (a claim).
+ */
+export function clientChannelPort(client: PluginClient): ChannelPort {
+  const once = async (name: string, args: Readonly<Record<string, unknown>>): Promise<unknown> => {
+    if (client.tool === undefined) throw new Error('this build cannot reach the daemon’s tool door');
+    const answer = ToolResultSchema.safeParse(await client.tool(name, args));
+    if (!answer.success) throw new Error(`the daemon answered ${name} in a shape this build does not read`);
+    if (answer.data.isError === true) throw new Error(answer.data.text);
+    return answer.data.data;
+  };
+  return {
+    async poll(generation, waitMs) {
+      const messages = parseChannelMessages(await once('channel_poll', { generation, waitMs }));
+      if (messages === undefined)
+        throw new Error('the daemon answered channel_poll in a shape this build does not read');
+      return messages;
+    },
+    async claim(generation, sendId) {
+      const answer = ClaimSchema.safeParse(await once('channel_claim', { generation, sendId }));
+      if (!answer.success) throw new Error('the daemon answered channel_claim in a shape this build does not read');
+      return { claimed: answer.data.claimed, writeBudgetMs: answer.data.writeBudgetMs };
     },
   };
 }

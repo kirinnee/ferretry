@@ -895,6 +895,7 @@ export class FleetCatalogService {
   }
 
   /** Each credential's status word, from the credentials surface. A list that fails shows no words. */
+
   async #credentialStatus(): Promise<CatalogFacts['credentialStatus']> {
     try {
       const list = await this.deps.credentials.list();

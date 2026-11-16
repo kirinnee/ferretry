@@ -961,6 +961,57 @@ describe('re-attempting a send under its original id', () => {
     should(ledger.only()).containEql({ fate: 'accepted', untyped: true, attempt: 1 });
   });
 
+  /**
+   * THE THREE SAFETY CHECKS (owner ruling 2026-11-15): before every try — the tracker makes one a second — the pane must not
+   * be compacting, must not be parked on a dialog or consent prompt, and its composer must be empty. Each holds the send
+   * (nothing typed, nothing queued, the row still untyped) and the first try after it clears types it.
+   */
+  it('does NOT type a kept send while the harness is COMPACTING, and types it on the first try after', async () => {
+    const { service, terminal, ledger } = await settled('accepted', { untyped: true }, [pane({ promptReady: true })]);
+    terminal.frozen = pane({ activeWork: true, compacting: true });
+
+    const withheld = await service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((error: unknown) => error);
+
+    should(withheld).be.instanceof(SendRetypeWithheld);
+    should((withheld as SendRetypeWithheld).reason).equal('busy');
+    should(terminal.typed).be.empty();
+    should(ledger.only()).containEql({ fate: 'accepted', untyped: true });
+
+    terminal.frozen = pane({ promptReady: true });
+    await service.reattempt(ID, 'send-1', { by: 'daemon' });
+    should(terminal.typed).eql(['ship it']);
+  });
+
+  it('does NOT type a kept send while a DIALOG or consent prompt is up, and types it on the first try after', async () => {
+    const { service, terminal, ledger } = await settled('accepted', { untyped: true }, [pane({ promptReady: true })]);
+    terminal.notReady = new SendPaneNotReady('the agent is at a permission prompt', 'dialog');
+
+    const withheld = await service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((error: unknown) => error);
+
+    should(withheld).be.instanceof(SendRetypeWithheld);
+    should(terminal.typed).be.empty();
+    should(ledger.only()).containEql({ fate: 'accepted', untyped: true });
+
+    terminal.notReady = undefined;
+    await service.reattempt(ID, 'send-1', { by: 'daemon' });
+    should(terminal.typed).eql(['ship it']);
+  });
+
+  it('does NOT type a kept send while the COMPOSER holds text, and types it on the first try after it is empty', async () => {
+    const { service, terminal, ledger } = await settled('accepted', { untyped: true }, [pane({ promptReady: true })]);
+    terminal.occupied = 'half a thought';
+
+    const refused = await service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((error: unknown) => error);
+
+    should(refused).be.instanceof(SendDraftRefused);
+    should(terminal.typed).be.empty();
+    should(ledger.only()).containEql({ fate: 'accepted', untyped: true });
+
+    terminal.occupied = undefined;
+    await service.reattempt(ID, 'send-1', { by: 'daemon' });
+    should(terminal.typed).eql(['ship it']);
+  });
+
   it('stays accepted when the busy pane did not prove it is holding the retype', async () => {
     const { service, terminal } = await settled('queued', {}, [
       pane({ promptReady: true }),

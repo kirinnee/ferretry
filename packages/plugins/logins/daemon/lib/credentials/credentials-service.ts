@@ -494,6 +494,8 @@ export interface FleetCredentialsServiceDeps {
   readonly status: CredentialStatusReader;
   /** The display email of one login, when the harness recorded one. */
   email(source: CredentialEmailSource): Promise<string | undefined>;
+  /** The organisation type a Claude login's account file records (non-secret), when it does. Absent where nothing reads it. */
+  organizationType?(source: CredentialEmailSource): Promise<string | undefined>;
   /** This machine's name, as the sign-out sentence says it. */
   machineName(): string;
   /** The harness command, located by this daemon's one rule. `undefined` when it is not installed. */
@@ -708,11 +710,20 @@ export class FleetCredentialsService {
   async launchStores(): Promise<readonly LoginLaunchStore[]> {
     const { entries } = await this.deps.catalog.entries();
     const out: LoginLaunchStore[] = [];
-    for (const { id, resolution } of entries) {
+    for (const entry of entries) {
+      const { id, resolution } = entry;
       const owned = stored(resolution);
       if (owned === undefined) continue;
-      if (owned.harness === 'claude') out.push({ id, variables: credentialLaunchEnvironment(owned) });
-      else if (owned.store === 'ferretry') out.push({ id, variables: {}, signInFile: owned.canonicalFile });
+      if (owned.harness === 'claude') {
+        const source = this.deps.catalog.emailSource(entry);
+        const organizationType =
+          source === undefined ? undefined : await this.deps.organizationType?.(source).catch(() => undefined);
+        out.push({
+          id,
+          variables: credentialLaunchEnvironment(owned),
+          ...(organizationType === undefined ? {} : { organizationType }),
+        });
+      } else if (owned.store === 'ferretry') out.push({ id, variables: {}, signInFile: owned.canonicalFile });
     }
     return out;
   }

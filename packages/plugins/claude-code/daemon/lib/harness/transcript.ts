@@ -17,6 +17,40 @@ const asInstant = (value: unknown): Instant | undefined =>
   typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? (value as Instant) : undefined;
 
 /** The visible text of a message's content: a string, or the text blocks of a list. */
+/** The MCP server name Ferretry's own channel is registered under (Runtimes' fixed layer: `FERRETRY_MCP_SERVER`). */
+const FERRETRY_CHANNEL_SERVER = 'ferretry';
+
+/**
+ * A message pushed through Ferretry's own MCP channel is recorded inside `<channel source="ferretry" …>\nTEXT\n</channel>`,
+ * where TEXT is exactly what would have been typed. The words inside are what the conversation and the send tracker are
+ * shown, with the `send_id` the tag names (the send they belong to); another server's wrapper, or text that is no wrapper,
+ * is nothing here and stays as it is. The FIRST `source` names the server (Claude writes its own before the meta's).
+ */
+function channelMessage(text: string): { readonly text: string; readonly sendId?: string } | undefined {
+  const found = /^\s*<channel((?:\s+[^\s=>]+="[^"]*")*)\s*>\n?([\s\S]*?)\n?<\/channel>\s*$/u.exec(text);
+  if (found === null) return undefined;
+  // Attribute by attribute, so a value that merely contains `send_id="` is not the attribute.
+  const attributes = [...(found[1] ?? '').matchAll(/([^\s=>]+)="([^"]*)"/gu)];
+  const attribute = (name: string): string | undefined => attributes.find(one => one[1] === name)?.[2];
+  if (attribute('source') !== FERRETRY_CHANNEL_SERVER) return undefined;
+  const sendId = attribute('send_id');
+  return { text: found[2] ?? '', ...(sendId === undefined || sendId === '' ? {} : { sendId }) };
+}
+
+/**
+ * The channel send an entry is, in its `data`: the `send_id` of the wrapper that was taken off. Conversation's send tracker
+ * proves a channel send ONLY by an input that carries its own id, so identical messages never share a receipt; `data` is
+ * read for nothing else on a message entry (a tool entry's `data` is its content, and a channel record is never one).
+ */
+const channelData = (sendId: string | undefined): { readonly channelSendId?: string } =>
+  sendId === undefined ? {} : { channelSendId: sendId };
+
+/** Whether a record's `origin` says it came through Ferretry's channel. */
+const fromFerretryChannel = (origin: unknown): boolean => {
+  const { kind, server } = asObject(origin) ?? {};
+  return kind === 'channel' && server === FERRETRY_CHANNEL_SERVER;
+};
+
 function textOf(content: unknown): string | undefined {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return undefined;
@@ -66,19 +100,23 @@ function proofEntry(record: Json, offset: number): TranscriptEntry | undefined {
     const content = typeof record.content === 'string' ? record.content : undefined;
     if (at === undefined || operation === undefined || !QUEUE_OPERATIONS.has(operation) || content === undefined)
       return undefined;
+    const channelled = channelMessage(content);
     return {
       id: `${QUEUE_OPERATION_PROOF}:${offset}`,
       at,
       role: 'system',
-      text: content,
-      data: { proof: QUEUE_OPERATION_PROOF, operation },
+      text: channelled?.text ?? content,
+      data: { proof: QUEUE_OPERATION_PROOF, operation, ...channelData(channelled?.sendId) },
     };
   }
   if (record.type !== 'attachment') return undefined;
   const attachment = asObject(record.attachment);
   if (attachment?.type !== 'queued_command' || attachment.commandMode !== 'prompt') return undefined;
-  if (asObject(attachment.origin)?.kind !== 'human') return undefined;
-  const text = textOf(attachment.prompt);
+  const channelled = fromFerretryChannel(attachment.origin);
+  if (asObject(attachment.origin)?.kind !== 'human' && !channelled) return undefined;
+  const prompt = textOf(attachment.prompt);
+  const wrapped = channelled && prompt !== undefined ? channelMessage(prompt) : undefined;
+  const text = wrapped?.text ?? prompt;
   const originatedAt = asInstant(attachment.timestamp) ?? asInstant(record.timestamp);
   const drained = at ?? originatedAt;
   if (text === undefined || text.trim() === '' || drained === undefined) return undefined;
@@ -87,7 +125,11 @@ function proofEntry(record: Json, offset: number): TranscriptEntry | undefined {
     at: drained,
     role: 'system',
     text,
-    data: { proof: QUEUED_PROMPT_PROOF, ...(originatedAt === undefined ? {} : { originatedAt }) },
+    data: {
+      proof: QUEUED_PROMPT_PROOF,
+      ...(originatedAt === undefined ? {} : { originatedAt }),
+      ...channelData(wrapped?.sendId),
+    },
   };
 }
 
@@ -114,13 +156,16 @@ export function parseEntry(line: string, offset = 0): TranscriptEntry | undefine
   const content = message?.content;
   const blocks = Array.isArray(content) ? content.map(asObject) : [];
   const tool = blocks.some(block => block?.type === 'tool_use' || block?.type === 'tool_result');
-  const text = textOf(content);
+  const written = textOf(content);
+  const wrapped = written !== undefined && fromFerretryChannel(record.origin) ? channelMessage(written) : undefined;
+  const text = wrapped?.text ?? written;
   const identity = toolIdentity(blocks);
   return {
     id,
     at,
     role: tool && text === undefined ? 'tool' : role,
     ...(text === undefined ? {} : { text }),
+    ...(wrapped?.sendId === undefined ? {} : { data: channelData(wrapped.sendId) }),
     ...(Object.keys(identity).length === 0 ? {} : { tools: identity }),
   };
 }
@@ -275,11 +320,13 @@ export function parseTail(text: string, partial: boolean): readonly HarnessTailR
     );
     const hasText = typeof content === 'string' || blocks.some(block => block?.type === 'text');
     const origin = asObject(record.origin)?.kind;
+    // Ferretry's own channel is written as a meta record but carries a ferret's or the daemon's words: a message, like a typed one.
     const harnessWrote =
-      record.isMeta === true ||
-      record.isSidechain === true ||
-      record.isVisibleInTranscriptOnly === true ||
-      (typeof origin === 'string' && origin !== '' && origin !== 'human');
+      !fromFerretryChannel(record.origin) &&
+      (record.isMeta === true ||
+        record.isSidechain === true ||
+        record.isVisibleInTranscriptOnly === true ||
+        (typeof origin === 'string' && origin !== '' && origin !== 'human'));
     if (record.type === 'user') {
       if (hasText && !working)
         records.push({
