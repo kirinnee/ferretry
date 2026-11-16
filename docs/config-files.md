@@ -682,10 +682,13 @@ there too, and journalled as `fleet.warden_leftover_closed`.
 
 ### Moving a ferret that hit a limit
 
-**Off by default.** With `autoMigrate.enabled`, a ferret whose login runs out is moved to another login — the
+**On by default** (owner ruling 2026-11-15; v4 shipped it off). Unless `warden.yaml` says `enabled: false` under
+this section — an explicit `false` is kept exactly as written, including in a home converted from v4 — a ferret
+whose login runs out is moved to another login — the
 same session, the same chat, the same card and lineage; only the login changes. It is the migration `fy migrate`
 makes, through the same safety check, never with a smaller context window, and the turn the ferret is handed
-opens with why, drawn as Ferretry · Warden. A rule: no Jev, no investigation, nothing spent.
+opens with why, drawn as Ferretry · Warden. A rule: no Jev, no investigation, nothing spent. (In 5.0 the section is
+spelled `autoMove`; the converter carries every key of v4's `autoMigrate` across unchanged.)
 
 ```yaml
 autoMigrate:
@@ -704,8 +707,14 @@ autoMigrate:
   installed, signed in, not switched off, not holding spend, not out of quota — and never the login that ran out,
   or another runtime on it. `targets: []` stays within the provider (a catalog's provider, the harness's own for
   a native login; a hand-made environment login is its own provider) and takes the one with most headroom. A
-  named list is tried in order and is the only way a move crosses to another provider. When nothing qualifies
+  named list is tried in order and is the only way a move crosses to another provider. **A non-empty `targets` is
+  a hard list:** a ferret goes to a login on it or nowhere, however much room another login has — a work login
+  you did not list is never a candidate. When nothing qualifies
   the owner is told once, in one line naming every login tried and why it was refused.
+- **Nowhere to go.** The ferret stays where it is and **resumes by itself at the reset time its login showed**, with Jev and
+  investigations off (a rule, listed as an `auto` resume under Recent triggers; once per reset; only while
+  `mayActAlone.resume` is on, and never under something of yours). The same one notice says when, in Pacific time.
+  A ferret whose limit shows no reset time waits for you.
 - **Never** while the ferret has an input card open, a sign-in waiting on your phone, a plan card waiting for you,
   holds a secure copy, handed a terminal or browser to the owner, or waits on a permission prompt or a dialog; never a Warden or anything a Warden started; never more than
   `maxMovesPerHour` times an hour.

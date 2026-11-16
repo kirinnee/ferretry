@@ -86,6 +86,12 @@ if [[ -f ${cd_workflow} ]]; then
     fail "${cd_workflow}: goreleaser's if must require a successful compile, which main-only gates"
   json "${cd_workflow}" | jq -e '.jobs.goreleaser.needs | index("compile") != null' >/dev/null ||
     fail "${cd_workflow}: goreleaser must need compile"
+  # With the owner's MACOS_SMOKE=skip switch compile is SKIPPED, and a refused tag skips it too: only main-only's own
+  # result tells the two apart, so goreleaser must need it and require its success.
+  json "${cd_workflow}" | jq -e '.jobs.goreleaser.needs | index("main-only") != null' >/dev/null ||
+    fail "${cd_workflow}: goreleaser must need main-only (a skipped compile does not prove the tag is on main)"
+  json "${cd_workflow}" | jq -e '.jobs.goreleaser.if | contains("needs.main-only.result == '"'"'success'"'"'")' >/dev/null ||
+    fail "${cd_workflow}: goreleaser's if must require main-only to have succeeded"
   # EVERY job other than main-only must depend on it, directly or through other jobs (a new publishing job cannot skip it).
   unguarded="$(json "${cd_workflow}" | jq -r '
     .jobs as $jobs

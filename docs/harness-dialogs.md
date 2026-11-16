@@ -118,6 +118,40 @@ Nothing that grants trust is ever answered by the daemon. The dialogs a launch c
 
 The rest — hooks, MCP servers, sign-in, settings errors, anything unrecognised — wait for a person.
 
+## Pre-answered in the ferret's own home (5.0, O11)
+
+Nothing should wait on a screen a key can answer. Every key below is written into **the ferret's own generated home**
+(the fixed layer; never the owner's `~/.claude` or `~/.codex`) and is part of the launch-settings fingerprint, so a
+change marks a running ferret Restart.
+
+| Harness | Screen                                                                       | Key                                                                                        | What it allows                                                                             |
+| ------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| Claude  | Trust this folder                                                            | `.claude.json` `projects[<cwd>].hasTrustDialogAccepted`                                    | the ferret's OWN working folder only (not a parent, not all): its settings and hooks run   |
+| Claude  | New MCP server found in this project                                         | none: NOT pre-answered                                                                     | nothing: the owner chooses in the ferret’s terminal (the one notice below)                 |
+| Claude  | Bypass-mode / auto-mode warning                                              | `skipDangerousModePermissionPrompt` (bypass) / `skipAutoPermissionPrompt` (auto), settings | shows no warning; the mode itself is the owner's `permissionMode`, held when loosened      |
+| Claude  | Onboarding, theme, Chrome, nudges                                            | `hasCompletedOnboarding`, `hasCompletedClaudeInChromeOnboarding`, `hasSeen…Nudge`          | nothing: they are seen screens                                                             |
+| Claude  | Update notice / self-update                                                  | `DISABLE_AUTOUPDATER=1` in the launch's process environment (v4's probe sets the same)     | nothing is installed by Claude; Ferretry applies updates                                   |
+| Codex   | Trust this folder                                                            | `-c projects={"<cwd>"={trust_level="trusted"}}`                                            | the ferret's OWN working folder only; it also lets that folder's `.codex/config.toml` load |
+| Codex   | Approvals and sandbox                                                        | `-c approval_policy` / `sandbox_mode` (`never` + `danger-full-access` when bypassing)      | bypass mode never asks; auto mode asks on request                                          |
+| Codex   | Full-access / world-writable warnings, rate-limit and model-migration nudges | `-c notice={hide_…=true}`                                                                  | nothing: they are notices                                                                  |
+
+**The project-MCP approval has no safe key.** `enableAllProjectMcpServers` approves EVERY server a folder's
+`.mcp.json` ever declares, and 5.0 has no owner-approved per-server list to write instead; v4 never wrote it. So a
+ferret launched in a folder with a new MCP server stops at that screen, and the owner is told once (below). An
+`enableAllProjectMcpServers` the owner (or Claude, on their answer) already put in the home is never touched.
+
+What no key answers is **told to the owner once** (`packages/plugins/warden/daemon/lib/dialog-watch.ts`): the Warden
+reads each ferret's recorded `harnessDialog` or `permissionRequest` every 30 s and raises ONE plain notice on that
+ferret's agenda per dialog **episode** — the same dialog on the same ferret is one episode, however many looks see it
+and however often the owner closes the notice; a look that misses it twice in a row ends the episode, and a different
+dialog starts a new one. The usage-limit dialog is the auto-move's, not this notice's. The Warden never picks a row.
+
+**The notice carries no pane text.** A dialog's title, body and row labels, and a tool prompt's command, path or URL
+(a `curl` with a bearer token, say), are served only to a caller holding `terminal.use`; the agenda carries no
+capability and keeps every ask version. So the notice says only fixed words: "<ferret> is waiting on a <kind> prompt in
+<harness>; open its terminal to read and choose", sits on that ferret's own board (the link to the ferret and its
+terminal), and names no row. What the screen says is read in the terminal.
+
 ## Declared gaps
 
 - **Which hooks.** The hook review says how many hooks are new, not which; the card shows what the pane

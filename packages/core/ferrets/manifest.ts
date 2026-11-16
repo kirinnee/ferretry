@@ -244,10 +244,12 @@ export default definePlugin({
         audit: { skip: 'a start recovery read records nothing, as today' },
         guard: { none: 'one ferret identity record, for the caller that proves it sent the start' },
       }),
-      // Pins (today's mounts/session-pin.ts and mounts/pins.ts, renamed): the owner's sidebar pin is a person's act.
+      // Pins (today's mounts/session-pin.ts and mounts/pins.ts, renamed): the owner's sidebar pin is a person's act. It answers
+      // the ferret's whole identity record and takes any ferret by name, so a device narrowed off fleet use is refused (c58-sec2).
       route('POST /v1/ferrets/:ferretId/pin', {
         minimum: 'operator',
         caller: 'person',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a sidebar pin records nothing, as today' },
         guard: { none: 'one ferret identity record with its pin instant' },
@@ -255,6 +257,7 @@ export default definePlugin({
       route('POST /v1/ferrets/:ferretId/unpin', {
         minimum: 'operator',
         caller: 'person',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a sidebar unpin records nothing, as today' },
         guard: { none: 'one ferret identity record' },
@@ -267,9 +270,14 @@ export default definePlugin({
         audit: { skip: 'a pin board read records nothing, as today' },
         guard: { none: 'the notes and message references a person or the ferret pinned' },
       }),
+      // The write side of the board the read above guards (c58-sec2): add, edit and remove are one `fleet.use`
+      // demand like the read, so a device narrowed off fleet use can neither read nor change a ferret's pinned notes.
+      // `use`, not `configure`: a note pin changes no host behaviour, and `configure` would put a passkey step-up on the app's
+      // ordinary pin button. A ferret's own credential is never grant-governed, so it keeps its own board.
       route('POST /v1/ferrets/:ferretId/pins', {
         minimum: 'operator',
         caller: 'any',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a pin board change records nothing, as today' },
         guard: { none: 'answers the pin board' },
@@ -756,6 +764,95 @@ export default definePlugin({
         options: [
           { flag: '--after <sequence>', help: 'start after this sequence' },
           { flag: '--json', help: 'print one protocol event per line' },
+        ],
+      }),
+      // V-0258: today’s `fy events <id>`: the journal after a cursor, read through the stream socket.
+      verb('events <id>', {
+        summary: 'read the events the daemon recorded for a ferret',
+        args: [{ name: 'id', help: 'session id or callsign' }],
+        options: [
+          { flag: '--after <sequence>', help: 'start after this sequence' },
+          { flag: '--limit <count>', help: 'stop after this many events' },
+          { flag: '--json', help: 'print one protocol event per line' },
+        ],
+      }),
+      // V-0262…: today’s `fy fs`, read-only over the file browser’s routes.
+      verb('fs', { summary: 'read a ferret’s working tree, never writing it', args: [] }),
+      verb('fs ls <id> [path]', {
+        summary: 'list a directory of a ferret’s working tree',
+        args: [
+          { name: 'id', help: 'session id or callsign' },
+          { name: 'path', help: 'relative directory', optional: true },
+        ],
+        options: [{ flag: '--json', help: 'print the daemon’s answer as JSON' }],
+      }),
+      verb('fs index <id>', {
+        summary: 'every searchable file under the ferret’s root in one read, with what it left out',
+        args: [{ name: 'id', help: 'session id or callsign' }],
+        options: [
+          { flag: '--query <text>', help: 'only files whose name or path contains this text' },
+          { flag: '--json', help: 'print the daemon’s answer as JSON' },
+        ],
+      }),
+      verb('fs cat <id> <path>', {
+        summary: 'read one file of a ferret’s working tree',
+        args: [
+          { name: 'id', help: 'session id or callsign' },
+          { name: 'path', help: 'relative file path' },
+        ],
+        options: [
+          { flag: '--head', help: 'read the file recorded in Git HEAD instead of the working tree' },
+          { flag: '--json', help: 'print the daemon’s answer as JSON' },
+        ],
+      }),
+      verb('fs changes <id>', {
+        summary: 'the Git working-tree changes of a ferret’s folder',
+        args: [{ name: 'id', help: 'session id or callsign' }],
+        options: [{ flag: '--json', help: 'print the daemon’s answer as JSON' }],
+      }),
+      verb('fs diff <id> <path>', {
+        summary: 'the unified diff of one changed path',
+        args: [
+          { name: 'id', help: 'session id or callsign' },
+          { name: 'path', help: 'relative changed path' },
+        ],
+        options: [{ flag: '--json', help: 'print the daemon’s answer as JSON' }],
+      }),
+      // V-0341…: today’s `fy pin`: a ferret’s pin board; `fy pin <words>` is `fy pin add <words>`.
+      verb('pin add <text...>', {
+        summary: 'pin a note to the board',
+        default: true,
+        args: [{ name: 'text', help: 'the note to pin', variadic: true }],
+        options: [
+          { flag: '-s, --session <id>', help: 'another ferret’s board (defaults to the ferret this runs inside)' },
+          { flag: '--json', help: 'print the daemon’s answer as JSON' },
+        ],
+      }),
+      verb('pin ls', {
+        summary: 'list the pins on the board',
+        args: [],
+        options: [
+          { flag: '-s, --session <id>', help: 'another ferret’s board (defaults to the ferret this runs inside)' },
+          { flag: '--json', help: 'print the daemon’s answer as JSON' },
+        ],
+      }),
+      verb('pin edit <id> <text...>', {
+        summary: 'replace the text of a note pin',
+        args: [
+          { name: 'id', help: 'the pin id, or the short id `pin ls` prints' },
+          { name: 'text', help: 'the replacement note', variadic: true },
+        ],
+        options: [
+          { flag: '-s, --session <id>', help: 'another ferret’s board (defaults to the ferret this runs inside)' },
+          { flag: '--json', help: 'print the daemon’s answer as JSON' },
+        ],
+      }),
+      verb('pin rm <id>', {
+        summary: 'remove a pin from the board',
+        args: [{ name: 'id', help: 'the pin id, or the short id `pin ls` prints' }],
+        options: [
+          { flag: '-s, --session <id>', help: 'another ferret’s board (defaults to the ferret this runs inside)' },
+          { flag: '--json', help: 'print the daemon’s answer as JSON' },
         ],
       }),
       verb('wait <id>', {

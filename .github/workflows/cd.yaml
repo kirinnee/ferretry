@@ -34,10 +34,14 @@ jobs:
   # start the shipped darwin-arm64 binary on a real Mac. REQUIRED here (`advisory: false`): when GitHub's
   # macOS pool gives the job no runner it is re-queued up to 3 times with backoff, and only then does
   # the release stop, saying the runner was unavailable (docs/standards/ci-cd, "macOS runner shortage").
+  #
+  # `compile` exists ONLY to feed `smoke-darwin`, so the owner's switch (`vars.MACOS_SMOKE == 'skip'`) skips it
+  # too: with the smoke off it was a 1.5-2.5 minute build `goreleaser` waited for and nobody used.
   compile:
     timeout-minutes: 15
     name: Compile Binaries
     needs: main-only
+    if: ${{ vars.MACOS_SMOKE != 'skip' }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -81,11 +85,14 @@ jobs:
   goreleaser:
     timeout-minutes: 30
     name: GoReleaser Publish
-    needs: [compile, smoke-darwin]
-    # `!cancelled()` replaces the implicit success(), so the gate is spelled out: `compile` passed (a failed
-    # compile also leaves `smoke-darwin` skipped, which must never publish) and the smoke passed, or the owner
-    # switched it off and it was skipped. A smoke that failed publishes nothing, switch or no switch.
-    if: ${{ !cancelled() && needs.compile.result == 'success' && (needs.smoke-darwin.result == 'success' || (vars.MACOS_SMOKE == 'skip' && needs.smoke-darwin.result == 'skipped')) }}
+    needs: [main-only, compile, smoke-darwin]
+    # `!cancelled()` replaces the implicit success(), so the gate is spelled out. `main-only` succeeded: with the
+    # owner's switch on, a refused tag skips `compile` and the smoke exactly as the switch does, so only this
+    # result tells them apart. Then, in two exclusive halves. Switch off (`MACOS_SMOKE` unset, or anything but
+    # 'skip'): `compile` AND the smoke both succeeded (a failed compile also leaves `smoke-darwin` skipped,
+    # which must never publish). Switch on ('skip'): the owner skipped both, so both are 'skipped' and this job
+    # starts at once. A smoke that failed publishes nothing, switch or no switch.
+    if: ${{ !cancelled() && needs.main-only.result == 'success' && ((vars.MACOS_SMOKE != 'skip' && needs.compile.result == 'success' && needs.smoke-darwin.result == 'success') || (vars.MACOS_SMOKE == 'skip' && needs.compile.result == 'skipped' && needs.smoke-darwin.result == 'skipped')) }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -100,11 +107,44 @@ jobs:
       - uses: ./.github/actions/install-nix
         with:
           shell: .#releaser
-      - name: Compile, package, and publish all channels
+      - name: Compile, package, and publish the GitHub release and the cask
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FURY_PUSH_TOKEN: ${{ secrets.FURY_PUSH_TOKEN }}
         run: nix develop .#releaser -c ./scripts/release/publish.sh
+  # Pushes the deb/rpm packages of the tag's GitHub release to Gemfury (the apt/yum channel). It runs after
+  # `goreleaser` and nothing waits for it: Gemfury indexes an rpm for ~85 s, and behind the GitHub release
+  # that was three minutes `sign` waited for a channel the signature has nothing to do with. A failed push
+  # turns the run red and is re-run on its own; the release and its signature are already out. This job
+  # alone holds `FURY_PUSH_TOKEN`.
+  fury:
+    timeout-minutes: 15
+    name: Push Linux packages to Gemfury
+    needs: goreleaser
+    if: ${{ !cancelled() && needs.goreleaser.result == 'success' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      # Only for scripts/release/fury.sh; nothing is built or installed.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/release/fury.sh
+          sparse-checkout-cone-mode: false
+      - name: Push the release's deb and rpm packages
+        env:
+          FURY_PUSH_TOKEN: ${{ secrets.FURY_PUSH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [[ -z ${FURY_PUSH_TOKEN} ]]; then
+            echo "::notice::FURY_PUSH_TOKEN is not set; the Linux packages were not pushed to Gemfury"
+            exit 0
+          fi
+          dist="${RUNNER_TEMP}/dist"
+          mkdir -p "${dist}"
+          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern '*.deb' --pattern '*.rpm' --dir "${dist}"
+          ./scripts/release/fury.sh "${dist}"
   # Signs checksums.txt so a standalone install can verify a self-update (docs/updating.md). The key
   # lives ONLY in this environment; restrict its deployment refs to `v*.*.*` tags in the repository
   # settings. Until the owner creates DAEMON_RELEASE_SIGNING_KEY this job says so and signs nothing,

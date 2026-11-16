@@ -1,6 +1,11 @@
 import { KERNEL_REFUSALS, PluginsChanged, parseRouteKey } from '@ferretry/kernel/contract';
 import type { EventDef } from '@ferretry/kernel/contract';
-import { allowedCallHeaders, type PluginClient } from '@ferretry/kernel/manifest';
+import {
+  allowedCallHeaders,
+  type PluginClient,
+  type PluginConditionalAnswer,
+  type PluginConditionalInit,
+} from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import type { PairedDaemon } from '../daemons/daemon-list.ts';
 import { type PasskeyHandler, type PasskeyNeed, type PromptOrigin, requestOrigin } from '../passkey/passkey.ts';
@@ -318,6 +323,7 @@ export class DaemonClient {
     const background = options.origin === 'background';
     return {
       call: (route, init) => this.#call(caller, route, init, background),
+      conditional: (route, params, init) => this.#conditional(caller, route, params, init, background),
       subscribe: (event, listener) => this.#subscribe(caller, event, listener),
       socket: (key, params, listeners, query) => this.#socket(caller, key, params, listeners, query),
       feed: {
@@ -411,12 +417,51 @@ export class DaemonClient {
     init: Parameters<PluginClient['call']>[1] = {},
     background = false,
   ): Promise<Answer> {
+    // Only the allow-listed headers cross (`allowedCallHeaders`); any other key a half passes is dropped.
+    const answer = await this.#answered(caller, route, init, allowedCallHeaders(init.headers), background);
+    if (answer.status >= 400) throw refusal(answer);
+    return answer.body as Answer;
+  }
+
+  /**
+   * A CONDITIONAL GET (`PluginClient.conditional`): the same guarded, passkey-confirmed round trip as a call, with the
+   * held tag in `If-None-Match`. A `304` is told as one (it has no body of its own: the caller holds it); a `200` carries
+   * the tag the daemon named it by, when it named one. The tag is the shell's to send, so it is never a half's header.
+   */
+  async #conditional(
+    caller: string,
+    route: string,
+    params: Readonly<Record<string, string>>,
+    init: PluginConditionalInit = {},
+    background = false,
+  ): Promise<PluginConditionalAnswer> {
+    const allowed = allowedCallHeaders(init.headers);
+    const headers = init.ifNoneMatch === undefined ? allowed : { ...allowed, 'if-none-match': init.ifNoneMatch };
+    const answer = await this.#answered(
+      caller,
+      route,
+      { params, ...(init.query === undefined ? {} : { query: init.query }) },
+      headers,
+      background,
+    );
+    if (answer.status >= 400) throw refusal(answer);
+    const etag = Object.entries(answer.headers).find(([name]) => name.toLowerCase() === 'etag')?.[1];
+    if (answer.status === 304) return etag === undefined ? { status: 304 } : { status: 304, etag };
+    return etag === undefined ? { status: 200, body: answer.body } : { status: 200, etag, body: answer.body };
+  }
+
+  /** One guarded round trip: admitted by the caller and the route's owner, sent, and confirmed once if a passkey is wanted. */
+  async #answered(
+    caller: string,
+    route: string,
+    init: Parameters<PluginClient['call']>[1] = {},
+    headers: Record<string, string> | undefined,
+    background = false,
+  ): Promise<TransportAnswer> {
     const owner = this.#routeOwner.get(route);
     if (owner === undefined) throw new TypeError(`${caller} called ${route}, which no compiled manifest declares`);
     await this.#admit(caller, owner);
     const { method, path } = parseRouteKey(route);
-    // Only the allow-listed headers cross (`allowedCallHeaders`); any other key a half passes is dropped.
-    const headers = allowedCallHeaders(init.headers);
     const request = {
       method,
       path: fillPath(path, init.params),
@@ -427,7 +472,7 @@ export class DaemonClient {
     };
     // A resend is the same request, its request id included: the daemon sees one act asked twice, never two acts.
     const origin: PromptOrigin = background ? 'background' : requestOrigin(method);
-    const answer = await this.#confirmed(
+    return await this.#confirmed(
       origin,
       await this.#sent(request),
       async () => {
@@ -438,8 +483,6 @@ export class DaemonClient {
       // Only a read can be quiet: a press asks for its step-up at once, whatever the caller said.
       init.quiet === true && requestOrigin(method) === 'background',
     );
-    if (answer.status >= 400) throw refusal(answer);
-    return answer.body as Answer;
   }
 
   /**
