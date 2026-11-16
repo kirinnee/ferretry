@@ -16,10 +16,11 @@
 import { passMidTurn } from '../update/mid-turn.ts';
 import type { IClockPort, IDaemonOutput, IDaemonPrompt, InstalledDaemonBinary } from '../update/machine.ts';
 import { type IProgress, NO_PROGRESS } from '../update/progress.ts';
-import type { DaemonLayout } from './layout.ts';
+import type { DaemonLayout, DaemonManagerKind } from './layout.ts';
 import { nixStorePathOf } from './nix-store.ts';
 import type {
   DaemonLifecycleVerb,
+  DaemonSupervisorReport,
   DaemonStartHandle,
   IDaemonHealthPort,
   IDaemonLifecycleClaim,
@@ -122,6 +123,19 @@ class DaemonShutdownFailedError extends Error {
 
 /** What the shell's launcher came to. */
 type DaemonLaunchOutcome = { readonly started: true } | { readonly started: false; readonly why: string };
+
+/** What `fy daemon status` learns of the daemon's supervisor; `unread` is a manager this build does not ask (launchd). */
+export type DaemonSupervision =
+  | {
+      readonly kind: 'read';
+      readonly daemon: string;
+      readonly report: DaemonSupervisorReport;
+      /** The pid the answering daemon reports for itself. */
+      readonly pid?: number;
+      /** Serving, but not as the installed service manager's daemon. */
+      readonly orphan: boolean;
+    }
+  | { readonly kind: 'unread'; readonly daemon: string; readonly manager: DaemonManagerKind };
 
 /** The two reads that need a connection to the daemon, supplied by the verb that runs. */
 export interface DaemonControlReads {
@@ -271,6 +285,26 @@ export class DaemonController {
       );
     }
     this.deps.out.success(lines.join('\n'));
+  }
+
+  /**
+   * What supervises the daemon, for `fy daemon status`: a read, never a change. launchd is not read in 5.0 (the Mac end
+   * list), so a Mac says so instead of asking `launchctl`. The pid is the answering daemon's own (`GET /healthz`).
+   */
+  async supervision(): Promise<DaemonSupervision> {
+    const { manager, daemonName: daemon } = this.deps.layout;
+    if (manager === 'launchd') return { kind: 'unread', daemon, manager };
+    const owner = await this.#owner();
+    const report = await owner.inspect();
+    const answering = await this.deps.health.probe();
+    return {
+      kind: 'read',
+      daemon,
+      report,
+      ...(answering === undefined ? {} : { pid: answering.pid }),
+      // The report in hand is the verdict `#orphanOf` would ask the manager for again.
+      orphan: owner !== this.deps.direct && servesOutsideSupervisor(report, answering),
+    };
   }
 
   async logs(options: DaemonCommandOptions): Promise<void> {
