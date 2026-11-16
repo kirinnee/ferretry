@@ -515,6 +515,11 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
       const facts: RuntimeFactsApi = {
         catalog: async () => (await assembly.catalog.runtimes()).runtimes,
         tools: async () => (await assembly.catalog.machine(undefined)).tools,
+        // Two settings only, never the rest of the machine view: Browsers' loopback firewall and Logins' shared-ports fact.
+        machineBrowserPorts: async () => {
+          const { browserPorts, browserFirewallFailure } = await assembly.catalog.machine(undefined);
+          return { browserPorts, browserFirewallFailure };
+        },
       };
 
       // ONE gate: its `start.decide` keeps the facts it read and its `launch.parts` contributes from exactly those.
