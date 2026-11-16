@@ -58,12 +58,19 @@ describe('the channel notification', () => {
 });
 
 const GEN = 'gen-test';
+const WRITE_BUDGET = 2_000;
 
 /** A port whose polls are answered from a script; once the script runs out it stops the pump. Claims are granted unless refused. */
 function scripted(
   pump: { current?: ChannelPump },
   script: readonly (readonly ChannelMessage[] | Error)[],
-  options: { readonly refuse?: ReadonlySet<string>; readonly events?: string[] } = {},
+  options: {
+    readonly refuse?: ReadonlySet<string>;
+    readonly events?: string[];
+    /** The monotonic clock the pump reads, and how long (ms of that clock) the daemon takes to answer a claim. */
+    readonly clock?: { t: number };
+    readonly takes?: number;
+  } = {},
 ) {
   const polls: { generation: string; waitMs: number }[] = [];
   const claims: { generation: string; sendId: string }[] = [];
@@ -82,7 +89,8 @@ function scripted(
     claim: async (generation, sendId) => {
       claims.push({ generation, sendId });
       options.events?.push(`claim ${sendId}`);
-      return options.refuse?.has(sendId) !== true;
+      if (options.clock !== undefined) options.clock.t += options.takes ?? 0;
+      return { claimed: options.refuse?.has(sendId) !== true, writeBudgetMs: WRITE_BUDGET };
     },
   };
   return { port, polls, claims };
@@ -109,6 +117,36 @@ describe('ChannelPump', () => {
     holder.current = new ChannelPump(port, line => written.push(line), seams);
     await holder.current.start();
     should(written).eql([channelNotification(message)]);
+  });
+
+  it('should NOT write a grant that came back after the write budget of the server’s own send, and say its id', async () => {
+    const holder: { current?: ChannelPump } = {};
+    const clock = { t: 10_000 };
+    const errors: string[] = [];
+    const { port, claims } = scripted(holder, [[message]], { clock, takes: WRITE_BUDGET + 1 });
+    const written: string[] = [];
+    holder.current = new ChannelPump(port, line => written.push(line), {
+      ...seams,
+      now: () => clock.t,
+      onError: text => errors.push(text),
+    });
+    await holder.current.start();
+    should(written).eql([]);
+    should(claims.map(claim => claim.sendId)).eql(['send-1']);
+    should(errors).have.length(1);
+    should(errors[0]).containEql('send-1').and.containEql('write budget');
+  });
+
+  it('should write a grant that came back exactly at the write budget, and a later message gets its own deadline', async () => {
+    const holder: { current?: ChannelPump } = {};
+    const clock = { t: 0 };
+    const second: ChannelMessage = { sendId: 'send-2', text: 'second' };
+    const { port } = scripted(holder, [[message, second]], { clock, takes: WRITE_BUDGET });
+    const written: string[] = [];
+    holder.current = new ChannelPump(port, line => written.push(line), { ...seams, now: () => clock.t });
+    await holder.current.start();
+    // Each claim is timed from ITS OWN send, not from the poll answer: two on-time grants, two writes.
+    should(written).eql([channelNotification(message), channelNotification(second)]);
   });
 
   it('should write NOTHING for a message whose claim the daemon refused (withdrawn: the fallback typed it instead)', async () => {
@@ -266,7 +304,7 @@ describe('ChannelPump', () => {
           holder.current?.stop();
           return [message];
         },
-        claim: async () => true,
+        claim: async () => ({ claimed: true, writeBudgetMs: WRITE_BUDGET }),
       },
       () => undefined,
       { ...seams, onError: text => errors.push(text) },
@@ -280,7 +318,7 @@ describe('ChannelPump', () => {
           silent.stop();
           throw new Error('x');
         },
-        claim: async () => true,
+        claim: async () => ({ claimed: true, writeBudgetMs: WRITE_BUDGET }),
       },
       () => undefined,
       seams,
@@ -328,12 +366,12 @@ describe('clientChannelPort', () => {
       door({
         channel_claim: input => {
           seen.push(input);
-          return { text: 'claimed', data: { claimed: input.sendId === 'a' } };
+          return { text: 'claimed', data: { claimed: input.sendId === 'a', writeBudgetMs: WRITE_BUDGET } };
         },
       }),
     );
-    should(await port.claim(GEN, 'a')).be.true();
-    should(await port.claim(GEN, 'b')).be.false();
+    should(await port.claim(GEN, 'a')).eql({ claimed: true, writeBudgetMs: WRITE_BUDGET });
+    should(await port.claim(GEN, 'b')).eql({ claimed: false, writeBudgetMs: WRITE_BUDGET });
     should(seen).eql([
       { generation: GEN, sendId: 'a' },
       { generation: GEN, sendId: 'b' },
@@ -342,6 +380,15 @@ describe('clientChannelPort', () => {
 
   it('should throw when channel_claim answers in a shape it cannot read', async () => {
     await clientChannelPort(door({ channel_claim: () => ({ text: 'ok', data: { claimed: 'yes' } }) }))
+      .claim(GEN, 'a')
+      .then(
+        () => should.fail(undefined, undefined, 'it should have thrown'),
+        (error: Error) => should(error.message).containEql('channel_claim in a shape this build does not read'),
+      );
+  });
+
+  it('should throw when channel_claim names no write budget (a grant with no deadline is never written)', async () => {
+    await clientChannelPort(door({ channel_claim: () => ({ text: 'ok', data: { claimed: true } }) }))
       .claim(GEN, 'a')
       .then(
         () => should.fail(undefined, undefined, 'it should have thrown'),
@@ -484,7 +531,7 @@ describe('serveTools — the channel end to end', () => {
             ? { text: 'ok', data: { messages: [{ sendId: 'send-1', text: banner, from: 'abby' }] } }
             : new Promise(() => undefined);
         }
-        return { text: 'ok', data: { claimed: true } };
+        return { text: 'ok', data: { claimed: true, writeBudgetMs: WRITE_BUDGET } };
       },
     } as unknown as PluginClient;
     return {

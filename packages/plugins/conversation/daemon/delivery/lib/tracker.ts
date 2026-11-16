@@ -74,6 +74,16 @@ interface SendReattempter {
 interface SendChannelPort {
   /** When the MCP server claimed this send (epoch ms), or `undefined` when it never did (or the daemon forgot). */
   claimedAt(id: SessionId, sendId: string): number | undefined;
+  /**
+   * How long after sending its claim request the server may still write the message (the contract's write budget): a
+   * grant is never given up on, nor its message typed, before the grant plus this plus the receipt window.
+   */
+  readonly writeBudgetMs: number;
+  /**
+   * When this daemon started holding channel state (epoch ms). A send accepted before it has a claim state the daemon
+   * forgot: a grant could have been given by the process before, so it waits out the budget and the window from here.
+   */
+  readonly bootedAt: number;
   /** The transcript showed Claude received this send: the channel works for this ferret. */
   received(id: SessionId, sendId: string): void;
   /** The channel was marked broken (a claimed send showed no receipt): nothing more waits on it. */
@@ -399,9 +409,11 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     if (verdict?.queuedAt !== undefined) return await this.channelReceived(id, record, verdict.queuedAt, now);
     const port = this.ports.channel;
     const claimedAt = port.claimedAt(id, record.sendId);
-    const receiptBy = (claimedAt ?? acceptedAt) + this.settings.channelReceiptMs;
-    // A channel marked broken meanwhile waits for nothing: a send it never claimed goes to the composer now.
-    if (now < receiptBy && !(claimedAt === undefined && port.broken(id))) return receiptBy;
+    const receiptBy = this.receiptBy(acceptedAt, claimedAt);
+    // A channel marked broken meanwhile waits for nothing: a send it never claimed goes to the composer now. (One that
+    // was accepted before this daemon booted is never "never claimed": its state is unknown, so it waits regardless.)
+    if (now < receiptBy && !(claimedAt === undefined && port.broken(id) && acceptedAt >= port.bootedAt))
+      return receiptBy;
     // ONE MORE LOOK before the only typing: a receipt that was merely slow must never become a second copy.
     const fresh = await this.ports.evidence
       .read(id, new Date(acceptedAt - this.settings.matchSlackMs).toISOString())
@@ -412,6 +424,9 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       return undefined;
     }
     if (again?.queuedAt !== undefined) return await this.channelReceived(id, record, again.queuedAt, now);
+    // A claim granted while that transcript was being read has its own, later deadline: the server may still write it.
+    const lateClaim = port.claimedAt(id, record.sendId);
+    if (claimedAt === undefined && lateClaim !== undefined) return this.receiptBy(acceptedAt, lateClaim);
     if (!fresh.readable) {
       if (now < acceptedAt + this.settings.channelUnreadableMs) return now + this.settings.firstCheckMs;
       await this.settle(
@@ -433,6 +448,20 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       });
     }
     return now + this.settings.untypedLookMs;
+  }
+
+  /**
+   * The instant before which a channel send is not given up on. Claimed: the grant, plus the time the server may still
+   * take to write it (its answer can arrive late, and it then writes only within that budget of ITS send, which is never
+   * after the grant), plus the receipt window. Never claimed: the window from the send; but a send accepted before this
+   * daemon booted has an unknown claim state, so it waits the budget and the window from boot.
+   */
+  private receiptBy(acceptedAt: number, claimedAt: number | undefined): number {
+    const port = this.ports.channel;
+    const window = this.settings.channelReceiptMs;
+    if (claimedAt !== undefined) return claimedAt + port.writeBudgetMs + window;
+    if (acceptedAt < port.bootedAt) return port.bootedAt + port.writeBudgetMs + window;
+    return acceptedAt + window;
   }
 
   /** The transcript's enqueue line proves Claude received a channel send: it is `queued` and never typed. */

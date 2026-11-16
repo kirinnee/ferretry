@@ -61,7 +61,12 @@ export type Withdrawal = 'withdrawn' | 'claimed';
 export class ChannelOutbox {
   private readonly lanes = new Map<string, Lane>();
 
-  constructor(private readonly clock: OutboxClock) {}
+  /** When this outbox (so this daemon process) began holding state: what it was told before then it does not know. */
+  readonly bootedAt: number;
+
+  constructor(private readonly clock: OutboxClock) {
+    this.bootedAt = clock.nowMs();
+  }
 
   private lane(ferret: string): Lane {
     let lane = this.lanes.get(ferret);

@@ -341,6 +341,17 @@ function evidenceSince(record: SendRecord, slackMs: number): number {
 }
 
 /**
+ * Whether this input may prove this send at all. A message that came through Ferretry's channel carries the `send_id` of
+ * the send it is, and ONLY that send is proven by it; a send handed to the channel is proven ONLY by an input carrying its
+ * own id. Two identical channel messages share a text and never a receipt, and a typed send never takes a channel message's
+ * proof for its own. Anything else is told by its text, as before.
+ */
+function ownedBy(input: ObservedHumanInput, record: SendRecord): boolean {
+  if (input.channelSendId !== undefined) return input.channelSendId === record.sendId;
+  return record.path !== 'channel';
+}
+
+/**
  * Judges every watched send against one reading of the transcript, ONE-TO-ONE.
  *
  * Sends are taken oldest first and each takes the EARLIEST unclaimed user record that carries its
@@ -360,7 +371,8 @@ function judgeSends(
   for (const record of ordered) {
     const needle = normalized(record.matchText ?? record.message);
     const since = evidenceSince(record, slackMs);
-    const after = (input: ObservedHumanInput): boolean => Date.parse(input.observedAt) >= since;
+    const after = (input: ObservedHumanInput): boolean =>
+      Date.parse(input.observedAt) >= since && ownedBy(input, record);
     const entered = inputs.find(
       input =>
         ENTERED.has(input.proof) &&
@@ -421,9 +433,12 @@ function judgeMerged(
   inputs: readonly ObservedHumanInput[],
   slackMs: number,
 ): void {
-  const pending = ordered.filter(record => verdicts.get(record.sendId)?.delivered === undefined);
+  // A channel message is one whole message with its own id: it is never half of a joined record, nor a joined one.
+  const pending = ordered.filter(
+    record => record.path !== 'channel' && verdicts.get(record.sendId)?.delivered === undefined,
+  );
   for (const input of inputs) {
-    if (!ENTERED.has(input.proof) || taken.has(input.proofKey)) continue;
+    if (!ENTERED.has(input.proof) || taken.has(input.proofKey) || input.channelSendId !== undefined) continue;
     const target = squeezed(input.text);
     const run = mergedRun(pending, target, Date.parse(input.observedAt), slackMs);
     if (run === undefined) continue;

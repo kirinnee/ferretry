@@ -15,17 +15,37 @@ export const FERRETRY_CHANNEL_SERVER = 'ferretry';
 
 /** `<channel` + attributes (quoted values only; a value may hold `>`) + `>`, the text, `</channel>`. */
 const CHANNEL_WRAPPER = /^\s*<channel((?:\s+[^\s=>]+="[^"]*")*)\s*>\n?([\s\S]*?)\n?<\/channel>\s*$/u;
-const FIRST_SOURCE = /(?:^|\s)source="([^"]*)"/u;
+const ATTRIBUTE = /([^\s=>]+)="([^"]*)"/gu;
+
+/** The first attribute called `name`, read attribute by attribute (a value that merely looks like one is not one). */
+function firstAttribute(attributes: string, name: string): string | undefined {
+  for (const found of attributes.matchAll(ATTRIBUTE)) if (found[1] === name) return found[2] ?? '';
+  return undefined;
+}
+
+/** What a Ferretry channel wrapper held: the words inside it, and the send they belong to when the tag names one. */
+export interface FerretryChannelMessage {
+  readonly text: string;
+  readonly sendId?: string;
+}
 
 /**
- * The text inside a Ferretry channel wrapper, or `undefined` when `text` is not one (no wrapper, or another server's).
- * The FIRST `source` attribute names the server: Claude writes its own before the meta's, so a meta key called `source`
- * (which it would duplicate) cannot steal the name.
+ * The words inside a Ferretry channel wrapper and its `send_id` attribute, or `undefined` when `text` is not one (no
+ * wrapper, or another server's). The FIRST `source` attribute names the server: Claude writes its own before the meta's,
+ * so a meta key called `source` (which it would duplicate) cannot steal the name.
  */
-export function unwrapFerretryChannel(text: string): string | undefined {
+export function parseFerretryChannel(text: string): FerretryChannelMessage | undefined {
   const found = CHANNEL_WRAPPER.exec(text);
   if (found === null) return undefined;
-  return FIRST_SOURCE.exec(found[1] ?? '')?.[1] === FERRETRY_CHANNEL_SERVER ? (found[2] ?? '') : undefined;
+  const attributes = found[1] ?? '';
+  if (firstAttribute(attributes, 'source') !== FERRETRY_CHANNEL_SERVER) return undefined;
+  const sendId = firstAttribute(attributes, 'send_id');
+  return { text: found[2] ?? '', ...(sendId === undefined || sendId === '' ? {} : { sendId }) };
+}
+
+/** The text inside a Ferretry channel wrapper, or `undefined` when `text` is not one. */
+export function unwrapFerretryChannel(text: string): string | undefined {
+  return parseFerretryChannel(text)?.text;
 }
 
 /** Whether a record's `origin` says it came through Ferretry's channel: `{ kind: 'channel', server: 'ferretry' }`. */

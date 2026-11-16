@@ -978,6 +978,94 @@ describe('claude development-channels warning (2.1.317)', () => {
     should(actual).deepEqual([undefined, undefined]);
   });
 
+  it('should answer nothing for a quoted warning with its two numbered options above an active UNNUMBERED consent menu', () => {
+    // Arrange: the reviewer's case. Everything numbered below the title is the quoted dialog; the live menu has no numbers.
+    // Two live rows right under the quoted dialog: the quoted title is still within the last 16 lines, as on screen.
+    const pane = `${screen().trimEnd()}\n ❯ Yes\n   No`;
+
+    // Act
+    const actual = [startupDialogAction(pane), devChannelsAction(pane)];
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing when the cursor marker is on BOTH rows, or on neither', () => {
+    const both = screen().replace('  2. Exit', '❯ 2. Exit');
+    const neither = screen().replace('❯ 1. I am using', '  1. I am using');
+
+    should([devChannelsAction(both), devChannelsAction(neither)]).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing for the title alone in scrollback above a normal composer', () => {
+    // Arrange: the warning was quoted in an earlier answer; the live screen is the ordinary prompt.
+    const pane = [
+      ' WARNING: Loading development channels',
+      '',
+      ' ● That is the warning Claude printed on launch.',
+      '',
+      '╭──────────────────────────────────────────────╮',
+      '│ >                                            │',
+      '╰──────────────────────────────────────────────╯',
+      '  ? for shortcuts',
+    ].join('\n');
+
+    // Act / Assert
+    should([startupDialogAction(pane), devChannelsAction(pane)]).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing when any other line follows the dialog (a prompt, a second dialog, a stray line)', () => {
+    const prompt = `${screen()}\n ❯ `;
+    const stray = `${screen()}\n some other output`;
+
+    should([devChannelsAction(prompt), devChannelsAction(stray)]).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing when the second numbered row is missing (the hint line stands where Exit should be)', () => {
+    const oneRow = screen().replace('  2. Exit\n', '');
+
+    should([startupDialogAction(oneRow), devChannelsAction(oneRow)]).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing when the body is not the measured one (edited text, a missing paragraph)', () => {
+    const edited = screen().replace('only. Do not use', 'only. Please do use');
+    const missing = screen().replace(' Channels: server:ferretry\n', '');
+
+    should([devChannelsAction(edited), devChannelsAction(missing)]).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer a dialog the pane wrapped to another width, and one drawn inside a box', () => {
+    // Arrange
+    const narrow = screen().replace(
+      ' --dangerously-load-development-channels is for local channel development only. Do not use this option to run\n channels you',
+      ' --dangerously-load-development-channels is for local channel\n development only. Do not use this option to run channels\n you',
+    );
+    const boxed = [
+      '╭──────────────────────────────────────────────────╮',
+      ...screen()
+        .trimEnd()
+        .split('\n')
+        .map(line => `│${line.padEnd(50)}│`),
+      '╰──────────────────────────────────────────────────╯',
+    ].join('\n');
+
+    // Act / Assert
+    should([devChannelsAction(narrow), devChannelsAction(boxed)]).deepEqual([
+      { kind: 'dev-channels', keys: ['Enter'] },
+      { kind: 'dev-channels', keys: ['Enter'] },
+    ]);
+  });
+
+  it('should answer the LAST copy of the dialog when an identical one was quoted above it, and a dialog drawn without its hint line', () => {
+    const doubled = `${screen()}\n${screen()}`;
+    const hintless = screen().replace(' Enter to confirm · Esc to cancel\n', '');
+
+    should([devChannelsAction(doubled), devChannelsAction(hintless)]).deepEqual([
+      { kind: 'dev-channels', keys: ['Enter'] },
+      { kind: 'dev-channels', keys: ['Enter'] },
+    ]);
+  });
+
   it('should answer nothing when the warning has scrolled out of the bottom window', () => {
     // Arrange
     const pane = `${screen()}\n${Array.from({ length: 20 }, (_, i) => `output line ${String(i)}`).join('\n')}`;

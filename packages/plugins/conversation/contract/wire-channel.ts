@@ -42,5 +42,18 @@ export const ChannelClaimInputSchema = z.strictObject({
 });
 export type ChannelClaimInput = z.infer<typeof ChannelClaimInputSchema>;
 
-export const ChannelClaimAnswerSchema = z.strictObject({ claimed: z.boolean() });
+/**
+ * How long after it SENT a claim request the server may still write the notification. The one owner of the number: the
+ * daemon hands it back in every claim answer (so the two ends can never disagree on it), the server writes only when the
+ * granted answer reached it within this long of its own send (its own monotonic clock, no clock shared with the daemon),
+ * and the daemon never gives up on a claimed message — never types it — before the grant plus this plus the receipt window.
+ * The server's send time is never later than the daemon's grant time, so its deadline is always over before the daemon's.
+ */
+export const CHANNEL_WRITE_BUDGET_MS = 2_000;
+
+export const ChannelClaimAnswerSchema = z.strictObject({
+  claimed: z.boolean(),
+  /** {@link CHANNEL_WRITE_BUDGET_MS}: how long after sending the request a granted claim may still be written. */
+  writeBudgetMs: z.number().int().positive(),
+});
 export type ChannelClaimAnswer = z.infer<typeof ChannelClaimAnswerSchema>;

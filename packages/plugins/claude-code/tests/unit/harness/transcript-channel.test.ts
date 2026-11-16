@@ -35,6 +35,22 @@ describe('Ferretry channel entries', () => {
     expect(parseEntry(user([{ type: 'text', text: WRAPPED }]))).toMatchObject({ role: 'user', text: TEXT });
   });
 
+  test('the send_id of the wrapper is kept in the entry’s data, on a user record, a drain and a queue line', () => {
+    expect(parseEntry(user(WRAPPED))).toMatchObject({ text: TEXT, data: { channelSendId: 's-1' } });
+    expect(parseEntry(drain(WRAPPED))).toMatchObject({ data: { proof: 'queued-prompt', channelSendId: 's-1' } });
+    expect(
+      parseEntry(line({ type: 'queue-operation', operation: 'enqueue', timestamp: AT, content: WRAPPED })),
+    ).toMatchObject({ text: TEXT, data: { proof: 'queue-operation', operation: 'enqueue', channelSendId: 's-1' } });
+  });
+
+  test('a wrapper that names no send, or whose value only contains the attribute, gives words and no send id', () => {
+    const bare = '<channel source="ferretry">\nA\n</channel>';
+    const tricky = '<channel source="ferretry" from="a send_id=" send_id="real">\nA\n</channel>';
+    expect(parseEntry(user(bare))).toEqual({ id: 'u1', at: AT, role: 'user', text: 'A' });
+    expect(parseEntry(user(tricky))).toMatchObject({ text: 'A', data: { channelSendId: 'real' } });
+    expect(parseEntry(user(OTHER, { origin: { kind: 'channel', server: 'testchan' } }))).not.toHaveProperty('data');
+  });
+
   test('another server’s record, and a wrapper a person typed, keep their wrapper', () => {
     expect(parseEntry(user(OTHER, { origin: { kind: 'channel', server: 'testchan' } }))?.text).toBe(OTHER);
     expect(parseEntry(user(WRAPPED, { origin: { kind: 'human' } }))?.text).toBe(WRAPPED);

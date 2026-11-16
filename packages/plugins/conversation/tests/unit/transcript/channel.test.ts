@@ -3,6 +3,7 @@ import should from 'should';
 import {
   FERRETRY_CHANNEL_SERVER,
   isFerretryChannelOrigin,
+  parseFerretryChannel,
   unwrapFerretryChannel,
 } from '../../../daemon/reader/lib/transcript/channel.ts';
 import { ClaudeTranscriptParser } from '../../../daemon/reader/lib/transcript/claude.ts';
@@ -59,6 +60,26 @@ describe('unwrapFerretryChannel', () => {
   it('should keep markup and entities inside the words exactly as written', () => {
     const words = `${BANNER}\nUse <b>&amp;</b> and "quotes" </channel-ish>`;
     should(unwrapFerretryChannel(`<channel source="ferretry" a="x>y">\n${words}\n</channel>`)).equal(words);
+  });
+});
+
+describe('parseFerretryChannel', () => {
+  it('should give the words and the send_id the tag names', () => {
+    should(parseFerretryChannel(WRAPPED)).eql({ text: TEXT, sendId: 's-1' });
+  });
+
+  it('should give the words alone when the tag names no send, or an empty one', () => {
+    should(parseFerretryChannel('<channel source="ferretry">\nA\n</channel>')).eql({ text: 'A' });
+    should(parseFerretryChannel('<channel source="ferretry" send_id="">\nA\n</channel>')).eql({ text: 'A' });
+  });
+
+  it('should read send_id attribute by attribute: a value that merely contains one is not it', () => {
+    const tag = '<channel source="ferretry" from="a send_id=" send_id="real">\nA\n</channel>';
+    should(parseFerretryChannel(tag)).eql({ text: 'A', sendId: 'real' });
+  });
+
+  it('should be nothing for another server’s wrapper', () => {
+    should(parseFerretryChannel(OTHER)).be.undefined();
   });
 });
 
@@ -133,6 +154,24 @@ describe('ClaudeObservedInputObserver — Ferretry channel', () => {
 
     should(actual).have.length(1);
     should(actual[0]).containEql({ proof: 'normal-user-record', text: TEXT, observedAt: '2026-11-16T06:02:39.331Z' });
+  });
+
+  it('should keep the channel send_id on the entry, the busy drain and the enqueue/release lines (and none on typed text)', () => {
+    const subject = new ClaudeObservedInputObserver();
+    const line = (operation: string, content: string) => ({
+      type: 'queue-operation',
+      operation,
+      content,
+      timestamp: '2026-11-16T06:05:05.818Z',
+    });
+
+    should(subject.observe(channelUser(WRAPPED), CONTEXT)[0]).containEql({ channelSendId: 's-1' });
+    should(subject.observe(channelDrain(WRAPPED), CONTEXT)[0]).containEql({ channelSendId: 's-1' });
+    should(subject.observe(line('enqueue', WRAPPED), CONTEXT)[0]).containEql({ channelSendId: 's-1' });
+    should(subject.observe(line('dequeue', WRAPPED), CONTEXT)[0]).containEql({ channelSendId: 's-1' });
+    should(subject.observe(line('enqueue', TEXT), CONTEXT)[0]).not.have.property('channelSendId');
+    should(subject.observe(channelUser(TEXT), CONTEXT)[0]).not.have.property('channelSendId');
+    should(subject.observe(channelDrain(TEXT), CONTEXT)[0]).not.have.property('channelSendId');
   });
 
   it('should leave another server’s wrapped record as the text Claude wrote', () => {

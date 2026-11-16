@@ -28,6 +28,15 @@ const G1 = 'gen-1';
 const G2 = 'gen-2';
 
 describe('the Claude channel outbox', () => {
+  it('should know when it began holding state, so a send accepted before it has an unknown claim state', () => {
+    const clock = new Clock();
+    const outbox = new ChannelOutbox(clock);
+    clock.advance(5_000);
+
+    should(outbox.bootedAt).equal(1_000);
+    should(new ChannelOutbox(clock).bootedAt).equal(6_000);
+  });
+
   it('offers a waiting message to the next poll at once, and it is the server’s to push only once it CLAIMS it', async () => {
     const clock = new Clock();
     const outbox = new ChannelOutbox(clock);

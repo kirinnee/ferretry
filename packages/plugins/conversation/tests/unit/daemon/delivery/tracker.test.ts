@@ -2,6 +2,7 @@ import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
 import { turnFileInstruction } from '@ferretry/core-mailbox/contract';
 import should from 'should';
+import { CHANNEL_WRITE_BUDGET_MS } from '../../../../contract/wire-channel.ts';
 import { type ClockPort, type SerialExecutor } from '../../../../daemon/seams/ports.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
 import { type SendRecord } from '../../../../daemon/seams/ledger-types.ts';
@@ -134,8 +135,12 @@ class World {
   /** Readings handed out first, one per read, before `reading` answers again (the transcript changing between two looks). */
   readings: SendEvidenceReading[] = [];
   /** The sends the MCP server said it forwarded through the Claude channel, and the ones the tracker typed instead. */
-  /** Send ids the MCP server CLAIMED, with the instant of the claim (an offset in ms from the epoch the tests use). */
+  /** Send ids the MCP server CLAIMED, with the instant of the claim (epoch ms). */
   readonly channelClaims = new Map<string, number>();
+  /** Runs at the start of every transcript read (a claim granted while the tracker reads, say). */
+  onRead: (() => void) | undefined;
+  /** When this daemon booted, as an offset in ms from the epoch the tests use (before every send by default). */
+  channelBootedAt = -60_000;
   /** Whether the channel was marked broken (a claimed message showed no receipt). */
   channelBroken = false;
   /** The sends the transcript showed Claude receiving (told to the channel). */
@@ -174,6 +179,7 @@ class World {
       runExclusive: async work => await work(),
     };
     const clock: ClockPort = { now: () => new Date(this.nowMs).toISOString() as Instant };
+    const booted = (): number => T0 + this.channelBootedAt;
     this.tracker = new SendTracker(
       {
         ledger: {
@@ -198,6 +204,7 @@ class World {
         evidence: {
           read: async (_id, since) => {
             this.sinces.push(since);
+            this.onRead?.();
             if (this.readFails) throw new Error('transcript gone');
             return this.readings.shift() ?? this.reading;
           },
@@ -222,6 +229,10 @@ class World {
         },
         channel: {
           claimedAt: (_id, sendId) => this.channelClaims.get(sendId),
+          writeBudgetMs: CHANNEL_WRITE_BUDGET_MS,
+          get bootedAt() {
+            return booted();
+          },
           received: (_id, sendId) => void this.channelReceipts.push(sendId),
           broken: () => this.channelBroken,
           fallBackToTyping: async (_id, entry) => {
@@ -2185,6 +2196,65 @@ describe('a send handed to the Claude channel', () => {
     should(world.channelReceipts).eql(['send-1']);
   });
 
+  describe('two sends with IDENTICAL text', () => {
+    const WRAPPED_2 = '<channel source="ferretry" send_id="send-2">\nship it now please\n</channel>';
+    const twin = () => [channelSend(), channelSend({ sendId: 'send-2' })] as const;
+    const byId = (world: World, sendId: string) => world.records.get(sendId);
+
+    it('never share one receipt: only s1 enqueued -> s1 is received, s2 falls back and is typed once', async () => {
+      const world = new World(...twin());
+      world.evidence(new ClaudeObservedInputObserver(), [claude.enqueue(WRAPPED, 20)]);
+
+      await world.checkAt(2_000);
+      should(byId(world, 'send-1')).containEql({ fate: 'queued', path: 'channel' });
+      should(byId(world, 'send-2')).containEql({ fate: 'accepted', path: 'channel' });
+
+      await world.checkAt(channelReceiptMs);
+      should(world.fellBack).eql(['send-2']);
+      should(byId(world, 'send-1')).containEql({ fate: 'queued', path: 'channel' });
+      should(world.channelReceipts).not.containEql('send-2');
+    });
+
+    it('each is received by its OWN enqueue line when both were enqueued: neither is typed', async () => {
+      const world = new World(...twin());
+      world.evidence(new ClaudeObservedInputObserver(), [claude.enqueue(WRAPPED, 20), claude.enqueue(WRAPPED_2, 30)]);
+
+      await world.checkAt(2_000);
+      await world.checkAt(channelReceiptMs + 1_000);
+
+      should(byId(world, 'send-1')).containEql({ fate: 'queued', path: 'channel' });
+      should(byId(world, 'send-2')).containEql({ fate: 'queued', path: 'channel' });
+      should(world.fellBack).be.empty();
+      should(world.channelReceipts).containEql('send-1').and.containEql('send-2');
+    });
+
+    it('are delivered only by their own user entry: s2 does not take s1’s delivery', async () => {
+      const world = new World(...twin());
+      world.evidence(new ClaudeObservedInputObserver(), [
+        claude.enqueue(WRAPPED, 20),
+        { ...claude.user(WRAPPED, 40, 'u-1'), isMeta: true, origin: { kind: 'channel', server: 'ferretry' } },
+      ]);
+
+      await world.checkAt(2_000);
+
+      should(byId(world, 'send-1')).containEql({ fate: 'delivered' });
+      should(byId(world, 'send-2')).containEql({ fate: 'accepted' });
+      await world.checkAt(channelReceiptMs);
+      should(world.fellBack).eql(['send-2']);
+    });
+
+    it('a typed send with the same text never takes a channel message’s proof for its own', async () => {
+      const world = new World(record({ sendId: 'send-9', acceptedAt: at(0) }));
+      world.evidence(new ClaudeObservedInputObserver(), [
+        { ...claude.user(WRAPPED, 40, 'u-1'), isMeta: true, origin: { kind: 'channel', server: 'ferretry' } },
+      ]);
+
+      await world.checkAt(2_000);
+
+      should(byId(world, 'send-9')).containEql({ fate: 'accepted' });
+    });
+  });
+
   it('counts the enqueue line as the receipt — queued, never typed — tells the channel, and waits for the delivery', async () => {
     const world = new World(channelSend());
     world.evidence(new ClaudeObservedInputObserver(), [claude.enqueue(WRAPPED, 20)]);
@@ -2236,11 +2306,61 @@ describe('a send handed to the Claude channel', () => {
     // The send's own window is over, but the claim is only 6 s old: the push may still be landing.
     await world.checkAt(channelReceiptMs);
     should(world.fellBack).be.empty();
-    should(world.scheduled.at(-1)?.delayMs).equal(4_000);
+    should(world.scheduled.at(-1)?.delayMs).equal(4_000 + CHANNEL_WRITE_BUDGET_MS);
 
     await world.checkAt(4_000 + channelReceiptMs);
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(CHANNEL_WRITE_BUDGET_MS);
+
+    await world.checkAt(4_000 + CHANNEL_WRITE_BUDGET_MS + channelReceiptMs);
     should(world.fellBack).eql(['send-1']);
     should(world.channelReceipts).be.empty();
+  });
+
+  it('waits out a late GRANT: the server may still write it for the write budget after the grant, so nothing is typed before grant + budget + window', async () => {
+    const world = new World(channelSend());
+    world.channelClaims.set('send-1', Date.parse(at(9_000)));
+
+    // The receipt window of the claim is over only at 9 s + 2 s budget + 10 s window; one ms short types nothing.
+    await world.checkAt(9_000 + CHANNEL_WRITE_BUDGET_MS + channelReceiptMs - 1);
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(1);
+
+    await world.checkAt(9_000 + CHANNEL_WRITE_BUDGET_MS + channelReceiptMs);
+    should(world.fellBack).eql(['send-1']);
+  });
+
+  it('does not type a send whose claim was granted WHILE the final transcript was being read: it waits for that grant’s own deadline', async () => {
+    const world = new World(channelSend());
+    world.onRead = () => {
+      world.onRead = undefined;
+      world.channelClaims.set('send-1', Date.parse(at(channelReceiptMs)));
+    };
+
+    await world.checkAt(channelReceiptMs);
+
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(CHANNEL_WRITE_BUDGET_MS + channelReceiptMs);
+
+    await world.checkAt(channelReceiptMs + CHANNEL_WRITE_BUDGET_MS + channelReceiptMs);
+    should(world.fellBack).eql(['send-1']);
+  });
+
+  it('a send accepted BEFORE this daemon booted has an unknown claim state: it waits write budget + window from boot, re-reads, and only then types', async () => {
+    const world = new World(channelSend());
+    world.channelBootedAt = 30_000;
+    world.channelBroken = true;
+
+    // Its own window is long over, but a grant by the previous process could still be written: nothing before boot + budget + window.
+    await world.checkAt(30_000 + CHANNEL_WRITE_BUDGET_MS + channelReceiptMs - 1);
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(1);
+
+    const reads = world.sinces.length;
+    await world.checkAt(30_000 + CHANNEL_WRITE_BUDGET_MS + channelReceiptMs);
+    should(world.fellBack).eql(['send-1']);
+    // the transcript was read again at that instant (the guard right before the only typing)
+    should(world.sinces.length).be.greaterThan(reads);
   });
 
   it('does not wait out the window for a send the server never claimed once the channel is marked broken', async () => {

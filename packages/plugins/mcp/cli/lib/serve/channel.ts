@@ -16,6 +16,12 @@
  * after the daemon typed the message instead can never push it a second time. Neither tool is in the tools list a model
  * sees; this module is their only caller.
  *
+ * A GRANT IS ONLY GOOD FOR A MOMENT. The server notes its OWN monotonic time when it SENDS the claim request and writes
+ * the notification only if the granted answer is back within the write budget the daemon names in that answer (the
+ * contract's CHANNEL_WRITE_BUDGET_MS) of that send. A grant that arrives later is dropped and said (ids only): by then the
+ * daemon may have given up on the channel and typed the message. The send time is never later than the daemon's grant
+ * time, so this deadline is always over before the daemon's own (grant + budget + receipt window); no clock is shared.
+ *
  * A CLAIM IS NOT A RECEIPT. Nothing here says Claude received anything: the daemon proves that from Claude's own
  * transcript (the `enqueue` line), and routes around a channel Claude does not take.
  *
@@ -38,8 +44,14 @@ export interface ChannelMessage {
 export interface ChannelPort {
   /** Candidates waiting for this session; waits up to `waitMs` for the first one. `generation` names this subscriber. */
   poll(generation: string, waitMs: number): Promise<readonly ChannelMessage[]>;
-  /** Asks to write one candidate to Claude. `true` only while the daemon still wants it pushed by this generation. */
-  claim(generation: string, sendId: string): Promise<boolean>;
+  /** Asks to write one candidate to Claude. Granted only while the daemon still wants it pushed by this generation. */
+  claim(generation: string, sendId: string): Promise<ChannelClaim>;
+}
+
+/** The daemon's answer to a claim: whether it was granted, and how long after the request was sent it may still be written. */
+interface ChannelClaim {
+  readonly claimed: boolean;
+  readonly writeBudgetMs: number;
 }
 
 /** How long one poll waits at the daemon: under the tool door's own limit, so no request outlives the transport. */
@@ -92,6 +104,8 @@ export interface ChannelSeams {
   readonly sleep: (ms: number) => Promise<void>;
   /** Said when a poll or a claim failed (the daemon's own sentence); never throws. */
   readonly onError?: (message: string) => void;
+  /** A MONOTONIC clock in milliseconds (default `performance.now`): only ever differenced, never compared with the daemon's. */
+  readonly now?: () => number;
 }
 
 /** Forwards the daemon's channel messages for this session to Claude, until stopped. */
@@ -117,10 +131,23 @@ export class ChannelPump {
     this.stopped = true;
   }
 
-  /** Whether the daemon granted the claim. A failed claim is said and counts as refused: nothing is written on a guess. */
+  /**
+   * Whether the daemon granted the claim AND the grant is still good: its answer came back within the write budget of this
+   * server's own send. A failed claim is said and counts as refused, and a late grant is dropped and said: nothing is
+   * written on a guess.
+   */
   private async claimed(message: ChannelMessage): Promise<boolean> {
+    const now = this.seams.now ?? (() => performance.now());
+    const sentAt = now();
     try {
-      return await this.port.claim(this.seams.generation, message.sendId);
+      const answer = await this.port.claim(this.seams.generation, message.sendId);
+      if (!answer.claimed) return false;
+      const waited = now() - sentAt;
+      if (waited <= answer.writeBudgetMs) return true;
+      this.seams.onError?.(
+        `channel claim for send ${message.sendId} was granted after ${String(Math.round(waited))} ms, past its ${String(answer.writeBudgetMs)} ms write budget: dropped, the daemon types it`,
+      );
+      return false;
     } catch (error) {
       this.seams.onError?.(`channel claim failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;

@@ -11,7 +11,7 @@ const ToolResultSchema = z.looseObject({
   data: z.unknown().optional(),
 });
 
-const ClaimSchema = z.looseObject({ claimed: z.boolean() });
+const ClaimSchema = z.looseObject({ claimed: z.boolean(), writeBudgetMs: z.number().positive() });
 
 const matchedOf = (result: McpToolResult): boolean | undefined => {
   const data = result.data;
@@ -105,7 +105,7 @@ export function clientChannelPort(client: PluginClient): ChannelPort {
     async claim(generation, sendId) {
       const answer = ClaimSchema.safeParse(await once('channel_claim', { generation, sendId }));
       if (!answer.success) throw new Error('the daemon answered channel_claim in a shape this build does not read');
-      return answer.data.claimed;
+      return { claimed: answer.data.claimed, writeBudgetMs: answer.data.writeBudgetMs };
     },
   };
 }

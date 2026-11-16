@@ -4,6 +4,7 @@ import {
   ChannelClaimInputSchema,
   ChannelPollInputSchema,
   CHANNEL_POLL_MAX_WAIT_MS,
+  CHANNEL_WRITE_BUDGET_MS,
 } from '../../contract/wire-channel.ts';
 import type { ChannelOutbox } from './lib/outbox.ts';
 
@@ -44,7 +45,10 @@ export function channelTools(outbox: ChannelOutbox): {
       const parsed = ChannelClaimInputSchema.safeParse(input);
       if (!parsed.success) return { text: 'channel_claim takes generation and sendId', isError: true };
       const claimed = outbox.claim(ferret, parsed.data.generation, parsed.data.sendId);
-      return { text: claimed ? 'claimed' : 'not claimed', data: { claimed } };
+      return {
+        text: claimed ? 'claimed' : 'not claimed',
+        data: { claimed, writeBudgetMs: CHANNEL_WRITE_BUDGET_MS },
+      };
     },
   };
 }

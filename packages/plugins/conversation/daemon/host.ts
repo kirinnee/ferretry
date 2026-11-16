@@ -128,6 +128,7 @@ import { type DeliveredAttachment, deliveredFilename, messageWithAttachments } f
 import { harnessSendTerminal } from './send-terminal.ts';
 import { channelSenderName, channelTools } from './channel/index.ts';
 import { ChannelOutbox } from './channel/lib/outbox.ts';
+import { CHANNEL_WRITE_BUDGET_MS } from '../contract/wire-channel.ts';
 import { harnessFamily } from './seams/harness-family.ts';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
@@ -727,6 +728,8 @@ export function buildConversationA(deps: {
       repository: sendRepository,
       channel: {
         claimedAt: (id, sendId) => channelOutbox.claimedAt(id, sendId),
+        writeBudgetMs: CHANNEL_WRITE_BUDGET_MS,
+        bootedAt: channelOutbox.bootedAt,
         received: (id, sendId) => {
           channelOutbox.received(id, sendId);
         },
@@ -1179,6 +1182,10 @@ export function buildConversationA(deps: {
     const moved = await lane.run(ferret, async () => {
       const current = (await ledger.list(ferret)).find(entry => entry.sendId === record.sendId);
       if (current?.path !== 'channel' || current.fate !== 'accepted') return false;
+      // A claim the server was granted a moment ago may still be written (it writes only within the budget of its own send,
+      // which is never after the grant): nothing is typed until that is over. The row stays a channel row; the next look waits.
+      const claimedAt = channelOutbox.claimedAt(ferret, record.sendId);
+      if (claimedAt !== undefined && kernel.clock.nowMs() < claimedAt + CHANNEL_WRITE_BUDGET_MS) return false;
       if (channelOutbox.withdraw(ferret, record.sendId) === 'claimed') channelOutbox.markBroken(ferret);
       const now = kernel.clock.now();
       const settled = await ledger.settle(ferret, record.sendId, {

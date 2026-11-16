@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { CHANNEL_WRITE_BUDGET_MS } from '../../../contract/wire-channel.ts';
 import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
 import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
@@ -244,9 +245,14 @@ async function conversation(
   const acted: string[] = [];
   const base = memoryStatePort(CONVERSATION_STATE);
   /** Set to make every appended line fail (the send ledger appends each accept, settle and withdrawal). */
-  const writes = { fail: false };
+  const writes: { fail: boolean; onLines?: (() => void) | undefined } = { fail: false };
   const state: typeof base = {
     ...base,
+    // A test may run something at the next read of any ledger (a claim granted while the fall back is about to type).
+    lines: ((...args: Parameters<typeof base.lines>) => {
+      writes.onLines?.();
+      return base.lines(...args);
+    }) as typeof base.lines,
     append: async (...args: Parameters<typeof base.append>) => {
       if (writes.fail) throw new Error('ENOSPC: no space left on device, write /state/sends/f1.jsonl');
       return await base.append(...args);
@@ -2778,9 +2784,16 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     at: AT,
     role: 'system',
     text: SENT,
-    data: { proof: 'queue-operation', operation: 'enqueue' },
+    data: { proof: 'queue-operation', operation: 'enqueue', channelSendId: 'lead-1' },
   };
-  const delivery = { id: 'u-1', at: '2026-11-08T09:00:00.700Z', role: 'user', text: SENT };
+  // What the Claude reader makes of the user record the channel message becomes: the wrapper off, its send_id kept.
+  const delivery = {
+    id: 'u-1',
+    at: '2026-11-08T09:00:00.700Z',
+    role: 'user',
+    text: SENT,
+    data: { channelSendId: 'lead-1' },
+  };
   const unrelated = { id: 'u-0', at: '2026-11-08T08:00:00.000Z', role: 'user', text: 'something earlier' };
   type Host = Awaited<ReturnType<typeof conversation>>['host'];
   const poll = async (host: Host, generation = GEN) =>
@@ -2920,6 +2933,88 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     await pass(clock, 10_000);
     expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
     expect(await rows(api, 'lead-1')).toHaveLength(1);
+    await host.stop();
+  });
+
+  test('a claim granted late (past the receipt window of the send) is waited out: grant + write budget + window pass before anything is typed, then it is typed ONCE', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await poll(host);
+    ferrets.reviewEntries = [unrelated];
+    await pass(clock, 9_000);
+    // The daemon grants the claim just before the send's own window ends; the answer may reach the server late.
+    expect(await claim(host, 'lead-1')).toMatchObject({
+      data: { claimed: true, writeBudgetMs: CHANNEL_WRITE_BUDGET_MS },
+    });
+
+    // Past the send's own window and past grant + window (19 s), a second short of grant + budget + window: nothing typed.
+    await pass(clock, 11_000);
+    expect(ferrets.delivered).toEqual([]);
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'accepted' });
+
+    await pass(clock, 2_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'direct' });
+    await pass(clock, 10_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    // The server's late answer is the daemon's refusal: nothing more can be pushed.
+    expect(await claim(host, 'lead-1')).toMatchObject({ data: { claimed: false } });
+    await host.stop();
+  });
+
+  test('a claim granted in the instant between the last look and the typing keeps the row on the channel: nothing is typed inside the write budget', async () => {
+    const { host, ferrets, api, clock, writes } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await poll(host);
+    let racing = false;
+    let granted: ReturnType<typeof claim> | undefined;
+    Object.defineProperty(ferrets, 'reviewEntries', {
+      configurable: true,
+      get: () => {
+        if (racing) {
+          racing = false;
+          // The next ledger read is the fall back's own: the server's claim lands there.
+          writes.onLines = () => {
+            writes.onLines = undefined;
+            granted = claim(host, 'lead-1');
+          };
+        }
+        return [unrelated];
+      },
+    });
+    await pass(clock, 8_000);
+    racing = true;
+
+    await pass(clock, 4_000);
+    expect(await granted).toMatchObject({ data: { claimed: true } });
+    expect(ferrets.delivered).toEqual([]);
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'accepted' });
+
+    // Its own deadline is grant + budget + window: only then is it typed, once.
+    await pass(clock, 14_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    expect(await rows(api, 'lead-1')).toHaveLength(1);
+    await host.stop();
+  });
+
+  test('two IDENTICAL channel sends do not share one receipt: only lead-1 was enqueued, so lead-2 is typed once and lead-1 never', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-2' });
+    await poll(host);
+    await claim(host, 'lead-1');
+    await claim(host, 'lead-2');
+    // Claude's transcript shows ONE enqueue line, for lead-1 (its entry carries the wrapper's send id).
+    ferrets.reviewEntries = [unrelated, receipt];
+
+    await pass(clock, 14_000);
+
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'queued', queueProof: 'transcript' });
+    expect(await row(api, 'lead-2')).toMatchObject({ path: 'direct' });
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
     await host.stop();
   });
 
