@@ -135,6 +135,8 @@ const FERRET_TOKEN_VARIABLE = 'FY_SESSION_TOKEN';
 const FERRET_ID_VARIABLE = 'FY_SESSION_ID';
 /** Where Claude Code's question hook records the question it asks (today's `QUESTION_ASKED_FILE_ENV`). */
 export const QUESTION_FILE_VARIABLE = 'FY_QUESTION_FILE';
+/** Where the agent puts media it made to show the person (today's `SESSION_MEDIA_VARIABLE`, docs/hypermedia.md). */
+export const MEDIA_FOLDER_VARIABLE = 'FY_MEDIA_DIR';
 
 /** The reason a stop records when its caller gave none (today's lifecycle `defaultStopReason`). */
 const DEFAULT_STOP_REASON = 'stopped by client';
@@ -152,6 +154,15 @@ const FAILED_ENDS: ReadonlySet<FerretEndCause['kind']> = new Set([
   'agent_crashed',
   'start_failed',
 ]);
+
+/** Why a held (daemon-origin) launch will not revive a ferret that ended on purpose. */
+const ENDED_ON_PURPOSE =
+  'this ferret was stopped on purpose or finished its work, so only a deliberate resume revives it';
+
+/** An end somebody chose: the owner's stop, or the ferret's own `signal done`. A crash, a lost terminal and the rest were nobody's choice. */
+function endedOnPurpose(record: FerretRecord): boolean {
+  return record.state === 'stopped' && (record.cause?.kind === 'stopped' || record.cause?.kind === 'completed');
+}
 
 /** Everything the service reaches outside its own memory. The daemon half binds these to kernel ports. */
 export interface FerretsPorts {
@@ -428,6 +439,12 @@ export interface FerretSessionPort {
    * Unbound, or a path that cannot be named: the variable is not set, and the hook records nothing.
    */
   questionFile?(ferret: FerretId): Promise<FencedPath>;
+  /**
+   * Additive (F-0327): THIS ferret's MEDIA folder (`media/` in its own session folder), made private if it is missing, and
+   * handed to the pane as `FY_MEDIA_DIR`: where the agent puts what it made to show the person, read back through
+   * `GET /v1/ferrets/:ferretId/fs/file?scope=media`. Unbound, or a folder that cannot be made: the variable is not set.
+   */
+  mediaFolder?(ferret: FerretId): Promise<FencedPath>;
   /**
    * Additive (structured questions): THIS ferret's `question-asked.json` as the hook left it (raw text, bounded) and its
    * modification time; `undefined` when absent, unreadable or over the bound. Reads only. Unbound: no question is seen.
@@ -1299,7 +1316,31 @@ export class FerretsService implements FerretsApi {
     this.requireTokens();
     if (await this.isCutOff(ferret))
       return failed('refused', 'the owner cut off this ferret; a confirmed owner resume is required');
+    // The launch is the DAEMON's, with no `expect` to judge the ferret's standing, so a stop its owner chose, or an end
+    // that finished its work, is checked here: this method never revives what somebody ended on purpose.
+    const held = this.registry.get(ferret);
+    if (held !== undefined && endedOnPurpose(held)) return failed('refused', ENDED_ON_PURPOSE);
     return await this.resumeHeld(ferret, undefined, { origin: DAEMON_ORIGIN, noTurn: true });
+  }
+
+  /**
+   * Why a lifecycle start of this ferret must be refused BEFORE it changes anything (its record, its credential, its
+   * conversation lease), or `undefined` when {@link launchHeld} will open a pane. The lifecycle asks it ahead of the
+   * launch because the launch would otherwise do nothing AFTER the credential was re-issued: a ferret the registry
+   * calls live but whose terminal this daemon cannot see (no handle, or the runner is off) answers "already running"
+   * without launching, and a hash rotated over a pane that still runs cuts that pane off from Ferretry.
+   */
+  async heldLaunchRefusal(ferret: FerretId): Promise<string | undefined> {
+    await this.ports.ready?.();
+    this.requireTokens();
+    const held = this.registry.get(ferret);
+    if (held === undefined) return `no ferret ${ferret}`;
+    if (await this.isCutOff(ferret)) return 'the owner cut off this ferret; a confirmed owner resume is required';
+    if (endedOnPurpose(held)) return ENDED_ON_PURPOSE;
+    if (held.state !== 'stopped')
+      return `ferret ${ferret} is recorded as ${held.state}, so a launch would open no pane and only re-issue its credential: stop it first`;
+    if (this.ports.runner() === undefined) return 'no runner plugin is on';
+    return undefined;
   }
 
   private async resumeHeld(
@@ -2764,6 +2805,9 @@ export class FerretsService implements FerretsApi {
     // The ferret's own question file (U4): its folder exists (`prepare` ran first); a path that cannot be named sets nothing.
     const questionFile = await this.ports.session?.questionFile?.(ferret).catch(() => undefined);
     if (questionFile !== undefined) env[QUESTION_FILE_VARIABLE] = questionFile;
+    // The ferret's media folder (F-0327), made if missing; a folder that cannot be made sets nothing.
+    const mediaFolder = await this.ports.session?.mediaFolder?.(ferret).catch(() => undefined);
+    if (mediaFolder !== undefined) env[MEDIA_FOLDER_VARIABLE] = mediaFolder;
     const resolved = await this.ports.vault.childEnvironment(ferret, env);
     if (!resolved.ok) return err(`unknown secrets: ${resolved.error.unknown.join(', ')}`);
     // What this launch told the ferret, kept for `instructions` (persisted, so a restart changes no answer): only the

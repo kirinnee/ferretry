@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { FerretRecord } from '../../../../contract/index.ts';
 import { ferretId, T0 } from '../../../../contract/testing/index.ts';
 import { FerretsService } from '../../../../daemon/lib/ferrets/service.ts';
 import type { SessionCutOffMark } from '../../../../daemon/lib/tokens/cut-off-mark.ts';
@@ -106,6 +107,122 @@ describe('launchHeld', () => {
     expect(answer.ok).toBe(false);
     expect(f.runner.starts).toBe(0);
     expect(cut.has(f.id)).toBe(true);
+  });
+});
+
+describe('launchHeld and a deliberate end', () => {
+  const ON_PURPOSE = 'this ferret was stopped on purpose or finished its work, so only a deliberate resume revives it';
+
+  test.each([{ kind: 'stopped' as const }, { kind: 'completed' as const }])(
+    'should refuse to revive a ferret that ended on purpose ($kind), launching nothing and leaving it stopped',
+    async cause => {
+      // Arrange — the owner's stop, or the ferret's own `signal done`; the launch is the DAEMON's, with no `expect`
+      const f = holding();
+      f.registry.put({ ...(f.registry.get(f.id) as FerretRecord), cause });
+
+      // Act
+      const answer = await f.service.launchHeld(f.id);
+
+      // Assert
+      expect(answer).toEqual({ ok: false, error: { code: 'refused', reason: ON_PURPOSE } });
+      expect(f.runner.starts).toBe(0);
+      expect(f.decided).toEqual([]);
+      expect(f.registry.get(f.id)?.state).toBe('stopped');
+    },
+  );
+
+  test.each([
+    { kind: 'terminal_gone' as const },
+    { kind: 'tmux_crashed' as const },
+    { kind: 'agent_crashed' as const, exitCode: 1 },
+    { kind: 'clean_exit' as const },
+  ])('should still relaunch a ferret whose end nobody chose ($kind)', async cause => {
+    // Arrange
+    const f = holding();
+    f.registry.put({ ...(f.registry.get(f.id) as FerretRecord), cause });
+
+    // Act
+    const answer = await f.service.launchHeld(f.id);
+
+    // Assert
+    expect(answer).toEqual({ ok: true, value: f.id });
+    expect(f.runner.starts).toBe(1);
+  });
+});
+
+describe('heldLaunchRefusal', () => {
+  test('should answer nothing for a stopped ferret a held launch will open a pane for', async () => {
+    // Arrange
+    const f = holding();
+
+    // Act
+    const refusal = await f.service.heldLaunchRefusal(f.id);
+
+    // Assert
+    expect(refusal).toBeUndefined();
+    expect(f.runner.starts).toBe(0);
+  });
+
+  test('should refuse a ferret the registry calls live, because a launch would open no pane and only re-issue its credential', async () => {
+    // Arrange
+    const f = holding({ state: 'working' });
+
+    // Act
+    const refusal = await f.service.heldLaunchRefusal(f.id);
+
+    // Assert
+    expect(refusal).toBe(
+      'ferret fern is recorded as working, so a launch would open no pane and only re-issue its credential: stop it first',
+    );
+  });
+
+  test('should refuse a ferret the registry does not hold', async () => {
+    // Arrange
+    const f = holding({ empty: true });
+
+    // Act
+    const refusal = await f.service.heldLaunchRefusal(ferretId('ghost'));
+
+    // Assert
+    expect(refusal).toBe('no ferret ghost');
+  });
+
+  test('should refuse a ferret the owner cut off', async () => {
+    // Arrange
+    const f = holding();
+    f.tokens.cutOff(f.id, T0);
+
+    // Act
+    const refusal = await f.service.heldLaunchRefusal(f.id);
+
+    // Assert
+    expect(refusal).toBe('the owner cut off this ferret; a confirmed owner resume is required');
+  });
+
+  test('should refuse a ferret that ended on purpose', async () => {
+    // Arrange
+    const f = holding();
+    f.registry.put({ ...(f.registry.get(f.id) as FerretRecord), cause: { kind: 'stopped' } });
+
+    // Act
+    const refusal = await f.service.heldLaunchRefusal(f.id);
+
+    // Assert
+    expect(refusal).toBe(
+      'this ferret was stopped on purpose or finished its work, so only a deliberate resume revives it',
+    );
+  });
+
+  test('should refuse when no runner plugin is on, before anything is re-issued', async () => {
+    // Arrange
+    const base = additivesFixture();
+    const service = new FerretsService(base.registry, base.tokens, { ...base.ports, runner: () => undefined });
+
+    // Act
+    const refusal = await service.heldLaunchRefusal(base.id);
+
+    // Assert
+    expect(refusal).toBe('no runner plugin is on');
   });
 });
 

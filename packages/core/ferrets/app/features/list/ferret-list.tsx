@@ -18,7 +18,7 @@ import { FERRETS_NEEDS_YOU_HOOK, type FerretNeedsYou, isFerretsNeedsYou } from '
 import type { LiveFerretsClient } from '../../lib/client.ts';
 import { useNeedsYou } from './use-needs-you.ts';
 import { daemonOfRoute, ferretOfRoute } from '../header/header-paths.ts';
-import { newFerretHref } from '../new-ferret/hrefs.ts';
+import { NewFerretButton } from '../new-ferret/new-machine-menu.tsx';
 import { ListOptions } from '../restart-outdated/restart-outdated-menu.tsx';
 import { restartFerrets } from '../restart-outdated/restart-outdated-api.ts';
 import { RestartOutdatedResult, useRestartOutdated } from '../restart-outdated/restart-outdated.tsx';
@@ -180,9 +180,7 @@ export function FerretListBody({
       {/* v4's sessions bar ended in a primary "New session" button whatever the list held: the door to start one is
           never only a command-bar entry or an empty-list message. */}
       <div className="fy-sbar__footer">
-        <a className="kt-btn" data-ferret-new="" data-variant="primary" href={newFerretHref(daemon)}>
-          + New ferret
-        </a>
+        <NewFerretButton daemon={daemon} onNavigate={onNavigate} />
       </div>
     </div>
   );
