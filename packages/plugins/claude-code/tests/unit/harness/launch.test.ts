@@ -24,6 +24,7 @@ import {
   CLAUDE_PROMPTS_SEEN,
   fixedLayer,
 } from '../../../daemon/lib/harness/fixed-layer.ts';
+import { CLAUDE_COMPACTION_HOOKS } from '../../../daemon/lib/harness/compaction.ts';
 import pending from '../../../ports-pending.json';
 
 const settings = new Map([
@@ -638,5 +639,9 @@ describe('the question tool (!A527: withheld from every ferret unless the questi
   it('keeps the PreToolUse hook on AskUserQuestion in the flag overlay, for a runtime that turns the tool back on', () => {
     should(fixedLayer('auto', '/f').overlay.hooks).eql(CLAUDE_OVERLAY_HOOKS);
     should(CLAUDE_OVERLAY_HOOKS.PreToolUse[0]?.matcher).equal('AskUserQuestion');
+    should(CLAUDE_OVERLAY_HOOKS.PreToolUse[1]?.matcher).equal('Bash');
+    should(Object.keys(CLAUDE_OVERLAY_HOOKS).sort()).eql(
+      Object.keys({ ...CLAUDE_COMPACTION_HOOKS, PreToolUse: 0 }).sort(),
+    );
   });
 });

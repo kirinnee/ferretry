@@ -368,6 +368,24 @@ describe('context-imports', () => {
     expect(found).toContain('packages/app/vite.config.ts:2: ../plugins/alpha/app/view.tsx');
   });
 
+  test('a daemon half may import its own generated feature list and no other generated file', async () => {
+    const f = ws([
+      {
+        id: 'alpha',
+        files: {
+          'daemon/features/one.feature.ts': 'export default {};\n',
+          'daemon/generated/features.ts': "import one from '../features/one.feature.ts';\nexport default [one];\n",
+          'daemon/generated/other.ts': 'export {};\n',
+          'daemon/build.ts':
+            "import features from './generated/features.ts';\nimport './generated/other.ts';\nexport { features };\n",
+        },
+      },
+    ]);
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('./generated/features.ts');
+    expect(found).toContain('alpha/daemon/build.ts:2: ./generated/other.ts');
+  });
+
   test('planted: a half reaches another package past its contract; a contract imports node:fs; a manifest imports a half', async () => {
     const f = ws(
       [

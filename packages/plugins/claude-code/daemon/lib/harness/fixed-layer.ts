@@ -1,4 +1,5 @@
 import type { HarnessConfig } from '../../../contract/index.ts';
+import { CLAUDE_COMPACTION_HOOKS } from './compaction.ts';
 import { CLAUDE_DANGEROUS_RM_HOOKS } from './dangerous-rm-hook.ts';
 
 // Copied from fleet/src/lib/account/fixed-layer.ts: these are seen screens, not owner choices.
@@ -15,9 +16,13 @@ const CLAUDE_QUESTION_HOOKS = {
   PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
 };
 
-/** Every hook the fixed overlay carries: the question hook and the dangerous-`rm` deny (`./dangerous-rm-hook.ts`). */
+/**
+ * Every hook the fixed overlay carries: the question hook and the dangerous-`rm` deny (`./dangerous-rm-hook.ts`), both
+ * on PreToolUse, and the compaction hooks (`./compaction.ts`).
+ */
 export const CLAUDE_OVERLAY_HOOKS = {
   PreToolUse: [...CLAUDE_QUESTION_HOOKS.PreToolUse, ...CLAUDE_DANGEROUS_RM_HOOKS.PreToolUse],
+  ...CLAUDE_COMPACTION_HOOKS,
 };
 
 /**
@@ -41,7 +46,11 @@ export const CLAUDE_JSON_DEFAULTS = { claudeInChromeDefaultEnabled: false } as c
  */
 export const CLAUDE_HOME_ENV = { DISABLE_AUTOUPDATER: '1' } as const;
 
-/** Fixed settings override item settings; the question hook is ONLY in the separate flag overlay. */
+/**
+ * Fixed settings override item settings; the question hook and the compaction hooks (`./compaction.ts`) are ONLY in the
+ * separate flag overlay. They are part of the `fixed-layer` fingerprint, so a ferret launched before them reads as
+ * Restart-needed.
+ */
 export function fixedLayer(permissionMode: HarnessConfig['permissionMode'], cwd: string) {
   const skip = permissionMode === 'skip';
   const settings = {
