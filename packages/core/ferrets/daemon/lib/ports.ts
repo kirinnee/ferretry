@@ -6,7 +6,7 @@ export interface ClockPort {
   now(): string;
 }
 
-export interface DirectoryEntry {
+interface DirectoryEntry {
   readonly name: string;
   readonly directory: boolean;
   /**
@@ -26,11 +26,11 @@ export interface DirectoryEntry {
   readonly regularFile?: boolean;
 }
 
-export interface FileInformation extends JournalFingerprint {
+interface FileInformation extends JournalFingerprint {
   readonly mode: number;
 }
 
-export interface DurableAppend {
+interface DurableAppend {
   readonly byteOffset: number;
   readonly byteLength: number;
   readonly fingerprint: JournalFingerprint;
@@ -42,13 +42,13 @@ export interface DurableAppend {
  * A result union rather than thrown errors: `lib` stays types-only, and the caller is forced to
  * decide what an absent or swapped journal means instead of inheriting a recreated one by default.
  */
-export type DurableAppendOutcome =
+type DurableAppendOutcome =
   | { readonly kind: 'appended'; readonly append: DurableAppend }
   | { readonly kind: 'absent' }
   | { readonly kind: 'replaced' };
 
 /** Text, and the identity (device, inode, size, change times) of the file it came from. */
-export interface IdentifiedText {
+interface IdentifiedText {
   readonly text: string;
   readonly identity: string;
 }
