@@ -47,6 +47,7 @@ import { declaredEnvironment, pluginEnvironment } from './plugin-env.ts';
 import { buildPluginGraph } from './plugin-graph.ts';
 import type { ShellContext, ShellVerb } from './shell-context.ts';
 import { renderGroupHelp, renderRootHelp, renderVerbHelp, usageLine, verbsUnder } from './help.ts';
+import { forwardNewToLink } from './forwards.ts';
 import { buildVerbTable, expandAlias, resolveVerb, type VerbEntry, type VerbTable } from './verbs.ts';
 import type { CliWorld } from './world.ts';
 
@@ -239,6 +240,15 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     if (hops >= 4) throw new ShellError(`the alias "${resolved.entry.line}" runs another alias too many times`);
     tokens = expandAlias(resolved.entry, resolved.rest) ?? tokens;
     resolved = resolveVerb(table, tokens);
+  }
+  // `fy new --continue [words]` / `--since` is `fy link …`: the one verb the person meant runs, with its own sentences.
+  if (resolved.kind === 'verb') {
+    const forward = forwardNewToLink(resolved.entry, resolved.rest, identity.binary);
+    if (forward?.kind === 'refused') {
+      io.err(`${forward.message}\n`);
+      return EXIT.usage;
+    }
+    if (forward?.kind === 'forward') resolved = resolveVerb(table, forward.tokens);
   }
   if (resolved.kind === 'unknown') return unknownVerb(world, resolved);
 
