@@ -40,6 +40,13 @@ import { closeSync, openSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { basename, dirname, join, relative, isAbsolute, resolve } from 'node:path';
+import {
+  candidateRunIds,
+  deployJobSucceeded,
+  PREVIEW_BRANCHES,
+  PREVIEW_DEPLOY_JOB,
+  PREVIEW_DEPLOY_WORKFLOW,
+} from './deploy-gate.ts';
 
 const SWEEP_ROOT = '/tmp/claude-1000/sweep';
 const FIXTURES = join(import.meta.dir, '..');
@@ -906,21 +913,26 @@ async function checkNewBuild(slot: Slot, libexec: string): Promise<Stamp> {
   return stamp;
 }
 
-/** The hosted 5.0 app must already be live for the commit, or the app would say "Reload to get the new app". Read-only `gh`. */
+/**
+ * The hosted 5.0 app must already be live for the commit, or the app would say "Reload to get the new app". Read-only `gh`.
+ * The rule (deploy-gate.ts): a successful preview Pages run for this exact commit on `rebuild/5.0` or `rebuild/5.0-after`
+ * whose `Deploy PWA` job itself succeeded; a run whose deploy was skipped (the never-backwards skip) deployed nothing.
+ */
 async function assertPagesDeployLive(commit: string): Promise<void> {
+  const env = process.env as Record<string, string>;
   const ran = await run(
     'gh',
     [
       'run',
       'list',
       '--workflow',
-      'Deploy 5.0 preview PWA to Pages',
+      PREVIEW_DEPLOY_WORKFLOW,
       '--limit',
       '300',
       '--json',
-      'headSha,conclusion,headBranch',
+      'databaseId,headSha,conclusion,headBranch',
     ],
-    process.env as Record<string, string>,
+    env,
     FIXTURES,
   );
   if (ran.code !== 0)
@@ -933,19 +945,23 @@ async function assertPagesDeployLive(commit: string): Promise<void> {
   } catch {
     die('refusing: gh did not return the deploy runs as JSON');
   }
-  const live =
-    Array.isArray(runs) &&
-    runs.some(
-      entry =>
-        isRecord(entry) &&
-        entry.headSha === commit &&
-        entry.conclusion === 'success' &&
-        entry.headBranch === 'rebuild/5.0',
-    );
-  if (!live)
-    die(
-      `refusing: commit ${commit.slice(0, 10)} has no successful "Deploy 5.0 preview PWA to Pages" run, so the hosted app does not match it; nothing was stopped`,
-    );
+  for (const id of candidateRunIds(runs, commit).slice(0, 10)) {
+    const viewed = await run('gh', ['run', 'view', String(id), '--json', 'jobs'], env, FIXTURES);
+    if (viewed.code !== 0)
+      die(
+        `refusing: could not read the jobs of Pages deploy run ${String(id)} with gh (exit ${String(viewed.code)}: ${viewed.err.trim().slice(0, 200)}), so I cannot say commit ${commit.slice(0, 10)} is live`,
+      );
+    let view: unknown;
+    try {
+      view = JSON.parse(viewed.out);
+    } catch {
+      die(`refusing: gh did not return the jobs of run ${String(id)} as JSON`);
+    }
+    if (deployJobSucceeded(view)) return;
+  }
+  die(
+    `refusing: commit ${commit.slice(0, 10)} has no successful "${PREVIEW_DEPLOY_WORKFLOW}" run on ${PREVIEW_BRANCHES.join(' or ')} whose "${PREVIEW_DEPLOY_JOB}" job succeeded (a run whose deploy was skipped does not count), so the hosted app does not match it; nothing was stopped`,
+  );
 }
 
 async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<void> {
