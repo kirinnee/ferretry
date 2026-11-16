@@ -366,3 +366,63 @@ describe('the turn-end check', () => {
     await turnEnded(ended('f1'));
   });
 });
+
+describe('the rest nudge job', () => {
+  const resting = (id: string, ferret: string) => ({
+    id,
+    subject: `Ask ${id}?`,
+    title: `Ask ${id}`,
+    source: 'agent-raised',
+    sourceRef: null,
+    raisedBy: 'agent',
+    parked: { reason: 'replied', at: '2020-01-01T00:00:00.000Z' },
+    resting: { sub: 'waiting-on-ferret', at: '2020-01-01T00:00:00.000Z' },
+    ferret,
+  });
+  async function silent(ferrets: readonly string[] = ['f1']) {
+    const conversation = fakeConversation();
+    const w = await world({ conversation });
+    w.asks.snapshots = async () =>
+      ferrets.map(ferret => ({ sessionId: ferret, items: [resting('A1', ferret)] })) as never;
+    return { ...w, conversation };
+  }
+  const sentTo = async (conversation: ReturnType<typeof fakeConversation>, ferret: string) =>
+    (await conversation.sends(ferretId(ferret))).sends;
+
+  test('is a job; a ferret silent on an item the owner replied to is nudged once as the daemon’s own words, then waits for the backoff', async () => {
+    const { host, conversation } = await silent();
+    expect(host.jobIds()).toContain('rest-nudge');
+
+    await host.runJob('rest-nudge');
+    await host.runJob('rest-nudge');
+
+    const sends = await sentTo(conversation, 'f1');
+    expect(sends.map(send => [send.sendId.startsWith('agenda-rest-nudge-f1-A1.'), send.senderKind])).toEqual([
+      [true, 'daemon'],
+    ]);
+    expect(sends[0]?.message).toContain('[attention check] The owner replied on !A1 «Ask A1»');
+  });
+
+  test('never reaches a stopped ferret, and says nothing, and breaks nothing, when Conversation is off', async () => {
+    const { host, conversation, ferrets } = await silent(['f1', 'f2']);
+    ferrets.add({ id: ferretId('f2'), state: 'stopped' });
+
+    await host.runJob('rest-nudge');
+
+    expect(await sentTo(conversation, 'f1')).toHaveLength(1);
+    expect(await sentTo(conversation, 'f2')).toEqual([]);
+
+    const off = await world();
+    off.asks.snapshots = async () => [{ sessionId: 'f1', items: [resting('A1', 'f1')] }] as never;
+    await off.host.runJob('rest-nudge');
+  });
+
+  test('boards that cannot be read fail the sweep, which the kernel reports and retries', async () => {
+    const { host, asks } = await silent();
+    asks.snapshots = async () => {
+      throw new Error('the board is damaged');
+    };
+
+    await expect(host.runJob('rest-nudge')).rejects.toThrow('the board is damaged');
+  });
+});

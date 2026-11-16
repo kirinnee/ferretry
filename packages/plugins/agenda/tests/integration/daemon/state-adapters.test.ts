@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
-import { BUZZES, MODES, NUDGES, SEEN, type BuzzRecord } from '../../../contract/index.ts';
+import { BUZZES, MODES, NUDGES, REST_NUDGES, SEEN, type BuzzRecord } from '../../../contract/index.ts';
 import { StateBuzzLedger } from '../../../daemon/adapters/state-buzz-ledger.ts';
-import { StateModeStore, StateNudgeStore, StateSeenStore } from '../../../daemon/adapters/state-stores.ts';
+import {
+  StateModeStore,
+  StateNudgeStore,
+  StateRestNudgeStore,
+  StateSeenStore,
+} from '../../../daemon/adapters/state-stores.ts';
 
 const AT = '2026-11-01T08:00:00.000Z' as BuzzRecord['at'];
 
@@ -18,7 +23,7 @@ const buzz = (key: string, ferret: string): BuzzRecord => ({
 });
 
 function fixture(folder = new MemoryStateFolder()) {
-  const state = folder.port([SEEN, BUZZES, MODES, NUDGES]);
+  const state = folder.port([SEEN, BUZZES, MODES, NUDGES, REST_NUDGES]);
   return { folder, state };
 }
 
@@ -158,5 +163,65 @@ describe('StateNudgeStore over the agenda state folder', () => {
     await expect(store.mark('f1')).rejects.toThrow('nudges.json');
     await expect(store.reserve('f1', mark('n1'), undefined)).rejects.toThrow('nudges.json');
     await expect(store.release('f1', 'n1')).rejects.toThrow('nudges.json');
+  });
+});
+
+describe('StateRestNudgeStore over the agenda state folder', () => {
+  const rec = (sendId: string, nudges = 1) => ({ since: AT, nudges, at: AT, sendId });
+
+  test('a ferret never nudged has no records; a reservation is read back by a restarted store, per ferret', async () => {
+    const { folder, state } = fixture();
+    const store = new StateRestNudgeStore(state);
+    expect(await store.records('f1')).toEqual({});
+
+    await store.reserve('f1', { A1: rec('s1'), A2: rec('s1') }, ['A1', 'A2']);
+
+    const restarted = new StateRestNudgeStore(fixture(folder).state);
+    expect(await restarted.records('f1')).toEqual({ A1: rec('s1'), A2: rec('s1') });
+    expect(await restarted.records('f2')).toEqual({});
+  });
+
+  test('a reservation replaces an item’s record, keeps live items, drops the ones no longer on the board, and keeps other ferrets', async () => {
+    const store = new StateRestNudgeStore(fixture().state);
+    await store.reserve('f1', { A1: rec('s1'), A2: rec('s1') }, ['A1', 'A2']);
+    await store.reserve('f2', { A1: rec('x') }, ['A1']);
+
+    await store.reserve('f1', { A1: rec('s2', 2) }, ['A1']);
+
+    expect(await store.records('f1')).toEqual({ A1: rec('s2', 2) });
+    expect(await store.records('f2')).toEqual({ A1: rec('x') });
+  });
+
+  test('releasing a send restores each item it still holds to its prior record, or to none, and leaves a newer send’s', async () => {
+    const store = new StateRestNudgeStore(fixture().state);
+    await store.reserve('f1', { A1: rec('s1') }, ['A1', 'A2']);
+    await store.reserve('f1', { A1: rec('s2', 2), A2: rec('s2') }, ['A1', 'A2']);
+
+    await store.release('f1', 's2', { A1: rec('s1'), A2: undefined, A3: undefined });
+    expect(await store.records('f1')).toEqual({ A1: rec('s1') });
+
+    await store.release('f1', 'not-it', { A1: undefined });
+    expect(await store.records('f1')).toEqual({ A1: rec('s1') });
+  });
+
+  test('a ferret left with no records leaves the file, and releasing for a ferret with none is a no-op', async () => {
+    const { folder, state } = fixture();
+    const store = new StateRestNudgeStore(state);
+    await store.reserve('f1', { A1: rec('s1') }, ['A1']);
+    await store.release('f1', 's1', { A1: undefined });
+    await store.release('f9', 's1', { A1: undefined });
+
+    expect(await store.records('f1')).toEqual({});
+    expect(await new StateRestNudgeStore(fixture(folder).state).records('f1')).toEqual({});
+  });
+
+  test('a damaged rest-nudges file refuses the read, the reservation and the release', async () => {
+    const { folder, state } = fixture();
+    folder.plant(REST_NUDGES, 'garbage');
+    const store = new StateRestNudgeStore(state);
+
+    await expect(store.records('f1')).rejects.toThrow('rest-nudges.json');
+    await expect(store.reserve('f1', { A1: rec('s1') }, ['A1'])).rejects.toThrow('rest-nudges.json');
+    await expect(store.release('f1', 's1', { A1: undefined })).rejects.toThrow('rest-nudges.json');
   });
 });

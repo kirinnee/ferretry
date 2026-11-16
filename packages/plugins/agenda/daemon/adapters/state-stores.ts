@@ -1,5 +1,6 @@
 import type { StatePort } from '@ferretry/kernel/contract';
-import { MODES, NUDGES, SEEN } from '../../contract/index.ts';
+import { MODES, NUDGES, REST_NUDGES, type RestNudgesFile, SEEN } from '../../contract/index.ts';
+import type { RestNudgeRecord, RestNudgeStore } from '../lib/rest-nudge.ts';
 import type { NudgeMark, NudgeStore } from '../lib/turn-nudge.ts';
 import type { SeenStore } from '../lib/seen.ts';
 import { emptySeen } from '../lib/seen.ts';
@@ -69,6 +70,61 @@ export class StateNudgeStore implements NudgeStore {
     const result = await this.state.update(NUDGES, current => {
       const { [ferret]: held, ...rest } = current?.nudged ?? {};
       return { format: 1 as const, nudged: held?.sendId === sendId ? rest : (current?.nudged ?? {}) };
+    });
+    if (!result.ok) throw new Error(result.error.sentence);
+  }
+}
+
+/** The rest nudge's counters (`state/agenda/rest-nudges.json`): what caps how often a silent ferret is nudged, across a restart. */
+export class StateRestNudgeStore implements RestNudgeStore {
+  constructor(private readonly state: StatePort) {}
+
+  async records(ferret: string): Promise<Readonly<Record<string, RestNudgeRecord>>> {
+    const read = await this.state.read(REST_NUDGES);
+    if (!read.ok) throw new Error(read.error.sentence);
+    return read.value?.ferrets[ferret] ?? {};
+  }
+
+  async reserve(
+    ferret: string,
+    taken: Readonly<Record<string, RestNudgeRecord>>,
+    live: readonly string[],
+  ): Promise<void> {
+    await this.write(ferret, held => ({
+      ...Object.fromEntries(Object.entries(held).filter(([id]) => live.includes(id))),
+      ...taken,
+    }));
+  }
+
+  async release(
+    ferret: string,
+    sendId: string,
+    prior: Readonly<Record<string, RestNudgeRecord | undefined>>,
+  ): Promise<void> {
+    await this.write(ferret, held => {
+      const next = { ...held };
+      for (const [id, before] of Object.entries(prior)) {
+        if (next[id]?.sendId !== sendId) continue;
+        if (before === undefined) delete next[id];
+        else next[id] = before;
+      }
+      return next;
+    });
+  }
+
+  /** Replaces one ferret's records, atomically with the read; a ferret left with none is removed from the file. */
+  private async write(
+    ferret: string,
+    change: (held: Readonly<Record<string, RestNudgeRecord>>) => Record<string, RestNudgeRecord>,
+  ): Promise<void> {
+    const result = await this.state.update(REST_NUDGES, current => {
+      const { [ferret]: held, ...others } = current?.ferrets ?? {};
+      const next = change(held ?? {});
+      return {
+        format: 1 as const,
+        // The instants were read from this file or from the clock; the lib holds them as plain strings.
+        ferrets: (Object.keys(next).length === 0 ? others : { ...others, [ferret]: next }) as RestNudgesFile['ferrets'],
+      };
     });
     if (!result.ok) throw new Error(result.error.sentence);
   }
