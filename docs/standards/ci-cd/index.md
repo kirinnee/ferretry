@@ -201,6 +201,11 @@ to the matrix.
 - **Why the Harness matrix is data.** A job-level `if:` cannot read `matrix`, so the `macos-15` leg is
   in or out through `fromJSON(needs.changes.outputs.harness_os)`; the check keeps its name,
   `Harness Contract (macos-15)`, when it runs and is absent when it does not.
+- **A macOS step's `bash` is 3.2, and the dev shell's environment is not 3.2 syntax.** `scripts/ci/in-devshell.sh`
+  sources the `nix print-dev-env` output (stdenv's `setup.sh`: `;&`, `local -n`), which `/bin/bash` cannot parse
+  (`syntax error near unexpected token ';'`, run 43797081874, the first macOS step to use it). The script therefore
+  `exec`s itself under the bash the environment names (its own `BASH=` line) before sourcing; any new script that
+  sources that file must do the same, and `scripts/ci/in-devshell.test.ts` pins the hand-over.
 
 ## macOS runner shortage
 
