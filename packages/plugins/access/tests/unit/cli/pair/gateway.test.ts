@@ -122,6 +122,26 @@ describe('protocol pairing gateway', () => {
   });
 });
 
+describe('protocol pairing gateway, the --open page', () => {
+  it('should send the page to the daemon and answer only the directory the daemon made', async () => {
+    const calls: Call[] = [];
+    const subject = new ProtocolPairingGateway(fakeClient({ directory: 'pair-open-AbCdEf' }, calls));
+
+    const directory = await subject.redirect('<p>page</p>');
+
+    should(directory).equal('pair-open-AbCdEf');
+    should(calls[0]?.route).equal('POST /v1/pair/redirect');
+    should(calls[0]?.init?.body).eql({ page: '<p>page</p>' });
+  });
+
+  it('should refuse an answer that names anything but a directory of the shape the sweep matches', async () => {
+    for (const directory of ['../../etc', 'pair-open-', 'other-AbCdEf', '/abs']) {
+      const subject = new ProtocolPairingGateway(fakeClient({ directory }));
+      await should(subject.redirect('<p>page</p>')).be.rejected();
+    }
+  });
+});
+
 describe('protocol pairing gateway, grant sets', () => {
   it('should send an empty body for the full set, the default', async () => {
     // Arrange

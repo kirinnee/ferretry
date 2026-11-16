@@ -13,9 +13,9 @@ import { repointRuntime, runtimeRecords } from './runtime-records.ts';
 import { lastSnapshot, prompt, turnObserved, turns } from './turns.ts';
 import { KeyedSerialExecutor } from './serial.ts';
 import type { SerialExecutor } from '../ports.ts';
-import { ConversationLeaseHeldError } from '../../../contract/conversation-lease.ts';
+import { claimConversationLease, conversationLeaseGuard } from './conversation-lease-guard.ts';
 import type { FerretLaunchLeases } from './launch-leases.ts';
-import { type LaunchSteps, paneVariables } from './launch-steps.ts';
+import { beforePane, type LaunchGuard, type LaunchSteps, paneOpened, paneVariables, released } from './launch-steps.ts';
 import type { SessionCutOffMark } from '../tokens/cut-off-mark.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../../../contract/agent-address.ts';
 import {
@@ -695,10 +695,6 @@ export const CONVERSATION_UNKNOWN =
 /** A launch asked before the features finished registering what it hands the pane (insurance: boot seals right after). */
 export const LAUNCH_STEPS_UNSEALED =
   'the ferret was not started: the daemon had not finished setting up what a launch hands a pane';
-const LEASE_UNCHECKED =
-  'the ferret was not started: whether another session is writing its conversation could not be checked';
-const LEASE_UNHELD =
-  'the ferret was stopped: its conversation could not be kept for it, and a second writer on it would corrupt it';
 
 /** What one launch attempt found that its caller must say (filled in by `launchAttempt`). */
 interface LaunchSaid {
@@ -757,12 +753,16 @@ export class FerretsService implements FerretsApi {
   /** What the members that live outside this file (`runtime-records.ts`, `compact-at.ts`, `turns.ts`, `insights.ts`) read. */
   readonly core: FerretsCore;
 
+  /** The guards the service owns (the conversation lease): never registered by a feature, so they run innermost. */
+  private readonly builtInGuards: readonly LaunchGuard[];
+
   constructor(
     private readonly registry: FerretRegistry,
     private readonly tokens: FerretTokenDirectory,
     private readonly ports: FerretsPorts,
   ) {
     this.serial = ports.serial ?? new KeyedSerialExecutor();
+    this.builtInGuards = ports.leases === undefined ? [] : [conversationLeaseGuard(ports.leases)];
     this.core = {
       registry,
       tokens,
@@ -1760,7 +1760,8 @@ export class FerretsService implements FerretsApi {
     // terminal's `claude --resume` could otherwise take the conversation and leave two writers (a failed relaunch
     // releases it, as a stop does).
     await this.settle(record, 'stopped', 'stopped', { kind: 'stopped' }, true);
-    if (record.harnessConversation !== undefined) await this.claimConversation(record.id, record.harnessConversation);
+    if (record.harnessConversation !== undefined && this.ports.leases !== undefined)
+      await claimConversationLease(this.ports.leases, record.id, record.harnessConversation);
     return this.registry.get(record.id) as FerretRecord;
   }
 
@@ -2102,9 +2103,11 @@ export class FerretsService implements FerretsApi {
       const held = await bound.verify().catch(() => err('the launch folder could not be checked again'));
       if (!held.ok) return failed('refused', held.error);
     }
-    // Before any pane exists: a conversation another live writer holds is refused here, never taken over.
-    const claimed = resumable === undefined ? ok(undefined) : await this.claimConversation(record.id, resumable);
-    if (!claimed.ok) return claimed;
+    // Before any pane exists: the launch guards are asked (the conversation lease, innermost: a conversation another live
+    // writer holds is refused here, never taken over). One snapshot of the list serves this launch's both phases.
+    const guards = this.guards();
+    const claimed = await beforePane(guards, { record, conversation: resumable });
+    if (!claimed.ok) return err(claimed.error);
     let started: Awaited<ReturnType<Harness['start']>>;
     try {
       started =
@@ -2123,12 +2126,12 @@ export class FerretsService implements FerretsApi {
     }
     // The pane is open: its conversation moves onto the pane's own pid. FAIL CLOSED: the caller's cleanup stops the
     // pane (keeping its handle, and so this lease, when it cannot) before anything else can write the conversation.
-    const held = await this.holdConversation(
-      record.id,
-      started.value.harnessConversation ?? resumable,
-      started.value.running.pid,
-    );
-    if (!held.ok) return held;
+    const held = await paneOpened(guards, {
+      record,
+      conversation: started.value.harnessConversation ?? resumable,
+      pid: started.value.running.pid,
+    });
+    if (!held.ok) return err(held.error);
     // What this launch told the ferret, kept for the out-of-date check; only once the harness really started.
     // A write that fails leaves no record at all (never the previous launch's), so nothing is compared against it.
     const told = this.ports.launchSections;
@@ -2152,33 +2155,12 @@ export class FerretsService implements FerretsApi {
     return ok(record.id);
   }
 
-  /** Claims the conversation a launch resumes, or refuses with who holds it. Nothing is said of a lease store's own failure. */
-  private async claimConversation(ferret: FerretId, conversation: string): Promise<Result<undefined, StartFailure>> {
-    try {
-      await this.ports.leases?.claimConversation(ferret, conversation);
-      return ok(undefined);
-    } catch (error) {
-      return error instanceof ConversationLeaseHeldError
-        ? failed('refused', error.message)
-        : failed('failed', LEASE_UNCHECKED);
-    }
-  }
-
-  /** Moves the conversation the open pane writes onto the pane's pid; a conversation the harness has not named leases nothing. */
-  private async holdConversation(
-    ferret: FerretId,
-    conversation: string | undefined,
-    pid: number | undefined,
-  ): Promise<Result<undefined, StartFailure>> {
-    if (conversation === undefined) return ok(undefined);
-    try {
-      await this.ports.leases?.moveConversationToPane(ferret, conversation, pid);
-      return ok(undefined);
-    } catch (error) {
-      return error instanceof ConversationLeaseHeldError
-        ? failed('refused', error.message)
-        : failed('failed', LEASE_UNHELD);
-    }
+  /**
+   * What a launch asks around its pane, outermost first: the guards features registered, then the built-in conversation
+   * lease (innermost, so no other check can refuse while the daemon's pid holds the conversation).
+   */
+  private guards(): readonly LaunchGuard[] {
+    return [...(this.ports.launchSteps?.guards() ?? []), ...this.builtInGuards];
   }
 
   /**
@@ -2655,7 +2637,7 @@ export class FerretsService implements FerretsApi {
     if (state === 'stopped') {
       await this.ports.endWait?.(record.id).catch(() => undefined);
       // A lease that cannot be freed only delays a terminal claim: the daemon already reads a stopped session's as stale.
-      if (!keepLease) await this.ports.leases?.release(record.id).catch(() => undefined);
+      if (!keepLease) await released(this.guards(), record.id);
     }
   }
 
