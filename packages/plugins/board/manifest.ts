@@ -93,7 +93,7 @@ export default definePlugin({
   core: false,
   kinds: ['view', 'command', 'instruction'],
   words: [
-    { word: 'card', means: 'one piece of work you asked for', insteadOf: ['task', 'ticket'] },
+    { word: 'task', means: 'one piece of work you asked for', insteadOf: ['card', 'ticket'] },
     { word: 'lane', means: 'a column a card moves through', insteadOf: ['phase', 'column'] },
     {
       word: 'progress',

@@ -43,6 +43,7 @@ import { check as registriesFresh } from '../validate/registries-fresh.ts';
 import { check as screenPaths } from '../validate/screen-paths.ts';
 import { check as shellProvides } from '../validate/shell-provides.ts';
 import { check as unwiredSeams } from '../validate/unwired-seams.ts';
+import { check as vocabulary } from '../validate/vocabulary.ts';
 import { check as words } from '../validate/words.ts';
 import { type Check, type Finding, contextFor, parseArgs, report } from './lib/check.ts';
 import { generatePackage, writeFiles } from './registries.ts';
@@ -75,6 +76,7 @@ export const CHECKS: readonly Check[] = [
   noMacros,
   words,
   glossary,
+  vocabulary,
   pins,
   privateFiles,
 ];
@@ -96,6 +98,7 @@ const SCOPED = new Set([
   'no-compat',
   'no-macros',
   'glossary',
+  'vocabulary',
   'private-files',
 ]);
 const GRAPH = new Set(['plugin-graph', 'core-closed', 'contract-graph', 'unwired-seams']);
