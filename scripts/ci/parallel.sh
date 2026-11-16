@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run every named part, preserving each exit code and log even when a sibling fails.
+# Run every named part, at most <limit> at once, preserving each exit code and log even when a sibling fails.
 # Usage: parallel.sh <directory> <limit> <command> [arguments...] -- <part>...
 directory=$1
 limit=$2
@@ -26,32 +26,45 @@ printf 'part\texit\tseconds\n' >"${directory}/results.tsv"
 pids=()
 status=0
 
-# A batch bounds local memory without requiring a new runtime or losing any part's result.
-for ((start = 0; start < ${#parts[@]}; start += limit)); do
-  pids=()
-  for ((index = start; index < start + limit && index < ${#parts[@]}; index++)); do
-    part=${parts[index]}
-    (
-      started=${SECONDS}
-      set +e
-      "${command[@]}" "${part}" >"${directory}/${part}.log" 2>&1
-      part_status=$?
-      printf '%s\t%s\t%s\n' "${part}" "${part_status}" "$((SECONDS - started))" >"${directory}/${part}.tsv"
-      exit "${part_status}"
-    ) &
-    pids+=("$!")
-  done
-  for pid in "${pids[@]}"; do
-    wait "${pid}" || status=1
-  done
+# A POOL of at most <limit> parts: the next part starts the moment ANY running part ends, so one long part
+# never holds back the others (fixed batches waited for the slowest of each batch: a 260 s unit group kept
+# three free slots idle). Parts start in the order given, so list the longest first. Each part's exit code
+# is read back from its own .tsv, which is written last; a part that wrote none failed.
+run_part() {
+  local part=$1 started=${SECONDS} part_status
+  set +e
+  "${command[@]}" "${part}" >"${directory}/${part}.log" 2>&1
+  part_status=$?
+  printf '%s\t%s\t%s\n' "${part}" "${part_status}" "$((SECONDS - started))" >"${directory}/${part}.tsv"
+  exit "${part_status}"
+}
+for part in "${parts[@]}"; do
+  rm -f "${directory}/${part}.tsv"
+done
+running=0
+for part in "${parts[@]}"; do
+  if [[ ${running} -ge ${limit} ]]; then
+    wait -n || true
+    running=$((running - 1))
+  fi
+  run_part "${part}" &
+  pids+=("$!")
+  running=$((running + 1))
+done
+for pid in "${pids[@]}"; do
+  wait "${pid}" || true
 done
 
 printf '\n| Part | Exit | Duration |\n| --- | --- | --- |\n' >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
 for part in "${parts[@]}"; do
   echo "📝 ${part} output"
-  cat "${directory}/${part}.log"
+  cat "${directory}/${part}.log" 2>/dev/null || true
+  if [[ ! -f ${directory}/${part}.tsv ]]; then
+    printf '%s\t%s\t%s\n' "${part}" "missing" "?" >"${directory}/${part}.tsv"
+  fi
   cat "${directory}/${part}.tsv" >>"${directory}/results.tsv"
   IFS=$'\t' read -r name part_status duration <"${directory}/${part}.tsv"
+  [[ ${part_status} == 0 ]] || status=1
   echo "📝 ${name}: exit ${part_status}, ${duration}s"
   printf '| %s | %s | %ss |\n' "${name}" "${part_status}" "${duration}" >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
 done
