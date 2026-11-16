@@ -100,8 +100,10 @@ export interface CommandInputs {
   readonly permissionMode: HarnessConfig['permissionMode'];
   readonly model?: string | undefined;
   readonly hasMcp: boolean;
-  /** The ferret's mode (`LaunchSpec.mode`): only an interactive one keeps the question tool. */
+  /** The ferret's mode (`LaunchSpec.mode`): with {@link questionTool} on, only an interactive one keeps the question tool. */
   readonly mode?: 'interactive' | 'auto' | undefined;
+  /** `HarnessConfig.questionTool`: the opt-in that gives an interactive ferret its question tool back. */
+  readonly questionTool: HarnessConfig['questionTool'];
   /** The conversation id: assigned at a start (Claude takes `--session-id`), named at a resume. */
   readonly conversation: { readonly kind: 'new' | 'resume'; readonly id: string };
   /** The absolute folders Ferrets lets this ferret read without asking (`LaunchSpec.readable`). */
@@ -141,7 +143,7 @@ function claudeCommand(inputs: CommandInputs): readonly string[] {
     `${inputs.home}/${HOME_FILES.overlay}`,
     '--permission-mode',
     inputs.permissionMode === 'skip' ? 'bypassPermissions' : 'auto',
-    ...questionArguments(inputs.mode),
+    ...questionArguments(inputs.mode, inputs.questionTool),
     ...(inputs.hasMcp ? ['--mcp-config', `${inputs.home}/${HOME_FILES.mcp}`] : []),
     inputs.conversation.kind === 'new' ? '--session-id' : '--resume',
     inputs.conversation.id,
@@ -151,12 +153,14 @@ function claudeCommand(inputs: CommandInputs): readonly string[] {
 }
 
 /**
- * The question tool, per ferret (O3, v4 parity with the Runtimes wrapper's `CLAUDE_NO_QUESTIONS_FLAG`): an interactive
- * ferret has an owner and keeps `AskUserQuestion`; an unattended one (`auto`, or no mode) has nobody to answer, so the
- * tool is withheld. Not part of the fixed layer's fingerprint: a ferret's mode is fixed for its life.
+ * The question tool (owner !A527: "disable question tool, so we dont get blocked"): WITHHELD from every ferret, an
+ * interactive one included, so none stops on a form only the pane shows; an agent asks through the agenda instead. The
+ * `questionTool` setting (`config/harness-claude-code.yaml`) is the one way back: with it on, an INTERACTIVE ferret (it
+ * has an owner at the pane) keeps `AskUserQuestion`, and an auto one (or one with no mode) still has it withheld, as
+ * nobody is there to answer. Not part of the fixed layer's fingerprint, so a change never reads a ferret as outdated.
  */
 export const CLAUDE_NO_QUESTIONS_FLAG = '--disallowed-tools=AskUserQuestion';
 
-export function questionArguments(mode: 'interactive' | 'auto' | undefined): readonly string[] {
-  return mode === 'interactive' ? [] : [CLAUDE_NO_QUESTIONS_FLAG];
+export function questionArguments(mode: 'interactive' | 'auto' | undefined, questionTool: boolean): readonly string[] {
+  return questionTool && mode === 'interactive' ? [] : [CLAUDE_NO_QUESTIONS_FLAG];
 }
