@@ -64,7 +64,7 @@ function renderHits(hits: readonly WorkHit[], own: string | undefined): string[]
 }
 
 const INDEXING_LINE =
-  'Still reading your conversation history for the first time; this list is what is read so far. Run it again in a moment.';
+  'Still reading your conversation history; this list is what is read so far. Run it again in a moment.';
 
 function renderListing(listing: LinkListing): string {
   const indexing = listing.indexing === true ? [INDEXING_LINE] : [];

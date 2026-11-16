@@ -48,7 +48,7 @@ const DELTA_READ_MAX_BYTES = 4 * 1024 * 1024;
 /** A refresh newer than this is reused by a listing. */
 const INDEX_FRESH_MS = 5_000;
 /** The longest a listing waits for a refresh of an already built index before it answers with what it has. */
-const INDEX_WAIT_MS = 1_500;
+const INDEX_WAIT_MS = 250;
 /** Files described at once: reads overlap, parses and writes take turns. */
 const CONCURRENCY = 8;
 /** Rows written per transaction. */

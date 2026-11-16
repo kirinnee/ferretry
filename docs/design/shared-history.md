@@ -122,7 +122,7 @@ Leases live at `fleet/shared/<harness>/.leases`.
   (async, eight at a time) and each is parsed in one go (a read is at most ~1.25 MiB) with the loop handed back after every file.
   A worker that is handed the bytes and returns the row is the next step if a cold build must be faster (below).
 - **When:** a background build two seconds after the daemon starts, and before a listing when the last refresh is older than
-  5 s. A listing of a built index waits for that refresh at most 1.5 s; a listing never waits on a first build: it answers from
+  5 s. A listing of a built index waits for that refresh at most 250 ms (then it answers with what it has and says so); a listing never waits on a first build: it answers from
   what is indexed (newest transcripts are read first) and sets `indexing: true`, which `fy link` prints as one line.
 - **Query:** `WHERE ok = 1 AND win = 1 AND last_at >= ?since AND instr(hay, ?word) > 0 … ORDER BY last_at DESC LIMIT ?` — the
   same matcher as ever (every word, as a substring, case-insensitively), over the ferret's name, the title, the first and latest
