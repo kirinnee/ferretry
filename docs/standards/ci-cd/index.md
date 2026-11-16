@@ -340,6 +340,10 @@ repository variable **`MACOS_SMOKE`** is the owner's way out, the macOS twin of 
   (a job-level `if:`), so nothing waits 15 minutes for a runner. `CI` still succeeds, so `Release` still runs, and
   `GoReleaser Publish` runs when the smoke was **skipped by the switch** as well as when it passed. It never runs
   past a failed `compile` or a smoke that ran and failed.
+- **It skips the release `compile` too.** `compile` in `cd.yaml` exists only to feed `smoke-darwin`, so the switch
+  skips both and `goreleaser` starts at once instead of waiting 1.5-2.5 minutes for a build nobody uses. The gate
+  has two exclusive halves: switch off, `compile` AND the smoke both `success`; switch on, both `skipped`. A mixed
+  state (a variable flipped mid-run) publishes nothing.
 - **It ships an unproven darwin binary.** Nothing else runs the cross-compiled darwin binary, so while the switch is
   on, a release is published without the darwin binary having started once on a Mac.
 - **It is never silent.** `compile` (`ci.yaml`) and `goreleaser` (`cd.yaml`) run
@@ -712,7 +716,7 @@ hung inside a test and held its runner for two hours, three runs in a row, befor
 - Every other job, sized at two to three times its p95 over the week to 2026-10-29: `CI` —
   `quick` 20, `pwa-screenshot` 20, `pwa-relevance` 5, `full-gates` 15, `compile` (with SIT) 20,
   `smoke` 10, `full-pending` and `full` 5; E2E relevance and summary 5; `Harness Contract (latest)`
-  20 and its report 10; `CD` `compile` 15, `goreleaser` 30 and `sign` 15; the darwin smoke
+  20 and its report 10; `CD` `compile` 15, `goreleaser` 30, `fury` 15 and `sign` 15; the darwin smoke
   (`smoke-darwin.yaml`) attempts 10 each, backoffs 5 and 8, verdict 5; `macOS Advisory` 5; `Deploy PWA to Pages` build 15, sign 10,
   deploy 10; `Deploy Hosted Relay` jobs 20; `Release` 20.
 - A new job states its ceiling when it is added, sized from its first green runs.
@@ -786,11 +790,26 @@ un-fired and no release published. The job passes `secrets.RELEASE_TOKEN`.
 `CD` reacts to the tag. Before it publishes anything it compiles the binaries once more and starts the
 darwin-arm64 one on a real Mac (`smoke-darwin`, `advisory: false`): a release proves darwin works, a macOS
 runner that never comes is re-queued up to 3 times, and only then does the release stop, saying the runner was
-unavailable ([macOS runner shortage](#macos-runner-shortage)). `goreleaser` `needs` that job. It then checks out with `fetch-depth: 0`, and runs
+unavailable ([macOS runner shortage](#macos-runner-shortage)). `goreleaser` `needs` that job, `compile` (which
+the owner's switch skips together with the smoke) and `main-only`, and its `if` requires `main-only` to have
+_succeeded_: a refused tag skips `compile` and the smoke exactly as the switch does, so a skipped compile alone
+proves nothing about the tag (`scripts/validate/release-guards.sh` holds it). It then checks out with `fetch-depth: 0`, and runs
 `nix develop .#releaser -c ./scripts/release/publish.sh` — the `.#releaser` shell is the only
 one with `goreleaser` and `go`. GoReleaser owns the GitHub release, archives, checksums, the
 installer, and the in-repo Homebrew cask. See
 [Semantic Release](../semantic-release/index.md) for what each half owns.
+
+**Two jobs follow `goreleaser` and neither waits for the other.** `sign` signs `checksums.txt`. `fury` pushes the
+`.deb`/`.rpm` assets of the tag's GitHub release (`gh release download --pattern '*.deb' --pattern '*.rpm'`) to
+Gemfury with `scripts/release/fury.sh`, every package in parallel, failing if any push failed (a 409 stays a
+warning). Gemfury indexes an rpm for ~85 s, so pushed inside `goreleaser` and one by one it held the GitHub
+release's job open for 193 s and `sign` behind it. `fury` alone holds `FURY_PUSH_TOKEN`
+(`scripts/validate/macos-policy.sh` pins both), and a red `fury` is re-run by itself: the release and its
+signature are already out.
+
+**The release job's critical path is measured, not guessed** (v4.291.19, 2026-11-16): `CI` 6.5 min, `Release` 2.6 min,
+`compile` 81 s, `smoke-darwin` 70 s, `goreleaser` 5.75 min, `sign` 15 s. Each of the changes above removes a wait
+that nothing downstream needed; a new step in this chain states what it makes later jobs wait for.
 
 ## Permissions and checkout
 
