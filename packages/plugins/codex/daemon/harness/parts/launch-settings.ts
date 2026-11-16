@@ -9,7 +9,12 @@ const MAX_LAUNCH_RECORD_BYTES = 4 * 1024;
 const UNKNOWN_LAUNCH: HarnessLaunchSettings = { kind: 'unknown' };
 
 /** Whether a relaunch would run on other settings than the last launch did. */
-export const launchSettingsPart: HarnessPart<'launchSettings'> = ({ kernel, permissionModeNow, settingsNow }) => {
+export const launchSettingsPart: HarnessPart<'launchSettings'> = ({
+  kernel,
+  permissionModeNow,
+  settingsNow,
+  hooksNow,
+}) => {
   return {
     /**
      * Whether a relaunch would run this ferret on other settings of this plugin's than its last start or resume did
@@ -28,6 +33,7 @@ export const launchSettingsPart: HarnessPart<'launchSettings'> = ({ kernel, perm
           codexLaunchSettingsRecord(
             permissionModeNow(),
             await settingsNow(recorded.value.runtime),
+            await hooksNow(recorded.value.runtime),
             recorded.value.runtime,
           ),
         );

@@ -1,7 +1,11 @@
 /** A selection that names every component: for the harness tests that are not about which components a runtime selects. */
 import type { SelectedComponents } from '@ferretry/plugin-runtimes/contract';
 
-const EVERYTHING = { has: () => true } as unknown as ReadonlySet<string>;
+/** Names everything by `has`, and lists nothing: there is no order to a selection of everything. */
+const EVERYTHING = {
+  has: () => true,
+  [Symbol.iterator]: () => [][Symbol.iterator](),
+} as unknown as ReadonlySet<string>;
 
 export const selectEverything = async (): Promise<SelectedComponents> => ({
   settings: EVERYTHING,

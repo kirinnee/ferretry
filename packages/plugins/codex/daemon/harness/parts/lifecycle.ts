@@ -19,6 +19,7 @@ export const lifecyclePart: HarnessPart<'start' | 'resume' | 'stop'> = ({
   locate,
   permissionModeNow,
   settingsNow,
+  hooksNow,
   rollouts,
   ensureHome,
   poolHistory,
@@ -89,7 +90,12 @@ export const lifecyclePart: HarnessPart<'start' | 'resume' | 'stop'> = ({
     permissionMode: HarnessConfig['permissionMode'],
     runtime: string | undefined,
   ): Promise<void> => {
-    const record = codexLaunchSettingsRecord(permissionMode, await settingsNow(runtime), runtime);
+    const record = codexLaunchSettingsRecord(
+      permissionMode,
+      await settingsNow(runtime),
+      await hooksNow(runtime),
+      runtime,
+    );
     try {
       await kernel.state.write(CODEX_LAUNCH_SETTINGS, record, ferret);
     } catch {
