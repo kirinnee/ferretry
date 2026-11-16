@@ -14,7 +14,7 @@ import { V5_WARDEN_REPORTS, V5_WARDEN_STATE, wardenStep } from '../../src/steps/
 import { v4Paths } from '../../src/v4/layout.ts';
 import { v5Writer } from '../../src/v5/write.ts';
 import { rebaseV4Path } from '../../src/v4/rebase.ts';
-import { agentHomesRoot } from '../../src/v5/harness-paths.ts';
+import { agentHomesRoot, historyPoolRoot } from '../../src/v5/harness-paths.ts';
 import { fixture } from './ferret-fixture.ts';
 
 const ACCOUNT = '22222222-2222-4222-8222-222222222222';
@@ -105,17 +105,18 @@ async function expectCarried(to: string, from: string, original: string): Promis
   expect(homes.find(item => item.what.startsWith('runtime homes copied'))?.count).toBe(3);
   expect(homes.find(item => item.what.startsWith('homes omitted'))?.count).toBe(0);
   const root = (harness: 'claude' | 'codex') => join(result.report.to, agentHomesRoot(harness));
+  const pool = (harness: 'claude' | 'codex') => join(result.report.to, historyPoolRoot(harness));
   expect(await readFile(join(root('claude'), ACCOUNT, 'user-state'), 'utf8')).toContain('FAKE-ACCOUNT-STATE');
   expect(await readFile(join(root('claude'), OTHER_RUNTIME, 'user-state'), 'utf8')).toContain('FAKE-OTHER-STATE');
   expect(await readFile(join(root('codex'), RUNTIME_ID, 'user-state'), 'utf8')).toContain('FAKE-RUNTIME-STATE');
-  expect(await readFile(join(root('codex'), '_shared/sessions/rollout.jsonl'), 'utf8')).toContain('FAKE-ROLLOUT');
+  expect(await readFile(join(pool('codex'), 'sessions/rollout.jsonl'), 'utf8')).toContain('FAKE-ROLLOUT');
   const ferret = JSON.parse(await readFile(join(result.report.to, 'state/ferrets/f1/ferret.json'), 'utf8')) as {
     transcript?: { home: string; file?: string };
   };
   expect(ferret.transcript?.home).toBe(join(root('codex'), RUNTIME_ID));
-  expect(ferret.transcript?.file).toBe(join(root('codex'), '_shared/sessions/rollout.jsonl'));
+  expect(ferret.transcript?.file).toBe(join(pool('codex'), 'sessions/rollout.jsonl'));
   const config = await readFile(join(result.report.to, 'state/ferrets/f1/config.json'), 'utf8');
-  expect(config).toContain(join(root('codex'), '_shared/sessions/rollout.jsonl'));
+  expect(config).toContain(join(pool('codex'), 'sessions/rollout.jsonl'));
   expect(config).toContain(join(result.report.to, 'fleet/bin/codex-work'));
   // Nothing of the converted home names where the v4 home was, nor where it was read from.
   for (const name of ['state/ferrets/f1/ferret.json', 'state/ferrets/f1/config.json']) {

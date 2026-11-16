@@ -234,6 +234,7 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
     copyShared: async () => refuseShared('not_internal'),
     linkCredential: async () => refuseShared('not_internal'),
     linkHistory: async () => refuseHistory('not_internal'),
+    moveToHistoryPool: async () => refuseHistory('not_internal'),
     ensurePrivateDirectory: async path => {
       reachForWrite(path, 'make', 'keep');
     },
