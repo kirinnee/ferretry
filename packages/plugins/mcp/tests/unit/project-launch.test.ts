@@ -122,6 +122,7 @@ function kernelRoots(
         copyTree: missing('copy a folder'),
         copyShared: missing('copy a shared folder'),
         linkCredential: missing('link a credential'),
+        linkHistory: missing('link a history entry'),
         ensurePrivateDirectory: missing('make a folder'),
         makeDirectory: missing('make a folder'),
         list: missing('list a folder'),

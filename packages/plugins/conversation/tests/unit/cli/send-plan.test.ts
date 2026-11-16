@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import type { SendEnvironment } from '../../../cli/lib/send/ports.ts';
-import type { SendRecord, SendResult } from '../../../contract/index.ts';
+import type { SendRecord, SendResult } from '@ferretry/core-mailbox/contract';
 import should from 'should';
 import { at } from '../../support/instant.ts';
 

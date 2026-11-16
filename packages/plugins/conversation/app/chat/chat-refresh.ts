@@ -1,10 +1,6 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import {
-  type LogPageOptions,
-  type QueuedMessage,
-  splitTranscriptImageMarkers,
-  type TranscriptImageMarker,
-} from '../../contract/index.ts';
+import { type QueuedMessage } from '@ferretry/core-mailbox/contract';
+import { type LogPageOptions, splitTranscriptImageMarkers, type TranscriptImageMarker } from '../../contract/index.ts';
 import { cancelSend, retrySend, submitSend } from './chat-reads.ts';
 import type { ChatSession } from './chat-session.ts';
 import { projectDeliveries } from './peer-delivery.ts';

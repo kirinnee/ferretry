@@ -16,7 +16,7 @@
  * the session live. Outside a session there is no source, and the row degrades to the faded pointer.
  */
 
-import type { DeliveredAttachment, HandoffPointer, HandoffDocument } from '../../contract/index.ts';
+import type { DeliveredAttachment, HandoffPointer, HandoffDocument } from '@ferretry/core-mailbox/contract';
 import { FileText, Info } from 'lucide-react';
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { StoredTranscriptAttachment } from '../composer/attachments.ts';

@@ -1,4 +1,4 @@
-import { type HandoffPointer, parseFerretryNotice, parseMessageAttachments } from '../../contract/index.ts';
+import { type HandoffPointer, parseFerretryNotice, parseMessageAttachments } from '@ferretry/core-mailbox/contract';
 import { ferretryFeatureOf } from '../composer/ferretry-sender.ts';
 import { markReplies } from './peer-delivery.ts';
 import { peerFrom } from './peer-message.ts';

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { type HandoffDocument, turnFileInstruction } from '../../../../contract/index.ts';
+import { type HandoffDocument, turnFileInstruction } from '@ferretry/core-mailbox/contract';
 import { AttachmentGalleryProvider } from '../../../../app/composer/attachment-gallery.tsx';
 import { type HandoffSource, HandoffSourceProvider, HandoffView } from '../../../../app/chat/handoff-message.tsx';
 import { OPEN_SEND_SETTLE_MS } from '../../../../app/chat/ledger-message.tsx';
