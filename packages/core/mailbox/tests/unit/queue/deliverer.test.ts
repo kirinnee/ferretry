@@ -164,7 +164,7 @@ describe('handing over a queue', () => {
     should(world.handed).be.empty();
     should(world.queue.map(entry => entry.waitReason)).eql(['draft', 'draft']);
     should(world.log.filter(event => event.kind === 'waiting')).have.length(2);
-    should(world.scheduled.at(-1)).equal(defaultQueueDeliverySettings.lookMs);
+    should(world.scheduled.at(-1)).equal(defaultQueueDeliverySettings.gatedLookMs);
   });
 
   it('should finish a send of ours left unsubmitted in the box, then deliver at once (B144)', async () => {
@@ -195,7 +195,7 @@ describe('handing over a queue', () => {
     should(world.handed).be.empty();
     should(world.state('a')?.waitReason).equal('draft');
     should(world.state('a')?.waitBehind).equal('stranded-1');
-    should(world.scheduled.at(-1)).equal(defaultQueueDeliverySettings.lookMs);
+    should(world.scheduled.at(-1)).equal(defaultQueueDeliverySettings.gatedLookMs);
   });
 
   it('should wait as unreadable when the box cannot be read again after clearing a draft of ours', async () => {
@@ -324,7 +324,7 @@ describe('handing over a queue', () => {
     should(world.handed).eql(['a']);
     should(world.state('a')).containEql({ state: 'queued', waitReason: 'busy' });
     should(world.state('b')).containEql({ state: 'queued', waitReason: 'busy' });
-    should(world.scheduled.at(-1)).equal(defaultQueueDeliverySettings.lookMs);
+    should(world.scheduled.at(-1)).equal(defaultQueueDeliverySettings.gatedLookMs);
 
     // The next look finds the prompt: both go, in order, and nothing was typed twice.
     await world.deliverer.changed(ID);
@@ -1042,5 +1042,145 @@ describe('labels and combined delivery', () => {
     await world.deliverer.arm();
 
     should(world.deliveries.map(entry => entry.delivery.members.map(member => member.id))).eql([['a', 'f']]);
+  });
+});
+
+describe('lanes, the compacting wait and the 1 s look', () => {
+  const lane = (
+    id: string,
+    laneName: NonNullable<QueuedMessage['lane']>,
+    seconds = 0,
+    extra: Partial<QueuedMessage> = {},
+  ) =>
+    message(id, laneName === 'owner' ? 'human' : laneName === 'ferretry' ? 'daemon' : 'agent', seconds, {
+      lane: laneName,
+      ...(laneName === 'action' || laneName === 'fyi'
+        ? {
+            label: laneName,
+            holdUntil: new Date(T0 + (seconds + (laneName === 'fyi' ? 600 : 60)) * 1_000).toISOString() as Instant,
+          }
+        : {}),
+      ...extra,
+    });
+
+  it('should hold for a compaction as its own wait reason, not busy, and type when it is done', async () => {
+    const world = new World(lane('o', 'owner'));
+    world.pane = pane({ activeWork: true, compacting: true });
+
+    await world.deliverer.enqueued(ID);
+
+    should(world.handed).be.empty();
+    should(world.state('o')).containEql({ state: 'queued', waitReason: 'compacting' });
+    should(reasonForWaiting({ target: world.target, pane: pane({ compacting: true }), launching: false })).equal(
+      'compacting',
+    );
+
+    world.pane = pane({ promptReady: true, activeWork: false });
+    await world.deliverer.changed(ID);
+    should(world.handed).eql(['o']);
+  });
+
+  it('should not back off a pane that refuses a hand-over because it began compacting', async () => {
+    const world = new World(lane('o', 'owner'));
+    world.answers.push({ kind: 'refused', reason: 'compacting', untilPrompt: true });
+    await world.deliverer.enqueued(ID);
+    should(world.state('o')).containEql({ state: 'queued', waitReason: 'compacting' });
+
+    // The very next look types it: the 5 min "until a prompt" backoff is for panes that never came to one.
+    world.nowMs += 1_000;
+    await world.deliverer.changed(ID);
+    should(world.handed).eql(['o', 'o']);
+  });
+
+  it('should look every second while a message is gated, and every 5 s after 2 minutes on the same reason', async () => {
+    const world = new World(lane('o', 'owner'));
+    world.pane = pane({ draft: 'half a question' });
+    const { gatedLookMs, gatedBackoffAfterMs, lookMs } = defaultQueueDeliverySettings;
+    should(gatedLookMs).equal(1_000);
+    should(lookMs).equal(5_000);
+    should(gatedBackoffAfterMs).equal(120_000);
+
+    await world.deliverer.enqueued(ID);
+    should(world.scheduled.at(-1)).equal(1_000);
+
+    world.nowMs += gatedBackoffAfterMs - 1;
+    await world.deliverer.changed(ID);
+    should(world.scheduled.at(-1)).equal(1_000);
+
+    world.nowMs += 1;
+    await world.deliverer.changed(ID);
+    should(world.scheduled.at(-1)).equal(5_000);
+
+    // A different reason starts the fast look again.
+    world.pane = pane({ blockingPrompt: 'Trust this folder?' });
+    await world.deliverer.changed(ID);
+    should(world.state('o')?.waitReason).equal('dialog');
+    should(world.scheduled.at(-1)).equal(1_000);
+  });
+
+  it('should not look every second for a screen it cannot read or a stopped session', async () => {
+    const unreadable = new World(lane('o', 'owner'));
+    unreadable.pane = 'unreadable';
+    await unreadable.deliverer.enqueued(ID);
+    should(unreadable.scheduled.at(-1)).equal(5_000);
+
+    const stopped = new World(lane('f', 'fyi'));
+    stopped.target = { ...stopped.target, status: 'stopped' };
+    stopped.nowMs = T0 + 600_000;
+    await stopped.deliverer.look(ID);
+    should(stopped.state('f')?.waitReason).equal('stopped');
+    should(stopped.scheduled.at(-1)).equal(5_000);
+  });
+
+  it('should set no timer when nothing waits, and hold an action to the end of its window, not every second', async () => {
+    const empty = new World();
+    await empty.deliverer.look(ID);
+    should(empty.scheduled).be.empty();
+
+    const held = new World(lane('a', 'action'));
+    await held.deliverer.enqueued(ID);
+    should(held.state('a')?.waitReason).equal(undefined);
+    should(held.scheduled).eql([60_000]);
+  });
+
+  it('should send an action that answers what its receiver waits on as urgent, once, keeping its lane', async () => {
+    const world = new World(lane('r', 'action', 0, { from: 'peer-session' }));
+    world.target = { ...world.target, waiting: { peer: 'peer-session' } };
+    world.pane = pane({ draft: 'a person is typing' });
+
+    await world.deliverer.enqueued(ID);
+    await world.deliverer.changed(ID);
+
+    should(world.log.filter(event => event.kind === 'promoted')).have.length(1);
+    should(world.state('r')).containEql({ lane: 'action', promoted: 'urgent' });
+
+    world.pane = pane({ promptReady: true, activeWork: false });
+    await world.deliverer.changed(ID);
+    should(world.handed).eql(['r']);
+    should(world.state('r')).containEql({ lane: 'action', promoted: 'urgent', state: 'delivered' });
+  });
+
+  it('should not call a message promoted when the kill switch sends everything at once', async () => {
+    const world = new World(lane('r', 'fyi', 0, { from: 'peer-session' }));
+    world.settings.coalesce = false;
+    world.target = { ...world.target, waiting: { peer: 'peer-session' } };
+
+    await world.deliverer.enqueued(ID);
+
+    should(world.handed).eql(['r']);
+    should(world.log.filter(event => event.kind === 'promoted')).be.empty();
+  });
+
+  it("should not promote an urgent message, a held one nobody waits on, or another ferret's reply", async () => {
+    const world = new World(
+      lane('u', 'urgent', 0, { from: 'peer-session' }),
+      lane('a', 'action', 1, { from: 'other' }),
+    );
+    world.target = { ...world.target, waiting: { peer: 'peer-session' } };
+    world.pane = pane({ draft: 'busy typing' });
+
+    await world.deliverer.enqueued(ID);
+
+    should(world.log.filter(event => event.kind === 'promoted')).be.empty();
   });
 });
