@@ -110,6 +110,10 @@ Leases live at `fleet/shared/<harness>/.leases`.
 - Targets: `fy link <words> --since 7d` warm **< 300 ms** end to end (index query < 10 ms), cold-after-boot answers
   immediately with partial results, full build < 60 s in the background.
 
+- **Names (owner add, 2026-11-16).** Every row carries the ferret's name when a ferret runs or ran the conversation
+  (from Ferrets' registry), else the conversation's own title, else the first prompt; both are searchable and `fy link`
+  prints the name on every row.
+
 ### 3.4 Safety with the lease store
 
 - Every pooled write is a harness process the daemon started (claims the lease on start, resume, fork) or a wrapper
