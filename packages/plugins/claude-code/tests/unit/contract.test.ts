@@ -70,11 +70,17 @@ describe('claude-code contract', () => {
   });
 
   test('skipping every permission prompt is a loosening; asking again is not', () => {
-    const auto = { searchPaths: [], permissionMode: 'auto' as const, questionTool: false, dangerousRmWaiver: false };
-    const skip = { searchPaths: [], permissionMode: 'skip' as const, questionTool: false, dangerousRmWaiver: false };
+    const auto = { searchPaths: [], permissionMode: 'auto' as const, dangerousRmWaiver: false };
+    const skip = { searchPaths: [], permissionMode: 'skip' as const, dangerousRmWaiver: false };
     expect(harnessConfigLoosens(auto, skip)).toEqual(['agents now skip every permission prompt']);
     expect(harnessConfigLoosens(skip, auto)).toEqual([]);
     expect(CLAUDE_CODE_CONFIG.axis).toBe('configure');
+  });
+
+  test('the question tool has no setting: a harness file that names questionTool is refused (no ferret ever has it)', () => {
+    expect(HarnessConfigSchema.safeParse({ questionTool: true }).success).toBe(false);
+    expect(HarnessConfigSchema.safeParse({ questionTool: false }).success).toBe(false);
+    expect(Object.keys(HarnessConfigSchema.shape)).not.toContain('questionTool');
   });
 
   test('^A525 a harness file with no permissionMode means skip; an explicit auto stays auto', () => {
@@ -106,14 +112,11 @@ describe('claude-code contract', () => {
     const base = {
       searchPaths: ['/a', '/b'],
       permissionMode: 'auto' as const,
-      questionTool: false,
       dangerousRmWaiver: false,
     };
     const binary = (path: string) => ({ ...base, binary: path });
     expect(held(base, base)).toEqual([]);
-    expect(
-      held(undefined, { searchPaths: [], permissionMode: 'auto', questionTool: false, dangerousRmWaiver: false }),
-    ).toEqual([]);
+    expect(held(undefined, { searchPaths: [], permissionMode: 'auto', dangerousRmWaiver: false })).toEqual([]);
     expect(held(base, binary('/x'))).toEqual(['agents now launch a different Claude Code program (binary changed)']);
     expect(held(binary('/x'), binary('/y'))).toHaveLength(1);
     expect(held(binary('/x'), base)).toHaveLength(1);

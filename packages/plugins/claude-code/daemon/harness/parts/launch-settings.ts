@@ -29,7 +29,6 @@ export async function launchInputs(
   runtime: string | undefined,
 ): Promise<
   LaunchSettingsInputs & {
-    readonly questionTool: boolean;
     readonly dangerousRmWaiver: boolean;
     readonly channels?: boolean;
   }
@@ -40,8 +39,6 @@ export async function launchInputs(
   const file = core.deps.config.file(configFile);
   return {
     permissionMode: file?.permissionMode ?? 'skip',
-    // Outside the recorded launch settings (no ferret reads as outdated for it), read in the same pass as the rest.
-    questionTool: file?.questionTool ?? false,
     // In the record, but only as its effect on the fixed layer (setting on AND bypass mode): see launchSettingsRecord.
     dangerousRmWaiver: file?.dangerousRmWaiver ?? false,
     // Outside the recorded launch settings too: the channel is decided per launch (setting, else the login's type).

@@ -8,12 +8,7 @@ import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { realClock } from '../support/ports.ts';
 import { codexCompactPrompt, tomlString, tomlTables } from '../../daemon/lib/index.ts';
 import { CODEX_LAUNCH_SETTINGS, CODEX_SETTINGS } from '../../contract/index.ts';
-import {
-  CODEX_QUESTIONS_FEATURE,
-  CODEX_QUESTIONS_OFF,
-  codexFixedArguments,
-  codexQuestionArguments,
-} from '../../daemon/lib/fixed-layer.ts';
+import { CODEX_QUESTIONS_FEATURE, CODEX_QUESTIONS_OFF, codexFixedArguments } from '../../daemon/lib/fixed-layer.ts';
 import { selectEverything } from '../support/selected.ts';
 
 const FERRET = 'f1' as FerretId;
@@ -71,8 +66,6 @@ const harnessOver = (
   location: Awaited<ReturnType<NonNullable<Parameters<typeof codexHarness>[0]['locate']>>>,
   /** The permission mode the config file says; absent means the harness file says nothing (the default applies). */
   permissionMode?: 'auto' | 'skip',
-  /** `questionTool` in the config file; absent means the harness file says nothing (off). */
-  questionTool?: boolean,
   /** A settings component the runtime selects (`config/codex/settings/`): its document is merged into `config.toml`. */
   settings?: Record<string, unknown>,
   /** The settings items (`config/codex/settings/`) in the config, with any launch flags they carry. */
@@ -82,7 +75,6 @@ const harnessOver = (
   /** The launch-settings records the launches wrote, in order. */
   const records: unknown[] = [];
   const harness = codexHarness({
-    ...(questionTool === undefined ? {} : { questionTool: () => questionTool }),
     selected: selectEverything,
     kernel: {
       roots,
@@ -231,7 +223,7 @@ describe('the Codex harness', () => {
     ]);
 
     it('reach the argv as separate words, in item name order, before the launch’s own arguments', async () => {
-      const { harness } = harnessOver(LOCATED, 'auto', undefined, undefined, items);
+      const { harness } = harnessOver(LOCATED, 'auto', undefined, items);
       const { runner, seen } = fakeRunner();
       await harness.start(specOf({ model: 'gpt-5.6-codex' }), runner, ENV);
       const command = seen[0]?.spec.command ?? [];
@@ -243,7 +235,7 @@ describe('the Codex harness', () => {
     });
 
     it('lose to the launch on a permission switch: the item’s sandbox and approval flags never reach the argv', async () => {
-      const { harness } = harnessOver(LOCATED, 'auto', undefined, undefined, items);
+      const { harness } = harnessOver(LOCATED, 'auto', undefined, items);
       const { runner, seen } = fakeRunner();
       await harness.start(specOf(), runner, ENV);
       const command = seen[0]?.spec.command ?? [];
@@ -257,7 +249,7 @@ describe('the Codex harness', () => {
       const spelled = new Map<string, unknown>([
         ['a', { settings: {}, flags: ['-sdanger-full-access', '-anever', '--yolo', '-pwork', '--some-future-flag'] }],
       ]);
-      const { harness } = harnessOver(LOCATED, 'auto', undefined, undefined, spelled);
+      const { harness } = harnessOver(LOCATED, 'auto', undefined, spelled);
       const { runner, seen } = fakeRunner();
       await harness.start(specOf(), runner, ENV);
       const command = seen[0]?.spec.command ?? [];
@@ -270,7 +262,7 @@ describe('the Codex harness', () => {
     });
 
     it('reach a resume too, after the conversation id', async () => {
-      const { harness } = harnessOver(LOCATED, 'auto', undefined, undefined, items);
+      const { harness } = harnessOver(LOCATED, 'auto', undefined, items);
       const { runner, seen } = fakeRunner();
       await harness.resume(specOf(), runner, ENV, 'conv-1');
       const command = seen[0]?.spec.command ?? [];
@@ -283,13 +275,7 @@ describe('the Codex harness', () => {
     });
 
     it('add nothing when no item carries a flag', async () => {
-      const { harness } = harnessOver(
-        LOCATED,
-        'auto',
-        undefined,
-        undefined,
-        new Map([['plain', { settings: { model: 'm' } }]]),
-      );
+      const { harness } = harnessOver(LOCATED, 'auto', undefined, new Map([['plain', { settings: { model: 'm' } }]]));
       const bare = harnessOver(LOCATED, 'auto');
       const withItem = fakeRunner();
       const without = fakeRunner();
@@ -334,8 +320,7 @@ describe('the Codex harness', () => {
     should(resumed.ok && resumed.value.harnessConversation).equal('conv-1');
   });
 
-  describe('the question tool (^A527: Codex gets --enable default_mode_request_user_input only when questionTool opts in, and an explicit OFF otherwise)', () => {
-    const FEATURE = ['--enable', 'default_mode_request_user_input'];
+  describe('the question tool (^A527, again 2026-11-17: no ferret ever gets request_user_input, and there is no setting to turn it on)', () => {
     const OFF = ['-c', 'features.default_mode_request_user_input=false'];
     const withFeature = (command: readonly string[]): boolean =>
       command.some((argument, at) => argument === '--enable' && command[at + 1] === 'default_mode_request_user_input');
@@ -344,12 +329,8 @@ describe('the Codex harness', () => {
       command.filter((argument, at) => argument === OFF[0] && command[at + 1] === OFF[1]).length;
 
     for (const call of ['start', 'resume'] as const) {
-      const launch = async (
-        mode: 'interactive' | 'auto' | undefined,
-        questionTool?: boolean,
-        settings?: Record<string, unknown>,
-      ) => {
-        const { harness, records } = harnessOver(LOCATED, undefined, questionTool, settings);
+      const launch = async (mode: 'interactive' | 'auto' | undefined, settings?: Record<string, unknown>) => {
+        const { harness, records } = harnessOver(LOCATED, undefined, settings);
         const { runner, seen } = fakeRunner();
         const spec = specOf(mode === undefined ? {} : { mode });
         const launched =
@@ -360,30 +341,11 @@ describe('the Codex harness', () => {
       /** A selected settings component that switches the feature ON in `config.toml`. */
       const FEATURE_ON = { features: { default_mode_request_user_input: true } };
 
-      it(`a ${call} enables nothing by default, an interactive ferret included, and says OFF explicitly`, async () => {
+      it(`a ${call} never enables it, an interactive ferret included, and says OFF explicitly exactly once`, async () => {
         for (const mode of ['interactive', 'auto', undefined] as const) {
-          for (const questionTool of [undefined, false] as const) {
-            const { command } = await launch(mode, questionTool);
-            should(withFeature(command)).be.false();
-            should(command.includes('--enable')).be.false();
-            should(offCount(command)).equal(1);
-          }
-        }
-      });
-
-      it(`a ${call} of an interactive ferret enables it once when questionTool is on, with no OFF beside it`, async () => {
-        const { command } = await launch('interactive', true);
-        should(withFeature(command)).be.true();
-        should(command.filter(argument => argument === '--enable')).eql(['--enable']);
-        should(command.indexOf('--enable') + 1).equal(command.indexOf(FEATURE[1] as string));
-        should(offCount(command)).equal(0);
-        should(command.join(' ')).not.containEql('default_mode_request_user_input=false');
-      });
-
-      it(`a ${call} of an auto ferret, or one with no mode, never enables it, even with questionTool on: it carries the OFF`, async () => {
-        for (const mode of ['auto', undefined] as const) {
-          const { command } = await launch(mode, true);
+          const { command } = await launch(mode);
           should(withFeature(command)).be.false();
+          should(command.includes('--enable')).be.false();
           should(offCount(command)).equal(1);
         }
       });
@@ -391,21 +353,10 @@ describe('the Codex harness', () => {
       it(`a ${call} overrides a selected settings component that turns the feature ON in config.toml`, async () => {
         // The launch names the OFF, which a `-c` override ranks above the config.toml the component fills (see below).
         for (const mode of ['interactive', 'auto', undefined] as const) {
-          for (const questionTool of [undefined, false] as const) {
-            const { command } = await launch(mode, questionTool, FEATURE_ON);
-            should(offCount(command)).equal(1);
-            should(withFeature(command)).be.false();
-          }
-        }
-        for (const mode of ['auto', undefined] as const) {
-          const { command } = await launch(mode, true, FEATURE_ON);
+          const { command } = await launch(mode, FEATURE_ON);
           should(offCount(command)).equal(1);
           should(withFeature(command)).be.false();
         }
-        // An interactive ferret the owner opted in carries --enable and no OFF, whatever the component says.
-        const { command } = await launch('interactive', true, FEATURE_ON);
-        should(withFeature(command)).be.true();
-        should(offCount(command)).equal(0);
       });
 
       it(`a ${call} records the same launch settings whatever the mode, so no ferret reads as outdated for it`, async () => {
@@ -417,7 +368,7 @@ describe('the Codex harness', () => {
     }
 
     it("writes a selected settings component's feature ON into config.toml unchanged: the launch OFF is what wins", async () => {
-      const { harness, written } = harnessOver(LOCATED, undefined, undefined, {
+      const { harness, written } = harnessOver(LOCATED, undefined, {
         features: { default_mode_request_user_input: true },
       });
       await harness.prepareHome(specOf());
@@ -425,13 +376,7 @@ describe('the Codex harness', () => {
       should(toml).containEql('default_mode_request_user_input = true');
     });
 
-    it('names the feature only for an interactive ferret with the setting on, and the OFF for every other launch', () => {
-      should(codexQuestionArguments('interactive', true)).eql(FEATURE);
-      should(codexQuestionArguments('auto', true)).eql(OFF);
-      should(codexQuestionArguments(undefined, true)).eql(OFF);
-      should(codexQuestionArguments('interactive', false)).eql(OFF);
-      should(codexQuestionArguments('auto', false)).eql(OFF);
-      should(codexQuestionArguments(undefined, false)).eql(OFF);
+    it('spells the OFF as a -c override of the one feature, and has no setting or helper that enables it', () => {
       should(CODEX_QUESTIONS_OFF).eql(OFF);
       should(CODEX_QUESTIONS_FEATURE).equal('default_mode_request_user_input');
     });

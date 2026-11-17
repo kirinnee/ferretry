@@ -56,19 +56,14 @@ export function codexFixedArguments(permissionMode: HarnessConfig['permissionMod
 
 /**
  * Codex gates `request_user_input` outside Plan mode behind this feature (copied from the Runtimes wrapper's
- * `CODEX_QUESTIONS_FEATURE`): it is given only to an interactive ferret, and only when the owner opted in.
+ * `CODEX_QUESTIONS_FEATURE`): no ferret is given it, so it is only ever named here to be turned off.
  */
 export const CODEX_QUESTIONS_FEATURE = 'default_mode_request_user_input';
 
-/** The explicit OFF: a `-c` override beats `config.toml`, so a settings component's `features` entry cannot turn it on. */
-export const CODEX_QUESTIONS_OFF: readonly string[] = ['-c', `features.${CODEX_QUESTIONS_FEATURE}=false`];
-
 /**
- * The question tool (owner !A527: no ferret stops on a prompt only the pane shows): NOT enabled by default, an
- * interactive ferret included, so Codex keeps `request_user_input` to its Plan mode and a ferret asks through the
- * agenda. The `questionTool` setting (`config/harness-codex.yaml`) is the one way back: with it on, an INTERACTIVE
- * ferret (it has an owner at the pane) gets `--enable default_mode_request_user_input`; an auto one, or one with no
- * mode, never does.
+ * The question tool (owner !A527, again 2026-11-17: "make sure ferrets dont use question tool"): NEVER enabled, for any
+ * ferret, with no setting to turn it back on, so Codex keeps `request_user_input` to its Plan mode and a ferret asks
+ * through the agenda.
  *
  * "Not enabled" is an explicit OFF, never just an omitted `--enable`: a runtime-selected settings component may carry
  * `features.default_mode_request_user_input = true`, which `prepareHome` writes into `config.toml`, and an omitted flag
@@ -79,9 +74,4 @@ export const CODEX_QUESTIONS_OFF: readonly string[] = ['-c', `features.${CODEX_Q
  * Deliberately NOT part of {@link codexFixedArguments}, whose fingerprint is the launch record's `fixed-layer`
  * section, so a change can never make a recorded launch read as outdated.
  */
-export function codexQuestionArguments(
-  mode: 'interactive' | 'auto' | undefined,
-  questionTool: boolean,
-): readonly string[] {
-  return questionTool && mode === 'interactive' ? ['--enable', CODEX_QUESTIONS_FEATURE] : CODEX_QUESTIONS_OFF;
-}
+export const CODEX_QUESTIONS_OFF: readonly string[] = ['-c', `features.${CODEX_QUESTIONS_FEATURE}=false`];

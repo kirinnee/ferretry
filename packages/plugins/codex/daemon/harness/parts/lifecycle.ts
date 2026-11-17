@@ -4,7 +4,7 @@ import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, codexCompactPrompt } from '../../lib/index.ts';
 import { settingsFlags } from '../../lib/settings.ts';
 import { CODEX_LAUNCH_SETTINGS, type HarnessConfig } from '../../../contract/index.ts';
-import { codexFixedArguments, codexPermissionArguments, codexQuestionArguments } from '../../lib/fixed-layer.ts';
+import { CODEX_QUESTIONS_OFF, codexFixedArguments, codexPermissionArguments } from '../../lib/fixed-layer.ts';
 import { codexLaunchSettingsRecord } from '../../lib/launch-settings.ts';
 import { codexCorrelationArguments } from '../../lib/transcript/rollout.ts';
 import type { HarnessPart } from './context.ts';
@@ -14,7 +14,6 @@ type ChildEnvironment = RunSpec['env'];
 
 /** Starting, resuming and stopping a ferret through whichever runner Ferrets hands over. */
 export const lifecyclePart: HarnessPart<'start' | 'resume' | 'stop'> = ({
-  options,
   kernel,
   locate,
   permissionModeNow,
@@ -48,7 +47,7 @@ export const lifecyclePart: HarnessPart<'start' | 'resume' | 'stop'> = ({
           ...codexPermissionArguments(permissionMode),
           ...codexFixedArguments(permissionMode, spec.folder),
           ...codexCorrelationArguments(spec.home),
-          ...codexQuestionArguments(spec.mode, options.questionTool?.() ?? false),
+          ...CODEX_QUESTIONS_OFF,
         ],
         ...(resume === undefined ? {} : { resume }),
         ...(spec.model === undefined ? {} : { model: spec.model }),

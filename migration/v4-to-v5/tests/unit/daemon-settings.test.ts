@@ -198,14 +198,12 @@ test('harness paths and the agenda deadline are added to the files the Settings 
     permissionMode: 'skip',
     binary: '~/bin/claude',
     searchPaths: ['~/.local/bin'],
-    questionTool: false,
     dangerousRmWaiver: false,
   });
   expect(await read('harness-codex.yaml', CodexHarnessSchema)).toEqual({
     permissionMode: 'skip',
     binary: '/opt/codex/bin/codex',
     searchPaths: ['~/.local/bin'],
-    questionTool: false,
   });
   // agenda wins key by key over attention, as v4 read it.
   expect(await read('agenda.yaml', AgendaConfigSchema)).toMatchObject({ agendaMode: false, deadlineWarnHours: 6 });

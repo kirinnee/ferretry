@@ -26,7 +26,6 @@ describe('the screens a Claude home pre-answers', () => {
         home: '/h/f1',
         permissionMode,
         hasMcp: false,
-        questionTool: false,
         conversation: { kind: 'new', id: 'c-1' },
       });
 

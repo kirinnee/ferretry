@@ -1264,8 +1264,8 @@ Each is easy to change later.
 - **O3 — `--disallowed-tools=AskUserQuestion`** belongs to the Claude fixed layer (agent runtimes
   only). **Superseded by owner !A527: it is now withheld from EVERY ferret, an interactive one included**
   (no ferret stops on a form only the pane shows; it asks through the agenda), and the generated wrapper always
-  prepends the flag. A per-harness `questionTool: true` (docs/launch-settings.md) gives an interactive ferret the tool
-  back on the harness launch path, where the PWA shows its question as an answerable card. The original text follows.
+  prepends the flag. (The per-harness `questionTool` opt-in that briefly gave an interactive ferret the tool back is
+  gone too: 2026-11-17, docs/launch-settings.md.) The original text follows.
   The daemon writes `FY_SESSION_MODE` (`interactive`|`auto`) into the
   ferret's launch environment at creation and the generated wrapper prepended the flag at exec time
   unless it was `interactive` (a launch with no mode is unattended). Codex gates `request_user_input`

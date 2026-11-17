@@ -37,7 +37,6 @@ const argv = (options: { permissionMode?: 'auto' | 'skip'; dangerousRmWaiver?: b
     permissionMode: options.permissionMode ?? 'skip',
     ...(options.dangerousRmWaiver === undefined ? {} : { dangerousRmWaiver: options.dangerousRmWaiver }),
     hasMcp: false,
-    questionTool: false,
     conversation: { kind: 'new', id: 'c-1' },
   });
 /** The `NAME=value` words `env` is given before the seed shell. */
@@ -246,7 +245,6 @@ describe('the process Claude is exec’d as (O11b, keys 5-9 end to end)', () => 
         permissionMode: options.permissionMode ?? 'skip',
         ...(options.dangerousRmWaiver === undefined ? {} : { dangerousRmWaiver: options.dangerousRmWaiver }),
         hasMcp: false,
-        questionTool: false,
         conversation: { kind: 'new', id: 'c-1' },
       });
       const child = Bun.spawn([...command], {

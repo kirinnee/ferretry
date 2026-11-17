@@ -295,26 +295,22 @@ Declared gap: an org-policy lock on Remote Control outranks the overlay, and `--
 for a login whose organisation it cannot determine; the contract test therefore pins the off switch against
 the user-settings control and the `--rc` argv in the unit tests.
 
-## The question tool is withheld from every ferret, unless the owner opts in
+## The question tool is withheld from every ferret
 
-Owner decision !A527 ("disable question tool, so we dont get blocked"): **no ferret has the harness's question tool by
-default, an interactive one included**, because a form only the pane shows stops a ferret nobody is watching. A ferret
-asks through the agenda instead (`fy agenda add`). The one way back is `questionTool: true` in
-`config/harness-claude-code.yaml` or `config/harness-codex.yaml` (default `false`, never held: it makes ferrets block,
-not act more). The ferret's mode reaches the launch through the one builder as `LaunchSpec.mode` (the record's own
-mode, set on every launch: a start, a resume, Restart CLI, a migration, a revive), and each harness spells it:
+Owner decisions !A527 ("disable question tool, so we dont get blocked") and 2026-11-17 ("make sure ferrets dont use
+question tool"): **no ferret has the harness's question tool, an interactive one included, and there is no setting to
+turn it back on**, because a form only the pane shows stops a ferret nobody is watching. A ferret asks through the
+agenda instead (`fy agenda add`). Whatever the ferret's mode, each harness spells it the same way:
 
-| Harness     | Default (every mode)                 | `questionTool: true`, interactive                         | `questionTool: true`, auto or no mode |
-| ----------- | ------------------------------------ | --------------------------------------------------------- | ------------------------------------- |
-| Claude Code | `--disallowed-tools=AskUserQuestion` | keeps `AskUserQuestion`                                   | `--disallowed-tools=AskUserQuestion`  |
-| Codex       | nothing added                        | `--enable default_mode_request_user_input` (Default mode) | nothing added                         |
+| Harness     | Every launch (start, resume, Restart CLI, migration, revive)                         |
+| ----------- | ------------------------------------------------------------------------------------ |
+| Claude Code | `--disallowed-tools=AskUserQuestion`                                                 |
+| Codex       | `-c features.default_mode_request_user_input=false` (an explicit OFF, never silence) |
 
-Codex's `request_user_input` stays available in its own Plan mode; the feature above only adds it to Default mode, and
-no flag was found that turns Plan mode's off. The Runtimes wrapper has no opt-in: it always withholds Claude's tool and
-never enables Codex's (declared GAP; the setting governs the harness launch). The pane is also handed
-`FY_SESSION_MODE` (`interactive` or `auto`), from the same record and after every launch part. The setting and a
-ferret's mode are outside the recorded launch's fixed-layer fingerprint, so changing either cannot make a running
-ferret read as outdated; it takes effect at the ferret's next launch. The Claude `dangerousRmWaiver` setting is the
+Codex's `request_user_input` stays available in its own Plan mode; the feature above only governs Default mode, and
+no flag was found that turns Plan mode's off. The Runtimes wrapper spells the same two lines. The pane is also handed
+`FY_SESSION_MODE` (`interactive` or `auto`), from the ferret's record and after every launch part. The question tool
+is outside the recorded launch's fixed-layer fingerprint, so it can never make a running ferret read as outdated. The Claude `dangerousRmWaiver` setting is the
 exception: its EFFECT (the setting on AND bypass mode) is in the `fixed-layer` fingerprint, so turning it off leaves a
 ferret launched with it on **Restart needed**. A record from before this reads as off, so no earlier ferret is flagged.
 

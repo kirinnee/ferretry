@@ -52,7 +52,6 @@ const ARGV = {
   binary: '/opt/bin/claude',
   home: '/fy/state/claude-code/agent-homes/f1',
   permissionMode: 'auto' as const,
-  questionTool: false,
   hasMcp: false,
   conversation: { kind: 'new' as const, id: 'c-1' },
 };

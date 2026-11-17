@@ -914,11 +914,9 @@ with `approval_policy=never` and `sandbox_mode=danger-full-access`); a file that
 rewrites an explicit value. The permission hold therefore judges explicit values: `auto` turned into `skip`, or `auto`
 with the key removed (which reads as `skip`), is held; no value turned into `auto` asks more and is not held.
 
-Both files also take `questionTool: true` (default `false`, owner !A527): by default no ferret has the harness's
-question tool, so none stops on a form only the pane shows and each asks through the agenda; `true` gives an
-**interactive** ferret the tool back (Claude keeps `AskUserQuestion`, Codex gets
-`--enable default_mode_request_user_input`), and an auto ferret never has it. It makes ferrets block rather than act,
-so it is **never held**.
+Neither file has a question-tool setting (owner !A527, again 2026-11-17): no ferret has the harness's question tool,
+so none stops on a form only the pane shows and each asks through the agenda. A file that names `questionTool` is a
+broken file (unknown key), so its last good version stays in effect.
 
 `harness-claude-code.yaml` also takes `channels` (unset by default): whether a Claude ferret gets Ferretry's message
 channel (the tools server loaded as a development channel). Unset, it follows each ferret's login (**on** for a `claude_max`
