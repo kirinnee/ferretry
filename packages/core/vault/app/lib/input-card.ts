@@ -123,14 +123,29 @@ const PLAIN_NOTICE = 'Not secret: the ferret can see this value.';
 export const plainFlagWords = (field: InputCardField): string => field.risk?.reason ?? PLAIN_NOTICE;
 
 /** What is wrong with a typed value of this field, shown under it; nothing for an empty one. */
-export const fieldProblem = (field: InputCardField, value: string): string | undefined =>
+const fieldProblem = (field: InputCardField, value: string): string | undefined =>
   value === '' ? undefined : inputValueProblem(value, field.sensitivity);
 
+/**
+ * What the card keeps of a typed field: whether it holds anything and what is wrong with it, never the value (the value
+ * stays in the field's own node until Send).
+ */
+export interface FieldState {
+  readonly filled: boolean;
+  readonly problem: string | undefined;
+}
+
+/** The state a field is in after a value was typed; the value itself is not kept. */
+export const fieldStateOf = (field: InputCardField, value: string): FieldState => ({
+  filled: value !== '',
+  problem: fieldProblem(field, value),
+});
+
 /** Whether Send may go: one typed value, or EVERY field of a larger card typed and fine. */
-export const typedReady = (fields: readonly InputCardField[], values: Readonly<Record<string, string>>): boolean =>
+export const typedReady = (fields: readonly InputCardField[], states: Readonly<Record<string, FieldState>>): boolean =>
   fields.length > 0 &&
-  fields.every(field => (values[field.key] ?? '') !== '') &&
-  (fields.length === 1 || fields.every(field => fieldProblem(field, values[field.key] ?? '') === undefined));
+  fields.every(field => states[field.key]?.filled === true) &&
+  (fields.length === 1 || fields.every(field => states[field.key]?.problem === undefined));
 
 export interface TypedFieldsSend {
   readonly request: InputRequest;
@@ -202,6 +217,9 @@ export const savedChoices = (request: InputRequest): SavedChoices | undefined =>
 
 /** Words for the button that opens the hand-picked accounts. */
 export const OTHER_ACCOUNT_WORDS = 'Use another account…';
+
+/** Words for the same button while the hand-picked accounts are drawn below it. */
+export const HIDE_OTHER_ACCOUNTS_WORDS = 'Hide other accounts';
 
 /** The account as the owner named it, with the username it holds when it has one ("GitHub · kirinnee"). */
 export const offerWords = (offer: InputSavedOffer): string =>

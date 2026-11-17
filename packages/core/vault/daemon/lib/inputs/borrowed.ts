@@ -1086,7 +1086,11 @@ export function chosenSignIn(
     const byProject =
       pickedBy(lineOfProject(defaults, project.id), key, matched) ??
       (project.nameIsUnique ? pickedBy(lineOfProject(defaults, project.name), key, matched) : undefined);
-    if (byProject !== undefined) return { signIn: byProject.id, why: 'project', project: project.name };
+    if (byProject !== undefined) {
+      // A name that is not one short line would make the whole card unreadable: the card then just does not name it.
+      const shown = oneLine(SIGN_IN_PROJECT_MAX_LENGTH).safeParse(project.name);
+      return { signIn: byProject.id, why: 'project', ...(shown.success ? { project: shown.data } : {}) };
+    }
   } else {
     const byFolder = pickedBy(folderMap(context), key, matched);
     if (byFolder !== undefined) return { signIn: byFolder.id, why: 'folder' };

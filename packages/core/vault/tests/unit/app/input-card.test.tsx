@@ -61,6 +61,42 @@ async function hidePage(): Promise<() => void> {
 }
 
 describe('the input card holds a typed value only in its field', () => {
+  it('I6 never puts what is typed into the markup: not in the page, not in the value attribute, shown or hidden', async () => {
+    const { mounted } = await card();
+    try {
+      const input = field(mounted.container);
+      await typeInto(input, FAKE_VALUE);
+      // The field holds it for the keyboard, and nothing else does: React does not copy it into the `value` attribute.
+      expect(input.value).toBe(FAKE_VALUE);
+      expect(input.getAttribute('value')).toBeNull();
+      expect(mounted.container.innerHTML).not.toContain(FAKE_VALUE);
+      // Showing what was typed changes the field's type, and still copies nothing into the markup.
+      await click(q(mounted.container, '[data-input-reveal]'));
+      expect(input.type).toBe('text');
+      expect(input.value).toBe(FAKE_VALUE);
+      expect(input.getAttribute('value')).toBeNull();
+      expect(mounted.container.innerHTML).not.toContain(FAKE_VALUE);
+      // Typing on: Send goes by what is in the field, so it is ready with a value and not before.
+      expect(q<HTMLButtonElement>(mounted.container, '[data-input-send]').disabled).toBe(false);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('I6 keeps Send off for an empty field and on again once something is typed', async () => {
+    const { mounted } = await card();
+    try {
+      const send = q<HTMLButtonElement>(mounted.container, '[data-input-send]');
+      expect(send.disabled).toBe(true);
+      await typeInto(field(mounted.container), FAKE_VALUE);
+      expect(send.disabled).toBe(false);
+      await typeInto(field(mounted.container), '');
+      expect(send.disabled).toBe(true);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
   it('I6 clears the field the moment Send is pressed, before the daemon answers, and keeps nothing after', async () => {
     const hold = held();
     const { mounted, calls } = await card(terminalRequest(), async () => {

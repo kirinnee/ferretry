@@ -16,7 +16,7 @@ import {
 } from '../../../app/lib/input-card.ts';
 import { INPUT_SETTLED_SLOT, InputDeliverBodySchema, InputRequestSchema } from '../../../contract/index.ts';
 import { click, settle, typeInto } from '../../support/app/dom-form.ts';
-import { mount, must } from '../../support/app/dom.ts';
+import { interact, mount, must } from '../../support/app/dom.ts';
 import {
   FAKE_VALUE,
   HAND_OFFER,
@@ -48,6 +48,14 @@ async function card(request = savedRequest(), answer?: () => Promise<unknown>) {
   await settle();
   return { ...rig, mounted };
 }
+
+/** A click that is the second of a double click or double tap: the browser says so in `detail`. */
+const doubleClick = async (element: Element | null): Promise<void> => {
+  const target = must(element, 'a clickable');
+  await interact(() => {
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 2 }));
+  });
+};
 
 const deliverBody = (calls: readonly { route: string; init?: { body?: unknown } | undefined }[]) =>
   calls.find(call => call.route.endsWith('/deliver'))?.init?.body as Record<string, unknown> | undefined;
@@ -119,6 +127,43 @@ describe('the offers the daemon drew', () => {
       expect(q(mounted.container, '[data-input-different]').textContent).toBe(
         'This looks like a different account from sudo on kirin-box.',
       );
+    } finally {
+      await mounted.unmount();
+    }
+  });
+});
+
+describe('the list of accounts picked by hand', () => {
+  it('is drawn BELOW a toggle that stays where it was and turns into "Hide other accounts", and hides again', async () => {
+    const { mounted } = await card();
+    try {
+      const toggle = q<HTMLButtonElement>(mounted.container, '[data-input-other-toggle]');
+      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      await click(toggle);
+      // The same button, in the same place: nothing is drawn where the owner just tapped.
+      expect(q(mounted.container, '[data-input-other-toggle]')).toBe(toggle);
+      expect(toggle.textContent).toBe('Hide other accounts');
+      expect(toggle.getAttribute('aria-expanded')).toBe('true');
+      const list = q(mounted.container, '[data-input-other]');
+      expect(toggle.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(list.querySelector(`[data-input-offer="${HAND_OFFER.id}"]`)).not.toBeNull();
+      await click(toggle);
+      expect(toggle.textContent).toBe('Use another account…');
+      expect(mounted.container.querySelector('[data-input-other]')).toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('is not delivered by the second click of a double tap on the toggle', async () => {
+    const { mounted, calls } = await card();
+    try {
+      await click(q(mounted.container, '[data-input-other-toggle]'));
+      // The second click of that gesture lands on whatever the first one drew at the same spot: the toggle, not an account.
+      await doubleClick(q(mounted.container, '[data-input-other-toggle]'));
+      await settle();
+      expect(deliverBody(calls)).toBeUndefined();
+      expect(mounted.container.querySelector('[data-input-settled]')).toBeNull();
     } finally {
       await mounted.unmount();
     }
@@ -202,6 +247,26 @@ describe('a tap on a saved account', () => {
       expect(body).toMatchObject({ entry: HAND_OFFER.id });
       expect(body).not.toHaveProperty('signIn');
       expect(body).not.toHaveProperty('padded');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('does not deliver the second click of a double click or double tap, on an account picked by hand or on the primary', async () => {
+    const { mounted, calls } = await card();
+    try {
+      await click(q(mounted.container, '[data-input-other-toggle]'));
+      await doubleClick(offer(mounted.container, HAND_OFFER.id));
+      await doubleClick(offer(mounted.container, MATCHED_OFFER.id));
+      await settle();
+      expect(deliverBody(calls)).toBeUndefined();
+      expect(offer(mounted.container, HAND_OFFER.id).disabled).toBe(false);
+      expect(mounted.container.querySelector('[data-input-settled]')).toBeNull();
+      // A single click is still a choice.
+      await click(offer(mounted.container, HAND_OFFER.id));
+      await settle();
+      expect(deliverBody(calls)).toMatchObject({ entry: HAND_OFFER.id });
+      expect(calls.filter(call => call.route.endsWith('/deliver'))).toHaveLength(1);
     } finally {
       await mounted.unmount();
     }
