@@ -10,13 +10,25 @@
 import { PanelSlot, useOptionalRouter } from '@ferretry/app';
 import { INPUT_SETTLED_SLOT, type InputSettledSlotProps } from '../../../contract/index.ts';
 
-export function SettledSlot({ slot }: { readonly slot: InputSettledSlotProps }) {
+export function SettledSlot({
+  slot,
+  hold,
+}: {
+  readonly slot: InputSettledSlotProps;
+  /** A panel here is still offering something (`true`) or is done (`false`): the card keeps its view meanwhile. */
+  readonly hold?: (holding: boolean) => void;
+}) {
   const router = useOptionalRouter();
   const daemon = router?.route.kind === 'screen' ? router.route.daemon : undefined;
   if (daemon === undefined) return null;
   return (
     <div data-input-settled-slot="">
-      <PanelSlot daemon={daemon} props={{ ...slot }} slot={INPUT_SETTLED_SLOT} subject={slot.ferret} />
+      <PanelSlot
+        daemon={daemon}
+        props={{ ...slot, ...(hold === undefined ? {} : { hold }) }}
+        slot={INPUT_SETTLED_SLOT}
+        subject={slot.ferret}
+      />
     </div>
   );
 }
