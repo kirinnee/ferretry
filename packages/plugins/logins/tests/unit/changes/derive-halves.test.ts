@@ -76,6 +76,75 @@ describe('deriveLoginChange: adding', () => {
   });
 });
 
+describe('deriveLoginChange: adding from a preset for one of its CLIs', () => {
+  it('should make a one-CLI Codex login that needs and carries only the Codex half’s variables', () => {
+    const edit = deriveLoginChange(
+      new Map(),
+      {
+        kind: 'login.add',
+        id: 'codex-deepseek',
+        harness: 'codex',
+        halves: ['codex'],
+        store: 'environment',
+        preset: 'deepseek',
+        env: { DEEPSEEK_API_KEY: KEY },
+      },
+      facts(),
+    );
+    const patch = patchOf(edit);
+    should(patch.harness).equal('codex');
+    should(patch.claude).be.undefined();
+    should(patch.codex).be.undefined();
+    should(patch.env).eql({ DEEPSEEK_API_KEY: KEY });
+    should(edit.summary).equal('Add a Codex login codex-deepseek from DeepSeek');
+  });
+
+  it('should still refuse the other CLI’s missing variable when no halves are named', () => {
+    const message = refusal(() =>
+      deriveLoginChange(
+        new Map(),
+        {
+          kind: 'login.add',
+          id: 'codex-deepseek',
+          harness: 'codex',
+          store: 'environment',
+          preset: 'deepseek',
+          env: { DEEPSEEK_API_KEY: KEY },
+        },
+        facts(),
+      ),
+    );
+    should(message).containEql('is needed for');
+  });
+
+  it('should refuse a harness the named halves leave out, and halves with no preset', () => {
+    const outside = refusal(() =>
+      deriveLoginChange(
+        new Map(),
+        {
+          kind: 'login.add',
+          id: 'x',
+          harness: 'claude-code',
+          halves: ['codex'],
+          store: 'environment',
+          preset: 'deepseek',
+          env: { DEEPSEEK_API_KEY: KEY },
+        },
+        facts(),
+      ),
+    );
+    should(outside).containEql('does not drive');
+    const bare = refusal(() =>
+      deriveLoginChange(
+        new Map(),
+        { kind: 'login.add', id: 'x', harness: 'codex', halves: ['codex'], store: 'environment' },
+        facts(),
+      ),
+    );
+    should(bare).equal('halves belong only to a login made from a preset');
+  });
+});
+
 describe('deriveLoginChange: login.env on a login with halves', () => {
   const BASE = 'https://api.deepseek.com/anthropic';
   const TWO_HALVES = new Map<string, LoginFile>([

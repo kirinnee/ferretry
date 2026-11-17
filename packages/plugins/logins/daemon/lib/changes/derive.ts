@@ -166,6 +166,7 @@ function addLogin(
   if (store === 'environment') {
     const env = change.env ?? {};
     if (change.preset === undefined) {
+      if (change.halves !== undefined) refuse('halves belong only to a login made from a preset');
       assertNoRawSecrets(env, `login ${change.id}`);
       candidate = present({
         harness: change.harness,
@@ -182,6 +183,9 @@ function addLogin(
       const input = {
         env,
         harness,
+        ...(change.halves === undefined
+          ? {}
+          : { halves: change.halves.map(half => (half === 'claude-code' ? 'claude' : 'codex')) }),
         ...(change.cloudCredential === undefined ? {} : { cloudCredential: change.cloudCredential }),
         ...(change.label === undefined ? {} : { label: change.label }),
       };
