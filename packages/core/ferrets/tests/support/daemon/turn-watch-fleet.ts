@@ -88,7 +88,7 @@ export interface FleetOptions {
 }
 
 export async function fleetOf(
-  turnState: 'your-turn' | 'working',
+  turnState: 'your-turn' | 'working' | 'needs-input',
   ferrets = 30,
   hooks: FleetHooks = {},
   options: FleetOptions = {},

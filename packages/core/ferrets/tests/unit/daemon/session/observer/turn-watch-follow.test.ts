@@ -12,7 +12,7 @@ import { fleetOf } from '../../../../support/daemon/turn-watch-fleet.ts';
 
 type Turn = 'working' | 'your-turn' | 'needs-input';
 
-const following = async (turnState: 'your-turn' | 'working', registry: 'working' | 'idle') => {
+const following = async (turnState: 'your-turn' | 'working' | 'needs-input', registry: 'working' | 'idle') => {
   const observed: { readonly ferret: FerretId; readonly turn: Turn }[] = [];
   let records: Map<string, FerretRecord> | undefined;
   const fleet = await fleetOf(
@@ -49,6 +49,44 @@ describe('the turn watch moves a registry state that disagrees with an agreeing 
     // Assert: told once, and the registry is idle.
     should(observed).deepEqual([{ ferret: id, turn: 'your-turn' }]);
     should(fleet.records.get(id as string)?.state).equal('idle');
+  });
+
+  it('should make a resumed ferret idle when its document kept needs-input and its pane still asks', async () => {
+    // Arrange: a permission prompt is up (confirmed needs-input), as the document records; the launch said `working`.
+    const { fleet, observed, settle } = await following('needs-input', 'working');
+    const [id] = [...fleet.records.keys()];
+    const asking = (handle: RunnerHandle) =>
+      fleet.runner.screens.set(handle, { frame: 'ask', working: false, atPrompt: false, permission: true });
+
+    // Act
+    for (let n = 0; n < 3; n += 1) await fleet.tick(asking, n);
+    await settle();
+
+    // Assert
+    should(observed).deepEqual([{ ferret: id, turn: 'needs-input' }]);
+    should(fleet.records.get(id as string)?.state).equal('idle');
+  });
+
+  it('should not take an unconfirmed your-turn as agreement, on its first look or on the frames after it', async () => {
+    // Arrange: a spinner-shaped line over a transcript whose turn ended is a weak your-turn (unconfirmed): after a kill
+    // and a resume inside one tick its first frame may be the old pane's, so it must never move the registry.
+    const { fleet, observed, settle } = await following('your-turn', 'working');
+    const spinner = (handle: RunnerHandle) =>
+      fleet.runner.screens.set(handle, {
+        frame: 'spin',
+        working: true,
+        spinnerOnly: true,
+        atPrompt: false,
+        permission: false,
+      });
+
+    // Act
+    for (let n = 0; n < 3; n += 1) await fleet.tick(spinner, n);
+    await settle();
+
+    // Assert
+    should(observed).deepEqual([]);
+    should([...fleet.records.values()].map(record => record.state)).deepEqual(['working']);
   });
 
   it('should write nothing while the registry already agrees with the recorded turn', async () => {

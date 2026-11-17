@@ -216,18 +216,13 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
 
   /**
    * Tells the host a look that recorded nothing because it decided exactly the recorded turn (see
-   * {@link PacedTurnPorts.agreed}). Only a decision as strong as one that would have been recorded counts: a confirmed
-   * observation, or an unconfirmed one the look before it saw too. A look that saw nothing, or one frame that the record
-   * merely outweighs, is no agreement.
+   * {@link PacedTurnPorts.agreed}). Only a CONFIRMED observation counts. The two-frame allowance that records an
+   * unconfirmed `your-turn` is no agreement here: after a kill and a resume inside one tick, its first frame may be the
+   * old pane's, so the new pane's first unconfirmed look would read as two (an idle blip and a spurious turn end).
    */
-  private tellAgreed(
-    session: TurnWatchSession,
-    before: TurnObservation | undefined,
-    observation: TurnObservation | undefined,
-  ): void {
+  private tellAgreed(session: TurnWatchSession, observation: TurnObservation | undefined): void {
     const recorded = session.state.turnState;
-    if (recorded === undefined || observation === undefined || observation.state !== recorded) return;
-    if (!observation.confirmed && before?.state !== observation.state) return;
+    if (recorded === undefined || observation?.confirmed !== true || observation.state !== recorded) return;
     try {
       this.ports.agreed?.(session.id, recorded);
     } catch {}
@@ -275,7 +270,7 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
       facts,
     });
     if (change === undefined) {
-      this.tellAgreed(session, before, step.observation);
+      this.tellAgreed(session, step.observation);
       return undefined;
     }
     const recorded = await this.ports.record(session.id, change, this.ports.clock.now());
