@@ -6,6 +6,8 @@ import {
   foldQueue,
   type InteractionMode,
   parseSessionId,
+  QueueRefused,
+  SendRefused,
   type QueueEvent,
   type QueuedMessage,
   type SendPaneObservation,
@@ -18,6 +20,7 @@ import { QueueDeliverer, defaultQueueDeliverySettings } from '../../../daemon/li
 import { SessionQueueService } from '../../../daemon/lib/queue/service.ts';
 import { Senders } from '../../../daemon/lib/queue/senders.ts';
 import { wakeDelivery } from '../../../daemon/lib/wake.ts';
+import { MailboxHostMissingError } from '../../../daemon/lib/host-slot.ts';
 import { SessionSendError } from '../../../daemon/lib/delivery/mounts/session-send.ts';
 
 const ID = parseSessionId('session-1');
@@ -37,7 +40,7 @@ const pane = (overrides: Partial<SendPaneObservation> = {}): SendPaneObservation
  * The Mailbox's real queue, deliverer and producers over an in-memory log and a pane the test sets, with `submit`
  * standing in for the send half's chooser: the stopped refusal, then `Senders.pick` and the queue.
  */
-function world(options: { mode?: InteractionMode; stopped?: boolean } = {}) {
+function world(options: { mode?: InteractionMode; stopped?: boolean; fails?: Error } = {}) {
   const log: QueueEvent[] = [];
   const handed: string[] = [];
   const direct: SendMessageRequest[] = [];
@@ -105,6 +108,7 @@ function world(options: { mode?: InteractionMode; stopped?: boolean } = {}) {
       ferret: typeof ID,
       request: { readonly sendId: string; readonly message: string; readonly monitor?: true },
     ): Promise<SendResult> => {
+      if (options.fails !== undefined) throw options.fails;
       if (options.stopped === true)
         throw new SessionSendError(
           'refused',
@@ -180,6 +184,25 @@ describe('the Mailbox providing ferrets.wake', () => {
 
     should(handed).eql([KEY]);
     should(queued()[0]?.state).equal('delivered');
+  });
+
+  it.each([
+    ['an unknown ferret', new SendRefused('session session-1 does not exist')],
+    ['a queue that refused it', new QueueRefused('not_found', 'no such queued message')],
+    ['a Mailbox with no host', new MailboxHostMissingError()],
+  ])('should answer refused with the words of %s', async (_name, fails) => {
+    const { wake, queued } = world({ fails });
+
+    const receipt = await wake.wake(ID, { key: KEY, text: TEXT });
+
+    should(receipt).eql({ kind: 'refused', reason: fails.message });
+    should(queued()).be.empty();
+  });
+
+  it('should not swallow a failure that is no refusal: the monitor records it against the session', async () => {
+    const { wake } = world({ fails: new Error('disk full') });
+
+    await wake.wake(ID, { key: KEY, text: TEXT }).should.be.rejectedWith('disk full');
   });
 
   it('should type a wake to an interactive chat directly, never queueing it (R3)', async () => {
