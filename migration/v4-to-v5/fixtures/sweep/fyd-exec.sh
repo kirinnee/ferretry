@@ -1,0 +1,51 @@
+#!/bin/sh
+# The ExecStart of a sweep slot's daemon service (and of its tmux scope): builds the EXACT environment at EVERY exec, then
+# execs the program, so the unit's MainPID is the program itself and a Restart=on-failure restart gets the same allow-list.
+#
+#   /bin/sh fyd-exec.sh <env-program> <env-file> <program> [args…]
+#
+# A user-manager service inherits the manager's CURRENT environment each time it starts, so a one-time UnsetEnvironment
+# snapshot would let a name added later (a credential included) ride in. Here nothing is inherited: `env -i` plus the lines of
+# <env-file> (the slot's private 0600 NAME=value file, written by slot.ts from its allow-list), and nothing else.
+#
+# <env-file> is PARSED, never evaluated: each line is NAME=value, the value everything after the first `=`, taken literally
+# (no quoting, no expansion). Fail closed (exit 78) on anything else: a missing, linked or foreign-owned file, an empty file, a
+# line without `=`, a name that is not [A-Za-z_][A-Za-z0-9_]*, a credential-shaped name, or a program path holding `=`.
+# No value is ever printed, put in a unit property or in argv by this script.
+set -eu
+
+fail() {
+  printf 'fyd-exec: refusing: %s\n' "$1" >&2
+  exit 78
+}
+
+[ "$#" -ge 3 ] || fail 'usage: fyd-exec.sh <env-program> <env-file> <program> [args...]'
+envbin=$1
+file=$2
+shift 2
+
+case "$envbin" in /*) ;; *) fail 'the env program must be an absolute path' ;; esac
+[ -x "$envbin" ] || fail 'the env program is not executable'
+case "$1" in /*) ;; *) fail 'the program must be an absolute path' ;; esac
+case "$1" in *=*) fail 'the program path holds "=" (env would read it as an assignment)' ;; esac
+# shellcheck disable=SC3067 # `test -O` (owned by this user) is in dash, bash and busybox sh, just not in the POSIX text
+[ -f "$file" ] && [ ! -L "$file" ] && [ -O "$file" ] && [ -r "$file" ] ||
+  fail 'the environment file is missing, a link, or not owned by this user'
+
+count=0
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in '') continue ;; esac
+  case "$line" in *=*) ;; *) fail 'an environment line has no "="' ;; esac
+  name=${line%%=*}
+  case "$name" in '' | [0-9]* | *[!A-Za-z0-9_]*) fail 'an environment line has an invalid variable name' ;; esac
+  case "$name" in
+  *_TOKEN | *_KEY | *_SECRET | *_PASSWORD | *_PASS | *_CREDENTIAL | *_CREDENTIALS) fail "credential-shaped name $name" ;;
+  GH_* | GITHUB_* | GIT_* | SSH_* | AWS_* | AZURE_* | GOOGLE_* | GCLOUD_* | NPM_* | DOCKER_*) fail "credential-shaped name $name" ;;
+  ANTHROPIC_* | OPENAI_* | CLAUDE_* | CODEX_*) fail "credential-shaped name $name" ;;
+  esac
+  set -- "$line" "$@"
+  count=$((count + 1))
+done <"$file"
+
+[ "$count" -gt 0 ] || fail 'the environment file holds no variables'
+exec "$envbin" -i "$@"

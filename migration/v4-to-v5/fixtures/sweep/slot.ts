@@ -18,8 +18,12 @@
  *
  * Both daemons run with a private XDG_RUNTIME_DIR (no user systemd manager, no session bus), an EMPTY HOME, an allow-list
  * environment, their own tmux socket, and the fake claude/codex first on PATH. No real model is ever called.
+ *
+ * WHERE they run (the caller's tool, not the daemon's environment): each daemon is a transient USER SERVICE of the caller's
+ * systemd manager (fy4-slot<N>.service / fy5-slot<N>.service, Restart=on-failure, KillMode=process), so a crash brings it back
+ * and a ferret's cgroup kill or a fleet limit never reaches it; each side's tmux server runs in its own scope
+ * (fy<4|5>-slot<N>-terminals.scope) so a daemon restart never kills a pane. See "user services" below.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmod,
@@ -36,7 +40,6 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
-import { closeSync, openSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { basename, dirname, join, relative, isAbsolute, resolve } from 'node:path';
@@ -47,6 +50,15 @@ import {
   PREVIEW_DEPLOY_JOB,
   PREVIEW_DEPLOY_WORKFLOW,
 } from './deploy-gate.ts';
+import {
+  assertScopeOwned,
+  assertServiceOwned,
+  showUnit,
+  stopScope,
+  stopService,
+  type GuardPorts,
+  type UnitInfo,
+} from './service-guard.ts';
 
 const SWEEP_ROOT = '/tmp/claude-1000/sweep';
 const FIXTURES = join(import.meta.dir, '..');
@@ -378,25 +390,6 @@ async function waitUntil(label: string, ms: number, check: () => Promise<boolean
   }
 }
 
-function startDaemon(
-  program: string,
-  port: number,
-  env: Record<string, string>,
-  logFile: string,
-  cwd: string,
-): ChildProcess {
-  const fd = openSync(logFile, 'a', 0o600);
-  const child = spawn(program, ['--host', '127.0.0.1', '--port', String(port)], {
-    env,
-    cwd,
-    stdio: ['ignore', fd, fd],
-    detached: true,
-  });
-  closeSync(fd);
-  child.unref();
-  return child;
-}
-
 async function stopByLock(lock: string, label: string): Promise<void> {
   const pids = await pidsHolding(lock);
   if (pids.length === 0) {
@@ -418,6 +411,353 @@ async function killTmux(socket: string, label: string): Promise<void> {
   console.log(`  ${label}: tmux server on its own socket ${ran.code === 0 ? 'killed' : 'was not running'}`);
 }
 
+// ─── user services: daemons that restart on a crash, tmux servers that outlive them ──────────────────────────────
+
+/*
+ * Each slot daemon is a transient user service of the CALLER's systemd manager, and each side's tmux server runs in its own
+ * scope, so that (1) a crashed daemon comes back by itself, (2) a daemon restart never kills a pane, and (3) neither lands
+ * in the cgroup of whoever ran the kit (a ferret's scope, or ferretry_fleet.slice), where a fleet limit or a cgroup kill
+ * would take the owner's preview down. systemd-run/systemctl are the CALLER's tools: the daemon's own environment is still
+ * exactly daemonEnvironment() (private XDG_RUNTIME_DIR, no bus).
+ *
+ * REBOOT SURVIVAL IS OUT OF SCOPE: a slot lives under /tmp, which systemd-tmpfiles wipes at boot ("D /tmp"), so no unit file
+ * is written to ~/.config/systemd/user and no linger is enabled; the units are transient and end with the user manager.
+ */
+
+/** The cgroup a daemon or tmux server inside this slice would sit in with a ferret's own processes: the limit that kills. */
+const FLEET_SLICE = 'ferretry_fleet.slice';
+
+/** `fy4-slot<N>` / `fy5-slot<N>`: one unit per slot AND side. */
+const unitOf = (slot: Slot, which: Which): string => `fy${which === 'v4' ? '4' : '5'}-slot${String(slot.n)}`;
+const serviceOf = (slot: Slot, which: Which): string => `${unitOf(slot, which)}.service`;
+const scopeOf = (slot: Slot, which: Which): string => `${unitOf(slot, which)}-terminals.scope`;
+const sideOf = (slot: Slot, which: Which): { dir: string; lock: string; tmux: string } =>
+  which === 'v4'
+    ? { dir: slot.v4.out, lock: slot.v4.lock, tmux: slot.v4.tmux }
+    : { dir: slot.v5.dir, lock: slot.v5.lock, tmux: slot.v5.tmux };
+const labelOf = (which: Which): string => (which === 'v4' ? 'v4' : '5.0');
+
+/**
+ * Names that look like a credential: the same patterns as the preview's credential check (preview/credential-check.ts, which
+ * cannot be imported here: it pulls in the whole converter). A unit or env file is never written with one.
+ */
+const CREDENTIAL_NAMES: readonly RegExp[] = [
+  /_(TOKEN|KEY|SECRET|PASSWORD|PASS|CREDENTIALS?)$/u,
+  /^(GH|GITHUB|GIT|SSH|AWS|AZURE|GOOGLE|GCLOUD|NPM|DOCKER|ANTHROPIC|OPENAI|CLAUDE|CODEX)_/u,
+  /^(GIT_ASKPASS|SSH_ASKPASS|SSH_AUTH_SOCK)$/u,
+];
+
+function assertNoCredentialNames(env: Readonly<Record<string, string>>): void {
+  const bad = Object.keys(env).filter(name => CREDENTIAL_NAMES.some(pattern => pattern.test(name)));
+  if (bad.length > 0)
+    die(
+      `refusing: the daemon environment has credential-shaped name(s) ${bad.join(', ')}; nothing is written to a unit or an env file`,
+      99,
+    );
+}
+
+/** What the caller needs to reach ITS user manager (and nothing else): the kit's allow-list plus the manager's own address. */
+function managerEnvironment(): Record<string, string> {
+  const runtime = process.env.XDG_RUNTIME_DIR;
+  if (runtime === undefined || runtime === '')
+    die(
+      'no user systemd manager is reachable (XDG_RUNTIME_DIR is not set); the sweep slots run as user services, so run this from a login session of the owning user',
+      69,
+    );
+  const env = baseEnvironment();
+  env.XDG_RUNTIME_DIR = runtime;
+  const bus = process.env.DBUS_SESSION_BUS_ADDRESS;
+  if (bus !== undefined && bus !== '') env.DBUS_SESSION_BUS_ADDRESS = bus;
+  return env;
+}
+
+const systemctlUser = async (args: readonly string[]): Promise<{ code: number; out: string; err: string }> =>
+  await run('systemctl', ['--user', ...args], managerEnvironment());
+
+/** One unit's state, or `undefined` when the user manager cannot be reached at all (then the callers fall back, or die). */
+const unitInfo = async (name: string): Promise<UnitInfo | undefined> => await showUnit(realPorts, name);
+
+/** The ownership guard's ports, wired to the real systemctl, /proc and tmux. Its decisions live in service-guard.ts. */
+const realPorts: GuardPorts = {
+  systemctl: systemctlUser,
+  holders: pidsHolding,
+  stopByLock,
+  cgroupPids: async cgroup => {
+    const text = await readFile(join('/sys/fs/cgroup', cgroup, 'cgroup.procs'), 'utf8').catch(() => '');
+    return text
+      .split('\n')
+      .map(Number)
+      .filter(pid => Number.isInteger(pid) && pid > 0);
+  },
+  tmuxServerPid: async socket => await tmuxServerPid(socket),
+  panePids: async socket => {
+    const tmux = Bun.which('tmux');
+    if (tmux === null) return [];
+    const ran = await run(tmux, ['-u', '-S', socket, 'list-panes', '-a', '-F', '#{pane_pid}'], baseEnvironment());
+    return ran.code === 0
+      ? ran.out
+          .split('\n')
+          .map(Number)
+          .filter(pid => Number.isInteger(pid) && pid > 0)
+      : [];
+  },
+  parentOf: async pid => {
+    // /proc/<pid>/stat is `pid (comm) state ppid …`; comm may hold spaces and parentheses, so read after the LAST ")".
+    const stat = await readFile(`/proc/${String(pid)}/stat`, 'utf8').catch(() => '');
+    const ppid = Number(
+      stat
+        .slice(stat.lastIndexOf(')') + 1)
+        .trim()
+        .split(' ')[1],
+    );
+    return Number.isInteger(ppid) ? ppid : undefined;
+  },
+  log: line => console.log(line),
+  refuse: sentence => die(sentence, 99),
+};
+
+const envFileOf = (slot: Slot, which: Which): string => join(sideOf(slot, which).dir, 'fyd.env');
+const guardIds = (slot: Slot, which: Which): { name: string; lock: string; envFile: string } => ({
+  name: serviceOf(slot, which),
+  lock: sideOf(slot, which).lock,
+  envFile: envFileOf(slot, which),
+});
+const scopeIds = (slot: Slot, which: Which): { name: string; socket: string } => ({
+  name: scopeOf(slot, which),
+  socket: sideOf(slot, which).tmux,
+});
+
+/** The cgroup a pid lives in, from its own /proc file (the unified hierarchy's single `0::` line). */
+async function cgroupOfPid(pid: number): Promise<string> {
+  const text = await readFile(`/proc/${String(pid)}/cgroup`, 'utf8').catch(() => '');
+  return (
+    text
+      .split('\n')
+      .find(line => line.startsWith('0::'))
+      ?.slice(3) ?? '(unknown)'
+  );
+}
+
+/** Tmux's own pid for the server on `socket`, or undefined when none runs there. Starts nothing (display-message never does). */
+async function tmuxServerPid(socket: string): Promise<number | undefined> {
+  const tmux = Bun.which('tmux');
+  if (tmux === null || (await lstat(socket).catch(() => undefined)) === undefined) return undefined;
+  const ran = await run(tmux, ['-u', '-S', socket, 'display-message', '-p', '#{pid}'], baseEnvironment());
+  const pid = Number.parseInt(ran.out.trim(), 10);
+  return ran.code === 0 && Number.isInteger(pid) ? pid : undefined;
+}
+
+const warnFleetSlice = (what: string, cgroup: string): void => {
+  if (cgroup.includes(FLEET_SLICE))
+    console.log(`  WARNING: ${what} is inside ${FLEET_SLICE} (${cgroup}): a fleet limit can take it down`);
+};
+
+/** The wrapper every daemon and tmux server is exec'd through: it builds the EXACT environment at each exec (see fyd-exec.sh). */
+const WRAPPER_SOURCE = join(import.meta.dir, 'fyd-exec.sh');
+const SHELL = '/bin/sh';
+
+/**
+ * The argv that runs `command` through the wrapper: `/bin/sh fyd-exec.sh <env> <env file> command…`. The wrapper does `env -i`
+ * plus the slot's private env file, then EXECs the command, so the pid stays the command's own. The env file holds the values;
+ * nothing here carries one (not argv, not a unit property).
+ */
+function wrapped(envFile: string, command: readonly string[]): string[] {
+  const wrapper = join(dirname(envFile), 'fyd-exec.sh');
+  const envProgram = Bun.which('env');
+  if (envProgram === null) die('env is not on PATH', 69);
+  const program = command[0];
+  if (program === undefined || !isAbsolute(program) || program.includes('='))
+    die(`refusing: ${String(program)} is not an absolute program path without "="`, 99);
+  return [SHELL, wrapper, envProgram, envFile, ...command];
+}
+
+/** `systemd-run --user --scope --unit <scope>` around a wrapped command: the caller's ambient environment never reaches it. */
+function inScope(
+  slot: Slot,
+  which: Which,
+  envFile: string,
+  command: readonly string[],
+): { program: string; args: string[] } {
+  return {
+    program: 'systemd-run',
+    args: [
+      '--user',
+      '--scope',
+      '--quiet',
+      '--unit',
+      scopeOf(slot, which).replace(/\.scope$/u, ''),
+      '--description',
+      `sweep slot ${String(slot.n)} ${labelOf(which)} terminals (tmux server and panes)`,
+      '--',
+      ...wrapped(envFile, command),
+    ],
+  };
+}
+
+/**
+ * The wrapper is COPIED next to the env file it reads (0700, in the slot folder), so a unit's restart never depends on the
+ * checkout the kit ran from (a worktree can go away) and the slot folder holds everything a restart needs.
+ */
+async function installWrapper(envFile: string): Promise<void> {
+  const wrapper = join(dirname(envFile), 'fyd-exec.sh');
+  await copyFile(WRAPPER_SOURCE, wrapper);
+  await chmod(wrapper, 0o700);
+}
+
+/**
+ * The slot's private env source: `NAME=value` lines (0600, inside the slot folder), the daemon allow-list and nothing else.
+ * fyd-exec.sh parses it at every exec. Refuses a credential-shaped name, a bad name or a line break BEFORE writing.
+ */
+async function writeEnvFile(slot: Slot, which: Which): Promise<void> {
+  const env = daemonEnvironment(slot, which);
+  const file = envFileOf(slot, which);
+  await writeFile(file, environmentFileText(env), { mode: 0o600 });
+  await chmod(file, 0o600);
+  await installWrapper(file);
+}
+
+/**
+ * Makes sure this side's tmux server runs on its socket, in its OWN scope, so that fyd attaches to an existing server and a
+ * daemon restart never takes a pane with it. Started exactly as fyd would (`-u -S <socket>`, `exit-empty off` in the same
+ * client, the tmux runner's own recipe); a server that is already there is left alone and its cgroup said out loud.
+ */
+async function ensureTmux(slot: Slot, which: Which): Promise<void> {
+  const side = sideOf(slot, which);
+  const label = `${labelOf(which)} tmux`;
+  const existing = await tmuxServerPid(side.tmux);
+  if (existing !== undefined) {
+    const cgroup = await cgroupOfPid(existing);
+    console.log(
+      `  ${label}: a server already runs on its socket (pid ${String(existing)}, cgroup ${cgroup}); left alone`,
+    );
+    warnFleetSlice(`the ${label} server`, cgroup);
+    return;
+  }
+  const tmux = Bun.which('tmux');
+  if (tmux === null) die('tmux is not on PATH', 69);
+  // A scope under this name that is not this slot's is refused before anything is started in it.
+  await assertScopeOwned(realPorts, scopeIds(slot, which));
+  await mkdir(dirname(side.tmux), { recursive: true, mode: 0o700 });
+  await writeEnvFile(slot, which);
+  const started = inScope(slot, which, envFileOf(slot, which), [
+    tmux,
+    '-u',
+    '-S',
+    side.tmux,
+    'start-server',
+    ';',
+    'set-option',
+    '-s',
+    'exit-empty',
+    'off',
+  ]);
+  const ran = await run(started.program, started.args, managerEnvironment());
+  const pid = await tmuxServerPid(side.tmux);
+  if (ran.code !== 0 || pid === undefined)
+    die(
+      `could not start the ${label} server in ${scopeOf(slot, which)} (exit ${String(ran.code)}: ${(ran.err + ran.out).trim().slice(0, 300)})`,
+    );
+  console.log(
+    `  ${label}: server pid ${String(pid)} started in ${scopeOf(slot, which)} (cgroup ${await cgroupOfPid(pid)})`,
+  );
+}
+
+/** The env file body: one `NAME=value` per line, parsed (never evaluated) by fyd-exec.sh. Never a credential-shaped name. */
+function environmentFileText(env: Readonly<Record<string, string>>): string {
+  assertNoCredentialNames(env);
+  return Object.entries(env)
+    .map(([name, value]) => {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name))
+        die(`refusing: "${name}" is not a valid environment variable name`, 99);
+      if (/[\n\r\0]/u.test(value)) die(`refusing: the value of ${name} holds a line break`, 99);
+      return `${name}=${value}`;
+    })
+    .join('\n')
+    .concat('\n');
+}
+
+/**
+ * Starts this side's daemon as `fy<4|5>-slot<N>.service`: Restart=on-failure after 2 s; KillMode=process so a daemon restart
+ * never kills a tmux server or a ferret; stdout and stderr appended to the same log file as before; the working directory as
+ * before. ExecStart is the wrapper (fyd-exec.sh), which builds the allow-list environment from the slot's env file at EVERY
+ * exec, restarts included, and execs the daemon: the manager's environment is never read and never inherited. A unit already
+ * under this name that is not this slot's is refused before anything is reset or started.
+ */
+async function startService(
+  slot: Slot,
+  which: Which,
+  program: string,
+  port: number,
+  logFile: string,
+  cwd: string,
+): Promise<void> {
+  const name = serviceOf(slot, which);
+  const command = wrapped(envFileOf(slot, which), [program, '--host', '127.0.0.1', '--port', String(port)]);
+  const info = await assertServiceOwned(realPorts, guardIds(slot, which));
+  if (info === undefined)
+    die(`no user systemd manager is reachable, so ${name} cannot be started (the daemons run as user services)`, 69);
+  if (info.loaded && info.active !== 'inactive' && info.active !== 'failed')
+    die(`refusing: ${name} is already ${info.active} (pid ${String(info.mainPid)}); stop it first`, 99);
+  if (info.loaded) await systemctlUser(['reset-failed', name]);
+  await writeEnvFile(slot, which);
+  await writeFile(logFile, '', { flag: 'a', mode: 0o600 });
+  const properties = [
+    'Restart=on-failure',
+    'RestartSec=2s',
+    'KillMode=process',
+    'TimeoutStopSec=30s',
+    `StandardOutput=append:${logFile}`,
+    `StandardError=append:${logFile}`,
+    `WorkingDirectory=${cwd}`,
+  ];
+  const ran = await systemdRun(slot, which, properties, command);
+  if (ran.code !== 0)
+    die(`could not start ${name} (exit ${String(ran.code)}: ${(ran.err + ran.out).trim().slice(0, 300)})`);
+}
+
+async function systemdRun(
+  slot: Slot,
+  which: Which,
+  properties: readonly string[],
+  command: readonly string[],
+): Promise<{ code: number; out: string; err: string }> {
+  return await run(
+    'systemd-run',
+    [
+      '--user',
+      '--quiet',
+      '--unit',
+      unitOf(slot, which),
+      '--description',
+      `sweep slot ${String(slot.n)} ${labelOf(which)} daemon`,
+      ...properties.flatMap(property => ['-p', property]),
+      '--',
+      ...command,
+    ],
+    managerEnvironment(),
+  );
+}
+
+/** Stops this side's daemon (see stopService): a unit that is not this slot's is refused first. Never touches tmux. */
+async function stopDaemon(slot: Slot, which: Which, label: string): Promise<void> {
+  await stopService(realPorts, guardIds(slot, which), label);
+}
+
+/** Ends this side's tmux server (by its own socket) and the scope it lived in, once the scope is proved this slot's. */
+async function stopTerminals(slot: Slot, which: Which): Promise<void> {
+  await stopScope(realPorts, scopeIds(slot, which), async () => {
+    await killTmux(sideOf(slot, which).tmux, labelOf(which));
+  });
+}
+
+/** Proves every unit and scope named for this slot is this slot's, BEFORE any of them is stopped, reset or cleaned up. */
+async function assertSlotUnitsOwned(slot: Slot): Promise<void> {
+  for (const which of ['v5', 'v4'] as const) {
+    await assertServiceOwned(realPorts, guardIds(slot, which));
+    await assertScopeOwned(realPorts, scopeIds(slot, which));
+  }
+}
+
 // ─── up ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async function up(slot: Slot, reuse: boolean): Promise<void> {
@@ -434,6 +774,8 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
   await assertSlotPath(slot);
   if ((await pidsHolding(slot.v4.lock)).length + (await pidsHolding(slot.v5.lock)).length > 0)
     die(`slot ${String(slot.n)} is already up; run sweep-down.sh ${String(slot.n)} first (or use it as it is)`);
+  // A unit or scope under this slot's name that is not this slot's refuses the whole up before anything is removed or started.
+  await assertSlotUnitsOwned(slot);
   for (const port of [slot.v4Port, slot.v5Port])
     if (!(await portFree(port)))
       die(`port ${String(port)} is taken by something else; slot ${String(slot.n)} cannot start`);
@@ -451,25 +793,28 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
   console.log(`slot ${String(slot.n)}: building a RICH v4 ${version} home (this takes several minutes) …`);
 
   // 1. The rich v4 home, through v4's own CLI, with the panes left running.
-  const build = kept
-    ? { code: 0, out: '', err: '' }
-    : await run(
-        process.execPath,
-        [
-          join(FIXTURES, 'build-v4-home.ts'),
-          '--out',
-          slot.v4.out,
-          '--v4-dir',
-          v4Dir,
-          '--v4-version',
-          version,
-          '--rich',
-          '--keep-panes',
-          '--port',
-          String(slot.v4Port),
-        ],
-        baseEnvironment(),
-      );
+  // The builder leaves its tmux server running (--keep-panes) for the v4 daemon to adopt, so the builder itself runs in the
+  // v4 terminals scope: that server then lives there, not in the cgroup of whoever ran the kit.
+  // Its environment is the kit's allow-list only, from a private 0600 file of its own (never argv).
+  const buildEnv = join(slot.dir, 'build.env');
+  await writeFile(buildEnv, environmentFileText(baseEnvironment()), { mode: 0o600 });
+  await chmod(buildEnv, 0o600);
+  await installWrapper(buildEnv);
+  const builder = inScope(slot, 'v4', buildEnv, [
+    process.execPath,
+    join(FIXTURES, 'build-v4-home.ts'),
+    '--out',
+    slot.v4.out,
+    '--v4-dir',
+    v4Dir,
+    '--v4-version',
+    version,
+    '--rich',
+    '--keep-panes',
+    '--port',
+    String(slot.v4Port),
+  ]);
+  const build = kept ? { code: 0, out: '', err: '' } : await run(builder.program, builder.args, managerEnvironment());
   if (!kept) await writeFile(join(slot.dir, 'build.log'), build.out + build.err, { mode: 0o600 });
   if (build.code !== 0) {
     die(`the rich v4 build failed (exit ${String(build.code)}); its log is ${join(slot.dir, 'build.log')}`);
@@ -513,10 +858,12 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
   await verifyLimitsOffV5(slot);
 
   // 5. Both daemons. v4 first (its panes are still in the builder's tmux server, which it adopts).
-  startDaemon(
+  await ensureTmux(slot, 'v4');
+  await startService(
+    slot,
+    'v4',
     join(v4Dir, 'fyd'),
     slot.v4Port,
-    daemonEnvironment(slot, 'v4'),
     join(slot.v4.out, 'fyd.log'),
     join(slot.v4.out, 'work'),
   );
@@ -526,13 +873,8 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
     async () =>
       (await fetch(`http://127.0.0.1:${String(slot.v4Port)}/v1/health`, { signal: AbortSignal.timeout(2000) })).ok,
   );
-  startDaemon(
-    join(v5Bin, 'fyd'),
-    slot.v5Port,
-    daemonEnvironment(slot, 'v5'),
-    join(slot.v5.dir, 'fyd.log'),
-    slot.v5.user,
-  );
+  await ensureTmux(slot, 'v5');
+  await startService(slot, 'v5', join(v5Bin, 'fyd'), slot.v5Port, join(slot.v5.dir, 'fyd.log'), slot.v5.user);
   await waitUntil(
     'the 5.0 daemon serving',
     180_000,
@@ -778,6 +1120,7 @@ async function status(slot: Slot): Promise<void> {
   console.log(
     `  5.0  http://127.0.0.1:${String(slot.v5Port)}    app: https://ferretry-v5.pages.dev/app/    CLI: fy5s${n}   home: ${slot.v5.home}`,
   );
+  for (const which of ['v4', 'v5'] as const) await statusServices(slot, which);
   console.log(`  put ${slot.bin} first on PATH to use fy4s${n} / fy5s${n}`);
   console.log(`  pair an agent browser (the link never reaches a tool argument or result):`);
   console.log(
@@ -788,13 +1131,47 @@ async function status(slot: Slot): Promise<void> {
   );
 }
 
+/** Each side's unit state, its daemon's cgroup and its tmux server's, with a warning for anything inside the fleet slice. */
+async function statusServices(slot: Slot, which: Which): Promise<void> {
+  const label = labelOf(which);
+  const side = sideOf(slot, which);
+  const info = await unitInfo(serviceOf(slot, which));
+  if (info === undefined)
+    console.log(`  ${label}   no user systemd manager is reachable from here: unit state unknown`);
+  else if (!info.loaded)
+    console.log(`  ${label}   ${serviceOf(slot, which)}: no unit (a daemon an older kit started, or none)`);
+  else {
+    const cgroup = info.mainPid > 0 ? await cgroupOfPid(info.mainPid) : '-';
+    console.log(
+      `  ${label}   ${serviceOf(slot, which)}: ${info.active} (${info.sub})  daemon pid ${info.mainPid > 0 ? String(info.mainPid) : '-'}  cgroup ${cgroup}`,
+    );
+    warnFleetSlice(`the ${label} daemon`, cgroup);
+  }
+  const holders = await pidsHolding(side.lock);
+  const tmuxPid = await tmuxServerPid(side.tmux);
+  if (holders.length > 0 && (info?.loaded !== true || !holders.includes(info.mainPid)))
+    for (const pid of holders) {
+      const cgroup = await cgroupOfPid(pid);
+      console.log(`  ${label}   daemon pid ${String(pid)} runs OUTSIDE its service, cgroup ${cgroup}`);
+      warnFleetSlice(`the ${label} daemon`, cgroup);
+    }
+  if (tmuxPid === undefined) console.log(`  ${label}   tmux server: none on ${side.tmux}`);
+  else {
+    const cgroup = await cgroupOfPid(tmuxPid);
+    console.log(`  ${label}   tmux server pid ${String(tmuxPid)}  cgroup ${cgroup}`);
+    warnFleetSlice(`the ${label} tmux server`, cgroup);
+  }
+}
+
 async function down(slot: Slot, options: { keepFiles: boolean; quiet?: boolean }): Promise<void> {
   await assertSlotPath(slot);
+  // Ownership first: a unit or scope under this slot's name that is not this slot's refuses the whole down, nothing stopped.
+  await assertSlotUnitsOwned(slot);
   if (options.quiet !== true) console.log(`slot ${String(slot.n)}: stopping`);
-  await stopByLock(slot.v5.lock, '5.0 daemon');
-  await stopByLock(slot.v4.lock, 'v4 daemon');
-  await killTmux(slot.v5.tmux, '5.0');
-  await killTmux(slot.v4.tmux, 'v4');
+  await stopDaemon(slot, 'v5', '5.0 daemon');
+  await stopDaemon(slot, 'v4', 'v4 daemon');
+  await stopTerminals(slot, 'v5');
+  await stopTerminals(slot, 'v4');
   await stopSlotChrome(slot, 'down');
   for (const which of ['4', '5']) await rm(join(slot.bin, `fy${which}s${String(slot.n)}`), { force: true });
   if (!options.keepFiles) await rm(slot.dir, { recursive: true, force: true });
@@ -1001,17 +1378,20 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
   const prev = (name: string): string => join(bin, `${name}.prev`);
   const files = [...V5_PROGRAMS, STAMP] as const;
   const startAndWait = async (which: 'new' | 'old'): Promise<string | undefined> => {
-    const child = startDaemon(
-      join(bin, 'fyd'),
-      slot.v5Port,
-      daemonEnvironment(slot, 'v5'),
-      join(slot.v5.dir, 'fyd.log'),
-      slot.v5.user,
-    );
+    // The tmux server is NOT touched by an upgrade: kept when it runs, started in its own scope only when it is missing.
+    await ensureTmux(slot, 'v5');
+    await startService(slot, 'v5', join(bin, 'fyd'), slot.v5Port, join(slot.v5.dir, 'fyd.log'), slot.v5.user);
     const deadline = Date.now() + 180_000;
     for (;;) {
-      if (child.exitCode !== null || child.signalCode !== null)
-        return `the ${which} daemon exited (${child.exitCode === null ? String(child.signalCode) : 'code ' + String(child.exitCode)}) before it served; see ${join(slot.v5.dir, 'fyd.log')}`;
+      // A daemon that crashes is restarted by its unit; one that keeps crashing is "failed" or waiting to restart: say so.
+      const state = await unitInfo(serviceOf(slot, 'v5'));
+      if (
+        state === undefined ||
+        state.active === 'failed' ||
+        state.active === 'inactive' ||
+        state.sub === 'auto-restart'
+      )
+        return `the ${which} daemon's service ${serviceOf(slot, 'v5')} is ${state === undefined ? 'unreadable' : `${state.active} (${state.sub})`} before it served; see ${join(slot.v5.dir, 'fyd.log')}`;
       const ok = await fetch(`http://127.0.0.1:${String(slot.v5Port)}/healthz`, {
         signal: AbortSignal.timeout(2000),
       }).then(
@@ -1025,8 +1405,10 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
     }
   };
 
-  // Stop ONLY this slot's 5.0 daemon, by its own lock. v4, every tmux server, the home and the identity are not touched.
-  await stopByLock(slot.v5.lock, '5.0 daemon');
+  // Stop ONLY this slot's 5.0 daemon (its unit once proved this slot's, else its own lock). v4, every tmux server, the home and
+  // the identity are not touched.
+  await assertServiceOwned(realPorts, guardIds(slot, 'v5'));
+  await stopDaemon(slot, 'v5', '5.0 daemon');
   // From here on EVERY failure (a copy, a chmod, a spawn, a daemon that never serves) takes the rollback below. `moved` is what THIS
   // run put aside as <name>.prev, so a leftover .prev from an older upgrade is never mistaken for this run's backup.
   const moved: string[] = [];
@@ -1060,7 +1442,7 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
   // Roll back. The .prev set is the only copy of the old programs, so it is COPIED back, never renamed or removed: it stays
   // intact through every unsuccessful recovery and is dropped only once the old daemon is proved healthy.
   console.error(`slot ${n}: ${failure}. Rolling back to ${oldLabel}.`);
-  const start = `fy5s${n} daemon start (the wrapper in ${slot.bin})`;
+  const start = `bun ${join(import.meta.dir, 'slot.ts')} upgrade-v5 ${n} <the old build folder> (or sweep-up.sh ${n} for a fresh pair)`;
   // Only what THIS run moved aside is restored: a .prev left by an older upgrade is not this run's backup.
   const recovery =
     moved.length === 0
@@ -1068,7 +1450,7 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
       : `The old programs are intact as ${bin}/<name>.prev (${moved.join(', ')}); the home was not touched. To put them back by hand: for f in ${moved.join(' ')}; do cp -p '${bin}/'"$f".prev '${bin}/'"$f"; done   then start it: ${start}`;
   let again: string | undefined;
   try {
-    await stopByLock(slot.v5.lock, 'new 5.0 daemon');
+    await stopDaemon(slot, 'v5', 'new 5.0 daemon');
     for (const name of moved) {
       const temp = join(bin, `${name}.restore`);
       await copyFile(prev(name), temp);
@@ -1080,7 +1462,7 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
     again = `restoring the old programs failed (${error instanceof Error ? error.message : String(error)})`;
   }
   if (again !== undefined) {
-    await stopByLock(slot.v5.lock, 'old 5.0 daemon (failed start)').catch(() => undefined);
+    await stopDaemon(slot, 'v5', 'old 5.0 daemon (failed start)').catch(() => undefined);
     die(
       `slot ${n}: the upgrade failed (${failure}) AND the old programs did not start either (${again}). The slot has NO running 5.0 daemon. ${recovery}`,
       2,
