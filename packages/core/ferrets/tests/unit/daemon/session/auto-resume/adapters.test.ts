@@ -20,6 +20,8 @@ import {
 } from '../../../../../daemon/adapters/session/auto-resume/index.ts';
 import { exitedSessionTransition } from '../../../../../daemon/lib/session/health/exit.ts';
 
+const NOW_MS = (): number => Date.parse(T0);
+
 const record = (id: string, state: FerretRecord['state'], extra: Partial<FerretRecord> = {}): FerretRecord => ({
   format: 1,
   id: ferretId(id),
@@ -66,7 +68,7 @@ describe("W2-a the boot exit pass (today's first self-check, over the registry)"
       record('d', 'working'),
       record('e', 'stopped', { handle: '%5' }),
     ]);
-    const found = await pass(new BootExitRecorder(new FerretBootExits(port), { now: () => T0 }));
+    const found = await pass(new BootExitRecorder(new FerretBootExits(port, NOW_MS), { now: () => T0 }));
     expect(found.map(candidate => candidate.id)).toEqual([ferretId('a'), ferretId('b'), ferretId('d')]);
     expect(settled).toEqual([
       { ferret: ferretId('a'), handle: '%1', from: 'running' },
@@ -77,15 +79,15 @@ describe("W2-a the boot exit pass (today's first self-check, over the registry)"
 
   test("W2-a a ferret between turns is recorded as today's idle status, so it is not told it was mid-turn", async () => {
     const { port } = ferrets([record('b', 'idle', { handle: '%2' })]);
-    const found = await pass(new BootExitRecorder(new FerretBootExits(port), { now: () => T0 }));
+    const found = await pass(new BootExitRecorder(new FerretBootExits(port, NOW_MS), { now: () => T0 }));
     expect(found[0]?.status).toBe('awaiting_user');
   });
 
   test('W2-a a document that claims no live agent (stopped, starting, none) is never observed', async () => {
     for (const status of ['stopped', 'completed', 'starting', undefined]) {
       const { port, settled } = ferrets([record('a', 'working', { handle: '%1' })], { status: async () => status });
-      expect(await new FerretBootExits(port).observe()).toEqual([]);
-      expect(await pass(new BootExitRecorder(new FerretBootExits(port), { now: () => T0 }))).toEqual([]);
+      expect(await new FerretBootExits(port, NOW_MS).observe()).toEqual([]);
+      expect(await pass(new BootExitRecorder(new FerretBootExits(port, NOW_MS), { now: () => T0 }))).toEqual([]);
       expect(settled).toEqual([]);
     }
   });
@@ -98,19 +100,19 @@ describe("W2-a the boot exit pass (today's first self-check, over the registry)"
     ];
     for (const over of cases) {
       const { port, settled } = ferrets([record('a', 'working', { handle: '%1' })], over);
-      expect(await pass(new BootExitRecorder(new FerretBootExits(port), { now: () => T0 }))).toEqual([]);
+      expect(await pass(new BootExitRecorder(new FerretBootExits(port, NOW_MS), { now: () => T0 }))).toEqual([]);
       expect(settled).toEqual([]);
     }
   });
 
   test('W2-a a settle that did not land (someone moved first) is not recorded', async () => {
     const { port } = ferrets([record('a', 'working', { handle: '%1' })], { settle: async () => false });
-    expect(await pass(new BootExitRecorder(new FerretBootExits(port), { now: () => T0 }))).toEqual([]);
+    expect(await pass(new BootExitRecorder(new FerretBootExits(port, NOW_MS), { now: () => T0 }))).toEqual([]);
   });
 
   test('W2-a the settle refuses anything but a gone pane failing', async () => {
     const { port, settled } = ferrets([]);
-    const exits = new FerretBootExits(port);
+    const exits = new FerretBootExits(port, NOW_MS);
     const registration = {
       daemonId: '',
       sessionId: 'a',

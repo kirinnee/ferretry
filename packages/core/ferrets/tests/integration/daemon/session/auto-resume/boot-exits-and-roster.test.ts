@@ -11,6 +11,8 @@ import {
 } from '../../../../../daemon/adapters/session/auto-resume/index.ts';
 import { exitedSessionTransition } from '../../../../../daemon/lib/session/health/exit.ts';
 
+const NOW_MS = (): number => Date.parse(T0);
+
 const record = (id: string, state: FerretRecord['state'], extra: Partial<FerretRecord> = {}): FerretRecord => ({
   format: 1,
   id: ferretId(id),
@@ -37,7 +39,7 @@ function world(records: readonly FerretRecord[], over: Partial<BootExitFerrets> 
     },
     ...over,
   };
-  return { exits: new FerretBootExits(port), settled };
+  return { exits: new FerretBootExits(port, NOW_MS), settled };
 }
 
 describe('the boot exit pass over the registry', () => {
@@ -98,7 +100,7 @@ describe('the boot exit pass over the registry', () => {
       expect(await world(live, over).exits.observe()).toEqual([]);
   });
 
-  for (const status of ['rate_limited', 'retrying', 'kill_failed'])
+  for (const status of ['retrying', 'kill_failed'])
     test(`W3-1 a ferret parked on ${status} whose pane is proven gone is observed gone (with or without a handle), keeping its real status`, async () => {
       const { exits, settled } = world([record('p', 'working', { handle: '%7' }), record('q', 'idle')], {
         status: async () => status,
@@ -116,17 +118,64 @@ describe('the boot exit pass over the registry', () => {
       expect(settled.map(each => each.handle)).toEqual(['%7', undefined]);
     });
 
+  const now = Date.parse(T0);
+  const claims = (status: string | undefined, retryAt?: number): boolean => claimsBootAgent(status, retryAt, now);
+
   test('W3-1 only the boot pass reads a parked status as an agent; the health port still declines it, and the rest stay refused', () => {
-    expect(['rate_limited', 'retrying', 'kill_failed', 'running', 'awaiting_user'].map(claimsBootAgent)).toEqual([
-      true,
+    expect(['retrying', 'kill_failed', 'running', 'awaiting_user'].map(each => claims(each))).toEqual([
       true,
       true,
       true,
       true,
     ]);
     expect(
-      ['stopped', 'completed', 'failed', 'starting', 'created', 'stalled', undefined].map(claimsBootAgent),
+      ['stopped', 'completed', 'failed', 'starting', 'created', 'stalled', undefined].map(each => claims(each)),
     ).toEqual([false, false, false, false, false, false, false]);
+  });
+
+  test('FX-W3-1 a rate_limited document claims an agent ONLY when its reset time (quota.retryAt) is already past', () => {
+    expect(claims('rate_limited', now - 1)).toBe(true);
+    expect(claims('rate_limited', now)).toBe(true);
+    expect(claims('rate_limited', now + 1)).toBe(false);
+    // At its limit with no reset time at all: left for the Warden's auto-move or the owner, as v4 did.
+    expect(claims('rate_limited', undefined)).toBe(false);
+  });
+
+  test('FX-W3-1 a rate_limited ferret is observed (keeping its real status) only past its reset time', async () => {
+    const live = [record('p', 'working', { handle: '%7' }), record('q', 'idle')];
+    const observe = async (retryAt: number | undefined) =>
+      (
+        await world(live, {
+          status: async () => 'rate_limited',
+          quota: async () => ({ atLimit: true, retryAt }),
+        }).exits.observe()
+      ).map(each => [each.id, each.status]);
+    expect(await observe(now - 60_000)).toEqual([
+      [ferretId('p'), 'rate_limited'],
+      [ferretId('q'), 'awaiting_user'],
+    ]);
+    expect(await observe(now + 60_000)).toEqual([]);
+    expect(await observe(undefined)).toEqual([]);
+    // No reset reader at all, or one that fails: no reset time is known, so nothing is resumed.
+    expect(await world(live, { status: async () => 'rate_limited' }).exits.observe()).toEqual([]);
+    expect(
+      await world(live, {
+        status: async () => 'rate_limited',
+        quota: async () => await Promise.reject(new Error('unreadable')),
+      }).exits.observe(),
+    ).toEqual([]);
+  });
+
+  test('FX-W3-1 a past reset settles a rate_limited ferret as the exit it is', async () => {
+    const { exits, settled } = world([record('p', 'working', { handle: '%7' })], {
+      status: async () => 'rate_limited',
+      quota: async () => ({ atLimit: true, retryAt: now - 1 }),
+    });
+    const [observation] = await exits.observe();
+    const transition = bootExitTransition(observation!);
+    expect(transition).toMatchObject({ status: 'failed', health: 'unknown' });
+    expect(await exits.settle(observation!, transition!)).toBe(true);
+    expect(settled[0]).toMatchObject({ ferret: ferretId('p'), handle: '%7', from: 'rate_limited' });
   });
 
   test('a document that claims no agent, or cannot be read, or a pane not proven gone, is left alone', async () => {

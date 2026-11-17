@@ -33,12 +33,23 @@ export function stillOwed(subject: AutoResumeSubject | undefined): boolean {
   return subject !== undefined && subject.status === 'failed';
 }
 
+/**
+ * What a resume rejects with when it was REFUSED because the ferret is no longer owed it (the `expect` judged under the
+ * ferret's own queue said no): the one refusal the pass may stand down on, and only when the ferret is up (see
+ * {@link isUpElsewhere}). Any other rejection (a gate, a failed launch) is a ferret that was not brought back.
+ */
+export class NoLongerOwed extends Error {
+  override readonly name = 'NoLongerOwed';
+}
+
 /** The registry states of a ferret that is up (or on its way up): somebody brought it back. */
 const UP_STATES: ReadonlySet<string> = new Set(['starting', 'working', 'idle']);
 
 /**
- * Whether a refused resume left the ferret UP, read fresh: another path resumed it first and this one has nothing left
- * to do. A ferret still `failed` (owed), `stopped` (the owner's stop, or a launch that failed) or gone is not.
+ * Whether the ferret is UP, read fresh after a {@link NoLongerOwed} refusal: another path really resumed it first and
+ * this one has nothing left to do. A ferret still `failed` (owed), `stopped` (the owner's stop) or gone is not.
+ * `starting` counts as up only because the refusal says another path took it: a launch that THIS pass's own resume
+ * failed leaves it `starting` too, and that rejects with something else.
  */
 export function isUpElsewhere(subject: AutoResumeSubject | undefined): boolean {
   return subject !== undefined && UP_STATES.has(subject.status);

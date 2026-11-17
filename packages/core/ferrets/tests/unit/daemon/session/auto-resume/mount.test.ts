@@ -635,10 +635,23 @@ describe('W2-a auto-resume, mounted', () => {
 
   describe('W3: the gaps converted ferrets and the other revive paths left', () => {
     /** The session document's status, as a converted v4 ferret still holds it (what the boot pass reads). */
-    const holdStatus = (h: TestHost, id: FerretId, status: string): void => {
+    const holdStatus = (h: TestHost, id: FerretId, status: string, quota?: Record<string, unknown>): void => {
       const document = JSON.parse(h.state('ferrets').raw(FerretStateFile, id) ?? '{}') as Record<string, unknown>;
-      h.state('ferrets').plant(FerretStateFile, JSON.stringify({ ...document, status }), id);
+      h.state('ferrets').plant(
+        FerretStateFile,
+        JSON.stringify({ ...document, status, ...(quota === undefined ? {} : { quota }) }),
+        id,
+      );
     };
+    /** A converted v4 ferret: live in the registry (`state`), with no handle. */
+    const dropHandle = async (h: TestHost, id: FerretId, state: 'working' | 'idle'): Promise<void> => {
+      await h.settle();
+      const document = JSON.parse(h.state('ferrets').raw(FerretFiles, id) ?? '{}') as Record<string, unknown>;
+      delete document.handle;
+      h.state('ferrets').plant(FerretFiles, JSON.stringify({ ...document, state }), id);
+    };
+    const PAST = 1;
+    const FUTURE = 4_102_444_800_000;
     /** The Warden's revive, as it makes it through Ferrets' port (`remedies.resume`). */
     const wardenRevive = async (h: TestHost, id: FerretId) =>
       await h.provided(FerretsPort, 'warden').resume(id, 'Ferretry started your terminal again.', {
@@ -652,15 +665,15 @@ describe('W2-a auto-resume, mounted', () => {
         skipped: { sessionId: string; reason: string }[];
       } | null;
 
-    for (const status of ['rate_limited', 'retrying'] as const)
-      test(`W3-1 a converted ferret parked on ${status} is settled terminal_gone at boot and auto-resumed, no handle needed`, async () => {
+    for (const [status, quota] of [
+      ['rate_limited', { atLimit: true, retryAt: PAST }],
+      ['retrying', undefined],
+    ] as const)
+      test(`W3-1 a converted ferret parked on ${status} (reset time past, where it has one) is settled terminal_gone at boot and auto-resumed, no handle needed`, async () => {
         let { h, runner } = await boot([fakeRuntimes(yes).plugin]);
         const id = await start(h, 'sumac');
-        await h.settle();
-        const document = JSON.parse(h.state('ferrets').raw(FerretFiles, id) ?? '{}') as Record<string, unknown>;
-        delete document.handle;
-        h.state('ferrets').plant(FerretFiles, JSON.stringify({ ...document, state: 'working' }), id);
-        holdStatus(h, id, status);
+        await dropHandle(h, id, 'working');
+        holdStatus(h, id, status, quota);
         const launches = runner.starts;
         h = await hostRestart(h, runner);
         expect(runner.starts).toBe(launches);
@@ -672,6 +685,28 @@ describe('W2-a auto-resume, mounted', () => {
         expect(types(h, id)).toContain('session.exited');
         expect(events(h, id).find(event => event.type === 'session.exited')?.data.from).toBe(status);
         expect(types(h, id)).toContain('session.auto_resumed');
+        await h.stop();
+      });
+
+    for (const [name, quota] of [
+      ['its reset time is still ahead', { atLimit: true, retryAt: FUTURE }],
+      ['it is at its limit with no reset time', { atLimit: true }],
+    ] as const)
+      test(`FX-W3-1 a rate_limited ferret is NOT resumed at boot while ${name}: nothing observed, settled or launched`, async () => {
+        let { h, runner } = await boot([fakeRuntimes(yes).plugin]);
+        const id = await start(h, 'sumac');
+        await dropHandle(h, id, 'working');
+        holdStatus(h, id, 'rate_limited', quota);
+        const launches = runner.starts;
+        h = await hostRestart(h, runner);
+
+        await runPass(h);
+
+        expect(runner.starts).toBe(launches);
+        expect(types(h, id)).not.toContain('session.exited');
+        expect(types(h, id)).not.toContain('session.auto_resumed');
+        expect(types(h, id)).not.toContain('session.auto_resume_skipped');
+        expect(h.state('ferrets').raw(AutoResumeFile)).toBeUndefined();
         await h.stop();
       });
 
@@ -711,6 +746,68 @@ describe('W2-a auto-resume, mounted', () => {
       expect((await view(h, id)).state).not.toBe('stopped');
       expect(types(h, id)).toContain('session.auto_resumed');
       expect(types(h, id).filter(type => type === 'session.exited')).toHaveLength(1);
+      await h.stop();
+    });
+
+    test('FX-W3-2 the sweep settling a ferret whose document says completed (the registry still said working) owes it NO resume', async () => {
+      let { h, runner } = await boot([fakeRuntimes(yes).plugin]);
+      const id = await start(h, 'zelkova');
+      await h.settle();
+      holdStatus(h, id, 'completed');
+      const launches = runner.starts;
+      h = await hostRestart(h, runner);
+      await h.runJob(TURN_WATCH_JOB);
+      await advance(h, 30_000);
+      expect((await view(h, id)).state).toBe('stopped');
+      expect((await view(h, id)).cause).toEqual({ kind: 'terminal_gone' });
+
+      await runPass(h);
+
+      expect(runner.starts).toBe(launches);
+      expect(types(h, id)).not.toContain('session.auto_resumed');
+      expect(types(h, id)).not.toContain('session.auto_resume_skipped');
+      expect(h.state('ferrets').raw(AutoResumeFile)).toBeUndefined();
+      await h.stop();
+    });
+
+    test('FX-W3-2 a sweep-settled ferret whose rate_limited document is still limited is owed no resume either', async () => {
+      let { h, runner } = await boot([fakeRuntimes(yes).plugin]);
+      const id = await start(h, 'zelkova');
+      await h.settle();
+      holdStatus(h, id, 'rate_limited', { atLimit: true, retryAt: FUTURE });
+      const launches = runner.starts;
+      h = await hostRestart(h, runner);
+      await h.runJob(TURN_WATCH_JOB);
+      await advance(h, 30_000);
+      expect((await view(h, id)).state).toBe('stopped');
+
+      await runPass(h);
+
+      expect(runner.starts).toBe(launches);
+      expect(types(h, id)).not.toContain('session.auto_resumed');
+      await h.stop();
+    });
+
+    test('FX-W3-4 an IDLE ferret the sweep settled first is resumed without the mid-turn notice (as the boot pass does); a working one gets it', async () => {
+      let { h, runner } = await boot([fakeRuntimes(yes).plugin]);
+      const idle = await start(h, 'alnus', 'interactive');
+      const working = await start(h, 'betula', 'interactive');
+      await h.settle();
+      const document = JSON.parse(h.state('ferrets').raw(FerretFiles, idle) ?? '{}') as Record<string, unknown>;
+      h.state('ferrets').plant(FerretFiles, JSON.stringify({ ...document, state: 'idle' }), idle);
+      const launches = runner.starts;
+      h = await hostRestart(h, runner);
+      await h.runJob(TURN_WATCH_JOB);
+      await advance(h, 30_000);
+      expect((await view(h, idle)).cause).toEqual({ kind: 'terminal_gone' });
+      expect((await view(h, working)).cause).toEqual({ kind: 'terminal_gone' });
+
+      await runPass(h);
+
+      expect(runner.starts).toBe(launches + 2);
+      const resumed = (id: FerretId) => events(h, id).find(event => event.type === 'session.auto_resumed')?.data;
+      expect(resumed(idle)?.notified).toBe(false);
+      expect(resumed(working)?.notified).toBe(true);
       await h.stop();
     });
 

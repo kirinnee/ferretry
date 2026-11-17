@@ -3,6 +3,7 @@ import type { AutoResumeDecideInput, FerretId, FerretRecord } from '../../contra
 import {
   AccountAutoResumeAvailability,
   BootExitRecorder,
+  bootClaim,
   bootExitTransition,
   type BootExitFerrets,
   FerretBootExits,
@@ -35,6 +36,12 @@ export interface AutoResumeDeps extends Omit<BootExitFerrets, 'list'> {
    */
   readonly bootedAt?: string;
   readonly record: (ferret: FerretId) => FerretRecord | undefined;
+  /**
+   * What a sweep-first settle said the ferret was doing (the `from` of its latest `session.exited` journal event), or
+   * `undefined` when the journal names none. The settle leaves the registry saying `stopped` and the document saying
+   * what it said, so only the journal still knows an idle ferret from a mid-turn one. Absent: the document's status.
+   */
+  readonly exitedFrom?: (ferret: FerretId) => Promise<string | undefined>;
   /** The kernel's decide walk on `auto-resume.decide` (bounded on the kernel clock), with who answered what. */
   readonly decide: (input: AutoResumeDecideInput) => Promise<DecideAnswer>;
   /**
@@ -112,7 +119,10 @@ export function buildAutoResume(deps: AutoResumeDeps): AutoResume {
 async function runOnce(deps: AutoResumeDeps, service: AutoResumeService): Promise<AutoResumeSummary | undefined> {
   // The first look after boot: only a settle that LANDED in this pass is recorded, so a second boot finds the ferrets
   // this one resumed live (or still stopped, never `working`) and owes them nothing again.
-  const exits = new BootExitRecorder(new FerretBootExits({ ...deps, list: deps.records }), deps.clock);
+  const exits = new BootExitRecorder(
+    new FerretBootExits({ ...deps, list: deps.records }, () => deps.clock.nowMs()),
+    deps.clock,
+  );
   for (const observation of await exits.observe([]).catch(() => [])) {
     const transition = bootExitTransition(observation);
     if (transition !== undefined) await exits.settle(observation, transition).catch(() => false);
@@ -120,7 +130,7 @@ async function runOnce(deps: AutoResumeDeps, service: AutoResumeService): Promis
   // Written down BEFORE anything is attempted: the host can go down again mid-pass, and what is owed must survive it.
   const settledNow = exits.close();
   await service
-    .record([...settledNow, ...settledBeforePass(deps, settledNow)])
+    .record([...settledNow, ...(await settledBeforePass(deps, settledNow))])
     .catch((error: unknown) =>
       deps.log.warn('the ferrets owed an auto-resume could not be recorded', { error: reasonOf(error) }),
     );
@@ -130,26 +140,37 @@ async function runOnce(deps: AutoResumeDeps, service: AutoResumeService): Promis
 /**
  * The ferrets the sweep or the turn watch's first look settled `terminal_gone` between this daemon's start and this pass:
  * the pass lost the race to settle them, not the right to resume them. Only a settle of THIS process counts (a ferret
- * stopped `terminal_gone` on an earlier boot was recorded, or deliberately not, by that boot's pass), and nothing is
- * known of whether it was mid-turn, so it is told what a mid-turn ferret is told.
+ * stopped `terminal_gone` on an earlier boot was recorded, or deliberately not, by that boot's pass).
+ *
+ * It is owed only what the boot pass owes, and the document is read the same way (`bootClaim`, after a settle): a
+ * ferret it says `completed`, `failed` or `stalled` (the registry still said working when the pane was lost), or still
+ * at a limit that has not reset, is left alone. What it was told it was doing is the `from` of the settle's own journal event, so an
+ * idle ferret is not given the mid-turn notice; with no such event it is the document's status.
  */
-function settledBeforePass(
+async function settledBeforePass(
   deps: AutoResumeDeps,
   already: readonly AutoResumeCandidate[],
-): readonly AutoResumeCandidate[] {
+): Promise<readonly AutoResumeCandidate[]> {
   const bootedAt = deps.bootedAt === undefined ? undefined : Date.parse(deps.bootedAt);
   if (bootedAt === undefined || !Number.isFinite(bootedAt)) return [];
   const taken = new Set(already.map(candidate => candidate.id));
-  return deps.records().flatMap(record => {
+  const found: AutoResumeCandidate[] = [];
+  for (const record of deps.records()) {
     const settledAt = Date.parse(record.stateAt);
-    return record.state === 'stopped' &&
-      record.cause?.kind === 'terminal_gone' &&
-      Number.isFinite(settledAt) &&
-      settledAt > bootedAt &&
-      !taken.has(record.id)
-      ? [{ id: record.id, status: 'running', at: record.stateAt }]
-      : [];
-  });
+    if (
+      record.state !== 'stopped' ||
+      record.cause?.kind !== 'terminal_gone' ||
+      !Number.isFinite(settledAt) ||
+      settledAt <= bootedAt ||
+      taken.has(record.id)
+    )
+      continue;
+    const status = await bootClaim(deps, record.id, deps.clock.nowMs(), true);
+    if (status === undefined) continue;
+    const from = await deps.exitedFrom?.(record.id).catch(() => undefined);
+    found.push({ id: record.id, status: from ?? status, at: record.stateAt });
+  }
+  return found;
 }
 
 function reasonOf(error: unknown): string {
