@@ -2,6 +2,7 @@ import { chmod, mkdir, readdir, utimes } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { moveSealed } from '../sealed.ts';
+import { bindConvertedHistory } from './harness-bindings.ts';
 import { rebaseV4Path } from '../v4/rebase.ts';
 import { configs, info, json, runtimeIds, runtimeName } from '../v4/ferrets.ts';
 import { agentHomesRoot as targetRoot, historyPoolRoot } from '../v5/harness-paths.ts';
@@ -51,12 +52,12 @@ export const harnessHomesStep: Step = {
   sealed: [],
   notCarried: [
     {
-      what: 'links from a converted ferret home to the history pool',
-      why: 'this step only writes the pool (state/<claude-code|codex>/history-pool/) and never opens it; v5 links each ferret home to it when the ferret starts, which is what lets a converted ferret resume its conversation (!A516)',
+      what: 'links from a converted ferret home to the history pool, other than the one the transcript is read through',
+      why: 'this step writes the pool (state/<claude-code|codex>/history-pool/) and never opens it; for a ferret with a v4 conversation it makes only the link its transcript is read through (Claude projects, Codex sessions) and v5 links the rest when the ferret starts (!A516)',
     },
     {
-      what: 'all harness-home symlinks (including pooled history and sign-in links)',
-      why: 'no link is read, followed or re-made; the v5 harness links history from the pool and Logins owns sign-ins',
+      what: 'all v4 harness-home symlinks (including pooled history and sign-in links)',
+      why: 'no v4 link is read, followed or re-made; the v5 harness links history from the pool and Logins owns sign-ins',
     },
     {
       what: 'runtime-home to per-ferret-home association',
@@ -207,6 +208,9 @@ export const harnessHomesStep: Step = {
         carriedIds.add(id);
         carriedHomes++;
       }
+      // Every converted ferret with a v4 conversation gets the binding v5 proves its transcript from, and the link to the
+      // pool it reads it through, so its history shows BEFORE the first resume.
+      const bound = await bindConvertedHistory(ctx, sessionConfigs);
       // A runtime v4 recorded (its id is known) whose home sits under fleet/homes but was not carried: its conversations
       // would be lost while the report said complete. Recorded runtimes and on-disk homes are matched on the SAME key (the
       // runtime id): a recorded home with no folder on disk, or one only a differently-shaped folder stands in for, is named.
@@ -235,6 +239,10 @@ export const harnessHomesStep: Step = {
             count: carriedHomes,
           },
           { what: 'links omitted (the v5 harness makes its own)', count: links },
+          {
+            what: 'converted ferret homes bound to their v4 conversation (Claude: conversation.json and the projects link; Codex: the rollouts record and the sessions link), so history reads before the first resume',
+            count: bound.claude + bound.codex,
+          },
           { what: 'homes omitted (no safe harness mapping)', count: omittedHomes },
         ],
       };
