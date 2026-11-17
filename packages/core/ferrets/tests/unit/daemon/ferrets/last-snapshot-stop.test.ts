@@ -50,12 +50,15 @@ describe('F-0326 every stop keeps the last screen, masked, before the pane goes'
     expect(f.registry.get(f.id)?.state).toBe('stopped');
   });
 
-  test('F-0326 a pane already gone keeps no file and the stop goes on; a stopped ferret is not looked at', async () => {
+  test('F-0326 a pane already gone keeps no file and nothing is looked at or stopped through its handle; a stopped ferret is not looked at', async () => {
     const f = fixture();
     const handle = await f.live('gone');
     await f.runner.stop(handle);
     await f.service.stop(f.id, 'now');
-    expect(f.events).toEqual(['look', 'stop:now']);
+    // The runner proves the ferret's own terminal gone, so the handle the record kept (which can name ANOTHER ferret's
+    // pane once the server restarted) is neither read nor stopped.
+    expect(f.events).toEqual([]);
+    expect(f.registry.get(f.id)?.state).toBe('stopped');
     expect(f.stored).toEqual([]);
     f.events.length = 0;
     await f.service.stop(f.id, 'now');

@@ -1269,8 +1269,12 @@ export class FerretsService implements FerretsApi {
     if (record.handle !== undefined && (harness === undefined || runner === undefined))
       throw new ApiError(503, 'the harness or runner needed to stop this ferret is unavailable', 'plugin_unavailable');
     if (record.handle !== undefined && harness !== undefined && runner !== undefined) {
-      await this.keepLastScreen(ferret, runner, record.handle as RunnerHandle);
-      await harness.stop(ferret, record.handle as RunnerHandle, runner, how);
+      // Its own terminal already gone: the handle the record kept names nobody (or, after a server restart, another
+      // ferret's pane), so there is nothing to read or stop.
+      if (!(await this.terminalGone(ferret, runner))) {
+        await this.keepLastScreen(ferret, runner, record.handle as RunnerHandle);
+        await harness.stop(ferret, record.handle as RunnerHandle, runner, how);
+      }
     }
     await this.settle(record, 'stopped', 'stopped', cause);
     // Today's `session.stopped` journal event, with the reason the caller gave or the lifecycle default.
@@ -1792,8 +1796,12 @@ export class FerretsService implements FerretsApi {
         'plugin_unavailable',
       );
     if (record.handle !== undefined && harness !== undefined && runner !== undefined) {
-      await this.keepLastScreen(record.id, runner, record.handle as RunnerHandle);
-      await harness.stop(record.id, record.handle as RunnerHandle, runner, 'now');
+      // A record whose own terminal is already gone (a converted v4 ferret's pane id, one from before a server restart)
+      // has nothing to stop: its handle can now name ANOTHER ferret's pane, which a stop through it would end.
+      if (!(await this.terminalGone(record.id, runner))) {
+        await this.keepLastScreen(record.id, runner, record.handle as RunnerHandle);
+        await harness.stop(record.id, record.handle as RunnerHandle, runner, 'now');
+      }
     }
     // The conversation's lease is HANDED to the ferret, never freed: between this pane's death and the relaunch's claim a
     // terminal's `claude --resume` could otherwise take the conversation and leave two writers (a failed relaunch
@@ -1802,6 +1810,11 @@ export class FerretsService implements FerretsApi {
     if (record.harnessConversation !== undefined && this.ports.leases !== undefined)
       await claimConversationLease(this.ports.leases, record.id, record.harnessConversation);
     return this.registry.get(record.id) as FerretRecord;
+  }
+
+  /** Whether the runner PROVES this ferret's own terminal is not there. Anything that proves nothing is `false`. */
+  private async terminalGone(ferret: FerretId, runner: Runner): Promise<boolean> {
+    return (await runner.gone?.(ferret).catch(() => false)) === true;
   }
 
   /**
@@ -2021,7 +2034,7 @@ export class FerretsService implements FerretsApi {
       try {
         // A handle is only ever tracked through a runner, so one is always here; none is a cleanup that cannot run.
         if (runner === undefined) throw new Error('no runner to stop the failed launch with');
-        await runner.stop(handle, 'now');
+        await runner.stop(handle, 'now', record.id);
       } catch {
         // Keep the handle recoverable by stop; a failed cleanup never claims the process stopped.
         await this.write({ ...record, handle }, record.state, 'state');
