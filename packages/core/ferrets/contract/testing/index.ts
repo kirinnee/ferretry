@@ -852,6 +852,13 @@ export class FakeFerrets implements FerretsApi {
     });
     return ok(id);
   }
+  /** Every ferret's queue, so a test can see work wait behind work on the SAME ferret (the real queue's one rule). */
+  readonly #queues = new Map<FerretId, Promise<unknown>>();
+  async exclusive<T>(ferret: FerretId, work: () => Promise<T>): Promise<T> {
+    const result = (this.#queues.get(ferret) ?? Promise.resolve()).catch(() => undefined).then(work);
+    this.#queues.set(ferret, result);
+    return await result;
+  }
   async stop(ferret: FerretId, how: 'polite' | 'now' = 'polite', reason?: string) {
     this.stops.push({ ferret, how, ...(reason === undefined ? {} : { reason }) });
     this.setState(ferret, 'stopped');

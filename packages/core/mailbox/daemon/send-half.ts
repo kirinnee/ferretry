@@ -1029,8 +1029,18 @@ export function buildSendHalf(deps: SendHalfDeps) {
       // stopped, and a wake queued behind a gate reaches here after the stop. Refused before any record, so nothing is typed,
       // nothing is kept, and nothing is recorded under the owner's name.
       if (request.agenda === true || request.monitor === true) throw neverRevives(request);
+      // OUTSIDE the ferret's mutation queue: the revive IS a resume, which takes that queue itself (it is not re-entrant).
       return await reviveLocked(ferret, request);
     }
+    // THE FERRET'S OWN MUTATION QUEUE (the one a start, stop and resume run on), taken after this lane: a typed message, an
+    // owner's answer to an ask included, is never typed between two keys of a stop or onto a pane a resume is replacing.
+    // The order is always lane, then queue (the revive above takes only the queue, inside its resume), so it cannot deadlock.
+    // Ferrets offering no queue (a unit fixture) leaves the lane as the only guard, as before.
+    const typed = async (): Promise<SendResult> => await typeOnPane(ferret, request, first);
+    return ferrets.exclusive === undefined ? await typed() : await ferrets.exclusive(ferret, typed);
+  };
+  /** Types one message into a live ferret's pane (a ferret that was running when {@link typeLocked} read it). */
+  const typeOnPane = async (ferret: SessionId, request: TypedSend, first: SendTarget): Promise<SendResult> => {
     // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
     // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
     const bound = await terminal.bind(ferret);

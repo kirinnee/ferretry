@@ -17,6 +17,7 @@ import type { FerretsService } from './service.ts';
 const WARDEN_PLUGIN = 'warden';
 /** The plugin that copies a kept conversation into a harness's pool, so the only one that may ask for it. */
 const CONVERSATION_PLUGIN = 'conversation';
+const MAILBOX_PLUGIN = 'mailbox';
 /** The plugin that owns runtimes, and so the only one that tells Ferrets one was renamed. */
 const RUNTIMES_PLUGIN = 'runtimes';
 
@@ -188,6 +189,11 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
       return await service.attach(ferret, handle, stated.data);
     },
     handle: ferret => service.handle(ferret),
+    exclusive: async (ferret, work) => {
+      if (consumer !== MAILBOX_PLUGIN)
+        throw new ApiError(403, "only the Mailbox runs work on a ferret's mutation queue", 'forbidden');
+      return await service.exclusive(ferret, work);
+    },
     markStalled: async (ferret, stalled) => {
       if (!warden) throw new ApiError(403, 'only the Warden marks a ferret stalled', 'forbidden');
       return await service.markStalled(ferret, stalled);
