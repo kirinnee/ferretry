@@ -543,6 +543,9 @@ export default implementDaemon(manifest, {
           profile: id => profiler.view(id),
         },
       },
+      subscribers: {
+        'logins.changed': () => inner.invalidate(),
+      },
       hooks: {
         // A pause refuses a NEW start on its login with the sentence that names the reset. A start naming no login is
         // allowed here: Ferrets picks the login and asks again. A damaged record of pauses refuses a budgeted login's

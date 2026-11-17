@@ -32,15 +32,16 @@ export async function usageHost(options: { readonly config?: Readonly<Record<str
     },
   } as unknown as DaemonImplementation<Manifest>;
   const ferrets = new FakeFerrets();
+  const logins = fakeLogins([sampleLogin('work')]);
   const host = await testHost({
     plugins: [recording],
     fakes: {
       ferrets,
       conversation: fakeConversation(),
-      logins: fakeLogins([sampleLogin('work')]),
+      logins,
       vault: new FakeVault(),
     },
     ...(options.config === undefined ? {} : { config: options.config }),
   });
-  return { host, scheduled, ferrets, hooks: built.hooks ?? {} };
+  return { host, scheduled, ferrets, logins, hooks: built.hooks ?? {} };
 }

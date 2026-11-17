@@ -6,7 +6,7 @@ import {
 } from '@ferretry/core-ferrets/contract';
 import { definePlugin, panel, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
-import { LoginsBudget, LoginsPort } from '@ferretry/plugin-logins/contract';
+import { LoginChanged, LoginsBudget, LoginsPort } from '@ferretry/plugin-logins/contract';
 import {
   BudgetReached,
   COMPACTION_HISTORY_STATE,
@@ -213,6 +213,8 @@ export default definePlugin({
     config: [USAGE_CONFIG],
     readModels: USAGE_READ_MODELS,
     publishes: [LoginPaused, LoginResumed, InsightsChanged, BudgetReached],
+    // A login added, removed, signed in or out, or switched: the feed's next read probes again rather than serving the old accounts (J-0028).
+    subscribes: [LoginChanged],
   },
 
   // `ferrets.compaction-history` is the one taker: Usage keeps how long compactions take (F-0130) and fills the hook.

@@ -3,6 +3,9 @@
  * J-0181, J-0227, J-0263, J-0264, J-0268 (docs/design/rebuild-parity.md, usage).
  */
 import { describe, expect, test } from 'bun:test';
+import type { LoginView } from '@ferretry/plugin-logins/contract';
+import { LoginChanged } from '@ferretry/plugin-logins/contract';
+import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { milliseconds } from '@ferretry/std';
 import { InsightsChanged } from '../../../contract/index.ts';
 import { HttpAnalyticsPricingFeed } from '../../../daemon/adapters/analytics/pricing-feed-source.ts';
@@ -128,6 +131,19 @@ describe('the jobs the kernel arms', () => {
     expect(watches).toBe(2);
   });
 
-  test.skip('J-0028 the usage feed re-reads when the published manifest file changes — pending: Logins now publishes `logins.changed`, but Usage does not subscribe to it and `CachedUsageFeed` has no way to drop its cache (the feed reads its list through the port per refresh)', () => {});
+  test('J-0028 a login that comes or goes shows in the feed at once, not after the cache interval', async () => {
+    const { host, logins } = await usageHost();
+    const agents = async () =>
+      (await host.request('GET', '/v1/usage')).json<{ accounts: { agent: string }[] }>().accounts.map(row => row.agent);
+    expect(await agents()).toEqual(['work']);
+
+    logins.setLogins([sampleLogin('work'), sampleLogin('home')]);
+    expect(await agents()).toEqual(['work']);
+
+    host.emit(LoginChanged, { loginId: 'home' as LoginView['id'], change: 'added' });
+    await host.settle();
+    expect((await agents()).sort()).toEqual(['home', 'work']);
+    await host.stop();
+  });
   test.skip('J-0115 the event-loop lag meter beats every interval and feeds the performance report — pending port: the kernel hands Usage no event-loop reading yet (the profile report says so in its limitations)', () => {});
 });
