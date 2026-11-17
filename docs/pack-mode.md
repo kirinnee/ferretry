@@ -443,7 +443,7 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   follow-up, a Warden escalation) goes on its **agenda home**, the owner's own ferret, never on the sub-ferret
   ([agenda.md](agenda.md#the-agenda-home)). Only a hands-on input (a password, code or approval the daemon asks for) stays
   on the sub-ferret.
-- **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
+- **Prompt:** a sub-ferret's fixed layer is the tools, settings and jobs rules plus two lines (`SUB_FERRET_INSTRUCTION`):
   never raise agenda items or notify the owner, report to your lead with `fy send` and label every send (`--kind blocker|action|fyi`, [message-delivery.md](message-delivery.md#labels-and-combined-delivery)); at each step it reads its task and rewrites the stale parts of its status and How to test (`fy task edit`), routine progress goes on its task (`fy task note`), and its lead is messaged only for a result, a blocker or a decision; if it has a task, link its PR to it, and the task moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
   out. Sizes with the default binary name: **lead 2910 characters** (4292 with Agenda mode on), **sub-ferret 2631**.
   `FY_SUB_FERRET=1` is derived from the record's `role` (a helper) at each launch; a running ferret is told the changed always-on section on the

@@ -15,6 +15,7 @@ type LaunchInstructionSectionId = NonNullable<FerretSummary['outdated']>['sectio
 const SECTION_WORDS: Readonly<Record<LaunchInstructionSectionId, string>> = {
   tools: 'tools',
   settings: 'settings',
+  jobs: 'background jobs',
   notify: 'notifications',
   board: 'board rules',
   'sub-ferret': 'sub-ferret rules',

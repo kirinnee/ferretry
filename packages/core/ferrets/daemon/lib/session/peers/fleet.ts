@@ -39,7 +39,7 @@ export const QUESTION_ASKED_FILE_ENV = 'FY_QUESTION_FILE';
 
 /** One section every agent runtime is told, whatever its switches: its id and its exact text. */
 export interface AlwaysOnSection {
-  readonly id: 'tools' | 'settings' | 'notify' | 'board' | 'sub-ferret';
+  readonly id: 'tools' | 'settings' | 'jobs' | 'notify' | 'board' | 'sub-ferret';
   readonly text: string;
 }
 

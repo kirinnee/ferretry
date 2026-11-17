@@ -317,6 +317,7 @@ const DeclaredWaitSchema = z.object({
 export const LaunchInstructionSectionIdSchema = z.enum([
   'tools',
   'settings',
+  'jobs',
   'attention',
   'notify',
   'board',

@@ -62,6 +62,22 @@ describe('changedInstructions', () => {
     should(actual.map(section => section.id)).deepEqual(['settings', 'notify']);
   });
 
+  it('should tell a ferret launched before the jobs section existed about it, and nothing else', () => {
+    // Arrange — a launch that was told tools, settings and notify, but never jobs.
+    const withJobs: readonly AlwaysOnSection[] = [
+      NOW[0] as AlwaysOnSection,
+      NOW[1] as AlwaysOnSection,
+      { id: 'jobs', text: 'Jobs: keep long commands in the job keeper.' },
+      NOW[2] as AlwaysOnSection,
+    ];
+
+    // Act
+    const actual = changedInstructions(launched('Notify: tell the owner with a notice.'), withJobs);
+
+    // Assert
+    should(actual.map(section => section.id)).deepEqual(['jobs']);
+  });
+
   it('should tell a session with no record nothing: nothing says what it has', () => {
     // Assert
     should(changedInstructions(undefined, NOW)).be.empty();
@@ -74,11 +90,12 @@ describe('instructionSectionNames', () => {
       instructionSectionNames([
         { id: 'tools', text: '' },
         { id: 'settings', text: '' },
+        { id: 'jobs', text: '' },
         { id: 'notify', text: '' },
         { id: 'board', text: '' },
         { id: 'sub-ferret', text: '' },
       ]),
-    ).eql(['Tools', 'Settings', 'Notify', 'Board', 'Sub-ferret']);
+    ).eql(['Tools', 'Settings', 'Jobs', 'Notify', 'Board', 'Sub-ferret']);
   });
 });
 
@@ -118,6 +135,19 @@ describe('recordTold', () => {
       questions: true,
     });
     should(changedInstructions(actual, NOW)).be.empty();
+  });
+});
+
+describe('recordTold for the jobs section', () => {
+  it('should keep jobs between settings and notify, in prompt order', () => {
+    // Arrange
+    const jobs: AlwaysOnSection = { id: 'jobs', text: 'Jobs: keep long commands in the job keeper.' };
+
+    // Act
+    const actual = recordTold(launched('Notify: tell the owner with a notice.'), [jobs]);
+
+    // Assert
+    should(actual.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'jobs', 'notify', 'pack']);
   });
 });
 

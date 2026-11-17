@@ -112,7 +112,7 @@ offers no comparison, has no record for the ferret (launched before this, or its
 or cannot read it answers `{ current: true, reasons: [] }`: nothing to say, so no Restart is offered on it.
 
 **Info › Runtime › Instructions** says what the running process was told: which Ferretry sections of its
-appended system prompt it carries (the tools, the settings rules, the Notify rule, the Board rules, and each of Hypermedia, Pack mode, Agenda mode and
+appended system prompt it carries (the tools, the settings rules, the jobs rule, the Notify rule, the Board rules, and each of Hypermedia, Pack mode, Agenda mode and
 Learning whose switch was on) with each one's size, its mode, and whether it may ask the owner a question.
 It reads `state.launchInstructions` (`SessionLaunchInstructionsSchema`), which the daemon records from the
 environment each pane is launched with — at every start, restart and revive — so a switch flipped since
@@ -124,7 +124,7 @@ next launch".
 
 A harness reads its appended system prompt once, at launch, and neither Claude Code nor Codex can re-read
 it mid-conversation. So a rule Ferretry tightens would otherwise reach a long-running ferret only when it
-restarted. The four sections every agent gets (the tools, the settings rules, the Notify rule and the Board rules
+restarted. The five sections every agent gets (the tools, the settings rules, the jobs rule ([jobs.md](jobs.md#how-agents-are-told)), the Notify rule and the Board rules
 ([board.md](board.md#the-board-rules)), `ALWAYS_ON_SECTIONS` in `@ferretry/fleet`) depend on nothing but the binary's name. Each launch now records
 a fingerprint of each one (`digest`, `instructionDigest`) beside its size.
 

@@ -138,6 +138,34 @@ The job routes sit on the same `terminal` capability as terminals ([grants](./gr
 naming another ferret is `403`); a person acts for any ferret subject to their device's grants. Jobs started by a ferret are placed
 in the ferret's limits scope like a terminal an agent opened.
 
+## How agents are told
+
+Agents learn to use the keeper from their system prompt **alone**. There are no hooks of any kind: no Claude PreToolUse rewrite, no
+TaskStop/KillShell hook, no Codex hook. The words are the always-on **`jobs`** section (`JOBS_INSTRUCTION` in
+`plugins/runtimes/daemon/lib/account/fixed-layer.ts`), appended to the prompt of every agent runtime, Claude and Codex, interactive or auto,
+lead or sub-ferret, rendered with the binary's own name. It teaches four things in one paragraph:
+
+1. Start a long or watch-style command (dev server, watcher, tail, a build or tests over about 2 minutes) as a BACKGROUND
+   `fy job run --name <x> -- <cmd>` (Claude: Bash with `run_in_background`; Codex: instead of a background terminal). Short commands stay as they are.
+2. That background command is only an attachment: the job keeps running if it ends. Read output with `fy job logs <id>`; wait with `fy job wait <id>`.
+3. After a move or restart, re-attach with a new background `fy job attach <id>` (`fy job ls` lists the jobs; the restart notice lists them under "Your jobs").
+4. Stop a job with `fy job stop <id>`. Stopping the background command (TaskStop, or closing the terminal) only detaches.
+
+Why the prompt can do this alone: on a move or restart Claude TERM→KILLs its background shells about 1.45 s after the pane dies, and Codex SIGKILLs its
+background terminals 60 s after the client leaves; a job the keeper holds is neither's child, so only the attachment dies, and the agent re-attaches.
+
+It is a section of its own (not part of `tools`) so a running ferret is told the new words once, by the instruction-refresh note
+([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)); its id is `jobs`, shown as "Jobs" in that note and
+"background jobs" on the outdated mark. A text change to it is picked up the same way.
+
+## Measuring it
+
+Whether agents obey is a **hand check**, not a dashboard. **Obedience** is the share of a ferret's long or watch-style _background_ commands that went
+through `fy job run`. Count, from a ferret's transcript, the background commands (Claude: Bash with `run_in_background`; Codex: background terminals)
+that are long or watch-style by the section's own test, and how many of them were `fy job run`; cross-check against the keeper's list (`fy job ls --all`). Short
+background commands are not counted either way. The bar is **70%**: below it the words need work (shorter, an example, a stronger verb), not a hook.
+There is nothing to build or schedule for this; do the check when a change to the section ships, and when the move gate keeps naming un-kept jobs.
+
 ## The app
 
 The Processes tab shows a **Background jobs** group under the process list: name, state (`running`, `exit N`, `lost`), age, command;
