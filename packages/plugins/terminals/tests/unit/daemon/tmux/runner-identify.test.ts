@@ -48,6 +48,7 @@ function world(
   } = {},
 ) {
   const calls: (readonly string[])[] = [];
+  const warnings: string[] = [];
   const signalled: Signalled[] = [];
   const starts = new Map<number, number>([[ROOT, ROOT_START]]);
   const rowsNow = (): readonly ProcessDetailRow[] =>
@@ -83,9 +84,10 @@ function world(
     socketPath: '/fixture/tmux.sock',
     instantOf: () => 'now' as never,
     now: () => 'now' as never,
+    log: { warn: message => void warnings.push(message) },
     ...(options.host === false ? {} : { processes: host }),
   });
-  return { runner, calls, signalled };
+  return { runner, calls, signalled, warnings };
 }
 
 const errno = (code: string): NodeJS.ErrnoException => Object.assign(new Error(code), { code });
@@ -106,6 +108,25 @@ describe('TmuxRunner.identify', () => {
       processStart: String(ROOT_START),
     });
     expect(await runner.identify(HANDLE, 'ferret-two' as FerretId)).toBeUndefined();
+  });
+
+  test('a refusal says which proof failed, in plain words: the session name, then the start ticks', async () => {
+    const other = world();
+    expect(await other.runner.identify(HANDLE, 'ferret-two' as FerretId)).toBeUndefined();
+    expect(other.warnings).toHaveLength(1);
+    expect(other.warnings[0]).toContain('session name "fy-ferret-one" is not this ferret\'s session "fy-ferret-two"');
+
+    const notFerret = world({ tmux: () => live('%7', ROOT, '0', 'main') });
+    expect(await notFerret.runner.identify(HANDLE)).toBeUndefined();
+    expect(notFerret.warnings[0]).toContain('session name "main" is not a ferret\'s session');
+
+    const noStart = world({ startOf: () => undefined });
+    expect(await noStart.runner.identify(HANDLE)).toEqual({ handle: HANDLE, pid: ROOT });
+    expect(noStart.warnings[0]).toContain(`start ticks of its process (pid ${String(ROOT)}) could not be read`);
+
+    const fine = world();
+    await fine.runner.identify(HANDLE, 'ferret-one' as FerretId);
+    expect(fine.warnings).toEqual([]);
   });
 
   test('is read-only: it asks tmux to list panes and nothing else', async () => {
@@ -168,6 +189,16 @@ describe('TmuxRunner.signalDescendant', () => {
   const job = row(5000, ROOT, 9100);
   const grandchild = row(5001, 5000, 9200);
   const rows = [job, grandchild];
+
+  test("a stale handle that now names ANOTHER ferret's pane signals nothing of its tree, even a proved descendant", async () => {
+    // `%7` is `fy-ferret-one`'s pane. A record of `ferret-two` still holding it must not signal `ferret-one`'s job.
+    const { runner, signalled } = world({ rows });
+    expect(await runner.signalDescendant(HANDLE, 5001, '9200', 'SIGKILL', 'ferret-two' as FerretId)).toBe(false);
+    expect(signalled).toEqual([]);
+    // The pane's own ferret still can.
+    expect(await runner.signalDescendant(HANDLE, 5001, '9200', 'SIGKILL', 'ferret-one' as FerretId)).toBe(true);
+    expect(signalled).toEqual([{ pid: 5001, signal: 'SIGKILL' }]);
+  });
 
   test('delivers ONE signal to ONE pid that descends from the pane root and matches its start', async () => {
     const { runner, signalled } = world({ rows });

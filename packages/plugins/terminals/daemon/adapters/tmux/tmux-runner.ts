@@ -449,9 +449,27 @@ export class TmuxRunner implements Runner {
     if (facts === undefined) return 'gone';
     // Another ferret's pane behind a stale handle: it is not THIS ferret's pane, so nothing about it (its process tree
     // above all) is told for this ferret. Not `'gone'` either: the ferret's own pane may be elsewhere, so it is unknown.
-    if (!isFerretSession(facts.session) || !TmuxRunner.owns(facts, ferret)) return undefined;
+    if (!isFerretSession(facts.session)) {
+      this.options.log?.warn(
+        `Not telling which process pane ${handle} runs: its tmux session name "${facts.session}" is not a ferret's session.`,
+        { handle },
+      );
+      return undefined;
+    }
+    if (!TmuxRunner.owns(facts, ferret)) {
+      this.options.log?.warn(
+        `Not telling which process pane ${handle} runs: its tmux session name "${facts.session}" is not this ferret's session "${ferret === undefined ? '' : ferretTmuxSession(ferret)}", so the handle is stale and the pane belongs to another ferret.`,
+        { handle },
+      );
+      return undefined;
+    }
     if (facts.dead || facts.pid <= 0) return { handle };
     const start = await this.options.processes?.startOf(facts.pid).catch(() => undefined);
+    if (start === undefined && this.options.processes !== undefined)
+      this.options.log?.warn(
+        `Pane ${handle} is named without a process start: the start ticks of its process (pid ${String(facts.pid)}) could not be read, so a later signal cannot prove it is the same process.`,
+        { handle },
+      );
     return { handle, pid: facts.pid, ...(start === undefined ? {} : { processStart: String(start) }) };
   }
 
@@ -462,18 +480,21 @@ export class TmuxRunner implements Runner {
    * read. Refused (`false`, nothing sent): no process host, a signal other than SIGTERM or SIGKILL, a pid that is not a
    * plain pid above init, a caller that could not read the start, a pane that is gone, dead or not a ferret's, a tree that
    * could not be read, a pid that is the root, not below it or reused, and a protected pid (the daemon or a parent of
-   * it, which a daemon started from inside a ferret's pane would otherwise be). Nothing is written to the pane.
+   * it, which a daemon started from inside a ferret's pane would otherwise be). Nothing is written to the pane. With
+   * `ferret` named, a pane that is another ferret's (a stale handle a restarted server handed out again) is refused as
+   * `identify` refuses it, so its process tree is never read or signalled for this ferret.
    */
   async signalDescendant(
     handle: RunnerHandle,
     pid: number,
     start: string | undefined,
     signal: 'SIGTERM' | 'SIGKILL',
+    ferret?: FerretId,
   ): Promise<boolean> {
     const host = this.options.processes;
     if (host === undefined || (signal !== 'SIGTERM' && signal !== 'SIGKILL')) return false;
     if (!Number.isSafeInteger(pid) || pid <= 1 || start === undefined || start === '') return false;
-    const pane = await this.identify(handle);
+    const pane = await this.identify(handle, ferret);
     if (pane === undefined || pane === 'gone' || pane.pid === undefined || pane.processStart === undefined)
       return false;
     if (pid === pane.pid || (await host.protectedPids()).includes(pid)) return false;
@@ -1003,8 +1024,24 @@ export class TmuxRunner implements Runner {
     const present = await this.options.tmux.execute(['has-session', '-t', exact]).catch(() => undefined);
     if (present === undefined || present.code !== 0) return;
     if (how === 'polite') {
-      const panes = await this.options.tmux.execute(['list-panes', '-s', '-t', exact, '-F', '#{pane_dead}']);
-      const live = panes.code === 0 && panes.stdout.split('\n').some(line => line.trim() === '0');
+      const panes = await this.options.tmux
+        .execute(['list-panes', '-s', '-t', exact, '-F', '#{pane_dead}'])
+        .catch((error: unknown) => ({
+          code: 1,
+          stdout: '',
+          stderr: error instanceof Error ? error.message : String(error),
+        }));
+      // A failed read is not proof that no pane is live: it says nothing, and the answer to nothing is not a kill.
+      // `can't find session` IS an answer (the session ended between the check and the read: already stopped).
+      if (panes.code !== 0) {
+        if (/can't find session/iu.test(panes.stderr) || isTmuxServerAbsent(panes.stderr)) return;
+        const why = panes.stderr.trim() || `tmux exited ${String(panes.code)}`;
+        this.options.log?.warn(`Could not read the panes of ${session}, so it was not stopped: ${why}`, { session });
+        throw new Error(
+          `could not read the panes of ${session} (${why}), so it was not stopped; it may still be running`,
+        );
+      }
+      const live = panes.stdout.split('\n').some(line => line.trim() === '0');
       if (live) {
         // `send-keys` wants a PANE target: `=fy-<id>` alone is parsed as a pane name and tmux answers "can't find pane",
         // while `=fy-<id>:` is the exact session's active pane. A refusal is thrown, so a polite stop that reached

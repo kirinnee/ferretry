@@ -109,6 +109,80 @@ describe('TmuxRunner stop and signal through a stale pane id', () => {
     await expect(refusing('kill-session').stop(PANE, 'now', STALE_OWNER)).rejects.toThrow(/could not stop/u);
   });
 
+  test('a polite stop by name whose pane read FAILS is not escalated to a kill: it stops nothing and says so', async () => {
+    const failures: { readonly stderr: string; readonly throws: boolean }[] = [
+      { stderr: 'server exited unexpectedly', throws: false },
+      { stderr: 'error connecting to /s (Permission denied)', throws: false },
+      { stderr: '', throws: true },
+    ];
+    for (const failure of failures) {
+      const calls: (readonly string[])[] = [];
+      const warnings: string[] = [];
+      const subject = new TmuxRunner({
+        tmux: {
+          execute: async args => {
+            calls.push(args);
+            if (args[0] === 'display-message') return { code: 0, stdout: `%5|4242|0|fy-${LIVE_OWNER}|1\n`, stderr: '' };
+            if (args[0] === 'list-panes') {
+              if (failure.throws) throw new Error('spawn failed');
+              return { code: 1, stdout: '', stderr: failure.stderr };
+            }
+            return { code: 0, stdout: '', stderr: '' };
+          },
+        },
+        spawn: {
+          run: async () => {
+            throw new Error('stop must not spawn');
+          },
+          runBytes: () => Promise.reject(new Error('stop must not spawn')),
+          start: () => {
+            throw new Error('stop must not spawn');
+          },
+        },
+        socketPath: '/fixture/tmux.sock',
+        instantOf: () => '2026-11-08T10:00:00.000Z' as never,
+        now: () => '2026-11-08T10:00:00.000Z' as never,
+        log: { warn: message => void warnings.push(message) },
+      });
+
+      await expect(subject.stop(PANE, 'polite', STALE_OWNER)).rejects.toThrow(
+        /was not stopped; it may still be running/u,
+      );
+
+      expect(calls.filter(args => args[0] === 'kill-session' || args[0] === 'send-keys')).toEqual([]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(`fy-${STALE_OWNER}`);
+    }
+  });
+
+  test('a polite stop by name whose session ended between the check and the read is the stop already made', async () => {
+    const calls: (readonly string[])[] = [];
+    const subject = new TmuxRunner({
+      tmux: {
+        execute: async args => {
+          calls.push(args);
+          if (args[0] === 'display-message') return { code: 0, stdout: `%5|4242|0|fy-${LIVE_OWNER}|1\n`, stderr: '' };
+          if (args[0] === 'list-panes') return { code: 1, stdout: '', stderr: "can't find session: x" };
+          return { code: 0, stdout: '', stderr: '' };
+        },
+      },
+      spawn: {
+        run: async () => {
+          throw new Error('stop must not spawn');
+        },
+        runBytes: () => Promise.reject(new Error('stop must not spawn')),
+        start: () => {
+          throw new Error('stop must not spawn');
+        },
+      },
+      socketPath: '/fixture/tmux.sock',
+      instantOf: () => '2026-11-08T10:00:00.000Z' as never,
+      now: () => '2026-11-08T10:00:00.000Z' as never,
+    });
+    await subject.stop(PANE, 'polite', STALE_OWNER);
+    expect(calls.filter(args => args[0] === 'kill-session' || args[0] === 'send-keys')).toEqual([]);
+  });
+
   test('a signal that names a ferret does nothing to another ferret', async () => {
     const { subject, writes } = runner();
 
