@@ -96,7 +96,7 @@ export async function skillItemsIn(
  * GAP(runtimes): that service is the kernel's config layer, which writes only a plugin's OWN files; a merge that writes
  * other plugins' files is the cross-owner writer the owner deferred (!A525 item 10).
  *
- * @pending runtimes: the settings merge of a copy writes other plugins' files
+ * @pending runtimes/runtimes-fleets-catalogue-setup: the settings merge of a copy writes other plugins' files
  */
 export function cloneConfigFilesOver(service: ConfigFileService): CloneConfigFiles {
   return {

@@ -1,0 +1,2 @@
+docs/board.md
+`needsOwner`'s and a gate on the way `gatesBetween`'s (`card-actions.ts`), both from each lane's stage

@@ -20,30 +20,29 @@ export interface PendingApps {
 
 export function readPendingApps(root: string): PendingApps {
   const text = readPendingMerged(root);
-  if (text === undefined) return { named: new Map(), halves: new Set(), exclusions: [] };
   const value = JSON.parse(text) as {
     format?: unknown;
     pendingHalves?: unknown;
     pendingAppPorts?: unknown;
   };
-  if (value.format !== 1) throw new Error('ports-pending.json: format is not 1');
+  if (value.format !== 1) throw new Error('ports-pending: format is not 1');
   const halves = new Set<string>();
   const named = new Map<string, ReadonlySet<string>>();
   if (value.pendingHalves !== undefined) {
     if (typeof value.pendingHalves !== 'object' || value.pendingHalves === null || Array.isArray(value.pendingHalves))
-      throw new Error('ports-pending.json: pendingHalves must name plugins and their pending halves');
+      throw new Error('ports-pending: pendingHalves must name plugins and their pending halves');
     for (const [plugin, pending] of Object.entries(value.pendingHalves)) {
       if (!Array.isArray(pending) || pending.some(half => typeof half !== 'string' || !HALF_NAMES.includes(half)))
-        throw new Error(`ports-pending.json: ${plugin} pendingHalves names only daemon, app or cli`);
+        throw new Error(`ports-pending: ${plugin} pendingHalves names only daemon, app or cli`);
       named.set(plugin, new Set(pending as string[]));
       if (pending.includes('app')) halves.add(plugin);
     }
   }
   const exclusions: PendingAppPort[] = [];
   if (value.pendingAppPorts !== undefined) {
-    if (!Array.isArray(value.pendingAppPorts)) throw new Error('ports-pending.json: pendingAppPorts must be a list');
+    if (!Array.isArray(value.pendingAppPorts)) throw new Error('ports-pending: pendingAppPorts must be a list');
     for (const entry of value.pendingAppPorts) {
-      if (typeof entry !== 'object' || entry === null) throw new Error('ports-pending.json: invalid pending app port');
+      if (typeof entry !== 'object' || entry === null) throw new Error('ports-pending: invalid pending app port');
       const { plugin, path, reason } = entry as { plugin?: unknown; path?: unknown; reason?: unknown };
       if (
         typeof plugin !== 'string' ||
@@ -57,9 +56,9 @@ export function readPendingApps(root: string): PendingApps {
         typeof reason !== 'string' ||
         reason.trim() === ''
       )
-        throw new Error('ports-pending.json: each pending app port needs its plugin, exact path and reason');
+        throw new Error('ports-pending: each pending app port needs its plugin, exact path and reason');
       if (exclusions.some(port => port.path === path))
-        throw new Error(`ports-pending.json: duplicate app exclusion ${path}`);
+        throw new Error(`ports-pending: duplicate app exclusion ${path}`);
       exclusions.push({ plugin, path, reason });
     }
   }

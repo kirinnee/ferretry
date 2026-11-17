@@ -24,6 +24,7 @@ const pending = {
   format: 1 as const,
   pending: ['vault', 'kernel2'],
   halves: {},
+  slugs: { vault: ['access-export-screen', 'kernel-no-event-route'], kernel2: ['kernel-sync-worker'] },
   reasons: {
     vault: [
       'GAP(access): the export screen waits for the passkey mount; app/export-sheet.tsx stays until then',
@@ -129,48 +130,35 @@ describe('pending-tags: reading comments', () => {
 });
 
 describe('pending-tags: @pending', () => {
-  test('naming an open gap of its own pending package passes, case and spacing aside', () => {
-    expect(run([file('/** @pending vault: No  EVENT route yet */\nexport const a = 1;')])).toEqual([]);
+  test('naming an open gap file of its own pending package passes, with or without a note', () => {
+    expect(run([file('/** @pending vault/kernel-no-event-route */\nexport const a = 1;')])).toEqual([]);
+    expect(run([file('/** @pending vault/access-export-screen: waits for the passkey mount */')])).toEqual([]);
   });
 
-  test('a gap that starts mid-word is not found', () => {
-    expect(run([file('/** @pending vault: vent route yet and more */')])).toEqual([
-      '@pending gap "vent route yet and more" is in none of pendingReasons.vault in ports-pending.json',
+  test('a slug that is not a gap file of the package is a finding (a closed line, or a typo)', () => {
+    expect(run([file('/** @pending vault/kernel-no-event-rout */')])).toEqual([
+      '@pending vault/kernel-no-event-rout names no open line: there is no ports-pending/kernel-no-event-rout.txt in vault; wire or delete what this @pending kept',
+    ]);
+    expect(run([file('/** @pending vault/kernel-sync-worker */')])).toHaveLength(1);
+  });
+
+  test('left in a package with no open line left is a finding', () => {
+    expect(run([file('/** @pending board/no-event-route */', 'board', 'packages/plugins/board/app/x.ts')])).toEqual([
+      'board has no open ports-pending line left; wire or delete what this @pending kept',
     ]);
   });
 
-  test('a gap in no pendingReasons line is a finding', () => {
-    expect(run([file('/** @pending vault: someday maybe never */')])).toEqual([
-      '@pending gap "someday maybe never" is in none of pendingReasons.vault in ports-pending.json',
-    ]);
-  });
-
-  test('a thin gap is a finding: one character, one word, a bare GAP(x), two words, too few characters', () => {
-    const thin = (gap: string) => run([file(`/** @pending vault: ${gap} */`)]);
-    for (const gap of ['a', 'GAP', 'the', 'GAP(kernel)', 'no event', 'no event rou'])
-      expect(thin(gap)).toEqual([expect.stringContaining('is too thin')]);
-  });
-
-  test('a gap wrapped over two lines is read as its first line only, so the short first line is thin', () => {
-    expect(run([file('/**\n * @pending vault: no event\n * route yet\n */')])).toEqual([
-      expect.stringContaining('is too thin'),
-    ]);
-  });
-
-  test('left in a package that has left ports-pending is a finding', () => {
-    expect(
-      run([file('/** @pending board: no event route yet */', 'board', 'packages/plugins/board/app/x.ts')]),
-    ).toEqual(['board has left ports-pending.json; wire or delete what this @pending kept']);
-  });
-
-  test('naming another owner, an unowned package, or no gap is a finding', () => {
-    expect(run([file('/** @pending kernel2: no event route yet */')])).toEqual([
+  test('naming another owner, an unowned package, or no slug is a finding', () => {
+    expect(run([file('/** @pending kernel2/kernel-sync-worker */')])).toEqual([
       '@pending names "kernel2", but this file belongs to "vault"',
     ]);
-    expect(run([{ ...file('/** @pending vault: no event route yet */'), owner: undefined }])).toEqual([
+    expect(run([{ ...file('/** @pending vault/kernel-no-event-route */'), owner: undefined }])).toEqual([
       '@pending in a package that is no subsystem; only a pending port may keep code this way',
     ]);
-    expect(run([file('/** @pending */')])).toEqual(['@pending must read "@pending <owner>: <the gap it waits for>"']);
+    const bare =
+      '@pending must read "@pending <owner>/<slug>" (then an optional ": note"): <slug> is a ports-pending/<slug>.txt file of this package';
+    expect(run([file('/** @pending */')])).toEqual([bare]);
+    expect(run([file('/** @pending vault: kernel-no-event-route */')])).toEqual([bare]);
   });
 });
 
@@ -257,10 +245,10 @@ describe('pending-tags: knip ignore', () => {
   test('a pending package must have a gap line naming the path; a ported one is a finding', () => {
     expect(run([], [ignore(['vault'], ['app/export-sheet.tsx'])])).toEqual([]);
     expect(run([], [ignore(['vault'], ['app/other.tsx'])])).toEqual([
-      '"app/other.tsx" is ignored, but no pendingReasons.vault line in ports-pending.json names it',
+      '"app/other.tsx" is ignored, but no vault ports-pending line names it',
     ]);
     expect(run([], [ignore(['board'], ['app/x.tsx'])])).toEqual([
-      '"app/x.tsx" is ignored, but board has left ports-pending.json; wire or delete it',
+      '"app/x.tsx" is ignored, but board has no open ports-pending line left; wire or delete it',
     ]);
   });
 
@@ -270,7 +258,7 @@ describe('pending-tags: knip ignore', () => {
 
   test('a glob key over two pending packages: the one that does not name the path is a finding', () => {
     expect(run([], [ignore(['vault', 'kernel2'], ['app/skeleton.ts'], 'packages/plugins/*')])).toEqual([
-      '"app/skeleton.ts" is ignored, but no pendingReasons.vault line in ports-pending.json names it',
+      '"app/skeleton.ts" is ignored, but no vault ports-pending line names it',
     ]);
   });
 
@@ -279,10 +267,10 @@ describe('pending-tags: knip ignore', () => {
       '"e" is ignored for vault, but is too short to be named (6 characters or more)',
     ]);
     expect(run([], [ignore(['vault'], ['export-sheet'])])).toEqual([
-      '"export-sheet" is ignored, but no pendingReasons.vault line in ports-pending.json names it',
+      '"export-sheet" is ignored, but no vault ports-pending line names it',
     ]);
     expect(run([], [ignore(['vault'], ['sheet.tsx'])])).toEqual([
-      '"sheet.tsx" is ignored, but no pendingReasons.vault line in ports-pending.json names it',
+      '"sheet.tsx" is ignored, but no vault ports-pending line names it',
     ]);
   });
 
@@ -438,7 +426,7 @@ describe('pending-tags: check.run over a fixture workspace', () => {
     write(
       root,
       'packages/plugins/vault/app/x.ts',
-      over.vaultSource ?? '/** @pending vault: no event route yet */\nexport const a = 1;\n',
+      over.vaultSource ?? '/** @pending vault/kernel-no-event-route */\nexport const a = 1;\n',
     );
     write(root, 'packages/app/package.json', JSON.stringify({ name: '@ferretry/app' }));
     write(
@@ -446,11 +434,7 @@ describe('pending-tags: check.run over a fixture workspace', () => {
       'packages/app/src/x.ts',
       '/** @public A number kept with the protocol (§5.2). */\nexport const b = 1;\n',
     );
-    write(
-      root,
-      'ports-pending.json',
-      JSON.stringify({ format: 1, pending: ['vault'], pendingReasons: { vault: ['GAP(kernel): no event route yet'] } }),
-    );
+    write(root, 'packages/plugins/vault/ports-pending/kernel-no-event-route.txt', 'GAP(kernel): no event route yet\n');
     write(
       root,
       'docs/rebuild/guarantees.tsv',
@@ -475,10 +459,10 @@ describe('pending-tags: check.run over a fixture workspace', () => {
     write(
       root,
       'packages/plugins/vault/app/y.tsx',
-      "const a = <p>Don't</p>;\n/** @pending vault: totally bogus gap */\nexport const b = 1;\nconst c = <p>it's</p>;\n",
+      "const a = <p>Don't</p>;\n/** @pending vault/totally-bogus-gap */\nexport const b = 1;\nconst c = <p>it's</p>;\n",
     );
     expect(await messages(root)).toEqual([
-      'packages/plugins/vault/app/y.tsx:2: @pending gap "totally bogus gap" is in none of pendingReasons.vault in ports-pending.json',
+      'packages/plugins/vault/app/y.tsx:2: @pending vault/totally-bogus-gap names no open line: there is no ports-pending/totally-bogus-gap.txt in vault; wire or delete what this @pending kept',
     ]);
   });
 
@@ -494,7 +478,7 @@ describe('pending-tags: check.run over a fixture workspace', () => {
     });
     const found = await messages(root);
     expect(found).toContain(
-      'knip.ts workspaces["packages/plugins/*"].ignore: "app/skeleton.ts" is ignored, but no pendingReasons.vault line in ports-pending.json names it',
+      'knip.ts workspaces["packages/plugins/*"].ignore: "app/skeleton.ts" is ignored, but no vault ports-pending line names it',
     );
     expect(found.some(m => m.includes('"ignoreFiles":app/y.ts'))).toBe(true);
     expect(found.some(m => m.includes('workspaces["packages/gone"]: matches no workspace package'))).toBe(true);

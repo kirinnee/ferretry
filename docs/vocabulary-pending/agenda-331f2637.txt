@@ -1,0 +1,2 @@
+docs/agenda.md
+**The Inbox has no To test list on a task-asks machine.** Once a machine advertises `agenda.card-asks.1` its tasks leave the Inbox's To test section, the Answer-quickly run step and the snoozed to-tes

@@ -1,0 +1,1 @@
+[shell] GAP(app-shell): no device copy of the transcript (today's session cache and "Updating…"): the shell has no session cache, so the chat opens on "Opening…" until the first read (app/chat/chat-screen.tsx)

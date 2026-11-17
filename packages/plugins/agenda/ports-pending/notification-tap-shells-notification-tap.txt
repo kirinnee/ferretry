@@ -1,0 +1,1 @@
+[cross: access] GAP(notification-tap): the shell's notification tap hook, ShellProvides.notificationOpened, is not yet taken by Access; the notification filter's sentence says the switch is that machine's own, as the rows are Access's now

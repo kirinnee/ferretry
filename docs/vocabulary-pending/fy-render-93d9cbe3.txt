@@ -1,0 +1,2 @@
+docs/fy-render.md
+rename holds the type under its former name, `card`: it is still read, as `task`, for good, because a

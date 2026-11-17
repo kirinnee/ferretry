@@ -14,7 +14,8 @@
  *   3. EXEMPT, because they are what a registry is for: a pure one-line ADD to a `registry` file (one added line, zero
  *      removed, in its sorted place among its entries); any edit of a `composition.tsv` that only ADDS lines (a package, or a
  *      new package, declaring more files only tightens this guard; order is held by the `composition` check, and a removed or
- *      changed declaration is not exempt); and line DELETIONS from a `ports-pending.json` ledger (closing a ruled line is expected).
+ *      changed declaration is not exempt). The pending ledger is no composition file: it is one file per open line, so closing a
+ *      line is a deletion that touches nothing else (`docs/standards/testing`).
  *   4. Anything that cannot be decided (no sha, no merge-base, an unreadable `composition.tsv`) FAILS and says why.
  *   5. Generated files are never on the list: a hand edit of one already fails `registries.ts --check`.
  *
@@ -31,9 +32,6 @@ import { changedFiles, git } from './changed-files.ts';
 import { COMPOSITION_FILE, type CompositionEntry, guarded, readDeclared } from './lib/composition.ts';
 import { ONE_FOLDER_BASE_REF, hasReason, packageRoots, sectionEntries } from './one-folder.ts';
 
-/** The ledgers whose pure line deletions are exempt. */
-const LEDGER = 'ports-pending.json';
-
 /** What one declared file's diff says: the lines added and removed, and where the first added line sits in the head. */
 export interface FileChange {
   readonly added: readonly string[];
@@ -44,7 +42,7 @@ export interface FileChange {
   readonly head: readonly string[] | undefined;
 }
 
-export type Exemption = 'registry-add' | 'declaration-add' | 'ledger-closing';
+export type Exemption = 'registry-add' | 'declaration-add';
 
 export interface Guarded {
   readonly file: string;
@@ -109,18 +107,7 @@ export function isSortedAdd(file: string, change: FileChange): boolean {
   return true;
 }
 
-/**
- * A ledger edit that only closes lines: nothing added, or only the comma the new last entry now lacks (a removed line comes
- * back without its trailing comma), and strictly more lines removed than added.
- */
-export function isLedgerClosing(change: FileChange): boolean {
-  if (change.removed.length <= change.added.length) return false;
-  const removed = new Set(change.removed);
-  return change.added.every(line => removed.has(`${line},`));
-}
-
 const exemption = (file: string, entry: CompositionEntry | undefined, change: FileChange): Exemption | undefined => {
-  if (basename(file) === LEDGER && isLedgerClosing(change)) return 'ledger-closing';
   if (basename(file) === COMPOSITION_FILE && change.removed.length === 0 && change.added.length > 0)
     return 'declaration-add';
   if (entry?.kind === 'registry' && isSortedAdd(file, change)) return 'registry-add';
@@ -184,13 +171,7 @@ export function describe(result: Evaluation): string[] {
   for (const problem of result.problems) out.push(`❌ ${problem}`);
   for (const { file, why } of result.exempt)
     out.push(
-      `  exempt ${file}: ${
-        why === 'registry-add'
-          ? 'one line added in its sorted place'
-          : why === 'declaration-add'
-            ? 'declarations added'
-            : 'ledger lines closed'
-      }`,
+      `  exempt ${file}: ${why === 'registry-add' ? 'one line added in its sorted place' : 'declarations added'}`,
     );
   for (const file of result.explained) out.push(`  ✓ ${file} (named under "## Contract change")`);
   if (result.missing.length > 0) {

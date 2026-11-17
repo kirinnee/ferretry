@@ -1,0 +1,1 @@
+[shell] GAP(access): app/harness/pair-from-menu.tsx is not reached: it is a dev harness page (?pair-from-menu) that v4's App never mounted, and 5.0 has no pairing-screen or menu contribution seam for a plugin to mount it in (the shell owns both) (owner: kaizen app shell)

@@ -1,7 +1,7 @@
 /**
  * `manifest-match` (§7.9): a half implements something its manifest does not declare, or misses something it does.
- * A skeleton half passes only while its plugin is listed in `ports-pending.json` (`pending`, or that half in
- * `pendingHalves`). Every core and plugin package
+ * A skeleton half passes only while its plugin is pending (it holds a `ports-pending/<slug>.txt` gap file, or
+ * names that half in `ports-pending/halves/`). Every core and plugin package
  * (all but the kernel, whose own declaration has no halves) ships a daemon, app and CLI half (spine D11).
  */
 import { halfFindings } from '../gen/lib/halves.ts';

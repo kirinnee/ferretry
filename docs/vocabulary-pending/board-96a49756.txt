@@ -1,0 +1,2 @@
+docs/board.md
+(`packages/daemon/src/lib/board/gate-items.ts`); the pure half is `gate-policy.ts` and `agenda/card-asks.ts`.

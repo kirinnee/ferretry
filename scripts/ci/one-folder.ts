@@ -2,7 +2,7 @@
  * THE ONE-FOLDER RULE of a pull request into `rebuild/5.0-after`: a feature lives in its own plugin folder, and a file
  * outside it is an exception the PR body has to explain (docs/standards/architecture "One feature, one folder").
  *
- * Parallel work collides on shared files: in one week of merges the shared lists (`ports-pending.json`,
+ * Parallel work collides on shared files: in one week of merges the shared lists (`ports-pending.json`, one file per open line now,
  * `knip.production.json`, the core ferrets daemon index and service, the app shell notes) were touched by 7 to 53 PRs
  * each. A PR that has to touch one says so, in the body, per file, with the reason.
  *

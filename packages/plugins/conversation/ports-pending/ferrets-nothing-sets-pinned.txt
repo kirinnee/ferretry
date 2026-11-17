@@ -1,0 +1,1 @@
+[cross: ferrets] GAP(ferrets): nothing sets the pinned pane in front until Ferrets' app half does, so a quote goes to the visible chat's composer only

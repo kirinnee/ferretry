@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { contextFor } from '../gen/lib/check.ts';
@@ -242,7 +242,7 @@ describe('unwired-seams: the real workspace', () => {
 
   test('the committed allowlist parses and every entry has a card and a reason', () => {
     const text = readPendingMerged(join(import.meta.dir, '..', '..')) ?? '';
-    const entries = parseUnwired(text, 'ports-pending.json') ?? [];
+    const entries = parseUnwired(text, 'ports-pending/') ?? [];
     expect(entries.length).toBeGreaterThan(0);
     for (const entry of entries) {
       expect(entry.card).toMatch(/^&F\d+$/);
@@ -278,11 +278,16 @@ describe('unwired-seams: the base the list may not grow from', () => {
     const run = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' });
     if (run.status !== 0) throw new Error(`git ${args.join(' ')}: ${run.stderr}`);
   };
-  /** A throwaway repo whose one commit holds `ports-pending.json` with `text`, or nothing when `text` is undefined. */
-  const repoWith = (text: string | undefined): string => {
+  /** A throwaway repo whose one commit holds one `ports-pending/unwired/<n>.json` per seam, or only another file when undefined. */
+  const repoWith = (seams: readonly object[] | undefined): string => {
     const dir = mkdtempSync(join(tmpdir(), 'unwired-base-'));
     git(dir, 'init', '-q');
-    writeFileSync(join(dir, text === undefined ? 'other.txt' : 'ports-pending.json'), text ?? 'x');
+    if (seams === undefined) writeFileSync(join(dir, 'other.txt'), 'x');
+    else {
+      mkdirSync(join(dir, 'ports-pending/unwired'), { recursive: true });
+      seams.forEach((seam, at) => writeFileSync(join(dir, `ports-pending/unwired/e${at}.json`), JSON.stringify(seam)));
+      writeFileSync(join(dir, 'other.txt'), 'x');
+    }
     git(dir, 'add', '-A');
     git(dir, 'commit', '-q', '-m', 'base');
     return dir;
@@ -295,19 +300,19 @@ describe('unwired-seams: the base the list may not grow from', () => {
   });
 
   test('a ref that does not exist fails closed with a plain sentence, not a first baseline', () => {
-    const dir = repoWith('{"unwired":[]}');
+    const dir = repoWith([]);
     dirs.push(dir);
     expect(() => readBaseUnwired(dir, 'definitely-missing-base')).toThrow(sentence('definitely-missing-base'));
   });
 
-  test('a ref that exists but holds no ports-pending.json fails closed', () => {
+  test('a ref that exists but holds no ledger file is an empty ledger, the end state, and still compares', () => {
     const dir = repoWith(undefined);
     dirs.push(dir);
-    expect(() => readBaseUnwired(dir, 'HEAD')).toThrow(sentence('HEAD'));
+    expect(readBaseUnwired(dir, 'HEAD')).toEqual([]);
   });
 
   test('a readable base with an empty unwired list still reports growth', () => {
-    const dir = repoWith('{"unwired":[]}');
+    const dir = repoWith([]);
     dirs.push(dir);
     const base = readBaseUnwired(dir, 'HEAD');
     expect(base).toEqual([]);
@@ -317,14 +322,8 @@ describe('unwired-seams: the base the list may not grow from', () => {
     expect(grew.every(f => f.message.includes('was added; the list may only shrink'))).toBe(true);
   });
 
-  test('a readable base with no unwired key is the one first baseline', () => {
-    const dir = repoWith('{"format":1,"pending":[]}');
-    dirs.push(dir);
-    expect(readBaseUnwired(dir, 'HEAD')).toBeUndefined();
-  });
-
   test('a readable base with a list reads it as before', () => {
-    const dir = repoWith(JSON.stringify({ unwired: [{ seam: 'hook:a', card, why: 'x' }] }));
+    const dir = repoWith([{ seam: 'hook:a', card, why: 'x' }]);
     dirs.push(dir);
     expect(readBaseUnwired(dir, 'HEAD')).toEqual([{ seam: 'hook:a', card, why: 'x' }]);
   });

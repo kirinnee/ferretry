@@ -1,10 +1,15 @@
 import { expect, test } from 'bun:test';
 import cli from '../../cli/index.ts';
 import manifest from '../../manifest.ts';
-import pending from '../../ports-pending.json';
+import { readdirSync, readFileSync } from 'node:fs';
+
+const ledger = new URL('../../ports-pending/', import.meta.url);
+const open = readdirSync(ledger)
+  .filter(name => name.endsWith('.txt'))
+  .map(name => readFileSync(new URL(name, ledger), 'utf8'));
 
 test('the five `fy harness codex settings` verbs run over the config routes, and their pending line is gone', async () => {
-  expect(pending.pendingReasons.codex.join(' ')).not.toContain('settings` verbs refuse with exit 69');
+  expect(open.join(' ')).not.toContain('settings` verbs refuse with exit 69');
   const calls: string[] = [];
   const out: string[] = [];
   const half = cli.build?.({

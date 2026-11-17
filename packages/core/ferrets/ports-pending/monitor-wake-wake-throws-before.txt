@@ -1,0 +1,1 @@
+[compose] GAP(monitor-wake): a wake that throws before the Mailbox keeps it is lost (the park is cleared first)

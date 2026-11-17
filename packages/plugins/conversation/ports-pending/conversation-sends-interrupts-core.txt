@@ -1,0 +1,1 @@
+[own] GAP(conversation): sends and interrupts are core/mailbox's (daemon/send-half.ts) over the Ferrets harness seam, with two by-design deviations from v4: Interrupt cannot refuse `kill_failed` (Ferrets has four states and no unconfirmed-stop state), and it answers `turn: 0` (Ferrets keeps no turn count).
