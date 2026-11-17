@@ -55,10 +55,17 @@ describe('G95 telling paired machines with one name apart', () => {
   });
 
   it('G95 should tell two live machines apart by address, and never by fingerprint', () => {
-    const a = pairing('aaaa', 'http://127.0.0.1:40245', OCT_3);
-    const b = pairing('bbbb', 'http://127.0.0.1:40246', OCT_3);
-    should(distinctDaemonName(a, [a, b])).equal('kirin-box (127.0.0.1:40245)');
-    should(distinctDaemonName(b, [a, b])).equal('kirin-box (127.0.0.1:40246)');
+    const a = pairing('aaaa', 'http://10.0.0.5:40245', OCT_3);
+    const b = pairing('bbbb', 'http://10.0.0.6:40246', OCT_3);
+    should(distinctDaemonName(a, [a, b])).equal('kirin-box (10.0.0.5:40245)');
+    should(distinctDaemonName(b, [a, b])).equal('kirin-box (10.0.0.6:40246)');
+  });
+
+  it('G95 should never put a loopback address in a name: two daemons on one host are told apart by pairing day', () => {
+    const a = pairing('aaaa', 'http://127.0.0.1:7617', OCT_3);
+    const b = pairing('bbbb', 'http://127.0.0.1:7618', OCT_9);
+    should(distinctDaemonName(a, [a, b])).equal('kirin-box (paired 3 Oct)');
+    should(distinctDaemonName(b, [a, b])).equal('kirin-box (paired 9 Oct)');
   });
 
   it('G95 should fall back to the day each was paired when even the address is shared and neither is newer', () => {

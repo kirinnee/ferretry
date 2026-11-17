@@ -691,7 +691,7 @@ the admin token on loopback is answered the step-up demand, like every other cal
 them in the background, so a locked second machine used to raise its unlock over the first machine's
 page. A background read (`GET`, `HEAD`) that meets `unlock_required` or a step-up now waits until its
 machine is on screen, and the Machines list shows that machine as locked; anything a person pressed asks at
-once. Two machines that answer to the same name are told apart by address in the prompt and the list.
+once. Two machines that answer to the same name are told apart by address in the prompt and the list; a loopback address is never printed (it means "this computer" to whoever reads it), so two daemons on one host read "name (paired 3 Nov)" or "name (2)" instead.
 
 There is no operator password. The passkey step-up replaced it for every purpose it had — the local
 browser's unlock, the remote `configure` lock and the per-change confirmation — and **nothing is kept for

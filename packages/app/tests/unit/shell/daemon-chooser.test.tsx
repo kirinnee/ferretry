@@ -357,9 +357,12 @@ describe('S10 a daemon-less screen may ask for a machine', () => {
     await click(view, '[data-testid="ask"]');
     const labels = [...view.container.querySelectorAll('[data-chooser-machine]')].map(node => node.textContent);
     expect(new Set(labels).size).toBe(labels.length);
-    expect(labels).toContain('laptop (127.0.0.1:40245)');
+    // The loopback twin is numbered, never named by its address; the off-host twin keeps its address.
+    expect(labels).toContain('laptop (1)');
+    expect(labels).toContain('laptop (192.168.1.9:40245)');
+    expect(labels.join(' ')).not.toContain('127.0.0.1');
     await click(view, '[data-chooser-machine="d1"]');
-    expect(answers.chosen[0]?.machine).toBe('laptop (127.0.0.1:40245)');
+    expect(answers.chosen[0]?.machine).toBe('laptop (1)');
     await view.unmount();
   });
 

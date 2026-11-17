@@ -1,3 +1,4 @@
+import { isLoopbackHost } from '../release/loopback.ts';
 import { daemonTitle, type PairedDaemon } from './daemon-list.ts';
 
 /**
@@ -27,12 +28,32 @@ export const replacedPairing = (daemon: PairedDaemon, paired: readonly PairedDae
 const pairedDay = (pairedAt: number): string =>
   new Date(pairedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
+const isLoopbackAddress = (address: string): boolean => {
+  try {
+    return isLoopbackHost(new URL(address).hostname);
+  } catch {
+    return false;
+  }
+};
+
+/** What follows a loopback daemon's name when it has twins: the day it was paired, else its number in pairing order. */
+const loopbackTwinMark = (daemon: PairedDaemon, twins: readonly PairedDaemon[]): string => {
+  const day = pairedDay(daemon.pairedAt);
+  if (!twins.some(other => pairedDay(other.pairedAt) === day)) return `paired ${day}`;
+  const order = [daemon, ...twins].sort(
+    (left, right) => left.pairedAt - right.pairedAt || left.daemon.localeCompare(right.daemon),
+  );
+  return String(order.indexOf(daemon) + 1);
+};
+
 /**
  * {@link daemonTitle}, told apart from every other paired daemon that would read the same — in words a person can
  * use, never the daemon's fingerprint. Two daemons on one host both call themselves by its name, so a line naming
- * "dev-box" could not say WHICH one. A twin is followed by its address. A pairing a newer one replaced
- * ({@link replacedPairing}) is called the old pairing, and the live one then needs no suffix at all. Two that still
- * share an address are told apart by the day each was paired.
+ * "dev-box" could not say WHICH one. A twin is followed by its address — unless that address is loopback, which
+ * means "this computer" to whoever reads it and so must not leak into a dialog on another device: a loopback twin
+ * is told apart by the day it was paired, or by its number in pairing order when a twin shares that day. A pairing a
+ * newer one replaced ({@link replacedPairing}) is called the old pairing, and the live one then needs no suffix at all.
+ * Two that still share an address are told apart by the day each was paired.
  */
 export const distinctDaemonName = (daemon: PairedDaemon, paired: readonly PairedDaemon[]): string => {
   const name = daemonTitle(daemon);
@@ -41,6 +62,7 @@ export const distinctDaemonName = (daemon: PairedDaemon, paired: readonly Paired
     other => other.daemon !== daemon.daemon && daemonTitle(other) === name && !replacedPairing(other, paired),
   );
   if (twins.length === 0) return name;
+  if (isLoopbackAddress(daemon.address)) return `${name} (${loopbackTwinMark(daemon, twins)})`;
   const sharedAddress = name === daemon.address || twins.some(other => other.address === daemon.address);
   if (!sharedAddress) return `${name} (${daemon.address.replace(/^[a-z]+:\/\//u, '')})`;
   return `${name} (paired ${pairedDay(daemon.pairedAt)})`;

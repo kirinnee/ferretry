@@ -391,6 +391,28 @@ describe('the /pair page', () => {
     expect(moves).toEqual([]);
   });
 
+  it('tells same-named daemons on one host apart on the list, never by the loopback address', async () => {
+    const twin = (id: string, port: number, pairedAt: number): PairedDaemon =>
+      ({
+        daemon: `fy_daemon_${id.repeat(43)}`,
+        machine: 'studio',
+        deviceId: DEVICE,
+        address: `http://127.0.0.1:${port}`,
+        carriers: [],
+        pairedAt,
+        lastSelectedAt: pairedAt,
+      }) as PairedDaemon;
+    const { Page } = setup(async () => {
+      throw new Error('not used');
+    }, [twin('a', 7617, Date.UTC(2026, 10, 16, 12)), twin('b', 7618, Date.UTC(2026, 10, 17, 12))]);
+    view = await mount(<Page {...props('https://pwa.example.test/pair', [])} />);
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('studio (paired 16 Nov)');
+    expect(text).toContain('studio (paired 17 Nov)');
+    expect(text).not.toContain('127.0.0.1');
+    expect(text).not.toContain('761');
+  });
+
   it('says a machine no longer accepts this browser when the shell sends it here for that', async () => {
     const machine = {
       daemon: DAEMON,

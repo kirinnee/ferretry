@@ -7,3 +7,4 @@ export * from './advertisement.ts';
 export * from './hosted-directory.ts';
 
 export * from './tunnel-service.ts';
+export * from './daemon-path.ts';
