@@ -109,8 +109,12 @@ export const lifecyclePart = (core: ClaudeCore): Serves<'discover' | 'resume' | 
     async stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void> {
       core.deps.panes.remember(ferret, handle);
       // The handle is a pane id, which names another ferret's pane once the server has restarted: stop only THIS ferret's.
-      await runner.stop(handle, how, ferret);
-      core.deps.panes.forget(ferret);
+      try {
+        await runner.stop(handle, how, ferret);
+      } finally {
+        // A stop that throws must not leave a stale record of this ferret's pane behind.
+        core.deps.panes.forget(ferret);
+      }
     },
   };
 };

@@ -756,6 +756,21 @@ describe('ClaudeHarness', () => {
     expect(panes.require(FERRET)).toBe('%7');
   });
 
+  test('stop forgets only this ferret’s pane, even when the runner refuses to stop', async () => {
+    const { harness, panes } = build();
+    panes.remember(FERRET, '%7');
+    panes.remember('f2' as FerretId, '%8');
+    const refusing = {
+      key: 'tmux',
+      stop: async () => Promise.reject(new Error('tmux went away')),
+    } as unknown as Runner;
+
+    await expect(harness.stop(FERRET, '%7' as never, refusing, 'now')).rejects.toThrow('tmux went away');
+
+    expect(() => panes.require(FERRET)).toThrow();
+    expect(panes.require('f2' as FerretId)).toBe('%8');
+  });
+
   describe('the settings items’ launch flags (any flag, owner decision ^A525)', () => {
     const withItems = (items: ReadonlyMap<string, unknown>) =>
       build({
