@@ -27,7 +27,7 @@
  *   private HTTPS hosts (`endpointAllowed` allows that for a local server) and those are answered to every other flow
  *   while it lives. The service's own `endpointAllowed` still guards each flow.
  * - Set 1 includes the hosts of project `.mcp.json` servers, which an agent working in a worktree can write; that
- *   address is not checked by `endpointAllowed`. See the `mcp` line of `ports-pending.json`.
+ *   address is not checked by `endpointAllowed`. That is a known limit of this reach, not a closed one.
  *
  * Nothing here holds a token, a code or a verifier: only host names.
  */
