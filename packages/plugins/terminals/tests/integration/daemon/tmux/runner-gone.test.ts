@@ -42,7 +42,7 @@ describe('W2-a TmuxRunner.gone', () => {
   test("W2-a asks only has-session, by the ferret's own session name, never a pane id", async () => {
     const { subject, calls } = runner(answered(1, `can't find session: fy-${FERRET}`));
     expect(await subject.gone(FERRET)).toBe(true);
-    expect(calls).toEqual([['has-session', '-t', `fy-${FERRET}`]]);
+    expect(calls).toEqual([['has-session', '-t', `=fy-${FERRET}`]]);
   });
 
   test('W2-a proven gone: the session cannot be found, or the private server is not running', async () => {
