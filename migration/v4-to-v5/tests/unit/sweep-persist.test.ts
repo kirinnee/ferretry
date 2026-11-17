@@ -1,17 +1,24 @@
 import { describe, expect, test } from 'bun:test';
-import { chmod, lstat, mkdtemp, readlink, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fakeCodexAuthText } from '../../fixtures/sweep/fake-codex-auth.ts';
 import {
+  AFTER_FAILED_PERSIST,
   LINK_SCRIPT,
+  addStoreRoots,
   daemonUnitText,
   defaultPersistDir,
   execLine,
   execWord,
   persistTargetProblem,
+  pointerDir,
   pointerFile,
+  restartTerminals,
+  revertFailedPersist,
   setting,
+  storePathsIn,
+  storeRootOf,
   terminalsUnitText,
   unitMarker,
 } from '../../fixtures/sweep/persist.ts';
@@ -152,7 +159,10 @@ describe('persist target', () => {
     ["inside the owner's v5 home", `${HOME}/.ferretry-v5/x`],
     ['the v4 home itself', `${HOME}/.ferretry`],
     ['inside a claude home', `${HOME}/.claude/slot`],
-    ['inside a codex home', `${HOME}/.codex-work/x`.replace('.codex-work', '.codex')],
+    ['inside a codex home', `${HOME}/.codex/x`],
+    ['inside a second codex home (prefix .codex)', `${HOME}/.codex-work/x`],
+    ['inside a second claude home (prefix .claude)', `${HOME}/.claude-llm2/x`],
+    ['inside a sibling of the v4 home (prefix .ferretry)', `${HOME}/.ferretry-sweep/slot6`],
     ['inside the secrets folder', `${HOME}/.secrets/x`],
     ['inside the unit folder', `${HOME}/.config/systemd/user/x`],
     ['the home itself', HOME],
@@ -162,11 +172,10 @@ describe('persist target', () => {
   ])('refuses a folder %s', (_why, target) => {
     expect(persistTargetProblem({ target, sweepRoot: ROOT, home: HOME })).toBeString();
   });
-  test('an ordinary folder under the home is fine, and a sibling that only shares a prefix is not mistaken for a forbidden one', () => {
+  test('an ordinary folder under the home is fine, and a name that only shares a prefix with a forbidden one is not mistaken for it', () => {
     expect(persistTargetProblem({ target: `${HOME}/data/slot6`, sweepRoot: ROOT, home: HOME })).toBeUndefined();
-    expect(
-      persistTargetProblem({ target: `${HOME}/.ferretry-sweep/slot6`, sweepRoot: ROOT, home: HOME }),
-    ).toBeUndefined();
+    expect(persistTargetProblem({ target: `${HOME}/.secretsfoo/slot6`, sweepRoot: ROOT, home: HOME })).toBeUndefined();
+    expect(persistTargetProblem({ target: `${HOME}/data/.claude/slot6`, sweepRoot: ROOT, home: HOME })).toBeUndefined();
     expect(persistTargetProblem({ target: '/tmpfoo/slot6', sweepRoot: ROOT, home: HOME })).toBeUndefined();
   });
 });
@@ -229,6 +238,30 @@ describe('link-slot.sh', () => {
     await rm(dir, { recursive: true });
   });
 
+  test('many units racing to make the same link all succeed, and nothing is put INSIDE the persistent folder', async () => {
+    for (let round = 0; round < 5; round += 1) {
+      const dir = await mkdtemp(join(tmpdir(), 'link-slot-race-'));
+      const target = join(dir, 'persistent');
+      await mkdir(target);
+      await writeFile(join(target, 'x'), 'x');
+      const script = join(dir, 'link-slot.sh');
+      await writeFile(script, LINK_SCRIPT, { mode: 0o700 });
+      const link = join(dir, 'tmp', 'sweep', 'slot6'); // the parent does not exist yet: every runner creates it
+      const runs = Array.from({ length: 16 }, () =>
+        Bun.spawn(['/bin/sh', script, target, link], {
+          env: { PATH: '/usr/bin:/bin' },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        }),
+      );
+      const codes = await Promise.all(runs.map(async proc => await proc.exited));
+      expect(codes).toEqual(codes.map(() => 0));
+      expect(await readlink(link)).toBe(target);
+      expect(await readdir(target)).toEqual(['x']);
+      await rm(dir, { recursive: true });
+    }
+  });
+
   test('refuses (78) a persistent folder that is missing or is itself a link', async () => {
     const missing = await run(['<dir>/nope', '<dir>/l']);
     expect(missing.code).toBe(78);
@@ -266,5 +299,151 @@ describe('the fake Codex sign-in', () => {
     expect(text).toContain('fixture-unverifiable-signature');
     expect(text).not.toMatch(/sk-[A-Za-z0-9]{10,}/u);
     expect(text).not.toMatch(/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{40,}/u);
+  });
+});
+
+describe('the pointer file is believed only as far as a persist target', () => {
+  const read = (dir: unknown, slot: unknown = 6): ReturnType<typeof pointerDir> =>
+    pointerDir({ document: { slot, dir }, slot: 6, sweepRoot: ROOT, home: HOME });
+  test('the default persistent folder is accepted', () => {
+    expect(read(defaultPersistDir(6, HOME))).toEqual({ dir: defaultPersistDir(6, HOME) });
+  });
+  test.each([
+    ['the home itself', HOME],
+    ['the owner v4 home', `${HOME}/.ferretry`],
+    ['inside the owner v5 home', `${HOME}/.ferretry-v5/x`],
+    ['a claude login folder', `${HOME}/.claude-llm2`],
+    ['a folder under /tmp', '/tmp/x/slot6'],
+    ['not normalized', `${HOME}/a/../.ferretry`],
+    ['the root', '/'],
+  ])('refuses a pointer that names %s', (_why, dir) => {
+    const found = read(dir);
+    expect(found.dir).toBeUndefined();
+    expect(found.problem).toBeString();
+  });
+  test("a document that is not this slot's, or has no dir, is simply no pointer", () => {
+    expect(read(defaultPersistDir(6, HOME), 7)).toEqual({});
+    expect(read(undefined)).toEqual({});
+    expect(read(5)).toEqual({});
+    expect(pointerDir({ document: null, slot: 6, sweepRoot: ROOT, home: HOME })).toEqual({});
+    expect(pointerDir({ document: 'x', slot: 6, sweepRoot: ROOT, home: HOME })).toEqual({});
+  });
+});
+
+describe("restarting a persisted side's tmux server", () => {
+  test('uses restart (a RemainAfterExit oneshot that is still active ignores start) and returns the new server pid', async () => {
+    const calls: string[][] = [];
+    const found = await restartTerminals(
+      {
+        serverPid: async () => 4242,
+        systemctl: async args => {
+          calls.push([...args]);
+          return { code: 0, out: '', err: '' };
+        },
+      },
+      'fy5-slot6-terminals.service',
+    );
+    expect(found).toEqual({ pid: 4242 });
+    expect(calls).toEqual([['restart', 'fy5-slot6-terminals.service']]);
+  });
+  test('says why when systemd refuses, or when no server answers afterwards', async () => {
+    const refused = await restartTerminals(
+      { serverPid: async () => undefined, systemctl: async () => ({ code: 5, out: '', err: 'Unit not found' }) },
+      'u.service',
+    );
+    expect(refused).toEqual({ why: 'exit 5: Unit not found' });
+    const silent = await restartTerminals(
+      { serverPid: async () => undefined, systemctl: async () => ({ code: 0, out: '', err: '' }) },
+      'u.service',
+    );
+    expect('why' in silent).toBe(true);
+  });
+});
+
+describe('a persist that failed half way', () => {
+  const ports = (log: string[], opts: { revertFails?: boolean; restartFails?: boolean } = {}) => ({
+    revert: async () => {
+      log.push('revert');
+      if (opts.revertFails === true) throw new Error('disk full');
+    },
+    restart: async () => {
+      log.push('restart');
+      if (opts.restartFails === true) throw new Error('no systemd');
+    },
+    say: (line: string) => log.push(`say: ${line.trim()}`),
+  });
+  test('puts the folder back, then starts both daemons again; the warning is said before either', async () => {
+    const log: string[] = [];
+    expect(await revertFailedPersist(ports(log), 6)).toBe('restarted');
+    expect(log.map(entry => entry.split(':')[0])).toEqual(['say', 'say', 'revert', 'restart']);
+    expect(log[1]).toBe(`say: ${AFTER_FAILED_PERSIST}`);
+    expect(AFTER_FAILED_PERSIST).toContain('do NOT run up');
+    expect(AFTER_FAILED_PERSIST).toContain('wipes');
+  });
+  test('a revert that fails starts nothing and says so', async () => {
+    const log: string[] = [];
+    expect(await revertFailedPersist(ports(log, { revertFails: true }), 6)).toBe('not-reverted');
+    expect(log).not.toContain('restart');
+    expect(log.at(-1)).toContain('disk full');
+  });
+  test('a restart that fails after the warning surfaces to the caller, which reports it', async () => {
+    const log: string[] = [];
+    await expect(revertFailedPersist(ports(log, { restartFails: true }), 6)).rejects.toThrow('no systemd');
+    expect(log[1]).toBe(`say: ${AFTER_FAILED_PERSIST}`);
+  });
+});
+
+describe('GC roots for the nix store paths a slot bakes', () => {
+  const HASH = 'a'.repeat(32);
+  const OTHER = 'b'.repeat(32);
+  test('finds each store path once, whatever surrounds it (PATH lists, Exec words, wrapper scripts)', () => {
+    const text = [
+      `PATH=/nix/store/${HASH}-coreutils-9.5/bin:/usr/bin:/nix/store/${OTHER}-tmux-3.5a/bin`,
+      `FY_FIXTURE_BUN=/nix/store/${HASH}-coreutils-9.5/bin/env`,
+      `exec "/nix/store/${OTHER}-fyd-4.9.1/bin/.fyd-wrapped" "$@"`,
+      '/nix/store/short-name /nix/store/ not-a-store-path',
+    ].join('\n');
+    expect(storePathsIn(text)).toEqual([
+      `/nix/store/${HASH}-coreutils-9.5`,
+      `/nix/store/${OTHER}-fyd-4.9.1`,
+      `/nix/store/${OTHER}-tmux-3.5a`,
+    ]);
+  });
+  test('the store path a program lives in; nothing outside the store has one', () => {
+    expect(storeRootOf(`/nix/store/${HASH}-fyd-4.9.1/bin/fyd`)).toBe(`/nix/store/${HASH}-fyd-4.9.1`);
+    expect(storeRootOf('/usr/bin/env')).toBeUndefined();
+  });
+  test('roots each path once under the folder, by its own name, with --indirect', async () => {
+    const calls: string[][] = [];
+    const found = await addStoreRoots(
+      {
+        nixStore: async args => {
+          calls.push([...args]);
+          return { code: 0, out: '', err: '' };
+        },
+      },
+      '/data/slot6/gcroots',
+      [`/nix/store/${OTHER}-b`, `/nix/store/${HASH}-a`, `/nix/store/${HASH}-a`],
+    );
+    expect(found.failed).toEqual([]);
+    expect(found.rooted).toEqual([`/nix/store/${HASH}-a`, `/nix/store/${OTHER}-b`]);
+    expect(calls[0]).toEqual([
+      '--add-root',
+      `/data/slot6/gcroots/${HASH}-a`,
+      '--indirect',
+      '--realise',
+      `/nix/store/${HASH}-a`,
+    ]);
+    expect(calls).toHaveLength(2);
+  });
+  test('a path that could not be rooted is reported with the reason, never skipped silently', async () => {
+    const failing = await addStoreRoots(
+      { nixStore: async () => ({ code: 1, out: '', err: 'path is not valid' }) },
+      '/d',
+      [`/nix/store/${HASH}-a`],
+    );
+    expect(failing).toEqual({ rooted: [], failed: [{ path: `/nix/store/${HASH}-a`, why: 'path is not valid' }] });
+    const missing = await addStoreRoots({ nixStore: undefined }, '/d', [`/nix/store/${HASH}-a`]);
+    expect(missing.failed[0]?.why).toContain('nix-store is not on PATH');
   });
 });

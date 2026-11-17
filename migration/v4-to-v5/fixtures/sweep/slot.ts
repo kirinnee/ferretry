@@ -30,7 +30,7 @@
  * transient units into enabled unit files (and the scopes into terminals services) and the slot folder into a persistent one.
  */
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import {
   chmod,
@@ -60,10 +60,16 @@ import {
 import { fakeCodexAuthText } from './fake-codex-auth.ts';
 import {
   LINK_SCRIPT,
+  addStoreRoots,
   daemonUnitText,
   defaultPersistDir,
   persistTargetProblem,
+  pointerDir,
   pointerFile,
+  restartTerminals,
+  revertFailedPersist,
+  storePathsIn,
+  storeRootOf,
   terminalsUnitText,
   unitMarker,
   userUnitDir,
@@ -127,14 +133,20 @@ interface Slot {
 
 /** The persistent folder the kit's own pointer file names for this slot, or undefined when the slot is not persisted. */
 function persistedDirOf(n: number): string | undefined {
+  let document: unknown;
   try {
-    const document: unknown = JSON.parse(readFileSync(pointerFile(n), 'utf8'));
-    return isRecord(document) && document.slot === n && typeof document.dir === 'string' && isAbsolute(document.dir)
-      ? document.dir
-      : undefined;
+    document = JSON.parse(readFileSync(pointerFile(n), 'utf8'));
   } catch {
     return undefined;
   }
+  // The pointer is believed only as far as a fresh `persist` target would be: unpersist MOVES this folder and down may delete it.
+  const read = pointerDir({ document, slot: n, sweepRoot: SWEEP_ROOT, home: homedir() });
+  if (read.problem !== undefined)
+    die(
+      `refusing: ${pointerFile(n)} names a folder that is not an allowed slot folder (${read.problem}); nothing was touched. Fix or delete that pointer file`,
+      99,
+    );
+  return read.dir;
 }
 
 function slotOf(n: number): Slot {
@@ -634,6 +646,7 @@ const warnFleetSlice = (what: string, cgroup: string): void => {
 /** The wrapper every daemon and tmux server is exec'd through: it builds the EXACT environment at each exec (see fyd-exec.sh). */
 const WRAPPER_SOURCE = join(import.meta.dir, 'fyd-exec.sh');
 const SHELL = '/bin/sh';
+const ENV_PROGRAM = '/usr/bin/env';
 
 /**
  * The argv that runs `command` through the wrapper: `/bin/sh fyd-exec.sh <env> <env file> command…`. The wrapper does `env -i`
@@ -642,12 +655,12 @@ const SHELL = '/bin/sh';
  */
 function wrapped(envFile: string, command: readonly string[]): string[] {
   const wrapper = join(dirname(envFile), 'fyd-exec.sh');
-  const envProgram = Bun.which('env');
-  if (envProgram === null) die('env is not on PATH', 69);
+  // The system's own env, never the caller's (a devshell's coreutils lives in an unrooted nix store path a GC can delete).
+  if (!existsSync(ENV_PROGRAM)) die(`${ENV_PROGRAM} does not exist`, 69);
   const program = command[0];
   if (program === undefined || !isAbsolute(program) || program.includes('='))
     die(`refusing: ${String(program)} is not an absolute program path without "="`, 99);
-  return [SHELL, wrapper, envProgram, envFile, ...command];
+  return [SHELL, wrapper, ENV_PROGRAM, envFile, ...command];
 }
 
 /** `systemd-run --user --scope --unit <scope>` around a wrapped command: the caller's ambient environment never reaches it. */
@@ -720,15 +733,16 @@ async function ensureTmux(slot: Slot, which: Which): Promise<void> {
   await writeEnvFile(slot, which);
   if (slot.persisted) {
     // A persisted slot's tmux server is the enabled terminals service (its unit file holds the same recipe as below).
+    // No server answers, so RESTART (not start): the unit is a RemainAfterExit oneshot that still reads active (exited) after its
+    // tmux server died, and starting an active unit does nothing.
     const name = terminalsOf(slot, which);
-    const began = await systemctlUser(['start', name]);
-    const serverPid = await tmuxServerPid(side.tmux);
-    if (began.code !== 0 || serverPid === undefined)
-      die(
-        `could not start the ${label} server with ${name} (exit ${String(began.code)}: ${(began.err + began.out).trim().slice(0, 300)})`,
-      );
+    const restarted = await restartTerminals(
+      { serverPid: async () => await tmuxServerPid(side.tmux), systemctl: systemctlUser },
+      name,
+    );
+    if ('why' in restarted) die(`could not start the ${label} server with ${name} (${restarted.why})`);
     console.log(
-      `  ${label}: server pid ${String(serverPid)} started by ${name} (cgroup ${await cgroupOfPid(serverPid)})`,
+      `  ${label}: server pid ${String(restarted.pid)} started by ${name} (cgroup ${await cgroupOfPid(restarted.pid)})`,
     );
     return;
   }
@@ -1883,6 +1897,47 @@ async function startBoth(slot: Slot, v4Dir: string): Promise<void> {
   await waitHealthy(slot, 'v5');
 }
 
+/** The folder (inside the persistent slot) that holds one nix GC root per store path the units and env files name. */
+const GCROOTS = 'gcroots';
+/** What only a persisted slot carries: removed again by unpersist, and by a persist that fails. */
+const PERSIST_ONLY = ['link-slot.sh', 'v4-bin', 'support', GCROOTS] as const;
+
+/**
+ * A unit file and an env file bake absolute programs (PATH entries, tmux, bun) and the copied v4 programs name theirs (the v4
+ * fyd is a makeWrapper script that execs /nix/store/…-fyd-4.x/bin/.fyd-wrapped). A nix-collect-garbage would delete any of them
+ * and the slot would not start after the next reboot. So every store path named in the units and env files, and the store path
+ * each copied v4 program, tmux and bun came from, gets a GC root under <slot>/gcroots (a root keeps the whole closure).
+ * A path that could not be rooted is said out loud, never silently skipped. Nothing here exists on a host without nix.
+ */
+async function rootBakedStorePaths(
+  slot: Slot,
+  units: readonly { name: string; text: string }[],
+  v4Dir: string,
+): Promise<void> {
+  const texts = units.map(unit => unit.text);
+  for (const which of ['v4', 'v5'] as const) texts.push(await readFile(envFileOf(slot, which), 'utf8'));
+  const paths = new Set(texts.flatMap(storePathsIn));
+  const origins = [process.execPath, Bun.which('tmux') ?? ''];
+  for (const name of ['fy', 'fyd', 'fyd-browser-worker']) origins.push(join(v4Dir, name));
+  for (const origin of origins) {
+    const real = origin === '' ? undefined : await realpath(origin).catch(() => undefined);
+    const root = real === undefined ? undefined : storeRootOf(real);
+    if (root !== undefined) paths.add(root);
+  }
+  if (paths.size === 0) return;
+  const folder = join(slot.real, GCROOTS);
+  await mkdir(folder, { recursive: true, mode: 0o700 });
+  const nixStore = Bun.which('nix-store');
+  const { rooted, failed } = await addStoreRoots(
+    { nixStore: nixStore === null ? undefined : async args => await run(nixStore, [...args], baseEnvironment()) },
+    folder,
+    [...paths],
+  );
+  console.log(`  GC roots: ${String(rooted.length)} nix store paths rooted under ${folder}`);
+  for (const miss of failed)
+    console.log(`  WARNING: ${miss.path} is NOT rooted (${miss.why}); a nix GC could break this slot after a reboot`);
+}
+
 async function persist(slot: Slot, targetArg: string | undefined): Promise<void> {
   const n = String(slot.n);
   if (slot.persisted) die(`slot ${n} is already persisted at ${slot.real}`, 99);
@@ -1916,6 +1971,7 @@ async function persist(slot: Slot, targetArg: string | undefined): Promise<void>
     await rm(pointerFile(slot.n), { force: true });
     if ((await lstat(slot.dir).catch(() => undefined))?.isSymbolicLink() === true) await rm(slot.dir);
     await moveTree(target, slot.dir);
+    for (const leftover of PERSIST_ONLY) await rm(join(slot.dir, leftover), { recursive: true, force: true });
   };
   let p: Slot;
   try {
@@ -1942,13 +1998,31 @@ async function persist(slot: Slot, targetArg: string | undefined): Promise<void>
     await writeEnvFile(p, 'v4');
     await writeEnvFile(p, 'v5');
     await mkdir(userUnitDir(), { recursive: true });
-    for (const unit of persistedUnits(p)) await writeFile(join(userUnitDir(), unit.name), unit.text, { mode: 0o644 });
+    const units = persistedUnits(p);
+    for (const unit of units) await writeFile(join(userUnitDir(), unit.name), unit.text, { mode: 0o644 });
+    await rootBakedStorePaths(p, units, v4.dir);
   } catch (error) {
     for (const name of files) {
       if ((await unitFileState(join(userUnitDir(), name), slot.n, name)) === 'ours')
         await rm(join(userUnitDir(), name), { force: true });
     }
-    await revert().catch(() => undefined);
+    // The folder goes back AND both daemons start again (persist stopped them): never a slot left stopped. This is the same
+    // start `up` ends with, without any rm or re-create of the slot.
+    await revertFailedPersist(
+      {
+        revert,
+        restart: async () => {
+          await startBoth(slotOf(slot.n), v4.dir);
+          await writeWrappers(slotOf(slot.n));
+        },
+        say: line => console.log(line),
+      },
+      slot.n,
+    ).catch((restartError: unknown) => {
+      console.log(
+        `  the daemons could NOT be started again (${restartError instanceof Error ? restartError.message : String(restartError)}); the slot folder is back at ${slot.dir}`,
+      );
+    });
     throw error;
   }
   const reloaded = await systemctlUser(['daemon-reload']);
@@ -1986,11 +2060,12 @@ async function unpersist(slot: Slot): Promise<void> {
   if ((await lstat(slot.dir).catch(() => undefined))?.isSymbolicLink() !== true)
     die(`refusing: ${slot.dir} is not the link the persisted slot expects; nothing was moved`, 99);
   await rm(slot.dir);
+  // The GC roots go first: the store paths they kept are no longer named by any unit file.
+  await rm(join(slot.real, GCROOTS), { recursive: true, force: true });
   await moveTree(slot.real, back);
   await rm(pointerFile(slot.n), { force: true });
   const plain = slotOf(slot.n);
-  for (const leftover of ['link-slot.sh', 'v4-bin', 'support'])
-    await rm(join(plain.dir, leftover), { recursive: true, force: true });
+  for (const leftover of PERSIST_ONLY) await rm(join(plain.dir, leftover), { recursive: true, force: true });
   await startBoth(plain, v4Dir);
   await writeWrappers(plain);
   console.log(
