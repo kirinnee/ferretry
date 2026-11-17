@@ -216,7 +216,8 @@ describe('SecuritySurface', () => {
 
     // Assert
     should(marked(surface, 'data-security-add')).be.empty();
-    expect(text(surface)).toContain('ask the owner to run `fy passkey window <this device>` at the machine');
+    expect(text(surface)).toContain('ask the owner to run `fy passkey window alpha-token` at the machine');
+    expect(text(surface)).not.toContain('<this device>');
     run(() => surface.unmount());
   });
 
@@ -226,7 +227,20 @@ describe('SecuritySurface', () => {
 
     // Assert
     should(marked(surface, 'data-security-add')).be.empty();
-    expect(text(surface)).toContain('within 10 minutes of pairing');
+    expect(text(surface)).toContain('No window is open to add one. On the machine itself, run this:');
+    should(marked(surface, 'data-passkey-owner-command')).have.length(1);
+    expect(text(surface)).toContain('fy passkey window alpha-token');
+    expect(text(surface)).not.toContain('<this device>');
+    run(() => surface.unmount());
+  });
+
+  it('prints the command with the device name the machine sent, as one quoted word', async () => {
+    // Arrange / Act
+    const surface = await mountSurface(machine([view({ registration: 'closed', deviceName: "Ann's phone" })]));
+
+    // Assert
+    // `text` is JSON, so the one backslash of the quoted apostrophe reads as two.
+    expect(text(surface)).toContain("fy passkey window 'Ann'\\\\''s phone'");
     run(() => surface.unmount());
   });
 

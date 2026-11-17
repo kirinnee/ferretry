@@ -30,6 +30,8 @@ import {
   PASSKEY_COST_SENTENCE,
   passkeyFailureSentence,
   passkeyLabel,
+  NO_WINDOW_SENTENCE,
+  passkeyWindowCommand,
   registrationClosedSentence,
   registrationClosesSentence,
   unsupportedSentence,
@@ -39,6 +41,7 @@ import type { CredentialsPort } from '@ferretry/app';
 import { addPasskeyCeremony, browserCredentials } from '../../lib/step-up-ceremony.ts';
 import { fetchPasskeys, type StepUpClient } from '../../lib/step-up-client.ts';
 import { type DaemonConnection, useDaemonClient } from '../../shell-grants.ts';
+import { OwnerCommand } from '../step-up/step-up-dialog.tsx';
 import { SecuritySettingsBlock } from './security-settings-block.tsx';
 
 export type PasskeyClientFactory = (connection: DaemonConnection) => Promise<StepUpClient>;
@@ -51,13 +54,15 @@ interface SecurityCardProps {
   readonly supported: boolean;
   readonly origin: string;
   readonly machine: string;
+  /** This device's id, for the owner's command when the machine did not send its name. */
+  readonly deviceId: string;
   readonly busy: boolean;
   readonly failure: string | null;
   readonly onAdd: () => void;
 }
 
 /** The panel's content for a loaded list. Pure over its props so every state is one render. */
-function SecurityCard({ view, supported, origin, machine, busy, failure, onAdd }: SecurityCardProps) {
+function SecurityCard({ view, supported, origin, machine, deviceId, busy, failure, onAdd }: SecurityCardProps) {
   const headingId = useId();
   const canAdd = supported && view.registration !== 'closed';
   const closes =
@@ -114,9 +119,20 @@ function SecurityCard({ view, supported, origin, machine, busy, failure, onAdd }
           ) : null}
         </div>
       ) : (
-        <p className="m-0 text-cell leading-base text-muted" data-security-unavailable="">
-          {supported ? registrationClosedSentence(view.passkeys.length > 0) : unsupportedSentence(origin)}
-        </p>
+        <div data-security-unavailable="">
+          {supported && view.passkeys.length === 0 ? (
+            <>
+              <p className="m-0 text-cell leading-base text-muted">{NO_WINDOW_SENTENCE}</p>
+              <OwnerCommand command={passkeyWindowCommand({ name: view.deviceName, id: deviceId })} />
+            </>
+          ) : (
+            <p className="m-0 text-cell leading-base text-muted">
+              {supported
+                ? registrationClosedSentence(true, passkeyWindowCommand({ name: view.deviceName, id: deviceId }))
+                : unsupportedSentence(origin)}
+            </p>
+          )}
+        </div>
       )}
       {failure === null ? null : (
         <p
@@ -214,6 +230,7 @@ export function SecuritySurface({
           supported={supported()}
           origin={origin()}
           machine={machineName ?? connection.baseUrl}
+          deviceId={connection.deviceId}
           busy={busy}
           failure={failure}
           onAdd={() => void add()}

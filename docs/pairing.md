@@ -618,6 +618,13 @@ and the window is ten minutes, admits ONE passkey and is audited. The device the
 Security → Add a passkey inside it. Nothing here pairs the device again, so its grant and its other
 sessions are untouched.
 
+**The unlock prompt says the command.** A device with no passkey and no open window cannot get in by itself, so
+its unlock prompt (and Settings → Security) says so in plain words and prints the exact line for the owner, with
+this device's own name in it and a copy button: `fy passkey window 'Name'`. The name is text the device chose, so it
+is always printed as ONE single-quoted word, and a name that is empty, starts with `-` or holds a control character
+is replaced by the device's id. The screen only READS `GET /v1/passkeys` (which now also answers the caller's own
+`deviceName`); it opens nothing. Pressing **Add a passkey** afterwards works only once the owner has run the command.
+
 - **The browser cannot scan on WebKit.** `BarcodeDetector` is Chromium-only, so the in-app scanner is
   absent there. This is not the blocked path it looks like — the intended carrier is the phone's own
   camera app, which opens the PWA pre-filled on every platform — but a reader who opened the app first

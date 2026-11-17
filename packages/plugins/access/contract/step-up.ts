@@ -218,6 +218,11 @@ export const PasskeysViewSchema = z.strictObject({
   registration: z.enum(['first-window', 'confirm-existing', 'reopened', 'closed']),
   registrationClosesAt: InstantSchema.optional(),
   stepUpUntil: InstantSchema.optional(),
+  /**
+   * What the machine calls THIS device, so a screen can print the exact `fy passkey window <this device>` command.
+   * Only the caller's own record, to the caller; absent from an older machine, which the screen says by device id.
+   */
+  deviceName: z.string().min(1).max(200).optional(),
 });
 export type PasskeysView = z.infer<typeof PasskeysViewSchema>;
 

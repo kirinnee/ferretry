@@ -32,11 +32,43 @@ export const unsupportedSentence = (origin: string): string =>
 export const confirmExistingSentence = (machine: string): string =>
   `Adding a passkey for ${machine} asks you to confirm with a passkey this device already holds first.`;
 
-/** Why no passkey can be added right now, per the registration rule. */
-export const registrationClosedSentence = (hasPasskeys: boolean): string =>
+const PASSKEY_WINDOW_PLACEHOLDER = 'fy passkey window <this device>';
+
+/**
+ * The exact command the owner runs AT THE MACHINE to open this device's passkey window (`docs/pairing.md`).
+ *
+ * A device's name is text the DEVICE chose, and this string is made to be pasted into a shell, so the name is
+ * always one single-quoted word (a `'` becomes `'\''`), and a name with a control character, a newline or a leading
+ * `-` (which `fy` would read as an option) is not printed at all: the device's id, which is a fixed-shape token,
+ * stands in. `fy` accepts either.
+ */
+export function passkeyWindowCommand(device: { readonly name?: string; readonly id: string }): string {
+  const name = device.name?.trim();
+  const printable =
+    name !== undefined && name !== '' && !name.startsWith('-') && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(name);
+  const who = printable ? `'${name.replaceAll("'", "'\\''")}'` : device.id;
+  return `fy passkey window ${who}`;
+}
+
+/** Why no passkey can be added right now, per the registration rule; `command` is the exact line for the owner when known. */
+export const registrationClosedSentence = (
+  hasPasskeys: boolean,
+  command: string = PASSKEY_WINDOW_PLACEHOLDER,
+): string =>
   hasPasskeys
-    ? 'This device cannot add another passkey right now: ask the owner to run `fy passkey window <this device>` at the machine.'
-    : 'A first passkey can be added only within 10 minutes of pairing: add one from a device that already has access, or ask the owner to run `fy passkey window <this device>` at the machine.';
+    ? `This device cannot add another passkey right now: ask the owner to run \`${command}\` at the machine.`
+    : `A first passkey can be added only within 10 minutes of pairing: add one from a device that already has access, or ask the owner to run \`${command}\` at the machine.`;
+
+/** The plain sentence a device with no passkey and no open window is told, with the command shown beside it. */
+export const NO_WINDOW_SENTENCE = 'No window is open to add one. On the machine itself, run this:';
+
+/** What to do once the owner has run it. */
+export const AFTER_WINDOW_SENTENCE =
+  'Then press Add a passkey. The window stays open for 10 minutes and takes one passkey.';
+
+/** The failure line for a press that met a closed window while the command is on screen. */
+export const stillClosedSentence = (command: string): string =>
+  `No passkey window is open for this device yet. Run \`${command}\` on the machine, then try again.`;
 
 /** When an open registration window closes, in one sentence, or `null` when the machine named no end. */
 export function registrationClosesSentence(closesAt: string | undefined): string | null {

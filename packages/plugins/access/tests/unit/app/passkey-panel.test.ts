@@ -9,6 +9,7 @@ import {
   passkeyFailureSentence,
   passkeyLabel,
   passkeyNudgeDismissed,
+  passkeyWindowCommand,
   confirmExistingSentence,
   registrationClosedSentence,
   registrationClosesSentence,
@@ -32,6 +33,35 @@ const throwing: NudgeStorage = {
     throw new Error('storage denied');
   },
 };
+
+describe('the command the owner runs at the machine (U-P)', () => {
+  const id = 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa';
+
+  it('should name the device as one single-quoted word', () => {
+    should(passkeyWindowCommand({ name: 'Liftoff Browser', id })).equal("fy passkey window 'Liftoff Browser'");
+    should(passkeyWindowCommand({ name: "Ann's phone", id })).equal("fy passkey window 'Ann'\\''s phone'");
+    should(passkeyWindowCommand({ name: '$(reboot); `id` && x', id })).equal(
+      "fy passkey window '$(reboot); `id` && x'",
+    );
+  });
+
+  it('should print the id instead of a name that could change what the shell reads or what the owner sees', () => {
+    const fallback = `fy passkey window ${id}`;
+    should(passkeyWindowCommand({ name: 'two\nlines', id })).equal(fallback);
+    should(passkeyWindowCommand({ name: 'tab\there', id })).equal(fallback);
+    should(passkeyWindowCommand({ name: 'flip\u202Eit', id })).equal(fallback);
+    should(passkeyWindowCommand({ name: '--help', id })).equal(fallback);
+    should(passkeyWindowCommand({ name: '   ', id })).equal(fallback);
+    should(passkeyWindowCommand({ id })).equal(fallback);
+  });
+
+  it('should fill the real command into the closed-window sentence, and only fall back to a placeholder with none', () => {
+    should(registrationClosedSentence(false, "fy passkey window 'Phone'")).containEql(
+      "run `fy passkey window 'Phone'`",
+    );
+    should(registrationClosedSentence(false)).containEql('<this device>');
+  });
+});
 
 describe('passkey panel sentences', () => {
   it('states the cost of a passkey verbatim', () => {

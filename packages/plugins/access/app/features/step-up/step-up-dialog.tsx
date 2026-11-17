@@ -14,10 +14,27 @@
  * collides with the shell's own gesture. A centred dialog with a scrim has nothing to collide with.
  */
 
+import { browserClipboardWriter, CopyButton } from '@ferretry/app/ui';
 import { Fingerprint, ShieldCheck } from 'lucide-react';
 import { useId, useRef, useSyncExternalStore } from 'react';
 import { useDialogFocus } from '../../shell-grants.ts';
+import { AFTER_WINDOW_SENTENCE, NO_WINDOW_SENTENCE } from '../../lib/passkey-panel.ts';
 import type { StepUpGate } from '../../lib/step-up-gate.ts';
+
+const copyWriter = browserClipboardWriter();
+
+/** The one line the owner runs at the machine, with the one control that copies it. */
+export function OwnerCommand({ command }: { readonly command: string }) {
+  return (
+    <div
+      className="mt-2 flex min-w-0 items-center gap-1 rounded-control border border-border-strong bg-surface-2 py-1 pl-2 pr-1"
+      data-passkey-owner-command=""
+    >
+      <code className="min-w-0 flex-1 select-all break-all font-mono text-meta leading-base text-fg">{command}</code>
+      <CopyButton text={command} label="Copy the command" write={copyWriter} touch />
+    </div>
+  );
+}
 
 /**
  * What one confirmation covers, said where the person decides, until the machine says its own window
@@ -57,8 +74,8 @@ const STEP_UP_COPY: PasskeyPromptCopy = {
 };
 
 /** What the unlock prompt leads with for a device that may add its first passkey now. */
-export const FIRST_PASSKEY_TITLE = 'Set up Face ID for this device';
-const FIRST_PASSKEY_CONFIRM = 'Set up passkey';
+export const FIRST_PASSKEY_TITLE = 'Add a passkey to this device';
+const FIRST_PASSKEY_CONFIRM = 'Add a passkey';
 
 /** The unlock that opens the app: one sentence, one line on how long it stays, one button. */
 export const UNLOCK_COPY: PasskeyPromptCopy = {
@@ -107,6 +124,9 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
   // A device with no passkey yet, inside its window: the way in is to set one up, so the prompt says so
   // first — the other remedies are for after the window has closed, and its failure sentence names them.
   const setup = copy.kind === 'unlock' && prompt.firstPasskey === true;
+  // No passkey and no window: the person cannot fix it here, so the prompt says the owner's exact command instead.
+  // Only the unlock prompt can add the passkey itself; a step-up prompt names the command in its failure line instead.
+  const ownerCommand = copy.kind === 'unlock' && !setup ? prompt.ownerCommand : undefined;
 
   return (
     <div
@@ -133,7 +153,7 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
       >
         <h2 id={`${uid}-title`} className="m-0 flex min-w-0 items-center gap-2 text-title font-semibold text-fg">
           <ShieldCheck size={16} className="shrink-0 text-accent" aria-hidden="true" />
-          {setup ? FIRST_PASSKEY_TITLE : copy.title}
+          {setup || ownerCommand !== undefined ? FIRST_PASSKEY_TITLE : copy.title}
         </h2>
         <p id={`${uid}-purpose`} className="m-0 mt-2 text-ui leading-base text-muted">
           {setup ? (
@@ -143,6 +163,14 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
                 {machine}
               </span>{' '}
               yet, and it can add one now: Face ID, a fingerprint or this device&rsquo;s PIN. Then it unlocks.
+            </>
+          ) : ownerCommand !== undefined ? (
+            <>
+              This device has no passkey for{' '}
+              <span className="font-semibold text-fg" data-step-up-machine="">
+                {machine}
+              </span>
+              . {NO_WINDOW_SENTENCE}
             </>
           ) : copy.kind === 'unlock' ? (
             <>
@@ -170,6 +198,14 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
             </>
           )}
         </p>
+        {ownerCommand === undefined ? null : (
+          <>
+            <OwnerCommand command={ownerCommand} />
+            <p className="m-0 mt-2 text-meta leading-base text-muted" data-passkey-after-window="">
+              {AFTER_WINDOW_SENTENCE}
+            </p>
+          </>
+        )}
         {listed && structured !== undefined ? (
           <>
             <p className="m-0 mt-2 break-words text-ui font-medium leading-base text-fg" data-step-up-does="">
@@ -249,7 +285,11 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
             onClick={() => void gate.confirm()}
           >
             <Fingerprint size={15} aria-hidden="true" />
-            {prompt.busy ? 'Waiting for your passkey…' : setup ? FIRST_PASSKEY_CONFIRM : copy.confirm}
+            {prompt.busy
+              ? 'Waiting for your passkey…'
+              : setup || ownerCommand !== undefined
+                ? FIRST_PASSKEY_CONFIRM
+                : copy.confirm}
           </button>
           <button
             type="button"

@@ -47,7 +47,13 @@ import {
   UNLOCK_STAYS_FALLBACK,
   unlockStaysSentence,
 } from './lib/security-settings-client.ts';
-import { describeStepUpFailure, firstPasskeyOffer, stepUpCeremony, unlockCeremony } from './lib/step-up-ceremony.ts';
+import {
+  describeStepUpFailure,
+  firstPasskeyOffer,
+  ownerCommandOffer,
+  stepUpCeremony,
+  unlockCeremony,
+} from './lib/step-up-ceremony.ts';
 import type { StepUpClient } from './lib/step-up-client.ts';
 import { type PromptOrigin as GateOrigin, StepUpGate } from './lib/step-up-gate.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection } from './shell-pairing.ts';
@@ -112,6 +118,8 @@ export function accessPasskey(ports: PasskeyPorts): PasskeyProvision {
     // The client is read only when a person presses the prompt's button.
     ceremony: stepUpCeremony(ceremonyPorts),
     describe: describeStepUpFailure(ports.origin),
+    // A device with no passkey and no window is told the owner's exact command, whichever prompt it meets first.
+    ownerCommand: ownerCommandOffer(client),
     // The machine's own window, read once as the prompt opens; a failed read leaves the prompt's neutral words.
     scope: async daemon => {
       const view = await fetchSecuritySettings(await client(daemon));
@@ -123,6 +131,7 @@ export function accessPasskey(ports: PasskeyPorts): PasskeyProvision {
     describe: describeStepUpFailure(ports.origin),
     // A device with no passkey, inside its window, is offered to set one up rather than sent elsewhere.
     firstPasskey: firstPasskeyOffer(client),
+    ownerCommand: ownerCommandOffer(client),
     // The machine's own number, read once as the prompt opens (an exempt route, so it answers before an unlock).
     scope: async daemon => {
       try {

@@ -394,10 +394,12 @@ export class StepUpService {
     const passkeys = await this.deps.store.list(device.deviceId);
     const registration = await this.#registration(device, passkeys, now);
     const stepUpUntil = this.deps.registry.expiresAt(device, now);
+    const record = await this.deps.devices.device(device.deviceId);
     return {
       ok: true,
       value: {
         passkeys: passkeys.map(passkeyView),
+        ...(record === undefined ? {} : { deviceName: record.name }),
         registration: registration.kind,
         ...(registration.closesAtMs === undefined ? {} : { registrationClosesAt: instant(registration.closesAtMs) }),
         ...(stepUpUntil === undefined ? {} : { stepUpUntil: instant(stepUpUntil) }),
