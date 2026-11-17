@@ -2,7 +2,7 @@ import { err, ok, type Result } from '@ferretry/std';
 import type { JsonlRecords, StateDamage, StateFileDef } from '../../contract/index.ts';
 import { damageOf, decodeJson, describeFault, openDocument, shapeOf } from './format.ts';
 import type { HostFs } from './host-fs.ts';
-import { JsonlScanner, scanJsonl } from './jsonl-scan.ts';
+import { JsonlScanner, MAX_JSONL_RECORD_BYTES, scanJsonl } from './jsonl-scan.ts';
 import { JSONL_CHUNK_BYTES } from './stream-lines.ts';
 import { checkSqlite, type SqliteFiles } from './sqlite-store.ts';
 
@@ -142,7 +142,7 @@ async function inspectJsonlFile(
     tornTail: () => undefined,
   });
   try {
-    const found = await fs.streamBytes(path, JSONL_CHUNK_BYTES, chunk => scanner.push(chunk));
+    const found = await fs.streamBytes(path, JSONL_CHUNK_BYTES, chunk => scanner.push(chunk), MAX_JSONL_RECORD_BYTES);
     if (!found) return def.required === true ? damageOf(label, 'missing') : undefined;
   } catch (error) {
     return damageOf(label, 'io', describeFault(error));

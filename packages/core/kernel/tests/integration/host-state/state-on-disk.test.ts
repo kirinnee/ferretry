@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -11,6 +11,7 @@ import { acquireHomeLock, StateHomeLockedError } from '../../../host/state/home-
 import { createNodeHostFs } from '../../../host/state/host-fs.ts';
 import { moveStateAside, openPluginState } from '../../../host/state/open-plugin-state.ts';
 import { createStatePort } from '../../../host/state/state-port.ts';
+import { JSONL_CHUNK_BYTES } from '../../../host/state/stream-lines.ts';
 
 const homes: string[] = [];
 const freshHome = async (): Promise<string> => {
@@ -241,5 +242,48 @@ describe('streamBytes on disk: the whole file in bounded pieces, never through a
         throw new Error('stop');
       }),
     ).rejects.toThrow('stop');
+  });
+});
+
+describe('lines on disk: a file that changes between two piece reads never loses a complete line', () => {
+  const Padded = z.strictObject({ count: z.number().int(), pad: z.string() });
+  const padded = defineState({ name: 'padded', path: 'padded.jsonl', store: 'jsonl', format: 1, schema: Padded });
+
+  test('U a torn tail cut off by a concurrent append of more than one piece does not swallow that append', async () => {
+    const home = await freshHome();
+    const port = createStatePort({ home, pluginId: 'demo', files: [padded], fs: createNodeHostFs() });
+    await port.append(padded, { count: 0, pad: '' });
+    await port.append(padded, { count: 1, pad: '' });
+    // A crash cut the third record short: bytes with no newline at the end of the file.
+    await appendFile(join(home, 'state', 'demo', 'padded.jsonl'), '{"format":1,"count":2,"pad":"cut');
+
+    const seen: number[] = [];
+    for await (const record of port.lines(padded)) {
+      seen.push(record.count);
+      // The reader holds the file between pieces. Another writer appends now: it cuts the torn tail off and writes a
+      // record longer than a whole piece, so the reader's position is inside what that append replaced.
+      if (seen.length === 1) await port.append(padded, { count: 3, pad: 'x'.repeat(JSONL_CHUNK_BYTES + 4096) });
+    }
+
+    expect(seen).toEqual([0, 1, 3]);
+    expect((await port.records(padded)).unreadable).toBe(0);
+  });
+
+  test('U pieces end on a line, a line of up to the limit is whole in one piece, and only the file end may be unterminated', async () => {
+    const home = await freshHome();
+    const fs = createNodeHostFs();
+    const long = `{"format":1,"count":2,"pad":"${'y'.repeat(5000)}"}`;
+    await writeFile(join(home, 'a.jsonl'), `{"format":1,"count":1}\n${long}\n{"format":1,"count":3}\n{"format":1,"cou`);
+    const pieces: string[] = [];
+    await fs.streamBytes(
+      join(home, 'a.jsonl'),
+      1024,
+      chunk => void pieces.push(Buffer.from(chunk).toString('utf8')),
+      16 * 1024,
+    );
+    expect(pieces.slice(0, -1).every(piece => piece.endsWith('\n'))).toBe(true);
+    expect(pieces.some(piece => piece.includes(`${long}\n`))).toBe(true);
+    expect(pieces.at(-1)).toBe('{"format":1,"cou');
+    expect(pieces.join('')).toBe(await Bun.file(join(home, 'a.jsonl')).text());
   });
 });
