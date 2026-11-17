@@ -1,10 +1,10 @@
-import type { StatePort } from '@ferretry/kernel/contract';
+import { MAX_STATE_TAIL_BYTES, type StatePort } from '@ferretry/kernel/contract';
 import { SENDS_STATE } from '../../../contract/index.ts';
 import { deepFreezeJson, type JsonValue } from '../../seams/json.ts';
 import type { ClockPort } from '../../seams/ports.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
 import type { SendRecord } from '../../seams/ledger-types.ts';
-import type { SendLedger, SendSettlement } from '@ferretry/core-mailbox/contract';
+import type { SendLedger, SendLedgerTail, SendSettlement } from '@ferretry/core-mailbox/contract';
 
 /**
  * The durable send ledger, as an append-only log in the ferret's own state file.
@@ -63,6 +63,23 @@ export class StateSendLedger implements SendLedger {
 
   async list(id: SessionId): Promise<readonly SendRecord[]> {
     return [...(await this.all(id)).values()];
+  }
+
+  /**
+   * The end of the log: the latest line of each send that has one in the last `maxBytes` (a line the window cuts is
+   * dropped), and the log's size, so a page of the newest sends reads about a megabyte of a 70 MB file. A window as wide as
+   * the whole file reads all of it, as `list` does.
+   */
+  async recent(id: SessionId, maxBytes: number): Promise<SendLedgerTail> {
+    const size = (await this.state.version(SENDS_STATE, id))?.size ?? 0;
+    const wide = Math.min(Math.max(1, Math.ceil(maxBytes)), MAX_STATE_TAIL_BYTES);
+    const { records: lines } = await this.state.tail<unknown>(SENDS_STATE, { maxBytes: wide, name: id });
+    const latest = new Map<string, SendRecord>();
+    for (const line of lines) {
+      const record = parseRecord(line);
+      if (record !== undefined) latest.set(record.sendId, frozen(record));
+    }
+    return { records: [...latest.values()], size };
   }
 
   async settle(id: SessionId, sendId: string, patch: SendSettlement): Promise<SendRecord | undefined> {

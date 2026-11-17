@@ -14,6 +14,7 @@ import {
 import type { MountRoute } from './lib/api.ts';
 import { messageWithAttachments } from './lib/attachments-delivery.ts';
 import { sessionSendRoutes, SessionSendError } from './lib/delivery/mounts/session-send.ts';
+import { SendsPager } from './lib/delivery/sends-pager.ts';
 import { actRefusal, buildSendHalf, refusalCode, sendActRefusal, type UnwiredSend } from './send-half.ts';
 
 /** What the send half hands over, and the queue it and the routes read: everything the port and the routes need. */
@@ -152,9 +153,10 @@ export function sendApi({
 
 /** The routes of the send path over the same half (`sessionSendRoutes`). */
 export function sendRoutes(
-  { send, queue }: Pick<MailboxParts, 'send' | 'queue'>,
+  { send, queue, ledger }: Pick<MailboxParts, 'send' | 'queue' | 'ledger'>,
   clearer: SentDraftClearer | undefined,
 ): readonly MountRoute[] {
+  const pager = new SendsPager(ledger);
   const { prepared, sendActs, interruptFerret, mayGo, deliverAttachments, submit, keptSend, records } = send;
   const { sendsStamp, awaitStatus, queueMessages, queueStamp, queueFailure, handoffOf } = send;
   return sessionSendRoutes(
@@ -179,6 +181,12 @@ export function sendRoutes(
       },
       interrupt: async (id: string) => await interruptFerret(id),
       sends: records,
+      // The same look a read takes first (a send the pane has settled), then a page cut from the index and the log's end.
+      sendsPage: async (id, query) => {
+        const ferret = parseSessionId(id);
+        await send.lookFirst(ferret);
+        return await pager.page(ferret, query);
+      },
       sendsStamp,
       sendStatus: async (id, sendId, options) => await awaitStatus(parseSessionId(id), sendId, options),
       queue: queueMessages,
