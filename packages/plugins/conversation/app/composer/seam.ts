@@ -15,8 +15,6 @@
  *     the pinned pane in front until Ferrets' app half does).
  *   - withReferences / referencesOf / withReferencePrefix ... copies of Agenda's "re:" chip helpers (today's
  *     `agenda-reply.ts`, `answer-chip.ts`): the composer stores the chips beside an unsent message.
- *   - FerretContext ......................................... GAP(C3, Q0): today's `SessionContext`, until the Ferrets
- *     contract exports the ferret view schemas.
  *   - canSubmitComposer ..................................... copy of today's `session-screens.ts` one-liner (C3's split).
  */
 
@@ -113,10 +111,10 @@ export const withReferencePrefix = <T extends { readonly send: (...args: never[]
     },
   });
 
-// ─── shapes owned elsewhere (GAPs) ────────────────────────────────────────────────────────────────────────────────
+// ─── shapes owned elsewhere ───────────────────────────────────────────────────────────────────────────────────────
 
-/** GAP(ferrets, Q0): today's `SessionContext` — `@ferretry/app`'s `ContextUsage` until the Ferrets contract exports it. */
-export type { ContextUsage as FerretContext } from '@ferretry/app';
+/** The context window a ferret has used: the Ferrets contract's own shape. */
+export type { FerretContext } from '@ferretry/core-ferrets/contract';
 
 /** Copy of today's `session-screens.ts` `canSubmitComposer` (C3 ports the rest of that file). */
 export const canSubmitComposer = (draft: string, disabled: boolean, sending: boolean): boolean =>

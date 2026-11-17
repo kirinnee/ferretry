@@ -394,6 +394,7 @@
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/core-mailbox": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-access": "workspace:*",
         "@ferretry/plugin-claude-code": "workspace:*",
         "@ferretry/std": "workspace:*",
         "@neslinesli93/qpdf-wasm": "0.3.0",

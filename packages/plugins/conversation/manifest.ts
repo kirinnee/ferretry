@@ -2,6 +2,7 @@ import { definePlugin } from '@ferretry/kernel/manifest';
 import { CONVERSATION_CONFIG, CONVERSATION_STATE, ConversationPort, MailboxPort } from './contract/index.ts';
 import { AsksPort } from '@ferretry/core-asks/contract';
 import { FerretsPort } from '@ferretry/core-ferrets/contract';
+import { AccessPort } from '@ferretry/plugin-access/contract';
 import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
 import actions, { data, hooks, ui } from './manifest/generated/actions.ts';
 
@@ -35,7 +36,9 @@ export default definePlugin({
   needs: { ferrets: FerretsPort, asks: AsksPort, mailbox: MailboxPort },
   // Optional: the chat reads the observer's stored turn state and its instant, and what the pane is stopped on, from Claude
   // Code's redacted prompt route (`GET /v1/ferrets/:ferretId/prompt`). Without it the chat claims no dated turn.
-  uses: { claudeCode: ClaudeCodePort },
+  // Access: the composer's location chip reads the per-device "turn location back on" steps from Access's
+  // `access.how-to-enable-location` hook; without it the chip keeps its generic steps.
+  uses: { claudeCode: ClaudeCodePort, access: AccessPort },
   provides: { conversation: ConversationPort },
 
   actions: { ...actions },
