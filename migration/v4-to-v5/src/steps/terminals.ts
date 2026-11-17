@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { linkSocket } from '../sealed.ts';
 import { configs, info, paneFor } from '../v4/ferrets.ts';
+import { tmuxPaneLive } from '../v4/pane-live.ts';
 import type { Step } from './index.ts';
 
 export const terminalsStep: Step = {
@@ -16,7 +17,7 @@ export const terminalsStep: Step = {
     },
     {
       what: 'terminal-pane daemonId, tmuxSession, pid and processStartTicks',
-      why: 'FerretRecordSchema exposes only handle; Terminals has no persisted pane-proof schema',
+      why: 'FerretRecordSchema exposes only handle; Terminals has no persisted pane-proof schema. They are read once, as the proof that the pane is still live before its handle is carried',
     },
     { what: 'in-flight input holds', why: 'closed and quarantined at restart' },
   ],
@@ -24,7 +25,13 @@ export const terminalsStep: Step = {
     const base = { id: this.id, title: this.title, notCarried: this.notCarried, sealed: [] };
     try {
       let panes = 0;
-      for (const config of await configs(ctx.v4.sessions)) if (await paneFor(ctx.v4.sessions, config)) panes++;
+      // The same rule as the ferrets step: a handle is available only while tmux proves the pane live (pane id, session,
+      // pid and the pid's start, as v4 recorded them); a stale one is carried nowhere. A preview carries none.
+      const paneLive = ctx.paneLive ?? tmuxPaneLive;
+      for (const config of await configs(ctx.v4.sessions)) {
+        const pane = await paneFor(ctx.v4.sessions, config);
+        if (pane !== undefined && ctx.preview !== true && (await paneLive(pane, ctx.v4.home))) panes++;
+      }
       const socket = join(ctx.v4.home, 'tmux.sock');
       const source = await info(socket);
       if (source !== undefined && !source.isSocket()) throw new Error('invalid socket');

@@ -17,6 +17,7 @@ import type { NotCarried, StepReport } from '../report.ts';
 import { CODEX_HELD_SENTENCE, heldReason, heldRuntimes, holdsCodex } from './preview-hold.ts';
 import { previewFolder, rewriteTranscript } from '../v5/harness-paths.ts';
 import { listV4Config, readV4Yaml } from '../v4/config.ts';
+import { tmuxPaneLive } from '../v4/pane-live.ts';
 import { configs, json, paneFor, runtimeIds, runtimeName, State, type V4Config } from '../v4/ferrets.ts';
 import type { Step, StepContext } from './index.ts';
 import { type DetailsSource, prepareDetails } from './ferret-details.ts';
@@ -37,6 +38,8 @@ export const v5FerretName = (config: { id: string; name: string; teammate?: stri
  * job finishing, a monitor, a wake-up). Its `state.json` is carried WITHOUT v4's last turn (`sessionStateDocument`),
  * so v5's turn watch WRITES the first turn it sees itself, and only that moves the record to `idle`: the restart queued
  * for it (`queuedRestarts`) runs on v5's own evidence, never on a stale v4 turn. With no pane, the v4 status decides.
+ * "In its pane" means tmux shows that pane id in the ferret's own v4 session at conversion time (`PaneLive`); a pane that
+ * is gone counts as no pane.
  */
 export function liveState(state: { status?: string } | undefined, attached: boolean): 'starting' | 'idle' | 'working' {
   if (attached) return 'working';
@@ -246,10 +249,17 @@ export const ferretsStep: Step = {
       const ledgers = await prepareLedgers(ctx, sourceRecords);
       const details: DetailsSource[] = [];
       const tokens: { ferret: string; digest: string; issuedAt: string; revoked?: true; cutOff?: true }[] = [];
+      const paneLive = ctx.paneLive ?? tmuxPaneLive;
+      let gonePanes = 0;
       for (const config of sourceRecords) {
         const state = await json(join(ctx.v4.sessions, config.id, 'state.json'), State);
         if (state !== undefined && state.id !== config.id) throw new Error('identity mismatch');
-        const pane = await paneFor(ctx.v4.sessions, config);
+        const recorded = await paneFor(ctx.v4.sessions, config);
+        // v4's pane handle is carried only while tmux proves it is still THIS ferret's pane: ids restart at %0 on a new
+        // server, so a stale one names another ferret's pane and a restart's stop would kill it. Not live = no handle.
+        const live = recorded !== undefined && !ctx.preview && (await paneLive(recorded, ctx.v4.home));
+        if (recorded !== undefined && !ctx.preview && !live) gonePanes++;
+        const pane = live ? recorded : undefined;
         const status = state?.status;
         const stopped =
           status === undefined || ['completed', 'failed', 'stalled', 'stopped', 'interrupted'].includes(status);
@@ -331,7 +341,19 @@ export const ferretsStep: Step = {
       return {
         ...base,
         status: 'converted',
-        notCarried: [...this.notCarried, ...held, ...documents.notCarried],
+        notCarried: [
+          ...this.notCarried,
+          ...(gonePanes === 0
+            ? []
+            : [
+                {
+                  what: `${gonePanes} v4 pane handle${gonePanes === 1 ? '' : 's'} (the pane was gone, or tmux did not show it in the ferret's own session)`,
+                  why: "pane ids restart on a new tmux server, so a stale one names another ferret's pane; such a ferret carries no handle, is not attached and is not queued for a restart",
+                },
+              ]),
+          ...held,
+          ...documents.notCarried,
+        ],
         kept: [
           { what: 'ferret records (including archived sessions)', count: records.length },
           { what: 'ferret credential hashes', count: tokens.length },

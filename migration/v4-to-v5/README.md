@@ -94,7 +94,7 @@ real schemas in a subprocess.
 
 Declared files without a v5 schema are **not written**: moves, auto-resume and terminals.json. v4's own restart queue
 is not carried either; instead `state/ferrets/restarts.json` queues a v5 restart for every ferret still in its v4 pane
-(not stopped, with a pane handle), so v5 relaunches it as a v5 harness at its next idle moment (M3). Such a ferret is
+(not stopped, with a pane handle), so v5 relaunches it as a v5 harness at its next idle moment (M3). A pane counts as "still there" only when tmux (read-only, on v4's `tmux.sock`) shows its id inside that ferret's own v4 session at conversion time; a stale handle (tmux gone after a slot restart or reboot, pane ids reused by another ferret) is not carried: that ferret has no handle, is not attached, is not queued, and the report counts them. Such a ferret is
 carried `working` and its `state.json` without v4's last turn (`turnState`, `turnStateAt`; a `created`/`starting` status
 becomes `running`), so the record goes `idle` only when v5's turn watch writes the first turn it sees itself: the
 restart runs on v5's own evidence, never on a stale v4 turn. Runtime

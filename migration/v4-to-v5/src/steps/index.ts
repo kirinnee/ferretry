@@ -7,6 +7,7 @@
  * pending, `home.json` is not written and v5 refuses the folder: an incomplete conversion cannot be booted.
  */
 import type { V4ConfigOverrides, V4Paths } from '../v4/layout.ts';
+import type { PaneLive } from '../v4/pane-live.ts';
 import type { LoginHarness } from './preview-hold.ts';
 import type { V5Writer } from '../v5/write.ts';
 import type { NotCarried, StepReport } from '../report.ts';
@@ -95,6 +96,11 @@ export interface StepContext {
    * cannot be converted, so nothing is recorded for a held v4 file (fail closed).
    */
   readonly dryConfigs?: (overrides: V4ConfigOverrides) => Promise<EnforcedConversion>;
+  /**
+   * Whether a v4 pane is provably live in its own tmux session (see `PaneLive`). Absent: the real, read-only tmux probe.
+   * Tests inject a fake so no unit test touches a real tmux.
+   */
+  readonly paneLive?: PaneLive;
   /** Absent in tests that do not read the host: a step needing it then reads nothing and says so. */
   readonly host?: HostFacts;
   /**
