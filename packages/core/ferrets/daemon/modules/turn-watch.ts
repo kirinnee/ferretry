@@ -19,6 +19,9 @@
  * between two spinner redraws cannot end a turn while the transcript's newest record says the agent is mid-turn. A ferret
  * whose harness proves no transcript (none offered, none bound yet, unreadable) is decided from the pane alone, which is
  * what today does for a session with no proved transcript.
+ *
+ * THE REGISTRY FOLLOWS THE RECORD, NOT ONLY ITS CHANGES: a look that decides the turn already recorded still moves a
+ * registry state that disagrees with it (`agreed`), because a launch sets `working` without touching the record.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
@@ -350,6 +353,22 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
                 questionOpen: (id: SessionId) =>
                   deps.questionOpen?.(id as unknown as FerretId) ?? Promise.resolve(false),
               }),
+          // A look that agrees with the recorded turn records nothing, so the registry is moved here when it disagrees:
+          // a launch (start, resume, attach) set it `working` while the document kept the last run's `your-turn` (a
+          // resume that beat the tick which would have cleared it), and a run whose turns all end between two looks
+          // never records a change. Left alone, the ferret read `working` for ever and the Warden nudged it every few
+          // minutes. One registry read per look; the registry is written only when it disagrees.
+          agreed: (id: SessionId, turn: SessionTurnState) => {
+            const record = ferretOf(id);
+            if (record === undefined || (record.state !== 'working' && record.state !== 'idle')) return;
+            if (record.state === (turn === 'working' ? 'working' : 'idle')) return;
+            void deps.turnObserved(id as unknown as FerretId, turn).catch((error: unknown) =>
+              deps.log.warn("a ferret's state could not follow its recorded turn", {
+                ferret: id,
+                ...turnWatchFailureFields(error),
+              }),
+            );
+          },
           // A damaged document is said ONCE, not on every look that meets it again (until its damage changes).
           failureKey: turnWatchFailureKey,
           failed: (id, error) =>

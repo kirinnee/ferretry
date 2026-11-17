@@ -80,7 +80,19 @@ export interface FleetHooks {
   readonly ticking?: () => void;
 }
 
-export async function fleetOf(turnState: 'your-turn' | 'working', ferrets = 30, hooks: FleetHooks = {}) {
+/** What a test may set beyond the recorded turn: the registry state it starts on, and who hears `turnObserved`. */
+export interface FleetOptions {
+  /** The registry state every ferret starts on; absent: the one its recorded turn says. */
+  readonly registry?: 'working' | 'idle';
+  readonly turnObserved?: (ferret: FerretId, turn: 'working' | 'your-turn' | 'needs-input') => Promise<void>;
+}
+
+export async function fleetOf(
+  turnState: 'your-turn' | 'working',
+  ferrets = 30,
+  hooks: FleetHooks = {},
+  options: FleetOptions = {},
+) {
   const { storage } = await memoryStorage({ clock: { now: () => new Date(RECORD_T0).toISOString() } });
   cleanups.push(async () => await storage.close());
   const runner = Object.assign(new FakeRunner(), { requireFerret: true });
@@ -102,7 +114,7 @@ export async function fleetOf(turnState: 'your-turn' | 'working', ferrets = 30, 
       harness: 'claude-code',
       runner: 'tmux',
       folder: `/work/${id}`,
-      state: turnState === 'working' ? 'working' : 'idle',
+      state: options.registry ?? (turnState === 'working' ? 'working' : 'idle'),
       handle: runner.adoptable(id as unknown as FerretId),
       createdAt: RECORD_T0,
       stateAt: RECORD_T0,
@@ -114,7 +126,7 @@ export async function fleetOf(turnState: 'your-turn' | 'working', ferrets = 30, 
     tail: transcripts.tail,
     record: ferret => records.get(ferret),
     runner: () => runner,
-    turnObserved: async () => undefined,
+    turnObserved: options.turnObserved ?? (async () => undefined),
     clock: { now: () => new Date(nowMs).toISOString() },
     every: () => () => undefined,
     yieldToLoop: async () => {
