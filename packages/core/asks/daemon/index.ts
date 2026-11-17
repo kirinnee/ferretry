@@ -63,7 +63,7 @@ export default implementDaemon(manifest, {
     const now = (): string => String(clock.now());
 
     const files = new StateAgendaFiles(state);
-    const versions = new SqliteAgendaVersionStore(state);
+    const versions = new SqliteAgendaVersionStore(state, async () => await clock.sleep(milliseconds(0)));
     const seen = new FileAgendaSeenStore(files, uniqueId, warn);
     const repository = new FileAgendaLedgerRepository(files, uniqueId, versions, {
       now: () => clock.nowMs(),
