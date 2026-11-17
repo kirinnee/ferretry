@@ -45,7 +45,7 @@ const status = (root: ParentNode, row: string): string =>
   '';
 
 describe('mcp#2 the status under an MCP server’s row in the Profiles library', () => {
-  it('draws the server’s own status line, from the machine’s inventory, with Check', async () => {
+  it('S-0061 draws the server’s own status line, from the machine’s inventory, with Check', async () => {
     const root = await mountRows([{ subject: 'linear', usedByRuntimes: 2 }]);
     expect(status(root, 'linear')).toBe('ready');
     expect(root.querySelector('[data-mcp-row="linear"] [data-mcp-status]')).not.toBeNull();

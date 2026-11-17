@@ -3,7 +3,7 @@
   "pending": ["usage"],
   "pendingReasons": {
     "usage": [
-      "[tests] eight usage parity rows stay `[ ]` in docs/design/rebuild-parity.tsv, each with its own skip or reason: F-0254 and F-0255 (the kernel sqlite store owns the -shm and -wal files), J-0028 (no Logins change event to invalidate the feed on), J-0115 (the kernel hands Usage no event-loop reading), J-0163 (the host's live-activity timers, not Usage's), R-0037 and R-0038 (`available: publicFeed` became a handler answer, so descriptor-parity records `available` dropped, which it does not count as a tightening), V-0235 (`--out` and `--trace-syscalls` need CLI shell facilities)"
+      "[tests] five usage parity rows stay `[ ]` in docs/design/rebuild-parity.tsv, each with its own skip or reason: J-0028 (Logins now publishes `logins.changed`, but Usage does not subscribe to it and `CachedUsageFeed` has no way to drop its cache), J-0115 (the kernel hands Usage no event-loop reading), R-0037 and R-0038 (`available: publicFeed` became a handler answer, so descriptor-parity records `available` dropped, which it does not count as a tightening), V-0235 (`--out` and `--trace-syscalls` need CLI shell facilities)"
     ]
   }
 }

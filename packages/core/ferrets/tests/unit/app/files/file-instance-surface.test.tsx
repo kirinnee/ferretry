@@ -76,7 +76,7 @@ describe('the file instance surface', () => {
     }
   });
 
-  it('draws one tab as an instance: its bar, its notice and its body, read once', async () => {
+  it('S-0102 draws one tab as an instance: its bar, its notice and its body, read once', async () => {
     const view = fresh();
     const tab: OpenFileTab = { path: 'a.ts', view: 'normal' };
     const Probe = () => {
@@ -115,7 +115,7 @@ describe('the file instance surface', () => {
 });
 
 describe('the Files pane as a tab strip', () => {
-  it('gives every opened file its own tab and keeps each tab’s own view', async () => {
+  it('S-0103 gives every opened file its own tab and keeps each tab’s own view', async () => {
     fixture.listings = {
       '': {
         entries: [

@@ -9,8 +9,8 @@
  *   - DaemonFerretScope / daemonFerretScope / daemonFerretKey .. re-exports of `@ferretry/app` (`compose/ferret-scope.ts`).
  *   - ConversationCaller / callRefusal ...................... the plugin client's `call` (§9.6), replacing today's
  *     `DaemonFetch` / `browserFetch` / `daemonRequest`; a refusal is `DaemonCallError` (status, code, sentence).
- *   - carrierDelivery ....................................... GAP(app-shell): today's `relay-carrier.ts` walk; the 5.0
- *     client does not classify an outage yet, so this reads a `delivery` mark off the error chain and finds none.
+ *   - carrierDelivery ....................................... today's `relay-carrier.ts` walk: reads the `delivery` mark
+ *     `@ferretry/app`'s session transport puts on a carrier failure (`unsent` before the request left, `unknown` after).
  *   - devicePreference, the foreground pin scope ......... re-exports of `@ferretry/app` (GAP(ferrets): nothing sets
  *     the pinned pane in front until Ferrets' app half does).
  *   - withReferences / referencesOf / withReferencePrefix ... copies of Agenda's "re:" chip helpers (today's
@@ -50,9 +50,9 @@ export { DaemonCallError };
 
 /**
  * Whether a request that failed on the carrier may have reached the daemon: `unsent` (proved not to have left), or
- * `unknown`; `undefined` for anything that is not a carrier outage. The 5.0 client marks an outage (S12,
- * `isCarrierOutage`) but cannot prove a request never left, so a marked outage reads `unknown` ("checking whether it
- * arrived") and never `unsent`; a `delivery` mark found down the chain still wins, as today's walk read it.
+ * `unknown`; `undefined` for anything that is not a carrier outage. The session transport marks a failure that happened
+ * before the request left as `unsent` and one at or after it as `unknown`; that `delivery` mark, found down the chain,
+ * wins. A carrier outage with no mark reads `unknown` ("checking whether it arrived").
  */
 export type CarrierDelivery = 'unsent' | 'unknown';
 

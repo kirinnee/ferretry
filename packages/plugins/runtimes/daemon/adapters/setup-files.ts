@@ -93,9 +93,10 @@ export async function skillItemsIn(
  * service `PUT /v1/config/file` writes through, so a copy is validated, refused if the file moved, and held when
  * it loosens exactly as an edit is. It writes as the owner (`'owner'`): the route that reached it is a person's.
  *
- * GAP(kernel): that service is the kernel's config layer; plugins have no config write port.
+ * GAP(runtimes): that service is the kernel's config layer, which writes only a plugin's OWN files; a merge that writes
+ * other plugins' files is the cross-owner writer the owner deferred (!A525 item 10).
  *
- * @pending runtimes: the settings merge of a copy needs the config layer's file service
+ * @pending runtimes: the settings merge of a copy writes other plugins' files
  */
 export function cloneConfigFilesOver(service: ConfigFileService): CloneConfigFiles {
   return {

@@ -143,8 +143,8 @@ export class SessionFiles {
   readonly launchGate: InMemoryLaunchGate;
   /**
    * ONE per-session mutation queue (today's `sessionMutations`): the lifecycle uses it, and so does FerretsService's
-   * start/stop/resume/revoke (the daemon binds it as `FerretsPorts.serial`). GAP(ports-pending: Session adapters): runtime
-   * control, Pack hooks and switches, and answers are not on it yet.
+   * start/stop/resume/revoke (the daemon binds it as `FerretsPorts.serial`), and so does runtime control. GAP(ports-pending:
+   * Session adapters): Pack hooks and switches, and answers are not on it yet.
    */
   readonly serial = new KeyedSerialExecutor();
   private readonly credentials = new NodeSessionCredentialIssuer();
