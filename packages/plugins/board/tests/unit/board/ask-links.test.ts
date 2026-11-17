@@ -16,7 +16,12 @@ class FakeAsks implements CardAskReader {
   constructor(
     private readonly asks: readonly OpenCardAsk[],
     private readonly failing = false,
+    private readonly mentions: readonly OpenCardAsk[] = [],
   ) {}
+
+  async mentioned(): Promise<readonly OpenCardAsk[]> {
+    return this.mentions;
+  }
 
   async open(): Promise<readonly OpenCardAsk[]> {
     this.reads += 1;
@@ -91,6 +96,47 @@ describe("Asks' link to cards", () => {
     should(found.get('F4')?.open).eql([{ ferret: 'owner3', id: 'A1' }]);
   });
 
+  it('should list an ask a ferret raised about a card beside the gate ask, and only the gate ask is asking', async () => {
+    const asks = new FakeAsks([ask('lead', 'A1', 'F1')], false, [ask('lead', 'A3', 'F1'), ask('lead', 'A4', 'F2')]);
+
+    const found = await links(asks).asksFor([card({ id: 'F1', owner: 'lead' })]);
+
+    should(found.get('F1')).deepEqual({
+      open: [
+        { ferret: 'lead', id: 'A1' },
+        { ferret: 'lead', id: 'A3' },
+      ],
+      asking: [{ ferret: 'lead', id: 'A1' }],
+    });
+    should(found.has('F2')).be.false();
+  });
+
+  it('should list a card carried by a ferret-raised ask alone, and an ask that is also its gate once', async () => {
+    const asks = new FakeAsks([ask('lead', 'A1', 'F1')], false, [ask('lead', 'A1', 'F1'), ask('child', 'A2', 'F2')]);
+
+    const found = await links(asks).asksFor([card({ id: 'F1' }), card({ id: 'F2' })]);
+
+    should(found.get('F1')?.open).eql([{ ferret: 'lead', id: 'A1' }]);
+    should(found.get('F2')).deepEqual({ open: [{ ferret: 'child', id: 'A2' }], asking: [] });
+  });
+
+  it('should keep the gate asks when the ferret-raised asks cannot be read, and say so', async () => {
+    const warnings: string[] = [];
+    const asks = new FakeAsks([ask('lead', 'A1', 'F1')]);
+    const reading: CardAskReader = {
+      open: async () => await asks.open(),
+      mentioned: async () => Promise.reject(new Error('the boards are unreadable')),
+    };
+
+    const found = await new CardAskLinks(reading, { warn: message => warnings.push(message) }).asksFor([
+      card({ id: 'F1', owner: 'lead' }),
+    ]);
+
+    should(found.get('F1')?.asking).eql([{ ferret: 'lead', id: 'A1' }]);
+    should(warnings).have.length(1);
+    should(warnings[0]).containEql('the boards are unreadable');
+  });
+
   it('should cost the cards their asks, not the read, when Asks cannot be read', async () => {
     const warnings: string[] = [];
     const asks = new FakeAsks([], true);
@@ -111,6 +157,7 @@ describe("Asks' link to cards", () => {
         controller.abort();
         return read;
       },
+      mentioned: async () => [],
     };
 
     await new CardAskLinks(reading, { warn: () => undefined }).asksFor([card({ id: 'F1' })], controller.signal).then(

@@ -70,11 +70,30 @@ export class AsksCardObligations implements CardObligations {
 }
 
 /**
- * Every open ask of the `card` source, with the card its gate entry names, in ONE Asks read (`AsksApi.open`). Asks
- * links an ask to a card only through this source, so this is every ask a card can carry.
+ * What a card carries in Asks: every open gate ask of the `card` source, with the card its entry names, in ONE read
+ * (`AsksApi.open`); and every open ask a ferret raised about a card, read from the boards' agenda items that name it
+ * (`AsksApi.snapshots`, the link `fy agenda ls` shows as `&F9`).
  */
 export class AsksCardAskReader implements CardAskReader {
-  constructor(private readonly asks: Pick<AsksApi, 'open'>) {}
+  constructor(private readonly asks: Pick<AsksApi, 'open' | 'snapshots'>) {}
+
+  async mentioned(): Promise<readonly OpenCardAsk[]> {
+    const boards = await this.asks.snapshots();
+    return boards.flatMap(board =>
+      board.items.flatMap(item => {
+        if (item.raisedBy !== 'agent' || item.notice === true) return [];
+        const named = [
+          ...(item.task === undefined || item.task === null ? [] : [item.task]),
+          ...(item.relatedTasks ?? []),
+        ];
+        return [...new Set(named.map(task => task.id))].map(cardId => ({
+          ferret: board.sessionId,
+          id: item.id,
+          cardId: cardId as CardId,
+        }));
+      }),
+    );
+  }
 
   async open(): Promise<readonly OpenCardAsk[]> {
     const open = await this.asks.open({ source: CARD_SOURCE, state: 'open' });
