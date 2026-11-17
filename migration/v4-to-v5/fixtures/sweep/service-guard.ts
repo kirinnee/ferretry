@@ -11,7 +11,8 @@
  *      the lock (a different pid on this slot's lock means the unit is not what runs here);
  *   3. anything else is foreign.
  * Identity of a TERMINALS SCOPE: every process in it is the tmux server on THIS slot's socket, a pane that server lists, or
- * a descendant of one of those; an empty scope has nothing to kill. A process of any other kind makes the scope foreign.
+ * a descendant of one of those; an empty scope has nothing to kill. A process of any other kind makes the scope foreign, and so
+ * does a control group whose cgroup.procs cannot be read.
  */
 
 export interface UnitInfo {
@@ -82,8 +83,8 @@ export interface GuardPorts {
   holders(lockFile: string): Promise<number[]>;
   /** The last resort for a daemon that holds the lock outside any unit: SIGTERM to the lock holders only. */
   stopByLock(lockFile: string, label: string): Promise<void>;
-  /** Every pid in a control group (cgroup.procs). */
-  cgroupPids(cgroup: string): Promise<number[]>;
+  /** Every pid in a control group (cgroup.procs), or `undefined` when cgroup.procs cannot be read (then nothing can be proved). */
+  cgroupPids(cgroup: string): Promise<number[] | undefined>;
   /** The tmux server's pid on a socket, or undefined when none runs there. */
   tmuxServerPid(socket: string): Promise<number | undefined>;
   /** The pids of every pane the tmux server on `socket` lists. */
@@ -147,7 +148,13 @@ export interface ScopeIds {
 
 /** Is every process in the scope this slot's tmux server, one of its panes, or a descendant of one? Empty = nothing to kill. */
 export async function judgeScope(ports: GuardPorts, who: ScopeIds, info: UnitInfo): Promise<Verdict> {
+  // A control group whose members cannot be listed cannot be proved empty OR ours: foreign, so nothing is stopped or killed.
   const procs = info.cgroup === '' ? [] : await ports.cgroupPids(info.cgroup);
+  if (procs === undefined)
+    return {
+      owned: false,
+      why: `${who.name} has a control group (${info.cgroup}) whose cgroup.procs cannot be read, so its processes cannot be shown to be this slot's; it is left alone`,
+    };
   if (procs.length === 0) return { owned: true };
   const server = await ports.tmuxServerPid(who.socket);
   if (server === undefined)

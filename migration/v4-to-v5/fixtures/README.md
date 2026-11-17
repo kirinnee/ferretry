@@ -48,7 +48,19 @@ alive and `--port <n>` pins the daemon's port. The directives that make the fake
 `sweep/` builds on it: `sweep-up.sh <1..9>` brings up a v4 daemon and a 5.0 daemon (a converted copy) side by side under
 `/tmp/claude-1000/sweep/slot<N>/`, `sweep-down.sh <N>` stops them. Each daemon is a transient **user service** (`fy4-slot<N>.service`, `fy5-slot<N>.service`: restarts after a crash,
 `KillMode=process`) and each side's tmux server runs in its own scope (`fy<4|5>-slot<N>-terminals.scope`), so neither sits in the cgroup of
-whoever ran the kit; `slot.ts status <N>` prints each unit's state and cgroup. Slots do not survive a reboot (they live under `/tmp`).
+whoever ran the kit; `slot.ts status <N>` prints each unit's state and cgroup. By default a slot does not survive a reboot (it lives under `/tmp`).
+`slot.ts persist <N> [dir]` makes ONE slot survive one: it stops the slot, moves its folder to `dir` (default
+`~/.local/share/fy-sweep/slot<N>`, refused inside `/tmp`, the sweep root or any of `~/.ferretry*`, `~/.claude*`, `~/.codex*`,
+`~/.secrets`), leaves `/tmp/claude-1000/sweep/slot<N>` as a symlink to it (every unit recreates it before it starts, because `/tmp` is
+empty after a boot; the homes record absolute paths of themselves, so nothing inside a home is rewritten), copies the v4 programs and
+the fake ferret's helper into the slot, and installs **enabled user units** in `~/.config/systemd/user/`
+(`fy4-slot<N>.service`, `fy5-slot<N>.service`, and `fy<4|5>-slot<N>-terminals.service` for each tmux server; `Restart=on-failure`,
+`KillMode=process`, the same allow-list env file at mode 0600 through `fyd-exec.sh`, `%` and `$` escaped in every path). Identity, devices
+and data are the same files; only the ferrets' panes are not kept (each side revives them, as after a restart). Starting at boot with
+no login needs `loginctl enable-linger`; `persist` says whether it is on and never turns it on itself. `slot.ts unpersist <N>` is the
+reverse. A persisted slot refuses `up` and `down` (without `--keep-files`) until it is unpersisted.
+The fixture's Codex login (`codex-main`) carries a fake `auth.json` (`sweep/fake-codex-auth.ts`: made-up markers, never a real token), so
+`codex-main-agent` counts as signed in and can resume.
 It is a developer tool (it starts daemons); CI does not run it.
 
 ## Boot v5 on the converted home

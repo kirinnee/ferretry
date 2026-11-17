@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -48,6 +48,8 @@ function fake(opts: {
   readonly units?: Readonly<Record<string, string>>;
   readonly holders?: readonly number[];
   readonly cgroupPids?: Readonly<Record<string, readonly number[]>>;
+  /** Control groups whose cgroup.procs cannot be read. */
+  readonly unreadableCgroups?: readonly string[];
   readonly tmuxPid?: number;
   readonly panes?: readonly number[];
   readonly parents?: Readonly<Record<number, number>>;
@@ -69,7 +71,8 @@ function fake(opts: {
     stopByLock: async lock => {
       lockStops.push(lock);
     },
-    cgroupPids: async cgroup => [...(opts.cgroupPids?.[cgroup] ?? [])],
+    cgroupPids: async cgroup =>
+      opts.unreadableCgroups?.includes(cgroup) === true ? undefined : [...(opts.cgroupPids?.[cgroup] ?? [])],
     tmuxServerPid: async () => opts.tmuxPid,
     panePids: async () => [...(opts.panes ?? [])],
     parentOf: async pid => opts.parents?.[pid],
@@ -221,6 +224,18 @@ describe('terminals scope: ownership before STOP', () => {
       ['reset-failed', scope.name],
     ]);
   });
+  test('a scope whose cgroup.procs cannot be read is foreign: no kill, no stop, no reset', async () => {
+    const f = fake({ units: { [scope.name]: scopeShow }, unreadableCgroups: [cg], tmuxPid: 500, panes: [501] });
+    let killed = false;
+    await expect(
+      stopScope(f.ports, scope, async () => {
+        killed = true;
+      }),
+    ).rejects.toThrow(/cgroup\.procs cannot be read/u);
+    expect(killed).toBe(false);
+    expect(mutating(f.calls)).toEqual([]);
+    expect((await judgeScope(f.ports, scope, parseUnitShow(scopeShow))).owned).toBe(false);
+  });
   test('an empty scope has nothing to protect', async () => {
     const f = fake({ units: { [scope.name]: scopeShow } });
     const info = parseUnitShow(scopeShow);
@@ -306,6 +321,70 @@ describe('fyd-exec.sh: the allow-list holds on every exec', () => {
       stderr: 'pipe',
     });
     expect(await missing.exited).toBe(78);
+    await rm(dir, { recursive: true });
+  });
+
+  test('fails closed (78) when the env file is a symbolic link, even to a good 0600 file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'fyd-exec-'));
+    const real = join(dir, 'real.env');
+    await writeFile(real, 'X=1\n', { mode: 0o600 });
+    await chmod(real, 0o600);
+    const link = join(dir, 'fyd.env');
+    await symlink(real, link);
+    const ran = Bun.spawn(['/bin/sh', wrapper, envProgram, link, envProgram], {
+      env: { PATH: '/usr/bin:/bin' },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [out, err, code] = await Promise.all([
+      new Response(ran.stdout).text(),
+      new Response(ran.stderr).text(),
+      ran.exited,
+    ]);
+    await rm(dir, { recursive: true });
+    expect(code).toBe(78);
+    expect(out).toBe('');
+    expect(err).toContain('a link');
+  });
+
+  test.each([0o644, 0o640, 0o660, 0o400, 0o700])(
+    'fails closed (78) when the env file is mode %o, not exactly 0600',
+    async mode => {
+      const dir = await mkdtemp(join(tmpdir(), 'fyd-exec-'));
+      const file = join(dir, 'fyd.env');
+      await writeFile(file, 'X=1\n', { mode });
+      await chmod(file, mode);
+      const ran = Bun.spawn(['/bin/sh', wrapper, envProgram, file, envProgram], {
+        env: { PATH: '/usr/bin:/bin' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [out, err, code] = await Promise.all([
+        new Response(ran.stdout).text(),
+        new Response(ran.stderr).text(),
+        ran.exited,
+      ]);
+      await rm(dir, { recursive: true });
+      expect(code).toBe(78);
+      expect(out).toBe('');
+      expect(err).toContain('0600');
+    },
+  );
+
+  test('fails closed (78) when the program is not an executable file, instead of a shell exec error', async () => {
+    const r = await runWrapper('X=1\n', {}, ['/nonexistent/fyd']);
+    await rm(r.dir, { recursive: true });
+    expect(r.code).toBe(78);
+  });
+
+  test('fails closed (78) when the env file is a directory', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'fyd-exec-'));
+    const ran = Bun.spawn(['/bin/sh', wrapper, envProgram, dir, envProgram], {
+      env: { PATH: '/usr/bin:/bin' },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    expect(await ran.exited).toBe(78);
     await rm(dir, { recursive: true });
   });
 
