@@ -43,6 +43,21 @@ const run = async (argv: string[], probe: 'up' | 'down' = 'up', exitCode = 0) =>
   return { ...built, code, out: built.io.stdout(), err: built.io.stderr() };
 };
 
+/** Connections as a test daemon has it: the one read `fy daemon status` makes for its Tunnel line. */
+const connectionsManifest = definePlugin({
+  id: 'connections',
+  title: 'Connections',
+  version: '5.0.0',
+  api: 5,
+  core: false,
+  kinds: [],
+  actions: {
+    routes: [
+      route('GET /v1/tunnel', { minimum: 'operator', caller: 'any', audit: { skip: 'test' }, guard: { none: 'test' } }),
+    ],
+  },
+});
+
 /** Terminals as a test daemon has it: the one read `fy daemon status` makes for its Limits block. */
 const terminalsManifest = definePlugin({
   id: 'terminals',
@@ -168,6 +183,38 @@ describe('fy daemon', () => {
     broken.transport.replies.push({ status: 200, body: { nonsense: true } });
     expect(await runFy(['daemon', 'status'], broken.world)).toBe(0);
     expect(broken.io.stdout()).not.toContain('limits');
+  });
+
+  it('L23 fy daemon status says the tunnel while the daemon serves, in --json too, and is silent when it cannot be read', async () => {
+    const sentence = 'The tunnel is up at https://example.invalid.';
+    const reply = { enabled: true, explicit: true, state: 'up', tunnelUrl: 'https://example.invalid', sentence };
+    const make = () => {
+      const made = fakeWorld({
+        registry: registryOf(skeletonEntry(connectionsManifest, 'h-connections')),
+        inventory: inventoryOf({ id: 'connections', contract: 'h-connections' }),
+      });
+      made.transport.replies.push({ status: 200, body: reply });
+      return made;
+    };
+    const text = make();
+    expect(await runFy(['daemon', 'status'], text.world)).toBe(0);
+    expect(text.transport.sent.map(sent => `${sent.method} ${sent.path}`)).toEqual(['GET /v1/tunnel']);
+    expect(text.io.stdout()).toContain(`Tunnel: ${sentence}`);
+    expect(text.io.stdout()).toContain('not reported in 5.0: liveness, firewall');
+    const json = make();
+    expect(await runFy(['daemon', 'status', '--json'], json.world)).toBe(0);
+    expect(JSON.parse(json.io.stdout())).toMatchObject({
+      tunnel: { state: 'up', sentence },
+      notReported: ['liveness', 'firewall'],
+    });
+    // Connections off or an older daemon: no line, the same exit, and the tunnel is named as not reported.
+    const without = await run(['daemon', 'status', '--json']);
+    expect(without.code).toBe(0);
+    expect(JSON.parse(without.out)).not.toHaveProperty('tunnel');
+    expect(JSON.parse(without.out).notReported).toContain('tunnel');
+    // Down: nothing is asked of a daemon that is not there.
+    const down = await run(['daemon', 'status', '--json'], 'down');
+    expect(JSON.parse(down.out)).not.toHaveProperty('tunnel');
   });
 
   it('V-0243 fy daemon status --json prints one machine-readable object, with the same exit codes', async () => {

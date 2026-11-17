@@ -5,15 +5,50 @@
  * {running, baseUrl, version|why, protocol}, so a script reading either keeps working.
  */
 import type { Health } from '@ferretry/kernel/contract';
+import { z } from 'zod';
 import type { DaemonSupervision } from '../daemon/controller.ts';
 import type { DaemonSupervisorReport } from '../daemon/ports.ts';
+import { livenessOf } from '../daemon/probe.ts';
+import type { DaemonLiveness } from '../daemon/readiness.ts';
 import type { ShellContext } from '../shell-context.ts';
 
 /** What a status read of the supervisor came to: a read, a manager 5.0 does not ask, or a failure that is only said. */
 export type SupervisorRead = DaemonSupervision | { readonly kind: 'failed'; readonly why: string };
 
-/** The parts of today's status 5.0 has no read for; said in both outputs rather than left to look healthy. */
-const NOT_REPORTED = ['liveness', 'tunnel', 'firewall'] as const;
+/** The route Connections serves the tunnel's state on (the app's Connection panel and `fy tunnel` read the same one). */
+const TUNNEL_ROUTE = 'GET /v1/tunnel';
+
+/** Only the words of the tunnel view this verb prints: the daemon writes the sentence once (`fy tunnel` says the same). */
+const TunnelWordsSchema = z.object({ state: z.string(), sentence: z.string() });
+type TunnelWords = z.infer<typeof TunnelWordsSchema>;
+
+/**
+ * The tunnel's words, from the daemon while it serves. NOTHING, rather than a failure, for every reason the read can
+ * fail (Connections off, an older daemon with no such route, a daemon that stopped since the probe): `status` reports on
+ * the daemon and its exit code is the daemon's, so a tunnel that cannot be read is named in `notReported`, not an error.
+ */
+export async function readTunnel(ctx: ShellContext): Promise<TunnelWords | undefined> {
+  try {
+    return TunnelWordsSchema.parse(await ctx.client('connections').call(TUNNEL_ROUTE));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The parts of today's status 5.0 has no read for, said in both outputs rather than left to look healthy. `firewall` is
+ * always one (no Browsers state route says it); `liveness` is one only where the manager is not read (launchd, or a
+ * read that failed), and `tunnel` only while the tunnel could not be read (the daemon is down, or Connections is off).
+ */
+const notReportedOf = (read: SupervisorRead, tunnel: TunnelWords | undefined): readonly string[] => [
+  ...(read.kind === 'read' ? [] : ['liveness']),
+  ...(tunnel === undefined ? ['tunnel'] : []),
+  'firewall',
+];
+
+/** The supervisor's verdict on the process, as the readiness wait reads it: running is alive, failed is dead, else absent. */
+const livenessRead = (read: SupervisorRead): DaemonLiveness | undefined =>
+  read.kind === 'read' ? livenessOf(read.report) : undefined;
 
 /**
  * Asks the controller what supervises the daemon. NEVER throws: `status` reports on the daemon and its exit code is the
@@ -53,17 +88,20 @@ const supervisorKeys = (read: SupervisorRead): Readonly<Record<string, unknown>>
 /** `daemon`, `reachability`, `orphan`, `supervisor`, `health` and `notReported`: today's keys, for `--json` to add. */
 export function supervisorJson(
   read: SupervisorRead,
-  probe: { readonly up: boolean; readonly health?: Health | undefined },
+  probe: { readonly up: boolean; readonly health?: Health | undefined; readonly tunnel?: TunnelWords | undefined },
 ): Readonly<Record<string, unknown>> {
+  const liveness = livenessRead(read);
   return {
     ...(read.kind === 'failed' ? {} : { daemon: read.daemon }),
     reachability: reachabilityOf(probe.up, read),
     orphan: read.kind === 'read' && read.orphan,
     supervisor: supervisorKeys(read),
+    ...(liveness === undefined ? {} : { liveness }),
+    ...(probe.tunnel === undefined ? {} : { tunnel: probe.tunnel }),
     ...(probe.health === undefined
       ? {}
       : { health: { ...probe.health, ...(read.kind === 'read' && read.pid !== undefined ? { pid: read.pid } : {}) } }),
-    notReported: NOT_REPORTED,
+    notReported: notReportedOf(read, probe.tunnel),
   };
 }
 
@@ -83,10 +121,17 @@ function supervisorLine(read: SupervisorRead): string {
     : `  ${report.manager}: ${report.state}${detailOf(report)}`;
 }
 
+/** `Liveness: alive|dead|absent`, where the manager was read. */
+const livenessLines = (read: SupervisorRead): readonly string[] => {
+  const liveness = livenessRead(read);
+  return liveness === undefined ? [] : [`Liveness: ${liveness}`];
+};
+
 /** The lines `status` adds under the 5.0 ones, and the remedy (said on the error stream, as today's does) for an orphan. */
 export function supervisorLines(
   read: SupervisorRead,
   binary: string,
+  tunnel?: TunnelWords,
 ): { readonly lines: readonly string[]; readonly remedy?: string } {
   const orphan = read.kind === 'read' && read.orphan;
   const pid = read.kind === 'read' ? (read.pid ?? read.report.pid) : undefined;
@@ -97,7 +142,9 @@ export function supervisorLines(
         : []),
       ...(pid === undefined ? [] : [`pid      ${String(pid)}`]),
       supervisorLine(read),
-      `not reported in 5.0: ${NOT_REPORTED.join(', ')}`,
+      ...livenessLines(read),
+      ...(tunnel === undefined ? [] : [`Tunnel: ${tunnel.sentence}`]),
+      `not reported in 5.0: ${notReportedOf(read, tunnel).join(', ')}`,
     ],
     ...(orphan && read.kind === 'read' && read.pid !== undefined
       ? {
@@ -118,5 +165,5 @@ export function downLines(read: SupervisorRead, binary: string): readonly string
           `  \`${binary} daemon logs\` shows the last step and any stall it reported; \`${binary} daemon restart\` replaces it`,
         ]
       : [];
-  return [supervisorLine(read), ...wedged];
+  return [supervisorLine(read), ...livenessLines(read), ...wedged];
 }

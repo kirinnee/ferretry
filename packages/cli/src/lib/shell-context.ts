@@ -18,6 +18,11 @@ export interface ShellContext {
    */
   client(caller: Manifest['id']): FollowingClient;
   /**
+   * Runs another verb of this `fy` to the end, as if the person had typed it (`setup` runs `pair` and `onboard`):
+   * resolved, helped, guarded and answered by the router like any other. Its exit code comes back.
+   */
+  runVerb(words: readonly string[]): Promise<number>;
+  /**
    * The connection itself, for a verb that reads the plugin inventory (doctor, daemon, plugin). A route call goes
    * through {@link client} instead. Opening it reads the credential and may start the daemon.
    */

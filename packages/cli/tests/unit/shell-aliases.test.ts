@@ -1,5 +1,5 @@
 /**
- * Today's spellings for verbs the 5.0 split renamed (V-0232, V-0245 … V-0248, V-0250, V-0436), resolved by the
+ * Today's spellings for verbs the 5.0 split renamed (V-0232, V-0245 … V-0248, V-0250), resolved by the
  * shell's REAL verb table over the generated registry the way `run.ts` does it: an alias is re-resolved to the verb it
  * runs, with every later word handed on. They run the new verb and add nothing of their own.
  */
@@ -55,12 +55,13 @@ it('V-0241 fy daemon setup is Onboarding’s own verb, not an alias of the shell
   });
 });
 
-it('V-0436 fy setup --yes --check runs `fy onboard`, the verb that replaced it', () => {
+it('V-0436 fy setup is the shell’s own verb now, no longer an alias of `fy onboard` (tests/unit/setup.test.ts proves it)', () => {
   expect(runs(['setup', '--yes', '--check'])).toEqual({
-    line: 'onboard',
-    owner: 'onboarding',
+    line: 'setup',
+    owner: 'shell',
     rest: ['--yes', '--check'],
   });
+  expect(table.entries.find(entry => entry.line === 'setup')?.alias).toBeUndefined();
 });
 
 it('V-0232 fy daemon import claude runs `fy runtime link`, the verb that replaced it', () => {
@@ -77,7 +78,7 @@ it('V-0232 fy daemon import codex --name smoke --dry-run hands every word on to 
 
 it('the old spellings are the shell’s own, add no verb conflict, and leave the new verbs where they were', () => {
   expect(table.conflicts).toEqual([]);
-  for (const old of ['daemon tunnel', 'daemon update', 'daemon import', 'setup'])
+  for (const old of ['daemon tunnel', 'daemon update', 'daemon import'])
     expect(table.entries.find(entry => entry.line === old)).toMatchObject({ owner: 'shell' });
   expect(runs(['tunnel', 'status'])).toMatchObject({ line: 'tunnel status', owner: 'connections' });
   expect(runs(['update'])).toMatchObject({ line: 'update', owner: 'shell' });

@@ -38,6 +38,7 @@ import {
   machineSetVerb,
   machineShowVerb,
 } from './commands/machine.ts';
+import { setupVerb } from './commands/setup.ts';
 import { statuslineVerb } from './commands/statusline.ts';
 import { wordsVerb } from './commands/words.ts';
 import { updateVerb } from './commands/update.ts';
@@ -85,6 +86,7 @@ const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'machine install': machineInstallVerb,
   'machine export': machineExportVerb,
   'machine clone': machineCloneVerb,
+  setup: setupVerb,
   update: updateVerb,
   statusline: statuslineVerb,
 };
@@ -295,6 +297,7 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
       surfaces,
       graph: buildPluginGraph(world.registry),
       deps,
+      runVerb: words => dispatch(words, world),
       client: caller => lazyClient(deps, caller, surfaces, inPane(world.environment)),
     };
     return await handler(context);
