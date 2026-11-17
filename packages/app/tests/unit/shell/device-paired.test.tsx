@@ -64,10 +64,10 @@ describe('useDevicePaired', () => {
     expect(text).not.toContain('deviceId');
   });
 
-  test('R2-m1 the title is the owner’s label, else the machine name', async () => {
+  test('R2-m1 the title is the machine’s own name', async () => {
     const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
     list.add({ daemon: A, machine: 'laptop', deviceId: 'd', address: 'https://x.test' });
-    list.add({ daemon: B, machine: 'desk', deviceId: 'd', address: 'https://y.test', label: 'Home desk' });
+    list.add({ daemon: B, machine: 'Home desk', deviceId: 'd', address: 'https://y.test' });
     const device = {
       theme: new ThemePreferenceStore(memoryStore()),
       systemDark: false,

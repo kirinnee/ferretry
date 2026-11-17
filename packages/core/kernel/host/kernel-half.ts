@@ -47,6 +47,8 @@ export function inventorySurfacesOf(manifest: Manifest): readonly Omit<ScopedRou
 
 export interface KernelHalfSources {
   readonly version: string;
+  /** What this machine is called now (the owner's name, else its host name), read at every call. */
+  daemonName(): string;
   inventory(): readonly InventoryEntry[];
   /** Gate's per-standing projection (§9.6). `undefined` (no Gate, or it threw) = only the five core pieces. */
   project(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[] | undefined;
@@ -193,6 +195,7 @@ export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<Kernel
         entries.filter(entry => (CORE_IDS as readonly string[]).includes(entry.id));
       return jsonResponse({
         protocol: PROTOCOL,
+        daemonName: sources.daemonName(),
         plugins: projected.map(entry => ({ id: entry.id, on: entry.on, contract: entry.contract })),
       } satisfies PluginInventory);
     },

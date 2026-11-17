@@ -51,7 +51,12 @@ export class AuditedPairingService extends PairingService {
   readonly #audit: PairingAuditOptions;
 
   constructor(options: ConstructorParameters<typeof PairingService>[0], audit: PairingAuditOptions) {
-    super({ ...options, onGranted: async grant => await granted(audit, grant) });
+    // Inherited, not spread: a spread would read `options.daemonName` once, and the machine's name can change while it runs.
+    super(
+      Object.create(options, {
+        onGranted: { value: async (grant: PairingGrant) => await granted(audit, grant), enumerable: true },
+      }) as ConstructorParameters<typeof PairingService>[0],
+    );
     this.#audit = audit;
   }
 

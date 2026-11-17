@@ -533,6 +533,7 @@ export class ShellRuntime {
       transport,
       surfaces: this.surfaces,
       ...(handler === undefined ? {} : { passkey: { daemon: paired, handler } }),
+      learnName: name => this.daemons.learnMachine(paired.daemon, name),
     });
     // An inventory change (start, a reconnect, `kernel.plugins-changed`) rebuilds the halves and hooks ONLY when some
     // package's standing moved: a re-read that answered the same keeps them, so no view remounts (a rebuilt half is a

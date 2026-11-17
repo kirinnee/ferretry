@@ -98,6 +98,14 @@ export async function loadIdentity(fs: HostFs, home: string): Promise<IdentityOu
 export const DAEMON_NAME_MAX_LENGTH = 100;
 
 /**
+ * What this machine is called: the owner's name from `config/host.yaml` when there is one, else the host name by the
+ * rule below. The owner's name was already checked by `MachineNameSchema`, so it is used as written.
+ */
+export function daemonNameOf(configured: string | undefined, hostname: string): string {
+  return configured === undefined ? daemonNameFrom(hostname) : configured;
+}
+
+/**
  * Today's `normalizeDaemonName`, byte for byte: hostnames are platform text, not a display-name contract, so control
  * and format characters go, the rest is trimmed and bounded, and an empty result is `Ferretry daemon`.
  */

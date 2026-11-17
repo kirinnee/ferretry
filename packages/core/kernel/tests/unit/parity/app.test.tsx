@@ -104,7 +104,7 @@ describe('the Kernel app half draws the surfaces today’s Settings had for conf
 
   it('S-0478 the settings navigation lists Files (the configuration files) beside the host checks', () => {
     const ids = (manifest.ui?.settings ?? []).map(setting => setting.id).sort();
-    expect(ids).toEqual(['doctor', 'files', 'host-checks']);
+    expect(ids).toEqual(['doctor', 'files', 'host-checks', 'name']);
   });
 
   it('S-0478 the command bar finds Configuration files by "yaml", "config" or a file name, and opens this machine\'s Files tab', () => {

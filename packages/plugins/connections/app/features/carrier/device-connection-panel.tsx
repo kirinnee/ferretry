@@ -20,7 +20,7 @@ export interface DeviceConnectionPorts {
   readonly webrtc: boolean;
 }
 
-const machineName = (daemon: PairedDaemon): string => daemon.label ?? daemon.machine;
+const machineName = (daemon: PairedDaemon): string => daemon.machine;
 
 export function DeviceConnectionPanel({ daemons, preferences, webrtc }: DeviceConnectionPorts) {
   const list = useSyncExternalStore(daemons.subscribe, daemons.snapshot, daemons.snapshot);

@@ -46,14 +46,25 @@ describe('DaemonList', () => {
     expect(again.get('d2')?.pairedOver).toBe('direct');
   });
 
-  test('a re-pair keeps the label and clears the daemon caches first', () => {
+  test('a re-pair clears the daemon caches first and keeps the first pairing time', () => {
     const cleared: string[] = [];
     const list = new DaemonList({ storage: memoryStore(), now: clock() });
     list.registerCache({ clearDaemon: d => cleared.push(d) });
-    list.add({ ...pairing('d1'), label: 'Work' });
+    const first = list.add(pairing('d1'));
     list.add(pairing('d1'));
-    expect(list.get('d1')?.label).toBe('Work');
+    expect(list.get('d1')?.pairedAt).toBe(first.pairedAt);
     expect(cleared).toEqual(['d1', 'd1']);
+  });
+
+  test('a record stored with the retired device-side label still parses, without it', () => {
+    const storage = memoryStore();
+    new DaemonList({ storage, now: clock() }).add(pairing('d1', 'pebox'));
+    const stored = JSON.parse(storage.entries()[APP_STORAGE.daemons] ?? '{}');
+    stored.value.daemons[0].label = 'Desk';
+    storage.setItem(APP_STORAGE.daemons, JSON.stringify(stored));
+    const again = new DaemonList({ storage, now: clock() });
+    expect(again.snapshot().daemons.map(d => [d.daemon, d.machine])).toEqual([['d1', 'pebox']]);
+    expect(Object.keys(again.get('d1') ?? {})).not.toContain('label');
   });
 
   test('removing a pairing forgets its device key and moves the selection', () => {
@@ -89,14 +100,10 @@ describe('DaemonList', () => {
     expect(list.snapshot()).toMatchObject({ selected: 'd1', daemons: [{ daemon: 'd1' }] });
   });
 
-  test('rename, select, carriers and machine name', () => {
+  test('select, carriers and machine name', () => {
     const list = new DaemonList({ storage: memoryStore(), now: clock() });
     list.add(pairing('d1'));
     list.add(pairing('d2'));
-    list.rename('d1', '  Home  ');
-    expect(list.get('d1')?.label).toBe('Home');
-    list.rename('d1', '');
-    expect(list.get('d1')?.label).toBeUndefined();
     list.select('d1');
     expect(list.snapshot().selected).toBe('d1');
     list.setCarriers('d1', [{ kind: 'direct' }]);
@@ -107,9 +114,9 @@ describe('DaemonList', () => {
 
   test('groups by machine, case-insensitively, sorted', () => {
     const list = new DaemonList({ storage: memoryStore(), now: clock() });
-    list.add({ ...pairing('a', 'Laptop'), label: 'Work' });
+    list.add(pairing('a', 'Laptop'));
     list.add(pairing('b', 'box'));
-    list.add({ ...pairing('c', 'laptop'), label: 'Home' });
+    list.add(pairing('c', 'laptop'));
     expect(groupByMachine(list.snapshot().daemons).map(g => [g.machine, g.daemons.map(d => d.daemon)])).toEqual([
       ['box', ['b']],
       ['laptop', ['c', 'a']],

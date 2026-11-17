@@ -125,6 +125,12 @@ const SHELL_VERB_LINES: readonly ShellVerbLine[] = [
     options: [JSON_OPTION],
   },
   {
+    verb: 'daemon name',
+    summary: 'say what this machine is called, or set it (--clear goes back to the host name)',
+    args: [{ name: 'name', help: 'the new name; leave out to see the current one', optional: true, variadic: true }],
+    options: [{ flag: '--clear', help: 'use the host name again' }],
+  },
+  {
     verb: 'daemon reset',
     summary: 'stop the daemon and remove ALL of its persistent data on this host',
     args: [],

@@ -25,13 +25,13 @@ const now = () => NOW;
 const MINUTE = 60_000;
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
 
-const record = (daemonId: string, label?: string): DaemonConnectionRecord => ({
+const record = (daemonId: string, daemonName?: string): DaemonConnectionRecord => ({
   ...daemonConnection({
     daemonId,
     baseUrl: `https://${daemonId}.example.test`,
     deviceId: `fy_device_id_${daemonId.padEnd(22, '0')}`,
+    ...(daemonName === undefined ? {} : { daemonName }),
   }),
-  ...(label === undefined ? {} : { label }),
   pairedAt: 0,
   lastSelectedAt: 0,
 });

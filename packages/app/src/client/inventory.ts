@@ -17,6 +17,8 @@ const InventoryEnvelopeSchema = z.object({ protocol: z.number().int() });
 /** The strict body once the protocol matched (wire schemas are strict objects; relay-protocol.md says why). */
 const InventoryBodySchema = z.strictObject({
   protocol: z.literal(PROTOCOL),
+  /** What the machine is called now; absent from a daemon older than the field. */
+  daemonName: z.string().max(128).optional(),
   plugins: z.array(z.strictObject({ id: z.string().min(1).max(64), on: z.boolean(), contract: z.string().max(128) })),
 });
 
@@ -26,7 +28,11 @@ export interface InventoryEntry {
 }
 
 export type Inventory =
-  | { readonly kind: 'read'; readonly entries: ReadonlyMap<string, InventoryEntry> }
+  | {
+      readonly kind: 'read';
+      readonly entries: ReadonlyMap<string, InventoryEntry>;
+      readonly daemonName?: string;
+    }
   /** The daemon speaks another session protocol: the one full-screen sentence, nothing else is sent. */
   | { readonly kind: 'protocol-mismatch'; readonly daemonProtocol: number }
   /**
@@ -56,7 +62,9 @@ export function parseInventory(body: unknown): Inventory {
     if (entries.has(plugin.id)) return { kind: 'unreadable' };
     entries.set(plugin.id, { on: plugin.on, contract: plugin.contract });
   }
-  return { kind: 'read', entries };
+  return parsed.data.daemonName === undefined
+    ? { kind: 'read', entries }
+    : { kind: 'read', entries, daemonName: parsed.data.daemonName };
 }
 
 /** Why a package is blocked on one daemon. */

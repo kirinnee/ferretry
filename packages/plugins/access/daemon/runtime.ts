@@ -230,7 +230,10 @@ export class AccessRuntime {
       },
       allowedOrigins: () => host.allowedOrigins(),
       relyingPartyName: 'Ferretry',
-      machineName: state.daemonName,
+      // A getter: the owner can rename the machine (`config/host.yaml`), and a passkey made after reads the new name.
+      get machineName() {
+        return kernel.identity.daemonName;
+      },
       clientName,
       announce: async notice => await push.notify({ payload: notice }),
       settings: () => this.settings(),
@@ -263,7 +266,10 @@ export class AccessRuntime {
     pairing = new AccessPairingService(
       {
         daemonId: state.daemonId,
-        daemonName: state.daemonName,
+        // A getter, read at every mint and answer: a rename needs no restart.
+        get daemonName() {
+          return kernel.identity.daemonName;
+        },
         // Asked at EVERY mint, never at build: the kernel binds after this is built and Connections may not be provided
         // yet, so a value read here once would freeze the fallback in for the life of the process.
         reach: () => this.#reach(kernel.log.warn.bind(kernel.log)),
@@ -282,7 +288,13 @@ export class AccessRuntime {
       },
       {
         log: async draft => await gate.audit(draft),
-        alert: new PushNewDeviceAlert(push, state.daemonName, sentence => kernel.log.warn(sentence)),
+        // Built per alert, so the title names the machine as it is called now.
+        alert: {
+          newDevicePaired: async device =>
+            await new PushNewDeviceAlert(push, kernel.identity.daemonName, sentence =>
+              kernel.log.warn(sentence),
+            ).newDevicePaired(device),
+        },
         failures: sentence => kernel.log.warn(sentence),
       },
       (deviceId, change) => {

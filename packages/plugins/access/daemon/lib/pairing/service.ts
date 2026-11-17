@@ -444,7 +444,10 @@ const REFUSED = { kind: 'refused' } as const;
 /** The complete pairing state machine. One instance belongs to one daemon runtime. */
 export class PairingService {
   readonly daemonId: DaemonId;
-  private readonly daemonName: string;
+  /** Read from the options at every use, so a machine the owner renamed is called its new name by the next mint. */
+  private get daemonName(): string {
+    return DaemonNameSchema.parse(this.options.daemonName);
+  }
   private readonly pairingAppUrl: string;
   private readonly capabilities: readonly string[];
   private readonly rateLimiter: PairingRateLimiter;
@@ -466,7 +469,7 @@ export class PairingService {
 
   constructor(private readonly options: PairingServiceOptions) {
     this.daemonId = DaemonIdSchema.parse(options.daemonId);
-    this.daemonName = DaemonNameSchema.parse(options.daemonName);
+    DaemonNameSchema.parse(options.daemonName);
     // THE CARRIER SET IS CHECKED BEFORE THIS DAEMON CAN PAIR ANYBODY, and the parsed copy is thrown
     // away on purpose.
     //

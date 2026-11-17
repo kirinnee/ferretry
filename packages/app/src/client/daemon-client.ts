@@ -105,6 +105,8 @@ export interface DaemonClientOptions {
    * ask and every refusal is returned as it came.
    */
   readonly passkey?: { readonly daemon: PairedDaemon; readonly handler: PasskeyHandler };
+  /** Told what the daemon calls its machine, every time the plugin list is read: a rename reaches this device by it. */
+  readonly learnName?: (name: string) => void;
 }
 
 /**
@@ -166,6 +168,7 @@ export class DaemonClient {
   readonly #transport: DaemonTransport;
   readonly #surfaces: readonly SurfaceEntry[];
   readonly #passkey: DaemonClientOptions['passkey'];
+  readonly #learnName: DaemonClientOptions['learnName'];
   /** Which package declares each route and socket key, across every compiled manifest. */
   readonly #routeOwner = new Map<string, string>();
   readonly #socketOwner = new Map<string, string>();
@@ -198,6 +201,7 @@ export class DaemonClient {
     this.#surfaces = options.surfaces;
     this.#rereadAfterMs = options.rereadAfterMs ?? DEFAULT_REREAD_AFTER_MS;
     this.#passkey = options.passkey;
+    this.#learnName = options.learnName;
     for (const entry of options.surfaces) {
       for (const route of entry.manifest.actions?.routes ?? []) this.#routeOwner.set(route.key, entry.id);
       for (const socket of entry.manifest.actions?.sockets ?? []) this.#socketOwner.set(socket.key, entry.id);
@@ -369,6 +373,7 @@ export class DaemonClient {
     }
     if (this.#stopped) return;
     this.#inventory = inventory;
+    if (inventory.kind === 'read' && inventory.daemonName !== undefined) this.#learnName?.(inventory.daemonName);
     this.#standings = standings(inventory, this.#surfaces);
     this.#closeBlockedSockets();
     this.#ensureEvents();
