@@ -1,9 +1,8 @@
 /**
- * Onboarding's verbs, parity with today's `fy setup` (V-0436) and `fy daemon setup` (V-0241, proved in full by
- * `tests/unit/cli/setup.test.ts`). `fy setup` is only PART proved here: the shell resolves the old spelling to
- * `fy onboard`, so what is proved is what `fy onboard` does, over a fake daemon and a scripted terminal. What v4's
- * `fy setup` did beyond it (install and start the daemon as a user service, check its health and reachability, offer
- * the pairing QR) is not done, so the ledger row stays open.
+ * Onboarding's verbs: `fy onboard` (what V-0436's `fy setup` runs as its last step) and `fy daemon setup` (V-0241, proved in
+ * full by `tests/unit/cli/setup.test.ts`). `fy setup` itself is the shell's own verb now (install, health, pair, then this
+ * `onboard`), and is proved in packages/cli/tests/unit/setup.test.ts; what is proved here is what `fy onboard` does, over a
+ * fake daemon and a scripted terminal.
  */
 import { describe, expect, test } from 'bun:test';
 import type { PluginClient, TerminalIo } from '@ferretry/kernel/manifest';

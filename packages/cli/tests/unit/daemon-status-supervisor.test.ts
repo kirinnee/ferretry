@@ -112,8 +112,9 @@ describe('fy daemon status: what supervises the daemon (Linux, systemd)', () => 
     expect(result.out).toContain('  systemd: running (systemd reports active)');
     expect(result.out).not.toContain('OUTSIDE');
     expect(result.err).toBe('');
-    // Said, not left to look healthy: what 5.0 has no read for.
-    expect(result.out).toContain('not reported in 5.0: liveness, tunnel, firewall');
+    // The manager's verdict on the process is read now (O6: liveness on Linux); only what 5.0 still has no read for is said.
+    expect(result.out).toContain('Liveness: alive');
+    expect(result.out).toContain('not reported in 5.0: tunnel, firewall');
     expect(result.ran).toEqual([
       'systemctl --user show fyd.service --property=LoadState --property=ActiveState --property=MainPID',
     ]);
@@ -190,8 +191,21 @@ describe('fy daemon status --json carries both key sets', () => {
       orphan: false,
       supervisor: { manager: 'systemd', state: 'running', pid: 4321, detail: 'systemd reports active' },
       health: { protocol: PROTOCOL, version: '5.0.0', pid: 4321 },
-      notReported: ['liveness', 'tunnel', 'firewall'],
+      liveness: 'alive',
+      notReported: ['tunnel', 'firewall'],
     });
+  });
+
+  it('liveness is the manager’s verdict on the process: running is alive, failed is dead, anything else absent', async () => {
+    expect((await status({ installed: true, unit: 'active', serving: 4321 }, '--json')).json).toMatchObject({
+      liveness: 'alive',
+    });
+    expect((await status({ installed: true, unit: 'failed' }, '--json')).json).toMatchObject({ liveness: 'dead' });
+    expect((await status({ installed: true, unit: 'inactive', serving: 4321 }, '--json')).json).toMatchObject({
+      liveness: 'absent',
+    });
+    const failed = await status({ installed: true, unit: 'failed' });
+    expect(failed.err).toContain('Liveness: dead');
   });
 
   it('an orphan and a stopped daemon read from the same keys', async () => {
@@ -222,6 +236,9 @@ describe('fy daemon status --json carries both key sets', () => {
       reachability: 'serving',
       orphan: false,
       supervisor: { manager: 'launchd', state: 'not-reported' },
+      // launchd is the Mac end list: no verdict on the process is guessed, and it is named instead.
+      notReported: ['liveness', 'tunnel', 'firewall'],
     });
+    expect(json).not.toHaveProperty('liveness');
   });
 });

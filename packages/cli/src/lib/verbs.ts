@@ -131,6 +131,16 @@ const SHELL_VERB_LINES: readonly ShellVerbLine[] = [
     options: [{ flag: '-y, --yes', help: 'skip the typed word' }],
   },
   {
+    verb: 'setup',
+    summary: 'finish installing: run the daemon as a user service, check it, pair your phone, then the first run',
+    args: [],
+    options: [
+      YES,
+      { flag: '--check', help: 'say whether the daemon answers and what is present, and change nothing' },
+      JSON_OPTION,
+    ],
+  },
+  {
     verb: 'update',
     summary: 'update this machine, restart its daemon, and roll back if the new version does not serve',
     args: [],
@@ -232,13 +242,12 @@ const SHELL_VERB_LINES: readonly ShellVerbLine[] = [
  * The spellings today's `fy` had for verbs the 5.0 split renamed, each running the verb that replaced it (v4 parity: a
  * person's habit, a script and an agent's old instructions still work). Thin by design: the alias adds no behaviour, no
  * option and no help of its own, and every word after it is handed to the new verb. The docs/design/rebuild-parity.tsv
- * rows name the old and the new spelling together (V-0232, V-0245 … V-0248, V-0250, V-0436).
+ * rows name the old and the new spelling together (V-0232, V-0245 … V-0248, V-0250; V-0436 is the shell's own `setup` verb, no longer an alias).
  */
 const SHELL_ALIAS_LINES = [
   { verb: 'daemon tunnel', alias: 'tunnel' },
   { verb: 'daemon update', alias: 'update' },
   { verb: 'daemon import', alias: 'runtime link' },
-  { verb: 'setup', alias: 'onboard' },
   // The Board's old noun: typed from habit, from an old transcript or from an agent's old instructions. It runs
   // `task` and says so on stderr; it is not listed in `--help`.
   { verb: 'card', alias: 'task', hidden: true },
