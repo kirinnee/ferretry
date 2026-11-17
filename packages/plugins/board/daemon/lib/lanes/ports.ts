@@ -1,12 +1,12 @@
 import type { BoardProjectId, BoardSwitch } from '../../../contract/index.ts';
 import type { ProjectInfo, RegisterProjectRequest } from '@ferretry/plugin-projects/contract';
-import type { LaneProposalCard } from './lane-proposal-card.ts';
+import type { LaneProposalTask } from './lane-proposal-task.ts';
 import type { BoardActorVia, LaneSet } from './model.ts';
 import type { ProjectGitFacts } from './template-inference.ts';
 
 /**
  * What the board store asks of lanes. `projectOf` is the board a ferret works on, `unfiled` when it has none;
- * `laneSet` is a project's current lanes, or `null` while it has none, which makes a card refuse with `no-lane-set`.
+ * `laneSet` is a project's current lanes, or `null` while it has none, which makes a task refuse with `no-lane-set`.
  * Lane-set WRITES (propose, edit, confirm) are not on this port.
  */
 export interface LaneSetSource {
@@ -41,24 +41,24 @@ export interface BoardSwitchStore {
  * the ask; the answer comes back through Asks (`LaneProposalAcceptance`).
  */
 export interface LaneProposalAsks {
-  raise(ferretId: string, reference: string, card: LaneProposalCard): Promise<void>;
+  raise(ferretId: string, reference: string, task: LaneProposalTask): Promise<void>;
   withdraw(ferretId: string, reference: string, note: string): Promise<void>;
 }
 
 /**
  * Whose a relocation is: the OWNER's (their own edit, or their Accept of a ferret's proposal), recorded as theirs
- * and free to close a card; or the DAEMON's, which runs every check an owner-less move does (`relocationProblems`).
+ * and free to close a task; or the DAEMON's, which runs every check an owner-less move does (`relocationProblems`).
  */
 export type RelocationAuthority =
   | { readonly kind: 'owner'; readonly via?: BoardActorVia }
   | { readonly kind: 'daemon' };
 
 /**
- * Moves the cards of a deleted lane to the lane the edit named, in the card store. Called after the edited set is
+ * Moves the tasks of a deleted lane to the lane the edit named, in the task store. Called after the edited set is
  * stored, with the new set already readable; it must be safe to repeat, because a failure here leaves the set edited
- * and the cards where they were. `by` is whose move it is, and what each card's history records.
+ * and the tasks where they were. `by` is whose move it is, and what each task's history records.
  */
-export interface CardRelocator {
+export interface TaskRelocator {
   relocate(projectId: BoardProjectId, moves: Readonly<Record<string, string>>, by: RelocationAuthority): Promise<void>;
 }
 

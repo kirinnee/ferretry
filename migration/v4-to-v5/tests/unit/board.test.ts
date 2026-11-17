@@ -25,8 +25,8 @@ afterEach(async () => {
   await f.clean();
 });
 
-/** A fake v4.291.5 card, as `FileBoardStore.write` stores it. */
-function v4Card(id: string, extra: Record<string, unknown> = {}) {
+/** A fake v4.291.5 task, as `FileBoardStore.write` stores it. */
+function v4Task(id: string, extra: Record<string, unknown> = {}) {
   const kind = { B: 'bug', F: 'feature', I: 'infra', C: 'chore' }[id.slice(0, 1)];
   return {
     v: 1,
@@ -76,7 +76,7 @@ const lanes = (project: string, extra: Record<string, unknown> = {}) => ({
 });
 
 const output = async (path: string) => JSON.parse(await readFile(join(f.to, path), 'utf8')) as unknown;
-const card = async (id: string) => CardSchema.parse(await output(`state/board/cards/${id}.json`));
+const task = async (id: string) => CardSchema.parse(await output(`state/board/cards/${id}.json`));
 /** A parsed v5 value, compared as plain JSON (its instants and ids are branded types). */
 const plain = (value: unknown): unknown => value;
 const exists = async (path: string) => (await stat(join(f.to, path)).catch(() => undefined)) !== undefined;
@@ -101,7 +101,7 @@ test('keeps the card id, the ask with its source and every mapped field; renames
   ];
   await f.put(
     'state/board/tasks/F1792.json',
-    v4Card('F1792', {
+    v4Task('F1792', {
       laneId: 'in-progress',
       status: { now: 'fake now', doneSoFar: 'fake done', next: 'fake next' },
       assignee: 'helper',
@@ -122,7 +122,7 @@ test('keeps the card id, the ask with its source and every mapped field; renames
   );
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('converted');
-  const kept = await card('F1792');
+  const kept = await task('F1792');
   expect(kept).toMatchObject({
     format: 1,
     id: 'F1792',
@@ -179,10 +179,10 @@ test('keeps parent, dependency and PR links, and the approval link to the ferret
     docs: ['https://example.invalid/fake-doc'],
   };
   const override = { by: 'owner', reason: 'fake reason', at: AT };
-  await f.put('state/board/tasks/F2.json', v4Card('F2'));
+  await f.put('state/board/tasks/F2.json', v4Task('F2'));
   await f.put(
     'state/board/tasks/B3.json',
-    v4Card('B3', {
+    v4Task('B3', {
       parent: { id: 'F2' },
       dependsOn: [
         { task: { machineId: OTHER_MACHINE, id: 'F9' }, until: 'released', override },
@@ -195,7 +195,7 @@ test('keeps parent, dependency and PR links, and the approval link to the ferret
   );
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('converted');
-  const kept = await card('B3');
+  const kept = await task('B3');
   expect(kept.parent).toEqual({ id: 'F2' });
   expect(plain(kept.dependsOn)).toEqual([
     { task: { machineId: OTHER_MACHINE, id: 'F9' }, until: 'released', override },
@@ -210,20 +210,20 @@ test('keeps parent, dependency and PR links, and the approval link to the ferret
 test('dropped cards and cards in a closed lane are kept', async () => {
   await f.put(
     'state/board/tasks/C1.json',
-    v4Card('C1', { laneId: 'closed', dropped: { reason: 'fake superseded', at: LATER } }),
+    v4Task('C1', { laneId: 'closed', dropped: { reason: 'fake superseded', at: LATER } }),
   );
-  await f.put('state/board/tasks/I4.json', v4Card('I4', { laneId: 'closed' }));
+  await f.put('state/board/tasks/I4.json', v4Task('I4', { laneId: 'closed' }));
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('converted');
-  expect(plain((await card('C1')).dropped)).toEqual({ reason: 'fake superseded', at: LATER });
-  expect((await card('I4')).laneId).toBe('closed');
+  expect(plain((await task('C1')).dropped)).toEqual({ reason: 'fake superseded', at: LATER });
+  expect((await task('I4')).laneId).toBe('closed');
   expect(report.kept).toContainEqual({ what: 'tasks (ids unchanged; dropped and closed tasks included)', count: 2 });
   expect(report.kept).toContainEqual({ what: 'dropped tasks', count: 1 });
 });
 
 test('counters continue after the highest id, whichever is higher', async () => {
-  await f.put('state/board/tasks/F1792.json', v4Card('F1792'));
-  await f.put('state/board/tasks/C7.json', v4Card('C7'));
+  await f.put('state/board/tasks/F1792.json', v4Task('F1792'));
+  await f.put('state/board/tasks/C7.json', v4Task('C7'));
   // v4 stores the LAST number handed out; F lags the files (a lost write), B is ahead of every file.
   await f.put('state/board/counters.json', { F: 1500, B: 40, C: 7 });
   expect((await boardStep.run(f.ctx())).status).toBe('converted');
@@ -234,7 +234,7 @@ test('counters continue after the highest id, whichever is higher', async () => 
 });
 
 test('with no counter file the highest card ids still set the next numbers', async () => {
-  await f.put('state/board/tasks/B12.json', v4Card('B12'));
+  await f.put('state/board/tasks/B12.json', v4Task('B12'));
   expect((await boardStep.run(f.ctx())).status).toBe('converted');
   expect(CountersFileSchema.parse(await output('state/board/counters.json')).next).toEqual({
     bug: 13,
@@ -247,19 +247,19 @@ test('with no counter file the highest card ids still set the next numbers', asy
 test('owner and daemon creators: via kept on the owner, the session they acted from is not', async () => {
   await f.put(
     'state/board/tasks/F1.json',
-    v4Card('F1', { createdBy: { kind: 'owner', sessionId: 'lead' }, createdByVia: 'admin-token' }),
+    v4Task('F1', { createdBy: { kind: 'owner', sessionId: 'lead' }, createdByVia: 'admin-token' }),
   );
-  await f.put('state/board/tasks/F2.json', v4Card('F2', { createdBy: { kind: 'daemon', sessionId: 'lead' } }));
-  await f.put('state/board/tasks/F3.json', v4Card('F3', { createdBy: { kind: 'ferret', sessionId: 'gone' } }));
+  await f.put('state/board/tasks/F2.json', v4Task('F2', { createdBy: { kind: 'daemon', sessionId: 'lead' } }));
+  await f.put('state/board/tasks/F3.json', v4Task('F3', { createdBy: { kind: 'ferret', sessionId: 'gone' } }));
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('converted');
-  expect((await card('F1')).createdBy).toEqual({ kind: 'owner', via: 'admin-token' });
-  expect((await card('F2')).createdBy).toEqual({ kind: 'daemon' });
+  expect((await task('F1')).createdBy).toEqual({ kind: 'owner', via: 'admin-token' });
+  expect((await task('F2')).createdBy).toEqual({ kind: 'daemon' });
   // A ferret whose session folder is gone is named by its id, and the report counts it.
-  expect(plain((await card('F3')).createdBy)).toEqual({ kind: 'ferret', name: 'gone', ferret: 'gone' });
+  expect(plain((await task('F3')).createdBy)).toEqual({ kind: 'ferret', name: 'gone', ferret: 'gone' });
   expect(report.kept).toContainEqual({ what: 'ferret actors named by id (no v4 config left)', count: 4 });
   expect(report.notCarried.map(item => item.what).join()).not.toContain('ask.source');
-  expect(plain((await card('F1')).ask)).toEqual({ text: 'Fake owner words', source: 'fake chat' });
+  expect(plain((await task('F1')).ask)).toEqual({ text: 'Fake owner words', source: 'fake chat' });
 });
 
 test('lane sets and the switch become one board file per project', async () => {
@@ -333,7 +333,7 @@ test('the sweep keeps its whole memory; a damaged one is a fresh start, as in v4
 });
 
 test('dry run writes nothing', async () => {
-  await f.put('state/board/tasks/F1.json', v4Card('F1'));
+  await f.put('state/board/tasks/F1.json', v4Task('F1'));
   await f.put('state/board/counters.json', { F: 1 });
   await f.put('board/lanes/unfiled.json', lanes('unfiled'));
   await f.put('state/board/sweep.json', { v: 1, sweptAt: AT, nudged: {}, seen: {} });
@@ -344,8 +344,8 @@ test('dry run writes nothing', async () => {
 });
 
 test('a card that does not map fails the step, names the card, never its content, and writes nothing', async () => {
-  await f.put('state/board/tasks/F1.json', v4Card('F1'));
-  await f.put('state/board/tasks/F2.json', v4Card('F2', { ask: { text: 'FAKE-SECRET-ASK' }, laneId: 'Bad Lane' }));
+  await f.put('state/board/tasks/F1.json', v4Task('F1'));
+  await f.put('state/board/tasks/F2.json', v4Task('F2', { ask: { text: 'FAKE-SECRET-ASK' }, laneId: 'Bad Lane' }));
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('failed');
   expect(report.note).toContain('F2');
@@ -355,16 +355,16 @@ test('a card that does not map fails the step, names the card, never its content
 });
 
 test('a card filed under another id, or of the wrong kind letter, fails', async () => {
-  await f.put('state/board/tasks/F1.json', v4Card('F5'));
+  await f.put('state/board/tasks/F1.json', v4Task('F5'));
   expect((await boardStep.run(f.ctx())).note).toBe("task F1 (state/board/tasks/F1.json) holds another task's id");
   await f.clean();
   f = await fixture();
-  await f.put('state/board/tasks/F1.json', { ...v4Card('F1'), kind: 'bug' });
+  await f.put('state/board/tasks/F1.json', { ...v4Task('F1'), kind: 'bug' });
   expect((await boardStep.run(f.ctx())).status).toBe('failed');
 });
 
 test('a top-level field v4 does not declare is named in notCarried, never valued', async () => {
-  await f.put('state/board/tasks/F1.json', { ...v4Card('F1'), retiredField: 'FAKE-SECRET-VALUE' });
+  await f.put('state/board/tasks/F1.json', { ...v4Task('F1'), retiredField: 'FAKE-SECRET-VALUE' });
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('converted');
   expect(report.notCarried.map(item => item.what)).toContain('task fields v4.291.5 does not declare: retiredField');
@@ -373,7 +373,7 @@ test('a top-level field v4 does not declare is named in notCarried, never valued
 });
 
 test('links in the board folders are refused, never followed', async () => {
-  await f.put('state/board/tasks/F1.json', v4Card('F1'));
+  await f.put('state/board/tasks/F1.json', v4Task('F1'));
   await symlink('/unreadable/fake-card', join(f.from, 'state/board/tasks/F2.json'));
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('failed');
@@ -406,9 +406,9 @@ test('a daemon move a person reported keeps who reported it, in the v5 actor sha
       reportedVia: 'admin-token',
     },
   ];
-  await f.put('state/board/tasks/F1.json', v4Card('F1', { history }));
+  await f.put('state/board/tasks/F1.json', v4Task('F1', { history }));
   expect((await boardStep.run(f.ctx())).status).toBe('converted');
-  const moved = (await card('F1')).history[1] as Record<string, unknown>;
+  const moved = (await task('F1')).history[1] as Record<string, unknown>;
   expect(moved.actor).toEqual({ kind: 'daemon' });
   expect(moved.reportedBy).toEqual({ kind: 'owner', via: 'admin-token' });
   expect(moved).not.toHaveProperty('reportedVia');
@@ -419,7 +419,7 @@ test('a history event with an unreadable actor fails the step, naming the card o
   const history = [
     { seq: 1, at: AT, actor: { kind: 'robot', sessionId: 'SECRET-FAKE' }, type: 'created', laneId: 'todo' },
   ];
-  await f.put('state/board/tasks/F1.json', v4Card('F1', { history }));
+  await f.put('state/board/tasks/F1.json', v4Task('F1', { history }));
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('failed');
   expect(JSON.stringify(report)).not.toContain('SECRET-FAKE');
@@ -433,9 +433,9 @@ test('a ferret actor is named by its v4 callsign, else a valid title, else its i
     { seq: 1, at: AT, actor: { kind: 'ferret', sessionId: 'lead' }, type: 'created', laneId: 'todo' },
     { seq: 2, at: LATER, actor: { kind: 'ferret', sessionId: 'helper' }, type: 'note', text: 'fake note' },
   ];
-  await f.put('state/board/tasks/F1.json', v4Card('F1', { history }));
+  await f.put('state/board/tasks/F1.json', v4Task('F1', { history }));
   expect((await boardStep.run(f.ctx())).status).toBe('converted');
-  const kept = await card('F1');
+  const kept = await task('F1');
   expect(plain(kept.createdBy)).toEqual({ kind: 'ferret', name: 'arleen', ferret: 'lead' });
   expect(plain(kept.history[1]?.actor)).toEqual({ kind: 'ferret', name: 'helper', ferret: 'helper' });
 });
@@ -484,10 +484,10 @@ test('every v4 history event type maps: migrated becomes a note, a status edit a
     { seq: 19, at: AT, actor: lead, type: 'reparented', from: null, to: { id: 'F2' }, reason: null },
     { seq: 20, at: AT, actor: { kind: 'daemon' }, type: 'dropped', reason: 'fake superseded' },
   ];
-  await f.put('state/board/tasks/F1.json', v4Card('F1', { history, legacyRef: 'lead:F3' }));
+  await f.put('state/board/tasks/F1.json', v4Task('F1', { history, legacyRef: 'lead:F3' }));
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('converted');
-  const kept = await card('F1');
+  const kept = await task('F1');
   expect(plain(kept.history.map(event => event.type))).toEqual([
     'created',
     'note',
@@ -514,8 +514,8 @@ test('a history event type v4 does not have fails the step, naming the card and 
     { seq: 1, at: AT, actor: { kind: 'ferret', sessionId: 'lead' }, type: 'created', laneId: 'todo' },
     { seq: 2, at: AT, actor: { kind: 'ferret', sessionId: 'lead' }, type: 'teleported', where: 'FAKE-SECRET-PLACE' },
   ];
-  await f.put('state/board/tasks/F1.json', v4Card('F1', { history }));
-  await f.put('state/board/tasks/F2.json', v4Card('F2'));
+  await f.put('state/board/tasks/F1.json', v4Task('F1', { history }));
+  await f.put('state/board/tasks/F2.json', v4Task('F2'));
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('failed');
   expect(report.note).toBe("task F1 has a history event of a type v4 does not have: 'teleported'");
@@ -537,7 +537,7 @@ test('a history event or clarification field v4 does not declare is named in not
   const clarifications = [
     { text: 'fake more', source: 'fake chat', at: AT, by: { kind: 'owner' }, byName: 'FAKE-SECRET-NAME' },
   ];
-  await f.put('state/board/tasks/F1.json', v4Card('F1', { history, clarifications }));
+  await f.put('state/board/tasks/F1.json', v4Task('F1', { history, clarifications }));
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('converted');
   const whats = report.notCarried.map(item => item.what);

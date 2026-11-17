@@ -1,14 +1,14 @@
 /**
  * The `agenda` screen: the Agenda page, every ferret's asks and notices on this machine in one list (today's Inbox
  * page). The page itself is this half's; the runtime (the agenda client, the ferrets) is the half's one, shared with
- * every view; the open card's conversation is Conversation's panel in the `agenda.conversation` slot.
+ * every view; the open task's conversation is Conversation's panel in the `agenda.conversation` slot.
  */
 
 import type { ScreenProps } from '@ferretry/kernel/manifest';
 import { MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
 import { useCallback } from 'react';
 import { useAgendaReferenceFacts } from '../hooks/use-agenda-reference-facts.ts';
-import { AgendaBoardProviders, useAgendaBoardHooks, useCardBoards } from '../features/agenda/agenda-board-hooks.tsx';
+import { AgendaBoardProviders, useAgendaBoardHooks, useTaskBoards } from '../features/agenda/agenda-board-hooks.tsx';
 import { AgendaCardConversation } from '../features/agenda/agenda-conversation-slot.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { useAskFocus } from '../features/agenda/use-ask-focus.ts';
@@ -29,19 +29,19 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
     const { navigate } = useRouter();
     const links = useAgendaLinks();
     const go = useCallback((to: string) => navigate(to), [navigate]);
-    // Board's hooks for THIS machine, over the whole page: the list's cards of this machine keep their proofs
+    // Board's hooks for THIS machine, over the whole page: the list's tasks of this machine keep their proofs
     // (`&F12` through the hook, `:agent` through the facts below). The machine-wide page mixes ferrets, so it proves
-    // `:agent` only (`!A3` and `@file` need one ferret's own page). A card of ANOTHER machine is drawn without them.
+    // `:agent` only (`!A3` and `@file` need one ferret's own page). A task of ANOTHER machine is drawn without them.
     const board = useAgendaBoardHooks(daemon);
     const references = useAgendaReferenceFacts(runtime, go);
-    // Board's hooks per OPEN CARD's machine (the Inbox is every machine's): Done · closes, a notice's Start and Close,
+    // Board's hooks per OPEN TASK's machine (the Inbox is every machine's): Done · closes, a notice's Start and Close,
     // Edit's lane editor and `&F12` proof. Each strips the page's proofs before it adds its own machine's.
-    const { laneEditor, cardBoard } = useCardBoards(go);
-    // Told on the OPENED CARD's machine (it may be another machine's, from the fleet Inbox), never the page's.
+    const { laneEditor, cardBoard: taskBoard } = useTaskBoards(go);
+    // Told on the OPENED TASK's machine (it may be another machine's, from the fleet Inbox), never the page's.
     const itemOpened = useItemOpened({ daemon, client: runtime.client }, fleet);
     const inbox = useRuntimeInbox(runtime, laneEditor, fleet);
     const phone = useLayoutMode() === 'drawer';
-    // A machine ask's push opens `/agenda?ask=A3`: the page opens that ask's card once it is among the open ones.
+    // A machine ask's push opens `/agenda?ask=A3`: the page opens that ask's task once it is among the open ones.
     const asked = useAskFocus();
     return (
       <AgendaBoardProviders hooks={board} onNavigate={go} references={references}>
@@ -49,7 +49,7 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
           <AgendaInboxContext.Provider value={inbox}>
             {itemOpened.host}
             <AgendaInboxPage
-              cardBoard={cardBoard}
+              cardBoard={taskBoard}
               inbox={inbox}
               phone={phone}
               clearPort={runtime.clearPort}

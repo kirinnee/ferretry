@@ -761,16 +761,16 @@ describe('SharedDraftService draft slots (&B142)', () => {
     // Arrange
     const { service } = subject();
     const chat: SharedDraftChange[] = [];
-    const card: SharedDraftChange[] = [];
+    const task: SharedDraftChange[] = [];
     service.subscribe('s1', change => chat.push(change));
-    service.subscribe('s1', change => card.push(change), 'A1');
+    service.subscribe('s1', change => task.push(change), 'A1');
 
     // Act
     await typed(service, 'to the card', 'A1');
     await typed(service, 'to the chat');
 
     // Assert
-    should(card.map(change => change.applied.text)).deepEqual([['to the card']]);
+    should(task.map(change => change.applied.text)).deepEqual([['to the card']]);
     should(chat.map(change => change.applied.text)).deepEqual([['to the chat']]);
   });
 

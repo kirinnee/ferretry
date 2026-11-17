@@ -4,7 +4,7 @@ import {
   AgendaActionRequestSchema,
   type AgendaAsk,
   type AgendaAskOption,
-  type AgendaCardAnswer,
+  type AgendaTaskAnswer,
   type AgendaItem,
   type AgendaKind,
   type AgendaLink,
@@ -16,7 +16,7 @@ import {
   agendaEditShapeProblems,
   agendaShapeProblems,
   defaultAgendaAnswers,
-  MAX_AGENDA_CARD_ANSWERS,
+  MAX_AGENDA_TASK_ANSWERS,
   MAX_AGENDA_SUBJECT_LENGTH,
   MAX_AGENDA_TITLE_LENGTH,
   recommendedAgendaOption,
@@ -25,7 +25,7 @@ import {
   type UpAnswer,
 } from '@ferretry/core-asks/contract';
 import { z } from 'zod';
-import { type AskFlags, type CardAsk, parseAsk, parseKind, TOO_MANY_ANSWERS } from './ask.ts';
+import { type AskFlags, type TaskAsk, parseAsk, parseKind, TOO_MANY_ANSWERS } from './ask.ts';
 import { type FieldInput, fieldsFrom } from './fields.ts';
 import { DEFAULT_HOW_TO_RESOLVE } from './how-to-resolve.ts';
 
@@ -37,7 +37,7 @@ export interface BriefFlags extends AskFlags {
   readonly where?: string | readonly string[];
   /** `--detail`: the context explained from zero, as Markdown (drawn folded away). */
   readonly detail?: string;
-  /** The card's heading and the push's title: what this is about, in a few plain words. Required. */
+  /** The task's heading and the push's title: what this is about, in a few plain words. Required. */
   readonly title?: string;
   /** The one-line ask, when it is not given as words; `summary` is the older name for it. */
   readonly ask?: string;
@@ -282,7 +282,7 @@ export function composeAddRequest(
 
 /**
  * The file `--confirms` names, when it names one. The daemon writes a confirmation's card itself — Allow,
- * Deny and Discard change — so the flags that choose a card's kind or answers are refused beside it.
+ * Deny and Discard change — so the flags that choose a task's kind or answers are refused beside it.
  */
 function confirmsFrom(
   flags: BriefFlags,
@@ -330,7 +330,7 @@ function askLineFrom(summary: string | undefined): string {
   return line;
 }
 
-/** The card's title: required, one line, and short enough to head a notification. */
+/** The task's title: required, one line, and short enough to head a notification. */
 function titleFrom(raw: string | undefined): string {
   if (raw === undefined) {
     throw new Error(
@@ -349,7 +349,7 @@ function titleFrom(raw: string | undefined): string {
 /**
  * The up answer a task or a permission may carry. It fits no other kind, and `--up-why` only describes it.
  */
-function upFrom(kind: CardAsk['kind'], flags: BriefFlags, file: BriefFile): UpAnswer | undefined {
+function upFrom(kind: TaskAsk['kind'], flags: BriefFlags, file: BriefFile): UpAnswer | undefined {
   const fromFile = typeof file.up === 'string' ? { label: file.up } : file.up;
   const label = text(flags.up) ?? text(fromFile?.label);
   const description = text(flags.upWhy) ?? (text(flags.up) === undefined ? text(fromFile?.description) : undefined);
@@ -399,7 +399,7 @@ function askFor(
   options: readonly string[] | undefined,
   questions: readonly AgendaQuestion[] | undefined,
   hasSteps: boolean,
-): CardAsk {
+): TaskAsk {
   const lone = questions?.length === 1 ? questions[0] : undefined;
   const named = parseKind(kind);
   if (named === 'task' && questions !== undefined) throw new Error(AGENDA_SHAPE_ERRORS.todoAsksNothing);
@@ -414,7 +414,7 @@ function askFor(
     throw new Error('--kind yesno brings its own Yes and No: drop the question options (or use --kind choice)');
   }
   // More than three options is more than the swipes can give, wherever the options were written.
-  if ((lone?.options?.length ?? 0) > MAX_AGENDA_CARD_ANSWERS) throw new Error(TOO_MANY_ANSWERS);
+  if ((lone?.options?.length ?? 0) > MAX_AGENDA_TASK_ANSWERS) throw new Error(TOO_MANY_ANSWERS);
   // Steps and nothing to answer is a to-do: the human does it, then marks it done.
   if (named === undefined && options === undefined && questions === undefined && hasSteps) {
     return parseAsk({ kind: 'todo' });
@@ -685,7 +685,7 @@ function replacementOf(flags: EditFlags):
   | {
       readonly kind: AgendaKind;
       readonly ask?: AgendaAsk;
-      readonly answers?: AgendaCardAnswer[];
+      readonly answers?: AgendaTaskAnswer[];
       readonly questions?: AgendaQuestion[];
       readonly optionDetails?: { label: string; detail: string }[];
     }

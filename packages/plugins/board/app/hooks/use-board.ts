@@ -1,10 +1,10 @@
 /**
  * THE BOARD, as hooks the pages build on. No markup here: a page takes a model and draws it.
  *
- *   useBoard(store, machines, filters)   every paired machine's cards, grouped project → lane, with the
+ *   useBoard(store, machines, filters)   every paired machine's tasks, grouped project → lane, with the
  *                                        header's counts; live (`board.changed`) and re-derived every 30s
- *   useBoardCard(store, machine, id)     one card in full, by `(machine, id)`
- *   useBoardCards(store, machine, ids)   several cards in full, in the order asked for
+ *   useBoardTask(store, machine, id)     one task in full, by `(machine, id)`
+ *   useBoardTasks(store, machine, ids)   several tasks in full, in the order asked for
  *   useBoardProjects(store, machines)    each machine's projects with their lane sets
  *   useBoardActions(store, ms)           move / reopen / depend / note / link / drop / editField
  *   useBoardFilters(...)                 the filter set read from, and written to, the URL query
@@ -14,7 +14,7 @@
  * so a link to a filtered board is the board.
  */
 
-import type { CardId } from '../../contract/index.ts';
+import type { TaskId } from '../../contract/index.ts';
 import { useNow } from '@ferretry/app/ui';
 import { useCallback, useEffect, useMemo, useReducer, useSyncExternalStore } from 'react';
 import { type BoardActions, createBoardActions } from '../lib/board-actions.ts';
@@ -27,13 +27,13 @@ import {
   parseBoardFilters,
   toServerQuery,
 } from '../lib/board-model.ts';
-import { type CardReferenceResolver, createCardReferenceResolver } from '../lib/card-reference-context.ts';
+import { type TaskReferenceResolver, createTaskReferenceResolver } from '../lib/task-reference-context.ts';
 import { boardPrivate } from '../lib/board-private-preference.ts';
 import {
   type BoardLoadStatus,
   type BoardMachineSlice,
   type BoardProjectsState,
-  type BoardCardState,
+  type BoardTaskState,
   boardViewKey,
   type DaemonBoardStore,
   IDLE_BOARD_TASK,
@@ -52,7 +52,7 @@ interface BoardMachineStatus {
   readonly machine: string;
   readonly status: BoardLoadStatus;
   readonly error: string | null;
-  /** The machine has more cards than were read; its counts still cover all of it. */
+  /** The machine has more tasks than were read; its counts still cover all of it. */
   readonly truncated: boolean;
 }
 
@@ -67,10 +67,10 @@ export interface BoardView {
 
 const machineKey = (machines: readonly BoardMachine[]): string => pairingKey(machines.map(m => m.connection));
 
-const summarise = (statuses: readonly BoardMachineStatus[], anyCards: boolean): BoardLoadStatus => {
+const summarise = (statuses: readonly BoardMachineStatus[], anyTasks: boolean): BoardLoadStatus => {
   if (statuses.length === 0) return 'idle';
   if (statuses.some(status => status.status === 'ready')) return 'ready';
-  if (anyCards) return 'ready';
+  if (anyTasks) return 'ready';
   if (statuses.every(status => status.status === 'error')) return 'error';
   return 'loading';
 };
@@ -130,13 +130,13 @@ export const useBoard = (
   }, [view, filters, names, key, store]);
 };
 
-/** One card in full, read from the machine that owns it. `machine` is `undefined` once it is unpaired. */
-export const useBoardCard = (
+/** One task in full, read from the machine that owns it. `machine` is `undefined` once it is unpaired. */
+export const useBoardTask = (
   store: DaemonBoardStore,
   machine: DaemonConnection | undefined,
-  id: CardId,
+  id: TaskId,
   options: { readonly beat?: boolean } = {},
-): BoardCardState => {
+): BoardTaskState => {
   const daemonId = machine?.daemonId;
   const beat = options.beat !== false;
   // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing is the deliberate key
@@ -151,13 +151,13 @@ export const useBoardCard = (
   );
 };
 
-/** Several cards in full, in the order asked for; each is watched while the caller is mounted. */
-export const useBoardCards = (
+/** Several tasks in full, in the order asked for; each is watched while the caller is mounted. */
+export const useBoardTasks = (
   store: DaemonBoardStore,
   machine: DaemonConnection,
-  ids: readonly CardId[],
+  ids: readonly TaskId[],
   options: { readonly beat?: boolean } = {},
-): readonly BoardCardState[] => {
+): readonly BoardTaskState[] => {
   const beat = options.beat !== false;
   const [, bump] = useReducer((count: number) => count + 1, 0);
   const wanted = ids.join('\u0000');
@@ -231,18 +231,18 @@ export const useBoardFilters = (
   return [filters, set];
 };
 
-const NO_CARDS: readonly { readonly id: string }[] = [];
+const NO_TASKS: readonly { readonly id: string }[] = [];
 
 /**
- * Whether a written card id proves out on `machine`: the card ids the machine holds (read once, kept live by
- * `board.changed`) plus the card the caller has already read in full. Syntax is not proof, so until the ids are
+ * Whether a written task id proves out on `machine`: the task ids the machine holds (read once, kept live by
+ * `board.changed`) plus the task the caller has already read in full. Syntax is not proof, so until the ids are
  * known nothing links.
  */
-export const useCardReferenceProof = (
+export const useTaskReferenceProof = (
   store: DaemonBoardStore,
   machine: DaemonConnection | undefined,
-  read: readonly { readonly id: string }[] = NO_CARDS,
-): CardReferenceResolver => {
+  read: readonly { readonly id: string }[] = NO_TASKS,
+): TaskReferenceResolver => {
   const daemonId = machine?.daemonId;
   // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing is the deliberate key
   useEffect(() => {
@@ -253,5 +253,5 @@ export const useCardReferenceProof = (
     () => (daemonId === undefined ? null : store.idsState(daemonId).ids),
     () => null,
   );
-  return useMemo(() => createCardReferenceResolver(read, ids ?? undefined), [read, ids]);
+  return useMemo(() => createTaskReferenceResolver(read, ids ?? undefined), [read, ids]);
 };

@@ -1,26 +1,26 @@
 /**
- * WHAT GITHUB SAYS OF A CARD'S PULL REQUESTS, written onto the card (`board-design.md` §3.1 items 4 and 7).
+ * WHAT GITHUB SAYS OF A TASK'S PULL REQUESTS, written onto the task (`board-design.md` §3.1 items 4 and 7).
  *
- * GitHub owns a PR's state, its checks, its merge and the release it first shipped in. The card keeps a
+ * GitHub owns a PR's state, its checks, its merge and the release it first shipped in. The task keeps a
  * labelled projection of them on each link (`polledAt`), and only the daemon's watcher writes it. One call
  * here is ONE write: the cache, the automatic links, the notes and the lane moves those facts trigger land
- * together, so a crash can never leave a merged PR cached on a card that did not move.
+ * together, so a crash can never leave a merged PR cached on a task that did not move.
  *
- * - **Triggers fire on a change, in the order a PR lives them.** Then every poll RECONCILES the card
- *   ({@link reconcileFacts}): whatever the cached facts say of its PRs, the card is caught up to it, so a
- *   card can never sit behind its own PR because an event was missed (the daemon was off, the card was
- *   refiled after the merge, the PR was linked late). A card sent back after its PR merged stays back
+ * - **Triggers fire on a change, in the order a PR lives them.** Then every poll RECONCILES the task
+ *   ({@link reconcileFacts}): whatever the cached facts say of its PRs, the task is caught up to it, so a
+ *   task can never sit behind its own PR because an event was missed (the daemon was off, the task was
+ *   refiled after the merge, the PR was linked late). A task sent back after its PR merged stays back
  *   (`lane-facts.ts`); `release.running` reads this machine's version.
  * - **Never backwards.** Every move goes through {@link triggerMove}, which refuses a move back and records
  *   "… while blocked by &F18" when a dependency had not shipped: reality wins over the gate (§2.7).
- * - **A PR closed unmerged** moves nothing: it adds a note and asks the watcher to nudge the card's ferret.
- *   CI going red moves nothing either; the card shows it, and its ferret is nudged once. Who that is — the
+ * - **A PR closed unmerged** moves nothing: it adds a note and asks the watcher to nudge the task's ferret.
+ *   CI going red moves nothing either; the task shows it, and its ferret is nudged once. Who that is — the
  *   assignee, else the nearest live lead — is decided where the message is sent (`notice-route.ts`).
  * - **`releasedIn` is immutable** once set: a later poll never rewrites the release a PR shipped in.
  */
 import {
-  type Card,
-  formatCardRef,
+  type Task,
+  formatTaskRef,
   type LaneTrigger,
   type PrChangeKind,
   type PrChecks,
@@ -28,12 +28,12 @@ import {
   prUrlParts,
   type ReleasedIn,
 } from '../../../contract/index.ts';
-import { type CardContext, reconcileFacts, requireStanding, triggerMove, withEvent } from './card-actions.ts';
+import { type TaskContext, reconcileFacts, requireStanding, triggerMove, withEvent } from './task-actions.ts';
 import type { PrAlertReason } from './notice-route.ts';
 
 /**
  * How often an unchanged PR's `polledAt` is rewritten. A poll that learns nothing new does not write the
- * card every minute; the label is refreshed at this pace so it never claims an older look than it is.
+ * task every minute; the label is refreshed at this pace so it never claims an older look than it is.
  */
 export const PR_POLL_LABEL_REFRESH_MS = 10 * 60_000;
 
@@ -54,7 +54,7 @@ export interface PrObservation {
   readonly mergeSha: string | null;
 }
 
-/** One poll's worth of facts for one card. */
+/** One poll's worth of facts for one task. */
 export interface PrUpdate {
   /** PRs to link because a rule matched them, each with the rule's words. Already linked ones are skipped. */
   readonly link: readonly { readonly url: string; readonly because: string }[];
@@ -65,15 +65,15 @@ export interface PrUpdate {
   readonly runningVersion: string | null;
 }
 
-/** A message the watcher queues about a card; WHO gets it is the sender's call (`notice-route.ts`). */
+/** A message the watcher queues about a task; WHO gets it is the sender's call (`notice-route.ts`). */
 interface PrNudge {
   readonly reason: PrAlertReason;
   readonly message: string;
 }
 
 export interface PrUpdateOutcome {
-  /** The card as written, or `null` when the poll changed nothing on it. */
-  readonly task: Card | null;
+  /** The task as written, or `null` when the poll changed nothing on it. */
+  readonly task: Task | null;
   readonly nudges: readonly PrNudge[];
 }
 
@@ -103,7 +103,7 @@ export const samePr = (left: string, right: string): boolean => {
   return a !== null && b !== null && a.number === b.number && a.repo.toLowerCase() === b.repo.toLowerCase();
 };
 
-/** The order a PR lives its triggers in, so one poll that saw several moves the card forward through them. */
+/** The order a PR lives its triggers in, so one poll that saw several moves the task forward through them. */
 const TRIGGER_ORDER: readonly LaneTrigger[] = ['pr.opened', 'pr.ready', 'ci.green', 'pr.merged', 'release.published'];
 
 interface PendingTrigger {
@@ -206,15 +206,15 @@ const nextLink = (pr: PrLink, update: PrUpdate, now: string): LinkChange => {
 };
 
 /**
- * One poll applied to one card, by the daemon: the automatic links, the refreshed cache, the notes, and
+ * One poll applied to one task, by the daemon: the automatic links, the refreshed cache, the notes, and
  * every lane move those facts trigger, in the order a PR lives them (opened, ready, checks, merged,
- * released), then the reconcile that puts the card where its facts say (running here included).
+ * released), then the reconcile that puts the task where its facts say (running here included).
  * `task: null` when nothing changed.
  */
-export const applyPrUpdate = (card: Card, update: PrUpdate, context: CardContext): PrUpdateOutcome => {
-  requireStanding('trigger', context.standing, card);
-  const ref = formatCardRef(card);
-  let next = card;
+export const applyPrUpdate = (task: Task, update: PrUpdate, context: TaskContext): PrUpdateOutcome => {
+  requireStanding('trigger', context.standing, task);
+  const ref = formatTaskRef(task);
+  let next = task;
   for (const candidate of update.link) {
     if (next.links.prs.some(pr => samePr(pr.url, candidate.url))) continue;
     const link = unpolled(candidate.url);
@@ -257,5 +257,5 @@ export const applyPrUpdate = (card: Card, update: PrUpdate, context: CardContext
   next =
     reconcileFacts(next, { ...context, runningVersion: update.runningVersion ?? context.runningVersion ?? null }) ??
     next;
-  return { task: next === card ? null : next, nudges };
+  return { task: next === task ? null : next, nudges };
 };

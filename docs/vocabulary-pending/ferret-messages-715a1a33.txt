@@ -1,2 +1,0 @@
-docs/ferret-messages.md
-(`packages/daemon/src/lib/warden/focus-card.ts`). A ferret with no task gets the turn it got before. The closing line

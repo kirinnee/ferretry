@@ -7,7 +7,7 @@ import {
   type ReopenNotice,
   reopenKey,
 } from '../../../daemon/lib/board/index.ts';
-import { card, NOW } from './support.ts';
+import { boardTask, NOW } from './support.ts';
 
 class FakeMessenger implements ReopenMessenger {
   readonly sent: Array<readonly [string, string, string]> = [];
@@ -21,7 +21,7 @@ class FakeMessenger implements ReopenMessenger {
 }
 
 const notice = (overrides: Partial<ReopenNotice['task']> = {}): ReopenNotice => ({
-  task: card({
+  task: boardTask({
     id: 'F412',
     owner: 'lead',
     assignee: 'child',

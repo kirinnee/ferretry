@@ -1,14 +1,14 @@
 /**
  * THE BOARD'S VIEWS OF ONE MODEL: the Tree's nesting and the Archive's paging and search.
  *
- * `mergeBoard` has already grouped cards project → lane; these functions only re-read the same cards in
+ * `mergeBoard` has already grouped tasks project → lane; these functions only re-read the same tasks in
  * another shape. They never touch the network or the clock, so each is a plain value-to-value test.
  */
 
 import type { LaneCategory } from '../../contract/index.ts';
 import { type BoardFilters, type BoardModel, NO_BOARD_FILTERS } from './board-model.ts';
 
-export type BoardCardOf = BoardModel['cards'][number];
+export type BoardTaskOf = BoardModel['cards'][number];
 
 export const BOARD_VIEWS = ['kanban', 'list', 'tree', 'dependencies', 'archive'] as const;
 export type BoardViewId = (typeof BOARD_VIEWS)[number];
@@ -28,23 +28,23 @@ export const parseBoardView = (value: string | null): BoardViewId =>
 // List
 // ---------------------------------------------------------------------------------------------------
 
-/** A row of the List: the card, and where it sits on its board. */
+/** A row of the List: the task, and where it sits on its board. */
 export interface BoardListRow {
-  readonly card: BoardCardOf;
+  readonly card: BoardTaskOf;
   readonly projectId: string;
   readonly laneId: string;
   readonly laneName: string;
   readonly category: LaneCategory | null;
-  /** Position of the card's project among the model's boards, then of its lane inside that board. */
+  /** Position of the task's project among the model's boards, then of its lane inside that board. */
   readonly place: readonly [number, number];
 }
 
-/** Every card of the model with its lane, in board order. */
+/** Every task of the model with its lane, in board order. */
 export const listRows = (model: BoardModel): readonly BoardListRow[] =>
   model.groups.flatMap((group, groupIndex) => [
     ...group.lanes.flatMap((lane, laneIndex) =>
-      lane.cards.map(card => ({
-        card,
+      lane.cards.map(task => ({
+        card: task,
         projectId: group.projectId,
         laneId: lane.id,
         laneName: lane.name,
@@ -52,11 +52,11 @@ export const listRows = (model: BoardModel): readonly BoardListRow[] =>
         place: [groupIndex, laneIndex] as const,
       })),
     ),
-    ...group.unplaced.map(card => ({
-      card,
+    ...group.unplaced.map(task => ({
+      card: task,
       projectId: group.projectId,
-      laneId: card.task.laneId,
-      laneName: card.task.laneId,
+      laneId: task.task.laneId,
+      laneName: task.task.laneId,
       category: null,
       place: [groupIndex, group.lanes.length] as const,
     })),
@@ -67,47 +67,47 @@ export const listRows = (model: BoardModel): readonly BoardListRow[] =>
 // ---------------------------------------------------------------------------------------------------
 
 export interface BoardTreeNode {
-  readonly card: BoardCardOf;
+  readonly card: BoardTaskOf;
   readonly depth: number;
-  /** The parent card is not on screen (filtered out or closed): this node is drawn as a root. */
+  /** The parent task is not on screen (filtered out or closed): this node is drawn as a root. */
   readonly detached: boolean;
   readonly children: readonly BoardTreeNode[];
 }
 
 /** One row of the Tree, flattened in reading order. */
 export interface BoardTreeRow {
-  readonly card: BoardCardOf;
+  readonly card: BoardTaskOf;
   readonly depth: number;
   readonly detached: boolean;
   readonly childCount: number;
 }
 
-const siblingKey = (card: BoardCardOf): string => `${card.daemonId}\u0000${card.task.id}`;
+const siblingKey = (task: BoardTaskOf): string => `${task.daemonId}\u0000${task.task.id}`;
 
 /**
- * A lead's card with its sub-ferret cards indented under it. A card whose parent is not in `cards` is a
+ * A lead's task with its sub-ferret tasks indented under it. A task whose parent is not in `tasks` is a
  * root of its own (`detached`, so the page can say its lead is out of view). The lead's children keep the
- * order `cards` gave them.
+ * order `tasks` gave them.
  */
-export const buildTree = (cards: readonly BoardCardOf[]): readonly BoardTreeNode[] => {
-  const present = new Map(cards.map(card => [siblingKey(card), card] as const));
-  const childrenOf = new Map<string, BoardCardOf[]>();
-  const roots: BoardCardOf[] = [];
-  for (const card of cards) {
-    const parent = card.task.parent;
-    const parentKey = parent === null ? null : `${card.daemonId}\u0000${parent.id}`;
+export const buildTree = (tasks: readonly BoardTaskOf[]): readonly BoardTreeNode[] => {
+  const present = new Map(tasks.map(task => [siblingKey(task), task] as const));
+  const childrenOf = new Map<string, BoardTaskOf[]>();
+  const roots: BoardTaskOf[] = [];
+  for (const task of tasks) {
+    const parent = task.task.parent;
+    const parentKey = parent === null ? null : `${task.daemonId}\u0000${parent.id}`;
     if (parentKey !== null && present.has(parentKey)) {
       const siblings = childrenOf.get(parentKey);
-      if (siblings === undefined) childrenOf.set(parentKey, [card]);
-      else siblings.push(card);
-    } else roots.push(card);
+      if (siblings === undefined) childrenOf.set(parentKey, [task]);
+      else siblings.push(task);
+    } else roots.push(task);
   }
-  const node = (card: BoardCardOf, depth: number): BoardTreeNode => {
-    const children = childrenOf.get(siblingKey(card)) ?? [];
+  const node = (task: BoardTaskOf, depth: number): BoardTreeNode => {
+    const children = childrenOf.get(siblingKey(task)) ?? [];
     return {
-      card,
+      card: task,
       depth,
-      detached: depth === 0 && card.task.parent !== null,
+      detached: depth === 0 && task.task.parent !== null,
       children: children.map(child => node(child, depth + 1)),
     };
   };
@@ -126,16 +126,16 @@ export const flattenTree = (nodes: readonly BoardTreeNode[]): readonly BoardTree
 
 export const ARCHIVE_PAGE = 25;
 
-/** Newest first by when the card was last touched, else created. */
-const archivedAt = (card: BoardCardOf): string => card.task.lastTouchedAt ?? card.task.createdAt;
+/** Newest first by when the task was last touched, else created. */
+const archivedAt = (task: BoardTaskOf): string => task.task.lastTouchedAt ?? task.task.createdAt;
 
-/** Closed and dropped cards, newest first, narrowed by a search over id, title and summary. */
-export const archiveRows = (cards: readonly BoardCardOf[], query: string): readonly BoardCardOf[] => {
+/** Closed and dropped tasks, newest first, narrowed by a search over id, title and summary. */
+export const archiveRows = (tasks: readonly BoardTaskOf[], query: string): readonly BoardTaskOf[] => {
   const needle = query.trim().toLocaleLowerCase();
-  return cards
-    .filter(card => {
+  return tasks
+    .filter(boardTask => {
       if (needle === '') return true;
-      const { task } = card;
+      const { task } = boardTask;
       return [task.id, task.title, task.summary].some(text => text.toLocaleLowerCase().includes(needle));
     })
     .sort((left, right) => archivedAt(right).localeCompare(archivedAt(left)) || left.key.localeCompare(right.key));
@@ -188,22 +188,22 @@ export const laneNames = (model: BoardModel): readonly string[] => {
 
 export type BoardGroupOf = BoardModel['groups'][number];
 
-/** Where a card sits: the board (project on one machine) and the lane it is in. */
-export interface BoardCardPlace {
+/** Where a task sits: the board (project on one machine) and the lane it is in. */
+export interface BoardTaskPlace {
   readonly group: BoardGroupOf;
   readonly laneName: string;
   readonly category: LaneCategory | null;
 }
 
-/** Every card's place by its key; the List, Tree and Archive need a card's lane without walking the lanes. */
-export const cardPlaces = (model: BoardModel): ReadonlyMap<string, BoardCardPlace> => {
-  const places = new Map<string, BoardCardPlace>();
+/** Every task's place by its key; the List, Tree and Archive need a task's lane without walking the lanes. */
+export const taskPlaces = (model: BoardModel): ReadonlyMap<string, BoardTaskPlace> => {
+  const places = new Map<string, BoardTaskPlace>();
   for (const group of model.groups) {
     for (const lane of group.lanes) {
-      for (const card of lane.cards) places.set(card.key, { group, laneName: lane.name, category: lane.category });
+      for (const task of lane.cards) places.set(task.key, { group, laneName: lane.name, category: lane.category });
     }
-    for (const card of group.unplaced) {
-      places.set(card.key, { group, laneName: card.task.laneId, category: null });
+    for (const task of group.unplaced) {
+      places.set(task.key, { group, laneName: task.task.laneId, category: null });
     }
   }
   return places;

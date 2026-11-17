@@ -29,8 +29,8 @@ mockUi({
   useReferenceSurface: () => ({}),
   cn: (...parts: unknown[]) => parts.filter(Boolean).join(' '),
 });
-// The card is loaded after the seam is mocked.
-const card = async () => await import('../../../app/components/pack-call.tsx');
+// The task is loaded after the seam is mocked.
+const task = async () => await import('../../../app/components/pack-call.tsx');
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -81,7 +81,7 @@ const child: PackRow = {
 };
 
 const show = async (pack: PackCall, rows?: readonly PackRow[]) => {
-  const { PackCallRow, PackRowsProvider } = await card();
+  const { PackCallRow, PackRowsProvider } = await task();
   view = await mount(
     <PackRowsProvider rows={rows}>
       <PackCallRow entry={row(pack)} pack={pack} rhythm={{ 'data-transcript-density': 'message' }} />
@@ -90,37 +90,37 @@ const show = async (pack: PackCall, rows?: readonly PackRow[]) => {
   return must(view.container.querySelector<HTMLElement>('.fy-message-pack'), 'the card');
 };
 
-const lines = (card: HTMLElement): string[] =>
-  [...card.querySelectorAll('.fy-pack-line')].map(line => line.textContent ?? '');
+const lines = (task: HTMLElement): string[] =>
+  [...task.querySelectorAll('.fy-pack-line')].map(line => line.textContent ?? '');
 
 describe('a helper start in the lead’s chat', () => {
   test('is a "Started helper" card: the proved name, what it runs on, the probe, its live state and brief', async () => {
-    const card = await show(start(), [child]);
-    expect(card.dataset.packKind).toBe('start');
-    expect(card.dataset.packState).toBe('started');
-    expect(card.dataset.transcriptDensity).toBe('message');
-    expect(card.querySelector('header')?.textContent).toContain('Started helper');
-    expect(must(card.querySelector('header a'), 'the link').getAttribute('href')).toBe('/ferret/mvnadia-1');
-    expect(lines(card)).toEqual([
+    const task = await show(start(), [child]);
+    expect(task.dataset.packKind).toBe('start');
+    expect(task.dataset.packState).toBe('started');
+    expect(task.dataset.transcriptDensity).toBe('message');
+    expect(task.querySelector('header')?.textContent).toContain('Started helper');
+    expect(must(task.querySelector('header a'), 'the link').getAttribute('href')).toBe('/ferret/mvnadia-1');
+    expect(lines(task)).toEqual([
       'claude-auto-work · claude-opus-5-5 · effort high',
       'decided by you · answered the probe in 812 ms',
       'Needs you — Trust this folder?',
     ]);
     // The brief is folded to its first line and opens to the whole, as Markdown.
-    const brief = must(card.querySelector<HTMLDetailsElement>('.fy-pack-fold'), 'the brief');
+    const brief = must(task.querySelector<HTMLDetailsElement>('.fy-pack-fold'), 'the brief');
     expect(brief.open).toBe(false);
     expect(brief.querySelector('.fy-pack-fold-preview')?.textContent).toBe('Review the pack service for races.');
     expect(brief.querySelector('.fy-pack-fold-body strong')?.textContent).toBe('findings');
     // No result yet, and the command is one tap away.
-    expect(card.querySelector('[data-pack-collected]')).toBeNull();
-    const toggle = must(card.querySelector<HTMLButtonElement>('.fy-sent-command-toggle'), 'the toggle');
+    expect(task.querySelector('[data-pack-collected]')).toBeNull();
+    const toggle = must(task.querySelector<HTMLButtonElement>('.fy-sent-command-toggle'), 'the toggle');
     await interact(() => toggle.click());
     expect(toggle.textContent).toBe('Hide command');
-    expect(card.textContent).toContain('Bash');
+    expect(task.textContent).toContain('Bash');
   });
 
   test('lists every candidate tried, a Jev note and a cached probe; says nothing live it cannot see', async () => {
-    const card = await show(
+    const task = await show(
       start({
         effort: undefined,
         progress: {
@@ -147,12 +147,12 @@ describe('a helper start in the lead’s chat', () => {
       }),
       [],
     );
-    expect(lines(card)).toEqual([
+    expect(lines(task)).toEqual([
       'claude-auto-work · claude-opus-5-5 · effort max',
       'decided by jev · probe cached',
       'Jev could not answer, so the routing prompt decided.',
     ]);
-    const tried = must(card.querySelectorAll<HTMLDetailsElement>('.fy-pack-fold')[0], 'the attempts');
+    const tried = must(task.querySelectorAll<HTMLDetailsElement>('.fy-pack-fold')[0], 'the attempts');
     expect(tried.querySelector('.fy-pack-fold-label')?.textContent).toBe('Tried 3 candidates');
     expect([...tried.querySelectorAll('li')].map(item => item.textContent)).toEqual([
       'refused codex-w · gpt-6-astra (probe 0 ms) — out_of_quota: used up',
@@ -160,20 +160,20 @@ describe('a helper start in the lead’s chat', () => {
       'started claude-auto-work (probe cached)',
     ]);
     // Not in the pack table read: no live line.
-    expect(card.querySelector('[data-pack-live]')).toBeNull();
-    expect(card.querySelector('header .fy-peer-name')?.textContent).toBe('nadia');
+    expect(task.querySelector('[data-pack-live]')).toBeNull();
+    expect(task.querySelector('header .fy-peer-name')?.textContent).toBe('nadia');
   });
 
   test('renders who decided in the words it was given, a multi-word decider included', async () => {
-    const card = await show(
+    const task = await show(
       start({ progress: { state: 'done', value: started({ decidedBy: 'the routing prompt', attempts: [] }) } }),
     );
-    expect(lines(card)).toContain('decided by the routing prompt');
+    expect(lines(task)).toContain('decided by the routing prompt');
   });
 
   test('a start with no probe on record says only who decided', async () => {
-    const card = await show(start({ progress: { state: 'done', value: started({ attempts: [] }) } }));
-    expect(lines(card)).toContain('decided by you');
+    const task = await show(start({ progress: { state: 'done', value: started({ attempts: [] }) } }));
+    expect(lines(task)).toContain('decided by you');
   });
 
   test('folds a collected result INTO the card, in every state a wait can be in', async () => {
@@ -193,8 +193,8 @@ describe('a helper start in the lead’s chat', () => {
       [{ state: 'unread' }, 'Result collected — not recognised; see the command', []],
     ];
     for (const [collected, title, said] of cases) {
-      const card = await show(start({ collected }));
-      const result = must(card.querySelector<HTMLElement>('[data-pack-collected]'), 'the result');
+      const task = await show(start({ collected }));
+      const result = must(task.querySelector<HTMLElement>('[data-pack-collected]'), 'the result');
       expect(result.querySelector('.fy-pack-section-title')?.textContent).toBe(title);
       expect([...result.querySelectorAll('.fy-pack-line')].map(line => line.textContent)).toEqual(said);
       if (collected?.state === 'done' && collected.value.summary !== undefined)
@@ -205,12 +205,12 @@ describe('a helper start in the lead’s chat', () => {
   });
 
   test('says starting, failed and not recognised without claiming a ferret', async () => {
-    let card = await show(start({ progress: { state: 'running' } }));
-    expect(card.querySelector('header')?.textContent).toBe('Starting a helper…');
-    expect(lines(card)).toEqual(['claude-auto-work · claude-opus-5-5 · effort high']);
+    let task = await show(start({ progress: { state: 'running' } }));
+    expect(task.querySelector('header')?.textContent).toBe('Starting a helper…');
+    expect(lines(task)).toEqual(['claude-auto-work · claude-opus-5-5 · effort high']);
     await view?.unmount();
 
-    card = await show(
+    task = await show(
       start({
         auto: true,
         runtime: undefined,
@@ -219,34 +219,34 @@ describe('a helper start in the lead’s chat', () => {
         progress: { state: 'failed', reason: 'the daemon is not running' },
       }),
     );
-    expect(card.dataset.packState).toBe('failed');
-    expect(card.querySelector('header')?.textContent).toBe('Could not start a helper');
-    expect(must(card.querySelector('[role="alert"]'), 'the alert').textContent).toBe('the daemon is not running');
-    expect(lines(card)[0]).toBe('chosen by Ferretry');
+    expect(task.dataset.packState).toBe('failed');
+    expect(task.querySelector('header')?.textContent).toBe('Could not start a helper');
+    expect(must(task.querySelector('[role="alert"]'), 'the alert').textContent).toBe('the daemon is not running');
+    expect(lines(task)[0]).toBe('chosen by Ferretry');
     await view?.unmount();
 
-    card = await show(
+    task = await show(
       start({ runtime: undefined, model: undefined, effort: undefined, progress: { state: 'unread' } }),
     );
-    expect(card.querySelector('header')?.textContent).toBe('Helper start');
-    expect(lines(card)).toEqual(['Its answer was not recognised — see the command.']);
+    expect(task.querySelector('header')?.textContent).toBe('Helper start');
+    expect(lines(task)).toEqual(['Its answer was not recognised — see the command.']);
   });
 
   test('a brief it could not see says where it came from; an empty one says nothing', async () => {
-    let card = await show(start({ brief: null, briefFile: '/tmp/brief.md' }));
-    expect(lines(card)).toContain('The brief was read from /tmp/brief.md.');
+    let task = await show(start({ brief: null, briefFile: '/tmp/brief.md' }));
+    expect(lines(task)).toContain('The brief was read from /tmp/brief.md.');
     await view?.unmount();
-    card = await show(start({ brief: null }));
-    expect(lines(card)).toContain('The brief was composed by a shell command.');
+    task = await show(start({ brief: null }));
+    expect(lines(task)).toContain('The brief was composed by a shell command.');
     await view?.unmount();
-    card = await show(start({ brief: '' }));
-    expect(card.querySelector('.fy-pack-fold')).toBeNull();
+    task = await show(start({ brief: '' }));
+    expect(task.querySelector('.fy-pack-fold')).toBeNull();
   });
 });
 
 describe('a refused start', () => {
   test('names the code and message out loud, the remedy, every attempt, and that it tried again', async () => {
-    const card = await show(
+    const task = await show(
       start({
         retried: true,
         progress: {
@@ -270,24 +270,24 @@ describe('a refused start', () => {
         },
       }),
     );
-    expect(card.dataset.packState).toBe('refused');
-    expect(card.querySelector('header')?.textContent).toBe('Helper not startedprobe_failed');
-    expect(must(card.querySelector('[role="alert"]'), 'the alert').textContent).toBe(
+    expect(task.dataset.packState).toBe('refused');
+    expect(task.querySelector('header')?.textContent).toBe('Helper not startedprobe_failed');
+    expect(must(task.querySelector('[role="alert"]'), 'the alert').textContent).toBe(
       'codex-auto-work did not answer a "reply OK" check.',
     );
-    expect(lines(card)).toEqual([
+    expect(lines(task)).toEqual([
       'claude-auto-work · claude-opus-5-5 · effort high',
       'codex-auto-work did not answer a "reply OK" check.',
       'Try the next candidate.',
       'Tried again — the next start is below.',
     ]);
-    expect(card.querySelector('[data-pack-attempts] li')?.textContent).toBe(
+    expect(task.querySelector('[data-pack-attempts] li')?.textContent).toBe(
       'refused codex-auto-work · gpt-6-astra (probe 45000 ms) — probe_failed: timed out',
     );
   });
 
   test('with nothing tried, no remedy and nothing asked, says only the refusal', async () => {
-    const card = await show(
+    const task = await show(
       start({
         auto: false,
         runtime: undefined,
@@ -299,15 +299,15 @@ describe('a refused start', () => {
         },
       }),
     );
-    expect(lines(card)).toEqual(['Pack mode is off.']);
-    expect(card.querySelector('[data-pack-attempts]')).toBeNull();
-    expect(card.querySelector('[data-pack-retried]')).toBeNull();
+    expect(lines(task)).toEqual(['Pack mode is off.']);
+    expect(task.querySelector('[data-pack-attempts]')).toBeNull();
+    expect(task.querySelector('[data-pack-retried]')).toBeNull();
   });
 });
 
 describe('a wait no card started, and a recommendation', () => {
   test('a standalone wait names the ferret, how it is doing, and the result', async () => {
-    const card = await show(
+    const task = await show(
       {
         kind: 'wait',
         id: 'mvnadia-1',
@@ -315,15 +315,15 @@ describe('a wait no card started, and a recommendation', () => {
       },
       [child],
     );
-    expect(card.dataset.packKind).toBe('wait');
-    expect(card.dataset.packState).toBe('done');
-    expect(card.querySelector('header')?.textContent).toContain('Waited for');
-    expect(card.querySelector('[data-pack-live]')?.textContent).toBe('Needs you — Trust this folder?');
-    expect(card.querySelector('.fy-pack-section-title')?.textContent).toBe('Result collected');
+    expect(task.dataset.packKind).toBe('wait');
+    expect(task.dataset.packState).toBe('done');
+    expect(task.querySelector('header')?.textContent).toContain('Waited for');
+    expect(task.querySelector('[data-pack-live]')?.textContent).toBe('Needs you — Trust this folder?');
+    expect(task.querySelector('.fy-pack-section-title')?.textContent).toBe('Result collected');
   });
 
   test('a recommendation folds the routing prompt and the models usable now under the task, ready or not', async () => {
-    const card = await show({
+    const task = await show({
       kind: 'recommend',
       task: 'review the auth change',
       progress: {
@@ -353,10 +353,10 @@ describe('a wait no card started, and a recommendation', () => {
         },
       },
     });
-    expect(card.dataset.packKind).toBe('recommend');
-    expect(card.querySelector('header')?.textContent).toBe('Asked which model suits');
-    expect(card.querySelector('.fy-pack-task')?.textContent).toBe('review the auth change');
-    const [routing, models] = [...card.querySelectorAll<HTMLDetailsElement>('.fy-pack-fold')];
+    expect(task.dataset.packKind).toBe('recommend');
+    expect(task.querySelector('header')?.textContent).toBe('Asked which model suits');
+    expect(task.querySelector('.fy-pack-task')?.textContent).toBe('review the auth change');
+    const [routing, models] = [...task.querySelectorAll<HTMLDetailsElement>('.fy-pack-fold')];
     // The prompt is folded to its first line, says where it came from, and opens to the whole as Markdown.
     expect(must(routing, 'the routing prompt').open).toBe(false);
     expect(routing?.querySelector('.fy-pack-fold-label')?.textContent).toBe('Routing prompt');
@@ -378,8 +378,8 @@ describe('a wait no card started, and a recommendation', () => {
 
   test('a recommendation that is asking, failed, unread, or has nothing ready says so', async () => {
     const said = async (progress: Extract<PackCall, { kind: 'recommend' }>['progress'], task: string | null = null) => {
-      const card = await show({ kind: 'recommend', task, progress });
-      const text = card.textContent ?? '';
+      const boardTask = await show({ kind: 'recommend', task, progress });
+      const text = boardTask.textContent ?? '';
       await view?.unmount();
       view = null;
       return text;

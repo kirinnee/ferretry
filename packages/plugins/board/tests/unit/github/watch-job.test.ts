@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { fixedClock } from '@ferretry/kernel/testing';
 import { milliseconds } from '@ferretry/std';
 import should from 'should';
-import { type Card, type PrLink, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
+import { type Task, type PrLink, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
 import { BoardService, type FerretRoster, NO_HELPERS } from '../../../daemon/lib/board/index.ts';
 import {
   BOOT_REFILE_DELAY_MS,
@@ -14,7 +14,7 @@ import {
   type WatchSleep,
 } from '../../../daemon/lib/github/index.ts';
 import {
-  card,
+  boardTask,
   FakeLanes,
   lanes,
   liveSession,
@@ -45,7 +45,7 @@ const flush = async (): Promise<void> => {
 };
 
 interface RigOptions {
-  readonly cards?: readonly Card[];
+  readonly cards?: readonly Task[];
   readonly random?: () => number;
   /** Runs as each tick reads the board. */
   readonly onTick?: () => void;
@@ -258,7 +258,7 @@ describe('the GitHub watch job: the Unfiled refile at start', () => {
     // Arrange
     const subject = rig({
       cards: [
-        card({
+        boardTask({
           projectId: UNFILED_PROJECT_ID,
           laneId: 'doing',
           workflow: 'quick',
@@ -280,8 +280,8 @@ describe('the GitHub watch job: the Unfiled refile at start', () => {
 });
 
 describe('the GitHub watch job: where an alert goes', () => {
-  const closedUnmerged = (): Card =>
-    card({
+  const closedUnmerged = (): Task =>
+    boardTask({
       laneId: 'review',
       workflow: 'quick',
       owner: 'lead',

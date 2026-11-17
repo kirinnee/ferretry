@@ -28,7 +28,7 @@
  */
 
 import type { WardenReviveConfig } from './protocol.ts';
-import { focusCardBrief, type WardenFocusCard } from './focus-card.ts';
+import { focusTaskBrief, type WardenFocusTask } from './focus-task.ts';
 import { instantMs } from './time.ts';
 
 /** One journal event, as the revive reads it. */
@@ -181,7 +181,7 @@ const clock = (at: string): string => `${at.slice(0, 10)} ${at.slice(11, 16)} UT
 /**
  * What a revived session is told.
  *
- * An AUTO session is told why and to carry on, on its focus card when it has one (`focus-card.ts`). An
+ * An AUTO session is told why and to carry on, on its focus task when it has one (`focus-task.ts`). An
  * INTERACTIVE one gets the notice only: somebody is typing into that terminal, and an instruction to "continue"
  * would be Ferretry putting words in the owner's turn.
  */
@@ -189,13 +189,13 @@ export function reviveMessage(
   cause: ReviveCause,
   diedAt: string,
   mode: 'auto' | 'interactive',
-  card?: WardenFocusCard,
+  task?: WardenFocusTask,
 ): string {
   const notice = `Ferretry started your terminal again: it ended because ${causeText(cause)} at ${clock(diedAt)}.`;
   if (mode === 'interactive') return notice;
   return (
     `${notice} Your conversation was resumed as it was. Re-read your last turn, then continue from where you stopped` +
-    (card === undefined ? '.' : `, on the task below.\n\n${focusCardBrief(card)}`)
+    (task === undefined ? '.' : `, on the task below.\n\n${focusTaskBrief(task)}`)
   );
 }
 

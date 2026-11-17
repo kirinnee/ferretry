@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type Card, CardActionRequestSchema } from '../../../contract/index.ts';
+import { type Task, CardActionRequestSchema } from '../../../contract/index.ts';
 import should from 'should';
 import {
   applyAction,
@@ -7,10 +7,10 @@ import {
   BoardError,
   BoardIndex,
   BoardService,
-  type CardContext,
+  type TaskContext,
 } from '../../../daemon/lib/board/index.ts';
 import {
-  card,
+  boardTask,
   FakeLanes,
   FakeParents,
   FakeSessions,
@@ -26,7 +26,7 @@ import {
 } from './support.ts';
 
 /**
- * A live lead may ADOPT a card whose owner ferret and assignee have both ended (docs/board.md § An orphaned card is
+ * A live lead may ADOPT a task whose owner ferret and assignee have both ended (docs/board.md § An orphaned task is
  * adopted). `gone` and `gone2` are ended ferrets (not in the roster); `lead` and `other` are live leads; `kid` is a
  * live helper of `lead`; `unreadable` is held by the daemon but its record cannot be read.
  */
@@ -40,9 +40,9 @@ const DIRECTORY = {
   addressOf: async (ferret: string) => ferret,
 };
 
-/** An orphaned card: both its ferrets ended. A ferret's own errand, so an adopter may pass its gates. */
-const orphan = (overrides: Partial<Card> = {}): Card =>
-  card({
+/** An orphaned task: both its ferrets ended. A ferret's own errand, so an adopter may pass its gates. */
+const orphan = (overrides: Partial<Task> = {}): Task =>
+  boardTask({
     laneId: 'implement',
     owner: 'gone',
     assignee: 'gone2',
@@ -53,7 +53,7 @@ const orphan = (overrides: Partial<Card> = {}): Card =>
   });
 
 const setup = (
-  cards: readonly Card[],
+  tasks: readonly Task[],
   options: {
     readonly sessions?: FakeSessions;
     readonly lanes?: FakeLanes;
@@ -70,7 +70,7 @@ const setup = (
       ),
     );
   const ports = world({
-    store: new MemoryBoardStore(cards),
+    store: new MemoryBoardStore(tasks),
     parents: new FakeParents(PARENTS),
     helpers: options.helpers ?? DIRECTORY,
     ...(options.withLiveness === false ? {} : { liveness: sessions }),
@@ -376,7 +376,7 @@ describe('adopting an orphaned card', () => {
 });
 
 describe('the adopt rule itself', () => {
-  const context = (overrides: Partial<CardContext>): CardContext => ({
+  const context = (overrides: Partial<TaskContext>): TaskContext => ({
     now: NOW,
     actor: { kind: 'ferret', name: 'lead', ferret: 'lead' },
     standing: 'reader',

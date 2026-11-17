@@ -40,7 +40,7 @@ export function effectiveMode(record: FerretRecord, details?: FerretDetails): Fe
 
 /**
  * What other subsystems and the app read: the record without its format stamp and runner handle, with the model and
- * card it was started with and its title from `details.json`. The pin instant is the reader's to add.
+ * task it was started with and its title from `details.json`. The pin instant is the reader's to add.
  */
 export function summaryOf(
   record: FerretRecord,
@@ -67,7 +67,7 @@ export function summaryOf(
   const model = details.options?.model;
   const effort = details.options?.effort;
   const fast = details.options?.fast;
-  const card = details.options?.card;
+  const task = details.options?.card;
   const label = details.options?.label;
   // A converted ferret's record carries no `mode` (v4 kept it in `config.json`; the conversion files it under the start
   // options), yet the Agents filter and "Clear all from agent ferrets" read the summary's. The record's own wins.
@@ -79,7 +79,7 @@ export function summaryOf(
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
     ...(fast === undefined ? {} : { fast }),
-    ...(card === undefined ? {} : { task: card }),
+    ...(task === undefined ? {} : { task: task }),
     ...(label === undefined ? {} : { label }),
     ...(mode === undefined ? {} : { mode }),
     ...(nudgeAfterSeconds === undefined ? {} : { nudgeAfterSeconds }),

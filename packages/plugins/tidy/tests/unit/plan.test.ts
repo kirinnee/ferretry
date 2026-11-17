@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { planTidy, type TidyAskFact, type TidyCardFact, type TidyFacts } from '../../daemon/lib/plan.ts';
+import { planTidy, type TidyAskFact, type TidyTaskFact, type TidyFacts } from '../../daemon/lib/plan.ts';
 
 const ME = 'lead-1';
 const OTHER = 'helper-2';
 
-const card = (id: string, extra: Partial<TidyCardFact> = {}): TidyCardFact => ({
+const task = (id: string, extra: Partial<TidyTaskFact> = {}): TidyTaskFact => ({
   id,
   title: `Card ${id}`,
   project: 'proj',
@@ -41,39 +41,39 @@ const kept = (plan: ReturnType<typeof planTidy>) => plan.keep.map(each => `${eac
 
 describe('planTidy: cards', () => {
   test('drops the ferret’s own open agent-asked card on a board that is off', () => {
-    const plan = planTidy(facts({ cards: [card('F1')] }));
+    const plan = planTidy(facts({ cards: [task('F1')] }));
     expect(dropped(plan)).toEqual(['F1']);
     expect(plan.keep).toEqual([]);
     expect(String(plan.ferret)).toBe(ME);
   });
   test('drops a card the ferret is assigned though another ferret owns it', () => {
-    expect(dropped(planTidy(facts({ cards: [card('F1', { owner: OTHER, assignee: ME })] })))).toEqual(['F1']);
+    expect(dropped(planTidy(facts({ cards: [task('F1', { owner: OTHER, assignee: ME })] })))).toEqual(['F1']);
   });
   test('leaves a card some other ferret owns and does', () => {
-    const plan = planTidy(facts({ cards: [card('F1', { owner: OTHER, assignee: OTHER })] }));
+    const plan = planTidy(facts({ cards: [task('F1', { owner: OTHER, assignee: OTHER })] }));
     expect([plan.drop, plan.keep]).toEqual([[], []]);
   });
   test('keeps a card the owner asked for', () => {
-    expect(kept(planTidy(facts({ cards: [card('F1', { askedBy: 'person' })] })))).toEqual(['F1:owner-asked']);
+    expect(kept(planTidy(facts({ cards: [task('F1', { askedBy: 'person' })] })))).toEqual(['F1:owner-asked']);
   });
   test('keeps a card on a board that is on', () => {
-    expect(kept(planTidy(facts({ cards: [card('F1')], boardsOn: new Set(['proj']) })))).toEqual(['F1:board-on']);
+    expect(kept(planTidy(facts({ cards: [task('F1')], boardsOn: new Set(['proj']) })))).toEqual(['F1:board-on']);
   });
   test('keeps a card another live ferret is assigned to, and drops it once that ferret is gone', () => {
-    const handed = card('F1', { assignee: OTHER });
+    const handed = task('F1', { assignee: OTHER });
     expect(kept(planTidy(facts({ cards: [handed], liveFerrets: new Set([OTHER]) })))).toEqual([
       'F1:assigned-to-live-ferret',
     ]);
     expect(dropped(planTidy(facts({ cards: [handed] })))).toEqual(['F1']);
   });
   test('does not count the ferret itself as another live ferret', () => {
-    expect(dropped(planTidy(facts({ cards: [card('F1')], liveFerrets: new Set([ME]) })))).toEqual(['F1']);
+    expect(dropped(planTidy(facts({ cards: [task('F1')], liveFerrets: new Set([ME]) })))).toEqual(['F1']);
   });
   test('keeps a card waiting at a gate on the owner', () => {
-    expect(kept(planTidy(facts({ cards: [card('F1')], gateCards: new Set(['F1']) })))).toEqual(['F1:waiting-at-gate']);
+    expect(kept(planTidy(facts({ cards: [task('F1')], gateCards: new Set(['F1']) })))).toEqual(['F1:waiting-at-gate']);
   });
   test('puts no card in a helper’s plan, because the board refuses its drops', () => {
-    const plan = planTidy(facts({ helper: true, cards: [card('F1')] }));
+    const plan = planTidy(facts({ helper: true, cards: [task('F1')] }));
     expect([plan.helper, plan.drop, plan.keep]).toEqual([true, [], []]);
   });
 });

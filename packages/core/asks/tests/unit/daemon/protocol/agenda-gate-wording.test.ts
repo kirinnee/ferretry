@@ -67,21 +67,21 @@ describe('a gate’s style comes from its lane’s stage', () => {
 });
 
 describe('the preview a card links', () => {
-  const card = (...docs: string[]) => ({ links: { prs: [], docs } });
+  const task = (...docs: string[]) => ({ links: { prs: [], docs } });
 
   it('is a Cloudflare Pages preview, never the production host or another site', () => {
-    should(previewUrlOf(card('https://abc123.ferretry.pages.dev/inbox'))).equal(
+    should(previewUrlOf(task('https://abc123.ferretry.pages.dev/inbox'))).equal(
       'https://abc123.ferretry.pages.dev/inbox',
     );
-    should(previewUrlOf(card('https://ferretry.pages.dev/'))).be.undefined();
-    should(previewUrlOf(card('http://abc.ferretry.pages.dev/'))).be.undefined();
-    should(previewUrlOf(card('https://example.com/a'))).be.undefined();
-    should(previewUrlOf(card('docs/board.md', ''))).be.undefined();
+    should(previewUrlOf(task('https://ferretry.pages.dev/'))).be.undefined();
+    should(previewUrlOf(task('http://abc.ferretry.pages.dev/'))).be.undefined();
+    should(previewUrlOf(task('https://example.com/a'))).be.undefined();
+    should(previewUrlOf(task('docs/board.md', ''))).be.undefined();
     should(previewUrlOf({ links: { prs: [] } })).be.undefined();
   });
 
   it('is the first one linked', () => {
-    should(previewUrlOf(card('docs/a.md', 'https://one.ferretry.pages.dev/', 'https://two.ferretry.pages.dev/'))).equal(
+    should(previewUrlOf(task('docs/a.md', 'https://one.ferretry.pages.dev/', 'https://two.ferretry.pages.dev/'))).equal(
       'https://one.ferretry.pages.dev/',
     );
   });

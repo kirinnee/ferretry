@@ -7,7 +7,7 @@ import {
   agendaDoneMessage,
   agendaNeedsInfoMessage,
 } from '../protocol/agenda-message.ts';
-import { agendaCardKind, agendaTitle } from '../protocol/agenda-card.ts';
+import { agendaTaskKind, agendaTitle } from '../protocol/agenda-task.ts';
 import { formWords } from '../protocol/agenda-form.ts';
 
 /**
@@ -22,7 +22,7 @@ import { formWords } from '../protocol/agenda-form.ts';
  * one, and reads its board on demand (`agenda ls`).
  *
  * The WORDS of every such message are the protocol's (`agenda-message.ts`), which the app reads back to draw
- * them as cards; this module decides which message an event becomes.
+ * them as tasks; this module decides which message an event becomes.
  *
  * Pure: every decision here is a function of the board and the words; the composition root does the
  * reading, the sending and the resolving.
@@ -34,7 +34,7 @@ const byAsk = (item: Pick<AgendaItem, 'id' | 'subject'>): AgendaMessageItem => (
   quote: item.subject,
 });
 
-/** An item as a heading names it: by its title, the card the owner is looking at. */
+/** An item as a heading names it: by its title, the task the owner is looking at. */
 const byTitle = (item: AgendaItem): AgendaMessageItem => ({ id: item.id, quote: agendaTitle(item) });
 
 /** The owner's answer in words: the choice they made, or what they wrote. */
@@ -63,7 +63,7 @@ function responseWords(response: AgendaResponse, fields: readonly AgendaFormFiel
  */
 export function isQuietAcknowledgement(item: ResolvedAgendaItem): boolean {
   return (
-    agendaCardKind(item) === 'info' &&
+    agendaTaskKind(item) === 'info' &&
     item.disposition === 'done' &&
     item.response === undefined &&
     (item.resolutionNote?.trim() ?? '') === ''

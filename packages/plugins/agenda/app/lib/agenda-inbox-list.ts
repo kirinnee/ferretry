@@ -13,7 +13,7 @@
  * ALSO sit in "With ferrets" for the items it holds.
  *
  * WHO AND WHAT, never the callsign alone: a group, and the open item, say the ferret, what it is working on (its
- * task's name and its card, `&F12`) and the machine ({@link inboxWho}).
+ * task's name and its task, `&F12`) and the machine ({@link inboxWho}).
  */
 
 import { matchesMode, sessionsBarNames, type ModeFilter } from './ferret-names.ts';
@@ -42,7 +42,7 @@ export interface FerretGroup {
   readonly ferret: string;
   /** What the conversation is working on, when that is not just the ferret's name. */
   readonly task: string | null;
-  /** The board card the conversation works on, as it is written (`&F12`); `null` when it has none. */
+  /** The board task the conversation works on, as it is written (`&F12`); `null` when it has none. */
   readonly card: string | null;
   /** The sub-ferret's own name when the group's session is not the owner's thread it is named for; `null` when it is. */
   readonly via: string | null;
@@ -65,11 +65,11 @@ const groupKey = (daemonId: DaemonId, sessionId: string): string => JSON.stringi
  */
 const isNoticeCard = (card: InboxCard): boolean => card.item.notice === true && !isMachineAgendaId(card.view.config.id);
 
-/** The card a conversation works on, as it is written: `&F12`. */
+/** The task a conversation works on, as it is written: `&F12`. */
 const cardOf = (view: SessionView): string | null =>
   view.config.focusTask === undefined ? null : formatTaskRef(view.config.focusTask);
 
-/** Who asked and what about: the ferret, its task's name, its card and its machine. */
+/** Who asked and what about: the ferret, its task's name, its task and its machine. */
 export interface InboxWho {
   readonly ferret: string;
   readonly task: string | null;
@@ -79,8 +79,8 @@ export interface InboxWho {
 
 /**
  * Who an item is from, never the callsign alone: the ferret, what it works on and the machine. The ferret and its
- * task are the OWNER's thread (the lineage root, `root`), not a sub-ferret's task title or callsign. The card is the
- * item's own (`task`, the card it was raised about) when it names one, else the conversation's focus card.
+ * task are the OWNER's thread (the lineage root, `root`), not a sub-ferret's task title or callsign. The task is the
+ * item's own (`task`, the task it was raised about) when it names one, else the conversation's focus task.
  */
 export const inboxWho = (card: InboxCard): InboxWho => {
   const names = sessionsBarNames(card.root ?? card.view);
@@ -92,7 +92,7 @@ export const inboxWho = (card: InboxCard): InboxWho => {
   };
 };
 
-/** The cards grouped by ferret. Each group's items are in the agenda's order; its notices keep their (newest-first) order. */
+/** The tasks grouped by ferret. Each group's items are in the agenda's order; its notices keep their (newest-first) order. */
 const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
   const grouped = new Map<string, InboxCard[]>();
   for (const card of cards) {
@@ -144,19 +144,19 @@ export interface InboxSections {
 }
 
 /**
- * `ownerCards` (on the owner's turn) and `ferretCards` (on the ferret's turn) sorted into the three sections.
+ * `ownerCards` (on the owner's turn) and `ferretTasks` (on the ferret's turn) sorted into the three sections.
  * A ferret that is stopped heads the first; one with anything else on the owner's turn is in the second.
  */
-export const inboxSections = (ownerCards: readonly InboxCard[], ferretCards: readonly InboxCard[]): InboxSections => {
+export const inboxSections = (ownerCards: readonly InboxCard[], ferretTasks: readonly InboxCard[]): InboxSections => {
   const owners = buildGroups(ownerCards);
   return {
     stopped: owners.filter(group => group.stopped),
     needsYou: owners.filter(group => !group.stopped),
-    withFerrets: buildGroups(ferretCards).map(group => ({ ...group, stopped: false })),
+    withFerrets: buildGroups(ferretTasks).map(group => ({ ...group, stopped: false })),
   };
 };
 
-/** Every card of a set of groups, in the order the page draws them: the keyboard's order. */
+/** Every task of a set of groups, in the order the page draws them: the keyboard's order. */
 export const groupCards = (groups: readonly FerretGroup[]): readonly InboxCard[] =>
   groups.flatMap(group => [...group.items, ...group.notices]);
 
@@ -250,7 +250,7 @@ const searchable = (
   ];
 };
 
-/** The open cards the header's machine filter and Find keep, in their order. */
+/** The open tasks the header's machine filter and Find keep, in their order. */
 export const filterInboxCards = (cards: readonly InboxCard[], filter: InboxListFilter): readonly InboxCard[] =>
   cards.filter(
     card =>
@@ -320,8 +320,8 @@ const wakeTime = (card: InboxCard): number => {
 };
 
 /**
- * The parked cards of one reason, in the order to read them: what wakes soonest first for a snooze, what was
- * replied to most recently first for a reply (`cards` arrive newest parked first).
+ * The parked tasks of one reason, in the order to read them: what wakes soonest first for a snooze, what was
+ * replied to most recently first for a reply (`tasks` arrive newest parked first).
  */
 export const parkedBy = (cards: readonly InboxCard[], reason: ParkedReason): readonly InboxCard[] => {
   const mine = cards.filter(card => card.item.parked?.reason === reason);

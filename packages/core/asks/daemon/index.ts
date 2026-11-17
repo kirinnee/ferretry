@@ -5,14 +5,14 @@
  * `build` wires today's agenda engine over the kernel's ports and hands back the nine routes and the Asks port. What
  * another subsystem owns is a seam here, unwired until that subsystem lands, and each says what it does meanwhile:
  *
- * - **Card asks** go to the Board's `ask.sources:card` `apply` before the answer is recorded; with no Board running, an
- *   answer to a card ask is refused and the ask stays open.
+ * - **Task asks** go to the Board's `ask.sources:card` `apply` before the answer is recorded; with no Board running, an
+ *   answer to a task ask is refused and the ask stays open.
  * - **Held configuration edits** (`--confirms`): no config port yet, so `--confirms` is refused.
  * - **Answers into a ferret's terminal**: typing into a ferret is Conversation's, provided under `ask.delivery:ferret`;
  *   unprovided, answers are held in the ferret's outbox, never lost, and shown as held.
- * - **Which ferrets exist, who started whom, a ferret's focus card, a card's gate**: Ferrets and Board provide them under
+ * - **Which ferrets exist, who started whom, a ferret's focus task, a task's gate**: Ferrets and Board provide them under
  *   `agenda.context`. With Ferrets off no ferret has a board and no raise is accepted; with Board off an item keeps the
- *   card it was raised with and a card's gate reads as asking.
+ *   task it was raised with and a task's gate reads as asking.
  * - **Push counts** after a raise: Notify's; meanwhile a raise says nothing about devices.
  */
 import { randomUUID } from 'node:crypto';
@@ -32,7 +32,7 @@ import { askDelivery } from './adapters/ask-delivery.ts';
 import { asksPort } from './adapters/asks-port.ts';
 import { AskEvents } from './adapters/ask-events.ts';
 import { sourceAnswers } from './adapters/source-answers.ts';
-import { CARD_SOURCE, cardAskAnswers } from './adapters/card-ask-answers.ts';
+import { TASK_SOURCE, taskAskAnswers } from './adapters/task-ask-answers.ts';
 import { FileAgendaLedgerRepository } from './adapters/agenda/file-agenda-ledger-repository.ts';
 import { FileAgendaOutboxRepository } from './adapters/agenda/file-agenda-outbox-repository.ts';
 import { FileAgendaSeenStore, SqliteAgendaVersionStore } from './adapters/agenda/file-agenda-versions.ts';
@@ -69,7 +69,7 @@ export default implementDaemon(manifest, {
       now: () => clock.nowMs(),
       warn,
     });
-    // Lineage and card context are Ferrets' and Board's (`agenda.context`), read at each call; an answer that cannot be had
+    // Lineage and task context are Ferrets' and Board's (`agenda.context`), read at each call; an answer that cannot be had
     // is the safe side of its question (see `agendaContext`). A notice with no owner home lands on the machine agenda
     // (bound there); a gate item or a follow-up never does.
     const context = agendaContext(key => hooks.provider(AgendaContext, key), warn);
@@ -181,7 +181,7 @@ export default implementDaemon(manifest, {
           replies,
           undefined,
           undefined,
-          cardAskAnswers(agenda, () => sources(CARD_SOURCE), now),
+          taskAskAnswers(agenda, () => sources(TASK_SOURCE), now),
           sourceAnswers(agenda, sources, now),
           context.reach,
         ),

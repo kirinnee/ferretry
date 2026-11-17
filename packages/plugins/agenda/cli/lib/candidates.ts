@@ -1,9 +1,9 @@
 import {
   type AgendaActionRequest,
-  type AgendaCardAnswer,
+  type AgendaTaskAnswer,
   type AgendaId,
   type AgendaItem,
-  agendaCardAnswers,
+  agendaTaskAnswers,
   formatTaskRef,
   type TaskRef,
 } from '@ferretry/core-asks/contract';
@@ -25,7 +25,7 @@ export interface AgendaCandidate {
   readonly id: AgendaId;
   readonly title: string;
   readonly state: CandidateState;
-  /** The cards it carries, as cited (`&F12`). */
+  /** The tasks it carries, as cited (`&F12`). */
   readonly cards: readonly string[];
   readonly item: AgendaItem;
 }
@@ -42,7 +42,7 @@ export const MAX_LISTED_CANDIDATES = 8;
 
 /**
  * Whether an open item is one a ferret could add to: one a ferret raised and can edit. A notice is read, never added
- * to; a held configuration change, a card gate and the daemon's own cards (an input form, a phone approval) answer one
+ * to; a held configuration change, a task gate and the daemon's own cards (an input form, a phone approval) answer one
  * thing each; and an item the owner raised is theirs.
  */
 export const isAgendaCandidate = (item: AgendaItem): boolean =>
@@ -175,13 +175,13 @@ const ASK_WORDS: Readonly<Record<NonNullable<AddRequest['ask']>['kind'], string>
   task: 'something for the owner to do',
 };
 
-const answerKey = (answer: AgendaCardAnswer): string =>
+const answerKey = (answer: AgendaTaskAnswer): string =>
   JSON.stringify([answer.direction, answer.does, answer.label.trim(), answer.description ?? '']);
 
 /** Whether the new ask has an answer (an `--up` label, say) that the candidate does not already offer. */
 function answersOfItsOwn(item: AgendaItem, request: AddRequest): boolean {
-  const offered = new Set(agendaCardAnswers(item).map(answerKey));
-  return agendaCardAnswers(request).some(answer => !offered.has(answerKey(answer)));
+  const offered = new Set(agendaTaskAnswers(item).map(answerKey));
+  return agendaTaskAnswers(request).some(answer => !offered.has(answerKey(answer)));
 }
 
 /** What the new ask says that `fy agenda edit` cannot add to an open agenda, in plain words; empty when nothing. */

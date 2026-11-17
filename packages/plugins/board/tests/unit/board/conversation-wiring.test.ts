@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import type { AskAnswer } from '@ferretry/core-asks/contract';
 import { sourceKey } from '@ferretry/core-asks/contract/testing';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
-import { as, boot, makeCard } from '../../integration/daemon/harness.ts';
+import { as, boot, makeTask } from '../../integration/daemon/harness.ts';
 
 /**
  * Board -> Conversation (optional `uses`, lead decision D2 #12): with Conversation on, what Board owes a ferret is typed
  * through Conversation's ordinary send as the owner's; with it off, it is held with a warning and nothing fails.
- * Ferrets' `ferret.started` makes a started ferret's card (today's `SessionCards.open`).
+ * Ferrets' `ferret.started` makes a started ferret's task (today's `SessionCards.open`).
  */
 
 const gateAnswer = (ask: { ferret?: string; id: string; entry: string }, choice: string, text?: string): AskAnswer =>
@@ -25,7 +25,7 @@ const gateAnswer = (ask: { ferret?: string; id: string; entry: string }, choice:
   }) as unknown as AskAnswer;
 
 const atTryIt = async (world: Awaited<ReturnType<typeof boot>>) => {
-  const made = await makeCard(world.host, { howToTest: 'Open the badge and look at its colour.' });
+  const made = await makeTask(world.host, { howToTest: 'Open the badge and look at its colour.' });
   for (const to of ['doing', 'to-test'])
     await world.host.request('POST', `/v1/board/tasks/${made.id}`, {
       body: { action: 'move', to, reason: 'for the test' },
@@ -87,8 +87,8 @@ describe('ferret.started makes the started ferret’s card (today’s SessionCar
     });
 
     const board = await world.host.request('GET', '/v1/board', { headers: as('owner') });
-    const cards = board.json<{ tasks: { title: string; ask?: { text: string } | null }[] }>().tasks;
-    expect(cards.some(card => card.ask?.text === 'Make the badge green')).toBe(true);
+    const tasks = board.json<{ tasks: { title: string; ask?: { text: string } | null }[] }>().tasks;
+    expect(tasks.some(task => task.ask?.text === 'Make the badge green')).toBe(true);
   });
 
   test('a start the board made itself, or a daemon worker, gets no second card', async () => {

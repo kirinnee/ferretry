@@ -856,7 +856,7 @@ const LESSON_TOOLS: readonly McpToolDefinition[] = [
 ];
 
 /**
- * The `search_work` tool: cards and agenda items by what they say, so a ferret finds the work that already
+ * The `search_work` tool: tasks and agenda items by what they say, so a ferret finds the work that already
  * covers its idea before filing a second one. Read-only; the daemon decides what the caller may see.
  */
 const SEARCH_TOOLS: readonly McpToolDefinition[] = [
@@ -886,7 +886,7 @@ const INSTRUCTIONS_TOOL: McpToolDefinition = {
   inputSchema: object({}),
 };
 
-/** The task progress tool (Board's `task_progress`) and its old name `card_progress`, which takes the old `card` key. */
+/** The task progress tool (Board's `task_progress`) and its old name `card_progress`, which takes the old `task` key. */
 const idOf = (word: string): Record<string, unknown> => ({
   type: 'string',
   pattern: '^[BFIC][1-9][0-9]{0,8}$',
@@ -905,7 +905,7 @@ const progress = (name: string, key: 'task' | 'card', description: string): McpT
     [key],
   ),
 });
-const CARD_TOOLS: readonly McpToolDefinition[] = [
+const TASK_TOOLS: readonly McpToolDefinition[] = [
   progress('task_progress', 'task', 'Rewrite one task’s progress (now, doneSoFar, next).'),
   progress('card_progress', 'card', 'Old name of task_progress: rewrite one task’s progress (now, doneSoFar, next).'),
 ];
@@ -916,6 +916,6 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
   ...CONFIG_TOOLS,
   ...LESSON_TOOLS,
   ...SEARCH_TOOLS,
-  ...CARD_TOOLS,
+  ...TASK_TOOLS,
   INSTRUCTIONS_TOOL,
 ];

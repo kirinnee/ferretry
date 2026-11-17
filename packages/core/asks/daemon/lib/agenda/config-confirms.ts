@@ -1,14 +1,14 @@
 /**
  * AN AGENDA ITEM THAT CONFIRMS A HELD CONFIGURATION CHANGE (docs/agenda.md § Confirming a configuration
  * change). A ferret's edit that loosens what the machine may spend or do is held until the owner confirms it
- * (docs/config-files.md); `fy agenda add --confirms <file>` raises the card that lets the owner's Allow be
+ * (docs/config-files.md); `fy agenda add --confirms <file>` raises the task that lets the owner's Allow be
  * that confirmation, so nobody has to walk to a terminal afterwards.
  *
- * This module is the card's words and shape, and what an answer to it means. It decides nothing about who
+ * This module is the task's words and shape, and what an answer to it means. It decides nothing about who
  * may answer — the route does that with the config files' own rule — and it touches no file.
  *
  * - The ask is a choice of exactly {@link AGENDA_CONFIRMS_ANSWERS}: Allow (right), Deny (left) and Discard
- *   change (up). The option labels ARE the decision, so a card that knows nothing about confirmations still
+ *   change (up). The option labels ARE the decision, so a task that knows nothing about confirmations still
  *   answers one correctly by choosing.
  * - The premise is the change itself, in the daemon's words, and the line that says what Allow does.
  */
@@ -16,14 +16,14 @@
 import {
   AGENDA_CONFIRMS_ANSWERS,
   type AgendaAsk,
-  type AgendaCardAnswer,
+  type AgendaTaskAnswer,
   type AgendaItem,
   type AgendaResponse,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_REASON_LENGTH,
   toBullets,
 } from '../protocol/agenda.ts';
-import { clipAtWord } from '../protocol/agenda-card.ts';
+import { clipAtWord } from '../protocol/agenda-task.ts';
 
 /** What the owner decided about a held change. */
 export type ConfirmationDecision = 'allow' | 'deny' | 'discard';
@@ -32,7 +32,7 @@ export type ConfirmationDecision = 'allow' | 'deny' | 'discard';
 export interface ConfirmationCard {
   readonly kind: 'choice';
   readonly ask: AgendaAsk;
-  readonly answers: AgendaCardAnswer[];
+  readonly answers: AgendaTaskAnswer[];
 }
 
 /** The ask and the answers of a confirmation of a held change to `path`. */
@@ -61,7 +61,7 @@ export function confirmationCard(path: string): ConfirmationCard {
 export const allowLine = (path: string): string => `Allow applies this change to ${path}.`;
 
 /**
- * The card's premise: each change, then what Allow does, then the raiser's own points when they still fit.
+ * The task's premise: each change, then what Allow does, then the raiser's own points when they still fit.
  * Past the premise's length the changes that fit are kept and the rest are counted, so the line about Allow
  * is never the one cut.
  */

@@ -136,12 +136,12 @@ export const FerretRecordSchema = z.strictObject({
 export type FerretRecord = z.infer<typeof FerretRecordSchema>;
 
 /**
- * A board card's id (`F21`, `B3`), copied from today's `protocol/src/lib/board-refs.ts` (`BOARD_TASK_ID_PATTERN`).
- * Ferrets is core and cannot import the Board's contract, so the shape is kept here: a start names the EXISTING card
+ * A board task's id (`F21`, `B3`), copied from today's `protocol/src/lib/board-refs.ts` (`BOARD_TASK_ID_PATTERN`).
+ * Ferrets is core and cannot import the Board's contract, so the shape is kept here: a start names the EXISTING task
  * the ferret works on, and the summary shows it.
  */
-export const FERRET_CARD_ID_PATTERN = /^[BFIC][1-9][0-9]{0,8}$/u;
-export const FerretCardIdSchema = z.string().regex(FERRET_CARD_ID_PATTERN);
+export const FERRET_TASK_ID_PATTERN = /^[BFIC][1-9][0-9]{0,8}$/u;
+export const FerretCardIdSchema = z.string().regex(FERRET_TASK_ID_PATTERN);
 
 /**
  * A ferret's task title (today's `start --name <title>`, `new --name <title>`, `rename --title`): free-form, kept
@@ -195,7 +195,7 @@ export type FerretWaiting = z.infer<typeof FerretWaitingSchema>;
 
 /**
  * What other subsystems and the app read about a ferret: its record without the format stamp and runner handle, and
- * today's view fields Ferrets keeps beside it — the model and card it was started with and its task title (from its
+ * today's view fields Ferrets keeps beside it — the model and task it was started with and its task title (from its
  * `details.json`), the instant the owner pinned it, and its quota (no core source; see {@link FerretQuotaSchema}).
  * Provenance, transfer lineage, project and transcript show as today's session view showed them: the transcript
  * without its launch-time `baseline`.
@@ -209,7 +209,7 @@ export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handl
   effort: z.string().min(1).optional(),
   /** Whether it was launched in the harness's fast mode. */
   fast: z.boolean().optional(),
-  /** The task it works on, from the stored start option `card`. */
+  /** The task it works on, from the stored start option `task`. */
   task: FerretCardIdSchema.optional(),
   /** The former name of `task`: read for one release, never written. */
   card: FerretCardIdSchema.optional(),

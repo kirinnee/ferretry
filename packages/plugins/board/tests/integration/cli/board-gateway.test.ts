@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { ClientBoardGateway, ClientLaneGateway } from '../../../cli/lib/gateway.ts';
 import manifest from '../../../manifest.ts';
-import { card, cardResponse, response } from '../../unit/cli/fixtures.ts';
+import { boardTask, taskResponse, response } from '../../unit/cli/fixtures.ts';
 import { FERRETRY_ID, laneSet, listing as projectListing, project } from '../../unit/cli/lane-fixtures.ts';
 
 /** A stand-in daemon: one answer for every route, or a function that answers each route the way the contract says. */
@@ -48,13 +48,13 @@ describe('the board gateway', () => {
   });
 
   it('should read one card by id', async () => {
-    const { client, calls } = recording(cardResponse());
+    const { client, calls } = recording(taskResponse());
     await new ClientBoardGateway(client).card('F412');
     should(calls[0]).eql({ route: 'GET /v1/board/tasks/:taskId', init: { params: { taskId: 'F412' } } });
   });
 
   it('should post a create without naming any ferret: the credential is the actor', async () => {
-    const { client, calls } = recording(cardResponse());
+    const { client, calls } = recording(taskResponse());
     const request = {
       kind: 'feature',
       title: 'Rename the widget',
@@ -66,7 +66,7 @@ describe('the board gateway', () => {
   });
 
   it('should post an action to the card', async () => {
-    const { client, calls } = recording(cardResponse(card({ laneId: 'implement' })));
+    const { client, calls } = recording(taskResponse(boardTask({ laneId: 'implement' })));
     await new ClientBoardGateway(client).act('F412', { action: 'move', to: 'implement' } as never);
     should(calls[0]).eql({
       route: 'POST /v1/board/tasks/:taskId',
@@ -75,7 +75,7 @@ describe('the board gateway', () => {
   });
 
   it('should post a progress write as one edit', async () => {
-    const { client, calls } = recording(cardResponse());
+    const { client, calls } = recording(taskResponse());
     await new ClientBoardGateway(client).act('F412', { action: 'edit', progress: { now: 'testing' } } as never);
     should(initOf(calls[0]).body).eql({ action: 'edit', progress: { now: 'testing' } });
   });

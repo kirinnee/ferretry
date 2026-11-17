@@ -8,7 +8,7 @@
 import type { LaneCategory } from '../../contract/index.ts';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
-import type { BoardDensity } from './board-card.tsx';
+import type { BoardDensity } from './board-task.tsx';
 
 export interface BoardLaneProps {
   readonly name: string;

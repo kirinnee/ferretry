@@ -276,7 +276,7 @@ The Warden reads the board (`board-design.md` §3.4). Its orphaned-task message 
 - **The task a resumed ferret carries on.** When the Warden starts an auto ferret again — an auto-revive,
   or a verdict's resume or restart — and the ferret has a focus task, its turn names the task: id, title,
   lane, the ask and every clarification verbatim, its links and its last five history lines
-  (`packages/daemon/src/lib/warden/focus-card.ts`). A ferret with no task gets the turn it got before. The closing line
+  (`packages/daemon/src/lib/warden/focus-task.ts`). A ferret with no task gets the turn it got before. The closing line
   tells a lead to move the task as it works; a sub-ferret, who may not, is told its task moves itself.
   An interactive ferret never gets a task typed into its terminal.
 

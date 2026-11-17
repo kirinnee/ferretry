@@ -1,31 +1,31 @@
 /**
- * WHERE PR FACTS PUT A CARD: the one owner of that decision (`board-design.md` §3.1).
+ * WHERE PR FACTS PUT A TASK: the one owner of that decision (`board-design.md` §3.1).
  *
- * GitHub owns what a PR is; the lane a card sits in must never disagree with it. A move driven by an EVENT
- * (a PR just merged) can be missed — the daemon was off, the card was refiled after the merge, the PR was
+ * GitHub owns what a PR is; the lane a task sits in must never disagree with it. A move driven by an EVENT
+ * (a PR just merged) can be missed — the daemon was off, the task was refiled after the merge, the PR was
  * linked late — so every place a fact can be stale (the watcher's poll, a refile, an import, a link) asks
- * {@link laneFromFacts} where the facts say the card belongs, instead of waiting for the event.
+ * {@link laneFromFacts} where the facts say the task belongs, instead of waiting for the event.
  *
- * - **Facts, not lanes.** The answer is read off the card's PRs, most advanced first: all merged and in a
+ * - **Facts, not lanes.** The answer is read off the task's PRs, most advanced first: all merged and in a
  *   release → the lane `release.published` enters (Released · to test), and, in a set that still has one, the
  *   lane `release.running` enters once this machine runs that release (no shipped template has one); any
  *   merged with none open → `pr.merged`; any open → `pr.ready` (`pr.opened` while all are drafts). A lane
  *   set that lacks the lane a fact names falls back to the next fact down.
- * - **Never backward, never sideways, except for open work.** A card already at or past the lane stays. A
- *   card the owner or a ferret sent back stays back until a PR newer than that move merges; the merges it
- *   was sent back from are spent. The one fact that moves a card back is an open PR, draft or not and
- *   whenever it was opened, on a card that has shipped something: work still in flight means the card is not
+ * - **Never backward, never sideways, except for open work.** A task already at or past the lane stays. A
+ *   task the owner or a ferret sent back stays back until a PR newer than that move merges; the merges it
+ *   was sent back from are spent. The one fact that moves a task back is an open PR, draft or not and
+ *   whenever it was opened, on a task that has shipped something: work still in flight means the task is not
  *   shipped, so it is back where `pr.ready` puts it and the history says "moved back to In progress: PR #1013
  *   ready for review". A PR closed unmerged says nothing.
- * - **Gates are for decisions, not facts.** A fact moves a card through an `ownerGate` lane, forward out of
+ * - **Gates are for decisions, not facts.** A fact moves a task through an `ownerGate` lane, forward out of
  *   Plan/Design or back out of Released · to test. It never enters an owner-gated `closed` lane, nor any
  *   `closed` lane in a set with a `verify` lane: only the owner closes there.
- * - **No opinion** is `null`: the card is dropped or closed, has no PR to say anything, or is already where
+ * - **No opinion** is `null`: the task is dropped or closed, has no PR to say anything, or is already where
  *   its facts put it.
  */
 import { compareVersions } from './versions.ts';
 import {
-  type Card,
+  type Task,
   categoryOf,
   isBackwardMove,
   type Lane,
@@ -36,19 +36,19 @@ import {
   type Workflow,
 } from '../../../contract/index.ts';
 
-/** What the facts are: the card's PRs as cached, and the version this machine runs (`null` when unknown). */
+/** What the facts are: the task's PRs as cached, and the version this machine runs (`null` when unknown). */
 export interface LaneFacts {
   readonly prs: readonly PrLink[];
   readonly runningVersion: string | null;
 }
 
-/** Where the facts put a card, and the words that say why. */
+/** Where the facts put a task, and the words that say why. */
 export interface FactMove {
   readonly lane: Lane;
   /** The trigger whose lane this is: `laneForTrigger(laneSet, workflow, trigger)` is `lane`. */
   readonly trigger: LaneTrigger;
   readonly reason: string;
-  /** The card goes back to an earlier lane, because open work sits beside what it shipped. */
+  /** The task goes back to an earlier lane, because open work sits beside what it shipped. */
   readonly backward: boolean;
 }
 
@@ -65,14 +65,14 @@ export const FACT_TRIGGERS: ReadonlySet<LaneTrigger> = new Set<LaneTrigger>([
 interface Candidate {
   readonly trigger: LaneTrigger;
   readonly reason: string;
-  /** Open work beside something shipped: the card is not shipped, so this may move it back. */
+  /** Open work beside something shipped: the task is not shipped, so this may move it back. */
   readonly pullsBack?: boolean;
 }
 
-/** When the card was last sent back by a person or a ferret (a reopen, or a move to an earlier lane). */
-const lastSentBackMs = (card: Card): number | null => {
+/** When the task was last sent back by a person or a ferret (a reopen, or a move to an earlier lane). */
+const lastSentBackMs = (task: Task): number | null => {
   let latest: number | null = null;
-  for (const event of card.history) {
+  for (const event of task.history) {
     const back = event.type === 'reopened' || (event.type === 'moved' && event.backward && event.auto !== true);
     const at = Date.parse(event.at);
     if (back && !Number.isNaN(at) && (latest === null || at > latest)) latest = at;
@@ -80,9 +80,9 @@ const lastSentBackMs = (card: Card): number | null => {
   return latest;
 };
 
-/** The PRs that can still say where the card belongs: not closed unmerged, and not merged before it was sent back. */
-const livePrs = (card: Card, prs: readonly PrLink[]): readonly PrLink[] => {
-  const sentBack = lastSentBackMs(card);
+/** The PRs that can still say where the task belongs: not closed unmerged, and not merged before it was sent back. */
+const livePrs = (task: Task, prs: readonly PrLink[]): readonly PrLink[] => {
+  const sentBack = lastSentBackMs(task);
   return prs.filter(pr => {
     if (pr.state === 'closed') return false;
     if (pr.state !== 'merged' || sentBack === null || pr.mergedAt === null) return true;
@@ -129,24 +129,24 @@ const candidatesOf = (live: readonly PrLink[], running: string | null): readonly
   return candidates;
 };
 
-/** Whether a fact may take a card into this lane: nothing the owner alone decides. */
+/** Whether a fact may take a task into this lane: nothing the owner alone decides. */
 const factMayEnter = (lane: Lane, laneSet: LaneSet): boolean =>
   lane.category !== 'closed' ||
   (lane.ownerGate !== true && !laneSet.lanes.some(candidate => candidate.category === 'verify'));
 
 /**
- * The lane the card's PR facts put it in, or `null` for no opinion (see the file header). Pure and total:
+ * The lane the task's PR facts put it in, or `null` for no opinion (see the file header). Pure and total:
  * a lane id the set does not know, or a workflow with no lane for the fact, is no opinion.
  */
-export const laneFromFacts = (card: Card, laneSet: LaneSet, workflow: Workflow, facts: LaneFacts): FactMove | null => {
-  if (card.dropped !== null) return null;
-  const category = categoryOf(laneSet, card.laneId);
+export const laneFromFacts = (task: Task, laneSet: LaneSet, workflow: Workflow, facts: LaneFacts): FactMove | null => {
+  if (task.dropped !== null) return null;
+  const category = categoryOf(laneSet, task.laneId);
   if (!category.ok || category.value === 'closed') return null;
-  for (const candidate of candidatesOf(livePrs(card, facts.prs), facts.runningVersion)) {
+  for (const candidate of candidatesOf(livePrs(task, facts.prs), facts.runningVersion)) {
     const found = laneForTrigger(laneSet, workflow, candidate.trigger);
     if (!found.ok || found.value === null || !factMayEnter(found.value, laneSet)) continue;
-    if (found.value.id === card.laneId) return null;
-    const backward = isBackwardMove(laneSet, card.laneId, found.value.id);
+    if (found.value.id === task.laneId) return null;
+    const backward = isBackwardMove(laneSet, task.laneId, found.value.id);
     if (!backward.ok) return null;
     if (!backward.value)
       return { lane: found.value, trigger: candidate.trigger, reason: candidate.reason, backward: false };

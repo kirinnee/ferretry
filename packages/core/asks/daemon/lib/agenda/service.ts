@@ -10,11 +10,11 @@ import type {
 } from '../protocol/agenda.ts';
 import type { AgendaConversationPage, AgendaVersion, AgendaVersionSummary } from '../protocol/agenda-versions.ts';
 import type { TaskRef } from '../protocol/board-refs.ts';
-import { agendaCardKind, clipAtWord } from '../protocol/agenda-card.ts';
+import { agendaTaskKind, clipAtWord } from '../protocol/agenda-task.ts';
 import { MACHINE_AGENDA_ID, MAX_AGENDA_TITLE_LENGTH } from '../protocol/agenda.ts';
 import { MAX_AGENDA_CONVERSATION_FRAGMENT_LENGTH } from '../protocol/agenda-versions.ts';
 import { formatTaskRef } from '../protocol/board-refs.ts';
-import type { CardAskOperation } from './card-asks.ts';
+import type { TaskAskOperation } from './task-asks.ts';
 import { KeyedSerialQueue } from './serial-queue.ts';
 import {
   isAncestorOf,
@@ -135,15 +135,15 @@ export interface AgendaChangeObserver {
 }
 
 /**
- * The card a session works on (`config.focusTask`, board-design.md §3.3). An agenda add that names no card
- * belongs to the raising session's focus card (§2.6), so an ask is never raised without its work. Total in
- * spirit: a lookup that fails leaves the item without a card rather than refusing it.
+ * The task a session works on (`config.focusTask`, board-design.md §3.3). An agenda add that names no task
+ * belongs to the raising session's focus task (§2.6), so an ask is never raised without its work. Total in
+ * spirit: a lookup that fails leaves the item without a task rather than refusing it.
  */
 export interface AgendaFocusSource {
   focusOf(sessionId: string): Promise<TaskRef | null>;
 }
 
-/** No session has a focus card: every item keeps only the card it was raised with. */
+/** No session has a focus task: every item keeps only the task it was raised with. */
 export const NO_AGENDA_FOCUS: AgendaFocusSource = { focusOf: async () => null };
 
 export type AgendaQueryResult<T> =
@@ -181,17 +181,17 @@ export function isAgendaSessionId(value: string): boolean {
   return SESSION_ID.test(value);
 }
 
-/** Whether a card waits in the lane where released work is tried (Released · to test). */
-export interface AgendaCardLanes {
+/** Whether a task waits in the lane where released work is tried (Released · to test). */
+export interface AgendaTaskLanes {
   inToTest(task: TaskRef): Promise<boolean>;
 }
 
-/** No card is known to be in the to-test lane: nothing is offered to close by default. */
-const NO_AGENDA_CARD_LANES: AgendaCardLanes = { inToTest: async () => false };
+/** No task is known to be in the to-test lane: nothing is offered to close by default. */
+const NO_AGENDA_TASK_LANES: AgendaTaskLanes = { inToTest: async () => false };
 
 /**
- * Whether a card's gate is asking the owner already (docs/agenda.md § One ask per thing): where, as the item and the
- * agenda it is on. A second ask about the same card is refused, or raised without the card.
+ * Whether a task's gate is asking the owner already (docs/agenda.md § One ask per thing): where, as the item and the
+ * agenda it is on. A second ask about the same task is refused, or raised without the task.
  */
 export interface AgendaGateAsking {
   asking(task: TaskRef): Promise<{ readonly sessionId: string; readonly id: AgendaId } | undefined>;
@@ -201,9 +201,9 @@ export interface AgendaGateAsking {
 const UNREADABLE = 'unreadable' as const;
 
 /**
- * Where to put what an agent wanted to ask about a card whose ask is already open on an agenda (docs/agenda.md § Card
- * asks): that agenda carries the card, so the words go there — by `agenda edit` when it is on the asker's own agenda,
- * else on the card.
+ * Where to put what an agent wanted to ask about a task whose ask is already open on an agenda (docs/agenda.md § Task
+ * asks): that agenda carries the task, so the words go there — by `agenda edit` when it is on the asker's own agenda,
+ * else on the task.
  */
 const carriedBy = (
   task: TaskRef,
@@ -215,8 +215,8 @@ const carriedBy = (
     : `${formatTaskRef(task)} already asks the owner on ${ASK_REFERENCE_SIGIL}${asking.id} (${asking.sessionId}'s agenda), which carries the task; add what the task needs to it: fy task note ${task.id} "<text>"`;
 
 /**
- * An agent's ask that NAMES a card whose ask is open already is refused: two asks about one card are two things in the
- * owner's Inbox. It points to the agenda that carries the card.
+ * An agent's ask that NAMES a task whose ask is open already is refused: two asks about one task are two things in the
+ * owner's Inbox. It points to the agenda that carries the task.
  */
 const refusedForGate = (
   task: TaskRef,
@@ -224,10 +224,10 @@ const refusedForGate = (
   from: string,
 ): AgendaMutation => ({ ok: false, error: { code: 'invalid', message: carriedBy(task, asking, from) } });
 
-/** No card is known to be asking: every ask keeps the card it names. */
+/** No task is known to be asking: every ask keeps the task it names. */
 const NO_AGENDA_GATE_ASKING: AgendaGateAsking = { asking: async () => undefined };
 
-/** The kinds of item whose card the owner is most likely to close with the answer: a to-do or a review. */
+/** The kinds of item whose task the owner is most likely to close with the answer: a to-do or a review. */
 const CLOSE_OFFERED_KINDS: ReadonlySet<AgendaKind> = new Set<AgendaKind>(['task', 'review']);
 
 export class AgendaService {
@@ -241,11 +241,11 @@ export class AgendaService {
     private readonly focus: AgendaFocusSource = NO_AGENDA_FOCUS,
     /** Who started whom: a sub-ferret raises and changes nothing here. Absent, every agent is a lead. */
     private readonly subFerrets: SubFerretDirectory = NO_SUB_FERRETS,
-    /** Which cards wait in the to-test lane: a to-do or review on one offers to close it by default. */
-    private readonly cards: AgendaCardLanes = NO_AGENDA_CARD_LANES,
+    /** Which tasks wait in the to-test lane: a to-do or review on one offers to close it by default. */
+    private readonly cards: AgendaTaskLanes = NO_AGENDA_TASK_LANES,
     /** Where the daemon asks the owner for a sub-ferret: its lineage's home (docs/agenda.md § Sub-ferret agenda). */
     private readonly homes: AgendaHomeResolver = SELF_AGENDA_HOME,
-    /** Which cards are asking the owner through their gate: a second ask about one is not raised (see {@link raise}). */
+    /** Which tasks are asking the owner through their gate: a second ask about one is not raised (see {@link raise}). */
     private readonly gates: AgendaGateAsking = NO_AGENDA_GATE_ASKING,
     /** Where a notice about a sub-ferret lands when the owner has no home for it: the machine agenda (§ The machine agenda). */
     private readonly machine?: MachineAgendaPort,
@@ -307,7 +307,7 @@ export class AgendaService {
   }
 
   /**
-   * A daemon raise about a sub-ferret that is not a hands-on card lands on the sub-ferret's agenda home instead
+   * A daemon raise about a sub-ferret that is not a hands-on task lands on the sub-ferret's agenda home instead
    * (docs/agenda.md § Sub-ferret agenda); the mutation's snapshot says where it landed.
    */
   async raise(sessionId: string, request: RaiseAgendaRequest, actor: AgendaActor): Promise<AgendaMutation> {
@@ -338,7 +338,7 @@ export class AgendaService {
       home === MACHINE_AGENDA_ID && home !== sessionId && actor.kind === 'daemon'
         ? { ...named, sourceRef: machineNoticeRef(sessionId, named.sourceRef, actor) }
         : named;
-    // The home's focus card is the lead's own work, not the sub-ferret's: a redirected row names no card.
+    // The home's focus task is the lead's own work, not the sub-ferret's: a redirected row names no task.
     const focused = placed.task === undefined && home === sessionId ? await this.withFocusCard(home, placed) : placed;
     const asking = await this.gateAsking(focused, actor);
     if (asking !== undefined && asking !== UNREADABLE && placed.task !== undefined)
@@ -356,7 +356,7 @@ export class AgendaService {
   }
 
   /**
-   * The gate item or thread through which the card an AGENT's ask would take is already asking, if any. A gate that
+   * The gate item or thread through which the task an AGENT's ask would take is already asking, if any. A gate that
    * cannot be read is not "not asking": that would let a second ask through, so it answers {@link UNREADABLE}.
    */
   private async gateAsking(request: RaiseAgendaRequest, actor: AgendaActor) {
@@ -386,15 +386,15 @@ export class AgendaService {
     return this.machine !== undefined || (await this.sessions.has(MACHINE_AGENDA_ID).catch(() => false));
   }
 
-  /** A to-do or review on a card in the to-test lane offers to close it, unless the add already said so. */
+  /** A to-do or review on a task in the to-test lane offers to close it, unless the add already said so. */
   private async withOfferClose(request: RaiseAgendaRequest): Promise<RaiseAgendaRequest> {
     if (request.offerClose !== undefined || request.task === undefined || request.notice === true) return request;
-    if (!CLOSE_OFFERED_KINDS.has(agendaCardKind(request))) return request;
+    if (!CLOSE_OFFERED_KINDS.has(agendaTaskKind(request))) return request;
     const waiting = await this.cards.inToTest(request.task).catch(() => false);
     return waiting ? { ...request, offerClose: true } : request;
   }
 
-  /** An add that names no card takes the raising session's focus card, when it has one (§2.6). */
+  /** An add that names no task takes the raising session's focus task, when it has one (§2.6). */
   private async withFocusCard(sessionId: string, request: RaiseAgendaRequest): Promise<RaiseAgendaRequest> {
     if (invalidSession(sessionId) !== null) return request;
     const task = await this.focus.focusOf(sessionId).catch(() => null);
@@ -557,7 +557,7 @@ export class AgendaService {
     );
   }
 
-  /** `from` is merged into `id` (`fy agenda merge`): one conversation, every card and link kept, `from` closed. */
+  /** `from` is merged into `id` (`fy agenda merge`): one conversation, every task and link kept, `from` closed. */
   async merge(sessionId: string, id: AgendaId, from: AgendaId, actor: AgendaActor): Promise<AgendaMutation> {
     return this.apply(sessionId, { action: 'merge', actor, id, from, at: this.clock.now() });
   }
@@ -568,14 +568,14 @@ export class AgendaService {
     id: AgendaId,
     request: RaiseAgendaRequest,
     actor: AgendaActor,
-    moveCards?: readonly TaskRef[],
+    moveTasks?: readonly TaskRef[],
   ): Promise<AgendaMutation> {
     return this.apply(sessionId, {
       action: 'split',
       actor,
       id,
       request,
-      ...(moveCards === undefined ? {} : { moveCards }),
+      ...(moveTasks === undefined ? {} : { moveCards: moveTasks }),
       at: this.clock.now(),
     });
   }
@@ -802,7 +802,7 @@ export class AgendaService {
   }
 
   /**
-   * The owner's action on an item never reached its ferret: the item is the owner's again, as an open card
+   * The owner's action on an item never reached its ferret: the item is the owner's again, as an open task
    * saying so (docs/agenda.md § Delivery). `request` names the request for more information or to discuss
    * it that was not delivered; absent for an answer. Daemon-only: the delivery path is the one witness.
    */
@@ -838,10 +838,10 @@ export class AgendaService {
   }
 
   /**
-   * A card ask on this agenda (docs/agenda.md § Card asks): put on it, restated, withdrawn, or the owner's answer
-   * recorded (`CardAskOperation`). Daemon-only: the card's lane is the witness.
+   * A task ask on this agenda (docs/agenda.md § Task asks): put on it, restated, withdrawn, or the owner's answer
+   * recorded (`TaskAskOperation`). Daemon-only: the task's lane is the witness.
    */
-  async cardAsk(sessionId: string, id: AgendaId, operation: CardAskOperation): Promise<AgendaMutation> {
+  async cardAsk(sessionId: string, id: AgendaId, operation: TaskAskOperation): Promise<AgendaMutation> {
     return this.apply(sessionId, {
       action: 'card-ask',
       actor: { kind: 'daemon', cause: 'system' },
@@ -851,7 +851,7 @@ export class AgendaService {
     });
   }
 
-  /** An open thread is linked to the card made to carry it out; daemon-only (docs/board.md § Thread cards). */
+  /** An open thread is linked to the task made to carry it out; daemon-only (docs/board.md § Thread tasks). */
   async linkTask(sessionId: string, id: AgendaId, task: TaskRef): Promise<AgendaMutation> {
     return this.apply(sessionId, {
       action: 'link-task',

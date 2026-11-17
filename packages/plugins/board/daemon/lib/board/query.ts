@@ -1,5 +1,5 @@
 /**
- * The board query (`GET /v1/board`): which cards a `BoardQuery` selects, in what order, one page at a
+ * The board query (`GET /v1/board`): which tasks a `BoardQuery` selects, in what order, one page at a
  * time, plus the header counts over the whole scoped board. Pure over already-derived views.
  *
  * SCOPE vs FILTER. The project, ferret, kind, visibility and free-text fields SCOPE the board: they decide which
@@ -10,23 +10,23 @@ import {
   type BoardCounts,
   type BoardPrStateFilter,
   type BoardQuery,
-  type CardView,
+  type TaskView,
   isInBoardState,
   type LaneCategory,
   type PrLink,
 } from '../../../contract/index.ts';
 import { BoardError } from './errors.ts';
-import { cardVisibility } from './visibility.ts';
+import { taskVisibility } from './visibility.ts';
 
 /** A view with the category of its lane; `undefined` when its board has no lanes this build knows. */
 export interface ScopedView {
-  readonly view: CardView;
+  readonly view: TaskView;
   readonly category: LaneCategory | undefined;
 }
 
 const unmerged = (pr: PrLink): boolean => pr.state === 'open' || pr.state === 'unknown';
 
-/** Whether a card's PRs match a PR-state filter. `unknown` (never polled yet) reads as open. */
+/** Whether a task's PRs match a PR-state filter. `unknown` (never polled yet) reads as open. */
 export const matchesPrState = (filter: BoardPrStateFilter, prs: readonly PrLink[]): boolean => {
   switch (filter) {
     case 'none':
@@ -44,7 +44,7 @@ export const matchesPrState = (filter: BoardPrStateFilter, prs: readonly PrLink[
   }
 };
 
-/** Whether a card is in a state filter. A card on a board with no known lanes is open unless dropped. */
+/** Whether a task is in a state filter. A task on a board with no known lanes is open unless dropped. */
 const inState = (query: Pick<BoardQuery, 'state'>, scoped: ScopedView): boolean =>
   isInBoardState(query.state, scoped.category ?? 'backlog', scoped.view.dropped !== null);
 
@@ -57,14 +57,14 @@ const matchesActivity = (filter: NonNullable<BoardQuery['activity']>, scoped: Sc
   }
 };
 
-/** Whether a card is on the board the query scopes. */
+/** Whether a task is on the board the query scopes. */
 export const inScope = (query: BoardQuery, scoped: ScopedView): boolean => {
   const { view } = scoped;
   if (query.project !== undefined && view.projectId !== query.project) return false;
   if (query.ferret !== undefined && view.owner !== query.ferret && view.assignee !== query.ferret) return false;
   if (query.kind !== undefined && view.kind !== query.kind) return false;
   if (query.visibility === 'public' || query.visibility === 'private') {
-    if (cardVisibility(view) !== query.visibility) return false;
+    if (taskVisibility(view) !== query.visibility) return false;
   }
   if (query.query !== undefined) {
     const needle = query.query.toLowerCase();
@@ -74,19 +74,19 @@ export const inScope = (query: BoardQuery, scoped: ScopedView): boolean => {
   return true;
 };
 
-/** Whether a scoped card passes the page filters. */
+/** Whether a scoped task passes the page filters. */
 export const passesFilters = (query: BoardQuery, scoped: ScopedView): boolean =>
   inState(query, scoped) &&
   (query.activity === undefined || matchesActivity(query.activity, scoped)) &&
   (query.prState === undefined || matchesPrState(query.prState, scoped.view.links.prs));
 
-/** Whether a card is on the default board (state `open`): neither dropped nor in a closed lane; no known lanes reads open. */
+/** Whether a task is on the default board (state `open`): neither dropped nor in a closed lane; no known lanes reads open. */
 export const isOpenOnBoard = (category: LaneCategory | undefined, dropped: boolean): boolean =>
   isInBoardState('open', category ?? 'backlog', dropped);
 
 const isOpen = (scoped: ScopedView): boolean => isOpenOnBoard(scoped.category, scoped.view.dropped !== null);
 
-/** The header's counts over the scoped board. Closed cards are "hidden" only while the page hides them. */
+/** The header's counts over the scoped board. Closed tasks are "hidden" only while the page hides them. */
 export const countsOf = (query: BoardQuery, scoped: readonly ScopedView[]): BoardCounts => {
   const open = scoped.filter(isOpen);
   const hidesClosed = query.state === 'open' || query.state === 'dropped';
@@ -100,16 +100,16 @@ export const countsOf = (query: BoardQuery, scoped: readonly ScopedView[]): Boar
   };
 };
 
-/** The card's most recent history instant: when it last changed. */
-const updatedAt = (view: CardView): string => view.history.at(-1)?.at ?? view.createdAt;
+/** The task's most recent history instant: when it last changed. */
+const updatedAt = (view: TaskView): string => view.history.at(-1)?.at ?? view.createdAt;
 
 const idNumber = (id: string): number => Number(id.slice(1));
 
 /**
- * Board order: a card's manual `order` first (unordered cards after), then the most recently changed,
+ * Board order: a task's manual `order` first (unordered tasks after), then the most recently changed,
  * then the id. Total, so a page boundary never moves between two reads of an unchanged board.
  */
-export const compareViews = (left: CardView, right: CardView): number => {
+export const compareViews = (left: TaskView, right: TaskView): number => {
   const leftOrder = left.order ?? Number.POSITIVE_INFINITY;
   const rightOrder = right.order ?? Number.POSITIVE_INFINITY;
   if (leftOrder !== rightOrder) return leftOrder < rightOrder ? -1 : 1;
@@ -134,14 +134,14 @@ export const offsetOf = (cursor: string | undefined): number => {
   return Number(match[1]);
 };
 
-/** One page of the filtered, ordered cards, and the cursor of the next page (`null` on the last). */
+/** One page of the filtered, ordered tasks, and the cursor of the next page (`null` on the last). */
 export const pageOf = (
   query: BoardQuery,
-  views: readonly CardView[],
-): { readonly cards: readonly CardView[]; readonly nextCursor: string | null } => {
+  views: readonly TaskView[],
+): { readonly cards: readonly TaskView[]; readonly nextCursor: string | null } => {
   const offset = offsetOf(query.cursor);
   const ordered = [...views].sort(compareViews);
-  const cards = ordered.slice(offset, offset + query.limit);
-  const end = offset + cards.length;
-  return { cards, nextCursor: end < ordered.length ? cursorFor(end) : null };
+  const tasks = ordered.slice(offset, offset + query.limit);
+  const end = offset + tasks.length;
+  return { cards: tasks, nextCursor: end < ordered.length ? cursorFor(end) : null };
 };

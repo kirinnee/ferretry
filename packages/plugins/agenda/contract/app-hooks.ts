@@ -1,10 +1,10 @@
 /**
  * THE APP HOOKS AGENDA OFFERS (§5.2; `@ferretry/app`'s `useAppHook`, a provider's `shell.hooks`).
  *
- * An ask about a card is Agenda's to draw and Board's to act on: "Done · closes &F12" sits in the ask's own answer
- * row, a notice's cards carry Start and Close, an Edit on a lane proposal opens the lane editor, and `&F12` in an
- * ask's words links to the card. Those writes, reads and pages are Board's, and neither half imports the other: Agenda
- * OFFERS the three card hooks below and the plugin that holds the cards PROVIDES them, each over its own client on one
+ * An ask about a task is Agenda's to draw and Board's to act on: "Done · closes &F12" sits in the ask's own answer
+ * row, a notice's tasks carry Start and Close, an Edit on a lane proposal opens the lane editor, and `&F12` in an
+ * ask's words links to the task. Those writes, reads and pages are Board's, and neither half imports the other: Agenda
+ * OFFERS the three task hooks below and the plugin that holds the tasks PROVIDES them, each over its own client on one
  * daemon. The names and the shapes are the whole agreement; Agenda narrows what it is given before it reads it.
  *
  * FAIL CLOSED. With no provider (Board not installed, not allowed on that daemon, or two plugins providing one name),
@@ -14,12 +14,12 @@
  * The values are plain data and functions (no framework type: this is a contract).
  */
 
-/** "Done · closes", and a notice's Start and Close: the card writes an ask makes. */
-export const AGENDA_CARD_ANSWER_HOOK = 'agenda.card-answer' as const;
+/** "Done · closes", and a notice's Start and Close: the task writes an ask makes. */
+export const AGENDA_TASK_ANSWER_HOOK = 'agenda.card-answer' as const;
 /** Where Edit on a lane-proposal ask goes. */
 export const AGENDA_LANE_PROPOSAL_HOOK = 'agenda.lane-proposal' as const;
-/** Whether `&F12` in an ask's words is a card, and where it opens. */
-export const AGENDA_CARD_REFERENCE_HOOK = 'agenda.card-reference' as const;
+/** Whether `&F12` in an ask's words is a task, and where it opens. */
+export const AGENDA_TASK_REFERENCE_HOOK = 'agenda.card-reference' as const;
 
 /**
  * The owner opened an ask here: its alerts come down on this device and, through the daemon, on the others. The alert
@@ -38,39 +38,39 @@ export type AgendaSeenMark = () => Promise<{ readonly cleared: boolean; readonly
  */
 export type AgendaItemOpened = (ferret: string, ask: string, seen: AgendaSeenMark) => Promise<unknown>;
 
-/** A card write's answer: done, or the refusal in words (`status` 0 when the request got no answer). */
-export type AgendaCardWrite<Value = undefined> =
+/** A task write's answer: done, or the refusal in words (`status` 0 when the request got no answer). */
+export type AgendaTaskWrite<Value = undefined> =
   | ({ readonly ok: true } & (Value extends undefined ? unknown : { readonly value: Value }))
   | { readonly ok: false; readonly status: number; readonly message: string };
 
-/** One card as the provider last read it. The same object until it changes. */
+/** One task as the provider last read it. The same object until it changes. */
 export interface AgendaCardView {
   readonly status: 'idle' | 'loading' | 'ready' | 'failed';
-  /** The board answered and has no such card. */
+  /** The board answered and has no such task. */
   readonly missing: boolean;
   readonly title?: string | undefined;
-  /** Done has nothing left to do: the card is already closed. */
+  /** Done has nothing left to do: the task is already closed. */
   readonly closed: boolean;
 }
 
-/** `agenda.card-answer`: the cards of the daemon the provider was built for, by id (`F12`). */
-export interface AgendaCardAnswer {
+/** `agenda.card-answer`: the tasks of the daemon the provider was built for, by id (`F12`). */
+export interface AgendaTaskAnswer {
   readonly subscribe: (listener: () => void) => () => void;
-  /** Keeps `card` read and live until the returned release is called. */
+  /** Keeps `task` read and live until the returned release is called. */
   readonly watch: (card: string) => () => void;
   readonly card: (card: string) => AgendaCardView;
   /**
-   * The board's own Done: moves the card into its board's Done lane with one request, recorded in its history and told
-   * to its ferret. Nothing is sent for a card that is already closed (answered done) or that the board has no Done for.
+   * The board's own Done: moves the task into its board's Done lane with one request, recorded in its history and told
+   * to its ferret. Nothing is sent for a task that is already closed (answered done) or that the board has no Done for.
    */
-  readonly done: (card: string) => Promise<AgendaCardWrite>;
-  /** Starts a ferret on the card (or names the one that holds it); `key` makes a retry of one click the same request. */
+  readonly done: (card: string) => Promise<AgendaTaskWrite>;
+  /** Starts a ferret on the task (or names the one that holds it); `key` makes a retry of one click the same request. */
   readonly start: (
     card: string,
     key: string,
-  ) => Promise<AgendaCardWrite<{ readonly started: boolean; readonly ferret: string }>>;
-  /** Drops the card with the reason the board records. */
-  readonly drop: (card: string, reason: string) => Promise<AgendaCardWrite>;
+  ) => Promise<AgendaTaskWrite<{ readonly started: boolean; readonly ferret: string }>>;
+  /** Drops the task with the reason the board records. */
+  readonly drop: (card: string, reason: string) => Promise<AgendaTaskWrite>;
 }
 
 /** An answer, as far as the lane editor reads it: a multiple choice and the label pressed. */
@@ -91,13 +91,13 @@ export interface AgendaLaneProposal {
 export type AgendaLaneEditor = AgendaLaneProposal['editorFor'];
 
 /** `agenda.card-reference`: the proof behind a `&F12` and where it opens. */
-export interface AgendaCardReference {
+export interface AgendaTaskReference {
   readonly subscribe: (listener: () => void) => () => void;
   /** Keeps the proof read and live until the returned release is called. */
   readonly watch: () => () => void;
-  /** Whether an id is a card on this daemon, as last read (a new function when that changes). Syntax is not proof. */
+  /** Whether an id is a task on this daemon, as last read (a new function when that changes). Syntax is not proof. */
   readonly proves: () => (id: string) => boolean;
-  /** The card's page. */
+  /** The task's page. */
   readonly href: (id: string) => string;
 }
 
@@ -106,10 +106,10 @@ const functions = (value: unknown, names: readonly string[]): boolean =>
   isRecord(value) && names.every(name => typeof value[name] === 'function');
 
 /** A provided value is read only when it has the shape: anything else is no provider. */
-export const isAgendaCardAnswer = (value: unknown): value is AgendaCardAnswer =>
+export const isAgendaTaskAnswer = (value: unknown): value is AgendaTaskAnswer =>
   functions(value, ['subscribe', 'watch', 'card', 'done', 'start', 'drop']);
 export const isAgendaLaneProposal = (value: unknown): value is AgendaLaneProposal => functions(value, ['editorFor']);
-export const isAgendaCardReference = (value: unknown): value is AgendaCardReference =>
+export const isAgendaTaskReference = (value: unknown): value is AgendaTaskReference =>
   functions(value, ['subscribe', 'watch', 'proves', 'href']);
 
 export const isAgendaItemOpened = (value: unknown): value is AgendaItemOpened => typeof value === 'function';
@@ -122,9 +122,9 @@ export const isAgendaItemOpened = (value: unknown): value is AgendaItemOpened =>
  * draws without it, so without the check a rename or a second provider would switch a card-moving answer off unseen.
  */
 export const AGENDA_APP_HOOKS = {
-  [AGENDA_CARD_ANSWER_HOOK]: isAgendaCardAnswer,
+  [AGENDA_TASK_ANSWER_HOOK]: isAgendaTaskAnswer,
   [AGENDA_LANE_PROPOSAL_HOOK]: isAgendaLaneProposal,
-  [AGENDA_CARD_REFERENCE_HOOK]: isAgendaCardReference,
+  [AGENDA_TASK_REFERENCE_HOOK]: isAgendaTaskReference,
   [AGENDA_ITEM_OPENED_HOOK]: isAgendaItemOpened,
 } as const;
 export type AgendaAppHook = keyof typeof AGENDA_APP_HOOKS;

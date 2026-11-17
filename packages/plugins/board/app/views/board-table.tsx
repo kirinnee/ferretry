@@ -2,17 +2,17 @@
  * THE BOARD'S TABLE VIEW (the route is still `?view=list`): the CURRENT SUMMARY. What waits on the owner leads
  * ("To test"), then what is being worked on, then two quiet sections of what merged and
  * what released lately. A row is the title, its one-line summary, the status pill and when it last mattered;
- * the people and the PR numbers live on the card. The Archive keeps the flat, columned rows.
+ * the people and the PR numbers live on the task. The Archive keeps the flat, columned rows.
  *
  * A row has no owner buttons (no Done, no Not good, no Reopen): the owner answers in the agenda.
  */
 
-import { formatCardRef } from '../../contract/index.ts';
+import { formatTaskRef } from '../../contract/index.ts';
 import { CornerDownRight } from 'lucide-react';
 import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isAgentTask } from '../lib/board-human.ts';
 import type { BoardModel } from '../lib/board-model.ts';
-import { cardSegments } from '../lib/board-present.ts';
+import { taskSegments } from '../lib/board-present.ts';
 import {
   SUMMARY_SECTIONS,
   SUMMARY_WINDOW_LABEL,
@@ -21,11 +21,11 @@ import {
   type SummaryWindow,
   summarySections,
 } from '../lib/board-summary.ts';
-import { type BoardCardOf, type BoardListRow, listRows } from '../lib/board-view.ts';
+import { type BoardTaskOf, type BoardListRow, listRows } from '../lib/board-view.ts';
 import { plainPreview } from '../lib/plain-label.ts';
 import { RouteLink } from '@ferretry/app/ui';
 import { BoardIcon } from './board-icons.tsx';
-import type { BoardCardEnv } from './board-views.tsx';
+import type { BoardTaskEnv } from './board-views.tsx';
 
 /** The muted summary: two lines, and "more" only when the text really is cut. */
 function Summary({
@@ -65,19 +65,19 @@ function Summary({
 
 interface RowProps {
   readonly row: BoardListRow;
-  readonly env: BoardCardEnv;
+  readonly env: BoardTaskEnv;
 }
 
 function TableRow({ row, env }: RowProps) {
-  const { card } = row;
-  const { task } = card;
+  const { card: boardTask } = row;
+  const { task } = boardTask;
   const preview = plainPreview(task.summary);
-  const href = env.hrefFor(card);
-  const segments = cardSegments(task, {
+  const href = env.hrefFor(boardTask);
+  const segments = taskSegments(task, {
     names: env.names,
     now: env.now,
     category: row.category,
-    machine: env.showMachine ? card.machine : null,
+    machine: env.showMachine ? boardTask.machine : null,
   });
   const segment = (key: 'people' | 'activity' | 'pr') => segments.find(entry => entry.key === key);
   const cell = (key: 'people' | 'activity' | 'pr'): ReactNode => {
@@ -102,7 +102,7 @@ function TableRow({ row, env }: RowProps) {
       <div className="fy-board-table__what">
         <div className="fy-board-table__line">
           <RouteLink className="fy-board-table__title" onNavigate={env.onNavigate} to={href}>
-            <span className="fy-board-table__ref">{formatCardRef({ id: task.id })}</span>{' '}
+            <span className="fy-board-table__ref">{formatTaskRef({ id: task.id })}</span>{' '}
             <span className="fy-board-table__title-text">{task.title}</span>
           </RouteLink>
           {extras.length === 0 ? null : (
@@ -156,10 +156,10 @@ function TableHead() {
 
 export interface TableRowsProps {
   readonly rows: readonly BoardListRow[];
-  readonly env: BoardCardEnv;
+  readonly env: BoardTaskEnv;
 }
 
-/** The Archive's rows, flat, one per card. */
+/** The Archive's rows, flat, one per task. */
 export function TableRows({ rows, env }: TableRowsProps) {
   return (
     <div className="fy-board-table">
@@ -175,20 +175,20 @@ export function TableRows({ rows, env }: TableRowsProps) {
 
 export interface TableViewProps {
   readonly model: BoardModel;
-  /** Closed cards, read only to list what was released lately; empty until read. */
+  /** Closed tasks, read only to list what was released lately; empty until read. */
   readonly closed?: BoardModel;
-  readonly env: BoardCardEnv;
+  readonly env: BoardTaskEnv;
   readonly window: SummaryWindow;
   readonly onWindow: (window: SummaryWindow) => void;
 }
 
-function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly env: BoardCardEnv }) {
-  const { card, row } = entry;
-  const { task } = card;
+function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly env: BoardTaskEnv }) {
+  const { card: boardTask, row } = entry;
+  const { task } = boardTask;
   const action = SUMMARY_SECTIONS[entry.section].action;
   const preview = plainPreview(task.summary);
-  const href = env.hrefFor(card);
-  const extras = cardSegments(task, { names: env.names, now: env.now, category: row.category, machine: null }).filter(
+  const href = env.hrefFor(boardTask);
+  const extras = taskSegments(task, { names: env.names, now: env.now, category: row.category, machine: null }).filter(
     segment => segment.key === 'blocked' || segment.key === 'subs',
   );
   return (
@@ -207,7 +207,7 @@ function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly e
             <CornerDownRight aria-label="Made for the task above" className="fy-board-summary__under" size={12} />
           )}
           <RouteLink className="fy-board-table__title" onNavigate={env.onNavigate} to={href}>
-            <span className="fy-board-table__ref">{formatCardRef({ id: task.id })}</span>{' '}
+            <span className="fy-board-table__ref">{formatTaskRef({ id: task.id })}</span>{' '}
             <span className="fy-board-table__title-text">{task.title}</span>
           </RouteLink>
           {extras.length === 0 ? null : (
@@ -304,18 +304,18 @@ export function TableView({ model, closed, env, window, onWindow }: TableViewPro
   );
 }
 
-/** A closed or dropped card as a Table row, for the Archive. */
+/** A closed or dropped task as a Table row, for the Archive. */
 export const archiveRowsOf = (
-  cards: readonly BoardCardOf[],
-  env: Pick<BoardCardEnv, 'places'>,
+  tasks: readonly BoardTaskOf[],
+  env: Pick<BoardTaskEnv, 'places'>,
 ): readonly BoardListRow[] =>
-  cards.map(card => {
-    const place = env.places.get(card.key);
+  tasks.map(task => {
+    const place = env.places.get(task.key);
     return {
-      card,
-      projectId: card.task.projectId,
-      laneId: card.task.laneId,
-      laneName: card.task.dropped === null ? (place?.laneName ?? card.task.laneId) : 'Dropped',
+      card: task,
+      projectId: task.task.projectId,
+      laneId: task.task.laneId,
+      laneName: task.task.dropped === null ? (place?.laneName ?? task.task.laneId) : 'Dropped',
       category: place?.category ?? null,
       place: [0, 0] as const,
     };

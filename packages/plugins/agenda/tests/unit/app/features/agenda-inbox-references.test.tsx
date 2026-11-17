@@ -1,13 +1,13 @@
 /**
  * THE MACHINE-WIDE INBOX DEALS EVERY MACHINE'S ASKS OVER ONE PAGE'S REFERENCE FACTS. Those facts (the fleet `:kim` is proved
- * against, the board's `&F12`, the ledger's `^A3`, the listed `@file`) belong to the PAGE'S daemon, so a card of another
- * machine proves nothing from them: its references stay prose, never a live link to this machine's kim or card
+ * against, the board's `&F12`, the ledger's `^A3`, the listed `@file`) belong to the PAGE'S daemon, so a task of another
+ * machine proves nothing from them: its references stay prose, never a live link to this machine's kim or task
  * (docs/reference-standard.md: a reference in one daemon's transcript can never open a same-named session on another).
- * A card of the page's own machine still links.
+ * A task of the page's own machine still links.
  *
- * The page binds Board per OPEN CARD's machine too (`AgendaCardBoard`, as the Agenda screen does), and that nested
- * provider names the CARD's machine: it must strip what the page's providers proved for the other one, or the card's
- * own scope would pass the page's proofs through (a fail-open). So the checks run at all three places a card is drawn.
+ * The page binds Board per OPEN TASK's machine too (`AgendaTaskBoard`, as the Agenda screen does), and that nested
+ * provider names the TASK's machine: it must strip what the page's providers proved for the other one, or the task's
+ * own scope would pass the page's proofs through (a fail-open). So the checks run at all three places a task is drawn.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
@@ -18,8 +18,8 @@ import type { ReactNode } from 'react';
 import {
   AgendaBoardProviders,
   agendaBoardHooks,
-  CardReferenceScope,
-  useCardBoards,
+  TaskReferenceScope,
+  useTaskBoards,
 } from '../../../../app/features/agenda/agenda-board-hooks.tsx';
 import { agendaProse } from '../../../../app/features/agenda/agenda-prose.tsx';
 import { AgendaInboxPage, AgendaNeedsYou } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
@@ -90,11 +90,11 @@ const linksIn = (root: ParentNode): ReadonlyArray<readonly [string, string | nul
     .map(link => [link.textContent ?? '', link.getAttribute('href')] as const);
 
 /** The page the screen draws: per-card Board, the way `createAgendaScreen` binds it. */
-function CardBoardPage({ inbox, open }: { inbox: Parameters<typeof AgendaInboxPage>[0]['inbox']; open?: string }) {
-  const { cardBoard } = useCardBoards(() => undefined);
+function TaskBoardPage({ inbox, open }: { inbox: Parameters<typeof AgendaInboxPage>[0]['inbox']; open?: string }) {
+  const { cardBoard: taskBoard } = useTaskBoards(() => undefined);
   return (
     <AgendaInboxPage
-      cardBoard={cardBoard}
+      cardBoard={taskBoard}
       inbox={inbox}
       {...(open === undefined ? {} : { initialOpen: open })}
       now={NOW}
@@ -105,7 +105,7 @@ function CardBoardPage({ inbox, open }: { inbox: Parameters<typeof AgendaInboxPa
   );
 }
 
-/** Site 2, `OpenItem`: the open card. */
+/** Site 2, `OpenItem`: the open task. */
 const openCard = async (card: ReturnType<typeof cardOn>) => {
   const fake = fakeInbox();
   view = await mount(
@@ -114,7 +114,7 @@ const openCard = async (card: ReturnType<typeof cardOn>) => {
         cards={[card]}
         fake={fake}
         reading={false}
-        render={inbox => <CardBoardPage inbox={inbox} open={card.key} />}
+        render={inbox => <TaskBoardPage inbox={inbox} open={card.key} />}
       />,
     ),
   );
@@ -124,7 +124,7 @@ const openCard = async (card: ReturnType<typeof cardOn>) => {
   return linksIn(root);
 };
 
-/** Site 1, `renderInboxCard`: the compact card in the Needs-you deck. */
+/** Site 1, `renderInboxCard`: the compact task in the Needs-you deck. */
 const listCard = async (card: ReturnType<typeof cardOn>) => {
   const fake = fakeInbox();
   view = await mount(
@@ -240,7 +240,7 @@ describe('a nested provider for another machine', () => {
           hooks={agendaBoardHooks(DESK, { cardAnswer: undefined, laneProposal: undefined, cardReference: undefined })}
           onNavigate={() => undefined}
         >
-          <CardReferenceScope daemonId={DESK}>{agendaProse()(WORDS)}</CardReferenceScope>
+          <TaskReferenceScope daemonId={DESK}>{agendaProse()(WORDS)}</TaskReferenceScope>
         </AgendaBoardProviders>
       </AgendaBoardProviders>,
     );
@@ -254,7 +254,7 @@ describe('a card scope outside the providers', () => {
   it('fails closed: nothing says whose proofs the surface carries, so it removes them', async () => {
     view = await mount(
       <ReferenceSurfaceProvider surface={{ taskReferenceResolver: () => true, onTaskOpen: () => undefined }}>
-        <CardReferenceScope daemonId={DESK}>{agendaProse()('see &F12')}</CardReferenceScope>
+        <TaskReferenceScope daemonId={DESK}>{agendaProse()('see &F12')}</TaskReferenceScope>
       </ReferenceSurfaceProvider>,
     );
 

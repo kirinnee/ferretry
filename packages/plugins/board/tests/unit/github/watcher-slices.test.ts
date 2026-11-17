@@ -1,17 +1,17 @@
 import { describe, it } from 'bun:test';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import type { Card, PrLink } from '../../../contract/index.ts';
-import { KernelCardStore } from '../../../daemon/adapters/store/card-store.ts';
+import type { Task, PrLink } from '../../../contract/index.ts';
+import { KernelTaskStore } from '../../../daemon/adapters/store/task-store.ts';
 import { BoardService } from '../../../daemon/lib/board/index.ts';
 import { GitHubWatcher, type GitHubWatcherPorts, UnfiledRefiler } from '../../../daemon/lib/github/index.ts';
 import { KeyedSerial } from '../../../daemon/lib/lanes/index.ts';
 import manifest from '../../../manifest.ts';
-import { card, FakeLanes, lanes, NOW, PROJECT, world } from '../board/support.ts';
+import { boardTask, FakeLanes, lanes, NOW, PROJECT, world } from '../board/support.ts';
 import { answer, prNode, prUrl, REPO } from './support.ts';
 
 /** A board small enough that time is irrelevant; the perf tier holds the 3,600-card slice budget. */
-const CARDS = 30;
+const TASKS = 30;
 
 const stateFile = (name: string) => manifest.data.state.find(candidate => candidate.name === name) as never;
 
@@ -32,16 +32,16 @@ const linked = (number: number): PrLink => ({
 const afterIo = async (): Promise<void> => await new Promise<void>(resolve => setImmediate(resolve));
 
 describe('GitHubWatcher: one tick over many changed cards', () => {
-  it(`writes every one of ${String(CARDS)} watched cards whose PRs all changed`, async () => {
-    // The real card store over an in-memory state folder: its schema checks and copies cost what they cost in the daemon.
-    const store = new KernelCardStore(
+  it(`writes every one of ${String(TASKS)} watched cards whose PRs all changed`, async () => {
+    // The real task store over an in-memory state folder: its schema checks and copies cost what they cost in the daemon.
+    const store = new KernelTaskStore(
       new MemoryStateFolder().port([stateFile('cards'), stateFile('counters')]),
       { cards: stateFile('cards'), counters: stateFile('counters') },
       new KeyedSerial(),
       { warn: () => undefined },
     );
-    for (let at = 1; at <= CARDS; at += 1) {
-      const seeded: Card = card({
+    for (let at = 1; at <= TASKS; at += 1) {
+      const seeded: Task = boardTask({
         id: `F${String(at)}`,
         laneId: 'implement',
         workflow: 'quick',
@@ -59,8 +59,8 @@ describe('GitHubWatcher: one tick over many changed cards', () => {
         return await service.recordPullRequests(...parameters);
       },
     };
-    // One repository answers for every PR, each now open (so every card moves), as one `gh` call would.
-    const everyPr = Object.fromEntries(Array.from({ length: CARDS }, (_, at) => [at + 1, prNode(at + 1)]));
+    // One repository answers for every PR, each now open (so every task moves), as one `gh` call would.
+    const everyPr = Object.fromEntries(Array.from({ length: TASKS }, (_, at) => [at + 1, prNode(at + 1)]));
     const reply = answer({ prs: everyPr });
     const copies = { repositoryOf: async () => null, branchOf: async () => null };
     const projects = { projects: async () => [] };
@@ -95,6 +95,6 @@ describe('GitHubWatcher: one tick over many changed cards', () => {
 
     const report = await watcher.tick();
 
-    should(report.written).have.length(CARDS);
+    should(report.written).have.length(TASKS);
   });
 });

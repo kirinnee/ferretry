@@ -8,10 +8,10 @@ import {
 import { type BoardProjectId, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
 import should from 'should';
 import {
-  type CardRelocator,
+  type TaskRelocator,
   type LaneActor,
   type LaneProposalAsks,
-  type LaneProposalCard,
+  type LaneProposalTask,
   type LaneSetMutation,
   LaneSetService,
   type LaneSetStore,
@@ -38,12 +38,12 @@ class MemoryStore implements LaneSetStore {
 }
 
 class Agenda implements LaneProposalAsks {
-  readonly raised: Array<readonly [string, string, LaneProposalCard]> = [];
+  readonly raised: Array<readonly [string, string, LaneProposalTask]> = [];
   readonly withdrawn: Array<readonly [string, string, string]> = [];
   failure?: Error;
-  async raise(ferretId: string, reference: string, card: LaneProposalCard): Promise<void> {
+  async raise(ferretId: string, reference: string, task: LaneProposalTask): Promise<void> {
     if (this.failure !== undefined) throw this.failure;
-    this.raised.push([ferretId, reference, card]);
+    this.raised.push([ferretId, reference, task]);
   }
   async withdraw(ferretId: string, reference: string, note: string): Promise<void> {
     if (this.failure !== undefined) throw this.failure;
@@ -51,7 +51,7 @@ class Agenda implements LaneProposalAsks {
   }
 }
 
-class Relocator implements CardRelocator {
+class Relocator implements TaskRelocator {
   readonly moves: Array<readonly [string, Readonly<Record<string, string>>]> = [];
   readonly reasons: Array<string | undefined> = [];
   readonly authorities: RelocationAuthority[] = [];
@@ -240,7 +240,7 @@ describe('LaneSetService.apply', () => {
   });
 
   it('should store a ferret’s edit of lanes the project has as a proposal: no lane changes and no card moves', async () => {
-    // Arrange: Released · to test removed and its cards sent to Closed (exploit b).
+    // Arrange: Released · to test removed and its tasks sent to Closed (exploit b).
     const { service, agenda, store, relocator } = world();
     const live: LaneSet = { ...templateLanes(FERRETRY_ID), version: 3 };
     store.sets.set(FERRETRY_ID, live);
@@ -289,7 +289,7 @@ describe('LaneSetService.apply', () => {
 });
 
 /**
- * A waiting proposal belongs to the ferret that made it (review L2), and its card goes when it does (review L1):
+ * A waiting proposal belongs to the ferret that made it (review L2), and its task goes when it does (review L1):
  * replaced, accepted in the editor, or dropped by a change to the lanes.
  */
 describe('LaneSetService and a waiting proposal’s card', () => {
@@ -389,7 +389,7 @@ describe('LaneSetService and a waiting proposal’s card', () => {
 });
 
 describe('LaneSetService.acceptProposal', () => {
-  /** A ferret's waiting proposal on Ferretry's live lanes: Released · to test removed, its cards to Merged. */
+  /** A ferret's waiting proposal on Ferretry's live lanes: Released · to test removed, its tasks to Merged. */
   const waiting = async () => {
     const parts = world();
     const live: LaneSet = { ...templateLanes(FERRETRY_ID), version: 3 };
@@ -442,7 +442,7 @@ describe('LaneSetService.acceptProposal', () => {
       FERRET,
     );
 
-    // Act + Assert: the first card (4) names nothing now; the second (5) is waiting.
+    // Act + Assert: the first task (4) names nothing now; the second (5) is waiting.
     should(await service.acceptProposal(FERRETRY_ID, 4)).be.false();
     should(store.sets.get(FERRETRY_ID)?.pending?.version).equal(5);
     await service.apply(FERRETRY_ID, { action: 'edit', version: 3, layout: live, relocate: {} }, OWNER);

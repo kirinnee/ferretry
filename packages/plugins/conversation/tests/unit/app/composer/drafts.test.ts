@@ -81,12 +81,12 @@ describe('daemon-scoped drafts', () => {
   });
 
   it('should keep an item slot’s draft apart from its ferret’s chat draft, and remove both with the daemon', () => {
-    const card = daemonFerretScope(daemonA, 'sess', 'A5');
+    const task = daemonFerretScope(daemonA, 'sess', 'A5');
     let store = upsertDraft(emptyDraftStore(), daemonFerretScope(daemonA, 'sess'), 'chat', 1);
-    store = upsertDraft(store, card, 'card', 2);
+    store = upsertDraft(store, task, 'card', 2);
 
     should(Object.keys(store.drafts)).have.length(2);
-    should(removeDraft(store, card).drafts[daemonFerretKey(daemonFerretScope(daemonA, 'sess'))]?.text).equal('chat');
+    should(removeDraft(store, task).drafts[daemonFerretKey(daemonFerretScope(daemonA, 'sess'))]?.text).equal('chat');
     should(removeDaemonDrafts(store, daemonA.daemonId).drafts).deepEqual({});
   });
 

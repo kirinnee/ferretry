@@ -44,27 +44,27 @@ describe('a message this ferret sent', () => {
         </ReferenceSurfaceProvider>
       </ScreenHrefProvider>,
     );
-    const card = must(view.container.querySelector<HTMLElement>('.fy-message-sent'), 'the card');
-    expect(card.dataset['sentState']).toBe('delivered');
-    expect(card.dataset['transcriptDensity']).toBe('message');
-    expect(card.textContent).toContain('Sent to');
-    expect(must(card.querySelector('a'), 'the recipient link').getAttribute('href')).toBe(
+    const task = must(view.container.querySelector<HTMLElement>('.fy-message-sent'), 'the card');
+    expect(task.dataset['sentState']).toBe('delivered');
+    expect(task.dataset['transcriptDensity']).toBe('message');
+    expect(task.textContent).toContain('Sent to');
+    expect(must(task.querySelector('a'), 'the recipient link').getAttribute('href')).toBe(
       '/d1/conversation/chat?ferret=mvtanna-1',
     );
-    expect(must(card.querySelector('.fy-sent-body strong'), 'the bold word').textContent).toBe('there');
-    expect(words(card.querySelector('.fy-sent-state'))).toBe('Delivered');
+    expect(must(task.querySelector('.fy-sent-body strong'), 'the bold word').textContent).toBe('there');
+    expect(words(task.querySelector('.fy-sent-state'))).toBe('Delivered');
     // The separator leads the command, not the state: a wrap never strands it at a line's end.
-    expect(card.querySelector('.fy-sent-state .fy-sent-dot')).toBeNull();
-    expect(card.querySelector('.fy-sent-command > .fy-sent-dot')?.getAttribute('aria-hidden')).toBe('true');
-    expect(card.querySelector('.fy-sent-dot + .fy-sent-command-toggle')).not.toBeNull();
-    expect(card.querySelector('[role="alert"]')).toBeNull();
+    expect(task.querySelector('.fy-sent-state .fy-sent-dot')).toBeNull();
+    expect(task.querySelector('.fy-sent-command > .fy-sent-dot')?.getAttribute('aria-hidden')).toBe('true');
+    expect(task.querySelector('.fy-sent-dot + .fy-sent-command-toggle')).not.toBeNull();
+    expect(task.querySelector('[role="alert"]')).toBeNull();
     // The command is one tap away, and folds back.
-    expect(card.querySelector('.fy-message-tools, [data-tool-group]')).toBeNull();
-    const toggle = must(card.querySelector<HTMLButtonElement>('.fy-sent-command-toggle'), 'the toggle');
+    expect(task.querySelector('.fy-message-tools, [data-tool-group]')).toBeNull();
+    const toggle = must(task.querySelector<HTMLButtonElement>('.fy-sent-command-toggle'), 'the toggle');
     expect(toggle.textContent).toBe('Show command');
     await interact(() => toggle.click());
     expect(toggle.textContent).toBe('Hide command');
-    expect(card.textContent).toContain('Bash');
+    expect(task.textContent).toContain('Bash');
     await interact(() => toggle.click());
     expect(toggle.textContent).toBe('Show command');
     await view.unmount();

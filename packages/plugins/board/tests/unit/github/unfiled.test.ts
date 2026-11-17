@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
   type BoardProjectId,
-  type Card,
+  type Task,
   type LaneSet,
   type PrLink,
   UNFILED_PROJECT_ID,
@@ -17,7 +17,7 @@ import {
   type UnfiledRefilerPorts,
 } from '../../../daemon/lib/github/index.ts';
 import {
-  card,
+  boardTask,
   FakeLanes,
   lanes,
   MemoryBoardStore,
@@ -42,10 +42,10 @@ const merged = (number: number, repo = REPO): PrLink => ({
   polledAt: NOW,
 });
 
-const unfiled = (overrides: Partial<Card> = {}): Card =>
-  card({ projectId: UNFILED_PROJECT_ID, laneId: 'doing', workflow: 'quick', ...overrides });
+const unfiled = (overrides: Partial<Task> = {}): Task =>
+  boardTask({ projectId: UNFILED_PROJECT_ID, laneId: 'doing', workflow: 'quick', ...overrides });
 
-const withPrs = (prs: readonly PrLink[], overrides: Partial<Card> = {}): Card =>
+const withPrs = (prs: readonly PrLink[], overrides: Partial<Task> = {}): Task =>
   unfiled({ links: { prs: [...prs], branch: null, commits: [], docs: [] }, ...overrides });
 
 const REMOTES: readonly ProjectRemote[] = [
@@ -66,7 +66,7 @@ class Boards implements FerretBoards {
 }
 
 interface RigOptions {
-  readonly cards: readonly Card[];
+  readonly cards: readonly Task[];
   readonly sessions?: Boards;
   readonly board?: (service: BoardService) => UnfiledRefilerPorts['board'];
   readonly projects?: UnfiledRefilerPorts['projects'];
@@ -118,7 +118,7 @@ const rig = (options: RigOptions) => {
     clock,
     proposals,
     sets,
-    stored: (id = 'F1') => store.cards.get(id) as Card,
+    stored: (id = 'F1') => store.cards.get(id) as Task,
   };
 };
 
@@ -222,7 +222,7 @@ describe('UnfiledRefiler: what it leaves alone', () => {
   it('should leave a card that is closed, dropped, filed already, or put on the Unfiled board on purpose', async () => {
     // Arrange
     const back = withPrs([merged(985)], { id: 'F4' });
-    const onPurpose: Card = {
+    const onPurpose: Task = {
       ...back,
       history: [
         ...back.history,
@@ -243,7 +243,7 @@ describe('UnfiledRefiler: what it leaves alone', () => {
       cards: [
         withPrs([merged(985)], { laneId: 'closed' }),
         withPrs([merged(985)], { id: 'F2', dropped: { reason: 'not needed', at: NOW } }),
-        card({ id: 'F3', laneId: 'implement' }),
+        boardTask({ id: 'F3', laneId: 'implement' }),
         onPurpose,
       ],
       sessions,
@@ -347,7 +347,7 @@ describe('UnfiledRefiler: failures', () => {
     // Arrange
     let listed = 0;
     const subject = rig({
-      cards: [card()],
+      cards: [boardTask()],
       projects: {
         projects: async () => {
           listed += 1;
@@ -409,9 +409,9 @@ describe('UnfiledRefiler: the live audit after 4.147.0', () => {
 
   it('should leave the cards Unfiled and say so once when the proposal is refused, and report one that throws', async () => {
     // Arrange
-    const cards = [unfiled({ owner: 'mvuk89us' }), unfiled({ id: 'F2', owner: 'mvuk89us' })];
-    const refused = rig({ cards, sessions: new Boards({ mvuk89us: NIX_REGISTRY }), propose: 'refused' });
-    const throws = rig({ cards, sessions: new Boards({ mvuk89us: NIX_REGISTRY }), propose: 'throws' });
+    const tasks = [unfiled({ owner: 'mvuk89us' }), unfiled({ id: 'F2', owner: 'mvuk89us' })];
+    const refused = rig({ cards: tasks, sessions: new Boards({ mvuk89us: NIX_REGISTRY }), propose: 'refused' });
+    const throws = rig({ cards: tasks, sessions: new Boards({ mvuk89us: NIX_REGISTRY }), propose: 'throws' });
 
     // Act
     await refused.refiler.run(REMOTES);

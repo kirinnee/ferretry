@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type Card, type PrLink, type ReleasedIn, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
+import { type Task, type PrLink, type ReleasedIn, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
 import should from 'should';
 import { BoardService } from '../../../daemon/lib/board/index.ts';
 import {
@@ -16,7 +16,7 @@ import {
 import type { TranscriptTailResult } from '../../../daemon/lib/board/transcript-events.ts';
 import type { TranscriptEvent } from '../../../daemon/lib/board/transcript-events.ts';
 import {
-  card,
+  boardTask,
   FakeLanes,
   lanes,
   MemoryBoardStore,
@@ -44,8 +44,8 @@ const link = (number: number, overrides: Partial<PrLink> = {}): PrLink => ({
   ...overrides,
 });
 
-const withLinks = (prs: readonly PrLink[], overrides: Partial<Card> = {}): Card =>
-  card({
+const withLinks = (prs: readonly PrLink[], overrides: Partial<Task> = {}): Task =>
+  boardTask({
     laneId: 'implement',
     workflow: 'quick',
     links: { prs: [...prs], branch: null, commits: [], docs: [] },
@@ -87,11 +87,11 @@ interface Rig {
   readonly warnings: string[];
   readonly nudges: { ferret: string; reason: string; message: string }[];
   readonly clock: { ms: number };
-  readonly stored: (id?: string) => Card;
+  readonly stored: (id?: string) => Task;
 }
 
 interface RigOptions {
-  readonly cards: readonly Card[];
+  readonly cards: readonly Task[];
   readonly gh?: FakeGh;
   readonly folders?: Readonly<Record<string, { readonly repo: string | null; readonly branch: string | null }>>;
   readonly cwds?: Readonly<Record<string, string>>;
@@ -158,9 +158,9 @@ const rig = (options: RigOptions): Rig => {
       },
     },
     nudges: {
-      send: async (card, message, reason) => {
+      send: async (task, message, reason) => {
         if (options.failingNudges === true) throw new Error('session gone');
-        nudges.push({ ferret: card.assignee ?? card.owner, reason, message });
+        nudges.push({ ferret: task.assignee ?? task.owner, reason, message });
       },
     },
     clock: { now, random: () => 0.5 },
@@ -183,7 +183,7 @@ const rig = (options: RigOptions): Rig => {
     warnings,
     nudges,
     clock,
-    stored: (id = 'F1') => store.cards.get(id) as Card,
+    stored: (id = 'F1') => store.cards.get(id) as Task,
   };
 };
 
@@ -218,7 +218,7 @@ describe('GitHubWatcher: polling', () => {
     should((await subject.watcher.tick()).polled).be.empty();
     subject.clock.ms += POLL_OPEN_MS;
     should((await subject.watcher.tick()).polled).deepEqual([REPO]);
-    // Nothing new: no card is written again.
+    // Nothing new: no task is written again.
     should(subject.store.writes).have.length(2);
   });
 
@@ -488,20 +488,20 @@ describe('GitHubWatcher: releases', () => {
   it(`should spend at most ${String(MAX_COMPARES_PER_TICK)} compares a tick across every card`, async () => {
     // Each its own merge commit: a tag known not to contain one merge says nothing of another.
     const sha = (index: number) => String(index).repeat(40);
-    const cards = Array.from({ length: 5 }, (_, index) =>
+    const tasks = Array.from({ length: 5 }, (_, index) =>
       withLinks([{ ...merged({ mergeSha: sha(index) }), url: prUrl(940 + index), number: 940 + index }], {
         id: `F${String(index + 1)}`,
         laneId: 'merged',
       }),
     );
     const prs = Object.fromEntries(
-      cards.map((_, index) => [
+      tasks.map((_, index) => [
         940 + index,
         prNode(940 + index, { state: 'MERGED', rollup: 'SUCCESS', sha: sha(index) }),
       ]),
     );
     const gh = new FakeGh(repoAnswer({ prs, releases }));
-    const subject = rig({ cards, gh });
+    const subject = rig({ cards: tasks, gh });
     await subject.watcher.tick();
     should(gh.compares()).have.length(MAX_COMPARES_PER_TICK);
   });
@@ -535,7 +535,7 @@ describe('GitHubWatcher: releases', () => {
     });
     await subject.watcher.tick();
     should(subject.stored().laneId).equal('released');
-    // A card waiting at the Plan gate stays there: only the owner passes a gate (docs/board.md § Cards show progress).
+    // A task waiting at the Plan gate stays there: only the owner passes a gate (docs/board.md § Tasks show progress).
     should(subject.stored('F2').laneId).equal('plan');
     should(subject.gh.calls).be.empty();
     // The release reaches this machine: the next tick finds it, with nothing new from GitHub.
@@ -586,7 +586,7 @@ describe('GitHubWatcher: releases', () => {
     });
     await subject.watcher.tick();
     should(subject.gh.polls()).equal(1);
-    // The repository is now idle for ten minutes. A card imported or linked with an unknown PR is looked at anyway.
+    // The repository is now idle for ten minutes. A task imported or linked with an unknown PR is looked at anyway.
     subject.store.cards.set('F2', withLinks([link(941)], { id: 'F2' }));
     should((await subject.watcher.tick()).polled).deepEqual([REPO]);
     should(subject.stored('F2').laneId).equal('merged');
@@ -730,7 +730,7 @@ describe('GitHubWatcher: nudges and refiling', () => {
   it('should refile an Unfiled card with no PR to the board its ferret’s folder names', async () => {
     // Arrange
     const subject = rig({
-      cards: [card({ projectId: UNFILED_PROJECT_ID, laneId: 'doing', workflow: 'quick' })],
+      cards: [boardTask({ projectId: UNFILED_PROJECT_ID, laneId: 'doing', workflow: 'quick' })],
       sessionBoards: { lead: OTHER_PROJECT },
     });
 
@@ -858,29 +858,29 @@ describe('GitHubWatcher: the job', () => {
   });
 
   it('should build the board index once a tick however many cards it watches', async () => {
-    const cards = [940, 941, 942, 943].map(number => withLinks([link(number)], { id: `F${number}` }));
-    const prs = Object.fromEntries(cards.map(watched => [watched.links.prs[0]?.number ?? 0, prNode(0)]));
-    // A BoardIndex walks the cards it is built from twice (by id, then by edges), so each walk of the snapshot's
+    const tasks = [940, 941, 942, 943].map(number => withLinks([link(number)], { id: `F${number}` }));
+    const prs = Object.fromEntries(tasks.map(watched => [watched.links.prs[0]?.number ?? 0, prNode(0)]));
+    // A BoardIndex walks the tasks it is built from twice (by id, then by edges), so each walk of the snapshot's
     // array is one half of one construction.
     let walks = 0;
-    const snapshotCards = [...cards];
-    snapshotCards[Symbol.iterator] = function* (): Generator<Card> {
+    const snapshotTasks = [...tasks];
+    snapshotTasks[Symbol.iterator] = function* (): Generator<Task> {
       walks += 1;
-      for (let at = 0; at < this.length; at += 1) yield this[at] as Card;
+      for (let at = 0; at < this.length; at += 1) yield this[at] as Task;
     };
     const subject = rig({
-      cards,
+      cards: tasks,
       gh: new FakeGh(
         repoAnswer({ prs: Object.fromEntries(Object.keys(prs).map(number => [number, prNode(Number(number))])) }),
       ),
       board: service => ({
-        snapshot: async () => ({ ...(await service.snapshot()), cards: snapshotCards }),
+        snapshot: async () => ({ ...(await service.snapshot()), cards: snapshotTasks }),
         act: async (...parameters) => await service.act(...parameters),
         recordPullRequests: async (...parameters) => await service.recordPullRequests(...parameters),
       }),
     });
     const report = await subject.watcher.tick();
-    should(report.written).have.length(cards.length);
+    should(report.written).have.length(tasks.length);
     should(walks).equal(2);
   });
 });

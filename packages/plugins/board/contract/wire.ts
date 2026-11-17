@@ -39,7 +39,7 @@ import {
   boardOk,
   MachineIdSchema,
   MAX_BOARD_REOPEN_ATTACHMENTS,
-  type CardRef,
+  type TaskRef,
   CardRefSchema,
   CardActorViaSchema,
   FerretRefSchema,
@@ -47,8 +47,8 @@ import {
 import { NonNegativeIntegerSchema, PositiveIntegerSchema } from '@ferretry/std';
 import { BoardInstantSchema as InstantSchema } from './refs.ts';
 import {
-  CARD_KIND_PREFIX,
-  type CardKind,
+  TASK_KIND_PREFIX,
+  type TaskKind,
   CardKindSchema,
   CardMessageSchema,
   CardTitleSchema,
@@ -56,17 +56,17 @@ import {
   WorkflowSchema,
 } from './workflow.ts';
 
-export const CARD_FORMAT = 1 as const;
-export const MAX_CARD_SUMMARY_LENGTH = 140;
+export const TASK_FORMAT = 1 as const;
+export const MAX_TASK_SUMMARY_LENGTH = 140;
 export const MAX_BOARD_PREMISE_LENGTH = 4 * 1024;
 export const MAX_BOARD_CONTEXT_LENGTH = 16 * 1024;
 /** The owner's test steps: a short checklist, sized like the context. */
 export const MAX_BOARD_HOW_TO_TEST_LENGTH = 16 * 1024;
-/** Each part of a card's status (Now, Done so far, Next): the three together are at most 24 KiB. */
+/** Each part of a task's status (Now, Done so far, Next): the three together are at most 24 KiB. */
 export const MAX_PROGRESS_PART_LENGTH = 8 * 1024;
-export const MAX_CARD_BRIEF_LENGTH = 64 * 1024;
+export const MAX_TASK_BRIEF_LENGTH = 64 * 1024;
 export const MAX_BOARD_REASON_LENGTH = 2 * 1024;
-export const MAX_CARD_NOTE_LENGTH = 2 * 1024;
+export const MAX_TASK_NOTE_LENGTH = 2 * 1024;
 export const MAX_BOARD_SOURCE_LENGTH = 2 * 1024;
 export const MAX_BOARD_TERMS = 32;
 export const MAX_BOARD_TERM_LENGTH = 80;
@@ -85,7 +85,7 @@ export const MAX_BOARD_ATTACHMENT_NAME_LENGTH = 255;
 const reason = z.string().trim().min(1).max(MAX_BOARD_REASON_LENGTH);
 
 /**
- * A file the owner sent with a move back, as the card's history names it: enough to say "2 images" and to
+ * A file the owner sent with a move back, as the task's history names it: enough to say "2 images" and to
  * open it from the ferret's chat, never its bytes.
  */
 export const BoardAttachmentSchema = z.object({
@@ -102,8 +102,8 @@ const oneLine = (maximum: number) =>
     .max(maximum)
     .refine(value => !/[\r\n]/u.test(value), 'one line');
 
-/** The id prefix a kind's cards carry: `F` for a feature. Kind is immutable because the prefix must match. */
-export const cardIdPrefix = (kind: CardKind): string => CARD_KIND_PREFIX[kind];
+/** The id prefix a kind's tasks carry: `F` for a feature. Kind is immutable because the prefix must match. */
+export const taskIdPrefix = (kind: TaskKind): string => TASK_KIND_PREFIX[kind];
 
 // ---------------------------------------------------------------------------------------------------
 // Ask references
@@ -116,7 +116,7 @@ export const AskIdTextSchema = z.string().regex(/^A[1-9][0-9]*$/u, 'an ask id is
 export const AskRefSchema = z.strictObject({ ferret: FerretRefSchema, id: AskIdTextSchema });
 export type AskRef = z.infer<typeof AskRefSchema>;
 
-/** How an ask is written: `^A48` (the sigil is spelled once, in core-asks). Cards are `&`, asks `^`, and the two never swap. */
+/** How an ask is written: `^A48` (the sigil is spelled once, in core-asks). Tasks are `&`, asks `^`, and the two never swap. */
 export const formatAskRef = (ref: AskRef): string => askReference(ref.id);
 
 // ---------------------------------------------------------------------------------------------------
@@ -124,11 +124,11 @@ export const formatAskRef = (ref: AskRef): string => askReference(ref.id);
 // ---------------------------------------------------------------------------------------------------
 
 /**
- * Who did something to a card: the owner, a ferret, or the daemon. The owner's `via` says how they acted when it
- * was not their own app ({@link CardActorVia}: the host's admin token, which a ferret without its own credential can
+ * Who did something to a task: the owner, a ferret, or the daemon. The owner's `via` says how they acted when it
+ * was not their own app ({@link TaskActorVia}: the host's admin token, which a ferret without its own credential can
  * hold too). A ferret is recorded with the name Ferrets knew it by when it acted, beside its id. The daemon is
  * always the actor of what it did for a ferret, and says which ferret's session caused the act in `ferret` when
- * the act carried one (a card made for a start, a move on `work.started`), so a history line reads
+ * the act carried one (a task made for a start, a move on `work.started`), so a history line reads
  * "daemon via lanie" and never as a fact nobody caused.
  *
  * The union is CLOSED and each member strict, so a stored actor is exactly one of these three shapes.
@@ -138,22 +138,22 @@ export const CardActorSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('ferret'), name: z.string().min(1), ferret: FerretRefSchema }),
   z.strictObject({ kind: z.literal('daemon'), ferret: FerretRefSchema.optional() }),
 ]);
-export type CardActor = z.infer<typeof CardActorSchema>;
+export type TaskActor = z.infer<typeof CardActorSchema>;
 
 // ---------------------------------------------------------------------------------------------------
-// Card parts
+// Task parts
 // ---------------------------------------------------------------------------------------------------
 
 /** One more thing the owner said about the ask, verbatim. */
 export const BoardClarificationSchema = z.strictObject({
-  text: z.string().min(1).max(MAX_CARD_BRIEF_LENGTH),
+  text: z.string().min(1).max(MAX_TASK_BRIEF_LENGTH),
   source: z.string().min(1).max(MAX_BOARD_SOURCE_LENGTH),
   at: InstantSchema,
   by: CardActorSchema,
 });
 export type BoardClarification = z.infer<typeof BoardClarificationSchema>;
 
-/** One row of a card's glossary: the work's ubiquitous language, spelled out for a newcomer. */
+/** One row of a task's glossary: the work's ubiquitous language, spelled out for a newcomer. */
 export const BoardTermSchema = z.strictObject({
   term: oneLine(MAX_BOARD_TERM_LENGTH).pipe(z.string().min(1)),
   meaning: z.string().trim().min(1).max(MAX_BOARD_TERM_MEANING_LENGTH),
@@ -168,7 +168,7 @@ export const BoardTermsSchema = z
     'each term appears once',
   );
 
-/** The owner's override of one dependency: the card may advance although the blocker is not done. */
+/** The owner's override of one dependency: the task may advance although the blocker is not done. */
 export const DependencyOverrideSchema = z.strictObject({ by: z.literal('owner'), reason, at: InstantSchema });
 export type DependencyOverride = z.infer<typeof DependencyOverrideSchema>;
 
@@ -179,11 +179,11 @@ export const BoardDependencySchema = z.object({
 });
 export type BoardDependency = z.infer<typeof BoardDependencySchema>;
 
-/** An outside-world blocker. Blocks by the owner or by another card are derived, never stored here. */
+/** An outside-world blocker. Blocks by the owner or by another task are derived, never stored here. */
 export const ExternalBlockSchema = z.strictObject({ on: z.literal('external'), reason, since: InstantSchema });
 export type ExternalBlock = z.infer<typeof ExternalBlockSchema>;
 
-/** A card that was abandoned or superseded. Terminal and hidden like Closed, until a reopen clears it. */
+/** A task that was abandoned or superseded. Terminal and hidden like Closed, until a reopen clears it. */
 export const BoardDropSchema = z.strictObject({ reason, at: InstantSchema });
 export type BoardDrop = z.infer<typeof BoardDropSchema>;
 
@@ -284,12 +284,12 @@ export const CardLinksSchema = z.object({
   commits: z.array(linkValue).max(MAX_BOARD_LINKS_PER_FIELD),
   docs: z.array(linkValue).max(MAX_BOARD_LINKS_PER_FIELD),
 });
-export type CardLinks = z.infer<typeof CardLinksSchema>;
+export type TaskLinks = z.infer<typeof CardLinksSchema>;
 
 export const BoardLinkFieldSchema = z.enum(['pr', 'branch', 'commit', 'doc']);
 export type BoardLinkField = z.infer<typeof BoardLinkFieldSchema>;
 
-/** The card fields an edit may change, each recorded as its own `field-edited` event. */
+/** The task fields an edit may change, each recorded as its own `field-edited` event. */
 export const BoardEditableFieldSchema = z.enum([
   'title',
   'summary',
@@ -347,13 +347,13 @@ const MovedEventSchema = z
   });
 
 /**
- * The card's history. Every event names its actor; the union is closed, so an event this build does not
+ * The task's history. Every event names its actor; the union is closed, so an event this build does not
  * know is refused rather than half-read.
  */
 export const CardEventSchema = z.discriminatedUnion('type', [
   z.strictObject({ ...EventBase, type: z.literal('created'), laneId: LaneIdSchema }),
   MovedEventSchema,
-  /** The owner's words that reopened it are ALSO appended to the card's clarifications: they are a new ask. */
+  /** The owner's words that reopened it are ALSO appended to the task's clarifications: they are a new ask. */
   z.strictObject({
     ...EventBase,
     type: z.literal('reopened'),
@@ -364,11 +364,11 @@ export const CardEventSchema = z.discriminatedUnion('type', [
     /** The files the owner sent with it; absent when there were none. */
     attachments: z.array(BoardAttachmentSchema).min(1).max(MAX_BOARD_REOPEN_ATTACHMENTS).optional(),
   }),
-  z.strictObject({ ...EventBase, type: z.literal('note'), text: z.string().trim().min(1).max(MAX_CARD_NOTE_LENGTH) }),
+  z.strictObject({ ...EventBase, type: z.literal('note'), text: z.string().trim().min(1).max(MAX_TASK_NOTE_LENGTH) }),
   z.strictObject({
     ...EventBase,
     type: z.literal('clarified'),
-    text: z.string().min(1).max(MAX_CARD_BRIEF_LENGTH),
+    text: z.string().min(1).max(MAX_TASK_BRIEF_LENGTH),
     source: z.string().min(1).max(MAX_BOARD_SOURCE_LENGTH),
   }),
   z.strictObject({ ...EventBase, type: z.literal('linked'), field: BoardLinkFieldSchema, value: linkValue }),
@@ -377,13 +377,13 @@ export const CardEventSchema = z.discriminatedUnion('type', [
     type: z.literal('assigned'),
     from: FerretRefSchema.nullable(),
     to: FerretRefSchema.nullable(),
-    /** Present when the card's assignee handed it down to one of its own descendants; the actor is that assignee. */
+    /** Present when the task's assignee handed it down to one of its own descendants; the actor is that assignee. */
     handedDown: z.literal(true).optional(),
-    /** Present when the daemon returned the card to a live lead because this ferret, its assignee, ended: the one that finished. */
+    /** Present when the daemon returned the task to a live lead because this ferret, its assignee, ended: the one that finished. */
     returnedFrom: FerretRefSchema.optional(),
-    /** Present when the card's assignee took it from a lead of its own (`fy card claim`): the lead that held it. The actor is the claimer. */
+    /** Present when the task's assignee took it from a lead of its own (`fy task claim`): the lead that held it. The actor is the claimer. */
     claimedFrom: FerretRefSchema.optional(),
-    /** Present when a live lead adopted the card because its owner ferret and its assignee had both ended (`fy card adopt`): the owner ferret it took the card from, and why. The actor is the adopter. */
+    /** Present when a live lead adopted the task because its owner ferret and its assignee had both ended (`fy task adopt`): the owner ferret it took the task from, and why. The actor is the adopter. */
     adopted: z.strictObject({ from: FerretRefSchema, reason }).optional(),
   }),
   z.strictObject({
@@ -410,7 +410,7 @@ export const CardEventSchema = z.discriminatedUnion('type', [
     from: NonNegativeIntegerSchema.nullable(),
     to: NonNegativeIntegerSchema.nullable(),
   }),
-  /** The owner put the card aside until `until`, or woke it early (`until: null`). */
+  /** The owner put the task aside until `until`, or woke it early (`until: null`). */
   z.strictObject({ ...EventBase, type: z.literal('snoozed'), until: InstantSchema.nullable() }),
   z.strictObject({
     ...EventBase,
@@ -429,38 +429,38 @@ export const CardEventSchema = z.discriminatedUnion('type', [
   }),
   z.strictObject({ ...EventBase, type: z.literal('dropped'), reason }),
 ]);
-export type CardEvent = z.infer<typeof CardEventSchema>;
-export type CardEventType = CardEvent['type'];
+export type TaskEvent = z.infer<typeof CardEventSchema>;
+export type TaskEventType = TaskEvent['type'];
 
 // ---------------------------------------------------------------------------------------------------
-// The card
+// The task
 // ---------------------------------------------------------------------------------------------------
 
 /** Who asked for the work, for the surfaces that wait on the owner: a `person`, or an `agent` on its own errand. */
 export const CardAskedBySchema = z.enum(['person', 'agent']);
-export type CardAskedBy = z.infer<typeof CardAskedBySchema>;
+export type TaskAskedBy = z.infer<typeof CardAskedBySchema>;
 
 /**
- * Whether a card is on the board by default. `public` is what the owner asked for; `private` is the ferrets' own
- * bookkeeping: sub-cards, helper cards and cards a ferret made for itself (docs/board.md § Public and private cards).
+ * Whether a task is on the board by default. `public` is what the owner asked for; `private` is the ferrets' own
+ * bookkeeping: sub-cards, helper tasks and tasks a ferret made for itself (docs/board.md § Public and private tasks).
  */
 export const CardVisibilitySchema = z.enum(['public', 'private']);
-export type CardVisibility = z.infer<typeof CardVisibilitySchema>;
+export type TaskVisibility = z.infer<typeof CardVisibilitySchema>;
 
 /**
- * Where a stored visibility came from: `default` is the one the daemon derived from who asked and where the card
+ * Where a stored visibility came from: `default` is the one the daemon derived from who asked and where the task
  * sits, and re-derives when those facts change; `chosen` was set by a person or a ferret and is never re-derived.
  */
 export const CardVisibilitySourceSchema = z.enum(['default', 'chosen']);
-export type CardVisibilitySource = z.infer<typeof CardVisibilitySourceSchema>;
+export type TaskVisibilitySource = z.infer<typeof CardVisibilitySourceSchema>;
 
 /**
- * A card's status: its current state in three Markdown parts, kept current by the ferret that holds the card. An edit
- * names the parts it replaces and the daemon merges them in the card's own write. A part with nothing to say is ''.
- * The field itself is optional on a card: absent means no status yet, and no reader invents one.
+ * A task's status: its current state in three Markdown parts, kept current by the ferret that holds the task. An edit
+ * names the parts it replaces and the daemon merges them in the task's own write. A part with nothing to say is ''.
+ * The field itself is optional on a task: absent means no status yet, and no reader invents one.
  */
 export const ProgressSchema = z.strictObject({
-  /** What is happening on the card at this moment. */
+  /** What is happening on the task at this moment. */
   now: z.string().max(MAX_PROGRESS_PART_LENGTH),
   /** What is implemented, one bullet each, with the PR link where there is one. */
   doneSoFar: z.string().max(MAX_PROGRESS_PART_LENGTH),
@@ -484,38 +484,38 @@ export const writtenProgressParts = (
     ? []
     : PROGRESS_PARTS.map(part => ({ ...part, text: progress[part.key] })).filter(part => part.text.trim() !== '');
 
-const CardShape = {
-  format: z.literal(CARD_FORMAT),
+const TaskShape = {
+  format: z.literal(TASK_FORMAT),
   id: CardIdSchema,
   machineId: MachineIdSchema,
   projectId: BoardProjectIdSchema,
   laneId: LaneIdSchema,
   kind: CardKindSchema,
   title: CardTitleSchema,
-  /** What the card face shows: one line. Empty until the ferret knows it. */
-  summary: oneLine(MAX_CARD_SUMMARY_LENGTH),
+  /** What the task face shows: one line. Empty until the ferret knows it. */
+  summary: oneLine(MAX_TASK_SUMMARY_LENGTH),
   /** The owner's words, verbatim, and where they were said. Never paraphrased. */
   ask: CardMessageSchema,
   clarifications: z.array(BoardClarificationSchema).max(MAX_BOARD_CLARIFICATIONS),
   /** Why this work exists: the problem or belief it rests on (markdown, short). */
   premise: z.string().max(MAX_BOARD_PREMISE_LENGTH).transform(unnestBullets),
-  /** What a newcomer needs: prior PRs, related cards, constraints (markdown). */
+  /** What a newcomer needs: prior PRs, related tasks, constraints (markdown). */
   context: z.string().max(MAX_BOARD_CONTEXT_LENGTH).transform(unnestBullets),
   terms: BoardTermsSchema,
-  /** The full description or plan (markdown); a sub-ferret's brief for a card `fy new` made. */
-  brief: z.string().max(MAX_CARD_BRIEF_LENGTH),
+  /** The full description or plan (markdown); a sub-ferret's brief for a task `fy new` made. */
+  brief: z.string().max(MAX_TASK_BRIEF_LENGTH),
   /**
    * How the owner checks the result before pressing Done (markdown, ideally a numbered list): where to go, what
-   * to do, what they should see. Empty until the ferret writes it; a card stored before it existed reads empty.
+   * to do, what they should see. Empty until the ferret writes it; a task stored before it existed reads empty.
    */
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).default(''),
-  /** The card's current state, rewritten whole by its holder; absent until a ferret writes one. */
+  /** The task's current state, rewritten whole by its holder; absent until a ferret writes one. */
   progress: ProgressSchema.optional(),
-  /** The accountable ferret: the creator by default, the lead for a delegated card. */
+  /** The accountable ferret: the creator by default, the lead for a delegated task. */
   owner: FerretRefSchema,
   /** The ferret doing it now; `null` reads as the owner. */
   assignee: FerretRefSchema.nullable(),
-  /** The lead's card. It may live on another project's board; roll-up follows it. */
+  /** The lead's task. It may live on another project's board; roll-up follows it. */
   parent: CardRefSchema.nullable(),
   dependsOn: z.array(BoardDependencySchema).max(MAX_BOARD_DEPENDENCIES),
   blocked: ExternalBlockSchema.nullable(),
@@ -527,52 +527,52 @@ const CardShape = {
   files: z.array(z.string().min(1).max(MAX_BOARD_FILE_LENGTH)).max(MAX_BOARD_FILES),
   order: NonNegativeIntegerSchema.nullable(),
   /**
-   * The owner's snooze: the card is put aside until `until`. It holds only while the card is still in `laneId`, the
-   * lane it was snoozed in, so a card sent back and released again is not hidden by an old snooze. Absent when never
-   * snoozed (and on a card stored before it existed).
+   * The owner's snooze: the task is put aside until `until`. It holds only while the task is still in `laneId`, the
+   * lane it was snoozed in, so a task sent back and released again is not hidden by an old snooze. Absent when never
+   * snoozed (and on a task stored before it existed).
    */
   snoozed: z.strictObject({ until: InstantSchema, laneId: LaneIdSchema }).nullable().optional(),
   createdAt: InstantSchema,
   createdBy: CardActorSchema,
   history: z.array(CardEventSchema).min(1),
   /**
-   * Whether a PERSON asked for the card, decided by the daemon once (at creation, or at the first boot that
-   * finds the card without it) and never taken from a caller: the Inbox's cards to test are only a person's.
-   * Absent on a card stored before it existed; a reader then falls back to the ask's source.
+   * Whether a PERSON asked for the task, decided by the daemon once (at creation, or at the first boot that
+   * finds the task without it) and never taken from a caller: the Inbox's cards to test are only a person's.
+   * Absent on a task stored before it existed; a reader then falls back to the ask's source.
    */
   askedBy: CardAskedBySchema.optional(),
   /**
-   * Whether the card shows on the board by default. Stored once (at creation, or at the first boot that finds the
-   * card without it) and changed only by `visibility` actions the daemon authorises. A card that has none reads by
-   * the rule in the daemon's `cardVisibility`: public when a person asked and it has no parent, otherwise private.
-   * The VIEW always carries it; absent only on a card stored before it existed.
+   * Whether the task shows on the board by default. Stored once (at creation, or at the first boot that finds the
+   * task without it) and changed only by `visibility` actions the daemon authorises. A task that has none reads by
+   * the rule in the daemon's `taskVisibility`: public when a person asked and it has no parent, otherwise private.
+   * The VIEW always carries it; absent only on a task stored before it existed.
    */
   visibility: CardVisibilitySchema.optional(),
   /**
-   * Whether the stored visibility is the daemon's `default` (it follows the card's asker and parent) or was
+   * Whether the stored visibility is the daemon's `default` (it follows the task's asker and parent) or was
    * `chosen`. Absent beside a stored visibility reads `chosen`: a value of unknown origin is never undone.
    */
   visibilitySource: CardVisibilitySourceSchema.optional(),
   /**
-   * The owner's Yes this card was made on where its board is off (docs/board.md § The board is opt-in): an item on
-   * the creating ferret's agenda. One Yes makes one card. Absent on every other card.
+   * The owner's Yes this task was made on where its board is off (docs/board.md § The board is opt-in): an item on
+   * the creating ferret's agenda. One Yes makes one task. Absent on every other task.
    */
   approval: AskRefSchema.optional(),
 };
 
-type CardCoherence = Pick<
-  z.infer<z.ZodObject<typeof CardShape>>,
+type TaskCoherence = Pick<
+  z.infer<z.ZodObject<typeof TaskShape>>,
   'id' | 'machineId' | 'kind' | 'parent' | 'dependsOn' | 'files' | 'history'
 >;
 
-/** Names this card, on its own machine or with the machine spelled out. */
-const namesSelf = (card: { readonly id: string; readonly machineId: string }, ref: CardRef): boolean =>
-  ref.id === card.id && (ref.machineId === undefined || ref.machineId === card.machineId);
+/** Names this task, on its own machine or with the machine spelled out. */
+const namesSelf = (task: { readonly id: string; readonly machineId: string }, ref: TaskRef): boolean =>
+  ref.id === task.id && (ref.machineId === undefined || ref.machineId === task.machineId);
 
-const refKey = (ref: CardRef): string => `${ref.machineId ?? ''}/${ref.id}`;
+const refKey = (ref: TaskRef): string => `${ref.machineId ?? ''}/${ref.id}`;
 
-const refineCard = (value: CardCoherence, context: z.RefinementCtx): void => {
-  if (!value.id.startsWith(cardIdPrefix(value.kind))) {
+const refineTask = (value: TaskCoherence, context: z.RefinementCtx): void => {
+  if (!value.id.startsWith(taskIdPrefix(value.kind))) {
     context.addIssue({ code: 'custom', message: 'task id prefix must match its kind', path: ['id'] });
   }
   if (value.parent !== null && namesSelf(value, value.parent)) {
@@ -595,32 +595,32 @@ const refineCard = (value: CardCoherence, context: z.RefinementCtx): void => {
   }
 };
 
-/** A card as the daemon stores it. */
-export const CardSchema = z.object(CardShape).superRefine(refineCard);
-export type Card = z.infer<typeof CardSchema>;
+/** A task as the daemon stores it. */
+export const CardSchema = z.object(TaskShape).superRefine(refineTask);
+export type Task = z.infer<typeof CardSchema>;
 
 /**
- * A SUB-CARD is a card made under a bigger one for one piece of work (one PR, one review, one fix round). The owner
+ * A SUB-CARD is a task made under a bigger one for one piece of work (one PR, one review, one fix round). The owner
  * tests the parent, never the sub-card, so the board closes it when its work ships and hides it by default.
  */
-export const isSubCard = (card: { readonly parent: CardRef | null }): boolean => card.parent !== null;
+export const isSubTask = (task: { readonly parent: TaskRef | null }): boolean => task.parent !== null;
 
 // ---------------------------------------------------------------------------------------------------
 // Derived at read time
 // ---------------------------------------------------------------------------------------------------
 
 /**
- * How a card is doing, derived from session liveness and the board (`board-design.md` §3.3): `active`
+ * How a task is doing, derived from session liveness and the board (`board-design.md` §3.3): `active`
  * (an attributed session is working), `idle`, `stale` (idle past its lane's threshold) or `orphaned` (its
- * ferrets are gone with the card still in an active or review lane). A card that is blocked, depends on an
- * unfinished card, or whose agenda carries its open ask is `idle` and never stale: someone else's clock.
+ * ferrets are gone with the task still in an active or review lane). A task that is blocked, depends on an
+ * unfinished task, or whose agenda carries its open ask is `idle` and never stale: someone else's clock.
  */
 export const CardActivitySchema = z.enum(['active', 'idle', 'stale', 'orphaned']);
-export type CardActivity = z.infer<typeof CardActivitySchema>;
+export type TaskActivity = z.infer<typeof CardActivitySchema>;
 
-/** Whether the owner asked for a card or an agent made it (`docs/board.md` § Human and agent cards). */
+/** Whether the owner asked for a task or an agent made it (`docs/board.md` § Human and agent tasks). */
 export const CardOriginSchema = z.enum(['human', 'agent']);
-export type CardOrigin = z.infer<typeof CardOriginSchema>;
+export type TaskOrigin = z.infer<typeof CardOriginSchema>;
 
 const categoryCounts = z.strictObject({
   backlog: NonNegativeIntegerSchema,
@@ -631,7 +631,7 @@ const categoryCounts = z.strictObject({
   closed: NonNegativeIntegerSchema,
 });
 
-/** A parent card's children, summed: how many (dropped ones excluded), where they are, and how many work now. */
+/** A parent task's children, summed: how many (dropped ones excluded), where they are, and how many work now. */
 export const RollupSchema = z
   .object({
     children: NonNegativeIntegerSchema,
@@ -650,43 +650,43 @@ export const RollupSchema = z
   });
 export type Rollup = z.infer<typeof RollupSchema>;
 
-const CardViewShape = {
-  ...CardShape,
-  /** The latest real activity on the card or any descendant; `null` when there has been none. */
+const TaskViewShape = {
+  ...TaskShape,
+  /** The latest real activity on the task or any descendant; `null` when there has been none. */
   lastTouchedAt: InstantSchema.nullable(),
   touchedBy: FerretRefSchema.nullable(),
   activity: CardActivitySchema,
   rollup: RollupSchema,
   /** The lane the children suggest moving to; `null` when they suggest nothing. */
   suggestedLane: LaneIdSchema.nullable(),
-  /** The open asks about this card: its gate entry's ask, or an ask that names it. */
+  /** The open asks about this task: its gate entry's ask, or an ask that names it. */
   openAsks: z.array(AskRefSchema),
   /** Dependencies not yet done and not overridden. */
   blockedBy: z.array(CardRefSchema),
-  /** The cards that depend on this one: the inverse index, never stored. */
+  /** The tasks that depend on this one: the inverse index, never stored. */
   blocks: z.array(CardRefSchema),
-  /** The earliest release any merged PR of the card shipped in. */
+  /** The earliest release any merged PR of the task shipped in. */
   shippedIn: ReleasedInSchema.nullable(),
   /**
    * Who the work is for: `human` when the owner asked for it, `agent` when a ferret or the daemon made it on
-   * its own (a sub-ferret's card, a Warden finding). Absent from a daemon older than the split, which a
+   * its own (a sub-ferret's task, a Warden finding). Absent from a daemon older than the split, which a
    * reader takes as "show it".
    */
   origin: CardOriginSchema.optional(),
-  /** The nearest ANCESTOR card (never the card itself) whose origin is `human`; `null` when there is none. */
+  /** The nearest ANCESTOR task (never the task itself) whose origin is `human`; `null` when there is none. */
   humanParent: CardRefSchema.nullable().optional(),
 };
 
 const askKey = (ref: AskRef): string => `${ref.ferret}/${ref.id}`;
 
-export const CardViewSchema = z.object(CardViewShape).superRefine((value, context) => {
-  refineCard(value, context);
+export const CardViewSchema = z.object(TaskViewShape).superRefine((value, context) => {
+  refineTask(value, context);
   const open = new Set(value.openAsks.map(askKey));
   if (open.size !== value.openAsks.length) {
     context.addIssue({ code: 'custom', message: 'each open ask is listed once', path: ['openAsks'] });
   }
 });
-export type CardView = z.infer<typeof CardViewSchema>;
+export type TaskView = z.infer<typeof CardViewSchema>;
 
 // ---------------------------------------------------------------------------------------------------
 // The board query and its answer
@@ -699,12 +699,12 @@ export type BoardPrStateFilter = z.infer<typeof BoardPrStateFilterSchema>;
 export const BoardActivityFilterSchema = z.enum([...CardActivitySchema.options, 'blocked']);
 export type BoardActivityFilter = z.infer<typeof BoardActivityFilterSchema>;
 
-/** Which cards: `open` (the default) excludes closed and dropped ones, which there will be thousands of. */
+/** Which tasks: `open` (the default) excludes closed and dropped ones, which there will be thousands of. */
 export const BoardStateFilterSchema = z.enum(['open', 'closed', 'dropped', 'all']);
 export type BoardStateFilter = z.infer<typeof BoardStateFilterSchema>;
 
 /**
- * Whether a card belongs in a state filter. A dropped card is only ever `dropped` (or `all`), whatever
+ * Whether a task belongs in a state filter. A dropped task is only ever `dropped` (or `all`), whatever
  * lane it was dropped from; `open` is everything neither closed nor dropped.
  */
 export const isInBoardState = (filter: BoardStateFilter, category: LaneCategory, dropped: boolean): boolean => {
@@ -714,8 +714,8 @@ export const isInBoardState = (filter: BoardStateFilter, category: LaneCategory,
 };
 
 /**
- * Which cards a board read selects by visibility: `public`, `private` or `all`. Absent reads `all`, so an app that
- * sends no filter keeps every card it relies on; the Board page and `fy board` ask for `public` themselves.
+ * Which tasks a board read selects by visibility: `public`, `private` or `all`. Absent reads `all`, so an app that
+ * sends no filter keeps every task it relies on; the Board page and `fy board` ask for `public` themselves.
  */
 export const BoardVisibilityFilterSchema = z.enum(['public', 'private', 'all']);
 export type BoardVisibilityFilter = z.infer<typeof BoardVisibilityFilterSchema>;
@@ -723,13 +723,13 @@ export type BoardVisibilityFilter = z.infer<typeof BoardVisibilityFilterSchema>;
 export const BoardQuerySchema = z.strictObject({
   /** One project's board; absent reads every project's. */
   project: BoardProjectIdSchema.optional(),
-  /** Cards this session owns or is assigned. */
+  /** Tasks this session owns or is assigned. */
   ferret: FerretRefSchema.optional(),
   kind: CardKindSchema.optional(),
   prState: BoardPrStateFilterSchema.optional(),
   activity: BoardActivityFilterSchema.optional(),
   state: BoardStateFilterSchema.default('open'),
-  /** Public cards, private ones, or both (absent). It scopes the board, so the header counts follow it. */
+  /** Public tasks, private ones, or both (absent). It scopes the board, so the header counts follow it. */
   visibility: BoardVisibilityFilterSchema.optional(),
   /** Free text over id, title, summary and ask. */
   query: z.string().trim().min(1).max(MAX_BOARD_QUERY_LENGTH).optional(),
@@ -749,17 +749,17 @@ export const BoardCountsSchema = z.strictObject({
 export type BoardCounts = z.infer<typeof BoardCountsSchema>;
 
 /**
- * A card the daemon could not read. It is set aside and reported, never fatal to the board read: `id` is
- * the card file's name, and `reason` a short summary of what failed to parse — never a path or the file's
+ * A task the daemon could not read. It is set aside and reported, never fatal to the board read: `id` is
+ * the task file's name, and `reason` a short summary of what failed to parse — never a path or the file's
  * contents.
  */
 export const BoardQuarantinedCardSchema = z.strictObject({ id: CardIdSchema, reason });
-export type BoardQuarantinedCard = z.infer<typeof BoardQuarantinedCardSchema>;
+export type BoardQuarantinedTask = z.infer<typeof BoardQuarantinedCardSchema>;
 
 /**
- * One page of a board. Scoped to one project, it carries that project's lanes, and every card is on it;
+ * One page of a board. Scoped to one project, it carries that project's lanes, and every task is on it;
  * across every project (`projectId: null`) there is no one lane set, so the app reads each project's.
- * `quarantined` names the cards on it that could not be read.
+ * `quarantined` names the tasks on it that could not be read.
  */
 export const BoardResponseSchema = z
   .object({
@@ -780,30 +780,30 @@ export const BoardResponseSchema = z
     if (value.laneSet !== null && value.laneSet.projectId !== value.projectId) {
       context.addIssue({ code: 'custom', message: "the lane set is the project's own", path: ['laneSet'] });
     }
-    if (value.cards.some(card => card.projectId !== value.projectId)) {
+    if (value.cards.some(task => task.projectId !== value.projectId)) {
       context.addIssue({ code: 'custom', message: "a project's board holds its own tasks", path: ['cards'] });
     }
   });
 export type BoardResponse = z.infer<typeof BoardResponseSchema>;
 
-/** One card, in full. */
+/** One task, in full. */
 export const CardResponseSchema = z.object({ card: CardViewSchema, laneSet: LaneSetSchema.nullable() });
-export type CardResponse = z.infer<typeof CardResponseSchema>;
+export type TaskResponse = z.infer<typeof CardResponseSchema>;
 
 /**
- * The owner's start of a ferret on a card: the card, and the ferret that is on it. `started: false` means a live
- * ferret already held the card, so none was started and `ferret` is that ferret (the app then offers its chat).
+ * The owner's start of a ferret on a task: the task, and the ferret that is on it. `started: false` means a live
+ * ferret already held the task, so none was started and `ferret` is that ferret (the app then offers its chat).
  */
 export const CardStartResponseSchema = z.strictObject({
   card: CardIdSchema,
   ferret: FerretRefSchema,
   started: z.boolean(),
 });
-export type CardStartResponse = z.infer<typeof CardStartResponseSchema>;
+export type TaskStartResponse = z.infer<typeof CardStartResponseSchema>;
 
 /**
- * Every card id this machine holds, whatever its project, lane, state or assignee, and nothing else about
- * it: what `&F12` is proved against, so a reference to a card on another project still opens its card.
+ * Every task id this machine holds, whatever its project, lane, state or assignee, and nothing else about
+ * it: what `&F12` is proved against, so a reference to a task on another project still opens its task.
  */
 export const BoardIdsResponseSchema = z.strictObject({ ids: z.array(CardIdSchema) });
 export type BoardIdsResponse = z.infer<typeof BoardIdsResponseSchema>;
@@ -814,7 +814,7 @@ export type BoardIdsResponse = z.infer<typeof BoardIdsResponseSchema>;
 
 const PrUrlSchema = z.string().max(MAX_BOARD_LINK_LENGTH).regex(PR_URL, 'a GitHub pull request URL');
 
-/** One card of a PR's merge unit still waiting on a card outside it, and how far that card must get. */
+/** One task of a PR's merge unit still waiting on a task outside it, and how far that task must get. */
 export const BoardMergeWaitSchema = z.strictObject({
   card: CardRefSchema,
   on: CardRefSchema,
@@ -823,34 +823,34 @@ export const BoardMergeWaitSchema = z.strictObject({
 export type BoardMergeWait = z.infer<typeof BoardMergeWaitSchema>;
 
 /**
- * `GET /v1/board/merge-gate?pr=<url>` (docs/board.md § Clashing claims queue the later card): whether a PR may merge as
+ * `GET /v1/board/merge-gate?pr=<url>` (docs/board.md § Clashing claims queue the later task): whether a PR may merge as
  * far as the board's queue goes, decided from ONE read of the board. The PR may merge when `waits` and `unreadable`
  * are both empty.
  */
 export const BoardMergeGateResponseSchema = z.strictObject({
   pr: PrUrlSchema,
-  /** The cards that ship in this PR: the open cards linking it, and their open sub-cards that link no PR of their own. */
+  /** The tasks that ship in this PR: the open tasks linking it, and their open sub-cards that link no PR of their own. */
   unit: z.array(CardRefSchema),
-  /** Each wait of a unit card on a card outside the unit that is not done yet. */
+  /** Each wait of a unit task on a task outside the unit that is not done yet. */
   waits: z.array(BoardMergeWaitSchema),
-  /** Cards this daemon could not read: any of them might link the PR, so the gate cannot call it free. */
+  /** Tasks this daemon could not read: any of them might link the PR, so the gate cannot call it free. */
   unreadable: z.array(CardIdSchema),
 });
 export type BoardMergeGateResponse = z.infer<typeof BoardMergeGateResponseSchema>;
 
 /**
- * A new card. Who creates it is the caller, never a field; the daemon fills the machine, the counter id,
+ * A new task. Who creates it is the caller, never a field; the daemon fills the machine, the counter id,
  * the lane (the variant's first backlog lane unless one is named) and the history.
  */
 export const CardCreateRequestSchema = z.strictObject({
   kind: CardKindSchema,
   title: CardTitleSchema,
-  summary: oneLine(MAX_CARD_SUMMARY_LENGTH).default(''),
+  summary: oneLine(MAX_TASK_SUMMARY_LENGTH).default(''),
   ask: CardMessageSchema,
   premise: z.string().max(MAX_BOARD_PREMISE_LENGTH).transform(unnestBullets).default(''),
   context: z.string().max(MAX_BOARD_CONTEXT_LENGTH).transform(unnestBullets).default(''),
   terms: BoardTermsSchema.default([]),
-  brief: z.string().max(MAX_CARD_BRIEF_LENGTH).default(''),
+  brief: z.string().max(MAX_TASK_BRIEF_LENGTH).default(''),
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).default(''),
   progress: ProgressSchema.optional(),
   workflow: WorkflowSchema.default('quick'),
@@ -867,40 +867,40 @@ export const CardCreateRequestSchema = z.strictObject({
   branch: linkValue.optional(),
   docs: z.array(linkValue).max(MAX_BOARD_LINKS_PER_FIELD).default([]),
   /**
-   * Where the board is off, a ferret's card needs the owner's Yes: the id of the answered "Track this on the
+   * Where the board is off, a ferret's task needs the owner's Yes: the id of the answered "Track this on the
    * board?" item on the ferret's own agenda (docs/board.md § The board is opt-in). Ignored for the owner.
    */
   approval: AskIdTextSchema.optional(),
-  /** The caller's own open agenda thread this card carries out: only linked to it (the thread's `task`), nothing else. */
+  /** The caller's own open agenda thread this task carries out: only linked to it (the thread's `task`), nothing else. */
   thread: AskIdTextSchema.optional(),
   /**
    * `public` or `private`; absent takes the default (public when a person asked and it has no parent). A ferret may
-   * choose for its own agent-asked card, and never hides a person's ask or publishes a sub-card.
+   * choose for its own agent-asked task, and never hides a person's ask or publishes a sub-card.
    */
   visibility: CardVisibilitySchema.optional(),
 });
-export type CardCreateRequest = z.infer<typeof CardCreateRequestSchema>;
-export type CardCreateRequestInput = z.input<typeof CardCreateRequestSchema>;
+export type TaskCreateRequest = z.infer<typeof CardCreateRequestSchema>;
+export type TaskCreateRequestInput = z.input<typeof CardCreateRequestSchema>;
 
-/** The text fields `fy card edit` (and `fy card patch`, `board-patch.ts`) changes, each with its wire schema. */
-export const CardEditFields = {
+/** The text fields `fy task edit` (and `fy task patch`, `board-patch.ts`) changes, each with its wire schema. */
+export const TaskEditFields = {
   title: CardTitleSchema.optional(),
-  summary: oneLine(MAX_CARD_SUMMARY_LENGTH).optional(),
+  summary: oneLine(MAX_TASK_SUMMARY_LENGTH).optional(),
   premise: z.string().max(MAX_BOARD_PREMISE_LENGTH).transform(unnestBullets).optional(),
   context: z.string().max(MAX_BOARD_CONTEXT_LENGTH).transform(unnestBullets).optional(),
   terms: BoardTermsSchema.optional(),
-  brief: z.string().max(MAX_CARD_BRIEF_LENGTH).optional(),
+  brief: z.string().max(MAX_TASK_BRIEF_LENGTH).optional(),
   howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).optional(),
   /**
-   * The parts of the status to replace: each part named replaces that part, each part left out keeps the card's (an
-   * empty part for a card with no status yet). The daemon merges them in the card's own write, so two ferrets
+   * The parts of the status to replace: each part named replaces that part, each part left out keeps the task's (an
+   * empty part for a task with no status yet). The daemon merges them in the task's own write, so two ferrets
    * rewriting different parts at once never undo each other.
    */
   progress: ProgressSchema.partial().optional(),
 };
 
 /**
- * Everything else a card can be asked to do. Who may do which is the daemon's decision (ownership and
+ * Everything else a task can be asked to do. Who may do which is the daemon's decision (ownership and
  * lineage, `board-design.md` §2.5); a dependency override is the owner's alone, enforced there too.
  */
 export const CardActionRequestSchema = z.discriminatedUnion('action', [
@@ -909,16 +909,16 @@ export const CardActionRequestSchema = z.discriminatedUnion('action', [
     action: z.literal('move'),
     to: LaneIdSchema,
     reason: reason.optional(),
-    /** Files for the card's ferret: only an owner's move back (a reopen) carries them. */
+    /** Files for the task's ferret: only an owner's move back (a reopen) carries them. */
     attachments: BoardReopenAttachmentsSchema.optional(),
   }),
   /**
    * Report an external trigger (`deploy.done`, `pr.review_approved`): something Ferretry cannot see
-   * happened, so the card moves the way that trigger moves it, as the daemon would — forward only, never into
+   * happened, so the task moves the way that trigger moves it, as the daemon would — forward only, never into
    * an owner-gated closed lane, and never out of a gate the owner has not answered. `reason` is what happened.
    */
   z.strictObject({ action: z.literal('trigger'), event: ExternalLaneTriggerSchema, reason: reason.optional() }),
-  /** Make this the card the calling session's activity is attributed to. */
+  /** Make this the task the calling session's activity is attributed to. */
   z.strictObject({ action: z.literal('focus') }),
   z.strictObject({ action: z.literal('block'), reason }),
   z.strictObject({ action: z.literal('unblock'), reason: reason.optional() }),
@@ -940,7 +940,7 @@ export const CardActionRequestSchema = z.discriminatedUnion('action', [
   }),
   z.strictObject({
     action: z.literal('clarify'),
-    text: z.string().min(1).max(MAX_CARD_BRIEF_LENGTH),
+    text: z.string().min(1).max(MAX_TASK_BRIEF_LENGTH),
     source: z.string().min(1).max(MAX_BOARD_SOURCE_LENGTH),
   }),
   z
@@ -956,25 +956,25 @@ export const CardActionRequestSchema = z.discriminatedUnion('action', [
       'a link names exactly one of pr, branch, commit or doc',
     ),
   z.strictObject({ action: z.literal('assign'), assignee: FerretRefSchema.nullable() }),
-  /** A ferret takes a card its own lead holds: the daemon reads who is asking, so the request names nobody. */
+  /** A ferret takes a task its own lead holds: the daemon reads who is asking, so the request names nobody. */
   z.strictObject({ action: z.literal('claim') }),
   /**
-   * A live lead takes a card whose owner ferret and assignee have BOTH ended: it becomes the card's owner and assignee, and
+   * A live lead takes a task whose owner ferret and assignee have BOTH ended: it becomes the task's owner and assignee, and
    * `reason` is kept in the history. The daemon reads who is asking and judges the orphan; the request names nobody.
    */
   z.strictObject({ action: z.literal('adopt'), reason: reason.optional() }),
-  z.strictObject({ action: z.literal('note'), text: z.string().trim().min(1).max(MAX_CARD_NOTE_LENGTH) }),
+  z.strictObject({ action: z.literal('note'), text: z.string().trim().min(1).max(MAX_TASK_NOTE_LENGTH) }),
   z
     .strictObject({
       action: z.literal('edit'),
-      ...CardEditFields,
+      ...TaskEditFields,
       /**
-       * READ BEFORE WRITE (`board.patch.1`, `fy card patch`): the card's revision as the writer read it
-       * (`cardRevision`, the seq of its newest history event). A card that has changed since is refused
+       * READ BEFORE WRITE (`board.patch.1`, `fy task patch`): the task's revision as the writer read it
+       * (`taskRevision`, the seq of its newest history event). A task that has changed since is refused
        * `version-conflict` and nothing is written: read it again.
        */
       revision: PositiveIntegerSchema.optional(),
-      /** Changes the card's visibility in the same mutation as its text, so one request is one outcome. */
+      /** Changes the task's visibility in the same mutation as its text, so one request is one outcome. */
       visibility: CardVisibilitySchema.optional(),
     })
     .refine(
@@ -989,13 +989,13 @@ export const CardActionRequestSchema = z.discriminatedUnion('action', [
     reason: reason.optional(),
   }),
   z.strictObject({ action: z.literal('order'), order: NonNegativeIntegerSchema.nullable() }),
-  /** Show the card on the board by default (`public`) or fold it with the ferrets' bookkeeping (`private`). */
+  /** Show the task on the board by default (`public`) or fold it with the ferrets' bookkeeping (`private`). */
   z.strictObject({ action: z.literal('visibility'), visibility: CardVisibilitySchema, reason: reason.optional() }),
-  /** Put the card aside until `until`, or wake it now with `null`. The owner's own, like Done. */
+  /** Put the task aside until `until`, or wake it now with `null`. The owner's own, like Done. */
   z.strictObject({ action: z.literal('snooze'), until: InstantSchema.nullable() }),
-  /** Move the card under another card (or to the top level with `parent: null`); the reason goes in its history. */
+  /** Move the task under another task (or to the top level with `parent: null`); the reason goes in its history. */
   z.strictObject({ action: z.literal('reparent'), parent: CardRefSchema.nullable(), reason: reason.optional() }),
-  /** Move the card to another project's board; absent `laneId` means the same-category lane there. */
+  /** Move the task to another project's board; absent `laneId` means the same-category lane there. */
   z.strictObject({
     action: z.literal('refile'),
     projectId: BoardProjectIdSchema,
@@ -1003,20 +1003,20 @@ export const CardActionRequestSchema = z.discriminatedUnion('action', [
     reason: reason.optional(),
   }),
 ]);
-export type CardActionRequest = z.infer<typeof CardActionRequestSchema>;
+export type TaskActionRequest = z.infer<typeof CardActionRequestSchema>;
 
-/** `fy card skip "<why>"`: the calling ferret records that its work needs no card (§3.4). */
+/** `fy task skip "<why>"`: the calling ferret records that its work needs no task (§3.4). */
 export const BoardSkipRequestSchema = z.strictObject({ reason: BoardSkipSchema.shape.reason });
 export type BoardSkipRequest = z.infer<typeof BoardSkipRequestSchema>;
 
 /** The decision as recorded on the session. */
 export const BoardSkipResponseSchema = z.object({ ferret: FerretRefSchema, skip: BoardSkipSchema });
 export type BoardSkipResponse = z.infer<typeof BoardSkipResponseSchema>;
-export type CardActionRequestInput = z.input<typeof CardActionRequestSchema>;
+export type TaskActionRequestInput = z.input<typeof CardActionRequestSchema>;
 
 /**
  * A project's lanes: propose from a template (live at once, unconfirmed), edit against the version the
- * editor saw, or confirm. An edit that removes a lane says where its cards go (`relocate`), checked
+ * editor saw, or confirm. An edit that removes a lane says where its tasks go (`relocate`), checked
  * against the current set by {@link laneEditProblems}.
  */
 export const LaneSetActionRequestSchema = z.discriminatedUnion('action', [
@@ -1092,7 +1092,7 @@ export const moveReasonProblem = (
     : boardOk(undefined);
 };
 
-/** The lanes an edit removes without saying where their cards go. Empty when the edit is complete. */
+/** The lanes an edit removes without saying where their tasks go. Empty when the edit is complete. */
 export const laneEditProblems = (
   current: Pick<LaneSet, 'lanes'>,
   edit: {
@@ -1109,7 +1109,7 @@ export const laneEditProblems = (
 // ---------------------------------------------------------------------------------------------------
 
 /**
- * The wake-up the board publishes after a write: which cards moved on which board. (Today's `board.changed` feed
+ * The wake-up the board publishes after a write: which tasks moved on which board. (Today's `board.changed` feed
  * event, `taskIds` renamed.)
  */
 export const BoardChangedSchema = z.strictObject({
@@ -1146,7 +1146,7 @@ export const LaneSetChangeResponseSchema = z.strictObject({
 export type LaneSetChangeResponse = z.infer<typeof LaneSetChangeResponseSchema>;
 
 /**
- * WHETHER A PROJECT USES THE BOARD (docs/board.md § The board is opt-in). Off, a ferret makes no card unless the owner
+ * WHETHER A PROJECT USES THE BOARD (docs/board.md § The board is opt-in). Off, a ferret makes no task unless the owner
  * asked for one or its lead handed it one. `setBy`: `default` is a board nobody decided (off), `owner` a switch the
  * owner threw. A ferret never throws it: it asks the owner first.
  */
@@ -1165,19 +1165,19 @@ export type BoardSwitchRequest = z.infer<typeof BoardSwitchRequestSchema>;
 export const BOARD_SWITCH_OWNER_ONLY =
   'Only the owner switches a board on or off. Ask them first, as one ask yes/no: "Track this on the board?"';
 
-// ─── the Asks source `card` ──────────────────────────────────────────────────────────────────────────────────────
+// ─── the Asks source `task` ──────────────────────────────────────────────────────────────────────────────────────
 /**
- * The obligation envelope a card puts on the agenda (`{ source: 'card', ref, entry }`, #1552): `ref` is the card,
+ * The obligation envelope a task puts on the agenda (`{ source: 'card', ref, entry }`, #1552): `ref` is the task,
  * `lane` the gate lane it entered, `entry` the history seq of that entry (the entry id is
- * `gate:<card>:<lane>:<entry>`, so a raise is idempotent). The Agenda shows it as ONE answer row; the card is read-only
- * status and is named at most once, as a plain reference. Answering moves the card (Asks -> `asks.answered`).
+ * `gate:<card>:<lane>:<entry>`, so a raise is idempotent). The Agenda shows it as ONE answer row; the task is read-only
+ * status and is named at most once, as a plain reference. Answering moves the task (Asks -> `asks.answered`).
  */
 export const CardAskRefSchema = z.strictObject({
   card: CardIdSchema,
   lane: LaneIdSchema.optional(),
   entry: z.string().min(1).optional(),
 });
-export type CardAskRef = z.infer<typeof CardAskRefSchema>;
+export type TaskAskRef = z.infer<typeof CardAskRefSchema>;
 
 // ─── stored files ────────────────────────────────────────────────────────────────────────────────────────────────
 export const CountersFileSchema = z.strictObject({
@@ -1195,7 +1195,7 @@ export const BoardFileSchema = z.strictObject({
   switch: BoardSwitchSchema,
   laneSet: LaneSetSchema.nullable(),
 });
-/** `state/board/sweep.json`: what the last sweep saw and when each card was nudged. Open cards only. */
+/** `state/board/sweep.json`: what the last sweep saw and when each task was nudged. Open tasks only. */
 export const SweepFileSchema = z.strictObject({
   format: z.literal(1),
   sweptAt: InstantSchema.nullable(),
@@ -1205,8 +1205,8 @@ export const SweepFileSchema = z.strictObject({
 export type SweepFile = z.infer<typeof SweepFileSchema>;
 
 /**
- * `state/board/focus.json`: the card each ferret works on, the card its delegations go under, and why its work has no
- * card. Ferrets keeps no such fact, so Board holds it (today's `config.focusTask`, `focusAnchor`, `boardSkip`).
+ * `state/board/focus.json`: the task each ferret works on, the task its delegations go under, and why its work has no
+ * task. Ferrets keeps no such fact, so Board holds it (today's `config.focusTask`, `focusAnchor`, `boardSkip`).
  */
 export const FerretFocusEntrySchema = z.strictObject({
   card: CardRefSchema.nullable(),
@@ -1227,7 +1227,7 @@ export const GithubFileSchema = z.strictObject({
 export const BoardConfigSchema = z.strictObject({
   github: z.strictObject({ watch: z.boolean().default(true) }).default({ watch: true }),
   /**
-   * The folders a ferret's repository is registered from when its first card is made on the Unfiled board
+   * The folders a ferret's repository is registered from when its first task is made on the Unfiled board
    * (`~` is the home folder). A repository outside every one of them stays Unfiled.
    */
   projectRoots: z.array(z.string().trim().min(1)).default(['~/Workspace', '~/.config']),

@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { CardId } from '@ferretry/plugin-board/contract';
+import type { TaskId } from '@ferretry/plugin-board/contract';
 import { MAX_AGENDA_DETAIL_LENGTH } from '../../daemon/lib/protocol.ts';
 import { MAX_LISTED_ORPHANS, orphanItem } from '../../daemon/lib/orphan-item.ts';
-import type { OrphanedCard } from '../../daemon/lib/orphans.ts';
+import type { OrphanedTask } from '../../daemon/lib/orphans.ts';
 
-const card = (n: number, waitingSince = `2026-07-01T00:${String(n % 60).padStart(2, '0')}:00.000Z`): OrphanedCard => ({
-  id: `F${String(n)}` as CardId,
+const task = (n: number, waitingSince = `2026-07-01T00:${String(n % 60).padStart(2, '0')}:00.000Z`): OrphanedTask => ({
+  id: `F${String(n)}` as TaskId,
   assignee: 'worker',
   line: `&F${String(n)} Card ${String(n)} is waiting in Implement, but no ferret is assigned, so nothing will happen to it.`,
   waitingSince,
@@ -19,8 +19,8 @@ describe('the orphaned cards item', () => {
 
   it('should name a single card, and count several', () => {
     // Act
-    const one = orphanItem([card(1)]);
-    const three = orphanItem([card(1), card(2), card(3)]);
+    const one = orphanItem([task(1)]);
+    const three = orphanItem([task(1), task(2), task(3)]);
 
     // Assert
     should(one?.subject).equal('A task has nobody working on it');
@@ -29,15 +29,15 @@ describe('the orphaned cards item', () => {
     should(three?.why).containEql('These were handed');
     should(three?.why).not.containEql('nothing under it is alive');
     should(three?.howToResolve).containEql('start a ferret on it');
-    should(three?.context).equal([1, 2, 3].map(n => `- ${card(n).line}`).join('\n'));
+    should(three?.context).equal([1, 2, 3].map(n => `- ${task(n).line}`).join('\n'));
   });
 
   it('should list the oldest wait first, whatever order the cards arrive in', () => {
     // Act
     const item = orphanItem([
-      card(1, '2026-07-03T00:00:00.000Z'),
-      card(2, '2026-07-01T00:00:00.000Z'),
-      card(3, '2026-07-02T00:00:00.000Z'),
+      task(1, '2026-07-03T00:00:00.000Z'),
+      task(2, '2026-07-01T00:00:00.000Z'),
+      task(3, '2026-07-02T00:00:00.000Z'),
     ]);
 
     // Assert
@@ -46,10 +46,10 @@ describe('the orphaned cards item', () => {
 
   it('should name the first dozen and count the rest, so 31 orphans make one item showing 12 and "…and 19 more."', () => {
     // Arrange
-    const cards = Array.from({ length: 31 }, (_, index) => card(index + 1));
+    const tasks = Array.from({ length: 31 }, (_, index) => task(index + 1));
 
     // Act
-    const item = orphanItem(cards);
+    const item = orphanItem(tasks);
 
     // Assert
     should(MAX_LISTED_ORPHANS).equal(12);
@@ -62,10 +62,10 @@ describe('the orphaned cards item', () => {
 
   it('should stay one bounded body however many cards are orphaned: 10,000 cards, a short item', () => {
     // Arrange
-    const cards = Array.from({ length: 10_000 }, (_, index) => card(index + 1));
+    const tasks = Array.from({ length: 10_000 }, (_, index) => task(index + 1));
 
     // Act
-    const item = orphanItem(cards);
+    const item = orphanItem(tasks);
 
     // Assert
     should(item?.subject).equal('10000 tasks have nobody working on them');
@@ -76,7 +76,7 @@ describe('the orphaned cards item', () => {
 
   it('should drop whole rows, and count them, when even a dozen would not fit an item', () => {
     // Arrange
-    const long = (n: number): OrphanedCard => ({ ...card(n), line: `&F${String(n)} ${'word '.repeat(80).trim()}` });
+    const long = (n: number): OrphanedTask => ({ ...task(n), line: `&F${String(n)} ${'word '.repeat(80).trim()}` });
 
     // Act
     const item = orphanItem(Array.from({ length: 30 }, (_, index) => long(index + 1)));
@@ -91,6 +91,6 @@ describe('the orphaned cards item', () => {
 
   it('should say the same thing for the same cards: the wording is what the board compares', () => {
     // Act + Assert
-    should(orphanItem([card(1), card(2)])).eql(orphanItem([card(2), card(1)]));
+    should(orphanItem([task(1), task(2)])).eql(orphanItem([task(2), task(1)]));
   });
 });

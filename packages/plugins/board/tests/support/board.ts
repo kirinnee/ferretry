@@ -1,23 +1,23 @@
 import {
-  type CardActor,
+  type TaskActor,
   type BoardChangedEvent,
   type BoardProjectId,
-  type BoardQuarantinedCard,
+  type BoardQuarantinedTask,
   type BoardSkip,
-  type Card,
-  type CardId,
+  type Task,
+  type TaskId,
   defaultLaneTargets,
   LANE_TEMPLATES,
   type Lane,
   type LaneSet,
   type LaneTemplateName,
-  type CardKind,
-  type CardRef,
+  type TaskKind,
+  type TaskRef,
   WorkflowSchema,
-  cardIdPrefix,
+  taskIdPrefix,
 } from '../../contract/index.ts';
 import {
-  type CardAskLinkSource,
+  type TaskAskLinkSource,
   type HelperDirectory,
   type BoardChangeSink,
   type BoardServiceDependencies,
@@ -38,8 +38,8 @@ import {
   type FerretRoster,
 } from '../../daemon/lib/board/index.ts';
 
-/** An agenda that names no card. */
-const NO_ASKS: CardAskLinkSource = { asksFor: async () => new Map() };
+/** An agenda that names no task. */
+const NO_ASKS: TaskAskLinkSource = { asksFor: async () => new Map() };
 
 export const MACHINE = 'machine-1';
 export const NOW = '2026-10-30T10:00:00.000Z';
@@ -147,8 +147,8 @@ export const lanes = (
 /** The names fake every world uses: a ferret is named by its id, so a recorded actor is predictable. */
 export const NAMES: FerretNames = { nameOf: async ferret => ferret };
 
-/** A ferret as a card records it, named as {@link NAMES} names it. */
-export const ferretActor = (ferret: string): Extract<CardActor, { kind: 'ferret' }> => ({
+/** A ferret as a task records it, named as {@link NAMES} names it. */
+export const ferretActor = (ferret: string): Extract<TaskActor, { kind: 'ferret' }> => ({
   kind: 'ferret',
   name: ferret,
   ferret,
@@ -156,8 +156,8 @@ export const ferretActor = (ferret: string): Extract<CardActor, { kind: 'ferret'
 
 const ferret = ferretActor;
 
-/** A stored card: `F1` by ferret `lead`, in Todo, unless told otherwise. */
-export const card = (overrides: Partial<Card> = {}): Card => {
+/** A stored task: `F1` by ferret `lead`, in Todo, unless told otherwise. */
+export const boardTask = (overrides: Partial<Task> = {}): Task => {
   const id = overrides.id ?? 'F1';
   const laneId = overrides.laneId ?? 'todo';
   return {
@@ -195,23 +195,23 @@ export const card = (overrides: Partial<Card> = {}): Card => {
 
 /** A store in memory with the port's contract: per-id writes, quarantine refusals, a counter. */
 export class MemoryBoardStore implements BoardStore {
-  readonly cards = new Map<CardId, Card>();
-  readonly writes: Card[] = [];
+  readonly cards = new Map<TaskId, Task>();
+  readonly writes: Task[] = [];
   private readonly counters = new Map<string, number>();
 
   constructor(
-    cards: readonly Card[] = [],
-    readonly quarantined: readonly BoardQuarantinedCard[] = [],
+    tasks: readonly Task[] = [],
+    readonly quarantined: readonly BoardQuarantinedTask[] = [],
   ) {
-    for (const entry of cards) this.cards.set(entry.id, entry);
+    for (const entry of tasks) this.cards.set(entry.id, entry);
   }
 
   async read(): Promise<BoardSnapshot> {
     return { cards: [...this.cards.values()], quarantined: this.quarantined };
   }
 
-  async allocateId(kind: CardKind): Promise<CardId> {
-    const prefix = cardIdPrefix(kind);
+  async allocateId(kind: TaskKind): Promise<TaskId> {
+    const prefix = taskIdPrefix(kind);
     const highest = Math.max(
       0,
       ...[...this.cards.keys()].filter(id => id.startsWith(prefix)).map(id => Number(id.slice(1))),
@@ -221,7 +221,7 @@ export class MemoryBoardStore implements BoardStore {
     return `${prefix}${next}`;
   }
 
-  async write<T>(id: CardId, decide: (current: Card | undefined) => Promise<BoardWrite<T>>): Promise<T> {
+  async write<T>(id: TaskId, decide: (current: Task | undefined) => Promise<BoardWrite<T>>): Promise<T> {
     const decision = await decide(this.cards.get(id));
     if (decision.task !== null) {
       this.cards.set(id, decision.task);
@@ -301,8 +301,8 @@ export class FakeSessions implements FerretLivenessSource {
 }
 
 export class FakeFocus implements FerretFocus {
-  readonly focused = new Map<string, CardRef>();
-  readonly anchors = new Map<string, CardRef>();
+  readonly focused = new Map<string, TaskRef>();
+  readonly anchors = new Map<string, TaskRef>();
   readonly skips = new Map<string, BoardSkip>();
 
   constructor(
@@ -312,7 +312,7 @@ export class FakeFocus implements FerretFocus {
 
   async setFocus(
     ferret: string,
-    task: CardRef,
+    task: TaskRef,
     _title?: string,
     options: { readonly anchor?: boolean } = {},
   ): Promise<boolean> {
@@ -324,15 +324,15 @@ export class FakeFocus implements FerretFocus {
     return true;
   }
 
-  async focusOf(ferret: string): Promise<CardRef | null> {
+  async focusOf(ferret: string): Promise<TaskRef | null> {
     return this.focused.get(ferret) ?? null;
   }
 
-  async focusOfAll(): Promise<ReadonlyMap<string, CardRef | null>> {
+  async focusOfAll(): Promise<ReadonlyMap<string, TaskRef | null>> {
     return new Map(this.focused);
   }
 
-  async anchorOf(ferret: string): Promise<CardRef | null> {
+  async anchorOf(ferret: string): Promise<TaskRef | null> {
     return this.anchors.get(ferret) ?? null;
   }
 

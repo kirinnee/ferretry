@@ -1,6 +1,6 @@
 /**
  * THE INBOX, DERIVED ONCE: from the machines' conversations, the boards this device holds and what it has done locally
- * to them, the conversations that need the owner (`unread`), the deck (`cards`) and the Inbox count (`total`). The
+ * to them, the conversations that need the owner (`unread`), the deck (`tasks`) and the Inbox count (`total`). The
  * Inbox page (`hooks/use-agenda-inbox.ts`) and the Agenda nav count (`agenda-nav-badge.ts`) both read it here, so there
  * is no second rule for what an Inbox item is: a machine's own notices, plain notifications, items in discussion, a rule
  * suggestion the owner already answered and an answer still in its undo window are all decided in one place.
@@ -65,8 +65,8 @@ export interface InboxDerived {
 
 /**
  * The reply overlay is the whole device's (`inboxLocal`), but a derivation counts only the machines it is given: a
- * card Undo brought back belongs to ITS machine, so another machine's badge, or a locked or unpaired machine, must
- * not add it. One machine's cards are the ones whose `daemonId` is among `machines`.
+ * task Undo brought back belongs to ITS machine, so another machine's badge, or a locked or unpaired machine, must
+ * not add it. One machine's tasks are the ones whose `daemonId` is among `machines`.
  */
 const repliedWithin = (machines: readonly InboxMachine[], replied: RepliedState): RepliedState => {
   const mine = new Set<DaemonId>(machines.map(machine => machine.connection.daemonId));
@@ -86,10 +86,10 @@ export const deriveInbox = (
       sessions: machine.sessions,
     })),
   );
-  const boardCards = boardDeck(unread, boardFor, local);
-  const cards = withRepliedCards(boardCards, repliedWithin(machines, local.replied));
+  const boardTasks = boardDeck(unread, boardFor, local);
+  const cards = withRepliedCards(boardTasks, repliedWithin(machines, local.replied));
   const held = (entry: UnreadSession): boolean => boardFor(entry.daemonId, entry.view.config.id) !== undefined;
-  return { unread, boardCards, cards, total: inboxCount(unread, held, cards) };
+  return { unread, boardCards: boardTasks, cards, total: inboxCount(unread, held, cards) };
 };
 
 /**

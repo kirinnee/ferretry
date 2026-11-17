@@ -11,18 +11,18 @@ import {
   BoardStateFilterSchema,
   type BoardTerm,
   BoardTermsSchema,
-  type CardActionRequest,
+  type TaskActionRequest,
   CardActionRequestSchema,
-  type CardCreateRequestInput,
+  type TaskCreateRequestInput,
   CardCreateRequestSchema,
-  type CardKind,
+  type TaskKind,
   CardKindSchema,
-  type CardRef,
-  type CardVisibility,
+  type TaskRef,
+  type TaskVisibility,
   CardVisibilitySchema,
   DependencyUntilSchema,
   ExternalLaneTriggerSchema,
-  parseCardRef,
+  parseTaskRef,
   prUrlParts,
   type Progress,
   stripListMarker,
@@ -30,7 +30,7 @@ import {
   WorkflowSchema,
   AskIdTextSchema,
 } from '../../contract/index.ts';
-import { cardTitleIssue } from './card-title.ts';
+import { taskTitleIssue } from './task-title.ts';
 import { refuse } from './errors.ts';
 
 const describeIssues = (error: z.ZodError): string =>
@@ -54,9 +54,9 @@ function parseOrRefuse<Output>(schema: z.ZodType<Output, unknown>, value: unknow
 
 // ─── references ────────────────────────────────────────────────────────────────────────────────
 
-/** `&F412` and a bare `F412` all name the same card; anything else is refused. */
-export function requireCardRef(value: string, label = 'task id'): CardRef {
-  const parsed = parseCardRef(value);
+/** `&F412` and a bare `F412` all name the same task; anything else is refused. */
+export function requireTaskRef(value: string, label = 'task id'): TaskRef {
+  const parsed = parseTaskRef(value);
   return parsed.ok ? parsed.value : refuse(`expected a ${label} like &F21, got "${value}"`);
 }
 
@@ -93,9 +93,9 @@ export interface BoardCreateOptions {
   readonly workflow?: string;
   readonly dependsOn?: readonly string[];
   readonly parent?: string;
-  /** The owner's Yes a card rests on where the board is off: an agenda item (`!A12`). */
+  /** The owner's Yes a task rests on where the board is off: an agenda item (`!A12`). */
   readonly approval?: string;
-  /** The caller's own open agenda thread this card carries out (`!A12`): the card is then the ferret's own errand. */
+  /** The caller's own open agenda thread this task carries out (`!A12`): the task is then the ferret's own errand. */
   readonly thread?: string;
   readonly assignee?: string;
   readonly pr?: readonly string[];
@@ -104,9 +104,9 @@ export interface BoardCreateOptions {
   readonly file?: readonly string[];
   readonly project?: string;
   readonly lane?: string;
-  /** `--private`: a card for the ferrets' own bookkeeping, off the default board. */
+  /** `--private`: a task for the ferrets' own bookkeeping, off the default board. */
   readonly private?: boolean;
-  /** `--public`: a card the owner sees on the default board. */
+  /** `--public`: a task the owner sees on the default board. */
   readonly public?: boolean;
 }
 
@@ -123,7 +123,7 @@ const trimmedAll = (values: readonly string[] | undefined): string[] =>
   (values ?? []).map(value => value.trim()).filter(value => value.length > 0);
 
 /**
- * `--premise` / `--context` as the card stores them: one flag is its text, several are one bullet each. Absent
+ * `--premise` / `--context` as the task stores them: one flag is its text, several are one bullet each. Absent
  * (never passed) is `undefined`; passed but blank is `''`, so an edit can clear the field.
  */
 const singlePoint = (value: string): string => (/[\r\n]/u.test(value) ? value : stripListMarker(value));
@@ -159,13 +159,13 @@ export function buildBoardCreateRequest(
   options: BoardCreateOptions,
   titleWords: readonly string[],
   resolved: BoardCreateResolved,
-): CardCreateRequestInput {
+): TaskCreateRequestInput {
   const kindFlag = present(options.kind) ?? refuse(`--kind is required (${CardKindSchema.options.join(', ')})`);
-  const kind: CardKind = requireChoice(kindFlag, CardKindSchema.options, '--kind');
+  const kind: TaskKind = requireChoice(kindFlag, CardKindSchema.options, '--kind');
 
   const title = present(options.title) ?? titleWords.join(' ').trim();
   if (title.length === 0) refuse('--title is required (or pass the title as the trailing words)');
-  const titleProblem = cardTitleIssue(title);
+  const titleProblem = taskTitleIssue(title);
   if (titleProblem !== null) refuse(titleProblem);
 
   const askText = present(options.ask);
@@ -181,7 +181,7 @@ export function buildBoardCreateRequest(
   const branch = present(options.branch);
   const lane = present(options.lane);
   if (options.private === true && options.public === true) refuse('pass --private or --public, not both');
-  const visibility: CardVisibility | undefined =
+  const visibility: TaskVisibility | undefined =
     options.private === true ? 'private' : options.public === true ? 'public' : undefined;
 
   const candidate = {
@@ -197,11 +197,11 @@ export function buildBoardCreateRequest(
     workflow,
     ...(resolved.projectId === undefined ? {} : { projectId: resolved.projectId }),
     ...(lane === undefined ? {} : { laneId: lane }),
-    parent: parent === undefined ? null : requireCardRef(parent, '--parent id'),
+    parent: parent === undefined ? null : requireTaskRef(parent, '--parent id'),
     ...(approval === undefined ? {} : { approval: requireAgendaFlag('--approval', approval) }),
     ...(thread === undefined ? {} : { thread: requireAgendaFlag('--thread', thread) }),
     assignee: resolved.assignee,
-    dependsOn: trimmedAll(options.dependsOn).map(value => ({ task: requireCardRef(value, '--depends-on id') })),
+    dependsOn: trimmedAll(options.dependsOn).map(value => ({ task: requireTaskRef(value, '--depends-on id') })),
     files: trimmedAll(options.file),
     ...(branch === undefined ? {} : { branch }),
     docs: trimmedAll(options.doc),
@@ -213,16 +213,16 @@ export function buildBoardCreateRequest(
 
 // ─── actions ───────────────────────────────────────────────────────────────────────────────────
 
-const action = (candidate: unknown, context: string): CardActionRequest =>
+const action = (candidate: unknown, context: string): TaskActionRequest =>
   parseOrRefuse(CardActionRequestSchema, candidate, context);
 
 const words = (value: readonly string[]): string => value.join(' ').trim();
 
-export const buildMoveAction = (to: string, reason: string | undefined): CardActionRequest =>
+export const buildMoveAction = (to: string, reason: string | undefined): TaskActionRequest =>
   action({ action: 'move', to, ...(present(reason) === undefined ? {} : { reason: present(reason) }) }, 'cannot move');
 
-/** An external event (a deploy finished, a review approved) reported for a card; the daemon moves the card if a lane waits on it. */
-export function buildTriggerAction(event: string, reason?: string): CardActionRequest {
+/** An external event (a deploy finished, a review approved) reported for a task; the daemon moves the task if a lane waits on it. */
+export function buildTriggerAction(event: string, reason?: string): TaskActionRequest {
   const parsed = ExternalLaneTriggerSchema.safeParse(event.trim());
   if (!parsed.success) {
     refuse(`"${event}" is not an event you can report; one of ${ExternalLaneTriggerSchema.options.join(' | ')}`);
@@ -233,12 +233,12 @@ export function buildTriggerAction(event: string, reason?: string): CardActionRe
   );
 }
 
-export const buildFocusAction = (): CardActionRequest => ({ action: 'focus' });
+export const buildFocusAction = (): TaskActionRequest => ({ action: 'focus' });
 
-export const buildBlockAction = (why: readonly string[]): CardActionRequest =>
+export const buildBlockAction = (why: readonly string[]): TaskActionRequest =>
   action({ action: 'block', reason: words(why) }, 'cannot block (say why)');
 
-export const buildUnblockAction = (reason: string | undefined): CardActionRequest =>
+export const buildUnblockAction = (reason: string | undefined): TaskActionRequest =>
   action(
     { action: 'unblock', ...(present(reason) === undefined ? {} : { reason: present(reason) }) },
     'cannot unblock',
@@ -247,13 +247,13 @@ export const buildUnblockAction = (reason: string | undefined): CardActionReques
 export function buildDependAction(
   dependency: string,
   options: { readonly until?: string; readonly override?: string },
-): CardActionRequest {
+): TaskActionRequest {
   const until = requireChoice(present(options.until) ?? 'shipped', DependencyUntilSchema.options, '--until');
   const override = present(options.override);
   return action(
     {
       action: 'depend',
-      task: requireCardRef(dependency, 'dependency id'),
+      task: requireTaskRef(dependency, 'dependency id'),
       until,
       ...(override === undefined ? {} : { override: { reason: override } }),
     },
@@ -261,17 +261,17 @@ export function buildDependAction(
   );
 }
 
-export const buildUndependAction = (dependency: string, reason: string | undefined): CardActionRequest =>
+export const buildUndependAction = (dependency: string, reason: string | undefined): TaskActionRequest =>
   action(
     {
       action: 'undepend',
-      task: requireCardRef(dependency, 'dependency id'),
+      task: requireTaskRef(dependency, 'dependency id'),
       reason: present(reason) ?? 'no longer a dependency',
     },
     'cannot remove the dependency',
   );
 
-export const buildDropAction = (reason: string | undefined): CardActionRequest =>
+export const buildDropAction = (reason: string | undefined): TaskActionRequest =>
   action({ action: 'drop', reason: present(reason) ?? '' }, 'cannot drop (--reason is required)');
 
 /** Where a reopen's ask came from when the person did not say: it is still recorded as the owner's. */
@@ -282,7 +282,7 @@ export const buildReopenAction = (options: {
   readonly ask?: string;
   readonly source?: string;
   readonly reason?: string;
-}): CardActionRequest => {
+}): TaskActionRequest => {
   const to = present(options.to) ?? refuse('reopen needs --to <lane>');
   const ask = present(options.ask) ?? refuse('reopen needs --ask "<the owner\'s new words>"');
   return action(
@@ -296,7 +296,7 @@ export const buildReopenAction = (options: {
   );
 };
 
-export const buildClarifyAction = (text: readonly string[], source: string | undefined): CardActionRequest =>
+export const buildClarifyAction = (text: readonly string[], source: string | undefined): TaskActionRequest =>
   action(
     { action: 'clarify', text: words(text), source: present(source) ?? refuse('clarify needs --source <link>') },
     'cannot clarify',
@@ -309,7 +309,7 @@ export interface BoardLinkOptions {
   readonly doc?: string;
 }
 
-export function buildLinkAction(options: BoardLinkOptions): CardActionRequest {
+export function buildLinkAction(options: BoardLinkOptions): TaskActionRequest {
   const given = (['pr', 'branch', 'commit', 'doc'] as const).filter(field => present(options[field]) !== undefined);
   if (given.length !== 1) refuse('link takes exactly one of --pr, --branch, --commit or --doc');
   const field = given[0] as 'pr' | 'branch' | 'commit' | 'doc';
@@ -317,34 +317,34 @@ export function buildLinkAction(options: BoardLinkOptions): CardActionRequest {
   return action({ action: 'link', [field]: field === 'pr' ? requirePrUrl(value) : value }, 'cannot link');
 }
 
-export const buildAssignAction = (assignee: string | null): CardActionRequest =>
+export const buildAssignAction = (assignee: string | null): TaskActionRequest =>
   action({ action: 'assign', assignee }, 'cannot assign');
 
 /** `claim` names no one: the daemon takes the caller's own session from its credential. */
-export const buildClaimAction = (): CardActionRequest => action({ action: 'claim' }, 'cannot claim');
+export const buildClaimAction = (): TaskActionRequest => action({ action: 'claim' }, 'cannot claim');
 
-/** `adopt` names no one either: the caller is the adopter, and `reason` (optional) is kept in the card's history. */
-export const buildAdoptAction = (reason: string | undefined): CardActionRequest =>
+/** `adopt` names no one either: the caller is the adopter, and `reason` (optional) is kept in the task's history. */
+export const buildAdoptAction = (reason: string | undefined): TaskActionRequest =>
   action({ action: 'adopt', ...(present(reason) === undefined ? {} : { reason: present(reason) }) }, 'cannot adopt');
 
 export function buildReparentAction(
   parent: string | undefined,
   none: boolean | undefined,
   reason: string | undefined,
-): CardActionRequest {
+): TaskActionRequest {
   if (none === true && present(parent) !== undefined) refuse('pass --parent <id> or --none, not both');
   const target =
-    none === true ? null : requireCardRef(present(parent) ?? refuse('reparent needs --parent <id>, or --none'));
+    none === true ? null : requireTaskRef(present(parent) ?? refuse('reparent needs --parent <id>, or --none'));
   return action(
     { action: 'reparent', parent: target, ...(present(reason) === undefined ? {} : { reason: present(reason) }) },
     'cannot reparent',
   );
 }
 
-export const buildNoteAction = (text: readonly string[]): CardActionRequest =>
+export const buildNoteAction = (text: readonly string[]): TaskActionRequest =>
   action({ action: 'note', text: words(text) }, 'cannot note (say something)');
 
-export function buildOrderAction(rank: string | undefined, none: boolean | undefined): CardActionRequest {
+export function buildOrderAction(rank: string | undefined, none: boolean | undefined): TaskActionRequest {
   if (none === true) {
     if (present(rank) !== undefined) refuse('pass a rank or --none, not both');
     return action({ action: 'order', order: null }, 'cannot order');
@@ -358,7 +358,7 @@ export function buildOrderAction(rank: string | undefined, none: boolean | undef
 export const buildFileAction = (
   path: string,
   options: { readonly remove?: boolean; readonly reason?: string },
-): CardActionRequest =>
+): TaskActionRequest =>
   action(
     {
       action: 'file',
@@ -370,7 +370,7 @@ export const buildFileAction = (
   );
 
 /** `--visibility public|private`, checked; absent when not given. */
-export function visibilityOf(value: string | undefined): CardVisibility | undefined {
+export function visibilityOf(value: string | undefined): TaskVisibility | undefined {
   const given = present(value);
   return given === undefined ? undefined : requireChoice(given, CardVisibilitySchema.options, '--visibility');
 }
@@ -385,7 +385,7 @@ export interface BoardEditOptions {
   readonly briefFile?: string;
   readonly howToTest?: string;
   readonly howToTestFile?: string;
-  /** `public` or `private`: who sees the card on the default board. */
+  /** `public` or `private`: who sees the task on the default board. */
   readonly visibility?: string;
 }
 
@@ -416,7 +416,7 @@ const editFields = (options: BoardEditOptions, texts: BoardEditTexts) => {
 };
 
 /** Terms replace the whole glossary. `--visibility` rides in the same action, so text and visibility are one change. */
-export function buildEditAction(options: BoardEditOptions, texts: BoardEditTexts = {}): CardActionRequest {
+export function buildEditAction(options: BoardEditOptions, texts: BoardEditTexts = {}): TaskActionRequest {
   const fields = editFields(options, texts);
   const visibility = visibilityOf(options.visibility);
   if (Object.keys(fields).length === 0 && visibility === undefined) {
@@ -425,7 +425,7 @@ export function buildEditAction(options: BoardEditOptions, texts: BoardEditTexts
     );
   }
   if ('title' in fields && fields.title !== undefined) {
-    const problem = cardTitleIssue(fields.title);
+    const problem = taskTitleIssue(fields.title);
     if (problem !== null) refuse(problem);
   }
   return action({ action: 'edit', ...fields, ...(visibility === undefined ? {} : { visibility }) }, 'cannot edit');
@@ -434,7 +434,7 @@ export function buildEditAction(options: BoardEditOptions, texts: BoardEditTexts
 export const buildRefileAction = (
   projectId: string,
   options: { readonly lane?: string; readonly reason?: string },
-): CardActionRequest =>
+): TaskActionRequest =>
   action(
     {
       action: 'refile',
@@ -457,9 +457,9 @@ export interface BoardViewOptions {
   readonly closed?: boolean;
   readonly query?: string;
   readonly mine?: boolean;
-  /** Show the private cards alone. */
+  /** Show the private tasks alone. */
   readonly private?: boolean;
-  /** Show public and private cards. */
+  /** Show public and private tasks. */
   readonly all?: boolean;
 }
 
@@ -470,7 +470,7 @@ export interface BoardViewResolved {
 }
 
 /**
- * The board shows public cards. `--private` shows the rest and `--all` shows both. A board scoped to one ferret
+ * The board shows public tasks. `--private` shows the rest and `--all` shows both. A board scoped to one ferret
  * (`--mine`, `--ferret`) is that ferret's own work, so it shows both unless `--private` says otherwise.
  */
 function boardVisibilityOf(options: BoardViewOptions, resolved: BoardViewResolved): 'public' | 'private' | undefined {
@@ -479,7 +479,7 @@ function boardVisibilityOf(options: BoardViewOptions, resolved: BoardViewResolve
   return 'public';
 }
 
-/** The `--activity` choices: the board's filters (a card's asks ride the agenda, so there is no waiting filter). */
+/** The `--activity` choices: the board's filters (a task's asks ride the agenda, so there is no waiting filter). */
 export const BOARD_ACTIVITY_CHOICES: readonly BoardActivityFilter[] = BoardActivityFilterSchema.options;
 
 export function buildBoardQuery(options: BoardViewOptions, resolved: BoardViewResolved): BoardQueryInput {
@@ -518,7 +518,7 @@ export function buildBoardQuery(options: BoardViewOptions, resolved: BoardViewRe
 
 // ─── progress ──────────────────────────────────────────────────────────────────────────────────
 
-/** The options of `fy card progress`: the parts it replaces, or a file holding all three. */
+/** The options of `fy task progress`: the parts it replaces, or a file holding all three. */
 export interface BoardProgressOptions {
   readonly now?: string;
   readonly done?: string;
@@ -527,8 +527,8 @@ export interface BoardProgressOptions {
   readonly file?: string;
 }
 
-/** `fy card progress`: the one edit that writes the parts named; the daemon merges them into the card's progress. */
-export function buildProgressAction(progress: Partial<Progress> | undefined): CardActionRequest {
+/** `fy task progress`: the one edit that writes the parts named; the daemon merges them into the task's progress. */
+export function buildProgressAction(progress: Partial<Progress> | undefined): TaskActionRequest {
   if (progress === undefined || Object.keys(progress).length === 0) {
     refuse('nothing to write: pass --now, --done, --next or --file');
   }

@@ -1,11 +1,11 @@
 /**
- * WHAT KIND OF AGENDA ITEM THIS IS, in one word — the pill in the card's top bar, tinted by a theme token (never a
+ * WHAT KIND OF AGENDA ITEM THIS IS, in one word — the pill in the task's top bar, tinted by a theme token (never a
  * colour alone). The words are the protocol's (`AGENDA_KIND_LABELS`, plain words for what the owner does); only the
- * tone is the app's. A card waiting to be tried is a Test. No line of advice goes with it: the card says what to do by
+ * tone is the app's. A task waiting to be tried is a Test. No line of advice goes with it: the task says what to do by
  * what it asks.
  */
 
-import { AGENDA_KIND_LABELS, agendaCardKind, type AgendaItem, type AgendaKind } from '@ferretry/core-asks/contract';
+import { AGENDA_KIND_LABELS, agendaTaskKind, type AgendaItem, type AgendaKind } from '@ferretry/core-asks/contract';
 import { gateVerb, gateOf } from '../../lib/gate-items.ts';
 
 type AgendaTypeTone = 'decision' | 'approval' | 'todo' | 'review' | 'note' | 'reply';
@@ -29,7 +29,7 @@ const TONES: Readonly<Record<AgendaKind, AgendaTypeTone>> = {
 };
 
 export const agendaTypeMeta = (item: AgendaItem): AgendaTypeMeta => {
-  const kind = agendaCardKind(item);
+  const kind = agendaTaskKind(item);
   const label = gateOf(item) === undefined ? AGENDA_KIND_LABELS[kind] : gateVerb(item);
   return { kind, tone: TONES[kind], label };
 };

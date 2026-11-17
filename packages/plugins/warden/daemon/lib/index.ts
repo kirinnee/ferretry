@@ -14,7 +14,7 @@ export * from './failover.ts';
 export * from './feed.ts';
 export * from './ferret-sentences.ts';
 export * from './ferret-view.ts';
-export * from './focus-card.ts';
+export * from './focus-task.ts';
 export * from './jev-checks.ts';
 export * from './jev-tree.ts';
 export * from './leftovers.ts';

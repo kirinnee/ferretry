@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { CONFIG_FILE_MAX_BYTES, CONFIG_TOO_LARGE } from '@ferretry/std/yaml';
 import { parseProgressFile } from '../../../cli/lib/board-progress.ts';
-import { parseCardPatch } from '../../../cli/lib/card-patch.ts';
+import { parseTaskPatch } from '../../../cli/lib/task-patch.ts';
 import { readPatchText } from '../../../cli/lib/patch-document.ts';
 
 // `fy task patch` and `fy task progress --file` read a file or stdin the person (or the ferret running the command)
 // names, with no size cap of the CLI's own. They read through the shared bounded reader (`@ferretry/std/yaml`), so a
 // hostile document is refused in one fixed sentence and the command finishes at once. A real patch is a few fields,
 // each at most 64 KiB, so the 256 KiB cap does not touch one. One hostile text of each shape, through THIS plugin's own
-// entry points (`readPatchText`, `parseCardPatch`, `parseProgressFile`).
+// entry points (`readPatchText`, `parseTaskPatch`, `parseProgressFile`).
 
 /** A nest of anchors, each aliasing the previous ten times: a million nodes from six short lines. */
 const laughs = (): string => {
@@ -59,7 +59,7 @@ describe('board cli: a hostile patch document is refused in a fixed sentence', (
 
     test(`board parseCardPatch (fy task patch), ${shape}`, () => {
       const hostile = text();
-      const result = parseCardPatch(hostile, 'p.yaml');
+      const result = parseTaskPatch(hostile, 'p.yaml');
       expect(result.ok).toBe(false);
       expect(!result.ok && result.problems.join('\n')).toContain(sentence);
     });

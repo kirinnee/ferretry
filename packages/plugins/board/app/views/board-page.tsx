@@ -1,11 +1,11 @@
 /**
- * THE BOARD PAGE (`/board`): every card on the machine as lanes.
+ * THE BOARD PAGE (`/board`): every task on the machine as lanes.
  *
  * It owns what the views must not: the reads (the U10 board store, once per kind of read) and the filters in
- * the URL. The page is READ-ONLY for the owner: no drag between lanes, no lane menu, no "Add card", no
+ * the URL. The page is READ-ONLY for the owner: no drag between lanes, no lane menu, no "Add task", no
  * "Lanes ✎" editor link — the board runs itself and the owner answers in the agenda. What stays are the
  * reading aids: the view switch, the filters, "Show private", the scope toggle and the theme switch. Everything
- * drawn is `BoardCard`, `BoardLane`, `BoardCountsBar` and `BoardFilterBar`, which the phone and the side pane reuse.
+ * drawn is `BoardTask`, `BoardLane`, `BoardCountsBar` and `BoardFilterBar`, which the phone and the side pane reuse.
  */
 
 import type { BoardActivityFilter, BoardProjectId } from '../../contract/index.ts';
@@ -24,11 +24,11 @@ import {
   BOARD_VIEWS,
   type BoardGroupOf,
   type BoardViewId,
-  cardPlaces,
+  taskPlaces,
   laneNames,
   parseBoardView,
 } from '../lib/board-view.ts';
-import { boardCardPath, boardPath } from '../lib/paths.ts';
+import { boardTaskPath, boardPath } from '../lib/paths.ts';
 import { BoardCountsBar } from './board-counts.tsx';
 import { DEFAULT_SUMMARY_WINDOW, parseSummaryWindow, type SummaryWindow } from '../lib/board-summary.ts';
 import { BoardFilterBar, BoardFilterSheet } from './board-filters.tsx';
@@ -36,7 +36,7 @@ import { BoardNotice } from './board-notice.tsx';
 import { PhoneKanban } from './board-phone.tsx';
 import { BoardDetail } from './detail/board-detail.tsx';
 import { TableView } from './board-table.tsx';
-import { ArchiveView, type BoardCardEnv, DependenciesView, KanbanView, TreeView } from './board-views.tsx';
+import { ArchiveView, type BoardTaskEnv, DependenciesView, KanbanView, TreeView } from './board-views.tsx';
 
 export interface BoardPageProps {
   readonly store: DaemonBoardStore;
@@ -51,20 +51,20 @@ export interface BoardPageProps {
   readonly onNavigate: (to: string) => void;
   /** A fixed clock for the age labels; the live page re-reads the time every 30 seconds. */
   readonly now?: number;
-  /** The card the address names (`/d/<id>/board/<taskId>`); it opens as a drawer, or a page on a phone. */
+  /** The task the address names (`/d/<id>/board/<taskId>`); it opens as a drawer, or a page on a phone. */
   readonly openCard?: { readonly daemonId: DaemonId; readonly taskId: string } | null;
   /** A phone: one lane at a time under a chip strip, the filters in a bottom sheet, rows sized for a thumb. */
   readonly phone?: boolean;
   /**
-   * The chat the reader came from. When there is one the page opens on THAT ferret's cards, with a one-tap
-   * "All cards" to widen it; a ferret or "All cards" choice in the URL always wins.
+   * The chat the reader came from. When there is one the page opens on THAT ferret's tasks, with a one-tap
+   * "All tasks" to widen it; a ferret or "All cards" choice in the URL always wins.
    */
   readonly origin?: FerretScope | null;
 }
 
 const NO_MACHINES: readonly BoardMachine[] = [];
 
-/** "This ferret | All cards": the one-tap widening of a board that opened on the chat the reader came from. */
+/** "This ferret | All tasks": the one-tap widening of a board that opened on the chat the reader came from. */
 function ScopeToggle({
   ferret,
   scoped,
@@ -72,7 +72,7 @@ function ScopeToggle({
 }: {
   readonly ferret: string;
   readonly scoped: boolean;
-  /** True to widen to every card, false to narrow back to the ferret. */
+  /** True to widen to every task, false to narrow back to the ferret. */
   readonly onChange: (all: boolean) => void;
 }) {
   return (
@@ -108,12 +108,12 @@ export function BoardPage({
   onSearch,
   onNavigate,
   now: fixedNow,
-  openCard = null,
+  openCard: openTask = null,
   phone = false,
   origin = null,
 }: BoardPageProps) {
   const params = useMemo(() => new URLSearchParams(search), [search]);
-  // The ferret the page opens on: the chat's, unless the URL names a ferret or asked for every card.
+  // The ferret the page opens on: the chat's, unless the URL names a ferret or asked for every task.
   const scopeFerret = origin?.ferret ?? null;
   const defaultScoped = scopeFerret !== null && params.get('cards') !== 'all' && params.get('ferret') === null;
   const filterSearch = useMemo(() => {
@@ -200,21 +200,21 @@ export function BoardPage({
 
   const model = board.model;
   const places = useMemo(() => {
-    if (!archive) return cardPlaces(model);
-    return new Map([...cardPlaces(closed.model), ...cardPlaces(dropped.model)]);
+    if (!archive) return taskPlaces(model);
+    return new Map([...taskPlaces(closed.model), ...taskPlaces(dropped.model)]);
   }, [archive, model, closed.model, dropped.model]);
 
   // A phone can dismiss a machine's error; it comes back if the machine says something else.
   const [dismissedErrors, setDismissedErrors] = useState<ReadonlySet<string>>(() => new Set());
 
   // ----- what the views are given -------------------------------------------------------------------
-  const env = useMemo<BoardCardEnv>(
+  const env = useMemo<BoardTaskEnv>(
     () => ({
       names,
       now,
       showMachine: model.multiMachine || machines.length > 1,
       touch: phone,
-      hrefFor: card => boardCardPath(card.daemonId, card.task.id),
+      hrefFor: task => boardTaskPath(task.daemonId, task.task.id),
       onNavigate,
       places,
     }),
@@ -231,8 +231,8 @@ export function BoardPage({
 
   const choices = useMemo(() => {
     const ferrets = new Map<string, string>();
-    for (const card of model.cards) {
-      for (const id of [card.task.owner, card.task.assignee]) {
+    for (const task of model.cards) {
+      for (const id of [task.task.owner, task.task.assignee]) {
         if (id !== null && !ferrets.has(id)) ferrets.set(id, names(id));
       }
     }
@@ -248,31 +248,31 @@ export function BoardPage({
   }, [model, projects, machines, names]);
 
   const detailMachine =
-    openCard === null ? undefined : machines.find(machine => machine.connection.daemonId === openCard.daemonId);
-  // The open card's sub-cards are in its detail whether or not the board shows them, open or closed: a read of its
-  // machine with every state and every sub-card in, which only an open card pays for.
+    openTask === null ? undefined : machines.find(machine => machine.connection.daemonId === openTask.daemonId);
+  // The open task's sub-cards are in its detail whether or not the board shows them, open or closed: a read of its
+  // machine with every state and every sub-card in, which only an open task pays for.
   const detailMachines = useMemo(() => (detailMachine === undefined ? NO_MACHINES : [detailMachine]), [detailMachine]);
   const detailFilters = useMemo<BoardFilters>(() => ({ ...NO_BOARD_FILTERS, state: 'all', agents: true }), []);
   const detailRead = useBoard(store, detailMachines, detailFilters, { beat: false });
-  const detailPlaces = useMemo(() => cardPlaces(detailRead.model), [detailRead.model]);
+  const detailPlaces = useMemo(() => taskPlaces(detailRead.model), [detailRead.model]);
   const siblings = useMemo(
     () =>
-      openCard === null
+      openTask === null
         ? []
         : detailRead.model.cards
-            .filter(card => card.daemonId === openCard.daemonId)
-            .map(card => ({
-              task: card.task,
-              laneName: detailPlaces.get(card.key)?.laneName ?? card.task.laneId,
-              runningOn: card.runningOn,
+            .filter(task => task.daemonId === openTask.daemonId)
+            .map(task => ({
+              task: task.task,
+              laneName: detailPlaces.get(task.key)?.laneName ?? task.task.laneId,
+              runningOn: task.runningOn,
             })),
-    [detailRead.model.cards, detailPlaces, openCard],
+    [detailRead.model.cards, detailPlaces, openTask],
   );
   const closeDetail = useCallback(() => {
-    if (openCard !== null) onNavigate(boardPath(openCard.daemonId));
-  }, [openCard, onNavigate]);
+    if (openTask !== null) onNavigate(boardPath(openTask.daemonId));
+  }, [openTask, onNavigate]);
 
-  // A count pressed on a phone opens the matching cards as a list (pressed again, it lifts the filter).
+  // A count pressed on a phone opens the matching tasks as a list (pressed again, it lifts the filter).
   const pressCount = (activity: BoardActivityFilter | null): void => {
     if (!phone || activity === null) {
       setFilters({ ...filters, activity });
@@ -291,20 +291,20 @@ export function BoardPage({
         scoped={scoped}
       />
     );
-  // `?highlight=F11` (Info's "Open board"): the card is marked and scrolled to, and the mark follows it through refreshes.
+  // `?highlight=F11` (Info's "Open board"): the task is marked and scrolled to, and the mark follows it through refreshes.
   const highlight = params.get('highlight');
   const pageRef = useRef<HTMLElement | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `model` is the trigger — a refresh redraws the cards, so the mark is laid again
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `model` is the trigger — a refresh redraws the tasks, so the mark is laid again
   useEffect(() => {
     const page = pageRef.current;
     if (page === null || highlight === null || highlight === '') return;
-    const cards = [...page.querySelectorAll<HTMLElement>('[data-task]')].filter(
-      card => card.dataset['task'] === highlight,
+    const tasks = [...page.querySelectorAll<HTMLElement>('[data-task]')].filter(
+      task => task.dataset['task'] === highlight,
     );
-    for (const card of cards) card.setAttribute('data-highlighted', '');
-    cards[0]?.scrollIntoView?.({ block: 'center', inline: 'nearest' });
+    for (const task of tasks) task.setAttribute('data-highlighted', '');
+    tasks[0]?.scrollIntoView?.({ block: 'center', inline: 'nearest' });
     return () => {
-      for (const card of cards) card.removeAttribute('data-highlighted');
+      for (const task of tasks) task.removeAttribute('data-highlighted');
     };
   }, [highlight, model]);
 
@@ -434,7 +434,7 @@ export function BoardPage({
           total={archiveAll.length}
         />
       )}
-      {openCard === null || detailMachine === undefined ? null : (
+      {openTask === null || detailMachine === undefined ? null : (
         <BoardDetail
           machine={detailMachine}
           names={names}
@@ -445,7 +445,7 @@ export function BoardPage({
           projectName={id => projectNames.get(id) ?? id.slice(0, 8)}
           siblings={siblings}
           store={store}
-          taskId={openCard.taskId}
+          taskId={openTask.taskId}
         />
       )}
     </section>

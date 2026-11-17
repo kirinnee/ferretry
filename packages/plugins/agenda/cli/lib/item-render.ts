@@ -4,7 +4,7 @@ import {
   type AgendaItem,
   type AgendaListSnapshot,
   agendaAnswerText,
-  agendaCardAnswers,
+  agendaTaskAnswers,
   agendaInDiscussion,
   agendaShape,
   agendaStage,
@@ -43,13 +43,13 @@ function actor(by: 'human' | 'agent' | 'daemon', name: string | null): string {
 const ARROWS: Readonly<Record<AgendaDirection, string>> = { left: '←', up: '↑', right: '→' };
 
 /**
- * The answers a card gives, laid out as the swipes point — `← No · → Yes`, each in its button's words
+ * The answers a task gives, laid out as the swipes point — `← No · → Yes`, each in its button's words
  * (`agendaAnswerText`). An old item's options past the third have no swipe; they are named after the arrows so
  * nothing the owner could pick is hidden.
  */
 function answersLine(item: AgendaItem): string {
-  const answers = agendaCardAnswers(item);
-  // Only a card asked in words has no answers to swipe: one question, or several answered as a numbered list.
+  const answers = agendaTaskAnswers(item);
+  // Only a task asked in words has no answers to swipe: one question, or several answered as a numbered list.
   if (answers.length === 0) {
     return agendaShape(item) === 'answers' ? 'answer: one reply, each answer numbered' : 'answer: write a full answer';
   }
@@ -76,7 +76,7 @@ function newestFirst(left: AgendaListRecord, right: AgendaListRecord): number {
 }
 
 function itemLines(item: AgendaItem, now?: string): string[] {
-  // A card with a title of its own is headed by it, the ask under it; an old item's ask is its heading.
+  // A task with a title of its own is headed by it, the ask under it; an old item's ask is its heading.
   const titled = hasOwnTitle(item);
   const lines = [
     `  ${agendaReference(item.id)}  [${item.source}]  ${compact(titled ? (item.title ?? '') : item.subject)}`,

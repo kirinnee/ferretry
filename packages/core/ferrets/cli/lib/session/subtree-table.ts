@@ -28,8 +28,8 @@ export function prCell(pr: SubtreeRow['pr']): string {
     .join(' ');
 }
 
-const cardCell = (row: SubtreeRow): string => {
-  const task = row.task ?? row.card; // `card` is the former key
+const taskCell = (row: SubtreeRow): string => {
+  const task = row.task ?? row.card; // `task` is the former key
   return task === undefined ? '-' : [task.ref, task.lane].filter(part => part !== undefined).join(' ');
 };
 
@@ -42,7 +42,7 @@ export function renderSubtreeTable(view: SubtreeView, nowMs: number | undefined)
     `${'  '.repeat(row.depth - 1)}${row.name}`,
     row.model ?? '-',
     stateCell(row, nowMs),
-    cardCell(row),
+    taskCell(row),
     prCell(row.pr),
     row.last === undefined ? '-' : `[${sinceLabel(nowMs ?? Date.parse(view.at), row.last.at)}] ${row.last.text}`,
   ]);

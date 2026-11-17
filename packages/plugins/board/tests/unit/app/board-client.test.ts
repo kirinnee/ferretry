@@ -7,7 +7,7 @@ import {
   REQUEST_ID_HEADER,
 } from '../../../app/lib/board-client.ts';
 import { NO_BOARD_FILTERS, toServerQuery } from '../../../app/lib/board-model.ts';
-import { boardAnswer, card, fakePort, laneSetFor, laptop, PROJECT } from './board-support.ts';
+import { boardAnswer, boardTask, fakePort, laneSetFor, laptop, PROJECT } from './board-support.ts';
 
 type Call = {
   route: string;
@@ -39,7 +39,7 @@ const clientOf = (answers: Record<string, unknown | ((call: Call) => unknown)>) 
 
 describe('the board read', () => {
   it('asks for the query and parses the answer', async () => {
-    const client = clientOf({ 'GET /v1/board': boardAnswer([card('F1')]) });
+    const client = clientOf({ 'GET /v1/board': boardAnswer([boardTask('F1')]) });
     const answer = await clientBoardPort(client).board(laptop, { ...query, project: PROJECT }, 'c1', 10);
     expect(answer.cards.map(entry => entry.id)).toEqual(['F1']);
     expect(client.calls[0]?.init.query).toMatchObject({ project: PROJECT, cursor: 'c1', limit: '10' });
@@ -123,7 +123,7 @@ describe('the board writes', () => {
   });
 
   it('hands the gate’s refusal of a card Start back in its own words (a device without fleet.configure, or a declined passkey)', async () => {
-    // c58-sec3 r1: starting a card asks `fleet.configure`, so a `--limited` device is refused in words, never a blank failure.
+    // c58-sec3 r1: starting a task asks `fleet.configure`, so a `--limited` device is refused in words, never a blank failure.
     const NOT_GIVEN =
       'this device has not been given permission to change the settings for the fleet. Grant it at the machine with `fy device grant <device> fleet --configure`, or from a device that holds it and may manage devices.';
     const PASSKEY = 'changing the settings for the fleet needs a passkey confirmation from this device.';
@@ -170,7 +170,7 @@ describe('readWholeBoard', () => {
     const port = fakePort({
       board: async () => {
         page += 1;
-        return boardAnswer([card(`F${page}`)], { nextCursor: `c${page}` });
+        return boardAnswer([boardTask(`F${page}`)], { nextCursor: `c${page}` });
       },
     });
     const read = await readWholeBoard(port, laptop, query);

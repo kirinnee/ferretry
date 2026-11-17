@@ -284,7 +284,7 @@ describe('lane proposals through Asks, over the stored board file', () => {
   it('should raise the same proposal once however often it is asked', async () => {
     const { asks } = board();
     const raise = new AsksLaneProposals(asks);
-    const card = {
+    const task = {
       subject: 's',
       title: 't',
       kind: 'choice' as const,
@@ -296,8 +296,8 @@ describe('lane proposals through Asks, over the stored board file', () => {
       howToResolve: 'h',
     };
 
-    await raise.raise('koen', laneProposalReference(FERRETRY_ID, 1), card);
-    await raise.raise('koen', laneProposalReference(FERRETRY_ID, 1), card);
+    await raise.raise('koen', laneProposalReference(FERRETRY_ID, 1), task);
+    await raise.raise('koen', laneProposalReference(FERRETRY_ID, 1), task);
 
     should(asks.raised).have.length(1);
   });

@@ -1,0 +1,25 @@
+import type { OpenTaskStanding } from '../peers/board.ts';
+
+/**
+ * The sessions that own, or are assigned, a task still in flight: not dropped, and not in a closed or shipped lane.
+ *
+ * A task whose lane cannot be read — a board with no lane set, a lane that no longer exists — counts as in flight:
+ * when unsure, keep it. The board derives a task's presence from the roster (`presenceOf`: not held reads as dead),
+ * and a lead walk goes through the roster's `lead` links, so a session still on a task must stay in the roster for
+ * the board to keep seeing the same chain it saw before the archive existed.
+ *
+ * Each task arrives with its lane's category already resolved by Board (today's `taskCategory(task, laneSets)`;
+ * `undefined` when the lane could not be read), because Ferrets cannot import Board's lane graph. UNWIRED: nothing
+ * hands the archive these tasks yet, and an archive without them keeps every session (`keeps.ts`: board unreadable).
+ */
+export function sessionsOnOpenTasks(tasks: readonly OpenTaskStanding[]): ReadonlySet<string> {
+  const sessions = new Set<string>();
+  for (const task of tasks) {
+    if (task.dropped !== null) continue;
+    const category = task.category;
+    if (category === 'closed' || category === 'shipped') continue;
+    sessions.add(task.owner);
+    if (task.assignee !== null) sessions.add(task.assignee);
+  }
+  return sessions;
+}

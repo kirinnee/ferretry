@@ -5,14 +5,14 @@
  *
  * Provable, and closed — every rule within ONE lineage (the agendas that share a home), never across two:
  *
- * 1. one card with more than one open owner item (a gate item and a thread, or two threads);
+ * 1. one task with more than one open owner item (a gate item and a thread, or two threads);
  * 2. one `source` + `sourceRef` open on two agendas;
  * 3. identical titles (letters and digits only, case ignored), both raised by agents, with the same ask and body.
  *
  * Of each group the one KEPT is the OLDEST — the first ask stands, and the later one is the repeat — unless a newer one
  * is on the owner's turn: that one is what the owner sees, so it stays and the oldest of those is kept.
  * Closed only when both were raised by the SAME session: two voices asking alike is reported, not decided.
- * Never closed, however alike: a hands-on card, a gate the owner answered, an item the owner has begun a conversation on
+ * Never closed, however alike: a hands-on task, a gate the owner answered, an item the owner has begun a conversation on
  * (they asked for more, or the ferret was told something that never arrived). Those are reported instead.
  */
 import type { AgendaId, AgendaItem } from '../protocol/agenda.ts';
@@ -94,7 +94,7 @@ const sameWords = (one: AgendaItem, other: AgendaItem): boolean => wordsOf(one) 
 const protectedBecause = (entry: Entry): string | undefined => {
   const { item } = entry;
   if (handsOnItem(item)) return 'a hands-on item';
-  // An agenda that carries a card's ask is the card's one ask: closing it as a duplicate would drop the ask.
+  // An agenda that carries a task's ask is the task's one ask: closing it as a duplicate would drop the ask.
   if ((item.cardAsks ?? []).length > 0) return "it carries a task's ask";
   if (item.history !== undefined || item.infoRequests !== undefined || item.undelivered !== undefined)
     return 'the owner has begun talking about it';
@@ -145,14 +145,14 @@ export const findDuplicates = (agendas: readonly DuplicateAgenda[]): DuplicateFi
     return [...groups.values()];
   };
 
-  // 1. One card, several owner items: its agents' threads (a hands-on card is no thread of the card).
-  const cardOf = (entry: Entry): string | undefined => {
+  // 1. One task, several owner items: its agents' threads (a hands-on task is no thread of the task).
+  const taskOf = (entry: Entry): string | undefined => {
     const { item } = entry;
     if (item.task === undefined || item.task === null || handsOnItem(item)) return undefined;
     if (item.raisedBy !== 'agent') return undefined;
     return `${entry.agenda.home}\n${item.task.machineId ?? ''}/${item.task.id}`;
   };
-  for (const group of grouped(open(), cardOf)) if (group.length > 1) settle('card', group);
+  for (const group of grouped(open(), taskOf)) if (group.length > 1) settle('card', group);
 
   // 2. One source reference open on two agendas.
   const sourceOf = (entry: Entry): string | undefined =>

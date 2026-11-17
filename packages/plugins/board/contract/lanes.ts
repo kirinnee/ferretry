@@ -6,7 +6,7 @@
  * proposed by the first ferret that works in a project — from one of the templates below — and is live
  * at once; the owner confirms or edits it later.
  *
- * - **`verify` is the owner's clock.** A card there waits for a human check and is never stale.
+ * - **`verify` is the owner's clock.** A task there waits for a human check and is never stale.
  * - **`closed` is hidden** from the Kanban, and only the owner closes, except in a set with no `verify`
  *   lane, where the last lane may close on its own trigger.
  * - **Lane order is the direction.** A move to an earlier lane is backward and needs a reason.
@@ -22,13 +22,13 @@ export const MAX_BOARD_LANES = 16;
 export const MAX_LANE_NAME_LENGTH = 40;
 export const MAX_LANE_ID_LENGTH = 32;
 
-/** The semantics the daemon reasons over, in the order a card normally travels through them. */
+/** The semantics the daemon reasons over, in the order a task normally travels through them. */
 export const LANE_CATEGORIES = ['backlog', 'active', 'review', 'shipped', 'verify', 'closed'] as const;
 export const LaneCategorySchema = z.enum(LANE_CATEGORIES);
 export type LaneCategory = z.infer<typeof LaneCategorySchema>;
 
 /**
- * The real signals that move a card by themselves (`board-design.md` §3.1). Most are facts Ferretry sees for
+ * The real signals that move a task by themselves (`board-design.md` §3.1). Most are facts Ferretry sees for
  * itself; the {@link EXTERNAL_LANE_TRIGGERS} happen where it cannot look, and somebody reports them.
  */
 export const LaneTriggerSchema = z.enum([
@@ -46,7 +46,7 @@ export const LaneTriggerSchema = z.enum([
 export type LaneTrigger = z.infer<typeof LaneTriggerSchema>;
 
 /**
- * The triggers Ferretry cannot see, so a card's owner or one of its ferrets REPORTS them (the task action
+ * The triggers Ferretry cannot see, so a task's owner or one of its ferrets REPORTS them (the task action
  * `trigger`): a deploy finished somewhere Ferretry does not run, or a reviewer approved the PR (the watcher
  * reads a PR's state, checks and merge, not its reviews). Every other trigger is a fact the daemon observes
  * itself and nobody may claim: a merge or a release is read from GitHub, never taken on a caller's word.
@@ -59,7 +59,7 @@ export type ExternalLaneTrigger = z.infer<typeof ExternalLaneTriggerSchema>;
 export const isExternalTrigger = (trigger: LaneTrigger): trigger is ExternalLaneTrigger =>
   (EXTERNAL_LANE_TRIGGERS as readonly LaneTrigger[]).includes(trigger);
 
-/** A lane's stable id. A rename changes the lane's name, never its id, so cards keep their place. */
+/** A lane's stable id. A rename changes the lane's name, never its id, so tasks keep their place. */
 export const LaneIdSchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]*$/u, 'a lane id is lowercase letters, digits and dashes')
@@ -74,7 +74,7 @@ export const LaneNameSchema = z
   .refine(value => !/[\r\n]/u.test(value), 'a lane name is one line');
 
 /**
- * How long a card may sit untouched in a lane before it is stale: a count of minutes, hours or days
+ * How long a task may sit untouched in a lane before it is stale: a count of minutes, hours or days
  * (`30m`, `2h`, `3d`). Written the way the owner reads it in the lane editor; {@link staleAfterMinutes}
  * turns it into an amount.
  */
@@ -106,9 +106,9 @@ export const MAX_GATE_OPTIONS = 3;
 export const MAX_GATE_LABEL_LENGTH = 24;
 
 /**
- * Where a gate's option sends the card:
+ * Where a gate's option sends the task:
  *
- * - `next`: the next lane of the card's variant (`nextLane`).
+ * - `next`: the next lane of the task's variant (`nextLane`).
  * - `lane`: a lane of the set, named.
  * - `reopen-with-ask`: back to the set's `notGoodLane`. The owner's words are required, and a
  *   conversation about them follows.
@@ -122,7 +122,7 @@ export const GateOutcomeSchema = z.discriminatedUnion('kind', [
 ]);
 export type GateOutcome = z.infer<typeof GateOutcomeSchema>;
 
-/** One answer to a gate: what the owner presses, and where it sends the card. */
+/** One answer to a gate: what the owner presses, and where it sends the task. */
 export const GateOptionSchema = z.strictObject({
   id: z
     .string()
@@ -141,10 +141,10 @@ export type GateOption = z.infer<typeof GateOptionSchema>;
 /**
  * A lane's stage in the workflow.
  *
- * - **`gate`** — the owner decides how the card leaves: 1–3 options, which the Inbox draws as →, ← and a
+ * - **`gate`** — the owner decides how the task leaves: 1–3 options, which the Inbox draws as →, ← and a
  *   button. Option ids are unique and at most one reopens with an agenda conversation. A gate lane is still
- *   ENTERED the way any lane is, on its `enterOn` triggers; its stage says how a card leaves it.
- * - **`auto`** — the card moves in by itself on its `triggers`; none means the ferret moves it there.
+ *   ENTERED the way any lane is, on its `enterOn` triggers; its stage says how a task leaves it.
+ * - **`auto`** — the task moves in by itself on its `triggers`; none means the ferret moves it there.
  */
 export const LaneStageSchema = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -253,11 +253,11 @@ const stageMirrorProblems = (lane: Lane): readonly string[] => {
  *   reads the stage its `enterOn` and `ownerGate` describe. Those two stay the compatibility mirror, so an
  *   app that predates stages, and every helper here, reads a staged lane correctly: a lane that declares a
  *   stage gets whichever mirror it leaves out, and is refused when one disagrees.
- * - `enterOn`: the triggers that move a card INTO this lane. Several lanes may name the same trigger;
- *   a card goes to the first one in its workflow's variant ({@link laneForTrigger}).
+ * - `enterOn`: the triggers that move a task INTO this lane. Several lanes may name the same trigger;
+ *   a task goes to the first one in its workflow's variant ({@link laneForTrigger}).
  * - `ownerGate`: only the owner passes this lane's gate. For a `closed` lane the gate is its ENTRANCE
  *   (only the owner closes); for any other lane it is the forward EXIT (only the owner, or the owner's
- *   approval, moves a card on). See {@link needsOwner}.
+ *   approval, moves a task on). See {@link needsOwner}.
  * - `staleAfter`: absent means the category's default (a `verify` lane is never stale).
  * - `emphasis`: how prominently the Board draws it; absent means {@link laneEmphasis}'s default.
  */
@@ -289,9 +289,9 @@ export const LaneVariantsSchema = z.partialRecord(WorkflowSchema, z.array(LaneId
 export type LaneVariants = z.infer<typeof LaneVariantsSchema>;
 
 /**
- * The lanes the owner's two verdicts send a card to: `doneLane` (Done, Works) is the set's `closed` lane,
+ * The lanes the owner's two verdicts send a task to: `doneLane` (Done, Works) is the set's `closed` lane,
  * and `notGoodLane` (Not good) is the `active` lane work resumes in, e.g. Implement. Declared, not guessed,
- * so the Kanban, the Table and the card detail all send a card to the same place.
+ * so the Kanban, the Table and the task detail all send a task to the same place.
  */
 const LaneTargetsShape = {
   doneLane: LaneIdSchema,
@@ -322,8 +322,8 @@ export interface LaneTargets {
 
 /**
  * The emphasis a lane is drawn with: the one it declares, else its category's. Lanes show progress; the owner's asks
- * ride the card's agenda (docs/agenda.md § Card asks). A `verify` lane defaults to `action` only as the mirror an
- * app that predates card asks requires; `shipped` and `closed` lanes are information.
+ * ride the task's agenda (docs/agenda.md § Task asks). A `verify` lane defaults to `action` only as the mirror an
+ * app that predates task asks requires; `shipped` and `closed` lanes are information.
  */
 export const laneEmphasis = (lane: Pick<Lane, 'category' | 'ownerGate' | 'emphasis'>): LaneEmphasis => {
   if (lane.emphasis !== undefined) return lane.emphasis;
@@ -332,7 +332,7 @@ export const laneEmphasis = (lane: Pick<Lane, 'category' | 'ownerGate' | 'emphas
   return 'progress';
 };
 
-/** What puts a card in a lane by itself, in the words `fy board lanes show` prints. */
+/** What puts a task in a lane by itself, in the words `fy board lanes show` prints. */
 const TRIGGER_WORDS: Readonly<Record<LaneTrigger, string>> = {
   'work.started': 'a session starts on it',
   'pr.opened': 'a PR opens',
@@ -346,7 +346,7 @@ const TRIGGER_WORDS: Readonly<Record<LaneTrigger, string>> = {
   'deploy.done': 'a deploy finishes (reported)',
 };
 
-/** When a card belongs in a lane, by its category alone, so any project's lane names are covered. */
+/** When a task belongs in a lane, by its category alone, so any project's lane names are covered. */
 export const LANE_CATEGORY_USE: Readonly<Record<LaneCategory, string>> = {
   backlog: 'not started yet',
   active: 'you are building it now',
@@ -360,8 +360,8 @@ export const LANE_CATEGORY_USE: Readonly<Record<LaneCategory, string>> = {
 const PLAN_USE = 'you are planning or designing it; its agenda asks the owner OK to build before it moves on';
 
 /**
- * One lane's "use when …" line: its category's meaning, what moves a card in by itself, and who passes its
- * gate. A lane nothing enters by itself says the ferret moves a card there. Pure and total.
+ * One lane's "use when …" line: its category's meaning, what moves a task in by itself, and who passes its
+ * gate. A lane nothing enters by itself says the ferret moves a task there. Pure and total.
  */
 export const laneUse = (lane: Pick<Lane, 'category' | 'enterOn' | 'ownerGate'>): string => {
   const planning = lane.category === 'active' && lane.ownerGate === true;
@@ -427,7 +427,7 @@ export const laneLayoutProblems = (layout: LaneLayout): readonly (readonly [stri
   if (hasVerify && closed.some(lane => lane.ownerGate !== true)) {
     problems.push(['lanes', 'the closed lane is owner-gated in a set that has a verify lane']);
   }
-  // A mirror, not a meaning: an app that predates card asks refuses a verify lane drawn any other way.
+  // A mirror, not a meaning: an app that predates task asks refuses a verify lane drawn any other way.
   if (layout.lanes.some(lane => lane.category === 'verify' && laneEmphasis(lane) !== 'action')) {
     problems.push(['lanes', "a verify lane's emphasis is action, so an older app still reads the set"]);
   }
@@ -511,12 +511,12 @@ const withDerivedTargets = (value: unknown): unknown => {
 
 /**
  * A ferret's lanes WAITING FOR THE OWNER (`docs/board.md` § A ferret's lane change waits for the owner): stored
- * beside the live set and never read as the board's lanes, so no card moves and no gate changes until the owner
- * accepts it. `version` is the number the set takes when it is accepted and the key of its agenda card; it is
- * above every number the set has had, so an Accept of an older card never names it. `baseVersion` is the live
+ * beside the live set and never read as the board's lanes, so no task moves and no gate changes until the owner
+ * accepts it. `version` is the number the set takes when it is accepted and the key of its agenda task; it is
+ * above every number the set has had, so an Accept of an older task never names it. `baseVersion` is the live
  * set it was made against: an accept once the live set moved on is a version conflict. `relocate` is where the
- * cards of the lanes it removes go, moved only when it goes live, as the owner. `proposerSession` is the session whose
- * agenda holds its card: only that session, a lead above it or the owner replaces it. Absent on a proposal stored
+ * tasks of the lanes it removes go, moved only when it goes live, as the owner. `proposerSession` is the session whose
+ * agenda holds its task: only that session, a lead above it or the owner replaces it. Absent on a proposal stored
  * before it was recorded, which anyone may replace.
  */
 export const PendingLaneSetSchema = z
@@ -543,7 +543,7 @@ export type PendingLaneSet = z.infer<typeof PendingLaneSetSchema>;
 export interface LaneGateProblem {
   readonly laneId: string;
   readonly why: string;
-  /** For a lane it removes: the lane, whether it was a gate, and where its cards go — so like removals group. */
+  /** For a lane it removes: the lane, whether it was a gate, and where its tasks go — so like removals group. */
   readonly removed?: {
     readonly name: string;
     readonly gate: boolean;
@@ -572,7 +572,7 @@ const sameBefore = (gate: string, was: readonly string[], now: readonly string[]
 };
 
 /**
- * The first gate of the NEW layout a relocation `from` → `to` would put cards past, in any variant's walk: a gate
+ * The first gate of the NEW layout a relocation `from` → `to` would put tasks past, in any variant's walk: a gate
  * that comes before `to` there, and that came after `from` before (or is new).
  */
 const passedGate = (current: Walkable, next: Walkable, from: string, to: string): Lane | undefined => {
@@ -607,9 +607,9 @@ const workflowList = (workflows: readonly string[]): string =>
   workflows.length < 2 ? workflows.join('') : `${workflows.slice(0, -1).join(', ')} and ${workflows.at(-1) ?? ''}`;
 
 /**
- * How a kept gate's answers would send cards differently, for every workflow that walks it before and after: each
- * answer resolved to the lane it sends a card to (`gateOutcomeLane`, so `next` follows the new order), an answer
- * removed, and an answer added. A lane the answer would close a card in is named by its category.
+ * How a kept gate's answers would send tasks differently, for every workflow that walks it before and after: each
+ * answer resolved to the lane it sends a task to (`gateOutcomeLane`, so `next` follows the new order), an answer
+ * removed, and an answer added. A lane the answer would close a task in is named by its category.
  */
 const answerChanges = (
   current: Walkable,
@@ -660,13 +660,13 @@ const answerChanges = (
 
 /**
  * EVERYTHING a change from `current` to `next` would do that is the owner's to decide (`docs/board.md` § A ferret's
- * lane change waits for the owner), in the owner's words, for a waiting proposal's Accept card and the lane editor:
+ * lane change waits for the owner), in the owner's words, for a waiting proposal's Accept task and the lane editor:
  *
- * - each lane it removes (saying when it is a gate) and where its cards go: into the closed lane (named by its
+ * - each lane it removes (saying when it is a gate) and where its tasks go: into the closed lane (named by its
  *   CATEGORY, never by a name the proposal chose), into a lane that is new, or past a gate of the new layout;
- * - each gate it makes automatic or whose `ownerGate` it drops, and each answer of a gate that would send cards
+ * - each gate it makes automatic or whose `ownerGate` it drops, and each answer of a gate that would send tasks
  *   somewhere else (resolved, so a reorder that moves `next` counts), is removed or is added;
- * - each lane it makes the closed lane (closing the cards in it), and the closed lane it makes an open one
+ * - each lane it makes the closed lane (closing the tasks in it), and the closed lane it makes an open one
  *   (reopening them);
  * - each gate workflows would skip, or reach from a different place: one line per gate, naming the workflows.
  *
@@ -721,7 +721,7 @@ export const laneGateProblems = (
   return problems;
 };
 
-/** A removed lane in words: what it was, and where its cards go. */
+/** A removed lane in words: what it was, and where its tasks go. */
 const removal = (
   current: Walkable,
   next: Walkable,
@@ -732,17 +732,17 @@ const removal = (
 ): LaneGateProblem => {
   const said = (
     laneId: string,
-    cards?: { readonly verb: 'moves' | 'sends'; readonly where: string },
+    tasks?: { readonly verb: 'moves' | 'sends'; readonly where: string },
   ): LaneGateProblem => ({
     laneId,
-    why: `removes ${lane.name}${gate ? ', which waits for the owner' : ''}${cards === undefined ? '' : `, and ${cards.verb} its tasks ${cards.where}`}`,
-    removed: { name: lane.name, gate, ...(cards === undefined ? {} : { cards }) },
+    why: `removes ${lane.name}${gate ? ', which waits for the owner' : ''}${tasks === undefined ? '' : `, and ${tasks.verb} its tasks ${tasks.where}`}`,
+    removed: { name: lane.name, gate, ...(tasks === undefined ? {} : { cards: tasks }) },
   });
   const target = to === undefined ? undefined : next.lanes.find(candidate => candidate.id === to);
   if (to === undefined || target === undefined) return said(lane.id);
   if (target.category === 'closed')
     return said(to, { verb: 'sends', where: 'into the closed lane, which closes them' });
-  // Judged where the cards end up: the new layout. A lane that is new gives no account of what it passed.
+  // Judged where the tasks end up: the new layout. A lane that is new gives no account of what it passed.
   if (!current.lanes.some(candidate => candidate.id === to)) {
     return said(to, { verb: 'sends', where: `into ${target.name}, a lane that is new` });
   }
@@ -758,7 +758,7 @@ const nameRun = (names: readonly string[]): string =>
 
 /**
  * What a change would do, as the owner reads it: {@link laneGateProblems}' lines, with lanes removed the same way
- * told ONCE — "removes 13 lanes that wait for the owner (Owner review 00 … Owner review 12), and sends their cards
+ * told ONCE — "removes 13 lanes that wait for the owner (Owner review 00 … Owner review 12), and sends their tasks
  * into the closed lane, which closes them" — in the place the first of them stood. One line per thing to decide.
  */
 export const laneChangeLines = (
@@ -785,10 +785,10 @@ export const laneChangeLines = (
       continue;
     }
     if (group[0] !== problem) continue;
-    const { gate, cards } = problem.removed ?? { gate: false };
+    const { gate, cards: tasks } = problem.removed ?? { gate: false };
     const names = nameRun(group.map(each => each.removed?.name ?? each.laneId));
     const lanes = `removes ${String(group.length)} lanes${gate ? ' that wait for the owner' : ''} (${names})`;
-    lines.push(cards === undefined ? lanes : `${lanes}, and ${cards.verb} their tasks ${cards.where}`);
+    lines.push(tasks === undefined ? lanes : `${lanes}, and ${tasks.verb} their tasks ${tasks.where}`);
   }
   return lines;
 };
@@ -807,7 +807,7 @@ export const LaneSetSchema = z.preprocess(
       projectId: BoardProjectIdSchema,
       version: PositiveIntegerSchema,
       confirmedBy: z.literal('owner').nullable(),
-      /** `CardActorVia`: present when the owner's confirmation came on the admin token, never on a person's app. */
+      /** `TaskActorVia`: present when the owner's confirmation came on the admin token, never on a person's app. */
       confirmedVia: CardActorViaSchema.optional(),
       proposedBy: z.string().min(1),
       ...LaneLayoutShape,
@@ -857,7 +857,7 @@ const plan: Lane = {
 };
 /**
  * Being worked on, PR open or not: review and CI are the ferret's to finish, not the owner's to act on, so
- * they fold in here instead of being a lane of their own. An open PR on a shipped card pulls it back here.
+ * they fold in here instead of being a lane of their own. An open PR on a shipped task pulls it back here.
  */
 const inProgress: Lane = {
   id: 'implement',
@@ -876,9 +876,9 @@ const merged: Lane = {
   emphasis: 'info',
 };
 /**
- * A release is what the owner can try: one lane, Released. Its card's agenda carries the owner's Done / Not good
- * (docs/agenda.md § Card asks); the lane only shows where the work is. A verify lane keeps `emphasis: 'action'`
- * as the mirror an app that predates card asks requires of one.
+ * A release is what the owner can try: one lane, Released. Its task's agenda carries the owner's Done / Not good
+ * (docs/agenda.md § Task asks); the lane only shows where the work is. A verify lane keeps `emphasis: 'action'`
+ * as the mirror an app that predates task asks requires of one.
  */
 const releasedToTest: Lane = {
   id: 'released',
@@ -937,7 +937,7 @@ const writingLanes: Lane[] = stagedLanes([
 ]);
 /**
  * Quick work that is ready to try. It has no release step, so a merge is what the owner tries, and so is a ferret's
- * done with no PR; the card's agenda carries the ask.
+ * done with no PR; the task's agenda carries the ask.
  */
 export const QUICK_TO_TEST_LANE: Lane = staged({
   id: 'to-test',
@@ -959,19 +959,19 @@ export type LaneTemplate = LaneLayoutValue & LaneTargets;
 
 /**
  * The templates, as data, built by the lane design rule (`docs/board.md`): lanes show PROGRESS — just enough to
- * show work moves, and nothing more. What the owner does is on the card's agenda (docs/agenda.md § Card asks).
+ * show work moves, and nothing more. What the owner does is on the task's agenda (docs/agenda.md § Task asks).
  *
- * - `pr-release-verify` — Ferretry's own: Todo → Plan/Design → In progress → Merged → Released → Closed. A card
+ * - `pr-release-verify` — Ferretry's own: Todo → Plan/Design → In progress → Merged → Released → Closed. A task
  *   reaches Released when its PR ships in a release; its agenda asks Done / Not good, and the owner's Done closes it.
  * - `pr-release` — no testing step; Released closes.
  * - `pr` — Merged closes.
  * - `ops` — Investigate → Fix → Verify → Closed.
  * - `writing` — Research → Draft → Review → Published → Closed.
- * - `quick` — Todo → Doing → Ready to try → Closed. A merge, a release or the ferret's done puts the card in
+ * - `quick` — Todo → Doing → Ready to try → Closed. A merge, a release or the ferret's done puts the task in
  *   Ready to try; its agenda asks, and the owner's Done closes it. The Unfiled board uses it.
  *
  * In the PR templates only `design-first` and `research-first` work walks Plan/Design. Not good sends a
- * card back to the last active lane (In progress, Fix, Draft, Doing); Done sends it to the closed lane.
+ * task back to the last active lane (In progress, Fix, Draft, Doing); Done sends it to the closed lane.
  */
 export const LANE_TEMPLATES: Readonly<Record<LaneTemplateName, LaneTemplate>> = {
   'pr-release-verify': {
@@ -1078,7 +1078,7 @@ export const variantLanes = (laneSet: Lanes, workflow: Workflow): BoardResult<re
 };
 
 /**
- * The lane after `from` in a workflow's variant, or `null` when `from` is its last. A card sitting in a
+ * The lane after `from` in a workflow's variant, or `null` when `from` is its last. A task sitting in a
  * lane its variant skips (after a lane edit, say) moves on to the variant's first lane later in the set.
  */
 export const nextLane = (
@@ -1094,7 +1094,7 @@ export const nextLane = (
   return boardOk(next ?? null);
 };
 
-/** The first lane of a category a workflow walks (e.g. where a new card goes, or where work starts). */
+/** The first lane of a category a workflow walks (e.g. where a new task goes, or where work starts). */
 export const firstLaneOfCategory = (
   laneSet: Lanes,
   workflow: Workflow,
@@ -1106,7 +1106,7 @@ export const firstLaneOfCategory = (
   return found === undefined ? boardErr({ code: 'no-lane-of-category', category }) : boardOk(found);
 };
 
-/** The lane a trigger moves a card of this workflow into, or `null` when its variant has none for it. */
+/** The lane a trigger moves a task of this workflow into, or `null` when its variant has none for it. */
 export const laneForTrigger = (
   laneSet: Lanes,
   workflow: Workflow,
@@ -1139,14 +1139,14 @@ export type GateOutcomeError =
   | { readonly code: 'unknown-option'; readonly laneId: string; readonly optionId: string }
   | { readonly code: 'no-next-lane'; readonly laneId: string };
 
-/** The option the owner chose at a gate, and the lane it sends the card to. */
+/** The option the owner chose at a gate, and the lane it sends the task to. */
 export interface GateOutcomeTarget {
   readonly option: GateOption;
   readonly lane: Lane;
 }
 
 /**
- * Where answering a lane's gate with one of its options sends a card of this workflow: the next lane of its
+ * Where answering a lane's gate with one of its options sends a task of this workflow: the next lane of its
  * variant, a named lane, the set's `notGoodLane` (reopen with an agenda conversation) or its `doneLane`
  * (close). Refused for a lane that is not a gate, an option it does not have, and `next` from a variant's
  * last lane. Pure and total; WHO may answer is the caller's to decide.
@@ -1198,7 +1198,7 @@ export const isBlockerDone = (category: LaneCategory, until: DependencyUntil, re
 };
 
 // ---------------------------------------------------------------------------------------------------
-// The lane-proposal card: the one agenda choice a proposal raises for the owner.
+// The lane-proposal task: the one agenda choice a proposal raises for the owner.
 // ---------------------------------------------------------------------------------------------------
 
 /** The option labels ARE the decision, so a client that knows nothing of lanes answers correctly by choosing. */
@@ -1206,13 +1206,13 @@ export const LANE_PROPOSAL_ANSWERS = { accept: 'Accept', edit: 'Edit' } as const
 
 const LANE_PROPOSAL_REFERENCE_PREFIX = 'lanes:';
 
-/** The project and version a lane-proposal card is about. */
+/** The project and version a lane-proposal task is about. */
 export interface LaneProposalTarget {
   readonly projectId: z.infer<typeof BoardProjectIdSchema>;
   readonly version: number;
 }
 
-/** The agenda `sourceRef` of a proposal's card, keyed by project AND version so a set proposed again gets its own. */
+/** The agenda `sourceRef` of a proposal's task, keyed by project AND version so a set proposed again gets its own. */
 export const laneProposalReference = (projectId: LaneProposalTarget['projectId'], version: number): string =>
   `${LANE_PROPOSAL_REFERENCE_PREFIX}${projectId}:${String(version)}`;
 

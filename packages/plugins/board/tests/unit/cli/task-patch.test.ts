@@ -1,0 +1,157 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import { taskPatchDocument, composeTaskPatch, parseTaskPatch } from '../../../cli/lib/task-patch.ts';
+import { patchYaml } from '../../../cli/lib/patch-document.ts';
+import { boardTask } from './fixtures.ts';
+
+const task = boardTask({
+  title: 'Patch-edit agenda and tasks',
+  summary: 'Ferrets send one patch',
+  premise: '- Many flags today',
+  howToTest: '1. Run it',
+  terms: [{ term: 'patch', meaning: 'a document of changes' }],
+});
+
+const parsed = (text: string) => {
+  const result = parseTaskPatch(text, 'f1.yaml');
+  if (!result.ok) throw new Error(result.problems.join('\n'));
+  return result.patch;
+};
+
+describe('task show --yaml', () => {
+  it('should print the revision (the newest history seq) and every field a patch changes', () => {
+    // Act
+    const document = taskPatchDocument(task);
+
+    // Assert
+    should(document).deepEqual({
+      revision: 1,
+      title: 'Patch-edit agenda and tasks',
+      summary: 'Ferrets send one patch',
+      premise: '- Many flags today',
+      context: '',
+      terms: [{ term: 'patch', meaning: 'a document of changes' }],
+      brief: '',
+      howToTest: '1. Run it',
+    });
+  });
+
+  it('should round-trip: the printed YAML patched back changes nothing', () => {
+    // Act
+    const plan = composeTaskPatch(task, parsed(patchYaml(taskPatchDocument(task), ['comment'])));
+
+    // Assert
+    should(plan).deepEqual({ kind: 'unchanged' });
+  });
+});
+
+describe('task patch', () => {
+  it('should send ONE edit with what differs and the revision; null empties, a list of points becomes bullets', () => {
+    // Act
+    const plan = composeTaskPatch(
+      task,
+      parsed('revision: 1\nsummary: Ferrets send one patch\ncontext:\n  - one\n  - two\nhowToTest: null\nterms: null'),
+    );
+
+    // Assert
+    should(plan).deepEqual({
+      kind: 'edit',
+      request: { action: 'edit', revision: 1, context: '- one\n- two', howToTest: '', terms: [] },
+    });
+  });
+
+  it('should refuse a patch written against an older revision', () => {
+    // Act + Assert
+    should(composeTaskPatch(task, parsed('revision: 7\nbrief: new plan'))).deepEqual({ kind: 'stale' });
+  });
+
+  it('should refuse a document that names no field to change', () => {
+    // Act
+    const empty = parseTaskPatch('revision: 1', 'f1.yaml');
+
+    // Assert
+    should(empty.ok).be.false();
+    should(!empty.ok && empty.problems).deepEqual(['f1.yaml names no field to change: a patch changes at least one']);
+  });
+
+  it('should read a null point list as emptied', () => {
+    // Act
+    const plan = composeTaskPatch(task, parsed('revision: 1\npremise: null'));
+
+    // Assert
+    should(plan).deepEqual({ kind: 'edit', request: { action: 'edit', revision: 1, premise: '' } });
+  });
+
+  it('should require the revision, refuse unknown or read-only keys, and never empty the title', () => {
+    // Act
+    const missing = parseTaskPatch('brief: new plan', 'f1.yaml');
+    const wrong = parseTaskPatch('revision: 1\nlaneId: done\nassignee: me\ntitle: null', 'f1.yaml');
+
+    // Assert
+    should(!missing.ok && missing.problems[0]).match(/^revision: required — read the whole task first/u);
+    const problems = wrong.ok ? '' : wrong.problems.join('\n');
+    should(problems).match(/laneId: not a field a patch changes \(it takes: revision, title, summary/u);
+    should(problems).match(/assignee: not a field a patch changes/u);
+    should(problems).match(/title: /u);
+  });
+});
+
+describe('task patch: the task progress merges by key', () => {
+  const withProgress = boardTask({ progress: { now: 'designing', doneSoFar: '- the schema', next: '1. the CLI' } });
+
+  it('should print the progress whole and send only the parts that changed', () => {
+    // Act
+    const document = taskPatchDocument(withProgress);
+    const plan = composeTaskPatch(
+      withProgress,
+      parsed('revision: 1\nprogress:\n  now: testing\n  doneSoFar: "- the schema"'),
+    );
+
+    // Assert
+    should(document.progress).deepEqual({ now: 'designing', doneSoFar: '- the schema', next: '1. the CLI' });
+    should(plan).deepEqual({ kind: 'edit', request: { action: 'edit', revision: 1, progress: { now: 'testing' } } });
+  });
+
+  it('should read a task with no progress as empty parts, and send nothing when the parts already match', () => {
+    // Act
+    const fresh = composeTaskPatch(task, parsed('revision: 1\nprogress:\n  next: "1. ship"\n  now: ""'));
+    const same = composeTaskPatch(withProgress, parsed('revision: 1\nprogress:\n  now: designing'));
+
+    // Assert
+    should(fresh).deepEqual({ kind: 'edit', request: { action: 'edit', revision: 1, progress: { next: '1. ship' } } });
+    should(same).deepEqual({ kind: 'unchanged' });
+  });
+
+  it('should refuse null on the progress and an unknown part', () => {
+    // Act
+    const nulled = parseTaskPatch('revision: 1\nprogress: null', 'f1.yaml');
+    const unknown = parseTaskPatch('revision: 1\nprogress:\n  later: x', 'f1.yaml');
+
+    // Assert
+    should(nulled.ok).be.false();
+    should(!unknown.ok && unknown.problems).deepEqual(['progress.later: not a field a patch changes']);
+  });
+});
+
+describe('task patch: a file that parses but is not a value', () => {
+  /** Five lines whose aliases would expand to a hundred thousand nodes: YAML the reader refuses to build. */
+  const ALIAS_BOMB = [
+    'revision: 1',
+    'a: &a [x, x, x, x, x, x, x, x, x, x]',
+    'b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]',
+    'c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]',
+    'd: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]',
+    'summary: [*d, *d, *d, *d, *d, *d, *d, *d, *d, *d]',
+  ].join('\n');
+
+  it('should say why in one sentence instead of throwing', () => {
+    // Act
+    const result = parseTaskPatch(ALIAS_BOMB, 'f1.yaml');
+
+    // Assert
+    should(result.ok).be.false();
+    should(!result.ok && result.problems).deepEqual([
+      'f1.yaml cannot be read:\n  line 5, column 24: the aliases (*name) in this file expand too far to read',
+    ]);
+  });
+});

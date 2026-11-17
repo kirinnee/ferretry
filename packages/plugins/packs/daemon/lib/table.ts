@@ -171,15 +171,15 @@ function newestLine(ferret: FerretSummary, lines: readonly SitrepLine[]): LastCa
     );
 }
 
-/** The card a ferret works on, from its card sitrep line: the reference it carries and the lane it sits in. */
-function cardOf(lines: readonly SitrepLine[]): PackRow['task'] {
+/** The task a ferret works on, from its task sitrep line: the reference it carries and the lane it sits in. */
+function taskOf(lines: readonly SitrepLine[]): PackRow['task'] {
   const line = lines.find(candidate => candidate.kind === 'card' && candidate.ref !== undefined);
   return line?.ref === undefined
     ? undefined
     : { ref: line.ref, ...(line.lane === undefined ? {} : { lane: line.lane }) };
 }
 
-/** The card's PR, from the same card line. */
+/** The task's PR, from the same task line. */
 function prOf(lines: readonly SitrepLine[]): PackRow['pr'] {
   return lines.find(candidate => candidate.kind === 'card' && candidate.ref !== undefined)?.pr;
 }
@@ -285,7 +285,7 @@ export async function readPackTable(
     const lines = sitreps[index]?.lines ?? [];
     const state = packRowState(ferret.state, sitreps[index]?.blockers ?? 0);
     const parent = parentOf(ferret);
-    const task = cardOf(lines);
+    const task = taskOf(lines);
     const pr = prOf(lines);
     const last = lasts[index];
     return {

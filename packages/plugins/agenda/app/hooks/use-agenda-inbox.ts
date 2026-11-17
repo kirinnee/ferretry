@@ -3,7 +3,7 @@
  * boards of exactly the conversations it names, and the answers held for their undo window.
  *
  * Built over the half's one runtime (`lib/agenda-runtime.ts`) by every view that draws it, and handed down through
- * `AgendaInboxContext`, so the Agenda page, the ask page and a ferret's panel count and deal the same cards.
+ * `AgendaInboxContext`, so the Agenda page, the ask page and a ferret's panel count and deal the same tasks.
  *
  * A BOARD IS READ WHEN ITS SUMMARY MOVES, and only then. The daemon rewrites `state.agenda` on every
  * board change and the fleet feed re-reads the list, so a changed summary is the signal; an unchanged
@@ -42,7 +42,7 @@ import {
   sessionsToReadForResolved,
   type UnreadSession,
   UNSNOOZE_ACTION,
-  withFerretCards,
+  withFerretTasks,
   withFerretSessions,
 } from '../lib/agenda-inbox.ts';
 import {
@@ -69,7 +69,7 @@ import { useEveryDaemon } from '@ferretry/app';
 import type { AgendaLaneEditor as LaneEditor } from '../../contract/app-hooks.ts';
 import { type BoardReadFailure, InboxBoardReads } from '../lib/inbox-board-reads.ts';
 
-/** Board's lane editor for the machine a card is on: the inbox is every machine's, and each has its own Board. */
+/** Board's lane editor for the machine a task is on: the inbox is every machine's, and each has its own Board. */
 export type InboxLaneEditor = (daemonId: DaemonId, ...ask: Parameters<LaneEditor>) => ReturnType<LaneEditor>;
 
 /** One paired machine, as the inbox reads it: its pairing, its name, its last session list. */
@@ -108,26 +108,26 @@ export interface AgendaInbox {
   readonly deferred: DeferredAgendaActions;
   readonly deferredState: DeferredAgendaState;
   /**
-   * Replies the owner just sent from an Inbox card: the item is already out of `cards` and in `parked` while the boards
+   * Replies the owner just sent from an Inbox card: the item is already out of `tasks` and in `parked` while the boards
    * catch up, and Undo takes the reply back (`lib/agenda-replied.ts`).
    */
   readonly replied: RepliedAgenda;
   readonly repliedState: RepliedState;
   readonly connectionFor: (daemonId: DaemonId) => DaemonConnection | undefined;
   /**
-   * A card's How to test, from the board this device already reads (any lane the card is in a verify lane for the
-   * owner's try, snoozed or not): what a card ask inside an agenda item shows. `null` when the board holds no steps.
+   * A task's How to test, from the board this device already reads (any lane the task is in a verify lane for the
+   * owner's try, snoozed or not): what a task ask inside an agenda item shows. `null` when the board holds no steps.
    */
   readonly howToTestFor?: (daemonId: DaemonId, cardId: string) => string | null;
-  /** The agenda client: what an open card's merge is sent through. Absent: no merge from the Inbox. */
+  /** The agenda client: what an open task's merge is sent through. Absent: no merge from the Inbox. */
   readonly agendaClient?: DaemonAgendaClient;
   /** The items one conversation's board holds (or its roll-up): what a merge can join. */
   readonly boardOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaItem[];
   /** The resolved records one conversation's board holds: where the title of an agenda merged away is read. */
   readonly recordsOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaListRecord[];
-  /** Where Edit on a lane-proposal card goes: its machine's Board lane editor (`agenda.lane-proposal`). Absent: Edit only answers. */
+  /** Where Edit on a lane-proposal task goes: its machine's Board lane editor (`agenda.lane-proposal`). Absent: Edit only answers. */
   readonly laneEditor?: InboxLaneEditor;
-  /** Every machine's ferrets have been read and no board is on its first read: a card not listed now is not open. */
+  /** Every machine's ferrets have been read and no board is on its first read: a task not listed now is not open. */
   readonly settled?: boolean;
   /** Paired machines this device has not unlocked: their items are not read, and each says so with an Unlock. */
   readonly locked?: readonly LockedInboxMachine[];
@@ -171,7 +171,7 @@ export const useInboxMachines = (
   );
 };
 
-/** Sends one inbox answer through the ONE agenda client, to the machine the card came from. */
+/** Sends one inbox answer through the ONE agenda client, to the machine the task came from. */
 const runInboxAction = (
   client: AgendaSender,
   connection: DaemonConnection,
@@ -191,7 +191,7 @@ const useStable = <T>(value: T, key: string): T => {
   return held.current.value;
 };
 
-/** What a card or row of the inbox draws from a session: its identity, names and open summary. */
+/** What a task or row of the inbox draws from a session: its identity, names and open summary. */
 const unreadKey = (entries: readonly UnreadSession[]): string =>
   entries
     .map(entry =>
@@ -345,19 +345,19 @@ export function useAgendaInboxModel(
   const failedBoards = useSyncExternalStore(boardReads.subscribe, boardReads.getSnapshot, boardReads.getSnapshot);
 
   // A ferret's rule suggestion the owner already answered stays open on the ferret's agenda until it expires (C2): it
-  // leaves the owner's Inbox through the owner's own "answered" set, never by closing the card. A reply just sent leaves
-  // the deck at once, and an Undo's card is back at once, before any board says so.
-  const boardCards = derived.boardCards;
+  // leaves the owner's Inbox through the owner's own "answered" set, never by closing the task. A reply just sent leaves
+  // the deck at once, and an Undo's task is back at once, before any board says so.
+  const boardTasks = derived.boardCards;
   const cards = useStable(derived.cards, cardsKey(derived.cards));
   // The overlay goes the moment the boards agree with it: parked or gone (or asked again), or listed open once Undo landed.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `repliedState` is the trigger -- a new entry (or Undo settling) must be checked against the boards at once
   useEffect(() => {
-    const listed = new Set(boardCards.map(card => card.key));
+    const listed = new Set(boardTasks.map(card => card.key));
     replied.reconcile((card): BoardItemRead => {
       const board = boards.snapshots.get(daemonSessionKey({ daemonId: card.daemonId, sessionId: card.view.config.id }));
       return board === undefined ? undefined : (board.items.find(item => item.id === card.item.id) ?? null);
     }, listed);
-  }, [replied, repliedState, boards, boardCards]);
+  }, [replied, repliedState, boards, boardTasks]);
   // The conversations whose items the agenda lists, with the machine each belongs to.
   const sources = useMemo(
     () =>
@@ -385,14 +385,14 @@ export function useAgendaInboxModel(
       boards.snapshots.get(daemonSessionKey({ daemonId, sessionId }))?.resolved ?? NO_RECORDS,
     [boards],
   );
-  const freshWithFerretCards = useMemo(
+  const freshWithFerretTasks = useMemo(
     () =>
-      withFerretCards(withFerretEntries, (daemonId, sessionId) =>
+      withFerretTasks(withFerretEntries, (daemonId, sessionId) =>
         boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
       ),
     [withFerretEntries, boards],
   );
-  const withFerret = useStable(freshWithFerretCards, cardsKey(freshWithFerretCards));
+  const withFerret = useStable(freshWithFerretTasks, cardsKey(freshWithFerretTasks));
   const boardKey = (entry: UnreadSession): string =>
     daemonSessionKey({ daemonId: entry.daemonId, sessionId: entry.view.config.id });
   const held = (entry: UnreadSession): boolean => boards.snapshots.has(boardKey(entry));
@@ -439,7 +439,7 @@ export function useAgendaInboxModel(
     () => machines.length > 0 && machines.every(({ connection }) => rollup.complete.has(connection.daemonId)),
     [machines, rollup],
   );
-  // A card that says "Merged in from !A5" names it from the resolved records of its conversation, which only a held
+  // A task that says "Merged in from !A5" names it from the resolved records of its conversation, which only a held
   // board carries (a roll-up has the open items alone): read that one board, once, instead of showing the bare id.
   const mergedRead = useRef(new Set<string>());
   useEffect(() => {
@@ -581,7 +581,7 @@ export const useRuntimeInbox = (
   );
   useAnsweredSuggestionSweep(inbox.cards, inbox.connectionFor, ruleClientFor);
   // The machine this page is drawn for, when it is locked, is not in the Inbox (it is not read): nothing is settled
-  // until it is unlocked and read, or the reader would be sent away from a card that was never looked for.
+  // until it is unlocked and read, or the reader would be sent away from a task that was never looked for.
   const ownLocked = reach.locked.some(line => line.daemonId === runtime.connection.daemonId);
   const settled = machines.every(machine => machine.sessions !== null) && !inbox.reading && !ownLocked;
   return useMemo(

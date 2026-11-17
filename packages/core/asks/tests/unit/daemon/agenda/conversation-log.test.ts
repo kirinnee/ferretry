@@ -242,7 +242,7 @@ describe('Agenda merge', () => {
     should(merged.change).equal('merged');
     should(kept.conversation?.map(entry => entry.text)).deepEqual(['one-a', 'two-a', 'one-b']);
     should(kept.mergedFrom).deepEqual(['A2']);
-    should([kept.task?.id, ...(kept.relatedTasks ?? []).map(card => card.id)].sort()).deepEqual(['F12', 'F13']);
+    should([kept.task?.id, ...(kept.relatedTasks ?? []).map(task => task.id)].sort()).deepEqual(['F12', 'F13']);
     should(kept.links?.map(link => link.target)).containEql('https://example.test/a');
     should(kept.links?.map(link => link.target)).containEql('https://example.test/b');
     should(lifecycleOf(merged.ledger, 'A2')).equal('addressed');
@@ -314,8 +314,8 @@ describe('Agenda split', () => {
     should(split.change).equal('split');
     should(parent.splitInto).deepEqual(['A2']);
     should(child.splitFrom).equal('A1');
-    should([parent.task?.id, ...(parent.relatedTasks ?? []).map(card => card.id)].sort()).deepEqual(['F12', 'F14']);
-    should([child.task?.id, ...(child.relatedTasks ?? []).map(card => card.id)].filter(Boolean)).deepEqual(['F13']);
+    should([parent.task?.id, ...(parent.relatedTasks ?? []).map(task => task.id)].sort()).deepEqual(['F12', 'F14']);
+    should([child.task?.id, ...(child.relatedTasks ?? []).map(task => task.id)].filter(Boolean)).deepEqual(['F13']);
     should(lifecycleOf(split.ledger, 'A2')).equal('active');
     should(lifecycleOf(split.ledger, 'A1')).equal('active');
   });
@@ -474,7 +474,7 @@ it('refuses overlong rest notes and invalid source timestamps atomically', async
 });
 
 it('refuses merging foreign items, notices and more cards than one item can carry', async () => {
-  const { MAX_AGENDA_CARDS } = await import('../../../../daemon/lib/protocol/agenda.ts');
+  const { MAX_AGENDA_TASKS } = await import('../../../../daemon/lib/protocol/agenda.ts');
   let ledger = raise(null).ledger;
   ledger = raise(ledger, { subject: 'Which quota?' }).ledger;
   const foreign = {
@@ -505,8 +505,8 @@ it('refuses merging foreign items, notices and more cards than one item can carr
             ...entry,
             item: {
               ...entry.item,
-              relatedTasks: Array.from({ length: MAX_AGENDA_CARDS }, (_, index) => ({
-                id: `F${itemIndex * MAX_AGENDA_CARDS + index + 1}`,
+              relatedTasks: Array.from({ length: MAX_AGENDA_TASKS }, (_, index) => ({
+                id: `F${itemIndex * MAX_AGENDA_TASKS + index + 1}`,
               })),
             },
           }

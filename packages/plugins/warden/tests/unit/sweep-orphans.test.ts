@@ -6,30 +6,30 @@ import {
   type OrphanMemory,
   type WardenBoardPort,
   type WardenBoardRead,
-  type WardenFocusCard,
+  type WardenFocusTask,
 } from '../../daemon/lib/index.ts';
 import { lanes, PROJECT } from '../support/board.ts';
-import { boardOf, cardView, orphanView } from './board-fixtures.ts';
+import { boardOf, taskView, orphanView } from './board-fixtures.ts';
 import { enabled, harness, type JevScript, journalTypes, NOW, no, session, triageable } from './sweep-harness.ts';
 
 /**
- * The Warden reading the board, end to end through the real sweep (`board-design.md` §3.4): an orphaned card
+ * The Warden reading the board, end to end through the real sweep (`board-design.md` §3.4): an orphaned task
  * is reported beside the ferrets' flags and its owner is told once, and a ferret the Warden starts again is
- * handed its focus card.
+ * handed its focus task.
  */
 
 const MINUTE = 60_000;
 const iso = (ms: number): string => new Date(ms).toISOString();
 
-/** A board port over a board the test can change between sweeps, and the focus cards it knows. */
+/** A board port over a board the test can change between sweeps, and the focus tasks it knows. */
 const boardPort = (
   initial: WardenBoardRead | undefined,
-  cards: Readonly<Record<string, WardenFocusCard>> = {},
+  tasks: Readonly<Record<string, WardenFocusTask>> = {},
 ): WardenBoardPort & { set(next: WardenBoardRead | undefined): void } => {
   let current = initial;
   return {
     read: async () => current,
-    focusCard: async sessionId => cards[sessionId],
+    focusCard: async sessionId => tasks[sessionId],
     set: next => {
       current = next;
     },
@@ -87,7 +87,7 @@ describe('an orphaned card', () => {
     // Act
     await subject.service.run({ force: false });
     const listed = subject.orphanItem.current;
-    board.set(boardOf(cardView({ assignee: 'worker' }, { activity: 'active' })));
+    board.set(boardOf(taskView({ assignee: 'worker' }, { activity: 'active' })));
     await subject.service.run({ force: false });
 
     // Assert
@@ -184,7 +184,7 @@ describe('an orphaned card', () => {
   });
 });
 
-/** `count` cards, each left by a ferret of its own among `ferrets`, none with a live owner: a roster of finished ferrets. */
+/** `count` tasks, each left by a ferret of its own among `ferrets`, none with a live owner: a roster of finished ferrets. */
 const orphans = (count: number, ferrets: number, from = 1): WardenBoardRead =>
   boardOf(
     ...Array.from({ length: count }, (_, index) =>
@@ -197,7 +197,7 @@ const finished = (ferrets: number) =>
 
 describe('orphaned cards on the one machine item', () => {
   it('should be ONE item for 31 cards of several ferrets and sessions, showing the first dozen and "+M more"', async () => {
-    // Arrange — the 31 cards that were all refused as one board's twenty-first item.
+    // Arrange — the 31 tasks that were all refused as one board's twenty-first item.
     const subject = harness({ config: enabled(), fleet: finished(4), board: boardPort(orphans(31, 4)) });
 
     // Act
@@ -237,7 +237,7 @@ describe('orphaned cards on the one machine item', () => {
     // Act — F1 recovers, F4 is orphaned.
     board.set(
       boardOf(
-        cardView({ id: 'F1', assignee: 'w0' }, { activity: 'active' }),
+        taskView({ id: 'F1', assignee: 'w0' }, { activity: 'active' }),
         ...orphans(3, 3).views.slice(1),
         orphanView({ id: 'F4', owner: 'gone', assignee: 'w3' }),
       ),
@@ -260,7 +260,7 @@ describe('orphaned cards on the one machine item', () => {
     await subject.service.run({ force: false });
 
     // Act
-    board.set(boardOf(cardView({ id: 'F1', assignee: 'w0' }, { activity: 'active' })));
+    board.set(boardOf(taskView({ id: 'F1', assignee: 'w0' }, { activity: 'active' })));
     await subject.service.run({ force: false });
     const cleared = subject.orphanItem.current;
     board.set(orphans(1, 2, 7));
@@ -279,7 +279,7 @@ describe('orphaned cards on the one machine item', () => {
     const subject = harness({ config: enabled(), fleet: finished(4), board });
     await subject.service.run({ force: false });
 
-    // Act — the owner closes the item; the same three cards stay orphaned for many sweeps.
+    // Act — the owner closes the item; the same three tasks stay orphaned for many sweeps.
     const subjectNow = (): string | undefined => subject.orphanItem.current?.subject;
     subject.orphanItem.current = undefined;
     for (let sweep = 0; sweep < 4; sweep += 1) await subject.service.run({ force: false });
@@ -291,7 +291,7 @@ describe('orphaned cards on the one machine item', () => {
     should(quiet).eql({ opened: 1, current: undefined });
     should(subject.orphanItem.opened).equal(2);
     should(subjectNow()).equal('4 tasks have nobody working on them');
-    // The sweep wrote the item twice: when it first opened, and when a card joined after the owner closed it.
+    // The sweep wrote the item twice: when it first opened, and when a task joined after the owner closed it.
     should(subject.orphanItem.writes).equal(2);
   });
 
@@ -366,7 +366,7 @@ describe('orphaned cards on the one machine item', () => {
       config: enabled(),
       fleet: finished(1),
       state: { orphans: earlier },
-      board: boardPort(boardOf(cardView({ id: 'F1', assignee: 'w0' }, { activity: 'active' }))),
+      board: boardPort(boardOf(taskView({ id: 'F1', assignee: 'w0' }, { activity: 'active' }))),
     });
 
     // Act
@@ -381,7 +381,7 @@ describe('orphaned cards on the one machine item', () => {
 
 describe('the orphaned cards item the Agenda refuses', () => {
   it('should be tried again next sweep — one attempt of one item, never one per card — and said once per reason', async () => {
-    // Arrange — 31 cards, the machine board refuses the one item.
+    // Arrange — 31 tasks, the machine board refuses the one item.
     let reason: string | undefined = 'this session already has 20 unresolved items';
     const subject = harness({
       config: enabled(),
@@ -395,7 +395,7 @@ describe('the orphaned cards item the Agenda refuses', () => {
     reason = 'the Agenda could not be written';
     await subject.service.run({ force: false });
     const refused = subject.journal.filter(entry => entry.type === 'fleet.warden_orphan_failed');
-    // Not remembered as told while the item has not landed: every card is still news when it does.
+    // Not remembered as told while the item has not landed: every task is still news when it does.
     const rememberedWhileRefused = subject.state().orphans;
     reason = undefined;
     await subject.service.run({ force: false });
@@ -417,7 +417,7 @@ describe('the orphaned cards item the Agenda refuses', () => {
 });
 
 describe('a ferret the Warden starts again', () => {
-  const card: WardenFocusCard = { task: cardView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
+  const task: WardenFocusTask = { task: taskView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
   /**
    * Jev's answers that walk the tree to the act: a ferret parked on its quota did not finish on purpose
    * (resume); a running one, silent, waits on nothing real (restart).
@@ -437,7 +437,7 @@ describe('a ferret the Warden starts again', () => {
       config,
       fleet: [triageable('q1')],
       guard: [jev('resume', 0.95)],
-      board: boardPort(boardOf(), { q1: card }),
+      board: boardPort(boardOf(), { q1: task }),
     });
 
     // Act
@@ -467,7 +467,7 @@ describe('a ferret the Warden starts again', () => {
       config,
       fleet: [stuck],
       guard: [jev('restart', 0.99)],
-      board: boardPort(boardOf(), { s1: card }),
+      board: boardPort(boardOf(), { s1: task }),
     });
 
     // Act
@@ -498,7 +498,7 @@ describe('a ferret the Warden starts again', () => {
       config,
       fleet: [{ ...human, config: { ...human.config, mode: 'interactive' } }],
       guard: [jev('resume', 0.95)],
-      board: boardPort(boardOf(), { q1: card }),
+      board: boardPort(boardOf(), { q1: task }),
     });
 
     // Act

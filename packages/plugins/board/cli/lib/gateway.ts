@@ -13,12 +13,12 @@ import {
   type BoardSkipRequest,
   BoardSkipResponseSchema,
   BoardSwitchSchema,
-  type CardActionRequestInput,
-  type CardCreateRequestInput,
+  type TaskActionRequestInput,
+  type TaskCreateRequestInput,
   type LaneSetActionRequestInput,
   LaneSetChangeResponseSchema,
   readBoard,
-  readCard,
+  readTask,
   readMergeGate,
 } from '../../contract/index.ts';
 import type { BoardGateway, FerretDirectoryEntry, LaneGateway } from './ports.ts';
@@ -68,15 +68,15 @@ export class ClientBoardGateway implements BoardGateway {
   }
 
   async card(id: string) {
-    return readCard(await this.client.call<unknown>('GET /v1/board/tasks/:taskId', { params: { taskId: id } }));
+    return readTask(await this.client.call<unknown>('GET /v1/board/tasks/:taskId', { params: { taskId: id } }));
   }
 
-  async create(request: CardCreateRequestInput) {
-    return readCard(await this.client.call<unknown>('POST /v1/board/tasks', { body: request }));
+  async create(request: TaskCreateRequestInput) {
+    return readTask(await this.client.call<unknown>('POST /v1/board/tasks', { body: request }));
   }
 
-  async act(id: string, request: CardActionRequestInput) {
-    return readCard(
+  async act(id: string, request: TaskActionRequestInput) {
+    return readTask(
       await this.client.call<unknown>('POST /v1/board/tasks/:taskId', {
         params: { taskId: id },
         body: request,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { AgendaCardRow } from '@ferretry/core-asks/contract';
+import type { AgendaTaskRow } from '@ferretry/core-asks/contract';
 import {
   type AgendaCardOutcome,
   AgendaCardsList,
@@ -28,13 +28,13 @@ afterEach(async () => {
   for (const each of mounted.splice(0)) await each.unmount();
 });
 
-const ONE: readonly AgendaCardRow[] = [
+const ONE: readonly AgendaTaskRow[] = [
   {
     task: { id: 'B1' as BoardTaskId },
     line: '&B1 Fix simcha Loge 502 is waiting in Review/CI, but no ferret is assigned, so nothing will happen to it.',
   },
 ];
-const THREE: readonly AgendaCardRow[] = [
+const THREE: readonly AgendaTaskRow[] = [
   ...ONE,
   {
     task: { id: 'B2' as BoardTaskId },
@@ -47,7 +47,7 @@ const THREE: readonly AgendaCardRow[] = [
 ];
 
 const draw = async (
-  cards: readonly AgendaCardRow[],
+  cards: readonly AgendaTaskRow[],
   over: Partial<Parameters<typeof AgendaCardsList>[0]['actions']> = {},
 ) => {
   const calls: string[] = [];

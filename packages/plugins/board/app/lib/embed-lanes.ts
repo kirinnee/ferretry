@@ -1,18 +1,18 @@
 /**
- * THE LANES OF A MINI BOARD a `card` or `board` block draws in chat, built from cards read one by one.
+ * THE LANES OF A MINI BOARD a `task` or `board` block draws in chat, built from tasks read one by one.
  *
- * Conversation hands the Board what the block named (`EmbedSpec`) and nothing the author typed about a card: the
- * title, lane and progress are read from the board. A board that lists cards draws what a `parent:` block draws:
- * the cards grouped under their lane, the lanes in the order their lane set keeps them. Pure and total, so a card
+ * Conversation hands the Board what the block named (`EmbedSpec`) and nothing the author typed about a task: the
+ * title, lane and progress are read from the board. A board that lists tasks draws what a `parent:` block draws:
+ * the tasks grouped under their lane, the lanes in the order their lane set keeps them. Pure and total, so a task
  * in a lane its board no longer has, or one whose lane set was not served, sits under "Elsewhere" and is never lost.
  */
 
-import type { CardView, LaneCategory, LaneSet } from '../../contract/index.ts';
+import type { TaskView, LaneCategory, LaneSet } from '../../contract/index.ts';
 import { THIS_MACHINE } from './machine.ts';
-import { boardCardKey, type BoardModel } from './board-model.ts';
-import type { BoardCardOf } from './board-view.ts';
+import { boardTaskKey, type BoardModel } from './board-model.ts';
+import type { BoardTaskOf } from './board-view.ts';
 
-/** What a block names: one card, a list of cards, or the children of a card. */
+/** What a block names: one task, a list of tasks, or the children of a task. */
 export type EmbedSpec =
   | { readonly kind: 'card'; readonly id: string }
   | { readonly kind: 'cards'; readonly ids: readonly string[] }
@@ -40,16 +40,16 @@ export interface EmbedLane {
   readonly key: string;
   readonly name: string;
   readonly category: LaneCategory | null;
-  readonly cards: readonly BoardCardOf[];
+  readonly cards: readonly BoardTaskOf[];
 }
 
 export interface EmbedEntry {
-  readonly task: CardView;
+  readonly task: TaskView;
   readonly laneSet: LaneSet | null;
 }
 
-export const embedCardOf = (task: CardView): BoardCardOf => ({
-  key: boardCardKey(THIS_MACHINE.daemonId, task.id),
+export const embedTaskOf = (task: TaskView): BoardTaskOf => ({
+  key: boardTaskKey(THIS_MACHINE.daemonId, task.id),
   daemonId: THIS_MACHINE.daemonId,
   machine: THIS_MACHINE.daemonId,
   task,
@@ -60,10 +60,10 @@ interface Slot {
   readonly project: number;
   readonly lane: number;
   readonly head: Omit<EmbedLane, 'cards'>;
-  readonly cards: BoardCardOf[];
+  readonly cards: BoardTaskOf[];
 }
 
-/** Cards grouped by project, then by lane in the lane set's own order; unplaced cards last in their project. */
+/** Tasks grouped by project, then by lane in the lane set's own order; unplaced tasks last in their project. */
 export const groupEmbedLanes = (entries: readonly EmbedEntry[]): readonly EmbedLane[] => {
   const projects = new Map<string, number>();
   const slots = new Map<string, Slot>();
@@ -82,16 +82,16 @@ export const groupEmbedLanes = (entries: readonly EmbedEntry[]): readonly EmbedL
       };
       slots.set(key, slot);
     }
-    slot.cards.push(embedCardOf(task));
+    slot.cards.push(embedTaskOf(task));
   }
   return [...slots.values()]
     .sort((a, b) => a.project - b.project || a.lane - b.lane)
     .map(slot => ({ ...slot.head, cards: slot.cards }));
 };
 
-/** The lanes of a whole-board read that hold a child of `parent`, the cards no lane holds under "Elsewhere". */
+/** The lanes of a whole-board read that hold a child of `parent`, the tasks no lane holds under "Elsewhere". */
 export const childLanes = (model: BoardModel, parent: string): readonly EmbedLane[] => {
-  const wanted = (card: BoardCardOf): boolean => card.task.parent?.id === parent;
+  const wanted = (task: BoardTaskOf): boolean => task.task.parent?.id === parent;
   return model.groups
     .flatMap((group): EmbedLane[] => [
       ...group.lanes.map(lane => ({

@@ -43,7 +43,7 @@ import {
   type ReviveSubject,
   reviveMessage,
 } from './revive.ts';
-import type { WardenFocusCard } from './focus-card.ts';
+import type { WardenFocusTask } from './focus-task.ts';
 import { fitOwnerNotice } from './owner-notice.ts';
 import { instantMs, isoFromMs } from './time.ts';
 import { WARDEN_LABEL, type WardenSessionView } from './types.ts';
@@ -88,10 +88,10 @@ export interface WardenRevivePorts {
   /** One notice to the owner. Total. */
   notifyOwner(notice: WardenReviveNotice): Promise<void>;
   /**
-   * The card a session's work is attributed to, so a revived auto ferret is told to carry on with it
-   * (`focus-card.ts`). Total: no card, or one that cannot be read, is `undefined`. Absent: no board.
+   * The task a session's work is attributed to, so a revived auto ferret is told to carry on with it
+   * (`focus-task.ts`). Total: no task, or one that cannot be read, is `undefined`. Absent: no board.
    */
-  focusCard?(sessionId: string): Promise<WardenFocusCard | undefined>;
+  focusCard?(sessionId: string): Promise<WardenFocusTask | undefined>;
   journal: { record(type: string, data: Readonly<Record<string, unknown>>): void };
 }
 
@@ -341,10 +341,10 @@ export class WardenReviveService {
     };
     await this.ports.events.emit(planned.id, 'warden.revive_planned', { cause, wave: planned.wave });
     // Only an auto ferret is told what to carry on with: an interactive one gets the notice alone.
-    const card = planned.mode === 'auto' ? await this.ports.focusCard?.(planned.id).catch(() => undefined) : undefined;
+    const task = planned.mode === 'auto' ? await this.ports.focusCard?.(planned.id).catch(() => undefined) : undefined;
     const outcome = await this.ports.resume(
       planned.id,
-      reviveMessage(planned.cause, planned.diedAt, planned.mode, card),
+      reviveMessage(planned.cause, planned.diedAt, planned.mode, task),
       // Nobody asked for this revive: the Warden did, unattended, so it is an agent's launch.
       WARDEN_SWEEP_ORIGIN,
     );

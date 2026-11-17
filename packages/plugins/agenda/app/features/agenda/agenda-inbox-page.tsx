@@ -6,7 +6,7 @@
  *   COLLAPSED until asked for). A ferret's group says who it is and where once, then lists its items and,
  *   below them, its plain notifications (a line, a time, Clear). The badge counts items on your turn and the
  *   notifications you have not cleared.
- * - WHO AND WHAT: a ferret's group says its callsign, what it works on (the task's name and its card, `&F12`) and
+ * - WHO AND WHAT: a ferret's group says its callsign, what it works on (the task's name and its task, `&F12`) and
  *   its machine — never the callsign alone — and so does the open item.
  * - A TAP OPENS THE ITEM HERE, as the SAME full item view the chat shows (`AgendaItemView`: Markdown, options,
  *   quick replies, terms, history), with that ferret's REAL composer under it ({@link AgendaInboxPageProps.renderComposer}):
@@ -15,11 +15,11 @@
  *   modified click opens the chat, and the open item has "Open chat". A tapped notification opens the chat and
  *   clears itself.
  * - THE OPEN ITEMS ARE A DECK, on a phone and a wide screen alike: SWIPE (or press) in the direction of an answer —
- *   the card's own row, in the options list's order: ← the first, ↑ the second, → the third — and ↓ is Skip,
- *   as everywhere: the next item, nothing sent, the skipped item stays open. "Not needed" is its own button, never a swipe. On touch the card's top bar and answer row swipe on their own,
+ *   the task's own row, in the options list's order: ← the first, ↑ the second, → the third — and ↓ is Skip,
+ *   as everywhere: the next item, nothing sent, the skipped item stays open. "Not needed" is its own button, never a swipe. On touch the task's top bar and answer row swipe on their own,
  *   exactly as in the chat; the item's head and the who-and-what line are the deck's. A swipe goes into the same
  *   undo window as a tap; reduced motion drops the fly-off. NO TEACHING TEXT: no banner naming an answer mid-drag and, on a phone,
- *   no hint line (a wide screen's run has ONE quiet line of its keys under the card, asked for by the owner); the one thing drawn is "Skip" on the ground a card pulled down uncovers (`SwipeReveal`,
+ *   no hint line (a wide screen's run has ONE quiet line of its keys under the task, asked for by the owner); the one thing drawn is "Skip" on the ground a task pulled down uncovers (`SwipeReveal`,
  *   where any later down-gesture goes). "Answer quickly" runs the deck from the top on a phone and a wide screen alike. On a wide screen the run is
  *   centred at a readable width, takes ← → ↓ (answer, answer, Skip) and j/k (move) from anywhere that is not a field or
  *   a menu, Esc closes it, a finger still swipes (a mouse never does), and finishing says "All done". In the list, j/k (or ↑/↓) walk the rows
@@ -134,7 +134,7 @@ import { askFormFor } from './ask-renderers.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
-import { CardReferenceScope } from './agenda-board-hooks.tsx';
+import { TaskReferenceScope } from './agenda-board-hooks.tsx';
 import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
 import { ResolvedItemView } from './resolved-item-view.tsx';
@@ -150,7 +150,7 @@ import { InboxFindResults } from './inbox-find-results.tsx';
 import { useItemLifecycle } from './use-item-lifecycle.ts';
 
 /**
- * Where a card came from: the FERRET that asked (its callsign, else the row's title), what it is working
+ * Where a task came from: the FERRET that asked (its callsign, else the row's title), what it is working
  * on when that differs, and its machine — linked to the conversation at the item.
  */
 export const inboxCardOrigin = (card: InboxCard, onNavigate: (to: string) => void): AgendaCardOrigin => {
@@ -164,7 +164,7 @@ export const inboxCardOrigin = (card: InboxCard, onNavigate: (to: string) => voi
   };
 };
 
-/** The refusal a card carries, if its last answer did not land. */
+/** The refusal a task carries, if its last answer did not land. */
 const failureFor = (failed: readonly FailedAgendaAction[], key: string): string | null =>
   failed.find(failure => failure.key === key)?.message ?? null;
 
@@ -180,8 +180,8 @@ interface CardHostProps {
 }
 
 /**
- * Answers a card into the undo window. Edit on a lane-proposal card also opens the lane editor: leaving the page
- * flushes the held answer, so the card is still resolved.
+ * Answers a task into the undo window. Edit on a lane-proposal task also opens the lane editor: leaving the page
+ * flushes the held answer, so the task is still resolved.
  */
 const answerCard = (
   { inbox, onNavigate }: Pick<CardHostProps, 'inbox' | 'onNavigate'>,
@@ -194,19 +194,19 @@ const answerCard = (
 };
 
 /**
- * Whether the owner may snooze this card: the machine must take snoozes, and a ferret's rule suggestion never does (the
+ * Whether the owner may snooze this task: the machine must take snoozes, and a ferret's rule suggestion never does (the
  * ferret reads its own board, so a snooze would tell it the owner looked: C2).
  */
 const snoozable = (card: InboxCard): boolean => card.item.signInRuleSuggestion === undefined;
 
-/** One compact card (the Sessions page's Needs-you deck), answered with its buttons into the undo window. */
+/** One compact task (the Sessions page's Needs-you deck), answered with its buttons into the undo window. */
 const renderInboxCard = (
   { inbox, onNavigate, now }: CardHostProps,
   card: InboxCard,
   act: (action: InboxAction) => void,
 ) => (
   <Fragment key={card.key}>
-    <CardReferenceScope daemonId={card.daemonId}>
+    <TaskReferenceScope daemonId={card.daemonId}>
       <AgendaCard
         error={failureFor(inbox.deferredState.failed, card.key)}
         item={card.item}
@@ -220,14 +220,14 @@ const renderInboxCard = (
         {...askFormFor(inbox, card, onNavigate)}
         {...(now === undefined ? {} : { now })}
       />
-    </CardReferenceScope>
+    </TaskReferenceScope>
   </Fragment>
 );
 
 /**
- * The card's own composer, as it registers itself with the app's composer targets (`registerComposerQuoteTarget`): its
+ * The task's own composer, as it registers itself with the app's composer targets (`registerComposerQuoteTarget`): its
  * ferret's conversation and THIS item's draft slot. The chat box registers under the conversation alone, so a quote or a
- * quick reply here never reads or empties the chat's words, nor another card's.
+ * quick reply here never reads or empties the chat's words, nor another task's.
  */
 const scopeOf = (card: InboxCard) => daemonSessionScope({ daemonId: card.daemonId }, card.view.config.id, card.item.id);
 
@@ -245,7 +245,7 @@ const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card
 };
 
 /**
- * A form item's one Send: the picks on the card and what is typed in the composer go as one answer into the undo
+ * A form item's one Send: the picks on the task and what is typed in the composer go as one answer into the undo
  * window. Throws the sentence the page shows when Send must wait (empty fields, asked once).
  */
 const answerForm = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard): void => {
@@ -257,7 +257,7 @@ const answerForm = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: Inb
 const copyWriter = browserClipboardWriter();
 
 /**
- * Who asked and about what, over the open item — the ferret, what it works on, its card and its machine, never the
+ * Who asked and about what, over the open item — the ferret, what it works on, its task and its machine, never the
  * callsign alone — and the way to its chat. It is also a place a swipe can start.
  */
 function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly onNavigate: (to: string) => void }) {
@@ -291,7 +291,7 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
   );
 }
 
-/** Where a touch item view swipes on its own: its card's top bar (↓ Skip) and its answer row (← ↑ → ↓). */
+/** Where a touch item view swipes on its own: its task's top bar (↓ Skip) and its answer row (← ↑ → ↓). */
 const VIEW_GESTURES = ['[data-agenda-card-top]', '[data-agenda-quick-replies]'].join(', ');
 
 interface OpenItemPlace {
@@ -340,7 +340,7 @@ function OpenItem({
         : storedHistory(card.item, lifecycle.conversation, lifecycle.conversationGap),
     [card.item, entries, lifecycle.conversation, lifecycle.conversationGap],
   );
-  // A step's tick goes to the machine the card came from, through the one agenda client (as in the chat). Without a
+  // A step's tick goes to the machine the task came from, through the one agenda client (as in the chat). Without a
   // client or a paired connection the list stays read-only, never a box that looks live and does nothing.
   const progress = inbox.agendaClient;
   const onProgress =
@@ -351,7 +351,7 @@ function OpenItem({
   const machineFerrets = isMachineAgendaId(card.view.config.id) ? ferretsOf(card.item.context) : [];
   return (
     <Fragment key={card.key}>
-      <CardReferenceScope daemonId={card.daemonId}>
+      <TaskReferenceScope daemonId={card.daemonId}>
         <div
           className="fy-inbox-open"
           data-inbox-gate={isGateItem(card.item) ? '' : undefined}
@@ -396,7 +396,7 @@ function OpenItem({
             {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
           />
         </div>
-      </CardReferenceScope>
+      </TaskReferenceScope>
     </Fragment>
   );
 }
@@ -511,7 +511,7 @@ function CardTools({
 }: {
   readonly act: (action: InboxAction) => void;
   readonly skip: () => void;
-  /** A ferret's rule suggestion has no Not needed: its card's own Dismiss says no (the agenda refuses a close). */
+  /** A ferret's rule suggestion has no Not needed: its task's own Dismiss says no (the agenda refuses a close). */
   readonly dismissable?: boolean;
 }) {
   return (
@@ -562,7 +562,7 @@ interface GateWords {
 
 /**
  * The words "Not good" waits for, asked where the answer row was; the refusal, if any, shows beside its buttons. The
- * words box is this half's own: Board's send-back, which also takes files to the card's ferret, is Board's, and this
+ * words box is this half's own: Board's send-back, which also takes files to the task's ferret, is Board's, and this
  * half imports nothing of Board's, so the answer here is words alone.
  */
 function GateWhy({
@@ -576,9 +576,9 @@ function GateWhy({
   onCancel,
 }: {
   readonly card: InboxCard;
-  /** What the answer is about, as the heading names it: the card being tried (`gateWhySubject`). */
+  /** What the answer is about, as the heading names it: the task being tried (`gateWhySubject`). */
   readonly subject: string;
-  /** The card's machine; a machine that has gone has nowhere to send the answer, so no box is drawn for it. */
+  /** The task's machine; a machine that has gone has nowhere to send the answer, so no box is drawn for it. */
   readonly daemon: DaemonConnection | undefined;
   readonly error: string | null;
   readonly optional: boolean;
@@ -598,7 +598,7 @@ function GateWhy({
   useEffect(() => {
     field.current?.focus();
   }, []);
-  // "Not yet" leaves the card where it is: there is no ferret to show a picture to.
+  // "Not yet" leaves the task where it is: there is no ferret to show a picture to.
   const takes = useAnswerFiles(optional ? undefined : ports, daemon);
   const upload = ports?.uploadAttachment;
   if (daemon === undefined) return null;
@@ -691,7 +691,7 @@ function GateWhy({
 const NO_ENTRIES: readonly TranscriptEntry[] = [];
 const NO_BOARD: readonly AgendaItem[] = [];
 
-/** What was said about the card's item, with read failures shown by the item's normal error state. */
+/** What was said about the task's item, with read failures shown by the item's normal error state. */
 function useItemConversation(
   card: InboxCard,
   read: ((card: InboxCard) => Promise<readonly TranscriptEntry[]>) | undefined,
@@ -731,7 +731,7 @@ function useItemConversation(
 /**
  * Past the last item: the ones the reader skipped are still open. Said once, with the way back to them —
  * never a silent jump to the top of the list. "Later" leaves them where they are: the reader is caught up
- * for now, and the skipped cards wait in the inbox.
+ * for now, and the skipped tasks wait in the inbox.
  */
 function QueueEnd({ remaining, onReview }: { readonly remaining: number; readonly onReview: () => void }) {
   const [later, setLater] = useState(false);
@@ -766,7 +766,7 @@ function QueueEnd({ remaining, onReview }: { readonly remaining: number; readonl
   );
 }
 
-/** Refusals whose card is no longer on the deck: said once, until the reader dismisses them. */
+/** Refusals whose task is no longer on the deck: said once, until the reader dismisses them. */
 function OrphanedFailures({ inbox }: { readonly inbox: AgendaInbox }) {
   const onDeck = new Set(inbox.cards.map(card => card.key));
   const orphans = inbox.deferredState.failed.filter(failure => !onDeck.has(failure.key));
@@ -1086,25 +1086,25 @@ export interface AgendaInboxPageProps {
   readonly onNavigate: (to: string) => void;
   /** A phone finishes a run back at the list; a wider screen keys it (a finger still swipes) and ends on "All done". */
   readonly phone: boolean;
-  /** The clock card ages read; the browser's otherwise. */
+  /** The clock task ages read; the browser's otherwise. */
   readonly now?: number;
   /** The clock the undo countdown reads; the browser's otherwise. */
   readonly clock?: () => number;
   /** Under the header: the shell's "notifications are off for <machine>" banner, which draws nothing when none is. */
   readonly banner?: ReactNode;
-  /** Reads what was said about the card's item in its conversation, for the open item's History. Absent: revisions only. */
+  /** Reads what was said about the task's item in its conversation, for the open item's History. Absent: revisions only. */
   readonly readConversation?: (card: InboxCard) => Promise<readonly TranscriptEntry[]>;
   /** Forces the phone deck's reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
-  /** On a phone, the item whose deck card starts open (a harness); the list otherwise. */
+  /** On a phone, the item whose deck task starts open (a harness); the list otherwise. */
   readonly initialOpen?: string;
   /** Only what this source raised (`/inbox?from=warden`); everything otherwise. */
   readonly from?: InboxSource | null;
   /** Lifts the source filter: the host drops `?from=` from the address. */
   readonly onClearFrom?: () => void;
   /**
-   * An item a notification tap asked for: its card opens as soon as it is among the open ones. `settled` says the
-   * machine's conversations have been read, so a missing card means the item is no longer open — and then
+   * An item a notification tap asked for: its task opens as soon as it is among the open ones. `settled` says the
+   * machine's conversations have been read, so a missing task means the item is no longer open — and then
    * `onOpenSettled(false)` lets the host send the reader to the conversation instead.
    */
   readonly open?: {
@@ -1122,9 +1122,9 @@ export interface AgendaInboxPageProps {
    */
   readonly renderComposer?: (card: InboxCard, answerForm: (() => void) | undefined) => ReactNode;
   /**
-   * Draws `children` (an open card, or its composer) over Board's hooks for THE CARD'S machine, not the page's: the
-   * Inbox is every machine's, so Done · closes, a notice's Start and Close and `&F12` are read per card's daemon.
-   * Absent: the card draws without Board.
+   * Draws `children` (an open task, or its composer) over Board's hooks for THE TASK'S machine, not the page's: the
+   * Inbox is every machine's, so Done · closes, a notice's Start and Close and `&F12` are read per task's daemon.
+   * Absent: the task draws without Board.
    */
   readonly cardBoard?: (daemonId: DaemonId, children: ReactNode) => ReactNode;
   /** How "Clear all from agent ferrets" reaches the machines. Absent: the Agents filter has no such button. */
@@ -1132,7 +1132,7 @@ export interface AgendaInboxPageProps {
   /** How a "Not good" takes files (`AnswerFilePorts`). Absent: its box is words alone. */
   readonly answerPorts?: AnswerFilePorts;
   /**
-   * An item was opened here (it is the deck's top card): its alerts come down on this device and the owner's others
+   * An item was opened here (it is the deck's top task): its alerts come down on this device and the owner's others
    * (docs/notifications.md § When an alert is cleared). Called once each time a different item opens. Absent: nothing.
    */
   readonly onItemOpened?: (card: InboxCard) => void;
@@ -1141,20 +1141,20 @@ export interface AgendaInboxPageProps {
 /** How long a tapped notification's item may take to appear among the open ones before its chat opens instead. */
 const OPEN_WAIT_MS = 5_000;
 
-/** How soon after the last input on this page a card coming up on top still counts as the owner opening it. */
+/** How soon after the last input on this page a task coming up on top still counts as the owner opening it. */
 const ATTENDED_MS = 60_000;
 
 /** What counts as someone at the page: a press, a key, a tap, or the page coming back into view. */
 const ATTENDED_INPUTS = ['pointerdown', 'keydown', 'click', 'touchstart', 'visibilitychange'] as const;
 
-/** Everything a row needs besides the card itself. */
+/** Everything a row needs besides the task itself. */
 interface RowEnv {
   readonly inbox: AgendaInbox;
   readonly now: number | undefined;
   readonly onNavigate: (to: string) => void;
   readonly selectedKey: string | null;
   readonly rowRef: (key: string) => (element: HTMLAnchorElement | null) => void;
-  /** Opens an item here, as the deck's top card. */
+  /** Opens an item here, as the deck's top task. */
   readonly onOpen: (key: string) => void;
   /** More than one machine is paired: the Machine group then says which machine it is. */
   readonly severalMachines: boolean;
@@ -1172,7 +1172,7 @@ function ItemRow({
 }) {
   const { now, onOpen, selectedKey, rowRef } = env;
   const ask = inboxRowAsk(card.item);
-  // The card this item is about, when it is not the one its ferret is on (the group's head says that one).
+  // The task this item is about, when it is not the one its ferret is on (the group's head says that one).
   const itemCard = inboxWho(card).card;
   const status = agendaStatus(card.item, group.ferret, now);
   const author = agendaAuthor(card.item, group.ferret);
@@ -1338,7 +1338,7 @@ function Section({
   readonly title: string;
   readonly groups: readonly FerretGroup[];
   readonly env: RowEnv;
-  /** Rows of another kind that sit in this section, above its ferrets (the cards to test). */
+  /** Rows of another kind that sit in this section, above its ferrets (the tasks to test). */
   readonly extra?: ReactNode;
   readonly extraCount?: number;
   /** Present when the section folds. */
@@ -1390,13 +1390,13 @@ function Section({
   );
 }
 
-/** One key of the desktop run and what it does on the card on top: the quiet line under the card. */
+/** One key of the desktop run and what it does on the task on top: the quiet line under the task. */
 interface RunKey {
   readonly key: string;
   readonly word: string;
 }
 
-/** The desktop run's shortcuts, said once under the card: the card's own answers by arrow, then moving and closing. */
+/** The desktop run's shortcuts, said once under the task: the task's own answers by arrow, then moving and closing. */
 function RunKeysHint({ keys }: { readonly keys: readonly RunKey[] }) {
   return (
     <p className="fy-inbox-keys" data-inbox-keys="">
@@ -1416,8 +1416,8 @@ const RUN_MOVES: readonly RunKey[] = [
 ];
 
 /**
- * The arrows an agenda card answers by, in its buttons' own words (`agendaAnswerText`), then Skip. Each is cut for the
- * row the open card draws (`answerRowLayout`): the deck's open item always has a composer, so a review's Request
+ * The arrows an agenda task answers by, in its buttons' own words (`agendaAnswerText`), then Skip. Each is cut for the
+ * row the open task draws (`answerRowLayout`): the deck's open item always has a composer, so a review's Request
  * changes is on it, and "Done · closes" is on it when the item offers one (`doneClose`).
  */
 export const agendaRunKeys = (card: InboxCard, doneClose = false): readonly RunKey[] => {
@@ -1431,15 +1431,15 @@ export const agendaRunKeys = (card: InboxCard, doneClose = false): readonly RunK
   ];
 };
 
-/** The run's keys for the open agenda card, counting its "Done · closes" as its row does. */
+/** The run's keys for the open agenda task, counting its "Done · closes" as its row does. */
 function AgendaRunKeysHint({ card }: { readonly card: InboxCard }) {
   return <RunKeysHint keys={agendaRunKeys(card, false)} />;
 }
 
-/** The keys the desktop run answers to at the page: the deck takes the arrows of an agenda card itself. */
+/** The keys the desktop run answers to at the page: the deck takes the arrows of an agenda task itself. */
 const RUN_KEY_NAMES: ReadonlySet<string> = new Set(['Escape', 'j', 'k', 'ArrowLeft', 'ArrowRight', 'ArrowDown']);
 
-/** The end of a run that answered every card: short, and the way back. */
+/** The end of a run that answered every task: short, and the way back. */
 function RunDone({ onBack }: { readonly onBack: () => void }) {
   return (
     <div className="fy-attn-end" data-agenda-run-done="">
@@ -1458,8 +1458,8 @@ function RunDone({ onBack }: { readonly onBack: () => void }) {
 }
 
 /**
- * Remembers that the focus was in the composer when its card left: the composer is removed with the card, and a
- * removed node leaves the focus on the page body. Rendered once per card, so it unmounts with that card's composer.
+ * Remembers that the focus was in the composer when its task left: the composer is removed with the task, and a
+ * removed node leaves the focus on the page body. Rendered once per task, so it unmounts with that task's composer.
  */
 function FocusHandoff({
   root,
@@ -1494,7 +1494,7 @@ export function AgendaInboxPage({
   onClearFrom,
   withFerretsOpen = false,
   renderComposer,
-  cardBoard,
+  cardBoard: taskBoard,
   clearPort,
   answerPorts,
   onItemOpened,
@@ -1504,7 +1504,7 @@ export function AgendaInboxPage({
   const resolvedConnection = resolvedMachine === null ? undefined : inbox.connectionFor(resolvedMachine.daemonId);
   const [cursor, setCursor] = useState<string | null>(null);
   const [deckAt, setDeckAt] = useState<string | null>(initialOpen ?? null);
-  // The card a tapped notification opened: it opens at its ask (a Needs-you push lands on what to do).
+  // The task a tapped notification opened: it opens at its ask (a Needs-you push lands on what to do).
   const [askAt, setAskAt] = useState<{ readonly key: string; readonly tap: number } | null>(null);
   const askTaps = useRef(0);
   const [deckOpen, setDeckOpen] = useState<boolean>(initialOpen !== undefined);
@@ -1536,7 +1536,7 @@ export function AgendaInboxPage({
   const repliedShown = filterInboxCards(replied, listFilter);
   const parkedCounts = { snoozed: snoozedShown.length, replied: repliedShown.length };
 
-  // The deck deals what waits on the owner, in the order the page lists it: the agenda items and their card asks.
+  // The deck deals what waits on the owner, in the order the page lists it: the agenda items and their task asks.
   const deckCards = groupCards([...sections.stopped, ...sections.needsYou]);
   const order = deckCards.map(card => card.key);
   const runOrder = order;
@@ -1544,7 +1544,7 @@ export function AgendaInboxPage({
   const navigable = [...order, ...(withFerretsShown ? groupCards(sections.withFerrets).map(card => card.key) : [])];
   const selectedKey = cursor !== null && navigable.includes(cursor) ? cursor : null;
 
-  // The deck follows the reader's place while it is listed, and the card after it once it leaves.
+  // The deck follows the reader's place while it is listed, and the task after it once it leaves.
   const lastOrder = useRef<readonly string[]>(runOrder);
   const deckPlace = nextSelection(lastOrder.current, deckAt, runOrder);
   const orderKey = runOrder.join('\u0001');
@@ -1620,7 +1620,7 @@ export function AgendaInboxPage({
       ? inbox.reading && !empty
       : inbox.resolvedReading && (filter === 'resolved' ? inbox.resolved.length : inbox.parked.length) > 0;
   const host: CardHostProps = { inbox, onNavigate, now, readConversation };
-  const boarded = (card: InboxCard, node: ReactNode): ReactNode => cardBoard?.(card.daemonId, node) ?? node;
+  const boarded = (card: InboxCard, node: ReactNode): ReactNode => taskBoard?.(card.daemonId, node) ?? node;
   const atEnd = deckPlace === QUEUE_END;
   const openAt = (key: string): void => {
     setDeckAt(key);
@@ -1631,7 +1631,7 @@ export function AgendaInboxPage({
     setDeckAt(runOrder[0] ?? null);
     setDeckOpen(true);
   };
-  // A desktop run that answered its last card says so, with the way back; a phone returns to its list.
+  // A desktop run that answered its last task says so, with the way back; a phone returns to its list.
   const [allDone, setAllDone] = useState(false);
   const running = deckOpen && filter === 'open' && runOrder.length > 0;
   const wasRunning = useRef(false);
@@ -1645,7 +1645,7 @@ export function AgendaInboxPage({
     setAllDone(!phone && wasRunning.current && !hasRun);
     wasRunning.current = false;
   }, [running, hasRun, phone]);
-  // A tapped notification's item opens as a card once it is among the open ones; a few seconds without it
+  // A tapped notification's item opens as a task once it is among the open ones; a few seconds without it
   // (or a settled read that lacks it) mean it is no longer open, and the host takes the reader to its chat.
   const openedFor = useRef<string | null>(null);
   const wantedKey = open === null ? null : `${open.daemonId}\u0000${open.sessionId}\u0000${open.id}`;
@@ -1701,7 +1701,7 @@ export function AgendaInboxPage({
     if (askedKey !== undefined && (!deckOpen || deckPlace !== askedKey)) setAskAt(null);
   }, [askedKey, deckOpen, deckPlace]);
 
-  // A reply moves the deck on by itself (the card leaves, `nextSelection` deals the one after it). Undo brings the card
+  // A reply moves the deck on by itself (the task leaves, `nextSelection` deals the one after it). Undo brings the task
   // back and the deck opens it, so the owner sees the words it restored.
   const revealKey = inbox.repliedState.entries.find(entry => entry.reveal)?.key;
   // biome-ignore lint/correctness/useExhaustiveDependencies: the key to reveal and the order it may now be listed in are the inputs
@@ -1714,22 +1714,22 @@ export function AgendaInboxPage({
     }
     inbox.replied.revealed(revealKey);
   }, [revealKey, orderKey]);
-  // The composer that sent a reply goes away with its card; the keyboard keeps its place on the next card's frame.
+  // The composer that sent a reply goes away with its task; the keyboard keeps its place on the next task's frame.
   const composerRoot = useRef<HTMLDivElement | null>(null);
   const composerHandoff = useRef(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the card on top changing is the only trigger
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the task on top changing is the only trigger
   useEffect(() => {
     if (!composerHandoff.current) return;
     composerHandoff.current = false;
     document.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-frame]')?.focus();
   }, [deckPlace]);
 
-  // An open item is the deck's top card, on a phone and a wide screen alike.
+  // An open item is the deck's top task, on a phone and a wide screen alike.
   const cardOpen = deckOpen && filter === 'open' && (deckSelected !== undefined || atEnd);
   // Opening an item is the owner seeing it: its alerts come down here and on their other devices. Only while someone is
-  // at this page (review round 9): a deck that moved on by itself on a screen nobody is at — its card was answered
-  // elsewhere — or a hidden tab is not an open, or it would take the next card's alert off the phone in the owner's
-  // hand. The card on top is told when it comes up within `ATTENDED_MS` of an input on a visible page (coming to the
+  // at this page (review round 9): a deck that moved on by itself on a screen nobody is at — its task was answered
+  // elsewhere — or a hidden tab is not an open, or it would take the next task's alert off the phone in the owner's
+  // hand. The task on top is told when it comes up within `ATTENDED_MS` of an input on a visible page (coming to the
   // page counts), or else at the next one.
   const openedCard = cardOpen ? deckSelected : undefined;
   const opened = useRef({ card: openedCard, tell: onItemOpened });
@@ -1745,7 +1745,7 @@ export function AgendaInboxPage({
     toldKey.current = card.key;
     tell?.(card);
   };
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a different item on top is the only trigger; the card object and the host callback are re-made every render
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a different item on top is the only trigger; the task object and the host callback are re-made every render
   useEffect(() => {
     if (openedCard === undefined) toldKey.current = null;
     tellOpened.current();
@@ -1763,8 +1763,8 @@ export function AgendaInboxPage({
     };
   }, []);
 
-  // The desktop run's keys. ←, ↑, → and ↓ answer or skip an agenda card inside the deck; a task card is answered here.
-  // j and k move between cards, Esc closes. Never while the reader is in a field, a menu or a dialog.
+  // The desktop run's keys. ←, ↑, → and ↓ answer or skip an agenda task inside the deck; a task task is answered here.
+  // j and k move between tasks, Esc closes. Never while the reader is in a field, a menu or a dialog.
   const runKeys = useRef<(event: KeyboardEvent) => void>(() => undefined);
   runKeys.current = event => {
     const at = runOrder.indexOf(deckPlace ?? '');
@@ -1912,13 +1912,13 @@ export function AgendaInboxPage({
   if (resolvedMachine !== null && resolvedConnection !== undefined) {
     return (
       <main aria-label="Inbox" className="fy-attn-inbox" data-agenda-inbox="card">
-        <CardReferenceScope daemonId={resolvedMachine.daemonId}>
+        <TaskReferenceScope daemonId={resolvedMachine.daemonId}>
           <ResolvedItemView
             row={resolvedMachine}
             connection={resolvedConnection}
             onClose={() => setResolvedMachine(null)}
           />
-        </CardReferenceScope>
+        </TaskReferenceScope>
         <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
       </main>
     );
@@ -1936,11 +1936,11 @@ export function AgendaInboxPage({
   }
 
   if (cardOpen) {
-    // The phone's quick answers: the card the reader started at on top, the ones AFTER it next in line —
+    // The phone's quick answers: the task the reader started at on top, the ones AFTER it next in line —
     // never the ones before it, so the queue only moves forward; past the last, the skipped ones are offered.
     const deck = deckSelected === undefined ? [] : deckCards.slice(Math.max(0, deckCards.indexOf(deckSelected)));
-    // The toast takes a row of its own between the card and the composer (never over the input, Send or the keys hint);
-    // wherever the deck foot is not drawn (the end of the run, a card) it floats at the bottom as before.
+    // The toast takes a row of its own between the task and the composer (never over the input, Send or the keys hint);
+    // wherever the deck foot is not drawn (the end of the run, a task) it floats at the bottom as before.
     const toastInFoot = !atEnd;
     return (
       <main
@@ -1979,7 +1979,7 @@ export function AgendaInboxPage({
         )}
         <OrphanedFailures inbox={inbox} />
         {atEnd ? (
-          // The end sits where the card did, at its height: the deck's peek gap and hint line are kept.
+          // The end sits where the task did, at its height: the deck's peek gap and hint line are kept.
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--end">
             <QueueEnd onReview={review} remaining={runOrder.length} />
             <p aria-hidden="true" className="fy-attn-inbox__hint" />
@@ -2136,7 +2136,7 @@ export function AgendaInboxPage({
   );
 }
 
-/** How many cards the Sessions page's Needs-you deck shows. */
+/** How many tasks the Sessions page's Needs-you deck shows. */
 const NEEDS_YOU_CARDS = 3;
 
 export interface AgendaNeedsYouProps {
@@ -2149,9 +2149,9 @@ export interface AgendaNeedsYouProps {
 }
 
 /**
- * The Sessions page's "Needs you" deck: the newest few cards across every machine, answered with their
+ * The Sessions page's "Needs you" deck: the newest few tasks across every machine, answered with their
  * buttons into the same undo window, and "See all N" into the inbox. Nothing open, nothing drawn —
- * except the undo toast, which outlives the last card it took.
+ * except the undo toast, which outlives the last task it took.
  */
 export function AgendaNeedsYou({ inbox, daemonId, onNavigate, now, clock }: AgendaNeedsYouProps) {
   const headingId = useId();

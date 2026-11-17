@@ -454,7 +454,7 @@ describe('what a verdict does', () => {
     // Assert
     should(subject.remedies).be.empty();
     should(subject.state().actions?.[0]).match({ action: 'stop', outcome: 'held' });
-    // A held act becomes a Warden card only while its flag still stands; this ferret is no longer flagged.
+    // A held act becomes a Warden task only while its flag still stands; this ferret is no longer flagged.
     should(feed.items).be.empty();
     should(journalTypes(subject)).containEql('fleet.warden_action_held');
   });
@@ -510,7 +510,7 @@ describe('what a verdict does', () => {
     }
     for (const line of typed) {
       should(line).not.match(/other-9|0\.45678|migration/u);
-      // A resume or restart with no focus card is handed the resume domain's own default turn (empty here).
+      // A resume or restart with no focus task is handed the resume domain's own default turn (empty here).
       if (line !== '') should(line).containEql('it asked a question and nobody has answered');
     }
     should(typed.filter(line => line !== '')).have.length(2);
@@ -1101,7 +1101,7 @@ describe('who needs you', () => {
       howToResolve: 'Answer it.',
       raisedBy: 'agent' as const,
     };
-    const card = {
+    const task = {
       ...row,
       id: 'A2',
       source: 'agent-raised' as const,
@@ -1115,8 +1115,8 @@ describe('who needs you', () => {
         session({ id: 'w', label: 'fleet-warden' }),
       ],
       feedBoards: {
-        s1: { sessionId: 's1', parseErrors: 0, items: [row, card] },
-        done: { sessionId: 'done', parseErrors: 0, items: [{ ...card, id: 'A9' }] },
+        s1: { sessionId: 's1', parseErrors: 0, items: [row, task] },
+        done: { sessionId: 'done', parseErrors: 0, items: [{ ...task, id: 'A9' }] },
       },
     });
     await subject.service.run({ force: false });

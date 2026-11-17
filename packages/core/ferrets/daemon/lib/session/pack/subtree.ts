@@ -2,7 +2,7 @@
  * THE SUBTREE TABLE A LEAD READS (docs/pack-mode.md; G24).
  *
  * Everything here is read from what the daemon already holds — the ferret registry and each member's sitrep lines
- * (Board adds its card notes, Conversation the messages a helper sent its lead, through `sitrep.lines`) — in ONE
+ * (Board adds its task notes, Conversation the messages a helper sent its lead, through `sitrep.lines`) — in ONE
  * pass, so a lead with fifty descendants costs one registry read and one bounded set of line lookups.
  *
  * THE EXCERPTS ARE REDACTED BEFORE THEY ARE CUT. A note or a message is arbitrary text a ferret wrote, so it can
@@ -148,15 +148,15 @@ function excerptEligible(members: readonly SubtreeMember[], limits: SubtreeLimit
   return new Set([...liveChosen, ...endedChosen]);
 }
 
-/** The task line a plugin added (the Board's; `card` is its former kind), whose reference, lane and PR the table shows. */
-function cardLine(lines: readonly SitrepLine[]): SitrepLine | undefined {
+/** The task line a plugin added (the Board's; `task` is its former kind), whose reference, lane and PR the table shows. */
+function taskLine(lines: readonly SitrepLine[]): SitrepLine | undefined {
   return lines.find(line => (line.kind === 'task' || line.kind === 'card') && line.ref !== undefined);
 }
 
 function rowOf(
   member: SubtreeMember,
   last: SubtreeRow['last'],
-  card: SitrepLine | undefined,
+  task: SitrepLine | undefined,
   model: string | undefined,
 ): SubtreeRow {
   const { ferret, depth } = member;
@@ -169,10 +169,10 @@ function rowOf(
     model: model ?? ferret.model ?? 'default',
     state,
     ferretState: ferret.state,
-    ...(card?.ref === undefined
+    ...(task?.ref === undefined
       ? {}
-      : { task: { ref: card.ref, ...(card.lane === undefined ? {} : { lane: card.lane }) } }),
-    ...(card?.pr === undefined ? {} : { pr: card.pr }),
+      : { task: { ref: task.ref, ...(task.lane === undefined ? {} : { lane: task.lane }) } }),
+    ...(task?.pr === undefined ? {} : { pr: task.pr }),
     ...(last === undefined ? {} : { last }),
     ...(state === 'ended' ? { endedAt: ferret.stateAt } : {}),
   };
@@ -191,7 +191,7 @@ export class SubtreeService {
     const rootFerret = this.registry.summary(root);
     if (rootFerret === undefined) return undefined;
     const members = subtreeMembers(this.registry, root, nowMs);
-    // The excerpt budget gates only the LAST text (and its redaction): every listed member keeps its model, card, lane
+    // The excerpt budget gates only the LAST text (and its redaction): every listed member keeps its model, task, lane
     // and PR, as today's table built every row from the board's one read.
     const eligible = excerptEligible(members, this.limits);
     const found = await mapBounded(
@@ -201,18 +201,18 @@ export class SubtreeService {
         const id = (members[index] as SubtreeMember).ferret.id;
         const lines = await this.ports.lines(id).catch((): readonly SitrepLine[] => []);
         const model = await this.ports.model(id).catch(() => undefined);
-        return { newest: eligible.has(index) ? newestLine(lines) : undefined, card: cardLine(lines), model };
+        return { newest: eligible.has(index) ? newestLine(lines) : undefined, card: taskLine(lines), model };
       },
     );
     const candidates = found.map(each => each.newest);
-    const cards = found.map(each => each.card);
+    const tasks = found.map(each => each.card);
     const models = found.map(each => each.model);
     const lasts = await this.excerpts(candidates);
     return {
       root: { id: rootFerret.id, name: rootFerret.name },
       at: instantFromEpochMs(nowMs),
       endedWindowMs: SUBTREE_ENDED_WINDOW_MS,
-      rows: members.map((member, index) => rowOf(member, lasts[index], cards[index], models[index])),
+      rows: members.map((member, index) => rowOf(member, lasts[index], tasks[index], models[index])),
     };
   }
 

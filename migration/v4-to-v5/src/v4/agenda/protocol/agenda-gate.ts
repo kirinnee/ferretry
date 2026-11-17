@@ -1,22 +1,22 @@
 // VENDORED from v4.291.5 (64fd8cbcc811e2341f1ab18be170d76106a44852) packages/protocol/src/lib/agenda-gate.ts, verbatim.
 // The converter's own frozen v4 reader: never imported by the product. Do not edit; re-vendor instead.
 /**
- * GATE ITEMS: the agenda item the daemon raises when an owner-asked card enters a lane whose stage is a gate
- * (docs/board.md § Cards show progress). The wire field is `AgendaItem.gate` (`agenda.ts`); this file owns the
+ * GATE ITEMS: the agenda item the daemon raises when an owner-asked task enters a lane whose stage is a gate
+ * (docs/board.md § Tasks show progress). The wire field is `AgendaItem.gate` (`agenda.ts`); this file owns the
  * pure facts both ends read off it — the item's stable reference, the ask it presents, which swipe gives which
  * option, and what a chosen label means.
  */
-import type { AgendaAskOption, AgendaCardAnswer, AgendaDirection, AgendaGate, AgendaGateOption } from './agenda.ts';
+import type { AgendaAskOption, AgendaTaskAnswer, AgendaDirection, AgendaGate, AgendaGateOption } from './agenda.ts';
 
 const GATE_REFERENCE_PREFIX = 'gate:';
 const GATE_FOLLOWUP_REFERENCE_PREFIX = 'gate-followup:';
 
-/** A card id, a lane id and an entry as a reference spells them: no separator inside any of them. */
-const CARD_ID = /^[BFIC][1-9][0-9]{0,8}$/u;
+/** A task id, a lane id and an entry as a reference spells them: no separator inside any of them. */
+const TASK_ID = /^[BFIC][1-9][0-9]{0,8}$/u;
 const LANE_ID = /^[^\s:]{1,64}$/u;
 const ENTRY = /^[1-9][0-9]{0,8}$/u;
 
-/** What a gate item's `sourceRef` names: the card, the gate lane, and the history entry that put it there. */
+/** What a gate item's `sourceRef` names: the task, the gate lane, and the history entry that put it there. */
 export interface GateReference {
   readonly cardId: string;
   readonly laneId: string;
@@ -25,22 +25,22 @@ export interface GateReference {
 
 /**
  * The `sourceRef` of a gate item: `gate:<card>:<lane>:<entry>`. One per entry into the gate, so raising it again
- * (a restart, a second write that finds the card still there) is the same item.
+ * (a restart, a second write that finds the task still there) is the same item.
  */
 export const gateReference = (gate: GateReference): string =>
   `${GATE_REFERENCE_PREFIX}${gate.cardId}:${gate.laneId}:${String(gate.entry)}`;
 
-/** The card, lane and entry a `sourceRef` names, or `undefined` for any other reference. Total. */
+/** The task, lane and entry a `sourceRef` names, or `undefined` for any other reference. Total. */
 export const parseGateReference = (sourceRef: string | null | undefined): GateReference | undefined => {
   if (typeof sourceRef !== 'string' || !sourceRef.startsWith(GATE_REFERENCE_PREFIX)) return undefined;
   const parts = sourceRef.slice(GATE_REFERENCE_PREFIX.length).split(':');
   if (parts.length !== 3) return undefined;
-  const [cardId = '', laneId = '', entry = ''] = parts;
-  if (!CARD_ID.test(cardId) || !LANE_ID.test(laneId) || !ENTRY.test(entry)) return undefined;
-  return { cardId, laneId, entry: Number(entry) };
+  const [taskId = '', laneId = '', entry = ''] = parts;
+  if (!TASK_ID.test(taskId) || !LANE_ID.test(laneId) || !ENTRY.test(entry)) return undefined;
+  return { cardId: taskId, laneId, entry: Number(entry) };
 };
 
-/** What a follow-up conversation's `sourceRef` names: the card, and the gate entry the owner said Not good to. */
+/** What a follow-up conversation's `sourceRef` names: the task, and the gate entry the owner said Not good to. */
 export interface GateFollowupReference {
   readonly cardId: string;
   readonly entry: number;
@@ -55,14 +55,14 @@ export const parseGateFollowupReference = (sourceRef: string | null | undefined)
   if (typeof sourceRef !== 'string' || !sourceRef.startsWith(GATE_FOLLOWUP_REFERENCE_PREFIX)) return undefined;
   const parts = sourceRef.slice(GATE_FOLLOWUP_REFERENCE_PREFIX.length).split(':');
   if (parts.length !== 2) return undefined;
-  const [cardId = '', entry = ''] = parts;
-  if (!CARD_ID.test(cardId) || !ENTRY.test(entry)) return undefined;
-  return { cardId, entry: Number(entry) };
+  const [taskId = '', entry = ''] = parts;
+  if (!TASK_ID.test(taskId) || !ENTRY.test(entry)) return undefined;
+  return { cardId: taskId, entry: Number(entry) };
 };
 
 /**
- * The extra answer a gate with ONE option offers, because a choice needs two: the card stays where it is and the
- * item closes; any words the owner gave reach the card's ferret. It is never one of `gate.options`, which is how a
+ * The extra answer a gate with ONE option offers, because a choice needs two: the task stays where it is and the
+ * item closes; any words the owner gave reach the task's ferret. It is never one of `gate.options`, which is how a
  * client tells it apart.
  */
 export const GATE_NOT_YET_LABEL = 'Not yet';
@@ -79,7 +79,7 @@ const isForward = (option: AgendaGateOption): boolean => option.outcome !== 'reo
 
 /**
  * Which label each swipe gives (the wire contract, the owner's decision !A205: → Done, ← Not good): → the first option
- * that moves the card on (next, a lane, close), ← the reopen-with-agenda option (else "Not yet"), ↑ a third. Two
+ * that moves the task on (next, a lane, close), ← the reopen-with-agenda option (else "Not yet"), ↑ a third. Two
  * answers are ← and → only, as every choice card lays two options out.
  */
 const gateLayout = (gate: Pick<AgendaGate, 'options'>): ReadonlyMap<AgendaDirection, string> => {
@@ -110,7 +110,7 @@ export const gateAskOptions = (gate: Pick<AgendaGate, 'options'>): AgendaAskOpti
   [...gateLayout(gate).values()].map(label => ({ label }));
 
 /** The answers, ← · ↑ · →, each `choose`ing its label, so an app that knows nothing of gates answers correctly. */
-export const gateAnswers = (gate: Pick<AgendaGate, 'options'>): AgendaCardAnswer[] =>
+export const gateAnswers = (gate: Pick<AgendaGate, 'options'>): AgendaTaskAnswer[] =>
   [...gateLayout(gate)].map(([direction, label]) => ({ direction, label, does: 'choose' as const }));
 
 /** What a chosen label means on this gate: one of its options, "Not yet", or nothing it offers. */

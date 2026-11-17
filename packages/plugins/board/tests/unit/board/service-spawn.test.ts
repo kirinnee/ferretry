@@ -1,14 +1,14 @@
 import { describe, it } from 'bun:test';
 import {
-  type Card,
-  type CardCreateRequestInput,
+  type Task,
+  type TaskCreateRequestInput,
   CardCreateRequestSchema,
   UNFILED_PROJECT_ID,
 } from '../../../contract/index.ts';
 import should from 'should';
 import { BoardError, BoardService, BoardUnavailableError } from '../../../daemon/lib/board/index.ts';
 import {
-  card,
+  boardTask,
   FakeFocus,
   FakeLanes,
   lanes,
@@ -19,7 +19,7 @@ import {
   world,
 } from './support.ts';
 
-const create = (input: Partial<CardCreateRequestInput> = {}) =>
+const create = (input: Partial<TaskCreateRequestInput> = {}) =>
   CardCreateRequestSchema.parse({
     kind: 'feature',
     title: 'Board store',
@@ -27,17 +27,17 @@ const create = (input: Partial<CardCreateRequestInput> = {}) =>
     ...input,
   });
 
-const serviceWith = (cards: readonly Card[], overrides: Partial<ServiceWorld> = {}) => {
-  const ports = world({ store: new MemoryBoardStore(cards), ...overrides });
+const serviceWith = (tasks: readonly Task[], overrides: Partial<ServiceWorld> = {}) => {
+  const ports = world({ store: new MemoryBoardStore(tasks), ...overrides });
   return { ports, service: new BoardService(ports) };
 };
 
-const stored = (ports: ServiceWorld, id: string): Card => ports.store.cards.get(id) as Card;
+const stored = (ports: ServiceWorld, id: string): Task => ports.store.cards.get(id) as Task;
 
 describe('reserving a card id', () => {
   it('should take the next id of the kind from the counter, never reused', async () => {
     // Arrange
-    const { service } = serviceWith([card({ id: 'F7' })]);
+    const { service } = serviceWith([boardTask({ id: 'F7' })]);
 
     // Act
     const first = await service.reserve('feature');
@@ -60,7 +60,7 @@ describe('reserving a card id', () => {
 describe("a start's card", () => {
   it('should write the card under the reserved id, owned as told, and focus the session that works it', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ id: 'F1', owner: 'lead', laneId: 'implement' })]);
+    const { ports, service } = serviceWith([boardTask({ id: 'F1', owner: 'lead', laneId: 'implement' })]);
     const id = await service.reserve('feature');
 
     // Act
@@ -117,7 +117,7 @@ describe('signal done on the card', () => {
   it('should note the message and move an active card to review in one write', async () => {
     // Arrange
     const { ports, service } = serviceWith(
-      [card({ id: 'F2', owner: 'lead', assignee: 'child', laneId: 'implement', workflow: 'quick' })],
+      [boardTask({ id: 'F2', owner: 'lead', assignee: 'child', laneId: 'implement', workflow: 'quick' })],
       { focus: focused('child', 'F2') },
     );
 
@@ -144,7 +144,7 @@ describe('signal done on the card', () => {
   it('should move a done Unfiled card with no PR to To test, never to Closed', async () => {
     // Arrange
     const { ports, service } = serviceWith(
-      [card({ projectId: UNFILED_PROJECT_ID, laneId: 'doing', workflow: 'quick' })],
+      [boardTask({ projectId: UNFILED_PROJECT_ID, laneId: 'doing', workflow: 'quick' })],
       {
         focus: focused('lead', 'F1'),
         lanes: new FakeLanes(new Map([[UNFILED_PROJECT_ID, lanes(UNFILED_PROJECT_ID, 'quick')]])),
@@ -167,8 +167,8 @@ describe('signal done on the card', () => {
 
   it('should only note a card that stays, and say why a gate or a blocker held it', async () => {
     // Arrange
-    const todo = serviceWith([card({ laneId: 'todo' })], { focus: focused('lead', 'F1') });
-    const gated = serviceWith([card({ laneId: 'plan' })], { focus: focused('lead', 'F1') });
+    const todo = serviceWith([boardTask({ laneId: 'todo' })], { focus: focused('lead', 'F1') });
+    const gated = serviceWith([boardTask({ laneId: 'plan' })], { focus: focused('lead', 'F1') });
 
     // Act
     const stays = await todo.service.signalDone('lead', undefined);
@@ -184,10 +184,10 @@ describe('signal done on the card', () => {
 
   it('should do nothing for a session with no focus card here', async () => {
     // Arrange
-    const none = serviceWith([card()]);
+    const none = serviceWith([boardTask()]);
     const elsewhere = new FakeFocus();
     elsewhere.focused.set('lead', { id: 'F1', machineId: 'another-machine' });
-    const remote = serviceWith([card()], { focus: elsewhere });
+    const remote = serviceWith([boardTask()], { focus: elsewhere });
     const vanished = serviceWith([], { focus: focused('lead', 'F1') });
 
     // Act / Assert
@@ -199,7 +199,7 @@ describe('signal done on the card', () => {
 
   it('should refuse a ferret that may not note the card it is focused on', async () => {
     // Arrange
-    const { service } = serviceWith([card({ owner: 'lead' })], { focus: focused('stranger', 'F1') });
+    const { service } = serviceWith([boardTask({ owner: 'lead' })], { focus: focused('stranger', 'F1') });
 
     // Act / Assert
     await should(service.signalDone('stranger', 'done')).be.rejectedWith({ code: 'forbidden' });

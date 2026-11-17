@@ -5,22 +5,22 @@ import { FerretIdSchema } from '../ids.ts';
 // ─── what keeps a finished ferret live (the session archive, docs/session-archive.md) ──────────────────────────────
 
 /**
- * One card as the archive's keep rule reads it (Board's answer): who owns and holds it, whether it was dropped, and
+ * One task as the archive's keep rule reads it (Board's answer): who owns and holds it, whether it was dropped, and
  * the category of its lane as Board resolved it. A category Ferrets does not know, or none, reads as "in flight".
  * `owner` and `assignee` are FERRET IDS, never callsigns: the rule matches them against the ids it is deciding about,
  * so a callsign would keep nobody.
  */
-export interface ArchiveCardStanding {
-  /** The ferret id that owns the card (never a callsign). */
+export interface ArchiveTaskStanding {
+  /** The ferret id that owns the task (never a callsign). */
   readonly owner: FerretId;
-  /** The ferret id the card is assigned to (never a callsign), or `null` for nobody. */
+  /** The ferret id the task is assigned to (never a callsign), or `null` for nobody. */
   readonly assignee: FerretId | null;
   readonly dropped: boolean;
   readonly category: string | undefined;
 }
 
 /**
- * Board's whole answer exactly as {@link ArchiveCardStanding} types it, which Ferrets parses at its boundary: anything
+ * Board's whole answer exactly as {@link ArchiveTaskStanding} types it, which Ferrets parses at its boundary: anything
  * else (an owner that is not a ferret id, a `dropped` that is not a boolean, an extra key) is unreadable, never a guess,
  * and one bad standing makes the whole answer unreadable. Board parses its own answer with it too, so the two cannot drift.
  */
@@ -35,11 +35,11 @@ export const ArchiveCardStandingsSchema = z.array(
 
 /**
  * A fact another plugin owns that keeps a finished ferret in the live set. Ferrets imports no plugin, so each owner
- * contributes its half: Board says which ferrets own or hold a card still in flight, Agenda says whether a ferret's own
+ * contributes its half: Board says which ferrets own or hold a task still in flight, Agenda says whether a ferret's own
  * board holds an item still open. A source that throws, or that nobody contributes, keeps every ferret live.
  */
 export type ArchiveKeepSource =
-  | { readonly kind: 'board'; cards(): Promise<readonly ArchiveCardStanding[]> }
+  | { readonly kind: 'board'; cards(): Promise<readonly ArchiveTaskStanding[]> }
   | { readonly kind: 'agenda'; hasOpenItem(ferret: FerretId): Promise<boolean> };
 
 /** Whether a contributed item is a keep source at all: a known kind with its answering function. */

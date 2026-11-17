@@ -12,7 +12,7 @@
  * `PackRecommendationSchema`), else the human lines the CLI half's `cli/lib/render.ts` prints.
  *
  * DEGRADE DIRECTION. A command that is not one of these stays an ordinary tool call. One that is, but
- * whose answer this reader cannot make out, is still a card — it says what was ASKED and that the answer
+ * whose answer this reader cannot make out, is still a task — it says what was ASKED and that the answer
  * was not recognised, never an outcome it did not see; "Show command" has the raw output.
  */
 
@@ -121,13 +121,13 @@ export interface PackStartCall {
   readonly brief: string | null;
   readonly briefFile?: string;
   readonly progress: PackProgress<PackStartOutcome>;
-  /** A later `wait` for this ferret, folded into its card. */
+  /** A later `wait` for this ferret, folded into its task. */
   readonly collected?: PackProgress<PackWaitOutcome>;
   /** A later `new` was run after this one was refused: the ferret tried again. */
   readonly retried?: boolean;
 }
 
-/** A `wait` no card in view started. */
+/** A `wait` no task in view started. */
 export interface PackWaitCall {
   readonly kind: 'wait';
   readonly id: string;
@@ -556,8 +556,8 @@ const waitsFor = (call: PackStartCall, id: string): boolean =>
  * The transcript with every Pack command lifted out of its tool group into a row of its own (`pack`),
  * between the calls that ran before and after it — as `projectDeliveries` does for a `send`.
  *
- * A `wait` for a ferret a card in this transcript started is folded INTO that card ("Result
- * collected") instead of standing alone, and its call joins the card's, so "Show command" still has it.
+ * A `wait` for a ferret a task in this transcript started is folded INTO that task ("Result
+ * collected") instead of standing alone, and its call joins the task's, so "Show command" still has it.
  * A refused start followed by another start is marked `retried`. Rows keep their ids: the first piece
  * of a split group keeps the group's.
  */
@@ -588,10 +588,10 @@ export const projectPackCalls = (
       }
       flush();
       if (pack.kind === 'wait') {
-        const card = out.findLastIndex(row => row.pack?.kind === 'new' && waitsFor(row.pack, pack.id));
-        const row = out[card];
+        const task = out.findLastIndex(row => row.pack?.kind === 'new' && waitsFor(row.pack, pack.id));
+        const row = out[task];
         if (row?.pack?.kind === 'new') {
-          out[card] = { ...row, tools: [...(row.tools ?? []), call], pack: { ...row.pack, collected: pack.progress } };
+          out[task] = { ...row, tools: [...(row.tools ?? []), call], pack: { ...row.pack, collected: pack.progress } };
           continue;
         }
       }

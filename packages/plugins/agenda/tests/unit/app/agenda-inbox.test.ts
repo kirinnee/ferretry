@@ -36,7 +36,7 @@ import {
   unreadSessions,
   unreadTotal,
   updatedSinceAsked,
-  withFerretCards,
+  withFerretTasks,
   withFerretSessions,
 } from '../../../app/lib/agenda-inbox.ts';
 import { answerAction, type InboxAction, withAskVersion } from '../../../app/lib/agenda-answers.ts';
@@ -286,10 +286,10 @@ describe('swipes', () => {
     expect(swipeIntent(threshold - 1, 0, width, two)).toMatchObject({ direction: 'right', committed: false });
     expect(swipeIntent(threshold, 4, width, two)).toMatchObject({ direction: 'right', progress: 1, committed: true });
     expect(swipeIntent(-threshold, 0, width, two)).toMatchObject({ direction: 'left', committed: true });
-    // Up has no action on a two-option card, so it never commits; down means nothing at all.
+    // Up has no action on a two-option task, so it never commits; down means nothing at all.
     expect(swipeIntent(0, -threshold * 2, width, two)).toMatchObject({ direction: 'up', committed: false });
     expect(swipeIntent(0, threshold * 2, width, two).committed).toBe(false);
-    // A card with no answer in a direction never commits that way.
+    // A task with no answer in a direction never commits that way.
     expect(swipeIntent(threshold * 2, 0, width, {}).committed).toBe(false);
   });
 
@@ -475,7 +475,7 @@ describe('the undo window', () => {
   });
 
   test('stamps the ask version the card showed, so an answer held through the undo window still names it', async () => {
-    // Arrange — the card shows EU/US as ask version 1; the ferret replaces it with EU/Asia while the answer is held
+    // Arrange — the task shows EU/US as ask version 1; the ferret replaces it with EU/Asia while the answer is held
     const { timers, advance } = fakeTimers();
     const posted: InboxAction[] = [];
     const deferred = new DeferredAgendaActions(async (_target, action) => {
@@ -500,7 +500,7 @@ describe('the undo window', () => {
   });
 
   test('stamps a held Mark as done and Skip with the version shown, so a replaced ask is never closed by it', () => {
-    // Arrange — the to-do shows ask version 2 when the owner taps Done, and Skip on another card
+    // Arrange — the to-do shows ask version 2 when the owner taps Done, and Skip on another task
     const done: InboxAction = { kind: 'resolve', label: 'Mark as done' };
     const skip: InboxAction = { kind: 'dismiss', label: 'Skip' };
 
@@ -642,7 +642,7 @@ describe('items in discussion', () => {
       ['s', 'A1'],
     ]);
     expect(
-      withFerretCards(withFerretSessions(sources), boardFor).map(card => [card.view.config.id, card.item.id]),
+      withFerretTasks(withFerretSessions(sources), boardFor).map(card => [card.view.config.id, card.item.id]),
     ).toEqual([
       ['s', 'A2'],
       ['only', 'A1'],

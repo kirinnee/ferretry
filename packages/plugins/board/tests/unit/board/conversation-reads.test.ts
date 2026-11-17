@@ -5,10 +5,10 @@ import type { RawWork, TranscriptEvent, WorkSource } from '@ferretry/plugin-conv
 import type { Instant } from '@ferretry/std';
 import { ConversationMessages, sendIdOf } from '../../../daemon/adapters/messages.ts';
 import { ConversationOwnerWords } from '../../../daemon/adapters/owner-words.ts';
-import { BoardWorkSource, cardWork } from '../../../daemon/adapters/work-source.ts';
+import { BoardWorkSource, taskWork } from '../../../daemon/adapters/work-source.ts';
 import { BoardTurnCheck, boardCheckSendId, mutatingWork, raisesAsk } from '../../../daemon/lib/board/index.ts';
 import { createdPrUrls } from '../../../daemon/lib/github/transcript.ts';
-import { as, boot, makeCard } from '../../integration/daemon/harness.ts';
+import { as, boot, makeTask } from '../../integration/daemon/harness.ts';
 
 /**
  * What Board takes from Conversation's additive reads (lead-approved): the send id, the transcript tail with tool calls,
@@ -191,8 +191,8 @@ describe('F-0001 Board reads the owner’s words through Conversation, strictly 
     expect(await refusing.said('f1')).toEqual([]);
   });
 
-  /** A card a ferret made on its own account, carrying words the owner may or may not have said to it. */
-  const ferretCard = async (world: Awaited<ReturnType<typeof boot>>, text: string) => {
+  /** A task a ferret made on its own account, carrying words the owner may or may not have said to it. */
+  const ferretTask = async (world: Awaited<ReturnType<typeof boot>>, text: string) => {
     await world.host.request('PUT', '/v1/board/projects/unfiled/switch', { body: { on: true }, headers: as('owner') });
     const made = await world.host.request('POST', '/v1/board/tasks', {
       body: { kind: 'feature', title: 'Badge colour', assignee: 'f1', ask: { text, source: 'session:f1' } },
@@ -211,7 +211,7 @@ describe('F-0001 Board reads the owner’s words through Conversation, strictly 
     const conversation = fakeConversation();
     const world = await boot({ uses: { conversation } });
     await conversation.send(F1, { kind: 'owner' }, { message: ASK });
-    const id = await ferretCard(world, ASK);
+    const id = await ferretTask(world, ASK);
 
     const refused = await hide(world, id);
 
@@ -222,14 +222,14 @@ describe('F-0001 Board reads the owner’s words through Conversation, strictly 
     const conversation = fakeConversation();
     const world = await boot({ uses: { conversation } });
     await conversation.send(F1, { kind: 'owner' }, { message: 'Something unrelated entirely.' });
-    const id = await ferretCard(world, ASK);
+    const id = await ferretTask(world, ASK);
 
     expect((await hide(world, id)).status).toBe(200);
   });
 
   test('F-0001 with Conversation off, a ferret’s private choice is an unavailable board, never a guess', async () => {
     const world = await boot();
-    const id = await ferretCard(world, ASK);
+    const id = await ferretTask(world, ASK);
 
     expect((await hide(world, id)).status).toBe(503);
   });
@@ -238,7 +238,7 @@ describe('F-0001 Board reads the owner’s words through Conversation, strictly 
 describe('J-0091 Board hands its cards to Conversation’s work search through search.sources', () => {
   test('J-0091 the half contributes one source, “board”, whose list is every card as work', async () => {
     const world = await boot({ uses: { conversation: fakeConversation() } });
-    const made = await makeCard(world.host);
+    const made = await makeTask(world.host);
 
     const [contribution] = world.contribution('search.sources') as { id: string; item: WorkSource }[];
     const works = await contribution?.item.list();
@@ -255,7 +255,7 @@ describe('J-0091 Board hands its cards to Conversation’s work search through s
 
   test('J-0091 a card that did not change is handed over as the same object, one that did as a new one, and a gone one is dropped', async () => {
     const world = await boot({ uses: { conversation: fakeConversation() } });
-    const made = await makeCard(world.host);
+    const made = await makeTask(world.host);
     const [contribution] = world.contribution('search.sources') as { item: WorkSource }[];
     const first = (await contribution?.item.list()) as readonly RawWork[];
     const same = (await contribution?.item.list()) as readonly RawWork[];
@@ -271,7 +271,7 @@ describe('J-0091 Board hands its cards to Conversation’s work search through s
   });
 
   test('J-0091 a card’s searchable fields are the text the owner reads on it, and only those', () => {
-    const work = cardWork(
+    const work = taskWork(
       {
         id: 'F7',
         projectId: 'p1',

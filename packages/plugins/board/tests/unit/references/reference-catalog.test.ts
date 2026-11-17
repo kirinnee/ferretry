@@ -5,13 +5,13 @@ import {
   type ReferenceCatalogInput,
   referenceCatalogLimit,
 } from '@ferretry/plugin-conversation/contract';
-import { type BoardCardViews, BoardReferenceCatalog } from '../../../daemon/adapters/reference-catalog.ts';
-import { type Card, type CardView, cap } from '../../../contract/index.ts';
+import { type BoardTaskViews, BoardReferenceCatalog } from '../../../daemon/adapters/reference-catalog.ts';
+import { type Task, type TaskView, cap } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
-import { card, lanes, PROJECT } from '../board/support.ts';
+import { boardTask, lanes, PROJECT } from '../board/support.ts';
 
-const view = (overrides: Partial<Card> = {}, touched: string | null = null): CardView => ({
-  ...card(overrides),
+const view = (overrides: Partial<Task> = {}, touched: string | null = null): TaskView => ({
+  ...boardTask(overrides),
   lastTouchedAt: touched,
   touchedBy: null,
   activity: 'idle',
@@ -28,10 +28,10 @@ const view = (overrides: Partial<Card> = {}, touched: string | null = null): Car
   shippedIn: null,
 });
 
-const catalog = (views: readonly CardView[]) =>
+const catalog = (views: readonly TaskView[]) =>
   new BoardReferenceCatalog({
     sweepBoard: async () => ({ views, laneSets: new Map([[PROJECT, lanes()]]) }),
-  } satisfies BoardCardViews);
+  } satisfies BoardTaskViews);
 
 const ask = (ferret: string, query?: string): ReferenceCatalogInput => ({
   ferret,
@@ -95,7 +95,7 @@ describe('board provides the & reference menu (reference.catalog)', () => {
       {
         ...dropped,
         dropped: { reason: 'not needed', at: '2026-11-02T00:00:00.000Z', by: { kind: 'owner' } },
-      } as CardView,
+      } as TaskView,
     ]).entries(ask('f1'));
     const closedOf = (id: string) => entries.find(entry => entry.token === id)?.closed;
     expect(closedOf('F1')).toBe(true);
@@ -178,7 +178,7 @@ describe('board provides the & reference menu (reference.catalog)', () => {
     expect(byId.get('F5')?.agentAsked).toBe(true);
     // A person's ask wins (askedBy person, or the owner's own chat: origin human), as the app's split reads it.
     for (const id of ['F2', 'F3', 'F4']) expect(byId.get(id)).not.toHaveProperty('agentAsked');
-    // A view that says neither falls back to who raised the card.
+    // A view that says neither falls back to who raised the task.
     const [raised, helper] = await catalog([
       view({ id: 'F6', owner: 'f1', createdBy: owner }),
       view({ id: 'F7', owner: 'f1' }),
@@ -203,9 +203,9 @@ describe('board provides the & reference menu (reference.catalog)', () => {
     expect(route?.capability).toBeDefined();
     expect(catalog([]).demand).toEqual(route?.capability as never);
     expect(catalog([]).demand).toEqual(cap('fleet', 'use'));
-    // …and the card list a caller reaches from a single card is asked the same, so no read here is easier than a route.
-    const card = manifest.actions.routes.find(each => each.key === 'GET /v1/board/tasks');
-    expect(card?.capability).toEqual(route?.capability as never);
+    // …and the task list a caller reaches from a single task is asked the same, so no read here is easier than a route.
+    const task = manifest.actions.routes.find(each => each.key === 'GET /v1/board/tasks');
+    expect(task?.capability).toEqual(route?.capability as never);
   });
 
   test('the manifest takes reference.catalog keyed by the & prefix, and Conversation stays an optional use', () => {

@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
-import { type CardActionRequest, CardCreateRequestSchema } from '../../../contract/index.ts';
+import { type TaskActionRequest, CardCreateRequestSchema } from '../../../contract/index.ts';
 import should from 'should';
 import { BoardError, BoardService, BoardUnavailableError, type OwnerWords } from '../../../daemon/lib/board/index.ts';
-import { card, ferretActor, MemoryBoardStore, PROJECT, world } from './support.ts';
+import { boardTask, ferretActor, MemoryBoardStore, PROJECT, world } from './support.ts';
 
 const SESSION = 'lead';
 const OWNER_SAID = 'Build a board that shows only the work the owner asked for';
@@ -51,7 +51,7 @@ const request = (visibility?: 'private') =>
     assignee: SESSION,
     ...(visibility === undefined ? {} : { visibility }),
   });
-const change: Record<'edit' | 'visibility', CardActionRequest> = {
+const change: Record<'edit' | 'visibility', TaskActionRequest> = {
   edit: { action: 'edit', title: 'Must not be written', visibility: 'private' },
   visibility: { action: 'visibility', visibility: 'private' },
 };
@@ -62,7 +62,7 @@ describe('strict private choices through SessionOwnerWords', () => {
       it(`should write nothing for ${operation} with unreadable ${failure}, then publish the recovered owner ask`, async () => {
         // Arrange: an earlier best-effort read stored an agent guess.
         const { words, recover } = fixture(failure);
-        const guessed = card({ ask, askedBy: 'agent', visibility: 'private', visibilitySource: 'default' });
+        const guessed = boardTask({ ask, askedBy: 'agent', visibility: 'private', visibilitySource: 'default' });
         const ports = world({ store: new MemoryBoardStore([guessed]), ownerWords: words });
         const subject = new BoardService(ports);
         const task = guessed;
@@ -96,7 +96,7 @@ describe('strict private choices through SessionOwnerWords', () => {
 describe('F-0001 a daemon that cannot read what the owner said', () => {
   it('F-0001 should refuse a ferret making its own card private as an unavailable board, not judge it on the card as stored', async () => {
     // Arrange: no OwnerWords port (Conversation is off, so who wrote each turn cannot be read)
-    const stored = card({ ask, askedBy: 'agent', visibility: 'public', visibilitySource: 'chosen' });
+    const stored = boardTask({ ask, askedBy: 'agent', visibility: 'public', visibilitySource: 'chosen' });
     const ports = world({ store: new MemoryBoardStore([stored]) });
     const store = ports.store as MemoryBoardStore;
     const subject = new BoardService(ports);
@@ -134,7 +134,7 @@ describe('F-0001 a daemon that cannot read what the owner said', () => {
 describe('F-0001 a card whose creator ferret was removed', () => {
   /** Conversation answers a strict read of a ferret the registry no longer has as "nobody the owner spoke to": no words, no failure. */
   const removedCreator = () => {
-    const gone = card({
+    const gone = boardTask({
       createdBy: ferretActor('gone'),
       ask: { text: 'a ferret’s own follow-up errand', source: 'session:gone' },
       askedBy: 'agent',

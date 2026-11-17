@@ -80,14 +80,14 @@ export interface AgendaAddOptions
   readonly jsonFile?: string;
   /** A Markdown file for the body; `-` reads standard input. */
   readonly bodyFile?: string;
-  /** `--offer-close`: the owner's tap may also close the card the item belongs to. */
+  /** `--offer-close`: the owner's tap may also close the task the item belongs to. */
   readonly offerClose?: boolean;
   /**
    * `--new "<why none fits>"`: open a new agenda although open ones were listed as candidates (search, check, then
    * open). The reason is required.
    */
   readonly new?: string;
-  /** `--related <id>`: a card to tie the item to, or an agenda item to edit instead of raising a duplicate. */
+  /** `--related <id>`: a task to tie the item to, or an agenda item to edit instead of raising a duplicate. */
   readonly related?: string;
 }
 
@@ -124,9 +124,9 @@ export interface AgendaLogOptions extends AgendaCommandOptions {
   readonly message?: string;
 }
 
-/** Flags of `fy agenda split`: the new item's writing, and the cards that go with it. */
+/** Flags of `fy agenda split`: the new item's writing, and the tasks that go with it. */
 export interface AgendaSplitOptions extends AgendaCommandOptions, Omit<BriefFlags, 'neededBy' | 'task'> {
-  /** `--move-cards F12,F13`: cards of the item that move to the new one. */
+  /** `--move-cards F12,F13`: tasks of the item that move to the new one. */
   readonly moveCards?: string;
   /** A JSON body with the same fields as `add`; `-` reads standard input. */
   readonly jsonFile?: string;
@@ -271,7 +271,7 @@ export class AgendaController {
     const before = await this.gateway.snapshot(sessionId);
     const warning = twoDecisionsWarning(composed);
     if (warning !== undefined) this.out.diagnostic(warning);
-    // A held configuration change is its own card: the owner's Allow applies that one change, so it joins nothing.
+    // A held configuration change is its own task: the owner's Allow applies that one change, so it joins nothing.
     // The Done button is sent later (only to a daemon that has it), but it is part of the ask the join analysis weighs.
     const asked = options.offerClose === true ? { ...composed, offerClose: true as const } : composed;
     if (composed.confirms === undefined && !(await this.#searchCheckOpen(before, asked, flag.card, options))) return;
@@ -286,7 +286,7 @@ export class AgendaController {
 
   /**
    * SEARCH, CHECK, THEN OPEN (docs/agenda.md § One channel per topic): whether the add may open a new agenda. The open
-   * agendas on the caller's own ledger are the candidates, closest first — one carrying the named card, or a card it
+   * agendas on the caller's own ledger are the candidates, closest first — one carrying the named task, or a task it
    * depends on or blocks, leads (dependent things share one agenda). With none, the add opens, after the daemon's
    * strong-duplicate check of everyone's work. With some, it needs `--new "<why none fits>"`; a person at a terminal is
    * asked "Should this join !A3?" instead, and a ferret is refused with the list and the two ways out. False: nothing
@@ -337,7 +337,7 @@ export class AgendaController {
     throw new Error(waysOut(binary, closest, plan));
   }
 
-  /** `--related`: a card (tie the item to it) or an agenda item (edit it instead); never both, never with `--new`. */
+  /** `--related`: a task (tie the item to it) or an agenda item (edit it instead); never both, never with `--new`. */
   #relatedPointer(options: AgendaAddOptions): { card?: string; item?: AgendaId } {
     const typed = options.related?.trim() ?? '';
     if (typed === '') return {};
@@ -483,7 +483,7 @@ export class AgendaController {
     );
   }
 
-  /** MERGE `from` into `id`: both conversations, every card and link are kept; `from` closes as merged. */
+  /** MERGE `from` into `id`: both conversations, every task and link are kept; `from` closes as merged. */
   async merge(reference: string, fromReference: string, options: AgendaCommandOptions): Promise<void> {
     const id = parseAgendaReference(reference);
     const from = parseAgendaReference(fromReference);
@@ -493,7 +493,7 @@ export class AgendaController {
     );
   }
 
-  /** SPLIT a new item off `id`: written as an add is, linked both ways, with the named cards moved to it. */
+  /** SPLIT a new item off `id`: written as an add is, linked both ways, with the named tasks moved to it. */
   async split(reference: string, words: readonly string[], options: AgendaSplitOptions): Promise<void> {
     const id = parseAgendaReference(reference);
     const [file, body] = await this.#inputs(options.jsonFile, options.bodyFile);
@@ -511,7 +511,7 @@ export class AgendaController {
       surface: _surface,
       ...item
     } = composed;
-    const moveCards = (options.moveCards ?? '')
+    const moveTasks = (options.moveCards ?? '')
       .split(',')
       .map(each => each.trim())
       .filter(each => each !== '')
@@ -526,7 +526,7 @@ export class AgendaController {
       action: 'split',
       id,
       item,
-      ...(moveCards.length === 0 ? {} : { moveCards }),
+      ...(moveTasks.length === 0 ? {} : { moveCards: moveTasks }),
     });
     const raised = onlyNewId(before, after);
     this.#report(after, options, () =>

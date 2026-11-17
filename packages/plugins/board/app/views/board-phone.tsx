@@ -1,9 +1,9 @@
 /**
  * THE BOARD ON A PHONE: one lane at a time. The lanes are a strip of chips along the top, a swipe (or the
- * arrow keys on the strip) moves to the next lane, and the chosen lane's cards run down the page as a list.
+ * arrow keys on the strip) moves to the next lane, and the chosen lane's tasks run down the page as a list.
  *
- * The lane shown is the page's (`at`, in the URL, so back from a card returns to the same lane). This
- * component keeps no state of its own and decides nothing about moves; it draws `PlacedCard` like every
+ * The lane shown is the page's (`at`, in the URL, so back from a task returns to the same lane). This
+ * component keeps no state of its own and decides nothing about moves; it draws `PlacedTask` like every
  * other view and only turns a finger or a key into "the next lane".
  */
 
@@ -19,14 +19,14 @@ import {
   UNPLACED_LANE,
 } from '../lib/board-phone.ts';
 import type { BoardGroupOf } from '../lib/board-view.ts';
-import { type BoardCardEnv, PlacedCard } from './board-views.tsx';
+import { type BoardTaskEnv, PlacedTask } from './board-views.tsx';
 
 export interface PhoneKanbanProps {
   readonly model: BoardModel;
-  readonly env: BoardCardEnv;
+  readonly env: BoardTaskEnv;
   readonly projectName: (group: BoardGroupOf) => string;
   readonly hideClosed: boolean;
-  /** The lane the URL names, or `null` for the first lane with a card. */
+  /** The lane the URL names, or `null` for the first lane with a task. */
   readonly at: string | null;
   readonly onLane: (laneId: string) => void;
 }
@@ -46,7 +46,7 @@ function PhoneBoard({
   onLane,
 }: {
   readonly group: BoardGroupOf;
-  readonly env: BoardCardEnv;
+  readonly env: BoardTaskEnv;
   readonly title: string;
   readonly hideClosed: boolean;
   readonly at: string | null;
@@ -105,7 +105,7 @@ function PhoneBoard({
     go(step);
   };
 
-  const cards =
+  const tasks =
     shown.id === UNPLACED_LANE ? group.unplaced : (group.lanes.find(lane => lane.id === shown.id)?.cards ?? []);
   const panelId = `${group.key}~panel`;
 
@@ -159,10 +159,10 @@ function PhoneBoard({
         role="tabpanel"
       >
         <ul className="fy-board-lane__cards">
-          {cards.length === 0 ? (
+          {tasks.length === 0 ? (
             <li className="fy-board-lane__empty">Nothing here</li>
           ) : (
-            cards.map(card => <PlacedCard card={card} env={env} key={card.key} />)
+            tasks.map(task => <PlacedTask card={task} env={env} key={task.key} />)
           )}
         </ul>
       </div>

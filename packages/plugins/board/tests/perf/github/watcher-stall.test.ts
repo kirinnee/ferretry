@@ -1,23 +1,23 @@
 import { describe, it } from 'bun:test';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import { KernelCardStore } from '../../../daemon/adapters/store/card-store.ts';
+import { KernelTaskStore } from '../../../daemon/adapters/store/task-store.ts';
 import { BoardService } from '../../../daemon/lib/board/index.ts';
 import { GitHubWatcher, UnfiledRefiler } from '../../../daemon/lib/github/index.ts';
 import { KeyedSerial } from '../../../daemon/lib/lanes/index.ts';
 import manifest from '../../../manifest.ts';
-import { card, FakeLanes, ferretActor, lanes, NOW, PROJECT, world } from '../../unit/board/support.ts';
+import { boardTask, FakeLanes, ferretActor, lanes, NOW, PROJECT, world } from '../../unit/board/support.ts';
 import { answer, prNode, prUrl } from '../../unit/github/support.ts';
 
 /**
- * The stall family (a live board of ~3,600 cards answered /healthz over 250 ms while the watcher wrote cards): the
+ * The stall family (a live board of ~3,600 tasks answered /healthz over 250 ms while the watcher wrote tasks): the
  * daemon is one thread, so what matters is the longest stretch the tick runs WITHOUT giving the event loop back.
- * The cards are stored by the real `KernelCardStore` (its schema parse and per-card serial sections included) and every
+ * The tasks are stored by the real `KernelTaskStore` (its schema parse and per-card serial sections included) and every
  * stub below yields to the loop once per call, as the real file, `gh` and Asks calls do, so a gap the sampler sees is
  * one synchronous slice of the tick's own work, measured as the CPU it burned (see the sampler).
  */
 const MAX_SLICE_MS = 100;
-const CARDS = 3_600;
+const TASKS = 3_600;
 const REPOSITORIES = 8;
 const HISTORY = 30;
 
@@ -38,7 +38,7 @@ const stored = (index: number) => {
   const id = `F${String(index + 1)}`;
   const repo = repositoryOf(index);
   const number = numberOf(index);
-  return card({
+  return boardTask({
     id,
     laneId: 'implement',
     workflow: 'quick',
@@ -75,20 +75,20 @@ const stored = (index: number) => {
   });
 };
 
-/** GitHub's answer for one repository: every PR open, which every card's `unknown` link learns from, so EVERY card writes. */
+/** GitHub's answer for one repository: every PR open, which every task's `unknown` link learns from, so EVERY task writes. */
 const everyPullRequest = (repo: string): string => {
   const prs: Record<number, unknown> = {};
-  for (let number = 1; number <= numberOf(CARDS); number += 1) prs[number] = prNode(number, { repo });
+  for (let number = 1; number <= numberOf(TASKS); number += 1) prs[number] = prNode(number, { repo });
   return answer({ prs });
 };
 
 describe('the watcher tick on a 3,600-card board', () => {
   it('should never run one synchronous slice of 100 ms or more while it writes every card', async () => {
     const state = new MemoryStateFolder().port([file('cards'), file('counters')]);
-    const store = new KernelCardStore(state, { cards: file('cards'), counters: file('counters') }, new KeyedSerial(), {
+    const store = new KernelTaskStore(state, { cards: file('cards'), counters: file('counters') }, new KeyedSerial(), {
       warn: () => undefined,
     });
-    for (let index = 0; index < CARDS; index += 1) {
+    for (let index = 0; index < TASKS; index += 1) {
       const task = stored(index);
       await store.write(task.id, async () => ({ task, result: null }));
     }
@@ -164,7 +164,7 @@ describe('the watcher tick on a 3,600-card board', () => {
     sampling = false;
     await sampler;
 
-    should(report.written.length).equal(CARDS);
+    should(report.written.length).equal(TASKS);
     should(longestSlice).be.below(MAX_SLICE_MS);
   }, 120_000);
 });

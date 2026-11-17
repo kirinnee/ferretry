@@ -1,8 +1,8 @@
 /**
- * Current-ferret file and card search (handover #6).
+ * Current-ferret file and task search (handover #6).
  *
- * One explicitly daemon-scoped search model, exposed as the same visible control wherever a host mounts it. The cards
- * it searches are THIS FERRET'S CARDS on the board, which Board reads and hands in ({@link FerretCardsRead}); the
+ * One explicitly daemon-scoped search model, exposed as the same visible control wherever a host mounts it. The tasks
+ * it searches are THIS FERRET'S TASKS on the board, which Board reads and hands in ({@link FerretTasksRead}); the
  * files are Ferrets' file index (`GET /v1/ferrets/:ferretId/fs/index`). The browser matches both against the typed
  * query.
  */
@@ -50,7 +50,7 @@ interface SessionSearchFile {
 }
 
 /**
- * The fields of one of this ferret's cards the search reads. GAP(board): Board's card record is not in its contract
+ * The fields of one of this ferret's tasks the search reads. GAP(board): Board's task record is not in its contract
  * yet; these are the fields it hands in.
  */
 export interface FerretSearchCard {
@@ -60,15 +60,15 @@ export interface FerretSearchCard {
   readonly lane: string;
 }
 
-/** This ferret's cards as Board read them: still reading, read, or not readable (and why). */
-export interface FerretCardsRead {
+/** This ferret's tasks as Board read them: still reading, read, or not readable (and why). */
+export interface FerretTasksRead {
   readonly state: SessionSearchResourceState;
   readonly error: string | null;
   readonly cards: readonly FerretSearchCard[];
 }
 
 /** No board on this host: an empty, ready slice, never an error (the search simply holds files only). */
-const NO_BOARD: FerretCardsRead = { state: 'ready', error: null, cards: [] };
+const NO_BOARD: FerretTasksRead = { state: 'ready', error: null, cards: [] };
 
 /** Which daemon and ferret a search is about. Ferret ids are per daemon, so both are its identity. */
 export interface FerretSearchScope {
@@ -93,7 +93,7 @@ interface SearchSnapshot {
   readonly fileState: SessionSearchResourceState;
   readonly taskError: string | null;
   readonly fileError: string | null;
-  /** This ferret's cards, whatever their lane; empty until the board is read. */
+  /** This ferret's tasks, whatever their lane; empty until the board is read. */
   readonly tasks: readonly FerretSearchCard[];
   readonly files: readonly SessionFileIndexEntry[];
   readonly coverage: SessionFileIndexCoverage;
@@ -154,7 +154,7 @@ export const MAX_SESSION_SEARCH_RESULTS = 12;
  * is the "two legitimate input domains need two named things" split rather than
  * a second copy of one decision.
  *
- * A name outranks a path. A card that matches only in its summary or lane sits between those two; see
+ * A name outranks a path. A task that matches only in its summary or lane sits between those two; see
  * {@link PROSE_TASK_MATCH_SCORE}.
  */
 const SESSION_SEARCH_WEIGHTS = {
@@ -197,7 +197,7 @@ export const sessionSearchResultKey = (result: SessionSearchResult): string =>
 
 /**
  * Ranked, with one membership rule for both kinds: the protocol-owned matcher over a haystack (a file's
- * name and path; a card's id, title, summary and lane). Ranking changes only order: it never
+ * name and path; a task's id, title, summary and lane). Ranking changes only order: it never
  * rejects a member.
  */
 export const filterSessionSearchResults = (
@@ -284,13 +284,13 @@ export function useSessionSearch(): SessionSearchContextValue {
 
 export function SessionSearchProvider({
   scope,
-  cards = NO_BOARD,
+  cards: tasks = NO_BOARD,
   focusSignal = 0,
   children,
 }: {
   readonly scope: FerretSearchScope | null;
-  /** This ferret's cards as Board read them; absent, the host has no board and no cards. */
-  readonly cards?: FerretCardsRead;
+  /** This ferret's tasks as Board read them; absent, the host has no board and no tasks. */
+  readonly cards?: FerretTasksRead;
   readonly focusSignal?: number;
   readonly children: ReactNode;
 }) {
@@ -298,7 +298,7 @@ export function SessionSearchProvider({
   const [stored, setStored] = useState<KeyedSnapshot>({ key: '', snapshot: INITIAL });
   const [query, setQueryState] = useState('');
   const [presenting, setPresenting] = useState<string | null>(null);
-  // Identity, not position: file and card reads settle independently and a
+  // Identity, not position: file and task reads settle independently and a
   // newly ranked row may be inserted before the reader's active result. An
   // index would then make Enter open a different result than the one still
   // highlighted a moment earlier.
@@ -307,7 +307,7 @@ export function SessionSearchProvider({
   const key = snapshotKey(scope);
   const currentKey = useRef(key);
   currentKey.current = key;
-  const ferret = cards;
+  const ferret = tasks;
   // The board read in flight for THIS session. Menus await it rather than offer an invented empty list.
   const taskPending = useRef<{
     readonly key: string;

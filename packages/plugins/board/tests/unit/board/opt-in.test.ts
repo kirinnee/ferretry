@@ -3,7 +3,7 @@ import should from 'should';
 import {
   type AnsweredAsk,
   approvalProblem,
-  cardLicence,
+  taskLicence,
   offBoardRefusal,
   TRACK_QUESTION,
 } from '../../../daemon/lib/board/index.ts';
@@ -24,19 +24,19 @@ const facts = { boardOn: false, parent: false, approved: false };
 
 describe('whether a ferret may make a card', () => {
   it('should let any card through where the board is on', () => {
-    should(cardLicence({ boardOn: true, parent: true, approved: true })).equal('board-on');
+    should(taskLicence({ boardOn: true, parent: true, approved: true })).equal('board-on');
   });
 
   it('should let a card under a parent the ferret holds through where the board is off', () => {
-    should(cardLicence({ ...facts, parent: true, approved: true })).equal('parent');
+    should(taskLicence({ ...facts, parent: true, approved: true })).equal('parent');
   });
 
   it("should let a card on the owner's Yes through where the board is off", () => {
-    should(cardLicence({ ...facts, approved: true })).equal('approval');
+    should(taskLicence({ ...facts, approved: true })).equal('approval');
   });
 
   it('should refuse a card with nothing behind it', () => {
-    should(cardLicence(facts)).be.null();
+    should(taskLicence(facts)).be.null();
   });
 });
 

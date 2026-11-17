@@ -10,7 +10,7 @@ import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import {
-  type ArchiveCardStanding,
+  type ArchiveTaskStanding,
   ArchiveKeeps,
   type ArchiveKeepSource,
   type FerretId,
@@ -25,9 +25,9 @@ import { ARCHIVE_PASS_JOB } from '../../../daemon/modules/archive.ts';
 
 export const HOUR_MS = 3_600_000;
 
-/** What Board says: the cards it holds, and whether it can answer at all. */
+/** What Board says: the tasks it holds, and whether it can answer at all. */
 class FakeBoard {
-  cards: ArchiveCardStanding[] = [];
+  cards: ArchiveTaskStanding[] = [];
   broken = false;
   asked = 0;
   source(): ArchiveKeepSource {

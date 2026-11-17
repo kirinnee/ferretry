@@ -5,7 +5,7 @@ import { StoreDamagedError, UndeclaredStateFileError } from '../../../host/state
 import {
   allFiles,
   blobFile,
-  cardFile,
+  taskFile,
   counterFile,
   keyFile,
   logFile,
@@ -147,20 +147,20 @@ describe('StatePort: update, collections, refusals', () => {
 
   test('a collection fills the * with a name, lists names sorted, and removes one', async () => {
     const { port } = memoryStore();
-    await port.write(cardFile, { count: 1 }, 'b');
-    await port.write(cardFile, { count: 2 }, 'a');
-    expect(await port.list(cardFile)).toEqual(['a', 'b']);
-    expect(await port.read(cardFile, 'a')).toEqual({ ok: true, value: { count: 2 } });
-    await port.remove(cardFile, 'a');
-    expect(await port.list(cardFile)).toEqual(['b']);
+    await port.write(taskFile, { count: 1 }, 'b');
+    await port.write(taskFile, { count: 2 }, 'a');
+    expect(await port.list(taskFile)).toEqual(['a', 'b']);
+    expect(await port.read(taskFile, 'a')).toEqual({ ok: true, value: { count: 2 } });
+    await port.remove(taskFile, 'a');
+    expect(await port.list(taskFile)).toEqual(['b']);
   });
 
   test('a collection needs a name, a single file takes none, and a name cannot climb out', async () => {
     const { port } = memoryStore();
-    await expect(port.read(cardFile)).rejects.toBeInstanceOf(UndeclaredStateFileError);
+    await expect(port.read(taskFile)).rejects.toBeInstanceOf(UndeclaredStateFileError);
     await expect(port.read(counterFile, 'x')).rejects.toBeInstanceOf(UndeclaredStateFileError);
     for (const bad of ['..', '../x', 'a/b', '', '.hidden']) {
-      await expect(port.read(cardFile, bad)).rejects.toBeInstanceOf(UndeclaredStateFileError);
+      await expect(port.read(taskFile, bad)).rejects.toBeInstanceOf(UndeclaredStateFileError);
     }
   });
 

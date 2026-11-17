@@ -1,16 +1,16 @@
 /**
- * NO UMBRELLA CARDS (docs/board.md § One card, one outcome): a card shows the progress of ONE outcome, and its asks
- * ride its agenda. A card that gathers many outcomes ("Agenda overhaul", "Misc fixes") shows no progress anybody can
- * read and hides the asks of each part, so `fy card new` refuses one unless `--broad "<why this must be one card>"`
- * says why it must be one. A card under a `--parent` is a part of a bigger card already, so it is never refused.
+ * NO UMBRELLA TASKS (docs/board.md § One task, one outcome): a task shows the progress of ONE outcome, and its asks
+ * ride its agenda. A task that gathers many outcomes ("Agenda overhaul", "Misc fixes") shows no progress anybody can
+ * read and hides the asks of each part, so `fy task new` refuses one unless `--broad "<why this must be one task>"`
+ * says why it must be one. A task under a `--parent` is a part of a bigger task already, so it is never refused.
  *
- * Pure and total: the controller hands it the card's title, summary and parent, and turns the signals into a refusal.
+ * Pure and total: the controller hands it the task's title, summary and parent, and turns the signals into a refusal.
  */
 
 export interface UmbrellaShape {
   readonly title: string;
   readonly summary?: string | undefined;
-  /** The card this one is part of, when `--parent` names one. */
+  /** The task this one is part of, when `--parent` names one. */
   readonly parent?: unknown;
 }
 
@@ -42,7 +42,7 @@ export const broadWord = (title: string): { readonly word: string; readonly stro
 };
 
 /**
- * Why a card looks like an umbrella, one reason a line; empty when it looks like one outcome. It is one when it has no
+ * Why a task looks like an umbrella, one reason a line; empty when it looks like one outcome. It is one when it has no
  * parent and its title uses a strong broad word, or its summary lists three outcomes or more, or a weak broad word
  * comes with a summary that lists two.
  */
@@ -72,5 +72,5 @@ export function umbrellaRefusal(signals: readonly string[], binary: string): str
   ].join('\n');
 }
 
-/** One line printed when a card with the owner's words is filed under a parent: a sub-card is private. */
-export const SUB_CARD_ASK_WARNING = 'this task will be private (a sub-task); drop --parent so the owner sees it';
+/** One line printed when a task with the owner's words is filed under a parent: a sub-card is private. */
+export const SUB_TASK_ASK_WARNING = 'this task will be private (a sub-task); drop --parent so the owner sees it';

@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import {
-  type CardActor,
-  type Card,
-  type CardCreateRequestInput,
+  type TaskActor,
+  type Task,
+  type TaskCreateRequestInput,
   CardCreateRequestSchema,
 } from '../../../contract/index.ts';
 import should from 'should';
@@ -15,7 +15,7 @@ import {
   ownerWordsMatch,
   wordsFerretOf,
 } from '../../../daemon/lib/board/index.ts';
-import { card, MemoryBoardStore, PROJECT, type ServiceWorld, world } from './support.ts';
+import { boardTask, MemoryBoardStore, PROJECT, type ServiceWorld, world } from './support.ts';
 
 const OWNER_ASK = 'Make the inbox show only cards a person asked for, with the project name next to the machine';
 
@@ -92,7 +92,7 @@ describe('ownerWordsMatch', () => {
 });
 
 describe('wordsFerretOf', () => {
-  const of = (source: string, createdBy: CardActor = { kind: 'owner' }) =>
+  const of = (source: string, createdBy: TaskActor = { kind: 'owner' }) =>
     wordsFerretOf({ createdBy, ask: { text: OWNER_ASK, source } });
 
   it('should read the session an ask source names, in any of the ways it is written', () => {
@@ -109,7 +109,7 @@ describe('wordsFerretOf', () => {
   });
 });
 
-const ferretActor = (ferret: string): CardActor => ({ kind: 'ferret', name: ferret, ferret });
+const ferretActor = (ferret: string): TaskActor => ({ kind: 'ferret', name: ferret, ferret });
 const ferretMade = (source: string, text = OWNER_ASK) =>
   ({ createdBy: ferretActor('lead'), ask: { text, source } }) as const;
 
@@ -187,7 +187,7 @@ const owner: BoardCaller = { kind: 'owner' };
 const adminOwner: BoardCaller = { kind: 'owner', via: 'admin-token' };
 const lead: BoardCaller = { kind: 'ferret', ferret: 'lead' };
 
-const create = (input: Partial<CardCreateRequestInput> = {}) =>
+const create = (input: Partial<TaskCreateRequestInput> = {}) =>
   CardCreateRequestSchema.parse({
     kind: 'feature',
     title: 'Board store',
@@ -206,16 +206,16 @@ class FakeOwnerWords implements OwnerWords {
   }
 }
 
-const serviceWith = (cards: readonly Card[], ownerWords?: OwnerWords, overrides: Partial<ServiceWorld> = {}) => {
+const serviceWith = (tasks: readonly Task[], ownerWords?: OwnerWords, overrides: Partial<ServiceWorld> = {}) => {
   const ports = world({
-    store: new MemoryBoardStore(cards),
+    store: new MemoryBoardStore(tasks),
     ...(ownerWords === undefined ? {} : { ownerWords }),
     ...overrides,
   });
   return { ports, service: new BoardService(ports) };
 };
 
-const stored = (ports: ServiceWorld, id: string): Card => ports.store.cards.get(id) as Card;
+const stored = (ports: ServiceWorld, id: string): Task => ports.store.cards.get(id) as Task;
 
 describe('creating a card decides who asked, once', () => {
   it("should store person when the ask is words the owner said the ferret's session", async () => {
@@ -281,10 +281,10 @@ describe('a view reads who asked from the card', () => {
   it('should prefer the stored answer over the ask source, and fall back to the source for an old card', async () => {
     const asked = { text: 'x', source: 'owner (board)' };
     const { service } = serviceWith([
-      card({ id: 'F1', ask: asked, askedBy: 'agent' }),
-      card({ id: 'F2', ask: { text: 'x', source: 'session:lead' }, askedBy: 'person' }),
-      card({ id: 'F3', ask: asked }),
-      card({ id: 'F4', ask: { text: 'x', source: 'session:lead' } }),
+      boardTask({ id: 'F1', ask: asked, askedBy: 'agent' }),
+      boardTask({ id: 'F2', ask: { text: 'x', source: 'session:lead' }, askedBy: 'person' }),
+      boardTask({ id: 'F3', ask: asked }),
+      boardTask({ id: 'F4', ask: { text: 'x', source: 'session:lead' } }),
     ]);
     should((await service.card('F1')).card.askedBy).equal('agent');
     should((await service.card('F2')).card.askedBy).equal('person');

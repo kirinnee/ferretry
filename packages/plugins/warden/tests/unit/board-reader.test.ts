@@ -1,27 +1,27 @@
 import { describe, expect, test } from 'bun:test';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
-import type { BoardApi, CardView, FocusCard } from '@ferretry/plugin-board/contract';
+import type { BoardApi, TaskView, FocusTask } from '@ferretry/plugin-board/contract';
 import { fakeBoard } from '@ferretry/plugin-board/contract/testing';
 import { boardReader } from '../../daemon/board.ts';
 import { lanes, PROJECT } from '../support/board.ts';
-import { cardView } from './board-fixtures.ts';
+import { taskView } from './board-fixtures.ts';
 
-const cardsOf = (count: number, from = 1): CardView[] =>
+const tasksOf = (count: number, from = 1): TaskView[] =>
   Array.from({ length: count }, (_, each) =>
-    cardView({ id: `F${String(from + each)}`, owner: 'lead', assignee: 'worker' }, { activity: 'orphaned' }),
+    taskView({ id: `F${String(from + each)}`, owner: 'lead', assignee: 'worker' }, { activity: 'orphaned' }),
   );
 
-/** Board's contract with the reads the reader uses: the orphaned cards in one read, the classic lanes, some focus cards. */
+/** Board's contract with the reads the reader uses: the orphaned tasks in one read, the classic lanes, some focus tasks. */
 const boardOf = (
-  cards: readonly CardView[],
-  options: { readonly focus?: Readonly<Record<string, FocusCard>> } = {},
+  tasks: readonly TaskView[],
+  options: { readonly focus?: Readonly<Record<string, FocusTask>> } = {},
 ): { readonly board: BoardApi; readonly reads: string[] } => {
   const reads: string[] = [];
   const board: BoardApi = {
     ...fakeBoard(),
     orphanedCards: async () => {
       reads.push('orphanedCards');
-      return { cards, laneSets: [lanes(PROJECT)] };
+      return { cards: tasks, laneSets: [lanes(PROJECT)] };
     },
     cardsPage: async () => {
       reads.push('cardsPage');
@@ -41,24 +41,24 @@ const nobodyIsAHelper = { isHelper: async () => false };
 describe('the Warden’s board reader', () => {
   test('reads every orphaned card in one call, however many there are (more than a page of 500)', async () => {
     // Arrange
-    const { board, reads } = boardOf(cardsOf(1203));
+    const { board, reads } = boardOf(tasksOf(1203));
 
     // Act
     const read = await boardReader(board, nobodyIsAHelper).read();
 
     // Assert
-    expect(read?.views.map(view => view.id)).toEqual(cardsOf(1203).map(view => view.id));
+    expect(read?.views.map(view => view.id)).toEqual(tasksOf(1203).map(view => view.id));
     expect(reads).toEqual(['orphanedCards']);
   });
 
   test('a card that leaves or joins the orphaned set between reads cannot make the read skip or repeat another', async () => {
-    // Arrange: a board that changes after every read it answers (a ferret picks up the first card; a new card is orphaned)
-    let orphaned = cardsOf(600);
+    // Arrange: a board that changes after every read it answers (a ferret picks up the first task; a new task is orphaned)
+    let orphaned = tasksOf(600);
     const board: BoardApi = {
       ...fakeBoard(),
       orphanedCards: async () => {
         const snapshot = { cards: orphaned, laneSets: [lanes(PROJECT)] };
-        orphaned = [...cardsOf(1, 1000), ...orphaned.slice(1)];
+        orphaned = [...tasksOf(1, 1000), ...orphaned.slice(1)];
         return snapshot;
       },
       cardsPage: async () => {
@@ -69,15 +69,15 @@ describe('the Warden’s board reader', () => {
     // Act
     const read = await boardReader(board, nobodyIsAHelper).read();
 
-    // Assert: exactly the snapshot, each card once
+    // Assert: exactly the snapshot, each task once
     const ids = read?.views.map(view => view.id) ?? [];
-    expect(ids).toEqual(cardsOf(600).map(view => view.id));
+    expect(ids).toEqual(tasksOf(600).map(view => view.id));
     expect(new Set(ids).size).toBe(600);
   });
 
   test('names each lane from the snapshot’s lane sets, by project', async () => {
     // Arrange
-    const { board } = boardOf(cardsOf(1));
+    const { board } = boardOf(tasksOf(1));
 
     // Act
     const read = await boardReader(board, nobodyIsAHelper).read();
@@ -101,8 +101,8 @@ describe('the Warden’s board reader', () => {
 
   test('a ferret’s focus card comes with the lane set that came back with it, and a helper is marked', async () => {
     // Arrange
-    const card = cardView({ id: 'F7', owner: 'lead', assignee: 'worker' });
-    const focus: FocusCard = { card, laneSet: lanes(PROJECT) };
+    const task = taskView({ id: 'F7', owner: 'lead', assignee: 'worker' });
+    const focus: FocusTask = { card: task, laneSet: lanes(PROJECT) };
     const { board, reads } = boardOf([], { focus: { worker: focus, lead: focus } });
     const reader = boardReader(board, { isHelper: async ferret => ferret === 'worker' });
 
@@ -120,8 +120,8 @@ describe('the Warden’s board reader', () => {
 
   test('a focus card whose board has no lane set carries none', async () => {
     // Arrange
-    const card = cardView({ id: 'F7', owner: 'lead', assignee: 'worker' });
-    const { board } = boardOf([], { focus: { lead: { card, laneSet: null } } });
+    const task = taskView({ id: 'F7', owner: 'lead', assignee: 'worker' });
+    const { board } = boardOf([], { focus: { lead: { card: task, laneSet: null } } });
 
     // Act
     const lead = await boardReader(board, nobodyIsAHelper).focusCard('lead');

@@ -2,7 +2,7 @@
  * THE WORK SEARCH INDEX: an inverted index over {@link WorkDocument}s, in memory, updated one document at
  * a time (docs/work-search.md § Ranking).
  *
- * It is a projection and nothing else. It holds no truth of its own — the card files and the asks
+ * It is a projection and nothing else. It holds no truth of its own — the task files and the asks
  * ledgers do — and it is rebuilt from them at every boot; {@link WorkSearchService} decides when a
  * document is stale. Every operation is synchronous, so a search never sees half an update.
  *
@@ -11,7 +11,7 @@
  * 2. Every word must match somewhere (the last as a prefix, so a half-typed word already finds); a word
  *    counts by the best field it is in — title ≫ summary and ask ≫ premise and context ≫ the rest — and the
  *    whole query read as one phrase in the title adds more.
- * 3. Open work, then recent work, is lifted: a match on last week's card beats the same match on one
+ * 3. Open work, then recent work, is lifted: a match on last week's task beats the same match on one
  *    closed a month ago.
  * 4. Closed, dropped and addressed work older than the window is left out — except an exact id, which
  *    names one thing and finds it at any age, and a query that asks for `all`. What the window left out is
@@ -69,7 +69,7 @@ const OPEN_BOOST = 1.25;
 const RECENCY_HALF_LIFE_DAYS = 14;
 const RECENCY_BOOST = 0.5;
 
-/** Where a related check draws its lines (see {@link WorkIndex.related}); tuned on a real board of ~500 cards. */
+/** Where a related check draws its lines (see {@link WorkIndex.related}); tuned on a real board of ~500 tasks. */
 const RELATED_STRONG_TITLE = 0.6;
 const RELATED_STRONG_BODY = 0.45;
 const RELATED_STRONG_BODY_TITLE = 0.25;
@@ -119,9 +119,9 @@ export class WorkIndex {
   private stale = 0;
 
   get size(): { readonly cards: number; readonly asks: number } {
-    let cards = 0;
-    for (const { document } of this.documents.values()) if (document.kind === 'card') cards += 1;
-    return { cards, asks: this.documents.size - cards };
+    let tasks = 0;
+    for (const { document } of this.documents.values()) if (document.kind === 'card') tasks += 1;
+    return { cards: tasks, asks: this.documents.size - tasks };
   }
 
   keys(): IterableIterator<string> {
@@ -257,7 +257,7 @@ export class WorkIndex {
    * The rarity of a document's own words that were NOT asked is `unaskedRarity` ({@link UnaskedRarity}). Those words
    * were not re-scrubbed in every item that holds them, so the index's count of them still includes every item a
    * secret was written in when it was indexed: `tokensOf` splits `sk-zqbody` into words, the vault masks the whole
-   * value only, and an ordinary card holding `zqbody` would rank by how many items hold a key containing it. Unless the
+   * value only, and an ordinary task holding `zqbody` would rank by how many items hold a key containing it. Unless the
    * index is rebuilt on every change of the values (`index`), such a word weighs as if no other item held it.
    */
   relatedAmong(

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { CardView } from '../../../contract/index.ts';
+import type { TaskView } from '../../../contract/index.ts';
 import { laneNameOf } from '../../../app/lib/board-detail.ts';
 import {
   AskSection,
@@ -15,7 +15,7 @@ import {
   TermsTable,
 } from '../../../app/views/detail/board-detail-sections.tsx';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
-import { card, laneSetFor, laptop, workstation } from './board-support.ts';
+import { boardTask, laneSetFor, laptop, workstation } from './board-support.ts';
 
 const NOW = Date.parse('2026-08-01T10:04:00.000Z');
 const LEAD = 'mvuc7tsf-0c3d50df';
@@ -119,7 +119,7 @@ describe('HowToTest', () => {
 
 describe('S-0033 AskSection', () => {
   it('quotes the ask and where it was said, without a clarification list when there are none', async () => {
-    const task = card('F1', { ask: { text: 'Ship the board', source: 'chat' } });
+    const task = boardTask('F1', { ask: { text: 'Ship the board', source: 'chat' } });
     const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
     expect(root.querySelector('blockquote')?.textContent).toBe('Ship the board');
     expect(text(root, '[data-kind="ask-origin"]')).toMatch(/^from Denisha via chat · \d+/u);
@@ -127,14 +127,14 @@ describe('S-0033 AskSection', () => {
   });
 
   it('draws the ask and nothing that asks from it: no form, field or answer button', async () => {
-    const task = card('F1', { ask: { text: 'Ship the board', source: 'chat' } });
+    const task = boardTask('F1', { ask: { text: 'Ship the board', source: 'chat' } });
     const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
     expect(root.querySelector('form, input, textarea, button')).toBeNull();
   });
 
   it('says who and where, and links the chat when the source is a session', async () => {
     const opened: string[] = [];
-    const task = card('F1', {
+    const task = boardTask('F1', {
       createdBy: { kind: 'owner' },
       ask: { text: 'Ship the board', source: 'session:mvuc7tsf-0c3d50df' },
     });
@@ -150,15 +150,15 @@ describe('S-0033 AskSection', () => {
 
   it('leaves the source off when it is the owner speaking and the card has no age', async () => {
     const task = {
-      ...card('F1', { createdBy: { kind: 'owner' }, ask: { text: 'Ship the board', source: 'owner (board)' } }),
-      createdAt: 'never' as CardView['createdAt'],
+      ...boardTask('F1', { createdBy: { kind: 'owner' }, ask: { text: 'Ship the board', source: 'owner (board)' } }),
+      createdAt: 'never' as TaskView['createdAt'],
     };
     const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
     expect(text(root, '[data-kind="ask-origin"]')).toBe('from you');
   });
 
   it('credits each clarification to you or to the ferret by name', async () => {
-    const task = card('F1', {
+    const task = boardTask('F1', {
       clarifications: [
         { text: 'Only on phones', source: 'chat', at: '2026-08-01T09:10:00.000Z', by: { kind: 'owner' } },
         {
@@ -188,7 +188,7 @@ describe('S-0033 AskSection', () => {
 
 describe('S-0033 AskSection quote', () => {
   it('drops the raw note a ferret left in front of the words', async () => {
-    const task = card('F1', { ask: { text: '(sada, found live) Fix the login', source: 'chat' } });
+    const task = boardTask('F1', { ask: { text: '(sada, found live) Fix the login', source: 'chat' } });
     const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
     expect(root.querySelector('blockquote')?.textContent).toBe('Fix the login');
   });
@@ -196,7 +196,7 @@ describe('S-0033 AskSection quote', () => {
 
 describe('TermsTable', () => {
   it('lists each term with its meaning', async () => {
-    const task = card('F1', { terms: [{ term: 'Lane', meaning: 'A column of the board.' }] });
+    const task = boardTask('F1', { terms: [{ term: 'Lane', meaning: 'A column of the board.' }] });
     const root = await show(<TermsTable terms={task.terms} />);
     expect(root.querySelector('tbody th')?.textContent).toBe('Lane');
     expect(root.querySelector('tbody td')?.textContent).toBe('A column of the board.');
@@ -209,7 +209,7 @@ describe('TermsTable', () => {
 });
 
 describe('ChildrenList', () => {
-  const child = card('F2', {
+  const child = boardTask('F2', {
     title: 'Sub work',
     parent: { id: 'F1' },
     activity: 'stale',
@@ -235,7 +235,7 @@ describe('ChildrenList', () => {
   });
 
   it('leaves the age off a child that was never touched', async () => {
-    const fresh = { ...child, lastTouchedAt: '' as CardView['lastTouchedAt'] };
+    const fresh = { ...child, lastTouchedAt: '' as TaskView['lastTouchedAt'] };
     const root = await show(
       <ChildrenList lines={[{ task: fresh, laneName: 'Todo' }]} now={NOW} onOpen={() => undefined} />,
     );
@@ -245,13 +245,13 @@ describe('ChildrenList', () => {
 
 describe('DependencyChips', () => {
   it('draws nothing when there are no dependencies either way', async () => {
-    const root = await show(<DependencyChips onOpen={() => undefined} task={card('F1')} />);
+    const root = await show(<DependencyChips onOpen={() => undefined} task={boardTask('F1')} />);
     expect(root.textContent).toBe('');
   });
 
   it('draws what it waits for and marks the ones still blocking, with no way to stop waiting', async () => {
     const opened: string[] = [];
-    const task = card('F1', {
+    const task = boardTask('F1', {
       dependsOn: [
         { task: { id: 'F2' }, until: 'shipped' },
         {
@@ -280,11 +280,11 @@ describe('DependencyChips', () => {
   });
 
   it('draws no Depends-on row when it only blocks, and no stop button either way', async () => {
-    const task = card('F1', { blocks: [{ id: 'F9' }] });
+    const task = boardTask('F1', { blocks: [{ id: 'F9' }] });
     const root = await show(<DependencyChips onOpen={() => undefined} task={task} />);
     expect(root.querySelector('[aria-label="Depends on"]')).toBeNull();
     expect(root.querySelector('[aria-label="Blocks"]')).not.toBeNull();
-    const waiting = card('F1', { dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] });
+    const waiting = boardTask('F1', { dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] });
     await view?.render(<DependencyChips onOpen={() => undefined} task={waiting} />);
     expect(root.querySelector('.fy-board-chip__x')).toBeNull();
     expect(root.querySelector('[aria-label="Blocks"]')).toBeNull();
@@ -292,16 +292,16 @@ describe('DependencyChips', () => {
 });
 
 describe('DependsLine', () => {
-  const line = (task: CardView) => <DependsLine onOpen={() => undefined} task={task} />;
+  const line = (task: TaskView) => <DependsLine onOpen={() => undefined} task={task} />;
 
   it('says "Nothing." and offers no way to add a dependency', async () => {
-    const root = await show(line(card('F1')));
+    const root = await show(line(boardTask('F1')));
     expect(root.textContent).toBe('Nothing.');
     expect(root.querySelector('button, form, input, [data-action="add-dependency"]')).toBeNull();
   });
 
   it('draws the chips of what it already waits for, and still no way to add or stop one', async () => {
-    const waiting = card('F1', { dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] });
+    const waiting = boardTask('F1', { dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] });
     const root = await show(line(waiting));
     expect(root.textContent).not.toContain('Nothing.');
     expect(root.querySelector('.fy-board-chip')).not.toBeNull();
@@ -312,12 +312,12 @@ describe('DependsLine', () => {
 
 describe('S-0138 LinksSection', () => {
   it('says nothing is linked when there is nothing', async () => {
-    const root = await show(<LinksSection runningOn={[]} task={card('F1')} />);
+    const root = await show(<LinksSection runningOn={[]} task={boardTask('F1')} />);
     expect(root.textContent).toBe('No PR, branch or doc linked yet.');
   });
 
   it('describes each PR state, with its checks and release', async () => {
-    const task = card('F1', {
+    const task = boardTask('F1', {
       links: links({
         prs: [
           pr(1, { draft: true }),
@@ -347,7 +347,7 @@ describe('S-0138 LinksSection', () => {
   });
 
   it('says where a shipped card is running, per machine', async () => {
-    const task = card('F1', {
+    const task = boardTask('F1', {
       links: links({ prs: [merged(6, RELEASE)] }),
       shippedIn: RELEASE,
     });
@@ -369,7 +369,7 @@ describe('S-0138 LinksSection', () => {
   });
 
   it('shows a shipped card with no machines listed, and anchors only web links', async () => {
-    const task = card('F1', {
+    const task = boardTask('F1', {
       shippedIn: RELEASE,
       links: links({ branch: 'feat/board', docs: ['https://example.test/docs/design', 'docs/design.md'] }),
     });
@@ -388,7 +388,7 @@ describe('S-0112 HistorySection', () => {
   const context = { names, laneName: (id: string) => laneNameOf(laneSetFor(), id) };
 
   it('draws the newest event first with who did it and why', async () => {
-    const task = card('F1', {
+    const task = boardTask('F1', {
       history: [
         { seq: 1, at: at(0), actor: { kind: 'ferret', name: LEAD, ferret: LEAD }, type: 'created', laneId: 'todo' },
         {
@@ -414,7 +414,7 @@ describe('S-0112 HistorySection', () => {
   });
 
   it('says what the admin token may be, as a tooltip on its name and in words a phone shows too', async () => {
-    const task = card('F1', {
+    const task = boardTask('F1', {
       history: [{ seq: 1, at: at(0), actor: { kind: 'owner', via: 'admin-token' }, type: 'created', laneId: 'todo' }],
     });
     const root = await show(<HistorySection context={context} now={NOW} task={task} />);
@@ -427,7 +427,7 @@ describe('S-0112 HistorySection', () => {
   });
 
   it('gives no other actor a note or a tooltip', async () => {
-    const task = card('F1', {
+    const task = boardTask('F1', {
       history: [{ seq: 1, at: at(0), actor: { kind: 'owner' }, type: 'created', laneId: 'todo' }],
     });
     const root = await show(<HistorySection context={context} now={NOW} task={task} />);
@@ -436,7 +436,7 @@ describe('S-0112 HistorySection', () => {
   });
 
   it('shows small changes inline as muted rows, with nothing that folds', async () => {
-    const task = card('F1', {
+    const task = boardTask('F1', {
       history: [
         { seq: 1, at: at(0), actor: { kind: 'ferret', name: LEAD, ferret: LEAD }, type: 'created', laneId: 'todo' },
         { seq: 2, at: at(1), actor: { kind: 'ferret', name: LEAD, ferret: LEAD }, type: 'file-claimed', path: 'a.ts' },

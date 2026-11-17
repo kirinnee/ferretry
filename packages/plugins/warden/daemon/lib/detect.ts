@@ -4,7 +4,7 @@
  * set. No I/O, no clock, no globals — everything arrives through the arguments.
  */
 
-import type { CardRef } from '@ferretry/plugin-board/contract';
+import type { TaskRef } from '@ferretry/plugin-board/contract';
 import { susFindings } from './sus.ts';
 import { firstInstantMs, instantMs, isoFromMs, latestInstantMs } from './time.ts';
 import {
@@ -29,7 +29,7 @@ export type WardenAnomalyKind =
   | 'provider_unavailable'
   /** Never detected: the owner asked the Warden to investigate this ferret. */
   | 'owner_request'
-  /** A card in an active or review lane whose ferret is finished, with nothing alive under it (`orphans.ts`). */
+  /** A task in an active or review lane whose ferret is finished, with nothing alive under it (`orphans.ts`). */
   | 'orphaned_card'
   /** A sub-ferret that has not answered its parent's last message, its turn long ended (`report-overdue.ts`). */
   | 'report_overdue'
@@ -67,8 +67,8 @@ export interface WardenAnomaly {
    * (`backoff.ts`); a new episode is a new subject at once. See {@link anomalySubject}.
    */
   readonly subject?: string;
-  /** The board card the anomaly is about, for a kind about a card (`orphaned_card`). */
-  readonly task?: CardRef;
+  /** The board task the anomaly is about, for a kind about a task (`orphaned_card`). */
+  readonly task?: TaskRef;
 }
 
 /**

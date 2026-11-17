@@ -1,16 +1,16 @@
 import { describe, it } from 'bun:test';
-import type { Card, CardGate, PrLink } from '../../../contract/index.ts';
+import type { Task, TaskGate, PrLink } from '../../../contract/index.ts';
 import should from 'should';
 import { nothingToTryReason, saysNothingToTry, tryItVerdict } from '../../../daemon/lib/board/index.ts';
-import { card } from './support.ts';
+import { boardTask } from './support.ts';
 
-const TRY_IT: Pick<CardGate, 'options'> = {
+const TRY_IT: Pick<TaskGate, 'options'> = {
   options: [
     { id: 'done', label: 'Done', outcome: 'close' },
     { id: 'not-good', label: 'Not good', outcome: 'reopen-with-ask' },
   ],
 };
-const PLAN: Pick<CardGate, 'options'> = { options: [{ id: 'ok', label: 'OK to build', outcome: 'next' }] };
+const PLAN: Pick<TaskGate, 'options'> = { options: [{ id: 'ok', label: 'OK to build', outcome: 'next' }] };
 
 const pr = (number: number, changes?: PrLink['changes'], state: PrLink['state'] = 'merged'): PrLink => ({
   url: `https://github.com/ferretry/ferretry/pull/${String(number)}`,
@@ -26,16 +26,16 @@ const pr = (number: number, changes?: PrLink['changes'], state: PrLink['state'] 
   ...(changes === undefined ? {} : { changes }),
 });
 
-/** A card a person asked for, with steps to try and no PR: the case that is asked. */
-const tryable = (overrides: Partial<Card> = {}): Card =>
-  card({
+/** A task a person asked for, with steps to try and no PR: the case that is asked. */
+const tryable = (overrides: Partial<Task> = {}): Task =>
+  boardTask({
     ask: { text: 'make it', source: 'owner' },
     createdBy: { kind: 'ferret', name: 'lead', ferret: 'lead' },
     howToTest: '1. Open the Inbox\n2. Tap Done',
     ...overrides,
   });
 
-const withPrs = (...prs: PrLink[]): Partial<Card> => ({
+const withPrs = (...prs: PrLink[]): Partial<Task> => ({
   links: { prs, branch: null, commits: [], docs: [] },
 });
 
@@ -101,7 +101,7 @@ describe('tryItVerdict', () => {
         kind: 'nothing',
         why: 'it is a private task',
       });
-      // No stored visibility: a ferret's own card reads as private by the daemon's default.
+      // No stored visibility: a ferret's own task reads as private by the daemon's default.
       should(tryItVerdict(tryable({ ask: { text: 'tidy', source: 'session:lead' }, askedBy: 'agent' }), TRY_IT)).match({
         kind: 'nothing',
         why: 'it is a private task',
@@ -146,7 +146,7 @@ describe('tryItVerdict', () => {
 
     it('does not count a PR that is not merged', () => {
       should(tryItVerdict(tryable(withPrs(pr(1, 'docs-tests', 'open'))), TRY_IT)).eql({ kind: 'ask' });
-      // An open code PR beside merged docs PRs does not stop the card from having nothing merged to try.
+      // An open code PR beside merged docs PRs does not stop the task from having nothing merged to try.
       should(tryItVerdict(tryable(withPrs(pr(1, 'docs-tests'), pr(2, 'code', 'open'))), TRY_IT)).eql({
         kind: 'nothing',
         why: 'its PRs change only docs and tests',

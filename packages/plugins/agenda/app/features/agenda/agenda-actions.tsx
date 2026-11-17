@@ -1,10 +1,10 @@
 /**
- * THE ANSWER BAR OF ONE ITEM CARD, pinned under its question. Answering is replying, so there is no
+ * THE ANSWER BAR OF ONE ITEM TASK, pinned under its question. Answering is replying, so there is no
  * text box here: the owner types in the ferret's normal message box, and a picked option carries that text.
  *
- *  1. The card's own answers as buttons (three at most; an old choice's options past the third plain, with
+ *  1. The task's own answers as buttons (three at most; an old choice's options past the third plain, with
  *     no arrow), the recommended one tagged "Recommended" and the reason said once, in one line, under them.
- *     An arrow on each only where the card can be swiped.
+ *     An arrow on each only where the task can be swiped.
  *  2. A text-only ask has no options: a line says to reply in the message box below.
  *  3. A quiet second row: Skip — move on, unanswered (only where the host can) · "Details ›" (only where the
  *     item has more to read) · a ⋯ menu holding "Not needed…", which dismisses.
@@ -13,7 +13,7 @@
  * here sends anything: every answer leaves through the callbacks.
  */
 
-import { type AgendaAskOption, type AgendaCardAnswer, GOT_IT_LABEL, plainLabel } from '@ferretry/core-asks/contract';
+import { type AgendaAskOption, type AgendaTaskAnswer, GOT_IT_LABEL, plainLabel } from '@ferretry/core-asks/contract';
 import { ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, Ellipsis, LoaderCircle, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import type { AnswerDirection } from '../../lib/agenda-answers.ts';
@@ -163,14 +163,14 @@ function AnswerButton({
   primary,
   onAnswer,
 }: {
-  readonly answer: AgendaCardAnswer;
+  readonly answer: AgendaTaskAnswer;
   readonly busy: boolean;
   readonly swipeHints: boolean;
   readonly arrows: boolean;
   readonly recommended: boolean;
-  /** The highlighted answer: the recommended one when the card recommends one of its answers, else → (yes). */
+  /** The highlighted answer: the recommended one when the task recommends one of its answers, else → (yes). */
   readonly primary: boolean;
-  readonly onAnswer: (answer: AgendaCardAnswer) => void;
+  readonly onAnswer: (answer: AgendaTaskAnswer) => void;
 }) {
   const hintId = useId();
   const arrow = arrows ? ARROWS[answer.direction] : null;
@@ -202,11 +202,11 @@ function AnswerButton({
 }
 
 export interface AgendaActionsProps {
-  /** The card's answers, left · up · right. */
-  readonly answers: readonly AgendaCardAnswer[];
+  /** The task's answers, left · up · right. */
+  readonly answers: readonly AgendaTaskAnswer[];
   /** An old choice's options past the third: buttons with no direction. */
   readonly extraOptions: readonly AgendaAskOption[];
-  /** The card can be swiped: each answer also says which way, aloud. */
+  /** The task can be swiped: each answer also says which way, aloud. */
   readonly swipeHints: boolean;
   /** Draws each answer's direction arrow. Defaults to `swipeHints`. */
   readonly arrows?: boolean;
@@ -217,13 +217,13 @@ export interface AgendaActionsProps {
   readonly recommendationLine?: string | undefined;
   /** An item waiting on its ferret says so, above the bar: "Waiting on Piper". */
   readonly waiting?: string;
-  /** Skips the card unanswered; present only where the host can skip. */
+  /** Skips the task unanswered; present only where the host can skip. */
   readonly onSkip?: () => void;
   /** Opens the detail; present only where the item has something to read beyond its question. */
   readonly onOpenDetail?: () => void;
   /** Says the answer is the message box's text: a text-only ask, or a review that wants changes written. */
   readonly composerHint?: string;
-  readonly onAnswer: (answer: AgendaCardAnswer) => void;
+  readonly onAnswer: (answer: AgendaTaskAnswer) => void;
   readonly onOption: (option: AgendaAskOption) => void;
   /** Whether "Not needed…" is in the ⋯ menu — it is not when an answer already dismisses (a Skip). */
   readonly dismissInMenu: boolean;
@@ -231,11 +231,11 @@ export interface AgendaActionsProps {
   readonly onDismiss: () => void;
   /** A plain notification: the one action is "Got it". */
   readonly clear?: () => void;
-  /** Quiet extras in the second row (the full card's "Add to reply"), between `secondaryLead` and the ⋯ menu. */
+  /** Quiet extras in the second row (the full task's "Add to reply"), between `secondaryLead` and the ⋯ menu. */
   readonly secondaryExtra?: ReactNode;
-  /** The start of the second row (the full card's `‹ 1 of 7 ›`). */
+  /** The start of the second row (the full task's `‹ 1 of 7 ›`). */
   readonly secondaryLead?: ReactNode;
-  /** The end of the second row, after the ⋯ menu (the full card's ✕). */
+  /** The end of the second row, after the ⋯ menu (the full task's ✕). */
   readonly secondaryTail?: ReactNode;
 }
 

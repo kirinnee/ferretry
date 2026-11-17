@@ -1,10 +1,10 @@
 /**
- * THE THREE BUTTONS OF A CARD IN A NOTICE (`AgendaItem.cards`), as the board's own writes: Open goes to the
- * card's page, Start a ferret is `POST /v1/board/cards/:cardId/start` (a NEW ferret on the card, or the one that already holds it), Close is the board's drop with the
+ * THE THREE BUTTONS OF A TASK IN A NOTICE (`AgendaItem.cards`), as the board's own writes: Open goes to the
+ * task's page, Start a ferret is `POST /v1/board/cards/:cardId/start` (a NEW ferret on the task, or the one that already holds it), Close is the board's drop with the
  * reason the owner confirmed. Nothing here is a second path to the daemon: each is the verb the board page uses,
  * so the daemon's authorization applies to it exactly as it does there, and a refusal comes back in its words.
  *
- * The board is Board's: this half takes its two writes through {@link AgendaCardsBoard}, a port the screen binds to
+ * The board is Board's: this half takes its two writes through {@link AgendaTasksBoard}, a port the screen binds to
  * Board's `agenda.card-answer` hook, and its pages through the shell's route table ({@link AgendaLinks}), so no Board
  * path is spelled here.
  */
@@ -25,37 +25,37 @@ interface BoardRefusal {
   readonly message: string;
 }
 
-/** A card on one machine. */
-interface BoardCardTarget {
+/** A task on one machine. */
+interface BoardTaskTarget {
   readonly daemonId: DaemonId;
   readonly id: BoardTaskId;
 }
 
 /** The two board writes a notice's buttons make. */
-export interface AgendaCardsBoard {
-  /** Starts a ferret on the card; `key` makes a retry of one click the same request. */
+export interface AgendaTasksBoard {
+  /** Starts a ferret on the task; `key` makes a retry of one click the same request. */
   readonly start: (
-    target: BoardCardTarget,
+    target: BoardTaskTarget,
     key?: string,
   ) => Promise<BoardResult<{ readonly started: boolean; readonly sessionId: string }, BoardRefusal>>;
-  /** Drops the card with the reason the board records. */
-  readonly drop: (target: BoardCardTarget, reason: string) => Promise<BoardResult<unknown, BoardRefusal>>;
+  /** Drops the task with the reason the board records. */
+  readonly drop: (target: BoardTaskTarget, reason: string) => Promise<BoardResult<unknown, BoardRefusal>>;
 }
 
 export const agendaCardsActions = (
-  board: AgendaCardsBoard,
+  board: AgendaTasksBoard,
   daemonId: DaemonId,
   onNavigate: (to: string) => void,
   links: Pick<AgendaLinks, 'card' | 'chat'>,
 ): AgendaCardsActions => {
-  const target = (id: BoardTaskId): BoardCardTarget => ({ daemonId, id });
+  const target = (id: BoardTaskId): BoardTaskTarget => ({ daemonId, id });
   const refused = (message: string): AgendaCardOutcome => ({ ok: false, message });
   // One key per Start click: kept while the request got no answer (the next click is a retry of it, and the daemon
   // answers a repeat with the first result), dropped once the daemon has answered, so a later click is new work.
   const pending = new Map<BoardTaskId, string>();
   return {
     open: id => {
-      // A card's page is Board's; with Board not installed there is no page to open.
+      // A task's page is Board's; with Board not installed there is no page to open.
       const page = links.card(daemonId, id);
       if (page !== undefined) onNavigate(page);
     },

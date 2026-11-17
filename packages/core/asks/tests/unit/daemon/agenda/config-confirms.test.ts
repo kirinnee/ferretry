@@ -14,16 +14,16 @@ const PRICE = 'the Jev price the cap counts with goes down from 2 to 0.042';
 describe('the card of an item that confirms a held configuration change', () => {
   it('should offer Allow, Deny and Discard change as the three swipes, each saying what it does', () => {
     // Arrange / Act
-    const card = confirmationCard('warden.yaml');
+    const task = confirmationCard('warden.yaml');
 
     // Assert
-    should(card.kind).equal('choice');
-    should(card.answers.map(answer => `${answer.direction}:${answer.label}`)).deepEqual([
+    should(task.kind).equal('choice');
+    should(task.answers.map(answer => `${answer.direction}:${answer.label}`)).deepEqual([
       'right:Allow',
       'left:Deny',
       'up:Discard change',
     ]);
-    should(card.answers[0]?.description).equal('Apply this change to warden.yaml now');
+    should(task.answers[0]?.description).equal('Apply this change to warden.yaml now');
   });
 
   describe('its premise', () => {

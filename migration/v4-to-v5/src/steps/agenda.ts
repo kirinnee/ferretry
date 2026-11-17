@@ -11,11 +11,11 @@
  * - The ledger: v5 reads `version: 1` ONLY; v4 wrote 4 and upgraded every older file (no version, 1, 2, 3) in memory
  *   as it read it. The converter first reads the board exactly as v4 did (`../v4/agenda/read.ts`, with v4's own
  *   engine vendored), then: `version` 4 → 1; the deprecated item fields `gate`, `gateAttached` and
- *   `gateAttachedChangedAt` are dropped (v5 deleted the standalone gate item and the older-app mirror; a card's gate
+ *   `gateAttachedChangedAt` are dropped (v5 deleted the standalone gate item and the older-app mirror; a task's gate
  *   rides `cardAsks`); a closed item whose disposition is `replied` (v5 has no such disposition) is closed as `done`.
  *   Every other byte of the item is kept in its order. v5's new optional fields (`raisedObligations`,
  *   `ownAskRepliedTo`) are absent, as on any board v5 never touched; `generatedSubject` is set ONLY on a daemon-raised
- *   `card-agenda:<card>` item (its subject, as the daemon wrote it), so answering its card ask rests it like a 5.0 one.
+ *   `card-agenda:<task>` item (its subject, as the daemon wrote it), so answering its task ask rests it like a 5.0 one.
  * - The history (`agenda-history.jsonl`): the same JSONL records; a `version` record of a `replied` close becomes
  *   `done`, and the ledger's byte cursor is recomputed over the rewritten bytes. Bytes past v4's committed cursor
  *   (never committed; v4 cuts them at its next append) are not carried.
@@ -38,7 +38,7 @@ import {
   AgendaSnapshotSchema,
   AskItemSchema,
   AskVersionsFiles,
-  parseCardAgendaReference,
+  parseTaskAgendaReference,
   ResolvedAgendaItemSchema,
 } from '@ferretry/core-asks/contract';
 import { Database } from 'bun:sqlite';
@@ -131,16 +131,16 @@ function v5Item(item: Json, closed: boolean, tally: Pick<Tally, 'gateFields' | '
     out[key] = key === 'disposition' && closed && value === 'replied' ? 'done' : value;
   }
   if (closed && item.disposition === 'replied') tally.repliedClosed++;
-  // A card agenda v4's daemon opened (`card-agenda:<card>`) is born in v5 with the subject it wrote kept as its own
+  // A task agenda v4's daemon opened (`card-agenda:<task>`) is born in v5 with the subject it wrote kept as its own
   // (`generatedSubject`), exactly as a 5.0-raised one: without it the item reads as asking the owner a question of its
-  // own, and answering its card ask leaves it in Needs you. v4's subject IS what the daemon wrote (v4 had no way for
+  // own, and answering its task ask leaves it in Needs you. v4's subject IS what the daemon wrote (v4 had no way for
   // anyone else to reword it into a different generated one), so it is carried as it stands.
   if (
     out.generatedSubject === undefined &&
     out.raisedBy === 'daemon' &&
     out.source === 'task' &&
     typeof out.subject === 'string' &&
-    parseCardAgendaReference(typeof out.sourceRef === 'string' ? out.sourceRef : undefined) !== undefined
+    parseTaskAgendaReference(typeof out.sourceRef === 'string' ? out.sourceRef : undefined) !== undefined
   ) {
     out.generatedSubject = out.subject;
   }
@@ -588,14 +588,14 @@ const V4NotificationLine = z.looseObject({
  * v4's `state/notifications.jsonl` → the Agenda plugin's `buzzes.jsonl` and `seen.json`.
  *
  * - A buzz record stops v5 buzzing the same moment twice. v5 can only meet again the ask's OWN buzz
- *   (`ask:<ferret>:<ask>`, a notice asked for the phone or a card's ask); every other key names an instant or
- *   another plugin's key, so only v4's `ping` push (→ `notice`) and an item's own push while it carries card asks
+ *   (`ask:<ferret>:<ask>`, a notice asked for the phone or a task's ask); every other key names an instant or
+ *   another plugin's key, so only v4's `ping` push (→ `notice`) and an item's own push while it carries task asks
  *   (→ `card-ask`) are carried, the first line per ask.
  * - `seen` is when the owner last opened each ask: v4 recorded that as an `agenda-clear` line naming `opened`.
  */
 async function convertNotifications(
   ctx: StepContext,
-  cardAskItems: ReadonlySet<string>,
+  taskAskItems: ReadonlySet<string>,
 ): Promise<{ buzzes: number; seen: number; lines: number; skipped: number }> {
   const bytes = await regularFile(join(ctx.v4.state, 'notifications.jsonl'));
   if (bytes === undefined) return { buzzes: 0, seen: 0, lines: 0, skipped: 0 };
@@ -631,7 +631,7 @@ async function convertNotifications(
       key => value[key] !== undefined,
     );
     const kind =
-      value.ping === true ? 'notice' : !variant && cardAskItems.has(`${ferret}:${ask}`) ? 'card-ask' : undefined;
+      value.ping === true ? 'notice' : !variant && taskAskItems.has(`${ferret}:${ask}`) ? 'card-ask' : undefined;
     const key = `ask:${ferret}:${ask}`;
     if (kind === undefined || buzzes.has(key)) continue;
     const sent = value.sent as Json | undefined;

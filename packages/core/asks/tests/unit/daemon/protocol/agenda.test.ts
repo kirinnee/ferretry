@@ -16,7 +16,7 @@ import {
   agendaBriefRequiredProblems,
   agendaNoticeProblems,
 } from '../../../../daemon/lib/protocol/agenda.ts';
-import { agendaTurn } from '../../../../daemon/lib/protocol/agenda-card.ts';
+import { agendaTurn } from '../../../../daemon/lib/protocol/agenda-task.ts';
 
 const AT = '2026-10-26T09:00:00.000Z';
 

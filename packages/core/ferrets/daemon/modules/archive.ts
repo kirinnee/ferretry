@@ -7,7 +7,7 @@
  *   - Board and Agenda each say what keeps a ferret live (`ArchiveKeeps`, a hook Ferrets offers because core imports no
  *     plugin). While EITHER has not contributed its half, no pass runs; and a source that fails keeps every ferret it was
  *     asked about. An absent answer is "keep live", never "archive".
- *   - EVERY ANSWER IS PARSED HERE, at the Ferrets boundary: an answer of the wrong shape (a card list that is not a list,
+ *   - EVERY ANSWER IS PARSED HERE, at the Ferrets boundary: an answer of the wrong shape (a task list that is not a list,
  *     an owner that is not a ferret id, a `dropped` that is not a boolean, an open-item answer that is not a boolean),
  *     one that throws, and one that does not come within {@link ARCHIVE_ANSWER_TIMEOUT_MS} all read as "unreadable",
  *     which keeps every ferret it was asked about. Nothing a source says is coerced.
@@ -32,7 +32,7 @@ import { createSessionArchive, type SessionArchive } from '../adapters/session/a
 import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import type { SessionArchiveSubsystem } from '../lib/runtime/mounts/session-archive.ts';
 import { ARCHIVE_PASS_LIMIT_DEFAULT } from '../lib/session/archive/index.ts';
-import type { LaneCategory, OpenCardStanding } from '../lib/session/peers/board.ts';
+import type { LaneCategory, OpenTaskStanding } from '../lib/session/peers/board.ts';
 import type { SessionId } from '../lib/session-id.ts';
 
 /** The kernel job that runs a pass when one is due. */
@@ -72,12 +72,12 @@ export function archiveAfterMs(settings: ArchiveSettings | undefined): number | 
  */
 export const hiddenFromLiveList = (state: FerretState, archived: boolean): boolean => archived && state === 'stopped';
 
-/** A card as the keep rule reads it. A lane category Ferrets does not know reads as unknown, which is "in flight". */
-const standing = (card: z.output<typeof ArchiveCardStandingsSchema>[number]): OpenCardStanding => ({
-  owner: card.owner,
-  assignee: card.assignee,
-  dropped: card.dropped === true ? 'dropped' : null,
-  category: card.category !== undefined && LANES.has(card.category) ? (card.category as LaneCategory) : undefined,
+/** A task as the keep rule reads it. A lane category Ferrets does not know reads as unknown, which is "in flight". */
+const standing = (task: z.output<typeof ArchiveCardStandingsSchema>[number]): OpenTaskStanding => ({
+  owner: task.owner,
+  assignee: task.assignee,
+  dropped: task.dropped === true ? 'dropped' : null,
+  category: task.category !== undefined && LANES.has(task.category) ? (task.category as LaneCategory) : undefined,
 });
 
 export interface ArchiveDeps {
@@ -138,9 +138,9 @@ export function buildArchive(deps: ArchiveDeps): MountedArchive {
   const agendas = () => deps.keeps().filter(source => source.kind === 'agenda');
   const sources = {
     pinned: deps.pinned,
-    board: async (): Promise<readonly OpenCardStanding[]> => {
+    board: async (): Promise<readonly OpenTaskStanding[]> => {
       const asked = boards();
-      // Nobody answers for the cards: the archive reads that as "board unreadable" and keeps every ferret.
+      // Nobody answers for the tasks: the archive reads that as "board unreadable" and keeps every ferret.
       if (asked.length === 0) throw new Error('no board is wired to say which ferrets are on an open task');
       const answers = await Promise.all(
         asked.map(

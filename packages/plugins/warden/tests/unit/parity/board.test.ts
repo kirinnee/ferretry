@@ -3,16 +3,16 @@ import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeFerrets, ferretId, T0 } from '@ferretry/core-ferrets/contract/testing';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import { err } from '@ferretry/std';
-import type { BoardApi, CardView } from '@ferretry/plugin-board/contract';
+import type { BoardApi, TaskView } from '@ferretry/plugin-board/contract';
 import { fakeBoard } from '@ferretry/plugin-board/contract/testing';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
 import daemon from '../../../daemon/index.ts';
 import { lanes, PROJECT } from '../../support/board.ts';
-import { cardView } from '../board-fixtures.ts';
+import { taskView } from '../board-fixtures.ts';
 
 /** `F1`, owned by a ferret no longer on this machine, its assignee `worker` stopped: Board calls it orphaned. */
-const orphaned: CardView = cardView({ owner: 'gone', assignee: 'worker' }, { activity: 'orphaned' });
+const orphaned: TaskView = taskView({ owner: 'gone', assignee: 'worker' }, { activity: 'orphaned' });
 
 /** An Asks that refuses the standing notice, remembering the entries it was asked to keep. */
 class RefusingAsks extends FakeAsks {
@@ -23,20 +23,20 @@ class RefusingAsks extends FakeAsks {
   }
 }
 
-/** The same card, owned by `lead`, a live auto ferret that the Warden may type to. */
-const ownedByLead: CardView = cardView({ owner: 'lead', assignee: 'worker' }, { activity: 'orphaned' });
+/** The same task, owned by `lead`, a live auto ferret that the Warden may type to. */
+const ownedByLead: TaskView = taskView({ owner: 'lead', assignee: 'worker' }, { activity: 'orphaned' });
 
 /**
- * Board's contract fake, answering the orphaned cards given (one by default) in one snapshot, recording every read.
+ * Board's contract fake, answering the orphaned tasks given (one by default) in one snapshot, recording every read.
  * Its lane sets are the classic ones, so a lane reads by name.
  */
-function boardWithOrphan(card: CardView | readonly CardView[] = orphaned): {
+function boardWithOrphan(task: TaskView | readonly TaskView[] = orphaned): {
   readonly board: BoardApi;
   readonly reads: number[];
-  /** Change which cards the board calls orphaned, between two runs. */
-  readonly set: (next: readonly CardView[]) => void;
+  /** Change which tasks the board calls orphaned, between two runs. */
+  readonly set: (next: readonly TaskView[]) => void;
 } {
-  let all: readonly CardView[] = Array.isArray(card) ? card : [card as CardView];
+  let all: readonly TaskView[] = Array.isArray(task) ? task : [task as TaskView];
   const reads: number[] = [];
   const board: BoardApi = {
     ...fakeBoard(),
@@ -55,9 +55,9 @@ function boardWithOrphan(card: CardView | readonly CardView[] = orphaned): {
 }
 
 interface WardenOptions {
-  /** A live auto ferret `lead` the card's owner is, so the sweep can type to it. */
+  /** A live auto ferret `lead` the task's owner is, so the sweep can type to it. */
   readonly liveOwner?: boolean;
-  /** A finished ferret `lead` beside `worker`, so cards of two ferrets can be orphaned. */
+  /** A finished ferret `lead` beside `worker`, so tasks of two ferrets can be orphaned. */
   readonly stoppedLead?: boolean;
   /** Conversation refuses every send. */
   readonly sendRefused?: boolean;
@@ -92,7 +92,7 @@ async function wardenWith(board: BoardApi | undefined, options: WardenOptions = 
   /** The notices standing on a ferret's board, as `source`/`entry` pairs. */
   const notices = async (ferret: string) =>
     (await fake.open({ ferret: ferretId(ferret), state: 'open' })).map(ask => String(ask.entry));
-  /** The ONE item of orphaned cards on the machine board: its entries (an ask each), and what its newest wording says. */
+  /** The ONE item of orphaned tasks on the machine board: its entries (an ask each), and what its newest wording says. */
   const machineItem = async () => {
     const open = await fake.open({ ferret: ferretId('machine-agenda'), state: 'open' });
     const subjects = (await fake.snapshots({ ferret: 'machine-agenda' }))[0]?.items.map(item => item.subject) ?? [];
@@ -149,7 +149,7 @@ describe('Board, an optional use of the Warden', () => {
     expect(ran.status).toBe(200);
     expect(reads.length).toBeGreaterThan(0);
     expect(kinds(ran.json())).toContainEqual(['orphaned_card', 'worker']);
-    // Its owner ferret is not on this machine, so nobody is typed to: the card is a row of the machine item, and no
+    // Its owner ferret is not on this machine, so nobody is typed to: the task is a row of the machine item, and no
     // ask is raised on the assignee's board.
     expect(typed).toEqual([]);
     expect(await notices('worker')).toEqual([]);
@@ -189,11 +189,11 @@ describe('Board, an optional use of the Warden', () => {
   });
 
   test('more than one page of orphaned cards: every one is flagged, once, from one read', async () => {
-    // Arrange: 1,203 cards, more than two pages of 500
-    const cards = Array.from({ length: 1203 }, (_, each) =>
-      cardView({ id: `F${String(each + 1)}`, owner: 'gone', assignee: 'worker' }, { activity: 'orphaned' }),
+    // Arrange: 1,203 tasks, more than two pages of 500
+    const tasks = Array.from({ length: 1203 }, (_, each) =>
+      taskView({ id: `F${String(each + 1)}`, owner: 'gone', assignee: 'worker' }, { activity: 'orphaned' }),
     );
-    const { board, reads } = boardWithOrphan(cards);
+    const { board, reads } = boardWithOrphan(tasks);
     const { run } = await wardenWith(board);
 
     // Act
@@ -222,13 +222,13 @@ describe('Board, an optional use of the Warden', () => {
 
   test('31 orphaned cards of several ferrets are ONE item on the machine board, and no ask on any ferret board', async () => {
     // Arrange — one board holds at most twenty unresolved items: 31 per-card asks were all refused.
-    const cards = Array.from({ length: 31 }, (_, each) =>
-      cardView(
+    const tasks = Array.from({ length: 31 }, (_, each) =>
+      taskView(
         { id: `F${String(each + 1)}`, owner: 'gone', assignee: each % 2 === 0 ? 'worker' : 'lead' },
         { activity: 'orphaned' },
       ),
     );
-    const { board } = boardWithOrphan(cards);
+    const { board } = boardWithOrphan(tasks);
     const { run, notices, machineItem } = await wardenWith(board, { stoppedLead: true });
 
     // Act
@@ -248,7 +248,7 @@ describe('Board, an optional use of the Warden', () => {
     // Arrange
     const { board } = boardWithOrphan(
       Array.from({ length: 4 }, (_, each) =>
-        cardView({ id: `F${String(each + 1)}`, owner: 'gone', assignee: 'worker' }, { activity: 'orphaned' }),
+        taskView({ id: `F${String(each + 1)}`, owner: 'gone', assignee: 'worker' }, { activity: 'orphaned' }),
       ),
     );
     const { run, machineIds, boardWrites } = await wardenWith(board);
@@ -267,18 +267,18 @@ describe('Board, an optional use of the Warden', () => {
 
   test('a changed list restates the SAME item, and all recovered closes it', async () => {
     // Arrange
-    const card = (id: string, activity: 'orphaned' | 'active') =>
-      cardView({ id, owner: 'gone', assignee: 'worker' }, { activity });
-    const { board, set } = boardWithOrphan([card('F1', 'orphaned'), card('F2', 'orphaned')]);
+    const task = (id: string, activity: 'orphaned' | 'active') =>
+      taskView({ id, owner: 'gone', assignee: 'worker' }, { activity });
+    const { board, set } = boardWithOrphan([task('F1', 'orphaned'), task('F2', 'orphaned')]);
     const { run, machineIds, machineItem } = await wardenWith(board);
     await run();
     const first = await machineIds();
 
     // Act
-    set([card('F1', 'orphaned'), card('F2', 'active'), card('F3', 'orphaned'), card('F4', 'orphaned')]);
+    set([task('F1', 'orphaned'), task('F2', 'active'), task('F3', 'orphaned'), task('F4', 'orphaned')]);
     await run();
     const changed = { ids: await machineIds(), item: await machineItem() };
-    set([card('F1', 'active'), card('F3', 'active'), card('F4', 'active')]);
+    set([task('F1', 'active'), task('F3', 'active'), task('F4', 'active')]);
     await run();
 
     // Assert
@@ -306,7 +306,7 @@ describe('Board, an optional use of the Warden', () => {
     // Arrange
     const { board } = boardWithOrphan(
       Array.from({ length: 5 }, (_, each) =>
-        cardView({ id: `F${String(each + 1)}`, owner: 'gone', assignee: 'worker' }, { activity: 'orphaned' }),
+        taskView({ id: `F${String(each + 1)}`, owner: 'gone', assignee: 'worker' }, { activity: 'orphaned' }),
       ),
     );
     const { run, typed, attempts, notices } = await wardenWith(board, { agendaOff: true });

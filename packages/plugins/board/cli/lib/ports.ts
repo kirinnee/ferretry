@@ -8,9 +8,9 @@ import type {
   BoardSkipRequest,
   BoardSkipResponse,
   BoardSwitch,
-  CardActionRequestInput,
-  CardCreateRequestInput,
-  CardResponse,
+  TaskActionRequestInput,
+  TaskCreateRequestInput,
+  TaskResponse,
   LaneSetActionRequestInput,
   LaneSetChangeResponse,
 } from '../../contract/index.ts';
@@ -29,10 +29,10 @@ export interface FerretDirectoryEntry {
  */
 export interface BoardGateway extends RelatedGateway {
   board(query: BoardQueryInput): Promise<BoardResponse>;
-  card(id: string): Promise<CardResponse>;
-  create(request: CardCreateRequestInput): Promise<CardResponse>;
-  act(id: string, request: CardActionRequestInput): Promise<CardResponse>;
-  /** `fy card skip`: records on the calling ferret why its work has no card. The daemon refuses an owner. */
+  card(id: string): Promise<TaskResponse>;
+  create(request: TaskCreateRequestInput): Promise<TaskResponse>;
+  act(id: string, request: TaskActionRequestInput): Promise<TaskResponse>;
+  /** `fy task skip`: records on the calling ferret why its work has no task. The daemon refuses an owner. */
   skip(request: BoardSkipRequest): Promise<BoardSkipResponse>;
   projects(): Promise<BoardProjectsResponse>;
   ferrets(): Promise<readonly FerretDirectoryEntry[]>;
@@ -54,7 +54,7 @@ export interface BoardOutput {
   diagnostic(message: string): void;
 }
 
-/** Reading `--brief-file`, `--how-to-test-file` and `fy card patch --file` is IO; `-` is standard input. */
+/** Reading `--brief-file`, `--how-to-test-file` and `fy task patch --file` is IO; `-` is standard input. */
 export interface TextFiles {
   readText(path: string): Promise<string>;
 }

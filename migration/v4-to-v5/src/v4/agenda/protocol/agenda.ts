@@ -89,19 +89,19 @@ export const MAX_AGENDA_WARNINGS = 12;
 export const MAX_AGENDA_WARNING_LENGTH = 400;
 /**
  * What an Agenda push says, at most: a lock screen shows the title and about a line or two. The
- * title is the card's own, so it is also how long a card's title should be; past it the lint advises.
+ * title is the task's own, so it is also how long a task's title should be; past it the lint advises.
  */
 export const AGENDA_PUSH_TITLE_LENGTH = 40;
-/** The push body is the card's ask, clipped here; an ask meant to stay under `AGENDA_ASK_TARGET_LENGTH` fits whole. */
+/** The push body is the task's ask, clipped here; an ask meant to stay under `AGENDA_ASK_TARGET_LENGTH` fits whole. */
 export const AGENDA_PUSH_BODY_LENGTH = 120;
 /** The longest title an item may carry at all; past the target it is advice, past this a refusal. */
 export const MAX_AGENDA_TITLE_LENGTH = 60;
-/** The most a card's ASK should say: a short title-like line, which is the push's text; the detail goes in `--body`. */
+/** The most a task's ASK should say: a short title-like line, which is the push's text; the detail goes in `--body`. */
 export const AGENDA_ASK_TARGET_LENGTH = 80;
 /** A segment (premise, context, answer, body…) is short points; one paragraph past this many characters is a wall of text the lint warns about. */
 export const AGENDA_SEGMENT_PARAGRAPH_LENGTH = 280;
-/** The most answers a card offers: one per swipe direction, left, up and right. */
-export const MAX_AGENDA_CARD_ANSWERS = 3;
+/** The most answers a task offers: one per swipe direction, left, up and right. */
+export const MAX_AGENDA_TASK_ANSWERS = 3;
 
 const singleLine = (maximum: number) =>
   z
@@ -143,8 +143,8 @@ export const AgendaAskSchema = z.union([
 export type AgendaAsk = z.infer<typeof AgendaAskSchema>;
 
 /**
- * WHAT KIND OF CARD AN ITEM IS, as the owner sees it — the words a ferret picks (`--kind`) and the
- * defaults each one answers with (`agenda-card.ts`). It sits beside the ask rather than replacing
+ * WHAT KIND OF TASK AN ITEM IS, as the owner sees it — the words a ferret picks (`--kind`) and the
+ * defaults each one answers with (`agenda-task.ts`). It sits beside the ask rather than replacing
  * it, so every daemon and app that reads only the ask still answers the item correctly:
  *
  * - `task`: do something, then say Done (the `task` ask).
@@ -154,7 +154,7 @@ export type AgendaAsk = z.infer<typeof AgendaAskSchema>;
  * - `review`: look at something and say whether it is good (the `answer-review` ask).
  * - `info`: something the owner should know, acknowledged with Got it (no ask).
  * - `reply`: a question only words answer (the `open-question` ask).
- * - `form`: several structured answers at once — pick-one, pick-many and yes/no fields on the card, one free-text
+ * - `form`: several structured answers at once — pick-one, pick-many and yes/no fields on the task, one free-text
  *   field answered in the reply box (`fields`, `AgendaFormFieldSchema`). It asks in words (the `open-question` ask), so
  *   an app that does not know forms still lets the owner reply.
  * - `input`: a value only the owner can type, for an agent's terminal or browser field (docs/input-requests.md).
@@ -174,7 +174,7 @@ export const AgendaKindSchema = z.enum([
 ]);
 export type AgendaKind = z.infer<typeof AgendaKindSchema>;
 
-/** The way a card is swiped to give one of its answers. Down is never one: the card scrolls that way. */
+/** The way a task is swiped to give one of its answers. Down is never one: the task scrolls that way. */
 export const AgendaDirectionSchema = z.enum(['left', 'up', 'right']);
 export type AgendaDirection = z.infer<typeof AgendaDirectionSchema>;
 
@@ -185,7 +185,7 @@ export type AgendaDirection = z.infer<typeof AgendaDirectionSchema>;
  * - `approve` / `reject`: answer a `permission` ask.
  * - `good` / `clarify`: answer an `answer-review` ask; `clarify` needs the reply text.
  * - `done`: resolve the item; `needs-info`: ask the ferret for more and keep it open; `dismiss`: close
- *   it unanswered. These three fit any card.
+ *   it unanswered. These three fit any task.
  */
 export const AgendaAnswerEffectSchema = z.enum([
   'choose',
@@ -200,18 +200,18 @@ export const AgendaAnswerEffectSchema = z.enum([
 export type AgendaAnswerEffect = z.infer<typeof AgendaAnswerEffectSchema>;
 
 /**
- * One answer on a card, bound to the swipe that gives it. Its label is what the button and the swipe
+ * One answer on a task, bound to the swipe that gives it. Its label is what the button and the swipe
  * stamp say; for `choose` it IS the option's label, so the button and the recorded answer cannot drift.
  */
-export const AgendaCardAnswerSchema = z.strictObject({
+export const AgendaTaskAnswerSchema = z.strictObject({
   direction: AgendaDirectionSchema,
   label: singleLine(MAX_AGENDA_ASK_OPTION_LENGTH),
   does: AgendaAnswerEffectSchema,
   description: singleLine(MAX_AGENDA_ASK_OPTION_DETAIL_LENGTH).optional(),
 });
-export type AgendaCardAnswer = z.infer<typeof AgendaCardAnswerSchema>;
+export type AgendaTaskAnswer = z.infer<typeof AgendaTaskAnswerSchema>;
 
-/** The effects each ask may be answered with, beyond the `done`, `needs-info` and `dismiss` every card takes. */
+/** The effects each ask may be answered with, beyond the `done`, `needs-info` and `dismiss` every task takes. */
 const ASK_EFFECTS: Readonly<Record<AgendaAsk['kind'] | 'none', readonly AgendaAnswerEffect[]>> = {
   permission: ['approve', 'reject'],
   'multiple-choice': ['choose'],
@@ -220,22 +220,22 @@ const ASK_EFFECTS: Readonly<Record<AgendaAsk['kind'] | 'none', readonly AgendaAn
   task: [],
   none: [],
 };
-const ANY_CARD_EFFECTS: readonly AgendaAnswerEffect[] = ['done', 'needs-info', 'dismiss'];
+const ANY_TASK_EFFECTS: readonly AgendaAnswerEffect[] = ['done', 'needs-info', 'dismiss'];
 
 /**
- * Everything wrong with a card's answers against its ask, as `[path, message]` pairs — empty when they
+ * Everything wrong with a task's answers against its ask, as `[path, message]` pairs — empty when they
  * fit: at most three, one per direction, each effect one its ask takes, and every `choose` naming one
  * of the ask's options. The schemas and the CLI both read it, so one rule refuses in both places.
  */
 export function agendaAnswerProblems(
-  answers: readonly AgendaCardAnswer[],
+  answers: readonly AgendaTaskAnswer[],
   ask: AgendaAsk | undefined,
 ): readonly (readonly [string, string])[] {
   const problems: (readonly [string, string])[] = [];
-  if (answers.length > MAX_AGENDA_CARD_ANSWERS) {
+  if (answers.length > MAX_AGENDA_TASK_ANSWERS) {
     problems.push([
       'answers',
-      `a card offers at most ${MAX_AGENDA_CARD_ANSWERS} answers (left, up, right); split it into several items, or let the reply carry the rest`,
+      `a card offers at most ${MAX_AGENDA_TASK_ANSWERS} answers (left, up, right); split it into several items, or let the reply carry the rest`,
     ]);
   }
   const directions = answers.map(answer => answer.direction);
@@ -244,7 +244,7 @@ export function agendaAnswerProblems(
   }
   const labels = answers.map(answer => answer.label.trim().toLowerCase());
   if (new Set(labels).size !== labels.length) problems.push(['answers', 'answer labels must be unique']);
-  const allowed = new Set([...ASK_EFFECTS[ask?.kind ?? 'none'], ...ANY_CARD_EFFECTS]);
+  const allowed = new Set([...ASK_EFFECTS[ask?.kind ?? 'none'], ...ANY_TASK_EFFECTS]);
   const options = ask?.kind === 'multiple-choice' ? ask.options.map(option => option.label.trim()) : [];
   answers.forEach((answer, index) => {
     if (!allowed.has(answer.does)) {
@@ -259,14 +259,14 @@ export function agendaAnswerProblems(
   return problems;
 }
 
-/** The card's own fields: what it is about, what kind it is, and its answers by direction. */
-export const AgendaCardShape = {
-  /** What the item is about, in a few plain words: the card's heading and the push's title. */
+/** The task's own fields: what it is about, what kind it is, and its answers by direction. */
+export const AgendaTaskShape = {
+  /** What the item is about, in a few plain words: the task's heading and the push's title. */
   title: singleLine(MAX_AGENDA_TITLE_LENGTH).optional(),
-  /** What kind of card it is; derived from the ask when absent (`agendaCardKind`). */
+  /** What kind of task it is; derived from the ask when absent (`agendaTaskKind`). */
   kind: AgendaKindSchema.optional(),
-  /** Up to three answers, one per direction; the kind's defaults when absent (`agendaCardAnswers`). */
-  answers: z.array(AgendaCardAnswerSchema).min(1).max(MAX_AGENDA_CARD_ANSWERS).optional(),
+  /** Up to three answers, one per direction; the kind's defaults when absent (`agendaTaskAnswers`). */
+  answers: z.array(AgendaTaskAnswerSchema).min(1).max(MAX_AGENDA_TASK_ANSWERS).optional(),
 };
 
 const AnswerReviewResponseSchema = z.discriminatedUnion('verdict', [
@@ -555,7 +555,7 @@ export const AgendaFieldTypeSchema = z.enum(['one', 'many', 'yesno', 'text']);
 export type AgendaFieldType = z.infer<typeof AgendaFieldTypeSchema>;
 
 /**
- * One field of a `form` card. `label` is the question; `name` is the short word its line in the answer uses
+ * One field of a `form` task. `label` is the question; `name` is the short word its line in the answer uses
  * ("Region"), else the question is used. `one` and `many` carry their options (each can say what it means);
  * `yesno` and `text` carry none. `recommended` is the asker's pick: one option for `one`, any for `many`, Yes
  * or No for `yesno`. Every field is optional to the owner, who may send any subset (&F922): `required` is kept so an
@@ -637,7 +637,7 @@ export const AgendaBriefShape = {
   /** Earlier answers that bear on this one, in point form: what the owner already decided. */
   decided: z.preprocess(asBullets, prose(MAX_AGENDA_POINTS_LENGTH)).optional(),
   /**
-   * What is STILL OPEN after the discussion so far, in point form: it shrinks as `decided` grows, so a card read
+   * What is STILL OPEN after the discussion so far, in point form: it shrinks as `decided` grows, so a task read
    * after several rounds of talk says where things stand, not where they started.
    */
   stillOpen: z.preprocess(asBullets, prose(MAX_AGENDA_POINTS_LENGTH)).optional(),
@@ -647,9 +647,9 @@ export const AgendaBriefShape = {
   questions: z.array(AgendaQuestionSchema).min(1).max(MAX_AGENDA_QUESTIONS).optional(),
   /** The asker's overall suggested decision. */
   recommendation: AgendaRecommendationSchema.optional(),
-  /** A longer Markdown explanation per option, each naming its option by label: the card's Options section. */
+  /** A longer Markdown explanation per option, each naming its option by label: the task's Options section. */
   optionDetails: z.array(AgendaOptionDetailSchema).min(1).max(MAX_AGENDA_ASK_OPTIONS).optional(),
-  /** The fields of a `form` card, in order: what the owner fills in before one Send (`agendaFormProblems`). */
+  /** The fields of a `form` task, in order: what the owner fills in before one Send (`agendaFormProblems`). */
   fields: z.array(AgendaFormFieldSchema).min(1).max(MAX_AGENDA_FIELDS).optional(),
   /** What happens if nobody answers. */
   impact: z.preprocess(asBullets, prose(MAX_AGENDA_POINTS_LENGTH)).optional(),
@@ -717,7 +717,7 @@ export const agendaBriefOf = (value: AgendaBrief): AgendaBrief => ({
 export const agendaOptionLabels = (item: {
   readonly ask?: AgendaAsk | undefined;
   readonly questions?: readonly AgendaQuestion[] | undefined;
-  readonly answers?: readonly AgendaCardAnswer[] | undefined;
+  readonly answers?: readonly AgendaTaskAnswer[] | undefined;
 }): readonly string[] => [
   ...(item.ask?.kind === 'multiple-choice' ? item.ask.options.map(option => option.label.trim()) : []),
   ...(item.questions ?? []).flatMap(question => (question.options ?? []).map(option => option.label.trim())),
@@ -728,7 +728,7 @@ export const agendaOptionLabels = (item: {
 export const agendaOptionDetailProblems = (item: {
   readonly ask?: AgendaAsk | undefined;
   readonly questions?: readonly AgendaQuestion[] | undefined;
-  readonly answers?: readonly AgendaCardAnswer[] | undefined;
+  readonly answers?: readonly AgendaTaskAnswer[] | undefined;
   readonly optionDetails?: readonly AgendaOptionDetail[] | undefined;
 }): string[] => {
   const details = item.optionDetails;
@@ -860,7 +860,7 @@ export const MAX_AGENDA_HISTORY = 20;
  * the owner asked for more information (`needs-info`) or to talk it through (`discuss`), the ferret
  * updated it (`updated`), the item left discussion for the queue (`surfaced`, the why as its note), or the
  * owner replied and it was PARKED as replied (`replied`, their words as its note; the ferret's `surface` or
- * `edit` brings it back, its `done` closes it); or the owner answered the CARD GATE asked on this thread
+ * `edit` brings it back, its `done` closes it); or the owner answered the TASK GATE asked on this thread
  * (`gate-answered`, the gate's `gate:` reference as its note, docs/agenda.md § One ask per thing), which keeps that
  * gate asked for good, whichever way the thread is closed after.
  */
@@ -889,7 +889,7 @@ export const AgendaConversationEntrySchema = z.strictObject({
 });
 export type AgendaConversationEntry = z.infer<typeof AgendaConversationEntrySchema>;
 
-/** The `gate:` references of the card gates the owner answered on this item, as its history records them. */
+/** The `gate:` references of the task gates the owner answered on this item, as its history records them. */
 export const gatesAnsweredOn = (item: { readonly history?: readonly AgendaHistoryEntry[] | undefined }): string[] =>
   (item.history ?? []).flatMap(entry =>
     entry.kind === 'gate-answered' && entry.note !== undefined ? [entry.note] : [],
@@ -975,7 +975,7 @@ export const AgendaRevisableFieldSchema = z.enum([
 export type AgendaRevisableField = z.infer<typeof AgendaRevisableFieldSchema>;
 
 /**
- * ONE EDIT OF AN ITEM, kept so a card that is a living summary of its discussion can show what changed and what
+ * ONE EDIT OF AN ITEM, kept so a task that is a living summary of its discussion can show what changed and what
  * it said before: who edited it, when, which fields changed, and those fields as they were (`previous` — a field
  * absent there was absent before the edit).
  */
@@ -989,7 +989,7 @@ export const AgendaRevisionSchema = z.strictObject({
     context: z.string().max(MAX_AGENDA_CONTEXT_LENGTH).nullable().optional(),
     howToResolve: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH).optional(),
     ask: AgendaAskSchema.optional(),
-    ...AgendaCardShape,
+    ...AgendaTaskShape,
     ...AgendaBriefShape,
   }),
 });
@@ -1042,7 +1042,7 @@ export type AgendaUndeliveredReply = z.infer<typeof AgendaUndeliveredReplySchema
 /**
  * Set on an item whose answer (or request to discuss, or for more information) the owner gave on the board
  * but that was never proven to reach the ferret (docs/agenda.md § Delivery): the item is open again, as a
- * card, until the owner answers it again or retries. Cleared by the owner's next action on it.
+ * task, until the owner answers it again or retries. Cleared by the owner's next action on it.
  */
 export const AgendaUndeliveredSchema = z.strictObject({
   at: InstantSchema,
@@ -1059,11 +1059,11 @@ export const MAX_AGENDA_CONFIRMS_CHANGES = 12;
 
 /**
  * The answers of an item that confirms a held configuration change (docs/agenda.md § Confirming a
- * configuration change): the option labels ARE the decision, so a card that knows nothing about
+ * configuration change): the option labels ARE the decision, so a task that knows nothing about
  * confirmations still answers it correctly by choosing one.
  */
 export const AGENDA_CONFIRMS_ANSWERS = {
-  /** Put the held change into effect, if it is still the one the card shows. */
+  /** Put the held change into effect, if it is still the one the task shows. */
   allow: 'Allow',
   /** Leave it held: nothing is discarded, the tighter version stays in effect. */
   deny: 'Deny',
@@ -1073,9 +1073,9 @@ export const AGENDA_CONFIRMS_ANSWERS = {
 
 /**
  * THE HELD CONFIGURATION CHANGE an item asks the owner to confirm (`fy agenda add --confirms <file>`):
- * the file, the digest of the held edit (its etag, so Allow confirms exactly the change the card
+ * the file, the digest of the held edit (its etag, so Allow confirms exactly the change the task
  * shows and never a later one), and each loosening in the daemon's words. `restated` is set when the
- * held edit changed after the item was raised and the card was re-armed with the new one.
+ * held edit changed after the item was raised and the task was re-armed with the new one.
  */
 export const AgendaConfirmsSchema = z.strictObject({
   path: singleLine(MAX_AGENDA_CONFIRMS_PATH_LENGTH),
@@ -1102,7 +1102,7 @@ export type AgendaCopyPlanRef = z.infer<typeof AgendaCopyPlanRefSchema>;
 /**
  * The task plan a card presents (task-plan.ts, docs/secure-copy.md): a ferret's planned sign-ins and pastes, answered
  * by the plan's own ticks, picks and passkey, which only the owner's plan routes carry. Only the daemon raises one. An
- * app from before task plans drops the ref and reads the card's `copyPlan`, or the daemon's words, instead.
+ * app from before task plans drops the ref and reads the task's `copyPlan`, or the daemon's words, instead.
  */
 export const AgendaTaskPlanRefSchema = z.strictObject({ planId: z.string().regex(/^[0-9a-f]{32}$/u) });
 export type AgendaTaskPlanRef = z.infer<typeof AgendaTaskPlanRefSchema>;
@@ -1110,32 +1110,32 @@ export type AgendaTaskPlanRef = z.infer<typeof AgendaTaskPlanRefSchema>;
 /**
  * The approve-on-phone card an `info` item presents (phone-approval.ts): nothing typed, nothing of the ferret's shown,
  * answered by the owner's phone and settled only by what the daemon sees. Only the daemon raises one. An app from
- * before these cards drops the ref and shows a plain info card with the daemon's subject, which holds no number.
+ * before these tasks drops the ref and shows a plain info task with the daemon's subject, which holds no number.
  */
 export const AgendaPhoneApprovalRefSchema = z.strictObject({
   id: z.string().regex(/^pa_[0-9a-f]{24}$/u, 'a phone approval id is pa_ and 24 hex digits'),
 });
 export type AgendaPhoneApprovalRef = z.infer<typeof AgendaPhoneApprovalRefSchema>;
 
-/** The most cards one machine notice lists, each with its own buttons. */
-export const MAX_AGENDA_CARDS = 12;
+/** The most tasks one machine notice lists, each with its own buttons. */
+export const MAX_AGENDA_TASKS = 12;
 
 /**
- * One board card a machine notice lists (the Warden's cards with nobody working on them): the card, and the one line that names
- * it. The app draws Open, Start a ferret on it and Close card under each line; the daemon authorizes each of the
- * three as the owner's own act on that card. An app from before these rows drops the field and shows the notice's
+ * One board task a machine notice lists (the Warden's tasks with nobody working on them): the task, and the one line that names
+ * it. The app draws Open, Start a ferret on it and Close task under each line; the daemon authorizes each of the
+ * three as the owner's own act on that task. An app from before these rows drops the field and shows the notice's
  * own words with Got it.
  */
-export const AgendaCardRowSchema = z.strictObject({
+export const AgendaTaskRowSchema = z.strictObject({
   task: TaskRefSchema,
   line: z.string().trim().min(1).max(MAX_AGENDA_SUBJECT_LENGTH),
 });
-export type AgendaCardRow = z.infer<typeof AgendaCardRowSchema>;
+export type AgendaTaskRow = z.infer<typeof AgendaTaskRowSchema>;
 
 /**
- * A 2FA seed staged at the machine and waiting for the owner's passkey (docs/secrets.md, "2FA keys"): the card's
+ * A 2FA seed staged at the machine and waiting for the owner's passkey (docs/secrets.md, "2FA keys"): the task's
  * Allow runs the `add-2fa-key` ceremony bound to `stage` and saves it to `account`, and Deny drops it. The generic
- * agenda answer saves nothing, so an app from before these cards shows the daemon's words and cannot save. Only the
+ * agenda answer saves nothing, so an app from before these tasks shows the daemon's words and cannot save. Only the
  * daemon raises one.
  */
 export const AgendaTwoFactorSeedRefSchema = z.strictObject({
@@ -1150,7 +1150,7 @@ export const AgendaTwoFactorSeedRefSchema = z.strictObject({
 export type AgendaTwoFactorSeedRef = z.infer<typeof AgendaTwoFactorSeedRefSchema>;
 
 /**
- * A FERRET'S SUGGESTION of a standing sign-in rule (sign-in-rules.ts, `account.propose` with `preapprove`): the card's
+ * A FERRET'S SUGGESTION of a standing sign-in rule (sign-in-rules.ts, `account.propose` with `preapprove`): the task's
  * only action opens the owner's create sheet with NOTHING ticked. It names the suggestion, never an account, and the
  * generic agenda answer creates nothing. Only the daemon raises one.
  */
@@ -1158,7 +1158,7 @@ export const AgendaSignInRuleSuggestionRefSchema = z.strictObject({ suggestion: 
 export type AgendaSignInRuleSuggestionRef = z.infer<typeof AgendaSignInRuleSuggestionRefSchema>;
 
 /**
- * A standing sign-in rule a fill in this session SUSPENDED (sign-in-rules.ts): an `info` card that sends the owner to
+ * A standing sign-in rule a fill in this session SUSPENDED (sign-in-rules.ts): an `info` task that sends the owner to
  * Settings › Secure copy. It names the rule, never an account (the agenda text holds no names), and an agenda answer
  * resumes nothing: only a new passkey does. Only the daemon raises one.
  */
@@ -1190,14 +1190,14 @@ export const agendaInputProblems = (value: {
   ];
 };
 
-/** The `409` code of an Allow or Discard that found the held change moved on: the card shows the new one. */
+/** The `409` code of an Allow or Discard that found the held change moved on: the task shows the new one. */
 export const AGENDA_CONFIG_CHANGED_CODE = 'config_changed';
 
 /** The longest gate option label, as the lane's own gate options are written (`board-lanes.ts`). */
 export const MAX_AGENDA_GATE_OPTION_LENGTH = 24;
 
 /**
- * Where a gate option sends the card, as the daemon applies the owner's answer (docs/board.md § Gates ask the
+ * Where a gate option sends the task, as the daemon applies the owner's answer (docs/board.md § Gates ask the
  * owner): on to the next lane of its workflow, to a named lane, back to rework with the owner's words and a
  * follow-up conversation, or to the board's closed lane.
  */
@@ -1213,53 +1213,53 @@ export const AgendaGateOptionSchema = z.strictObject({
 export type AgendaGateOption = z.infer<typeof AgendaGateOptionSchema>;
 
 /**
- * THE GATE AN ITEM ASKS ABOUT: the daemon raised it because an owner-asked card entered a lane whose stage is a
- * gate, and answering it moves the card (docs/board.md § Cards show progress). Only the daemon writes one; an app
+ * THE GATE AN ITEM ASKS ABOUT: the daemon raised it because an owner-asked task entered a lane whose stage is a
+ * gate, and answering it moves the task (docs/board.md § Tasks show progress). Only the daemon writes one; an app
  * that predates the field reads an ordinary choice card and answers it by label.
  */
 export const AgendaGateSchema = z.strictObject({
   cardId: z.string().min(1).max(64),
   laneId: z.string().min(1).max(64),
   laneName: z.string().min(1).max(80),
-  /** The card history's `seq` of the event that put the card in the lane: one item per entry. */
+  /** The task history's `seq` of the event that put the task in the lane: one item per entry. */
   entry: PositiveIntegerSchema,
   projectId: z.string().min(1).max(128),
   projectName: z.string().min(1).max(120).optional(),
-  /** The card's title, so a thread carrying this gate can name the card: "Badge colour is ready to test". */
+  /** The task's title, so a thread carrying this gate can name the task: "Badge colour is ready to test". */
   cardTitle: z.string().min(1).max(MAX_AGENDA_TITLE_LENGTH).optional(),
-  options: z.array(AgendaGateOptionSchema).min(1).max(MAX_AGENDA_CARD_ANSWERS),
+  options: z.array(AgendaGateOptionSchema).min(1).max(MAX_AGENDA_TASK_ANSWERS),
 });
 export type AgendaGate = z.infer<typeof AgendaGateSchema>;
 
 // ---------------------------------------------------------------------------------------------------
-// CARD ASKS (docs/agenda.md § Card asks). A card never asks the owner itself: when it reaches a stage that waits on
-// the owner (a gate: OK to build, or Done / Not good), the daemon puts a CARD ASK on the agenda that carries the card.
+// TASK ASKS (docs/agenda.md § Task asks). A task never asks the owner itself: when it reaches a stage that waits on
+// the owner (a gate: OK to build, or Done / Not good), the daemon puts a TASK ASK on the agenda that carries the task.
 // Kept in a block of its own: the conversation's merge and split carry `cardAsks` as they find them.
 // ---------------------------------------------------------------------------------------------------
 
-/** The most card asks one agenda keeps: every open one, then the newest answered ones, so a replay still finds its own. */
-export const MAX_AGENDA_CARD_ASKS = 16;
+/** The most task asks one agenda keeps: every open one, then the newest answered ones, so a replay still finds its own. */
+export const MAX_AGENDA_TASK_ASKS = 16;
 
 /**
- * The owner's answer to a card ask, kept on the ask: the choice, their words, and a SHA-256 of everything the answer
+ * The owner's answer to a task ask, kept on the ask: the choice, their words, and a SHA-256 of everything the answer
  * said (`receipt`) with the `askVersion` it was given against, so an exact repeat (a lost response, a second tap) is
  * answered as the first one was and moves nothing again.
  */
-export const AgendaCardAskAnswerSchema = z.object({
+export const AgendaTaskAskAnswerSchema = z.object({
   at: InstantSchema,
   response: AgendaResponseSchema,
   note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
   receipt: z.string().regex(/^[0-9a-f]{64}$/u),
   askVersion: PositiveIntegerSchema.optional(),
 });
-export type AgendaCardAskAnswer = z.infer<typeof AgendaCardAskAnswerSchema>;
+export type AgendaTaskAskAnswer = z.infer<typeof AgendaTaskAskAnswerSchema>;
 
 /**
- * WHAT A CARD ASK WOKE: the turn a ferret's thread was in when the ask was put on it (since when it waited on the owner,
+ * WHAT A TASK ASK WOKE: the turn a ferret's thread was in when the ask was put on it (since when it waited on the owner,
  * or the park, rest or wait on its ferret the ask ended), so the thread goes back to exactly that if the ask is
- * withdrawn unanswered. Only on a ferret's own thread; the card's agenda the daemon opened has nothing to go back to.
+ * withdrawn unanswered. Only on a ferret's own thread; the task's agenda the daemon opened has nothing to go back to.
  */
-export const AgendaCardAskWokeSchema = z.object({
+export const AgendaTaskAskWokeSchema = z.object({
   waitingSince: InstantSchema,
   parked: AgendaParkedSchema.optional(),
   resting: AgendaRestingSchema.optional(),
@@ -1267,28 +1267,28 @@ export const AgendaCardAskWokeSchema = z.object({
   askedAt: InstantSchema.optional(),
   waitingFor: z.enum(['info', 'discussion']).optional(),
 });
-export type AgendaCardAskWoke = z.infer<typeof AgendaCardAskWokeSchema>;
+export type AgendaTaskAskWoke = z.infer<typeof AgendaTaskAskWokeSchema>;
 
 /**
- * ONE CARD ASK: the card's gate as it stands (the card, its lane, the entry that put it there and the lane's
- * options), when it was put on this agenda, the card's How to test, and — once the owner answered — their answer.
+ * ONE TASK ASK: the task's gate as it stands (the task, its lane, the entry that put it there and the lane's
+ * options), when it was put on this agenda, the task's How to test, and — once the owner answered — their answer.
  * Open while it has no answer. Only the daemon writes one; only the owner answers one.
  */
-export const AgendaCardAskSchema = z.object({
+export const AgendaTaskAskSchema = z.object({
   gate: AgendaGateSchema,
   at: InstantSchema,
-  /** The turn this ask woke the thread out of (`AgendaCardAskWoke`); absent on the card's own agenda and on an ask from before it was kept. */
-  woke: AgendaCardAskWokeSchema.optional(),
-  /** The card's How to test, as written (Markdown): what the owner tries before they answer. */
+  /** The turn this ask woke the thread out of (`AgendaTaskAskWoke`); absent on the task's own agenda and on an ask from before it was kept. */
+  woke: AgendaTaskAskWokeSchema.optional(),
+  /** The task's How to test, as written (Markdown): what the owner tries before they answer. */
   howToTest: z.string().max(MAX_AGENDA_BODY_LENGTH).optional(),
-  answer: AgendaCardAskAnswerSchema.optional(),
+  answer: AgendaTaskAskAnswerSchema.optional(),
   /**
-   * The owner said "Not yet" (a one-option gate's other answer): the card stays, their words reached its ferret, and
+   * The owner said "Not yet" (a one-option gate's other answer): the task stays, their words reached its ferret, and
    * the ask stays OPEN for them to answer later. The ferret may rest the agenda now; it still may not close it.
    */
   notYet: z.object({ at: InstantSchema, note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional() }).optional(),
 });
-export type AgendaCardAsk = z.infer<typeof AgendaCardAskSchema>;
+export type AgendaTaskAsk = z.infer<typeof AgendaTaskAskSchema>;
 
 /**
  * THE OWNER'S LATEST ANSWER TO AN OPEN ITEM'S ASK (docs/agenda.md § States): an answer rests the item, it never
@@ -1318,7 +1318,7 @@ const AgendaItemBaseShape = {
   waitingSince: InstantSchema,
   howToResolve: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
   ask: AgendaAskSchema.optional(),
-  ...AgendaCardShape,
+  ...AgendaTaskShape,
   ...AgendaBriefShape,
   /** The indices of the steps the owner has ticked: sorted, unique, each below `steps.length`; absent when none. */
   stepsDone: z.array(NonNegativeIntegerSchema).min(1).max(MAX_AGENDA_STEPS).optional(),
@@ -1357,8 +1357,8 @@ const AgendaItemBaseShape = {
   splitFrom: AgendaIdSchema.optional(),
   /** The items split off this one, oldest first; on the original. */
   splitInto: z.array(AgendaIdSchema).min(1).optional(),
-  /** The cards of the items merged into this one, besides its own `task`: nothing a merge absorbed loses its card. */
-  relatedTasks: z.array(TaskRefSchema).min(1).max(MAX_AGENDA_CARDS).readonly().optional(),
+  /** The tasks of the items merged into this one, besides its own `task`: nothing a merge absorbed loses its task. */
+  relatedTasks: z.array(TaskRefSchema).min(1).max(MAX_AGENDA_TASKS).readonly().optional(),
   /** Off the owner's queue for now, and why (`AgendaParked`); absent on an item in play. */
   parked: AgendaParkedSchema.optional(),
   /** When the ferret last woke a snoozed item as urgent (`now`): it may again only `AGENDA_URGENT_WAKE_MS` later. */
@@ -1368,7 +1368,7 @@ const AgendaItemBaseShape = {
   /**
    * A PLAIN NOTIFICATION (`fy notify`), not an agenda item: a summary the owner reads in the ferret's Inbox
    * group and taps to open its chat. It has no answers and no turn; reading or clearing it resolves it. An old
-   * app reads it as an info card.
+   * app reads it as an info task.
    */
   notice: z.literal(true).optional(),
   /** The ferret asked for the phone to buzz for this notification (`fy notify --ping`). */
@@ -1376,14 +1376,14 @@ const AgendaItemBaseShape = {
   /** The held configuration change the owner's Allow puts into effect (`AgendaConfirms`). */
   confirms: AgendaConfirmsSchema.optional(),
   /**
-   * The board card this item belongs to (`board.ts`): the card derives "waiting on you" from its open,
-   * blocking items. Absent or `null` reads as "no card": an item raised before cards existed, or by a client
+   * The board task this item belongs to (`board.ts`): the task derives "waiting on you" from its open,
+   * blocking items. Absent or `null` reads as "no task": an item raised before tasks existed, or by a client
    * that named none. An older app reading a newer board drops the field.
    */
   task: TaskRefSchema.nullable().optional(),
   /**
-   * The owner's one tap may close the linked card too: the answer row offers "Done · closes &F12". Set by
-   * `fy agenda add --offer-close`, and by the daemon for a to-do or review on a card in the to-test lane.
+   * The owner's one tap may close the linked task too: the answer row offers "Done · closes &F12". Set by
+   * `fy agenda add --offer-close`, and by the daemon for a to-do or review on a task in the to-test lane.
    */
   offerClose: z.literal(true).optional(),
   /** The input request an `input` card presents; present exactly on that kind (`agendaInputProblems`). */
@@ -1394,8 +1394,8 @@ const AgendaItemBaseShape = {
   taskPlan: AgendaTaskPlanRefSchema.optional(),
   /** The approve-on-phone card an `info` item presents; only an `info` item carries one. */
   phoneApproval: AgendaPhoneApprovalRefSchema.optional(),
-  /** The board cards a machine notice lists, each with Open, Start and Close (`AgendaCardRow`); only the daemon raises them. */
-  cards: z.array(AgendaCardRowSchema).min(1).max(MAX_AGENDA_CARDS).readonly().optional(),
+  /** The board tasks a machine notice lists, each with Open, Start and Close (`AgendaTaskRow`); only the daemon raises them. */
+  cards: z.array(AgendaTaskRowSchema).min(1).max(MAX_AGENDA_TASKS).readonly().optional(),
   /** The staged 2FA seed a card asks the owner to save with a passkey; answered by that ceremony, never the generic answer. */
   twoFactorSeed: AgendaTwoFactorSeedRefSchema.optional(),
   /** A ferret's suggested standing rule: its card opens the create sheet with nothing ticked, never the generic answer. */
@@ -1403,13 +1403,13 @@ const AgendaItemBaseShape = {
   /** A standing rule a fill suspended; only an `info` item carries one, and no answer resumes it. */
   signInRuleSuspended: AgendaSignInRuleSuspendedRefSchema.optional(),
   /**
-   * DEPRECATED: the card gate a standalone gate item asked about. No daemon raises one any more — a card's ask rides
-   * its agenda (`cardAsks`) — and the boot migration turned every open one into its card's agenda. Kept so an item
+   * DEPRECATED: the task gate a standalone gate item asked about. No daemon raises one any more — a task's ask rides
+   * its agenda (`cardAsks`) — and the boot migration turned every open one into its task's agenda. Kept so an item
    * answered before reads, and its receipt still answers a replay.
    */
   gate: AgendaGateSchema.optional(),
   /**
-   * The FIRST OPEN card ask's gate (`cardAsks`), mirrored for an app that predates card asks: it draws Done / Not good
+   * The FIRST OPEN task ask's gate (`cardAsks`), mirrored for an app that predates task asks: it draws Done / Not good
    * on the agenda and answers them with `gate: true`. Only the daemon sets or clears it, always with `cardAsks`.
    */
   gateAttached: AgendaGateSchema.optional(),
@@ -1420,10 +1420,10 @@ const AgendaItemBaseShape = {
    * mirror never replaced or lost an ask.
    */
   gateAttachedChangedAt: InstantSchema.optional(),
-  /** The card asks this agenda carries, oldest first (`AgendaCardAsk`); only the daemon writes them. */
-  cardAsks: z.array(AgendaCardAskSchema).min(1).max(MAX_AGENDA_CARD_ASKS).optional(),
+  /** The task asks this agenda carries, oldest first (`AgendaTaskAsk`); only the daemon writes them. */
+  cardAsks: z.array(AgendaTaskAskSchema).min(1).max(MAX_AGENDA_TASK_ASKS).optional(),
   /**
-   * A digest of the thread as the daemon last left it, apart from its card asks: when the thread no longer matches it,
+   * A digest of the thread as the daemon last left it, apart from its task asks: when the thread no longer matches it,
    * the owner or a ferret has touched it since, and a withdrawn ask leaves it where it is. Only the daemon writes it;
    * absent on a thread from before it, which a withdrawn ask never moves.
    */
@@ -1636,7 +1636,7 @@ export function agendaContentLength(item: object): number {
 
 /**
  * An item that fits the transport bound: when it weighs more than `MAX_AGENDA_ITEM_LENGTH`, its oldest revisions go
- * first, then its oldest history (a card gate's `gate-answered` entry never goes: it keeps that gate asked for good).
+ * first, then its oldest history (a task gate's `gate-answered` entry never goes: it keeps that gate asked for good).
  * The daemon must archive owner records removed here in the same ledger write. The history count is bounded too;
  * an item already within both bounds is returned as it is.
  */
@@ -1746,7 +1746,7 @@ const AgendaSnapshotObjectSchema = z.object({
   updatedAt: InstantSchema,
   /** Writing advice for the item just raised or edited; present only on that response. */
   warnings: z.array(z.string().trim().min(1).max(MAX_AGENDA_WARNING_LENGTH)).max(MAX_AGENDA_WARNINGS).optional(),
-  /** What the daemon did to the request that the caller should know, not advice on its writing (a card link left off). */
+  /** What the daemon did to the request that the caller should know, not advice on its writing (a task link left off). */
   notes: z.array(z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH)).max(MAX_AGENDA_WARNINGS).optional(),
   /**
    * How many devices this machine has enrolled for push, counted as an item was raised; present only on
@@ -1787,7 +1787,7 @@ const ResolvedAgendaHeaderObjectSchema = z
     projection: z.literal('header'),
     lifecycle: z.literal('addressed'),
     id: AgendaIdSchema,
-    title: AgendaCardShape.title.unwrap(),
+    title: AgendaTaskShape.title.unwrap(),
     kind: AgendaKindSchema,
     subject: AgendaItemBaseShape.subject,
     /** The Inbox's Find searches this one-line reason as well as the title and subject. */
@@ -1826,7 +1826,7 @@ export const isAgendaHeader = (item: AgendaItem | AgendaListRecord): item is Res
 
 const AddAgendaRequestSchema = z.strictObject({
   action: z.literal('add'),
-  ...AgendaCardShape,
+  ...AgendaTaskShape,
   source: z.literal('agent-raised').default('agent-raised'),
   sourceRef: z.string().max(MAX_AGENDA_SOURCE_REF_LENGTH).nullable().default(null),
   subject: singleLine(MAX_AGENDA_SUBJECT_LENGTH),
@@ -1842,18 +1842,18 @@ const AddAgendaRequestSchema = z.strictObject({
   ping: z.literal(true).optional(),
   /**
    * The configuration file whose HELD change this item asks the owner to confirm (`--confirms`). The daemon
-   * records the held edit's digest and words and writes the card's ask and answers; refused when the file has
+   * records the held edit's digest and words and writes the task's ask and answers; refused when the file has
    * no held change.
    */
   confirms: singleLine(MAX_AGENDA_CONFIRMS_PATH_LENGTH).optional(),
   /**
-   * The board card the item belongs to. A daemon released before this field (4.111 and every older one)
+   * The board task the item belongs to. A daemon released before this field (4.111 and every older one)
    * refuses an add that carries it, so a client sends it only to a daemon that reports
    * `DAEMON_FEATURES.agendaTask`.
    */
   task: TaskRefSchema.optional(),
   /**
-   * Offer the owner a "Done · closes &F12" answer that also closes the item's card (`--offer-close`). A daemon
+   * Offer the owner a "Done · closes &F12" answer that also closes the item's task (`--offer-close`). A daemon
    * without `DAEMON_FEATURES.agendaOfferClose` refuses the whole add, so a client sends it only to one that has it.
    */
   offerClose: z.literal(true).optional(),
@@ -1932,7 +1932,7 @@ export const AgendaEditRequestSchema = z.strictObject({
     .string()
     .regex(/^[0-9a-z]{1,32}$/u)
     .optional(),
-  title: AgendaCardShape.title,
+  title: AgendaTaskShape.title,
   /**
    * What the item needs from the owner now (`--stage`); a change is kept in its `stages`. Only a daemon that
    * reports `agenda.channel.1` takes it.
@@ -1944,8 +1944,8 @@ export const AgendaEditRequestSchema = z.strictObject({
    * is refused, and the ferret's answer to an earlier question is cleared unless this edit sets a new one.
    */
   ask: AgendaAskSchema.optional(),
-  kind: AgendaCardShape.kind,
-  answers: AgendaCardShape.answers,
+  kind: AgendaTaskShape.kind,
+  answers: AgendaTaskShape.answers,
   context: z.preprocess(asBullets, z.string().max(MAX_AGENDA_CONTEXT_LENGTH)).nullable().optional(),
   ...AgendaBriefShape,
   /**
@@ -1964,8 +1964,8 @@ export const AgendaEditRequestSchema = z.strictObject({
   now: z.literal(true).optional(),
   /**
    * `--back`, RETIRED from the CLI (`fy agenda answer` replaced it) and kept for older ones: the ferret needs
-   * something NEW from the owner, so a RESTING item asks again, fresh, with the whole card refreshed. Without it
-   * (and without a `questionAnswer` or a replaced ask) an edit of a resting item only rewrites the card.
+   * something NEW from the owner, so a RESTING item asks again, fresh, with the whole task refreshed. Without it
+   * (and without a `questionAnswer` or a replaced ask) an edit of a resting item only rewrites the task.
    */
   back: z.literal(true).optional(),
 });
@@ -1979,10 +1979,10 @@ export const AgendaActionRequestSchema = z
       id: AgendaIdSchema,
       note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
       response: AgendaResponseSchema.optional(),
-      /** The response picks one of the attached card gate's options, not one of the thread's own answers. */
+      /** The response picks one of the attached task gate's options, not one of the thread's own answers. */
       gate: z.literal(true).optional(),
       /**
-       * WHICH card ask the response answers (`agenda.card-asks.1`): its gate reference (`gate:<card>:<lane>:<entry>`).
+       * WHICH task ask the response answers (`agenda.card-asks.1`): its gate reference (`gate:<card>:<lane>:<entry>`).
        * Absent with `gate: true`, the answer is to the ask an older app was shown (`gateAttached`).
        */
       cardAsk: z.string().min(1).max(MAX_AGENDA_SOURCE_REF_LENGTH).optional(),
@@ -1993,8 +1993,8 @@ export const AgendaActionRequestSchema = z
        */
       askVersion: PositiveIntegerSchema.optional(),
       /**
-       * Files the owner sent with a Not good on a card's gate (`from` is this agenda's own session, where the app
-       * uploaded them): carried to the card's ferret with the reopen. Only an answer to a gate takes them, and only a
+       * Files the owner sent with a Not good on a task's gate (`from` is this agenda's own session, where the app
+       * uploaded them): carried to the task's ferret with the reopen. Only an answer to a gate takes them, and only a
        * daemon that reports `agenda.gate.attachments.1`; any other answer is refused.
        */
       attachments: BoardReopenAttachmentsSchema.optional(),
@@ -2013,7 +2013,7 @@ export const AgendaActionRequestSchema = z
       note: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH).optional(),
     }),
     /**
-     * The owner wants to talk a SURFACED item through before answering — the premise is wrong, or the card is
+     * The owner wants to talk a SURFACED item through before answering — the premise is wrong, or the task is
      * not understood. The item stays open, marked in discussion (`waitingFor: 'discussion'`), and the raising
      * ferret is told `[discuss !A3 «title»] …` to reply in chat. Kept for older apps: the current app talks
      * to the ferret in chat, where the ask already starts.
@@ -2061,22 +2061,22 @@ export const AgendaActionRequestSchema = z
       text: z.string().trim().min(1).max(MAX_AGENDA_BODY_LENGTH),
       messageId: z.string().trim().min(1).max(128).optional(),
     }),
-    /** Merge `from` into `id` (`agenda.conversation.1`): both conversations, all cards and links kept; `from` closes. */
+    /** Merge `from` into `id` (`agenda.conversation.1`): both conversations, all tasks and links kept; `from` closes. */
     z.strictObject({
       action: z.literal('merge'),
       id: AgendaIdSchema,
       from: AgendaIdSchema,
     }),
     /**
-     * Split a NEW item off `id` (`agenda.conversation.1`): its own writing, linked both ways, the named cards moved to it.
+     * Split a NEW item off `id` (`agenda.conversation.1`): its own writing, linked both ways, the named tasks moved to it.
      */
     z.strictObject({
       action: z.literal('split'),
       id: AgendaIdSchema,
       /** The new item, written as an add is (its ask, title, premise and context), raised by the same ferret. */
       item: SplitAgendaItemSchema,
-      /** Cards of `id` that go to the new item: its `task` and `relatedTasks`. */
-      moveCards: z.array(TaskRefSchema).min(1).max(MAX_AGENDA_CARDS).optional(),
+      /** Tasks of `id` that go to the new item: its `task` and `relatedTasks`. */
+      moveCards: z.array(TaskRefSchema).min(1).max(MAX_AGENDA_TASKS).optional(),
     }),
     /** The owner puts an open item away `until` a time still ahead; it comes back then as a fresh item. */
     z.strictObject({

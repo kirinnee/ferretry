@@ -111,7 +111,7 @@ describe('tidy on the test host', () => {
     const board = {
       ...base,
       cards: async (query: Parameters<typeof base.cards>[0]) =>
-        (await base.cards(query)).map(card => ({ ...card, origin: 'agent' as const })),
+        (await base.cards(query)).map(task => ({ ...task, origin: 'agent' as const })),
       switchOf: async (project: string) => ({
         projectId: project as never,
         on: false,

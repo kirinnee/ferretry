@@ -3,10 +3,10 @@ import { describe, expect, it } from 'bun:test';
 import {
   type BoardFilters,
   type BoardMachineData,
-  boardCardKey,
+  boardTaskKey,
   boardFiltersToSearch,
   boardQueryParams,
-  cardMatchesQuery,
+  taskMatchesQuery,
   checkMove,
   inDateRange,
   inLane,
@@ -22,11 +22,11 @@ import {
 import {
   CHILD,
   COUNTS,
-  card,
+  boardTask,
   laneSetFor,
   laptop,
   OTHER_PROJECT,
-  originCard,
+  originTask,
   PROJECT,
   phone,
   unasked,
@@ -34,14 +34,14 @@ import {
 } from './board-support.ts';
 import { mergeBoardAt as mergeBoard } from './board-support.ts';
 
-const data = (machine: typeof laptop, name: string, cards: ReturnType<typeof card>[], version = '4.110.0') =>
+const data = (machine: typeof laptop, name: string, tasks: ReturnType<typeof boardTask>[], version = '4.110.0') =>
   ({
     daemonId: machine.daemonId,
     machine: name,
     version,
-    cards,
+    cards: tasks,
     laneSets: new Map([[PROJECT, laneSetFor()]]),
-    counts: { ...COUNTS, active: cards.length },
+    counts: { ...COUNTS, active: tasks.length },
     quarantined: [],
   }) satisfies BoardMachineData;
 
@@ -49,14 +49,14 @@ describe('mergeBoard', () => {
   it('keeps two machines’ same-numbered cards apart, keyed (daemonId, taskId)', () => {
     const model = mergeBoard(
       [
-        data(laptop, 'laptop', [card('F12', { title: 'on laptop' })]),
-        data(workstation, 'workstation', [card('F12', { title: 'on workstation' })]),
+        data(laptop, 'laptop', [boardTask('F12', { title: 'on laptop' })]),
+        data(workstation, 'workstation', [boardTask('F12', { title: 'on workstation' })]),
       ],
       NO_BOARD_FILTERS,
     );
     expect(model.cards.map(entry => entry.key)).toEqual([
-      boardCardKey(laptop.daemonId, 'F12'),
-      boardCardKey(workstation.daemonId, 'F12'),
+      boardTaskKey(laptop.daemonId, 'F12'),
+      boardTaskKey(workstation.daemonId, 'F12'),
     ]);
     expect(model.cards.map(entry => entry.task.title)).toEqual(['on laptop', 'on workstation']);
     expect(model.multiMachine).toBe(true);
@@ -66,9 +66,9 @@ describe('mergeBoard', () => {
     const wide = { ...laneSetFor(), lanes: laneSetFor().lanes.filter(lane => lane.id !== 'plan') };
     const model = mergeBoard(
       [
-        data(laptop, 'laptop', [card('F1', { laneId: 'implement' }), card('F2', { laneId: 'review' })]),
+        data(laptop, 'laptop', [boardTask('F1', { laneId: 'implement' }), boardTask('F2', { laneId: 'review' })]),
         {
-          ...data(workstation, 'workstation', [card('F1', { laneId: 'implement' })]),
+          ...data(workstation, 'workstation', [boardTask('F1', { laneId: 'implement' })]),
           laneSets: new Map([[PROJECT, wide]]),
         },
       ],
@@ -89,8 +89,8 @@ describe('mergeBoard', () => {
     const quarantined = [{ id: 'F9', reason: 'unreadable' }] as never;
     const model = mergeBoard(
       [
-        { ...data(laptop, 'laptop', [card('F1')]), quarantined },
-        { ...data(workstation, 'workstation', [card('F2', { laneId: 'gone' })]), counts: null },
+        { ...data(laptop, 'laptop', [boardTask('F1')]), quarantined },
+        { ...data(workstation, 'workstation', [boardTask('F2', { laneId: 'gone' })]), counts: null },
       ],
       NO_BOARD_FILTERS,
     );
@@ -101,22 +101,22 @@ describe('mergeBoard', () => {
 
   it('applies the machine and mine filters, and leaves the rest to the daemon', () => {
     const owners = [
-      card('F1', { createdBy: { kind: 'owner' } }),
-      card('F2'),
-      card('F3', { openAsks: [{ ferret: CHILD, id: 'A1' }] }),
+      boardTask('F1', { createdBy: { kind: 'owner' } }),
+      boardTask('F2'),
+      boardTask('F3', { openAsks: [{ ferret: CHILD, id: 'A1' }] }),
     ];
-    const machines = [data(laptop, 'laptop', owners), data(workstation, 'workstation', [card('F4')])];
+    const machines = [data(laptop, 'laptop', owners), data(workstation, 'workstation', [boardTask('F4')])];
     expect(
       mergeBoard(machines, { ...NO_BOARD_FILTERS, machine: workstation.daemonId }).cards.map(entry => entry.task.id),
     ).toEqual(['F4']);
     expect(mergeBoard(machines, { ...NO_BOARD_FILTERS, mine: true }).cards.map(entry => entry.task.id)).toEqual(['F1']);
-    expect(isMine(card('F2'))).toBe(false);
-    // A card opened on the admin token is an owner card underneath (its `via` only labels it): still mine.
-    expect(isMine({ ...card('F5'), createdBy: { kind: 'owner', via: 'admin-token' } })).toBe(true);
+    expect(isMine(boardTask('F2'))).toBe(false);
+    // A task opened on the admin token is an owner task underneath (its `via` only labels it): still mine.
+    expect(isMine({ ...boardTask('F5'), createdBy: { kind: 'owner', via: 'admin-token' } })).toBe(true);
   });
 
   it('hides agent cards unless asked, or unless a ferret or an activity is chosen', () => {
-    const machines = [data(laptop, 'laptop', [originCard('F1', 'human'), originCard('F2', 'agent', { id: 'F1' })])];
+    const machines = [data(laptop, 'laptop', [originTask('F1', 'human'), originTask('F2', 'agent', { id: 'F1' })])];
     const ids = (filters: BoardFilters) => mergeBoard(machines, filters).cards.map(entry => entry.task.id);
     expect(ids(NO_BOARD_FILTERS)).toEqual(['F1']);
     expect(ids({ ...NO_BOARD_FILTERS, agents: true })).toEqual(['F1', 'F2']);
@@ -128,19 +128,19 @@ describe('mergeBoard', () => {
 
   it('takes the agent cards the board is not showing out of the header counts, so a pill and its cards agree', () => {
     const laneSet = laneSetFor();
-    const counted = (cards: ReturnType<typeof originCard>[]) =>
-      mergeBoard([{ ...data(laptop, 'laptop', cards), counts: { ...COUNTS, active: 4 } }], NO_BOARD_FILTERS).counts;
+    const counted = (tasks: ReturnType<typeof originTask>[]) =>
+      mergeBoard([{ ...data(laptop, 'laptop', tasks), counts: { ...COUNTS, active: 4 } }], NO_BOARD_FILTERS).counts;
     expect(laneSet.lanes.some(lane => lane.id === 'tested' && lane.category === 'verify')).toBe(true);
-    const cards = [
-      originCard('F1', 'human', null, { laneId: 'tested' }),
-      originCard('F2', 'agent', { id: 'F1' }, { laneId: 'tested', activity: 'active' }),
-      originCard('F3', 'agent', null, {
+    const tasks = [
+      originTask('F1', 'human', null, { laneId: 'tested' }),
+      originTask('F2', 'agent', { id: 'F1' }, { laneId: 'tested', activity: 'active' }),
+      originTask('F3', 'agent', null, {
         laneId: 'tested',
         openAsks: [{ ferret: CHILD, id: 'A1' }],
       }),
     ];
-    expect(counted(cards)).toMatchObject({ active: 2 });
-    const shown = mergeBoard([{ ...data(laptop, 'laptop', cards), counts: { ...COUNTS, active: 3 } }], {
+    expect(counted(tasks)).toMatchObject({ active: 2 });
+    const shown = mergeBoard([{ ...data(laptop, 'laptop', tasks), counts: { ...COUNTS, active: 3 } }], {
       ...NO_BOARD_FILTERS,
       agents: true,
     });
@@ -148,10 +148,10 @@ describe('mergeBoard', () => {
   });
 
   it('keeps a card an agent asked for (askedBy alone) out of every count while Show private is off', () => {
-    const asked = (id: string, askedBy: 'person' | 'agent') => card(id, { laneId: 'tested', askedBy });
-    const cards = [asked('F1', 'person'), asked('F2', 'agent'), asked('F3', 'agent')];
+    const asked = (id: string, askedBy: 'person' | 'agent') => boardTask(id, { laneId: 'tested', askedBy });
+    const tasks = [asked('F1', 'person'), asked('F2', 'agent'), asked('F3', 'agent')];
     const read = (agents: boolean) =>
-      mergeBoard([{ ...data(laptop, 'laptop', cards), counts: { ...COUNTS, active: 3 } }], {
+      mergeBoard([{ ...data(laptop, 'laptop', tasks), counts: { ...COUNTS, active: 3 } }], {
         ...NO_BOARD_FILTERS,
         agents,
       });
@@ -163,13 +163,13 @@ describe('mergeBoard', () => {
   });
 
   it('keeps a top-level card the daemon says is for the owner, though its stored askedBy is agent', () => {
-    const cards = [
-      card('F1', { origin: 'human', askedBy: 'agent' }),
-      card('F2', { origin: 'agent', askedBy: 'agent' }),
-      card('F3', { origin: 'human', askedBy: 'agent', parent: { id: 'F1' } }),
+    const tasks = [
+      boardTask('F1', { origin: 'human', askedBy: 'agent' }),
+      boardTask('F2', { origin: 'agent', askedBy: 'agent' }),
+      boardTask('F3', { origin: 'human', askedBy: 'agent', parent: { id: 'F1' } }),
     ];
     const ids = (filters: BoardFilters) =>
-      mergeBoard([data(laptop, 'laptop', cards)], filters).cards.map(entry => entry.task.id);
+      mergeBoard([data(laptop, 'laptop', tasks)], filters).cards.map(entry => entry.task.id);
     expect(ids(NO_BOARD_FILTERS)).toEqual(['F1']);
     expect(ids({ ...NO_BOARD_FILTERS, agents: true })).toEqual(['F1', 'F2', 'F3']);
   });
@@ -177,10 +177,10 @@ describe('mergeBoard', () => {
   it('counts a sub-card as a ferret card unless a person asked for it', () => {
     const machines = [
       data(laptop, 'laptop', [
-        card('F1'),
-        card('F2', { parent: { id: 'F1' }, askedBy: 'agent' }),
-        card('F3', { parent: { id: 'F1' }, askedBy: 'person' }),
-        card('F4', { parent: { id: 'F1' }, askedBy: 'agent' }),
+        boardTask('F1'),
+        boardTask('F2', { parent: { id: 'F1' }, askedBy: 'agent' }),
+        boardTask('F3', { parent: { id: 'F1' }, askedBy: 'person' }),
+        boardTask('F4', { parent: { id: 'F1' }, askedBy: 'agent' }),
       ]),
     ];
     const ids = (filters: BoardFilters) => mergeBoard(machines, filters).cards.map(entry => entry.task.id);
@@ -192,10 +192,10 @@ describe('mergeBoard', () => {
   it('hides the cards a daemon calls private and shows the ones it calls public, whoever asked', () => {
     const machines = [
       data(laptop, 'laptop', [
-        card('F1', { askedBy: 'person', visibility: 'public' }),
-        card('F2', { askedBy: 'person', visibility: 'private' }),
-        card('F3', { askedBy: 'agent', visibility: 'public' }),
-        card('F4', { parent: { id: 'F1' }, askedBy: 'person', visibility: 'private' }),
+        boardTask('F1', { askedBy: 'person', visibility: 'public' }),
+        boardTask('F2', { askedBy: 'person', visibility: 'private' }),
+        boardTask('F3', { askedBy: 'agent', visibility: 'public' }),
+        boardTask('F4', { parent: { id: 'F1' }, askedBy: 'person', visibility: 'private' }),
       ]),
     ];
     const ids = (filters: BoardFilters) => mergeBoard(machines, filters).cards.map(entry => entry.task.id);
@@ -204,19 +204,19 @@ describe('mergeBoard', () => {
   });
 
   it('treats a sub-card from a daemon that says nothing about who asked as a ferret card, and offers the filter', () => {
-    const machines = [data(laptop, 'laptop', unasked([card('F1'), card('F2', { parent: { id: 'F1' } })]))];
+    const machines = [data(laptop, 'laptop', unasked([boardTask('F1'), boardTask('F2', { parent: { id: 'F1' } })]))];
     expect(mergeBoard(machines, NO_BOARD_FILTERS).cards.map(entry => entry.task.id)).toEqual(['F1']);
     expect(mergeBoard(machines, NO_BOARD_FILTERS).splitsAgents).toBe(true);
   });
 
   it('takes ferret sub-cards out of the header counts while they are hidden, and back in when shown', () => {
-    const cards = [
-      card('F1', { laneId: 'tested' }),
-      card('F2', { laneId: 'tested', parent: { id: 'F1' }, askedBy: 'agent' }),
-      card('F3', { laneId: 'tested', parent: { id: 'F1' }, askedBy: 'agent', activity: 'active' }),
+    const tasks = [
+      boardTask('F1', { laneId: 'tested' }),
+      boardTask('F2', { laneId: 'tested', parent: { id: 'F1' }, askedBy: 'agent' }),
+      boardTask('F3', { laneId: 'tested', parent: { id: 'F1' }, askedBy: 'agent', activity: 'active' }),
     ];
     const read = (agents: boolean) =>
-      mergeBoard([{ ...data(laptop, 'laptop', cards), counts: { ...COUNTS, active: 1 } }], {
+      mergeBoard([{ ...data(laptop, 'laptop', tasks), counts: { ...COUNTS, active: 1 } }], {
         ...NO_BOARD_FILTERS,
         agents,
       }).counts;
@@ -225,7 +225,7 @@ describe('mergeBoard', () => {
   });
 
   it('shows every card and offers no toggle when the daemon does not say who asked', () => {
-    const machines = [data(laptop, 'laptop', unasked([card('F1'), card('F2')]))];
+    const machines = [data(laptop, 'laptop', unasked([boardTask('F1'), boardTask('F2')]))];
     const model = mergeBoard(machines, NO_BOARD_FILTERS);
     expect(model.cards.map(entry => entry.task.id)).toEqual(['F1', 'F2']);
     expect(model.splitsAgents).toBe(false);
@@ -235,10 +235,10 @@ describe('mergeBoard', () => {
     const model = mergeBoard(
       [
         data(laptop, 'laptop', [
-          card('F3', { lastTouchedAt: '2026-08-01T10:00:00.000Z' }),
-          card('F2', { lastTouchedAt: '2026-08-01T08:00:00.000Z' }),
-          card('F1', { order: 0 }),
-          card('F4', { order: 1 }),
+          boardTask('F3', { lastTouchedAt: '2026-08-01T10:00:00.000Z' }),
+          boardTask('F2', { lastTouchedAt: '2026-08-01T08:00:00.000Z' }),
+          boardTask('F1', { order: 0 }),
+          boardTask('F4', { order: 1 }),
         ]),
       ],
       NO_BOARD_FILTERS,
@@ -279,7 +279,9 @@ describe('runningOn', () => {
   });
 
   it('is set on every merged card from every paired machine’s version', () => {
-    const shipped = card('F1', { shippedIn: { version: '4.110.0', tag: 'v4.110.0', at: '2026-08-01T10:00:00.000Z' } });
+    const shipped = boardTask('F1', {
+      shippedIn: { version: '4.110.0', tag: 'v4.110.0', at: '2026-08-01T10:00:00.000Z' },
+    });
     const model = mergeBoard(
       [data(laptop, 'laptop', [shipped], '4.110.0'), data(workstation, 'workstation', [], '4.100.0')],
       NO_BOARD_FILTERS,
@@ -396,26 +398,26 @@ describe('cardMatchesQuery', () => {
   const lanes = laneSetFor();
 
   it('keeps an open card and drops closed and dropped ones from the default board', () => {
-    expect(cardMatchesQuery(card('F1'), lanes, open)).toBe(true);
-    expect(cardMatchesQuery(card('F1', { laneId: 'closed' }), lanes, open)).toBe(false);
-    expect(cardMatchesQuery(card('F1', { laneId: 'closed' }), lanes, { ...open, state: 'closed' })).toBe(true);
-    expect(cardMatchesQuery(card('F1'), lanes, { ...open, state: 'all' })).toBe(true);
+    expect(taskMatchesQuery(boardTask('F1'), lanes, open)).toBe(true);
+    expect(taskMatchesQuery(boardTask('F1', { laneId: 'closed' }), lanes, open)).toBe(false);
+    expect(taskMatchesQuery(boardTask('F1', { laneId: 'closed' }), lanes, { ...open, state: 'closed' })).toBe(true);
+    expect(taskMatchesQuery(boardTask('F1'), lanes, { ...open, state: 'all' })).toBe(true);
   });
 
   it('judges a card with no known lane set by whether it was dropped', () => {
-    expect(cardMatchesQuery(card('F1'), null, open)).toBe(true);
-    expect(cardMatchesQuery(card('F1'), null, { ...open, state: 'dropped' })).toBe(false);
+    expect(taskMatchesQuery(boardTask('F1'), null, open)).toBe(true);
+    expect(taskMatchesQuery(boardTask('F1'), null, { ...open, state: 'dropped' })).toBe(false);
   });
 
   it('matches project, ferret, kind, pr state and activity', () => {
-    expect(cardMatchesQuery(card('F1'), lanes, { ...open, project: OTHER_PROJECT })).toBe(false);
-    expect(cardMatchesQuery(card('F1', { assignee: CHILD }), lanes, { ...open, ferret: CHILD })).toBe(true);
-    expect(cardMatchesQuery(card('F1'), lanes, { ...open, ferret: CHILD })).toBe(false);
-    expect(cardMatchesQuery(card('B1', { kind: 'bug' }), lanes, { ...open, kind: 'feature' })).toBe(false);
-    expect(cardMatchesQuery(card('F1'), lanes, { ...open, pr: 'none' })).toBe(true);
-    expect(cardMatchesQuery(card('F1'), lanes, { ...open, pr: 'merged' })).toBe(false);
-    expect(cardMatchesQuery(card('F1', { activity: 'stale' }), lanes, { ...open, activity: 'stale' })).toBe(true);
-    expect(cardMatchesQuery(card('F1'), lanes, { ...open, activity: 'blocked' })).toBe(false);
+    expect(taskMatchesQuery(boardTask('F1'), lanes, { ...open, project: OTHER_PROJECT })).toBe(false);
+    expect(taskMatchesQuery(boardTask('F1', { assignee: CHILD }), lanes, { ...open, ferret: CHILD })).toBe(true);
+    expect(taskMatchesQuery(boardTask('F1'), lanes, { ...open, ferret: CHILD })).toBe(false);
+    expect(taskMatchesQuery(boardTask('B1', { kind: 'bug' }), lanes, { ...open, kind: 'feature' })).toBe(false);
+    expect(taskMatchesQuery(boardTask('F1'), lanes, { ...open, pr: 'none' })).toBe(true);
+    expect(taskMatchesQuery(boardTask('F1'), lanes, { ...open, pr: 'merged' })).toBe(false);
+    expect(taskMatchesQuery(boardTask('F1', { activity: 'stale' }), lanes, { ...open, activity: 'stale' })).toBe(true);
+    expect(taskMatchesQuery(boardTask('F1'), lanes, { ...open, activity: 'blocked' })).toBe(false);
   });
 });
 
@@ -462,22 +464,22 @@ describe('cardMatchesQuery on every pr and activity filter', () => {
   });
   const merged = { state: 'merged', mergedAt: '2026-08-01T10:00:00.000Z', mergeSha: 'a'.repeat(40) };
   const withPr = (extra: Record<string, unknown>) =>
-    card('F1', { links: { prs: [pr(extra)], branch: null, commits: [], docs: [] } });
+    boardTask('F1', { links: { prs: [pr(extra)], branch: null, commits: [], docs: [] } });
 
   it('reads draft, open, red, merged and released off the card’s pull requests', () => {
-    expect(cardMatchesQuery(withPr({ draft: true }), lanes, { ...open, pr: 'draft' })).toBe(true);
-    expect(cardMatchesQuery(withPr({}), lanes, { ...open, pr: 'draft' })).toBe(false);
-    expect(cardMatchesQuery(withPr({}), lanes, { ...open, pr: 'open' })).toBe(true);
-    expect(cardMatchesQuery(withPr({ checks: 'failing' }), lanes, { ...open, pr: 'ci_red' })).toBe(true);
-    expect(cardMatchesQuery(withPr(merged), lanes, { ...open, pr: 'merged' })).toBe(true);
-    expect(cardMatchesQuery(withPr({}), lanes, { ...open, pr: 'released' })).toBe(false);
-    const shipped = card('F1', { shippedIn: { version: '1.0.0', tag: 'v1.0.0', at: '2026-08-01T10:00:00.000Z' } });
-    expect(cardMatchesQuery(shipped, lanes, { ...open, pr: 'released' })).toBe(true);
+    expect(taskMatchesQuery(withPr({ draft: true }), lanes, { ...open, pr: 'draft' })).toBe(true);
+    expect(taskMatchesQuery(withPr({}), lanes, { ...open, pr: 'draft' })).toBe(false);
+    expect(taskMatchesQuery(withPr({}), lanes, { ...open, pr: 'open' })).toBe(true);
+    expect(taskMatchesQuery(withPr({ checks: 'failing' }), lanes, { ...open, pr: 'ci_red' })).toBe(true);
+    expect(taskMatchesQuery(withPr(merged), lanes, { ...open, pr: 'merged' })).toBe(true);
+    expect(taskMatchesQuery(withPr({}), lanes, { ...open, pr: 'released' })).toBe(false);
+    const shipped = boardTask('F1', { shippedIn: { version: '1.0.0', tag: 'v1.0.0', at: '2026-08-01T10:00:00.000Z' } });
+    expect(taskMatchesQuery(shipped, lanes, { ...open, pr: 'released' })).toBe(true);
   });
 
   it('reads blocked off the card', () => {
-    const blocked = card('F1', { blockedBy: [{ id: 'F2' }] });
-    expect(cardMatchesQuery(blocked, lanes, { ...open, activity: 'blocked' })).toBe(true);
+    const blocked = boardTask('F1', { blockedBy: [{ id: 'F2' }] });
+    expect(taskMatchesQuery(blocked, lanes, { ...open, activity: 'blocked' })).toBe(true);
   });
 });
 
@@ -524,13 +526,17 @@ describe('lane and date filters', () => {
   });
 
   it('narrows the merged board by lane, created and touched, in the Archive as on the board', () => {
-    const cards = [
-      card('F1', { laneId: 'review', createdAt: at(10, 29).toISOString(), lastTouchedAt: at(10, 30, 9).toISOString() }),
-      card('F2', { laneId: 'review', createdAt: at(8, 1).toISOString(), lastTouchedAt: at(8, 2).toISOString() }),
-      card('F3', { laneId: 'implement', createdAt: at(10, 29).toISOString(), lastTouchedAt: null }),
+    const tasks = [
+      boardTask('F1', {
+        laneId: 'review',
+        createdAt: at(10, 29).toISOString(),
+        lastTouchedAt: at(10, 30, 9).toISOString(),
+      }),
+      boardTask('F2', { laneId: 'review', createdAt: at(8, 1).toISOString(), lastTouchedAt: at(8, 2).toISOString() }),
+      boardTask('F3', { laneId: 'implement', createdAt: at(10, 29).toISOString(), lastTouchedAt: null }),
     ];
     const ids = (filters: Partial<BoardFilters>) =>
-      mergeBoard([data(laptop, 'laptop', cards)], { ...NO_BOARD_FILTERS, ...filters }, NOW).cards.map(c => c.task.id);
+      mergeBoard([data(laptop, 'laptop', tasks)], { ...NO_BOARD_FILTERS, ...filters }, NOW).cards.map(c => c.task.id);
     expect(ids({ lane: 'Review/CI' })).toEqual(['F1', 'F2']);
     expect(ids({ created: range({ preset: '7d' }) })).toEqual(['F1', 'F3']);
     expect(ids({ touched: range({ preset: 'today' }) })).toEqual(['F1']);

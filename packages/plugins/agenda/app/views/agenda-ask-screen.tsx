@@ -1,12 +1,12 @@
 /**
  * The `agenda-ask` screen (`agenda/:ferret/:ask` under its machine): where a buzz lands. It is the Agenda page opened AT the ask, as
- * today's page opens one from a tapped notification: the card shows while the ask is open, with the ferret's
+ * today's page opens one from a tapped notification: the task shows while the ask is open, with the ferret's
  * conversation and composer under it (Conversation's panel in the `agenda.conversation` slot), and the reader goes on
  * to the ferret's chat when it is not open any more.
  */
 
 import type { ScreenProps } from '@ferretry/kernel/manifest';
-import { useCardBoards } from '../features/agenda/agenda-board-hooks.tsx';
+import { useTaskBoards } from '../features/agenda/agenda-board-hooks.tsx';
 import { AgendaCardConversation } from '../features/agenda/agenda-conversation-slot.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { AgendaInboxContext, useRuntimeInbox } from '../hooks/use-agenda-inbox.ts';
@@ -25,10 +25,10 @@ export function createAgendaAskScreen(runtime: AgendaRuntime, fleet?: AgendaFlee
   return function AgendaAskScreen({ params }: ScreenProps) {
     const { navigate } = useRouter();
     const links = useAgendaLinks();
-    // Board's hooks per OPEN CARD's machine (the Inbox is every machine's): Done · closes, a notice's Start and Close,
+    // Board's hooks per OPEN TASK's machine (the Inbox is every machine's): Done · closes, a notice's Start and Close,
     // Edit's lane editor and `&F12` proof.
-    const { laneEditor, cardBoard } = useCardBoards(to => navigate(to));
-    // Told on the OPENED CARD's machine (it may be another machine's, from the fleet Inbox), never the page's.
+    const { laneEditor, cardBoard: taskBoard } = useTaskBoards(to => navigate(to));
+    // Told on the OPENED TASK's machine (it may be another machine's, from the fleet Inbox), never the page's.
     const itemOpened = useItemOpened({ daemon, client: runtime.client }, fleet);
     const inbox = useRuntimeInbox(runtime, laneEditor, fleet);
     const phone = useLayoutMode() === 'drawer';
@@ -44,7 +44,7 @@ export function createAgendaAskScreen(runtime: AgendaRuntime, fleet?: AgendaFlee
         <AgendaInboxContext.Provider value={inbox}>
           {itemOpened.host}
           <AgendaInboxPage
-            cardBoard={cardBoard}
+            cardBoard={taskBoard}
             inbox={inbox}
             phone={phone}
             clearPort={runtime.clearPort}

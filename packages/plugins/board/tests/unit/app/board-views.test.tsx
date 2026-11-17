@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
   ArchiveView,
-  type BoardCardEnv,
+  type BoardTaskEnv,
   DependenciesView,
   KanbanView,
   TreeView,
@@ -9,9 +9,9 @@ import {
 import { TableView } from '../../../app/views/board-table.tsx';
 import { type BoardModel, NO_BOARD_FILTERS } from '../../../app/lib/board-model.ts';
 import { ferretNamer } from '../../../app/lib/board-present.ts';
-import { cardPlaces } from '../../../app/lib/board-view.ts';
+import { taskPlaces } from '../../../app/lib/board-view.ts';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
-import { boardModelOf, card, OTHER_PROJECT, originCard } from './board-support.ts';
+import { boardModelOf, boardTask, OTHER_PROJECT, originTask } from './board-support.ts';
 
 const NOW = Date.parse('2026-08-01T10:04:00.000Z');
 
@@ -21,13 +21,13 @@ afterEach(async () => {
   view = null;
 });
 
-const envOf = (model: BoardModel, extra: Partial<BoardCardEnv> = {}): BoardCardEnv => ({
+const envOf = (model: BoardModel, extra: Partial<BoardTaskEnv> = {}): BoardTaskEnv => ({
   names: ferretNamer(new Map()),
   now: NOW,
   showMachine: false,
   hrefFor: entry => `/d/laptop/board/${entry.task.id}`,
   onNavigate: () => undefined,
-  places: cardPlaces(model),
+  places: taskPlaces(model),
   ...extra,
 });
 
@@ -35,15 +35,15 @@ const ids = (root: HTMLElement, selector = '.fy-board-card, .fy-board-table__row
   [...root.querySelectorAll<HTMLElement>(selector)].map(node => node.dataset.task);
 
 describe('S-0124 KanbanView', () => {
-  const cards = [
-    card('F1', { laneId: 'todo' }),
-    card('F2', { laneId: 'implement' }),
-    card('F3', { laneId: 'implement' }),
-    card('F9', { laneId: 'ghost' }),
+  const tasks = [
+    boardTask('F1', { laneId: 'todo' }),
+    boardTask('F2', { laneId: 'implement' }),
+    boardTask('F3', { laneId: 'implement' }),
+    boardTask('F9', { laneId: 'ghost' }),
   ];
 
   it('draws a lane per lane of the set, with its cards, "Nothing here" when empty and an Unplaced lane', async () => {
-    const model = await boardModelOf(cards);
+    const model = await boardModelOf(tasks);
     view = await mount(
       <KanbanView env={envOf(model)} hideClosed={false} model={model} projectName={() => 'ferretry'} />,
     );
@@ -65,7 +65,7 @@ describe('S-0124 KanbanView', () => {
   });
 
   it('hides the Closed lane when closed work is hidden', async () => {
-    const model = await boardModelOf(cards);
+    const model = await boardModelOf(tasks);
     view = await mount(<KanbanView env={envOf(model)} hideClosed model={model} projectName={() => 'ferretry'} />);
     expect([...view.container.querySelectorAll('.fy-board-lane__name')].map(node => node.textContent)).not.toContain(
       'Closed',
@@ -73,7 +73,7 @@ describe('S-0124 KanbanView', () => {
   });
 
   it('gives each project its own row of lanes under a heading, with the machine when several', async () => {
-    const model = await boardModelOf([card('F1'), card('F2', { projectId: OTHER_PROJECT })]);
+    const model = await boardModelOf([boardTask('F1'), boardTask('F2', { projectId: OTHER_PROJECT })]);
     view = await mount(
       <KanbanView
         env={envOf(model)}
@@ -89,7 +89,7 @@ describe('S-0124 KanbanView', () => {
   });
 
   it('is read-only: no card is draggable, no lane takes a drop, no Done target, no Lanes editor link', async () => {
-    const model = await boardModelOf(cards);
+    const model = await boardModelOf(tasks);
     view = await mount(<KanbanView env={envOf(model)} hideClosed model={model} projectName={() => 'p'} />);
     const root = view.container;
     expect(root.querySelectorAll('[draggable="true"]')).toHaveLength(0);
@@ -101,7 +101,7 @@ describe('S-0124 KanbanView', () => {
   });
 
   it('draws no Lanes editor link beside a project heading when several are on the board', async () => {
-    const model = await boardModelOf([card('F1'), card('F2', { projectId: OTHER_PROJECT })]);
+    const model = await boardModelOf([boardTask('F1'), boardTask('F2', { projectId: OTHER_PROJECT })]);
     view = await mount(<KanbanView env={envOf(model)} hideClosed model={model} projectName={() => 'p'} />);
     expect(view.container.querySelector('.fy-board-project__head')).not.toBeNull();
     expect(view.container.querySelector('.fy-board-project__lanes, [data-board-lanes]')).toBeNull();
@@ -111,14 +111,19 @@ describe('S-0124 KanbanView', () => {
 describe('S-0266 TableView, S-0263 SummaryRowView', () => {
   const SHIPPED = { version: '4.110.0', tag: 'v4.110.0', at: '2026-08-01T09:00:00.000Z' };
   const OLD_RELEASE = { version: '4.109.0', tag: 'v4.109.0', at: '2026-07-30T09:00:00.000Z' };
-  const cards = [
-    card('F1', { laneId: 'tested', shippedIn: SHIPPED, title: 'Title that must wrap whole', summary: 'Short summary' }),
-    card('F2', { laneId: 'implement', activity: 'active' }),
-    card('F3', { laneId: 'review', activity: 'idle', lastTouchedAt: '2026-08-01T07:00:00.000Z' }),
-    card('F4', { laneId: 'merged', lastTouchedAt: '2026-08-01T09:30:00.000Z' }),
-    card('F5', { laneId: 'merged', lastTouchedAt: '2026-07-01T09:30:00.000Z' }),
-    card('F6', { laneId: 'released', shippedIn: OLD_RELEASE }),
-    card('F7', { laneId: 'todo' }),
+  const tasks = [
+    boardTask('F1', {
+      laneId: 'tested',
+      shippedIn: SHIPPED,
+      title: 'Title that must wrap whole',
+      summary: 'Short summary',
+    }),
+    boardTask('F2', { laneId: 'implement', activity: 'active' }),
+    boardTask('F3', { laneId: 'review', activity: 'idle', lastTouchedAt: '2026-08-01T07:00:00.000Z' }),
+    boardTask('F4', { laneId: 'merged', lastTouchedAt: '2026-08-01T09:30:00.000Z' }),
+    boardTask('F5', { laneId: 'merged', lastTouchedAt: '2026-07-01T09:30:00.000Z' }),
+    boardTask('F6', { laneId: 'released', shippedIn: OLD_RELEASE }),
+    boardTask('F7', { laneId: 'todo' }),
   ];
   const table = (model: BoardModel, props: Partial<Parameters<typeof TableView>[0]> = {}) => (
     <TableView env={envOf(model)} model={model} onWindow={() => undefined} window="7d" {...props} />
@@ -127,7 +132,7 @@ describe('S-0266 TableView, S-0263 SummaryRowView', () => {
     ids(root, section === undefined ? '.fy-board-summary__row' : `[data-section="${section}"] .fy-board-summary__row`);
 
   it('leads with what waits on the owner, then what is worked on, then merged and released', async () => {
-    const model = await boardModelOf(cards);
+    const model = await boardModelOf(tasks);
     view = await mount(table(model));
     const root = view.container;
     expect([...root.querySelectorAll('.fy-board-summary__head')].map(node => node.firstChild?.textContent)).toEqual([
@@ -141,7 +146,7 @@ describe('S-0266 TableView, S-0263 SummaryRowView', () => {
   });
 
   it('shows the title, summary, lane pill and when, and no who or PR columns', async () => {
-    const model = await boardModelOf(cards);
+    const model = await boardModelOf(tasks);
     view = await mount(table(model));
     const root = view.container;
     expect(root.querySelector('[data-task="F1"] .fy-board-table__title')?.textContent).toContain(
@@ -163,7 +168,7 @@ describe('S-0266 TableView, S-0263 SummaryRowView', () => {
   });
 
   it('draws no owner button on any row: no Done, no Not good, no Reopen, and no Done column', async () => {
-    const model = await boardModelOf(cards);
+    const model = await boardModelOf(tasks);
     view = await mount(table(model));
     const root = view.container;
     expect(root.querySelector('.fy-board-done, .fy-board-card__verdict, [data-verdict]')).toBeNull();
@@ -173,7 +178,7 @@ describe('S-0266 TableView, S-0263 SummaryRowView', () => {
   });
 
   it('draws the information rows lighter than the action rows', async () => {
-    const model = await boardModelOf(cards);
+    const model = await boardModelOf(tasks);
     view = await mount(table(model));
     const root = view.container;
     expect(root.querySelector('[data-task="F1"]')?.hasAttribute('data-action')).toBe(true);
@@ -181,7 +186,7 @@ describe('S-0266 TableView, S-0263 SummaryRowView', () => {
   });
 
   it('narrows merged and released to the window, but never to-test or working now', async () => {
-    const model = await boardModelOf(cards);
+    const model = await boardModelOf(tasks);
     const windows: string[] = [];
     view = await mount(table(model, { window: 'today', onWindow: next => void windows.push(next) }));
     const root = view.container;
@@ -192,15 +197,15 @@ describe('S-0266 TableView, S-0263 SummaryRowView', () => {
   });
 
   it('lists a closed card that shipped inside the window under released recently', async () => {
-    const open = await boardModelOf(cards);
-    const closed = await boardModelOf([card('F8', { laneId: 'closed', shippedIn: SHIPPED })]);
+    const open = await boardModelOf(tasks);
+    const closed = await boardModelOf([boardTask('F8', { laneId: 'closed', shippedIn: SHIPPED })]);
     view = await mount(table(open, { closed }));
     expect(rowIds(view.container, 'released')).toEqual(['F8', 'F6']);
   });
 
   it('draws an agent card right under the human card it serves', async () => {
     const model = await boardModelOf(
-      [originCard('F2', 'human'), originCard('F9', 'human'), originCard('F10', 'agent', { id: 'F2' })],
+      [originTask('F2', 'human'), originTask('F9', 'human'), originTask('F10', 'agent', { id: 'F2' })],
       { ...NO_BOARD_FILTERS, agents: true },
     );
     view = await mount(table(model, { env: envOf(model) }));
@@ -212,7 +217,7 @@ describe('S-0266 TableView, S-0263 SummaryRowView', () => {
 
   it('shows the blocked and sub-task marks beside the title', async () => {
     const model = await boardModelOf([
-      card('F3', {
+      boardTask('F3', {
         blockedBy: [{ id: 'F9' }],
         rollup: {
           children: 2,
@@ -235,7 +240,7 @@ describe('S-0266 TableView, S-0263 SummaryRowView', () => {
     Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => heights.scroll });
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => heights.client });
     try {
-      const model = await boardModelOf([card('F4', { summary: 'A summary that runs past two lines' })]);
+      const model = await boardModelOf([boardTask('F4', { summary: 'A summary that runs past two lines' })]);
       view = await mount(table(model));
       const more = view.container.querySelector('[data-task="F4"] .fy-board-table__more');
       expect(more?.textContent).toBe('more');
@@ -257,14 +262,14 @@ describe('S-0266 TableView, S-0263 SummaryRowView', () => {
 
 describe('S-0273 TreeView', () => {
   it('indents a lead’s children under it', async () => {
-    const model = await boardModelOf([card('F10'), card('F11', { parent: { id: 'F10' } })]);
+    const model = await boardModelOf([boardTask('F10'), boardTask('F11', { parent: { id: 'F10' } })]);
     view = await mount(<TreeView env={envOf(model)} model={model} />);
     expect(ids(view.container)).toEqual(['F10', 'F11']);
     expect(view.container.querySelector('[data-task="F11"]')?.getAttribute('data-depth')).toBe('1');
   });
 
   it('names the lane id when a card’s lane is unknown, and says so when empty', async () => {
-    const unplaced = await boardModelOf([card('F1', { laneId: 'ghost' })]);
+    const unplaced = await boardModelOf([boardTask('F1', { laneId: 'ghost' })]);
     view = await mount(<TreeView env={envOf(unplaced, { places: new Map() })} model={unplaced} />);
     expect(view.container.querySelector('[data-seg="lane"]')?.textContent).toBe('ghost');
     await view.unmount();
@@ -277,9 +282,9 @@ describe('S-0273 TreeView', () => {
 describe('S-0088 DependenciesView', () => {
   it('lists the cards that wait on, or are waited on by, another', async () => {
     const model = await boardModelOf([
-      card('F1', { blockedBy: [{ id: 'F2' }, { id: 'F3' }] }),
-      card('F2', { blocks: [{ id: 'F1' }] }),
-      card('F4'),
+      boardTask('F1', { blockedBy: [{ id: 'F2' }, { id: 'F3' }] }),
+      boardTask('F2', { blocks: [{ id: 'F1' }] }),
+      boardTask('F4'),
     ]);
     view = await mount(<DependenciesView env={envOf(model)} model={model} />);
     expect(ids(view.container)).toEqual(['F1', 'F2']);
@@ -288,11 +293,11 @@ describe('S-0088 DependenciesView', () => {
   });
 
   it('names the lane id for a card with no place, and says so when nothing depends on anything', async () => {
-    const model = await boardModelOf([card('F1', { blockedBy: [{ id: 'F2' }], laneId: 'ghost' })]);
+    const model = await boardModelOf([boardTask('F1', { blockedBy: [{ id: 'F2' }], laneId: 'ghost' })]);
     view = await mount(<DependenciesView env={envOf(model, { places: new Map() })} model={model} />);
     expect(view.container.querySelector('[data-seg="lane"]')?.textContent).toBe('ghost');
     await view.unmount();
-    const none = await boardModelOf([card('F9')]);
+    const none = await boardModelOf([boardTask('F9')]);
     view = await mount(<DependenciesView env={envOf(none)} model={none} />);
     expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('No task depends on another.');
   });
@@ -300,7 +305,7 @@ describe('S-0088 DependenciesView', () => {
 
 describe('S-0032 ArchiveView', () => {
   const props = async (extra: Partial<Parameters<typeof ArchiveView>[0]> = {}) => {
-    const model = await boardModelOf([card('F1'), card('F2')]);
+    const model = await boardModelOf([boardTask('F1'), boardTask('F2')]);
     return {
       shown: model.cards,
       remaining: 0,
@@ -322,7 +327,7 @@ describe('S-0032 ArchiveView', () => {
 
   it('shows the blocked, sub-task and released marks beside a closed card’s title', async () => {
     const model = await boardModelOf([
-      card('F3', {
+      boardTask('F3', {
         blockedBy: [{ id: 'F9' }],
         rollup: {
           children: 2,

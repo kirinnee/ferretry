@@ -41,11 +41,11 @@ describe('the walk up the leads', () => {
         ),
         liveSession('owner'),
       ]);
-    const card = { owner: 'owner', assignee: 's0' };
+    const task = { owner: 'owner', assignee: 's0' };
 
     // Assert: the last session inside the cap answers; the first one past it is never reached.
-    should(noticeRecipient(chain(MAX_LINEAGE_DEPTH - 1), card)?.ferret).equal(`s${MAX_LINEAGE_DEPTH - 1}`);
-    should(noticeRecipient(chain(MAX_LINEAGE_DEPTH), card)?.ferret).equal('owner');
+    should(noticeRecipient(chain(MAX_LINEAGE_DEPTH - 1), task)?.ferret).equal(`s${MAX_LINEAGE_DEPTH - 1}`);
+    should(noticeRecipient(chain(MAX_LINEAGE_DEPTH), task)?.ferret).equal('owner');
   });
 
   it('should stop at a session in the chain that cannot be read, and fall to the owner’s line', () => {

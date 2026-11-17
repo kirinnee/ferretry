@@ -1,19 +1,19 @@
 import { describe, it } from 'bun:test';
 import {
   BoardQuerySchema,
-  type Card,
-  type CardId,
-  type CardActionRequestInput,
+  type Task,
+  type TaskId,
+  type TaskActionRequestInput,
   CardActionRequestSchema,
-  type CardCreateRequestInput,
+  type TaskCreateRequestInput,
   CardCreateRequestSchema,
-  cardRevision,
+  taskRevision,
   type PrLink,
   UNFILED_PROJECT_ID,
 } from '../../../contract/index.ts';
 import should from 'should';
 import {
-  CardAskLinks,
+  TaskAskLinks,
   AlertSurface,
   type AskThread,
   actorOf,
@@ -30,7 +30,7 @@ import {
 } from '../../../daemon/lib/board/index.ts';
 import { unfiledLaneSet } from '../../../daemon/lib/lanes/index.ts';
 import {
-  card,
+  boardTask,
   FakeChanges,
   FakeDone,
   FakeFocus,
@@ -59,22 +59,22 @@ const stranger = ferret('stranger');
 const LEAD_HELD = { owner: 'lead', assignee: null } as const;
 const HANDED_DOWN_HELD = { owner: 'owner-lead', assignee: 'lead' } as const;
 
-const create = (input: Partial<CardCreateRequestInput> = {}) =>
+const create = (input: Partial<TaskCreateRequestInput> = {}) =>
   CardCreateRequestSchema.parse({
     kind: 'feature',
     title: 'Board store',
     ask: { text: 'build it', source: 'owner' },
     ...input,
   });
-const action = (input: CardActionRequestInput) => CardActionRequestSchema.parse(input);
+const action = (input: TaskActionRequestInput) => CardActionRequestSchema.parse(input);
 
-/** A service over a store already holding `cards`. */
-const serviceWith = (cards: readonly Card[], overrides: Partial<ServiceWorld> = {}) => {
-  const ports = world({ store: new MemoryBoardStore(cards), ...overrides });
+/** A service over a store already holding `tasks`. */
+const serviceWith = (tasks: readonly Task[], overrides: Partial<ServiceWorld> = {}) => {
+  const ports = world({ store: new MemoryBoardStore(tasks), ...overrides });
   return { ports, service: new BoardService(ports) };
 };
 
-const stored = (ports: ServiceWorld, id = 'F1'): Card => ports.store.cards.get(id) as Card;
+const stored = (ports: ServiceWorld, id = 'F1'): Task => ports.store.cards.get(id) as Task;
 const lastEvent = (ports: ServiceWorld, id = 'F1') => stored(ports, id).history.at(-1);
 
 async function refusal(work: Promise<unknown>): Promise<BoardError> {
@@ -114,7 +114,7 @@ describe('creating a card', () => {
 
   it('should number cards per kind across the machine', async () => {
     // Arrange
-    const { service } = serviceWith([card({ id: 'F7' })]);
+    const { service } = serviceWith([boardTask({ id: 'F7' })]);
 
     // Act
     const feature = await service.create(create(), lead);
@@ -147,7 +147,7 @@ describe('creating a card', () => {
   });
 
   it('should refuse a board with no lanes, naming the proposal command', async () => {
-    // Act: the owner has no session, so the card goes to Unfiled, which has no lanes here.
+    // Act: the owner has no session, so the task goes to Unfiled, which has no lanes here.
     const error = await refusal(serviceWith([]).service.create(create({ assignee: 'worker' }), owner));
 
     // Assert
@@ -182,7 +182,7 @@ describe('creating a card', () => {
 
   it('should let the assignee of a card add a child under it, and nobody unrelated', async () => {
     // Arrange
-    const parent = card({ owner: 'lead', assignee: 'child' });
+    const parent = boardTask({ owner: 'lead', assignee: 'child' });
     const { service } = serviceWith([parent]);
 
     // Act
@@ -201,7 +201,7 @@ describe('creating a card', () => {
   ])('should refuse $name', async ({ input, code }) => {
     // Act
     const error = await refusal(
-      serviceWith([card()]).service.create(create(input as Partial<CardCreateRequestInput>), lead),
+      serviceWith([boardTask()]).service.create(create(input as Partial<TaskCreateRequestInput>), lead),
     );
 
     // Assert
@@ -210,7 +210,7 @@ describe('creating a card', () => {
 
   it('should record a dependency named at create', async () => {
     // Act
-    const response = await serviceWith([card()]).service.create(
+    const response = await serviceWith([boardTask()]).service.create(
       create({ dependsOn: [{ task: { id: 'F1' }, until: 'released' }] }),
       lead,
     );
@@ -232,7 +232,7 @@ describe('creating a card', () => {
 
   it('should refuse an id the counter issued twice instead of overwriting the card', async () => {
     // Arrange
-    const store = new MemoryBoardStore([card({ id: 'F1' })]);
+    const store = new MemoryBoardStore([boardTask({ id: 'F1' })]);
     store.allocateId = async () => 'F1';
 
     // Act
@@ -249,7 +249,7 @@ describe('creating a card', () => {
 describe('moving a card', () => {
   it('should move it forward with no reason needed', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card()]);
+    const { ports, service } = serviceWith([boardTask()]);
 
     // Act
     const response = await service.act('F1', action({ action: 'move', to: 'plan' }), lead);
@@ -264,7 +264,7 @@ describe('moving a card', () => {
     { name: 'a lane the board lacks', to: 'nowhere', code: 'unknown-lane' },
   ])('should refuse a move to $name', async ({ to, code }) => {
     // Act
-    const error = await refusal(serviceWith([card()]).service.act('F1', action({ action: 'move', to }), lead));
+    const error = await refusal(serviceWith([boardTask()]).service.act('F1', action({ action: 'move', to }), lead));
 
     // Assert
     should(error.code).equal(code);
@@ -273,7 +273,7 @@ describe('moving a card', () => {
   it('should refuse a card whose lane its board lost', async () => {
     // Act
     const error = await refusal(
-      serviceWith([card({ laneId: 'gone' })]).service.act('F1', action({ action: 'move', to: 'plan' }), lead),
+      serviceWith([boardTask({ laneId: 'gone' })]).service.act('F1', action({ action: 'move', to: 'plan' }), lead),
     );
 
     // Assert
@@ -282,7 +282,7 @@ describe('moving a card', () => {
 
   it('should need a reason to move back, and record it on a plain ferret move', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'review' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'review' })]);
 
     // Act
     const refused = await refusal(service.act('F1', action({ action: 'move', to: 'implement' }), lead));
@@ -297,7 +297,7 @@ describe('moving a card', () => {
 
   it('should keep an owner-gated lane for the owner to pass', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'plan' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'plan' })]);
 
     // Act
     const refused = await refusal(service.act('F1', action({ action: 'move', to: 'implement' }), lead));
@@ -313,7 +313,7 @@ describe('moving a card', () => {
   it('should record a move made on the admin token as the admin token, never as the owner', async () => {
     // Arrange — the host's admin token with no ferret's own credential: the owner at the machine, or a ferret
     // that ran fy without its session. It keeps the owner's authority (it may pass the owner gate) …
-    const { ports, service } = serviceWith([card({ laneId: 'plan' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'plan' })]);
 
     // Act
     await service.act('F1', action({ action: 'move', to: 'implement' }), { kind: 'owner', via: 'admin-token' });
@@ -325,7 +325,7 @@ describe('moving a card', () => {
 
   it('should let only the owner close a card on a board that has a verify lane', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'tested' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'tested' })]);
 
     // Act
     const refused = await refusal(service.act('F1', action({ action: 'move', to: 'closed' }), lead));
@@ -339,7 +339,7 @@ describe('moving a card', () => {
 
   it('should let a ferret close a card on a board with no verify lane', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ projectId: OTHER_PROJECT, laneId: 'review' })]);
+    const { ports, service } = serviceWith([boardTask({ projectId: OTHER_PROJECT, laneId: 'review' })]);
 
     // Act
     await service.act('F1', action({ action: 'move', to: 'merged' }), lead);
@@ -350,8 +350,8 @@ describe('moving a card', () => {
 
   it('should hold a blocked card back from a later category but let it move sideways and back', async () => {
     // Arrange
-    const blocker = card({ id: 'F2', laneId: 'implement' });
-    const blocked = card({ laneId: 'merged', dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] });
+    const blocker = boardTask({ id: 'F2', laneId: 'implement' });
+    const blocked = boardTask({ laneId: 'merged', dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] });
     const { ports, service } = serviceWith([blocked, blocker]);
 
     // Act
@@ -367,7 +367,7 @@ describe('moving a card', () => {
 
   it("should send a card back on the owner's move as one atomic reopen, delivered to its ferret", async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'tested', assignee: 'child' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'tested', assignee: 'child' })]);
 
     // Act
     const response = await service.act(
@@ -397,7 +397,7 @@ describe('moving a card', () => {
 
   it("should tell the card's ferret ONCE when the owner moves it into the closed lane, and not on a reopen", async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'tested', assignee: 'child', title: 'Ship it' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'tested', assignee: 'child', title: 'Ship it' })]);
 
     // Act
     await service.act('F1', action({ action: 'move', to: 'closed' }), owner);
@@ -410,8 +410,8 @@ describe('moving a card', () => {
   it('should tell nobody when a ferret closes the card, or the owner moves it within the open lanes', async () => {
     // Arrange
     const { ports, service } = serviceWith([
-      card({ id: 'F1', laneId: 'tested', assignee: 'child' }),
-      card({ id: 'F2', laneId: 'review', assignee: 'child' }),
+      boardTask({ id: 'F1', laneId: 'tested', assignee: 'child' }),
+      boardTask({ id: 'F2', laneId: 'review', assignee: 'child' }),
     ]);
 
     // Act
@@ -425,7 +425,7 @@ describe('moving a card', () => {
   it('should refuse to move a dropped card', async () => {
     // Act
     const error = await refusal(
-      serviceWith([card({ dropped: { reason: 'superseded', at: NOW } })]).service.act(
+      serviceWith([boardTask({ dropped: { reason: 'superseded', at: NOW } })]).service.act(
         'F1',
         action({ action: 'move', to: 'plan' }),
         lead,
@@ -440,7 +440,7 @@ describe('moving a card', () => {
   it('should refuse a ferret that is not on the card, saying who may', async () => {
     // Act
     const error = await refusal(
-      serviceWith([card()]).service.act('F1', action({ action: 'move', to: 'plan' }), stranger),
+      serviceWith([boardTask()]).service.act('F1', action({ action: 'move', to: 'plan' }), stranger),
     );
 
     // Assert
@@ -449,8 +449,8 @@ describe('moving a card', () => {
   });
 
   it("should let a lead move its helper's card through lineage", async () => {
-    // Arrange: grandchild's card is owned by child, whose parent is lead.
-    const { ports, service } = serviceWith([card({ owner: 'child', assignee: 'grandchild' })]);
+    // Arrange: grandchild's task is owned by child, whose parent is lead.
+    const { ports, service } = serviceWith([boardTask({ owner: 'child', assignee: 'grandchild' })]);
 
     // Act
     await service.act('F1', action({ action: 'move', to: 'plan' }), lead);
@@ -462,7 +462,11 @@ describe('moving a card', () => {
   it('should refuse a card on a board that lost its lanes', async () => {
     // Act
     const error = await refusal(
-      serviceWith([card({ projectId: 'unfiled' })]).service.act('F1', action({ action: 'note', text: 'hi' }), lead),
+      serviceWith([boardTask({ projectId: 'unfiled' })]).service.act(
+        'F1',
+        action({ action: 'note', text: 'hi' }),
+        lead,
+      ),
     );
 
     // Assert
@@ -481,7 +485,7 @@ describe('moving a card', () => {
 describe('reopening a card', () => {
   it('should send it back with the words, delivered to the assignee when someone else reopens it', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'merged', assignee: 'child' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'merged', assignee: 'child' })]);
 
     // Act
     await service.act(
@@ -507,7 +511,7 @@ describe('reopening a card', () => {
 
   it('should not tell the assignee about its own reopen', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'merged', assignee: 'child' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'merged', assignee: 'child' })]);
 
     // Act
     await service.act(
@@ -526,7 +530,7 @@ describe('reopening a card', () => {
   ])('should refuse a reopen $name', async ({ to, message }) => {
     // Act
     const error = await refusal(
-      serviceWith([card({ laneId: 'implement' })]).service.act(
+      serviceWith([boardTask({ laneId: 'implement' })]).service.act(
         'F1',
         action({ action: 'reopen', to, reason: 'r', ask: { text: 't', source: 's' } }),
         lead,
@@ -540,7 +544,9 @@ describe('reopening a card', () => {
 
   it('should reopen a dropped card into any open lane', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'implement', dropped: { reason: 'superseded', at: NOW } })]);
+    const { ports, service } = serviceWith([
+      boardTask({ laneId: 'implement', dropped: { reason: 'superseded', at: NOW } }),
+    ]);
 
     // Act
     await service.act(
@@ -563,7 +569,7 @@ describe('reopening a card', () => {
 describe('dependencies', () => {
   it('should add one inside the board-wide dependency section', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card(), card({ id: 'F2' })]);
+    const { ports, service } = serviceWith([boardTask(), boardTask({ id: 'F2' })]);
 
     // Act
     const response = await service.act('F1', action({ action: 'depend', task: { id: 'F2' } }), lead);
@@ -577,7 +583,7 @@ describe('dependencies', () => {
 
   it("should let any ferret depend its own card on anybody's", async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ owner: 'stranger' }), card({ id: 'F2', owner: 'lead' })]);
+    const { ports, service } = serviceWith([boardTask({ owner: 'stranger' }), boardTask({ id: 'F2', owner: 'lead' })]);
 
     // Act
     await service.act('F1', action({ action: 'depend', task: { id: 'F2' } }), stranger);
@@ -589,8 +595,8 @@ describe('dependencies', () => {
   it('should refuse a dependency that closes a cycle, naming it', async () => {
     // Arrange
     const { service } = serviceWith([
-      card(),
-      card({ id: 'F2', dependsOn: [{ task: { id: 'F1' }, until: 'shipped' }] }),
+      boardTask(),
+      boardTask({ id: 'F2', dependsOn: [{ task: { id: 'F1' }, until: 'shipped' }] }),
     ]);
 
     // Act
@@ -609,8 +615,8 @@ describe('dependencies', () => {
   ])('should refuse a dependency on $name', async ({ task, code }) => {
     // Arrange
     const { service } = serviceWith([
-      card({ dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] }),
-      card({ id: 'F2' }),
+      boardTask({ dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] }),
+      boardTask({ id: 'F2' }),
     ]);
 
     // Act
@@ -623,8 +629,8 @@ describe('dependencies', () => {
   it('should let only the owner override, recorded, and then let the card advance', async () => {
     // Arrange
     const { ports, service } = serviceWith([
-      card({ dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] }),
-      card({ id: 'F2' }),
+      boardTask({ dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] }),
+      boardTask({ id: 'F2' }),
     ]);
     const override = action({ action: 'depend', task: { id: 'F2' }, override: { reason: 'ship without it' } });
 
@@ -647,8 +653,8 @@ describe('dependencies', () => {
     // Arrange
     const overridden = { by: 'owner' as const, reason: 'ok', at: NOW };
     const { ports, service } = serviceWith([
-      card({ dependsOn: [{ task: { id: 'F2' }, until: 'shipped', override: overridden }] }),
-      card({ id: 'F2' }),
+      boardTask({ dependsOn: [{ task: { id: 'F2' }, until: 'shipped', override: overridden }] }),
+      boardTask({ id: 'F2' }),
     ]);
 
     // Act
@@ -661,8 +667,8 @@ describe('dependencies', () => {
   it('should remove one with a reason, and refuse one it does not have', async () => {
     // Arrange
     const { ports, service } = serviceWith([
-      card({ dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] }),
-      card({ id: 'F2' }),
+      boardTask({ dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] }),
+      boardTask({ id: 'F2' }),
     ]);
 
     // Act
@@ -681,7 +687,7 @@ describe('dependencies', () => {
 describe('everything else on a card', () => {
   it('should focus the calling ferret without writing the card', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card()]);
+    const { ports, service } = serviceWith([boardTask()]);
 
     // Act
     await service.act('F1', action({ action: 'focus' }), lead);
@@ -694,7 +700,7 @@ describe('everything else on a card', () => {
 
   it('should refuse focus for the owner and for a session that is gone', async () => {
     // Arrange
-    const { service } = serviceWith([card({ assignee: 'ghost' })]);
+    const { service } = serviceWith([boardTask({ assignee: 'ghost' })]);
 
     // Act
     const human = await refusal(service.act('F1', action({ action: 'focus' }), owner));
@@ -707,7 +713,7 @@ describe('everything else on a card', () => {
 
   it("should record a ferret's skip on its own session, stamped now, without touching a card", async () => {
     // Arrange
-    const { ports, service } = serviceWith([card()]);
+    const { ports, service } = serviceWith([boardTask()]);
 
     // Act
     const recorded = await service.skip({ reason: 'chit-chat, nothing to track' }, lead);
@@ -721,7 +727,7 @@ describe('everything else on a card', () => {
 
   it('should clear a standing skip when the ferret takes a card', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card()]);
+    const { ports, service } = serviceWith([boardTask()]);
     await service.skip({ reason: 'chit-chat' }, lead);
 
     // Act
@@ -733,7 +739,7 @@ describe('everything else on a card', () => {
 
   it('should refuse a skip from the owner or the daemon, and for a session that is gone', async () => {
     // Arrange
-    const { service } = serviceWith([card()]);
+    const { service } = serviceWith([boardTask()]);
 
     // Act
     const human = await refusal(service.skip({ reason: 'x' }, owner));
@@ -748,7 +754,7 @@ describe('everything else on a card', () => {
 
   it('should block and unblock on the outside world only', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card()]);
+    const { ports, service } = serviceWith([boardTask()]);
 
     // Act
     await service.act('F1', action({ action: 'block', reason: 'waiting on GitHub' }), lead);
@@ -768,7 +774,7 @@ describe('everything else on a card', () => {
   it('should refuse to block a dropped card', async () => {
     // Act
     const error = await refusal(
-      serviceWith([card({ dropped: { reason: 'no', at: NOW } })]).service.act(
+      serviceWith([boardTask({ dropped: { reason: 'no', at: NOW } })]).service.act(
         'F1',
         action({ action: 'block', reason: 'x' }),
         lead,
@@ -781,7 +787,7 @@ describe('everything else on a card', () => {
 
   it('should let the owner side drop, not the assignee, and only once', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ assignee: 'child' })]);
+    const { ports, service } = serviceWith([boardTask({ assignee: 'child' })]);
 
     // Act
     const assignee = await refusal(service.act('F1', action({ action: 'drop', reason: 'superseded' }), child));
@@ -796,7 +802,7 @@ describe('everything else on a card', () => {
 
   it('should append a clarification verbatim', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card()]);
+    const { ports, service } = serviceWith([boardTask()]);
 
     // Act
     await service.act('F1', action({ action: 'clarify', text: 'also the phone', source: 'owner, chat' }), lead);
@@ -810,9 +816,9 @@ describe('everything else on a card', () => {
 
   it('should link each kind once', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card()]);
+    const { ports, service } = serviceWith([boardTask()]);
     const url = 'https://github.com/kirinnee/ferretry/pull/930';
-    const links: CardActionRequestInput[] = [
+    const links: TaskActionRequestInput[] = [
       { action: 'link', pr: url },
       { action: 'link', branch: 'feat/board-store' },
       { action: 'link', commit: 'abc123' },
@@ -850,7 +856,7 @@ describe('everything else on a card', () => {
 
   it('should let the owner side reassign, once per change', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ assignee: 'child' })]);
+    const { ports, service } = serviceWith([boardTask({ assignee: 'child' })]);
 
     // Act
     const assignee = await refusal(service.act('F1', action({ action: 'assign', assignee: 'worker' }), child));
@@ -865,7 +871,7 @@ describe('everything else on a card', () => {
 
   it('should note', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card()]);
+    const { ports, service } = serviceWith([boardTask()]);
 
     // Act
     await service.act('F1', action({ action: 'note', text: 'surveying origin/main' }), lead);
@@ -876,7 +882,7 @@ describe('everything else on a card', () => {
 
   it('should let the assignee fill the card, but keep the title and brief for the owner side', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ assignee: 'child' })]);
+    const { ports, service } = serviceWith([boardTask({ assignee: 'child' })]);
 
     // Act
     await service.act(
@@ -980,10 +986,10 @@ describe('everything else on a card', () => {
   });
 
   it('should refuse a patch written against an older revision, and apply one written against the current', async () => {
-    // Arrange: the card's revision is the seq of its newest history event (`cardRevision`)
+    // Arrange: the task's revision is the seq of its newest history event (`taskRevision`)
     const { ports, service } = serviceWith([]);
     const created = await service.create(create({}), lead);
-    const read = cardRevision(created.card);
+    const read = taskRevision(created.card);
     await service.act(created.card.id, action({ action: 'edit', summary: 'somebody else wrote first' }), lead);
 
     // Act
@@ -992,7 +998,7 @@ describe('everything else on a card', () => {
     );
     await service.act(
       created.card.id,
-      action({ action: 'edit', revision: cardRevision(stored(ports)), summary: 'read, then written' }),
+      action({ action: 'edit', revision: taskRevision(stored(ports)), summary: 'read, then written' }),
       lead,
     );
 
@@ -1004,7 +1010,7 @@ describe('everything else on a card', () => {
 
   it('should let the assignee write How to test without owner standing', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ assignee: 'child' })]);
+    const { ports, service } = serviceWith([boardTask({ assignee: 'child' })]);
 
     // Act
     await service.act('F1', action({ action: 'edit', howToTest: '1. Run fy task show F1' }), child);
@@ -1015,7 +1021,7 @@ describe('everything else on a card', () => {
 
   it('should claim and release files', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card()]);
+    const { ports, service } = serviceWith([boardTask()]);
 
     // Act
     await service.act('F1', action({ action: 'file', path: 'src/lib/board/service.ts' }), lead);
@@ -1034,7 +1040,7 @@ describe('everything else on a card', () => {
 
   it('should reorder for the owner side', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card()]);
+    const { ports, service } = serviceWith([boardTask()]);
 
     // Act
     await service.act('F1', action({ action: 'order', order: 3 }), lead);
@@ -1047,7 +1053,7 @@ describe('everything else on a card', () => {
 
   describe('snoozing a card to test', () => {
     const LATER = '2026-10-30T14:00:00.000Z';
-    const toTest = () => card({ laneId: 'tested' });
+    const toTest = () => boardTask({ laneId: 'tested' });
 
     it('should let the owner snooze a card and remember the lane it was snoozed in', async () => {
       // Arrange
@@ -1103,15 +1109,15 @@ describe('everything else on a card', () => {
   });
 
   describe('re-parenting a card', () => {
-    const cards = () => [
-      card({ id: 'F1', owner: 'lead', assignee: 'child', askedBy: 'agent' }),
-      card({ id: 'F2', owner: 'lead' }),
-      card({ id: 'F3', owner: 'stranger', assignee: 'stranger' }),
+    const tasks = () => [
+      boardTask({ id: 'F1', owner: 'lead', assignee: 'child', askedBy: 'agent' }),
+      boardTask({ id: 'F2', owner: 'lead' }),
+      boardTask({ id: 'F3', owner: 'stranger', assignee: 'stranger' }),
     ];
 
     it('should move the card under another, with the words in its history', async () => {
       // Arrange
-      const { ports, service } = serviceWith(cards());
+      const { ports, service } = serviceWith(tasks());
 
       // Act
       const response = await service.act(
@@ -1135,8 +1141,8 @@ describe('everything else on a card', () => {
     it('should lift a card to the top level with --none, and refuse a move that changes nothing', async () => {
       // Arrange
       const { ports, service } = serviceWith([
-        card({ id: 'F1', owner: 'lead', parent: { id: 'F2' } }),
-        card({ id: 'F2', owner: 'lead' }),
+        boardTask({ id: 'F1', owner: 'lead', parent: { id: 'F2' } }),
+        boardTask({ id: 'F2', owner: 'lead' }),
       ]);
 
       // Act
@@ -1153,10 +1159,10 @@ describe('everything else on a card', () => {
 
     it('should let the human, the owner and an ancestor re-parent', async () => {
       // Arrange
-      const human = serviceWith(cards());
+      const human = serviceWith(tasks());
       const ancestor = serviceWith([
-        card({ id: 'F1', owner: 'child', askedBy: 'agent' }),
-        card({ id: 'F2', owner: 'lead' }),
+        boardTask({ id: 'F1', owner: 'child', askedBy: 'agent' }),
+        boardTask({ id: 'F2', owner: 'lead' }),
       ]);
 
       // Act
@@ -1170,7 +1176,7 @@ describe('everything else on a card', () => {
 
     it("should refuse the card's worker and a stranger", async () => {
       // Arrange
-      const { ports, service } = serviceWith(cards());
+      const { ports, service } = serviceWith(tasks());
 
       // Act
       const worker = await refusal(service.act('F1', action({ action: 'reparent', parent: { id: 'F2' } }), child));
@@ -1184,7 +1190,7 @@ describe('everything else on a card', () => {
 
     it('should refuse a ferret that cannot write the tree it would move the card onto', async () => {
       // Arrange
-      const { ports, service } = serviceWith(cards());
+      const { ports, service } = serviceWith(tasks());
 
       // Act
       const error = await refusal(service.act('F1', action({ action: 'reparent', parent: { id: 'F3' } }), lead));
@@ -1197,8 +1203,8 @@ describe('everything else on a card', () => {
     it('should refuse a loop, a missing parent and a card from another machine', async () => {
       // Arrange
       const { service } = serviceWith([
-        card({ id: 'F1', owner: 'lead' }),
-        card({ id: 'F2', owner: 'lead', parent: { id: 'F1' } }),
+        boardTask({ id: 'F1', owner: 'lead' }),
+        boardTask({ id: 'F2', owner: 'lead', parent: { id: 'F1' } }),
       ]);
 
       // Act
@@ -1214,8 +1220,8 @@ describe('everything else on a card', () => {
   });
 
   it('should refuse a write that would leave the card invalid', async () => {
-    // Arrange: a card already at the clarification bound.
-    const full = card({
+    // Arrange: a task already at the clarification bound.
+    const full = boardTask({
       clarifications: Array.from({ length: 128 }, () => ({
         text: 't',
         source: 's',
@@ -1238,7 +1244,7 @@ describe('everything else on a card', () => {
 describe('handing a card to a helper', () => {
   it('should refuse a card dropped after the lead chose it', async () => {
     // Arrange
-    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', dropped: { at: NOW, reason: 'x' } })]);
+    const { service, ports } = serviceWith([boardTask({ id: 'F1', owner: 'lead', dropped: { at: NOW, reason: 'x' } })]);
 
     // Act
     const error = await refusal(service.handOver('F1', 'lead', 'child', LEAD_HELD));
@@ -1251,7 +1257,7 @@ describe('handing a card to a helper', () => {
 
   it('should refuse a card moved into a closed lane after the lead chose it', async () => {
     // Arrange
-    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', laneId: 'closed' })]);
+    const { service, ports } = serviceWith([boardTask({ id: 'F1', owner: 'lead', laneId: 'closed' })]);
 
     // Act
     const error = await refusal(service.handOver('F1', 'lead', 'child', LEAD_HELD));
@@ -1264,7 +1270,9 @@ describe('handing a card to a helper', () => {
 
   it('should still hand the card over, with a warning, when the helper cannot be focused', async () => {
     // Arrange
-    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead' })], { focus: new FakeFocus(new Set()) });
+    const { service, ports } = serviceWith([boardTask({ id: 'F1', owner: 'lead' })], {
+      focus: new FakeFocus(new Set()),
+    });
 
     // Act
     const handed = await service.handOver('F1', 'lead', 'child', LEAD_HELD);
@@ -1278,7 +1286,7 @@ describe('handing a card to a helper', () => {
 describe('handing a card on after another start changed who holds it', () => {
   it('should refuse a hand-over when only the assignee changed, the lead still owning the card', async () => {
     // Arrange
-    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', assignee: 'child-a' })]);
+    const { service, ports } = serviceWith([boardTask({ id: 'F1', owner: 'lead', assignee: 'child-a' })]);
 
     // Act
     const error = await refusal(service.handOver('F1', 'lead', 'child-b', LEAD_HELD));
@@ -1291,7 +1299,7 @@ describe('handing a card on after another start changed who holds it', () => {
 
   it('should refuse a hand-over when only the owner changed', async () => {
     // Arrange
-    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead-two', assignee: null })]);
+    const { service, ports } = serviceWith([boardTask({ id: 'F1', owner: 'lead-two', assignee: null })]);
 
     // Act
     const error = await refusal(service.handOver('F1', 'lead-two', 'child', LEAD_HELD));
@@ -1303,7 +1311,7 @@ describe('handing a card on after another start changed who holds it', () => {
 
   it('should refuse the owner’s start when only the assignee changed, though the owner may always assign', async () => {
     // Arrange
-    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', assignee: 'child-a' })]);
+    const { service, ports } = serviceWith([boardTask({ id: 'F1', owner: 'lead', assignee: 'child-a' })]);
 
     // Act
     const error = await refusal(service.assignForOwner('F1', 'child-b', LEAD_HELD));
@@ -1315,7 +1323,7 @@ describe('handing a card on after another start changed who holds it', () => {
 
   it('should let the second of two sequential hand-overs through only when the card is held as it was judged', async () => {
     // Arrange
-    const { service } = serviceWith([card({ id: 'F1', owner: 'lead' })]);
+    const { service } = serviceWith([boardTask({ id: 'F1', owner: 'lead' })]);
 
     // Act
     const first = await service.handOver('F1', 'lead', 'child-a', LEAD_HELD);
@@ -1332,7 +1340,7 @@ describe('handing a card on after another start changed who holds it', () => {
 describe('the owner starting a ferret on a card', () => {
   it('should assign the card to the new ferret as the owner and focus it', async () => {
     // Arrange
-    const { service } = serviceWith([card({ id: 'F1', owner: 'lead' })]);
+    const { service } = serviceWith([boardTask({ id: 'F1', owner: 'lead' })]);
 
     // Act
     const assigned = await service.assignForOwner('F1', 'child', LEAD_HELD);
@@ -1343,8 +1351,8 @@ describe('the owner starting a ferret on a card', () => {
 
   it('should refuse a dropped card and a card in a closed lane, and change nothing', async () => {
     // Arrange
-    const dropped = serviceWith([card({ id: 'F1', dropped: { at: NOW, reason: 'x' } })]);
-    const closed = serviceWith([card({ id: 'F1', laneId: 'closed' })]);
+    const dropped = serviceWith([boardTask({ id: 'F1', dropped: { at: NOW, reason: 'x' } })]);
+    const closed = serviceWith([boardTask({ id: 'F1', laneId: 'closed' })]);
 
     // Act
     const droppedError = await refusal(dropped.service.assignForOwner('F1', 'child', LEAD_HELD));
@@ -1360,7 +1368,7 @@ describe('the owner starting a ferret on a card', () => {
 
 describe('an assignee handing its card down', () => {
   const parents = new FakeParents({ grandchild: 'child', sibling: 'lead', kid: 'stranger', child: 'lead' });
-  const assigned = () => serviceWith([card({ assignee: 'child' })], { parents });
+  const assigned = () => serviceWith([boardTask({ assignee: 'child' })], { parents });
   const handed = (to: string | null) => action({ action: 'assign', assignee: to });
 
   it('should let the assignee assign it to its own helper and record it as handed down', async () => {
@@ -1426,7 +1434,7 @@ describe('an assignee handing its card down', () => {
 
   it('should hand an existing card down on `fy new --card`, then refuse a sibling and a non-assignee', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ owner: 'owner-lead', assignee: 'lead' })], {
+    const { ports, service } = serviceWith([boardTask({ owner: 'owner-lead', assignee: 'lead' })], {
       parents: new FakeParents({ child: 'lead', sibling: 'other' }),
     });
 
@@ -1447,7 +1455,7 @@ describe('an assignee handing its card down', () => {
 describe('refiling a card', () => {
   it("should land it in the same category's lane on the other board and tell both boards", async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'implement' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'implement' })]);
 
     // Act
     await service.act(
@@ -1464,7 +1472,7 @@ describe('refiling a card', () => {
 
   it('should fall back to the backlog when the other board lacks the category', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'tested' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'tested' })]);
 
     // Act
     await service.act('F1', action({ action: 'refile', projectId: OTHER_PROJECT }), lead);
@@ -1475,8 +1483,8 @@ describe('refiling a card', () => {
 
   it('should let the daemon note a card, as the board alert surface does for a withheld alert', async () => {
     // Arrange: the real BoardService authority, an open public parent and a private child alerted about.
-    const parent = card({ id: 'F10', askedBy: 'person', owner: 'lead', parent: null });
-    const leaf = card({ id: 'F11', owner: 'lead', assignee: 'child', parent: { id: 'F10' } });
+    const parent = boardTask({ id: 'F10', askedBy: 'person', owner: 'lead', parent: null });
+    const leaf = boardTask({ id: 'F11', owner: 'lead', assignee: 'child', parent: { id: 'F10' } });
     const { ports, service } = serviceWith([parent, leaf]);
     const surface = new AlertSurface({
       snapshot: async () => await service.snapshot(),
@@ -1487,7 +1495,7 @@ describe('refiling a card', () => {
     });
 
     // Act
-    await surface.surface('F11' as CardId, '&F11 PR #1 CI is red.');
+    await surface.surface('F11' as TaskId, '&F11 PR #1 CI is red.');
 
     // Assert
     should(lastEvent(ports, 'F10')).match({
@@ -1498,8 +1506,8 @@ describe('refiling a card', () => {
   });
 
   it('should take a named lane, and let the daemon refile too', async () => {
-    // Arrange — quick work walks no Plan gate, so the lane named is past none (docs/board.md § Cards show progress)
-    const { ports, service } = serviceWith([card({ workflow: 'quick' })]);
+    // Arrange — quick work walks no Plan gate, so the lane named is past none (docs/board.md § Tasks show progress)
+    const { ports, service } = serviceWith([boardTask({ workflow: 'quick' })]);
 
     // Act
     await service.act('F1', action({ action: 'refile', projectId: OTHER_PROJECT, laneId: 'review' }), daemon);
@@ -1519,7 +1527,9 @@ describe('refiling a card', () => {
     },
   ])('should refuse a refile $name', async ({ input, code }) => {
     // Act
-    const error = await refusal(serviceWith([card()]).service.act('F1', action({ action: 'refile', ...input }), lead));
+    const error = await refusal(
+      serviceWith([boardTask()]).service.act('F1', action({ action: 'refile', ...input }), lead),
+    );
 
     // Assert
     should(error.code).equal(code);
@@ -1528,7 +1538,7 @@ describe('refiling a card', () => {
   it('should keep an owner-gated closed lane on the other board for the owner', async () => {
     // Act
     const error = await refusal(
-      serviceWith([card({ projectId: OTHER_PROJECT })]).service.act(
+      serviceWith([boardTask({ projectId: OTHER_PROJECT })]).service.act(
         'F1',
         action({ action: 'refile', projectId: PROJECT, laneId: 'closed' }),
         lead,
@@ -1543,8 +1553,8 @@ describe('refiling a card', () => {
     { name: 'into the closed lane of its category', laneId: undefined },
     { name: 'into the closed lane it names', laneId: 'closed' },
   ])('should carry a task that is already closed $name, past the gate', async ({ laneId }) => {
-    // Arrange: Merged closes on the `pr` board, so the card is closed there already.
-    const { ports, service } = serviceWith([card({ projectId: OTHER_PROJECT, laneId: 'merged' })]);
+    // Arrange: Merged closes on the `pr` board, so the task is closed there already.
+    const { ports, service } = serviceWith([boardTask({ projectId: OTHER_PROJECT, laneId: 'merged' })]);
 
     // Act
     await service.act('F1', action({ action: 'refile', projectId: PROJECT, ...(laneId ? { laneId } : {}) }), lead);
@@ -1558,7 +1568,7 @@ describe('refiling a card', () => {
     // Arrange
     const target = lanes(PROJECT);
     const variants = { ...target.variants, 'design-first': ['todo', 'plan', 'implement'] };
-    const { ports, service } = serviceWith([card({ projectId: OTHER_PROJECT, laneId: 'merged' })], {
+    const { ports, service } = serviceWith([boardTask({ projectId: OTHER_PROJECT, laneId: 'merged' })], {
       lanes: new FakeLanes(
         new Map([
           [PROJECT, { ...target, variants }],
@@ -1576,7 +1586,7 @@ describe('refiling a card', () => {
 
   it('should still keep the gate for a ferret moving a card into Closed after a refile', async () => {
     // Arrange
-    const { service } = serviceWith([card({ projectId: OTHER_PROJECT, laneId: 'merged' })]);
+    const { service } = serviceWith([boardTask({ projectId: OTHER_PROJECT, laneId: 'merged' })]);
     await service.act('F1', action({ action: 'refile', projectId: PROJECT, laneId: 'released' }), lead);
 
     // Act
@@ -1590,7 +1600,7 @@ describe('refiling a card', () => {
 describe('a daemon trigger', () => {
   it('should move the card into the lane the trigger names, marked automatic', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'implement' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'implement' })]);
 
     // Act
     const response = await service.trigger('F1', 'pr.opened', { ferret: 'child', reason: 'PR #930 opened' });
@@ -1609,8 +1619,8 @@ describe('a daemon trigger', () => {
 
   it('should record the ferret whose session caused the move beside the daemon, and nobody when none did', async () => {
     // Arrange
-    const caused = serviceWith([card({ laneId: 'implement' })]);
-    const alone = serviceWith([card({ laneId: 'implement' })]);
+    const caused = serviceWith([boardTask({ laneId: 'implement' })]);
+    const alone = serviceWith([boardTask({ laneId: 'implement' })]);
 
     // Act
     await caused.service.trigger('F1', 'pr.opened', { ferret: 'child' });
@@ -1624,7 +1634,7 @@ describe('a daemon trigger', () => {
   it('should leave the status alone when it moves the card', async () => {
     // Arrange
     const { ports, service } = serviceWith([
-      card({ laneId: 'implement', progress: { now: 'in review soon', doneSoFar: '', next: '' } }),
+      boardTask({ laneId: 'implement', progress: { now: 'in review soon', doneSoFar: '', next: '' } }),
     ]);
 
     // Act
@@ -1637,8 +1647,8 @@ describe('a daemon trigger', () => {
   it('should move a blocked card anyway and say so', async () => {
     // Arrange
     const { ports, service } = serviceWith([
-      card({ laneId: 'review', dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] }),
-      card({ id: 'F2' }),
+      boardTask({ laneId: 'review', dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] }),
+      boardTask({ id: 'F2' }),
     ]);
 
     // Act
@@ -1665,7 +1675,7 @@ describe('a daemon trigger', () => {
     },
   ])('should not move $name', async ({ stored: overrides, trigger }) => {
     // Arrange
-    const { ports, service } = serviceWith([card(overrides)]);
+    const { ports, service } = serviceWith([boardTask(overrides)]);
 
     // Act
     const response = await service.trigger('F1', trigger);
@@ -1685,7 +1695,7 @@ describe('a daemon trigger', () => {
 
   it('should not let a ferret or the owner trigger', async () => {
     // Act
-    const { ports, service } = serviceWith([card({ laneId: 'implement' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'implement' })]);
     const caught = await service.act('F1', action({ action: 'move', to: 'review' }), lead).then(() => 'moved');
 
     // Assert: a ferret MOVES; only the daemon's trigger path marks a move automatic.
@@ -1696,11 +1706,11 @@ describe('a daemon trigger', () => {
 
 describe('reading the board', () => {
   const board = () => [
-    card({ id: 'F1', laneId: 'implement' }),
-    card({ id: 'F2', laneId: 'closed' }),
-    card({ id: 'F3', laneId: 'tested' }),
-    card({ id: 'F4', projectId: OTHER_PROJECT }),
-    card({ id: 'F5', dropped: { reason: 'no', at: NOW } }),
+    boardTask({ id: 'F1', laneId: 'implement' }),
+    boardTask({ id: 'F2', laneId: 'closed' }),
+    boardTask({ id: 'F3', laneId: 'tested' }),
+    boardTask({ id: 'F4', projectId: OTHER_PROJECT }),
+    boardTask({ id: 'F5', dropped: { reason: 'no', at: NOW } }),
   ];
 
   it("should serve one project's open cards with its lanes, counts and the quarantined files", async () => {
@@ -1750,7 +1760,7 @@ describe('reading the board', () => {
 
   it('should serve one card, and say when it is missing or quarantined', async () => {
     // Arrange
-    const store = new MemoryBoardStore([card({ projectId: 'unfiled' })], [{ id: 'F9', reason: 'damaged' }]);
+    const store = new MemoryBoardStore([boardTask({ projectId: 'unfiled' })], [{ id: 'F9', reason: 'damaged' }]);
     const { service } = serviceWith([], { store, machineId: () => undefined });
 
     // Act
@@ -1765,21 +1775,21 @@ describe('reading the board', () => {
   });
 
   /**
-   * One card's read derived the whole board (every card's activity, every ferret's lineage) to show one card:
+   * One task's read derived the whole board (every task's activity, every ferret's lineage) to show one task:
    * ~140 ms for a 2.8 KB answer. Its neighbourhood alone gives it the same view; Asks is read once for every
-   * open card ask, so an ask about this card on another card's ferret's ledger still shows.
+   * open task ask, so an ask about this task on another task's ferret's ledger still shows.
    */
   it('should derive one card from its neighbourhood alone and give it the view the whole board gives it', async () => {
     // Arrange
-    const cards = [
-      card({ id: 'F0' }),
-      card({ id: 'F1', parent: { id: 'F0' } }),
-      card({ id: 'F2', parent: { id: 'F1' }, owner: 'child' }),
-      card({ id: 'F3', parent: { id: 'F1' }, dropped: { reason: 'superseded', at: NOW } }),
-      card({ id: 'F4', owner: 'stranger' }),
+    const tasks = [
+      boardTask({ id: 'F0' }),
+      boardTask({ id: 'F1', parent: { id: 'F0' } }),
+      boardTask({ id: 'F2', parent: { id: 'F1' }, owner: 'child' }),
+      boardTask({ id: 'F3', parent: { id: 'F1' }, dropped: { reason: 'superseded', at: NOW } }),
+      boardTask({ id: 'F4', owner: 'stranger' }),
     ];
     const ask = { ferret: 'stranger', id: 'A1' };
-    const agenda = new CardAskLinks(
+    const agenda = new TaskAskLinks(
       {
         open: async () => [{ ferret: 'stranger', id: 'A1', cardId: 'F1' }],
         mentioned: async () => [],
@@ -1794,7 +1804,7 @@ describe('reading the board', () => {
         return await deriver.derive(inputs);
       },
     };
-    const { service } = serviceWith(cards, { asks: agenda, activity, lanes: new FakeLanes() });
+    const { service } = serviceWith(tasks, { asks: agenda, activity, lanes: new FakeLanes() });
 
     // Act
     const one = await service.card('F1');
@@ -1809,10 +1819,10 @@ describe('reading the board', () => {
 
   it('should walk a loop in parent once when it gathers a neighbourhood', () => {
     // Arrange
-    const looped = [card({ id: 'F1', parent: { id: 'F2' } }), card({ id: 'F2', parent: { id: 'F1' } })];
+    const looped = [boardTask({ id: 'F1', parent: { id: 'F2' } }), boardTask({ id: 'F2', parent: { id: 'F1' } })];
 
     // Act
-    const around = neighbourhoodOf(looped[0] as Card, new BoardIndex(looped, MACHINE));
+    const around = neighbourhoodOf(looped[0] as Task, new BoardIndex(looped, MACHINE));
 
     // Assert
     should(around.map(each => each.id).sort()).eql(['F1', 'F2']);
@@ -1836,7 +1846,7 @@ describe('reading the board', () => {
   });
 
   describe('the orphaned cards, one snapshot', () => {
-    /** Derives every card as `orphaned` unless it is named, counting each derivation. */
+    /** Derives every task as `orphaned` unless it is named, counting each derivation. */
     const orphanedExcept = (named: Readonly<Record<string, 'active' | 'idle'>> = {}) => {
       const derivations: number[] = [];
       const activity = {
@@ -1855,11 +1865,13 @@ describe('reading the board', () => {
 
     it('should list every open orphaned card past one page of 500, from one derivation of activity', async () => {
       // Arrange
-      const cards = Array.from({ length: 620 }, (_, each) => card({ id: `F${String(each + 1)}`, laneId: 'implement' }));
+      const tasks = Array.from({ length: 620 }, (_, each) =>
+        boardTask({ id: `F${String(each + 1)}`, laneId: 'implement' }),
+      );
       const { activity, derivations } = orphanedExcept();
 
       // Act
-      const read = await serviceWith(cards, { activity }).service.orphanedCards();
+      const read = await serviceWith(tasks, { activity }).service.orphanedCards();
 
       // Assert
       should(read.views).have.length(620);
@@ -1870,17 +1882,17 @@ describe('reading the board', () => {
 
     it('should leave out a card that is active, idle, closed or dropped', async () => {
       // Arrange
-      const cards = [
-        card({ id: 'F1', laneId: 'implement' }),
-        card({ id: 'F2', laneId: 'implement' }),
-        card({ id: 'F3', laneId: 'implement' }),
-        card({ id: 'F4', laneId: 'closed' }),
-        card({ id: 'F5', laneId: 'implement', dropped: { reason: 'no', at: NOW } }),
+      const tasks = [
+        boardTask({ id: 'F1', laneId: 'implement' }),
+        boardTask({ id: 'F2', laneId: 'implement' }),
+        boardTask({ id: 'F3', laneId: 'implement' }),
+        boardTask({ id: 'F4', laneId: 'closed' }),
+        boardTask({ id: 'F5', laneId: 'implement', dropped: { reason: 'no', at: NOW } }),
       ];
       const { activity } = orphanedExcept({ F2: 'active', F3: 'idle' });
 
       // Act
-      const read = await serviceWith(cards, { activity }).service.orphanedCards();
+      const read = await serviceWith(tasks, { activity }).service.orphanedCards();
 
       // Assert
       should(read.views.map(view => view.id)).eql(['F1']);
@@ -1892,7 +1904,7 @@ describe('what follows a write', () => {
   it('should report, not fail, when focus, the feed or the reopen delivery cannot be done', async () => {
     // Arrange
     const ports = world({
-      store: new MemoryBoardStore([card({ laneId: 'merged', assignee: 'child' })]),
+      store: new MemoryBoardStore([boardTask({ laneId: 'merged', assignee: 'child' })]),
       focus: new FakeFocus(new Set(), true),
       changes: new FakeChanges('journal closed'),
       reopen: new FakeReopen(true),
@@ -2030,7 +2042,7 @@ describe('the reopen message and actors', () => {
 describe("relocating a removed lane's cards", () => {
   it('should record the reason it is given instead, for a move that is not a removal', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ id: 'F1', laneId: 'tested' })]);
+    const { ports, service } = serviceWith([boardTask({ id: 'F1', laneId: 'tested' })]);
 
     // Act
     await service.relocate(PROJECT, { tested: 'released' }, 'Released and To test are one lane now');
@@ -2048,9 +2060,9 @@ describe("relocating a removed lane's cards", () => {
   it('should move each card of a removed lane on that board once, and say why', async () => {
     // Arrange
     const { ports, service } = serviceWith([
-      card({ id: 'F1', laneId: 'review' }),
-      card({ id: 'F2', laneId: 'implement' }),
-      card({ id: 'F3', laneId: 'review', projectId: OTHER_PROJECT }),
+      boardTask({ id: 'F1', laneId: 'review' }),
+      boardTask({ id: 'F2', laneId: 'implement' }),
+      boardTask({ id: 'F3', laneId: 'review', projectId: OTHER_PROJECT }),
     ]);
 
     // Act
@@ -2075,10 +2087,13 @@ describe("relocating a removed lane's cards", () => {
 
   it('should leave a card that moved away, or was refiled, before its turn', async () => {
     // Arrange
-    const store = new MemoryBoardStore([card({ id: 'F1', laneId: 'plan' }), card({ id: 'F2', laneId: 'plan' })]);
+    const store = new MemoryBoardStore([
+      boardTask({ id: 'F1', laneId: 'plan' }),
+      boardTask({ id: 'F2', laneId: 'plan' }),
+    ]);
     const write = store.write.bind(store);
     store.write = async (id, decide) => {
-      const current = store.cards.get(id) as Card;
+      const current = store.cards.get(id) as Task;
       if (id === 'F1') store.cards.set(id, { ...current, laneId: 'implement' });
       if (id === 'F2') store.cards.set(id, { ...current, projectId: OTHER_PROJECT });
       return await write(id, decide);
@@ -2095,11 +2110,11 @@ describe("relocating a removed lane's cards", () => {
   it('should never close a card, free one from a gate, carry one past a gate or lose one on the daemon’s relocation', async () => {
     // Arrange: the classic lanes; Plan/Design and To test are gates.
     const { ports, service } = serviceWith([
-      card({ id: 'F1', laneId: 'tested' }),
-      card({ id: 'F2', laneId: 'plan' }),
-      card({ id: 'F3', laneId: 'todo' }),
-      card({ id: 'F4', laneId: 'merged' }),
-      card({ id: 'F5', laneId: 'review' }),
+      boardTask({ id: 'F1', laneId: 'tested' }),
+      boardTask({ id: 'F2', laneId: 'plan' }),
+      boardTask({ id: 'F3', laneId: 'todo' }),
+      boardTask({ id: 'F4', laneId: 'merged' }),
+      boardTask({ id: 'F5', laneId: 'review' }),
     ]);
 
     // Act
@@ -2135,7 +2150,10 @@ describe("relocating a removed lane's cards", () => {
 
   it('should move the cards of the owner’s relocation as the owner’s, closing them when it says so', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ id: 'F1', laneId: 'tested' }), card({ id: 'F2', laneId: 'plan' })]);
+    const { ports, service } = serviceWith([
+      boardTask({ id: 'F1', laneId: 'tested' }),
+      boardTask({ id: 'F2', laneId: 'plan' }),
+    ]);
 
     // Act
     const moved = await service.relocate(PROJECT, { tested: 'closed' }, undefined, { kind: 'owner' });
@@ -2151,7 +2169,10 @@ describe("relocating a removed lane's cards", () => {
 
   it('should skip a card that vanished and a relocation onto its own lane', async () => {
     // Arrange
-    const store = new MemoryBoardStore([card({ id: 'F1', laneId: 'plan' }), card({ id: 'F2', laneId: 'review' })]);
+    const store = new MemoryBoardStore([
+      boardTask({ id: 'F1', laneId: 'plan' }),
+      boardTask({ id: 'F2', laneId: 'review' }),
+    ]);
     const write = store.write.bind(store);
     store.write = async (id, decide) => {
       if (id === 'F1') store.cards.delete(id);
@@ -2182,16 +2203,21 @@ describe('lanes follow PR facts at the write', () => {
     polledAt: NOW,
     ...fields,
   });
-  const holding = (pr: PrLink, overrides: Partial<Card> = {}): Card =>
-    card({ id: 'F2', laneId: 'implement', links: { prs: [pr], branch: null, commits: [], docs: [] }, ...overrides });
-  const moves = (task: Card) =>
+  const holding = (pr: PrLink, overrides: Partial<Task> = {}): Task =>
+    boardTask({
+      id: 'F2',
+      laneId: 'implement',
+      links: { prs: [pr], branch: null, commits: [], docs: [] },
+      ...overrides,
+    });
+  const moves = (task: Task) =>
     task.history.flatMap(event =>
       event.type === 'moved' ? [[event.to, event.trigger, event.reason, event.actor.kind, event.auto]] : [],
     );
 
   it('should use what another card already caches of a PR the moment it is linked', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'implement' }), holding(known())]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'implement' }), holding(known())]);
 
     // Act
     await service.act('F1', action({ action: 'link', pr: URL.replace('kirinnee', 'KirinNee') }), lead);
@@ -2216,7 +2242,7 @@ describe('lanes follow PR facts at the write', () => {
     },
   ])('should move a task at once on a linked PR that is $name', async ({ pr, lane, trigger }) => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'implement' }), holding(pr)], {
+    const { ports, service } = serviceWith([boardTask({ laneId: 'implement' }), holding(pr)], {
       runningVersion: () => '4.114.0',
     });
 
@@ -2229,8 +2255,8 @@ describe('lanes follow PR facts at the write', () => {
   });
 
   it('should keep a card waiting at the Plan gate where it is, whatever its linked PR says', async () => {
-    // Arrange — only the owner passes a gate (docs/board.md § Cards show progress)
-    const { ports, service } = serviceWith([card({ laneId: 'plan' }), holding(known({ releasedIn: RELEASE }))], {
+    // Arrange — only the owner passes a gate (docs/board.md § Tasks show progress)
+    const { ports, service } = serviceWith([boardTask({ laneId: 'plan' }), holding(known({ releasedIn: RELEASE }))], {
       runningVersion: () => '4.114.0',
     });
 
@@ -2244,7 +2270,7 @@ describe('lanes follow PR facts at the write', () => {
 
   it('should leave a card where it is when the PR linked is one nobody has polled', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'implement' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'implement' })]);
 
     // Act
     await service.act('F1', action({ action: 'link', pr: URL }), lead);
@@ -2259,7 +2285,7 @@ describe('lanes follow PR facts at the write', () => {
     // Arrange
     const other = known({ url: 'https://github.com/kirinnee/ferretry/pull/931', number: 931 });
     const unknown = known({ state: 'unknown', checks: 'none', mergedAt: null, mergeSha: null, polledAt: null });
-    const { ports, service } = serviceWith([card(), holding(other), holding(unknown, { id: 'F3' })]);
+    const { ports, service } = serviceWith([boardTask(), holding(other), holding(unknown, { id: 'F3' })]);
 
     // Act
     await service.act('F1', action({ action: 'link', pr: URL }), lead);
@@ -2271,7 +2297,7 @@ describe('lanes follow PR facts at the write', () => {
   it('should take the freshest look when several cards cache the same PR', async () => {
     // Arrange
     const stale = known({ state: 'open', mergedAt: null, mergeSha: null, polledAt: '2026-10-30T08:00:00.000Z' });
-    const { ports, service } = serviceWith([card(), holding(known()), holding(stale, { id: 'F3' })]);
+    const { ports, service } = serviceWith([boardTask(), holding(known()), holding(stale, { id: 'F3' })]);
 
     // Act
     await service.act('F1', action({ action: 'link', pr: URL }), lead);
@@ -2281,7 +2307,7 @@ describe('lanes follow PR facts at the write', () => {
   });
 
   describe('a refile out of the Unfiled board', () => {
-    const unfiledWorld = (task: Card) =>
+    const unfiledWorld = (task: Task) =>
       serviceWith([task], {
         lanes: new FakeLanes(
           new Map([
@@ -2290,9 +2316,9 @@ describe('lanes follow PR facts at the write', () => {
           ]),
         ),
       });
-    // Quick work walks no Plan gate: these cases are about where the facts land a card, not about a gate.
-    const unfiledAt = (laneId: string, prs: readonly PrLink[], workflow: Card['workflow'] = 'quick'): Card =>
-      card({
+    // Quick work walks no Plan gate: these cases are about where the facts land a task, not about a gate.
+    const unfiledAt = (laneId: string, prs: readonly PrLink[], workflow: Task['workflow'] = 'quick'): Task =>
+      boardTask({
         projectId: UNFILED_PROJECT_ID,
         laneId,
         workflow,
@@ -2300,7 +2326,7 @@ describe('lanes follow PR facts at the write', () => {
       });
 
     it('should stop a design-first card at the board’s Plan gate, whatever its PRs say', async () => {
-      // Arrange — the review's exploit: a card done on the quick board comes back past a Plan it never had
+      // Arrange — the review's exploit: a task done on the quick board comes back past a Plan it never had
       const { ports, service } = unfiledWorld(unfiledAt('to-test', [known({ releasedIn: RELEASE })], 'design-first'));
 
       // Act
@@ -2372,7 +2398,7 @@ describe('lanes follow PR facts at the write', () => {
 
   it('should refile as before when the card has no PR facts', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'implement' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'implement' })]);
 
     // Act
     await service.act('F1', action({ action: 'refile', projectId: OTHER_PROJECT }), lead);
@@ -2398,9 +2424,9 @@ describe('listing the card ids', () => {
   it('should list every card of every project and state, and nothing but its id', async () => {
     // Arrange
     const store = new MemoryBoardStore([
-      card({ id: 'F1' }),
-      card({ id: 'F2', projectId: 'other-project' }),
-      card({ id: 'F3', dropped: { reason: 'superseded', at: NOW } }),
+      boardTask({ id: 'F1' }),
+      boardTask({ id: 'F2', projectId: 'other-project' }),
+      boardTask({ id: 'F3', dropped: { reason: 'superseded', at: NOW } }),
     ]);
     const { service } = serviceWith([], { store });
 
@@ -2429,9 +2455,9 @@ describe('creating a card for a thread (--thread)', () => {
           if (item === 'throws') throw new Error('unreadable');
           return item;
         },
-        link: async (ferret, id, card) => {
+        link: async (ferret, id, task) => {
           if (refusing !== undefined) return { ok: false, message: refusing };
-          linked.push({ ferret, id, card });
+          linked.push({ ferret, id, card: task });
           return { ok: true };
         },
       },
@@ -2469,8 +2495,8 @@ describe('creating a card for a thread (--thread)', () => {
       store,
       threads: {
         open: async () => thread(),
-        link: async (ferret, id, card) => {
-          linked.push({ ferret, id, card });
+        link: async (ferret, id, task) => {
+          linked.push({ ferret, id, card: task });
           return { ok: true };
         },
       },

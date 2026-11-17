@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { CardActor, Card, CardEvent, CardView } from '../../../contract/index.ts';
+import type { TaskActor, Task, TaskEvent, TaskView } from '../../../contract/index.ts';
 import should from 'should';
 import {
   BoardSweep,
@@ -14,7 +14,7 @@ import {
   type SweepMemory,
   type SweepMemoryStore,
 } from '../../../daemon/lib/board/index.ts';
-import { card, FakeSessions, lanes, liveSession, NOW, PROJECT, rosterOf } from './support.ts';
+import { boardTask, FakeSessions, lanes, liveSession, NOW, PROJECT, rosterOf } from './support.ts';
 
 const NOW_MS = Date.parse(NOW);
 const MINUTE = 60_000;
@@ -23,10 +23,10 @@ const ago = (ms: number): string => new Date(NOW_MS - ms).toISOString();
 const EARLIER = ago(MINUTE);
 
 const laneSets = new Map([[PROJECT, lanes(PROJECT)]]);
-const ferret = (ferret: string): CardActor => ({ kind: 'ferret', name: ferret, ferret });
+const ferret = (ferret: string): TaskActor => ({ kind: 'ferret', name: ferret, ferret });
 
-const view = (stored: Partial<Card> = {}, derived: Partial<CardView> = {}): CardView => ({
-  ...card(stored),
+const view = (stored: Partial<Task> = {}, derived: Partial<TaskView> = {}): TaskView => ({
+  ...boardTask(stored),
   lastTouchedAt: null,
   touchedBy: null,
   activity: 'idle',
@@ -45,9 +45,9 @@ const view = (stored: Partial<Card> = {}, derived: Partial<CardView> = {}): Card
   ...derived,
 });
 
-const board = (...views: CardView[]): SweepBoard => ({ views, laneSets });
+const board = (...views: TaskView[]): SweepBoard => ({ views, laneSets });
 
-const created = (at = ago(HOUR)): CardEvent => ({
+const created = (at = ago(HOUR)): TaskEvent => ({
   seq: 1,
   at,
   actor: ferret('lead'),
@@ -56,19 +56,19 @@ const created = (at = ago(HOUR)): CardEvent => ({
 });
 
 /** An event before the card numbers it. Distributed, so each event type keeps its own fields. */
-type EventInput = CardEvent extends infer Event ? (Event extends unknown ? Omit<Event, 'seq'> : never) : never;
+type EventInput = TaskEvent extends infer Event ? (Event extends unknown ? Omit<Event, 'seq'> : never) : never;
 
-/** The child card of the lead's card F1, worked by `child`, with these events after its creation. */
-const childCard = (events: readonly EventInput[], stored: Partial<Card> = {}): Card => ({
-  ...card({ id: 'F2', parent: { id: 'F1' }, assignee: 'child', laneId: 'implement', ...stored }),
-  history: [created(), ...events.map((event, index) => ({ ...event, seq: index + 2 }) as CardEvent)],
+/** The child task of the lead's task F1, worked by `child`, with these events after its creation. */
+const childTask = (events: readonly EventInput[], stored: Partial<Task> = {}): Task => ({
+  ...boardTask({ id: 'F2', parent: { id: 'F1' }, assignee: 'child', laneId: 'implement', ...stored }),
+  history: [created(), ...events.map((event, index) => ({ ...event, seq: index + 2 }) as TaskEvent)],
 });
 
-const leadCard = view({ id: 'F1', laneId: 'plan' });
+const leadTask = view({ id: 'F1', laneId: 'plan' });
 
 const everyone = rosterOf(['lead', 'child', 'other'].map(id => liveSession(id)));
 
-/** A memory that has seen the child card up to its creation, with nothing blocking it. */
+/** A memory that has seen the child task up to its creation, with nothing blocking it. */
 const sawChild = (mark: Partial<SweepMemory['seen'][string]> = {}): SweepMemory => ({
   format: 1,
   sweptAt: EARLIER,
@@ -95,7 +95,7 @@ describe('the nudge words', () => {
 });
 
 describe('who a stale card nudges', () => {
-  const stale = (stored: Partial<Card> = {}) => view({ assignee: 'child', ...stored }, { activity: 'stale' });
+  const stale = (stored: Partial<Task> = {}) => view({ assignee: 'child', ...stored }, { activity: 'stale' });
 
   it('should nudge a live assignee, busy or idle, and nobody while it declared a wait', () => {
     // Arrange
@@ -120,14 +120,14 @@ describe('who a stale card nudges', () => {
           liveSession('grand', { lead: 'child' }),
         ].map(session => (alive.includes(session.id) ? session : { ...session, status: 'stopped' as const })),
       );
-    const card = stale({ owner: 'boss', assignee: 'grand' });
+    const task = stale({ owner: 'boss', assignee: 'grand' });
 
     // Assert
-    should(nudgeRecipient(card, line(['grand', 'child', 'lead', 'boss']))).equal('grand');
-    should(nudgeRecipient(card, line(['child', 'lead', 'boss']))).equal('child');
-    should(nudgeRecipient(card, line(['lead', 'boss']))).equal('lead');
-    should(nudgeRecipient(card, line(['boss']))).equal('boss');
-    should(nudgeRecipient(card, line([]))).be.null();
+    should(nudgeRecipient(task, line(['grand', 'child', 'lead', 'boss']))).equal('grand');
+    should(nudgeRecipient(task, line(['child', 'lead', 'boss']))).equal('child');
+    should(nudgeRecipient(task, line(['lead', 'boss']))).equal('lead');
+    should(nudgeRecipient(task, line(['boss']))).equal('boss');
+    should(nudgeRecipient(task, line([]))).be.null();
   });
 
   it('should reach the owner only when nobody in the assignee’s line is alive', () => {
@@ -145,20 +145,20 @@ describe('who a stale card nudges', () => {
   it('should keep an interactive creator for last, and never skip past it to a dead line', () => {
     // Arrange
     const owner = liveSession('lizzette', { interactive: true });
-    const card = stale({ owner: 'lizzette', assignee: 'child' });
+    const task = stale({ owner: 'lizzette', assignee: 'child' });
 
     // Assert
-    should(nudgeRecipient(card, rosterOf([owner, liveSession('child', { lead: 'lizzette' })]))).equal('child');
+    should(nudgeRecipient(task, rosterOf([owner, liveSession('child', { lead: 'lizzette' })]))).equal('child');
     should(
       nudgeRecipient(
-        card,
+        task,
         rosterOf([owner, liveSession('child', { lead: 'sub-lead', status: 'stopped' }), liveSession('sub-lead')]),
       ),
     ).equal('sub-lead');
     should(
-      nudgeRecipient(card, rosterOf([owner, liveSession('child', { lead: 'lizzette', status: 'stopped' })])),
+      nudgeRecipient(task, rosterOf([owner, liveSession('child', { lead: 'lizzette', status: 'stopped' })])),
     ).equal('lizzette');
-    should(nudgeRecipient(card, rosterOf([liveSession('child', { lead: 'lizzette', status: 'stopped' })]))).be.null();
+    should(nudgeRecipient(task, rosterOf([liveSession('child', { lead: 'lizzette', status: 'stopped' })]))).be.null();
   });
 
   it('should nudge nobody when the assignee is unreadable', () => {
@@ -168,7 +168,7 @@ describe('who a stale card nudges', () => {
 });
 
 describe('the sweep plan: nudges', () => {
-  const staleCard = (stored: Partial<Card> = {}, derived: Partial<CardView> = {}) =>
+  const staleTask = (stored: Partial<Task> = {}, derived: Partial<TaskView> = {}) =>
     view(
       { laneId: 'implement', createdAt: ago(5 * HOUR), ...stored },
       { activity: 'stale', lastTouchedAt: ago(3 * HOUR), ...derived },
@@ -178,9 +178,9 @@ describe('the sweep plan: nudges', () => {
     // Arrange
     const memory = { ...EMPTY_SWEEP_MEMORY, nudged: { F1: ago(HOUR), F2: ago(3 * HOUR) } };
     const swept = board(
-      staleCard({ id: 'F1' }),
-      staleCard({ id: 'F2' }),
-      staleCard({ id: 'F3' }, { lastTouchedAt: null }),
+      staleTask({ id: 'F1' }),
+      staleTask({ id: 'F2' }),
+      staleTask({ id: 'F3' }, { lastTouchedAt: null }),
     );
 
     // Act
@@ -198,11 +198,11 @@ describe('the sweep plan: nudges', () => {
   it('should nudge nobody for a card that is not stale, has no threshold, or has nobody to tell', () => {
     // Arrange
     const swept = board(
-      staleCard({ id: 'F1' }, { activity: 'idle' }),
-      staleCard({ id: 'F2' }, { activity: 'active' }),
-      staleCard({ id: 'F3', laneId: 'tested' }),
-      staleCard({ id: 'F4', laneId: 'nowhere' }),
-      staleCard({ id: 'F5', assignee: 'child' }),
+      staleTask({ id: 'F1' }, { activity: 'idle' }),
+      staleTask({ id: 'F2' }, { activity: 'active' }),
+      staleTask({ id: 'F3', laneId: 'tested' }),
+      staleTask({ id: 'F4', laneId: 'nowhere' }),
+      staleTask({ id: 'F5', assignee: 'child' }),
     );
 
     // Act
@@ -250,7 +250,7 @@ describe('the sweep plan: no news', () => {
         ...extra,
       }) as const;
     const child = view(
-      childCard(
+      childTask(
         [
           moved('todo', 'implement'),
           { at: EARLIER, actor: ferret('child'), type: 'blocked', reason: 'vendor' },
@@ -272,17 +272,17 @@ describe('the sweep plan: no news', () => {
       { blockedBy: [{ id: 'F9' }] },
     );
     const dropped = view(
-      childCard([{ at: EARLIER, actor: ferret('child'), type: 'dropped', reason: 'superseded' }], {
+      childTask([{ at: EARLIER, actor: ferret('child'), type: 'dropped', reason: 'superseded' }], {
         id: 'F3',
         dropped: { reason: 'superseded', at: EARLIER },
       }),
     );
-    const fresh = view(childCard([moved('todo', 'implement')], { id: 'F4', createdAt: NOW }));
+    const fresh = view(childTask([moved('todo', 'implement')], { id: 'F4', createdAt: NOW }));
 
     // Act
     const plan = planSweep(
       { ...sawChild(), seen: { ...sawChild().seen, F3: { blockedBy: [] } } },
-      board(leadCard, child, dropped, fresh),
+      board(leadTask, child, dropped, fresh),
       everyone,
       NOW,
     );
@@ -296,7 +296,7 @@ describe('the sweep plan: no news', () => {
 describe('the sweep plan: a go-ahead once the last blocker ships', () => {
   const blockedChild = () =>
     view(
-      childCard([], {
+      childTask([], {
         dependsOn: [
           { task: { id: 'F9' }, until: 'shipped' },
           { task: { id: 'F8' }, until: 'released' },
@@ -318,7 +318,7 @@ describe('the sweep plan: a go-ahead once the last blocker ships', () => {
 
   it("should tell only the dependent card's assignee it can go ahead, naming what shipped", () => {
     // Act
-    const plan = planSweep(wasBlocked, board(leadCard, blockedChild(), ...blockers), everyone, NOW);
+    const plan = planSweep(wasBlocked, board(leadTask, blockedChild(), ...blockers), everyone, NOW);
 
     // Assert
     should(plan.nudges).eql([
@@ -328,14 +328,14 @@ describe('the sweep plan: a go-ahead once the last blocker ships', () => {
 
   it('should tell nobody when the blockers left without shipping, the assignee is gone, or nothing changed', () => {
     // Arrange
-    const unshipped = view(childCard([], { dependsOn: [] }));
-    const stillBlocked = view(childCard([]), { blockedBy: [{ id: 'F9' }] });
-    const swept = board(leadCard, blockedChild(), ...blockers);
+    const unshipped = view(childTask([], { dependsOn: [] }));
+    const stillBlocked = view(childTask([]), { blockedBy: [{ id: 'F9' }] });
+    const swept = board(leadTask, blockedChild(), ...blockers);
 
     // Assert
-    should(sentTexts(sawChild({ blockedBy: ['/F9'] }), board(leadCard, unshipped))).eql([]);
+    should(sentTexts(sawChild({ blockedBy: ['/F9'] }), board(leadTask, unshipped))).eql([]);
     should(sentTexts(wasBlocked, swept, rosterOf([liveSession('lead')]))).eql([]);
-    should(sentTexts(sawChild({ blockedBy: ['/F9'] }), board(leadCard, stillBlocked))).eql([]);
+    should(sentTexts(sawChild({ blockedBy: ['/F9'] }), board(leadTask, stillBlocked))).eql([]);
     should(sentTexts(EMPTY_SWEEP_MEMORY, swept)).eql([]);
   });
 });
@@ -384,17 +384,17 @@ describe('the board sweep tick', () => {
   const stale = (id: string, assignee: string) =>
     view({ id, assignee, laneId: 'implement' }, { activity: 'stale', lastTouchedAt: ago(3 * HOUR) });
   const unblocked = () =>
-    view(childCard([], { dependsOn: [{ task: { id: 'F9' }, until: 'shipped' }] }), { blockedBy: [] });
+    view(childTask([], { dependsOn: [{ task: { id: 'F9' }, until: 'shipped' }] }), { blockedBy: [] });
 
   it('should send each nudge as it is, the go-ahead too, and remember the stale nudge', async () => {
     // Arrange
     const child = view(
-      childCard([{ at: EARLIER, actor: ferret('child'), type: 'blocked', reason: 'vendor' }], {
+      childTask([{ at: EARLIER, actor: ferret('child'), type: 'blocked', reason: 'vendor' }], {
         dependsOn: [{ task: { id: 'F9' }, until: 'shipped' }],
       }),
     );
     const { sweep, sent, store } = tickWorld(
-      board(leadCard, child, view({ id: 'F9', laneId: 'merged' }), stale('F5', 'lead')),
+      board(leadTask, child, view({ id: 'F9', laneId: 'merged' }), stale('F5', 'lead')),
       sawChild({ blockedBy: ['/F9'] }),
     );
 
@@ -415,7 +415,7 @@ describe('the board sweep tick', () => {
   it('should report what it could not send and carry on, so an unsent nudge or go-ahead is tried again', async () => {
     // Arrange
     const world = tickWorld(
-      board(leadCard, unblocked(), view({ id: 'F9', laneId: 'merged' }), stale('F5', 'other'), stale('F6', 'lead')),
+      board(leadTask, unblocked(), view({ id: 'F9', laneId: 'merged' }), stale('F5', 'other'), stale('F6', 'lead')),
       sawChild({ blockedBy: ['/F9'] }),
       new Set(['other', 'child']),
     );

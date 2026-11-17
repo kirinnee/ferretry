@@ -12,14 +12,14 @@ export class AskEvents implements AgendaChangeObserver {
     if (item === undefined) return;
     const answered = change.change === 'answered' || (change.change === 'resolved' && change.actor.kind === 'human');
     const latest = item.history?.at(-1);
-    const cardAnswers = new Set(
+    const taskAnswers = new Set(
       (item.cardAsks ?? []).flatMap(ask => (ask.answer === undefined ? [] : [`an_${ask.answer.receipt.slice(0, 24)}`])),
     );
     if (answered) {
       for (const answer of answersOn(ferret, item)) {
-        // A daemon card answer names the precise obligation in its history; older answers are already published.
+        // A daemon task answer names the precise obligation in its history; older answers are already published.
         if (change.actor.kind === 'daemon' && answer.entry !== latest?.note) continue;
-        if (change.actor.kind === 'human' && cardAnswers.has(answer.id)) continue;
+        if (change.actor.kind === 'human' && taskAnswers.has(answer.id)) continue;
         this.events.publish(AskAnswered, {
           ferret,
           askId: item.id as AskId,

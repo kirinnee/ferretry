@@ -13,7 +13,7 @@
 
 import type { MarkdownAstFenceNode, MarkdownFences } from '@ferretry/app';
 import { FyRenderBlock } from './fy-render-block.tsx';
-import { FyRenderCardEmbed, type FyRenderCardEmbedHost } from './fy-render-card-embed.tsx';
+import { FyRenderTaskEmbed, type FyRenderTaskEmbedHost } from './fy-render-task-embed.tsx';
 import {
   FY_RENDER_FENCE_ATTRIBUTE,
   type FyRenderWorkspaceReader,
@@ -77,15 +77,15 @@ export function tolerateAuthoringNoise(source: string): string {
   return source.replace(/\r\n?/gu, '\n');
 }
 
-/** What a surface lends the blocks it draws: the file reader for a `src: @path`, and the board to ask for a card. */
+/** What a surface lends the blocks it draws: the file reader for a `src: @path`, and the board to ask for a task. */
 export interface FyRenderFenceHost {
   /**
    * Reads a workspace file for a media block's `src: @path`, as the reader. A path goes in and bytes or a refusal come
-   * out — never a client, URL or token. Without it a workspace `src:` shows a card saying the view cannot read it.
+   * out — never a client, URL or token. Without it a workspace `src:` shows a task saying the view cannot read it.
    */
   readonly readWorkspaceMedia?: FyRenderWorkspaceReader | undefined;
   /** The daemon whose board a `task` or `board` block asks. Without it those blocks stay ordinary code fences. */
-  readonly cardEmbed?: FyRenderCardEmbedHost | undefined;
+  readonly cardEmbed?: FyRenderTaskEmbedHost | undefined;
 }
 
 /** The fences Conversation's surfaces hand to `<Markdown enableFyRender fences={…}>`. Build once per host; keep it stable. */
@@ -99,7 +99,7 @@ export function fyRenderFences(host: FyRenderFenceHost = {}): MarkdownFences {
       if (!isFyRenderEmbedBlock(parsed.block))
         return <FyRenderBlock block={parsed.block} readWorkspaceMedia={host.readWorkspaceMedia} />;
       if (host.cardEmbed === undefined) return null;
-      return <FyRenderCardEmbed block={parsed.block} host={host.cardEmbed} onTaskOpen={onTaskOpen} />;
+      return <FyRenderTaskEmbed block={parsed.block} host={host.cardEmbed} onTaskOpen={onTaskOpen} />;
     },
   };
 }

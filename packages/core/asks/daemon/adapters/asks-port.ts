@@ -23,8 +23,8 @@ import {
 import type { AgendaActor, AgendaService, RaiseAgendaRequest } from '../lib/agenda/index.ts';
 import { SerialQueue } from '../lib/agenda/serial-queue.ts';
 import { machineNoticeRef } from '../lib/agenda/service.ts';
-import { askedCardAsks, cardAskReference } from '../lib/protocol/agenda-card-asks.ts';
-import { askForKind } from '../lib/protocol/agenda-card.ts';
+import { askedTaskAsks, taskAskReference } from '../lib/protocol/agenda-task-asks.ts';
+import { askForKind } from '../lib/protocol/agenda-task.ts';
 import {
   MACHINE_AGENDA_ID,
   type AgendaItem,
@@ -165,7 +165,7 @@ export function answerOf(ferret: string, item: ResolvedAgendaItem): AskAnswer | 
   };
 }
 
-/** Durable answers on a thread, including the owner's answer while it rests and answered card questions. */
+/** Durable answers on a thread, including the owner's answer while it rests and answered task questions. */
 export function answersOn(ferret: string, item: AgendaItem | ResolvedAgendaItem): AskAnswer[] {
   const out: AskAnswer[] = [];
   if ('resolvedAt' in item) {
@@ -194,7 +194,7 @@ export function answersOn(ferret: string, item: AgendaItem | ResolvedAgendaItem)
     if (ask.answer === undefined) continue;
     const found = answerOf(ferret, {
       ...item,
-      sourceRef: `ask:card:${cardAskReference(ask)}`,
+      sourceRef: `ask:card:${taskAskReference(ask)}`,
       resolvedAt: ask.answer.at,
       resolvedBy: 'human',
       resolvedBySession: null,
@@ -233,23 +233,23 @@ function summaryOf(
   };
 }
 
-/** The `card` source the Board registers: a gate's ask, `gate:<card>:<lane>:<entry>`. */
-const CARD_SOURCE = 'card' as SourceKey;
+/** The `task` source the Board registers: a gate's ask, `gate:<card>:<lane>:<entry>`. */
+const TASK_SOURCE = 'card' as SourceKey;
 
 /**
- * The open asks a card's gates put on an item that is NOT itself the card's obligation: a ferret's own item or a card
+ * The open asks a task's gates put on an item that is NOT itself the task's obligation: a ferret's own item or a task
  * agenda carrying `cardAsks` (what a v4 agenda holds, and what this engine still reads, answers and rests). Each is
- * an open ask of the `card` source named by its gate, on its carrier's own id, so the Board finds the ask a gate
- * already has and raises no second one. Only the Board's own read (the `card` source) lists them; the carrier stays
+ * an open ask of the `task` source named by its gate, on its carrier's own id, so the Board finds the ask a gate
+ * already has and raises no second one. Only the Board's own read (the `task` source) lists them; the carrier stays
  * one ask of its own source everywhere else.
  */
-const carriedCardAsks = (ferret: string, item: AgendaItem, sources: Parameters<typeof summaryOf>[3]): AskSummary[] =>
-  parseObligation(item.sourceRef)?.source === CARD_SOURCE
+const carriedTaskAsks = (ferret: string, item: AgendaItem, sources: Parameters<typeof summaryOf>[3]): AskSummary[] =>
+  parseObligation(item.sourceRef)?.source === TASK_SOURCE
     ? []
-    : askedCardAsks(item).map(ask => ({
+    : askedTaskAsks(item).map(ask => ({
         ...summaryOf(ferret, item, 'open', sources),
-        source: CARD_SOURCE,
-        entry: cardAskReference(ask) as EntryId,
+        source: TASK_SOURCE,
+        entry: taskAskReference(ask) as EntryId,
       }));
 
 /** Which ferrets have a board; the engine's own list (`ferrets/*`). */
@@ -442,11 +442,11 @@ export function asksPort(
       if (reason !== 'answered') {
         // A carrier's card ask is withdrawn from the carrier: the item is the ferret's own and stays open.
         const carrier = (await snapshot(ref.ferret))?.items.find(item => item.id === ref.id);
-        if (carrier !== undefined && carriedCardAsks(ref.ferret, carrier, sources).length > 0) {
-          for (const ask of askedCardAsks(carrier).filter(
-            carried => entry === undefined || cardAskReference(carried) === entry,
+        if (carrier !== undefined && carriedTaskAsks(ref.ferret, carrier, sources).length > 0) {
+          for (const ask of askedTaskAsks(carrier).filter(
+            carried => entry === undefined || taskAskReference(carried) === entry,
           ))
-            await agenda.cardAsk(ref.ferret, ref.id, { kind: 'withdraw', reference: cardAskReference(ask) });
+            await agenda.cardAsk(ref.ferret, ref.id, { kind: 'withdraw', reference: taskAskReference(ask) });
           return;
         }
       }
@@ -463,8 +463,8 @@ export function asksPort(
         (ferret, board) =>
           state === 'open'
             ? board.items.flatMap(item =>
-                filter.source === CARD_SOURCE
-                  ? [summaryOf(ferret, item, 'open', sources), ...carriedCardAsks(ferret, item, sources)]
+                filter.source === TASK_SOURCE
+                  ? [summaryOf(ferret, item, 'open', sources), ...carriedTaskAsks(ferret, item, sources)]
                   : [summaryOf(ferret, item, 'open', sources)],
               )
             : board.resolved.map(item =>

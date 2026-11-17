@@ -7,7 +7,7 @@
  */
 import { err, ok, type Result } from '@ferretry/std';
 import { type BoardProjectId, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
-import { laneChangeCard, laneProposalCard } from './lane-proposal-card.ts';
+import { laneChangeTask, laneProposalTask } from './lane-proposal-task.ts';
 import {
   decideLaneChange,
   type LaneActor,
@@ -18,7 +18,7 @@ import {
 import { ancestorsOf, type FerretParents } from './lineage.ts';
 import { laneProposalReference, type LaneSet, type LaneSetActionRequest } from './model.ts';
 import type {
-  CardRelocator,
+  TaskRelocator,
   LaneProposalAsks,
   LaneSetSource,
   LaneSetStore,
@@ -52,7 +52,7 @@ export class LaneSetService implements LaneSetSource {
     private readonly registry: ProjectRegistry,
     private readonly ferrets: Pick<FerretProjects, 'projectOf'>,
     private readonly asks: LaneProposalAsks,
-    private readonly relocator: CardRelocator,
+    private readonly relocator: TaskRelocator,
     /** Who started whom, so a lead may replace its own ferret's waiting proposal. Absent, only that ferret may. */
     private readonly parents?: FerretParents,
   ) {}
@@ -66,7 +66,7 @@ export class LaneSetService implements LaneSetSource {
     return stored ?? defaultLaneSet(projectId);
   }
 
-  /** Whether a card may be created in the project: a refusal names the command to run when it may not. */
+  /** Whether a task may be created in the project: a refusal names the command to run when it may not. */
   async hasLaneSet(projectId: BoardProjectId): Promise<boolean> {
     return (await this.laneSet(projectId)) !== null;
   }
@@ -95,7 +95,7 @@ export class LaneSetService implements LaneSetSource {
   /**
    * Applies a propose, edit or confirm (`decideLaneChange`). A ferret's change to a project that has lanes waits
    * for the owner and moves nothing; any ferret result the owner has not confirmed puts one ask on the Agenda for that ferret.
-   * Cards move only once a change is live, as whoever made it live: the owner's, or the checked daemon's.
+   * Tasks move only once a change is live, as whoever made it live: the owner's, or the checked daemon's.
    */
   async apply(
     projectId: BoardProjectId,
@@ -105,7 +105,7 @@ export class LaneSetService implements LaneSetSource {
     const board = await this.project(projectId);
     if (board === undefined) return err({ code: 'not-found', projectId });
     const leads = await this.leadsProposer(projectId, actor);
-    // A ferret's change never relocates: it waits, or it is a first proposal with no cards to move.
+    // A ferret's change never relocates: it waits, or it is a first proposal with no tasks to move.
     const decided = await this.store.transact<
       Result<{ readonly decision: LaneSetDecision; readonly before: LaneSet | null }, LaneSetProblem>
     >(projectId, current => {
@@ -127,7 +127,7 @@ export class LaneSetService implements LaneSetSource {
       await this.asks.raise(
         actor.ferretId,
         laneProposalReference(projectId, pending?.version ?? laneSet.version),
-        pending === undefined ? laneProposalCard(board.name, laneSet) : laneChangeCard(board.name, laneSet, pending),
+        pending === undefined ? laneProposalTask(board.name, laneSet) : laneChangeTask(board.name, laneSet, pending),
       );
       return ok({ laneSet, ask: 'raised' });
     } catch {
@@ -136,8 +136,8 @@ export class LaneSetService implements LaneSetSource {
   }
 
   /**
-   * The owner's Accept on a proposal card: it confirms the live set of that version, or makes the waiting proposal
-   * of that version live and moves its cards as the owner's. A card for a version that has moved on confirms
+   * The owner's Accept on a proposal task: it confirms the live set of that version, or makes the waiting proposal
+   * of that version live and moves its tasks as the owner's. A task for a version that has moved on confirms
    * nothing. Only ever called for the owner's own answer (`LaneProposalAcceptance`).
    */
   async acceptProposal(projectId: BoardProjectId, version: number): Promise<boolean> {
@@ -170,7 +170,7 @@ export class LaneSetService implements LaneSetSource {
 
   /**
    * Closes the ask of a waiting proposal that is gone — replaced, accepted in the editor, or dropped by a
-   * change to the lanes — saying why, so the owner never answers a card that would do nothing. Total: a card that
+   * change to the lanes — saying why, so the owner never answers a task that would do nothing. Total: a task that
    * cannot be closed stays open, and its Accept still confirms nothing.
    */
   private async withdrawGone(

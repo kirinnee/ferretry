@@ -21,7 +21,7 @@ import { memoryStatePort } from '../../support/state.ts';
 /**
  * The reference menus through Gate's admission and its governance (the stand-in, given the governance a
  * `consultsGrants` route is handed; the real `GateAdmission` is asked about this route in Gate's own suite): a device the operator
- * has not granted filesystem, terminal, browser or fleet (cards) use is refused the lists those facts' own routes refuse it.
+ * has not granted filesystem, terminal, browser or fleet (tasks) use is refused the lists those facts' own routes refuse it.
  * `%terminal`, `%browser`, `&` and `/` are fakes that declare the demands the real ones will; `:` and `@` are Conversation's OWN
  * providers over a Ferrets fake (the first taker of a key serves it, so a fixture cannot stand in for them).
  */
@@ -340,7 +340,7 @@ describe('GET /v1/ferrets/:ferretId/references keeps the grants of the facts it 
     const s = await setup({ provide: { '&': many(500) }, files: folder });
     const files = await ask(s, '@', 'owner');
     expect(files.json<{ entries: unknown[] }>().entries).toHaveLength(2_000);
-    const cards = await ask(s, '&', 'owner');
-    expect(cards.json<{ entries: unknown[] }>().entries).toHaveLength(200);
+    const tasks = await ask(s, '&', 'owner');
+    expect(tasks.json<{ entries: unknown[] }>().entries).toHaveLength(200);
   });
 });

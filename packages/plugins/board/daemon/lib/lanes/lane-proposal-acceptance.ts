@@ -6,7 +6,7 @@
  * Total, as every answer observer is: a store that fails leaves the ask answered and the set a proposal, and the
  * owner can confirm it again from the Board.
  */
-import { acceptedProposal, type LaneProposalAnswer } from './lane-proposal-card.ts';
+import { acceptedProposal, type LaneProposalAnswer } from './lane-proposal-task.ts';
 import type { LaneSetService } from './lane-set-service.ts';
 
 export class LaneProposalAcceptance {

@@ -21,9 +21,9 @@ import {
   BoardConfigSchema,
   BoardFileSchema,
   BoardPort,
-  CARD_ACTED_AUDIT,
-  CARD_CREATED_AUDIT,
-  CARD_STARTED_AUDIT,
+  TASK_ACTED_AUDIT,
+  TASK_CREATED_AUDIT,
+  TASK_STARTED_AUDIT,
   CardAskRefSchema,
   CardProgressToolInputSchema,
   TaskProgressToolInputSchema,
@@ -39,8 +39,8 @@ import {
   SweepFileSchema,
 } from './contract/index.ts';
 
-// state/board/ (§9.2). A card is one file; a collection path holds one `*`.
-const CARDS = defineState({ name: 'cards', path: 'cards/*.json', store: 'json', format: 1, schema: CardSchema });
+// state/board/ (§9.2). A task is one file; a collection path holds one `*`.
+const TASKS = defineState({ name: 'cards', path: 'cards/*.json', store: 'json', format: 1, schema: CardSchema });
 const COUNTERS = defineState({
   name: 'counters',
   path: 'counters.json',
@@ -57,7 +57,7 @@ const BOARDS = defineState({
   schema: BoardFileSchema,
 });
 const SWEEP = defineState({ name: 'sweep', path: 'sweep.json', store: 'json', format: 1, schema: SweepFileSchema });
-/** Which card each ferret works on, its delegation anchor and its standing skip (Ferrets keeps none of it). */
+/** Which task each ferret works on, its delegation anchor and its standing skip (Ferrets keeps none of it). */
 const FOCUS = defineState({ name: 'focus', path: 'focus.json', store: 'json', format: 1, schema: FocusFileSchema });
 const GITHUB = defineState({ name: 'github', path: 'github.json', store: 'json', format: 1, schema: GithubFileSchema });
 
@@ -75,13 +75,13 @@ const taskRoute = <const Key extends string>(key: Key, descriptor: Parameters<ty
 const fleetUse = cap('fleet', 'use');
 const fleetConfigure = cap('fleet', 'configure');
 const read = { skip: 'a read of tasks and lanes' } as const;
-const cardText = { none: 'tasks are authored text; no pane, page or vault text' } as const;
+const taskText = { none: 'tasks are authored text; no pane, page or vault text' } as const;
 
 /**
- * Board (§2.3): cards and lanes for the work you ask for, with each card's progress and its PRs.
+ * Board (§2.3): tasks and lanes for the work you ask for, with each task's progress and its PRs.
  *
- * #1552 (docs/rebuild/inflight.md §2): a card is READ-ONLY STATUS. It never asks and has no answer route, verb or
- * button. Its asks are `card` obligations the Agenda shows (one answer row); answering one moves its cards.
+ * #1552 (docs/rebuild/inflight.md §2): a task is READ-ONLY STATUS. It never asks and has no answer route, verb or
+ * button. Its asks are `task` obligations the Agenda shows (one answer row); answering one moves its tasks.
  *
  * Ownership calls (skeletons-work):
  *  - Board owns the lane-set and switch routes of today's `board-projects` mount (`/v1/board/projects/…`): they live in
@@ -89,7 +89,7 @@ const cardText = { none: 'tasks are authored text; no pane, page or vault text' 
  *  - Task plans (`card_plan`, the owner's approval routes) are Accounts' (DECISIONS-1 #16: `/v1/accounts/plans`), not Board's.
  *  - Deleted as compatibility: `/v1/tasks`, `/v1/sessions/:id/tasks` (legacy-tasks), `POST /v1/board/import`, `fy board import`.
  *  - There is no GitHub route today: the watch is a job over `state/board/github.json` and `gh`.
- *  - The `/v1/sessions/:id/…` paths are `/v1/ferrets/:ferretId/…`; `tasks` are `cards`;
+ *  - The `/v1/sessions/:id/…` paths are `/v1/ferrets/:ferretId/…`; `tasks` are `tasks`;
  */
 export default definePlugin({
   id: 'board',
@@ -122,7 +122,7 @@ export default definePlugin({
         noStore: true,
         compress: true,
         audit: read,
-        guard: cardText,
+        guard: taskText,
       }),
       route('GET /v1/board/ids', {
         minimum: 'operator',
@@ -131,7 +131,7 @@ export default definePlugin({
         noStore: true,
         compress: true,
         audit: read,
-        guard: cardText,
+        guard: taskText,
       }),
       route('GET /v1/board/merge-gate', {
         minimum: 'operator',
@@ -139,7 +139,7 @@ export default definePlugin({
         capability: fleetUse,
         noStore: true,
         audit: read,
-        guard: cardText,
+        guard: taskText,
       }),
       ...taskRoute('GET /v1/board/tasks', {
         minimum: 'operator',
@@ -147,15 +147,15 @@ export default definePlugin({
         capability: fleetUse,
         noStore: true,
         audit: read,
-        guard: cardText,
+        guard: taskText,
       }),
       ...taskRoute('POST /v1/board/tasks', {
         minimum: 'operator',
         caller: 'any',
         capability: fleetUse,
         noStore: true,
-        audit: { record: CARD_CREATED_AUDIT },
-        guard: cardText,
+        audit: { record: TASK_CREATED_AUDIT },
+        guard: taskText,
       }),
       ...taskRoute('GET /v1/board/tasks/:taskId', {
         minimum: 'operator',
@@ -163,24 +163,24 @@ export default definePlugin({
         capability: fleetUse,
         noStore: true,
         audit: read,
-        guard: cardText,
+        guard: taskText,
       }),
       ...taskRoute('POST /v1/board/tasks/:taskId', {
         minimum: 'operator',
         caller: 'any',
         capability: fleetUse,
         noStore: true,
-        audit: { record: CARD_ACTED_AUDIT },
-        guard: cardText,
+        audit: { record: TASK_ACTED_AUDIT },
+        guard: taskText,
       }),
       ...taskRoute('POST /v1/board/tasks/:taskId/start', {
         minimum: 'operator',
         caller: 'person',
-        // c58-sec3 r1: starting a card starts a ferret (the card text is its prompt), so it asks what `POST /v1/ferrets` asks.
+        // c58-sec3 r1: starting a task starts a ferret (the task text is its prompt), so it asks what `POST /v1/ferrets` asks.
         capability: fleetConfigure,
         noStore: true,
-        audit: { record: CARD_STARTED_AUDIT },
-        guard: cardText,
+        audit: { record: TASK_STARTED_AUDIT },
+        guard: taskText,
       }),
       route('POST /v1/board/skip', {
         minimum: 'operator',
@@ -188,7 +188,7 @@ export default definePlugin({
         capability: fleetUse,
         noStore: true,
         audit: { record: BOARD_SKIPPED_AUDIT },
-        guard: cardText,
+        guard: taskText,
       }),
 
       route('GET /v1/board/projects', {
@@ -235,8 +235,8 @@ export default definePlugin({
         minimum: 'authenticated',
         caller: 'any',
         capability: fleetUse,
-        audit: { record: CARD_ACTED_AUDIT },
-        guard: cardText,
+        audit: { record: TASK_ACTED_AUDIT },
+        guard: taskText,
         summary: 'Rewrite one task’s progress (now, doneSoFar, next).',
         input: TaskProgressToolInputSchema,
       }),
@@ -245,8 +245,8 @@ export default definePlugin({
         minimum: 'authenticated',
         caller: 'any',
         capability: fleetUse,
-        audit: { record: CARD_ACTED_AUDIT },
-        guard: cardText,
+        audit: { record: TASK_ACTED_AUDIT },
+        guard: taskText,
         summary: 'old name of task_progress',
         input: CardProgressToolInputSchema,
       }),
@@ -756,13 +756,13 @@ export default definePlugin({
     renderers: [
       renderer('ask', { source: 'card' }),
       renderer('reference', { prefix: '&' }),
-      // A `card` or `board` block in chat (Conversation's fence): the mini board and its lanes, from this board.
+      // A `task` or `board` block in chat (Conversation's fence): the mini board and its lanes, from this board.
       renderer('reference', { prefix: '&board' }),
     ],
   },
 
   data: {
-    state: [CARDS, COUNTERS, BOARDS, SWEEP, FOCUS, GITHUB],
+    state: [TASKS, COUNTERS, BOARDS, SWEEP, FOCUS, GITHUB],
     config: [BOARD_CONFIG],
     readModels: ['cards', 'progress', 'lanes'],
     publishes: [CardMoved, BoardChanged],
@@ -771,20 +771,20 @@ export default definePlugin({
 
   hooks: {
     takes: [
-      // The `card` ask source: a card's gate entry is an obligation `{ source: 'card', ref, entry }` Asks holds.
+      // The `task` ask source: a task's gate entry is an obligation `{ source: 'card', ref, entry }` Asks holds.
       { hook: AskSources, key: 'card', schema: CardAskRefSchema },
       { hook: StartDecide, priority: 60 },
       { hook: SitrepLines, priority: 50 },
-      // The turn-end checks (D2 #12) and a started ferret's card (Ferrets' additive `ferret.started`).
+      // The turn-end checks (D2 #12) and a started ferret's task (Ferrets' additive `ferret.started`).
       { hook: TurnEnded },
       { hook: FerretStarted },
-      // Board's cards are work Conversation's search finds (`search.sources`).
+      // Board's tasks are work Conversation's search finds (`search.sources`).
       { hook: SearchSources },
-      // The `&` menu of a ferret's composer: its cards (reference.catalog, lead ruling 2026-11-07). Asked only when Conversation is on.
+      // The `&` menu of a ferret's composer: its tasks (reference.catalog, lead ruling 2026-11-07). Asked only when Conversation is on.
       { hook: ReferenceCatalog, key: '&' },
-      // The session archive's keep rule (Ferrets' `session.archive-keeps`): every card, so a ferret on one in flight stays live.
+      // The session archive's keep rule (Ferrets' `session.archive-keeps`): every task, so a ferret on one in flight stays live.
       { hook: ArchiveKeeps },
-      // Asks' agenda reads a ferret's focus card, the to-test lane and a card's gate ask from here (`agenda.context`).
+      // Asks' agenda reads a ferret's focus task, the to-test lane and a task's gate ask from here (`agenda.context`).
       { hook: AgendaContext, key: 'board' },
     ],
     offers: [{ hook: CardMoving, timeoutMs: 200 }],

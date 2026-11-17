@@ -1,9 +1,9 @@
 // VENDORED from v4.291.5 (64fd8cbcc811e2341f1ab18be170d76106a44852) packages/protocol/src/lib/board-refs.ts, verbatim.
 // The converter's own frozen v4 reader: never imported by the product. Do not edit; re-vendor instead.
 /**
- * HOW A CARD IS NAMED: the board's task id, the reference to one, and the result type its helpers return.
+ * HOW A TASK IS NAMED: the board's task id, the reference to one, and the result type its helpers return.
  *
- * A LEAF ON PURPOSE. `attention.ts` links an agenda item to the card it belongs to, and `session.ts`
+ * A LEAF ON PURPOSE. `attention.ts` links an agenda item to the task it belongs to, and `session.ts`
  * imports `attention.ts` while `tasks.ts` imports `session.ts`. So anything the agenda imports must
  * import neither, or the modules load in a cycle and a schema is read before it exists. This file
  * depends on zod alone.
@@ -31,7 +31,7 @@ export const BoardTaskIdSchema = z.string().regex(BOARD_TASK_ID_PATTERN);
 export type BoardTaskId = z.infer<typeof BoardTaskIdSchema>;
 
 export const MAX_MACHINE_ID_LENGTH = 128;
-/** The daemon a card lives on. Opaque to the board; the app's merged view keys on it. */
+/** The daemon a task lives on. Opaque to the board; the app's merged view keys on it. */
 export const MachineIdSchema = z.string().trim().min(1).max(MAX_MACHINE_ID_LENGTH);
 
 /**
@@ -43,7 +43,7 @@ export const UNFILED_PROJECT_ID = 'unfiled';
 export const BoardProjectIdSchema = z.union([z.uuid(), z.literal(UNFILED_PROJECT_ID)]);
 export type BoardProjectId = z.infer<typeof BoardProjectIdSchema>;
 
-/** A card, named. Without `machineId` it means "on this machine". */
+/** A task, named. Without `machineId` it means "on this machine". */
 export const TaskRefSchema = z.strictObject({
   machineId: MachineIdSchema.optional(),
   id: BoardTaskIdSchema,
@@ -55,13 +55,13 @@ export const TASK_REF_SIGIL = '&';
 /** The retired sigil: still accepted as input for one release, never printed. */
 export const LEGACY_TASK_REF_SIGIL = '#';
 
-/** How a card is written everywhere: `&F412`. The machine is not part of it (see the file header). */
+/** How a task is written everywhere: `&F412`. The machine is not part of it (see the file header). */
 export const formatTaskRef = (ref: TaskRef): string => `${TASK_REF_SIGIL}${ref.id}`;
 
 export type TaskRefParseError = { readonly code: 'empty' } | { readonly code: 'malformed'; readonly input: string };
 
 /**
- * Reads a card reference a person or ferret typed: `&F412`, the retired `#F412`, or a bare `F412`, in
+ * Reads a task reference a person or ferret typed: `&F412`, the retired `#F412`, or a bare `F412`, in
  * any case. Surrounding space is ignored; anything else that is not exactly one id is `malformed`.
  */
 export const parseTaskRef = (input: string): BoardResult<TaskRef, TaskRefParseError> => {
@@ -73,21 +73,21 @@ export const parseTaskRef = (input: string): BoardResult<TaskRef, TaskRefParseEr
   return BOARD_TASK_ID_PATTERN.test(id) ? boardOk({ id }) : boardErr({ code: 'malformed', input });
 };
 
-const CARD_REF_IN_TEXT = /(?<![\w&])&([BFIC][1-9][0-9]{0,8})(?!\w)/u;
+const TASK_REF_IN_TEXT = /(?<![\w&])&([BFIC][1-9][0-9]{0,8})(?!\w)/u;
 
-/** The first `&F412`-style card reference in free text (a brief), or `undefined` when it names none. */
+/** The first `&F412`-style task reference in free text (a brief), or `undefined` when it names none. */
 export const firstTaskRefIn = (text: string): TaskRef | undefined => {
-  const found = CARD_REF_IN_TEXT.exec(text)?.[1];
+  const found = TASK_REF_IN_TEXT.exec(text)?.[1];
   return found === undefined ? undefined : { id: found };
 };
 
-/** The longest reason a card-less turn is recorded with: the same bound as a card's own reasons. */
+/** The longest reason a card-less turn is recorded with: the same bound as a task's own reasons. */
 export const MAX_BOARD_SKIP_REASON_LENGTH = 2 * 1024;
 
 /**
- * A session's decision that its work needs no card (`fy task skip "<why>"`, `board-design.md` §3.4): chit-chat,
+ * A session's decision that its work needs no task (`fy task skip "<why>"`, `board-design.md` §3.4): chit-chat,
  * or the owner said not to track it. Kept as `config.boardSkip`, because the session owns the decision. While
- * it stands the turn-end check stays quiet; taking a card (a new `config.focusTask`) clears it, so a later ask
+ * it stands the turn-end check stays quiet; taking a task (a new `config.focusTask`) clears it, so a later ask
  * is checked afresh. Here rather than in `board.ts` because `session.ts` reads it (see the file header).
  */
 export const BoardSkipSchema = z.strictObject({
@@ -102,7 +102,7 @@ export type BoardSkip = z.infer<typeof BoardSkipSchema>;
  * `fy` without its session, so it says which one it KNOWS — the token ({@link ADMIN_TOKEN_ACTOR_WORDS}) — and a
  * surface never shows it as the owner. Only a paired device's act is plainly `owner`.
  *
- * IT IS A SIBLING FIELD ON PURPOSE — `actorVia` on an event, `createdByVia` on a card, `byVia` on a clarification,
+ * IT IS A SIBLING FIELD ON PURPOSE — `actorVia` on an event, `createdByVia` on a task, `byVia` on a clarification,
  * `confirmedVia` on a lane set — never a member of the board actor union: those parents are plain objects, so an older app, CLI or a downgraded
  * daemon drops the field it does not know and reads the act as the owner's, as it always did, instead of
  * refusing the board.
@@ -116,16 +116,16 @@ export const ADMIN_TOKEN_ACTOR_NOTE = 'the owner at this machine, or a ferret wi
 /** What every surface says for an `admin-token` board actor in a sentence: the token, and what it may be. */
 export const ADMIN_TOKEN_ACTOR_WORDS = `the admin token (${ADMIN_TOKEN_ACTOR_NOTE})`;
 
-/** Files one move back, or one answer to a card's gate, may carry to the card's ferret (the owner's "Not good" composer). */
+/** Files one move back, or one answer to a task's gate, may carry to the task's ferret (the owner's "Not good" composer). */
 export const MAX_BOARD_REOPEN_ATTACHMENTS = 10;
 
 /** A stored attachment's id: the content address the attachment store gives every file it keeps. */
 export const BoardAttachmentIdSchema = z.string().regex(/^att_[0-9a-f]{64}$/u);
 
 /**
- * The files the "Not good" composer carries to the card's ferret, in a board move back (`move`, `reopen`) and in an
- * answer to a card's gate. They are uploaded first, through the ordinary attachment route, to `from`; the daemon
- * carries them on to the ferret that is told. A board move back takes them only from the card's assignee or owner
+ * The files the "Not good" composer carries to the task's ferret, in a board move back (`move`, `reopen`) and in an
+ * answer to a task's gate. They are uploaded first, through the ordinary attachment route, to `from`; the daemon
+ * carries them on to the ferret that is told. A board move back takes them only from the task's assignee or owner
  * ferret; a gate answer, only from the agenda's own session. Sent only to a daemon that reports
  * `board.reopen.attachments.1` (the move back) or `agenda.gate.attachments.1` (the gate answer); an older one
  * refuses the field.

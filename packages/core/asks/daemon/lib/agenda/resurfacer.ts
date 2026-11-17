@@ -1,4 +1,4 @@
-import { agendaInDiscussion } from '../protocol/agenda-card.ts';
+import { agendaInDiscussion } from '../protocol/agenda-task.ts';
 import type { AgendaLedgerRepository, AgendaService } from './service.ts';
 import { agendaSnapshot } from './state-machine.ts';
 

@@ -1,24 +1,24 @@
 /**
- * TIDY — the one decision behind `fy tidy`: which of a ferret's own cards to drop, which of its own asks to close, and
+ * TIDY — the one decision behind `fy tidy`: which of a ferret's own tasks to drop, which of its own asks to close, and
  * what to keep and why. Copied from today's `lib/tidy/plan.ts`.
  *
  * Pure. The service gathers the facts; this decides, so a dry run, the real run and the tests share one rule and
  * nothing here can write.
  *
- * A card is dropped only when it is the ferret's own errand on a board nobody switched on: the card is the ferret's
+ * A task is dropped only when it is the ferret's own errand on a board nobody switched on: the task is the ferret's
  * (owner or assignee), still open, asked by an agent, on a board that is off, assigned to no other live ferret and not
  * waiting at a gate on the owner. An ask is closed only when it is the ferret's own, raised by it, and only tracks
  * work; anything that asks the owner something is listed and left.
  *
- * What 5.0 changed: a card never asks (#1552), so an ask no longer carries a card link; `card-dropped` is therefore
+ * What 5.0 changed: a task never asks (#1552), so an ask no longer carries a task link; `card-dropped` is therefore
  * never produced here, though the code stays in the wire. An ask is "being answered" once it is `answered` and not yet
  * closed, which is where today's pending-reply and undelivered flags ended up.
  */
 import type { AskKind, AskRaiser } from '@ferretry/core-asks/contract';
 import type { TidyClose, TidyDrop, TidyKeep, TidyPlan } from '../../contract/index.ts';
 
-/** What the decision needs to know about one card. */
-export interface TidyCardFact {
+/** What the decision needs to know about one task. */
+export interface TidyTaskFact {
   readonly id: string;
   readonly title: string;
   readonly project: string;
@@ -42,37 +42,37 @@ export interface TidyAskFact {
 export interface TidyFacts {
   readonly ferret: string;
   readonly helper: boolean;
-  readonly cards: readonly TidyCardFact[];
+  readonly cards: readonly TidyTaskFact[];
   /** The projects whose board switch is on. An unreadable switch is off, so it is not in this set. */
   readonly boardsOn: ReadonlySet<string>;
   /** Ferrets still running, waiting or starting, not stopped. */
   readonly liveFerrets: ReadonlySet<string>;
-  /** Cards an open gate ask waits on the owner for. */
+  /** Tasks an open gate ask waits on the owner for. */
   readonly gateCards: ReadonlySet<string>;
   /** The caller's own asks, open or answered. */
   readonly asks: readonly TidyAskFact[];
 }
 
-type CardKeep = Extract<TidyKeep, { kind: 'card' }>;
+type TaskKeep = Extract<TidyKeep, { kind: 'card' }>;
 type AskKeep = Extract<TidyKeep, { kind: 'ask' }>;
 
-const effectiveAssignee = (card: TidyCardFact): string => card.assignee ?? card.owner;
+const effectiveAssignee = (task: TidyTaskFact): string => task.assignee ?? task.owner;
 
-/** The first reason a card must stay, or `undefined` when it is the ferret's own unwanted card. */
-const cardKeep = (card: TidyCardFact, facts: TidyFacts): CardKeep | undefined => {
-  const keep = (code: CardKeep['code'], why: string): CardKeep => ({
+/** The first reason a task must stay, or `undefined` when it is the ferret's own unwanted task. */
+const taskKeep = (task: TidyTaskFact, facts: TidyFacts): TaskKeep | undefined => {
+  const keep = (code: TaskKeep['code'], why: string): TaskKeep => ({
     kind: 'card',
-    id: card.id,
-    title: card.title,
+    id: task.id,
+    title: task.title,
     code,
     why,
   });
-  if (card.askedBy === 'person') return keep('owner-asked', 'the owner asked for it');
-  if (facts.boardsOn.has(card.project)) return keep('board-on', 'the board is on, so the task is wanted');
-  const doing = effectiveAssignee(card);
+  if (task.askedBy === 'person') return keep('owner-asked', 'the owner asked for it');
+  if (facts.boardsOn.has(task.project)) return keep('board-on', 'the board is on, so the task is wanted');
+  const doing = effectiveAssignee(task);
   if (doing !== facts.ferret && facts.liveFerrets.has(doing))
     return keep('assigned-to-live-ferret', `${doing} is still working it`);
-  if (facts.gateCards.has(card.id)) return keep('waiting-at-gate', 'it waits at a gate on the owner');
+  if (facts.gateCards.has(task.id)) return keep('waiting-at-gate', 'it waits at a gate on the owner');
   return undefined;
 };
 
@@ -110,19 +110,19 @@ const judgeAsk = (ask: TidyAskFact, facts: TidyFacts): AskVerdict => {
   return { close: closes(ask, 'status-only', 'it asks no question and offers no choice; it only tracks work') };
 };
 
-/** Decide a ferret's tidy. Cards and asks are independent lists; a helper's plan has no cards. */
+/** Decide a ferret's tidy. Tasks and asks are independent lists; a helper's plan has no tasks. */
 export const planTidy = (facts: TidyFacts): TidyPlan => {
   const keep: TidyKeep[] = [];
   const drop: TidyDrop[] = [];
   const candidates = facts.helper
     ? []
-    : facts.cards.filter(card => card.owner === facts.ferret || card.assignee === facts.ferret);
-  for (const card of candidates) {
-    const reason = cardKeep(card, facts);
+    : facts.cards.filter(task => task.owner === facts.ferret || task.assignee === facts.ferret);
+  for (const task of candidates) {
+    const reason = taskKeep(task, facts);
     if (reason === undefined)
       drop.push({
-        id: card.id,
-        title: card.title,
+        id: task.id,
+        title: task.title,
         why: 'the board is off and nobody but you asked for it',
       });
     else keep.push(reason);

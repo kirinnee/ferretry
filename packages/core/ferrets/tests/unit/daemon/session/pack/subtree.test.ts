@@ -205,22 +205,22 @@ describe('the subtree table', () => {
       draft: false,
       checks: 'passing',
     } as const;
-    const card = (id: string): SitrepLine => ({ kind: 'card', text: id, ref: `&F${id.length}`, lane: 'Review', pr });
+    const task = (id: string): SitrepLine => ({ kind: 'card', text: id, ref: `&F${id.length}`, lane: 'Review', pr });
     const view = await new SubtreeService(
       registry,
       ports({
-        h0: [card('h0'), line('hi', 1)],
-        h1: [card('h1'), line('hi', 1)],
-        h2: [card('h2'), line('hi', 1)],
-        h3: [card('h3'), line('hi', 1)],
-        done: [card('done'), line('bye', 4)],
+        h0: [task('h0'), line('hi', 1)],
+        h1: [task('h1'), line('hi', 1)],
+        h2: [task('h2'), line('hi', 1)],
+        h3: [task('h3'), line('hi', 1)],
+        done: [task('done'), line('bye', 4)],
       }),
       { concurrency: 2, excerptRows: 2, endedRows: 0 },
     ).view('root' as FerretId);
     const rows = view?.rows ?? [];
     // Only two rows have a last line (the budget) ...
     expect(rows.filter(row => row.last !== undefined)).toHaveLength(2);
-    // ... yet EVERY row keeps its card, its lane and its PR, the ended one and the live ones past the budget included.
+    // ... yet EVERY row keeps its task, its lane and its PR, the ended one and the live ones past the budget included.
     expect(rows).toHaveLength(5);
     for (const row of rows) {
       expect(row.task).toMatchObject({ lane: 'Review' });

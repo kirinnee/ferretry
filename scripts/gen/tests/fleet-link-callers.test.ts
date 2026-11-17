@@ -55,7 +55,7 @@ import { UNRESOLVED_OPERATION, reachesIn } from '../lib/fleet-link-scan.ts';
 import { loadManifests, loadWorkspace } from '../lib/workspace.ts';
 
 const ROOT = join(import.meta.dir, '..', '..', '..');
-const AFTER_MERGE_CARD = '&F3537';
+const AFTER_MERGE_TASK = '&F3537';
 const FLEET_ROOTS = ['fleet', 'harness-home'] as const;
 const SNAPSHOT = join(import.meta.dir, 'fleet-link-callers.snapshot.json');
 
@@ -108,7 +108,7 @@ describe('the fleet and harness-home link exception (declared; to be removed at 
       found,
       `${found.join('; ')} reach a generic link operation. Generic links from/into the fleet credential store and the ` +
         `host harness homes are a declared exception for Runtimes' provisioning only (docs/secrets.md); a new caller must ` +
-        `not appear before the after-merge move (${AFTER_MERGE_CARD}, dedicated credential link operation).`,
+        `not appear before the after-merge move (${AFTER_MERGE_TASK}, dedicated credential link operation).`,
     ).toEqual([]);
   });
 
@@ -116,12 +116,12 @@ describe('the fleet and harness-home link exception (declared; to be removed at 
     for (const allowed of RUNTIMES_PROVISIONING)
       expect(
         real.reaches.has(allowed),
-        `${allowed} no longer reads linkTo or copyTree: delete it from RUNTIMES_PROVISIONING (${AFTER_MERGE_CARD})`,
+        `${allowed} no longer reads linkTo or copyTree: delete it from RUNTIMES_PROVISIONING (${AFTER_MERGE_TASK})`,
       ).toBe(true);
     const disk = (real.reaches.get(FILE_PROVISIONER) ?? []).map(place => place.split(' ').at(-1));
     expect(
       disk,
-      `${FILE_PROVISIONER} no longer reads a link-capable FleetDisk member: delete it from DISK_CALLERS (${AFTER_MERGE_CARD})`,
+      `${FILE_PROVISIONER} no longer reads a link-capable FleetDisk member: delete it from DISK_CALLERS (${AFTER_MERGE_TASK})`,
     ).toEqual(expect.arrayContaining(['FleetDisk.linkTo', 'FleetDisk.copyInto']));
   });
 
@@ -132,10 +132,10 @@ describe('the fleet and harness-home link exception (declared; to be removed at 
     }
     expect(
       existsSync(SNAPSHOT),
-      `${SNAPSHOT} is missing: a reviewer must approve the first snapshot (${AFTER_MERGE_CARD})`,
+      `${SNAPSHOT} is missing: a reviewer must approve the first snapshot (${AFTER_MERGE_TASK})`,
     ).toBe(true);
     const approved = JSON.parse(await readFile(SNAPSHOT, 'utf8')) as AuthoritySurface;
-    expect(describeSurfaceChange(approved, real.surface, AFTER_MERGE_CARD)).toEqual([]);
+    expect(describeSurfaceChange(approved, real.surface, AFTER_MERGE_TASK)).toEqual([]);
     expect(real.surface).toEqual(approved);
   });
 
@@ -152,7 +152,7 @@ describe('the fleet and harness-home link exception (declared; to be removed at 
       .map(({ id }) => id);
     expect(
       holders,
-      `a plugin other than runtimes declares fleet or harness-home: the declared link exception covers Runtimes only (${AFTER_MERGE_CARD})`,
+      `a plugin other than runtimes declares fleet or harness-home: the declared link exception covers Runtimes only (${AFTER_MERGE_TASK})`,
     ).toEqual(['runtimes']);
   });
 });
@@ -544,7 +544,7 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
         'packages/plugins/runtimes/daemon/adopt.ts',
         'packages/plugins/runtimes/daemon/start.ts',
       ]);
-      expect(describeSurfaceChange(baseline, baseline, AFTER_MERGE_CARD)).toEqual([]);
+      expect(describeSurfaceChange(baseline, baseline, AFTER_MERGE_TASK)).toEqual([]);
     });
 
     test('an exported helper in an allowed module, re-exported and called by a worker, fails the pin (cc6 F3)', async () => {
@@ -560,7 +560,7 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
             `export function restoreFleetAlias(fleet: RootHandle, ${CALL}) {\n  return fleet.linkTo(at, target);\n}\n`,
         },
       );
-      const changes = describeSurfaceChange(baseline, surface, AFTER_MERGE_CARD);
+      const changes = describeSurfaceChange(baseline, surface, AFTER_MERGE_TASK);
       expect(changes.some(change => change.includes('gained the export restoreFleetAlias: function'))).toBe(true);
       expect(
         changes.some(change => change.includes('repair-api.ts is a new module that imports an allowed module')),
@@ -569,7 +569,7 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
         changes.some(change => change.includes('repair-worker.ts is a new module that imports an allowed module')),
       ).toBe(true);
       for (const change of changes) {
-        expect(change).toContain(AFTER_MERGE_CARD);
+        expect(change).toContain(AFTER_MERGE_TASK);
         expect(change).toContain('reviewer must approve');
       }
     });
@@ -584,7 +584,7 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
             `  relink(${CALL}) {\n    return this.fleet.linkTo(at, target);\n  }\n  private hidden() {}\n}\n`,
         },
       );
-      const changes = describeSurfaceChange(baseline, surface, AFTER_MERGE_CARD);
+      const changes = describeSurfaceChange(baseline, surface, AFTER_MERGE_TASK);
       // The new method is a new export AND a new link-capable member of the disk (it reaches the handle's linkTo).
       expect(changes).toHaveLength(2);
       expect(changes.some(change => change.includes('gained the export FleetDisk.relink'))).toBe(true);
@@ -595,7 +595,7 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
       const surface = await surfaceOf({
         'packages/plugins/other/daemon/sneaky.ts': `import type { FleetDisk } from '../../runtimes/daemon/adapters/fleet-disk.ts';\nexport const use = (disk: FleetDisk) => disk.link;\n`,
       });
-      expect(describeSurfaceChange(baseline, surface, AFTER_MERGE_CARD).join('\n')).toContain(
+      expect(describeSurfaceChange(baseline, surface, AFTER_MERGE_TASK).join('\n')).toContain(
         'packages/plugins/other/daemon/sneaky.ts is a new module that imports an allowed module',
       );
     });
@@ -606,7 +606,7 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
         'packages/plugins/other/daemon/holder.ts': `import type { RootHandle } from '@ferretry/kernel/contract';\nexport class Holder {\n  constructor(readonly root: RootHandle) {}\n}\nexport const hold = (root: RootHandle) => new Holder(root);\n`,
         'packages/plugins/other/daemon/dynamic-origin.ts': `${TYPES}export const open = (roots: RootsPort, name: import('@ferretry/kernel/contract').RootName) => roots.root(name);\n`,
       });
-      const text = describeSurfaceChange(baseline, surface, AFTER_MERGE_CARD).join('\n');
+      const text = describeSurfaceChange(baseline, surface, AFTER_MERGE_TASK).join('\n');
       expect(text).toContain(
         'second-origin.ts is a new module that asks the kernel for a fleet or harness-home handle',
       );
@@ -623,7 +623,7 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
       replace: Record<string, string> = {},
       ownContract: Record<string, string> | undefined = undefined,
     ): Promise<string[]> =>
-      describeSurfaceChange(baseline, await surfaceOf(extra, replace, ownContract), AFTER_MERGE_CARD);
+      describeSurfaceChange(baseline, await surfaceOf(extra, replace, ownContract), AFTER_MERGE_TASK);
 
     test('the baseline holds the disk where the fixture holds it', () => {
       expect(baseline.diskHolders).toEqual([
@@ -643,7 +643,7 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
         })
       ).join('\n');
       expect(text).toContain('repair-worker.ts is a new module that holds a FleetDisk');
-      expect(text).toContain(AFTER_MERGE_CARD);
+      expect(text).toContain(AFTER_MERGE_TASK);
     });
 
     test('a module holding the disk only through an interface property, a return or a parameter is pinned', async () => {
@@ -706,7 +706,7 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
       expect(api.length).toBeGreaterThan(0);
       for (const change of api) {
         expect(change).toContain('RootHandle');
-        expect(change).toContain(AFTER_MERGE_CARD);
+        expect(change).toContain(AFTER_MERGE_TASK);
         expect(change).toContain('reviewer must approve');
         expect(change).toContain('decide its guard');
       }
@@ -759,7 +759,7 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
         ).join('\n');
         expect(text).toContain(`${file} is a new module that imports an allowed module`);
         expect(text).toContain(`${file} is a new module that holds a FleetDisk`);
-        expect(text).toContain(AFTER_MERGE_CARD);
+        expect(text).toContain(AFTER_MERGE_TASK);
       });
 
       test('a migration module asking roots.root("fleet") is an origin', async () => {

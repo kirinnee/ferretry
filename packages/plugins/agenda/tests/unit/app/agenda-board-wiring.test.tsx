@@ -21,8 +21,8 @@ import { type ComponentType, Suspense } from 'react';
 import app from '../../../app/index.ts';
 import manifest from '../../../manifest.ts';
 import {
-  AGENDA_CARD_ANSWER_HOOK,
-  AGENDA_CARD_REFERENCE_HOOK,
+  AGENDA_TASK_ANSWER_HOOK,
+  AGENDA_TASK_REFERENCE_HOOK,
   AGENDA_ITEM_OPENED_HOOK,
   AGENDA_LANE_PROPOSAL_HOOK,
 } from '../../../contract/app-hooks.ts';
@@ -86,7 +86,7 @@ const drawn = async (
   provided: Provided,
   ready: (root: HTMLElement) => boolean,
 ): Promise<HTMLElement> => {
-  // A phone: the opened ask is the deck's card, with its answer row.
+  // A phone: the opened ask is the deck's task, with its answer row.
   window.innerWidth = 400;
   const half = app.build?.({ manifest, client: daemon(items) });
   const component =
@@ -145,7 +145,7 @@ for (const surface of ['screen', 'ask'] as const) {
 
     test('offers Done · closes through Board’s hook, and one tap sends one done', async () => {
       const { answer, calls } = fakeAnswer();
-      const root = await ask([closing], { [AGENDA_CARD_ANSWER_HOOK]: answer }, node => doneClose(node) !== null);
+      const root = await ask([closing], { [AGENDA_TASK_ANSWER_HOOK]: answer }, node => doneClose(node) !== null);
       await interact(() => doneClose(root)?.click());
       await interact(() => new Promise<void>(done => setTimeout(done, 0)));
       expect(doneCalls(calls)).toEqual(['done:F12']);
@@ -170,7 +170,7 @@ for (const surface of ['screen', 'ask'] as const) {
       const reference = fakeReference();
       const root = await ask(
         [closing],
-        { [AGENDA_CARD_REFERENCE_HOOK]: reference },
+        { [AGENDA_TASK_REFERENCE_HOOK]: reference },
         node => node.textContent?.includes('Try') === true,
       );
       expect(reference.watched).toEqual(['ids']);
@@ -207,7 +207,7 @@ describe('the ferret-agenda panel', () => {
     await drawn(
       'panel',
       [closing],
-      { [AGENDA_CARD_REFERENCE_HOOK]: reference },
+      { [AGENDA_TASK_REFERENCE_HOOK]: reference },
       node => node.querySelector('[data-agenda-tab-row]') !== null,
     );
     expect(reference.watched).toEqual(['ids']);

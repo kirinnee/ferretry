@@ -1,0 +1,67 @@
+/**
+ * THE FERRET'S TASKS: what one ferret's side panel reads.
+ *
+ * One read of the board (this machine, this ferret's project) through the store, so the chip, the panel and the
+ * drawer draw the same task and a change reaches them together.
+ */
+
+import { useMemo } from 'react';
+import { type BoardChat, chatTasks, chatChip, descendantSessionIds, type FerretLineage } from '../lib/board-chat.ts';
+import { NO_BOARD_FILTERS } from '../lib/board-model.ts';
+import type { DaemonBoardStore } from '../lib/board-store.ts';
+import type { DaemonConnection } from '../lib/machine.ts';
+import type { TaskRef } from '../../contract/index.ts';
+import { type BoardMachine, useBoard } from './use-board.ts';
+
+export interface UseChatCardInput {
+  readonly store: DaemonBoardStore;
+  readonly connection: DaemonConnection;
+  readonly machineName: string;
+  readonly ferret: string;
+  /** The ferret's focus task, when the host knows it. */
+  readonly focus: TaskRef | null;
+  /** The machine's ferrets, for the helpers' tasks. */
+  readonly ferrets: readonly FerretLineage[] | undefined;
+  /** "Internal": the panel draws the tasks ferrets made for other ferrets. */
+  readonly agents: boolean;
+}
+
+export const useChatTask = ({
+  store,
+  connection,
+  machineName,
+  ferret,
+  focus,
+  ferrets,
+  agents,
+}: UseChatCardInput): BoardChat => {
+  const machines = useMemo<readonly BoardMachine[]>(
+    () => [{ connection, name: machineName }],
+    [connection, machineName],
+  );
+  // Every task is read, agent tasks too: the header chip must find a helper's own focus task. What the panel
+  // draws is `chatTasks`' business.
+  const filters = useMemo(() => ({ ...NO_BOARD_FILTERS, project: null, agents: true }), []);
+  const board = useBoard(store, machines, filters);
+  const relatives = useMemo(() => descendantSessionIds(ferrets ?? [], ferret), [ferrets, ferret]);
+  const { model, status } = board;
+  const daemonId = connection.daemonId;
+  const tasks = useMemo(
+    () => chatTasks(model, { daemonId, sessionId: ferret, focus, relatives, agents }),
+    [model, daemonId, ferret, focus, relatives, agents],
+  );
+  const chip = useMemo(
+    () =>
+      chatChip(
+        focus ?? undefined,
+        tasks.focus,
+        tasks.focus === null ? undefined : tasks.places.get(tasks.focus.key),
+        status,
+      ),
+    [focus, tasks, status],
+  );
+  return useMemo(
+    () => ({ chip, cards: tasks, status, refresh: board.refresh, agents, splitsAgents: model.splitsAgents }),
+    [chip, tasks, status, board.refresh, agents, model.splitsAgents],
+  );
+};

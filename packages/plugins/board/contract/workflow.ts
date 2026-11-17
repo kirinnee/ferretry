@@ -1,24 +1,24 @@
-/** The small card vocabulary every board schema shares: a card's kind, title, workflow and the owner's words. */
+/** The small task vocabulary every board schema shares: a task's kind, title, workflow and the owner's words. */
 import { z } from 'zod';
 
-export const MAX_CARD_TITLE_LENGTH = 200;
-export const MAX_CARD_MESSAGE_LENGTH = 64 * 1024;
-export const MAX_CARD_SOURCE_LENGTH = 2 * 1024;
+export const MAX_TASK_TITLE_LENGTH = 200;
+export const MAX_TASK_MESSAGE_LENGTH = 64 * 1024;
+export const MAX_TASK_SOURCE_LENGTH = 2 * 1024;
 
 export const CardKindSchema = z.enum(['bug', 'feature', 'infra', 'chore']);
-export type CardKind = z.infer<typeof CardKindSchema>;
+export type TaskKind = z.infer<typeof CardKindSchema>;
 
-/** The id prefix a kind's cards carry: `F` for a feature. Kind is immutable because the prefix must match. */
-export const CARD_KIND_PREFIX: Readonly<Record<CardKind, string>> = { bug: 'B', feature: 'F', infra: 'I', chore: 'C' };
+/** The id prefix a kind's tasks carry: `F` for a feature. Kind is immutable because the prefix must match. */
+export const TASK_KIND_PREFIX: Readonly<Record<TaskKind, string>> = { bug: 'B', feature: 'F', infra: 'I', chore: 'C' };
 
-/** A card's title: at most five words, so reading it directly says what the work is doing. */
+/** A task's title: at most five words, so reading it directly says what the work is doing. */
 export const CardTitleSchema = z
   .string()
   .trim()
   .min(1)
-  .max(MAX_CARD_TITLE_LENGTH)
+  .max(MAX_TASK_TITLE_LENGTH)
   .refine(value => value.split(/\s+/u).length <= 5, 'title must contain at most five words');
-export type CardTitle = z.infer<typeof CardTitleSchema>;
+export type TaskTitle = z.infer<typeof CardTitleSchema>;
 
 /** Selects the lane variant. Immutable after create. */
 export const WorkflowSchema = z.enum(['quick', 'design-first', 'research-first', 'investigate']);
@@ -26,10 +26,10 @@ export type Workflow = z.infer<typeof WorkflowSchema>;
 
 /** The owner's words, verbatim, and where they were said. Never paraphrased. */
 export const CardMessageSchema = z.object({
-  text: z.string().min(1).max(MAX_CARD_MESSAGE_LENGTH),
-  source: z.string().min(1).max(MAX_CARD_SOURCE_LENGTH),
+  text: z.string().min(1).max(MAX_TASK_MESSAGE_LENGTH),
+  source: z.string().min(1).max(MAX_TASK_SOURCE_LENGTH),
 });
-export type CardMessage = z.infer<typeof CardMessageSchema>;
+export type TaskMessage = z.infer<typeof CardMessageSchema>;
 
 const LIST_MARKER = /^\s*(?:[-*•]|\d+[.)])\s+/u;
 const NESTED_MARKER = /^(\s*(?:[-*•]|\d+[.)])\s+)(?:(?:[-*•]|\d+[.)])\s+)+/u;

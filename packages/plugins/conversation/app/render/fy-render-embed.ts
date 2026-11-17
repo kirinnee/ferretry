@@ -7,9 +7,9 @@
  * no title, no lane and no status is authored here, so a block can never say something the board does
  * not. What it shows is read from the board when it is drawn (`fy-render-embed.tsx`).
  *
- *   task    exactly one `&F12` (an older message spells the type `card`; the header reader hands it here as `task`)
+ *   task    exactly one `&F12` (an older message spells the type `task`; the header reader hands it here as `task`)
  *   board   a list of `&F12` `&F13` … (spaces or lines, an optional leading `- `), or `parent: &F12`
- *           alone, which shows that card's children grouped by lane
+ *           alone, which shows that task's children grouped by lane
  */
 
 import { FY_RENDER_LIMITS, parseReferenceToken } from '@ferretry/app';
@@ -28,7 +28,7 @@ const LIST_MARK = /^-\s+/u;
 
 const refuse = (reason: string): FyRenderEmbedParse => ({ ok: false, reason });
 
-const cardId = (word: string): string | null => {
+const taskId = (word: string): string | null => {
   const reference = parseReferenceToken(word);
   return reference?.kind === 'task' ? reference.id : null;
 };
@@ -54,7 +54,7 @@ export function parseFyRenderEmbed(type: 'task' | 'board', payload: string): FyR
   if (parent !== null) {
     if (type !== 'board') return refuse('Only a board block may name a parent');
     if (lines.length > 1) return refuse('A board names a parent or lists tasks, never both');
-    const id = cardId(parent[1] ?? '');
+    const id = taskId(parent[1] ?? '');
     return id === null
       ? refuse(`"${parent[1]}" is not a task reference`)
       : { ok: true, spec: { kind: 'children', parent: id } };
@@ -62,7 +62,7 @@ export function parseFyRenderEmbed(type: 'task' | 'board', payload: string): FyR
 
   const ids: string[] = [];
   for (const word of words(payload)) {
-    const id = cardId(word);
+    const id = taskId(word);
     if (id === null) return refuse(`"${word}" is not a task reference`);
     if (ids.includes(id)) return refuse(`${id} is listed twice`);
     ids.push(id);

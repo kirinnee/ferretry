@@ -1,23 +1,23 @@
 /**
- * WHAT A BOARD CARD SAYS, AS PLAIN VALUES.
+ * WHAT A BOARD TASK SAYS, AS PLAIN VALUES.
  *
- * A card face is two lines (`board-design.md` §4.0): the title, and one meta line made of short
+ * A task face is two lines (`board-design.md` §4.0): the title, and one meta line made of short
  * SEGMENTS — `&F412 · owner→assignee · ● 4m · PR ✓ · ⛓ 2 · subs 2/3`. This file decides which segments
- * a card has and what each one says; the component only draws them. Nothing here reads the clock (the
- * caller passes `now`) or the network, so every state of a card can be driven with plain values.
+ * a task has and what each one says; the component only draws them. Nothing here reads the clock (the
+ * caller passes `now`) or the network, so every state of a task can be driven with plain values.
  *
- * LIVENESS IS THE DAEMON'S: `activity` arrives on the card and is only worded here. The one exception
- * the page honours is the To test lane — a card there waits for the OWNER, so it is never worded as
+ * LIVENESS IS THE DAEMON'S: `activity` arrives on the task and is only worded here. The one exception
+ * the page honours is the To test lane — a task there waits for the OWNER, so it is never worded as
  * stale or idle, whatever the daemon derived.
  */
 
-import { type CardView, formatCardRef, type LaneCategory, type PrLink } from '../../contract/index.ts';
+import { type TaskView, formatTaskRef, type LaneCategory, type PrLink } from '../../contract/index.ts';
 import { displayCallsign } from './callsign.ts';
 
 /** How a segment is coloured; `quiet` is the plain meta text. */
 type BoardTone = 'quiet' | 'ok' | 'warn' | 'err' | 'pend' | 'accent';
 
-/** The glyph a segment or count wears: the card draws it from the app's icon set, so no emoji font is needed. */
+/** The glyph a segment or count wears: the task draws it from the app's icon set, so no emoji font is needed. */
 export type BoardIconName =
   | 'active'
   | 'to-test'
@@ -78,12 +78,12 @@ export const ferretNamer =
     return callsign === '' ? fallbackFerretName(sessionId) : callsign;
   };
 
-export const peopleLabel = (task: Pick<CardView, 'owner' | 'assignee'>, names: FerretNames): string => {
+export const peopleLabel = (task: Pick<TaskView, 'owner' | 'assignee'>, names: FerretNames): string => {
   const owner = names(task.owner);
   return task.assignee === null || task.assignee === task.owner ? owner : `${owner}→${names(task.assignee)}`;
 };
 
-const activitySegment = (task: CardView, category: LaneCategory | null, now: number): BoardSegment => {
+const activitySegment = (task: TaskView, category: LaneCategory | null, now: number): BoardSegment => {
   const age = ageLabel(task.lastTouchedAt, now);
   const make = (text: string, icon: BoardIconName | null, tone: BoardTone, title: string): BoardSegment => ({
     key: 'activity',
@@ -111,7 +111,7 @@ const activitySegment = (task: CardView, category: LaneCategory | null, now: num
   }
 };
 
-/** The PR the card face names: an open one first, else the newest merged one, else the last linked. */
+/** The PR the task face names: an open one first, else the newest merged one, else the last linked. */
 export const headlinePr = (prs: readonly PrLink[]): PrLink | null => {
   if (prs.length === 0) return null;
   const open = prs.find(pr => pr.state === 'open');
@@ -144,10 +144,10 @@ const prSegment = (prs: readonly PrLink[]): BoardSegment | null => {
 };
 
 /**
- * Whether the card says how the owner tests it: a small marker when it does, and a quiet "no test steps" on a card
+ * Whether the task says how the owner tests it: a small marker when it does, and a quiet "no test steps" on a task
  * waiting to be tested that does not, so the missing ones stand out to the lead.
  */
-const testSegment = (task: Pick<CardView, 'howToTest'>, category: LaneCategory | null): BoardSegment | null => {
+const testSegment = (task: Pick<TaskView, 'howToTest'>, category: LaneCategory | null): BoardSegment | null => {
   if (task.howToTest.trim() !== '') {
     return {
       key: 'test',
@@ -170,26 +170,26 @@ const testSegment = (task: Pick<CardView, 'howToTest'>, category: LaneCategory |
 };
 
 /** How many of the children are finished: closed ones, of those not dropped. */
-export const subsDone = (task: Pick<CardView, 'rollup'>): number => task.rollup.byCategory.closed;
+export const subsDone = (task: Pick<TaskView, 'rollup'>): number => task.rollup.byCategory.closed;
 
 export interface SegmentContext {
   readonly names: FerretNames;
   readonly now: number;
-  /** The category of the lane the card sits in; `null` when its lane is unknown. */
+  /** The category of the lane the task sits in; `null` when its lane is unknown. */
   readonly category: LaneCategory | null;
   /** The machine's name, set only when more than one machine is on the board. */
   readonly machine: string | null;
 }
 
-/** The meta line of a card, in priority order: when the row is too narrow the card drops whole items from the right. */
-export const cardSegments = (task: CardView, context: SegmentContext): readonly BoardSegment[] => {
+/** The meta line of a task, in priority order: when the row is too narrow the task drops whole items from the right. */
+export const taskSegments = (task: TaskView, context: SegmentContext): readonly BoardSegment[] => {
   const segments: BoardSegment[] = [
     {
       key: 'ref',
-      text: formatCardRef({ id: task.id }),
+      text: formatTaskRef({ id: task.id }),
       icon: null,
       tone: 'quiet',
-      title: `${task.kind} ${formatCardRef({ id: task.id })}`,
+      title: `${task.kind} ${formatTaskRef({ id: task.id })}`,
       optional: false,
     },
     activitySegment(task, context.category, context.now),
@@ -206,7 +206,7 @@ export const cardSegments = (task: CardView, context: SegmentContext): readonly 
       text: String(task.blockedBy.length),
       icon: 'blocked',
       tone: 'warn',
-      title: `Blocked by ${task.blockedBy.map(ref => formatCardRef(ref)).join(', ')}`,
+      title: `Blocked by ${task.blockedBy.map(ref => formatTaskRef(ref)).join(', ')}`,
       optional: false,
     });
   }

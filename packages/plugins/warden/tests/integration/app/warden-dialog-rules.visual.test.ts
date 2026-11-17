@@ -1,5 +1,5 @@
 /**
- * THE "SCREENS FERRETRY CLEARS" CARD in a real browser over a FIXED FAKE screen (`fixtures/warden-dialog-rules-scene.tsx`): a
+ * THE "SCREENS FERRETRY CLEARS" TASK in a real browser over a FIXED FAKE screen (`fixtures/warden-dialog-rules-scene.tsx`): a
  * proposed rule (the row it would press marked, the owner's yes offered) and a held one (shown, never saved), on a phone (390)
  * and a desktop (1280), light and dark. No real pane, ferret or secret is drawn.
  * Set `FY_WARDEN_DIALOG_RULES_SHOTS_DIR` to keep the pictures.
@@ -81,9 +81,9 @@ describe('the screens Ferretry clears, over a fake screen', () => {
           const tab = await context.newPage();
           try {
             await tab.goto(`${origin}/?theme=${theme}&state=${state.name === 'held' ? 'held' : 'proposal'}`);
-            const card = tab.locator('[aria-label="Screens Ferretry clears"]');
-            await card.waitFor({ state: 'visible' });
-            const text = await card.innerText();
+            const task = tab.locator('[aria-label="Screens Ferretry clears"]');
+            await task.waitFor({ state: 'visible' });
+            const text = await task.innerText();
             expect(text).toContain(state.expects);
             expect(text.includes('Save this rule')).toBe(state.saves);
             // No horizontal scroll on a phone: the card fits the width it is given.

@@ -4,15 +4,15 @@ import type {
   ReferenceCatalogProvider,
 } from '@ferretry/plugin-conversation/contract';
 import { referenceCatalogLimit } from '@ferretry/plugin-conversation/contract';
-import { type CardView, cap, type LaneCategory } from '../../contract/index.ts';
+import { type TaskView, cap, type LaneCategory } from '../../contract/index.ts';
 import type { LaneSets } from '../lib/board/index.ts';
 
-/** What Board reads of itself to answer the `&` menu: every card's view with the lanes of each board (`sweepBoard`). */
-export interface BoardCardViews {
-  sweepBoard(): Promise<{ readonly views: readonly CardView[]; readonly laneSets: LaneSets }>;
+/** What Board reads of itself to answer the `&` menu: every task's view with the lanes of each board (`sweepBoard`). */
+export interface BoardTaskViews {
+  sweepBoard(): Promise<{ readonly views: readonly TaskView[]; readonly laneSets: LaneSets }>;
 }
 
-/** The detail a card with no assignee prints (today's `&` menu row). */
+/** The detail a task with no assignee prints (today's `&` menu row). */
 const UNASSIGNED = 'unassigned';
 
 /** The longest an alias is (the entry schema's own bound). */
@@ -20,35 +20,35 @@ const MAX_ALIAS = 64;
 
 const clip = (text: string, max: number): string => (text.length <= max ? text : text.slice(0, max));
 
-const laneOf = (view: CardView, laneSets: LaneSets) =>
+const laneOf = (view: TaskView, laneSets: LaneSets) =>
   laneSets.get(view.projectId)?.lanes.find(lane => lane.id === view.laneId);
 
 /** Closed work: dropped, or sitting in a closed-category lane. Known to a proof, not offered by the menu. */
-const isClosed = (view: CardView, category: LaneCategory | undefined): boolean =>
+const isClosed = (view: TaskView, category: LaneCategory | undefined): boolean =>
   view.dropped !== null || category === 'closed';
 
 /** Work in progress: an active or review lane. The menu lists it first. */
 const isActive = (category: LaneCategory | undefined): boolean => category === 'active' || category === 'review';
 
 /**
- * Whether the ask behind a card was an agent's, not the owner's: TODAY'S rule (the `&` menu's "Include agent cards"
- * switch), read from the card's own facts and never guessed from its text. The daemon's `askedBy: person` or
+ * Whether the ask behind a task was an agent's, not the owner's: TODAY'S rule (the `&` menu's "Include agent tasks"
+ * switch), read from the task's own facts and never guessed from its text. The daemon's `askedBy: person` or
  * `origin: human` is the owner's; `origin: agent` or `askedBy: agent` is an agent's; a view that carries neither
  * falls back to "the owner raised it" (`createdBy`), as the app's `isMine` reads it.
  */
-const isAgentAsked = (view: CardView): boolean => {
+const isAgentAsked = (view: TaskView): boolean => {
   if (view.askedBy === 'person' || view.origin === 'human') return false;
   if (view.origin === 'agent' || view.askedBy === 'agent') return true;
   return view.createdBy.kind !== 'owner';
 };
 
-const touchedMs = (view: CardView): number => {
+const touchedMs = (view: TaskView): number => {
   const parsed = Date.parse(view.lastTouchedAt ?? view.createdAt);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
 interface Row {
-  readonly view: CardView;
+  readonly view: TaskView;
   readonly entry: ReferenceCatalogEntry;
   readonly closed: boolean;
   readonly active: boolean;
@@ -56,7 +56,7 @@ interface Row {
 }
 
 /**
- * Open cards first, then closed ones, so the entry bound drops closed work before live work; within each, active
+ * Open tasks first, then closed ones, so the entry bound drops closed work before live work; within each, active
  * work first, then the most recently touched, then id so a re-read never reshuffles equals (today's `compareTasks`).
  */
 const compareRows = (left: Row, right: Row): number =>
@@ -66,22 +66,22 @@ const compareRows = (left: Row, right: Row): number =>
   left.view.id.localeCompare(right.view.id);
 
 /**
- * THE `&` MENU OF ONE FERRET'S COMPOSER (reference.catalog, key `&`): the cards the ferret owns or is assigned, which is
- * today's `sessionCards` slice of the board. The row reads as it did: the token is the card id, the label its title, the
- * detail its assignee (or `unassigned`); the lane and the card's summary are the other words it is found by. A done or
- * dropped card is `closed` (known, so `&F12` still proves, but not offered until its id is typed).
+ * THE `&` MENU OF ONE FERRET'S COMPOSER (reference.catalog, key `&`): the tasks the ferret owns or is assigned, which is
+ * today's `sessionCards` slice of the board. The row reads as it did: the token is the task id, the label its title, the
+ * detail its assignee (or `unassigned`); the lane and the task's summary are the other words it is found by. A done or
+ * dropped task is `closed` (known, so `&F12` still proves, but not offered until its id is typed).
  *
- * An entry says who asked: `agentAsked: true` when a ferret or the daemon asked for the card (the card's own
- * `askedBy` / `origin`), omitted when the owner did. The composer's "Include agent cards" switch filters by it and
- * still offers the card when its id is typed, so `&F12` of a helper's card proves either way: no card is dropped here.
+ * An entry says who asked: `agentAsked: true` when a ferret or the daemon asked for the task (the task's own
+ * `askedBy` / `origin`), omitted when the owner did. The composer's "Include agent tasks" switch filters by it and
+ * still offers the task when its id is typed, so `&F12` of a helper's task proves either way: no task is dropped here.
  *
- * The demand is the one `GET /v1/board` declares (`fleet` use), because it reads the same cards; Conversation asks it
+ * The demand is the one `GET /v1/board` declares (`fleet` use), because it reads the same tasks; Conversation asks it
  * of the caller before `entries` runs and refuses exactly as that route would. An entry carries card text and ids only.
  */
 export class BoardReferenceCatalog implements ReferenceCatalogProvider {
   readonly demand = cap('fleet', 'use');
 
-  constructor(private readonly board: BoardCardViews) {}
+  constructor(private readonly board: BoardTaskViews) {}
 
   async entries(input: ReferenceCatalogInput): Promise<readonly ReferenceCatalogEntry[]> {
     const { views, laneSets } = await this.board.sweepBoard();

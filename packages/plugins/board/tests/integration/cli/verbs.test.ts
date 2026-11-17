@@ -2,8 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   AT,
-  card,
-  cardResponse,
+  boardTask,
+  taskResponse,
   DENISHA,
   FERRETRY_ID,
   laneSet,
@@ -18,7 +18,7 @@ const STANDARD = {
   'GET /v1/board/projects': PROJECTS,
   'GET /v1/ferrets': [{ id: DENISHA, name: 'denisha' }],
 };
-const CARD = cardResponse(card({ id: 'F7' }), laneSet());
+const TASK = taskResponse(boardTask({ id: 'F7' }), laneSet());
 const body = (result: { calls: readonly { route: string; init?: unknown }[] }, index = 0) =>
   (result.calls[index]?.init as { body?: unknown } | undefined)?.body;
 /** The body of the one write a verb sent (a POST), wherever the reads fall around it. */
@@ -28,7 +28,10 @@ const written = (result: { calls: readonly { route: string; init?: unknown }[] }
 describe('fy board', () => {
   it('should read the board of the calling ferret’s project and draw it lane by lane', async () => {
     const result = await run('board', {
-      answers: { ...STANDARD, 'GET /v1/board': response({ cards: [card({ id: 'F7', title: 'Rename the widget' })] }) },
+      answers: {
+        ...STANDARD,
+        'GET /v1/board': response({ cards: [boardTask({ id: 'F7', title: 'Rename the widget' })] }),
+      },
     });
     should(result.code).equal(0);
     should(result.calls.map(call => call.route)).eql(['GET /v1/board/projects', 'GET /v1/ferrets', 'GET /v1/board']);
@@ -71,7 +74,7 @@ describe('fy task new', () => {
     const result = await run('task new', {
       args: ['Rename', 'widget'],
       options,
-      answers: { ...STANDARD, 'POST /v1/search/related': { matches: [] }, 'POST /v1/board/tasks': CARD },
+      answers: { ...STANDARD, 'POST /v1/search/related': { matches: [] }, 'POST /v1/board/tasks': TASK },
     });
     should(result.code).equal(0);
     should(result.calls.map(call => call.route)).containEql('POST /v1/search/related');
@@ -101,7 +104,7 @@ describe('fy task new', () => {
             },
           ],
         },
-        'POST /v1/board/tasks': CARD,
+        'POST /v1/board/tasks': TASK,
       },
     });
     should(result.code).equal(1);
@@ -113,7 +116,7 @@ describe('fy task new', () => {
     const failure = await run('task new', {
       args: ['Rename', 'widget'],
       options: { ...options, 'brief-file': '/nope.md' },
-      answers: { ...STANDARD, 'POST /v1/search/related': { matches: [] }, 'POST /v1/board/tasks': CARD },
+      answers: { ...STANDARD, 'POST /v1/search/related': { matches: [] }, 'POST /v1/board/tasks': TASK },
       files: {},
     }).then(
       () => undefined,
@@ -127,7 +130,7 @@ describe('fy task show, move and progress', () => {
   it('should show one card in full', async () => {
     const result = await run('task show', {
       args: ['&F7'],
-      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': CARD },
+      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': TASK },
     });
     should(result.code).equal(0);
     should(result.out).match(/F7/u);
@@ -138,7 +141,7 @@ describe('fy task show, move and progress', () => {
     const result = await run('task show', {
       args: ['F7'],
       options: { yaml: true },
-      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': CARD },
+      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': TASK },
     });
     should(result.out)
       .match(/revision:/u)
@@ -149,13 +152,13 @@ describe('fy task show, move and progress', () => {
     const current = await run('task show', {
       args: ['F7'],
       options: { json: true },
-      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': CARD },
+      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': TASK },
     });
     should(JSON.parse(current.out)).have.property('task').and.not.have.property('card');
     const former = await run('task show', {
       args: ['F7'],
       options: { json: true },
-      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': { task: CARD.card, laneSet: CARD.laneSet } },
+      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': { task: TASK.card, laneSet: TASK.laneSet } },
     });
     should(JSON.parse(former.out)).have.property('task');
   });
@@ -164,7 +167,7 @@ describe('fy task show, move and progress', () => {
     const result = await run('task move', {
       args: ['F7', 'Implement'],
       options: { reason: 'started' },
-      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': CARD, 'POST /v1/board/tasks/:taskId': CARD },
+      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': TASK, 'POST /v1/board/tasks/:taskId': TASK },
     });
     should(result.code).equal(0);
     should(written(result)).containEql({ action: 'move', to: 'implement' });
@@ -174,7 +177,7 @@ describe('fy task show, move and progress', () => {
     const result = await run('task progress', {
       args: ['F7'],
       options: { now: 'testing', next: '1. ship' },
-      answers: { 'POST /v1/board/tasks/:taskId': CARD, ...STANDARD },
+      answers: { 'POST /v1/board/tasks/:taskId': TASK, ...STANDARD },
     });
     should(result.code).equal(0);
     should(result.calls[0]).eql({
@@ -188,7 +191,7 @@ describe('fy task show, move and progress', () => {
       args: ['F7'],
       options: { file: '/p.yaml' },
       files: { '/p.yaml': 'now: from file\nnext: later\n' },
-      answers: { 'POST /v1/board/tasks/:taskId': CARD, ...STANDARD },
+      answers: { 'POST /v1/board/tasks/:taskId': TASK, ...STANDARD },
     });
     should(body(result)).eql({ action: 'edit', progress: { now: 'from file', doneSoFar: '', next: 'later' } });
   });
@@ -202,7 +205,7 @@ describe('fy task show, move and progress', () => {
 });
 
 describe('the other card verbs', () => {
-  const answers = { ...STANDARD, 'POST /v1/board/tasks/:taskId': CARD, 'GET /v1/board/tasks/:taskId': CARD };
+  const answers = { ...STANDARD, 'POST /v1/board/tasks/:taskId': TASK, 'GET /v1/board/tasks/:taskId': TASK };
 
   it('should send each verb as the one action it is', async () => {
     const cases: [string, string[], Record<string, string | boolean>, object][] = [

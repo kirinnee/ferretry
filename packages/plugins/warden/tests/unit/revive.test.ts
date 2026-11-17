@@ -17,7 +17,7 @@ import {
   signalName,
 } from '../../daemon/lib/index.ts';
 import { lanes, PROJECT } from '../support/board.ts';
-import { cardView } from './board-fixtures.ts';
+import { taskView } from './board-fixtures.ts';
 
 const NOW = Date.parse('2026-10-30T12:00:00.000Z');
 const ago = (seconds: number): string => new Date(NOW - seconds * 1000).toISOString();
@@ -163,11 +163,11 @@ describe('the plain words for a death', () => {
 
   it('should name the focus card an auto session carries on with, and give an interactive one none', () => {
     // Arrange
-    const card = { task: cardView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
+    const task = { task: taskView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
 
     // Act
-    const auto = reviveMessage({ kind: 'tmux_crashed' }, '2026-10-30T11:59:00.000Z', 'auto', card);
-    const interactive = reviveMessage({ kind: 'tmux_crashed' }, '2026-10-30T11:59:00.000Z', 'interactive', card);
+    const auto = reviveMessage({ kind: 'tmux_crashed' }, '2026-10-30T11:59:00.000Z', 'auto', task);
+    const interactive = reviveMessage({ kind: 'tmux_crashed' }, '2026-10-30T11:59:00.000Z', 'interactive', task);
 
     // Assert
     should(auto).containEql('continue from where you stopped, on the task below.\n\nYour task: &F1 — Ship the thing');

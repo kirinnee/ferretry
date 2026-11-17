@@ -18,7 +18,7 @@
 import { FerretStateSchema, FerretSummarySchema, HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { CardIdSchema } from './card.ts';
+import { CardIdSchema } from './task.ts';
 
 const InteractionModeSchema = z.enum(['auto', 'interactive']);
 export type InteractionMode = z.infer<typeof InteractionModeSchema>;
@@ -402,24 +402,24 @@ export const PackAttemptSchema = z.strictObject({
 export type PackAttempt = z.infer<typeof PackAttemptSchema>;
 
 /**
- * The board card a started helper works on (`board-design.md` §3.1): made with the ferret, owned by
+ * The board task a started helper works on (`board-design.md` §3.1): made with the ferret, owned by
  * the lead and named in the helper's brief. Its parent comes from the lead's intent (`parentFrom`), never
- * from the card the lead touched last. `note` says what the start could not do on the board; the ferret
+ * from the task the lead touched last. `note` says what the start could not do on the board; the ferret
  * started all the same, because a board failure never fails a start.
  */
 export const PackChildCardSchema = z.strictObject({
   id: CardIdSchema.optional(),
   /** The board's name as the owner reads it: the project's, or `Unfiled`. */
   project: NonEmpty.optional(),
-  /** The card it sits under; absent when it is at the top level. */
+  /** The task it sits under; absent when it is at the top level. */
   parent: CardIdSchema.optional(),
-  /** Why it sits there: `brief` (the brief names it) or `focus` (the lead's explicit focus card). */
+  /** Why it sits there: `brief` (the brief names it) or `focus` (the lead's explicit focus task). */
   parentFrom: z.enum(['brief', 'focus']).optional(),
-  /** The card was the lead's existing one (`--card` or a same-titled open card), now assigned to the helper. */
+  /** The task was the lead's existing one (`--task` or a same-titled open task), now assigned to the helper. */
   existing: z.literal(true).optional(),
   note: NonEmpty.optional(),
 });
-export type PackChildCard = z.infer<typeof PackChildCardSchema>;
+export type PackChildTask = z.infer<typeof PackChildCardSchema>;
 
 /**
  * What a `fy new` answered (its `--json` body), as a transcript holds it. A refusal is an ANSWER, not an HTTP error, so a ferret reads the

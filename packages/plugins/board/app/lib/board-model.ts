@@ -1,15 +1,15 @@
 /**
- * THE BOARD, AS PURE DECISIONS: how every paired machine's cards merge into one board, what the page's
- * filters are and how they travel in a URL, what each card is "running on", and whether a move may go.
+ * THE BOARD, AS PURE DECISIONS: how every paired machine's tasks merge into one board, what the page's
+ * filters are and how they travel in a URL, what each task is "running on", and whether a move may go.
  *
  * Nothing here reads the network or the clock. `board-client.ts` reads, `board-store.ts` holds, and
  * `hooks/use-board.ts` wires the two; this file is the part a test can drive with plain values.
  *
- * A CARD IS KEYED `(daemonId, taskId)`. A task id (`F412`) is unique on its machine only, so two machines
- * both holding an `F12` are two cards. Every project keeps the lane set of the machine that owns the
- * card, because each daemon may have confirmed its own lanes for what is, to the owner, the same project.
+ * A TASK IS KEYED `(daemonId, taskId)`. A task id (`F412`) is unique on its machine only, so two machines
+ * both holding an `F12` are two tasks. Every project keeps the lane set of the machine that owns the
+ * task, because each daemon may have confirmed its own lanes for what is, to the owner, the same project.
  *
- * LIVENESS IS THE DAEMON'S. `activity`, `lastTouchedAt`, and `rollup` arrive on the card
+ * LIVENESS IS THE DAEMON'S. `activity`, `lastTouchedAt`, and `rollup` arrive on the task
  * and are only grouped and counted here — never derived from a clock. The one fact computed in the
  * browser is {@link runningOn}, because only the browser knows every paired daemon's version.
  */
@@ -22,33 +22,33 @@ import {
   BoardProjectIdSchema,
   type BoardPrStateFilter,
   BoardPrStateFilterSchema,
-  type BoardQuarantinedCard,
+  type BoardQuarantinedTask,
   type BoardResult,
   type BoardStateFilter,
   BoardStateFilterSchema,
-  type CardId,
-  type CardView,
+  type TaskId,
+  type TaskView,
   boardErr,
   boardOk,
   isInBoardState,
-  isSubCard,
+  isSubTask,
   type LaneCategory,
   type LaneSet,
   type MoveReasonProblem,
   moveReasonProblem,
   type ReleasedIn,
-  type CardKind,
+  type TaskKind,
   CardKindSchema,
 } from '../../contract/index.ts';
 import { compareReleaseVersions } from './release-order.ts';
-import { isPrivateCard, splitAvailable } from './board-human.ts';
+import { isPrivateTask, splitAvailable } from './board-human.ts';
 import type { DaemonId } from './machine.ts';
 
 // ---------------------------------------------------------------------------------------------------
-// Cards
+// Tasks
 // ---------------------------------------------------------------------------------------------------
 
-/** Whether one paired machine is running the release a card shipped in. */
+/** Whether one paired machine is running the release a task shipped in. */
 export interface RunningOnMachine {
   readonly daemonId: DaemonId;
   readonly machine: string;
@@ -58,21 +58,21 @@ export interface RunningOnMachine {
   readonly has: boolean;
 }
 
-/** A card on the merged board: the daemon's view of it, and the machine it lives on. */
-interface BoardCard {
-  /** `(daemonId, taskId)`, collision-safe: see {@link boardCardKey}. */
+/** A task on the merged board: the daemon's view of it, and the machine it lives on. */
+interface BoardTask {
+  /** `(daemonId, taskId)`, collision-safe: see {@link boardTaskKey}. */
   readonly key: string;
   readonly daemonId: DaemonId;
   readonly machine: string;
-  readonly task: CardView;
-  /** Empty until the card has shipped in a release. */
+  readonly task: TaskView;
+  /** Empty until the task has shipped in a release. */
   readonly runningOn: readonly RunningOnMachine[];
 }
 
-export const boardCardKey = (daemonId: DaemonId, taskId: CardId): string => JSON.stringify([daemonId, taskId]);
+export const boardTaskKey = (daemonId: DaemonId, taskId: TaskId): string => JSON.stringify([daemonId, taskId]);
 
 /**
- * Each paired machine's version against the release a card shipped in. A card that has not shipped has
+ * Each paired machine's version against the release a task shipped in. A task that has not shipped has
  * no `runningOn`; a machine whose version is unknown, or not comparable, is `has: false` rather than
  * guessed at.
  */
@@ -117,25 +117,25 @@ export const NO_DATE_RANGE: BoardDateRange = Object.freeze({ preset: null, from:
 export interface BoardFilters {
   readonly project: BoardProjectId | null;
   readonly machine: DaemonId | null;
-  /** A session id: the cards it owns or is assigned. */
+  /** A session id: the tasks it owns or is assigned. */
   readonly ferret: string | null;
-  readonly kind: CardKind | null;
+  readonly kind: TaskKind | null;
   readonly pr: BoardPrStateFilter | null;
   readonly state: BoardStateFilter;
   readonly activity: BoardActivityFilter | null;
-  /** The cards the owner created or that wait on the owner. */
+  /** The tasks the owner created or that wait on the owner. */
   readonly mine: boolean;
   /**
-   * "Show private": the private cards, the ferrets' own bookkeeping (sub-cards and helper cards). Off, the board is
-   * what the owner asked for. The field and URL parameter keep the name `agents` it had as "Ferret cards", so a
+   * "Show private": the private tasks, the ferrets' own bookkeeping (sub-cards and helper tasks). Off, the board is
+   * what the owner asked for. The field and URL parameter keep the name `agents` it had as "Ferret tasks", so a
    * saved link still works.
    */
   readonly agents: boolean;
-  /** A lane id, or a lane name in the card's own project (case does not matter). */
+  /** A lane id, or a lane name in the task's own project (case does not matter). */
   readonly lane: string | null;
-  /** When the card was created (`createdAt`). */
+  /** When the task was created (`createdAt`). */
   readonly created: BoardDateRange;
-  /** When the card was last touched (the daemon's derived `lastTouchedAt`). */
+  /** When the task was last touched (the daemon's derived `lastTouchedAt`). */
   readonly touched: BoardDateRange;
 }
 
@@ -184,7 +184,7 @@ export interface BoardFilterDefaults {
 
 const NO_FILTER_DEFAULTS: BoardFilterDefaults = Object.freeze({ agents: false });
 
-/** `1` shows private cards and `0` hides them, whatever the device chose; anything else is the device's choice. */
+/** `1` shows private tasks and `0` hides them, whatever the device chose; anything else is the device's choice. */
 const parseAgents = (value: string | null, fallback: boolean): boolean =>
   value === '1' ? true : value === '0' ? false : fallback;
 
@@ -256,7 +256,7 @@ export const boardFiltersToSearch = (
 export interface BoardServerQuery {
   readonly project: BoardProjectId | null;
   readonly ferret: string | null;
-  readonly kind: CardKind | null;
+  readonly kind: TaskKind | null;
   readonly pr: BoardPrStateFilter | null;
   readonly state: BoardStateFilter;
   readonly activity: BoardActivityFilter | null;
@@ -290,20 +290,20 @@ export const serverQueryKey = (query: BoardServerQuery): string =>
   JSON.stringify([query.project, query.ferret, query.kind, query.pr, query.state, query.activity]);
 
 /**
- * Whether agent cards are on the board. They are when asked for, and also when the reader narrowed the board
- * to one ferret or one activity: the daemon's header counts include agent cards, so a count pressed (or a
- * ferret chosen) must show the cards it counted.
+ * Whether agent tasks are on the board. They are when asked for, and also when the reader narrowed the board
+ * to one ferret or one activity: the daemon's header counts include agent tasks, so a count pressed (or a
+ * ferret chosen) must show the tasks it counted.
  */
 export const showsAgents = (filters: Pick<BoardFilters, 'agents' | 'ferret' | 'activity'>): boolean =>
   filters.agents || filters.ferret !== null || filters.activity !== null;
 
-/** Whether the owner has a stake in the card: they raised it. */
-export const isMine = (task: Pick<CardView, 'createdBy'>): boolean => task.createdBy.kind === 'owner';
+/** Whether the owner has a stake in the task: they raised it. */
+export const isMine = (task: Pick<TaskView, 'createdBy'>): boolean => task.createdBy.kind === 'owner';
 
-const categoryIn = (laneSet: LaneSet | null, task: CardView): LaneCategory | null =>
+const categoryIn = (laneSet: LaneSet | null, task: TaskView): LaneCategory | null =>
   laneSet?.lanes.find(lane => lane.id === task.laneId)?.category ?? null;
 
-const matchesActivity = (filter: BoardActivityFilter, task: CardView): boolean => {
+const matchesActivity = (filter: BoardActivityFilter, task: TaskView): boolean => {
   switch (filter) {
     case 'blocked':
       return task.blockedBy.length > 0;
@@ -312,7 +312,7 @@ const matchesActivity = (filter: BoardActivityFilter, task: CardView): boolean =
   }
 };
 
-const matchesPr = (filter: BoardPrStateFilter, task: CardView): boolean => {
+const matchesPr = (filter: BoardPrStateFilter, task: TaskView): boolean => {
   const prs = task.links.prs;
   switch (filter) {
     case 'none':
@@ -331,12 +331,12 @@ const matchesPr = (filter: BoardPrStateFilter, task: CardView): boolean => {
 };
 
 /**
- * Whether a card the daemon just sent belongs in a read made with this query. A live update re-reads one
- * card, not the board, so the page must decide for itself whether that card still belongs to the view; it
+ * Whether a task the daemon just sent belongs in a read made with this query. A live update re-reads one
+ * task, not the board, so the page must decide for itself whether that task still belongs to the view; it
  * is the same decision the daemon makes, over the same fields, and the periodic re-read corrects any
- * disagreement. It reads the card's derived `activity`; it never works one out.
+ * disagreement. It reads the task's derived `activity`; it never works one out.
  */
-export const cardMatchesQuery = (task: CardView, laneSet: LaneSet | null, query: BoardServerQuery): boolean => {
+export const taskMatchesQuery = (task: TaskView, laneSet: LaneSet | null, query: BoardServerQuery): boolean => {
   const category = categoryIn(laneSet, task);
   if (query.project !== null && task.projectId !== query.project) return false;
   if (query.ferret !== null && task.owner !== query.ferret && task.assignee !== query.ferret) return false;
@@ -357,8 +357,8 @@ const localDay = (date: string, dayOffset: number): number => {
 };
 
 /**
- * Whether an instant falls inside a date range as of `now`. An empty range holds everything; a card with
- * no such instant (a card never touched) is outside any range that is set.
+ * Whether an instant falls inside a date range as of `now`. An empty range holds everything; a task with
+ * no such instant (a task never touched) is outside any range that is set.
  */
 export const inDateRange = (range: BoardDateRange, instant: string | null, now: number): boolean => {
   if (range.preset === null && range.from === null && range.to === null) return true;
@@ -375,10 +375,10 @@ export const inDateRange = (range: BoardDateRange, instant: string | null, now: 
 };
 
 /**
- * Whether a card sits in the lane a filter names: by lane id, or by the lane's name in the card's own
+ * Whether a task sits in the lane a filter names: by lane id, or by the lane's name in the task's own
  * project on its own machine (so `Review` means that project's Review lane, whatever its id).
  */
-export const inLane = (lane: string, task: Pick<CardView, 'laneId'>, laneSet: LaneSet | null): boolean => {
+export const inLane = (lane: string, task: Pick<TaskView, 'laneId'>, laneSet: LaneSet | null): boolean => {
   if (task.laneId === lane) return true;
   const wanted = lane.toLowerCase();
   return laneSet?.lanes.some(l => l.id === task.laneId && l.name.toLowerCase() === wanted) ?? false;
@@ -393,11 +393,11 @@ export interface BoardMachineData {
   readonly daemonId: DaemonId;
   readonly machine: string;
   readonly version: string | null;
-  readonly cards: readonly CardView[];
-  /** This machine's lane set for each project it holds cards for; `null` when it has none confirmed. */
+  readonly cards: readonly TaskView[];
+  /** This machine's lane set for each project it holds tasks for; `null` when it has none confirmed. */
   readonly laneSets: ReadonlyMap<BoardProjectId, LaneSet | null>;
   readonly counts: BoardCounts | null;
-  readonly quarantined: readonly BoardQuarantinedCard[];
+  readonly quarantined: readonly BoardQuarantinedTask[];
 }
 
 /** One lane of one project's board on one machine. */
@@ -405,7 +405,7 @@ interface BoardLane {
   readonly id: string;
   readonly name: string;
   readonly category: LaneCategory;
-  readonly cards: readonly BoardCard[];
+  readonly cards: readonly BoardTask[];
 }
 
 /**
@@ -419,26 +419,26 @@ interface BoardGroup {
   readonly projectId: BoardProjectId;
   readonly laneSet: LaneSet | null;
   readonly lanes: readonly BoardLane[];
-  /** Cards whose lane is not in the lane set (an edit raced the read); never dropped from view. */
-  readonly unplaced: readonly BoardCard[];
+  /** Tasks whose lane is not in the lane set (an edit raced the read); never dropped from view. */
+  readonly unplaced: readonly BoardTask[];
 }
 
 interface BoardQuarantine {
   readonly daemonId: DaemonId;
   readonly machine: string;
-  readonly cards: readonly BoardQuarantinedCard[];
+  readonly cards: readonly BoardQuarantinedTask[];
 }
 
 export interface BoardModel {
   readonly groups: readonly BoardGroup[];
-  readonly cards: readonly BoardCard[];
+  readonly cards: readonly BoardTask[];
   /** The header's numbers, summed over every machine read. */
   readonly counts: BoardCounts;
-  /** Cards a daemon set aside as unreadable, per machine. */
+  /** Tasks a daemon set aside as unreadable, per machine. */
   readonly quarantined: readonly BoardQuarantine[];
   /** More than one machine is in the model: the page shows a machine chip. */
   readonly multiMachine: boolean;
-  /** The machines say who asked for a card or whether it is private, so "Show private" means something; an older daemon says nothing. */
+  /** The machines say who asked for a task or whether it is private, so "Show private" means something; an older daemon says nothing. */
   readonly splitsAgents: boolean;
 }
 
@@ -463,10 +463,10 @@ const COUNTED: readonly (readonly [BoardActivityFilter, 'stale' | 'orphaned' | '
   ['active', 'active'],
 ];
 
-/** A machine's header counts without the ferret cards the board is not showing, so a pill and its cards agree. */
-const withoutCards = (
+/** A machine's header counts without the ferret tasks the board is not showing, so a pill and its tasks agree. */
+const withoutTasks = (
   counts: BoardCounts,
-  hidden: readonly { readonly task: CardView; readonly category: LaneCategory | null }[],
+  hidden: readonly { readonly task: TaskView; readonly category: LaneCategory | null }[],
 ): BoardCounts =>
   COUNTED.reduce(
     (left, [filter, key]) => ({
@@ -476,8 +476,8 @@ const withoutCards = (
     counts,
   );
 
-/** The card's place in its lane: ordered cards first (by `order`), then the longest-untouched first. */
-const compareCards = (left: BoardCard, right: BoardCard): number => {
+/** The task's place in its lane: ordered tasks first (by `order`), then the longest-untouched first. */
+const compareTasks = (left: BoardTask, right: BoardTask): number => {
   const a = left.task.order;
   const b = right.task.order;
   if (a !== null && b !== null && a !== b) return a - b;
@@ -488,7 +488,7 @@ const compareCards = (left: BoardCard, right: BoardCard): number => {
 };
 
 /**
- * Merges every machine's read into one board: cards keyed `(daemonId, taskId)`, grouped project → lane
+ * Merges every machine's read into one board: tasks keyed `(daemonId, taskId)`, grouped project → lane
  * with each machine's own lane set, counts summed, and `runningOn` set from every machine's version.
  * `machine`, `mine`, `lane` and the date ranges are applied here (`now` is what a preset counts back
  * from); the rest of the filters were the daemon's.
@@ -498,18 +498,18 @@ export const mergeBoard = (machines: readonly BoardMachineData[], filters: Board
   const showAgents = showsAgents(filters);
   const kept = machines.filter(data => filters.machine === null || data.daemonId === filters.machine);
   const groups: BoardGroup[] = [];
-  const cards: BoardCard[] = [];
+  const tasks: BoardTask[] = [];
   let counts = ZERO_COUNTS;
   const quarantined: BoardQuarantine[] = [];
 
   for (const data of kept) {
-    const hidden: { readonly task: CardView; readonly category: LaneCategory | null }[] = [];
+    const hidden: { readonly task: TaskView; readonly category: LaneCategory | null }[] = [];
     if (data.quarantined.length > 0) {
       quarantined.push({ daemonId: data.daemonId, machine: data.machine, cards: data.quarantined });
     }
-    const byProject = new Map<BoardProjectId, BoardCard[]>();
+    const byProject = new Map<BoardProjectId, BoardTask[]>();
     for (const task of data.cards) {
-      if (!showAgents && isPrivateCard(task)) {
+      if (!showAgents && isPrivateTask(task)) {
         hidden.push({ task, category: categoryIn(data.laneSets.get(task.projectId) ?? null, task) });
         continue;
       }
@@ -517,19 +517,19 @@ export const mergeBoard = (machines: readonly BoardMachineData[], filters: Board
       if (filters.lane !== null && !inLane(filters.lane, task, data.laneSets.get(task.projectId) ?? null)) continue;
       if (!inDateRange(filters.created, task.createdAt, now)) continue;
       if (!inDateRange(filters.touched, task.lastTouchedAt, now)) continue;
-      const card: BoardCard = {
-        key: boardCardKey(data.daemonId, task.id),
+      const boardTask: BoardTask = {
+        key: boardTaskKey(data.daemonId, task.id),
         daemonId: data.daemonId,
         machine: data.machine,
         task,
         runningOn: runningOn(task.shippedIn, versions),
       };
-      cards.push(card);
+      tasks.push(boardTask);
       const members = byProject.get(task.projectId);
-      if (members === undefined) byProject.set(task.projectId, [card]);
-      else members.push(card);
+      if (members === undefined) byProject.set(task.projectId, [boardTask]);
+      else members.push(boardTask);
     }
-    if (data.counts !== null) counts = addCounts(counts, withoutCards(data.counts, hidden));
+    if (data.counts !== null) counts = addCounts(counts, withoutTasks(data.counts, hidden));
     for (const [projectId, members] of byProject) {
       const laneSet = data.laneSets.get(projectId) ?? null;
       const known = new Set(laneSet?.lanes.map(lane => lane.id));
@@ -543,25 +543,25 @@ export const mergeBoard = (machines: readonly BoardMachineData[], filters: Board
           id: lane.id,
           name: lane.name,
           category: lane.category,
-          cards: members.filter(card => card.task.laneId === lane.id).sort(compareCards),
+          cards: members.filter(task => task.task.laneId === lane.id).sort(compareTasks),
         })),
-        unplaced: members.filter(card => !known.has(card.task.laneId)).sort(compareCards),
+        unplaced: members.filter(task => !known.has(task.task.laneId)).sort(compareTasks),
       });
     }
   }
 
   return {
     groups,
-    cards,
+    cards: tasks,
     counts,
     quarantined,
     multiMachine: kept.length > 1,
-    splitsAgents: kept.some(data => splitAvailable(data.cards) || data.cards.some(isSubCard)),
+    splitsAgents: kept.some(data => splitAvailable(data.cards) || data.cards.some(isSubTask)),
   };
 };
 
 // ---------------------------------------------------------------------------------------------------
-// Moving a card
+// Moving a task
 // ---------------------------------------------------------------------------------------------------
 
 export type MoveCheckProblem = MoveReasonProblem | { readonly code: 'no-lane-set' };

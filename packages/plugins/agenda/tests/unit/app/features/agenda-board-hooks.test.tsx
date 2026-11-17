@@ -6,25 +6,25 @@
  * no provider (or a value of the wrong shape) draws the ask as it is drawn without Board.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { AgendaCardRow, AgendaItem } from '@ferretry/core-asks/contract';
+import type { AgendaTaskRow, AgendaItem } from '@ferretry/core-asks/contract';
 import { ScreenHrefProvider } from '@ferretry/app';
 import { interact, type Mounted, mount, must, WithAppHooks } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
 import {
-  AGENDA_CARD_ANSWER_HOOK,
-  AGENDA_CARD_REFERENCE_HOOK,
+  AGENDA_TASK_ANSWER_HOOK,
+  AGENDA_TASK_REFERENCE_HOOK,
   AGENDA_LANE_PROPOSAL_HOOK,
   type AgendaLaneEditor,
 } from '../../../../contract/app-hooks.ts';
 import { fakeAnswer, fakeReference } from '../../../support/app/board-hooks.ts';
 import {
   AgendaBoardProviders,
-  AgendaCardBoard,
+  AgendaTaskBoard,
   agendaBoardHooks,
   laneEditorBook,
   laneEditorOf,
   useAgendaBoardHooks,
-  useCardBoards,
+  useTaskBoards,
 } from '../../../../app/features/agenda/agenda-board-hooks.tsx';
 import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import type { AgendaInbox } from '../../../../app/hooks/use-agenda-inbox.ts';
@@ -136,7 +136,7 @@ describe('agenda.card-answer: an item’s Done · closes', () => {
 });
 
 describe('agenda.card-answer: a notice’s Start and Close', () => {
-  const cards: readonly AgendaCardRow[] = [
+  const cards: readonly AgendaTaskRow[] = [
     {
       task: { id: 'B1' as BoardTaskId },
       line: '&B1 Fix the scroller is waiting in Review, but no ferret is assigned.',
@@ -367,7 +367,7 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
     });
 
     test('releases only the registration being disposed, though every card of a machine registers the SAME function', () => {
-      // The shell hands one cached `editorFor` per machine, so each card's scope registers the identical function.
+      // The shell hands one cached `editorFor` per machine, so each task's scope registers the identical function.
       const shared = upon('shared');
       const book = laneEditorBook();
       const first = book.register(desk, shared);
@@ -389,7 +389,7 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
     });
   });
 
-  /** An open card of `daemon`, with the Inbox page binding Board per card exactly as the screens do. */
+  /** An open task of `daemon`, with the Inbox page binding Board per task exactly as the screens do. */
   const Page = ({
     cards,
     open,
@@ -418,10 +418,10 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
     navigated: string[];
     reducedMotion: boolean | undefined;
   }) {
-    const { laneEditor, cardBoard } = useCardBoards(to => navigated.push(to));
+    const { laneEditor, cardBoard: taskBoard } = useTaskBoards(to => navigated.push(to));
     return (
       <AgendaInboxPage
-        cardBoard={cardBoard}
+        cardBoard={taskBoard}
         inbox={{ ...inbox, laneEditor }}
         initialOpen={open}
         now={NOW}
@@ -462,7 +462,7 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
     const theirs = fakeAnswer();
     view = await mount(
       shell(
-        { [there]: { [AGENDA_CARD_ANSWER_HOOK]: mine.answer }, [desk]: { [AGENDA_CARD_ANSWER_HOOK]: theirs.answer } },
+        { [there]: { [AGENDA_TASK_ANSWER_HOOK]: mine.answer }, [desk]: { [AGENDA_TASK_ANSWER_HOOK]: theirs.answer } },
         <Page cards={[onDesk]} navigated={[]} open={onDesk.key} />,
       ),
     );
@@ -480,7 +480,7 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
     const unproved = { ...mine, proves: () => () => false };
     view = await mount(
       shell(
-        { [there]: { [AGENDA_CARD_REFERENCE_HOOK]: unproved }, [desk]: { [AGENDA_CARD_REFERENCE_HOOK]: theirs } },
+        { [there]: { [AGENDA_TASK_REFERENCE_HOOK]: unproved }, [desk]: { [AGENDA_TASK_REFERENCE_HOOK]: theirs } },
         <Page cards={[onDesk]} navigated={[]} open={onDesk.key} />,
       ),
     );
@@ -527,7 +527,7 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
         {
           [desk]: {
             [AGENDA_LANE_PROPOSAL_HOOK]: {
-              // ONE function for the machine, as the shell caches it: every card's scope registers this same value.
+              // ONE function for the machine, as the shell caches it: every task's scope registers this same value.
               editorFor: (ask: { sourceRef?: string | null }) => `/desk-lanes/${ask.sourceRef}`,
             },
           },
@@ -539,7 +539,7 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
     await interact(() =>
       must(root().querySelector<HTMLButtonElement>('.fy-attn-deck__top [aria-label="Next item"]'), 'Next').click(),
     );
-    // The leaving card unmounts once its fly-out ends, releasing its scope's registration.
+    // The leaving task unmounts once its fly-out ends, releasing its scope's registration.
     await interact(() => new Promise(resolve => setTimeout(resolve, 400)));
     await interact(() => flush());
     expect(root().querySelector('.fy-attn-deck__leaving')).toBeNull();
@@ -552,13 +552,13 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
 
   test('a notice’s Start on another machine goes to that machine’s Board, not refused', async () => {
     const theirs = fakeAnswer();
-    const cards: readonly AgendaCardRow[] = [{ task: { id: 'B1' as BoardTaskId }, line: '&B1 is waiting.' }];
+    const cards: readonly AgendaTaskRow[] = [{ task: { id: 'B1' as BoardTaskId }, line: '&B1 is waiting.' }];
     view = await mount(
       shell(
-        { [desk]: { [AGENDA_CARD_ANSWER_HOOK]: theirs.answer } },
-        <AgendaCardBoard daemonId={desk} editors={laneEditorBook()} onNavigate={() => undefined}>
+        { [desk]: { [AGENDA_TASK_ANSWER_HOOK]: theirs.answer } },
+        <AgendaTaskBoard daemonId={desk} editors={laneEditorBook()} onNavigate={() => undefined}>
           <AgendaCardsHost cards={cards} connection={daemonConnection({ daemonId: desk })} />
-        </AgendaCardBoard>,
+        </AgendaTaskBoard>,
       ),
     );
 

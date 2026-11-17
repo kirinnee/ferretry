@@ -4,10 +4,10 @@ import {
   AGENDA_SEGMENT_PARAGRAPH_LENGTH,
   type AgendaAsk,
   type AgendaBrief,
-  type AgendaCardAnswer,
+  type AgendaTaskAnswer,
   type AgendaKind,
 } from '../protocol/agenda.ts';
-import { agendaCardAnswers, agendaCardKind } from '../protocol/agenda-card.ts';
+import { agendaTaskAnswers, agendaTaskKind } from '../protocol/agenda-task.ts';
 
 /** What an item says, as the lint reads it: its title, its ask, the context, its answers and the brief. */
 export interface AgendaWriting extends AgendaBrief {
@@ -16,7 +16,7 @@ export interface AgendaWriting extends AgendaBrief {
   readonly title?: string | undefined;
   readonly kind?: AgendaKind | undefined;
   readonly ask?: AgendaAsk | undefined;
-  readonly answers?: readonly AgendaCardAnswer[] | undefined;
+  readonly answers?: readonly AgendaTaskAnswer[] | undefined;
   readonly context?: string | null | undefined;
 }
 
@@ -27,8 +27,8 @@ const FILE_PATH =
   /(?:^|[\s(`"'])(?:~|\.{1,2})?\/[\w.@-]+(?:\/[\w.@-]+)+|\b[\w.@-]+(?:\/[\w.@-]+)+\.(?:ts|tsx|js|jsx|json|md|ya?ml|sh|rs|go|toml|nix)\b/gu;
 const ACRONYM = /\b[A-Z]{2,6}\b/gu;
 /**
- * Words that point at something the card does not carry: an earlier message, a thread, "the PR we
- * discussed". A card is read cold, so whatever they point at has to be said on the card instead.
+ * Words that point at something the task does not carry: an earlier message, a thread, "the PR we
+ * discussed". A task is read cold, so whatever they point at has to be said on the task instead.
  */
 const BACK_REFERENCE = new RegExp(
   [
@@ -48,7 +48,7 @@ const BARE_OPTION = /^(?:[A-Za-z0-9]|(?:option|choice|plan|approach)\s*[A-Za-z0-
 const MIN_OPTION_LENGTH = 3;
 /** Short words that need no description. */
 const PLAIN_OPTIONS: ReadonlySet<string> = new Set(['yes', 'no', 'ok']);
-/** The kinds of card that put a decision to the owner, so a cold reader needs the situation to make it. */
+/** The kinds of task that put a decision to the owner, so a cold reader needs the situation to make it. */
 const DECISION_KINDS: ReadonlySet<AgendaKind> = new Set(['permission', 'choice', 'yesno', 'reply']);
 /** Capitals a reader already knows. */
 const PLAIN_CAPITALS: ReadonlySet<string> = new Set(['OK', 'AM', 'PM', 'UTC', 'ASAP', 'FYI', 'TODO', 'API']);
@@ -80,7 +80,7 @@ function fieldsOf(item: AgendaWriting): Field[] {
   push('recommendation', [item.recommendation?.decision ?? '', item.recommendation?.why ?? ''].join(' '));
   push('impact', item.impact);
   push('urgency', item.urgency);
-  agendaCardAnswers(item).forEach(answer => {
+  agendaTaskAnswers(item).forEach(answer => {
     push(`answer "${answer.label}"`, [answer.label, answer.description ?? ''].join(' '));
   });
   return fields;
@@ -93,7 +93,7 @@ function definedTerms(item: AgendaWriting): ReadonlySet<string> {
 
 /** Whether the item asks the owner to decide something: a permission, a choice, a question or an open question. */
 function isDecision(item: AgendaWriting): boolean {
-  return (item.questions?.length ?? 0) > 0 || DECISION_KINDS.has(agendaCardKind(item));
+  return (item.questions?.length ?? 0) > 0 || DECISION_KINDS.has(agendaTaskKind(item));
 }
 
 function isBlank(text: string | null | undefined): boolean {
@@ -128,10 +128,10 @@ function collect(
 
 /**
  * The choice options that name nothing on their own — a letter, a number, "Option 2", two characters — and
- * carry no description. Yes and No are plain words and a yes-or-no card's own.
+ * carry no description. Yes and No are plain words and a yes-or-no task's own.
  */
 function vagueOptions(item: AgendaWriting): string[] {
-  if (agendaCardKind(item) !== 'choice' || item.ask?.kind !== 'multiple-choice') return [];
+  if (agendaTaskKind(item) !== 'choice' || item.ask?.kind !== 'multiple-choice') return [];
   return item.ask.options
     .filter(option => option.description === undefined)
     .map(option => option.label.trim())
@@ -156,7 +156,7 @@ function hasWallOfText(text: string): boolean {
   return false;
 }
 
-/** Whether the text holds a heading line outside fenced code, which the card would draw as a huge title. */
+/** Whether the text holds a heading line outside fenced code, which the task would draw as a huge title. */
 function hasHeading(text: string): boolean {
   let fenced = false;
   for (const line of text.split(/\r?\n/u)) {
@@ -224,8 +224,8 @@ function isCoveredByTerm(word: string, defined: ReadonlySet<string>): boolean {
  * has been told. Each line names what to change, so the ferret can fix the item with `agenda edit`.
  *
  * The owner reads cold — often on a phone, days later — so THE RULE IS ISOLATION: could the owner answer
- * with nothing else open? Everything needed to decide is on the card. (Premise, the situation, and context,
- * the facts around it, are how a card gets there — a decision card with neither draws the strongest warning,
+ * with nothing else open? Everything needed to decide is on the task. (Premise, the situation, and context,
+ * the facts around it, are how a task gets there — a decision task with neither draws the strongest warning,
  * but is never refused.) A short plain title (the push's heading) and ask (its text); no pointing at an
  * earlier message; no ticket or PR ids, links, file paths or capitals nobody has explained; options that
  * say what choosing them does. Anything in `terms` counts as explained, and an id followed by what it is

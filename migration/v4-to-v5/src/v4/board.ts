@@ -1,13 +1,13 @@
 /**
  * Narrow readers for the v4 (4.291.x) board files. A LOCAL copy on purpose (see `./layout.ts`). Source of truth is
  * `origin/main` at v4.291.5: `packages/protocol/src/lib/{board,board-refs,board-lanes,tasks}.ts`,
- * `packages/daemon/src/adapters/board/file-board-store.ts` (cards, counters),
+ * `packages/daemon/src/adapters/board/file-board-store.ts` (tasks, counters),
  * `packages/daemon/src/lib/board/sweep.ts` (sweep), `packages/daemon/src/lib/board-projects/board-switch.ts` (switch).
  * Inventory: `docs/migration/v4-formats.md` §C.iii "1.".
  *
  * Each reader declares the fields the conversion maps. Deep members (history events, clarifications, terms, links,
  * lane options, a pending lane proposal) are read loose here: the step maps them and v5's STRICT Board schemas check
- * every one of them before anything is written. A top-level card field, or a history event field, this reader does not
+ * every one of them before anything is written. A top-level task field, or a history event field, this reader does not
  * know is reported by NAME (never its value) so nothing is dropped silently.
  */
 import { readdir, readFile } from 'node:fs/promises';
@@ -17,8 +17,8 @@ import { info } from './ferrets.ts';
 
 const Instant = z.iso.datetime({ offset: true });
 const SessionId = z.string().min(1);
-export const CARD_ID = /^[BFIC][1-9][0-9]{0,8}$/u;
-const CardId = z.string().regex(CARD_ID);
+export const TASK_ID = /^[BFIC][1-9][0-9]{0,8}$/u;
+const TaskId = z.string().regex(TASK_ID);
 const MachineId = z.string().trim().min(1).max(128);
 const ProjectId = z.union([z.uuid(), z.literal('unfiled')]);
 const LaneId = z
@@ -36,12 +36,12 @@ export const V4Actor = z.discriminatedUnion('kind', [
 export type V4ActorValue = z.infer<typeof V4Actor>;
 
 /** v4 `TaskRefSchema`. */
-export const V4TaskRef = z.strictObject({ machineId: MachineId.optional(), id: CardId });
+export const V4TaskRef = z.strictObject({ machineId: MachineId.optional(), id: TaskId });
 export type V4TaskRefValue = z.infer<typeof V4TaskRef>;
 
-const V4CardShape = {
+const V4TaskShape = {
   v: z.literal(1),
-  id: CardId,
+  id: TaskId,
   machineId: MachineId,
   projectId: ProjectId,
   laneId: LaneId,
@@ -85,25 +85,25 @@ const V4CardShape = {
   askedBy: z.enum(['person', 'agent']).optional(),
   visibility: z.enum(['public', 'private']).optional(),
   visibilitySource: z.enum(['default', 'chosen']).optional(),
-  /** v4 `AgendaRefSchema`: the creating ferret's agenda item that approved the card. */
+  /** v4 `AgendaRefSchema`: the creating ferret's agenda item that approved the task. */
   approval: z.strictObject({ sessionId: SessionId, id: z.string().regex(/^A[1-9][0-9]*$/u) }).optional(),
 };
-export const KNOWN_CARD_FIELDS: ReadonlySet<string> = new Set(Object.keys(V4CardShape));
+export const KNOWN_TASK_FIELDS: ReadonlySet<string> = new Set(Object.keys(V4TaskShape));
 const FIELD_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 
-export const V4Card = z.looseObject(V4CardShape).superRefine((card, context) => {
-  const prefix = { bug: 'B', feature: 'F', infra: 'I', chore: 'C' }[card.kind];
-  if (!card.id.startsWith(prefix)) context.addIssue({ code: 'custom', message: 'id prefix', path: ['id'] });
-  if (card.history.some((event, index) => event.seq !== index + 1))
+export const V4Task = z.looseObject(V4TaskShape).superRefine((task, context) => {
+  const prefix = { bug: 'B', feature: 'F', infra: 'I', chore: 'C' }[task.kind];
+  if (!task.id.startsWith(prefix)) context.addIssue({ code: 'custom', message: 'id prefix', path: ['id'] });
+  if (task.history.some((event, index) => event.seq !== index + 1))
     context.addIssue({ code: 'custom', message: 'history seq', path: ['history'] });
-  if (card.history[0]?.type !== 'created')
+  if (task.history[0]?.type !== 'created')
     context.addIssue({ code: 'custom', message: 'history opens with created', path: ['history'] });
 });
-export type V4CardValue = z.infer<typeof V4Card>;
+export type V4TaskValue = z.infer<typeof V4Task>;
 
-/** The top-level fields of a card this reader does not declare: names only, refused if a name is not field-like. */
-export function unknownCardFields(card: Record<string, unknown>): string[] | undefined {
-  const unknown = Object.keys(card).filter(key => !KNOWN_CARD_FIELDS.has(key));
+/** The top-level fields of a task this reader does not declare: names only, refused if a name is not field-like. */
+export function unknownTaskFields(task: Record<string, unknown>): string[] | undefined {
+  const unknown = Object.keys(task).filter(key => !KNOWN_TASK_FIELDS.has(key));
   return unknown.every(key => FIELD_NAME.test(key)) ? unknown.sort() : undefined;
 }
 
@@ -168,7 +168,7 @@ export function defaultLaneTargets(
   return done === undefined || notGood === undefined ? undefined : { doneLane: done.id, notGoodLane: notGood.id };
 }
 
-/** A problem with a v4 board file, worded with the file or card id only: safe to put in the report. */
+/** A problem with a v4 board file, worded with the file or task id only: safe to put in the report. */
 export class BoardInputError extends Error {
   override readonly name = 'BoardInputError';
 }
@@ -201,7 +201,7 @@ export async function readDocument(path: string, label: string): Promise<unknown
   }
 }
 
-/** Where v4 keeps its board: cards, counters and sweep under `state/board/`, switch and lanes under `<home>/board/`. */
+/** Where v4 keeps its board: tasks, counters and sweep under `state/board/`, switch and lanes under `<home>/board/`. */
 export function v4BoardPaths(home: string) {
   const state = join(home, 'state', 'board');
   const root = join(home, 'board');
@@ -241,7 +241,7 @@ export const V4_EVENT_TYPES: ReadonlySet<string> = new Set([
   'migrated',
 ]);
 
-/** v4 `LegacyTaskRefSchema`: the `<session>:<old id>` a `migrated` event and a card's `legacyRef` name. */
+/** v4 `LegacyTaskRefSchema`: the `<session>:<old id>` a `migrated` event and a task's `legacyRef` name. */
 export const V4LegacyRef = z.string().regex(/^[^\s:]+:[BFIC][1-9][0-9]{0,8}$/u);
 
 /** The board fields of a v4 session `config.json` (`SessionConfigSchema`): its name, callsign and focus. */
@@ -250,7 +250,7 @@ export const V4FerretBoardConfig = z.looseObject({
   name: z.string().min(1),
   teammate: z.string().optional(),
 });
-/** `focusTask` / `focusAnchor`: a card ref. */
+/** `focusTask` / `focusAnchor`: a task ref. */
 export const V4FocusRef = V4TaskRef;
 /** `boardSkip`: v4 `BoardSkipSchema`. */
 export const V4BoardSkip = z.strictObject({

@@ -1,6 +1,6 @@
 import type { Log } from '@ferretry/kernel/contract';
 import type { SessionView } from '../../../lib/protocol/session.ts';
-import type { OpenCardStanding } from '../../../lib/session/peers/board.ts';
+import type { OpenTaskStanding } from '../../../lib/session/peers/board.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
 import type { SessionArchiveSubsystem } from '../../../lib/runtime/mounts/session-archive.ts';
 import { createSessionDirectory } from '../../../lib/session/directory/index.ts';
@@ -8,7 +8,7 @@ import {
   type ArchiveKeepSources,
   SessionArchiveService,
   sessionKeeps,
-  sessionsOnOpenCards,
+  sessionsOnOpenTasks,
 } from '../../../lib/session/archive/index.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
 import { StorageArchiveSessions } from './storage-archive-sessions.ts';
@@ -18,10 +18,10 @@ export interface SessionArchiveSources {
   /** The ferrets the owner pinned. */
   pinned(): Promise<ReadonlyMap<string, string>>;
   /**
-   * Every card as stored, each with its lane's category as Board resolved it. INJECTED by the Board plugin; until it
-   * is wired the archive cannot prove a ferret is off every open card, so it keeps every one live.
+   * Every task as stored, each with its lane's category as Board resolved it. INJECTED by the Board plugin; until it
+   * is wired the archive cannot prove a ferret is off every open task, so it keeps every one live.
    */
-  board?(): Promise<readonly OpenCardStanding[]>;
+  board?(): Promise<readonly OpenTaskStanding[]>;
   /** Whether a session's agenda board holds an item that is still open. */
   hasOpenAgendaItem(sessionId: string): Promise<boolean>;
   /**
@@ -99,7 +99,7 @@ export function createSessionArchive(input: {
     onOpenCards: async () => {
       // Unwired, this rejects: `sessionKeeps` reads a rejection as "board unreadable" and keeps every session.
       if (sources.board === undefined) throw new Error('no board is wired to say which sessions are on an open task');
-      return sessionsOnOpenCards(await sources.board());
+      return sessionsOnOpenTasks(await sources.board());
     },
     hasOpenAgendaItem: sources.hasOpenAgendaItem,
   };

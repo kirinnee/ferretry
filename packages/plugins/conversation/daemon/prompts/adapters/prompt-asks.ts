@@ -12,12 +12,12 @@ import {
 /** The ask source Conversation registers (`ask.sources:prompt`). */
 const PROMPT_SOURCE = 'prompt' as SourceKey;
 
-/** The most words a card carries as context (Asks' own bound is far larger; a prompt is never near it). */
+/** The most words a task carries as context (Asks' own bound is far larger; a prompt is never near it). */
 const MAX_CONTEXT = 8_000;
 
 /**
  * What the prompt obligations need of Asks: raise (idempotent by source and entry) and close. `open` (by source and
- * entry) is asked only to find a card whose ref was never saved: never on a steady tick.
+ * entry) is asked only to find a task whose ref was never saved: never on a steady tick.
  */
 export type PromptAsksPort = Pick<AsksApi, 'raise' | 'close' | 'open'>;
 
@@ -39,22 +39,22 @@ export interface PromptRoster {
 
 /**
  * THE PROMPT OBLIGATIONS: a ferret parked on a permission prompt or a harness dialog waits on the owner exactly like
- * an ask does, so it IS an Agenda card (Asks' source `prompt`), raised once per wait and closed the moment the wait
+ * an ask does, so it IS an Agenda task (Asks' source `prompt`), raised once per wait and closed the moment the wait
  * ends (answered in the console, the pane moved on, the ferret stopped or went away). Nothing here answers the prompt.
  *
  * The question watch's tick drives it, but a tick reads nothing on its own: a pane is read only for a ferret that was
- * REPORTED CHANGED since the last sweep ({@link changed}: Ferrets said its state moved), that is owed a card (its record
+ * REPORTED CHANGED since the last sweep ({@link changed}: Ferrets said its state moved), that is owed a task (its record
  * says it is waiting) or whose last look failed, plus ONE reconciliation of every ferret that could be parked (`idle`) on
- * the first sweep after boot. Twenty idle ferrets nobody touched cost no read. A card is closed by the ref this sweep
+ * the first sweep after boot. Twenty idle ferrets nobody touched cost no read. A task is closed by the ref this sweep
  * was handed when it raised it, kept in {@link PromptRecords}; a raise that succeeded but whose ref was not saved (the
  * save failed, the daemon died) is found again by its durable `(source, entry)` before its record is cleared, replaced
- * or removed, so no card is stranded and none is doubled (a child's card lands on its lead's board: the board a card is
+ * or removed, so no task is stranded and none is doubled (a child's task lands on its lead's board: the board a task is
  * on says nothing about whose it is). A raise or a close that failed is asked again by the next sweep, and said once
  * until it works.
  *
- * Each wait is an OCCURRENCE: the same prompt asked again after the wait was positively seen to end is a new card,
+ * Each wait is an OCCURRENCE: the same prompt asked again after the wait was positively seen to end is a new task,
  * because Asks keeps `(source, entry)` for life. Only a positive reading ends a wait: an empty or failed read is no
- * evidence, so a transient `{}` never closes a card. Nor does it settle a ferret that was reported changed: its read is
+ * evidence, so a transient `{}` never closes a task. Nor does it settle a ferret that was reported changed: its read is
  * asked again (one per sweep) until a positive reading comes back, or the one event that said it moved is lost.
  */
 export class PromptAsks {
@@ -169,7 +169,7 @@ export class PromptAsks {
     return true;
   }
 
-  /** A positive reading that the wait is over (or the ferret is gone): its card is closed by the ref it was raised with. */
+  /** A positive reading that the wait is over (or the ferret is gone): its task is closed by the ref it was raised with. */
   async #ended(id: string, gone: boolean): Promise<void> {
     const record = this.#records?.get(id);
     if (record === undefined) return;
@@ -184,8 +184,8 @@ export class PromptAsks {
   }
 
   /**
-   * Closes the card of a record's occurrence before the record is cleared, replaced or removed. The saved ref names it;
-   * with none saved but the wait recorded, a raise may have succeeded whose ref was never written, so the card is found
+   * Closes the task of a record's occurrence before the record is cleared, replaced or removed. The saved ref names it;
+   * with none saved but the wait recorded, a raise may have succeeded whose ref was never written, so the task is found
    * by its durable `(source, entry)` (the entry is deterministic) wherever Asks put it, and every one open is closed.
    */
   async #withdraw(id: string, record: PromptWaitRecord): Promise<void> {
@@ -194,8 +194,8 @@ export class PromptAsks {
     const ref = promptRefOfKey(record.key);
     if (ref === undefined) return;
     const entry = EntryIdSchema.parse(promptEntry(id, ref, record.occurrence));
-    for (const card of await this.asks.open({ source: PROMPT_SOURCE, entry }))
-      await this.asks.close({ ferret: card.ferret ?? id, id: card.id }, 'withdrawn', entry);
+    for (const task of await this.asks.open({ source: PROMPT_SOURCE, entry }))
+      await this.asks.close({ ferret: task.ferret ?? id, id: task.id }, 'withdrawn', entry);
   }
 
   async #close(ask: NonNullable<PromptWaitRecord['ask']>): Promise<void> {

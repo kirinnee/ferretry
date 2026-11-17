@@ -1,0 +1,1277 @@
+/**
+ * THE CARD RULES: what each request does to one task, as pure functions of the task, the request and the
+ * facts the service gathered first (lanes, the board graph, the caller's standing).
+ *
+ * Every rule that refuses throws a {@link BoardError} whose message says what to do instead. The rules
+ * that matter most, from `board-design.md`:
+ *
+ * - **Authority** (§2.5) is checked first, by {@link requireStanding}.
+ * - **A move back needs a reason**, and **a move back by the owner is a reopen** (§2.9): one write records
+ *   the `reopened` event and appends the owner's words to the clarifications, and the service then
+ *   delivers it to the task's ferret.
+ * - **Gates** (§2.3): only the owner passes an owner-gated lane (`needsOwner`), so only the owner closes.
+ * - **Files ride a reopen only**: an owner's move back may carry the files the owner attached ("Not good"),
+ *   which the service resolved first; the `reopened` event names them and the delivery carries them on.
+ * - **Dependencies** (§2.7): a task with unfinished blockers cannot move to a later CATEGORY; only the
+ *   owner overrides a dependency, and the override is recorded. Cycles are refused.
+ */
+import {
+  type TaskActor,
+  taskRevision,
+  type BoardAttachment,
+  type BoardClarification,
+  type BoardEditableField,
+  type Progress,
+  BoardEditableFieldSchema,
+  type TaskVisibility,
+  type BoardProjectId,
+  type Task,
+  type TaskActionRequest,
+  type TaskCreateRequest,
+  type TaskEvent,
+  type TaskId,
+  categoryOf,
+  firstLaneOfCategory,
+  formatTaskRef,
+  gateOptions,
+  isBackwardMove,
+  LANE_CATEGORIES,
+  type Lane,
+  type LaneSet,
+  type LaneTrigger,
+  laneForTrigger,
+  laneOf,
+  laneStage,
+  moveReasonProblem,
+  needsOwner,
+  type PrLink,
+  prUrlParts,
+  type BoardReopenAttachments,
+  type TaskRef,
+  variantLanes,
+} from '../../../contract/index.ts';
+import {
+  type BoardCaller,
+  type BoardOperation,
+  type BoardStanding,
+  type TaskAudience,
+  claimRefusalMessage,
+  effectiveAssignee,
+  mayDo,
+  mayPassGate,
+  OPERATION_STANDINGS,
+  refusalMessage,
+} from './authority.ts';
+import { queueBehindClashes } from './clash-queue.ts';
+import { BoardError } from './errors.ts';
+import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
+import { laneFromFacts } from './lane-facts.ts';
+import { closedLaneOf, shippedCloseReason, SUB_TASK_SHIPPED_REASON } from './sub-task-close.ts';
+import { taskVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
+
+/** The facts every rule may consult, gathered by the service before it calls one. */
+export interface TaskContext {
+  readonly now: string;
+  /** Who acts, as the task records them: an owner on the admin token says so in its `via`. */
+  readonly actor: TaskActor;
+  readonly standing: BoardStanding;
+  /** True when the caller is the task's assignee and the new assignee is its own descendant (`mayHandDown`). */
+  readonly handsDown?: boolean;
+  /** The lead of the caller's own that holds the task, when the caller may CLAIM it (`claimableFrom`). */
+  readonly claimedFrom?: string;
+  /** The ended owner ferret a live lead may ADOPT the task from (the service judged the orphan: `BoardService.orphanedOwner`). */
+  readonly adoptedFrom?: string;
+  /** The lanes of the task's own board. */
+  readonly laneSet: LaneSet;
+  readonly index: BoardIndex;
+  readonly laneSets: LaneSets;
+  /** The version this daemon runs, for `release.running`; absent or `null` when it is not known. */
+  readonly runningVersion?: string | null;
+  /**
+   * Who the task's gates ask (`TaskAudience`): an internal task's owner ferret and leads pass its gates themselves.
+   * Absent reads as `external`, the strict reading: only the owner passes a gate.
+   */
+  readonly audience?: TaskAudience;
+  /**
+   * The files the request carries, as the service found them in the attachment store; absent when it carries
+   * none. Only a reopen takes them.
+   */
+  readonly attachments?: {
+    readonly request: BoardReopenAttachments;
+    readonly files: readonly BoardAttachment[];
+  };
+}
+
+/** What a rule decided. `task: null` changes nothing on the task. */
+export interface TaskOutcome {
+  readonly task: Task | null;
+  /** Set when the task was sent back with someone's words: the service delivers it to its ferret. */
+  readonly reopened?: {
+    readonly from: string;
+    readonly to: string;
+    readonly reason: string;
+    /** The files to carry to the ferret with it. */
+    readonly attachments?: BoardReopenAttachments;
+  };
+}
+
+/** The source recorded with an owner's words when they arrived as a move on the board. */
+export const OWNER_MOVE_SOURCE = 'owner (board move)';
+
+type NewEvent = TaskEvent extends infer E ? (E extends TaskEvent ? Omit<E, 'seq' | 'at' | 'actor'> : never) : never;
+
+/** The task with one more history event: next seq, this instant, this actor. */
+export const withEvent = (task: Task, event: NewEvent, context: Pick<TaskContext, 'now' | 'actor'>): Task => ({
+  ...task,
+  history: [
+    ...task.history,
+    { ...event, seq: task.history.length + 1, at: context.now, actor: context.actor } as TaskEvent,
+  ],
+});
+
+export const requireStanding = (
+  operation: BoardOperation,
+  standing: BoardStanding,
+  task: Pick<Task, 'id' | 'owner' | 'assignee'>,
+): void => {
+  if (!mayDo(operation, standing)) {
+    throw new BoardError('forbidden', refusalMessage(operation, task), OPERATION_STANDINGS[operation]);
+  }
+};
+
+/** The refusal for a reassign: an assignee is told the one reassign it has, handing the task down. */
+const requireAssign = (standing: BoardStanding, task: Pick<Task, 'id' | 'owner' | 'assignee'>): void => {
+  if (mayDo('assign', standing)) return;
+  const message =
+    standing === 'assignee'
+      ? `${refusalMessage('assign', task)}; its assignee may only hand it down to one of its own helpers`
+      : refusalMessage('assign', task);
+  throw new BoardError('forbidden', message, OPERATION_STANDINGS.assign);
+};
+
+const laneNames = (laneSet: LaneSet): string => laneSet.lanes.map(lane => lane.id).join(', ');
+
+/** A lane of this board, or the refusal that lists the lanes it has. */
+const requireLane = (laneSet: LaneSet, laneId: string): Lane => {
+  const lane = laneOf(laneSet, laneId);
+  if (!lane.ok) {
+    throw new BoardError(
+      'unknown-lane',
+      `there is no lane "${laneId}" on this board; its lanes are ${laneNames(laneSet)}`,
+    );
+  }
+  return lane.value;
+};
+
+const rank = (laneSet: LaneSet, laneId: string): number => {
+  const category = categoryOf(laneSet, laneId);
+  return category.ok ? LANE_CATEGORIES.indexOf(category.value) : -1;
+};
+
+const isBackward = (laneSet: LaneSet, from: string, to: string): boolean => {
+  const backward = isBackwardMove(laneSet, from, to);
+  return backward.ok && backward.value;
+};
+
+const requireOpen = (task: Task, doing: string): void => {
+  if (task.dropped !== null) {
+    throw new BoardError('invalid', `${formatTaskRef(task)} is dropped; reopen it before you ${doing} it`);
+  }
+};
+
+/**
+ * Only the owner enters an owner-gated closed lane — or, on an internal task moved, its owner ferret or a lead
+ * (`mayPassGate`): the refusal for anyone else.
+ */
+const requireOwnerForClosed = (
+  lane: Lane,
+  standing: BoardStanding,
+  task: Pick<Task, 'id'>,
+  audience: TaskAudience = 'external',
+): void => {
+  if (lane.category === 'closed' && lane.ownerGate === true && !mayPassGate(standing, audience)) {
+    throw new BoardError(
+      'owner-gate',
+      `only the owner closes a task; move ${formatTaskRef(task)} to the lane before ${lane.name} and the owner closes it`,
+      ['owner-human'],
+    );
+  }
+};
+
+// ---------------------------------------------------------------------------------------------------
+// Gates: the one stopping point (docs/board.md § Tasks show progress)
+// ---------------------------------------------------------------------------------------------------
+
+const isGate = (lane: Lane): boolean => laneStage(lane).kind === 'gate';
+
+/**
+ * The gate lanes the task's variant walks strictly between its lane and `target`, in order. Entering a gate is not
+ * passing it, so `target` never counts; a move back passes none.
+ */
+export const gatesBetween = (laneSet: LaneSet, task: Pick<Task, 'laneId' | 'workflow'>, target: Lane): Lane[] => {
+  const at = (id: string): number => laneSet.lanes.findIndex(lane => lane.id === id);
+  // A variant naming a lane the set lacks cannot say what is walked, so every lane is.
+  const walked = variantLanes(laneSet, task.workflow);
+  return (walked.ok ? walked.value : laneSet.lanes).filter(
+    lane => at(lane.id) > at(task.laneId) && at(lane.id) < at(target.id) && isGate(lane),
+  );
+};
+
+// ---------------------------------------------------------------------------------------------------
+// Moves
+// ---------------------------------------------------------------------------------------------------
+
+const move = (task: Task, to: string, reason: string | undefined, context: TaskContext): TaskOutcome => {
+  requireStanding('move', context.standing, task);
+  requireOpen(task, 'move');
+  const ref = formatTaskRef(task);
+  if (to === task.laneId) throw new BoardError('invalid', `${ref} is already in ${to}`);
+  const target = requireLane(context.laneSet, to);
+  const from = requireLane(context.laneSet, task.laneId);
+  if (!moveReasonProblem(context.laneSet, task.laneId, to, reason).ok) {
+    throw new BoardError('reason-required', `moving ${ref} back from ${from.name} to ${target.name} needs a reason`);
+  }
+  const gated = needsOwner(context.laneSet, task.laneId, to);
+  const audience = context.audience ?? 'external';
+  const forward = !isBackward(context.laneSet, task.laneId, to);
+  // Leaving a gate is `needsOwner`'s; a gate on the way is passed too, and entering one is fine.
+  const passed = forward ? gatesBetween(context.laneSet, task, target)[0] : undefined;
+  if (((gated.ok && gated.value) || passed !== undefined) && !mayPassGate(context.standing, audience)) {
+    requireOwnerForClosed(target, context.standing, task, audience);
+    const gate = passed ?? from;
+    const where = gate.id === from.id ? `on from ${from.name}` : `past ${gate.name}`;
+    throw new BoardError(
+      'owner-gate',
+      audience === 'internal'
+        ? `only its owner ferret or a lead above it moves ${ref} ${where}`
+        : `only the owner moves ${ref} ${where}: the daemon asks them in the Inbox, so raise no ask for it`,
+      audience === 'internal' ? ['owner-human', 'owner', 'ancestor'] : ['owner-human'],
+    );
+  }
+  if (rank(context.laneSet, to) > rank(context.laneSet, task.laneId)) {
+    const blockers = blockedBy(task, context.index, context.laneSets);
+    if (blockers.length > 0) {
+      throw new BoardError(
+        'blocked-by',
+        `${ref} is blocked by ${blockers.map(formatTaskRef).join(', ')}: it can move sideways or back, but not on to ${target.name} until they ship (only the owner may override a dependency)`,
+      );
+    }
+  }
+  const backward = isBackwardMove(context.laneSet, task.laneId, to);
+  const isBack = backward.ok && backward.value;
+  if (isBack && context.standing === 'owner-human') {
+    return reopenTo(task, to, reason ?? '', { text: reason ?? '', source: OWNER_MOVE_SOURCE }, context);
+  }
+  if (context.attachments !== undefined) {
+    throw new BoardError('invalid', `files ride only the owner's move back; ${ref} is not being sent back`);
+  }
+  return {
+    task: {
+      ...withEvent(task, { type: 'moved', from: task.laneId, to, backward: isBack, reason: reason ?? null }, context),
+      laneId: to,
+    },
+  };
+};
+
+/** The reopen itself: the owner's words become a clarification, then the task goes to `to` (§2.9). */
+const reopenTo = (
+  task: Task,
+  to: string,
+  reason: string,
+  ask: { readonly text: string; readonly source: string },
+  context: TaskContext,
+): TaskOutcome => {
+  const clarification: BoardClarification = {
+    text: ask.text,
+    source: ask.source,
+    at: context.now,
+    by: context.actor,
+  };
+  const files = context.attachments;
+  const reopened = withEvent(
+    task,
+    {
+      type: 'reopened',
+      from: task.laneId,
+      to,
+      reason,
+      ask,
+      ...(files === undefined ? {} : { attachments: [...files.files] }),
+    },
+    context,
+  );
+  return {
+    task: { ...reopened, laneId: to, dropped: null, clarifications: [...task.clarifications, clarification] },
+    reopened: { from: task.laneId, to, reason, ...(files === undefined ? {} : { attachments: files.request }) },
+  };
+};
+
+const reopen = (
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'reopen' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('reopen', context.standing, task);
+  const ref = formatTaskRef(task);
+  const target = requireLane(context.laneSet, action.to);
+  if (target.category === 'closed') {
+    throw new BoardError('invalid', `a reopen opens a task; to close ${ref}, move it to ${target.name}`);
+  }
+  if (task.dropped === null) {
+    const backward = isBackwardMove(context.laneSet, task.laneId, action.to);
+    if (!(backward.ok && backward.value)) {
+      throw new BoardError(
+        'invalid',
+        `a reopen goes back to an earlier lane; ${ref} is in ${task.laneId}, so move it on instead`,
+      );
+    }
+  } else if (
+    action.to !== task.laneId &&
+    !isBackward(context.laneSet, task.laneId, action.to) &&
+    !mayPassGate(context.standing, context.audience ?? 'external')
+  ) {
+    // A dropped task comes back where it was dropped, or earlier: a drop is no way past a gate.
+    const from = requireLane(context.laneSet, task.laneId);
+    throw new BoardError(
+      'owner-gate',
+      `only the owner reopens ${ref} past ${from.name}, where it was dropped; reopen it there or earlier`,
+      ['owner-human'],
+    );
+  }
+  return reopenTo(task, action.to, action.reason, action.ask, context);
+};
+
+/**
+ * A daemon move on a real signal (§3.1): into the lane the trigger names for the task's workflow. It
+ * never goes backwards (unless `backward` says the facts pulled the task back, see {@link laneFromFacts})
+ * and never moves a dropped task, and it is NOT stopped by dependencies, because
+ * reality wins over the rule; the history says what it was blocked by. `null` when nothing moves.
+ *
+ * IT NEVER PASSES A GATE (docs/board.md § Tasks show progress): a task waiting at one stays there, whatever the
+ * signal, and a move that would pass one on the way stops in it. Only the owner's own report (`passGates`) goes on.
+ */
+export const triggerMove = (
+  task: Task,
+  trigger: LaneTrigger,
+  reason: string | undefined,
+  context: TaskContext,
+  backward = false,
+  passGates = false,
+): Task | null => {
+  requireStanding('trigger', context.standing, task);
+  if (task.dropped !== null) return null;
+  const lane = laneForTrigger(context.laneSet, task.workflow, trigger);
+  if (!lane.ok || lane.value === null || lane.value.id === task.laneId) return null;
+  if (lane.value.category === 'closed' && lane.value.ownerGate === true) return null;
+  const movesBack = isBackwardMove(context.laneSet, task.laneId, lane.value.id);
+  if (!movesBack.ok || movesBack.value !== backward) return null;
+  if (!passGates && isGate(requireLane(context.laneSet, task.laneId))) return null;
+  const stop = passGates ? undefined : gatesBetween(context.laneSet, task, lane.value)[0];
+  const to = stop ?? lane.value;
+  const blockers = backward ? [] : blockedBy(task, context.index, context.laneSets);
+  const note = blockers.length === 0 ? null : `${trigger} while blocked by ${blockers.map(formatTaskRef).join(', ')}`;
+  const held = stop === undefined ? null : `stopped at ${stop.name}, which waits for the owner`;
+  const said = [reason, note, held].filter(part => part !== undefined && part !== null).join('; ');
+  return {
+    ...withEvent(
+      task,
+      {
+        type: 'moved',
+        from: task.laneId,
+        to: to.id,
+        backward,
+        reason: said === '' ? null : said,
+        auto: true,
+        trigger,
+      },
+      context,
+    ),
+    laneId: to.id,
+  };
+};
+
+/**
+ * The first gate a move from the task's lane to `target` would pass: the task's own lane, else a lane of its
+ * variant strictly between the two (`laneStage`, so a stored or a derived gate). Entering a gate is not passing
+ * it, so `target` itself never counts, nor does a gate the task's variant skips. `undefined` when it passes
+ * none, a backward target included. Throws `unknown-lane` for a task in a lane the set lacks.
+ */
+export const gateOnTheWay = (
+  laneSet: LaneSet,
+  task: Pick<Task, 'laneId' | 'workflow'>,
+  target: Lane,
+): Lane | undefined => {
+  const from = requireLane(laneSet, task.laneId);
+  return isGate(from) ? from : gatesBetween(laneSet, task, target)[0];
+};
+
+/**
+ * An external trigger somebody reported (the task action `trigger`): something Ferretry cannot see happened —
+ * a deploy finished, a reviewer approved — so the task moves the way that trigger moves it. The move is the
+ * daemon's, through {@link triggerMove}, so it is recorded `auto` with the trigger and `reportedBy` names
+ * the caller. Never backward and never into an owner-gated closed lane; the report of a non-owner never closes a
+ * task at all (a fact may close a set with no verify lane; a caller's word may not), never moves a blocked task on
+ * to a later category (as a move does not), and never passes a gate the owner has not answered: neither the task's own lane nor one its variant walks on the way
+ * ({@link gateOnTheWay}). Already there, or past it, is no change.
+ */
+const report = (
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'trigger' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('report', context.standing, task);
+  requireOpen(task, 'report an event on');
+  const ref = formatTaskRef(task);
+  const found = laneForTrigger(context.laneSet, task.workflow, action.event);
+  if (!found.ok || found.value === null) {
+    throw new BoardError(
+      'invalid',
+      `no lane of this board enters on ${action.event} for ${task.workflow} work, so it does not move ${ref}; its lanes are ${laneNames(context.laneSet)}`,
+    );
+  }
+  const target = found.value;
+  if (target.id === task.laneId) return { task: null };
+  // Only the owner closes on a report: a fact may close a set with no verify lane, a caller's word may not.
+  if (target.category === 'closed' && (target.ownerGate === true || context.standing !== 'owner-human')) {
+    throw new BoardError(
+      'owner-gate',
+      target.ownerGate === true
+        ? `${action.event} would close ${ref} in ${target.name}, which only the owner's own move enters`
+        : `${action.event} would close ${ref} in ${target.name}, and only the owner closes a task on a report`,
+      ['owner-human'],
+    );
+  }
+  const from = requireLane(context.laneSet, task.laneId);
+  const back = isBackwardMove(context.laneSet, task.laneId, target.id);
+  if (!back.ok || back.value) return { task: null };
+  const gate = context.standing === 'owner-human' ? undefined : gateOnTheWay(context.laneSet, task, target);
+  if (gate !== undefined) {
+    throw new BoardError(
+      'owner-gate',
+      gate.id === from.id
+        ? `${ref} waits in ${from.name} for the owner; a report does not pass that gate, the owner's answer does`
+        : `${ref} would pass ${gate.name}, which waits for the owner; a report does not pass that gate, the owner's answer does`,
+      ['owner-human'],
+    );
+  }
+  // A dependency holds a caller's word as it holds a move: only a fact, or the owner, moves a blocked task on.
+  const blockers =
+    context.standing !== 'owner-human' && rank(context.laneSet, target.id) > rank(context.laneSet, task.laneId)
+      ? blockedBy(task, context.index, context.laneSets)
+      : [];
+  if (blockers.length > 0) {
+    throw new BoardError(
+      'blocked-by',
+      `${ref} is blocked by ${blockers.map(formatTaskRef).join(', ')}: a report does not move it on to ${target.name} until they ship (only the owner may override a dependency)`,
+    );
+  }
+  const moved = triggerMove(
+    task,
+    action.event,
+    action.reason,
+    { ...context, actor: { kind: 'daemon' }, standing: 'daemon' },
+    false,
+    context.standing === 'owner-human',
+  );
+  // Never null by now: every case triggerMove declines was answered above.
+  return { task: moved === null ? null : reportedBy(moved, context) };
+};
+
+/** The move just made, with who reported the trigger beside the daemon that made it. */
+const reportedBy = (moved: Task, context: Pick<TaskContext, 'actor'>): Task => ({
+  ...moved,
+  history: moved.history.map((event, index) =>
+    index === moved.history.length - 1 && event.type === 'moved' ? { ...event, reportedBy: context.actor } : event,
+  ),
+});
+
+/**
+ * Catches a task up to its own PR facts ({@link laneFromFacts}): the daemon's automatic move, recorded with the
+ * trigger and the fact that moved it. It stops at a gate like every daemon move ({@link triggerMove}): facts move a
+ * task into one, never out of or past it — not on, and not back for an open PR. `null` when the facts
+ * put the task where it already is, or have no opinion. Whoever asked for the write, the move is the
+ * daemon's: a task the facts moved was moved by no one.
+ */
+export const reconcileFacts = (task: Task, context: TaskContext): Task | null => {
+  const move = laneFromFacts(task, context.laneSet, task.workflow, {
+    prs: task.links.prs,
+    runningVersion: context.runningVersion ?? null,
+  });
+  const moved =
+    move === null
+      ? null
+      : triggerMove(
+          task,
+          move.trigger,
+          move.reason,
+          { ...context, actor: { kind: 'daemon' }, standing: 'daemon' },
+          move.backward,
+        );
+  // A sub-card that ships does not wait for the owner to try it: its parent carries the test.
+  const reason = shippedCloseReason(moved ?? task, context.laneSet);
+  return reason === null ? moved : (closeAsDaemon(moved ?? task, reason, context) ?? moved);
+};
+
+/** What a close is recorded as: the release or merge that shipped a sub-card, else the helper's own done. */
+const closeTrigger = (task: Task, reason: string): LaneTrigger =>
+  reason !== SUB_TASK_SHIPPED_REASON
+    ? 'signal.done'
+    : task.links.prs.some(pr => pr.releasedIn !== null)
+      ? 'release.published'
+      : 'pr.merged';
+
+/**
+ * The daemon's automatic move of a task into the board's closed lane, with the reason beside it. It is for a sub-card
+ * that shipped or whose helper finished ({@link sub-card-close}); the owner's own Done is a verdict, not this.
+ */
+export const closeAsDaemon = (task: Task, reason: string, context: TaskContext): Task | null => {
+  const target = closedLaneOf(context.laneSet);
+  if (target === undefined || target.id === task.laneId) return null;
+  return {
+    ...withEvent(
+      task,
+      {
+        type: 'moved',
+        from: task.laneId,
+        to: target.id,
+        backward: false,
+        reason,
+        auto: true,
+        trigger: closeTrigger(task, reason),
+      },
+      { ...context, actor: { kind: 'daemon' } },
+    ),
+    laneId: target.id,
+  };
+};
+
+/**
+ * THE ONE PLACE THE DAEMON PASSES A GATE (docs/board.md § Tasks show progress; their asks ride the agenda). A task at a
+ * TRY-IT lane with nothing to try is moved by the daemon into the board's closed lane, reason beside it, so nobody is
+ * asked to tap Done on it. Only the daemon (the `trigger` standing), only out of a lane whose gate has a reopen option
+ * (a try-it), only into the closed lane. Everything else about a gate stays the owner's: a ferret's move past one is
+ * still refused by `move`, and nothing on the wire reaches this. `null` when the task is not at such a gate, is
+ * dropped, or the board has no closed lane: nothing is written.
+ */
+export const closeNothingToTry = (task: Task, reason: string, context: TaskContext): Task | null => {
+  requireStanding('trigger', context.standing, task);
+  if (task.dropped !== null) return null;
+  const from = laneOf(context.laneSet, task.laneId);
+  if (!from.ok || !gateOptions(from.value).some(option => option.outcome.kind === 'reopen-with-ask')) return null;
+  const target = closedLaneOf(context.laneSet);
+  if (target === undefined || target.id === task.laneId) return null;
+  return {
+    ...withEvent(
+      task,
+      { type: 'moved', from: task.laneId, to: target.id, backward: false, reason, auto: true, trigger: 'signal.done' },
+      { ...context, actor: { kind: 'daemon' } },
+    ),
+    laneId: target.id,
+  };
+};
+
+// ---------------------------------------------------------------------------------------------------
+// Dependencies
+// ---------------------------------------------------------------------------------------------------
+
+/** A dependency target on this machine, or the refusal that says why it cannot be one. */
+export const requireLocalTask = (index: BoardIndex, ref: TaskRef, role: string): Task => {
+  if (!index.isLocal(ref)) {
+    throw new BoardError(
+      'invalid',
+      `${formatTaskRef(ref)} is on another machine; a ${role} must be a task on this machine for now`,
+    );
+  }
+  const found = index.get(ref);
+  if (found === undefined) throw new BoardError('not-found', `there is no task ${formatTaskRef(ref)} on this machine`);
+  return found;
+};
+
+const sameRef = (left: TaskRef, right: TaskRef): boolean => left.id === right.id;
+
+const depend = (
+  boardTask: Task,
+  action: Extract<TaskActionRequest, { action: 'depend' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('depend', context.standing, boardTask);
+  if (action.override !== undefined) requireStanding('override', context.standing, boardTask);
+  const ref = formatTaskRef(boardTask);
+  const blocker = requireLocalTask(context.index, action.task, 'dependency');
+  if (blocker.id === boardTask.id) throw new BoardError('invalid', `${ref} cannot depend on itself`);
+  const override =
+    action.override === undefined
+      ? undefined
+      : { by: 'owner' as const, reason: action.override.reason, at: context.now };
+  const task = { id: blocker.id };
+  const existing = boardTask.dependsOn.find(dependency => sameRef(dependency.task, task));
+  if (existing !== undefined && override === undefined && existing.until === action.until) {
+    throw new BoardError('invalid', `${ref} already depends on ${formatTaskRef(task)}`);
+  }
+  if (existing === undefined) {
+    const cycle = dependencyCycle(context.index, boardTask.id, task);
+    if (cycle !== null) throw new BoardError('cycle', `that dependency would close a cycle: ${cycle}`);
+  }
+  const kept = override ?? existing?.override;
+  const entry = { task, until: action.until, ...(kept === undefined ? {} : { override: kept }) };
+  const dependsOn =
+    existing === undefined
+      ? [...boardTask.dependsOn, entry]
+      : boardTask.dependsOn.map(dependency => (sameRef(dependency.task, task) ? entry : dependency));
+  return {
+    task: {
+      ...withEvent(
+        boardTask,
+        { type: 'depended', task, until: action.until, ...(override === undefined ? {} : { override }) },
+        context,
+      ),
+      dependsOn,
+    },
+  };
+};
+
+const undepend = (
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'undepend' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('undepend', context.standing, task);
+  if (!task.dependsOn.some(dependency => sameRef(dependency.task, action.task))) {
+    throw new BoardError('invalid', `${formatTaskRef(task)} does not depend on ${formatTaskRef(action.task)}`);
+  }
+  return {
+    task: {
+      ...withEvent(task, { type: 'undepended', task: action.task, reason: action.reason }, context),
+      dependsOn: task.dependsOn.filter(dependency => !sameRef(dependency.task, action.task)),
+    },
+  };
+};
+
+// ---------------------------------------------------------------------------------------------------
+// Links
+// ---------------------------------------------------------------------------------------------------
+
+/** What another task already caches of the same PR (the freshest look), under this link's own spelling. */
+const cachedElsewhere = (url: string, index: BoardIndex): PrLink | null => {
+  const parts = prUrlParts(url);
+  if (parts === null) return null;
+  let freshest: PrLink | null = null;
+  for (const other of index.cards) {
+    for (const pr of other.links.prs) {
+      if (pr.state === 'unknown' || pr.polledAt === null) continue;
+      if (pr.number !== parts.number || pr.repo.toLowerCase() !== parts.repo.toLowerCase()) continue;
+      if (freshest === null || (freshest.polledAt ?? '') < pr.polledAt) freshest = pr;
+    }
+  }
+  return freshest === null ? null : { ...freshest, url, repo: parts.repo };
+};
+
+/** A newly linked PR: what another task already caches of it, else the URL and nothing GitHub has said yet. */
+const unpolledPr = (url: string, index: BoardIndex): PrLink => {
+  const parts = prUrlParts(url);
+  if (parts === null) throw new BoardError('invalid', `${url} is not a GitHub pull request URL`);
+  const cached = cachedElsewhere(url, index);
+  if (cached !== null) return cached;
+  return {
+    url,
+    number: parts.number,
+    repo: parts.repo,
+    state: 'unknown',
+    draft: false,
+    checks: 'none',
+    mergedAt: null,
+    mergeSha: null,
+    releasedIn: null,
+    polledAt: null,
+  };
+};
+
+const link = (
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'link' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('link', context.standing, task);
+  const ref = formatTaskRef(task);
+  const already = (value: string): never => {
+    throw new BoardError('invalid', `${ref} already links ${value}`);
+  };
+  const { links } = task;
+  if (action.pr !== undefined) {
+    if (links.prs.some(pr => pr.url === action.pr)) already(action.pr);
+    const linked: Task = {
+      ...withEvent(task, { type: 'linked', field: 'pr', value: action.pr }, context),
+      links: { ...links, prs: [...links.prs, unpolledPr(action.pr, context.index)] },
+    };
+    return { task: reconcileFacts(linked, context) ?? linked };
+  }
+  if (action.branch !== undefined) {
+    if (links.branch === action.branch) already(action.branch);
+    return {
+      task: {
+        ...withEvent(task, { type: 'linked', field: 'branch', value: action.branch }, context),
+        links: { ...links, branch: action.branch },
+      },
+    };
+  }
+  if (action.commit !== undefined) {
+    if (links.commits.includes(action.commit)) already(action.commit);
+    return {
+      task: {
+        ...withEvent(task, { type: 'linked', field: 'commit', value: action.commit }, context),
+        links: { ...links, commits: [...links.commits, action.commit] },
+      },
+    };
+  }
+  const doc = action.doc as string;
+  if (links.docs.includes(doc)) already(doc);
+  return {
+    task: {
+      ...withEvent(task, { type: 'linked', field: 'doc', value: doc }, context),
+      links: { ...links, docs: [...links.docs, doc] },
+    },
+  };
+};
+
+// ---------------------------------------------------------------------------------------------------
+// Re-plan and the rest
+// ---------------------------------------------------------------------------------------------------
+
+/** The fields only the owner side may rewrite: they change what the work IS. */
+const PLAN_FIELDS: readonly BoardEditableField[] = ['title', 'brief'];
+
+/** A task's status with the parts an edit names replaced, inside the task's own write (docs/board.md § The task's Status). */
+const mergedProgress = (task: Task, parts: Partial<Progress> | undefined): Progress | undefined =>
+  parts === undefined
+    ? undefined
+    : {
+        now: parts.now ?? task.progress?.now ?? '',
+        doneSoFar: parts.doneSoFar ?? task.progress?.doneSoFar ?? '',
+        next: parts.next ?? task.progress?.next ?? '',
+      };
+
+const edit = (
+  task: Task,
+  request: Extract<TaskActionRequest, { action: 'edit' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('edit', context.standing, task);
+  const action = { ...request, progress: mergedProgress(task, request.progress) };
+  // READ BEFORE WRITE (`fy task patch`): the writer read the task at `revision`; a change since would be overwritten unseen.
+  if (action.revision !== undefined && taskRevision(task) !== action.revision) {
+    throw new BoardError(
+      'version-conflict',
+      `${formatTaskRef(task)} changed since you read it: read it again (task show ${task.id} --yaml), update every part that is out of date, and patch it back`,
+    );
+  }
+  const changed = BoardEditableFieldSchema.options.filter(
+    field => action[field] !== undefined && JSON.stringify(action[field]) !== JSON.stringify(task[field]),
+  );
+  if (changed.some(field => PLAN_FIELDS.includes(field))) requireStanding('replan', context.standing, task);
+  const visibility =
+    action.visibility === undefined || alreadyChosen(task, action.visibility) ? undefined : action.visibility;
+  if (changed.length === 0 && visibility === undefined) {
+    throw new BoardError('invalid', `that edit changes nothing on ${formatTaskRef(task)}`);
+  }
+  let next = task;
+  for (const field of changed)
+    next = { ...withEvent(next, { type: 'field-edited', field }, context), [field]: action[field] };
+  return { task: visibility === undefined ? next : visibilityChanged(next, task, visibility, undefined, context) };
+};
+
+/**
+ * Whether `to` is already the task's recorded choice. The same value as the derived default is still a change when
+ * nobody chose it: recording the choice is what keeps a later repair of the default from undoing it.
+ */
+const alreadyChosen = (task: Task, to: TaskVisibility): boolean =>
+  visibilityChosen(task) && taskVisibility(task) === to;
+
+/**
+ * Makes a task public or private ({@link visibilityVerdict} says who may). The change is stored on the task and
+ * written to its history as a note, which every app already reads.
+ */
+const setVisibility = (
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'visibility' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  if (alreadyChosen(task, action.visibility)) {
+    throw new BoardError('invalid', `${formatTaskRef(task)} is already ${action.visibility}`);
+  }
+  return { task: visibilityChanged(task, task, action.visibility, action.reason, context) };
+};
+
+/**
+ * `task` (which may already carry other edits) made `to`, if the caller's standing on `original` allows it. The choice
+ * is stored as chosen, so no later repair of the derived default can undo it.
+ */
+const visibilityChanged = (
+  task: Task,
+  original: Task,
+  to: TaskVisibility,
+  reason: string | undefined,
+  context: TaskContext,
+): Task => {
+  const refusal = visibilityVerdict(original, to, context.standing);
+  if (refusal !== null) {
+    throw new BoardError('forbidden', `${formatTaskRef(original)}: ${refusal.message}`, refusal.allowed);
+  }
+  const why = reason === undefined ? '' : `: ${reason}`;
+  const was = taskVisibility(original);
+  const change = was === to ? `${to} (chosen)` : `${was} → ${to}`;
+  return {
+    ...withEvent(task, { type: 'note', text: `visibility: ${change}${why}` }, context),
+    visibility: to,
+    visibilitySource: 'chosen',
+  };
+};
+
+const file = (
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'file' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('file', context.standing, task);
+  const ref = formatTaskRef(task);
+  const held = task.files.includes(action.path);
+  if (action.release === true) {
+    if (!held) throw new BoardError('invalid', `${ref} has not claimed ${action.path}`);
+    return {
+      task: {
+        ...withEvent(task, { type: 'file-released', path: action.path, reason: action.reason ?? null }, context),
+        files: task.files.filter(path => path !== action.path),
+      },
+    };
+  }
+  if (held) throw new BoardError('invalid', `${ref} already claims ${action.path}`);
+  // A claim that clashes with an open task's queues this one behind it (docs/design/clash-queue.md).
+  return {
+    task: queueBehindClashes(
+      { ...withEvent(task, { type: 'file-claimed', path: action.path }, context), files: [...task.files, action.path] },
+      [action.path],
+      context,
+    ),
+  };
+};
+
+/**
+ * Where a refiled task lands on the other board when its PR facts say nothing ({@link factsLandingLane}):
+ * the named lane, else the first lane there of the category it is in now, else that board's first backlog
+ * lane. A closed task stays closed: it lands in a closed lane of the other board even when its workflow does
+ * not walk one, rather than being reopened.
+ */
+const refileLane = (task: Task, from: LaneSet, target: LaneSet, laneId: string | undefined): Lane => {
+  if (laneId !== undefined) return requireLane(target, laneId);
+  const category = categoryOf(from, task.laneId);
+  const same = category.ok ? firstLaneOfCategory(target, task.workflow, category.value) : undefined;
+  if (same?.ok === true) return same.value;
+  const closed = category.ok && category.value === 'closed' ? target.lanes.find(isClosedLane) : undefined;
+  return closed ?? entryLane(target, task.workflow);
+};
+
+const isClosedLane = (lane: Lane): boolean => lane.category === 'closed';
+
+/**
+ * Where an open task lands on the other board when its PR facts have a say there: the last active lane its
+ * variant walks (where work resumes), for {@link reconcileFacts} to move on with the fact in its history.
+ * Landing by category instead would put a task merged but not released, sitting in the Unfiled board's To
+ * test, into a Released · to test lane, and facts never move a task back. `undefined` when the facts say
+ * nothing, so the task lands by category.
+ */
+const factsLandingLane = (task: Task, target: LaneSet, context: TaskContext): Lane | undefined => {
+  const lanes = variantLanesOf(target, task.workflow);
+  const resume = lanes.findLast(lane => lane.category === 'active') ?? entryLane(target, task.workflow);
+  const move = laneFromFacts({ ...task, laneId: resume.id }, target, task.workflow, {
+    prs: task.links.prs,
+    runningVersion: context.runningVersion ?? null,
+  });
+  return move === null ? undefined : resume;
+};
+
+const variantLanesOf = (laneSet: LaneSet, workflow: Task['workflow']): readonly Lane[] => {
+  const lanes = variantLanes(laneSet, workflow);
+  return lanes.ok ? lanes.value : laneSet.lanes;
+};
+
+/** The first backlog lane a workflow walks, else its first lane: where a new task goes. */
+const entryLane = (laneSet: LaneSet, workflow: Task['workflow']): Lane => {
+  const backlog = firstLaneOfCategory(laneSet, workflow, 'backlog');
+  return backlog.ok ? backlog.value : (laneSet.lanes[0] as Lane);
+};
+
+const refile = (
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'refile' }>,
+  target: LaneSet | null,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('refile', context.standing, task);
+  const ref = formatTaskRef(task);
+  if (action.projectId === task.projectId) throw new BoardError('invalid', `${ref} is already on that board`);
+  if (target === null) {
+    throw new BoardError(
+      'no-lane-set',
+      `that project has no lanes yet; propose them with \`fy board lanes propose\` first`,
+    );
+  }
+  // A refile keeps the task's state. The owner already closed a task that is closed here, so carrying it
+  // into the other board's closed lane is no closing; the gate is for a task that is not closed yet.
+  const source = categoryOf(context.laneSet, task.laneId);
+  const alreadyClosed = source.ok && source.value === 'closed';
+  // Its facts land it where work resumes there, and move it on from there only as far as the first gate.
+  const atGate = task.dropped === null && !alreadyClosed && isGate(requireLane(context.laneSet, task.laneId));
+  const byFacts =
+    action.laneId === undefined && !alreadyClosed && task.dropped === null
+      ? factsLandingLane(task, target, context)
+      : undefined;
+  const landing = byFacts ?? refileLane(task, context.laneSet, target, action.laneId);
+  if (!(alreadyClosed && isClosedLane(landing))) requireOwnerForClosed(landing, context.standing, task);
+  const lane =
+    alreadyClosed || mayPassGate(context.standing, context.audience ?? 'external')
+      ? landing
+      : refileGateLanding(task, {
+          from: context.laneSet,
+          target,
+          lane: landing,
+          named: action.laneId !== undefined,
+          atGate,
+        });
+  const fromProject: BoardProjectId = task.projectId;
+  const refiled: Task = {
+    ...withEvent(
+      task,
+      { type: 'refiled', fromProject, toProject: action.projectId, toLane: lane.id, reason: action.reason ?? null },
+      context,
+    ),
+    projectId: action.projectId,
+    laneId: lane.id,
+  };
+  return { task: reconcileFacts(refiled, { ...context, laneSet: target }) ?? refiled };
+};
+
+/**
+ * Where a refile lands for anyone who may not pass a gate (docs/board.md § Tasks show progress): never past a gate of
+ * the other board's variant — a landing with one before it stops in that gate, and a lane NAMED past one is refused —
+ * and a task waiting at a gate never lands in a later stage than that gate's, nor leaves it for a lane that is not a
+ * gate. Throws `owner-gate` naming the gate.
+ */
+const refileGateLanding = (
+  task: Task,
+  facts: {
+    readonly from: LaneSet;
+    readonly target: LaneSet;
+    readonly lane: Lane;
+    readonly named: boolean;
+    readonly atGate: boolean;
+  },
+): Lane => {
+  const ref = formatTaskRef(task);
+  const source = requireLane(facts.from, task.laneId);
+  const stage = (lane: Lane): number => LANE_CATEGORIES.indexOf(lane.category);
+  if (
+    facts.atGate &&
+    (stage(facts.lane) > stage(source) || (!isGate(facts.lane) && stage(facts.lane) === stage(source)))
+  ) {
+    throw new BoardError(
+      'owner-gate',
+      `${ref} waits in ${source.name} for the owner; only the owner moves it on, to this board or another`,
+      ['owner-human'],
+    );
+  }
+  const entry = entryLane(facts.target, task.workflow);
+  const passed = gatesBetween(facts.target, { laneId: entry.id, workflow: task.workflow }, facts.lane)[0];
+  if (passed === undefined) return facts.lane;
+  if (!facts.named) return passed;
+  throw new BoardError(
+    'owner-gate',
+    `${ref} would land past ${passed.name} on that board, which waits for the owner; refile it without --lane, or to ${passed.name}`,
+    ['owner-human'],
+  );
+};
+
+const sameParent = (left: TaskRef | null, right: TaskRef | null): boolean =>
+  left === null || right === null ? left === right : sameRef(left, right);
+
+/**
+ * Moves a task under another task, or to the top level. The task's owner, its leads and the owner (human)
+ * may; the new parent must also be a task the caller may add a child under (`parentStanding`), so a task
+ * never lands on a tree its caller cannot write.
+ */
+const reparent = (
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'reparent' }>,
+  context: TaskContext,
+  parentStanding: BoardStanding | null,
+): TaskOutcome => {
+  requireStanding('reparent', context.standing, task);
+  const ref = formatTaskRef(task);
+  let to: TaskRef | null = null;
+  if (action.parent !== null) {
+    const parent = requireLocalTask(context.index, action.parent, 'parent');
+    requireStanding('adopt', parentStanding ?? 'reader', parent);
+    if (parentLoop(context.index, task.id, { id: parent.id })) {
+      throw new BoardError(
+        'cycle',
+        `${ref} cannot sit under ${formatTaskRef(parent)}: that task is ${ref} or inside it`,
+      );
+    }
+    to = { id: parent.id };
+  }
+  if (sameParent(task.parent, to)) {
+    throw new BoardError(
+      'invalid',
+      `${ref} is already ${to === null ? 'at the top level' : `under ${formatTaskRef(to)}`}`,
+    );
+  }
+  const sitting = { ...task, parent: to };
+  const moved = task.visibility === undefined ? sitting : withDefaultVisibility(sitting);
+  const was = taskVisibility(task);
+  const now = taskVisibility(moved);
+  // Where a task sits is part of what decides who can see it: a task never becomes a public sub-card, and a
+  // person's task is never hidden, by a caller the visibility rules would stop doing either directly.
+  const refusal =
+    now === 'public' && task.parent === null && to !== null
+      ? visibilityVerdict(moved, 'public', context.standing)
+      : was === 'public' && now === 'private'
+        ? visibilityVerdict(moved, 'private', context.standing)
+        : null;
+  if (refusal !== null) {
+    throw new BoardError('forbidden', `${ref}: ${refusal.message}, and moving it there would do that`, refusal.allowed);
+  }
+  return {
+    task: {
+      ...withEvent(moved, { type: 'reparented', from: task.parent, to, reason: action.reason ?? null }, context),
+      parent: to,
+    },
+  };
+};
+
+/**
+ * Applies one action request to one task. `focus` changes nothing on the task (the service records it
+ * on the session), so it answers `task: null` once its authority is proved. `refile` needs the target
+ * board's lanes, which the service reads first. `reparent` needs the caller's standing on the NEW parent.
+ */
+export const applyAction = (
+  task: Task,
+  action: TaskActionRequest,
+  context: TaskContext,
+  refileTarget: LaneSet | null = null,
+  parentStanding: BoardStanding | null = null,
+): TaskOutcome => {
+  const ref = formatTaskRef(task);
+  switch (action.action) {
+    case 'move':
+      return move(task, action.to, action.reason, context);
+    case 'focus':
+      requireStanding('focus', context.standing, task);
+      return { task: null };
+    case 'block':
+      requireStanding('block', context.standing, task);
+      requireOpen(task, 'block');
+      return {
+        task: {
+          ...withEvent(task, { type: 'blocked', reason: action.reason }, context),
+          blocked: { on: 'external', reason: action.reason, since: context.now },
+        },
+      };
+    case 'unblock':
+      requireStanding('unblock', context.standing, task);
+      if (task.blocked === null) throw new BoardError('invalid', `${ref} is not blocked`);
+      return {
+        task: { ...withEvent(task, { type: 'unblocked', reason: action.reason ?? null }, context), blocked: null },
+      };
+    case 'depend':
+      return depend(task, action, context);
+    case 'undepend':
+      return undepend(task, action, context);
+    case 'drop':
+      requireStanding('drop', context.standing, task);
+      requireOpen(task, 'drop');
+      return {
+        task: {
+          ...withEvent(task, { type: 'dropped', reason: action.reason }, context),
+          dropped: { reason: action.reason, at: context.now },
+        },
+      };
+    case 'reopen':
+      return reopen(task, action, context);
+    case 'clarify': {
+      requireStanding('clarify', context.standing, task);
+      const clarification: BoardClarification = {
+        text: action.text,
+        source: action.source,
+        at: context.now,
+        by: context.actor,
+      };
+      return {
+        task: {
+          ...withEvent(task, { type: 'clarified', text: action.text, source: action.source }, context),
+          clarifications: [...task.clarifications, clarification],
+        },
+      };
+    }
+    case 'link':
+      return link(task, action, context);
+    case 'trigger':
+      return report(task, action, context);
+    case 'assign':
+      if (context.handsDown !== true) requireAssign(context.standing, task);
+      if (action.assignee === task.assignee) throw new BoardError('invalid', `${ref} is already assigned that way`);
+      return {
+        task: {
+          ...withEvent(
+            task,
+            {
+              type: 'assigned',
+              from: task.assignee,
+              to: action.assignee,
+              ...(context.handsDown === true ? { handedDown: true as const } : {}),
+            },
+            context,
+          ),
+          assignee: action.assignee,
+        },
+      };
+    case 'claim': {
+      const actor = context.actor;
+      if (context.claimedFrom === undefined || actor.kind !== 'ferret') {
+        const caller: BoardCaller =
+          actor.kind === 'ferret' ? { kind: 'ferret', ferret: actor.ferret } : { kind: 'owner' };
+        throw new BoardError('forbidden', claimRefusalMessage(task, caller));
+      }
+      const claimer = actor.ferret;
+      return {
+        task: {
+          ...withEvent(
+            task,
+            { type: 'assigned', from: task.assignee, to: claimer, claimedFrom: context.claimedFrom },
+            context,
+          ),
+          assignee: claimer,
+        },
+      };
+    }
+    case 'adopt': {
+      const actor = context.actor;
+      if (context.adoptedFrom === undefined || actor.kind !== 'ferret') {
+        throw new BoardError(
+          'forbidden',
+          `only a live lead may adopt ${ref}, and only when its owner ferret and its assignee have both ended`,
+        );
+      }
+      const adopter = actor.ferret;
+      return {
+        task: {
+          ...withEvent(
+            task,
+            {
+              type: 'assigned',
+              from: task.assignee,
+              to: adopter,
+              adopted: {
+                from: context.adoptedFrom,
+                reason: action.reason ?? `owner ferret ${task.owner} and assignee ${effectiveAssignee(task)} ended`,
+              },
+            },
+            context,
+          ),
+          owner: adopter,
+          assignee: adopter,
+        },
+      };
+    }
+    case 'note':
+      requireStanding('note', context.standing, task);
+      return { task: withEvent(task, { type: 'note', text: action.text }, context) };
+    case 'edit':
+      return edit(task, action, context);
+    case 'file':
+      return file(task, action, context);
+    case 'order':
+      requireStanding('order', context.standing, task);
+      if (action.order === task.order) throw new BoardError('invalid', `${ref} already has that order`);
+      return {
+        task: {
+          ...withEvent(task, { type: 'ordered', from: task.order, to: action.order }, context),
+          order: action.order,
+        },
+      };
+    case 'snooze':
+      requireStanding('snooze', context.standing, task);
+      if (action.until === null) {
+        if (task.snoozed == null) throw new BoardError('invalid', `${ref} is not snoozed`);
+      } else if (Date.parse(action.until) <= Date.parse(context.now)) {
+        throw new BoardError('invalid', `${ref} can only be snoozed to a time that has not passed`);
+      }
+      return {
+        task: {
+          ...withEvent(task, { type: 'snoozed', until: action.until }, context),
+          snoozed: action.until === null ? null : { until: action.until, laneId: task.laneId },
+        },
+      };
+    case 'refile':
+      return refile(task, action, refileTarget, context);
+    case 'reparent':
+      return reparent(task, action, context, parentStanding);
+    case 'visibility':
+      return setVisibility(task, action, context);
+  }
+};
+
+// ---------------------------------------------------------------------------------------------------
+// Create
+// ---------------------------------------------------------------------------------------------------
+
+export interface NewTaskContext {
+  readonly id: TaskId;
+  readonly machineId: string;
+  readonly now: string;
+  readonly actor: TaskActor;
+  readonly standing: BoardStanding;
+  /** The accountable ferret: the creating session, or the assignee the owner named. */
+  readonly owner: string;
+  readonly projectId: BoardProjectId;
+  readonly laneSet: LaneSet;
+  readonly index: BoardIndex;
+}
+
+/** A new task, before the store has it: in its variant's first backlog lane unless one is named. */
+export const newTask = (request: TaskCreateRequest, context: NewTaskContext): Task => {
+  const lane =
+    request.laneId === undefined
+      ? entryLane(context.laneSet, request.workflow)
+      : requireLane(context.laneSet, request.laneId);
+  requireOwnerForClosed(lane, context.standing, { id: context.id });
+  for (const dependency of request.dependsOn) requireLocalTask(context.index, dependency.task, 'dependency');
+  return {
+    format: 1,
+    id: context.id,
+    machineId: context.machineId,
+    projectId: context.projectId,
+    laneId: lane.id,
+    kind: request.kind,
+    title: request.title,
+    summary: request.summary,
+    ask: request.ask,
+    clarifications: [],
+    premise: request.premise,
+    context: request.context,
+    terms: request.terms,
+    brief: request.brief,
+    howToTest: request.howToTest,
+    ...(request.progress === undefined ? {} : { progress: request.progress }),
+    owner: context.owner,
+    assignee: request.assignee,
+    parent: request.parent,
+    dependsOn: request.dependsOn.map(dependency => ({ task: { id: dependency.task.id }, until: dependency.until })),
+    blocked: null,
+    dropped: null,
+    workflow: request.workflow,
+    links: { prs: [], branch: request.branch ?? null, commits: [], docs: request.docs },
+    files: request.files,
+    order: null,
+    createdAt: context.now,
+    createdBy: context.actor,
+    history: [{ seq: 1, at: context.now, actor: context.actor, type: 'created', laneId: lane.id }],
+  };
+};

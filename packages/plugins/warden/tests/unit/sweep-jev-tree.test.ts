@@ -144,11 +144,11 @@ describe('a question Jev was not sure of', () => {
       node: 'wait_reasonable',
       confidence: 0.58,
     });
-    const card = subject.raises.at(-1)?.request;
-    should(card?.why).equal(
+    const task = subject.raises.at(-1)?.request;
+    should(task?.why).equal(
       'Jev could not answer “Is the wait still reasonable?” surely enough (58% sure, below your bar).',
     );
-    should(JSON.stringify(card)).containEql(
+    should(JSON.stringify(task)).containEql(
       'What the daemon saw: Is the agent program running: yes; Has its output changed lately: no.',
     );
   });

@@ -4,7 +4,7 @@ export * from './ferret-boards.ts';
 export * from './ferret-projects.ts';
 export * from './inferred-lane-proposer.ts';
 export * from './lane-proposal-acceptance.ts';
-export * from './lane-proposal-card.ts';
+export * from './lane-proposal-task.ts';
 export * from './lane-set-policy.ts';
 export * from './lane-set-service.ts';
 export * from './lineage.ts';
