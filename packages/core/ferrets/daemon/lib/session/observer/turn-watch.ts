@@ -51,6 +51,14 @@ export interface PacedTurnPorts extends SessionTurnPorts {
    * `undefined` for one that is told every time it happens. No key, no dedupe.
    */
   failureKey?(error: unknown): string | undefined;
+  /**
+   * Told when a look AGREES with the recorded turn: it decided the turn the document already holds, so nothing is
+   * recorded. What follows the recorded turn (the ferret's registry state) may still disagree with it: a launch moves
+   * the ferret to `working` without touching the document, and a resume that lands before a tick saw the old pane gone
+   * keeps the last run's `your-turn` there. If the new run's turns all end between two looks, no look ever records a
+   * change, so only this tells the follower the turn it should be on. Absent: nothing follows an agreeing look.
+   */
+  agreed?(id: SessionId, state: SessionTurnState): void;
 }
 
 /** The frame identity a look carries: its digest, `absent` for no pane, `undefined` when the runner gave none. */
@@ -206,6 +214,20 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
     }
   }
 
+  /**
+   * Tells the host a look that recorded nothing because it decided exactly the recorded turn (see
+   * {@link PacedTurnPorts.agreed}). Only a CONFIRMED observation counts. The two-frame allowance that records an
+   * unconfirmed `your-turn` is no agreement here: after a kill and a resume inside one tick, its first frame may be the
+   * old pane's, so the new pane's first unconfirmed look would read as two (an idle blip and a spurious turn end).
+   */
+  private tellAgreed(session: TurnWatchSession, observation: TurnObservation | undefined): void {
+    const recorded = session.state.turnState;
+    if (recorded === undefined || observation?.confirmed !== true || observation.state !== recorded) return;
+    try {
+      this.ports.agreed?.(session.id, recorded);
+    } catch {}
+  }
+
   private async watch(session: TurnWatchSession): Promise<TurnStateChange | undefined> {
     const live = isTurnStatus(session.state.status);
     const nowMs = Date.parse(this.ports.clock.now());
@@ -247,7 +269,10 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
       frame: wokenSince ? undefined : frame,
       facts,
     });
-    if (change === undefined) return undefined;
+    if (change === undefined) {
+      this.tellAgreed(session, step.observation);
+      return undefined;
+    }
     const recorded = await this.ports.record(session.id, change, this.ports.clock.now());
     // The writer read the document under its lock and did not throw: whatever was wrong with it has been mended.
     this.told.delete(session.id);

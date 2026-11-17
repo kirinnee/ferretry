@@ -81,4 +81,26 @@ describe('PacedTurnWatcher, the host sinks it tells a failure through', () => {
     should([...report.failures.keys()]).deepEqual([ID]);
     should(report.failures.get(ID)).equal('the pane could not be read');
   });
+  it('an agreed sink that throws cannot stop the tick: the look still decided nothing to record', async () => {
+    // Arrange: the pane is at its prompt over no transcript, which is a confirmed your-turn the document already holds.
+    const agreed: string[] = [];
+    const watcher = new PacedTurnWatcher(
+      ports({
+        sessions: async () => [{ id: ID, state: { status: 'running', turn: 1, turnState: 'your-turn' } }],
+        pane: async () => ({ working: false, atPrompt: true, permission: false, frame: 'idle' }),
+        agreed: (_id, state) => {
+          agreed.push(state);
+          throw new Error('the host sink is gone');
+        },
+      }),
+    );
+
+    // Act
+    const report = await watcher.tick();
+
+    // Assert
+    should(agreed).deepEqual(['your-turn']);
+    should([...report.changed.keys()]).deepEqual([]);
+    should([...report.failures.keys()]).deepEqual([]);
+  });
 });
