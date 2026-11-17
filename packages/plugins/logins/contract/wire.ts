@@ -626,6 +626,8 @@ export const LoginChangeSchema = z.discriminatedUnion('kind', [
     id: z.string().min(1).max(200),
     /** The CLI. For a preset with both halves, the one listed first. */
     harness: HarnessKindSchema,
+    /** `preset` only: the CLIs the login drives, `harness` among them. Absent: every one the preset offers. */
+    halves: z.array(HarnessKindSchema).min(1).readonly().optional(),
     label: ChangeLabelSchema.optional(),
     /** Absent (or `ferretry`) is an empty slot Ferretry keeps; `host` is the person's own login, shared in place. */
     store: LoginStoreSchema.optional(),

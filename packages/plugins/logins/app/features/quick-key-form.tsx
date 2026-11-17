@@ -7,7 +7,8 @@
  * field. A name the Vault ALREADY holds is asked about first (keep the one there, or replace it), as Paste variables… does,
  * so a key a working login may be using is never overwritten without the person's say-so. A preset that needs more than
  * a key (another value the person must type, or a cloud credential) gets the full form straight away, and **More fields…**
- * opens that full form for any preset.
+ * opens that full form for any preset. A preset that drives several CLIs asks which one the login is for, and the login is
+ * made for THAT CLI alone, carrying only the variables it reads (never the other CLI's).
  */
 
 import { useId, useRef, useState } from 'react';
@@ -15,7 +16,7 @@ import type { ProviderPresetView } from '../../contract/index.ts';
 import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { useLoginChanges } from '../lib/login-changes.ts';
 import { readLogins } from '../lib/logins-api.ts';
-import { type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
+import { HARNESS_NAMES, type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
 import { heldSecretNames, saveSecret } from '../lib/secrets-api.ts';
 import { Button, ChangeApplyPanel, SecretInput, useSecretField } from '../ui.ts';
 import { usableHarnesses } from './provider-grid.tsx';
@@ -41,10 +42,28 @@ export function quickKeyVariable(preset: ProviderPresetView): PresetVariable | u
 /** The Vault name a preset files its key under. */
 const secretName = (variable: PresetVariable): string => variable.secret ?? variable.name;
 
-/** What the login is made with: each plain variable's own value (never a typed one) and the key's reference. */
-function loginEnvironment(preset: ProviderPresetView, key: PresetVariable): Readonly<Record<string, string>> {
+/**
+ * The CLIs the quick form offers: the ones the preset can drive here that read the key. A preset that offers several
+ * leaves the person to choose; one that offers a single CLI never asks.
+ */
+const quickHarnesses = (preset: ProviderPresetView, key: PresetVariable): readonly HarnessKind[] => {
+  const usable = usableHarnesses(preset);
+  const reading = usable.filter(harness => key.harnesses.includes(harness));
+  return reading.length > 0 ? reading : usable;
+};
+
+/**
+ * What the login is made with: each plain variable's own value (never a typed one) and the key's reference. A preset
+ * that drives several CLIs sends only the chosen CLI's variables.
+ */
+function loginEnvironment(
+  preset: ProviderPresetView,
+  key: PresetVariable,
+  harness?: HarnessKind,
+): Readonly<Record<string, string>> {
   const entries: [string, string][] = [];
   for (const variable of preset.variables) {
+    if (harness !== undefined && !variable.harnesses.includes(harness)) continue;
     if (variable === key) entries.push([variable.name, `\${secret:${secretName(variable)}}`]);
     else if ((variable.value ?? '').trim() !== '' || variable.allowEmpty)
       entries.push([variable.name, variable.value ?? '']);
@@ -66,8 +85,11 @@ export interface QuickKeyFormProps {
 export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMore }: QuickKeyFormProps) {
   const changes = useLoginChanges(client);
   const name = secretName(variable);
-  const harnesses = usableHarnesses(preset);
-  const harness: HarnessKind = harnesses[0] ?? preset.harness;
+  const harnesses = quickHarnesses(preset, variable);
+  const [chosen, setChosen] = useState<HarnessKind | undefined>(undefined);
+  const several = harnesses.length > 1;
+  const harness: HarnessKind =
+    chosen !== undefined && harnesses.includes(chosen) ? chosen : (harnesses[0] ?? preset.harness);
   /** The key lives only in the field's own value: read from here on submit, never held in React state. */
   const field = useSecretField();
   const inputId = useId();
@@ -95,7 +117,8 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
       harness,
       store: 'environment',
       preset: preset.id,
-      env: loginEnvironment(preset, variable),
+      env: loginEnvironment(preset, variable, several ? harness : undefined),
+      ...(several ? { halves: [harness] } : {}),
     });
     if (result.kind === 'applied') onAdded(id);
   };
@@ -158,6 +181,24 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
 
   return (
     <div className="flex flex-col gap-2" data-quick-key-form={preset.id}>
+      {several ? (
+        <label className="flex flex-col gap-1 text-cell text-fg">
+          Use it with
+          <select
+            className="kt-input"
+            value={harness}
+            disabled={filed || asking || saving}
+            data-quick-key-harness=""
+            onChange={event => setChosen(event.target.value as HarnessKind)}
+          >
+            {harnesses.map(name => (
+              <option key={name} value={name}>
+                {HARNESS_NAMES[name]}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       {filed ? (
         <p role="status" className="m-0 text-cell leading-base text-muted" data-quick-key-filed="">
           Your key is in the secret store as <span className="font-mono">{name}</span>; the login names it as{' '}
