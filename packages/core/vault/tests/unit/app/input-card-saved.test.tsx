@@ -6,7 +6,14 @@
 import { describe, expect, it } from 'bun:test';
 import { type PlacedPanel, RouterProvider, WithSlotPanels } from '@ferretry/app/testing';
 import { InputCard } from '../../../app/features/input/input-card.tsx';
-import { savedChoices } from '../../../app/lib/input-card.ts';
+import {
+  offerBody,
+  offerElsewhereWords,
+  offerWhyWords,
+  offerWords,
+  savedChoices,
+  signInNote,
+} from '../../../app/lib/input-card.ts';
 import { INPUT_SETTLED_SLOT, InputDeliverBodySchema, InputRequestSchema } from '../../../contract/index.ts';
 import { click, settle, typeInto } from '../../support/app/dom-form.ts';
 import { mount, must } from '../../support/app/dom.ts';
@@ -115,6 +122,46 @@ describe('the offers the daemon drew', () => {
     } finally {
       await mounted.unmount();
     }
+  });
+});
+
+describe('the offers in words', () => {
+  it('says why the one-tap choice is first, naming the project when it is the project’s default', () => {
+    expect(offerWhyWords({ ...MATCHED_OFFER, why: 'project', project: 'ferretry' })).toBe('The default for ferretry');
+    expect(offerWhyWords({ ...MATCHED_OFFER, why: 'folder' })).toBe('The default for this folder');
+    expect(offerWhyWords(HAND_OFFER)).toBeUndefined();
+  });
+
+  it('says where a hand-picked account signs in, and that one linked to no site is not linked', () => {
+    expect(offerElsewhereWords(HAND_OFFER)).toBe('Signs in at liftoff.okta.com');
+    expect(offerElsewhereWords({ ...HAND_OFFER, elsewhere: [] })).toBe('Not linked to a site');
+    expect(offerElsewhereWords(MATCHED_OFFER)).toBeUndefined();
+  });
+
+  it('puts the username beside the label unless the label already names it in brackets', () => {
+    expect(offerWords(MATCHED_OFFER)).toBe('sudo on kirin-box · kirin');
+    expect(offerWords({ ...MATCHED_OFFER, label: 'GitHub (kirin)' })).toBe('GitHub (kirin)');
+    expect(offerWords(HAND_OFFER)).toBe('Work admin');
+  });
+
+  it('says how an SSO sign-in goes, and nothing for a plain password sign-in', () => {
+    const base = savedRequest();
+    const withSignIn = (method: unknown) =>
+      InputRequestSchema.parse({
+        ...base,
+        saved: { ...base.saved, signIn: { id: 'ACME', label: 'Acme', method } },
+      });
+    expect(signInNote(withSignIn({ kind: 'sso', name: 'Acme SSO' }))).toBe('Sign in with Acme SSO');
+    expect(signInNote(withSignIn({ kind: 'password' }))).toBeUndefined();
+    expect(signInNote(base)).toBeUndefined();
+  });
+
+  it('refuses to build a tap while the daemon is looking at the target again', () => {
+    const { observedDigest: _gone, ...looking } = savedRequest();
+    expect(offerBody(looking as ReturnType<typeof savedRequest>, MATCHED_OFFER, true, 'd1')).toEqual({
+      ok: false,
+      problem: 'Ferretry is looking at the target again',
+    });
   });
 });
 
