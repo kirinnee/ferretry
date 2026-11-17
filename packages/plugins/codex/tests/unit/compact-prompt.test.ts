@@ -1,19 +1,29 @@
 import { describe, expect, test } from 'bun:test';
 import { COMPACTION_KEEP_LINES, COMPACTION_REABSORB_LINES } from '@ferretry/core-ferrets/contract';
-import { CODEX_COMPACT_PROMPT } from '../../daemon/lib/compact-prompt.ts';
+import { codexCompactPrompt } from '../../daemon/lib/compact-prompt.ts';
 import { buildCodexLaunchArgv } from '../../daemon/lib/launch.ts';
 import { tomlString } from '../../daemon/lib/toml.ts';
+
+const SESSION = 'mwk9aqzd-bd4e1844';
+const CODEX_COMPACT_PROMPT = codexCompactPrompt(SESSION);
 
 describe('the Codex compaction prompt', () => {
   test('still asks for the summary, because the setting replaces Codex’s own summary prompt', () => {
     expect(CODEX_COMPACT_PROMPT.split('\n')[0]).toContain('handoff summary');
   });
 
-  test('carries the one keep text and the one re-read text Claude gets, with the session left to the shell', () => {
+  test('carries the one keep text and the one re-read text Claude gets, with the ferret’s own session id filled in', () => {
     for (const line of COMPACTION_KEEP_LINES) expect(CODEX_COMPACT_PROMPT).toContain(line);
     for (const line of COMPACTION_REABSORB_LINES)
-      expect(CODEX_COMPACT_PROMPT).toContain(line.replaceAll('%s', '$FY_SESSION_ID'));
+      expect(CODEX_COMPACT_PROMPT).toContain(line.replaceAll('%s', SESSION));
     expect(CODEX_COMPACT_PROMPT).not.toContain('%s');
+  });
+
+  test('the prompt a Codex ferret gets holds its id and no $FY_ text', () => {
+    expect(CODEX_COMPACT_PROMPT).toContain(`This is session ${SESSION}.`);
+    expect(CODEX_COMPACT_PROMPT).toContain(`fy logs ${SESSION} --turn 1`);
+    expect(CODEX_COMPACT_PROMPT).not.toContain('$FY_');
+    expect(codexCompactPrompt('other-id')).not.toContain(SESSION);
   });
 
   test('says each thing once', () => {

@@ -6,7 +6,7 @@ import should from 'should';
 import { CODEX_OFFLINE_LAUNCH_ERROR, codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { realClock } from '../support/ports.ts';
-import { CODEX_COMPACT_PROMPT, tomlString, tomlTables } from '../../daemon/lib/index.ts';
+import { codexCompactPrompt, tomlString, tomlTables } from '../../daemon/lib/index.ts';
 import { CODEX_LAUNCH_SETTINGS, CODEX_SETTINGS } from '../../contract/index.ts';
 import {
   CODEX_QUESTIONS_FEATURE,
@@ -200,7 +200,7 @@ describe('the Codex harness', () => {
     const { runner, seen } = fakeRunner();
     await harness.start(specOf({}), runner, ENV);
     const command = seen[0]?.spec.command ?? [];
-    const at = command.indexOf(`compact_prompt=${tomlString(CODEX_COMPACT_PROMPT)}`);
+    const at = command.indexOf(`compact_prompt=${tomlString(codexCompactPrompt(FERRET))}`);
     should(at).be.greaterThan(0);
     should(command[at - 1]).equal('-c');
   });

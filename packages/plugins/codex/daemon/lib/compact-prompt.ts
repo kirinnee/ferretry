@@ -4,20 +4,19 @@
  * from hooks; here they ride in the summary request, and the summary ends with the re-read instructions, so the ferret
  * reads them first when it resumes.
  *
- * The pane's `FY_SESSION_ID` is left for the shell to expand: the ferret's own commands read it.
+ * The ferret's session id is written into the text when the prompt is composed at launch. Codex does not expand a shell
+ * variable inside a prompt, so a `$FY_SESSION_ID` left in it would reach the agent as the variable's name, not its id.
  */
 import { COMPACTION_KEEP_LINES, compactionReabsorbLines } from '@ferretry/core-ferrets/contract';
 
 /** The Codex config key its compaction (summary) prompt is read from. */
 export const CODEX_COMPACT_PROMPT_KEY = 'compact_prompt';
 
-/** The session id as the ferret's own shell spells it. */
-const SESSION = '$FY_SESSION_ID';
-
-/** The compaction prompt: the summary Codex needs, what it must keep, and what the resumed ferret must re-read. */
-export const CODEX_COMPACT_PROMPT = [
-  'Write a handoff summary of this conversation for the agent that will resume the work: progress so far, key decisions, constraints, and what remains.',
-  ...COMPACTION_KEEP_LINES,
-  'End the summary with these instructions, word for word:',
-  ...compactionReabsorbLines(SESSION),
-].join('\n');
+/** The compaction prompt for one ferret: the summary Codex needs, what it must keep, and what the resumed ferret must re-read. */
+export const codexCompactPrompt = (session: string): string =>
+  [
+    'Write a handoff summary of this conversation for the agent that will resume the work: progress so far, key decisions, constraints, and what remains.',
+    ...COMPACTION_KEEP_LINES,
+    'End the summary with these instructions, word for word:',
+    ...compactionReabsorbLines(session),
+  ].join('\n');
