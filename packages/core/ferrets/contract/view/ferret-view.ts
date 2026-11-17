@@ -327,6 +327,7 @@ export const LaunchInstructionSectionIdSchema = z.enum([
   'pack',
   'agenda',
   'learning',
+  'rm-targets',
 ]);
 export type LaunchInstructionSectionId = z.infer<typeof LaunchInstructionSectionIdSchema>;
 
