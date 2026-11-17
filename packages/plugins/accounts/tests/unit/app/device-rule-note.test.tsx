@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { INPUT_SETTLED_SLOT } from '@ferretry/core-vault/contract';
+import { INPUT_CARD_CODES_SLOT, INPUT_SETTLED_SLOT } from '@ferretry/core-vault/contract';
 import { ACCESS_DEVICE_NOTE_SLOT, ACCOUNTS_CONTRIBUTED_SLOTS } from '../../../contract/slots.ts';
 import { DeviceRuleNote } from '../../../app/features/secure-copy/device-rule-note.tsx';
 import { deviceRuleNotePanel } from '../../../app/surfaces.tsx';
@@ -60,10 +60,12 @@ describe('the rule count under a device’s revoke', () => {
 
 describe('the panel Accounts places in Access’s device-note slot', () => {
   it('is declared by the manifest in that slot', () => {
-    expect(ACCOUNTS_CONTRIBUTED_SLOTS).toEqual([ACCESS_DEVICE_NOTE_SLOT, INPUT_SETTLED_SLOT]);
+    expect(ACCOUNTS_CONTRIBUTED_SLOTS).toEqual([ACCESS_DEVICE_NOTE_SLOT, INPUT_SETTLED_SLOT, INPUT_CARD_CODES_SLOT]);
     expect((manifest.ui?.panels ?? []).map(panel => ({ slot: panel.slot, id: panel.id }))).toEqual([
       { slot: ACCESS_DEVICE_NOTE_SLOT, id: 'device-rule-note' },
       { slot: INPUT_SETTLED_SLOT, id: 'sign-in-rule-offer' },
+      { slot: INPUT_SETTLED_SLOT, id: 'always-use' },
+      { slot: INPUT_CARD_CODES_SLOT, id: 'input-codes' },
     ]);
   });
 

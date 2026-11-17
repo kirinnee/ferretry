@@ -10,10 +10,13 @@
  * cleared the moment the daemon has staged it; what is saved is bound to a passkey for that one stage.
  */
 
+import type { InputSaved } from '@ferretry/core-vault/contract';
 import {
+  type AccountList,
   type AccountSummary,
   factorMismatch,
   factorMismatchWords,
+  matchedSignIns,
   MAX_SEEDS_PER_ACCOUNT,
   type ParsedTotpKey,
   type Place,
@@ -32,6 +35,45 @@ export interface CodesAccount {
   /** How many of its keys already hold a seed. */
   readonly seeds: number;
 }
+
+/**
+ * The accounts a code card's panel may save to: the ones with a sign-in the daemon matches to this card's key
+ * (`saved.match`, the same exact match it checks a stage against, so a seedless account is here too), the daemon's
+ * one-tap choice first. An account the daemon would not match is never offered, and the daemon refuses a stage for
+ * any other (`not_this_cards_account`), so this only decides what is worth drawing.
+ */
+export const codesAccounts = (saved: InputSaved | undefined, list: AccountList): readonly CodesAccount[] => {
+  const primary = saved?.offers.find(offer => offer.primary === true && offer.matched)?.id;
+  const ids = [...new Set(matchedSignIns(saved?.match, list.signIns).map(signIn => signIn.account))].sort(
+    (left, right) => Number(right === primary) - Number(left === primary),
+  );
+  const accounts: CodesAccount[] = [];
+  for (const id of ids) {
+    const account = list.accounts.find(each => each.id === id);
+    if (account === undefined) continue;
+    accounts.push({
+      id: account.id,
+      label: account.label,
+      ...(account.username === undefined ? {} : { username: account.username }),
+      places: list.signIns.filter(signIn => account.signIns.includes(signIn.id)).map(signIn => signIn.place),
+      seeds: account.factors.filter(key => key.automatic).length,
+    });
+  }
+  return accounts;
+};
+
+/**
+ * Which account the panel starts on: the daemon's one-tap choice when it made one, else the only one. With several
+ * and no primary the owner picks (`undefined` here), so the panel never guesses an account for a seed.
+ */
+export const startingAccount = (
+  saved: InputSaved | undefined,
+  accounts: readonly CodesAccount[],
+): CodesAccount | undefined => {
+  const primary = saved?.offers.find(offer => offer.primary === true && offer.matched);
+  const chosen = primary === undefined ? undefined : accounts.find(account => account.id === primary.id);
+  return chosen ?? (accounts.length === 1 ? accounts[0] : undefined);
+};
 
 /** What the passkey prompt says is being approved: the account named from the daemon's own list, never a ferret's words. */
 export const addKeyActWords = (account: Pick<CodesAccount, 'label' | 'username'>): string =>

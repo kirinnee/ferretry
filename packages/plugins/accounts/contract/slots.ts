@@ -1,4 +1,4 @@
-import { INPUT_SETTLED_SLOT } from '@ferretry/core-vault/contract';
+import { INPUT_CARD_CODES_SLOT, INPUT_SETTLED_SLOT } from '@ferretry/core-vault/contract';
 
 /**
  * THE SLOTS ACCOUNTS FILLS ON ANOTHER PLUGIN'S PAGE.
@@ -12,7 +12,11 @@ import { INPUT_SETTLED_SLOT } from '@ferretry/core-vault/contract';
  *
  * `vault.input-settled` — on the Vault's input card, after a saved account was tapped and the daemon typed it. The Vault
  * names it and what it carries (its `contract/input-slots.ts`: Accounts imports the name, it never spells it); Accounts' panel offers "Don't ask again" for the sign-in the tap used. The props are ids and place keys the
- * card already held: never a value.
+ * card already held: never a value. It also offers "Always use for <project>" there, and the owner's tap writes the default.
+ *
+ * `vault.input-card-codes` — on the Vault's input card while it asks for a one-time code. The Vault names it and what it
+ * carries (its `contract/input-card-slots.ts`); Accounts' panel is "Set up automatic codes" (the 2FA key is typed into
+ * Accounts' own masked field, bound to a passkey). The props are ids and place keys: never a value, a code or a seed.
  */
 
 /** Under a paired device's Revoke on Add device: what else revoking it does. `subject` is the device's id. */
@@ -22,4 +26,4 @@ export const ACCESS_DEVICE_NOTE_SLOT = 'access.device-note' as const;
  * Every slot of another plugin's page that Accounts contributes a panel to. `vault.input-settled` (the Vault's name,
  * `subject` is the asking ferret) comes from the Vault's contract.
  */
-export const ACCOUNTS_CONTRIBUTED_SLOTS = [ACCESS_DEVICE_NOTE_SLOT, INPUT_SETTLED_SLOT] as const;
+export const ACCOUNTS_CONTRIBUTED_SLOTS = [ACCESS_DEVICE_NOTE_SLOT, INPUT_SETTLED_SLOT, INPUT_CARD_CODES_SLOT] as const;

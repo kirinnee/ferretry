@@ -11,7 +11,7 @@
  * daemon sends only to an owner who may use secrets), never a typed value, never a code, never a seed. The slot is
  * mounted ONLY while the card is pending and asks a code; a filler that needs a value gets it from its own field.
  */
-import type { InputSaved } from './inputs-wire.ts';
+import { type InputSaved, InputSavedSchema } from './inputs-wire.ts';
 
 export const INPUT_CARD_CODES_SLOT = 'vault.input-card-codes' as const;
 
@@ -39,14 +39,15 @@ export function readInputCardCodesSlotProps(props: unknown): InputCardCodesSlotP
   const { requestId, ferretId, saved, refresh, hold } = candidate;
   if (typeof requestId !== 'string' || requestId === '') return undefined;
   if (typeof ferretId !== 'string' || ferretId === '') return undefined;
-  if (typeof saved !== 'object' || saved === null || Array.isArray(saved)) return undefined;
-  if (!Array.isArray((saved as { offers?: unknown }).offers)) return undefined;
+  // The same schema the daemon's request is read with: a filler never believes a shape the wire would refuse.
+  const read = InputSavedSchema.safeParse(saved);
+  if (!read.success) return undefined;
   if (typeof refresh !== 'function') return undefined;
   if (hold !== undefined && typeof hold !== 'function') return undefined;
   return {
     requestId,
     ferretId,
-    saved: saved as InputSaved,
+    saved: read.data,
     refresh: refresh as () => void,
     ...(hold === undefined ? {} : { hold: hold as (holding: boolean) => void }),
   };

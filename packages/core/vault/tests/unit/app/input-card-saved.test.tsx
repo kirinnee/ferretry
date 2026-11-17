@@ -17,6 +17,7 @@ import {
 import { INPUT_SETTLED_SLOT, InputDeliverBodySchema, InputRequestSchema } from '../../../contract/index.ts';
 import { click, settle, typeInto } from '../../support/app/dom-form.ts';
 import { interact, mount, must } from '../../support/app/dom.ts';
+import { settledSlotProps } from '../../../app/lib/input-card.ts';
 import {
   FAKE_VALUE,
   HAND_OFFER,
@@ -327,6 +328,20 @@ describe('a tap on a saved account', () => {
     } finally {
       await mounted.unmount();
     }
+  });
+});
+
+describe('what the settled card tells the slot about the tapped account', () => {
+  it('says it was already the project’s default only when the daemon chose it for the project reason', () => {
+    const request = savedRequest();
+    const chosen = { ...MATCHED_OFFER, primary: true, why: 'project', project: 'ferretry' } as never;
+    expect(settledSlotProps(request, chosen)).toMatchObject({ entry: MATCHED_OFFER.id, projectDefault: true });
+    expect(settledSlotProps(request, { ...MATCHED_OFFER, primary: true, why: 'only' } as never)).not.toHaveProperty(
+      'projectDefault',
+    );
+    expect(settledSlotProps(request, { ...MATCHED_OFFER, primary: undefined } as never)).not.toHaveProperty(
+      'projectDefault',
+    );
   });
 });
 

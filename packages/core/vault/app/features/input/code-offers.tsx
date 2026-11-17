@@ -9,6 +9,7 @@
  * {@link CodesSlot} is the place Accounts draws "Set up automatic codes" (`contract/input-card-slots.ts`). The card never
  * knows what draws there.
  */
+import { useEffect, useRef } from 'react';
 import { PanelSlot, useOptionalRouter } from '@ferretry/app';
 import { INPUT_CARD_CODES_SLOT, type InputCardCodesSlotProps, type InputSavedOffer } from '../../../contract/index.ts';
 import {
@@ -80,6 +81,7 @@ export function CodeButtons({ offer, keys, disabled, onUse }: CodeButtonsProps) 
 
 /** Mounts whatever panels any plugin contributes to the codes slot, handed the ids the card holds and no value. */
 export function CodesSlot({ slot }: { readonly slot: InputCardCodesSlotProps }) {
+  useLetGoOnUnmount(slot.hold);
   const router = useOptionalRouter();
   const daemon = router?.route.kind === 'screen' ? router.route.daemon : undefined;
   if (daemon === undefined) return null;
@@ -87,5 +89,20 @@ export function CodesSlot({ slot }: { readonly slot: InputCardCodesSlotProps }) 
     <div data-input-codes-slot="">
       <PanelSlot daemon={daemon} props={{ ...slot }} slot={INPUT_CARD_CODES_SLOT} subject={slot.ferretId} />
     </div>
+  );
+}
+
+/**
+ * A panel that said `hold(true)` must not keep the card holding once its slot is gone (the card stopped offering it, or
+ * the card went away): the slot's own unmount says `hold(false)` for it.
+ */
+export function useLetGoOnUnmount(hold: ((holding: boolean) => void) | undefined): void {
+  const latest = useRef(hold);
+  latest.current = hold;
+  useEffect(
+    () => () => {
+      latest.current?.(false);
+    },
+    [],
   );
 }

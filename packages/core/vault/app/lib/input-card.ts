@@ -361,6 +361,7 @@ export const settledSlotProps = (request: InputRequest, offer: InputSavedOffer):
   ...(offer.signIn === undefined ? {} : { signIn: offer.signIn }),
   ...(request.saved?.match === undefined ? {} : { place: request.saved.match }),
   ...(request.saved?.project === undefined ? {} : { project: request.saved.project }),
+  ...(offer.primary === true && offer.why === 'project' ? { projectDefault: true as const } : {}),
 });
 
 // ─── a paste of a secure copy (docs/secure-copy.md) ───────────────────────────────────────────────────────────────────

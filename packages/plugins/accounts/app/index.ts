@@ -5,7 +5,9 @@ import { ruleLinkView, RULE_FRAGMENT_KEY } from './features/secure-copy/rule-lin
 import { RuleLinkHold } from './lib/rule-link.ts';
 import {
   accountsTab,
+  alwaysUsePanel,
   deviceRuleNotePanel,
+  inputCodesPanel,
   secureCopyTab,
   signInApprovalRenderer,
   signInRuleOfferPanel,
@@ -30,6 +32,9 @@ export default provideToShell(
         'device-rule-note': deviceRuleNotePanel(client),
         // The Vault's input card offers `vault.input-settled` after a saved account settled it: "Don't ask again".
         'sign-in-rule-offer': signInRuleOfferPanel(client),
+        // ...and "Always use for <project>" after a hand tap; `vault.input-card-codes`, under a code card: "Set up automatic codes".
+        'always-use': alwaysUsePanel(client),
+        'input-codes': inputCodesPanel(client),
       },
     }),
   }),

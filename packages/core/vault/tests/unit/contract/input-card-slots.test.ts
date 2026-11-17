@@ -43,10 +43,34 @@ describe('reading the props of the codes slot', () => {
       { ...GOOD, saved: null },
       { ...GOOD, saved: {} },
       { ...GOOD, saved: [] },
+      // The saved facts are read with the wire's own schema, not just "has an offers array".
+      { ...GOOD, saved: { offers: 'no' } },
+      { ...GOOD, saved: { offers: [{ id: 'GITHUB' }] } },
+      { ...GOOD, saved: { match: 'github.com', offers: [], extra: 1 } },
       { ...GOOD, refresh: 'x' },
       { ...GOOD, hold: 'x' },
     ])
       expect(readInputCardCodesSlotProps(junk)).toBeUndefined();
+  });
+
+  it('hands the panel the saved facts as the wire schema read them, offers and keys included', () => {
+    const saved = {
+      match: 'github.com',
+      offers: [
+        {
+          id: 'GITHUB',
+          label: 'GitHub',
+          fills: 'totp',
+          matched: true,
+          signIn: 'si_0123456789abcdef',
+          primary: true,
+          why: 'only',
+          codes: [{ factor: 'tf_0123456789ab', label: 'Authy', checked: 'worked' }],
+        },
+      ],
+      project: { id: 'p1', name: 'demo-project' },
+    };
+    expect(readInputCardCodesSlotProps({ ...GOOD, saved })?.saved).toEqual(saved as never);
   });
 
   it('keeps the settled slot’s reader as it was (the hold callback is optional)', () => {

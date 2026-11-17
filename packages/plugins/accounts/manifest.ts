@@ -7,6 +7,7 @@ import { FerretsChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { BoardPort } from '@ferretry/plugin-board/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import {
+  INPUT_CARD_CODES_SLOT,
   INPUT_SETTLED_SLOT,
   InputPhoneApprovals,
   InputSavedLogins,
@@ -1058,6 +1059,10 @@ export default definePlugin({
     panels: [
       panel(ACCESS_DEVICE_NOTE_SLOT, { id: 'device-rule-note', order: 10 }),
       panel(INPUT_SETTLED_SLOT, { id: 'sign-in-rule-offer', order: 10 }),
+      // "Always use for <project>" after a hand tap, under the same settled card (the owner's tap writes the default).
+      panel(INPUT_SETTLED_SLOT, { id: 'always-use', order: 20 }),
+      // "Set up automatic codes" under a card that asks for a code (`vault.input-card-codes`, its contract/input-card-slots.ts).
+      panel(INPUT_CARD_CODES_SLOT, { id: 'input-codes', order: 10 }),
     ],
   },
 

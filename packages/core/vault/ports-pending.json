@@ -3,7 +3,7 @@
   "pending": ["vault"],
   "pendingReasons": {
     "vault": [
-      "[own] GAP(vault): the input card draws the daemon's saved-login offers (a one-tap account, \"Use another account…\", and the slot after a settled card), but not seed setup (the card offers the slot vault.input-card-codes and Accounts has not filled it yet) or \"Always use\" (that needs an Accounts panel in the slot after the card); and the Secrets tab has no \"Copy to another machine\" (an accepted omission). Agenda hands the ask:input renderer no request id (only {kind:\"input\"}), so the card finds its request by listing the ferret's open requests and matching the prompt the ask quotes (app/features/input/input-card-host.tsx)"
+      "[own] GAP(vault): the input card draws the daemon's saved-login offers (a one-tap account, \"Use another account…\", and the slot after a settled card); and the Secrets tab has no \"Copy to another machine\" (an accepted omission). Agenda hands the ask:input renderer no request id (only {kind:\"input\"}), so the card finds its request by listing the ferret's open requests and matching the prompt the ask quotes (app/features/input/input-card-host.tsx)"
     ]
   }
 }
