@@ -59,12 +59,13 @@ export interface TurnWatchDeps {
   readonly turnObserved: (ferret: FerretId, turn: SessionTurnState) => Promise<void>;
   /**
    * A live ferret whose pane a look could not read and the runner PROVES gone is settled stopped, `terminal_gone`, on
-   * exactly that handle (`FerretsService.settleGone`: a compare-and-set that a stop or a resume in between wins). Absent:
+   * exactly that handle, or exactly NO handle for a record that holds none (`FerretsService.settleGone`: a compare-and-set
+   * that a stop or a resume in between wins). Absent:
    * a vanished pane is never noticed after boot.
    */
   readonly settleGone?: (
     ferret: FerretId,
-    handle: string,
+    handle: string | undefined,
     exited: { readonly from: string; readonly reason: string },
     stillGone: () => Promise<boolean>,
   ) => Promise<boolean>;
@@ -217,7 +218,7 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
   const noticeGone = (record: FerretRecord): void => {
     const runner = deps.runner();
     const handle = record.handle;
-    if (deps.settleGone === undefined || runner?.gone === undefined || handle === undefined) return;
+    if (deps.settleGone === undefined || runner?.gone === undefined) return;
     if (settling.has(record.id)) return;
     settling.add(record.id);
     const from = record.state === 'idle' ? 'awaiting_user' : 'running';
@@ -236,7 +237,9 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
           return;
         }
         // The terminal is there. A pane the runner PROVES is there with its program ended (the harness was killed or
-        // crashed and the pane was kept) is no live agent either: settled with how it ended, in the ferret's queue.
+        // crashed and the pane was kept) is no live agent either: settled with how it ended, in the ferret's queue. A
+        // record with no handle names no pane to ask about.
+        if (handle === undefined) return;
         const exit = await runner.exited?.(record.id, handle as RunnerHandle);
         if (exit !== undefined)
           await deps.settleExited?.(
@@ -257,10 +260,11 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
   };
   // The watch's roster drops a session whose document is in no turn status (a declared `waiting`, a converted v4 copy), so
   // no look of it would ever come back empty and ask. The sweep asks about EVERY live registry record, one cheap
-  // `has-session` each per {@link GONE_SWEEP_MS}, whatever its document says.
+  // `has-session` each per {@link GONE_SWEEP_MS}, whatever its document says: a record with NO handle too (a converted
+  // v4 ferret has none, so no look is ever taken of it, and only this sweep can settle it).
   const sweepGone = (): void => {
     for (const record of deps.live?.() ?? []) {
-      if ((record.state === 'working' || record.state === 'idle') && record.handle !== undefined) noticeGone(record);
+      if (record.state === 'working' || record.state === 'idle') noticeGone(record);
     }
   };
   const startSweep = (): (() => void) => deps.every(GONE_SWEEP_MS, sweepGone);

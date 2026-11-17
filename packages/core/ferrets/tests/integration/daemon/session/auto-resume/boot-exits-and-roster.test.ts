@@ -24,7 +24,7 @@ const record = (id: string, state: FerretRecord['state'], extra: Partial<FerretR
 });
 
 function world(records: readonly FerretRecord[], over: Partial<BootExitFerrets> = {}) {
-  const settled: { ferret: FerretId; handle: string; from: string; reason: string }[] = [];
+  const settled: { ferret: FerretId; handle: string | undefined; from: string; reason: string }[] = [];
   const port: BootExitFerrets = {
     list: () => records,
     status: async () => 'running',
@@ -56,13 +56,44 @@ describe('the boot exit pass over the registry', () => {
     expect((await exits.observe())[0]?.status).toBe('awaiting_user');
   });
 
-  test('a ferret that is starting, stopped, or has no handle is never observed', async () => {
+  test('a ferret that is starting or stopped is never observed, handle or not', async () => {
     const { exits } = world([
       record('c', 'starting', { handle: '%3' }),
-      record('d', 'working'),
+      record('d', 'starting'),
       record('e', 'stopped', { handle: '%5' }),
+      record('f', 'stopped'),
     ]);
     expect(await exits.observe()).toEqual([]);
+  });
+
+  test('FX3: a handle-less working ferret (a converted v4 copy) whose pane is proven gone is observed, and settled on NO handle', async () => {
+    const { exits, settled } = world([record('h', 'working')]);
+    const observed = await exits.observe();
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toMatchObject({ id: ferretId('h'), status: 'running', exit: { kind: 'gone' } });
+    const transition = exitedSessionTransition(observed[0]!)!;
+    expect(await exits.settle(observed[0]!, transition)).toBe(true);
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({ ferret: ferretId('h'), handle: undefined, from: 'running' });
+  });
+
+  test('FX3: a handle-less idle ferret is observed as between turns and settled on NO handle', async () => {
+    const { exits, settled } = world([record('i', 'idle')]);
+    const [observation] = await exits.observe();
+    expect(observation?.status).toBe('awaiting_user');
+    expect(await exits.settle(observation!, exitedSessionTransition(observation!)!)).toBe(true);
+    expect(settled[0]).toMatchObject({ ferret: ferretId('i'), handle: undefined, from: 'awaiting_user' });
+  });
+
+  test('FX3: a handle-less ferret is left alone when its document claims no agent or its pane is not proven gone', async () => {
+    const live = [record('h', 'working')];
+    for (const over of [
+      { status: async () => 'completed' },
+      { status: async () => undefined },
+      { gone: async () => false },
+      { gone: async () => await Promise.reject(new Error('runner down')) },
+    ] satisfies Partial<BootExitFerrets>[])
+      expect(await world(live, over).exits.observe()).toEqual([]);
   });
 
   test('a document that claims no agent, or cannot be read, or a pane not proven gone, is left alone', async () => {

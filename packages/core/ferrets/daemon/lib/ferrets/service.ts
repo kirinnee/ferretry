@@ -1309,10 +1309,14 @@ export class FerretsService implements FerretsApi {
    * durable. A COMPARE-AND-SET under the ferret's own queue: only while it is still live on exactly `handle`. Anything
    * that moved in between (a stop, a resume that relaunched it on another pane) wins, and false is answered. Nothing is
    * killed or launched: the pane is already gone. Its attachments are released as a stop releases them.
+   *
+   * `handle` is `undefined` for a live record that holds NO handle (a converted v4 ferret: a handle without proof of its
+   * pane is dropped), which has no pane id to compare and could never be settled otherwise: the compare-and-set then
+   * lands only while the record STILL holds none. A record that gained a handle meanwhile was relaunched, which wins.
    */
   async settleGone(
     ferret: FerretId,
-    handle: string,
+    handle: string | undefined,
     exited: { readonly from: string; readonly reason: string },
     /**
      * Asked INSIDE the ferret's queue, after the compare-and-set: whether the terminal is STILL proven gone. A pane id is
