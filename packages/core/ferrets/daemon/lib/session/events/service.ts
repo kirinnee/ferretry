@@ -37,6 +37,12 @@ export type FleetEventStreamScope =
       readonly kind: 'session';
       readonly sessionId: string;
       readonly after: number;
+      /**
+       * `?from=now`: start at the end of the journal. Nothing is replayed and the journal is not read at all (so the open
+       * costs the same for a ferret with ten events or ten million); only events appended after the open are sent, and
+       * `after` is 0. A reader that wants to resume from a known place sends `after` instead.
+       */
+      readonly from?: 'now';
       readonly live?: boolean;
       /** `?transcript=1`: send a `transcript` frame each time the session's transcript file changes. */
       readonly transcript?: boolean;
@@ -179,8 +185,9 @@ class FleetEventSocketHandler implements SocketHandler {
     }
     this.unsubscribe = unsubscribe;
     try {
-      if (this.scope.kind === 'session') await this.replaySession();
-      else await this.replayFleet(this.scope.tail ?? FLEET_EVENT_BACKLOG_LIMIT);
+      if (this.scope.kind === 'session') {
+        if (this.scope.from !== 'now') await this.replaySession();
+      } else await this.replayFleet(this.scope.tail ?? FLEET_EVENT_BACKLOG_LIMIT);
       if (this.closed) return;
       this.replaying = false;
       const queued = this.pending;
