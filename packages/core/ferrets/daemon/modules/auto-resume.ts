@@ -3,6 +3,7 @@ import type { AutoResumeDecideInput, FerretId, FerretRecord } from '../../contra
 import {
   AccountAutoResumeAvailability,
   BootExitRecorder,
+  bootExitTransition,
   type BootExitFerrets,
   FerretBootExits,
   owedAutoResume,
@@ -14,11 +15,11 @@ import {
 import { autoResumeVerdict } from '../lib/ferrets/auto-resume.ts';
 import type { AutoResumeSummary } from '../lib/protocol/auto-resume.ts';
 import {
+  type AutoResumeCandidate,
   AutoResumeService,
   type AutoResumeSettings,
   defaultAutoResumeSettings,
 } from '../lib/session/auto-resume/index.ts';
-import { exitedSessionTransition } from '../lib/session/health/exit.ts';
 
 /** The job that records how each ferret's terminal fared across the restart and works the owed resumes off (W2-a). */
 export const AUTO_RESUME_JOB = 'ferrets.auto-resume';
@@ -26,7 +27,13 @@ export const AUTO_RESUME_JOB = 'ferrets.auto-resume';
 /** What the auto-resume stands on, each through its one owner. */
 export interface AutoResumeDeps extends Omit<BootExitFerrets, 'list'> {
   readonly state: Pick<StatePort, 'read' | 'write' | 'remove'>;
-  readonly records: () => readonly Pick<FerretRecord, 'id' | 'state' | 'handle'>[];
+  readonly records: () => readonly Pick<FerretRecord, 'id' | 'state' | 'handle' | 'cause' | 'stateAt'>[];
+  /**
+   * When this daemon started. A ferret the 30 s sweep or the first look of the turn watch settled `terminal_gone` AFTER
+   * this and before the pass looked was just as much a ferret the host restart took down: the pass finds it already
+   * stopped, and resumes it all the same. Absent: only what the pass itself settles is owed (no earlier ordering).
+   */
+  readonly bootedAt?: string;
   readonly record: (ferret: FerretId) => FerretRecord | undefined;
   /** The kernel's decide walk on `auto-resume.decide` (bounded on the kernel clock), with who answered what. */
   readonly decide: (input: AutoResumeDecideInput) => Promise<DecideAnswer>;
@@ -107,16 +114,42 @@ async function runOnce(deps: AutoResumeDeps, service: AutoResumeService): Promis
   // this one resumed live (or still stopped, never `working`) and owes them nothing again.
   const exits = new BootExitRecorder(new FerretBootExits({ ...deps, list: deps.records }), deps.clock);
   for (const observation of await exits.observe([]).catch(() => [])) {
-    const transition = exitedSessionTransition(observation);
+    const transition = bootExitTransition(observation);
     if (transition !== undefined) await exits.settle(observation, transition).catch(() => false);
   }
   // Written down BEFORE anything is attempted: the host can go down again mid-pass, and what is owed must survive it.
+  const settledNow = exits.close();
   await service
-    .record(exits.close())
+    .record([...settledNow, ...settledBeforePass(deps, settledNow)])
     .catch((error: unknown) =>
       deps.log.warn('the ferrets owed an auto-resume could not be recorded', { error: reasonOf(error) }),
     );
   return await service.run();
+}
+
+/**
+ * The ferrets the sweep or the turn watch's first look settled `terminal_gone` between this daemon's start and this pass:
+ * the pass lost the race to settle them, not the right to resume them. Only a settle of THIS process counts (a ferret
+ * stopped `terminal_gone` on an earlier boot was recorded, or deliberately not, by that boot's pass), and nothing is
+ * known of whether it was mid-turn, so it is told what a mid-turn ferret is told.
+ */
+function settledBeforePass(
+  deps: AutoResumeDeps,
+  already: readonly AutoResumeCandidate[],
+): readonly AutoResumeCandidate[] {
+  const bootedAt = deps.bootedAt === undefined ? undefined : Date.parse(deps.bootedAt);
+  if (bootedAt === undefined || !Number.isFinite(bootedAt)) return [];
+  const taken = new Set(already.map(candidate => candidate.id));
+  return deps.records().flatMap(record => {
+    const settledAt = Date.parse(record.stateAt);
+    return record.state === 'stopped' &&
+      record.cause?.kind === 'terminal_gone' &&
+      Number.isFinite(settledAt) &&
+      settledAt > bootedAt &&
+      !taken.has(record.id)
+      ? [{ id: record.id, status: 'running', at: record.stateAt }]
+      : [];
+  });
 }
 
 function reasonOf(error: unknown): string {

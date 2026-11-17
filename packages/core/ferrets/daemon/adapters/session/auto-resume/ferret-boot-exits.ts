@@ -2,12 +2,38 @@ import type { FerretId, FerretRecord } from '../../../../contract/index.ts';
 import {
   claimsRunningAgent,
   type ExitedSessionTransition,
+  exitedSessionTransition,
   type SessionExitObservation,
 } from '../../../lib/session/health/exit.ts';
 import type { SessionExitPort } from '../../../lib/session/health/service.ts';
 
 /** Today's word for a session at its prompt between turns: what decides that a revived ferret is not told "mid-turn". */
 const BETWEEN_TURNS = 'awaiting_user';
+
+/**
+ * The statuses a ferret holds while the daemon has it PARKED between panes: `rate_limited` (on a usage limit), `retrying`
+ * (a relaunch is being retried) and `kill_failed` (a stop that could not finish). The health port's
+ * `claimsRunningAgent` leaves them out on purpose, because while the daemon lives each says something truer than "it
+ * exited". After a host restart that reason is gone: their pane was lost with the host, and v4 brought them back like any
+ * other. A converted v4 ferret still holds one of them in its state document, so the boot pass counts them as claiming
+ * an agent, and ONLY the boot pass: nothing else in the daemon reads them as running.
+ */
+const PARKED_STATUSES: ReadonlySet<string> = new Set(['rate_limited', 'retrying', 'kill_failed']);
+
+/** Whether a state document's status claims an agent the host restart took down: a running one, or a parked one. */
+export const claimsBootAgent = (status: string | undefined): status is string =>
+  status !== undefined && (claimsRunningAgent(status) || PARKED_STATUSES.has(status));
+
+/**
+ * The record a boot exit gets. A parked status is read as the running one it was before the pane was lost: the exit is
+ * the same `gone`, and `exitedSessionTransition` (the health port's rule, which refuses a parked status) is left as it
+ * is. The observation itself keeps the real status: it is what the journal's `from` and the revive's notice read.
+ */
+export function bootExitTransition(observation: SessionExitObservation): ExitedSessionTransition | undefined {
+  return exitedSessionTransition(
+    PARKED_STATUSES.has(observation.status) ? { ...observation, status: 'running' } : observation,
+  );
+}
 
 /** What the boot exit pass reads and does, each through its one owner (W2-a). */
 export interface BootExitFerrets {
@@ -58,7 +84,7 @@ export class FerretBootExits implements SessionExitPort {
     for (const record of this.ferrets.list()) {
       if (record.state !== 'working' && record.state !== 'idle') continue;
       const status = await this.ferrets.status(record.id).catch(() => undefined);
-      if (!claimsRunningAgent(status) || status === undefined) continue;
+      if (!claimsBootAgent(status)) continue;
       if (!(await this.ferrets.gone(record.id).catch(() => false))) continue;
       observed.push({
         id: record.id,

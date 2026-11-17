@@ -3,6 +3,8 @@ import type { FerretId, FerretRecord } from '../../../../../contract/index.ts';
 import { ferretId, T0 } from '../../../../../contract/testing/index.ts';
 import {
   type BootExitFerrets,
+  bootExitTransition,
+  claimsBootAgent,
   FerretBootExits,
   owedAutoResume,
   RegistryAutoResumeRoster,
@@ -94,6 +96,37 @@ describe('the boot exit pass over the registry', () => {
       { gone: async () => await Promise.reject(new Error('runner down')) },
     ] satisfies Partial<BootExitFerrets>[])
       expect(await world(live, over).exits.observe()).toEqual([]);
+  });
+
+  for (const status of ['rate_limited', 'retrying', 'kill_failed'])
+    test(`W3-1 a ferret parked on ${status} whose pane is proven gone is observed gone (with or without a handle), keeping its real status`, async () => {
+      const { exits, settled } = world([record('p', 'working', { handle: '%7' }), record('q', 'idle')], {
+        status: async () => status,
+      });
+      const observed = await exits.observe();
+      expect(observed.map(each => [each.id, each.status])).toEqual([
+        [ferretId('p'), status],
+        [ferretId('q'), 'awaiting_user'],
+      ]);
+      for (const observation of observed) {
+        const transition = bootExitTransition(observation);
+        expect(transition).toMatchObject({ status: 'failed', health: 'unknown' });
+        expect(await exits.settle(observation, transition!)).toBe(true);
+      }
+      expect(settled.map(each => each.handle)).toEqual(['%7', undefined]);
+    });
+
+  test('W3-1 only the boot pass reads a parked status as an agent; the health port still declines it, and the rest stay refused', () => {
+    expect(['rate_limited', 'retrying', 'kill_failed', 'running', 'awaiting_user'].map(claimsBootAgent)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect(
+      ['stopped', 'completed', 'failed', 'starting', 'created', 'stalled', undefined].map(claimsBootAgent),
+    ).toEqual([false, false, false, false, false, false, false]);
   });
 
   test('a document that claims no agent, or cannot be read, or a pane not proven gone, is left alone', async () => {

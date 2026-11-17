@@ -265,6 +265,47 @@ describe('auto-resume service', () => {
     });
   });
 
+  for (const up of ['starting', 'working', 'idle'])
+    it(`W3-2 should stand down, saying nothing, when the revive is refused because another path left the session ${up}`, async () => {
+      // Arrange: the Warden (or a message, or a person) resumed it between the pass's check and its own resume.
+      const h = new Harness();
+      h.ledger = [candidate('a')];
+      h.fail('a');
+      h.refused.set('a', 'it is no longer owed this resume');
+      const ports = h.ports();
+      const resume = ports.resumer.resume;
+      ports.resumer.resume = async (id, message) => {
+        h.subjects.set(id, { status: up, mode: 'auto' });
+        await resume(id, message);
+      };
+
+      // Act
+      const actual = await new AutoResumeService(ports, SETTINGS).run();
+
+      // Assert: no skipped line, no summary, nothing left owed.
+      should(actual).equal(undefined);
+      should(h.journal).deepEqual([]);
+      should(h.summaries).deepEqual([]);
+      should(h.ledger).deepEqual([]);
+    });
+
+  it('W3-2 should still say why when the refused revive left the session stopped (the owner stopped it, or the launch failed)', async () => {
+    const h = new Harness();
+    h.ledger = [candidate('a')];
+    h.fail('a');
+    h.refused.set('a', 'the launch failed');
+    const ports = h.ports();
+    const resume = ports.resumer.resume;
+    ports.resumer.resume = async (id, message) => {
+      h.subjects.set(id, { status: 'stopped', mode: 'auto' });
+      await resume(id, message);
+    };
+
+    const actual = await new AutoResumeService(ports, SETTINGS).run();
+
+    should(actual?.skipped).deepEqual([{ sessionId: 'a', reason: 'the launch failed' }]);
+  });
+
   it('should skip with the text of a non-error refusal', async () => {
     const h = new Harness();
     h.ledger = [candidate('a')];

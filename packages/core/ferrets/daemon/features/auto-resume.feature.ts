@@ -13,6 +13,8 @@ function register(f: FerretsContext): FeatureContribution | undefined {
   // through the ordinary resume, staggered, two at a time, each only on Runtimes' OWN yes (RULING #27 Q5: no answer, no
   // resume, no spend). A person's stop, resume or archive in between wins (`expect`, judged under the ferret's queue).
   const autoResume = buildAutoResume({
+    // Registered as the daemon starts, before anything serves: a ferret settled gone from here on is the restart's.
+    bootedAt: kernel.clock.now(),
     state: kernel.state,
     // The held records (with the runner handle the list view leaves out): the handle is what the settle compares.
     records: () =>

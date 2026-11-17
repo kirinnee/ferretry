@@ -33,6 +33,17 @@ export function stillOwed(subject: AutoResumeSubject | undefined): boolean {
   return subject !== undefined && subject.status === 'failed';
 }
 
+/** The registry states of a ferret that is up (or on its way up): somebody brought it back. */
+const UP_STATES: ReadonlySet<string> = new Set(['starting', 'working', 'idle']);
+
+/**
+ * Whether a refused resume left the ferret UP, read fresh: another path resumed it first and this one has nothing left
+ * to do. A ferret still `failed` (owed), `stopped` (the owner's stop, or a launch that failed) or gone is not.
+ */
+export function isUpElsewhere(subject: AutoResumeSubject | undefined): boolean {
+  return subject !== undefined && UP_STATES.has(subject.status);
+}
+
 /** Candidates inside the age window, newest record per session. */
 export function freshCandidates(
   candidates: readonly AutoResumeCandidate[],

@@ -81,8 +81,8 @@ describe("W2-a the boot exit pass (today's first self-check, over the registry)"
     expect(found[0]?.status).toBe('awaiting_user');
   });
 
-  test('W2-a a document that claims no live agent (kill_failed, stopped, none) is never observed', async () => {
-    for (const status of ['kill_failed', 'stopped', 'starting', undefined]) {
+  test('W2-a a document that claims no live agent (stopped, starting, none) is never observed', async () => {
+    for (const status of ['stopped', 'completed', 'starting', undefined]) {
       const { port, settled } = ferrets([record('a', 'working', { handle: '%1' })], { status: async () => status });
       expect(await new FerretBootExits(port).observe()).toEqual([]);
       expect(await pass(new BootExitRecorder(new FerretBootExits(port), { now: () => T0 }))).toEqual([]);

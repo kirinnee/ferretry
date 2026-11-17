@@ -1,5 +1,5 @@
 import type { AutoResumeSummary } from '../../protocol/auto-resume.ts';
-import { bootNotice, freshCandidates, stillOwed } from './policy.ts';
+import { bootNotice, freshCandidates, isUpElsewhere, stillOwed } from './policy.ts';
 import type { AutoResumeCandidate, AutoResumeOutcome, AutoResumePorts, AutoResumeSettings } from './types.ts';
 
 function reasonOf(error: unknown): string {
@@ -85,6 +85,12 @@ export class AutoResumeService {
     try {
       await this.ports.resumer.resume(candidate.id, message);
     } catch (error) {
+      // Another path (the Warden's revive, a message sent to it, a person) brought it back between the check above and
+      // the resume's own, under the ferret's queue: the ferret is up, which is what this pass wanted. Standing down says
+      // nothing: a "skipped: stopped, resumed or ended by something else first" line would read as a failure on a ferret
+      // that is running. A ferret that is NOT up (stopped by its owner, or a launch that failed) is still told.
+      const now = await this.ports.roster.subject(candidate.id).catch(() => undefined);
+      if (isUpElsewhere(now)) return undefined;
       return await this.settle(candidate.id, { kind: 'skipped', reason: reasonOf(error) });
     }
     return await this.settle(candidate.id, { kind: 'resumed', notified: message !== undefined });
