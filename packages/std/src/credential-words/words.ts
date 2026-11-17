@@ -103,10 +103,11 @@ const STUCK_FLAG_NAMES: ReadonlyMap<string, string> = new Map([['-p', 'password'
  * character as the password's first). A letter that takes a value ends the cluster, because it takes the rest of the word as
  * that value (`-hproxy.example.com`, `-uprod_user`, `-eapiKey=v`): those words hold no `-p` flag, so only the letters that
  * are switches in the programs that read `-p<password>` (`v` verbose, `x`, `q` quick, `s` silent, `t`, `n`, `f` force, `i`,
- * `a`, `b`, `z`) are read as a cluster. A cluster with another letter in it is not read, and shows what it always did. Over-hiding
+ * `a`, `b`, `z`, and the ones mysql and mysqldump add: `N` skip column names, `B` batch, `C` compress, `E` vertical,
+ * `V` version, `d` no data, `l` lock tables) are read as a cluster. A cluster with another letter in it is not read, and shows what it always did. Over-hiding
  * a longer single-dash flag that is no password (`-port=8080808080`, `-spring.profiles=x`) is accepted: the safe side.
  */
-const PASSWORD_STUCK = /^(-[abfinqstvxz]*p)(\S[\s\S]*)$/u;
+const PASSWORD_STUCK = /^(-[abfinqstvxzNBCEVdl]*p)(\S[\s\S]*)$/u;
 
 /** What splits a value into the pieces a token may start at: spaces, quotes and separators. */
 const PIECE_BREAK = /[\s"'`:,;=]+/u;

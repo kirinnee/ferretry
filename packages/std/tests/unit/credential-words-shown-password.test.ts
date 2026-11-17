@@ -4,7 +4,8 @@
  * all older than the `-p<password>` fix, each now hidden and each pinned both ways: the shape that must be cut, and the
  * look-alike that points at a variable (or is too short to be a credential) and must stay as written.
  *
- * 1. clustered short flags: `-vp<password>`, `-xp<password>` (mysql reads the letters before the `p` as flags);
+ * 1. clustered short flags: `-vp<password>`, `-xp<password>`, `-Np`, `-Bp`, `-Cp`, `-Ep`, `-Vp`, `-dp`, `-lp` (mysql and
+ *    mysqldump read the letters before the `p` as flags);
  * 2. a separator right after the letter: `-p=<password>`, `-p-<password>` (the separator is the password's first character);
  * 3. a default literal inside `${X:-lit}`: the literal is a value, not a reference;
  * 4. a single-quoted `'$Literal'`: a shell expands nothing in single quotes, so the text is a value.
@@ -234,14 +235,26 @@ describe('a single-quoted $word is a value: a shell expands nothing in single qu
   });
 });
 
-describe('KNOWN GAP (ports-pending runtimes): a cluster with a value-taking letter is still SHOWN', () => {
-  // These pin what the cutter does TODAY. When the GAP closes, they flip: move each word to the hidden cases above.
-  test.each(['-Np', '-Bp', '-Cp', '-Ep', '-Vp', '-dp', '-lp'])(
-    'should still show the password of %s<value> until the GAP is closed',
+describe('a cluster of mysql and mysqldump switches in front of the p', () => {
+  test.each(['-Np', '-Bp', '-Cp', '-Ep', '-Vp', '-dp', '-lp', '-NBp', '-vNBp'])(
+    'should hide the password of %s<value> and keep the flags',
     flags => {
       // Arrange
       const word = `${flags}${PASSWORD}`;
 
+      // Act
+      const actual = shownWord(word, undefined);
+
+      // Assert
+      expect(actual).toEqual({ text: `${flags}${HIDDEN}`, hidden: true });
+      expect(actual.text).not.toContain(PASSWORD);
+    },
+  );
+
+  // A letter that takes a value ends the cluster (it takes the rest of the word), so those words hold no `-p` flag.
+  test.each([`-hproxy.example.com`, `-uprod_user`, `-eapiKey=v`, `-DNp${PASSWORD}`, `-hNp${PASSWORD}`])(
+    'should keep %s as written: a value-taking letter swallows the rest of the word',
+    word => {
       // Act
       const actual = shownWord(word, undefined);
 
