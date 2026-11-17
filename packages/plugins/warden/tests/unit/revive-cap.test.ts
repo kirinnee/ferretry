@@ -286,6 +286,39 @@ describe('a death while auto-resume was off is not revived when it is switched o
     should(written.map(state => state.offSince)).deepEqual([iso(T0)]);
   });
 
+  it('should journal the switch going off once, and going on again, so the gap is traceable', async () => {
+    // Arrange
+    let on = false;
+    const r = rig(() => on);
+    let stored: ReviveState | undefined;
+    const keep = async (state: ReviveState): Promise<void> => {
+      stored = state;
+    };
+
+    // Act: three sweeps while off, then on.
+    for (const at of [T0, T0 + MINUTE, T0 + 2 * MINUTE])
+      await r.service.run({ fleet: old, config: config(), revive: stored, nowMs: at }, keep);
+    on = true;
+    await r.service.run({ fleet: old, config: config(), revive: stored, nowMs: T0 + 3 * MINUTE }, keep);
+
+    // Assert
+    should(r.journal).deepEqual([
+      { type: 'fleet.warden_revive_switched_off', data: { since: iso(T0) } },
+      { type: 'fleet.warden_revive_switched_on', data: { offSince: iso(T0), armedAt: iso(T0 + 3 * MINUTE) } },
+    ]);
+  });
+
+  it('should journal nothing when the switch merely cannot be read', async () => {
+    // Arrange
+    const r = rig(() => undefined);
+
+    // Act
+    await r.service.run({ fleet: old, config: config(), revive: undefined, nowMs: T0 }, async () => {});
+
+    // Assert
+    should(r.journal).deepEqual([]);
+  });
+
   it('should not record the switch as off when it merely cannot be read', async () => {
     // Arrange
     const r = rig(() => undefined);
