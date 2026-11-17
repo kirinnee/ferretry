@@ -203,7 +203,7 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
     if (record === undefined || record.state === 'stopped' || record.handle === undefined) return undefined;
     const look = await deps
       .runner()
-      ?.look?.(record.handle as RunnerHandle)
+      ?.look?.(record.handle as RunnerHandle, record.id)
       .catch(() => undefined);
     if (look === undefined) noticeGone(record);
     return look === undefined ? undefined : turnPaneEvidenceOfLook(look);

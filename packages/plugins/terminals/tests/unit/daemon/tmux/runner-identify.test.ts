@@ -7,7 +7,7 @@
  *   protected pid (the daemon or one of its parents).
  */
 import { describe, expect, test } from 'bun:test';
-import type { RunnerHandle } from '@ferretry/core-ferrets/contract';
+import type { FerretId, RunnerHandle } from '@ferretry/core-ferrets/contract';
 import { TmuxRunner, type PaneProcessHost } from '../../../../daemon/adapters/tmux/tmux-runner.ts';
 import type { ProcessDetailRow, ProcessTreeRead } from '../../../../daemon/lib/session/processes/ports.ts';
 
@@ -94,6 +94,18 @@ describe('TmuxRunner.identify', () => {
   test('names the live pane by handle, pid and the pid start', async () => {
     const { runner } = world();
     expect(await runner.identify(HANDLE)).toEqual({ handle: HANDLE, pid: ROOT, processStart: String(ROOT_START) });
+  });
+
+  test('names the pane for its own ferret, and tells nothing of it for another ferret whose stale handle it is', async () => {
+    // The pane `%7` is `fy-ferret-one`'s. A record of `ferret-two` that kept `%7` after a server restart must not take
+    // stock of `ferret-one`'s processes (a move would hand them to ferret-two's new first turn).
+    const { runner } = world();
+    expect(await runner.identify(HANDLE, 'ferret-one' as FerretId)).toEqual({
+      handle: HANDLE,
+      pid: ROOT,
+      processStart: String(ROOT_START),
+    });
+    expect(await runner.identify(HANDLE, 'ferret-two' as FerretId)).toBeUndefined();
   });
 
   test('is read-only: it asks tmux to list panes and nothing else', async () => {

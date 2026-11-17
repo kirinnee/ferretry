@@ -96,7 +96,7 @@ export class LastSnapshotCapture {
     abandoned: AbortSignal,
     deadPane: boolean,
   ): Promise<CaptureOutcome> {
-    const screen = deadPane ? await runner.deadScreen?.(ferret, handle) : (await runner.look?.(handle))?.status;
+    const screen = deadPane ? await runner.deadScreen?.(ferret, handle) : (await runner.look?.(handle, ferret))?.status;
     // Today's rule: only a frame actually observed on a live pane is kept; a blank one is not evidence of anything.
     if (screen === undefined || screen.trim() === '') return 'nothing';
     const masked = await this.deps.redaction.read(scope => maskedScreen(scope, screen, this.deps.yieldToLoop));

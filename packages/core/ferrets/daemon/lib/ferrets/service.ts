@@ -2403,6 +2403,7 @@ export class FerretsService implements FerretsApi {
         turn.instruction,
         () => this.registry.get(ferret)?.handle === handle,
         ms => this.pause(ms),
+        ferret,
       );
       tellCarried(carried, { text: turn.instruction, turn: turn.turn, file: turn.file });
     } catch {
@@ -2439,14 +2440,18 @@ export class FerretsService implements FerretsApi {
     if (handle === undefined) return notTyped;
     let admission: SessionEffectAdmission | undefined;
     try {
-      await runner.deliver(handle, {
-        text: turn.instruction,
-        beforeWrite: async () => {
-          admission = await admit(ferret, turn.prompt);
-          // `settled` aborts this delivery at the exact pre-write boundary: a replay, never a second typing.
-          if (admission !== 'perform') throw new FirstTurnNotPerformed();
+      await runner.deliver(
+        handle,
+        {
+          text: turn.instruction,
+          beforeWrite: async () => {
+            admission = await admit(ferret, turn.prompt);
+            // `settled` aborts this delivery at the exact pre-write boundary: a replay, never a second typing.
+            if (admission !== 'perform') throw new FirstTurnNotPerformed();
+          },
         },
-      });
+        ferret,
+      );
       // A runner that typed without asking first has typed a turn no ledger admitted: refused, never counted.
       if (admission !== 'perform') return notTyped;
       await session.settleFirstTurn(ferret, turn.prompt);
@@ -2484,7 +2489,7 @@ export class FerretsService implements FerretsApi {
   ): Promise<Result<FerretId, StartFailure>> {
     if (runner.settled === undefined) return ok(ferret);
     try {
-      await runner.settled(handle);
+      await runner.settled(handle, ferret);
     } catch (error) {
       const ran = diedParked(error) ? FIRST_TURN_NEVER_RAN : FIRST_TURN_MAYBE_RAN;
       const why = (await this.startExplained(ferret, runner, handle, said)) ?? STARTUP_EXITED;
@@ -2509,7 +2514,7 @@ export class FerretsService implements FerretsApi {
     const harness = key === undefined ? undefined : this.ports.harness(key);
     if (harness?.startFailure === undefined || runner.lastScreen === undefined) return undefined;
     try {
-      const sentence = harness.startFailure(await runner.lastScreen(handle));
+      const sentence = harness.startFailure(await runner.lastScreen(handle, ferret));
       if (typeof sentence !== 'string' || sentence === '') return undefined;
       if (sentence.length <= START_EXPLAINED_MAX) said.explained = sentence;
       return sentence;

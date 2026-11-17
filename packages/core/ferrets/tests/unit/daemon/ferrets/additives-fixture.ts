@@ -53,13 +53,13 @@ export class ActingRunner extends SignalRunner {
     });
     if (!acted.ok) throw new FakeRunnerFailure({ kind: 'held', code: acted.error.refused });
   }
-  override async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {
+  override async deliver(handle: RunnerHandle, delivery: RunnerDelivery, ferret?: FerretId): Promise<DeliveryOutcome> {
     for (const write of ['load-buffer', 'paste-buffer', 'send-keys']) await this.#write(handle, write);
-    return await super.deliver(handle, delivery);
+    return await super.deliver(handle, delivery, ferret);
   }
-  override async stopTurn(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerStopOutcome> {
+  override async stopTurn(handle: RunnerHandle, stop: RunnerStop, ferret?: FerretId): Promise<RunnerStopOutcome> {
     if (this.working || stop.whenIdle) await this.#write(handle, `send-keys ${stop.key}`);
-    return await super.stopTurn(handle, stop);
+    return await super.stopTurn(handle, stop, ferret);
   }
 }
 
@@ -119,6 +119,8 @@ export function additivesFixture(options: AdditivesOptions = {}) {
   // The act runner the RUNNER guards its own writes with (Ferrets holds none: the seam never acts itself).
   const act = options.queueing === undefined ? undefined : queueingAct(options.queueing);
   const runner = act === undefined ? new SignalRunner() : new ActingRunner(act);
+  // Every production caller must name the ferret a handle is for: a pane id alone can name another ferret's pane.
+  runner.requireFerret = true;
   const harness = new FakeHarness();
   const history: { readonly type: string; readonly data: Readonly<Record<string, unknown>> }[] = [];
   const ports: FerretsPorts = {

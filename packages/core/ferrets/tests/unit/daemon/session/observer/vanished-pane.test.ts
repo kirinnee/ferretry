@@ -29,7 +29,7 @@ async function watched(state: 'working' | 'idle' = 'working', status: 'running' 
     id,
     status === 'running' ? { id, status, turn: 1, turnState: 'working', turnStateAt: AT } : { id, status, turn: 1 },
   );
-  const runner = new FakeRunner();
+  const runner = Object.assign(new FakeRunner(), { requireFerret: true });
   const record = {
     format: 1,
     id: id as unknown as FerretId,
