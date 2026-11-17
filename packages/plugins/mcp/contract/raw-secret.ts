@@ -19,7 +19,8 @@ const KNOWN_SHAPES: readonly RegExp[] = [
   /\bglpat-[A-Za-z0-9_-]{16,}/u,
 ];
 const CREDENTIAL_KEY = /(?:(?:key|token|secret|password|passwd)s?|credentials?)$/iu;
-const REFERENCE = /^\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
+// A pointer holds a NAME and nothing else: `${NAME:-<literal>}` carries a literal and so can carry a credential.
+const REFERENCE = /^\$(?:\{(?:secret\??:)?[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
 const MIN_SECRET_LENGTH = 16;
 const ENTROPY_THRESHOLD = 3.5;
 
