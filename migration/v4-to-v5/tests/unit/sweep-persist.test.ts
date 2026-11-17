@@ -1,26 +1,35 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { chmod, lstat, mkdir, mkdtemp, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fakeCodexAuthText } from '../../fixtures/sweep/fake-codex-auth.ts';
 import {
   AFTER_FAILED_PERSIST,
+  KIT_FILES,
   LINK_SCRIPT,
   addStoreRoots,
   daemonUnitText,
   defaultPersistDir,
   execLine,
   execWord,
+  ownerLauncher,
   persistTargetProblem,
+  persistedBinDir,
+  persistedKitDir,
+  relativeImportsOf,
   pointerDir,
   pointerFile,
   restartTerminals,
   revertFailedPersist,
   setting,
+  shellQuote,
   storePathsIn,
   storeRootOf,
   terminalsUnitText,
   unitMarker,
+  wrapperName,
+  wrapperText,
 } from '../../fixtures/sweep/persist.ts';
 
 const HOME = '/home/someone';
@@ -445,5 +454,80 @@ describe('GC roots for the nix store paths a slot bakes', () => {
     expect(failing).toEqual({ rooted: [], failed: [{ path: `/nix/store/${HASH}-a`, why: 'path is not valid' }] });
     const missing = await addStoreRoots({ nixStore: undefined }, '/d', [`/nix/store/${HASH}-a`]);
     expect(missing.failed[0]?.why).toContain('nix-store is not on PATH');
+  });
+});
+
+describe('persisted wrappers and the kit copy they run', () => {
+  const sweepDir = join(import.meta.dir, '..', '..', 'fixtures', 'sweep');
+
+  test('relativeImportsOf reads import and export-from specifiers, and nothing else', () => {
+    const source = [
+      "import { a } from './one.ts';",
+      "import type { B } from './two.ts';",
+      'import {',
+      '  c,',
+      "} from './three.ts';",
+      "export { d } from './four.ts';",
+      "import { e } from 'node:fs';",
+      "const lazy = './not-an-import.ts';",
+      "// import { z } from './commented.ts' is still matched only at line start, so this comment is not",
+    ].join('\n');
+    expect(relativeImportsOf(source)).toEqual(['four.ts', 'one.ts', 'three.ts', 'two.ts']);
+  });
+
+  test('KIT_FILES is exactly slot.ts and everything it imports, transitively (the real sources)', () => {
+    const seen = new Set<string>();
+    const queue = ['slot.ts'];
+    while (queue.length > 0) {
+      const name = queue.pop() ?? '';
+      if (seen.has(name)) continue;
+      seen.add(name);
+      queue.push(...relativeImportsOf(readFileSync(join(sweepDir, name), 'utf8')));
+    }
+    expect([...seen].sort()).toEqual([...KIT_FILES]);
+  });
+
+  test('shellQuote single-quotes, and a quote inside is closed, escaped and reopened', () => {
+    expect(shellQuote('/a b/c')).toBe("'/a b/c'");
+    expect(shellQuote("it's")).toBe("'it'\\''s'");
+  });
+
+  test('wrapper names are fy4s<N> and fy5s<N>', () => {
+    expect(wrapperName(8, 'v4')).toBe('fy4s8');
+    expect(wrapperName(8, 'v5')).toBe('fy5s8');
+  });
+
+  test('a persisted wrapper execs bun on the kit copy, never on a worktree, and passes its arguments through', () => {
+    const real = '/home/u/.local/share/fy-sweep/slot8';
+    const text = wrapperText({
+      slot: 8,
+      side: 'v5',
+      bun: '/nix/store/abc-bun/bin/bun',
+      slotTs: join(persistedKitDir(real), 'slot.ts'),
+      generatedBy: 'slot.ts (persist / wrappers)',
+    });
+    expect(text.startsWith('#!/bin/sh\n')).toBe(true);
+    expect(text).toContain(
+      "exec '/nix/store/abc-bun/bin/bun' '/home/u/.local/share/fy-sweep/slot8/kit/slot.ts' cli 8 v5 \"$@\"",
+    );
+    expect(text).not.toContain('.worktrees');
+    expect(text).toContain('fy5s8: the 5.0 CLI');
+    expect(wrapperText({ slot: 3, side: 'v4', bun: '/b', slotTs: '/s.ts', generatedBy: 'x' })).toContain(
+      'cli 3 v4 "$@"',
+    );
+  });
+
+  test('a path with a quote is still one shell word, and a line break is refused', () => {
+    const text = wrapperText({ slot: 1, side: 'v4', bun: "/o'x/bun", slotTs: '/s.ts', generatedBy: 'x' });
+    expect(text).toContain("exec '/o'\\''x/bun' '/s.ts' cli 1 v4");
+    expect(() => wrapperText({ slot: 1, side: 'v4', bun: '/b\nrm -rf /', slotTs: '/s.ts', generatedBy: 'x' })).toThrow(
+      /line break/u,
+    );
+  });
+
+  test('the owner launcher execs the persisted 5.0 wrapper by its absolute path', () => {
+    const real = '/home/u/.local/share/fy-sweep/slot8';
+    expect(persistedBinDir(real)).toBe(`${real}/bin`);
+    expect(ownerLauncher(real, 8)).toBe(`exec '${real}/bin/fy5s8' "$@"`);
   });
 });

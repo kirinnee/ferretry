@@ -59,6 +59,13 @@ the fake ferret's helper into the slot, and installs **enabled user units** in `
 and data are the same files; only the ferrets' panes are not kept (each side revives them, as after a restart). Starting at boot with
 no login needs `loginctl enable-linger`; `persist` says whether it is on and never turns it on itself. `slot.ts unpersist <N>` is the
 reverse. A persisted slot refuses `up` and `down` (without `--keep-files`) until it is unpersisted.
+A persisted slot's CLI wrappers survive a reboot too: `fy4s<N>` / `fy5s<N>` live in `<persistent folder>/bin/` and run `bun` on a COPY of
+the kit in `<persistent folder>/kit/` (`slot.ts` and the files it imports, so no git worktree path is involved). The shared
+`/tmp/claude-1000/sweep/bin/fy?s<N>` are only links to them for PATH habits: gone at boot, put back by the next `slot.ts` command
+(`status`, `wrappers`, `cli`, …); call the persistent path directly, or point your own launcher at it (`exec '<folder>/bin/fy5s<N>' "$@"`).
+`slot.ts wrappers <N>` (re)writes ONLY those wrappers, the links and the kit copy of an already persisted slot (also how a slot an older
+kit persisted gets them): it stops and starts nothing, runs no `systemctl`, touches no file in either home and leaves the unit files alone,
+so it is safe against a slot in use. `unpersist` removes `bin/` and `kit/` with the rest of what `persist` added.
 The fixture's Codex login (`codex-main`) carries a fake `auth.json` (`sweep/fake-codex-auth.ts`: made-up markers, never a real token), so
 `codex-main-agent` counts as signed in and can resume.
 It is a developer tool (it starts daemons); CI does not run it.
