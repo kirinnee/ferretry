@@ -151,7 +151,13 @@ export interface RunnerPaneIdentity {
 export interface Runner {
   readonly key: RunnerKey;
   start(spec: RunSpec): Promise<Result<RunningFerret, StartRefusal>>;
-  stop(handle: RunnerHandle, how: 'polite' | 'now'): Promise<void>;
+  /**
+   * Stops the pane behind `handle`. A pane id is not an identity: a private tmux server hands `%0` out again after it
+   * restarts, so a handle a record kept (a converted v4 ferret's, one from before a restart) can name ANOTHER ferret's
+   * pane. With `ferret` the runner stops the pane ONLY when it is that ferret's own and otherwise stops nothing; without
+   * it the handle alone is trusted (a launch cleanup that has just made the pane). Every caller that holds a ferret passes it.
+   */
+  stop(handle: RunnerHandle, how: 'polite' | 'now', ferret?: FerretId): Promise<void>;
   resume(spec: RunSpec, harnessConversationId: string): Promise<Result<RunningFerret, StartRefusal>>;
   attach(handle: RunnerHandle): Promise<Result<RunningFerret, AttachRefusal>>;
   alive(handle: RunnerHandle): Promise<boolean>;
@@ -159,7 +165,7 @@ export interface Runner {
    * A raw process signal: `interrupt` is the runner's own interrupt key (tmux: `C-c`), which can QUIT a harness at an
    * idle prompt. Never a harness's turn stop: that is {@link Runner.stopTurn}.
    */
-  signal(handle: RunnerHandle, signal: 'interrupt' | 'terminate'): Promise<void>;
+  signal(handle: RunnerHandle, signal: 'interrupt' | 'terminate', ferret?: FerretId): Promise<void>;
   /**
    * Delivers one message into the ferret's pane (today's tmux paste-and-keys delivery, which Conversation and the
    * harnesses call). A handle with nothing behind it rejects; it never starts anything. A rejection that knows what

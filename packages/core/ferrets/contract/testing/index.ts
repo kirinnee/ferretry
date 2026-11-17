@@ -136,7 +136,10 @@ export class FakeRunner implements Runner {
     this.#live.set(handle, { ...running, ferret: spec.ferret });
     return ok(running);
   }
-  async stop(handle: RunnerHandle): Promise<void> {
+  async stop(handle: RunnerHandle, _how?: 'polite' | 'now', ferret?: FerretId): Promise<void> {
+    // As the tmux runner does: a handle that names ANOTHER ferret's pane stops nothing.
+    const live = this.#live.get(handle);
+    if (ferret !== undefined && live !== undefined && live.ferret !== ferret) return;
     this.#live.delete(handle);
   }
   async resume(spec: RunSpec): Promise<Result<RunningFerret, StartRefusal>> {
@@ -548,8 +551,8 @@ export class FakeHarness implements Harness {
     );
     return running.ok ? ok({ running: running.value, harnessConversation: conversation }) : running;
   }
-  async stop(_ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now') {
-    await runner.stop(handle, how);
+  async stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now') {
+    await runner.stop(handle, how, ferret);
   }
   async deliver(_ferret: FerretId, _handle: RunnerHandle, message: OutboundMessage): Promise<Delivery> {
     if (!this.#seen.has(message.id)) {

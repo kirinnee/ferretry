@@ -852,7 +852,16 @@ export class TmuxRunner implements Runner {
     };
   }
 
-  async stop(handle: RunnerHandle, how: 'polite' | 'now'): Promise<void> {
+  /**
+   * Whether the pane `facts` describes is `ferret`'s own. A pane id is not an identity: the private server hands `%0` out
+   * again after it restarts, so a handle a record kept can name ANOTHER ferret's pane, and a stop through it would end
+   * that ferret. With no `ferret` the caller vouches for the handle itself (a launch cleaning up a pane it just made).
+   */
+  private static owns(facts: PaneFacts, ferret: FerretId | undefined): boolean {
+    return ferret === undefined || facts.session === ferretTmuxSession(ferret);
+  }
+
+  async stop(handle: RunnerHandle, how: 'polite' | 'now', ferret?: FerretId): Promise<void> {
     if (!PANE_ID.test(handle)) return;
     // Any stop forgets the pane text kept for the look: a polite one only interrupts, but the pane text is not kept.
     // Forgotten again as it ends, so no look that overlaps the stop keeps any (`#stopEpoch`).
@@ -860,6 +869,8 @@ export class TmuxRunner implements Runner {
     try {
       const facts = await this.facts(handle);
       if (facts === undefined) return;
+      // Another ferret's pane (or a person's shell) behind this handle: nothing is pressed and nothing is killed.
+      if (!TmuxRunner.owns(facts, ferret)) return;
       if (how === 'polite' && !facts.dead) {
         // The harness's own interrupt first; the session goes once the pane is dead or the caller asks again `now`.
         await this.options.tmux.execute(['send-keys', '-t', handle, 'C-c']);
@@ -873,10 +884,10 @@ export class TmuxRunner implements Runner {
     }
   }
 
-  async signal(handle: RunnerHandle, signal: 'interrupt' | 'terminate'): Promise<void> {
+  async signal(handle: RunnerHandle, signal: 'interrupt' | 'terminate', ferret?: FerretId): Promise<void> {
     if (!PANE_ID.test(handle)) return;
     const facts = await this.facts(handle);
-    if (facts === undefined || facts.dead || !isFerretSession(facts.session)) return;
+    if (facts === undefined || facts.dead || !isFerretSession(facts.session) || !TmuxRunner.owns(facts, ferret)) return;
     if (signal === 'interrupt') await this.options.tmux.execute(['send-keys', '-t', handle, 'C-c']);
     else await this.options.tmux.execute(killSessionArguments(facts.session));
   }

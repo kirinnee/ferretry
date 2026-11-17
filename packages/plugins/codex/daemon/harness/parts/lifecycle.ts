@@ -117,7 +117,8 @@ export const lifecyclePart: HarnessPart<'start' | 'resume' | 'stop'> = ({
 
     async stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void> {
       try {
-        await runner.stop(handle, how);
+        // The handle is a pane id, which names another ferret's pane once the server has restarted: stop only THIS ferret's.
+        await runner.stop(handle, how, ferret);
       } finally {
         // What was proved about this ferret's rollout is only a cache: a stopped ferret keeps none, and a read that
         // comes later proves it afresh.
