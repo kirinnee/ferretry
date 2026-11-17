@@ -35,7 +35,7 @@ button, no frame, no caption:
 | `video`   | plays in the browser's own player, from `src:`                                                                             |
 | `audio`   | plays in the browser's own player, from `src:`                                                                             |
 | `pdf`     | a workspace PDF opens in a new tab or downloads; an https PDF is a link                                                    |
-| `card`    | a live board task (`&F12`): title, lane, progress, PRs; click opens it; updates when the task moves                        |
+| `task`    | a live board task (`&F12`): title, lane, progress, PRs; click opens it; updates when the task moves                        |
 | `board`   | a live mini board, grouped by lane: up to 12 task refs, or `parent: &F12` for that task's children                         |
 
 So write `chart` when the point is in numbers — a trend, a comparison, a share, a before-and-after —

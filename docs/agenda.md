@@ -224,7 +224,7 @@ each answer does to the task).
   of a rest nobody touched does not make it a different thread), taken of the thread **as it is stored** (after the
   history is cut to its bound, with the seal's own room counted, so a thread with a full history still matches). Anything else written on the thread afterwards — the owner's reply,
   answer, Needs info or snooze, the ferret's edit (its revision), hand-back, rest or new question, and the daemon's own
-  other lines — makes the digest differ. The seal is renewed only by a card-ask write (put an ask on, restate it,
+  other lines — makes the digest differ. The seal is renewed only by a task-ask write (put an ask on, restate it,
   answer it, Not yet, withdraw another) that finds the thread still matching it. **A thread that no longer matches is
   never sealed again by a restate, a second ask, an answer or a Not yet**: the mismatch lasts for as long as asks are
   on it. The one fresh seal is for the FIRST ask put on a thread that has no open ask, which starts a turn of its own
@@ -416,7 +416,7 @@ first**, then those it is **working** on, each oldest rest first, then the snooz
     are what the item's versions keep and what the Changes diff compares first.
   - **The conversation is only the log.** The ferret answers there briefly and points at the tabs; it never retypes
     a tab into the conversation.
-  - **Explainer mode by default, in hypermedia**: fy-render charts, mermaid, an interactive `html` visual the reader changes (never a stepper), and `card` and
+  - **Explainer mode by default, in hypermedia**: fy-render charts, mermaid, an interactive `html` visual the reader changes (never a stepper), and `task` and
     `board` blocks for status. **Plain Markdown draws no fold** — raw HTML in prose stays inert — so a long part is
     folded inside an fy-render `html` block (`<details><summary>…</summary>…</details>`), whose contents are HTML.
     **GAP:** a fold written in Markdown (for example a fenced or directive fold block) is not built; it would take a
@@ -898,10 +898,10 @@ button, and the machine's own agenda (`machine-agenda`) offers none.
 
 ### Split
 
-`fy agenda split A5 --title … --premise … --context … "<ask>" [--move-cards F12,…] [--stage …]` raises a new item for
+`fy agenda split A5 --title … --premise … --context … "<ask>" [--move-tasks F12,…] [--stage …]` raises a new item for
 the part of A5 that stopped passing the one-agenda test. The new item is the same ferret's, with its own ask and its own
 place in the owner's queue (one Needs-you entry per item); it and A5 point at each other (`splitFrom`, `splitInto`),
-and the tasks named in `--move-cards` go along. A5 keeps its state, ask and conversation. Refused: a task A5 does not
+and the tasks named in `--move-tasks` go along. A5 keeps its state, ask and conversation. Refused: a task A5 does not
 hold, a gate, a notice or a task the daemon acts on, and a request an open item of the ferret already makes.
 
 A task A5 carries only through its [task ask](#task-asks) can be moved too. A moved task's asks go with it:
@@ -958,7 +958,7 @@ ever, and closing it would lose it when the ferret still needs something.
 
 The owner can put an open item away ("we are waiting for approval"): **for** a while or **until** a time — 1 hour,
 4 hours, tomorrow 9:00 in their own time zone, or a time they pick. In the app it is **Snooze** in the open item's ⋯ menu, and the
-clock in a card-to-test's head (never a button in the answer row), and on a phone the Inbox swipe-down compass offers the same four choices (one
+clock in a to-test item's head (never a button in the answer row), and on a phone the Inbox swipe-down compass offers the same four choices (one
 list, `snoozePicks`, for both; Custom… asks for the time on a sheet); on the command line `fy agenda snooze <id> --for 4h | --until 17:00`, and
 `fy agenda unsnooze <id>` brings it back now.
 
@@ -1780,7 +1780,7 @@ task's ask on the task's own agenda instead, and the Inbox keeps no to-test row 
 Either way the owner answers through their authority and the task moves once; the other path is withdrawn. A machine that
 advertises neither keeps today's rows.
 
-**The Inbox has no To test list on a card-asks machine.** Once a machine advertises `agenda.card-asks.1` its tasks leave the Inbox's To test section, the Answer-quickly run step and the snoozed to-test rows, and out of the Inbox's count: the task's ask is an item on an agenda, and that is the one place the owner meets it. The check is per machine (`AgendaWireDirectory.cardAsksOf`), so a machine that does not advertise it keeps every row it has today, and no task waiting on the owner is lost while machines are on different versions. A person-asked
+**The Inbox has no To test list on a task-asks machine.** Once a machine advertises `agenda.card-asks.1` its tasks leave the Inbox's To test section, the Answer-quickly run step and the snoozed to-test rows, and out of the Inbox's count: the task's ask is an item on an agenda, and that is the one place the owner meets it. The check is per machine (`AgendaWireDirectory.cardAsksOf`), so a machine that does not advertise it keeps every row it has today, and no task waiting on the owner is lost while machines are on different versions. A person-asked
 task in a gate lane **with no open gate item** keeps its to-test row even on a machine that advertises gates but not task asks, so no task
 waiting on the owner is ever lost between the two lists.
 
@@ -1912,7 +1912,7 @@ source module does not exist yet), and fails the checklist once it does.
 | 12  | A ferret can show a live task or mini board inline, and it updates when the task moves.                                                                                                                                                                                                                            | `packages/pwa/tests/unit/fy-render-card-embed.test.tsx` (`DoD 12`, by pointer)                                                                                                                                                                                |
 | 13  | The board shows public tasks by default, each linked to its PRs and approvals.                                                                                                                                                                                                                                     | `DoD 13`; `features/board-page.test.tsx`, `board-private-preference.test.ts`, `card-visibility.sit.test.ts`. **GAP:** each linked to its PRs and approvals has no test here                                                                                   |
 | 14  | One agenda can go from explainer to question to plan to tracker to test, with its type showing the current stage, and the history keeps each stage.                                                                                                                                                                | `DoD 14` (`fy agenda edit --stage` through every stage, then `fy agenda done`); the head: `features/agenda-item-parts.test.tsx` (PR 7)                                                                                                                        |
-| 15  | When part of an agenda no longer passes the test, the ferret splits it into a new linked agenda.                                                                                                                                                                                                                   | `DoD 15` (`fy agenda split --move-cards`); the page: `features/agenda-merge-control.test.tsx` (PR 8)                                                                                                                                                          |
+| 15  | When part of an agenda no longer passes the test, the ferret splits it into a new linked agenda.                                                                                                                                                                                                                   | `DoD 15` (`fy agenda split --move-tasks`); the page: `features/agenda-merge-control.test.tsx` (PR 8)                                                                                                                                                          |
 | 16  | A main-chat exchange about an agenda shows in that agenda's conversation, with your words verbatim and tagged "from chat", plus the ferret's reply. The chat reply links to the agenda, and the exchange moves the state as a reply would (it rests, and comes back on the ferret's answer).                       | `DoD 16` (`fy agenda log --reply` and `--rest`: verbatim, tagged, the same message never logged twice, the item rests and comes back ahead of a newer one). **GAP:** the chat reply links to the agenda — taught only (`link` in the Agenda-mode instruction) |
 
 **A long report reaches the item through `edit`.** The main tab, "Where we are now", is written whole from a file
