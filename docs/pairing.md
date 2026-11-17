@@ -75,12 +75,15 @@ carrying the redemption response, or one generic `pair-refused`), then the sessi
   refusal of the same code says the earlier attempt may have paired a device nobody holds and tells the
   reader to check the device list.
 - **When every carrier fails, every leg is reported**, in plain words, one sentence each
-  (`PairingUnreachableError` in `packages/pwa/src/lib/pairing-unreachable.ts`). A loopback direct
-  address is called what it is: it means "this computer itself", so from another device it can never
-  reach the machine. The relay leg says whether the machine is not connected to the relay, the relay is
-  switched off or busy, or it could not be reached at all. When no relay was discovered, the sentence
-  says so. Reporting only the first leg hid a failing relay behind a loopback dial that could never have
-  worked. Sentences name a host and port only, never a path, so the fingerprint stays out of them.
+  (`PairingUnreachableError` in `packages/plugins/connections/app/pairing/unreachable.ts`), in the order tried,
+  followed by "Most likely fix" and a numbered list (the pairing screen draws it as a list). A loopback direct
+  address is normal over an SSH tunnel, so it is one clause ("only works on that machine itself, or through an SSH tunnel from this computer"),
+  never the verdict; the first fixes are the tunnel still running, the same browser on the same computer, and
+  Chrome's local network access prompt. The relay leg says whether the machine is not connected to the relay, the
+  relay is switched off or busy, or it could not be reached at all; when the machine is not connected it adds that
+  that "Ferretry may not be running on that machine, or its relay may be switched off there" — "may", because the link carries no machine or relay state — and that pairing from another device needs it running with the relay on (or an SSH tunnel). When no relay
+  was discovered, the sentence says so. Sentences name a host and port only, never a path, so the fingerprint
+  stays out of them.
 
 What a relay operator can and cannot observe about a redemption is §10 and §13 of the same document:
 fingerprint, client IP, timing and frame shape, and the fact that a first pairing happened — never the

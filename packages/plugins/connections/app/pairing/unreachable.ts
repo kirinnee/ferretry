@@ -8,8 +8,10 @@
  * relay vocabulary for a direct dial, and silence about the relay leg, which was the leg that
  * mattered (it was failing on the relay's side).
  *
- * The direct leg's commonest failure from another device is a loopback address. `127.0.0.1` means
- * "this computer itself", so on a phone it names the phone. The sentence says that in those words.
+ * A loopback direct address (`127.0.0.1`) is NORMAL for the one supported way to pair a machine you reach over
+ * SSH: a tunnel from this computer. It is therefore one clause in the direct sentence and the first fix to try,
+ * never the verdict. Pairing can cross the relay (protocol §14), so a relay leg that failed is said as a failure
+ * to carry the pairing, not as a fallback that was never possible.
  *
  * This module names an ADDRESS'S HOST AND PORT only, never a path. A rendezvous path carries the
  * daemon fingerprint, and neither the code nor the fingerprint belongs in an error a reader may
@@ -48,24 +50,27 @@ const urlOf = (address: string): URL | undefined => {
 /** `host:port` for an address, or the input itself when it is not a URL. Never a path. */
 const hostOf = (address: string): string => urlOf(address)?.host ?? address;
 
+/** The protocol owns what counts as loopback; this only asks it. */
+const isLoopbackDirect = (leg: PairingLegFailure): boolean => {
+  const url = urlOf(leg.address);
+  return url !== undefined && isLoopbackHost(url.hostname);
+};
+
 const directSentence = (leg: PairingLegFailure): string => {
   const host = hostOf(leg.address);
-  const url = urlOf(leg.address);
-  // The protocol owns what counts as loopback; this only asks it.
-  if (url !== undefined && isLoopbackHost(url.hostname)) {
-    return (
-      `The pairing link gives the machine's address as ${host}. That address means "this computer itself", ` +
-      'so on any other device it points back at that device and can never reach the machine.'
-    );
-  }
-  return `This device could not reach the machine directly at ${host}. The machine may be asleep, or on a network this device cannot reach.`;
+  // A loopback address is NORMAL here: through an SSH tunnel it is the supported way in. So it is one clause, never the verdict.
+  const why = isLoopbackDirect(leg)
+    ? `${urlOf(leg.address)?.hostname ?? host} only works on that machine itself, or through an SSH tunnel from this computer.`
+    : 'The machine may be asleep, or on a network this device cannot reach.';
+  return `First, directly at ${host}: no answer. ${why}`;
 };
 
 const relaySentence = (leg: PairingLegFailure): string => {
   const host = hostOf(leg.address);
   switch (leg.code) {
     case RELAY_CLOSE_CODES.daemonAbsent:
-      return `Ferretry's relay (${host}) answered, but the machine is not connected to it right now. Check that Ferretry is running on the machine and that it is online.`;
+      // Pairing CAN cross the relay (protocol §14), so this says why it did not: the machine is not on it.
+      return `Ferretry's relay (${host}) answered, but the machine is not connected to it, so it could not carry the pairing.`;
     case RELAY_CLOSE_CODES.hostedDisabled:
       return `Ferretry's relay (${host}) is switched off right now, so there was nothing to fall back to.`;
     case RELAY_CLOSE_CODES.hostedCapacity:
@@ -91,14 +96,46 @@ const relaySentence = (leg: PairingLegFailure): string => {
 const NO_RELAY_SENTENCE =
   "There was no relay to fall back to: this page could not find out where Ferretry's relay is. Check this device's internet connection.";
 
+/** The heading line of the fix list; the screen reads it and the numbered lines under it as a list. */
+const MOST_LIKELY_FIX = 'Most likely fix:';
+
 /**
- * The sentence a pairing screen shows when every leg failed at transport.
+ * The fixes worth trying, most likely first, for the legs that actually failed.
  *
- * Each leg gets one sentence, in the order it was tried. A walk with no relay leg says so too,
- * because "the relay was never tried" and "the relay failed" have different remedies.
+ * The browser knows only what each carrier answered, never the machine's own settings (the link carries no relay
+ * state), so the relay item says "may be switched off", never that it is.
+ */
+const fixesFor = (legs: readonly PairingLegFailure[]): readonly string[] => {
+  const direct = legs.find(leg => leg.kind === 'direct');
+  const relay = legs.find(leg => leg.kind === 'relay');
+  const fixes: string[] = [];
+  if (direct !== undefined && isLoopbackDirect(direct)) {
+    fixes.push(
+      'If you use an SSH tunnel: check it is still running, and that its local port was free (look for "Could not request local forwarding" in the ssh window).',
+      'Open the link in the same browser, on the same computer as the tunnel.',
+    );
+  } else {
+    fixes.push('Check the machine is awake and on a network this device can reach.');
+  }
+  fixes.push('If Chrome asked about local network access, allow it.');
+  if (relay?.code === RELAY_CLOSE_CODES.daemonAbsent) {
+    fixes.push(
+      'Ferretry may not be running on that machine, or its relay may be switched off there. Pairing from another device needs it running with the relay on (or an SSH tunnel).',
+    );
+  }
+  return fixes;
+};
+
+/**
+ * The text a pairing screen shows when every leg failed at transport.
+ *
+ * Line by line: what was tried, in the order it was tried (one short sentence per leg, and one more when there was no
+ * relay leg, because "never tried" and "failed" have different remedies), then {@link MOST_LIKELY_FIX} and a numbered
+ * list. The pairing screen renders the numbered lines as a list; any other reader gets plain lines.
  */
 const describePairingUnreachable = (legs: readonly PairingLegFailure[]): string => {
-  const sentences = legs.map(leg => (leg.kind === 'direct' ? directSentence(leg) : relaySentence(leg)));
-  if (!legs.some(leg => leg.kind === 'relay')) sentences.push(NO_RELAY_SENTENCE);
-  return sentences.join(' ');
+  const tried = legs.map(leg => (leg.kind === 'direct' ? directSentence(leg) : `Then ${relaySentence(leg)}`));
+  if (!legs.some(leg => leg.kind === 'relay')) tried.push(NO_RELAY_SENTENCE);
+  const fixes = fixesFor(legs).map((fix, index) => `${index + 1}. ${fix}`);
+  return [...tried, MOST_LIKELY_FIX, ...fixes].join('\n');
 };

@@ -260,6 +260,37 @@ describe('PairingScreen exchange', () => {
     await screen.unmount();
   });
 
+  it('shows what was tried as short lines and the likely fixes as a numbered list', async () => {
+    const screen = await screenWith({
+      arrival: PREFILLED,
+      onPair: async () => {
+        throw new Error(
+          [
+            'First, directly at 127.0.0.1:7617: no answer. 127.0.0.1 only works on that machine itself, or through an SSH tunnel from this computer.',
+            "Then Ferretry's relay (relay.example) answered, but the machine is not connected to it, so it could not carry the pairing.",
+            'Most likely fix:',
+            '1. If you use an SSH tunnel: check it is still running.',
+            '2. Open the link in the same browser, on the same computer as the tunnel.',
+          ].join('\n'),
+        );
+      },
+    });
+
+    await interact(() => buttonNamed(screen.container, 'Pair this device').click());
+
+    const failure = must(screen.container.querySelector('[data-pairing-failure="transport"]'), 'the failure');
+    expect([...failure.querySelectorAll('p')].map(line => line.textContent)).toEqual([
+      'First, directly at 127.0.0.1:7617: no answer. 127.0.0.1 only works on that machine itself, or through an SSH tunnel from this computer.',
+      "Then Ferretry's relay (relay.example) answered, but the machine is not connected to it, so it could not carry the pairing.",
+      'Most likely fix:',
+    ]);
+    expect([...failure.querySelectorAll('ol > li')].map(item => item.textContent)).toEqual([
+      'If you use an SSH tunnel: check it is still running.',
+      'Open the link in the same browser, on the same computer as the tunnel.',
+    ]);
+    await screen.unmount();
+  });
+
   it('fails honestly when the daemon cannot be reached, and offers a fresh start', async () => {
     const screen = await screenWith({
       arrival: PREFILLED,

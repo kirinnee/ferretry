@@ -390,6 +390,55 @@ interface PairingFrameProps {
   readonly children: ReactNode;
 }
 
+/** A line the walk numbered ("1. Check…"), and what follows the number. */
+const NUMBERED_LINE = /^\d+\.\s+(.*)$/;
+
+type MessageBlock =
+  | { readonly kind: 'line'; readonly text: string }
+  | { readonly kind: 'steps'; readonly steps: readonly string[] };
+
+/**
+ * A failure message's lines, with each run of numbered lines gathered into one list.
+ * The pairing walk writes "what was tried" lines, then "Most likely fix:" and numbered lines;
+ * a message without numbered lines (every other failure) is one block per line, as before.
+ */
+const messageBlocks = (message: string): readonly MessageBlock[] => {
+  const blocks: MessageBlock[] = [];
+  for (const line of message.split('\n')) {
+    const numbered = NUMBERED_LINE.exec(line);
+    const last = blocks[blocks.length - 1];
+    if (numbered?.[1] === undefined) {
+      if (line.trim().length > 0) blocks.push({ kind: 'line', text: line });
+    } else if (last?.kind === 'steps') {
+      blocks[blocks.length - 1] = { kind: 'steps', steps: [...last.steps, numbered[1]] };
+    } else {
+      blocks.push({ kind: 'steps', steps: [numbered[1]] });
+    }
+  }
+  return blocks;
+};
+
+/** The failure sentence(s), short lines and a real numbered list when the walk gave one. */
+function FailureMessage({ message, cause }: { readonly message: string; readonly cause: PairingFailureCause }) {
+  return (
+    <div className="m-0 flex flex-col gap-2 text-ui leading-base text-err" role="alert" data-pairing-failure={cause}>
+      {messageBlocks(message).map(block =>
+        block.kind === 'steps' ? (
+          <ol key={block.steps.join('\n')} className="m-0 flex list-decimal flex-col gap-1 pl-5">
+            {block.steps.map(step => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        ) : (
+          <p key={block.text} className="m-0">
+            {block.text}
+          </p>
+        ),
+      )}
+    </div>
+  );
+}
+
 /** The housing, and the only thing the embedded seam actually changes. */
 function PairingFrame({ embedded, stage, children }: PairingFrameProps) {
   if (embedded) {
@@ -497,9 +546,7 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded, deviceName, o
         <Title id="pairing-title" className={titleClass}>
           Pairing failed
         </Title>
-        <p className="m-0 text-ui leading-base text-err" role="alert" data-pairing-failure={stage.cause}>
-          {stage.message}
-        </p>
+        <FailureMessage message={stage.message} cause={stage.cause} />
         {/*
           ONE REMEDY PER REASON, which is this repository's doctrine and here it is also §14's.
           A daemon that judged the code wants a fresh code; a redemption that never reached one wants
