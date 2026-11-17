@@ -44,6 +44,26 @@ describe('CachedUsageFeed', () => {
     should(source.reads).equal(1);
   });
 
+  it('should read again after each invalidation, once per event, and keep the last snapshot when that read fails', async () => {
+    // Arrange
+    const source = new RecordingSource([[{ agent: 'writer' }], [{ agent: 'reader' }], undefined]);
+    const feed = new CachedUsageFeed([source], { now: () => 1_000, refreshMs: 10_000 });
+    await feed.accounts();
+    await feed.accounts();
+
+    // Act
+    feed.invalidate();
+    const refreshed = await feed.accounts();
+    await feed.accounts();
+    feed.invalidate();
+    const failed = await feed.accounts();
+
+    // Assert
+    should(refreshed).deepEqual([{ agent: 'reader' }]);
+    should(failed).deepEqual([{ agent: 'reader' }]);
+    should(source.reads).equal(3);
+  });
+
   it('should refresh once the interval has elapsed', async () => {
     // Arrange
     const source = new RecordingSource([[{ agent: 'writer' }], [{ agent: 'reader' }]]);

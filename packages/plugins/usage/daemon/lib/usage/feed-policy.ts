@@ -35,6 +35,13 @@ export interface UsageCacheState {
   readonly snapshot?: UsageSnapshot;
   /** Epoch ms before which a failed source is not probed again. */
   readonly retryAfter: number;
+  /** The accounts moved under the snapshot (a login came, went or changed): it is kept to answer from, never served as fresh. */
+  readonly invalidated?: true;
+}
+
+/** The cache after the accounts changed: the last good snapshot stays for a failed refresh, but the next read probes again. */
+export function invalidateUsageCache(state: UsageCacheState): UsageCacheState {
+  return { ...state, retryAfter: 0, invalidated: true };
 }
 
 export const emptyUsageCache: UsageCacheState = { retryAfter: 0 };
@@ -57,7 +64,7 @@ export function cachedAccounts(state: UsageCacheState): readonly AccountUsage[] 
  */
 export function decideUsageRead(state: UsageCacheState, now: number, refreshMs: number): UsageReadDecision {
   const snapshot = state.snapshot;
-  if (snapshot !== undefined && now >= snapshot.at && now - snapshot.at < refreshMs) {
+  if (snapshot !== undefined && state.invalidated !== true && now >= snapshot.at && now - snapshot.at < refreshMs) {
     return { kind: 'serve', accounts: snapshot.accounts };
   }
   if (now < state.retryAfter) return { kind: 'serve', accounts: cachedAccounts(state) };
