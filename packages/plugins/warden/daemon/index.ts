@@ -1,6 +1,7 @@
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { HARNESS_DIALOG_RULES_KEY, WardenDialogRulesClaude, WardenDialogRulesCodex } from '../contract/dialog-rules.ts';
 import manifest from '../manifest.ts';
+import { isLaunchChange } from './lib/launch-change.ts';
 import { wardenFlags } from './lib/protocol.ts';
 import { toWireBlessing, toWireFlag, toWireLeave, toWireRun } from './lib/wire-map.ts';
 import { wardenRoutes } from './routes.ts';
@@ -105,8 +106,9 @@ export default implementDaemon(manifest, {
       hooks: {
         'ferret.changed': payload => {
           if (payload.state === 'stopped') subsystem.nudgeSweep('paneDied');
-          // A launch writes the ferret `starting` (a fresh start says `started`): the quiet clock starts there.
-          if (payload.change === 'started' || payload.state === 'starting') subsystem.launched(payload.ferret);
+          // A launch writes the ferret `starting` (a fresh start says `started`, an attach comes back `working` from
+          // `stopped`): the quiet clock starts there.
+          if (isLaunchChange(payload)) subsystem.launched(payload.ferret);
         },
         'turn.ended': () => subsystem.nudgeSweep('turnEnd'),
       },
