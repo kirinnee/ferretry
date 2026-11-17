@@ -32,6 +32,9 @@ import type { SessionId } from './lib/session-id.ts';
  *   handover: sessions, startAccount, planner — Ferrets' session services / Runtimes.
  *   move:     askAgent — Ferrets' queue; transcripts — Conversation; signals — the kernel has no signal capability for a pid
  *             (the Terminals runner's `signalDescendant`); host.procWorkingDirectory — no cwd read.
+ *             Nothing binds `signals` yet. Whoever does must reach a pid only through
+ *             `runner.signalDescendant(handle, pid, start, signal, record.id)` (the ferret named, so a stale handle can never
+ *             signal another ferret's tree), never through a raw pid signal.
  *             A Restart and a move onto another login are bound (`restart`, `login`, `pane`, `paneIdentity`, `sessions`).
  *             Converting onto another harness is not built: it waits for the harnesses' `exportConversation`/`adoptConversation`.
  */

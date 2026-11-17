@@ -480,20 +480,22 @@ export class TmuxRunner implements Runner {
    * read. Refused (`false`, nothing sent): no process host, a signal other than SIGTERM or SIGKILL, a pid that is not a
    * plain pid above init, a caller that could not read the start, a pane that is gone, dead or not a ferret's, a tree that
    * could not be read, a pid that is the root, not below it or reused, and a protected pid (the daemon or a parent of
-   * it, which a daemon started from inside a ferret's pane would otherwise be). Nothing is written to the pane. With
-   * `ferret` named, a pane that is another ferret's (a stale handle a restarted server handed out again) is refused as
-   * `identify` refuses it, so its process tree is never read or signalled for this ferret.
+   * it, which a daemon started from inside a ferret's pane would otherwise be). Nothing is written to the pane. The
+   * `ferret` is required: a pane that is another ferret's (a stale handle a restarted server handed out again) is refused
+   * as `identify` refuses it, so its process tree is never read or signalled for this ferret.
    */
   async signalDescendant(
     handle: RunnerHandle,
     pid: number,
     start: string | undefined,
     signal: 'SIGTERM' | 'SIGKILL',
-    ferret?: FerretId,
+    ferret: FerretId,
   ): Promise<boolean> {
     const host = this.options.processes;
     if (host === undefined || (signal !== 'SIGTERM' && signal !== 'SIGKILL')) return false;
     if (!Number.isSafeInteger(pid) || pid <= 1 || start === undefined || start === '') return false;
+    // The type says the ferret is there; a caller that is not typed (or a cast) must not turn "no ferret" into "any ferret".
+    if ((ferret as FerretId | undefined) === undefined) return false;
     const pane = await this.identify(handle, ferret);
     if (pane === undefined || pane === 'gone' || pane.pid === undefined || pane.processStart === undefined)
       return false;

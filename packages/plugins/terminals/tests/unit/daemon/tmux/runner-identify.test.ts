@@ -14,6 +14,8 @@ import type { ProcessDetailRow, ProcessTreeRead } from '../../../../daemon/lib/s
 const HANDLE = '%7' as RunnerHandle;
 const ROOT = 4242;
 const ROOT_START = 9000;
+/** The ferret whose session `live()` names. */
+const FERRET = 'ferret-one' as FerretId;
 
 interface Reply {
   readonly code: number;
@@ -200,41 +202,47 @@ describe('TmuxRunner.signalDescendant', () => {
     expect(signalled).toEqual([{ pid: 5001, signal: 'SIGKILL' }]);
   });
 
+  test('a call that names no ferret (an untyped caller) signals nothing: no ferret is never any ferret', async () => {
+    const { runner, signalled } = world({ rows });
+    expect(await runner.signalDescendant(HANDLE, 5001, '9200', 'SIGKILL', undefined as never)).toBe(false);
+    expect(signalled).toEqual([]);
+  });
+
   test('delivers ONE signal to ONE pid that descends from the pane root and matches its start', async () => {
     const { runner, signalled } = world({ rows });
-    expect(await runner.signalDescendant(HANDLE, 5001, '9200', 'SIGTERM')).toBe(true);
+    expect(await runner.signalDescendant(HANDLE, 5001, '9200', 'SIGTERM', FERRET)).toBe(true);
     expect(signalled).toEqual([{ pid: 5001, signal: 'SIGTERM' }]);
   });
 
   test('delivers SIGKILL when asked, and no other signal', async () => {
     const { runner, signalled } = world({ rows });
-    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGKILL')).toBe(true);
-    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGSTOP' as never)).toBe(false);
+    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGKILL', FERRET)).toBe(true);
+    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGSTOP' as never, FERRET)).toBe(false);
     expect(signalled).toEqual([{ pid: 5000, signal: 'SIGKILL' }]);
   });
 
   test('a pid that is not below the pane root is never signalled', async () => {
     const { runner, signalled } = world({ rows, startOf: pid => (pid === ROOT ? ROOT_START : 7777) });
-    expect(await runner.signalDescendant(HANDLE, 777, '7777', 'SIGTERM')).toBe(false);
+    expect(await runner.signalDescendant(HANDLE, 777, '7777', 'SIGTERM', FERRET)).toBe(false);
     expect(signalled).toEqual([]);
   });
 
   test('a reused pid (another start) is never signalled', async () => {
     const { runner, signalled } = world({ rows });
-    expect(await runner.signalDescendant(HANDLE, 5000, '9101', 'SIGTERM')).toBe(false);
+    expect(await runner.signalDescendant(HANDLE, 5000, '9101', 'SIGTERM', FERRET)).toBe(false);
     expect(signalled).toEqual([]);
   });
 
   test('a caller that could not read the start cannot prove which run it means: nothing is signalled', async () => {
     const { runner, signalled } = world({ rows });
-    expect(await runner.signalDescendant(HANDLE, 5000, undefined, 'SIGTERM')).toBe(false);
+    expect(await runner.signalDescendant(HANDLE, 5000, undefined, 'SIGTERM', FERRET)).toBe(false);
     expect(signalled).toEqual([]);
   });
 
   test('the start is re-read just before the signal: a pid that changed in between is left alone', async () => {
     // The tree still lists 9100; the fresh read just before the signal says the pid is another run now.
     const { runner, signalled } = world({ rows, startOf: pid => (pid === ROOT ? ROOT_START : 9999) });
-    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM')).toBe(false);
+    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM', FERRET)).toBe(false);
     expect(signalled).toEqual([]);
   });
 
@@ -242,36 +250,36 @@ describe('TmuxRunner.signalDescendant', () => {
     const daemon = row(100, 5000, 9300);
     const parent = row(50, 100, 9400);
     const { runner, signalled } = world({ rows: [job, daemon, parent], protectedPids: [100, 50] });
-    expect(await runner.signalDescendant(HANDLE, 100, '9300', 'SIGKILL')).toBe(false);
-    expect(await runner.signalDescendant(HANDLE, 50, '9400', 'SIGKILL')).toBe(false);
+    expect(await runner.signalDescendant(HANDLE, 100, '9300', 'SIGKILL', FERRET)).toBe(false);
+    expect(await runner.signalDescendant(HANDLE, 50, '9400', 'SIGKILL', FERRET)).toBe(false);
     expect(signalled).toEqual([]);
   });
 
   test('the pane root itself, init and nonsense pids are never signalled', async () => {
     const { runner, signalled } = world({ rows: [row(1, ROOT, 5), row(-4, ROOT, 5), row(0, ROOT, 5), job] });
     for (const pid of [ROOT, 1, 0, -4, 1.5, Number.NaN])
-      expect(await runner.signalDescendant(HANDLE, pid, String(ROOT_START), 'SIGKILL')).toBe(false);
-    expect(await runner.signalDescendant(HANDLE, 1, '5', 'SIGKILL')).toBe(false);
+      expect(await runner.signalDescendant(HANDLE, pid, String(ROOT_START), 'SIGKILL', FERRET)).toBe(false);
+    expect(await runner.signalDescendant(HANDLE, 1, '5', 'SIGKILL', FERRET)).toBe(false);
     expect(signalled).toEqual([]);
   });
 
   test('a pane that is gone or dead signals nothing', async () => {
     for (const tmux of [() => live('%9'), () => live('%7', ROOT, '1')]) {
       const { runner, signalled } = world({ rows, tmux });
-      expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM')).toBe(false);
+      expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM', FERRET)).toBe(false);
       expect(signalled).toEqual([]);
     }
   });
 
   test('a pane that is not a ferret session signals nothing', async () => {
     const { runner, signalled } = world({ rows, tmux: () => live('%7', ROOT, '0', 'fy-webterm-x') });
-    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM')).toBe(false);
+    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM', FERRET)).toBe(false);
     expect(signalled).toEqual([]);
   });
 
   test('a tree that cannot be read proves no descent: nothing is signalled', async () => {
     const { runner, signalled } = world({ rows, tree: { kind: 'unavailable', reason: 'no procfs' } });
-    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM')).toBe(false);
+    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM', FERRET)).toBe(false);
     expect(signalled).toEqual([]);
   });
 
@@ -285,7 +293,7 @@ describe('TmuxRunner.signalDescendant', () => {
         return rootReads === 1 ? ROOT_START : ROOT_START + 1;
       },
     });
-    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM')).toBe(false);
+    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM', FERRET)).toBe(false);
     expect(signalled).toEqual([]);
   });
 
@@ -297,7 +305,7 @@ describe('TmuxRunner.signalDescendant', () => {
           kill: () => {
             throw errno(code);
           },
-        }).runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM'),
+        }).runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM', FERRET),
       ).toBe(false);
     await expect(
       world({
@@ -305,13 +313,13 @@ describe('TmuxRunner.signalDescendant', () => {
         kill: () => {
           throw errno('EINVAL');
         },
-      }).runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM'),
+      }).runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM', FERRET),
     ).rejects.toThrow('EINVAL');
   });
 
   test('a runner given no process host signals nothing', async () => {
     const { runner, signalled } = world({ rows, host: false });
-    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM')).toBe(false);
+    expect(await runner.signalDescendant(HANDLE, 5000, '9100', 'SIGTERM', FERRET)).toBe(false);
     expect(signalled).toEqual([]);
   });
 });
