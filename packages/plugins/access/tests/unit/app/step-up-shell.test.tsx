@@ -172,15 +172,16 @@ describe('G95 the prompt comes from the machine on screen', () => {
     }
   });
 
-  it('G95 should tell same-named machines apart by address in the prompt', async () => {
+  it('G95 should tell same-named machines on one host apart in the prompt, without the loopback address', async () => {
     const { provision } = harness();
     const view = await mount(<provision.Prompts />);
     try {
       await interact(() => void provision.handler.confirm(TWO, STEP_UP, 'explicit'));
       await settle();
       const text = must(dialogs(view.container)[0], 'the prompt').textContent ?? '';
-      expect(text).toContain('dev-box (127.0.0.1:40246');
-      expect(text).not.toContain('dev-box (127.0.0.1:40245');
+      expect(text).toContain('dev-box (2)');
+      expect(text).not.toContain('dev-box (1)');
+      expect(text).not.toContain('127.0.0.1');
     } finally {
       await view.unmount();
     }

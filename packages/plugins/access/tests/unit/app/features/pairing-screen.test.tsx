@@ -597,21 +597,62 @@ describe('PairingScreen never shows the loopback address of a relayed daemon', (
     await screen.unmount();
   });
 
-  it('lists a relayed daemon by its name and "through the relay", not its loopback address', async () => {
+  it('lists a loopback daemon by its name alone: no address and no path word', async () => {
     const relayed = daemonConnection({
       daemonId: 'relayed',
       baseUrl: 'http://127.0.0.1:7617',
       deviceId: 'relayed-secret',
       daemonName: 'studio',
     });
+    for (const sameMachine of [false, true]) {
+      const screen = await screenWith({
+        connections: [{ ...relayed, pairedAt: 1, lastSelectedAt: 1 }],
+        selectedDaemonId: relayed.daemonId,
+        sameMachine,
+      });
+
+      expect(screen.container.textContent).toContain('studio');
+      expect(screen.container.textContent).not.toContain('127.0.0.1');
+      expect(screen.container.textContent).not.toContain('7617');
+      expect(screen.container.textContent).not.toContain('direct');
+      expect(screen.container.textContent).not.toContain('through the relay');
+      await screen.unmount();
+    }
+  });
+
+  it('lists a non-loopback daemon by its name and address, with no path word', async () => {
+    const remote = daemonConnection({
+      daemonId: 'remote',
+      baseUrl: 'https://box.example.test',
+      deviceId: 'remote-secret',
+      daemonName: 'lab',
+    });
     const screen = await screenWith({
-      connections: [{ ...relayed, pairedAt: 1, lastSelectedAt: 1 }],
-      selectedDaemonId: relayed.daemonId,
+      connections: [{ ...remote, pairedAt: 1, lastSelectedAt: 1 }],
+      selectedDaemonId: remote.daemonId,
       sameMachine: false,
     });
 
-    expect(screen.container.textContent).toContain('studio');
-    expect(screen.container.textContent).toContain('through the relay');
+    expect(screen.container.textContent).toContain('lab');
+    expect(screen.container.textContent).toContain('https://box.example.test');
+    expect(screen.container.textContent).not.toContain('direct');
+    expect(screen.container.textContent).not.toContain('through the relay');
+    await screen.unmount();
+  });
+
+  it('lists an unnamed loopback daemon by a plain stand-in, never its address', async () => {
+    const unnamed = daemonConnection({
+      daemonId: 'unnamed',
+      baseUrl: 'http://127.0.0.1:7618',
+      deviceId: 'unnamed-secret',
+    });
+    const screen = await screenWith({
+      connections: [{ ...unnamed, pairedAt: 1, lastSelectedAt: 1 }],
+      selectedDaemonId: unnamed.daemonId,
+      sameMachine: false,
+    });
+
+    expect(screen.container.textContent).toContain('Your Ferretry machine');
     expect(screen.container.textContent).not.toContain('127.0.0.1');
     await screen.unmount();
   });

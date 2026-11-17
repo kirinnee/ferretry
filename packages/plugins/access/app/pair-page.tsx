@@ -125,7 +125,15 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
     const [refusedBy, setRefusedBy] = useState<string | null>(() => new URL(location()).searchParams.get('refused'));
     const scanHost = useMemo(() => (environment.scanHost ?? (() => browserQrScan(environment.loadDecoder)))(), []);
     const snapshot = useSyncExternalStore(ports.daemons.subscribe, ports.daemons.snapshot);
-    const connections = useMemo(() => snapshot.daemons.map(connectionRecord), [snapshot]);
+    // Each row is named by the same helper every other list uses, so same-named twins read apart here too.
+    const connections = useMemo(
+      () =>
+        snapshot.daemons.map(entry => ({
+          ...connectionRecord(entry),
+          label: distinctDaemonName(entry, snapshot.daemons),
+        })),
+      [snapshot],
+    );
     const refused = refusedBy === null ? undefined : snapshot.daemons.find(entry => entry.daemon === refusedBy);
     if (link === null && fragment.arrival > 0)
       return (

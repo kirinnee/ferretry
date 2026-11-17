@@ -29,13 +29,12 @@
 import { SecretInput, useSecretField } from '@ferretry/app/ui';
 import { Check, ChevronRight, Link2, ShieldCheck, Trash2 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
-import { type DaemonPath, describeDaemonPath } from '@ferretry/plugin-connections/contract';
+import { type DaemonPath, describeDaemonPath, describeListedDaemon } from '@ferretry/plugin-connections/contract';
 import { PAIRING_DEVICE_NAME_MAX_LENGTH } from '../../../contract/index.ts';
 import {
   BrandMark,
   type DaemonConnectionRecord,
   type DaemonId,
-  daemonDisplayName,
   RelayPairingRefusedError,
 } from '../../shell-pairing.ts';
 import type { QrScanHost } from '../../lib/pair-scan.ts';
@@ -296,14 +295,12 @@ export function PairingScreen({
         <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Paired daemons">
           {connections.map(connection => {
             const selected = connection.daemonId === selectedDaemonId;
-            // A relayed daemon is its name and "through the relay", never the loopback address it listens on.
-            const path = describeDaemonPath({
+            // A list row never claims a path: it names the daemon, and shows its address only when that is not loopback.
+            const listed = describeListedDaemon({
               address: connection.baseUrl,
               name: connection.label?.trim() || connection.daemonName,
-              sameMachine,
             });
-            // A direct daemon keeps the name it always had, with its address beneath.
-            const name = path.kind === 'relay' ? path.title : daemonDisplayName(connection);
+            const name = listed.title;
             return (
               <li
                 key={connection.daemonId}
@@ -323,11 +320,9 @@ export function PairingScreen({
                   </span>
                   <span className="min-w-0">
                     <span className="block truncate text-ui font-semibold text-fg">{name}</span>
-                    <span className="block truncate font-mono text-meta text-faint" data-daemon-path={path.kind}>
-                      {path.kind === 'relay' || name === connection.baseUrl
-                        ? path.path
-                        : `${path.path} · ${connection.baseUrl}`}
-                    </span>
+                    {listed.address !== undefined && listed.address !== name && (
+                      <span className="block truncate font-mono text-meta text-faint">{listed.address}</span>
+                    )}
                   </span>
                   <ChevronRight size={16} className="shrink-0 text-faint" aria-hidden="true" />
                 </button>

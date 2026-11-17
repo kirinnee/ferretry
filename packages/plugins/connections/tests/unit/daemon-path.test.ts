@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DAEMON_PATH_WORDS, daemonPathKind, describeDaemonPath } from '../../contract/index.ts';
+import { DAEMON_PATH_WORDS, describeDaemonPath, describeListedDaemon } from '../../contract/index.ts';
 
 const LOOPBACK = 'http://127.0.0.1:7617';
 
@@ -24,7 +24,7 @@ describe('describeDaemonPath', () => {
   });
 
   test('a loopback address seen from another machine is judged relayed before anything is exchanged', () => {
-    expect(daemonPathKind({ address: LOOPBACK })).toBe('relay');
+    expect(describeDaemonPath({ address: LOOPBACK }).kind).toBe('relay');
     expect(describeDaemonPath({ address: LOOPBACK, sameMachine: false }).address).toBeUndefined();
   });
 
@@ -49,6 +49,31 @@ describe('describeDaemonPath', () => {
   });
 
   test('an address that is not a URL is never taken for loopback', () => {
-    expect(daemonPathKind({ address: 'not a url' })).toBe('direct');
+    expect(describeDaemonPath({ address: 'not a url' }).kind).toBe('direct');
+  });
+});
+
+describe('describeListedDaemon', () => {
+  test('a loopback daemon is its name alone: no address, no path word', () => {
+    const row = describeListedDaemon({ address: LOOPBACK, name: 'studio' });
+    expect(row).toEqual({ title: 'studio' });
+    expect(JSON.stringify(row)).not.toContain('127.0.0.1');
+    expect(JSON.stringify(row).toLowerCase()).not.toContain('direct');
+  });
+
+  test('an unnamed loopback daemon gets the plain stand-in, never its address', () => {
+    expect(describeListedDaemon({ address: LOOPBACK })).toEqual({ title: DAEMON_PATH_WORDS.unnamed });
+    expect(describeListedDaemon({ address: 'http://[::1]:7617' }).address).toBeUndefined();
+  });
+
+  test('a non-loopback daemon shows its address and no path word', () => {
+    expect(describeListedDaemon({ address: 'https://box.example.test:8443', name: 'lab' })).toEqual({
+      title: 'lab',
+      address: 'https://box.example.test:8443',
+    });
+    expect(describeListedDaemon({ address: 'https://box.example.test' })).toEqual({
+      title: 'https://box.example.test',
+      address: 'https://box.example.test',
+    });
   });
 });

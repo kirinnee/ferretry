@@ -67,7 +67,7 @@ const isLoopbackAddress = (address: string): boolean => {
  * another machine can only be reached through the relay (a direct dial would find that device itself), so that is
  * what it will be; everything else is dialled directly first.
  */
-export function daemonPathKind(input: DaemonPathInput): DaemonPathKind {
+function daemonPathKind(input: DaemonPathInput): DaemonPathKind {
   if (input.via !== undefined) return input.via;
   return isLoopbackAddress(input.address) && input.sameMachine !== true ? 'relay' : 'direct';
 }
@@ -83,4 +83,24 @@ export function describeDaemonPath(input: DaemonPathInput): DaemonPath {
   const address = hostOf(input.address);
   const title = name ?? address;
   return { kind, title, path, address, summary: `${title} · ${path}` };
+}
+
+/** What a LIST row says about a paired daemon: its name, and its address only when that address means something here. */
+export interface ListedDaemon {
+  readonly title: string;
+  /** Present only for a non-loopback daemon. A loopback address points back at whoever reads it, so it is never listed. */
+  readonly address?: string;
+}
+
+/**
+ * A list row never claims a path (direct or relayed): nothing on a list measured one. It names the daemon and shows
+ * the address only when it is not loopback. A loopback daemon is its name alone, and a stand-in when it has none.
+ */
+export function describeListedDaemon(input: {
+  readonly address: string;
+  readonly name?: string | undefined;
+}): ListedDaemon {
+  const name = input.name?.trim() || undefined;
+  if (isLoopbackAddress(input.address)) return { title: name ?? DAEMON_PATH_WORDS.unnamed };
+  return { title: name ?? input.address, address: input.address };
 }
