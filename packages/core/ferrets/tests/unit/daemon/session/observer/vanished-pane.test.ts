@@ -19,12 +19,12 @@ interface Settled {
 }
 
 /** A live ferret on a fake pane, the turn watch over it, and a way to tick it once and let its settle land. */
-async function watched(state: 'working' | 'idle' = 'working') {
+async function watched(state: 'working' | 'idle' = 'working', status: 'running' | 'waiting' = 'running') {
   const made = await memoryStorage({ clock: { now: () => AT } });
   cleanups.push(async () => await made.storage.close());
   const id = parseSessionId('vanish-1');
   await made.storage.writeConfig(id, sessionConfig(id));
-  await made.storage.writeState(id, { id, status: 'running', turn: 1, turnState: 'working', turnStateAt: AT });
+  await made.storage.writeState(id, { id, status, turn: 1, turnState: 'working', turnStateAt: AT });
   const runner = new FakeRunner();
   const record = {
     format: 1,
@@ -40,6 +40,7 @@ async function watched(state: 'working' | 'idle' = 'working') {
     stateAt: RECORD_T0,
   } as FerretRecord;
   const settled: Settled[] = [];
+  const stillGones: Array<() => Promise<boolean>> = [];
   let timer: (() => void) | undefined;
   const log = new RecordingLog();
   const { host } = buildTurnWatch({
@@ -48,8 +49,9 @@ async function watched(state: 'working' | 'idle' = 'working') {
     record: () => record,
     runner: () => runner,
     turnObserved: async () => undefined,
-    settleGone: async (ferret, handle, exited) => {
+    settleGone: async (ferret, handle, exited, stillGone) => {
       settled.push({ ferret, handle, ...exited });
+      stillGones.push(stillGone);
       return true;
     },
     clock: { now: () => AT },
@@ -65,7 +67,7 @@ async function watched(state: 'working' | 'idle' = 'working') {
     timer?.();
     await new Promise(resolve => setTimeout(resolve, 50));
   };
-  return { runner, record, settled, tick, id: id as unknown as FerretId };
+  return { runner, record, settled, stillGones, tick, id: id as unknown as FerretId };
 }
 
 describe('a ferret whose terminal vanished', () => {
@@ -83,6 +85,37 @@ describe('a ferret whose terminal vanished', () => {
         reason: 'the agent is no longer running: its terminal is gone, so how it exited was not recorded',
       },
     ]);
+  });
+
+  it('is asked again inside the settle: a pane id reused by a relaunch is not the pane that vanished', async () => {
+    const fleet = await watched('working');
+    fleet.runner.reboot();
+    await fleet.tick();
+    const [stillGone] = fleet.stillGones;
+    expect(await stillGone?.()).toBe(true);
+
+    // A restart ran while the settle waited its turn: a live pane now answers to the ferret.
+    fleet.runner.adoptable(fleet.id);
+
+    expect(await stillGone?.()).toBe(false);
+  });
+
+  it('is settled gone while its document says `waiting` (a status the watch never looks at)', async () => {
+    const fleet = await watched('working', 'waiting');
+    fleet.runner.reboot();
+
+    await fleet.tick();
+
+    expect(fleet.settled.map(one => one.handle)).toEqual([fleet.record.handle as string]);
+  });
+
+  it('is not asked about while `waiting` and its pane is alive', async () => {
+    const fleet = await watched('working', 'waiting');
+
+    await fleet.tick();
+
+    expect(fleet.runner.goneAsked).toEqual([fleet.id]);
+    expect(fleet.settled).toEqual([]);
   });
 
   it('says it was between turns when it was idle', async () => {

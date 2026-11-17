@@ -357,7 +357,8 @@ export class TmuxRunner implements Runner {
     } catch {
       return false;
     }
-    const present = await this.options.tmux.execute(['has-session', '-t', session]).catch(() => undefined);
+    // `=` is tmux's exact-name match: without it `fy-abc` would also find a session named `fy-abcdef`.
+    const present = await this.options.tmux.execute(['has-session', '-t', `=${session}`]).catch(() => undefined);
     if (present === undefined || present.code === 0) return false;
     return /can't find session/iu.test(present.stderr) || isTmuxServerAbsent(present.stderr);
   }

@@ -1303,12 +1303,24 @@ export class FerretsService implements FerretsApi {
    * that moved in between (a stop, a resume that relaunched it on another pane) wins, and false is answered. Nothing is
    * killed or launched: the pane is already gone. Its attachments are released as a stop releases them.
    */
-  async settleGone(ferret: FerretId, handle: string, exited: { readonly from: string; readonly reason: string }) {
+  async settleGone(
+    ferret: FerretId,
+    handle: string,
+    exited: { readonly from: string; readonly reason: string },
+    /**
+     * Asked INSIDE the ferret's queue, after the compare-and-set: whether the terminal is STILL proven gone. A pane id is
+     * not an incarnation (a private tmux server hands `%0` out again), so a proof taken before the queue was reached can
+     * be about a pane a relaunch has since replaced on the very same handle. Absent: the caller's own proof stands (the
+     * boot pass, which runs before anything can relaunch).
+     */
+    stillGone?: () => Promise<boolean>,
+  ) {
     return await this.serial.run(ferret, async () => {
       await this.ports.ready?.();
       const record = this.registry.get(ferret);
       if (record === undefined || (record.state !== 'working' && record.state !== 'idle') || record.handle !== handle)
         return false;
+      if (stillGone !== undefined && !(await stillGone().catch(() => false))) return false;
       this.ports.stopping?.(ferret);
       await this.settle(record, 'stopped', 'stopped', { kind: 'terminal_gone' });
       await this.ports.history?.(ferret, 'session.exited', {

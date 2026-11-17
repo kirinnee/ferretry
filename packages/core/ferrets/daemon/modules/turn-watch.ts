@@ -34,7 +34,9 @@ import type { ObserverPatch } from '../lib/session/observer/observer.ts';
 import type { QuestionStepPolicy } from '../lib/session/observer/question.ts';
 import { PacedTurnWatcher } from '../lib/session/observer/turn-watch.ts';
 import type { SessionTurnState } from '../lib/protocol/session.ts';
-import type { TurnPaneEvidence } from '../lib/session/peers/turn.ts';
+import { claimsRunningAgent } from '../lib/session/health/exit.ts';
+import { isTurnStatus, type TurnPaneEvidence } from '../lib/session/peers/turn.ts';
+import type { SessionStatus } from '../lib/protocol/session.ts';
 import type { SessionId } from '../lib/session-id.ts';
 import type { SessionTranscriptTail } from '../lib/session/peers/reads.ts';
 
@@ -64,6 +66,7 @@ export interface TurnWatchDeps {
     ferret: FerretId,
     handle: string,
     exited: { readonly from: string; readonly reason: string },
+    stillGone: () => Promise<boolean>,
   ) => Promise<boolean>;
   readonly clock: { now(): string };
   /** Whether the ferret's owner stores a question that is open now (the `turn.question-open` provider); `false` with none. */
@@ -77,6 +80,9 @@ export interface TurnWatchDeps {
 
 /** What a settled vanished terminal says (the boot exit pass's own sentence for a `gone` pane). */
 const GONE_REASON = 'the agent is no longer running: its terminal is gone, so how it exited was not recorded';
+
+/** How often a live ferret that is in no turn status (a declared wait) is asked whether its terminal is still there. */
+const UNWATCHED_GONE_ASK_MS = 30_000;
 
 /** The sentence a part that is not mounted in this build rejects with. */
 const notMounted = (part: string): Error => new Error(`${part} is not mounted in this version of Ferretry.`);
@@ -201,7 +207,15 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
     void runner
       .gone(record.id)
       .then(async gone => {
-        if (gone) await deps.settleGone?.(record.id, handle, { from, reason: GONE_REASON });
+        // The proof above was taken outside the ferret's queue: the settle asks again once it holds the queue, because a
+        // restart that ran in between may have put a live pane on this very handle.
+        if (gone)
+          await deps.settleGone?.(
+            record.id,
+            handle,
+            { from, reason: GONE_REASON },
+            async () => (await runner.gone?.(record.id)) === true,
+          );
       })
       .catch((error: unknown) =>
         deps.log.warn("a ferret's vanished terminal could not be settled", {
@@ -210,6 +224,18 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
         }),
       )
       .finally(() => settling.delete(record.id));
+  };
+  // A ferret the registry holds live whose document claims a running agent but is not in a turn status (a declared
+  // `waiting`) is never looked at, so no empty look would ever ask. It is asked about directly, at most once per
+  // {@link UNWATCHED_GONE_ASK_MS}: one cheap `has-session`.
+  const askedAt = new Map<FerretId, number>();
+  const noticeUnwatchedGone = (record: FerretRecord, status: SessionStatus): void => {
+    if (isTurnStatus(status) || !claimsRunningAgent(status)) return;
+    const nowMs = Date.parse(deps.clock.now());
+    const last = askedAt.get(record.id);
+    if (last !== undefined && nowMs - last < UNWATCHED_GONE_ASK_MS) return;
+    askedAt.set(record.id, nowMs);
+    noticeGone(record);
   };
   const refused = (part: string) => async (): Promise<never> => {
     throw notMounted(part);
@@ -246,9 +272,10 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
           sessions: async () =>
             (await ports.sessions()).map(session => {
               const record = ferretOf(session.id);
-              return record !== undefined && record.state !== 'stopped'
-                ? session
-                : { ...session, state: { ...session.state, status: 'stopped' as const } };
+              if (record === undefined || record.state === 'stopped')
+                return { ...session, state: { ...session.state, status: 'stopped' as const } };
+              noticeUnwatchedGone(record, session.state.status);
+              return session;
             }),
           yieldToLoop: deps.yieldToLoop,
           // An open question is a person being asked: the look reads it as `needs-input`, as it does a recorded one.
