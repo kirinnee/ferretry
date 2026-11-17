@@ -922,8 +922,11 @@ bypass mode (`permissionMode: skip`) a launch sets `CLAUDE_CODE_EVEN_MORE_DANGER
 dangerous-`rm` guard. It is a loosening, so an agent's edit turning it on is **held** for the owner like a looser permission
 mode (docs/harness-dialogs.md). Not reached yet, each a declared GAP:
 
-- `components/instructions/` (now `instructions/<name>.yaml`, a `text:` document that Runtimes owns, which an agent does
-  not reach) and `presets/` (no successor declared yet).
+- `presets/` (no successor declared yet).
+
+`instructions/<name>.yaml` (Runtimes) and `codex/hooks/<name>.yaml` (Codex) ARE reached, by owner ruling: an agent may
+write them, but **every add and every change is held** for the owner (each file's rule holds all of them, not only a
+loosening), because instructions are what a ferret is told and a hook is a shell command. The owner's own write is never held.
 
 `agenda.yaml` also holds `deadlineWarnHours`, which before 5.0 lived in `daemon.json`, out of an agent's reach. It
 only moves when a deadline warning buzzes: no spend and no authority, so an agent may change it.

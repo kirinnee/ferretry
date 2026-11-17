@@ -6,6 +6,7 @@ import {
   CODEX_SETTINGS,
   HarnessConfigSchema,
   harnessConfigLoosens,
+  hooksItemHeld,
 } from '../../contract/index.ts';
 import { codexConformance, fakeCodex } from '../../contract/testing/index.ts';
 import manifest from '../../manifest.ts';
@@ -90,5 +91,25 @@ describe('codex contract', () => {
     expect(held(undefined, searched(['/a']))).toEqual(dirs);
     expect(held(base, { ...base, permissionMode: 'skip', binary: '/x' })).toHaveLength(2);
     expect(held({ ...base, permissionMode: 'skip' }, base)).toEqual([]);
+  });
+});
+
+describe('codex hooks items: an agent add or change is HELD, never applied (owner ruling !A525 item 9)', () => {
+  const hooks = { hooks: {} };
+  const changed = { hooks: { Stop: [{ command: 'echo done' }] } };
+
+  test('the collection judges with hooksItemHeld, not neverLoosens', () => {
+    expect(CODEX_HOOKS.loosens).toBe(hooksItemHeld);
+  });
+
+  test('a new item is held, a changed one is held, an unchanged one is not', () => {
+    expect(hooksItemHeld(undefined, hooks)).toHaveLength(1);
+    expect(hooksItemHeld(hooks, changed)).toHaveLength(1);
+    expect(hooksItemHeld(changed, hooks)).toHaveLength(1);
+    expect(hooksItemHeld(hooks, { ...hooks })).toEqual([]);
+  });
+
+  test('the sentence never names a command', () => {
+    expect(hooksItemHeld(hooks, changed).join(' ')).not.toContain('echo');
   });
 });
