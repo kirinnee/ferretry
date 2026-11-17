@@ -60,18 +60,13 @@ async function scriptIdentity(words: readonly string[], cwd: string | undefined)
   }
 }
 
-async function linuxIdentity(pid: number, procRoot: string): Promise<string | undefined | 'unknown'> {
+async function linuxIdentity(pid: number, procRoot: string): Promise<string> {
   const base = `${procRoot}/${pid}`;
-  const identity = await fileIdentity(`${base}/exe`);
-  if (identity === undefined) return 'unknown';
-  let program: string;
   try {
-    program = await readlink(`${base}/exe`);
-  } catch {
-    return 'unknown';
-  }
-  if (!RUNTIMES.has(basename(program.replace(/ \(deleted\)$/u, '')))) return identity;
-  try {
+    const identity = await fileIdentity(`${base}/exe`);
+    if (identity === undefined) return 'unknown';
+    const program = await readlink(`${base}/exe`);
+    if (!RUNTIMES.has(basename(program.replace(/ \(deleted\)$/u, '')))) return identity;
     const words = (await readText(`${base}/cmdline`)).split('\0').filter(word => word !== '');
     const cwd = await readlink(`${base}/cwd`).catch(() => undefined);
     const script = await scriptIdentity(words, cwd);
@@ -81,7 +76,7 @@ async function linuxIdentity(pid: number, procRoot: string): Promise<string | un
   }
 }
 
-async function darwinIdentity(pid: number, lsof: ExecutableReads['lsof']): Promise<string | undefined | 'unknown'> {
+async function darwinIdentity(pid: number, lsof: ExecutableReads['lsof']): Promise<string> {
   try {
     const ran = await lsof(['-a', '-p', String(pid), '-d', 'txt', '-Fn']);
     if (ran.exitCode !== 0) return 'unknown';
@@ -99,13 +94,9 @@ async function darwinIdentity(pid: number, lsof: ExecutableReads['lsof']): Promi
 
 /** The identity of the file process `pid` runs: `'unknown'` when it cannot be read (always a refusal). */
 export async function executableIdentityOf(pid: number, reads: ExecutableReads): Promise<string | 'unknown'> {
-  const found =
-    reads.platform === 'linux'
-      ? await linuxIdentity(pid, reads.procRoot ?? '/proc')
-      : reads.platform === 'darwin'
-        ? await darwinIdentity(pid, reads.lsof)
-        : 'unknown';
-  return found ?? 'unknown';
+  if (reads.platform === 'linux') return await linuxIdentity(pid, reads.procRoot ?? '/proc');
+  if (reads.platform === 'darwin') return await darwinIdentity(pid, reads.lsof);
+  return 'unknown';
 }
 
 export interface TrustedSources {

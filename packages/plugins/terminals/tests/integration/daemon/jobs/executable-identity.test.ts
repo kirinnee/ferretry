@@ -36,11 +36,12 @@ function standIn(): { dir: string; fy: string; sleep: string } {
   return { dir, fy, sleep };
 }
 
-/** Starts `exec -a "<argv0>" <program> -c 'sleep 60; true'` under bash, so its command line says what the test wants and its file is the program. */
+/** Starts `exec -a "<argv0>" <program> -c 'read -t 60 _; true'` under bash, so its command line says what the test wants and its file is the program. */
 async function spawnAs(argv0: string, program: string): Promise<number> {
   const bash = Bun.which('bash');
   if (bash === null) throw new Error('bash is required');
-  const child = Bun.spawn([bash, '-c', `exec -a "${argv0}" "${program}" -c 'sleep 60; true'`], {
+  const child = Bun.spawn([bash, '-c', `exec -a "${argv0}" "${program}" -c 'read -t 60 _; true'`], {
+    stdin: 'pipe',
     stdout: 'ignore',
     stderr: 'ignore',
   });
@@ -95,6 +96,58 @@ describe('which file a process runs (Linux procfs)', () => {
 
     // Assert
     should(identity).equal(`${await fileIdentity(process.execPath)}#${realpathSync(script)}`);
+  });
+});
+
+describe('what an unreadable or odd process answers (a fake procfs and a fake lsof)', () => {
+  /** A fake /proc/<pid>: `exe` links to a file named `program`; `cmdline` and `cwd` are optional. */
+  function proc(program: string, options: { cmdline?: string; cwd?: string } = {}): { root: string; dir: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'fy-fakeproc-'));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const binary = join(dir, program);
+    writeFileSync(binary, '');
+    const entry = join(dir, '7');
+    mkdirSync(entry);
+    symlinkSync(binary, join(entry, 'exe'));
+    if (options.cmdline !== undefined) writeFileSync(join(entry, 'cmdline'), options.cmdline);
+    if (options.cwd !== undefined) symlinkSync(options.cwd, join(entry, 'cwd'));
+    return { root: dir, dir };
+  }
+  const linux = (root: string) => ({ platform: 'linux', lsof: noLsof, procRoot: root });
+
+  it('should answer unknown for a runtime whose command line is unreadable or names no readable script', async () => {
+    should(await executableIdentityOf(7, linux(proc('bun').root))).equal('unknown');
+    should(await executableIdentityOf(7, linux(proc('bun', { cmdline: 'bun\0' }).root))).equal('unknown');
+    should(await executableIdentityOf(7, linux(proc('bun', { cmdline: 'bun\0relative.ts\0' }).root))).equal('unknown');
+    should(await executableIdentityOf(7, linux(proc('bun', { cmdline: 'bun\0/no/such/script.ts\0' }).root))).equal(
+      'unknown',
+    );
+  });
+
+  it('should resolve a relative script against the process’s own working folder', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'fy-cwd-'));
+    cleanups.push(() => rmSync(folder, { recursive: true, force: true }));
+    writeFileSync(join(folder, 'fy.ts'), '');
+    const fake = proc('bun', { cmdline: 'bun\0fy.ts\0job\0attach\0', cwd: folder });
+    should(await executableIdentityOf(7, linux(fake.root))).match(/^\d+:\d+#.*fy\.ts$/u);
+  });
+
+  it('should read macOS’s first text mapping through lsof, and refuse anything else it says', async () => {
+    const file = join(standIn().dir, 'fy');
+    const ask = async (exitCode: number | null, stdout: string) =>
+      await executableIdentityOf(1, { platform: 'darwin', lsof: async () => ({ exitCode, stdout }) });
+    should(await ask(0, `p1\nn${file}\nn/usr/lib/dyld\n`)).equal((await fileIdentity(file)) as string);
+    should(await ask(1, '')).equal('unknown');
+    should(await ask(0, 'p1\n')).equal('unknown');
+    should(await ask(0, 'p1\nn/no/such/file\n')).equal('unknown');
+    should(
+      await executableIdentityOf(1, {
+        platform: 'darwin',
+        lsof: async () => {
+          throw new Error('lsof missing');
+        },
+      }),
+    ).equal('unknown');
   });
 });
 
