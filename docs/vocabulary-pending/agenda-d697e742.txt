@@ -1,0 +1,2 @@
+docs/agenda.md
+| 12  | A ferret can show a live task or mini board inline, and it updates when the task moves.                                                                                                         

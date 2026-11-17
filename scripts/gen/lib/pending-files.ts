@@ -1,30 +1,59 @@
 /**
- * Where the pending lists live. Each owner keeps its own `ports-pending.json`, so parallel units stop colliding on one
- * root file. THE RULE (one name, two places):
+ * Where the pending ledger lives: ONE FILE PER OPEN LINE, so closing a line is `git rm <file>` and two branches that
+ * close neighbouring lines never touch the same text (a list in one file conflicts on adjacent deleted lines, on a
+ * move-to-done and on a strike-through; one file per item does not). THE RULE (one name, two places):
  *
- * - `packages/core/<id>/ports-pending.json` or `packages/plugins/<id>/ports-pending.json` holds only plugin `<id>`'s
- *   lines: its `pending` entry, `pendingReasons.<id>`, `pendingHalves.<id>`, `pendingAppPorts` of `<id>`, and the
- *   `unwired` seams that name a file inside that package (`code:packages/.../<id>/...`).
- * - the root `ports-pending.json` keeps only `unwired` seams that belong to no single package (hooks, ports).
+ * - `packages/core/<id>/ports-pending/` or `packages/plugins/<id>/ports-pending/` holds only plugin `<id>`'s lines:
+ *   - `<slug>.txt`: one open gap. The body is the line text (its `[scope]` tag and sentence) and one trailing newline.
+ *     Closing the gap is `git rm` of the file; adding one is a new file. No index names it.
+ *   - `halves/<half>.txt`: the half (`daemon`, `app`, `cli`) is still a skeleton. The body is ignored (empty is fine).
+ *   - `unwired/<slug>.json`: one `unwired` seam `{ seam, card, why }` that names a file inside that package.
+ *   - `app-ports/<slug>.json`: one pending app port `{ plugin, path, reason }`.
+ * - the root `ports-pending/unwired/<slug>.json` keeps only `unwired` seams that belong to no single package.
  *
- * Readers merge every file into the one document the old root file was, so a reader never learns where a line lives.
- * A line named twice, in one file or across two, is an error; the `ports-pending` check also enforces the rule.
+ * A plugin is PENDING while it holds at least one gap file: there is no `pending` list to edit, so the last line closed is
+ * the plugin leaving. `slug` is lowercase letters, digits and `-`; a gap's slug is its GAP(...) tag plus two or three
+ * words of the text, and is the name an `@pending <id>/<slug>` code tag uses.
+ *
+ * Readers get the document the old single `ports-pending.json` was (`readPendingMerged`), so none of them learns where a
+ * line lives. A base ref that still holds the old `ports-pending.json` files is read too (the transition only).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const PENDING_FILE = 'ports-pending.json';
+/** The folder every owner keeps its lines in (and the root keeps its repo-wide seams in). */
+export const PENDING_DIR = 'ports-pending';
 
-/** A package-owned file: `packages/<core|plugins>/<id>/ports-pending.json`. Group 1 is the owner id. */
-export const OWNED_FILE = /^packages\/(?:core|plugins)\/([^/]+)\/ports-pending\.json$/u;
+/** The name the readers say in a message: the ledger as a whole. */
+export const PENDING_FILE = `${PENDING_DIR}/`;
 
-export interface PendingText {
+/** The retired single-file spelling; a base ref may still hold it, a working tree may not. */
+export const LEGACY_FILE = 'ports-pending.json';
+
+/** A package-owned ledger file: `packages/<core|plugins>/<id>/ports-pending/<rest>`. Group 1 is the owner id, 2 the rest. */
+export const OWNED_FILE = /^packages\/(?:core|plugins)\/([^/]+)\/ports-pending\/(.+)$/u;
+
+/** A root ledger file: `ports-pending/<rest>`. Group 1 is the rest. */
+export const ROOT_FILE = /^ports-pending\/(.+)$/u;
+
+export const SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/u;
+
+export type PendingKind = 'gap' | 'half' | 'unwired' | 'app-port';
+
+export interface PendingEntry {
+  /** Root-relative path (or `<ref>:<path>` for a base ref). */
   readonly where: string;
+  /** The owner id; `undefined` for the root. */
+  readonly owner: string | undefined;
+  readonly kind: PendingKind;
+  /** The file name without its extension (a half's name for a `half`). */
+  readonly slug: string;
+  /** A gap's line; the JSON text of an `unwired` or `app-port` entry; empty for a half. */
   readonly text: string;
+  /** Why the file is not a valid entry, or undefined. */
+  readonly problem?: string;
 }
-
-const KEYS = ['pending', 'pendingReasons', 'pendingHalves', 'pendingAppPorts', 'unwired'] as const;
 
 /**
  * The only directories the working-tree walk does not enter, each by exact name: `.git` (VCS metadata), `node_modules`
@@ -36,125 +65,223 @@ export const NOT_SEARCHED = ['.git', 'node_modules', '.worktrees', '.direnv'] as
 
 /**
  * The one folder skipped by its path from the root, not its name: the fixture workspaces `scripts/gen/tests` build (each
- * has a `packages/plugins/alpha/ports-pending.json` of its own). It is git-ignored and owned by those tests, which run in
+ * has a `packages/plugins/alpha/ports-pending/` of its own). It is git-ignored and owned by those tests, which run in
  * the same job as the checks that scan the real tree, so a scan that met a fixture still alive read a pending list that was
  * not the repo's and failed with "listed twice". A fixture's own scan has its folder as root, so it never meets this path.
  */
 export const NOT_SEARCHED_PATHS = ['scripts/gen/tests/.tmp'] as const;
 
-/** Every `ports-pending.json` under `root`, root-relative, sorted; skips only the directories in `NOT_SEARCHED` and `NOT_SEARCHED_PATHS`. */
+const isLedgerFile = (rel: string): boolean =>
+  rel.split('/').includes(PENDING_DIR) || rel === LEGACY_FILE || rel.endsWith(`/${LEGACY_FILE}`);
+
+/** Every ledger file under `root` (every file below a `ports-pending/` folder, and any `ports-pending.json`), sorted. */
 export function pendingFilePaths(root: string): string[] {
   const found: string[] = [];
-  const walk = (rel: string): void => {
+  const walk = (rel: string, inside: boolean): void => {
     for (const entry of readdirSync(join(root, rel), { withFileTypes: true })) {
       if ((NOT_SEARCHED as readonly string[]).includes(entry.name)) continue;
       const next = rel === '' ? entry.name : `${rel}/${entry.name}`;
       if ((NOT_SEARCHED_PATHS as readonly string[]).includes(next)) continue;
-      if (entry.isDirectory()) walk(next);
-      else if (entry.name === PENDING_FILE) found.push(next);
+      if (entry.isDirectory()) walk(next, inside || entry.name === PENDING_DIR);
+      else if (inside || entry.name === LEGACY_FILE) found.push(next);
     }
   };
-  walk('');
+  walk('', false);
   return found.sort();
 }
 
-export function readPendingTexts(root: string): PendingText[] {
-  return pendingFilePaths(root).map(where => ({ where, text: readFileSync(join(root, where), 'utf8') }));
+/** What one ledger path is: its owner, kind and slug, or why it is not a ledger file at all. */
+export function classify(rel: string): Omit<PendingEntry, 'where' | 'text'> {
+  const owned = OWNED_FILE.exec(rel);
+  const root = owned === null ? ROOT_FILE.exec(rel) : null;
+  const owner = owned?.[1];
+  const rest = owned?.[2] ?? root?.[1];
+  const bad = (problem: string): Omit<PendingEntry, 'where' | 'text'> => ({
+    owner,
+    kind: 'gap',
+    slug: rest ?? rel,
+    problem,
+  });
+  if (rest === undefined)
+    return bad(
+      'is outside the rule: a ledger file is packages/<core|plugins>/<id>/ports-pending/<slug>.txt (or halves/, unwired/, app-ports/ inside it), or the root ports-pending/unwired/<slug>.json',
+    );
+  const parts = rest.split('/');
+  const file = parts[parts.length - 1] ?? '';
+  const base = file.replace(/\.[^.]+$/u, '');
+  const ext = file.slice(base.length);
+  if (parts.length === 1) {
+    if (owner === undefined) return bad('the root ports-pending/ keeps only unwired/<slug>.json seams');
+    if (ext !== '.txt') return bad('a gap file is <slug>.txt');
+    return SLUG.test(base) ? { owner, kind: 'gap', slug: base } : bad(`"${base}" is not a slug (a-z, 0-9, "-")`);
+  }
+  const folder = parts[0];
+  if (parts.length === 2 && folder === 'halves' && owner !== undefined)
+    return ext === '.txt' && ['daemon', 'app', 'cli'].includes(base)
+      ? { owner, kind: 'half', slug: base }
+      : bad('a half file is halves/daemon.txt, halves/app.txt or halves/cli.txt');
+  if (parts.length === 2 && folder === 'unwired')
+    return ext === '.json' && SLUG.test(base)
+      ? { owner, kind: 'unwired', slug: base }
+      : bad('an unwired seam is unwired/<slug>.json');
+  if (parts.length === 2 && folder === 'app-ports' && owner !== undefined)
+    return ext === '.json' && SLUG.test(base)
+      ? { owner, kind: 'app-port', slug: base }
+      : bad('a pending app port is app-ports/<slug>.json');
+  return bad('is outside the rule: no such folder in a ports-pending/ ledger');
+}
+
+/** The line a gap file holds: the body without its one trailing newline. */
+export function gapLine(body: string): string {
+  return body.endsWith('\n') ? body.slice(0, -1) : body;
+}
+
+function entryOf(where: string, rel: string, body: string): PendingEntry {
+  if (rel === LEGACY_FILE || rel.endsWith(`/${LEGACY_FILE}`))
+    return {
+      where,
+      owner: undefined,
+      kind: 'gap',
+      slug: rel,
+      text: body,
+      problem: `is the retired single ${LEGACY_FILE}: one file per open line under ports-pending/ now`,
+    };
+  const base = classify(rel);
+  if (base.problem !== undefined) return { ...base, where, text: body };
+  if (base.kind === 'gap') {
+    const line = gapLine(body);
+    const problem =
+      line.trim() === ''
+        ? 'is empty: a gap file holds its line'
+        : line.includes('\n')
+          ? 'holds more than one line: one gap per file'
+          : line !== line.trim()
+            ? 'has leading or trailing spaces'
+            : undefined;
+    return { ...base, where, text: line, ...(problem === undefined ? {} : { problem }) };
+  }
+  if (base.kind === 'half') return { ...base, where, text: '' };
+  try {
+    const value: unknown = JSON.parse(body);
+    if (value === null || typeof value !== 'object' || Array.isArray(value))
+      return { ...base, where, text: body, problem: 'is not a JSON object' };
+  } catch (error) {
+    return {
+      ...base,
+      where,
+      text: body,
+      problem: `is not JSON: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  return { ...base, where, text: body };
+}
+
+/** Every entry of a working tree, sorted by path. */
+export function readPendingEntries(root: string): PendingEntry[] {
+  return pendingFilePaths(root).map(rel => entryOf(rel, rel, readFileSync(join(root, rel), 'utf8')));
 }
 
 /**
- * A ref's committed pending files, EVERY path whose last segment is `ports-pending.json` wherever it sits: the ownership
- * check, not the listing, decides which are allowed. Throws when git cannot list the ref; `[]` when it holds none.
+ * The entries a git ref commits, plus the retired single files as entries of the old kinds (so a base that predates the
+ * folder layout still answers). Throws when git cannot list the ref.
  */
-export function readPendingTextsAt(root: string, ref: string): PendingText[] {
+export function readPendingEntriesAt(root: string, ref: string): PendingEntry[] {
   const listed = spawnSync('git', ['ls-tree', '-r', '--name-only', ref], { cwd: root, encoding: 'utf8' });
   if (listed.status !== 0) throw new Error(`git cannot list ${ref}`);
-  const paths = listed.stdout.split('\n').filter(p => p === PENDING_FILE || p.endsWith(`/${PENDING_FILE}`));
-  return paths.map(where => {
-    const shown = spawnSync('git', ['show', `${ref}:${where}`], { cwd: root, encoding: 'utf8' });
-    if (shown.status !== 0) throw new Error(`git cannot read ${ref}:${where}`);
-    return { where: `${ref}:${where}`, text: shown.stdout };
-  });
+  const entries: PendingEntry[] = [];
+  const legacy: { where: string; text: string }[] = [];
+  for (const rel of listed.stdout.split('\n').filter(p => p !== '' && isLedgerFile(p))) {
+    const shown = spawnSync('git', ['show', `${ref}:${rel}`], { cwd: root, encoding: 'utf8' });
+    if (shown.status !== 0) throw new Error(`git cannot read ${ref}:${rel}`);
+    if (rel === LEGACY_FILE || rel.endsWith(`/${LEGACY_FILE}`))
+      legacy.push({ where: `${ref}:${rel}`, text: shown.stdout });
+    else entries.push(entryOf(`${ref}:${rel}`, rel, shown.stdout));
+  }
+  for (const file of legacy) entries.push(...legacyEntries(file.where, file.text));
+  return entries;
 }
 
-/** The old single-file document, from every file. `undefined` when there is no file at all. */
-export function mergePendingTexts(files: readonly PendingText[]): string | undefined {
-  if (files.length === 0) return undefined;
-  const pending: unknown[] = [];
-  const reasons: Record<string, unknown> = {};
-  const halves: Record<string, unknown> = {};
+/** An old-layout `ports-pending.json` as entries; its `pending` ids are kept as synthetic `pending` gap-less owners. */
+function legacyEntries(where: string, text: string): PendingEntry[] {
+  const doc = JSON.parse(text) as Record<string, unknown>;
+  const out: PendingEntry[] = [];
+  const owned = OWNED_FILE.exec(where.slice(where.indexOf(':') + 1).replace(LEGACY_FILE, `${PENDING_DIR}/x`));
+  const fileOwner = owned?.[1];
+  const reasons = (doc.pendingReasons ?? {}) as Record<string, string[]>;
+  for (const [id, lines] of Object.entries(reasons))
+    lines.forEach((line, at) => out.push({ where, owner: id, kind: 'gap', slug: `legacy-${at + 1}`, text: line }));
+  const halves = (doc.pendingHalves ?? {}) as Record<string, string[]>;
+  for (const [id, list] of Object.entries(halves))
+    for (const half of list) out.push({ where, owner: id, kind: 'half', slug: half, text: '' });
+  for (const seam of (doc.unwired ?? []) as { seam?: string }[])
+    out.push({ where, owner: fileOwner, kind: 'unwired', slug: String(seam.seam ?? ''), text: JSON.stringify(seam) });
+  for (const port of (doc.pendingAppPorts ?? []) as { plugin?: string }[])
+    out.push({
+      where,
+      owner: port.plugin,
+      kind: 'app-port',
+      slug: String(port.plugin ?? ''),
+      text: JSON.stringify(port),
+    });
+  for (const id of (doc.pending ?? []) as string[])
+    out.push({ where, owner: id, kind: 'gap', slug: '(pending)', text: '', problem: 'pending-marker' });
+  return out;
+}
+
+/**
+ * The one document the old single file was, from entries: `pending` is every owner with a gap (or, from an old base, its
+ * explicit list), `pendingReasons` the gap lines (sorted by slug), `pendingHalves` the skeleton halves.
+ */
+export function mergeEntries(entries: readonly PendingEntry[]): string {
+  const pending = new Set<string>();
+  const reasons = new Map<string, string[]>();
+  const slugs = new Map<string, string[]>();
+  const halves = new Map<string, string[]>();
   const appPorts: unknown[] = [];
   const unwired: unknown[] = [];
-  const seen = new Set<string>();
-  let hasUnwired = false;
-  const formats = new Set<unknown>();
-  const once = (key: string, where: string): void => {
-    if (seen.has(key))
-      throw new Error(`${where}: ${key} is listed twice (in this file or in another ports-pending.json)`);
-    seen.add(key);
-  };
-  for (const { where, text } of files) {
-    const doc = JSON.parse(text) as Record<string, unknown>;
-    formats.add(doc.format); // the readers name a format that is not 1; files must only agree
-    for (const key of Object.keys(doc))
-      if (key !== 'format' && !(KEYS as readonly string[]).includes(key))
-        throw new Error(`${where}: unknown key "${key}"`);
-    if (Array.isArray(doc.pending))
-      for (const id of doc.pending) {
-        if (typeof id === 'string') once(`pending ${id}`, where);
-        pending.push(id);
-      }
-    else if (doc.pending !== undefined) throw new Error(`${where}: "pending" is not a list of ids`);
-    for (const [target, name] of [
-      [reasons, 'pendingReasons'],
-      [halves, 'pendingHalves'],
-    ] as const) {
-      const given = doc[name];
-      if (given === undefined) continue;
-      if (typeof given !== 'object' || given === null || Array.isArray(given))
-        throw new Error(`${where}: "${name}" is not an object of plugin id to lists`);
-      for (const [id, list] of Object.entries(given)) {
-        once(`${name}.${id}`, where);
-        target[id] = list;
-      }
+  for (const entry of [...entries].sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0))) {
+    if (entry.problem === 'pending-marker') {
+      if (entry.owner !== undefined) pending.add(entry.owner);
+      continue;
     }
-    if (Array.isArray(doc.pendingAppPorts)) appPorts.push(...doc.pendingAppPorts);
-    else if (doc.pendingAppPorts !== undefined) throw new Error(`${where}: "pendingAppPorts" must be a list`);
-    if (Array.isArray(doc.unwired)) {
-      hasUnwired = true;
-      unwired.push(...doc.unwired);
-    } else if (doc.unwired !== undefined) throw new Error(`${where}: "unwired" is not a list`);
+    if (entry.problem !== undefined) throw new Error(`${entry.where}: ${entry.problem}`);
+    const owner = entry.owner;
+    if (entry.kind === 'gap' && owner !== undefined) {
+      pending.add(owner);
+      reasons.set(owner, [...(reasons.get(owner) ?? []), entry.text]);
+      slugs.set(owner, [...(slugs.get(owner) ?? []), entry.slug]);
+    } else if (entry.kind === 'half' && owner !== undefined)
+      halves.set(owner, [...(halves.get(owner) ?? []), entry.slug]);
+    else if (entry.kind === 'unwired') unwired.push(JSON.parse(entry.text));
+    else if (entry.kind === 'app-port') appPorts.push(JSON.parse(entry.text));
   }
-  if (formats.size > 1) throw new Error('the ports-pending.json files disagree on "format"');
   return JSON.stringify({
-    format: [...formats][0],
-    pending,
-    pendingReasons: reasons,
-    pendingHalves: halves,
+    format: 1,
+    pending: [...pending],
+    pendingReasons: Object.fromEntries(reasons),
+    pendingSlugs: Object.fromEntries(slugs),
+    pendingHalves: Object.fromEntries(halves),
     pendingAppPorts: appPorts,
-    ...(hasUnwired ? { unwired } : {}),
+    unwired,
   });
 }
 
-/** The merged document of a working tree, or `undefined` when it has no pending file. */
-export function readPendingMerged(root: string): string | undefined {
-  return mergePendingTexts(readPendingTexts(root));
+/** The merged document of a working tree: an empty ledger (the end state) is a document with nothing in it. */
+export function readPendingMerged(root: string): string {
+  return mergeEntries(readPendingEntries(root));
 }
 
-/** A base spelling: `file:<path>` (one file, or a directory read like a tree) or a git ref. */
+/**
+ * A base spelling: `file:<path>` (a directory read like a tree, or one old-layout file; `undefined` when the path is
+ * not there) or a git ref (throws when git cannot list it; a ref that holds no ledger file is an EMPTY ledger, the end
+ * state, so it still compares).
+ */
 export function readPendingMergedBase(root: string, ref: string): string | undefined {
-  if (!ref.startsWith('file:')) return mergePendingTexts(readPendingTextsAt(root, ref));
+  if (!ref.startsWith('file:')) return mergeEntries(readPendingEntriesAt(root, ref));
   const target = ref.slice(5);
   if (!existsSync(target)) return undefined;
-  if (readdirSafe(target)) return readPendingMerged(target);
-  return mergePendingTexts([{ where: target, text: readFileSync(target, 'utf8') }]);
-}
-
-function readdirSafe(path: string): boolean {
-  try {
-    readdirSync(path);
-    return true;
-  } catch {
-    return false;
-  }
+  // A single file is an old-layout document (a test's, or a release compare's); a directory is read like a tree.
+  return statSync(target).isDirectory()
+    ? readPendingMerged(target)
+    : mergeEntries(legacyEntries(target, readFileSync(target, 'utf8')));
 }

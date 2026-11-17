@@ -1,0 +1,5 @@
+{
+  "seam": "hook:task.moving",
+  "card": "&F1787",
+  "why": "Extension point: no plugin reacts when a task moves, which is fine until one needs to."
+}

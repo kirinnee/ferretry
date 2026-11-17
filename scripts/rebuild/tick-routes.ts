@@ -10,7 +10,7 @@
  * Stub detection is a source scan, not a run: from the route key's literal in the owner's non-test `daemon/` source
  * it reads the handler window (down to the next route key) for `pending(`, `*Pending`, `unavailable*`, `GAP(`,
  * `refuses every request` and `not ported`, and it names the lines of those markers the handler FILE carries
- * ("maybe", the handler may reach a stub through a helper). It also reads `ports-pending.json`'s reasons for the
+ * ("maybe", the handler may reach a stub through a helper). It also reads the `ports-pending/` gap lines for the
  * route's path. A route whose key is not a literal (built by a helper) says so.
  *
  * `no-marker` means ONLY that no marker sits in the handler window and its file: it is NOT "works". A stub reached
@@ -190,7 +190,7 @@ export async function report(root: string): Promise<string> {
     'Descriptor parity is NECESSARY, never sufficient: a route row is `[x]` only with a route test that drives the real handler',
     'through the host and whose title names the row id (enforced by `scripts/validate/parity-ticks.ts`). Use this report to see',
     'which open routes are stubs (`stub`: a pending or GAP refusal in the handler; `maybe`: the handler file carries a marker, or',
-    '`ports-pending.json` names the route; a row a review traced by hand is a `stub` too) before spending a batch on them.',
+    '`ports-pending/` names the route; a row a review traced by hand is a `stub` too) before spending a batch on them.',
     '`no-marker` means only that the scan found no marker: it does NOT mean the handler works.',
     '',
     `Open route rows: ${rows.length}. Descriptor proven: ${count.proven}. Not proven: ${count.not}${

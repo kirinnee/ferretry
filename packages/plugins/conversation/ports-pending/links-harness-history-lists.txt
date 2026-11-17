@@ -1,0 +1,1 @@
+[own] GAP(links): the harness history lists how many transcripts were skipped, in which harness (`skippedBy`), and each entry's turns, not today's per-transcript skip reasons (the index records one: the file holds no message the owner said, or no folder) or recorded event count (the finders describe turns, not events)

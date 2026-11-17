@@ -63,11 +63,27 @@ laundered a defect into something every gate was right to pass.
 manifest OFFERS and nothing wires: a hook with no taker (or one key of a closed key set with none), a hook the
 offerer's own daemon code never reads, a port nothing reaches (no other plugin, no kernel bind, and no route path
 named by its own app or cli half), and an unbound seam in daemon code (`unbound(`, `notBuilt*`, a hard-coded
-`const x: T | undefined = undefined;`). Each is wired or listed under `"unwired"` in a `ports-pending.json` (its owning package's, or the root's when no package owns it) with a
+`const x: T | undefined = undefined;`). Each is wired or listed as an `unwired/<slug>.json` file in a `ports-pending/` folder (its owning package's, or the root's when no package owns it) with a
 `&F<digits>` task and one sentence on what the owner loses. The list only shrinks against the base ref, and an entry
 that is stale or names something that does not exist is a finding.
 
 Hook wiring lives in `nix/pre-commit.nix` — see [Linting](../linting/index.md).
+
+### The pending ledger: one file per open line
+
+`ports-pending`, `pending-tags`, `unwired-seams`, `after-merge` and `vocabulary` read ledgers that agents close in parallel,
+so each open line is its own file and closing it is a deletion:
+
+- **Close a line:** `git rm packages/<core|plugins>/<id>/ports-pending/<slug>.txt` in the branch that closes it (and
+  delete or wire any code `@pending <id>/<slug>` tag that named it).
+- **Add a line:** a new `<slug>.txt` in the same folder: the body is the line text, `[scope]` tag first, one line, one
+  trailing newline. The slug is the GAP(...) tag plus two or three words. Adding is rare: the list only shrinks against the
+  base, so a plugin that holds no gap in the base cannot gain one.
+- **Count:** `ls packages/*/*/ports-pending/*.txt | wc -l`. No index file exists; nobody edits one.
+- `vocabulary` keeps `<scope>/vocabulary-pending/<name>-<hash>.txt`, one per remaining hit of the old word: fix the
+  sentence, then `git rm` its file (the check names it). The hash is of the line with the word masked, not of its path.
+
+The rule and the layout live in `scripts/gen/lib/pending-files.ts`.
 
 ## Workspace, CLI, and release contracts
 

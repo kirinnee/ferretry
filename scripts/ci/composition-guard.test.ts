@@ -4,15 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { runTwoAdds } from '../gen/tests/merge-safe.ts';
-import {
-  type FileChange,
-  describe,
-  evaluate,
-  isLedgerClosing,
-  isSortedAdd,
-  parseDiff,
-  run,
-} from './composition-guard.ts';
+import { type FileChange, describe, evaluate, isSortedAdd, parseDiff, run } from './composition-guard.ts';
 import {
   COMPOSITION_HEADER,
   type CompositionEntry,
@@ -35,7 +27,7 @@ const entry = (path: string, kind: CompositionEntry['kind'] = 'composition'): Co
 const DECLARED = new Map(
   [
     entry('packages/core/ferrets/manifest.ts'),
-    entry('packages/core/ferrets/ports-pending.json'),
+    entry('packages/core/ferrets/daemon/index.ts'),
     entry('packages/core/ferrets/daemon/harness/parts/index.ts', 'registry'),
   ].map(item => [item.path, item] as const),
 );
@@ -109,12 +101,12 @@ suite('the guard decides', () => {
     const result = check(
       {
         'packages/core/ferrets/manifest.ts': edit(['a'], ['b']),
-        'packages/core/ferrets/ports-pending.json': edit(['c'], ['d']),
+        'packages/core/ferrets/daemon/index.ts': edit(['c'], ['d']),
       },
       body('## Contract change', '- packages/core/ferrets/manifest.ts: new route'),
     );
     expect(result.ok).toBe(false);
-    expect(result.missing.map(item => item.file)).toEqual(['packages/core/ferrets/ports-pending.json']);
+    expect(result.missing.map(item => item.file)).toEqual(['packages/core/ferrets/daemon/index.ts']);
   });
 
   test('deleting a declared file is an edit of it', () => {
@@ -201,27 +193,6 @@ suite('exempt: one added line in its sorted place', () => {
         edit(['composition\ta.ts\t-\t-\tfirst'], [], 2, [COMPOSITION_HEADER, 'composition\ta.ts\t-\t-\tfirst']),
       ),
     ).toBe(true);
-  });
-});
-
-suite('exempt: closing lines of a ports-pending.json ledger', () => {
-  const ledger = 'packages/core/ferrets/ports-pending.json';
-
-  test('only deletions pass without a section', () => {
-    const result = check({ [ledger]: edit([], ['    "[a] one",', '    "[b] two",']) });
-    expect(result.ok).toBe(true);
-    expect(result.exempt).toEqual([{ file: ledger, why: 'ledger-closing' }]);
-  });
-
-  test('deleting the last entry also rewrites the comma of the new last one, and still passes', () => {
-    expect(isLedgerClosing(edit(['    "[a] one"'], ['    "[a] one",', '    "[b] two"']))).toBe(true);
-  });
-
-  test('adding a line, or rewriting a line, does not', () => {
-    expect(isLedgerClosing(edit(['    "[new] gap",'], []))).toBe(false);
-    expect(isLedgerClosing(edit(['    "[a] reworded",'], ['    "[a] one",']))).toBe(false);
-    expect(isLedgerClosing(edit(['    "[new] gap",'], ['    "[a] one",', '    "[b] two",']))).toBe(false);
-    expect(check({ [ledger]: edit(['    "[new] gap",'], []) }).ok).toBe(false);
   });
 });
 
@@ -523,17 +494,15 @@ const TSV = `${[
   COMPOSITION_HEADER,
   ['composition', 'manifest.ts', '-', '-', 'the manifest literal'].join('\t'),
   ['registry', 'parts/index.ts', '-', '-', 'one line per part'].join('\t'),
-  ['composition', 'ports-pending.json', '-', '-', 'the ledger'].join('\t'),
 ].join('\n')}\n`;
 
-/** A repository with one package that declares a seam, a ledger and a registry; returns the base commit. */
+/** A repository with one package that declares a seam and a registry; returns the base commit. */
 function fixture() {
   const r = repo();
   r.git('init', '-q', '-b', 'base');
   r.write('package.json', JSON.stringify({ name: 'x', workspaces: ['packages/*'] }));
   r.write('packages/alpha/package.json', '{"name":"alpha"}');
   r.write('packages/alpha/manifest.ts', 'export const manifest = { id: 1 };\n');
-  r.write('packages/alpha/ports-pending.json', '{\n  "pending": [\n    "[a] one",\n    "[b] two"\n  ]\n}\n');
   r.write('packages/alpha/parts/index.ts', PARTS);
   r.write('packages/alpha/composition.tsv', TSV);
   r.write('packages/alpha/other.ts', 'export const other = 1;\n');
@@ -617,21 +586,6 @@ suite('the job, end to end (real git, no network)', () => {
     const result = guard(unsorted, '');
     expect(result.code).toBe(1);
     expect(result.lines.join('\n')).toContain('✗ packages/alpha/parts/index.ts');
-  });
-
-  test('a ledger PR that only deletes lines passes; one that adds a line does not', () => {
-    const closing = fixture();
-    closing.write('packages/alpha/ports-pending.json', '{\n  "pending": [\n    "[a] one"\n  ]\n}\n');
-    closing.commit('fix: close a ruled line');
-    expect(guard(closing, '').code).toBe(0);
-
-    const adding = fixture();
-    adding.write(
-      'packages/alpha/ports-pending.json',
-      '{\n  "pending": [\n    "[a] one",\n    "[b] two",\n    "[c] three"\n  ]\n}\n',
-    );
-    adding.commit('feat: a new gap');
-    expect(guard(adding, '').code).toBe(1);
   });
 
   test('a package declaring one more file (one sorted line in its composition.tsv) passes', () => {

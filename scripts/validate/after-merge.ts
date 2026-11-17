@@ -152,7 +152,7 @@ export function parityOpen(root: string): number {
   return rows.filter(row => (row.split('\t')[status] ?? '').startsWith('[ ]')).length;
 }
 
-/** Every open-gap line `ports-pending.json` states. */
+/** Every open-gap line the `ports-pending/` ledger holds (one file each). */
 export function portsPendingLines(root: string): number {
   return Object.values(readPending(root).reasons).reduce((sum, lines) => sum + lines.length, 0);
 }

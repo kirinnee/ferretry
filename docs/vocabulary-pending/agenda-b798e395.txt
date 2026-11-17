@@ -1,0 +1,2 @@
+docs/agenda.md
+carries `cards` (below): each task gets its own **Open**, **Start a ferret** and **Close**, on one line (a phone's width

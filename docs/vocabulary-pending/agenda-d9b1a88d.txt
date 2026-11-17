@@ -1,0 +1,2 @@
+docs/agenda.md
+list, so a machine that carries several (`cardAsks`, `agenda.card-asks.1`) fills it unchanged. The item's own

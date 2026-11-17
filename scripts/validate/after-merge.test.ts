@@ -129,11 +129,9 @@ describe('after-merge', () => {
     const root = fixture({
       'docs/design/rebuild-parity.tsv':
         'id\tkind\tstatus\nV-1\tV\t[ ]\nV-2\tV\t[x]\nV-3\tV\tremoved by design (x)\nV-4\tV\t[ ]\nV-5\tV\t[ ] pending: a note after the box\n',
-      'ports-pending.json': JSON.stringify({
-        format: 1,
-        pending: ['a', 'b'],
-        pendingReasons: { a: ['one', 'two'], b: ['three'] },
-      }),
+      'packages/plugins/a/ports-pending/one.txt': 'one\n',
+      'packages/plugins/a/ports-pending/two.txt': 'two\n',
+      'packages/core/b/ports-pending/three.txt': 'three\n',
     });
     expect(parityOpen(root)).toBe(3);
     expect(portsPendingLines(root)).toBe(3);

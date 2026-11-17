@@ -1,0 +1,2 @@
+docs/agenda.md
+`AGENDA_KIND_LABELS` in `@ferretry/protocol` (`agenda-card.ts`, with `agendaKindLabel(item)` to read it) — and the

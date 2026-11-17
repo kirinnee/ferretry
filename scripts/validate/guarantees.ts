@@ -5,7 +5,7 @@
  *
  * `guarantees` fails when a kept row (or the kept half of a split row) has no test whose name STARTS with its id
  * (`test('G11 person route refuses …')`; `.skip` and `.todo` do not count), or when a REMOVED row still has a test (its
- * code remains). Rows owned by a package still in `ports-pending.json`, or cut from the release (`deferred.json`),
+ * code remains). Rows owned by a package still pending (a `ports-pending/` gap file), or cut from the release (`deferred.json`),
  * are skipped unless `--strict`.
  *
  * A test that EXISTS is not a test that PASSES: `guarantees` also reads the JUnit files the test tiers write

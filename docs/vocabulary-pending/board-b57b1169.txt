@@ -1,0 +1,2 @@
+docs/board.md
+task ask (the state machine's `card-ask` command), and it records an answer only after the owner's check passed and

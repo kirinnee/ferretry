@@ -1,0 +1,2 @@
+docs/agenda.md
+| 13  | The board shows public tasks by default, each linked to its PRs and approvals.                                                                                                                  

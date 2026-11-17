@@ -1,9 +1,0 @@
-{
-  "format": 1,
-  "pending": ["catalogs"],
-  "pendingReasons": {
-    "catalogs": [
-      "[shell] GAP(shared-install): /shared installs through the shell's machine picker (Install on a machine → pick → install on that machine's client), which differs from v4 in one way: v4 chose the machine with a select inside the item's own sheet while 5.0 opens the shell's picker as a second sheet above it (with exactly ONE machine paired at all, and it ready, the shell now answers alone, no picker, as v4 installed on it straight away; a second paired machine in any state asks). With no paired machine /shared draws the not-paired note instead of Install, as v4 did (Review stays above the note in both): packages/plugins/catalogs/app/features/shared/shared-item-sheet.tsx"
-    ]
-  }
-}

@@ -1,0 +1,5 @@
+{
+  "seam": "hook:message.before-send",
+  "card": "&F1787",
+  "why": "Extension point: no plugin can change or refuse a message before it is sent."
+}

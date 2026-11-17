@@ -1,0 +1,1 @@
+[cross: terminals] GAP(terminals), GAP(browsers): TerminalListView and BrowserStatus (packages/app/src/references/surface-references.ts) are minimal structural types of the listing and the status a proof reads, because packages/app cannot import a plugin's contract; the owners' types (Terminals' contract/wire.ts, Browsers' contract/wire/browser.ts) would replace them

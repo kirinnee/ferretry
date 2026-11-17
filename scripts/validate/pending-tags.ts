@@ -2,14 +2,13 @@
  * `pending-tags`: the ways the dead-code gates (`knip.ts`, `knip.production.ts` and the per-package `knip.json` /
  * `knip.production.json` they compose, see `scripts/gen/lib/knip-config.ts`) are told to keep something stay honest.
  *
- * - `@pending <owner>: <gap>` keeps ported code that waits for its wire. `<owner>` is the package's own subsystem id,
- *   that id is still listed in `ports-pending.json` `pending`, and `<gap>` is at least 3 words and 16 characters that
- *   start at a word of one of its `pendingReasons` lines (compared without case or repeated spaces). When the port
- *   lands and the id leaves `pending`, every tag left in the package is a finding, so the marker can never become a
- *   quiet way to keep dead code.
+ * - `@pending <owner>/<slug>` (then an optional `: note`) keeps ported code that waits for its wire. `<owner>` is the
+ *   package's own subsystem id and `<slug>` the name of one of its open gap files, `ports-pending/<slug>.txt` in the
+ *   package. Closing that line (`git rm` of the file) makes every tag naming it a finding, so the marker can never
+ *   become a quiet way to keep dead code, and a port that lands leaves nothing behind.
  * - A whole file kept the same way sits in a workspace's `ignore` in a knip config. The workspace key is resolved to
  *   the packages it matches (`packages/plugins/*` is every plugin); each matching subsystem must be pending and one of
- *   its `pendingReasons` lines must name the path as a whole token (6 characters or more). A key that matches no
+ *   its gap lines (\`ports-pending/*.txt\`) must name the path as a whole token (6 characters or more). A key that matches no
  *   package is a finding. The CLI, the app shell and std have no port to wait for, so an `ignore` path under a key
  *   that matches only them (or the root) must instead be named on `ALLOWED_KNIP` with its reason (ruling #29: every
  *   ignore carries a GAP line or a reason).
@@ -105,13 +104,9 @@ export interface TagInput {
   readonly docExists: (path: string) => boolean;
 }
 
-export const MIN_GAP_WORDS = 3;
-export const MIN_GAP_CHARS = 16;
 export const MIN_IGNORE_CHARS = 6;
 
-const normal = (text: string): string => text.toLowerCase().replace(/\s+/g, ' ').trim();
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const isWordChar = (char: string | undefined): boolean => char !== undefined && /[\p{L}\p{N}]/u.test(char);
 
 function lineAt(text: string, offset: number): number {
   let line = 1;
@@ -153,24 +148,6 @@ export function tagsOf(where: string, text: string): { readonly tags: readonly T
 }
 
 const reasonsOf = (pending: PortsPending, owner: string): readonly string[] => pending.reasons[owner] ?? [];
-
-/** Whether `gap` appears in `reason` (case and spacing aside), starting at a word of it. */
-function gapIn(reason: string, gap: string): boolean {
-  const hay = normal(reason);
-  const needle = normal(gap);
-  for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + 1))
-    if (at === 0 || !isWordChar(hay[at - 1])) return true;
-  return false;
-}
-
-/** Why a gap is too thin to tie a tag to a reason, or undefined. */
-function thinGap(gap: string): string | undefined {
-  const text = normal(gap);
-  const words = text.split(' ').filter(word => /[\p{L}\p{N}]/u.test(word)).length;
-  return words >= MIN_GAP_WORDS && text.length >= MIN_GAP_CHARS
-    ? undefined
-    : `@pending gap "${gap}" is too thin: write at least ${MIN_GAP_WORDS} words and ${MIN_GAP_CHARS} characters of a pendingReasons line`;
-}
 
 /** Whether `reason` names `path` as a whole path token (delimited by space, quote, backtick, comma or a bracket). */
 function namesPath(reason: string, path: string): boolean {
@@ -232,12 +209,15 @@ export function tagFindings(input: TagInput): Finding[] {
     for (const tag of read.tags) {
       const where = `${file.where}:${tag.line}`;
       if (tag.kind === 'pending') {
-        const match = /^([a-z][a-z0-9-]*):\s*(\S.*)$/.exec(tag.rest);
+        const match = /^([a-z][a-z0-9-]*)\/([a-z0-9][a-z0-9-]*)(?::\s*.*)?$/.exec(tag.rest);
         if (match === null) {
-          add(where, '@pending must read "@pending <owner>: <the gap it waits for>"');
+          add(
+            where,
+            '@pending must read "@pending <owner>/<slug>" (then an optional ": note"): <slug> is a ports-pending/<slug>.txt file of this package',
+          );
           continue;
         }
-        const [, owner = '', gap = ''] = match;
+        const [, owner = '', slug = ''] = match;
         if (file.owner === undefined) {
           add(where, `@pending in a package that is no subsystem; only a pending port may keep code this way`);
           continue;
@@ -247,16 +227,14 @@ export function tagFindings(input: TagInput): Finding[] {
           continue;
         }
         if (!listed.has(owner)) {
-          add(where, `${owner} has left ports-pending.json; wire or delete what this @pending kept`);
+          add(where, `${owner} has no open ports-pending line left; wire or delete what this @pending kept`);
           continue;
         }
-        const thin = thinGap(gap);
-        if (thin !== undefined) {
-          add(where, thin);
-          continue;
-        }
-        if (!reasonsOf(input.pending, owner).some(reason => gapIn(reason, gap)))
-          add(where, `@pending gap "${gap}" is in none of pendingReasons.${owner} in ports-pending.json`);
+        if (!(input.pending.slugs[owner] ?? []).includes(slug))
+          add(
+            where,
+            `@pending ${owner}/${slug} names no open line: there is no ports-pending/${slug}.txt in ${owner}; wire or delete what this @pending kept`,
+          );
         continue;
       }
       if (ALLOWED_PUBLIC.has(`${file.where}#${tag.rest}`)) continue;
@@ -270,7 +248,7 @@ export function tagFindings(input: TagInput): Finding[] {
       if (owner === undefined) continue; // no port to wait for; knip judges these alone
       for (const path of ignore.paths) {
         if (!listed.has(owner)) {
-          add(where, `"${path}" is ignored, but ${owner} has left ports-pending.json; wire or delete it`);
+          add(where, `"${path}" is ignored, but ${owner} has no open ports-pending line left; wire or delete it`);
           continue;
         }
         if (path.length < MIN_IGNORE_CHARS) {
@@ -281,7 +259,7 @@ export function tagFindings(input: TagInput): Finding[] {
           continue;
         }
         if (!reasonsOf(input.pending, owner).some(reason => namesPath(reason, path)))
-          add(where, `"${path}" is ignored, but no pendingReasons.${owner} line in ports-pending.json names it`);
+          add(where, `"${path}" is ignored, but no ${owner} ports-pending line names it`);
       }
     }
   }
@@ -530,7 +508,7 @@ export const checkWith = (allowedKnip: ReadonlyMap<string, string>): Check => ({
       pending = readPending(ctx.root);
     } catch (error) {
       return [
-        { check: NAME, where: 'ports-pending.json', message: error instanceof Error ? error.message : String(error) },
+        { check: NAME, where: 'ports-pending/', message: error instanceof Error ? error.message : String(error) },
       ];
     }
     const rows = readRows(ctx.root);

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import {
   AskBoardSnapshotSchema,
   AskItemSchema,
@@ -19,10 +20,14 @@ import { agendaRoutes, type AgendaRouteParts } from '../../../daemon/routes.ts';
 import { raiseAsk } from './support.ts';
 
 test('Agenda’s app half is bound: no half of it is pending, and what is still open is named by GAP', async () => {
-  const pending = await Bun.file(new URL('../../../ports-pending.json', import.meta.url)).json();
-  expect(pending.pendingHalves?.agenda).toBeUndefined();
-  expect((pending.pendingAppPorts ?? []).some((port: { plugin: string }) => port.plugin === 'agenda')).toBe(false);
-  const open = JSON.stringify(pending.pendingReasons?.agenda ?? []);
+  const ledger = new URL('../../../ports-pending/', import.meta.url);
+  expect(existsSync(new URL('halves/', ledger))).toBe(false);
+  expect(existsSync(new URL('app-ports/', ledger))).toBe(false);
+  const open = JSON.stringify(
+    readdirSync(ledger)
+      .filter(name => name.endsWith('.txt'))
+      .map(name => readFileSync(new URL(name, ledger), 'utf8')),
+  );
   expect(open).not.toContain('GAP(agenda-channel-header)');
   // The composer is Conversation's panel now (lead decision Q9), so agenda-composer is closed; the nav GAP is still open.
   expect(open).not.toContain('GAP(agenda-composer)');

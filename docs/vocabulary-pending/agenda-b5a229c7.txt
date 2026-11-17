@@ -1,0 +1,2 @@
+docs/agenda.md
+on any other kind). The daemon sets it only for a machine that reports `agenda.cards.1`; an older app drops the

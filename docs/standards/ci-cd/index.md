@@ -145,7 +145,7 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   `fy check`) holds the format and that every path exists. A PR that edits a declared file fails unless its body has a
   `## Contract change` section naming the file by full path with a reason (the same body parser as `## Outside files`). The
   declarations are read at the PR's merge-base, so a PR cannot un-declare a file and edit it in one go. Exempt: one added line in its
-  sorted place in a `registry`, an edit of a `composition.tsv` that only adds lines (a package declaring more files), and deleted lines of a `ports-pending.json` ledger. Generated files are never
+  sorted place in a `registry`, an edit of a `composition.tsv` that only adds lines (a package declaring more files). The `ports-pending/` ledger is no composition file (one file per open line). Generated files are never
   declared (a hand edit already fails `registries.ts --check`). `bun scripts/ci/composition-guard.ts --replay <ref> [count]` reads
   history and prints which merges the rule would have failed.
 - **Changed-plugin scope.** A pull request into exactly `rebuild/5.0-after` without the `full-ci` label runs only the
@@ -157,7 +157,7 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   silently, so the rules are an allowlist:**
   - The changed set is `git diff --name-only --no-renames <base>...<head>` (both sides of a rename are listed).
   - A file may be scoped only under `packages/plugins/<one>/` of a workspace package, and never that package's
-    `package.json` or `manifest.ts`, and never a `ports-pending` record (the root file, a per-plugin file or a folder of them: the
+    `package.json` or `manifest.ts`, and never a `ports-pending` record (a ledger file or a folder of them: the
     validation reads every one). Any other path (core, app, cli, std, scripts, nix, `.github`, docs, root manifests, `generated/`, a path nobody
     has seen) makes the run FULL. A new top-level path is therefore FULL until someone allowlists it in `scope.ts`.
   - The dependency graph is the UNION of workspace `package.json` dependencies (all four kinds), the manifests' `needs` /

@@ -1,7 +1,0 @@
-{
-  "format": 1,
-  "pending": ["vault"],
-  "pendingReasons": {
-    "vault": ["[own] GAP(vault): the Secrets tab has no \"Copy to another machine\" (an accepted omission)"]
-  }
-}

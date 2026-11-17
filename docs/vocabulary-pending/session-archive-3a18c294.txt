@@ -1,0 +1,2 @@
+docs/session-archive.md
+| Keep signals                      | `.../archive/keeps.ts`, `.../archive/open-cards.ts`                                   |

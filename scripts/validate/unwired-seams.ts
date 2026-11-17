@@ -12,7 +12,7 @@
  * - R4 a seam left unbound in code: `unbound(` / `unboundFn(`, a `notBuilt*` fallback, a hard-coded
  *   `const x: T | undefined = undefined;`, read by one fixed regex.
  *
- * Each raw seam must be wired or listed in `ports-pending.json` under `"unwired"`, with a `&F<digits>` card and one
+ * Each raw seam must be wired or listed in a `ports-pending/unwired/<slug>.json` file, with a `&F<digits>` card and one
  * sentence on what the owner loses (R5). The list only shrinks against the base ref; an entry whose seam is now wired,
  * or names something that does not exist, is a finding.
  *
@@ -28,7 +28,7 @@ import { readPendingMerged, readPendingMergedBase } from '../gen/lib/pending-fil
 import { contractPath } from '../gen/lib/workspace.ts';
 
 const CHECK = 'unwired-seams';
-const PORTS_PENDING = 'ports-pending.json';
+const PORTS_PENDING = 'ports-pending/';
 /** The stored JSON key that holds an entry's &F task; it is a name on disk, so a message names it as it is written. */
 const TASK_KEY = 'card';
 
@@ -372,9 +372,9 @@ export function unwiredFindings(
   return findings;
 }
 
-// ─── reading ports-pending.json ───────────────────────────────────────────────────────────────────────────────────
+// ─── reading the ports-pending/ ledger ───────────────────────────────────────────────────────────────────────────────────
 
-/** The `"unwired"` list of a `ports-pending.json` text; `undefined` when the key is absent. */
+/** The `"unwired"` list of the merged ledger document; `undefined` when the key is absent. */
 export function parseUnwired(text: string, where: string): UnwiredEntry[] | undefined {
   const value = (JSON.parse(text) as { unwired?: unknown }).unwired;
   if (value === undefined) return undefined;
@@ -426,7 +426,7 @@ export const check: Check = {
     let base: UnwiredEntry[] | undefined;
     try {
       const merged = readPendingMerged(ctx.root);
-      entries = merged === undefined ? [] : (parseUnwired(merged, PORTS_PENDING) ?? []);
+      entries = parseUnwired(merged, PORTS_PENDING) ?? [];
       base = readBaseUnwired(ctx.root, ctx.base ?? 'origin/rebuild/5.0');
     } catch (error) {
       return [{ check: CHECK, where: PORTS_PENDING, message: error instanceof Error ? error.message : String(error) }];
