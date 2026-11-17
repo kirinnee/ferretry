@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { type FerretId, type FerretRecord } from '../../../../../contract/index.ts';
+import { type FerretId, type FerretRecord, type RunnerExit, type RunnerHandle } from '../../../../../contract/index.ts';
 import { FakeRunner, T0 as RECORD_T0 } from '../../../../../contract/testing/index.ts';
 import { buildTurnWatch } from '../../../../../daemon/modules/turn-watch.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
@@ -45,6 +45,8 @@ async function watched(state: 'working' | 'idle' = 'working', status: 'running' 
   } as FerretRecord;
   const settled: Settled[] = [];
   const stillGones: Array<() => Promise<boolean>> = [];
+  const settledExits: Array<{ ferret: FerretId; handle: string; exit: RunnerExit; from: string }> = [];
+  const stillExiteds: Array<() => Promise<boolean>> = [];
   let timer: (() => void) | undefined;
   const log = new RecordingLog();
   const timers: Array<() => void> = [];
@@ -58,6 +60,11 @@ async function watched(state: 'working' | 'idle' = 'working', status: 'running' 
     settleGone: async (ferret, handle, exited, stillGone) => {
       settled.push({ ferret, handle, ...exited });
       stillGones.push(stillGone);
+      return true;
+    },
+    settleExited: async (ferret, handle, exit, from, stillExited) => {
+      settledExits.push({ ferret, handle, exit, from });
+      stillExiteds.push(stillExited);
       return true;
     },
     clock: { now: () => AT },
@@ -80,7 +87,17 @@ async function watched(state: 'working' | 'idle' = 'working', status: 'running' 
     timers[timers.length - 1]?.();
     await new Promise(resolve => setTimeout(resolve, 50));
   };
-  return { runner, record, settled, stillGones, tick, sweep, id: id as unknown as FerretId };
+  return {
+    runner,
+    record,
+    settled,
+    stillGones,
+    settledExits,
+    stillExiteds,
+    tick,
+    sweep,
+    id: id as unknown as FerretId,
+  };
 }
 
 describe('a ferret whose terminal vanished', () => {
@@ -192,5 +209,90 @@ describe('a ferret whose terminal vanished', () => {
 
     expect(fleet.runner.goneAsked).toEqual([]);
     expect(fleet.settled).toEqual([]);
+  });
+});
+
+describe('a ferret whose pane is kept dead (the harness was killed or crashed)', () => {
+  it('is settled with how it ended, on the handle it ran on, by the watch', async () => {
+    const fleet = await watched('working');
+    fleet.runner.die(fleet.record.handle as RunnerHandle, { signal: 9 });
+
+    await fleet.tick();
+
+    expect(fleet.settledExits).toEqual([
+      {
+        ferret: fleet.id,
+        handle: fleet.record.handle as string,
+        exit: { signal: 9 },
+        from: 'running',
+      },
+    ]);
+    // A terminal that is there is no vanished terminal.
+    expect(fleet.settled).toEqual([]);
+  });
+
+  it('is settled by the sweep while its document says `waiting` (the watch never looks at it)', async () => {
+    const fleet = await watched('working', 'waiting');
+    fleet.runner.die(fleet.record.handle as RunnerHandle, { status: 1 });
+
+    await fleet.tick();
+    expect(fleet.settledExits).toEqual([]);
+    await fleet.sweep();
+
+    expect(fleet.settledExits.map(one => one.exit)).toEqual([{ status: 1 }]);
+  });
+
+  it('says it was between turns when it was idle', async () => {
+    const fleet = await watched('idle');
+    fleet.runner.die(fleet.record.handle as RunnerHandle, { status: 2 });
+
+    await fleet.tick();
+
+    expect(fleet.settledExits.map(one => one.from)).toEqual(['awaiting_user']);
+  });
+
+  it('is asked again inside the settle: a live pane a relaunch put on the same handle is not the dead one', async () => {
+    const fleet = await watched('working');
+    const handle = fleet.record.handle as RunnerHandle;
+    fleet.runner.die(handle, { signal: 9 });
+    await fleet.tick();
+    const [stillExited] = fleet.stillExiteds;
+    expect(await stillExited?.()).toBe(true);
+
+    // The relaunch cleared the corpse and a live pane answers on the very same handle.
+    fleet.runner.deadPanes.delete(handle);
+
+    expect(await stillExited?.()).toBe(false);
+  });
+
+  it('is never read dead while its pane is alive', async () => {
+    const fleet = await watched('working', 'waiting');
+
+    await fleet.sweep();
+
+    expect(fleet.runner.exitedAsked).toEqual([[fleet.id, fleet.record.handle as RunnerHandle]]);
+    expect(fleet.settledExits).toEqual([]);
+  });
+
+  it('is left alone, and the watch keeps going, when the runner cannot answer', async () => {
+    const fleet = await watched('working');
+    fleet.runner.die(fleet.record.handle as RunnerHandle, { signal: 9 });
+    fleet.runner.exitedAnswer = 'throw';
+
+    await fleet.tick();
+
+    expect(fleet.settledExits).toEqual([]);
+  });
+
+  it('is not asked about once the registry says it is stopped (an owner stop is never turned into a crash)', async () => {
+    const fleet = await watched();
+    fleet.runner.die(fleet.record.handle as RunnerHandle, { signal: 2 });
+    (fleet.record as { state: string }).state = 'stopped';
+
+    await fleet.tick();
+    await fleet.sweep();
+
+    expect(fleet.runner.exitedAsked).toEqual([]);
+    expect(fleet.settledExits).toEqual([]);
   });
 });

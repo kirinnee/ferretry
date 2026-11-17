@@ -14,12 +14,12 @@ export class SessionPresenter {
   constructor(private readonly io: ISessionIo) {}
 
   /** Prints one ferret: the detail block, or its JSON. */
-  view(view: FerretSummary, json = false): void {
+  view(view: FerretSummary, json = false, lastWords?: string): void {
     if (json) {
       this.json(view);
       return;
     }
-    this.lines(renderFerret(view));
+    this.lines(renderFerret(view, lastWords));
   }
 
   /** Prints already-rendered lines to stdout. */

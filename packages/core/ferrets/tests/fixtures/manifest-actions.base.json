@@ -1473,6 +1473,22 @@
     },
     {
       "audit": {
+        "skip": "a ferret read records nothing"
+      },
+      "caller": "any",
+      "capability": {
+        "axis": "use",
+        "capability": "terminal"
+      },
+      "guard": "secrets",
+      "key": "GET /v1/ferrets/:ferretId/last-screen",
+      "method": "GET",
+      "minimum": "operator",
+      "noStore": true,
+      "path": "/v1/ferrets/:ferretId/last-screen"
+    },
+    {
+      "audit": {
         "skip": "a read of the journal records nothing"
       },
       "caller": "any",

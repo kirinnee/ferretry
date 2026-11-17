@@ -11,6 +11,7 @@ import { compactAt, setCompactAt } from './compact-at.ts';
 import { agentControl, effectiveLimits, revokeToken, turnUsage } from './insights.ts';
 import { repointRuntime, runtimeRecords } from './runtime-records.ts';
 import { lastSnapshot, prompt, turnObserved, turns } from './turns.ts';
+import { endOfExit } from './exit-cause.ts';
 import { KeyedSerialExecutor } from './serial.ts';
 import { typePointer } from './pointer-retry.ts';
 import type { SerialExecutor } from '../ports.ts';
@@ -48,6 +49,7 @@ import type {
   FerretRecord,
   FerretRuntimeRecord,
   FerretRuntimeRename,
+  RunnerExit,
   FerretAddress,
   FerretsApi,
   FerretState,
@@ -245,9 +247,10 @@ export interface FerretsPorts {
   /**
    * Keeps the ferret's last screen (`last-snapshot.txt`, today's `launcher.snapshot`) just before its pane is stopped
    * or replaced: masked, bounded, best effort. It never rejects and never holds a stop past its own bound. Unbound:
-   * nothing is kept.
+   * nothing is kept. `deadPane`: the pane is one the runner proved dead and kept, read through `Runner.deadScreen`
+   * (a look never reads a dead pane); the screen goes to the same stored file and nowhere else.
    */
-  lastSnapshot?(ferret: FerretId, runner: Runner, handle: RunnerHandle): Promise<void>;
+  lastSnapshot?(ferret: FerretId, runner: Runner, handle: RunnerHandle, deadPane?: boolean): Promise<void>;
   /** `ferret.started` (additive, D2 #12): told once a start's record is written, before its launch. */
   started?(payload: FerretStartedPayload): void;
   /** Writes a ferret's `details.json` (its start options and title). */
@@ -1340,6 +1343,47 @@ export class FerretsService implements FerretsApi {
   }
 
   /**
+   * Settles a ferret whose pane the runner PROVED dead but KEPT (`Runner.exited`: `remain-on-exit`, `pane_dead` 1), the
+   * way {@link FerretsService.settleGone} settles a vanished one: a COMPARE-AND-SET under the ferret's own queue, only
+   * while it is still live on exactly `handle`, and `stillExited` asked AGAIN inside the queue (a relaunch that ran
+   * while this waited may have put a live pane on the same handle). An owner's stop wins by construction: it runs in the
+   * same queue and leaves the record `stopped`, so this answers false. The end is {@link endOfExit}: its cause carries
+   * the exit status or signal only, and the journal says the same: what the pane showed is kept as the ferret's stored
+   * last screen (read back only through `lastSnapshot`), never on either. Nothing is killed or launched; the dead pane is cleared by the next launch. True only when it landed.
+   */
+  async settleExited(
+    ferret: FerretId,
+    handle: string,
+    exit: RunnerExit,
+    from: string,
+    stillExited: () => Promise<boolean>,
+  ) {
+    const end = endOfExit(exit);
+    return await this.serial.run(ferret, async () => {
+      await this.ports.ready?.();
+      const record = this.registry.get(ferret);
+      if (record === undefined || (record.state !== 'working' && record.state !== 'idle') || record.handle !== handle)
+        return false;
+      if (!(await stillExited().catch(() => false))) return false;
+      this.ports.stopping?.(ferret);
+      // What the pane still shows is kept as the stored last screen (0600, its own folder, masked again on every read),
+      // never on the cause or in the journal: both are served to every caller. Best effort and bounded, like a stop's.
+      const runner = this.ports.runner();
+      if (runner !== undefined) await this.keepLastScreen(ferret, runner, handle as RunnerHandle, true);
+      await this.settle(record, 'stopped', 'stopped', end.cause);
+      await this.ports.history?.(ferret, 'session.exited', {
+        reason: end.reason,
+        from,
+        status: end.status,
+        pane: 'dead',
+        exitCode: exit.status ?? null,
+        signal: exit.signal ?? null,
+      });
+      return true;
+    });
+  }
+
+  /**
    * Whether this ferret's runtime can start NOW, without touching it: its runtime (or the login it names) resolves and may
    * be spent, its harness and runner are on, and its login is usable (signed in, readable). A restart asks this BEFORE it
    * replaces a live pane, so a login that needs sign-in leaves the ferret running and the restart waits for the owner to
@@ -1822,8 +1866,13 @@ export class FerretsService implements FerretsApi {
    * a Warden or budget stop and a pane a move replaces all come through here). Best effort: whatever the capture does,
    * the stop goes on.
    */
-  private async keepLastScreen(ferret: FerretId, runner: Runner, handle: RunnerHandle): Promise<void> {
-    await this.ports.lastSnapshot?.(ferret, runner, handle).catch(() => undefined);
+  private async keepLastScreen(
+    ferret: FerretId,
+    runner: Runner,
+    handle: RunnerHandle,
+    deadPane = false,
+  ): Promise<void> {
+    await this.ports.lastSnapshot?.(ferret, runner, handle, deadPane).catch(() => undefined);
   }
 
   /** A caller that is a ferret reaches only itself and its helpers (the same rule as stop and resume). */

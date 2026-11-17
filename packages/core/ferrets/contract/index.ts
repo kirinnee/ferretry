@@ -23,6 +23,7 @@ export * from './history.ts';
 export * from './job-keeping.ts';
 export * from './hooks.ts';
 export * from './ids.ts';
+export * from './last-words.ts';
 export * from './kinds.ts';
 export * from './launch-origin.ts';
 export * from './live-read.ts';

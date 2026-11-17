@@ -90,6 +90,40 @@ describe('fy status', () => {
     expect(api.calls).toEqual([{ method: 'get', args: ['fern'] }]);
   });
 
+  test('fy status reads the last words of a ferret that ended on its own through the stored last screen, and nothing else does', async () => {
+    const SCREEN = '$ build\n\nout of memory\nKilled\n';
+    const asked: string[] = [];
+    const lastScreen = async (id: string) => {
+      asked.push(id);
+      return SCREEN;
+    };
+    const ended = sessionView({ id: 'mid', name: 'fern', state: 'stopped', cause: { kind: 'signal', signal: 9 } });
+    type Reader = (id: string) => Promise<string | undefined>;
+    const run = async (view: typeof ended, json = false, read: Reader | null = lastScreen) => {
+      const { io, presenter } = capturedPresenter();
+      const api = { get: async () => view, ...(read === null ? {} : { lastScreen: read }) } as never;
+      await new SessionStatusController(api, presenter).execute('fern', { json });
+      return io.out.join('\n');
+    };
+    expect(await run(ended)).toContain('    out of memory\n    Killed');
+    expect(asked).toEqual(['mid']);
+    // `--json` is the record exactly as the daemon answered it: no screen, and no read of one.
+    asked.length = 0;
+    const json = await run(ended, true);
+    expect(json).not.toContain('Killed');
+    expect(asked).toEqual([]);
+    // A stop, a live ferret and a missing reader read nothing; a reader that finds none says only why it ended.
+    for (const view of [
+      sessionView({ id: 'mid', state: 'stopped', cause: { kind: 'stopped' } }),
+      sessionView({ id: 'mid', state: 'working' }),
+    ])
+      expect(await run(view)).not.toContain('Killed');
+    expect(asked).toEqual([]);
+    expect(await run(ended, false, null)).toContain('ended: the agent was killed by signal 9');
+    expect(await run(ended, false, null)).not.toContain('its last words');
+    expect(await run(ended, false, async () => undefined)).not.toContain('its last words');
+  });
+
   test('V-0445 --subtree draws the helpers from parent links, indented, an ended one marked', async () => {
     const api = {
       subtree: async (reference: string) => {
