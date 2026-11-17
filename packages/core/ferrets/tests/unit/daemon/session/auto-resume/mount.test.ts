@@ -136,6 +136,21 @@ async function runPass(h: TestHost): Promise<void> {
   await h.settle();
 }
 
+/**
+ * The daemon restarted over a host that went down, and something settled the vanished panes AFTER the boot pass closed its
+ * recorder: the pass first ran with nothing to settle (the panes were still there), the panes then vanished, and the turn
+ * watch's first look and its 30 s sweep settled them. The boot pass gate keeps them from settling any earlier.
+ */
+async function settledAfterBootPass(h: TestHost, runner: FakeRunner): Promise<TestHost> {
+  await h.settle();
+  const restarted = await h.restart();
+  await runPass(restarted);
+  runner.reboot();
+  await restarted.runJob(TURN_WATCH_JOB);
+  await advance(restarted, 30_000);
+  return restarted;
+}
+
 /** The host went down: every pane with it, then the daemon came back on the same state. */
 async function hostRestart(h: TestHost, runner: FakeRunner): Promise<TestHost> {
   await h.settle();
@@ -732,10 +747,9 @@ describe('W2-a auto-resume, mounted', () => {
       let { h, runner } = await boot([fakeRuntimes(yes).plugin]);
       const id = await start(h, 'ulmus');
       const launches = runner.starts;
-      h = await hostRestart(h, runner);
-      // The turn watch is armed (its first look and its 30 s sweep) and settles the vanished pane before the pass runs.
-      await h.runJob(TURN_WATCH_JOB);
-      await advance(h, 30_000);
+      // The boot pass has closed its recorder (the observers are let in); then the turn watch's first look and its 30 s
+      // sweep settle the vanished pane, and a later pass still owes the ferret its resume.
+      h = await settledAfterBootPass(h, runner);
       expect((await view(h, id)).state).toBe('stopped');
       expect((await view(h, id)).cause).toEqual({ kind: 'terminal_gone' });
       expect(runner.starts).toBe(launches);
@@ -749,17 +763,16 @@ describe('W2-a auto-resume, mounted', () => {
       await h.stop();
     });
 
-    test('FX-W3-2 the sweep settling a ferret whose document says completed (the registry still said working) owes it NO resume', async () => {
+    test('FX-W3-2 a ferret whose document says completed (the registry still said working) is not settled by the sweep and is owed NO resume', async () => {
       let { h, runner } = await boot([fakeRuntimes(yes).plugin]);
       const id = await start(h, 'zelkova');
       await h.settle();
       holdStatus(h, id, 'completed');
       const launches = runner.starts;
-      h = await hostRestart(h, runner);
-      await h.runJob(TURN_WATCH_JOB);
-      await advance(h, 30_000);
-      expect((await view(h, id)).state).toBe('stopped');
-      expect((await view(h, id)).cause).toEqual({ kind: 'terminal_gone' });
+      h = await settledAfterBootPass(h, runner);
+      // A recorded outcome is the sweep's to leave alone: nothing is settled over it.
+      expect((await view(h, id)).state).not.toBe('stopped');
+      expect(types(h, id)).not.toContain('session.exited');
 
       await runPass(h);
 
@@ -776,9 +789,7 @@ describe('W2-a auto-resume, mounted', () => {
       await h.settle();
       holdStatus(h, id, 'rate_limited', { atLimit: true, retryAt: FUTURE });
       const launches = runner.starts;
-      h = await hostRestart(h, runner);
-      await h.runJob(TURN_WATCH_JOB);
-      await advance(h, 30_000);
+      h = await settledAfterBootPass(h, runner);
       expect((await view(h, id)).state).toBe('stopped');
 
       await runPass(h);
@@ -796,9 +807,7 @@ describe('W2-a auto-resume, mounted', () => {
       const document = JSON.parse(h.state('ferrets').raw(FerretFiles, idle) ?? '{}') as Record<string, unknown>;
       h.state('ferrets').plant(FerretFiles, JSON.stringify({ ...document, state: 'idle' }), idle);
       const launches = runner.starts;
-      h = await hostRestart(h, runner);
-      await h.runJob(TURN_WATCH_JOB);
-      await advance(h, 30_000);
+      h = await settledAfterBootPass(h, runner);
       expect((await view(h, idle)).cause).toEqual({ kind: 'terminal_gone' });
       expect((await view(h, working)).cause).toEqual({ kind: 'terminal_gone' });
 
@@ -814,8 +823,9 @@ describe('W2-a auto-resume, mounted', () => {
     test('W3-3 a ferret that vanished long after boot (a crash an hour in) is NOT owed a resume by the next pass', async () => {
       let { h, runner } = await boot([fakeRuntimes(yes).plugin]);
       const id = await start(h, 'viburnum');
-      h = await hostRestart(h, runner);
+      h = await h.restart();
       // The pass of this boot ran with nothing to settle (the pane was still there: the daemon restarted, not the host).
+      await runPass(h);
       runner.reboot();
       await h.runJob(TURN_WATCH_JOB);
       await advance(h, 30_000);
