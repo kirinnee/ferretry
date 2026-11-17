@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { v4Paths } from '../../src/v4/layout.ts';
+import type { PaneLive } from '../../src/v4/pane-live.ts';
 import { v5Writer } from '../../src/v5/write.ts';
 
 export const AT = '2026-11-01T00:00:00.000Z';
@@ -63,7 +64,13 @@ export async function fixture() {
     put,
     session,
     pane,
-    ctx: (dryRun = false) => ({ v4: v4Paths(from), v5: v5Writer(to, { dryRun }), dryRun }),
+    // Every terminal-pane.json a test writes is a LIVE pane unless the test passes its own probe (never a real tmux).
+    ctx: (dryRun = false, paneLive: PaneLive = async () => true) => ({
+      v4: v4Paths(from),
+      v5: v5Writer(to, { dryRun }),
+      dryRun,
+      paneLive,
+    }),
     clean: () => rm(root, { recursive: true, force: true }),
   };
 }

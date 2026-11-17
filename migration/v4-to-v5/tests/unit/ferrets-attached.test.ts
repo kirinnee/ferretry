@@ -128,3 +128,114 @@ test('queuedRestarts names each queued ferret by id and callsign', () => {
     ).map(entry => [entry.id, entry.name, entry.since]),
   ).toEqual([['a', 'joslin', at]]);
 });
+
+// A v4 pane id is only a handle while tmux still shows it in that ferret's own session: ids restart at %0 on a new tmux
+// server, so a stale one names another ferret's fresh pane, and the queued restart's stop would kill it.
+// tmux's own answer, as v4's ExactTmuxPaneReaper checks it: the pane id, its session, its pid and that pid's start.
+type Seen = { paneId: string; tmuxSession: string; pid: number; processStartTicks: number };
+const seenIn =
+  (...owners: readonly Seen[]) =>
+  async (pane: Seen) =>
+    owners.some(
+      owner =>
+        pane.paneId === owner.paneId &&
+        pane.tmuxSession === owner.tmuxSession &&
+        pane.pid === owner.pid &&
+        pane.processStartTicks === owner.processStartTicks,
+    );
+// What ferret-fixture's pane() writes for every ferret except the session name.
+const mine = (id: string, extra: Partial<Seen> = {}): Seen => ({
+  paneId: '%12',
+  tmuxSession: `fy-${id}`,
+  pid: 100,
+  processStartTicks: 1,
+  ...extra,
+});
+
+const runningFerret = async (id: string, extra: Record<string, unknown> = {}) => {
+  await f.session(id, extra);
+  await f.put(`state/sessions/${id}/state.json`, { id, turn: 0, status: 'running', turnState: 'working' });
+  await f.pane(id);
+};
+
+test('FX2 a stale pane (tmux has no such pane, or it is another ferret’s) carries no handle, is not working and queues no restart', async () => {
+  await runningFerret('gone1');
+  await runningFerret('taken1');
+  // gone1: tmux no longer lists %12 at all. taken1: %12 exists but belongs to another ferret's session.
+  const probe = seenIn(mine('someone-else'));
+  const report = await ferretsStep.run(f.ctx(false, probe));
+  expect(report.status).toBe('converted');
+  for (const id of ['gone1', 'taken1']) {
+    const stored = await record(id);
+    expect(stored.handle).toBeUndefined();
+    expect(stored.state).toBe('working'); // v4's own status ('running') decides, as with no pane: never `attached`
+    expect(await carriedState(id)).toHaveProperty('turnState', 'working');
+  }
+  expect(await restarts()).toBeUndefined();
+  expect(JSON.stringify(report.notCarried)).toContain('2 v4 pane handles');
+});
+
+test('FX2 a stale pane of an idle v4 ferret is carried idle, not forced to working', async () => {
+  await f.session('idle1');
+  await f.put('state/sessions/idle1/state.json', {
+    id: 'idle1',
+    turn: 0,
+    status: 'awaiting_user',
+    turnState: 'your-turn',
+  });
+  await f.pane('idle1');
+  await ferretsStep.run(f.ctx(false, seenIn()));
+  expect(await record('idle1')).toMatchObject({ state: 'idle' });
+  expect((await record('idle1')).handle).toBeUndefined();
+  expect(await restarts()).toBeUndefined();
+});
+
+test('FX2 a live pane in its own session carries the handle, is working, and queues the restart (today’s case)', async () => {
+  await runningFerret('live1');
+  await runningFerret('gone1');
+  const seen: string[] = [];
+  const probe = seenIn(mine('live1'));
+  const report = await ferretsStep.run(
+    f.ctx(false, async (pane, home) => {
+      seen.push(home);
+      return probe(pane);
+    }),
+  );
+  expect(report.status).toBe('converted');
+  expect(seen.every(home => home === f.from)).toBe(true);
+  expect(await record('live1')).toMatchObject({ state: 'working', handle: '%12' });
+  expect((await record('gone1')).handle).toBeUndefined();
+  const queued = ((await restarts())?.queued as { id: string }[]).map(entry => entry.id);
+  expect(queued).toEqual(['live1']);
+  expect(JSON.stringify(report.notCarried)).toContain('1 v4 pane handle (');
+});
+
+test('FX2 the preview is unchanged: no handle, stopped, and tmux is never asked', async () => {
+  // The preview holds every non-Claude ferret out, so this one is a Claude Code ferret.
+  await runningFerret('live1', { harness: 'claude', agent: '/old/fleet/bin/claude-work' });
+  let asked = 0;
+  const ctx = {
+    ...f.ctx(false, async () => {
+      asked++;
+      return true;
+    }),
+    preview: true,
+  };
+  expect((await ferretsStep.run(ctx)).status).toBe('converted');
+  expect(await record('live1')).toMatchObject({ state: 'stopped' });
+  expect((await record('live1')).handle).toBeUndefined();
+  expect(await restarts()).toBeUndefined();
+  expect(asked).toBe(0);
+});
+
+test('FX2 the right pane id in the right session is still stale when the pane pid, or that pid’s start, is not the recorded one', async () => {
+  await runningFerret('pid1');
+  await runningFerret('ticks1');
+  await runningFerret('ok1');
+  const probe = seenIn(mine('pid1', { pid: 999 }), mine('ticks1', { processStartTicks: 2 }), mine('ok1'));
+  expect((await ferretsStep.run(f.ctx(false, probe))).status).toBe('converted');
+  expect((await record('pid1')).handle).toBeUndefined();
+  expect((await record('ticks1')).handle).toBeUndefined();
+  expect((await record('ok1')).handle).toBe('%12');
+  expect(((await restarts())?.queued as { id: string }[]).map(entry => entry.id)).toEqual(['ok1']);
+});
