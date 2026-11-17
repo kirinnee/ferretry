@@ -7,16 +7,43 @@
  */
 
 import type { ActionsRowOffer } from '@ferretry/core-ferrets/contract';
-import { Puzzle } from 'lucide-react';
+import {
+  CircleX,
+  Hand,
+  type LucideIcon,
+  ListOrdered,
+  Plug,
+  Puzzle,
+  ShieldQuestion,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import type { CoreActionContext } from './core-actions.ts';
 import type { FerretActionContribution, FerretActionEntry } from './registry.ts';
+
+/**
+ * The icon each offered row is drawn with, by the row's own id: the menu chooses it (a row is plain data and carries no
+ * icon). A row this table does not know keeps the generic puzzle piece, so a plugin's new row is drawn before it is listed.
+ */
+const OFFERED_ROW_ICONS: Readonly<Record<string, LucideIcon>> = {
+  'interrupt-turn': Hand,
+  'add-mcp': Plug,
+  'add-skills': Sparkles,
+  'warden-investigate': ShieldQuestion,
+  'clear-stuck-messages': Trash2,
+  'dismiss-cancelled-messages': CircleX,
+  'open-queue': ListOrdered,
+};
+
+/** The icon an offered row is drawn with. */
+export const offeredRowIcon = (id: string): LucideIcon => OFFERED_ROW_ICONS[id] ?? Puzzle;
 
 const entryOf = (row: ActionsRowOffer): FerretActionEntry => {
   const base = {
     id: row.id,
     label: row.label,
-    icon: Puzzle,
+    icon: offeredRowIcon(row.id),
     ...(row.detail === undefined ? {} : { detail: row.detail }),
     ...(row.danger === true ? { danger: true } : {}),
     ...(row.unavailable === undefined ? {} : { unavailable: row.unavailable }),

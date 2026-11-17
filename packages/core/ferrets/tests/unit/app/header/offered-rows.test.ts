@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { ActionsRowOffer } from '@ferretry/core-ferrets/contract';
-import { contributionOf } from '../../../../app/features/header/offered-rows.ts';
+import { Puzzle } from 'lucide-react';
+import { contributionOf, offeredRowIcon } from '../../../../app/features/header/offered-rows.ts';
 import { ferretActionSections } from '../../../../app/features/header/registry.ts';
 
 const interrupt: ActionsRowOffer = {
@@ -42,6 +43,23 @@ describe('rows another plugin offers the Actions menu', () => {
       detail: 'later',
       unavailable: 'Send it a message first.',
     });
+  });
+
+  it('draw with the icon of what they are, and a row the menu does not know keeps the generic one', () => {
+    const ids = [
+      'interrupt-turn',
+      'add-mcp',
+      'add-skills',
+      'warden-investigate',
+      'clear-stuck-messages',
+      'dismiss-cancelled-messages',
+      'open-queue',
+    ];
+    for (const id of ids) expect(offeredRowIcon(id), id).not.toBe(Puzzle);
+    expect(new Set(ids.map(offeredRowIcon)).size, 'one icon per row').toBe(ids.length);
+    expect(offeredRowIcon('something-new')).toBe(Puzzle);
+    const sections = ferretActionSections([contributionOf({ ...interrupt, id: 'interrupt-turn' })], {} as never);
+    expect(sections[0]?.entries[0]?.icon).toBe(offeredRowIcon('interrupt-turn'));
   });
 
   it('a withdrawn row leaves nothing behind', () => {
