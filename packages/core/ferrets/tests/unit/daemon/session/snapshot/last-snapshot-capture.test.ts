@@ -199,6 +199,102 @@ describe('F-0326 the last screen a stop keeps (last-snapshot.txt)', () => {
     }
   });
 
+  test('W4 a blank pane that WAS read forgets the older stored frame (it is no longer the last screen); a pane that could not be read keeps it', async () => {
+    const blanks = [
+      runnerLooking(async () => screen('  \n \n')),
+      // Only whitespace of another kind.
+      runnerLooking(async () => screen('   \t\n')),
+    ];
+    for (const runner of blanks) {
+      const cleared: string[] = [];
+      const capture = new LastSnapshotCapture({
+        store: id => ({ write: async () => undefined, clear: async asked => void cleared.push(`${id}/${asked}`) }),
+        redaction: masker(),
+        sleep,
+        log: { warn: () => undefined },
+      });
+      await capture.capture(FERRET, runner, HANDLE);
+      expect(cleared).toEqual([`${FERRET}/${FERRET}`]);
+    }
+    for (const runner of [
+      runnerLooking(async () => undefined),
+      runnerLooking(async () => screen(undefined)),
+      {} as Runner,
+    ]) {
+      const cleared: string[] = [];
+      const capture = new LastSnapshotCapture({
+        store: () => ({ write: async () => undefined, clear: async asked => void cleared.push(asked) }),
+        redaction: masker(),
+        sleep,
+        log: { warn: () => undefined },
+      });
+      await capture.capture(FERRET, runner, HANDLE);
+      expect(cleared).toEqual([]);
+    }
+  });
+
+  test('W4 a blank DEAD pane forgets the older stored frame too, and a frame with something on it still replaces it', async () => {
+    const cleared: string[] = [];
+    const written: string[] = [];
+    const capture = new LastSnapshotCapture({
+      store: () => ({ write: async (_id, text) => void written.push(text), clear: async id => void cleared.push(id) }),
+      redaction: masker(),
+      sleep,
+      log: { warn: () => undefined },
+    });
+    const dead = (shown: string): Runner => ({ deadScreen: async () => shown }) as unknown as Runner;
+
+    await capture.capture(FERRET, dead('\n  \n'), HANDLE, true);
+    expect(cleared).toEqual([FERRET]);
+    expect(written).toEqual([]);
+
+    await capture.capture(FERRET, dead('exit 1\n'), HANDLE, true);
+    expect(written).toEqual(['exit 1\n']);
+    expect(cleared).toEqual([FERRET]);
+  });
+
+  test('W4 a capture given up after the bound forgets nothing later: a blank screen, or a masker that comes back blank, does not clear the older frame', async () => {
+    // (1) The look hangs past the bound and then answers a BLANK screen.
+    // (2) The look answers at once, but the masker hangs past the bound and then answers blank.
+    const cases: { name: string; runner: () => Runner; lateRead: () => Pick<Redaction, 'read'> }[] = [
+      {
+        name: 'blank look',
+        runner: () => runnerLooking(async () => await lateLook.promise),
+        lateRead: () => masker(),
+      },
+      {
+        name: 'blank mask',
+        runner: () => runnerLooking(async () => screen('something on screen')),
+        lateRead: () => ({
+          read: async <T>(): Promise<T> => {
+            await lateLook.promise;
+            return '  ' as unknown as T;
+          },
+        }),
+      },
+    ];
+    let lateLook = Promise.withResolvers<RunnerLook>();
+    for (const each of cases) {
+      lateLook = Promise.withResolvers<RunnerLook>();
+      const cleared: string[] = [];
+      const written: string[] = [];
+      const capture = new LastSnapshotCapture({
+        store: () => ({
+          write: async (_id, text) => void written.push(text),
+          clear: async id => void cleared.push(id),
+        }),
+        redaction: each.lateRead(),
+        sleep,
+        log: { warn: () => undefined },
+        bound: milliseconds(20),
+      });
+      await capture.capture(FERRET, each.runner(), HANDLE);
+      lateLook.resolve(screen('  \n'));
+      await Bun.sleep(15);
+      expect({ case: each.name, cleared, written }).toEqual({ case: each.name, cleared: [], written: [] });
+    }
+  });
+
   test('F-0326 a look, a masker or a write that fails keeps no file, never rejects, and logs the ferret id only', async () => {
     const refusing: Pick<Redaction, 'read'> = {
       read: async () => {

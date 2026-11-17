@@ -12,6 +12,7 @@ import type { BuiltWorktrees } from '../modules/worktrees.ts';
 import type { SessionFiles } from '../modules/session-files.ts';
 import type { AgentPinService } from '../lib/agent-pins/index.ts';
 import type { OutdatedMark } from '../lib/fleet-list/outdated-mark.ts';
+import type { BootPassGate } from '../lib/session/auto-resume/boot-gate.ts';
 import type { LaunchStepRegistrar } from '../lib/ferrets/launch-steps.ts';
 import type { FerretsService } from '../lib/ferrets/service.ts';
 import type { LaunchInstructionSectionId } from '../lib/protocol/session.ts';
@@ -50,6 +51,8 @@ export interface FeatureContribution {
 export interface LateBindings {
   /** Brings a ferret's next turn-watch look forward (the turn-watch feature). */
   wakeTurnWatch?: (ferret: FerretId) => void;
+  /** Opens once the auto-resume boot pass has closed its recorder; the turn watch's vanished-pane observers wait on it. */
+  bootPass?: BootPassGate;
   /** The managed worktrees (the worktrees feature). */
   worktrees?: BuiltWorktrees;
   /** The moves and forks (the moves feature). */

@@ -33,7 +33,8 @@ import { SessionObserver } from '../lib/session/observer/observer.ts';
 import type { ObserverPatch } from '../lib/session/observer/observer.ts';
 import type { QuestionStepPolicy } from '../lib/session/observer/question.ts';
 import { PacedTurnWatcher } from '../lib/session/observer/turn-watch.ts';
-import type { SessionTurnState } from '../lib/protocol/session.ts';
+import { SessionStateSchema, type SessionTurnState } from '../lib/protocol/session.ts';
+import type { BootPassGate } from '../lib/session/auto-resume/boot-gate.ts';
 import type { TurnPaneEvidence } from '../lib/session/peers/turn.ts';
 import type { SessionId } from '../lib/session-id.ts';
 import type { SessionTranscriptTail } from '../lib/session/peers/reads.ts';
@@ -83,6 +84,12 @@ export interface TurnWatchDeps {
     stillExited: () => Promise<boolean>,
   ) => Promise<boolean>;
   readonly clock: { now(): string };
+  /**
+   * Held back until the auto-resume boot pass has closed its recorder: only a settle that pass lands is owed a resume, so
+   * a vanished ferret the sweep or a look's failure notice settled first would be stopped and never resumed. Until it is
+   * open, no vanished terminal is noticed (the sweep may be registered, its ticks settle nothing). Absent: always open.
+   */
+  readonly bootPass?: Pick<BootPassGate, 'open'>;
   /** Whether the ferret's owner stores a question that is open now (the `turn.question-open` provider); `false` with none. */
   readonly questionOpen?: (ferret: FerretId) => Promise<boolean>;
   /** Runs `tick` every `intervalMs` until the answer is called (`kernel.clock.every`). */
@@ -94,6 +101,14 @@ export interface TurnWatchDeps {
 
 /** What a settled vanished terminal says (the boot exit pass's own sentence for a `gone` pane). */
 const GONE_REASON = 'the agent is no longer running: its terminal is gone, so how it exited was not recorded';
+
+/**
+ * The statuses of a session document that are a RECORDED OUTCOME: the ferret finished, failed or was stopped, and somebody
+ * wrote that down. Deliberately not "everything but a running agent": `rate_limited`, `retrying`, `kill_failed`,
+ * `created`, `starting` and `stalled` are statuses of a ferret whose pane is still meant to be there (or is being made),
+ * so a pane that vanishes under them is exactly what the settle is for.
+ */
+const OUTCOME_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'stopped']);
 
 /** How often every live ferret is asked whether its terminal is still there, whatever its document says. */
 const GONE_SWEEP_MS = 30_000;
@@ -215,24 +230,42 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
   // runner's PROOF settles either, and never on the tick's time: the settle waits in the ferret's own queue, which a long
   // stop or restart can hold. A stop the owner made has already moved the record out of working/idle there.
   const settling = new Set<FerretId>();
+  // Whether the ferret's session document RECORDS an outcome (completed, failed or stopped). That is an outcome somebody
+  // already wrote: a pane gone after it is that outcome's normal end, and settling it again would write a second
+  // `session.exited` and a `terminal_gone` over it. Any other status (a rate limit, a retry, a stalled or half-started
+  // ferret) still means the pane is meant to be there. A document that is missing or unreadable says nothing either way,
+  // so the runner's proof alone decides, as it did before.
+  const outcomeRecorded = async (ferret: FerretId): Promise<boolean> => {
+    const document = SessionStateSchema.safeParse(
+      await deps.storage.readState(ferret as unknown as SessionId).catch(() => undefined),
+    );
+    return document.success && OUTCOME_STATUSES.has(document.data.status);
+  };
+  const notFinished = async (ferret: FerretId): Promise<boolean> => !(await outcomeRecorded(ferret));
   const noticeGone = (record: FerretRecord): void => {
     const runner = deps.runner();
     const handle = record.handle;
     if (deps.settleGone === undefined || runner?.gone === undefined) return;
+    if (deps.bootPass !== undefined && !deps.bootPass.open) return;
     if (settling.has(record.id)) return;
     settling.add(record.id);
     const from = record.state === 'idle' ? 'awaiting_user' : 'running';
-    void runner
-      .gone(record.id)
+    void notFinished(record.id)
+      .then(async claims => {
+        if (!claims) return;
+        return await runner.gone?.(record.id);
+      })
       .then(async gone => {
+        if (gone === undefined) return;
         // The proof above was taken outside the ferret's queue: the settle asks again once it holds the queue, because a
-        // restart that ran in between may have put a live pane on this very handle.
+        // restart that ran in between may have put a live pane on this very handle, or a `signal done` may have
+        // recorded the ferret's outcome (asked again here too, so the outcome in the document is never overwritten).
         if (gone) {
           await deps.settleGone?.(
             record.id,
             handle,
             { from, reason: GONE_REASON },
-            async () => (await runner.gone?.(record.id)) === true,
+            async () => (await runner.gone?.(record.id)) === true && (await notFinished(record.id)),
           );
           return;
         }
@@ -247,7 +280,9 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
             handle,
             exit,
             from,
-            async () => (await runner.exited?.(record.id, handle as RunnerHandle)) !== undefined,
+            async () =>
+              (await runner.exited?.(record.id, handle as RunnerHandle)) !== undefined &&
+              (await notFinished(record.id)),
           );
       })
       .catch((error: unknown) =>

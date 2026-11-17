@@ -27,7 +27,15 @@ function refusalOf(error: unknown): string | undefined {
 /** What this store asks of the kernel's root. */
 export type LastSnapshotRoot = Pick<
   RootHandle,
-  'name' | 'internal' | 'ensurePrivateDirectory' | 'resolve' | 'publish' | 'lstat' | 'readDurable' | 'fileIdentity'
+  | 'name'
+  | 'internal'
+  | 'ensurePrivateDirectory'
+  | 'resolve'
+  | 'publish'
+  | 'lstat'
+  | 'readDurable'
+  | 'fileIdentity'
+  | 'remove'
 >;
 
 /**
@@ -80,6 +88,19 @@ export class FileLastSnapshotStore implements LastSnapshotReader, LastSnapshotWr
     if (existing !== undefined && (existing.kind !== 'file' || existing.links !== 1))
       throw new Error('the last snapshot name is not a plain file, so nothing was written');
     await this.root.publish(target, bytes, { mode: 0o600 });
+  }
+
+  /**
+   * Forgets the stored frame (a blank pane was observed after it). Only a plain one-link file is removed, by its own
+   * name and never followed; anything else at the name was never written by this store and is left as it is. A frame
+   * that is not there, or a folder that is not there yet, is the normal case, not a fault, and no folder is made for it.
+   */
+  async clear(id: string): Promise<void> {
+    const target = this.file(id as SessionId);
+    const leaf = await this.leaf(target);
+    if (leaf === 'no-folder' || leaf === undefined) return;
+    if (leaf.kind !== 'file' || leaf.links !== 1) return;
+    await this.root.remove(target);
   }
 
   async read(id: string): Promise<StoredLastSnapshot> {

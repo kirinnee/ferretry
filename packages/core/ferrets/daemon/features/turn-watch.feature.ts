@@ -1,5 +1,6 @@
 import { milliseconds } from '@ferretry/std';
 import { QUESTION_OPEN_KEY, QuestionOpen, Runners } from '../../contract/index.ts';
+import { sharedBootPass } from '../lib/session/auto-resume/boot-gate.ts';
 import { buildTurnWatch } from '../modules/turn-watch.ts';
 import type { FeatureContribution, FerretsContext, FerretsFeature } from './types.ts';
 
@@ -14,7 +15,10 @@ function register(f: FerretsContext): FeatureContribution | undefined {
   // Armed once the daemon serves (today's `observer.arm()` after the first monitor tick), closed when it stops.
   // The transcript, through the harness that wrote it (U5): the proof of WHICH file is a ferret's is the harness's, so
   // Ferrets opens no transcript path. The turn fold and both stream sources read it here.
+  // Shared with the auto-resume feature (whichever registers first makes it): the sweep waits for the boot pass.
+  const bootPass = sharedBootPass(late);
   const turnWatch = buildTurnWatch({
+    bootPass,
     storage: sessionStore,
     tail: transcripts.tail,
     record: ferret => registry.get(ferret),
@@ -47,6 +51,11 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     id: TURN_WATCH_JOB,
     schedule: { onceAfterStart: true },
     run: async () => {
+      // The 30 s sweep is registered BEFORE anything is awaited, so it exists however slow the registry load is. Its ticks
+      // (and a look's failure notice) settle nothing until the auto-resume boot pass has closed its recorder
+      // (`bootPass`): only a settle that pass lands is owed a resume, so a vanished ferret swept first would be stopped
+      // and never resumed. A tick that finds nothing loaded asks about nothing, and a settle waits for `ready` itself.
+      kernel.lifecycle.onStop(turnWatch.startSweep());
       await ready();
       await storeLoaded.catch(() => undefined);
       // Once per arm, every held ferret's document is brought to its registry state: one left `starting` by a crash
@@ -58,7 +67,6 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       for (const record of registry.list()) if (record.state === 'stopped') removeEnvironment(record.id);
       turnWatch.host.arm();
       kernel.lifecycle.onStop(async () => await turnWatch.host.close());
-      kernel.lifecycle.onStop(turnWatch.startSweep());
     },
   });
 
