@@ -1,5 +1,5 @@
 /**
- * HYPERMEDIA IN THE FERRET TOOLBAR (`panels.hypermedia`, slot `ferret.toolbar`; lead decision Q2): one "Hypermedia"
+ * HYPERMEDIA IN THE FERRET'S MODES MENU (`panels.hypermedia`, slot `conversation.modes`; lead decision Q2): one "Hypermedia"
  * switch for the ferret the toolbar is for, and the polite status line that says what the switch did
  * (docs/hypermedia.md). Today it was a menuitemcheckbox in the ferret's Actions menu, which is Ferrets'.
  *

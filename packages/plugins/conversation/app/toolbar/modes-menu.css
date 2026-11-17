@@ -1,0 +1,52 @@
+/* The header's Modes menu: the button sits at the end of the main line; the modes it holds are one row each, so every
+   switch reads as a label with its On/Off beside it rather than as a loose chip. */
+.fy-modes {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding-right: var(--flow-3, 12px);
+}
+.fy-modes__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 34;
+}
+.fy-modes__popover {
+  position: fixed;
+  z-index: 35;
+  width: min(340px, calc(100vw - 16px));
+  max-height: min(560px, 70vh);
+  overflow-y: auto;
+  padding: 8px 12px 12px;
+  border: var(--stroke-panel, 1px) solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+  color: var(--fg);
+}
+.fy-modes__popover:focus {
+  outline: none;
+}
+.fy-modes__sheet {
+  padding: 4px 16px calc(12px + var(--safe-bottom, 0px));
+}
+.fy-modes__hint {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+/* The mounted slot is a plain column here: each mode a row with a hairline between. */
+.fy-modes [data-modes-body] .fy-slot,
+.fy-modes__sheet .fy-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.fy-modes [data-modes-body] .fy-panel,
+.fy-modes__sheet .fy-panel {
+  padding: 6px 0;
+}
+.fy-modes [data-modes-body] .fy-panel + .fy-panel,
+.fy-modes__sheet .fy-panel + .fy-panel {
+  border-top: var(--divider-width, 1px) solid var(--border-soft);
+}

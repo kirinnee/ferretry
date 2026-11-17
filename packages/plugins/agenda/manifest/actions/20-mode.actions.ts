@@ -1,4 +1,5 @@
 /** Agenda mode: `GET|PATCH /v1/ferrets/:ferretId/agenda-mode` (Agenda's; ports/agenda.md lists session/agenda-mode with it), `fy agenda mode`, the toolbar switch. */
+import { CONVERSATION_MODES_SLOT } from '@ferretry/plugin-conversation/contract';
 import { manifestFragment, panel, route, verb } from '@ferretry/kernel/manifest';
 import { AGENDA_MODE_CHANGED_AUDIT, AgendaModeChanged } from '../../contract/index.ts';
 
@@ -29,6 +30,6 @@ export default manifestFragment({
       ],
     }),
   ],
-  ui: { panels: [panel('ferret.toolbar', { id: 'ferret-agenda-mode', order: 60 })] },
+  ui: { panels: [panel(CONVERSATION_MODES_SLOT, { id: 'ferret-agenda-mode', order: 60 })] },
   data: { publishes: [AgendaModeChanged] },
 });

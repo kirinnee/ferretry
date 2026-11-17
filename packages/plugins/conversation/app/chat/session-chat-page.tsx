@@ -4,8 +4,8 @@
  *
  * Today's session page drew the whole workspace: the top bar, Info, Actions, the terminal deck, the browser, the
  * agenda, the board, approvals, analytics. On 5.0 each of those is another plugin's panel, mounted here and never
- * imported: `ferret.toolbar` above the conversation (Ferrets' header and actions, Conversation's compaction setting,
- * Lessons), `ferret.side` beside it (the queue, terminals, browser, cards, agenda, skills), and `composer.tools` inside
+ * imported: `ferret.toolbar` above the conversation (Ferrets' name, status, Info and Actions) with the Modes menu at its end
+ * (`conversation.modes`: Agenda mode, Hypermedia, Passive lessons, Compact memory at, the lessons scan), `ferret.side` beside it (the queue, terminals, browser, cards, agenda, skills), and `composer.tools` inside
  * the composer (attachments, dictation, the runtime picker). What stays is the conversation, copied from the page's
  * `chat` column with its order of operations: the issue line, the search, the transcript, the question form or the
  * composer.
@@ -61,6 +61,7 @@ import { CompactionChip } from './compaction-card.tsx';
 import { HandoffSourceProvider } from './handoff-message.tsx';
 import type { SendCancel, SendRetry, SendSubmit } from './ledger-message.tsx';
 import { chatFileProof, chatReferenceSurface } from './reference-surface.ts';
+import { ModesMenu } from '../toolbar/modes-menu.tsx';
 import { RowSlotProvider } from './row-slots.tsx';
 import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 import { Transcript } from './transcript.tsx';
@@ -373,9 +374,15 @@ export function SessionChatPage({
     <>
       {embedded ? null : (
         // The toolbar's turn word is told of a compaction the page's live sample says is running.
-        <ChatTurnContext.Provider value={toolbarTurn}>
-          <PanelSlot daemon={daemonId} slot="ferret.toolbar" subject={ferretId} />
-        </ChatTurnContext.Provider>
+        // The main line is the name and the status; every mode is one click behind the Modes button at its end.
+        <div className="flex min-w-0 items-center" data-ferret-header="">
+          <div className="min-w-0 flex-1">
+            <ChatTurnContext.Provider value={toolbarTurn}>
+              <PanelSlot daemon={daemonId} slot="ferret.toolbar" subject={ferretId} />
+            </ChatTurnContext.Provider>
+          </div>
+          <ModesMenu daemon={daemonId} ferret={ferretId} />
+        </div>
       )}
       {liveSample?.compaction?.phase === 'running' || liveStream !== undefined ? (
         <div className="flex items-center gap-2 px-3" data-chat-status="">

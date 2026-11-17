@@ -1,5 +1,5 @@
 /**
- * COMPACT MEMORY AT IN THE FERRET TOOLBAR (`panels.compact-at`, slot `ferret.toolbar`): one "Compact memory at" button
+ * COMPACT MEMORY AT IN THE FERRET'S MODES MENU (`panels.compact-at`, slot `conversation.modes`): one "Compact memory at" button
  * that opens {@link CompactAtForm} for the ferret the toolbar is for (docs/compact-at.md). Today this was a row of the
  * ferret's Actions menu; the menu is Ferrets', so the row is this panel now, with the same form and words.
  *

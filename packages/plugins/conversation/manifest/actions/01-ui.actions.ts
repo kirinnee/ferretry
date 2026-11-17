@@ -6,7 +6,7 @@
  * splitting them would move an entry. A new feature's panel is a line here until the order is no longer pinned.
  */
 import { panel, renderer, screen, settingsTab } from '@ferretry/kernel/manifest';
-import { AGENDA_CONVERSATION_SLOT } from '../../contract/index.ts';
+import { AGENDA_CONVERSATION_SLOT, CONVERSATION_MODES_SLOT } from '../../contract/index.ts';
 import { ACTIONS_ROW_SLOT, FILES_SEARCH_SLOT } from '@ferretry/core-ferrets/contract';
 import { fragment } from '../kit.ts';
 
@@ -25,9 +25,10 @@ export default fragment({
     panels: [
       panel('composer.tools', { id: 'attachments', order: 10 }),
       panel('ferret.side', { id: 'queue', order: 10 }),
-      panel('ferret.toolbar', { id: 'compact-at', order: 30 }),
+      // The modes (Compact memory at, Hypermedia) live in the header's Modes menu, not on its main line.
+      panel(CONVERSATION_MODES_SLOT, { id: 'compact-at', order: 30 }),
       // Lead decision Q2: today's Actions-menu switch, a toolbar panel of its own (listed before Compact memory at, as today).
-      panel('ferret.toolbar', { id: 'hypermedia', order: 25 }),
+      panel(CONVERSATION_MODES_SLOT, { id: 'hypermedia', order: 25 }),
       // Whose turn it is (working, your turn, needs you), beside Ferrets' status mark (order 20, which has no turn to say).
       panel('ferret.toolbar', { id: 'turn', order: 21 }),
       // This device's conversation width (lead decision Q11).

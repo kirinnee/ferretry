@@ -1,5 +1,5 @@
 /**
- * The `ferret.toolbar` panel `ferret-agenda-mode`: the "Agenda mode" switch for one ferret (today's Actions-menu
+ * The `conversation.modes` panel `ferret-agenda-mode` (the ferret's Modes menu): the "Agenda mode" switch for one ferret (today's Actions-menu
  * entry), read and set through Agenda's own `GET|PATCH /v1/ferrets/:ferretId/agenda-mode`. The daemon decides who may
  * set it: the daemon's note ("takes effect at the next launch") and a refusal are said in the status line the actions draw
  * (`actions.host`).
