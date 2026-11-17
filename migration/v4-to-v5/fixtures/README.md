@@ -46,7 +46,10 @@ alive and `--port <n>` pins the daemon's port. The directives that make the fake
 (`FIXTURE-REC`, `FIXTURE-RUN`, in `support/fake-claude-rich.ts` and `fake-claude-tui.sh`) answer only when `FY_FIXTURE_RICH` is set.
 
 `sweep/` builds on it: `sweep-up.sh <1..9>` brings up a v4 daemon and a 5.0 daemon (a converted copy) side by side under
-`/tmp/claude-1000/sweep/slot<N>/`, `sweep-down.sh <N>` stops them. It is a developer tool (it starts daemons); CI does not run it.
+`/tmp/claude-1000/sweep/slot<N>/`, `sweep-down.sh <N>` stops them. Each daemon is a transient **user service** (`fy4-slot<N>.service`, `fy5-slot<N>.service`: restarts after a crash,
+`KillMode=process`) and each side's tmux server runs in its own scope (`fy<4|5>-slot<N>-terminals.scope`), so neither sits in the cgroup of
+whoever ran the kit; `slot.ts status <N>` prints each unit's state and cgroup. Slots do not survive a reboot (they live under `/tmp`).
+It is a developer tool (it starts daemons); CI does not run it.
 
 ## Boot v5 on the converted home
 
