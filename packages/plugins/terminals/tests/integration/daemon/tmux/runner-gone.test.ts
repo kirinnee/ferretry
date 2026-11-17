@@ -55,6 +55,12 @@ describe('W2-a TmuxRunner.gone', () => {
       expect(await runner(answered(1, stderr)).subject.gone(FERRET)).toBe(true);
   });
 
+  test('FX4 proven gone: a server kept up with no session at all answers "no current target"', async () => {
+    expect(await runner(answered(1, 'no current target')).subject.gone(FERRET)).toBe(true);
+    // Only as tmux's whole answer: the phrase inside some other refusal proves nothing.
+    expect(await runner(answered(1, 'lost server: no current target')).subject.gone(FERRET)).toBe(false);
+  });
+
   test('W2-a not gone: a live session (one tmux kept with a dead pane included)', async () => {
     expect(await runner(answered(0)).subject.gone(FERRET)).toBe(false);
     // Whatever tmux printed beside it, a session it answered for is there.
