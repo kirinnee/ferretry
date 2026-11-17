@@ -137,6 +137,8 @@ export interface WardenSubsystem {
   leave(ferret: string, duration: '1h' | '4h' | 'until_change'): ReturnType<WardenSweepService['leaveAlone']>;
   /** An event that may bring the next sweep forward (a turn ended, a ferret stopped). */
   nudgeSweep(trigger: 'turnEnd' | 'question' | 'paneDied'): void;
+  /** A ferret was launched (started, resumed, revived, restarted, model switch): its quiet clock starts again now. */
+  launched(ferret: string): void;
   arm(): () => void;
 }
 
@@ -618,6 +620,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
       return await service.investigationStatus(ferret);
     },
     leave: async (ferret, duration) => await loop.exclusive(async () => await service.leaveAlone(ferret, duration)),
+    launched: ferret => liveness.launched(ferret),
     nudgeSweep: trigger => {
       void service
         .currentConfig()
