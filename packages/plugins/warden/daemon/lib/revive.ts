@@ -249,6 +249,10 @@ export interface ReviveState {
   readonly breaker?: ReviveBreaker;
   /** Deaths already explained once (`<id>@<diedAt>` → when), so a refusal is journalled once and not every sweep. */
   readonly refused: Readonly<Record<string, string>>;
+  /** When the machine's auto-resume switch was first seen OFF; cleared when it is seen on again. */
+  readonly offSince?: string;
+  /** When the switch was last turned on after being off: a death before this is not revived. Absent: never seen off. */
+  readonly armedAt?: string;
 }
 
 export const EMPTY_REVIVE_STATE: ReviveState = { sessions: {}, batches: [], refused: {} };

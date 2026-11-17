@@ -762,6 +762,11 @@ revive, one that exited 0, a Warden investigator, or a ferret whose lead was sto
 **How it is paced.**
 
 - Only deaths from the last `windowMinutes` (15); at most once per ferret per `cooldownMinutes` (30), kept across restarts.
+- Never more than 3 revives of one ferret in a rolling hour; the next death is left stopped and you get one notice per
+  ferret per hour. With the default 30-minute cooldown a ferret can be revived at most twice an hour, so this cap only
+  binds when `cooldownMinutes` is set below 20.
+- A death that happened while the machine's "Auto-resume after restart" switch was off is not revived when it is turned
+  back on: only deaths after the switch-on count. A switch that cannot be read counts as neither on nor off.
 - 3 or more deaths within 10 s are a fleet-wide death ("the tmux server crashed"): the Warden waits until the
   tmux server answers, then revives in waves of `waveSize` (max 3), at least `waveGapSeconds` (min 10) apart.
   Interactive ferrets and leads go first; children of a revived lead go in a later wave.
