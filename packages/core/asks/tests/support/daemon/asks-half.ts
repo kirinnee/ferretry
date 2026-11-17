@@ -14,7 +14,7 @@ import {
   type StatePort,
 } from '@ferretry/kernel/contract';
 import { type HookInvoker, type Needer, providedFor } from '@ferretry/kernel/manifest';
-import { testArrival, fixedClock, owner } from '@ferretry/kernel/testing';
+import { testArrival, fixedClock, owner, type DrivenClock } from '@ferretry/kernel/testing';
 import type { AgendaFerretsContext } from '../../../contract/index.ts';
 import { isAgendaSessionId } from '../../../daemon/lib/agenda/index.ts';
 import asksDaemon from '../../../daemon/index.ts';
@@ -66,10 +66,12 @@ export async function asksHalf(
     home?: string;
     wrapState?: (state: StatePort) => StatePort;
     resurfaceAfterMinutes?: number;
+    /** The kernel clock; a perf case gives one whose `sleep` really yields a turn. Default: a fixed clock. */
+    clock?: DrivenClock;
   } = {},
 ) {
   const home = options.home ?? (await mkdtemp(join(tmpdir(), 'asks-half-')));
-  const clock = fixedClock();
+  const clock = options.clock ?? fixedClock();
   const hooks = {
     provider: (hook: { readonly name: string }, key: string) => {
       const name = `${hook.name}:${key}`;
