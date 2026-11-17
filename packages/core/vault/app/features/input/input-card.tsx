@@ -240,16 +240,15 @@ function OfferButton({ offer, disabled, onUse }: OfferButtonProps) {
   return (
     <button
       aria-label={`Use ${offerWords(offer)}`}
-      className="kt-btn min-h-[44px] min-w-0 flex-col items-start justify-center text-left"
+      className={`flex min-h-[44px] w-full min-w-0 flex-col items-start gap-0.5 rounded-control border bg-surface-2 px-3 py-2 text-left text-fg ${primary ? 'border-accent' : 'border-border-strong'}`}
       data-input-offer={offer.id}
       data-input-primary={primary ? '' : undefined}
-      data-variant={primary ? 'primary' : undefined}
       disabled={disabled}
       onClick={onUse}
       type="button"
     >
-      <span className="min-w-0 break-words font-medium">{offerWords(offer)}</span>
-      <span className="min-w-0 break-words text-meta font-normal" data-input-offer-detail="">
+      <span className="block min-w-0 break-words text-left font-medium">{offerWords(offer)}</span>
+      <span className="block min-w-0 break-words text-left text-meta font-normal" data-input-offer-detail="">
         {[offerFillsWords(offer), why, elsewhere].filter(each => each !== undefined).join(' · ')}
       </span>
     </button>
