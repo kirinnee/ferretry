@@ -68,8 +68,13 @@ export interface StatePort {
    * Each record in order. A line that does not parse or check is SKIPPED and reading goes on (today's journal read);
    * `records()` says how many were skipped. Only an io fault or a missing `required` file is damage.
    * The file is read a piece at a time, as the reader asks, and a record is handed out as soon as its line is complete:
-   * a journal of any size costs one piece, never the whole file. A fault part way ends the read after the records
-   * already handed out. Stopping early stops the read.
+   * a journal of any size costs one piece, never the whole file. A line is read whole or not at all: a writer that
+   * rewrites the file's torn last line between two pieces is never glued onto what was read.
+   * A fault part way (an io fault) always hands out the records before it first, then ends the read in one of two ways,
+   * by the file's declaration: `onDamaged: 'subsystem'` (the default) THROWS `StoreDamagedError`; a `narrower` file ENDS QUIETLY and
+   * records the damage (the next write to it re-checks and refuses while it stands). So a quiet end is not proof the
+   * file was read to its end: a caller that must (a sequence owner) reads through a file that throws, or appends,
+   * which refuses a damaged file. Stopping early stops the read.
    */
   lines<Shape>(file: StateFileDef<string, Shape>, name?: string): AsyncIterable<Shape>;
   /**
