@@ -405,6 +405,12 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
       if (file.store !== 'opaque') throw new TypeError(`state ${file.name}: only an opaque file's path is handed out`);
       return `${folder.realFolder()}/${pathOf(file, name)}`;
     },
+    async pinMade(file, name) {
+      guard(file);
+      pathOf(file, name);
+      if (file.store !== 'opaque')
+        throw new TypeError(`state ${file.name}: only an opaque file is made outside the port`);
+    },
     sqlite(file, name): SqliteHandle {
       guard(file);
       const path = pathOf(file, name);

@@ -453,6 +453,13 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
       return at.path;
     },
 
+    async pinMade(def: StateFileDef, name?: string): Promise<void> {
+      const at = locate(def, name);
+      if (def.store !== 'opaque')
+        throw new TypeError(`state ${def.name}: only an opaque file is made outside the port`);
+      await pinned(at);
+    },
+
     sqlite(def: StateFileDef, name?: string): SqliteHandle {
       const at = locate(def, name);
       if (def.store !== 'sqlite' && def.store !== 'sqlite-cache')

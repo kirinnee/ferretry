@@ -78,6 +78,9 @@ function documentsPort(docs: Map<string, Doc>, beforePersist: () => void | Promi
     pathOf: () => {
       throw new Error('the fixture holds no paths');
     },
+    pinMade: async () => {
+      throw new Error('the fixture holds no paths');
+    },
     damaged: () => [],
   };
 }

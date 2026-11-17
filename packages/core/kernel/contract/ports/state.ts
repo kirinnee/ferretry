@@ -119,6 +119,15 @@ export interface StatePort {
    * throws: a path is never handed out for a file the port reads and writes, nor for another plugin's.
    */
   pathOf(file: StateFileDef, name?: string): string;
+  /**
+   * A private file or folder of THIS plugin's that something OUTSIDE the daemon made (a child at {@link pathOf}: a
+   * browser profile, a tmux socket, a harness-refreshed credential) now exists or was replaced: the fence index looks at
+   * it again before this returns, so a root call made after it cannot reach an alias of the new file (a hard link, a bind
+   * mount) from the snapshot kept before. A file no private place touches costs nothing. Without this call such a file is
+   * pinned only at the index's next look, within 250 ms. Rejects `private_unpinned` (503) when the look cannot be made: the
+   * file is on disk, but no root opens anything until a look succeeds. Only an `opaque` file, as {@link pathOf}.
+   */
+  pinMade(file: StateFileDef, name?: string): Promise<void>;
   /** Whether this subsystem is damaged, and which files. */
   damaged(): readonly StateDamage[];
 }
