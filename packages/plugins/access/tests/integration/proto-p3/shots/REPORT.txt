@@ -1,0 +1,10 @@
+reduced-motion a 390 light: running = none
+reduced-motion a 390 dark: running = color,color,color,color,color,color
+reduced-motion a 1280 light: running = none
+reduced-motion a 1280 dark: running = color,color,color,color,color,color
+live flow a: pair -> pairing -> paired ok
+reduced-motion b 390 light: running = none
+reduced-motion b 390 dark: running = color,color
+reduced-motion b 1280 light: running = none
+reduced-motion b 1280 dark: running = color,color
+live flow b: pair -> pairing -> paired ok
