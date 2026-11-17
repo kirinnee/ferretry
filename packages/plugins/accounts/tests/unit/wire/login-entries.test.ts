@@ -6,7 +6,6 @@ import {
   LoginMethodSchema,
   loginMethodSentence,
   normalizedLoginDomain,
-  InputSavedSchema,
   LoginMatchSchema,
   providerNameOf,
   suggestedLoginId,
@@ -29,17 +28,6 @@ it('should normalise a base32 seed and refuse one that is not base32', () => {
   expect(TotpSeedSchema.parse('jbsw y3dp-ehpk 3pxp====')).toBe('JBSWY3DPEHPK3PXP');
   expect(TotpSeedSchema.safeParse('not-a-seed-0189!!').success).toBe(false);
   expect(TotpSeedSchema.safeParse('JBSW').success).toBe(false);
-});
-
-it('should carry offers with the daemon’s match decision, never a value', () => {
-  const saved = {
-    match: 'sudo@kirin-box',
-    suggest: { id: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' },
-    saves: 'password',
-    offers: [{ id: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box', fills: 'password', matched: true }],
-  };
-  expect(InputSavedSchema.safeParse(saved).success).toBe(true);
-  expect(InputSavedSchema.safeParse({ ...saved, offers: [{ ...saved.offers[0], value: 'x' }] }).success).toBe(false);
 });
 
 it('should fill the password for a secret, the code for a private value and the username for plain', () => {

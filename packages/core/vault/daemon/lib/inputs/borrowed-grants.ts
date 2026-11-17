@@ -18,11 +18,11 @@ import {
   TASK_PLAN_TERMINAL_TOOLS,
   type TwoFactorId,
 } from './borrowed.ts';
-import type { ClearJob, InputTargetFacts } from '../../../contract/index.ts';
+import { type ClearJob, codeTargetProblem, type InputTargetFacts } from '../../../contract/index.ts';
 import type { InputRequestField } from './wire.ts';
 import { identityOf, SECOND_FACTOR_WINDOW_MS } from './login-observer.ts';
 import { terminalHides } from './lock.ts';
-import { codeTargetProblem, type SavedListing } from './saved-logins.ts';
+import type { SavedListing } from './saved-logins.ts';
 
 /**
  * THE SIGN-INS THE OWNER APPROVED IN ADVANCE (task-plan lines and standing sign-in rules), as the input service reads

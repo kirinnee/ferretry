@@ -7,6 +7,7 @@ import { FerretsChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { BoardPort } from '@ferretry/plugin-board/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import {
+  INPUT_SETTLED_SLOT,
   InputPhoneApprovals,
   InputSavedLogins,
   InputSecureCopies,
@@ -1052,7 +1053,12 @@ export default definePlugin({
     renderers: [renderer('ask', { source: 'sign-in-approval' })],
     // Access's Add device page offers this slot under each paired device's Revoke (its app half's device-note-slot.ts):
     // how many standing sign-in rules the device's passkey approved, because revoking it suspends them.
-    panels: [panel(ACCESS_DEVICE_NOTE_SLOT, { id: 'device-rule-note', order: 10 })],
+    // The Vault's input card offers `vault.input-settled` after a saved account settled it (its contract/input-slots.ts):
+    // "Don't ask again" for the sign-in the tap used, the owner's own sheet, approved with the passkey.
+    panels: [
+      panel(ACCESS_DEVICE_NOTE_SLOT, { id: 'device-rule-note', order: 10 }),
+      panel(INPUT_SETTLED_SLOT, { id: 'sign-in-rule-offer', order: 10 }),
+    ],
   },
 
   /** Never reached by a ferret, through any root: the sealed login secrets and the account records (`PrivacyDecl`). */

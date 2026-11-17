@@ -382,34 +382,6 @@ function codeKeysOf(account: AccountSummary): readonly InputCodeKey[] {
 }
 
 /**
- * WHY THE DAEMON MAY NOT TYPE A ONE-TIME CODE IT MADE into these fields of what it saw, or `undefined` when it may. A
- * code it makes is a second factor typed by the machine itself, so where it lands is not the owner's call on a flag:
- *
- * - never into the secret store, and never before the daemon has looked at the target again;
- * - a page: only on https, into a field the browser reported visible and uncovered, in the page's own frame (a frame
- *   from another origin could be anyone's), so the code goes exactly where the matched sign-in signs in;
- * - a terminal: the card's one prompt, whose key (`tool@host` of a PROVED program in line mode) the sign-in matched.
- *
- * Fixed sentences only: they reach the owner and the log.
- */
-export function codeTargetProblem(
-  facts: InputTargetFacts | undefined,
-  fieldIds: readonly string[],
-): string | undefined {
-  if (facts === undefined) return 'Ferretry is looking at the target again';
-  if (facts.kind === 'secret') return 'a code Ferretry makes is typed only into a sign-in';
-  if (facts.kind === 'terminal') return undefined;
-  if (!facts.secure) return 'the page is not https';
-  for (const id of fieldIds) {
-    const found = facts.fields.find(field => field.fieldId === id);
-    if (found === undefined || !found.visible) return 'Ferretry cannot see the code field on the page';
-    if (found.covered === true) return 'something on the page covers the code field';
-    if (found.frameOrigin !== facts.origin) return 'the code field is inside a frame from another site';
-  }
-  return undefined;
-}
-
-/**
  * THE ACCOUNT A CODE CARD IS ABOUT, and its 2FA keys, for the card's title (`factorAskWords`): from the sign-ins the
  * daemon matched to the key, WHATEVER fields their accounts hold (so whether a seed is held never changes the title).
  * The ferret's `factor` names one key when it is a key of such an account; otherwise it is ignored, never an error.
