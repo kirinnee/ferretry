@@ -256,13 +256,15 @@ describe('C1 the parts of the model no file of Runtimes holds', () => {
   const before = assembleRuntimesModel(files()).model;
   const withMachine = (machine: Record<string, unknown>) => ({ ...before, machine: { ...before.machine, ...machine } });
 
-  it('names every machine setting a change moves except the two runtimes.yaml holds', () => {
+  it('names every machine setting a change moves except the four runtimes.yaml holds', () => {
     const next = withMachine({
       agentPermissions: 'auto',
       publicUsageFeed: true,
       browserMode: 'window',
       defaultRuntime: 'claude-default',
       autoResume: false,
+      browserPorts: 'per-user',
+      browserFirewallFailure: 'refuse',
     });
 
     expect(unownedChanges(before, next as never)).toEqual([
@@ -278,10 +280,18 @@ describe('C1 the parts of the model no file of Runtimes holds', () => {
     expect(unownedChanges(before, next as never)).toEqual(['the advanced settings']);
   });
 
-  it('says nothing for a change of only the default runtime and auto-resume, or of nothing', () => {
+  it('says nothing for a change of only the default runtime, auto-resume and the two loopback-port settings, or of nothing', () => {
     expect(unownedChanges(before, before)).toEqual([]);
     expect(
-      unownedChanges(before, withMachine({ defaultRuntime: 'claude-default', autoResume: false }) as never),
+      unownedChanges(
+        before,
+        withMachine({
+          defaultRuntime: 'claude-default',
+          autoResume: false,
+          browserPorts: { cdp: 9300, relay: 9301, vnc: 5901 },
+          browserFirewallFailure: 'refuse',
+        }) as never,
+      ),
     ).toEqual([]);
   });
 });

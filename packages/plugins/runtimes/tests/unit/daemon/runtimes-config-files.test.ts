@@ -145,6 +145,20 @@ describe('the model-in-effect adapter', () => {
     ).toEqual([{ path: 'runtimes.yaml', patch: { autoResume: false } }]);
   });
 
+  it('C1 writes the two loopback-port settings into runtimes.yaml only off their defaults, and drops them when back on them', async () => {
+    const files = adapter();
+    const loaded = await files.load();
+    const before = modelOf(loaded);
+    const moved = {
+      ...before,
+      machine: { ...before.machine, browserPorts: 'per-user', browserFirewallFailure: 'refuse' },
+    };
+
+    expect(files.editsFor(loaded, moved as AccountModel, NO_MOVES)).toEqual([
+      { path: 'runtimes.yaml', patch: { browserPorts: 'per-user', browserFirewallFailure: 'refuse' } },
+    ]);
+  });
+
   it('refuses a change that edits a component another plugin owns (mcp here), before a file is written', async () => {
     const files = adapter(undefined, EMPTY_OWNERS);
     const loaded = await files.load();

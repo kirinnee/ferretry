@@ -314,6 +314,10 @@ export function assembleRuntimesModel(files: RuntimesFiles): RuntimesModel {
         ? {}
         : { defaultRuntime }),
       ...(files.settings?.autoResume === undefined ? {} : { autoResume: files.settings.autoResume }),
+      ...(files.settings?.browserPorts === undefined ? {} : { browserPorts: files.settings.browserPorts }),
+      ...(files.settings?.browserFirewallFailure === undefined
+        ? {}
+        : { browserFirewallFailure: files.settings.browserFirewallFailure }),
     },
     credentials,
     components,
