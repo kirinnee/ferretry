@@ -127,10 +127,12 @@ const V4_MACHINE_KEYS = new Set([
   'advanced',
 ]);
 
+/** Whether a v4 setting is written as the scalar that v5 leaves out (its default). */
+const isDefaultScalar = (pair: Pair, standard: string): boolean =>
+  isScalar(pair.value) && pair.value.value === standard;
+
 /** `machine.yaml` keys v5 declares no field for, and why (shown in the report only when the file wrote one). */
 const MACHINE_NOT_CARRIED: Readonly<Record<string, string>> = {
-  browserPorts: 'v5 browsers.yaml declares only mode and proxy; the browser picks its loopback ports',
-  browserFirewallFailure: 'v5 browsers.yaml declares no firewall-failure switch',
   advanced: 'secretsFile, aliases, wrapper commands, usage and path.announce have no v5 config field',
   attentionNudge: 'superseded: the file also wrote agendaNudge, which v4 read instead',
 };
@@ -348,6 +350,12 @@ function splitMachine(plan: Plan, file: V4ConfigFile, document: Document, resolv
   }
   const autoResume = get('autoResume');
   if (autoResume !== undefined) into(RUNTIMES_CONFIG, autoResume, 'autoResume');
+  // v5's runtimes.yaml leaves both out for the defaults, so a machine that chose otherwise must carry the choice.
+  const ports = get('browserPorts');
+  if (ports !== undefined && !isDefaultScalar(ports, 'random')) into(RUNTIMES_CONFIG, ports, 'browserPorts');
+  const firewall = get('browserFirewallFailure');
+  if (firewall !== undefined && !isDefaultScalar(firewall, 'warn'))
+    into(RUNTIMES_CONFIG, firewall, 'browserFirewallFailure');
   const control = get('agentControl');
   if (control !== undefined) into(LimitsConfigFile, control, 'agentControl');
   const conversations = get('conversations');
