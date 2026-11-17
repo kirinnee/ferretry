@@ -57,6 +57,7 @@ import {
 } from '../../lib/input-card.ts';
 import type { InputRequest, InputSavedOffer } from '../../../contract/index.ts';
 import { Eye, EyeOff, ShieldAlert, type VaultClient } from '../../shell.tsx';
+import { FieldShot } from './field-shot.tsx';
 import { SettledSlot } from './settled-slot.tsx';
 
 /** The style hook of the input box: a class name, kept as it is (not owner text). */
@@ -811,6 +812,9 @@ export function InputCard({
             <p className="m-0 text-meta text-warn" data-input-blocked="" role="status">
               {blocked}
             </p>
+          ) : null}
+          {request.pictured === true && request.target.kind === 'page' ? (
+            <FieldShot client={client} fields={fields} request={request} />
           ) : null}
           <InputForm
             blocked={blocked}

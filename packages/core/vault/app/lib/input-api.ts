@@ -13,11 +13,14 @@ import {
   InputDeliverResultSchema,
   type InputRequest,
   InputRequestSchema,
+  type InputShot,
+  InputShotSchema,
 } from '../../contract/index.ts';
 import type { VaultClient } from '../shell.tsx';
 
 const LIST_ROUTE = 'GET /v1/ferrets/:ferretId/input-requests';
 const DELIVER_ROUTE = 'POST /v1/ferrets/:ferretId/input-requests/:requestId/deliver';
+const SHOT_ROUTE = 'GET /v1/ferrets/:ferretId/input-requests/:requestId/shot';
 const CANCEL_ROUTE = 'POST /v1/ferrets/:ferretId/input-requests/:requestId/cancel';
 
 /** A listed request this build can read, or one it cannot (a newer daemon's), kept apart so the owner is told to update. */
@@ -52,4 +55,15 @@ export async function deliverInput(
 
 export async function cancelInput(client: VaultClient, request: Ids): Promise<void> {
   await client.call(CANCEL_ROUTE, { params: { ferretId: request.sessionId, requestId: request.id }, body: {} });
+}
+
+/**
+ * The picture of a page request's fields, taken before anything was typed (the owner's card only; the daemon holds it in
+ * memory and serves it while the request waits). Only a request marked `pictured` has one. The bytes are returned to
+ * the one caller that draws them and are kept nowhere here.
+ */
+export async function readInputShot(client: VaultClient, request: Ids): Promise<InputShot> {
+  return InputShotSchema.parse(
+    await client.call(SHOT_ROUTE, { params: { ferretId: request.sessionId, requestId: request.id } }),
+  );
 }

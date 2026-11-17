@@ -880,3 +880,25 @@ export function unpadInputValue(padded: string): string | undefined {
   }
   return decoder.decode(bytes.subarray(LENGTH_WIDTH + 1, end));
 }
+
+/**
+ * `GET /v1/ferrets/:ferretId/input-requests/:requestId/shot`: the picture of a page request's fields the daemon took
+ * before anything was typed (`InputShot`, targets.ts), for the OWNER's card only while the request waits. `pngBase64` is
+ * the browser's own screenshot; `clip` is the part of the page it shows, in the same coordinates as a field's `box`.
+ * Never a value: the picture is of the page before a byte was typed.
+ */
+const INPUT_SHOT_MAX_BASE64 = 16_000_000;
+export const InputShotSchema = z.strictObject({
+  // Only base64 reaches an <img src="data:…"> the card draws: anything else is refused, never drawn.
+  pngBase64: z
+    .string()
+    .min(1)
+    .max(INPUT_SHOT_MAX_BASE64)
+    .regex(/^[A-Za-z0-9+/]+={0,2}$/u),
+  clip: z.strictObject({
+    x: z.number().finite(),
+    y: z.number().finite(),
+    w: z.number().finite().nonnegative(),
+    h: z.number().finite().nonnegative(),
+  }),
+});
