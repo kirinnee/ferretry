@@ -136,9 +136,21 @@ export class WardenReviveService {
     if (!config.enabled || !config.revive.enabled || !config.mayActAlone.resume) return none;
     // The machine's own switch for unattended resumes, fail closed: off or unreadable revives nothing. An operator's own
     // resume never comes through here.
-    if ((await this.ports.autoResume().catch((): undefined => undefined)) !== true) return none;
+    const switched = await this.ports.autoResume().catch((): undefined => undefined);
+    if (switched !== true) {
+      // Switched off (not merely unreadable): remember it, so a death that happens while it is off is not brought back
+      // by switching it on. Written once; the next sweeps find it already there.
+      const before = input.revive ?? EMPTY_REVIVE_STATE;
+      if (switched === false && before.offSince === undefined) await persist({ ...before, offSince: at }, []);
+      return none;
+    }
 
     let state = this.housekeeping(input.revive ?? EMPTY_REVIVE_STATE, input.fleet, nowMs);
+    // Switched on again after being off: only deaths from now on are the Warden's to revive.
+    if (state.offSince !== undefined) {
+      const { offSince: _off, ...rest } = state;
+      state = { ...rest, armedAt: at };
+    }
     const found = await this.candidates(input, state);
     state = found.state;
     const fresh = found.subjects.filter(subject => state.refused[deathKey(subject)] === undefined);
@@ -248,6 +260,9 @@ export class WardenReviveService {
       if (view.config.credentialRevoked === true) continue;
       const finished = instantMs(view.state.finishedAt);
       if (finished === undefined || input.nowMs - finished > horizon) continue;
+      // It died while auto-resume was off: switching it on is not a request to bring this one back.
+      const armed = state.armedAt === undefined ? undefined : instantMs(state.armedAt);
+      if (armed !== undefined && finished < armed) continue;
       const verdict = classifyEnd(view.state.status, await this.ports.events.read(view.config.id));
       if (verdict.kind === 'leave') {
         if (verdict.why === 'stopped') {
@@ -361,6 +376,8 @@ export class WardenReviveService {
             attempts,
             recent: [...revivesInCapWindow(previous, nowMs), at],
             crashRevives: (previous?.crashRevives ?? 0) + (planned.cause.kind === 'agent_crashed' ? 1 : 0),
+            // The cap notice is once per ferret per hour: a revive that rolls the cap window forward must not forget it.
+            ...(previous?.capNoticedAt === undefined ? {} : { capNoticedAt: previous.capNoticedAt }),
           },
         },
         refused: { ...state.refused, [key]: at },

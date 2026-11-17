@@ -457,6 +457,8 @@ const ReviveStateSchema = z.object({
   batches: z.array(z.object({ at: Instant, ids: z.array(z.string().min(1)) })).default([]),
   breaker: z.object({ openedAt: Instant, until: Instant, why: z.string() }).optional(),
   refused: z.record(z.string(), Instant).default({}),
+  offSince: Instant.optional(),
+  armedAt: Instant.optional(),
 });
 
 const ReviveWatchSchema = z.object({
