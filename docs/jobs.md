@@ -169,6 +169,14 @@ each such shell's own program, with the attach call taken out, classifies safe (
 started `make` yet, so that shell keeps its own verdict. An attachment to a job that has already ended is listed as exiting, not as "kept;
 re-attach after the move". A keeper that cannot answer within 5 s proves nothing, and the classifier decides alone (fail closed).
 
+**Declared residual: a same-uid forgery inside the real `fy`.** Proving the file does not prove the code it runs. `fy` is a Bun
+standalone, and Bun can be told to load other code inside that same file: a `bunfig.toml` `preload` in the working directory,
+`BUN_OPTIONS=--preload …`, or `BUN_BE_BUN=1`. A process started that way with the argv `fy job attach <id>` has the trusted
+identity, so the gate lists it as a kept attachment and a move kills it. This is accepted (lead decision, F4316): it takes a
+deliberate forgery with the ferret's own credential and uid, and the only harm is the move killing the forger's own disguised
+process; no other ferret's or the owner's work is reachable through it. The compiled `fy` turns off bunfig and `.env` autoloading
+(a separate change), which closes the accidental case; a check of the attachment's environment is not built (see below).
+
 **Detach before the kill.** After the gate passes and before the pane is killed, the move asks the keeper to detach every attachment of
 the ferret (each prints its detach message and exits 75), then waits for them to be gone: 4 s IN TOTAL on the move's clock, the keeper questions included
 (each is bounded to 1.5 s), so a slow keeper cannot stretch it. The jobs are untouched. A keeper that fails or hangs, or an attachment that will not
@@ -228,4 +236,10 @@ that was SIGKILLed leaves the tool shell and the attachment running, reparented 
 - The backstop re-reads every ended job of a ferret that is gone for good, every 15 s, until retention deletes it.
 - Jobs of a ferret that finished or was removed are not yet closed with its terminals; they end on their own or are stopped.
 - Limits are constants, not owner configuration.
+- The executable proof does not read the attachment's environment: `BUN_OPTIONS`, `BUN_BE_BUN`, `NODE_OPTIONS`, `LD_PRELOAD`, `LD_AUDIT`
+  or `LD_LIBRARY_PATH` (`DYLD_INSERT_LIBRARIES` on macOS) set on a real `fy` is not refused (the declared residual above).
+- The trusted `fy` on the daemon's search path is whatever resolves first, even from a directory the user can write; on nix, where
+  `fy` and the daemon are separate store paths, trust rests on that search path alone.
+- After a daemon update moves `fy` to a new path, attachments still running the old one are no longer trusted, so a move of
+  that ferret blocks ("a program Ferretry doesn't recognise") until it re-attaches (fail closed).
 - Orphan detection needs procfs; on macOS an attachment records no harness and is never swept.
