@@ -76,6 +76,8 @@ export interface ISessionApi {
   list(): Promise<readonly FerretSummary[]>;
   /** One ferret, by id or name; the daemon resolves the name. */
   get(reference: string): Promise<FerretSummary>;
+  /** The ferret's stored last screen (the gated, re-masked read), or `undefined` when none can be read. */
+  lastScreen?(reference: string): Promise<string | undefined>;
   suggestNames(count: number): Promise<string[]>;
   /** `requestId` is the caller's idempotency key (`--request-id`); omitted, the start mints its own. */
   start(body: StartBody, requestId?: string): Promise<{ readonly id: string }>;

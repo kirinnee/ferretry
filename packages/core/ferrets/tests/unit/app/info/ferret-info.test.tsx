@@ -130,6 +130,33 @@ describe('the info panel', () => {
     expect(root.querySelector('[data-info-settings="restarted"]')).toBeNull();
   });
 
+  it('reads an ended ferret’s last words through the stored last screen route, never from its record', async () => {
+    const calls: Call[] = [];
+    const { root } = await open(
+      {
+        ...ANSWERS,
+        'GET /v1/ferrets/:ferretId': ferretOf('f1', { state: 'stopped', cause: { kind: 'signal', signal: 9 } }),
+        'GET /v1/ferrets/:ferretId/last-screen': { screen: '$ build\n\nout of memory\nKilled\n' },
+      },
+      calls,
+    );
+    expect(calls.some(call => call.route === 'GET /v1/ferrets/:ferretId/last-screen')).toBe(true);
+    expect(root.querySelector('[data-info-last-lines]')?.textContent).toBe('$ build\nout of memory\nKilled');
+  });
+
+  it('reads no last screen for a ferret that is going or whose end somebody chose, and draws none a refusal hid', async () => {
+    const going = await open();
+    expect(going.calls.some(call => call.route.endsWith('/last-screen'))).toBe(false);
+    await mounted?.unmount();
+    const refused = await open({
+      ...ANSWERS,
+      'GET /v1/ferrets/:ferretId': ferretOf('f1', { state: 'stopped', cause: { kind: 'agent_crashed', exitCode: 1 } }),
+      'GET /v1/ferrets/:ferretId/last-screen': Object.assign(new Error('forbidden'), { status: 403 }),
+    });
+    expect(refused.root.querySelector('[data-info-last-lines]')).toBeNull();
+    expect(refused.root.querySelector('[data-info-cause]')?.textContent).toContain('exited with code 1');
+  });
+
   it('closes through its ×', async () => {
     const { root } = await open();
     await interact(() => must(root.querySelector<HTMLButtonElement>('[data-info-close]'), 'close').click());

@@ -1,3 +1,4 @@
+import { ferretOf } from '@ferretry/core-gate/contract';
 import { ApiError, headerValue, jsonResponse } from '@ferretry/kernel/contract';
 import { FerretLiveReadSchema, SubtreeViewSchema } from '../../contract/index.ts';
 import { ConditionalFleetList } from '../lib/fleet-list/conditional.ts';
@@ -51,6 +52,15 @@ function register(f: FerretsContext): FeatureContribution | undefined {
         // sentence, never a 200 with no body.
         if (summary === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
         return jsonResponse(await outdatedMarks.one(summary));
+      },
+      // The stored last screen, through the same gated and re-masked read the API gives other plugins: `lastSnapshot`
+      // refuses a caller that may not touch the ferret before the file is opened and masks with the Vault's values now.
+      'GET /v1/ferrets/:ferretId/last-screen': async call => {
+        const id = await pathFerret(call);
+        const screen = await service.lastSnapshot(id, ferretOf(call));
+        if (screen === undefined)
+          throw new ApiError(409, `ferret ${id} has no stored last screen to read`, 'stored_snapshot_unavailable');
+        return jsonResponse({ screen });
       },
       'GET /v1/ferrets/:ferretId/live': async call =>
         jsonResponse(FerretLiveReadSchema.parse(liveRead(await ingestEvidenceOf(await pathFerret(call))))),

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { z } from 'zod';
 import {
   type FerretSummary,
   FerretSummarySchema,
@@ -28,6 +29,8 @@ import { HeldFleetList } from './session/held-list.ts';
 export const FERRET_ROUTES = {
   list: 'GET /v1/ferrets',
   subtree: 'GET /v1/ferrets/:ferretId/subtree',
+  /** The STORED last screen (`FerretsApi.lastSnapshot`): gated, and masked again on every read. */
+  lastScreen: 'GET /v1/ferrets/:ferretId/last-screen',
   get: 'GET /v1/ferrets/:ferretId',
   start: 'POST /v1/ferrets',
   recoverStart: 'GET /v1/ferrets/by-request/:requestId',
@@ -45,6 +48,7 @@ export const FERRET_ROUTES = {
 } as const;
 
 const ListedSchema = FerretSummarySchema.array();
+const LastScreenSchema = z.object({ screen: z.string() });
 const at = (reference: string) => ({ params: { ferretId: reference } });
 
 /** Only a transport failure retries a start; HTTP refusals and local guard errors are final (S54). */
@@ -131,6 +135,18 @@ export class ClientSessionApi
   async get(reference: string, signal?: AbortSignal): Promise<FerretSummary> {
     const call = this.client.call<unknown>(FERRET_ROUTES.get, at(reference));
     return FerretSummarySchema.parse(signal === undefined ? await call : await abandonOnAbort(call, signal));
+  }
+
+  /**
+   * The ferret's STORED last screen, through the gated and re-masked read (`live=false`), or `undefined` when there is
+   * none, the caller may not read it or the route is not there: a ferret's last words are a courtesy, never a failure.
+   */
+  async lastScreen(reference: string): Promise<string | undefined> {
+    const answer = await this.client
+      .call<unknown>(FERRET_ROUTES.lastScreen, { ...at(reference), quiet: true })
+      .catch(() => undefined);
+    const parsed = LastScreenSchema.safeParse(answer);
+    return parsed.success ? parsed.data.screen : undefined;
   }
 
   async subtree(reference: string): Promise<SubtreeView> {

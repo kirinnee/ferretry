@@ -92,6 +92,10 @@ export interface AdditivesOptions {
   readonly limits?: () => LimitsFile | undefined;
   /** The stored last screen as the daemon's reader answers it, masked again (unbound by default). */
   readonly storedLastSnapshot?: (ferret: FerretId) => Promise<string | undefined>;
+  /** The last-screen keeper a stop or an exit settle calls (unbound by default: nothing is kept). */
+  readonly lastSnapshot?: FerretsPorts['lastSnapshot'];
+  /** Told of every `ferret.changed` the service raises (the events stream's source), with its payload. */
+  readonly changed?: FerretsPorts['changed'];
 }
 
 /** A Ferrets service over fakes; with `queueing`, a runner that acts per write on the kernel's real act rules. */
@@ -133,7 +137,7 @@ export function additivesFixture(options: AdditivesOptions = {}) {
     sitrepSources: () => [],
     instructions: () => [],
     folder: path => ok(fenced(path)),
-    changed: () => {},
+    changed: options.changed ?? (() => {}),
     history: async (_ferret, type, data) => {
       history.push({ type, data });
     },
@@ -142,6 +146,7 @@ export function additivesFixture(options: AdditivesOptions = {}) {
     ...(options.session === undefined ? {} : { session: options.session }),
     ...(options.limits === undefined ? {} : { limits: options.limits }),
     ...(options.storedLastSnapshot === undefined ? {} : { storedLastSnapshot: options.storedLastSnapshot }),
+    ...(options.lastSnapshot === undefined ? {} : { lastSnapshot: options.lastSnapshot }),
   };
   const service = new FerretsService(registry, tokens, ports);
   return {

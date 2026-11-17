@@ -17,6 +17,7 @@ import {
   type Runner,
   type RunnerDelivery,
   type RunnerDeliveryFailure,
+  type RunnerExit,
   type RunnerHandle,
   type RunnerLook,
   type RunnerStop,
@@ -41,6 +42,7 @@ import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { sessionTarget } from '../../lib/tmux/address.ts';
 import { tmuxStartDirectory } from '../../lib/tmux/format-escape.ts';
 import { maskedScreen } from '../../lib/tmux/screen-mask.ts';
+import { PANE_EXIT_FACTS, parsePaneExits } from '../../lib/tmux/pane-exit.ts';
 import { killSessionArguments, paneActivityFormat, remainOnExitArguments } from '../../lib/tmux/commands.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../lib/tmux/contracts.ts';
 import { TmuxController } from '../../lib/tmux/controller.ts';
@@ -362,6 +364,57 @@ export class TmuxRunner implements Runner {
     const present = await this.options.tmux.execute(['has-session', '-t', `=${session}`]).catch(() => undefined);
     if (present === undefined || present.code === 0) return false;
     return /can't find session/iu.test(present.stderr) || isTmuxServerAbsent(present.stderr);
+  }
+
+  /**
+   * Whether the pane `handle` of `ferret` is PROVEN to be there with its program ended (`Runner.exited`): the session is
+   * the ferret's own (named by the ferret, every target the exact `=name`), and `list-panes -s` lists that exact pane id
+   * with `pane_dead` 1. A live pane, a pane id the session does not hold (a relaunch replaced it), a session that is not
+   * there (that is {@link TmuxRunner.gone}) and every refusal that proves nothing answer `undefined`. It answers the
+   * status and signal only, never what the pane shows ({@link TmuxRunner.deadScreen}). Only asks.
+   */
+  async exited(ferret: FerretId, handle: RunnerHandle): Promise<RunnerExit | undefined> {
+    if (!PANE_ID.test(handle)) return undefined;
+    let session: string;
+    try {
+      session = ferretTmuxSession(ferret);
+    } catch {
+      return undefined;
+    }
+    const listed = await this.options.tmux
+      .execute(['list-panes', '-s', '-t', `=${session}`, '-F', PANE_EXIT_FACTS])
+      .catch(() => undefined);
+    if (listed === undefined || listed.code !== 0) return undefined;
+    const pane = parsePaneExits(listed.stdout).find(candidate => candidate.paneId === handle);
+    if (pane === undefined || !pane.dead) return undefined;
+    return {
+      ...(pane.status === undefined ? {} : { status: pane.status }),
+      ...(pane.signal === undefined ? {} : { signal: pane.signal }),
+    };
+  }
+
+  /**
+   * The masked screen of a pane {@link TmuxRunner.exited} proves dead (`Runner.deadScreen`), for the ferret's stored last
+   * screen and nothing else: the proof is asked again here (a pane that is live, another ferret's or replaced answers
+   * `undefined`), the screen is read through the same act and redaction a look uses, so a hold refuses it, and the whole
+   * masked frame is returned (the keeper bounds it). `undefined` with no look wiring, a hold, or an unreadable screen.
+   */
+  async deadScreen(ferret: FerretId, handle: RunnerHandle): Promise<string | undefined> {
+    if ((await this.exited(ferret, handle)) === undefined) return undefined;
+    const watch = this.options.look;
+    if (watch === undefined) return undefined;
+    const acted = await watch
+      .act(targetRef('terminal', handle), 'read', async () => {
+        const captured = await this.options.tmux.execute(['capture-pane', '-p', '-t', handle]);
+        if (captured.code !== 0) return { kind: 'content' as const };
+        return await watch.redaction.read(async scope => ({
+          kind: 'content' as const,
+          data: (await maskedScreen(scope, captured.stdout, watch.yieldToLoop)) as never,
+        }));
+      })
+      .catch(() => undefined);
+    if (acted === undefined || !acted.ok || typeof acted.value.data !== 'string') return undefined;
+    return acted.value.data;
   }
 
   /**

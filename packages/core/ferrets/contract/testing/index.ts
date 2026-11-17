@@ -56,6 +56,7 @@ import {
   type RunnerFormCapture,
   type TranscriptEntry,
   type RunnerHeldAt,
+  type RunnerExit,
   type RunnerLook,
   type RunnerPaneObservation,
   type RunnerStop,
@@ -298,7 +299,7 @@ export class FakeRunner implements Runner {
   async look(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerLook | undefined> {
     this.#named('look', ferret);
     this.looked.push(handle);
-    if (!this.#owns(handle, ferret)) return undefined;
+    if (!this.#owns(handle, ferret) || this.deadPanes.has(handle)) return undefined;
     return this.screens.get(handle) ?? { frame: 'idle', working: false, atPrompt: true, permission: false };
   }
   /**
@@ -337,6 +338,29 @@ export class FakeRunner implements Runner {
   #owns(handle: RunnerHandle, ferret: FerretId | undefined): boolean {
     const live = this.#live.get(handle);
     return live !== undefined && (ferret === undefined || live.ferret === ferret);
+  }
+  /** TEST ONLY: how a pane whose program ended is answered by `exited`, per handle; absent = the pane is live (or not there). */
+  readonly deadPanes = new Map<RunnerHandle, RunnerExit>();
+  /** Every `[ferret, handle]` `exited` was asked about, in order. */
+  readonly exitedAsked: (readonly [FerretId, RunnerHandle])[] = [];
+  /** What the next `exited` does instead of answering: a test's own throw. */
+  exitedAnswer: 'answer' | 'throw' = 'answer';
+  async exited(ferret: FerretId, handle: RunnerHandle): Promise<RunnerExit | undefined> {
+    this.exitedAsked.push([ferret, handle]);
+    if (this.exitedAnswer === 'throw') throw new Error('the fake runner could not ask');
+    return this.#live.get(handle)?.ferret === ferret ? this.deadPanes.get(handle) : undefined;
+  }
+  /** TEST ONLY: what a dead pane still shows, per handle (what `deadScreen` answers). */
+  readonly deadScreens = new Map<RunnerHandle, string>();
+  async deadScreen(ferret: FerretId, handle: RunnerHandle): Promise<string | undefined> {
+    return this.#live.get(handle)?.ferret === ferret && this.deadPanes.has(handle)
+      ? this.deadScreens.get(handle)
+      : undefined;
+  }
+  /** TEST ONLY: the program in the pane behind `handle` ended and tmux kept the pane (`screen` is what it still shows). */
+  die(handle: RunnerHandle, how: RunnerExit = {}, screen?: string): void {
+    this.deadPanes.set(handle, how);
+    if (screen !== undefined) this.deadScreens.set(handle, screen);
   }
   /** TEST ONLY: the host went down and took the runner's server with it: every pane is gone. */
   reboot(): void {
