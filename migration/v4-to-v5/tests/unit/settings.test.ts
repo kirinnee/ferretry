@@ -228,7 +228,11 @@ test('converts every v4 config kind into the v5 file that owns it, read back wit
   ] as const)
     expect((await read(path, schema)).permissionMode).toBe('skip');
   expect(await text('harness-claude-code.yaml')).toContain('# I trust my agents');
-  expect(await read('runtimes.yaml', RuntimesFileSchema)).toEqual({ defaultRuntime: 'claude-work', autoResume: false });
+  expect(await read('runtimes.yaml', RuntimesFileSchema)).toEqual({
+    defaultRuntime: 'claude-work',
+    autoResume: false,
+    browserPorts: 'per-user',
+  });
   expect(await read('conversation.yaml', ConversationConfigSchema)).toEqual({ keepInSync: false });
   const browsers = await read('browsers.yaml', BrowsersConfigSchema);
   expect(browsers.mode).toBe('window');
@@ -244,10 +248,43 @@ test('converts every v4 config kind into the v5 file that owns it, read back wit
   expect((await stat(join(f.to, 'config/runtimes/claude-work.yaml'))).mode & 0o777).toBe(0o600);
   const notCarried = report.notCarried.map(item => item.what);
   expect(notCarried).not.toContain('config/machine.yaml autoResume');
-  for (const key of ['browserPorts', 'advanced', 'attentionNudge'])
-    expect(notCarried).toContain(`config/machine.yaml ${key}`);
+  expect(notCarried).not.toContain('config/machine.yaml browserPorts');
+  for (const key of ['advanced', 'attentionNudge']) expect(notCarried).toContain(`config/machine.yaml ${key}`);
   expect(report.kept).toContainEqual({ what: 'runtimes', count: 1 });
   expect(report.kept).toContainEqual({ what: 'instruction documents', count: 1 });
+});
+
+/** Converts a lone v4 machine.yaml and answers the runtimes.yaml it wrote (undefined when none) plus the report. */
+const convertMachine = async (lines: readonly string[]) => {
+  await yaml('machine.yaml', [...lines, ''].join('\n'));
+  const report = await settingsStep.run(f.ctx());
+  return {
+    report,
+    runtimes: (await exists('runtimes.yaml')) ? await read('runtimes.yaml', RuntimesFileSchema) : undefined,
+  };
+};
+
+test('E7 machine.yaml browser port settings left at their defaults are not written to runtimes.yaml', async () => {
+  const { runtimes, report } = await convertMachine(['browserPorts: random', 'browserFirewallFailure: warn']);
+  expect(runtimes).toBeUndefined();
+  expect(report.notCarried.map(item => item.what)).not.toContain('config/machine.yaml browserPorts');
+  expect(report.notCarried.map(item => item.what)).not.toContain('config/machine.yaml browserFirewallFailure');
+});
+
+test('E7 machine.yaml browserPorts per-user is carried into runtimes.yaml', async () => {
+  const { runtimes } = await convertMachine(['browserPorts: per-user']);
+  expect(runtimes).toEqual({ browserPorts: 'per-user' });
+});
+
+test('E7 machine.yaml explicit browserPorts are carried into runtimes.yaml as the three ports', async () => {
+  const { runtimes } = await convertMachine(['browserPorts:', '  cdp: 9300', '  relay: 9301', '  vnc: 5901']);
+  expect(runtimes).toEqual({ browserPorts: { cdp: 9300, relay: 9301, vnc: 5901 } });
+});
+
+test('E7 machine.yaml browserFirewallFailure refuse is carried into runtimes.yaml', async () => {
+  expect((await convertMachine(['browserFirewallFailure: refuse'])).runtimes).toEqual({
+    browserFirewallFailure: 'refuse',
+  });
 });
 
 test('!A527 an owner-shaped warden.yaml carries every autoMigrate key and the targets list, verbatim, as autoMove', async () => {
