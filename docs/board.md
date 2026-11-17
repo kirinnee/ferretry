@@ -33,8 +33,8 @@ alone did not hold, because a person's own instructions that say "record every t
 
 | Where the board is off                                    | What happens                                                                                                       |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `fy start`, the app's New session                         | no task is made, unless `--card` hands over an existing one                                                        |
-| `fy new`                                                  | a task only under a live task the lead holds on the child's board (brief or focus), or the one `--card` hands over |
+| `fy start`, the app's New session                         | no task is made, unless `--task` hands over an existing one                                                        |
+| `fy new`                                                  | a task only under a live task the lead holds on the child's board (brief or focus), or the one `--task` hands over |
 | `fy task create`, `fy task refile` to another board       | a ferret's task is refused unless it rests on a live parent it holds there or on the owner's Yes                   |
 | the [turn-end check](#the-turn-end-check)                 | silent                                                                                                             |
 | the sweep's stale and unblocked nudges, a PR or a release | unchanged: they only ever touch a task that exists, so only a ferret holding one hears them                        |
@@ -224,7 +224,7 @@ session identity — in `BoardService` (`create`, `act`) and on the lane route �
 | `fy send` its lead (and peers the lead names)                                                              | editing a project's lanes (`PATCH` of the lane list: `403 sub-ferret`)                                                      |
 
 The refusal is `forbidden` and speaks to the caller, never of "sub-ferrets" at large: it says what it can't do, what it MAY do, and who can do the rest, e.g.
-`You are a sub-ferret, so you can't move cards. You may note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send <lead-callsign> "…"`.
+`You are a sub-ferret, so you can't move tasks. You may note on and link a PR or branch to your own task, and drop or reassign tasks in your own subtree. For anything else ask your lead: fy send <lead-callsign> "…"`.
 A sub-ferret's own PR or branch link is always allowed; a commit or doc link, a `move` and a `focus` are judged against the task's **current holder**
 (assignee, else owner): the holder may, anyone else is refused. When the refused task is one the sub-ferret's lead holds, the last sentence is replaced by
 "Your lead holds this task: claim it first: fy task claim &F12", because claiming is what makes the sub-ferret the holder
@@ -397,7 +397,7 @@ has one), else the verify lane where the owner tries it. It never moves a task i
 owner closes, never out of a gate, and stops at a gate on the way. A task with an OPEN PR goes to the review lane and waits there until the PR merges (never closed, never past it); one whose PR merged is left to its PR.
 
 **A session starting on a task fires `work.started`.** `SessionCards` does it, for a task it just made (`fy new`,
-`fy start`) and for one handed over by `fy new --card`, so a sub-ferret, who may not move tasks, still lands in the
+`fy start`) and for one handed over by `fy new --task`, so a sub-ferret, who may not move tasks, still lands in the
 lane its workflow works in (In progress / Doing; Plan for `design-first`). A task already past that lane stays
 where it is, and a failed move only warns: the session still starts. A task the lead makes with `fy task create`
 has no session yet, so it stays in Todo until the lead passes `--lane` or moves it.
@@ -1033,14 +1033,14 @@ Claiming makes the claimer the task's **holder**, and nothing more. The holder m
 `focus`; `move` the task (a sub-ferret's move is judged in the write, against the current holder only: a task another ferret holds stays
 refused, and the lane rules still apply: an owner gate or an unfinished dependency still holds it); and hand it down. It does **not** grant `drop`
 (an assignee fails the drop authority, see the standings above), `edit`, `block`, `reparent`, `refile` or any other re-plan.
-`fy start --card <id>` does the same for a NEW session: it assigns an existing task to the session being started under the same checks as
-`fy new --card` (the caller must be allowed to hand that task down; the owner may take any existing task), makes no second task, and needs a prompt.
+`fy start --task <id>` does the same for a NEW session: it assigns an existing task to the session being started under the same checks as
+`fy new --task` (the caller must be allowed to hand that task down; the owner may take any existing task), makes no second task, and needs a prompt.
 **The handover is not best effort.** The task must exist, be open work (a dropped or closed task is refused up front) and the session an ordinary
 ferret (a miner, guide builder or warden takes no task); all of it is judged before a session is written. The assignment itself is one write that
 re-judges the task, so a task dropped, closed or reassigned after that check is refused there: the new session is stopped with the reason, the task is
 left as it was, and the start answers `card_refused`. Nothing launches on a task it was not given.
 
-Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the task DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a task on out of a gate
+Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the task DOWN: it may assign it to one of its own descendants (`fy new --task`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a task on out of a gate
 or past one (a lane whose stage is a gate, owner-gated or a `verify` lane), and only the owner closes — except on an internal task, whose owner ferret and its leads pass its gates
 and close it ([Tasks show progress](#tasks-show-progress-their-asks-ride-the-agenda)), and a sub-task, which the daemon closes when its work
 ships or its helper finishes ([Sub-tasks close themselves](#sub-tasks-close-themselves)). A ferret's change to a project's lanes waits for the owner
@@ -1425,7 +1425,7 @@ The owner can start work on a task that has nobody working on it, from the Warde
 
 - **It starts a NEW ferret on the task**, never the old assignee: that one may be gone, may have been started for
   another repository, or may carry a focus the task has left. The client sends only the task id; the daemon decides
-  the rest, through the same start `fy new --card` makes (`SessionCards.open` over an existing task):
+  the rest, through the same start `fy new --task` makes (`SessionCards.open` over an existing task):
   - **the task** is the new ferret's focus task and its anchor, and is assigned to it (the start moves the task into
     its working lane);
   - **the folder** is the task's own project's folder, read from the task as it is now, so a task refiled to another
@@ -1513,7 +1513,7 @@ quiet. Taking a task (`fy task create`, `fy task focus`, a start) clears it, so 
 
 ## `fy ps`
 
-The CARD column shows each session's focus task and its lane (`&F18 Plan/Design`). A running ferret with no task
+The TASK column shows each session's focus task and its lane (`&F18 Plan/Design`). A running ferret with no task
 shows `—` in amber.
 
 ## Commands
