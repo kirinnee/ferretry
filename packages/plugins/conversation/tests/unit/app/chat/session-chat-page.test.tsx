@@ -109,7 +109,8 @@ describe('SessionChatPage', () => {
       ['conversation.row-actions', 'shared'],
       ['conversation.row', 'shared'],
       ['conversation.above-composer', 'shared'],
-      ['ferret.side', 'shared'],
+      // `ferret.side` is not drawn: the page opens on the chat and the composer, and the workspace mounts the side column
+      // only once the reader opens it (`ferret-workspace.tsx`).
     ]);
   });
 

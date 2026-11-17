@@ -1,7 +1,7 @@
 /**
  * WHAT A PANEL OF A FERRET'S PAGE MAY ASK ITS WORKSPACE FOR (v4's workspace `openFile` controller, which opens a file AND
- * focuses it): to bring another panel of the SAME ferret on screen. On a desktop every `ferret.side` panel is already beside
- * the chat, so showing one is nothing; on a phone the workspace shows one panel behind a chip row, so the request moves the
+ * focuses it): to bring another panel of the SAME ferret on screen. On a desktop the `ferret.side` panels are beside the
+ * chat once the side column is open, so showing one opens a closed column and scrolls to it; on a phone the workspace shows one panel behind a chip row, so the request moves the
  * chip (`ferret-workspace.tsx`).
  *
  * It is scoped to one ferret on one daemon: the provider names both, and a panel acts only when the ferret it draws for is the

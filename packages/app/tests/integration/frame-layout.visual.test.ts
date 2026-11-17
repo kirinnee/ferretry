@@ -182,9 +182,32 @@ describe('the ferrets page (the screen the side column holds)', () => {
 });
 
 describe('the ferret page', () => {
-  it('at 1280 gives the side pane its own scrolling column and keeps the chat most of the row', async () => {
-    const { tab, close } = await open(VIEWPORTS[0], '/d/ws/ferrets/zoe', '[data-slot="ferret.side"] [data-side-panel]');
+  it('at 1280 opens on the chat and the composer: the side column is closed until its toggle is pressed', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], '/d/ws/ferrets/zoe', '[data-chat]');
     try {
+      await shotOf(tab, '1280-ferret-side-closed');
+      expect(await tab.locator('[data-slot="ferret.side"]').count(), 'no side column drawn').toBe(0);
+      expect(await tab.locator('[data-side-panel]:visible').count(), 'no panel on screen').toBe(0);
+      const toggle = tab.locator('[data-side-toggle]');
+      expect(await toggle.getAttribute('aria-expanded')).toBe('false');
+      expect((await hitsItself(tab, '[data-side-toggle]')).hit, 'the toggle takes a press').toBe(true);
+      const rail = await width(tab, '[data-side-rail]');
+      expect(rail, 'a closed column costs a slim rail, not a column').toBeLessThanOrEqual(40);
+      await toggle.click();
+      await tab.waitForSelector('[data-slot="ferret.side"] [data-side-panel]');
+      expect(await toggle.getAttribute('aria-expanded')).toBe('true');
+      await toggle.click();
+      expect(await tab.locator('[data-side-panel]:visible').count(), 'pressed again, it closes').toBe(0);
+    } finally {
+      await close();
+    }
+  });
+
+  it('at 1280 gives the side pane its own scrolling column and keeps the chat most of the row', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], '/d/ws/ferrets/zoe', '[data-chat]');
+    try {
+      await tab.click('[data-side-toggle]');
+      await tab.waitForSelector('[data-slot="ferret.side"] [data-side-panel]');
       const panels = await tab.locator('[data-slot="ferret.side"] [data-side-panel]').count();
       expect(panels, 'every panel the default layout lists is drawn').toBe(15);
       const slot = await tab.evaluate(() => {
@@ -246,7 +269,7 @@ describe('the ferret page', () => {
             const pane = document.querySelector('[data-slot="ferret.side"]');
             return {
               transcript: box('[data-transcript]'),
-              paneOverflowsSideways: pane === null ? true : pane.scrollWidth > pane.clientWidth + 1,
+              paneOverflowsSideways: pane === null ? false : pane.scrollWidth > pane.clientWidth + 1,
             };
           });
           expect(parts.transcript, 'the transcript is readable at a laptop height').toBeGreaterThanOrEqual(250);

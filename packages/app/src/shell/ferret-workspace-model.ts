@@ -125,8 +125,9 @@ export const panelPlaced = (panels: readonly PanelRef[], panelId: string): boole
   panels.some(candidate => candidate.id === panelId);
 
 /**
- * Beside the chat every panel is already on screen, so asking for one only scrolls the side column to it (a column
- * taller than the window would otherwise leave a click with nothing to show). A panel nobody placed is ignored.
+ * Beside the chat every panel of an OPEN side column is on screen, so asking for one only scrolls the column to it (a
+ * column taller than the window would otherwise leave a click with nothing to show); the workspace opens a closed column
+ * first (`ferret-workspace.tsx`). A panel nobody placed is ignored.
  */
 export function revealPanel(panels: readonly PanelRef[], panelId: string): void {
   const panel = panels.find(candidate => candidate.id === panelId);
