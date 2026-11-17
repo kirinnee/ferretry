@@ -538,8 +538,22 @@ export class LessonsService {
     const record = state.scan;
     if (record === undefined) throw new LessonsError('not-found', 'no scan has run');
     if (record.state !== 'running') return scanProgress(record);
-    for (const batch of record.batches) {
-      if (batch.minerFerretId !== undefined) await this.deps.miner.stop(batch.minerFerretId);
+    // Ask every miner to stop even when one refuses: a throw must not leave the later miners running. The scan stays
+    // `running` when any refused, so the owner can cancel again and reach the ones that did not stop.
+    const minerIds = record.batches.flatMap(batch => (batch.minerFerretId === undefined ? [] : [batch.minerFerretId]));
+    const outcomes = await Promise.allSettled(minerIds.map(async id => await this.deps.miner.stop(id)));
+    const failures = outcomes.flatMap((outcome, index) =>
+      outcome.status === 'rejected'
+        ? [
+            `${minerIds[index] ?? 'a miner'}: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`,
+          ]
+        : [],
+    );
+    if (failures.length > 0) {
+      throw new LessonsError(
+        'unavailable',
+        `${String(failures.length)} of ${String(minerIds.length)} miners did not stop (${failures.join('; ')}); the scan is still running, cancel again to retry`,
+      );
     }
     const next: ScanRecord = {
       ...record,

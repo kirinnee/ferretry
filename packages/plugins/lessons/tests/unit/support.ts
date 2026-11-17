@@ -233,6 +233,8 @@ class MemoryScanMiner implements ScanMinerPort {
     readonly model: string | undefined;
   }> = [];
   readonly stopped: string[] = [];
+  /** Miners whose stop throws, after being recorded as asked. */
+  readonly refuseStop = new Set<string>();
 
   async digestCharacters(ferretId: string): Promise<number | undefined> {
     return this.digests.get(ferretId);
@@ -255,6 +257,7 @@ class MemoryScanMiner implements ScanMinerPort {
 
   async stop(minerFerretId: string): Promise<void> {
     this.stopped.push(minerFerretId);
+    if (this.refuseStop.has(minerFerretId)) throw new Error(`${minerFerretId} would not stop`);
   }
 }
 
