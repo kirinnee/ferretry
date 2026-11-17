@@ -20,7 +20,7 @@ export interface FeedSocket {
   send?(frame: string | Uint8Array): void;
   onmessage: ((event: { readonly data: unknown }) => void) | null;
   onclose: ((event: { readonly reason?: string; readonly code?: number }) => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((event?: { readonly message?: string }) => void) | null;
   close(code?: number, reason?: string): void;
 }
 
@@ -228,7 +228,7 @@ export class HttpTransport implements DaemonTransport {
               : `${closed.reason} (code ${String(closed.code)})`;
           end(`WebSocket stream closed unexpectedly: ${detail}`, closed.code);
         };
-        opened.onerror = () => end('WebSocket stream failed');
+        opened.onerror = failure => end(streamFailure(failure?.message));
       } catch (error) {
         end(error instanceof Error ? error.message : String(error));
       }
@@ -262,6 +262,19 @@ export class HttpTransport implements DaemonTransport {
     if (authorization !== undefined) headers.authorization = authorization;
     return { url: url.toString(), headers };
   }
+}
+
+/**
+ * Why a stream failed before it had a close code, from the words the runtime put on its error event. A daemon that
+ * answers the upgrade with a status (a ferret it does not know is a 404) shows only as "Expected 101 status code: 404";
+ * that is said as what it is. Anything else the runtime says is kept without its address; nothing at all stays the bare
+ * sentence.
+ */
+function streamFailure(message: string | undefined): string {
+  const status = /status code: (\d{3})/u.exec(message ?? '')?.[1];
+  if (status !== undefined) return `WebSocket stream failed: the daemon refused the stream (HTTP ${status})`;
+  const detail = /\bfailed: (.+)$/u.exec(message ?? '')?.[1]?.trim();
+  return detail === undefined || detail === '' ? 'WebSocket stream failed' : `WebSocket stream failed: ${detail}`;
 }
 
 /** A text frame, or the bytes of a binary one; anything else (a Blob this runtime did not decode) is not a frame. */
