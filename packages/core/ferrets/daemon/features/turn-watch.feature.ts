@@ -47,6 +47,10 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     id: TURN_WATCH_JOB,
     schedule: { onceAfterStart: true },
     run: async () => {
+      // The 30 s sweep is registered BEFORE anything is awaited: a ferret that vanishes while the registry is still
+      // loading is swept on the first tick after it has (a tick that finds nothing loaded asks about nothing, and a
+      // settle waits for `ready` itself), instead of the sweep not existing until a slow load is over.
+      kernel.lifecycle.onStop(turnWatch.startSweep());
       await ready();
       await storeLoaded.catch(() => undefined);
       // Once per arm, every held ferret's document is brought to its registry state: one left `starting` by a crash
@@ -58,7 +62,6 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       for (const record of registry.list()) if (record.state === 'stopped') removeEnvironment(record.id);
       turnWatch.host.arm();
       kernel.lifecycle.onStop(async () => await turnWatch.host.close());
-      kernel.lifecycle.onStop(turnWatch.startSweep());
     },
   });
 

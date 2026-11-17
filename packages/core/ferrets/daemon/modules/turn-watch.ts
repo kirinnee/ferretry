@@ -33,7 +33,8 @@ import { SessionObserver } from '../lib/session/observer/observer.ts';
 import type { ObserverPatch } from '../lib/session/observer/observer.ts';
 import type { QuestionStepPolicy } from '../lib/session/observer/question.ts';
 import { PacedTurnWatcher } from '../lib/session/observer/turn-watch.ts';
-import type { SessionTurnState } from '../lib/protocol/session.ts';
+import { SessionStateSchema, type SessionTurnState } from '../lib/protocol/session.ts';
+import { claimsRunningAgent } from '../lib/session/health/exit.ts';
 import type { TurnPaneEvidence } from '../lib/session/peers/turn.ts';
 import type { SessionId } from '../lib/session-id.ts';
 import type { SessionTranscriptTail } from '../lib/session/peers/reads.ts';
@@ -215,6 +216,16 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
   // runner's PROOF settles either, and never on the tick's time: the settle waits in the ferret's own queue, which a long
   // stop or restart can hold. A stop the owner made has already moved the record out of working/idle there.
   const settling = new Set<FerretId>();
+  // Whether the ferret's session document still claims a live agent (the boot exit pass's own rule). A document that
+  // says done, failed or stopped is an outcome somebody already recorded: a pane gone after it is that outcome's normal
+  // end, and settling it again would write a second `session.exited` and a `terminal_gone` over it. A document that is
+  // missing or unreadable says nothing either way, so the runner's proof alone decides, as it did before.
+  const claimsAgent = async (ferret: FerretId): Promise<boolean> => {
+    const document = SessionStateSchema.safeParse(
+      await deps.storage.readState(ferret as unknown as SessionId).catch(() => undefined),
+    );
+    return !document.success || claimsRunningAgent(document.data.status);
+  };
   const noticeGone = (record: FerretRecord): void => {
     const runner = deps.runner();
     const handle = record.handle;
@@ -222,17 +233,22 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
     if (settling.has(record.id)) return;
     settling.add(record.id);
     const from = record.state === 'idle' ? 'awaiting_user' : 'running';
-    void runner
-      .gone(record.id)
+    void claimsAgent(record.id)
+      .then(async claims => {
+        if (!claims) return;
+        return await runner.gone?.(record.id);
+      })
       .then(async gone => {
+        if (gone === undefined) return;
         // The proof above was taken outside the ferret's queue: the settle asks again once it holds the queue, because a
-        // restart that ran in between may have put a live pane on this very handle.
+        // restart that ran in between may have put a live pane on this very handle, or a `signal done` may have
+        // recorded the ferret's outcome (asked again here too, so the outcome in the document is never overwritten).
         if (gone) {
           await deps.settleGone?.(
             record.id,
             handle,
             { from, reason: GONE_REASON },
-            async () => (await runner.gone?.(record.id)) === true,
+            async () => (await runner.gone?.(record.id)) === true && (await claimsAgent(record.id)),
           );
           return;
         }
@@ -247,7 +263,9 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
             handle,
             exit,
             from,
-            async () => (await runner.exited?.(record.id, handle as RunnerHandle)) !== undefined,
+            async () =>
+              (await runner.exited?.(record.id, handle as RunnerHandle)) !== undefined &&
+              (await claimsAgent(record.id)),
           );
       })
       .catch((error: unknown) =>

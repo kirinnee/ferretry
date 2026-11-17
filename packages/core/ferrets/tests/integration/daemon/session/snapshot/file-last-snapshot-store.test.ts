@@ -45,6 +45,38 @@ describe('F-0326 the last-snapshot file on the sessions root', () => {
     expect(await store.read(FERRET)).toEqual({ kind: 'read', text: 'second frame\n' });
   });
 
+  test('W4 clear forgets the stored frame: the read is absent, a folder or a frame that is not there is no fault, and nothing else in the folder goes', async () => {
+    const { folder, store } = await fresh();
+    // No folder yet: nothing to forget, and none is made for it.
+    await store.clear(FERRET);
+    expect(await store.read(FERRET)).toEqual({ kind: 'absent' });
+
+    await store.write(FERRET, 'an older frame\n');
+    await writeFile(`${folder}/environment.json`, CREDENTIAL);
+    await store.clear(FERRET);
+    expect(await store.read(FERRET)).toEqual({ kind: 'absent' });
+    expect(await readdir(folder)).toEqual(['environment.json']);
+    // Clearing what is already cleared is no fault.
+    await store.clear(FERRET);
+
+    // A newer frame after a clear is read back as the frame, not the older one.
+    await store.write(FERRET, 'a newer frame\n');
+    expect(await store.read(FERRET)).toEqual({ kind: 'read', text: 'a newer frame\n' });
+  });
+
+  test('W4 clear leaves a name that is not a plain file alone (a folder, a link), as a write refuses it', async () => {
+    const { folder, store } = await fresh();
+    await mkdir(`${folder}/last-snapshot.txt`, { recursive: true, mode: 0o700 });
+    await store.clear(FERRET);
+    expect((await lstat(`${folder}/last-snapshot.txt`)).isDirectory()).toBe(true);
+    await rm(`${folder}/last-snapshot.txt`, { recursive: true });
+    await writeFile(`${folder}/credential.txt`, CREDENTIAL);
+    await symlink(`${folder}/credential.txt`, `${folder}/last-snapshot.txt`);
+    await store.clear(FERRET);
+    expect((await lstat(`${folder}/last-snapshot.txt`)).isSymbolicLink()).toBe(true);
+    expect(await readFile(`${folder}/credential.txt`, 'utf8')).toBe(CREDENTIAL);
+  });
+
   test('C58-15 the reader masks the stored file AGAIN: a value added to the Vault after the capture is masked on read, and a damaged file answers nothing', async () => {
     // Arrange: the frame was kept while the Vault held only OLD; LATER was plain text then.
     const OLD = 'sk-fixture-old-0123456789abcdef';

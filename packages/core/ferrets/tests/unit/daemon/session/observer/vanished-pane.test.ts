@@ -19,7 +19,11 @@ interface Settled {
 }
 
 /** A live ferret on a fake pane, the turn watch over it, and a way to tick it once and let its settle land. */
-async function watched(state: 'working' | 'idle' = 'working', status: 'running' | 'waiting' = 'running') {
+async function watched(
+  state: 'working' | 'idle' = 'working',
+  status: 'running' | 'waiting' | 'completed' | 'failed' = 'running',
+  settleLands = false,
+) {
   const made = await memoryStorage({ clock: { now: () => AT } });
   cleanups.push(async () => await made.storage.close());
   const id = parseSessionId('vanish-1');
@@ -60,6 +64,8 @@ async function watched(state: 'working' | 'idle' = 'working', status: 'running' 
     settleGone: async (ferret, handle, exited, stillGone) => {
       settled.push({ ferret, handle, ...exited });
       stillGones.push(stillGone);
+      // As the service does: a settle that lands leaves the record stopped, so nothing else notices it again.
+      if (settleLands) (record as { state: string }).state = 'stopped';
       return true;
     },
     settleExited: async (ferret, handle, exit, from, stillExited) => {
@@ -88,6 +94,8 @@ async function watched(state: 'working' | 'idle' = 'working', status: 'running' 
     await new Promise(resolve => setTimeout(resolve, 50));
   };
   return {
+    made,
+    log,
     runner,
     record,
     settled,
@@ -372,5 +380,71 @@ describe('a ferret whose pane is kept dead (the harness was killed or crashed)',
 
     expect(fleet.runner.exitedAsked).toEqual([]);
     expect(fleet.settledExits).toEqual([]);
+  });
+});
+
+describe('a ferret whose session document already recorded how it ended (done / failed)', () => {
+  for (const status of ['completed', 'failed'] as const) {
+    it(`is NOT settled gone by the sweep once its document says \`${status}\`: no second session.exited, no status overwrite`, async () => {
+      const fleet = await watched('working', status);
+      fleet.runner.reboot();
+
+      await fleet.sweep();
+      await fleet.tick();
+
+      expect(fleet.settled).toEqual([]);
+      expect(fleet.settledExits).toEqual([]);
+    });
+
+    it(`is NOT settled as exited by the sweep once its document says \`${status}\` (a dead pane kept after the outcome)`, async () => {
+      const fleet = await watched('working', status);
+      fleet.runner.die(fleet.record.handle as RunnerHandle, { signal: 9 });
+
+      await fleet.sweep();
+
+      expect(fleet.settledExits).toEqual([]);
+      expect(fleet.settled).toEqual([]);
+    });
+  }
+
+  it('is not settled when the outcome lands between the proof and the settle: the second ask says no', async () => {
+    const fleet = await watched('working', 'waiting');
+    fleet.runner.reboot();
+    await fleet.sweep();
+    const [stillGone] = fleet.stillGones;
+    expect(await stillGone?.()).toBe(true);
+
+    // `signal done` recorded the ferret's outcome while the settle waited its turn in the ferret's queue.
+    const id = fleet.id as unknown as ReturnType<typeof parseSessionId>;
+    await fleet.made.storage.writeState(id, { id, status: 'completed', turn: 1 });
+
+    expect(await stillGone?.()).toBe(false);
+  });
+
+  it('is still settled while its document claims a live agent (the runner proof decides, as before)', async () => {
+    const fleet = await watched('working', 'waiting');
+    fleet.runner.reboot();
+
+    await fleet.sweep();
+
+    expect(fleet.settled).toHaveLength(1);
+  });
+});
+
+describe('the sweep and a failed look noticing the same vanished terminal', () => {
+  it('settle it once, however the two overlap, and the sweep that follows finds it stopped', async () => {
+    const fleet = await watched('working', 'running', true);
+    fleet.runner.reboot();
+
+    // The look fails and the sweep ticks in the same instant: both notice, only one settle is asked.
+    fleet.tick();
+    await fleet.sweep();
+    expect(fleet.settled).toHaveLength(1);
+
+    // A later sweep reads the registry's own word: it is stopped, so nothing is asked and nothing is settled again.
+    await fleet.sweep();
+    await fleet.tick();
+    expect(fleet.settled).toHaveLength(1);
+    expect(fleet.log.lines.filter(line => line.level === 'warn')).toEqual([]);
   });
 });

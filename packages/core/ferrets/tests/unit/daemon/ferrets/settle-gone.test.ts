@@ -76,3 +76,17 @@ test('settleGone: a handle-less ferret is not settled on a handle it never held,
   expect(await f.service.settleGone(f.id, undefined, EXITED, async () => false)).toBe(false);
   expect(f.registry.get(f.id)?.state).toBe('working');
 });
+
+test('settleGone: the second notice of the same vanished terminal (the sweep and a failed look) writes one session.exited, once', async () => {
+  const { f, handle } = await running();
+  const exits = () => f.history.filter(line => line.type === 'session.exited').length;
+  const before = exits();
+
+  // Both observers proved it gone and both reach the ferret's queue: the first lands, the second finds it stopped.
+  const first = f.service.settleGone(f.id, handle, EXITED, async () => true);
+  const second = f.service.settleGone(f.id, handle, EXITED, async () => true);
+
+  expect([await first, await second]).toEqual([true, false]);
+  expect(exits() - before).toBe(1);
+  expect((await f.service.get(f.id))?.cause).toEqual({ kind: 'terminal_gone' });
+});

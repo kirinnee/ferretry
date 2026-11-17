@@ -97,13 +97,22 @@ export class LastSnapshotCapture {
     deadPane: boolean,
   ): Promise<CaptureOutcome> {
     const screen = deadPane ? await runner.deadScreen?.(ferret, handle) : (await runner.look?.(handle, ferret))?.status;
-    // Today's rule: only a frame actually observed on a live pane is kept; a blank one is not evidence of anything.
-    if (screen === undefined || screen.trim() === '') return 'nothing';
+    // Today's rule: only a frame actually observed on a pane is kept, and a blank one is never written. A pane that was
+    // READ and showed nothing is newer than any frame kept before it, so that older frame is forgotten rather than left
+    // to be read back as this ferret's last screen (a pane that could not be read says nothing of the kind: it stays).
+    if (screen === undefined) return 'nothing';
+    if (screen.trim() === '') return await this.forget(id);
     const masked = await this.deps.redaction.read(scope => maskedScreen(scope, screen, this.deps.yieldToLoop));
-    if (typeof masked !== 'string' || masked.trim() === '') return 'nothing';
+    if (typeof masked !== 'string' || masked.trim() === '') return await this.forget(id);
     // The bound is checked here, before the write starts; a write already begun is not called back (see the class).
     if (abandoned.aborted) return 'nothing';
     await this.deps.store(id).write(id, lastSnapshotText(masked));
     return 'written';
+  }
+
+  /** A blank pane was observed: the older stored frame, if any, is no longer the last one. */
+  private async forget(id: SessionId): Promise<CaptureOutcome> {
+    await this.deps.store(id).clear?.(id);
+    return 'nothing';
   }
 }
