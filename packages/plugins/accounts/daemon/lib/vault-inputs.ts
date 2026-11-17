@@ -3,8 +3,8 @@
  * `packages/daemon/src/lib/input-requests/{login-observer,lock,saved-logins,ports}.ts` (bb89d054d).
  *
  * TODO(contract): every name here belongs to the Vault (input requests). The shared grant matcher (I210) must run the
- * SAME `codeTargetProblem`, `identityOf` and `terminalHides` the Vault's tap path runs, so these copies are a stopgap
- * until the Vault's contract exports them (the grants themselves now reach the Vault through `input.saved`'s `grants`). The two ports at
+ * SAME `identityOf` and `terminalHides` the Vault's tap path runs, so these copies are a stopgap until the Vault's
+ * contract exports them (`codeTargetProblem` already is: Accounts imports it from `@ferretry/core-vault/contract`; the grants themselves now reach the Vault through `input.saved`'s `grants`). The two ports at
  * the bottom are what the Vault's input-request service asks of a secure copy and a paste rule; nothing in the
  * Vault's contract takes them yet.
  */
@@ -91,34 +91,6 @@ export function terminalHides(facts: InputTargetFacts): boolean {
 
 /** What a card's offers are drawn from: the accounts and sign-ins, never a value (`saved-logins.ts`). */
 export type SavedListing = Pick<AccountList, 'accounts' | 'signIns'>;
-
-/**
- * WHY THE DAEMON MAY NOT TYPE A ONE-TIME CODE IT MADE into these fields of what it saw, or `undefined` when it may. A
- * code it makes is a second factor typed by the machine itself, so where it lands is not the owner's call on a flag:
- *
- * - never into the secret store, and never before the daemon has looked at the target again;
- * - a page: only on https, into a field the browser reported visible and uncovered, in the page's own frame (a frame
- *   from another origin could be anyone's), so the code goes exactly where the matched sign-in signs in;
- * - a terminal: the card's one prompt, whose key (`tool@host` of a PROVED program in line mode) the sign-in matched.
- *
- * Fixed sentences only: they reach the owner and the log.
- */
-export function codeTargetProblem(
-  facts: InputTargetFacts | undefined,
-  fieldIds: readonly string[],
-): string | undefined {
-  if (facts === undefined) return 'Ferretry is looking at the target again';
-  if (facts.kind === 'secret') return 'a code Ferretry makes is typed only into a sign-in';
-  if (facts.kind === 'terminal') return undefined;
-  if (!facts.secure) return 'the page is not https';
-  for (const id of fieldIds) {
-    const found = facts.fields.find(field => field.fieldId === id);
-    if (found === undefined || !found.visible) return 'Ferretry cannot see the code field on the page';
-    if (found.covered === true) return 'something on the page covers the code field';
-    if (found.frameOrigin !== facts.origin) return 'the code field is inside a frame from another site';
-  }
-  return undefined;
-}
 
 /**
  * WHO DELIVERED A VALUE (`protocol/src/lib/input-request.ts`): the machine, a paired device's tap, a paste rule, a

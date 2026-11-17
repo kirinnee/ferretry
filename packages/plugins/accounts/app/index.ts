@@ -3,7 +3,13 @@ import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { ruleLinkView, RULE_FRAGMENT_KEY } from './features/secure-copy/rule-link-view.tsx';
 import { RuleLinkHold } from './lib/rule-link.ts';
-import { accountsTab, deviceRuleNotePanel, secureCopyTab, signInApprovalRenderer } from './surfaces.tsx';
+import {
+  accountsTab,
+  deviceRuleNotePanel,
+  secureCopyTab,
+  signInApprovalRenderer,
+  signInRuleOfferPanel,
+} from './surfaces.tsx';
 
 /** Where a `#rules/<stage>` link waits between the device view that takes it and the machine's list that shows it. */
 const ruleLinks = new RuleLinkHold();
@@ -20,7 +26,11 @@ export default provideToShell(
       settings: { accounts: accountsTab(client), 'secure-copy': secureCopyTab(client, ruleLinks) },
       renderers: { 'ask:sign-in-approval': signInApprovalRenderer(client) },
       // Access's Add device page offers this slot under each device's Revoke; the device is its `subject`.
-      panels: { 'device-rule-note': deviceRuleNotePanel(client) },
+      panels: {
+        'device-rule-note': deviceRuleNotePanel(client),
+        // The Vault's input card offers `vault.input-settled` after a saved account settled it: "Don't ask again".
+        'sign-in-rule-offer': signInRuleOfferPanel(client),
+      },
     }),
   }),
   {

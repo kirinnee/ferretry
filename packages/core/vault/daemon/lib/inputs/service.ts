@@ -20,6 +20,7 @@ import {
 } from './borrowed.ts';
 import { type AgendaId, MAX_AGENDA_TITLE_LENGTH } from './wire.ts';
 import {
+  codeTargetProblem,
   INPUT_DEFAULT_EXPIRY_SECONDS,
   INPUT_MAX_CHECK_FAILURES,
   INPUT_MAX_PENDING_PER_FERRET,
@@ -113,7 +114,6 @@ import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
 import { bindingOf, mayRebind } from './rebind.ts';
 import {
   codeCardKeys,
-  codeTargetProblem,
   type SavedListing,
   savedForFields,
   signInOfAt,
