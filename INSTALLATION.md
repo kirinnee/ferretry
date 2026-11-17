@@ -15,9 +15,8 @@ macOS arm64 (no Intel mac).
 ## Quick start
 
 Install with the method you already use, then run `fy setup`. It installs the daemon as a user
-service (launchd on macOS, systemd on Linux), checks its health, version, updates and relay, and ends
-by offering the QR code for your phone. It is safe to run again: a daemon already running under its
-service manager is left alone.
+service (launchd on macOS, systemd on Linux), waits for it to answer, offers the QR code for your
+phone, then runs the first run (`fy onboard`).
 
 Homebrew (macOS):
 
@@ -65,17 +64,20 @@ Sharing one Linux machine between several people, each with their own daemon? Fo
 
 ### What `fy setup` does
 
-| Flag      | Effect                                                                             |
-| --------- | ---------------------------------------------------------------------------------- |
-| (none)    | Asks before installing the daemon, then offers the pairing QR at the end.          |
-| `--yes`   | Installs without asking. Required when there is no terminal. Shows no QR.          |
-| `--check` | Changes nothing: reports what is there and what setup would do.                    |
-| `--json`  | Prints a summary an agent can read (`ready`, `daemon`, `update`, `relay`, `next`). |
+It runs four steps in order: install the daemon as a user service, wait for `/healthz`, show the pairing
+QR (at a terminal, without `--yes` or `--json`), then run the first run (`fy onboard`).
 
-Exit status: `0` ready, `1` not running, `2` waiting for you (no terminal and no `--yes`, or you said
-no). It never updates or restarts a running daemon; it names `fy daemon update` when a release is
-out. The JSON has no field for a pairing code or a token: pairing is always `fy pair`, run by a
-person in their own terminal.
+| Flag      | Effect                                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------------------------- |
+| (none)    | Needs a terminal. Installs the daemon, offers the pairing QR, then runs the first run.                        |
+| `--yes`   | Goes ahead without asking. Required when there is no terminal. Shows no QR.                                   |
+| `--check` | Changes nothing: says whether the daemon answers and, if it does, what `fy onboard --check` finds is present. |
+| `--json`  | Prints what `fy onboard --json` prints (`complete`, `exitCode`, `steps`, `linkedSignIn`, `next`).             |
+
+Exit status: `0` every step settled, `1` the daemon did not install or did not answer, `2` waiting for
+you (no terminal and no `--yes`, or the first run still needs you). With `--json` the progress lines go
+to stderr, so stdout is only the JSON. The JSON has no field for a pairing code or a token: pairing is
+`fy pair`, run by a person in their own terminal.
 
 ```bash
 fy setup --check

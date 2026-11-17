@@ -1113,3 +1113,7 @@ describe('the declared-wait monitor (J-0003 J-0006 J-0070 J-0071 J-0072 J-0120)'
     expect(JSON.parse(h.state('ferrets').raw(MonitorTickFile) ?? '{}')).toMatchObject({ armed: false, overdue: true });
   });
 });
+
+describe('rows re-owned from Usage', () => {
+  test.skip('J-0163 timers started outside a live activity are wrapped so they do not hold the daemon busy — the host’s live-activity timers, which are not Usage’s', () => {});
+});

@@ -128,7 +128,6 @@ describe('the jobs the kernel arms', () => {
     expect(watches).toBe(2);
   });
 
-  test.skip('J-0028 the usage feed re-reads when the published manifest file changes — pending port: a Logins change event the feed can invalidate on (the published manifest file is Logins’, and the feed reads its list through the port per refresh)', () => {});
+  test.skip('J-0028 the usage feed re-reads when the published manifest file changes — pending: Logins now publishes `logins.changed`, but Usage does not subscribe to it and `CachedUsageFeed` has no way to drop its cache (the feed reads its list through the port per refresh)', () => {});
   test.skip('J-0115 the event-loop lag meter beats every interval and feeds the performance report — pending port: the kernel hands Usage no event-loop reading yet (the profile report says so in its limitations)', () => {});
-  test.skip('J-0163 timers started outside a live activity are wrapped so they do not hold the daemon busy — not Usage’s: the host’s live-activity timers (Ferrets/kernel), listed under usage in the parity table', () => {});
 });

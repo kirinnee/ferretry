@@ -429,3 +429,7 @@ describe('the places today’s state-home fence names, as 5.0 keeps them (stateH
     expect(read.ok).toBe(false);
   });
 });
+
+describe('rows re-owned from Usage', () => {
+  test.skip('F-0254 F-0255 the index database has no -shm and -wal files of its own — pending port: the kernel sqlite store, which opens the file and owns its journal side files; Usage opens no database itself', () => {});
+});
