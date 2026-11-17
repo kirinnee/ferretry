@@ -26,8 +26,11 @@ export function FieldShot({
   readonly fields: readonly InputCardField[];
 }) {
   const [shot, setShot] = useState<InputShot | null>(null);
-  const { id, sessionId } = request;
-  // One read per request id: a refreshed request (new facts, same id) does not take the picture again.
+  const { id, sessionId, observedDigest } = request;
+  // One read per request id AND observed digest: a refresh with the same facts does not read again, but a rebind (same
+  // id, new picture, new facts, new digest) clears the old picture and reads the new one, so the boxes never sit on a
+  // stale picture.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `observedDigest` is the re-read trigger; the effect does not read it
   useEffect(() => {
     let live = true;
     setShot(null);
@@ -40,7 +43,7 @@ export function FieldShot({
       live = false;
       setShot(null);
     };
-  }, [client, id, sessionId]);
+  }, [client, id, sessionId, observedDigest]);
   if (shot === null) return null;
   return (
     <figure className="relative m-0 min-w-0 overflow-hidden rounded-control border border-border" data-input-shot="">
@@ -56,7 +59,6 @@ export function FieldShot({
           data-input-shot-box={box.key}
           key={box.key}
           style={{ left: `${box.left}%`, top: `${box.top}%`, width: `${box.width}%`, height: `${box.height}%` }}
-          title={box.label}
         />
       ))}
     </figure>

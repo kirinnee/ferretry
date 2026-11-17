@@ -54,6 +54,42 @@ describe('the page-field picture on the input card', () => {
     expect(shotCalls(calls)).toHaveLength(1);
   });
 
+  it('reads the new picture when the daemon rebinds the same request to a new observed digest', async () => {
+    const request = pageRequest({ pictured: true });
+    const NEW_PNG = `${PNG.slice(0, -4)}AAAA`;
+    let answered = 0;
+    const rig = recordingClient(async route => {
+      if (route !== SHOT_ROUTE) return {};
+      answered += 1;
+      return answered === 1 ? SHOT : { ...SHOT, pngBase64: NEW_PNG };
+    });
+    const mounted = await mount(<InputCard client={rig.client} now={NOW} onDone={() => undefined} request={request} />);
+    live.push(mounted);
+    await settle();
+    expect(q<HTMLImageElement>(mounted.container, '[data-input-shot] img').getAttribute('src')).toBe(
+      `data:image/png;base64,${PNG}`,
+    );
+    // Same id, new picture, new facts, new digest: the card must not keep the old picture under the new boxes.
+    await mounted.render(
+      <InputCard
+        client={rig.client}
+        now={NOW}
+        onDone={() => undefined}
+        request={{ ...request, observedDigest: 'd'.repeat(64) }}
+      />,
+    );
+    await settle();
+    expect(shotCalls(rig.calls)).toHaveLength(2);
+    expect(q<HTMLImageElement>(mounted.container, '[data-input-shot] img').getAttribute('src')).toBe(
+      `data:image/png;base64,${NEW_PNG}`,
+    );
+  });
+
+  it("draws the boxes without a hover title (the label is the ferret's wording)", async () => {
+    const { mounted } = await card(pageRequest({ pictured: true }));
+    expect(q<HTMLElement>(mounted.container, '[data-input-shot-box="value"]').hasAttribute('title')).toBe(false);
+  });
+
   it('reads nothing for a card that is not pictured, or a terminal', async () => {
     const plain = await card(pageRequest());
     expect(shotCalls(plain.calls)).toHaveLength(0);
