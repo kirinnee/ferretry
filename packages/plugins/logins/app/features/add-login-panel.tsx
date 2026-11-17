@@ -4,7 +4,8 @@
  * from the login's own page. A preset's secret travels as a `${secret:NAME}` reference — the value is stored in the
  * secret store, never typed into a login file — so a variable holding a raw key is refused by the daemon. A pasted
  * block of variables (Paste variables…) is recognised in this browser and fills a preset's plain values; a pasted
- * key is named only, and pasted into the secret store itself.
+ * key is named only, and pasted into the secret store itself. A tile whose preset asks for nothing but a key opens
+ * the key-only quick form first (`quick-key-form.tsx`); **More fields…** there opens the full form below.
  */
 
 import { useEffect, useState } from 'react';
@@ -18,6 +19,7 @@ import { type Prefill, withheldSentence } from '../lib/paste-model.ts';
 import { Button, ChangeApplyPanel } from '../ui.ts';
 import { PasteVariables } from './paste-variables.tsx';
 import { ProviderGrid, usableHarnesses } from './provider-grid.tsx';
+import { QuickKeyForm, quickKeyVariable } from './quick-key-form.tsx';
 
 export interface AddLoginPanelProps {
   readonly client: LoginsClient;
@@ -236,6 +238,8 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
   // A paste is held for the preset it picked and for no other: another preset's form never reads it.
   const [held, setHeld] = useState<{ readonly presetId: string; readonly prefill: Prefill } | undefined>(undefined);
   const [added, setAdded] = useState<string | null>(null);
+  // The provider whose full form was asked for from its quick form (More fields…).
+  const [more, setMore] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -256,6 +260,7 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
     setAdded(id);
     setChoosing(null);
     setHeld(undefined);
+    setMore(null);
     onAdded?.(id);
   };
 
@@ -284,7 +289,11 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
     const close = (): void => {
       setHeld(undefined);
       setChoosing(null);
+      setMore(null);
     };
+    // A paste's prefill, or More fields…, goes to the full form; otherwise a key-only preset asks for its key alone.
+    const keyVariable =
+      more === picked.id || (held !== undefined && held.presetId === picked.id) ? undefined : quickKeyVariable(picked);
     return (
       <section className="flex min-w-0 flex-col gap-3" data-add-login="">
         <div className="kt-panel flex flex-col gap-1 p-panel" data-add-login-preset={picked.id}>
@@ -293,13 +302,24 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
             <LoginScopeChip harnesses={usableHarnesses(picked)} />
           </span>
           <span className="text-cell leading-base text-muted">{picked.summary}</span>
-          <PresetForm
-            client={client}
-            preset={picked}
-            {...(held === undefined || held.presetId !== picked.id ? {} : { prefill: held.prefill })}
-            onAdded={done}
-            onCancel={close}
-          />
+          {keyVariable !== undefined ? (
+            <QuickKeyForm
+              client={client}
+              preset={picked}
+              variable={keyVariable}
+              onAdded={done}
+              onCancel={close}
+              onMore={() => setMore(picked.id)}
+            />
+          ) : (
+            <PresetForm
+              client={client}
+              preset={picked}
+              {...(held === undefined || held.presetId !== picked.id ? {} : { prefill: held.prefill })}
+              onAdded={done}
+              onCancel={close}
+            />
+          )}
         </div>
       </section>
     );

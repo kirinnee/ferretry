@@ -1,0 +1,312 @@
+import { afterEach, describe, expect, it } from 'bun:test';
+import { AddLoginPanel } from '../../../app/features/add-login-panel.tsx';
+import { QuickKeyForm, quickKeyVariable } from '../../../app/features/quick-key-form.tsx';
+import type { ProviderPresetView } from '../../../contract/index.ts';
+import { login, loginList } from '../cli/fakes.ts';
+import { interact, mount, must } from '../support/dom.ts';
+import { type Call, scripted } from './support/client.ts';
+import { typeInto } from './support/typing.ts';
+
+// The one-click provider form: it asks only for the key, files it in the Vault under the preset's secret name, and the
+// login holds a `${secret:NAME}` reference — the key reaches no field, sentence or login file.
+
+const KEY = 'SENTINEL-sk-quick-very-secret';
+const LIST = 'GET /v1/logins';
+const GRANTS = 'GET /v1/grants';
+const STAGE = 'POST /v1/logins/changes';
+const APPLY = 'POST /v1/logins/changes/:changeId/apply';
+const HELD = 'GET /v1/secrets';
+const FILE = 'POST /v1/secrets';
+
+const OPEN = { capabilities: [{ capability: 'fleet', use: true, configure: true, configureRefusal: 'granted' }] };
+const NONE_HELD = { v: 1, health: 'ready', secrets: [], references: [] };
+const holding = (...names: string[]) => ({
+  v: 1,
+  health: 'ready',
+  secrets: names.map(name => ({ name, createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z' })),
+  references: [],
+});
+const staged = {
+  id: 'chg1',
+  change: { kind: 'login.add', id: 'claude-zai-glm', harness: 'claude-code' },
+  summary: 'Add claude-zai-glm.',
+  consequences: [],
+  expiresAt: '2026-11-17T00:10:00.000Z',
+  state: 'pending',
+};
+
+const until = async (shown: () => boolean, what: string): Promise<void> => {
+  for (let elapsed = 0; elapsed < 2_000 && !shown(); elapsed += 10)
+    await interact(() => new Promise(resolve => setTimeout(resolve, 10)));
+  if (!shown()) throw new Error(`never shown: ${what}`);
+};
+
+const press = async (element: Element | null, what: string): Promise<void> => {
+  const target = must(element as HTMLElement | null, what);
+  await until(() => !(target as HTMLButtonElement).disabled, `${what} to be enabled`);
+  await interact(() => target.click());
+};
+
+const ZAI: ProviderPresetView = {
+  id: 'zai-glm',
+  label: 'GLM / Z.ai',
+  harness: 'claude-code',
+  summary: 'Claude Code on GLM.',
+  docs: 'https://docs.example.test',
+  origin: 'built-in',
+  variables: [
+    {
+      name: 'ANTHROPIC_BASE_URL',
+      kind: 'plain',
+      value: 'https://api.z.ai/api/anthropic',
+      required: true,
+      allowEmpty: false,
+      harnesses: ['claude-code'],
+    },
+    {
+      name: 'ANTHROPIC_AUTH_TOKEN',
+      kind: 'secret',
+      secret: 'ZAI_API_KEY',
+      required: true,
+      allowEmpty: false,
+      harnesses: ['claude-code'],
+    },
+    { name: 'API_TIMEOUT_MS', kind: 'plain', required: false, allowEmpty: false, harnesses: ['claude-code'] },
+  ],
+  models: [],
+  test: { available: true, spends: 'nothing', note: 'Free.' },
+  quota: { source: 'none', note: 'n/a' },
+  unverified: [],
+  verified: '2026-10-16',
+  offered: { available: true },
+  halves: [{ harness: 'claude-code', offered: { available: true }, models: [] }],
+};
+
+const routes = (held: unknown, calls: Call[]) =>
+  scripted(
+    {
+      'GET /v1/logins/presets': { presets: [ZAI] },
+      [LIST]: loginList(),
+      [GRANTS]: OPEN,
+      [HELD]: held,
+      [FILE]: { name: 'ZAI_API_KEY' },
+      [STAGE]: staged,
+      [APPLY]: { outcome: 'applied' },
+    },
+    calls,
+  );
+
+const mountForm = async (client: ReturnType<typeof routes>, added: string[] = [], more: string[] = []) => {
+  const variable = must(quickKeyVariable(ZAI), 'the key variable');
+  return mount(
+    <QuickKeyForm
+      client={client}
+      preset={ZAI}
+      variable={variable}
+      onAdded={id => added.push(id)}
+      onCancel={() => undefined}
+      onMore={() => more.push('more')}
+    />,
+  );
+};
+
+const type = async (view: { container: HTMLElement }, text: string): Promise<void> =>
+  typeInto(must(view.container.querySelector<HTMLInputElement>('[data-quick-key-input]'), 'the key field'), text);
+
+afterEach(() => {
+  document.body.innerHTML = '';
+});
+
+describe('which providers get the key-only form', () => {
+  it('picks the one secret of a preset that asks for nothing else a person must type', () => {
+    expect(quickKeyVariable(ZAI)?.name).toBe('ANTHROPIC_AUTH_TOKEN');
+  });
+
+  it('leaves a preset that needs a typed value, a second key or a cloud credential to the full form', () => {
+    const url = must(ZAI.variables[0], 'the base URL');
+    const token = must(ZAI.variables[1], 'the key');
+    const timeout = must(ZAI.variables[2], 'the timeout');
+    const typed = { ...ZAI, variables: [{ ...url, value: undefined }, token, timeout] } as ProviderPresetView;
+    expect(quickKeyVariable(typed)).toBeUndefined();
+    const second = { ...ZAI, variables: [...ZAI.variables, { ...token, name: 'OTHER_KEY', secret: 'OTHER' }] };
+    expect(quickKeyVariable(second as ProviderPresetView)).toBeUndefined();
+    const cloud = { ...ZAI, cloudCredential: { kinds: ['aws'], suggested: 'aws-main' } };
+    expect(quickKeyVariable(cloud as unknown as ProviderPresetView)).toBeUndefined();
+    expect(quickKeyVariable({ ...ZAI, variables: [url] } as ProviderPresetView)).toBeUndefined();
+  });
+});
+
+describe('the key-only form', () => {
+  it('files the key in the Vault under the preset’s secret name and adds a login that only names it', async () => {
+    const calls: Call[] = [];
+    const added: string[] = [];
+    const view = await mountForm(routes(NONE_HELD, calls), added);
+    const c = view.container;
+    const field = must(c.querySelector<HTMLInputElement>('[data-quick-key-input]'), 'the key field');
+    // The key is typed into a hidden field, and it is the only field there is.
+    expect(field.type).toBe('password');
+    expect(c.querySelectorAll('input')).toHaveLength(1);
+    await type(view, KEY);
+    await press(c.querySelector('[data-change-submit]'), 'Add');
+    await until(() => added.length > 0, 'the login to be added');
+
+    // The value went to the Vault under the preset's own secret name, once, and nowhere else.
+    expect(calls.filter(call => call.route === FILE).map(call => call.body)).toEqual([
+      { name: 'ZAI_API_KEY', value: KEY },
+    ]);
+    expect(JSON.stringify(calls.filter(call => call.route !== FILE))).not.toContain(KEY);
+    // The login carries the preset's plain defaults and a reference for the key; an optional blank is left out.
+    expect(calls.find(call => call.route === STAGE)?.body).toEqual({
+      kind: 'login.add',
+      id: 'claude-zai-glm',
+      harness: 'claude-code',
+      store: 'environment',
+      preset: 'zai-glm',
+      env: {
+        ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+        ANTHROPIC_AUTH_TOKEN: `\${secret:ZAI_API_KEY}`,
+      },
+    });
+    expect(added).toEqual(['claude-zai-glm']);
+    // After filing, the key is in no field, no sentence and nothing the tree holds.
+    expect(c.innerHTML).not.toContain(KEY);
+    expect(c.textContent).not.toContain(KEY);
+    for (const input of Array.from(c.querySelectorAll('input'))) expect(input.value).not.toContain(KEY);
+    expect(c.querySelector('[data-quick-key-filed]')?.textContent).toContain('ZAI_API_KEY');
+    await view.unmount();
+  });
+
+  it('asks first when the Vault already holds the name, and writes nothing until the person answers', async () => {
+    const calls: Call[] = [];
+    const added: string[] = [];
+    const view = await mountForm(routes(holding('ZAI_API_KEY'), calls), added);
+    const c = view.container;
+    await type(view, KEY);
+    await press(c.querySelector('[data-change-submit]'), 'Add');
+    await until(() => c.querySelector('[data-quick-key-held="ZAI_API_KEY"]') !== null, 'the question');
+    expect(c.querySelector('[data-quick-key-held]')?.textContent).toContain(
+      'ZAI_API_KEY is already in the secret store',
+    );
+    expect(calls.some(call => call.route === FILE || call.route === STAGE)).toBe(false);
+    // While it waits for the answer the key sits in the hidden field and nowhere else.
+    expect(c.textContent).not.toContain(KEY);
+
+    // Back changes nothing; replacing files the typed key and then adds the login.
+    await press(c.querySelector('[data-quick-key-back]'), 'Back');
+    expect(c.querySelector('[data-quick-key-held]')).toBeNull();
+    expect(calls.some(call => call.route === FILE)).toBe(false);
+    await press(c.querySelector('[data-change-submit]'), 'Add');
+    await until(() => c.querySelector('[data-quick-key-replace]') !== null, 'the question again');
+    await press(c.querySelector('[data-quick-key-replace]'), 'Replace it with mine');
+    await until(() => added.length > 0, 'the login to be added');
+    expect(calls.filter(call => call.route === FILE).map(call => call.body)).toEqual([
+      { name: 'ZAI_API_KEY', value: KEY },
+    ]);
+    expect(c.innerHTML).not.toContain(KEY);
+    await view.unmount();
+  });
+
+  it('keeps the key that is there when the person says so, and sends the typed one nowhere', async () => {
+    const calls: Call[] = [];
+    const added: string[] = [];
+    const view = await mountForm(routes(holding('ZAI_API_KEY'), calls), added);
+    const c = view.container;
+    await type(view, KEY);
+    await press(c.querySelector('[data-change-submit]'), 'Add');
+    await until(() => c.querySelector('[data-quick-key-keep]') !== null, 'the question');
+    await press(c.querySelector('[data-quick-key-keep]'), 'Use the one already there');
+    await until(() => added.length > 0, 'the login to be added');
+    expect(calls.some(call => call.route === FILE)).toBe(false);
+    expect(JSON.stringify(calls)).not.toContain(KEY);
+    expect(c.innerHTML).not.toContain(KEY);
+    for (const input of Array.from(c.querySelectorAll('input'))) expect(input.value).toBe('');
+    await view.unmount();
+  });
+
+  it('writes nothing when it cannot tell what the Vault holds, and says why', async () => {
+    const calls: Call[] = [];
+    const view = await mountForm(routes(new Error('the Vault is locked'), calls));
+    const c = view.container;
+    await type(view, KEY);
+    await press(c.querySelector('[data-change-submit]'), 'Add');
+    await until(() => c.querySelector('[data-change-refusal]') !== null, 'the refusal');
+    expect(calls.some(call => call.route === FILE || call.route === STAGE)).toBe(false);
+    expect(c.textContent).not.toContain(KEY);
+    await view.unmount();
+  });
+
+  it('offers no Add until a key is typed, and More… hands over to the full form', async () => {
+    const more: string[] = [];
+    const view = await mountForm(routes(NONE_HELD, []), [], more);
+    const c = view.container;
+    await until(() => c.querySelector('[data-change-apply="reading"]') === null, 'the grants');
+    expect((c.querySelector('[data-change-submit]') as HTMLButtonElement).disabled).toBe(true);
+    await press(c.querySelector('[data-quick-key-more]'), 'More fields…');
+    expect(more).toEqual(['more']);
+    await view.unmount();
+  });
+
+  it('retries the login without the key when the add was refused after the key was filed', async () => {
+    const calls: Call[] = [];
+    let refuse = true;
+    const client = scripted(
+      {
+        [LIST]: loginList(),
+        [GRANTS]: OPEN,
+        [HELD]: NONE_HELD,
+        [FILE]: { name: 'ZAI_API_KEY' },
+        [STAGE]: () => (refuse ? new Error('refused for now') : staged),
+        [APPLY]: { outcome: 'applied' },
+      },
+      calls,
+    );
+    const added: string[] = [];
+    const view = await mountForm(client, added);
+    const c = view.container;
+    await type(view, KEY);
+    await press(c.querySelector('[data-change-submit]'), 'Add');
+    await until(() => c.querySelector('[data-change-refusal]') !== null, 'the refusal');
+    expect(c.querySelector('[data-quick-key-input]')).toBeNull();
+    refuse = false;
+    await press(c.querySelector('[data-change-submit]'), 'Add');
+    await until(() => added.length > 0, 'the login to be added');
+    expect(calls.filter(call => call.route === FILE)).toHaveLength(1);
+    expect(c.innerHTML).not.toContain(KEY);
+    await view.unmount();
+  });
+});
+
+describe('the tile', () => {
+  it('opens the key-only form, and More fields… opens today’s full form with the key as a reference', async () => {
+    const calls: Call[] = [];
+    const view = await mount(<AddLoginPanel client={routes(NONE_HELD, calls)} />);
+    const c = view.container;
+    await until(() => c.querySelector('[data-provider-tile="zai-glm"]') !== null, 'the tile');
+    await press(c.querySelector('[data-provider-tile="zai-glm"]'), 'GLM / Z.ai');
+    expect(c.querySelector('[data-quick-key-form="zai-glm"]')).not.toBeNull();
+    expect(c.querySelector('[data-add-login-form]')).toBeNull();
+    await press(c.querySelector('[data-quick-key-more]'), 'More fields…');
+    expect(c.querySelector('[data-quick-key-form]')).toBeNull();
+    const fields = Array.from(c.querySelectorAll<HTMLInputElement>('[data-add-login-form="zai-glm"] input'));
+    expect(fields.map(field => field.value)).toEqual([
+      'https://api.z.ai/api/anthropic',
+      `\${secret:ZAI_API_KEY}`,
+      '',
+      '',
+    ]);
+    await view.unmount();
+  });
+
+  it('sends a preset that needs more than a key to the full form straight away', async () => {
+    const [url, ...rest] = ZAI.variables;
+    const needy = { ...ZAI, variables: [{ ...url, value: undefined }, ...rest] };
+    const client = scripted({ 'GET /v1/logins/presets': { presets: [needy] }, [LIST]: loginList(login()) });
+    const view = await mount(<AddLoginPanel client={client} />);
+    const c = view.container;
+    await until(() => c.querySelector('[data-provider-tile="zai-glm"]') !== null, 'the tile');
+    await press(c.querySelector('[data-provider-tile="zai-glm"]'), 'GLM / Z.ai');
+    expect(c.querySelector('[data-add-login-form="zai-glm"]')).not.toBeNull();
+    expect(c.querySelector('[data-quick-key-form]')).toBeNull();
+    await view.unmount();
+  });
+});
