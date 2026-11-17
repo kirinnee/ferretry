@@ -41,4 +41,19 @@ describe('what an owner’s ask renderer receives', () => {
     expect(owned?.key).toBe('ask:sign-in-approval');
     expect(owned?.value.ref).toEqual({ kind: 'rule-suggestion', suggestion: 'srg_dddddddddddddddd' });
   });
+
+  it('hands the input renderer the request the card was raised for, from its input or its obligation', () => {
+    const id = 'ab'.repeat(16);
+    const own = agendaItem('A5', { kind: 'input', input: { requestId: id } } as never);
+    expect(askRendererFor(own, from)?.value.ref).toEqual({ kind: 'input', request: id });
+    const raised = agendaItem('A6', { kind: 'input', sourceRef: `ask:input:${id}` } as never);
+    const owned = askRendererFor(raised, from);
+    expect(owned?.key).toBe('ask:input');
+    expect(owned?.value.ref).toEqual({ kind: 'input', request: id });
+  });
+
+  it('hands the input renderer no request for an input card that names none', () => {
+    const bare = agendaItem('A7', { kind: 'input', sourceRef: 'ask:input:not-an-id' } as never);
+    expect(askRendererFor(bare, from)?.value.ref).toEqual({ kind: 'input' });
+  });
 });
