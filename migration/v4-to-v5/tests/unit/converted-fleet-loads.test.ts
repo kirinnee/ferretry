@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parse } from 'yaml';
+import { acceptedConfigStep } from '../../src/steps/accepted-config.ts';
 import { loginsStep } from '../../src/steps/logins.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
 import { fixture } from './ferret-fixture.ts';
@@ -197,10 +198,13 @@ async function loadLikeFyRuntimes() {
 describe('a converted home’s fleet configuration loads the way `fy runtimes` loads it', () => {
   test('CASE 1, every login carried: load() resolves, every v4 runtime is in the model, instructions "main" holds its document', async () => {
     await plantMachine();
-    const settings = await settingsStep.run(f.ctx());
+    const ctx = f.ctx();
+    const settings = await settingsStep.run(ctx);
     expect({ status: settings.status, note: settings.note }).toEqual({ status: 'converted', note: undefined });
-    const logins = await loginsStep.run(f.ctx());
+    const logins = await loginsStep.run(ctx);
     expect(logins.status).toBe('converted');
+    // Last, as in a real conversion: v4 never held an instructions file, so v5 starts with it in effect.
+    expect((await acceptedConfigStep.run(ctx)).status).toBe('converted');
 
     const loaded = await loadLikeFyRuntimes();
 
