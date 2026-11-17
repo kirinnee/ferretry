@@ -193,13 +193,11 @@ not on the host also needs a passkey step-up ([grants.md](grants.md)); nothing i
 
 ## The single file is retired
 
-A `fleet/config.yaml` — any version — is **refused, never converted**, while it is there. Nothing is
-read from it and nothing is deleted. The same sentence reaches `fy` and the browser:
-
-> _path_ is the old single-file configuration, which this Ferretry no longer reads: each login,
-> component, profile and runtime is now its own file under config/ in the state home. Move it aside (for
-> example rename it to config.yaml.old), then set this machine up again from the app or with
-> `fy daemon setup`.
+A `fleet/config.yaml` — any version — is **ignored**: this Ferretry never reads it, never converts it and
+never deletes it, and a machine that still has one boots and runs as if it were not there. Each login,
+component, profile and runtime is its own file under config/ in the state home. (Version 4 refused a stray
+single file by sentence; 5.0 does not, by owner decision — no compatibility code for a file nobody edits.
+Parity row F-0423 is removed by design.)
 
 The state home's layout version is 2. A version-1 home is upgraded in place — only its marker changes —
 so paired devices, sessions and secrets survive, and an older Ferretry refuses the upgraded home rather

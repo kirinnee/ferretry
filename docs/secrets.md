@@ -1366,6 +1366,12 @@ says the keys were not copied, and the _Copy secrets from…_ list offers them a
 actually holds and the receiving one does not are asked for. **A key already on the receiving machine is never
 written by Clone, in any mode, for any reason** — when the source has a newer one, Clone only says so — below.
 
+**5.0 state (declared GAP, parity rows S-0057 and S-0495).** The Clone preview in 5.0 does not run the sealed copy
+above or report its keys to `POST /v1/runtimes/clone/keys`: a key the source holds and this machine does not is **named**
+(_Add these API keys here_, with each name) and **never carried**, so the person adds each with `fy secret set NAME`. Read
+"copies with its key", "the same sealed copy" and "copied with its login" in this section as the design of that copy, which
+is not built.
+
 #### A key that is newer on the source (reported, never copied)
 
 **Owner decision (Option A, design §14.4): a copy never writes or overwrites a secret-store entry or a
@@ -1381,12 +1387,12 @@ was last copied, `docs/design/account-model.md` §3.8): when the **source** last
 `updatedAt`) and the instant **this** machine's copy filed it. A later review compares those two with what each list
 says now:
 
-| The source…                     | This machine…            | Outcome   | In the Clone preview                                                                      |
-| ------------------------------- | ------------------------ | --------- | ----------------------------------------------------------------------------------------- |
-| holds it, this machine does not | —                        | `missing` | Copied with its login, as always                                                          |
-| changed it since the copy       | has not changed it since | `newer`   | **A newer `X` exists on _source_.** Clone does not replace it: run `fy secret set X` here |
-| changed it since the copy       | changed it too           | `both`    | The same, plus _You changed it on this machine too_                                       |
-| has not changed it              | (anything)               | `same`    | Nothing is said                                                                           |
+| The source…                     | This machine…            | Outcome   | In the Clone preview                                                                         |
+| ------------------------------- | ------------------------ | --------- | -------------------------------------------------------------------------------------------- |
+| holds it, this machine does not | —                        | `missing` | Named, never carried: _Add these API keys here_; run `fy secret set X` (GAP: S-0057, S-0495) |
+| changed it since the copy       | has not changed it since | `newer`   | **A newer `X` exists on _source_.** Clone does not replace it: run `fy secret set X` here    |
+| changed it since the copy       | changed it too           | `both`    | The same, plus _You changed it on this machine too_                                          |
+| has not changed it              | (anything)               | `same`    | Nothing is said                                                                              |
 
 A key both machines hold that no earlier copy recorded is `same`: nothing says the source moved on.
 

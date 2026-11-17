@@ -179,7 +179,9 @@ export type CloneSettingsDecisions = z.infer<typeof CloneSettingsDecisionsSchema
  * How one API key stands against the source's copy of it, from `updatedAt` timestamps alone — no value and
  * no digest of one is ever compared (docs/secrets.md):
  *
- * - `missing` — the source holds it, this machine does not: it is copied, as it always was;
+ * - `missing` — the source holds it, this machine does not: it is NAMED (the review's "Add these API keys here") and
+ *   never carried; the person adds it with `fy secret set NAME`. The app runs no sealed copy and never calls
+ *   {@link CLONE_KEYS_PATH} (declared GAP, parity rows S-0057 and S-0495);
  * - `newer` — the source changed it since the last copy and nothing changed it here: REPORTED only;
  * - `both` — the source changed it AND it was changed here since the last copy: REPORTED only, saying so;
  * - `same` — nothing newer on the source, or no earlier copy to compare with: nothing is said.
@@ -274,6 +276,9 @@ export const CLONE_KEYS_PATH = '/v1/runtimes/clone/keys' as const;
  * was created at that instant: a key deleted and made again since is not the one the copy filed, so it is left
  * unrecorded, and a key the person edited since is still recorded at the copy's instant, so the next review
  * sees that it changed here. Timestamps only. A sign-in's name is refused at parse.
+ *
+ * The route and this shape are for a client that runs a sealed copy. The 5.0 app does not: a missing key is named in the
+ * review and never carried, so nothing calls it (declared GAP, parity rows S-0057 and S-0495).
  */
 export const CloneKeysRecordRequestSchema = z.strictObject({
   source: z.strictObject({ daemonId: NonEmptyStringSchema }),
