@@ -212,5 +212,9 @@ describe('merge-bar case 2: the preview stage loads its whole fleet configuratio
     ]);
     const instructions: string[] = await readdir(join(f.to, 'config/instructions')).catch(() => []);
     expect(instructions).toContain('main.yaml');
+    // In effect, not a held add: the loaded model holds the document (v5 holds every new instructions file otherwise).
+    expect(loaded.evaluation.effective.model.components.instructions.main).toMatchObject({
+      text: '# House rules\nBe kind.\n',
+    });
   });
 });
