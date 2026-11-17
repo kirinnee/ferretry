@@ -1602,9 +1602,23 @@ describe('a daemon trigger', () => {
       auto: true,
       trigger: 'pr.opened',
       reason: 'PR #930 opened',
-      actor: { kind: 'daemon' },
+      actor: { kind: 'daemon', ferret: 'child' },
     });
     should(ports.changes.events[0]?.ferret).equal('child');
+  });
+
+  it('should record the ferret whose session caused the move beside the daemon, and nobody when none did', async () => {
+    // Arrange
+    const caused = serviceWith([card({ laneId: 'implement' })]);
+    const alone = serviceWith([card({ laneId: 'implement' })]);
+
+    // Act
+    await caused.service.trigger('F1', 'pr.opened', { ferret: 'child' });
+    await alone.service.trigger('F1', 'pr.opened');
+
+    // Assert
+    should(lastEvent(caused.ports)?.actor).eql({ kind: 'daemon', ferret: 'child' });
+    should(lastEvent(alone.ports)?.actor).eql({ kind: 'daemon' });
   });
 
   it('should leave the status alone when it moves the card', async () => {
@@ -2003,13 +2017,13 @@ describe('the reopen message and actors', () => {
     );
   });
 
-  it('should record each caller as its actor, a ferret by its name and the daemon as nobody else', async () => {
+  it('should record each caller as its actor, a ferret by its name and the daemon with the ferret that caused its act', async () => {
     // Assert
     should(await actorOf(owner, NAMES)).eql({ kind: 'owner' });
     should(await actorOf({ kind: 'owner', via: 'admin-token' }, NAMES)).eql({ kind: 'owner', via: 'admin-token' });
     should(await actorOf(lead, NAMES)).eql({ kind: 'ferret', name: 'lead', ferret: 'lead' });
     should(await actorOf(daemon, NAMES)).eql({ kind: 'daemon' });
-    should(await actorOf({ kind: 'daemon', ferret: 'child' }, NAMES)).eql({ kind: 'daemon' });
+    should(await actorOf({ kind: 'daemon', ferret: 'child' }, NAMES)).eql({ kind: 'daemon', ferret: 'child' });
   });
 });
 

@@ -611,6 +611,40 @@ describe('renderCard', () => {
     );
   });
 
+  it('should print a daemon act as "daemon via <ferret>" when it carries the ferret that caused it', () => {
+    // Arrange
+    const caused = card({
+      history: [
+        event({ seq: 1, type: 'created', laneId: 'todo', actor: { kind: 'daemon', ferret: DENISHA } }),
+        event({
+          seq: 2,
+          type: 'moved',
+          from: 'todo',
+          to: 'implement',
+          backward: false,
+          reason: 'the session started on it',
+          auto: true,
+          trigger: 'work.started',
+          actor: { kind: 'daemon', ferret: KIRIN },
+        }),
+        event({ seq: 3, type: 'note', text: 'unnamed', actor: { kind: 'daemon', ferret: ANON } }),
+        event({ seq: 4, type: 'note', text: 'alone', actor: { kind: 'daemon' } }),
+      ],
+    });
+
+    // Act
+    const lines = renderCard(caused, lanes, [], names).split('\n');
+
+    // Assert
+    should(lines).containEql(`    1  ${AT}  daemon via denisha  created in Todo`);
+    should(lines).containEql(
+      `    2  ${AT}  daemon via kirin  moved Todo → Implement (auto, work.started): the session started on it`,
+    );
+    // A ferret the directory does not know reads by its session id; a daemon act nobody caused stays plain.
+    should(lines).containEql(`    3  ${AT}  daemon via ${ANON}  note: unnamed`);
+    should(lines).containEql(`    4  ${AT}  daemon  note: alone`);
+  });
+
   it('should print a reported trigger as by its reporter, the admin token said for what it is', () => {
     // Arrange
     const moved = { type: 'moved', from: 'todo', to: 'implement', backward: false, reason: 'deployed', auto: true };

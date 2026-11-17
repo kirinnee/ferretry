@@ -243,14 +243,14 @@ const callerOf = (by: RelocationAuthority): BoardCaller =>
 /**
  * The board actor a caller is recorded as: the owner (with `via: 'admin-token'` for the host's token with no
  * ferret's credential, so no surface shows it as the owner), a ferret by the name Ferrets knows it by now, or
- * the daemon — which records nobody it acted for.
+ * the daemon, with the ferret whose session caused the act when the act carried one.
  */
 export const actorOf = async (caller: BoardCaller, names: FerretNames): Promise<CardActor> => {
   if (caller.kind === 'owner')
     return caller.via === 'admin-token' ? { kind: 'owner', via: 'admin-token' } : { kind: 'owner' };
   if (caller.kind === 'ferret')
     return { kind: 'ferret', name: await names.nameOf(caller.ferret), ferret: caller.ferret };
-  return { kind: 'daemon' };
+  return caller.ferret === undefined ? { kind: 'daemon' } : { kind: 'daemon', ferret: caller.ferret };
 };
 
 const ferretOf = (caller: BoardCaller): string | undefined => (caller.kind === 'owner' ? undefined : caller.ferret);

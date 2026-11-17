@@ -127,14 +127,16 @@ export const formatAskRef = (ref: AskRef): string => askReference(ref.id);
  * Who did something to a card: the owner, a ferret, or the daemon. The owner's `via` says how they acted when it
  * was not their own app ({@link CardActorVia}: the host's admin token, which a ferret without its own credential can
  * hold too). A ferret is recorded with the name Ferrets knew it by when it acted, beside its id. The daemon is
- * itself and nobody else: what it did for a ferret is recorded as the daemon's.
+ * always the actor of what it did for a ferret, and says which ferret's session caused the act in `ferret` when
+ * the act carried one (a card made for a start, a move on `work.started`), so a history line reads
+ * "daemon via lanie" and never as a fact nobody caused.
  *
  * The union is CLOSED and each member strict, so a stored actor is exactly one of these three shapes.
  */
 export const CardActorSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('owner'), via: CardActorViaSchema.optional() }),
   z.strictObject({ kind: z.literal('ferret'), name: z.string().min(1), ferret: FerretRefSchema }),
-  z.strictObject({ kind: z.literal('daemon') }),
+  z.strictObject({ kind: z.literal('daemon'), ferret: FerretRefSchema.optional() }),
 ]);
 export type CardActor = z.infer<typeof CardActorSchema>;
 

@@ -74,9 +74,9 @@ describe("a start's card", () => {
     // Assert
     should(made).match({ id: 'F2', owner: 'lead', assignee: 'child', parent: { id: 'F1' }, laneId: 'todo' });
     should(stored(ports, 'F2').history).deepEqual([
-      { seq: 1, at: NOW, actor: { kind: 'daemon' }, type: 'created', laneId: 'todo' },
+      { seq: 1, at: NOW, actor: { kind: 'daemon', ferret: 'lead' }, type: 'created', laneId: 'todo' },
     ]);
-    should(made.createdBy).deepEqual({ kind: 'daemon' });
+    should(made.createdBy).deepEqual({ kind: 'daemon', ferret: 'lead' });
     should(ports.focus.focused.get('child')).deepEqual({ id: 'F2' });
     should(ports.focus.focused.has('lead')).be.false();
     should(ports.changes.events).deepEqual([{ ferret: 'lead', event: { projectId: PROJECT, taskIds: ['F2'] } }]);
