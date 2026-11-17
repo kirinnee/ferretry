@@ -647,6 +647,13 @@ export default definePlugin({
     ],
   },
 
+  /**
+   * The job keeper's words for a ferret (docs/jobs.md § How agents are told): every agent, Claude or Codex, lead or helper, because
+   * each can start a background command a move or restart would otherwise kill. `role: 'any'` reaches both lead and helper; no
+   * `harness` reaches both harnesses.
+   */
+  instructions: [{ id: 'jobs', text: 'instructions/jobs.md', when: { role: 'any' } }],
+
   /** `tmux-release`: today's `tmux release` row, asked fresh per report (it never starts a tmux server). */
   doctor: ['tmux', 'user-slice', 'tmux-release'],
 
