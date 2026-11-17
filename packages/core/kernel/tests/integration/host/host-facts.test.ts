@@ -1,7 +1,8 @@
 /** TT: the real adapter reads exactly the file each method names, from a fixture /proc and /sys tree. */
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
 import { nodeHostFacts } from '../../../host/adapters/host-facts.ts';
 import type { CgroupFile, ProcPidFile, ProcSystemFile } from '../../../contract/ports.ts';
 
@@ -26,6 +27,9 @@ async function tree() {
   await writeFile(`${proc}/net/tcp`, 'sl local\n');
   await symlink('/dev/pts/3', `${proc}/42/fd/0`);
   await symlink('/usr/bin/sh', `${proc}/42/exe`);
+  await symlink('/work/project', `${proc}/42/cwd`);
+  await mkdir(`${proc}/43`, { recursive: true });
+  await symlink('/work/gone (deleted)', `${proc}/43/cwd`);
   await mkdir(`${sys}/fs/cgroup/user.slice`, { recursive: true });
   await writeFile(`${sys}/fs/cgroup/user.slice/cpu.weight`, '100\n');
   await mkdir(`${sys}/block/sda/sda1`, { recursive: true });
@@ -35,6 +39,38 @@ async function tree() {
   await symlink(`${sys}/block/sda/sda1`, `${sys}/dev/block/8:1`);
   return nodeHostFacts({ proc, sys });
 }
+
+describe.skipIf(process.platform !== 'linux')('TT procWorkingDirectory on the real /proc', () => {
+  test('a child process we spawned answers its folder; once it is gone the answer is undefined', async () => {
+    const work = await mkdtemp(`${tmpdir()}/fy-cwd-`);
+    roots.push(work);
+    const child = spawn('sleep', ['30'], { cwd: work, stdio: 'ignore' });
+    const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
+    try {
+      expect(child.pid).toBeDefined();
+      const facts = nodeHostFacts();
+      expect(await facts.procWorkingDirectory(child.pid as number)).toBe(await realpath(work));
+      expect(await facts.procWorkingDirectory(process.pid)).toBe(await realpath(process.cwd()));
+    } finally {
+      child.kill('SIGKILL');
+      await exited;
+    }
+    expect(await nodeHostFacts().procWorkingDirectory(child.pid as number)).toBeUndefined();
+  });
+
+  test('a child whose folder was removed answers undefined, not the "(deleted)" text', async () => {
+    const work = await mkdtemp(`${tmpdir()}/fy-cwd-gone-`);
+    const child = spawn('sleep', ['30'], { cwd: work, stdio: 'ignore' });
+    const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
+    try {
+      await rm(work, { recursive: true, force: true });
+      expect(await nodeHostFacts().procWorkingDirectory(child.pid as number)).toBeUndefined();
+    } finally {
+      child.kill('SIGKILL');
+      await exited;
+    }
+  });
+});
 
 describe('TT nodeHostFacts on a fixture tree', () => {
   test('TT runtime file allowlists refuse traversal and undeclared interface files', async () => {
@@ -59,6 +95,7 @@ describe('TT nodeHostFacts on a fixture tree', () => {
         () => facts.procFdLink(value, '0'),
         () => facts.procFdReach(value, '0'),
         () => facts.procExecutable(value),
+        () => facts.procWorkingDirectory(value),
       ])
         await expect(read()).rejects.toBeInstanceOf(RangeError);
     }
@@ -70,7 +107,8 @@ describe('TT nodeHostFacts on a fixture tree', () => {
 
   test('process reads', async () => {
     const facts = await tree();
-    expect(await facts.pids()).toEqual([42]);
+    // `readdir` order is the filesystem's, not a contract: `pids()` is "the numeric entries of /proc", so compare as a set.
+    expect([...(await facts.pids())].sort((a, b) => a - b)).toEqual([42, 43]);
     expect(await facts.procFile(42, 'stat')).toStartWith('42 (sh)');
     expect(await facts.procFile('self', 'cgroup')).toBe('0::/user.slice\n');
     expect(await facts.procTasks(42)).toEqual(['42']);
@@ -78,7 +116,24 @@ describe('TT nodeHostFacts on a fixture tree', () => {
     expect(await facts.procFds(42)).toEqual(['0']);
     expect(await facts.procFdLink(42, '0')).toBe('/dev/pts/3');
     expect(await facts.procExecutable(42)).toBe('/usr/bin/sh');
+    expect(await facts.procWorkingDirectory(42)).toBe('/work/project');
     expect(await facts.procSystemFile('net/tcp')).toBe('sl local\n');
+  });
+
+  test('the working folder: a removed folder and a process that is not there both answer undefined', async () => {
+    const facts = await tree();
+    expect(await facts.procWorkingDirectory(43)).toBeUndefined();
+    expect(await facts.procWorkingDirectory(44)).toBeUndefined();
+  });
+
+  test('the working folder: a failure that is not "no answer" is rethrown, not swallowed', async () => {
+    const root = await mkdtemp(`${tmpdir()}/fy-facts-`);
+    roots.push(root);
+    const proc = `${root}/proc`;
+    // A `cwd` that is a plain directory, not a link: readlink answers EINVAL, which is no process-gone answer.
+    await mkdir(`${proc}/45/cwd`, { recursive: true });
+    const facts = nodeHostFacts({ proc, sys: `${root}/sys` });
+    await expect(facts.procWorkingDirectory(45)).rejects.toMatchObject({ code: 'EINVAL' });
   });
 
   test('cgroup and block-device reads; a partition reads its parent disk’s scheduler', async () => {

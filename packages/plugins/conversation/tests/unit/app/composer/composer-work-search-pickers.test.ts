@@ -75,8 +75,8 @@ const ladder = (port?: WorkSearchPort) =>
   createReferencesProvider({
     daemon,
     scope,
-    hostedPrefixes: ['!', '&'],
-    getCatalog: prefix => (prefix === '!' ? localAgenda : []),
+    hostedPrefixes: ['^', '&'],
+    getCatalog: prefix => (prefix === '^' ? localAgenda : []),
     getProjectNames: () => NAMES,
     ...(port === undefined ? {} : { getWorkSearch: () => port }),
   });
@@ -113,9 +113,9 @@ describe("the composer pickers over the daemon's work search", () => {
   it('adds an ask found by words under the @@@ rows, keeping catalog rows first and not repeating one', async () => {
     const { port } = fakePort([askHit('A3'), askHit('A9')]);
     const found = replacements(await ladder(port).candidates(context('@', 'relay', 3)));
-    expect(found).toContain('!A9');
-    expect(found.filter(replacement => replacement === '!A3')).toHaveLength(1);
-    expect(found[0]).toBe('!A3');
+    expect(found).toContain('^A9');
+    expect(found.filter(replacement => replacement === '^A3')).toHaveLength(1);
+    expect(found[0]).toBe('^A3');
   });
 
   it('shows a snoozed or replied ask with its standing as the chip, asking for open work only', async () => {
@@ -124,8 +124,8 @@ describe("the composer pickers over the daemon's work search", () => {
     const chips = result.candidates.map(candidate => [candidate.replacement, candidate.badge]);
     expect(chips).toEqual(
       expect.arrayContaining([
-        ['!A9', 'snoozed'],
-        ['!A8', 'replied'],
+        ['^A9', 'snoozed'],
+        ['^A8', 'replied'],
       ]),
     );
     expect(asked).toEqual([{ q: 'region', kind: 'ask', open: true, limit: 20 }]);
@@ -133,7 +133,7 @@ describe("the composer pickers over the daemon's work search", () => {
 
   it("offers only this ferret's asks, since an id of another ferret would not prove", async () => {
     const { port } = fakePort([askHit('A5', { ferret: 'another/ferret' })]);
-    expect(replacements(await ladder(port).candidates(context('@', 'region', 3)))).not.toContain('!A5');
+    expect(replacements(await ladder(port).candidates(context('@', 'region', 3)))).not.toContain('^A5');
   });
 
   it('keeps the instant list for an empty query or an id prefix, and never asks', async () => {

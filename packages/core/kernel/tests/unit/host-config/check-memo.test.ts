@@ -8,73 +8,19 @@
  * - a plugin's patch of a hand-written broken file parses it once, not twice.
  */
 import { describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
-import { z } from 'zod';
-import { defineConfig } from '../../../contract/index.ts';
-import { CHECKS_KEPT, type ConfigCheckMemo, createConfigCheckMemo } from '../../../host/config/check-memo.ts';
-import type { checkConfigText } from '../../../host/config/check.ts';
-import { createConfigFiles } from '../../../host/config/service.ts';
+import { CHECKS_KEPT, createConfigCheckMemo } from '../../../host/config/check-memo.ts';
 import { CONFIG_FILE_MAX_BYTES, editConfigText, readConfigText, readConfigTextToEdit } from '@ferretry/std/yaml';
 import type { HostFs } from '../../../host/state/host-fs.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { PRIVATE_WORD } from './adversarial-texts.ts';
-import { captureLog, HOME, loginsDef, manualClock } from './support.ts';
+import { type Checked, brokenTexts, refuseWrites, VOICE, voiceDef, world } from './check-memo-support.ts';
+import { HOME, loginsDef, testEtag } from './support.ts';
 
-type Checked = ReturnType<typeof checkConfigText>;
-
-const digest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
-
-const VOICE = `${HOME}/config/voice.yaml`;
-
-const voiceDef = defineConfig({
-  file: 'voice.yaml',
-  schema: z.strictObject({ limit: z.number().int().default(10), note: z.unknown().optional() }),
-  axis: 'configure',
-  loosens: () => [],
-});
-
-/** A memo that records every check it is asked to keep, so a test can inspect all it ever held. */
-function spyMemo(): ConfigCheckMemo & { readonly kept: { path: string; digest: string; checked: Checked }[] } {
-  const inner = createConfigCheckMemo();
-  const kept: { path: string; digest: string; checked: Checked }[] = [];
-  return {
-    kept,
-    get: (path, key) => inner.get(path, key),
-    keep: (path, key, checked) => {
-      kept.push({ path, digest: key, checked });
-      inner.keep(path, key, checked);
-    },
-    keepOnly: present => inner.keepOnly(present),
-    size: () => inner.size(),
-  };
-}
-
-function world(options: { fs?: HostFs & { seed(path: string, data: string): void } } = {}) {
-  const fs = options.fs ?? createMemoryHostFs();
-  const checks = spyMemo();
-  const files = createConfigFiles({
-    home: HOME,
-    fs,
-    clock: manualClock(),
-    log: captureLog(),
-    binary: 'fy',
-    checks,
-    defs: [
-      { plugin: 'voice', def: voiceDef },
-      { plugin: 'logins', def: loginsDef },
-    ],
-  });
-  return { fs, files, checks };
-}
+/** The key a service keeps a check under is its etag of the text; `world` gives the service `TEST_ETAG_KEY`. */
+const digest = testEtag;
 
 /** A fake key of a shape the raw-secret scan knows, built at run time (never a real one). */
 const fakeKey = (): string => `sk-ant-api03-${'Q7xR2m'.repeat(8)}`;
-
-function timedSync(act: () => unknown): number {
-  const started = performance.now();
-  act();
-  return performance.now() - started;
-}
 
 describe('the check memo itself', () => {
   const checked = (n: number): Checked => ({
@@ -108,29 +54,20 @@ describe('the check memo itself', () => {
 });
 
 describe('the memo holds only what a load settled', () => {
-  test('T-0034 2 000 refused config_write calls under new names leave the memo empty and the heap flat', async () => {
+  test('T-0034 refused config_write calls under new names leave the memo empty', async () => {
+    // Small on purpose (100 writes of 4 KiB): what stays is the same at any size; the heap at 2 000 writes of 250 KiB
+    // is tests/perf/host-config/check-memo-bound.test.ts.
     const { files, checks } = world();
     await files.reload();
-    const writer = files.writer();
-    const write = async (n: number) =>
-      await writer.write(
-        { plugin: 'logins', def: loginsDef, name: `n${String(n)}` },
-        // About 250 KiB that fails its schema: an unknown key and a wrong type.
-        `budget: "${String(n)}"\nnote: ${'x'.repeat(250 * 1024)}\n`,
-        { byAgent: true },
-      );
-    // Warm up, then measure.
-    for (let n = 0; n < 50; n += 1) expect((await write(n)).kind).toBe('refused');
-    Bun.gc(true);
-    const before = process.memoryUsage().heapUsed;
-    for (let n = 50; n < 2_050; n += 1) await write(n);
-    Bun.gc(true);
-    const grown = process.memoryUsage().heapUsed - before;
-    // Before: every refused text (and its issues) stayed, about 500 MB for these 2 000.
+    const kinds = await refuseWrites(
+      files,
+      Array.from({ length: 100 }, (_, n) => n),
+      4 * 1024,
+    );
+    expect(new Set(kinds)).toEqual(new Set(['refused']));
     expect(checks.size()).toBe(0);
     expect(checks.kept.filter(item => item.path.startsWith('logins/'))).toEqual([]);
-    expect(grown).toBeLessThan(64 * 1024 * 1024);
-  }, 120_000);
+  });
 
   test('T-0034 the memo never holds more than the files settled, times the per-file cap', async () => {
     const { fs, files, checks } = world();
@@ -244,13 +181,10 @@ describe('a file is read with a hard byte bound', () => {
 });
 
 describe("a plugin's patch of a hand-written broken file parses it once", () => {
-  /** Hand-written files an edit replaces whole: not YAML, a key twice, over the cap. */
-  const broken = [
-    ['quote soup', `limit: 7\n${'" : \' '.repeat(Math.floor((CONFIG_FILE_MAX_BYTES - 10) / 6))}`],
-    ['broken lines', `limit: 7\n${'"\n'.repeat(Math.floor((CONFIG_FILE_MAX_BYTES - 10) / 2))}`],
-    ['a key twice', 'limit: 7\nlimit: 8\n'],
-    ['over the cap', `limit: 7\n${'#'.repeat(CONFIG_FILE_MAX_BYTES)}`],
-  ] as const;
+  // Small on purpose: the three that are parsed are 2 KiB, since what is proved (one parse reads what two parses read,
+  // and the edit comes out the same) holds at any size; only "over the cap" must be the cap, and it is refused unparsed.
+  // The cost at 256 KiB is tests/perf/host-config/check-memo-bound.test.ts.
+  const broken = [...brokenTexts(2048).slice(0, 3), ...brokenTexts(CONFIG_FILE_MAX_BYTES).slice(3)];
 
   test('the one-parse read edits to exactly the text the two-parse edit made', () => {
     for (const [, text] of broken) {
@@ -269,34 +203,17 @@ describe("a plugin's patch of a hand-written broken file parses it once", () => 
     }
   });
 
-  test('T-0034 the patch write of a 256 KiB broken file costs one parse, not two', async () => {
-    // A wall-clock bound is a measurement of the box as much as of the code (5.3 s under load, 0.3 s alone), so the
-    // bound is a RATIO to what one parse costs on this box right now, and a noisy attempt is measured again: parsing
-    // twice costs about 2x in every attempt, a busy moment costs one.
-    const ATTEMPTS = 3;
-    for (const [label, text] of broken.slice(0, 2)) {
-      let best = Number.POSITIVE_INFINITY;
-      for (let attempt = 0; attempt < ATTEMPTS && best >= 1.6; attempt += 1) {
-        const { fs, files } = world();
-        fs.seed(VOICE, 'limit: 7\n');
-        await files.reload();
-        fs.seed(VOICE, text);
-        await files.reload();
-        // What ONE parse of this text costs on this box, now: the floor the patch write must stay near.
-        const once = Math.min(
-          timedSync(() => readConfigText(text)),
-          timedSync(() => readConfigText(text)),
-        );
-        Bun.gc(true);
-        const started = performance.now();
-        const outcome = await files.port('voice').write(voiceDef, undefined, { patch: { limit: 3 } });
-        const spent = performance.now() - started;
-        expect(outcome.kind, label).toBe('written');
-        expect(files.port('voice').file(voiceDef)?.limit).toBe(3);
-        // A little over one parse: two parses of the file took 1.06–1.24 s on a loaded box and cost twice `once`.
-        best = Math.min(best, (spent - 100) / Math.max(once, 1));
-      }
-      expect(best, label).toBeLessThan(1.6);
+  test('T-0034 the patch write of a broken file lands and keeps the rest', async () => {
+    // Small on purpose: the cost (one parse, not two) at 256 KiB is tests/perf/host-config/check-memo-bound.test.ts.
+    for (const [label, text] of brokenTexts(2048).slice(0, 2)) {
+      const { fs, files } = world();
+      fs.seed(VOICE, 'limit: 7\n');
+      await files.reload();
+      fs.seed(VOICE, text);
+      await files.reload();
+      const outcome = await files.port('voice').write(voiceDef, undefined, { patch: { limit: 3 } });
+      expect(outcome.kind, label).toBe('written');
+      expect(files.port('voice').file(voiceDef)?.limit).toBe(3);
     }
-  }, 120_000);
+  });
 });

@@ -70,7 +70,7 @@ and the longest routing prompt:
 | Tools (terminals, browser pages)         | 1,294      | 324      | every agent runtime         |
 | Ferretry settings (short "Set up" skill) | 493        | 123      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
-| Board (opt-in; `fy task`, cards)         | 757        | 189      | every agent runtime         |
+| Board (opt-in; `fy task`, tasks)         | 757        | 189      | every agent runtime         |
 | Agenda (`fy agenda`, with answer shapes) | 1,289      | 322      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,320      | 330      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,038      | 260      | `FY_PACK=1`                 |
@@ -81,14 +81,14 @@ and the longest routing prompt:
 The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settings section points at
 `fy config guide`, which prints it. A test keeps the whole prompt, with the longest routing prompt, under
 8 KB (the Tools section grew by 351 to teach the login rule and `terminal_request_input`: do the login or website step yourself, ask the owner only for the one secret value, then by 6 more, its wording tightened, to teach `browser_request_input` and to never create a passkey; the old always-on Agenda section became the short Notify rule, and its words moved into the Agenda section, which only a ferret in agenda mode carries — [notifications.md](notifications.md#agenda-mode); Hypermedia grew by 335 to teach `chart`) and the Pack section itself under 1,050 characters. The always-on Board
-section (749, with the card-writing rule, How to test and the lane-by-category rule) was paid for, not added on top: the tools are named by prefix (`terminal_*`, `browser_*`), map, media
+section (749, with the task-writing rule, How to test and the lane-by-category rule) was paid for, not added on top: the tools are named by prefix (`terminal_*`, `browser_*`), map, media
 and chart's full spec moved behind `fy render guide <type>`, and the lessons rule was compressed. The measured total
 is 7,246 without the Tools growth above (the Board rule teaches How to test and which lane by the kind of work, in tightened words, the lane rule paid for by tightening Hypermedia; the Agenda section carries the required `--premise` and `--context`, the self-contained, full-Markdown, hypermedia rule, the reply-rests-the-item rule — `agenda answer` brings it back, `agenda rest` takes it on, `done` closes it once nothing is left (it replaced the older `edit --back`, in one character less) — and the rule that an owner's question about an item is answered ON it (`agenda answer`, options kept) and an unanswered question is closed only with `done --reason`, paid for in its own words and by raising the cap from 7.9 to 8 KB; its one kind → answer-shape line, `AGENDA_SHAPE_LINE` from `@ferretry/protocol`, replaced the old per-kind flag hints and was paid for by tightening the section's own wording, leaving 6 characters under the cap; the `form=` clause for agenda forms, added after, was paid for by trimming the Lessons rule, so the measured total is 7,841), and the test keeps at least 150 characters of headroom under the 8 KB cap. The routing line grew from a 150-character
 summary to the whole prompt when the use-case guide became one routing prompt, so the agent decides with
 exactly what Jev is told. The agenda-first model (2026-11-03) rewrote the Agenda section to teach what an agenda
 is — one channel of the owner's attention, the three-part test, search-check-open, the states, the type stages,
-splitting and chat discussion — and the Board section to say a card shows progress only, its asks ride its agenda,
-and there are no umbrella cards. It was paid for by the Board section's gate words and its full `fy task create`
+splitting and chat discussion — and the Board section to say a task shows progress only, its asks ride its agenda,
+and there are no umbrella tasks. It was paid for by the Board section's gate words and its full `fy task create`
 example, and by tightening the Agenda section's own wording: agenda 1,237 → 1,285, board 802 → 638, the measured total
 7,841 → 7,725. That leaves 125 characters under the cap for the agenda verbs that ship next (`answer`, `rest`, `log`,
 `split`, `merge`), which join the section when they exist. Review round 1 restored the owner's two standing rules —
@@ -109,13 +109,13 @@ Final review then restored "on it" in the chat line (the owner's words go ON the
 PR 3's conversation verbs then joined it — `log <id> --reply|--rest` in the chat line, and `split` and `merge`
 in the splitting sentence — partly paid for by `answer <id> "<text>"` → `answer <id> "…"`: agenda 1,236 → 1,266 (cap
 1,270), the total then 7,781.
-The Hypermedia line then learned `card` and `board` (live board cards) on main, 1,288 → 1,320. Together with PR 3's agenda the measured total is
-7,813 (7,827 counting the separators), 37 characters under the 7,850 cap (23 counting the separators). The card-asks PR then
+The Hypermedia line then learned `task` and `board` (live board tasks) on main, 1,288 → 1,320. Together with PR 3's agenda the measured total is
+7,813 (7,827 counting the separators), 37 characters under the 7,850 cap (23 counting the separators). The task-asks PR then
 reworded the Board section ("Before it's ready to try:", "lane by work", "add to one") and kept "show progress only": board 638 → 631, the
 measured total 7,806 (7,820 counting the separators), 44 characters under the 7,850 cap (30 counting the separators).
 PR 10 (teach round 2) re-read the Agenda and Board text against the spec and found every rule and verb (`answer`, `rest`, `log`, `split`, `merge`, the stages) already taught except the `done` verb and "say so" when unsure. Review round 1 added both, paid for by "logs their words verbatim" in place of "puts their words on it verbatim"; round 2 put the chat reply's teaching "link it" back and paid for it with "unsure→closest" in place of "unsure: closest": agenda 1,266 → 1,269 (cap 1,270), the measured total 7,806 → 7,809 (7,823 counting the separators), 41 characters under the 7,850 cap (27 counting the separators). `teaching-spec.test.ts` now holds each verb and the stage chain to the spec.
 The body as the live document (F909, the owner on !A332: "the chat is the stream of log, the body is the DB") then replaced the body rule above: `--where`=short status on the open line, and "Body=live doc (report/plan/status): rewrite it whole (`edit --body-file`); chat points at it." on the state line, paid for in part by the old "(rest: `--body`, one-screen summary; full report: `--link`)", ", `--where`=now" and "Keep current (`edit`)": agenda 1,269 → 1,289 (cap 1,270 → 1,300), the measured total 7,809 → 7,829 (7,843 counting the separators), 21 characters under the 7,850 cap (7 counting the separators). The whole-prompt cap is unchanged.
-The owner's asks are public cards (the owner, 2026-11-04: "when user ask for ticket or tickets, make sure they are not internal. the board should answer 'What's the current status of all the things I asked you to do'") added one Board sentence, 631 → 757 (cap 700 → 760). It was paid for in part by Pack (1,046 → 1,038: "agents, ") and Tools (1,299 → 1,294); the Agenda, Pack and Hypermedia wording that is left is pinned by tests, so the **whole-prompt cap was raised 7,850 → 7,950** (`8_000 - 50`), the measured total 7,942 (7,956 counting the separators, as every earlier figure here is counted: the cap is on the section text, and 44 characters remain under 8,000).
+The owner's asks are public tasks (the owner, 2026-11-04: "when user ask for ticket or tickets, make sure they are not internal. the board should answer 'What's the current status of all the things I asked you to do'") added one Board sentence, 631 → 757 (cap 700 → 760). It was paid for in part by Pack (1,046 → 1,038: "agents, ") and Tools (1,299 → 1,294); the Agenda, Pack and Hypermedia wording that is left is pinned by tests, so the **whole-prompt cap was raised 7,850 → 7,950** (`8_000 - 50`), the measured total 7,942 (7,956 counting the separators, as every earlier figure here is counted: the cap is on the section text, and 44 characters remain under 8,000).
 
 The tabs (&F923) then made the main tab, "Where we are now", the first and default tab, as long and rich as it needs to be, and let a ferret add tabs of its own: the open line dropped ", `--where`=short status", and the state line became "Live doc=tabs, rewrite each whole: `edit --where-file` (main), `--body-file`, `--tab-file Name=f`; chat points at it.": agenda 1,289 → 1,289, the measured total unchanged.
 
@@ -124,12 +124,12 @@ The owner then asked for the body to be split by content type (&F946: _"split by
 The owner's board-and-agenda teaching (&C48, 2026-11-04) then added five rules and paid for them inside the 8 KB:
 
 - **Board** (757 → 814, cap 760 → 820): the board runs itself (_"TASK no longer have user interactivity anymore! agenda
-  tracks all those"_: a card never asks; answers, tests and Done ride its agenda, which moves it), public = the owner's
-  asks and private = the ferret's sub-cards, planning is a phase, the title and summary read as a sitrep, and the card's
+  tracks all those"_: a task never asks; answers, tests and Done ride its agenda, which moves it), public = the owner's
+  asks and private = the ferret's sub-tasks, planning is a phase, the title and summary read as a sitrep, and the task's
   status (`--status-{now,done,next}`), and **read → edit** (the owner: _"we need to read to know what needs to be
   updated, else there might be many segments that might be outdated!"_: `fy task show` whole, then edit every stale
   part). Paid for by "(`fy board lanes show`)", which the move's
-  help and refusals already print, and by tighter words for the umbrella, related-card and agenda sentences.
+  help and refusals already print, and by tighter words for the umbrella, related-task and agenda sentences.
 - **Agenda** (1,311 → 1,380, cap 1,320 → 1,390): every update reads the item whole (`show`) and edits every stale part
   — premise, context, the ask, its options and kind (how to reply), still-open and each tab (!A358); the tabs
   hold any kind of content (to-dos, steps, explainers, results) and steps and explainers stay there. Paid for by the
@@ -139,14 +139,16 @@ The owner's board-and-agenda teaching (&C48, 2026-11-04) then added five rules a
 - **Hypermedia** (1,320 → 1,209): the owner's explainer rule — ADHD-friendly, said in those words, an example for each
   point, and interactive visuals the reader changes, never steppers (_"interactive should not be steppers -- there's no
   need for steppers"_) — paid for by tightening the section's first lines and its
-  mermaid, svg and html lines. Its last line now says where fy-render draws (chat, agenda tabs and cards), which the
+  mermaid, svg and html lines. Its last line now says where fy-render draws (chat, agenda tabs and tasks), which the
   old "Chat only" contradicted.
 
 The cap now **counts the blank line between sections** (14 characters), as the composed prompt has it — every earlier
 figure above left them out. The measured total is 7,993 with them, so the **whole-prompt cap is now `8_000`**: the 8 KB
-itself, 7 characters of headroom. The next rule must be paid for in words. The sub-ferret section grew 759 → 840 (cap 760 → 880) for its card line (read it, then edit its status and How
+itself, 7 characters of headroom. The next rule must be paid for in words. The sub-ferret section grew 759 → 840 (cap 760 → 880) for its task line (read it, then edit its status and How
 to test; the old "Your final report says how the owner tests it" went, since the holder now writes it); it is not in
 the lead's total, and the sub-ferret prompt (2,631) stays smaller than the lead's (2,910).
+
+The owner's rule "agents should always rebase before pushing" (C58 O17, 2026-11-16) added one sentence to Tools, 1,261 → 1,516: before every push, rebase your own branch onto the latest base and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on (merge the base into those). The rest of the wording is pinned by tests, so the **whole-prompt cap went `8_000` → `8_250`** and the Tools cap 1,300 → 1,530: 8,232 measured. The `pre-push` gate that backs it is in [Linting](standards/linting/index.md#pushing-a-branch-that-is-behind-its-base).
 
 ## The routing prompt
 
@@ -287,15 +289,15 @@ fy new --auto --name "Fix Login Redirect" "<complete brief>"   # the decision mo
    check: `started claude-work (probe OK 640 ms)`, `(probe OK, cached)`, `refused … (probe failed 3436 ms)`.
 4. **Start**: the same session start every surface uses (callsign, launch, audit), with `parent` recorded and
    the brief followed by a footer telling the sub-ferret to finish with `fy signal done "<result>"`. The
-   sub-ferret gets a **board card** with the session when the lead's board is on, or when the lead holds a card
-   to put it under (the brief names it, or the lead's focus) or hands one over (`--card`): owned by the lead,
-   assigned to the child, and the footer names it (`Your card is &F413 on the Ferretry board`). On a board that
-   is off ([board.md](board.md#the-board-is-opt-in)) and with no card in hand, the child starts with none and
+   sub-ferret gets a **board task** with the session when the lead's board is on, or when the lead holds a task
+   to put it under (the brief names it, or the lead's focus) or hands one over (`--task`): owned by the lead,
+   assigned to the child, and the footer names it (`Your task is &F413 on the Ferretry board`). On a board that
+   is off ([board.md](board.md#the-board-is-opt-in)) and with no task in hand, the child starts with none and
    `fy new` says so. The start no longer forces board access
    `none`: authority on the board is ownership and lineage. A board failure never fails the start; `fy new`
    prints what it could not do. A
    harness that exits before it is ready fails the start with its exit status **and its last output lines**
-   (`the interactive harness exited (2): its last output was "…"`), so the card says why — the wrapper's
+   (`the interactive harness exited (2): its last output was "…"`), so the task says why — the wrapper's
    refusal naming a missing secret, or the harness rejecting an argument the one-shot probe does not pass.
 
 The answer is never an HTTP error for a refusal: it is `{outcome: 'refused', refusal: {code, message,
@@ -368,15 +370,15 @@ failed, stalled or stopped. A plain `fy start` refused here answers `409 limit_r
 
 ## Checking on your sub-ferrets
 
-A lead does not need its children to message it progress. A sub-ferret keeps its card's **Status** current (read it with `fy task show
-<id>`, then `fy task edit <id> --status-now|--status-done|--status-next`; [board.md](board.md#the-cards-status)), puts
-routine progress on its card (`fy task note`) and messages its lead only for a result, a blocker or a decision the lead must make; the lead
+A lead does not need its children to message it progress. A sub-ferret keeps its task's **Status** current (read it with `fy task show
+<id>`, then `fy task edit <id> --status-now|--status-done|--status-next`; [board.md](board.md#the-tasks-status)), puts
+routine progress on its task (`fy task note`) and messages its lead only for a result, a blocker or a decision the lead must make; the lead
 **looks when it wants to**:
 
 ```text
 $ fy status --subtree
 rhett (mvzxdjv2-58f11bc0): 3 descendants
-SESSION  MODEL        STATE      CARD             PR               LAST
+SESSION  MODEL        STATE      TASK             PR               LAST
 ada      sonnet-5-5   running    &F767 Implement  #321 CI pending  [2m] route and table done, writing tests
   bo     glm-5.3      needs-you  &F770 Review     -                [14m] which lane should review move to?
 cy       gpt-6.1-sol  ended 25m  &F768 Done       #320 merged      [25m] merged; nothing left
@@ -384,21 +386,21 @@ cy       gpt-6.1-sol  ended 25m  &F768 Done       #320 merged      [25m] merged;
 
 - **One call.** `fy status --subtree [<id>]` asks `GET /v1/ferrets/:ferretId/subtree` once (default: the calling
   session; the owner outside a pane names an id). The daemon builds every row from what it already holds — the
-  sessions registry, one read of the board's cards, the PR cache the board keeps, and the end of each
+  sessions registry, one read of the board's tasks, the PR cache the board keeps, and the end of each
   descendant's outbox. It never calls GitHub per row, so fifty descendants cost one request.
 - **Rows.** One per live descendant, plus any that ended in the last two hours (`ended 25m`), in tree order: a
   ferret, then its own sub-ferrets indented beneath it, then the next sibling (by callsign). Lineage is the
   registry's `parent` links (the shared `subtreeDepths` walk `fy stop` also uses), never the request.
 - **State.** `running`; `waiting` (parked or rate limited); `needs-you` (an open question, an agenda item or a
   flagged need — painted amber); `ended`.
-- **Card and PR.** The card a session works on (`&F767`) and its lane; the card's open PR (else its newest) with CI
+- **Task and PR.** The task a session works on (`&F767`) and its lane; the task's open PR (else its newest) with CI
   as the board's PR cache last read it (`CI passing|failing|pending`, or `merged`/`closed`). `-` where there is none.
-- **Last line.** The newer of the card's last note and the ferret's last message to the asking ferret, cut to one line
+- **Last line.** The newer of the task's last note and the ferret's last message to the asking ferret, cut to one line
   of at most 100 characters (`…`; an emoji counts as one). A tie goes to the note. "The asking ferret" is the caller the
   daemon derives from its credential, not the id in the path: when lead A asks for `--subtree B`, a grandchild's result
   sent to A shows, not only what was sent to B. The owner outside a pane has no such caller, so it sees messages sent to the
   named root. The outbox is read backwards in 64 KiB chunks, whole records at a time, up to 1 MiB: a long report never
-  hides the message under it, and only a message older than the last megabyte falls back to the card's note.
+  hides the message under it, and only a message older than the last megabyte falls back to the task's note.
 - **Secrets never reach the line.** The whole note or message is run through the same fail-closed redactor the
   operator transcript reads use (the vault, logins and just-typed values) **before** it is cut to a line, in one batch
   per table, so a secret that straddles the 100-character cut is masked whole. If the redactor cannot run, every
@@ -406,10 +408,10 @@ cy       gpt-6.1-sol  ended 25m  &F768 Done       #320 merged      [25m] merged;
 - **Bounded work.** A large tree cannot make the daemon scan without limit: at most 4 outbox files are open at once,
   at most 64 rows get an excerpt (live rows first; at most 8 of them recently ended), and at most 8 MiB of outbox is
   read for the table (1 MiB per row), live rows spending it before ended ones. A read that fails keeps its whole
-  share of that budget, since it may already have read it. A row past a budget is still listed — state, card and PR intact — with no
+  share of that budget, since it may already have read it. A row past a budget is still listed — state, task and PR intact — with no
   last line, so `-` in that column on a very large table means "not read", not "silent". A failed outbox read does
   the same for its row.
-- **`--json`** prints the same view (`root`, `at`, `endedWindowMs`, `rows` with `depth`, `state`, `status`, `card`, `pr`,
+- **`--json`** prints the same view (`root`, `at`, `endedWindowMs`, `rows` with `depth`, `state`, `status`, `task`, `pr`,
   `last`, `endedAt`).
 
 The route is `fleet.use` ([grants.md](grants.md)). The lead's instruction line is: check your children with
@@ -417,21 +419,21 @@ The route is `fleet.use` ([grants.md](grants.md)). The lead's instruction line i
 
 ## Sub-ferret limits
 
-The owner's decision (2026-10-30): **only lead ferrets raise agenda items and move cards; sub-ferrets report to
+The owner's decision (2026-10-30): **only lead ferrets raise agenda items and move tasks; sub-ferrets report to
 their lead.** A _sub-ferret_ is a session another session started (`config.parent`); a _lead_ has none. Many sub-ferrets
 are weaker models, writing to the board and agenda becomes a coordination problem, and what they need is mostly
 to report back. Enforced by the daemon from the caller's session identity, not by the prompt:
 
 - **Refused** (`forbidden`, saying what to do instead): every agenda write (`add`, `edit`, `surface`, `done`, `dismiss`),
-  `fy notify`, every card verb except the three below, and editing a project's lanes. The message reads
+  `fy notify`, every task verb except the three below, and editing a project's lanes. The message reads
   `You are a sub-ferret, so you can't <this>. You may <what it may>. For anything else ask your lead: fy send <lead-callsign> "…"`.
-  For a `move`, `focus` or commit/doc `link` on a card its lead holds the last sentence is "Your lead holds this card: claim it first: fy task claim <id>": `fy task claim` takes the card (only from an ancestor, never a sibling's or cousin's), and the holder may then do exactly those, not `drop` or re-plan it ([board.md](board.md#claiming-a-card-your-lead-holds)). A sub-ferret that leads a subtree may still `drop` and `assign` cards in it ([board.md](board.md#authority)).
-- **Allowed:** `fy send` to the lead (and peers it names); `fy task note`, and `fy task link --pr` / `--branch`, on a card;
+  For a `move`, `focus` or commit/doc `link` on a task its lead holds the last sentence is "Your lead holds this task: claim it first: fy task claim <id>": `fy task claim` takes the task (only from an ancestor, never a sibling's or cousin's), and the holder may then do exactly those, not `drop` or re-plan it ([board.md](board.md#claiming-a-task-your-lead-holds)). A sub-ferret that leads a subtree may still `drop` and `assign` tasks in it ([board.md](board.md#authority)).
+- **Allowed:** `fy send` to the lead (and peers it names); `fy task note`, and `fy task link --pr` / `--branch`, on a task;
   `fy task edit <id>` naming only the status (`--status-now|--status-done|--status-next|--status-file`) and How to test
-  (`--how-to-test`), on the card it holds;
-  reading the board and the agenda. `fy new` still makes the sub-ferret's card where it makes one at all.
+  (`--how-to-test`), on the task it holds;
+  reading the board and the agenda. `fy new` still makes the sub-ferret's task where it makes one at all.
 - **A lead looks after its sub-ferrets' agenda.** The lead — and any ancestor — may `edit`, `surface`, `done` and
-  `dismiss` items on a session it started: `fy agenda done !A1 -s <sub-session>`. The daemon proves it by lineage
+  `dismiss` items on a session it started: `fy agenda done ^A1 -s <sub-session>`. The daemon proves it by lineage
   (walking `config.parent` up from the target session, fail-closed on a cycle, a missing session or an unreadable
   registry) and attributes the change to the lead, not the sub-ferret. A sibling, an unrelated lead and a
   descendant acting on its ancestor stay refused; `add`, `progress`, `answer` and the owner's snooze/reply verbs
@@ -439,15 +441,15 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   itself started a deeper session holds the same authority over that one.
 - **The daemon asks through the lead's agenda.** What the daemon raises about a sub-ferret (a gate item, a Not good
   follow-up, a Warden escalation) goes on its **agenda home**, the owner's own ferret, never on the sub-ferret
-  ([agenda.md](agenda.md#the-agenda-home)). Only a hands-on card (a password, code or approval the daemon asks for) stays
+  ([agenda.md](agenda.md#the-agenda-home)). Only a hands-on input (a password, code or approval the daemon asks for) stays
   on the sub-ferret.
 - **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
-  never raise agenda items or notify the owner, report to your lead with `fy send` and label every send (`--kind blocker|action|fyi`, [message-delivery.md](message-delivery.md#labels-and-combined-delivery)); at each step it reads its card and rewrites the stale parts of its status and How to test (`fy task edit`), routine progress goes on its card (`fy task note`), and its lead is messaged only for a result, a blocker or a decision; if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
+  never raise agenda items or notify the owner, report to your lead with `fy send` and label every send (`--kind blocker|action|fyi`, [message-delivery.md](message-delivery.md#labels-and-combined-delivery)); at each step it reads its task and rewrites the stale parts of its status and How to test (`fy task edit`), routine progress goes on its task (`fy task note`), and its lead is messaged only for a result, a blocker or a decision; if it has a task, link its PR to it, and the task moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
   out. Sizes with the default binary name: **lead 2910 characters** (4292 with Agenda mode on), **sub-ferret 2631**.
-  `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
+  `FY_SUB_FERRET=1` is derived from the record's `role` (a helper) at each launch; a running ferret is told the changed always-on section on the
   owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
-- **Nudges** about a sub-ferret's card (the turn-check, a reopen, a go-ahead) go to its lead. The board's alerts (a stale
-  card, a red CI, a PR closed unmerged) go to the sub-ferret itself while it is alive, then its nearest live lead
+- **Nudges** about a sub-ferret's task (the turn-check, a reopen, a go-ahead) go to its lead. The board's alerts (a stale
+  task, a red CI, a PR closed unmerged) go to the sub-ferret itself while it is alive, then its nearest live lead
   ([board.md](board.md#who-a-board-alert-is-for)).
   The Warden's liveness checks on the sub-ferret itself are unchanged.
 
@@ -525,11 +527,11 @@ anything, so an accept is never held; it is a `fleet.configure` act, and a ferre
 
 ## The settings page
 
-Settings › Pack mode (phone first): the switch, who decides, the limits and the probe, then ONE card —
+Settings › Pack mode (phone first): the switch, who decides, the limits and the probe, then ONE panel —
 **Routing prompt — ferrets use this to pick which model runs each sub-task**:
 
 - where the prompt came from (your words, an accepted clean-up or written prompt and by whom, or the default);
-- **first run — the nudge.** While no prompt has been saved the card says "Not written yet" instead of showing an
+- **first run — the nudge.** While no prompt has been saved the panel says "Not written yet" instead of showing an
   empty box: the "Your idea (optional)" field, a big **Write it for me** button and "Or write it by hand", which
   opens the box;
 - once a prompt is saved, **Write it for me** sits above the buttons with the same idea field (it builds on the
@@ -553,7 +555,7 @@ are kept out of the session list and the palette, though a link to one still ope
 
 - **The probe is one-shot, the start is interactive.** The probe carries the start's model and effort, but
   not its `--session-id`, hand-off `Read(...)` rules, fast-mode overlay or remote-control arguments, so a
-  harness that refuses only one of those passes the probe and fails the start — with its own words on the card.
+  harness that refuses only one of those passes the probe and fails the start — with its own words in the panel.
 - **A probe leaves a one-line conversation** in the runtime's history, as any one-shot run of the CLI does.
 - **A clean-up's session stays on record.** Once its rewrite is read the ferret is stopped and its run folder
   is pruned after five newer runs, but the session itself is kept like any stopped ferret, only hidden from the

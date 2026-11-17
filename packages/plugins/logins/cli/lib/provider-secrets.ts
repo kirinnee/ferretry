@@ -34,11 +34,10 @@ export function secretNeeds(preset: ProviderPresetView, env: Readonly<Record<str
 }
 
 /**
- * The shell's variables `--from-env` may use: only the names the presets declare, only the ones set and not empty.
- * A shell this command line cannot read from is refused in words, never read around.
- *
- * GAP(logins): a `PREFIX_*` family a preset's `detect.variables` names is not an exact name the manifest can declare
- * (`permissions.cliEnvReads`), so the shell is never asked for it and a provider told only by one is not detected.
+ * The shell's variables `--from-env` may use: only the names and `PREFIX_*` families the presets declare, only the ones
+ * set and not empty. A family is asked for by its own spelling and answers each set variable of that prefix, so a
+ * provider the shell tells only through one (`ZAI_*`) is detected. A shell this command line cannot read from is
+ * refused in words, never read around.
  */
 export function shellVariables(deps: LoginsCommandDeps): Readonly<Record<string, string>> {
   if (deps.readEnvironment === undefined) {
@@ -48,10 +47,7 @@ export function shellVariables(deps: LoginsCommandDeps): Readonly<Record<string,
   }
   const asked = deps.readEnvironment(PRESET_ENV_NAMES);
   return Object.fromEntries(
-    PRESET_ENV_NAMES.flatMap(name => {
-      const value = asked[name];
-      return value === undefined || value === '' ? [] : [[name, value]];
-    }),
+    Object.entries(asked).flatMap(([name, value]) => (value === undefined || value === '' ? [] : [[name, value]])),
   );
 }
 

@@ -88,21 +88,21 @@ describe('the lineage lines', () => {
   test('says where a merged item went, as a reference', async () => {
     const root = await draw(item({ mergedInto: 'A2' } as never), undefined);
     const line = must(root.querySelector('[data-agenda-lineage-line="merged-into"]'), 'merged-into line');
-    expect(line.textContent).toContain('Merged into !A2');
+    expect(line.textContent).toContain('Merged into ^A2');
     expect(root.querySelector('[data-agenda-merge-open]')).toBeNull();
   });
 
   test('names each target by its title where it is given, and by its id where it is not', async () => {
     const root = await draw(item({ splitInto: ['A7', 'A8'] } as never), undefined, { A7: 'the snooze copy' });
     expect(root.querySelector('[data-agenda-lineage-line="split-into"]')?.textContent).toContain(
-      'Split into !A7 (the snooze copy), !A8',
+      'Split into ^A7 (the snooze copy), ^A8',
     );
   });
 
   test('says where a split came from and where it went', async () => {
     const root = await draw(item({ splitFrom: 'A3', splitInto: ['A7', 'A8'] } as never), undefined);
-    expect(root.querySelector('[data-agenda-lineage-line="split-from"]')?.textContent).toContain('Split from !A3');
-    expect(root.querySelector('[data-agenda-lineage-line="split-into"]')?.textContent).toContain('Split into !A7, !A8');
+    expect(root.querySelector('[data-agenda-lineage-line="split-from"]')?.textContent).toContain('Split from ^A3');
+    expect(root.querySelector('[data-agenda-lineage-line="split-into"]')?.textContent).toContain('Split into ^A7, ^A8');
     expect(root.textContent).not.toContain('Split off');
   });
 });
@@ -129,15 +129,15 @@ describe('Merge with…', () => {
     expect(picker.textContent).toContain('Merge this item with which open agenda?');
     expect(picker.textContent).not.toContain('Queue choice');
     expect(must(root.querySelector('[data-agenda-merge-candidate="A2"]'), 'candidate').textContent).toBe(
-      '!A2 Pick the queue',
+      '^A2 Pick the queue',
     );
 
     await click(root, '[data-agenda-merge-candidate="A2"]');
     const confirm = must(root.querySelector('[data-agenda-merge-confirm]'), 'confirm step');
     expect(confirm.textContent).toBe(
-      'Merge !A2 into this item?' +
-        '!A2 closes; this item keeps its ask. Both conversations and all cards are kept.' +
-        'Keep !A2 instead' +
+      'Merge ^A2 into this item?' +
+        '^A2 closes; this item keeps its ask. Both conversations and all tasks are kept.' +
+        'Keep ^A2 instead' +
         'CancelMerge',
     );
     expect(confirm.textContent).not.toContain('Pick the queue');
@@ -167,8 +167,8 @@ describe('Merge with…', () => {
     await click(root, '[data-agenda-merge-candidate="A2"]');
     await click(root, 'input[type="checkbox"]');
     const words = root.querySelector('[data-agenda-merge-confirm]')?.textContent;
-    expect(words).toContain('Merge this item into !A2?');
-    expect(words).toContain('This item closes; !A2 keeps its ask. Both conversations and all cards are kept.');
+    expect(words).toContain('Merge this item into ^A2?');
+    expect(words).toContain('This item closes; ^A2 keeps its ask. Both conversations and all tasks are kept.');
     await click(root, '[data-agenda-merge-go]');
     expect(sent).toEqual([{ survivor: 'A2', absorbed: 'A5' }]);
   });

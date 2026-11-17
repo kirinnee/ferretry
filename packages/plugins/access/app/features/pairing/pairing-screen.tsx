@@ -26,6 +26,7 @@
  * a sentence explaining that it is 0 is noise; the list earns its place once
  * there is something in it.
  */
+import { SecretInput, useSecretField } from '@ferretry/app/ui';
 import { Check, ChevronRight, Link2, ShieldCheck, Trash2 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
 import { PAIRING_DEVICE_NAME_MAX_LENGTH } from '../../../contract/index.ts';
@@ -40,7 +41,8 @@ import type { QrScanHost } from '../../lib/pair-scan.ts';
 import { usePairingScreenMarker } from '../../lib/pairing-screen-marker.ts';
 import { type PairingArrival, pairingDaemonHost, pairingSeedFromUrl, type PairingSeed } from '../../lib/pairing.ts';
 import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
-import { browserDeviceName, normalizedDeviceName } from '../../lib/device-name.ts';
+import { browserDeviceName } from '@ferretry/app';
+import { normalizedDeviceName } from '../../lib/device-name.ts';
 import { PairScanner } from './pair-scanner.tsx';
 
 /** Exchanges the code; `deviceName` is what the person called this device on the confirm screen. */
@@ -168,10 +170,11 @@ export function PairingScreen({
   // Chosen once per screen, so a person editing it is never overwritten and two attempts send one name.
   const [deviceName, setDeviceName] = useState(defaultName);
   const [pasting, setPasting] = useState(false);
-  const [link, setLink] = useState('');
+  /** The pasted link holds a live code: it lives only in the input's own value, read on submit, never in state or markup. */
+  const link = useSecretField(typed => typed.trim().length);
   const [linkError, setLinkError] = useState<string | null>(null);
   // A pasted link, or a seed taken from one, holds a live code: the page is marked for the whole of that (docs/pairing.md).
-  usePairingScreenMarker(link !== '' || stage.kind === 'confirm' || stage.kind === 'pairing');
+  usePairingScreenMarker(link.filled || stage.kind === 'confirm' || stage.kind === 'pairing');
 
   // The fragment carries a single-use secret. It is in this screen's state from
   // the first render, so the address bar — history, a bookmark, a screenshot,
@@ -195,14 +198,14 @@ export function PairingScreen({
     setLinkError(null);
     let seed: PairingSeed;
     try {
-      seed = pairingSeedFromUrl(link.trim());
+      seed = pairingSeedFromUrl(link.read().trim());
     } catch (reason) {
       setLinkError(reason instanceof Error ? reason.message : 'The pairing link could not be read.');
       return;
     }
     // Cleared before anything is awaited: the field must not still be holding a
     // single-use code while the network is in flight.
-    setLink('');
+    link.clear();
     setStage({ kind: 'confirm', seed });
   };
 
@@ -323,17 +326,13 @@ export function PairingScreen({
         <form className="flex flex-col gap-2" onSubmit={submitLink}>
           <label className="flex flex-col gap-1 text-ui font-medium text-fg" htmlFor="pairing-link">
             Pairing link
-            <input
+            <SecretInput
+              field={link}
               id="pairing-link"
               aria-label="Pairing link"
               aria-describedby="pairing-link-error"
-              autoCapitalize="none"
-              autoComplete="off"
               className="h-control w-full rounded-control border border-border bg-surface-2 px-control-x font-mono text-meta text-fg placeholder:text-faint focus:border-accent"
-              onChange={event => setLink(event.target.value)}
               placeholder="https://…/pair#…"
-              spellCheck={false}
-              value={link}
             />
           </label>
           {linkError !== null && (
@@ -341,7 +340,7 @@ export function PairingScreen({
               {linkError}
             </p>
           )}
-          <button type="submit" className="kt-btn min-h-[44px]" disabled={link.trim() === ''}>
+          <button type="submit" className="kt-btn min-h-[44px]" disabled={!link.filled}>
             <Link2 size={16} aria-hidden="true" />
             Use this link
           </button>

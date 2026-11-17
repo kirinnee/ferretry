@@ -94,8 +94,8 @@ export const laneChangeCard = (projectName: string, live: LaneSet, pending: Pend
     why: lines.length === 0 ? opening : why,
     ...(lines.length === 0 || hidden ? {} : { recommendation: { decision: EDIT.label, why: LANE_CHANGE_READ_FIRST } }),
     howToResolve: hidden
-      ? 'It does more than a card can show, so it is accepted in the Board lane editor, where every part of it is listed. Choose Edit to go there; the board keeps its lanes until you accept.'
-      : 'Choose Accept to switch the board to these lanes; any cards they move, move then. Choose Edit to change them in the Board lane editor; the board keeps its lanes until you save.',
+      ? 'It does more than a task can show, so it is accepted in the Board lane editor, where every part of it is listed. Choose Edit to go there; the board keeps its lanes until you accept.'
+      : 'Choose Accept to switch the board to these lanes; any tasks they move, move then. Choose Edit to change them in the Board lane editor; the board keeps its lanes until you save.',
   };
 };
 

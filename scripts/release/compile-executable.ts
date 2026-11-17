@@ -47,6 +47,10 @@
  * worker that registry declares (`scripts/release/plugin-workers.ts`), flat beside the entry as `<root>/<file stem>.js`;
  * the kernel's `bunWorkers` resolves a plugin's URL to that file when compiled. A declared worker with no program on
  * disk, or two with one name, FAILS this compile rather than the release smoke.
+ *
+ * AND NO BINARY LOADS THE DIRECTORY IT IS RUN FROM: `autoloadBunfig` and `autoloadDotenv` are off, so a cwd
+ * `bunfig.toml` `preload` never runs inside `fy`/`fyd` and a cwd `.env` never changes their environment
+ * (pinned by `packages/cli/tests/integration/compile-autoload.test.ts`).
  */
 import { createRequire } from 'node:module';
 import { basename, dirname, join, normalize } from 'node:path';
@@ -191,6 +195,12 @@ const result = await Bun.build({
   naming: { entry: '[name].[ext]' },
   compile: {
     outfile: options.outfile,
+    // A compiled binary is not a Bun project: it must never run a working directory's files. Bun loads a
+    // cwd `bunfig.toml` (whose `preload` runs that repo's code INSIDE fy/fyd) and a cwd `.env` (which
+    // silently rewrites its environment) by default, so both stay OFF here. `tsconfig.json` and
+    // `package.json` autoloading already default to off in Bun 1.4; they are not repeated.
+    autoloadBunfig: false,
+    autoloadDotenv: false,
     ...(options.target === undefined ? {} : { target: options.target as Bun.Build.CompileTarget }),
   },
   define: options.define,

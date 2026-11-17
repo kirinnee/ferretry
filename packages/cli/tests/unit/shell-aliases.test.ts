@@ -1,10 +1,11 @@
 /**
- * Today's spellings for verbs the 5.0 split renamed (V-0232, V-0241, V-0245 … V-0248, V-0250, V-0436), resolved by the
+ * Today's spellings for verbs the 5.0 split renamed (V-0232, V-0245 … V-0248, V-0250), resolved by the
  * shell's REAL verb table over the generated registry the way `run.ts` does it: an alias is re-resolved to the verb it
  * runs, with every later word handed on. They run the new verb and add nothing of their own.
  */
 import { expect, it } from 'bun:test';
 import { registry } from '../../src/generated/commands.ts';
+import { renderRootHelp, verbsUnder } from '../../src/lib/help.ts';
 import { buildVerbTable, expandAlias, resolveVerb, type VerbEntry } from '../../src/lib/verbs.ts';
 
 const table = buildVerbTable(registry);
@@ -46,27 +47,56 @@ it('V-0250 fy daemon update --check --json runs `fy update`, the verb that repla
   });
 });
 
-it('V-0241 fy daemon setup runs `fy onboard`, the verb that replaced it', () => {
-  expect(runs(['daemon', 'setup'])).toEqual({ line: 'onboard', owner: 'onboarding', rest: [] });
+it('V-0241 fy daemon setup is Onboarding’s own verb, not an alias of the shell', () => {
+  expect(runs(['daemon', 'setup', '--dry-run'])).toEqual({
+    line: 'daemon setup',
+    owner: 'onboarding',
+    rest: ['--dry-run'],
+  });
 });
 
-it('V-0436 fy setup --yes --check runs `fy onboard`, the verb that replaced it', () => {
+it('V-0436 fy setup is the shell’s own verb now, no longer an alias of `fy onboard` (tests/unit/setup.test.ts proves it)', () => {
   expect(runs(['setup', '--yes', '--check'])).toEqual({
-    line: 'onboard',
-    owner: 'onboarding',
+    line: 'setup',
+    owner: 'shell',
     rest: ['--yes', '--check'],
   });
+  expect(table.entries.find(entry => entry.line === 'setup')?.alias).toBeUndefined();
 });
 
 it('V-0232 fy daemon import claude runs `fy runtime link`, the verb that replaced it', () => {
   expect(runs(['daemon', 'import', 'claude'])).toEqual({ line: 'runtime link', owner: 'runtimes', rest: ['claude'] });
 });
 
+it('V-0232 fy daemon import codex --name smoke --dry-run hands every word on to `fy runtime link`', () => {
+  expect(runs(['daemon', 'import', 'codex', '--name', 'smoke', '--dry-run'])).toEqual({
+    line: 'runtime link',
+    owner: 'runtimes',
+    rest: ['codex', '--name', 'smoke', '--dry-run'],
+  });
+});
+
 it('the old spellings are the shell’s own, add no verb conflict, and leave the new verbs where they were', () => {
   expect(table.conflicts).toEqual([]);
-  for (const old of ['daemon tunnel', 'daemon update', 'daemon setup', 'daemon import', 'setup'])
+  for (const old of ['daemon tunnel', 'daemon update', 'daemon import'])
     expect(table.entries.find(entry => entry.line === old)).toMatchObject({ owner: 'shell' });
   expect(runs(['tunnel', 'status'])).toMatchObject({ line: 'tunnel status', owner: 'connections' });
   expect(runs(['update'])).toMatchObject({ line: 'update', owner: 'shell' });
   expect(runs(['onboard'])).toMatchObject({ line: 'onboard', owner: 'onboarding' });
+});
+
+it('O18 fy card is the hidden old spelling of fy task: every sub-verb runs the task verb, and no help lists it', () => {
+  expect(runs(['card', 'show', 'F1'])).toEqual({ line: 'task show', owner: 'board', rest: ['F1'] });
+  expect(runs(['card', 'note', 'F1', 'a', 'note'])).toEqual({
+    line: 'task note',
+    owner: 'board',
+    rest: ['F1', 'a', 'note'],
+  });
+  const old = table.entries.find(entry => entry.line === 'card');
+  expect(old).toMatchObject({ owner: 'shell', alias: 'task', hidden: true });
+  expect(table.conflicts).toEqual([]);
+  const help = renderRootHelp('fy', table, {});
+  expect(help).not.toMatch(/^ +card\b/mu);
+  expect(help).toMatch(/^ +task show\b/mu);
+  expect(verbsUnder(table, ['card'])).toEqual([]);
 });

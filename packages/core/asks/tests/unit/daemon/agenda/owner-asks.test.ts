@@ -163,7 +163,7 @@ describe('owner asks', () => {
   it('should drop an item that already references an agenda item, in either spelling', () => {
     // Arrange
     const reply =
-      '- You: answer !A3 on the agenda\n- You: see ?A4\n- You: read the agenda item\n- You: read the agenda item';
+      '- You: answer ^A3 on the agenda\n- You: see ?A4\n- You: read the agenda item\n- You: read the agenda item';
 
     // Act
     const actual = ownerAsks(reply);

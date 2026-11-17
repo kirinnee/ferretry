@@ -52,6 +52,12 @@ const wait = async (ms: number): Promise<void> => {
   await settle();
 };
 
+/** Reload this ferret as the person does with the default choice: press it, then confirm the interruption. */
+const reload = async (root: HTMLElement): Promise<void> => {
+  await click(root, '[data-add-mcp-reload]');
+  if (root.querySelector('[data-add-mcp-reload-confirm]') !== null) await click(root, '[data-add-mcp-reload-confirm]');
+};
+
 const open = async (answers: Answers, over: Record<string, unknown> = {}) => {
   const calls: Call[] = [];
   const closed: string[] = [];
@@ -110,8 +116,8 @@ describe('mcp#0 Add MCP server — project scope', () => {
     expect(text(root, '[data-add-mcp-added="project"]')).toContain('/w/.mcp.json');
     expect(root.textContent).toContain('Marin picks it up after a reload');
     expect(root.textContent).toContain('Claude Code asks once to trust');
-    await click(root, '[data-add-mcp-reload]');
-    expect(calls.find(call => call.route === RESTART)?.body).toEqual({ scope: 'ids', ids: ['f1'] });
+    await reload(root);
+    expect(calls.find(call => call.route === RESTART)?.body).toEqual({ scope: 'ids', ids: ['f1'], when: 'now' });
     expect(calls.find(call => call.route === RESTART)?.headers?.['x-fy-request-id']).toMatch(/^[0-9a-f-]{36}$/);
     expect(closed).toEqual(['closed']);
   });
@@ -235,7 +241,7 @@ describe('mcp#0 Add MCP server — login scope', () => {
     await submit(root);
     await click(root, '[data-add-mcp-sign-in]');
     expect(root.querySelector('[role="alert"]')?.textContent).toContain('This machine didn’t answer');
-    await click(root, '[data-add-mcp-reload]');
+    await reload(root);
     expect(root.querySelector('[role="alert"]')?.textContent).toContain('This machine didn’t answer');
   });
 
@@ -283,6 +289,91 @@ describe('mcp#0 Add MCP server — scope switching', () => {
   });
 });
 
+describe('mcp#1 the owner chooses to restart now or when each ferret is idle (^A525, input 166)', () => {
+  const none = { restarted: [], queued: [], skipped: [], failed: [] };
+  const added = async () => {
+    const made = await open({
+      [PREVIEW_PROJECT]: projectPreview(),
+      [ADD_PROJECT]: projectAdded,
+      [RESTART]: { ...none, restarted: [{ id: 'f1' }] },
+    });
+    await fillCommand(made.root);
+    await submit(made.root);
+    return made;
+  };
+  const FERRETS = 'GET /v1/ferrets';
+  const restartBody = (calls: Call[]) => calls.find(call => call.route === RESTART)?.body;
+
+  it('offers both, with now ticked as v4 restarted at once, and says what each does', async () => {
+    const { root } = await added();
+    const choice = root.querySelector('[data-add-mcp-when]');
+    expect(choice?.textContent).toContain('Restart now');
+    expect(choice?.textContent).toContain('interrupted');
+    expect(choice?.textContent).toContain('When each ferret is idle');
+    expect(choice?.textContent).toContain('Nothing is interrupted');
+    expect(root.querySelector<HTMLInputElement>('input[value="now"]')?.checked).toBe(true);
+    expect(root.querySelector<HTMLInputElement>('input[value="idle"]')?.checked).toBe(false);
+  });
+
+  it('asks before restarting now, says it interrupts the turn, sends nothing until it is confirmed, and Back asks nothing', async () => {
+    const { root, calls, closed } = await added();
+    await click(root, '[data-add-mcp-reload]');
+    expect(text(root, '[data-add-mcp-confirm]')).toContain('Restart Marin now?');
+    expect(text(root, '[data-add-mcp-confirm]')).toContain('current turn interrupted');
+    expect(restartBody(calls)).toBeUndefined();
+    await click(root, 'button:not([data-add-mcp-reload-confirm])');
+    expect(root.querySelector('[data-add-mcp-confirm]')).toBeNull();
+    expect(restartBody(calls)).toBeUndefined();
+    await click(root, '[data-add-mcp-reload]');
+    await click(root, '[data-add-mcp-reload-confirm]');
+    expect(restartBody(calls)).toEqual({ scope: 'ids', ids: ['f1'], when: 'now' });
+    expect(closed).toEqual(['closed']);
+  });
+
+  it('names how many other ferrets the confirmation restarts', async () => {
+    const made = await open(
+      {
+        [LISTING]: { project: null },
+        [PREVIEW_LOGIN]: loginPreview({ ferrets: 3 }),
+        [ADD_LOGIN]: loginAdded,
+        [FERRETS]: [
+          { id: 'f1', name: 'Marin', runtime: 'marin', state: 'idle', harness: 'claude-code', folder: '/w' },
+          { id: 'f2', name: 'Two', runtime: 'marin', state: 'working', harness: 'claude-code', folder: '/w' },
+        ],
+        [RESTART]: { ...none, restarted: [{ id: 'f1' }, { id: 'f2' }] },
+      },
+      { login: 'marin' },
+    );
+    await fillCommand(made.root);
+    await submit(made.root);
+    await click(made.root, '.fy-action-form__check input');
+    await click(made.root, '[data-add-mcp-reload]');
+    expect(text(made.root, '[data-add-mcp-confirm]')).toContain('Restart Marin and 1 other ferret now?');
+  });
+
+  it('when idle: no question, and the request says idle', async () => {
+    const { root, calls } = await added();
+    await click(root, 'input[value="idle"]');
+    await click(root, '[data-add-mcp-reload]');
+    expect(root.querySelector('[data-add-mcp-confirm]')).toBeNull();
+    expect(restartBody(calls)).toEqual({ scope: 'ids', ids: ['f1'], when: 'idle' });
+  });
+
+  it('the choice goes once the answer is queued', async () => {
+    const made = await open({
+      [PREVIEW_PROJECT]: projectPreview(),
+      [ADD_PROJECT]: projectAdded,
+      [RESTART]: { ...none, queued: [{ id: 'f1', name: 'Marin', reason: 'mid-turn' }] },
+    });
+    await fillCommand(made.root);
+    await submit(made.root);
+    await click(made.root, 'input[value="idle"]');
+    await click(made.root, '[data-add-mcp-reload]');
+    expect(made.root.querySelector('[data-add-mcp-when]')).toBeNull();
+    expect(text(made.root, '[data-add-mcp-queued]')).toContain('next idle moment');
+  });
+});
+
 describe('mcp#1 Reload this ferret says what the restart did', () => {
   const none = { restarted: [], queued: [], skipped: [], failed: [] };
 
@@ -294,7 +385,7 @@ describe('mcp#1 Reload this ferret says what the restart did', () => {
     });
     await fillCommand(made.root);
     await submit(made.root);
-    await click(made.root, '[data-add-mcp-reload]');
+    await reload(made.root);
     return made;
   };
 
@@ -374,12 +465,12 @@ describe('mcp#1 Also reload the other ferrets on this login', () => {
 
   it('mcp#1 offers the live ferrets on the same runtime, not this one, not a stopped one, not another runtime', async () => {
     const { root } = await addedOnLogin(none);
-    expect(label(root)).toBe('Also reload the other 2 ferrets on this login now');
+    expect(label(root)).toBe('Also reload the other 2 ferrets on this login');
   });
 
   it('mcp#1 says “ferret” for one other, and offers nothing when the preview says only this ferret runs there', async () => {
     const one = await addedOnLogin(none, [row('f1', 'marin', 'idle'), row('f2', 'marin', 'idle')]);
-    expect(label(one.root)).toBe('Also reload the other 1 ferret on this login now');
+    expect(label(one.root)).toBe('Also reload the other 1 ferret on this login');
     await mounted?.unmount();
     mounted = undefined;
     const alone = await addedOnLogin(none, everyone, loginPreview({ ferrets: 1 }));
@@ -405,15 +496,19 @@ describe('mcp#1 Also reload the other ferrets on this login', () => {
   it('mcp#1 reloads only this ferret until the box is ticked, then sends this ferret and the others by id', async () => {
     const restart = { ...none, restarted: [{ id: 'f1' }, { id: 'f2' }, { id: 'f3' }] };
     const plain = await addedOnLogin(restart);
-    await click(plain.root, '[data-add-mcp-reload]');
-    expect(plain.calls.find(call => call.route === RESTART)?.body).toEqual({ scope: 'ids', ids: ['f1'] });
+    await reload(plain.root);
+    expect(plain.calls.find(call => call.route === RESTART)?.body).toEqual({ scope: 'ids', ids: ['f1'], when: 'now' });
     await mounted?.unmount();
     mounted = undefined;
 
     const all = await addedOnLogin(restart);
     await click(all.root, '.fy-action-form__check input');
-    await click(all.root, '[data-add-mcp-reload]');
-    expect(all.calls.find(call => call.route === RESTART)?.body).toEqual({ scope: 'ids', ids: ['f1', 'f2', 'f3'] });
+    await reload(all.root);
+    expect(all.calls.find(call => call.route === RESTART)?.body).toEqual({
+      scope: 'ids',
+      ids: ['f1', 'f2', 'f3'],
+      when: 'now',
+    });
     expect(all.closed).toEqual(['closed']);
   });
 
@@ -425,7 +520,7 @@ describe('mcp#1 Also reload the other ferrets on this login', () => {
       failed: [],
     });
     await click(root, '.fy-action-form__check input');
-    await click(root, '[data-add-mcp-reload]');
+    await reload(root);
     expect(closed).toEqual([]);
     expect(text(root, '[data-add-mcp-queued]')).toBe(
       'Marin reloaded. Other ferrets: 1 reloaded, 1 waits for its next idle moment.',
@@ -442,7 +537,7 @@ describe('mcp#1 Also reload the other ferrets on this login', () => {
       failed: [{ id: 'f1', reason: 'the pane did not answer' }],
     });
     await click(root, '.fy-action-form__check input');
-    await click(root, '[data-add-mcp-reload]');
+    await reload(root);
     expect(closed).toEqual([]);
     expect(root.querySelector('[role="alert"]')?.textContent).toContain(
       'could not be reloaded: the pane did not answer. Other ferrets: 2 reloaded.',
@@ -458,13 +553,13 @@ describe('mcp#1 Also reload the other ferrets on this login', () => {
       failed: [{ id: 'f1', reason: 'the pane did not answer' }],
     });
     await click(root, '.fy-action-form__check input');
-    await click(root, '[data-add-mcp-reload]');
+    await reload(root);
     expect(root.querySelector('.fy-action-form__check')).toBeNull();
-    await click(root, '[data-add-mcp-reload]');
+    await reload(root);
     const bodies = calls.filter(call => call.route === RESTART).map(call => call.body);
     expect(bodies).toEqual([
-      { scope: 'ids', ids: ['f1', 'f2', 'f3'] },
-      { scope: 'ids', ids: ['f1'] },
+      { scope: 'ids', ids: ['f1', 'f2', 'f3'], when: 'now' },
+      { scope: 'ids', ids: ['f1'], when: 'now' },
     ]);
   });
 
@@ -479,12 +574,13 @@ describe('mcp#1 Also reload the other ferrets on this login', () => {
       ],
     });
     await click(root, '.fy-action-form__check input');
-    await click(root, '[data-add-mcp-reload]');
-    expect(label(root)).toBe('Also reload the other 1 ferret on this login now');
-    await click(root, '[data-add-mcp-reload]');
+    await reload(root);
+    expect(label(root)).toBe('Also reload the other 1 ferret on this login');
+    await reload(root);
     expect(calls.filter(call => call.route === RESTART).map(call => call.body)[1]).toEqual({
       scope: 'ids',
       ids: ['f1', 'f3'],
+      when: 'now',
     });
   });
 });

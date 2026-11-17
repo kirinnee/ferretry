@@ -7,9 +7,10 @@ import { defineState, SessionModes } from '@ferretry/kernel/contract';
 import { definePlugin, memberRoute, panel, route, screen, verb } from '@ferretry/kernel/manifest';
 import { AccessPort } from '@ferretry/plugin-access/contract';
 import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
+import { MCP_INSTALL_SLOT, MCP_ROW_SLOT, McpPort } from '@ferretry/plugin-mcp/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
-import { SKILLS_ADD_SLOT, SkillsPort } from '@ferretry/plugin-skills/contract';
+import { SKILLS_ADD_SLOT, SKILLS_ROW_SLOT, SkillsPort } from '@ferretry/plugin-skills/contract';
 import {
   AUDIT,
   CATALOGS_WORDS,
@@ -77,6 +78,8 @@ export default definePlugin({
     projects: ProjectsPort,
     skills: SkillsPort,
     runtimes: RuntimesPort,
+    // MCP: the app half contributes to the `mcp.row` and `mcp.install` slots and reads their props shape; off, the tab has no such controls.
+    mcp: McpPort,
   },
   provides: { catalogs: CatalogsPort, shareWindow: ShareWindowPort },
 
@@ -573,7 +576,7 @@ export default definePlugin({
           },
           { flag: '--unbound <placeholder>', help: 'leave a placeholder unfilled (repeatable) (default: [])' },
           { flag: '--older', help: 'allow installing an older version than the one installed' },
-          { flag: '--yes', help: 'do not ask before installing' },
+          { flag: '-y, --yes', help: 'do not ask before installing' },
           { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
         ],
       }),
@@ -586,7 +589,7 @@ export default definePlugin({
         summary: 'remove one install, and only the files it wrote',
         args: [{ name: 'installId', help: 'an install id from "catalog installs"' }],
         options: [
-          { flag: '--yes', help: 'do not ask before removing' },
+          { flag: '-y, --yes', help: 'do not ask before removing' },
           { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
         ],
       }),
@@ -773,6 +776,11 @@ export default definePlugin({
     panels: [
       panel(SKILLS_ADD_SLOT, { id: 'add-skills', order: 10 }),
       panel(ACTIONS_ROW_SLOT, { id: 'add-skills-row', order: 20 }),
+      // Publish, Uninstall and "installed from" on each skill's row: Skills offers `skills.row`, Catalogs draws into it.
+      panel(SKILLS_ROW_SLOT, { id: 'skills-row', order: 10 }),
+      // The same on each MCP server's row and in the MCP tab's header ("Install from a file…"): MCP offers, Catalogs draws.
+      panel(MCP_ROW_SLOT, { id: 'mcp-row', order: 10 }),
+      panel(MCP_INSTALL_SLOT, { id: 'mcp-install', order: 10 }),
     ],
     screens: [
       screen('sharing', { path: 'sharing/:tab?', nav: { label: 'Sharing', icon: 'share-2', order: 20 } }),

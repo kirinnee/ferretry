@@ -3,14 +3,15 @@
  * the housekeeping lane's opening (J-0186), the configuration watcher's interval, backstop and debounce
  * (J-0109, J-0146, J-0265, J-0266), the host arming the configuration load and watcher at boot (J-0066), and the
  * spawn deadline that kills a child (J-0172, today's git runner deadline, which 5.0 hands to the kernel's spawn).
- * Time is driven by hand; the one real child is killed within tens of milliseconds.
+ * Time is driven by hand; the one real child is killed at its deadline (how fast: `tests/perf/parity/jobs.test.ts`).
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { milliseconds } from '@ferretry/std';
 import { AdmissionPort } from '../../../contract/bound.ts';
-import type { Cancel } from '../../../contract/ports.ts';
+import type { Cancel, WorkerHandle, WorkersPort } from '../../../contract/ports.ts';
 import type { ConfigTreeEvents } from '../../../host/config/watcher.ts';
 import {
   CONFIG_WATCH_BACKSTOP_MS,
@@ -18,10 +19,13 @@ import {
   CONFIG_WATCH_INTERVAL_MS,
 } from '../../../host/config/watcher.ts';
 import { bootHost, type HostOptions, type RunningHost } from '../../../host/host.ts';
-import { bunSpawn } from '../../../host/adapters/process.ts';
+import { systemClock } from '../../../host/adapters/clock.ts';
+import { nodeTempDirs } from '../../../host/adapters/temp-dir.ts';
+import { bunSpawn, bunWorkers } from '../../../host/adapters/process.ts';
+import { runPluginChecks } from '../../../host/check-plugins.ts';
 import { DEFAULT_BACKGROUND_DELAY_MS, JobRunner, parseBackgroundDelay } from '../../../host/jobs.ts';
-import { realAdapters } from '../../../host/wiring.ts';
-import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
+import { fileLogSink, realAdapters } from '../../../host/wiring.ts';
+import { definePlugin, implementDaemon, type DaemonImplementation } from '../../../manifest/index.ts';
 import { fixedClock } from '../../../testing/clock.ts';
 import { configHarness, updatesDef } from '../host-config/support.ts';
 import { recordingAdmission, silentLog } from '../host/fixtures.ts';
@@ -349,7 +353,6 @@ describe('the host arms the configuration', () => {
 describe('the spawn deadline', () => {
   test('J-0172 a child still running at its deadline is killed with SIGKILL and the answer says it timed out', async () => {
     const spawn = bunSpawn({ PATH: process.env.PATH ?? '' });
-    const started = Date.now();
     // The child ignores SIGTERM and says who it is, so only SIGKILL can have ended it.
     const answer = await spawn.runBytes(
       process.execPath,
@@ -357,7 +360,7 @@ describe('the spawn deadline', () => {
         '-e',
         "process.on('SIGTERM', () => {}); process.stdout.write(String(process.pid)); setInterval(() => {}, 1_000);",
       ],
-      // Long enough for a fresh `bun -e` to start and write its pid on a loaded runner; far inside the five-second bound below.
+      // Long enough for a fresh `bun -e` to start and write its pid on a loaded runner; the speed bound is the perf tier's.
       { timeout: milliseconds(2_000) },
     );
     expect(answer.timedOut).toBe(true);
@@ -376,8 +379,6 @@ describe('the spawn deadline', () => {
     const survived = alive();
     if (survived) process.kill(pid, 'SIGKILL');
     expect(survived).toBe(false);
-    // Killed at the deadline, nowhere near the child's own thirty seconds.
-    expect(Date.now() - started).toBeLessThan(5_000);
   });
 
   test('J-0172 a child that finishes inside its deadline is not marked timed out', async () => {
@@ -388,5 +389,139 @@ describe('the spawn deadline', () => {
     expect(answer.timedOut).toBe(false);
     expect(answer.exitCode).toBe(0);
     expect(new TextDecoder().decode(answer.stdout)).toBe('done');
+  });
+});
+
+describe('the runtime timers the kernel replaced', () => {
+  test('J-0093 J-0175 clock.after runs its callback once, as handed over, when due; cancelled it never runs (no activity ledger)', async () => {
+    const clock = fixedClock();
+    const ran: string[] = [];
+    const cancel = clock.after(milliseconds(50), () => void ran.push('due'));
+    const cancelled = clock.after(milliseconds(50), () => void ran.push('cancelled'));
+    cancelled();
+    await clock.advance(49);
+    expect(ran).toEqual([]);
+    await clock.advance(1);
+    await clock.advance(500);
+    expect(ran).toEqual(['due']);
+    cancel();
+    // The real clock is the same timer: it fires once, and a cancelled one stays quiet.
+    const real = systemClock();
+    const fired: string[] = [];
+    real.after(milliseconds(5), () => void fired.push('fired'));
+    real.after(milliseconds(5), () => void fired.push('cancelled'))();
+    await real.sleep(milliseconds(60));
+    expect(fired).toEqual(['fired']);
+  });
+
+  test('J-0153 a log record is one JSON line appended at once and in call order: nothing is queued, so nothing is drained or late', () => {
+    const lines: string[] = [];
+    const sink = fileLogSink(line => void lines.push(line));
+    for (const message of ['one', 'two', 'three']) sink({ level: 'info', scope: 'kernel', message });
+    // Every line is out before the call returns: there is no writer to wait for.
+    expect(lines).toHaveLength(3);
+    expect(lines.every(line => line.endsWith('\n'))).toBe(true);
+    expect(lines.map(line => (JSON.parse(line) as { message: string }).message)).toEqual(['one', 'two', 'three']);
+  });
+
+  test('J-0165 a worker that never answers the probe is reported once the kernel deadline passes, and is terminated', async () => {
+    const clock = fixedClock();
+    const terminated: string[] = [];
+    const workers: WorkersPort = {
+      start: (url): WorkerHandle => ({
+        post: () => {},
+        onMessage: () => () => {},
+        onExit: () => () => {},
+        terminate: async () => void terminated.push(url.href),
+      }),
+    };
+    const manifest = definePlugin({
+      id: 'w',
+      title: 'w',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      workers: ['housekeeping'],
+    });
+    const implementation = {
+      half: 'daemon',
+      manifest,
+      build: () => ({}),
+      workers: { housekeeping: new URL('file:///h.ts') },
+    } as unknown as DaemonImplementation;
+    const said: string[] = [];
+    const done = runPluginChecks(
+      {
+        implementations: [implementation],
+        facts: { home: '/h', host: '127.0.0.1', port: 9123, version: '5.0.0', platform: 'linux', arch: 'x64' },
+        workers,
+        tempDirs: nodeTempDirs('/not-the-state-home'),
+        clock,
+        workerTimeoutMs: 1_000,
+      },
+      line => void said.push(line),
+    );
+    await flush();
+    await clock.advance(999);
+    await flush();
+    expect(said).toEqual([]);
+    await clock.advance(1);
+    await done;
+    expect(said).toEqual(['workers      ! housekeeping did not start — no answer within 1000 ms.']);
+    expect(terminated).toEqual(['file:///h.ts']);
+  });
+});
+
+describe('the worker thread the kernel starts', () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
+  });
+
+  /** A real worker that answers `{ id }` after `delay` ms, started the way a plugin's worker is. */
+  async function start() {
+    const dir = await mkdtemp(`${tmpdir()}/fy-worker-`);
+    dirs.push(dir);
+    const file = `${dir}/late.worker.ts`;
+    await writeFile(
+      file,
+      'self.onmessage = e => { setTimeout(() => postMessage({ id: e.data.id }), e.data.delay); };\n',
+    );
+    const handle = bunWorkers().start(pathToFileURL(file), { name: 'late' });
+    const answers: number[] = [];
+    const exits: number[] = [];
+    handle.onMessage(message => void answers.push((message as { id: number }).id));
+    handle.onExit(exit => void exits.push(exit.code));
+    const until = async (done: () => boolean): Promise<void> => {
+      for (let wait = 0; wait < 100 && !done(); wait += 1) await new Promise(resolve => setTimeout(resolve, 20));
+    };
+    return { handle, answers, exits, until };
+  }
+
+  test('J-0161 an idle worker is not ended by the kernel: it stays up and answers later, and only terminate ends it', async () => {
+    const worker = await start();
+    worker.handle.post({ id: 1, delay: 0 });
+    await worker.until(() => worker.answers.length === 1);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(worker.exits).toEqual([]);
+    worker.handle.post({ id: 2, delay: 0 });
+    await worker.until(() => worker.answers.length === 2);
+    expect(worker.answers).toEqual([1, 2]);
+    await worker.handle.terminate();
+    await worker.until(() => worker.exits.length > 0);
+    expect(worker.exits).toHaveLength(1);
+  });
+
+  test('J-0169 a slow request is not failed by the kernel: no per-request deadline, the answer arrives whenever the plugin sends it', async () => {
+    const worker = await start();
+    worker.handle.post({ id: 7, delay: 300 });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(worker.answers).toEqual([]);
+    expect(worker.exits).toEqual([]);
+    await worker.until(() => worker.answers.length === 1);
+    expect(worker.answers).toEqual([7]);
+    expect(worker.exits).toEqual([]);
+    await worker.handle.terminate();
   });
 });

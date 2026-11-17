@@ -68,6 +68,9 @@ export function summarizeToolInput(name: string, input: unknown): string {
   }
 }
 
+/** The summary of an open tool whose call the transcript window does not hold: nothing is known of what it runs. */
+export const COMMAND_NOT_FOUND = '(command not found in chat tail)';
+
 /** Joins in-flight tool IDs with transcript records; missing evidence remains unknown. */
 export function joinOpenTools(
   openToolIds: readonly string[],
@@ -87,7 +90,7 @@ export function joinOpenTools(
     return {
       toolUseId,
       name,
-      summary: record ? summarizeToolInput(name, input) : '(command not found in chat tail)',
+      summary: record ? summarizeToolInput(name, input) : COMMAND_NOT_FOUND,
       startedAt: record?.timestamp,
       verdict: hasCommand ? classifyCommand((input as { readonly command: string }).command) : classifyToolName(name),
     };

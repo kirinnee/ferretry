@@ -226,7 +226,7 @@ export class PhoneApprovalService {
       why: words.agendaWhy,
       context: [`Asked by ${held.approval.agentName}.`, words.warning].join('\n'),
       howToResolve:
-        'Approve the sign-in on your phone if you expected it; Ferretry sees it go through. If you did not, tap Not me on the card and deny it on your phone.',
+        'Approve the sign-in on your phone if you expected it; Ferretry sees it go through. If you did not, tap Not me on the item and deny it on your phone.',
     });
     if (!card.ok) throw new PhoneApprovalError('unavailable', card.message);
     const kept: Held = { ...held, askId: card.id };

@@ -2,7 +2,7 @@ import { type Instant, InstantSchema } from '@ferretry/std';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { type Question, QUESTION_STATE } from '../../../contract/index.ts';
 import { type AskedQuestion, parseAskedQuestion } from '../lib/asked.ts';
-import type { PendingQuestion } from '../../seams/protocol.ts';
+import type { PendingQuestion } from '@ferretry/core-mailbox/contract';
 
 /**
  * The one lane every change to a ferret's `question.json` runs in, keyed by the ferret: the writer, the exact-id clear
@@ -23,7 +23,8 @@ export interface QuestionLane {
  * stored whole — a payload that does not parse or names another transcript — clears it, so an earlier question is never shown while a different form is open, and the
  * ferret's question is then what its transcript says (today's fallback when the hook's evidence is refused). A call that
  * asks SEVERAL questions is one form and is stored whole (the first question and `more`), so it is shown and its sends are
- * guarded like any other. Answers the question written, or `undefined`. It runs in the ferret's {@link QuestionLane}, like the clear and the withdrawal.
+ * guarded like any other. (A question read off the PANE holds only the tab on screen; the transcript's call for it
+ * upgrades it to the whole form through {@link writeProjectedQuestion}: `paneQuestionUpgrade`.) Answers the question written, or `undefined`. It runs in the ferret's {@link QuestionLane}, like the clear and the withdrawal.
  */
 export async function writeAskedQuestion(
   state: StatePort,

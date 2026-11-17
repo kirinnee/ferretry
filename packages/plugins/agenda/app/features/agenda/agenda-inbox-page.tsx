@@ -112,7 +112,8 @@ import {
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import type { DaemonConnection, DaemonId } from '../../shell.ts';
 import { daemonSessionScope } from '../../shell.ts';
-import { composerQuoteTarget, escapeCloses } from '../../shell.ts';
+import { composerQuoteTarget, escapeCloses, ferretScopeOf } from '../../shell.ts';
+import type { AnswerFilePorts } from '../../lib/answer-file-ports.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import {
   choiceLabel,
@@ -236,7 +237,7 @@ const scopeOf = (card: InboxCard) => daemonSessionScope({ daemonId: card.daemonI
  * scope (Conversation's, in the `agenda.conversation` slot); with none, the answer goes alone.
  */
 const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard, action: InboxAction) => {
-  const composer = composerQuoteTarget(scopeOf(card));
+  const composer = composerQuoteTarget(ferretScopeOf(scopeOf(card)));
   const draft = composer?.draft() ?? '';
   const sent = withComposerNote(action, composerNoteFor(card.item, draft));
   answerCard(host, card, sent);
@@ -248,7 +249,7 @@ const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card
  * window. Throws the sentence the page shows when Send must wait (empty fields, asked once).
  */
 const answerForm = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard): void => {
-  const composer = composerQuoteTarget(scopeOf(card));
+  const composer = composerQuoteTarget(ferretScopeOf(scopeOf(card)));
   sendForm(card.key, card.item, composer?.draft() ?? '', action => answerCard(host, card, action));
   composer?.replaceDraft('');
 };
@@ -291,7 +292,7 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
 }
 
 /** Where a touch item view swipes on its own: its card's top bar (↓ Skip) and its answer row (← ↑ → ↓). */
-const VIEW_GESTURES = '[data-agenda-card-top], [data-agenda-quick-replies]';
+const VIEW_GESTURES = ['[data-agenda-card-top]', '[data-agenda-quick-replies]'].join(', ');
 
 interface OpenItemPlace {
   readonly index: number;
@@ -515,7 +516,7 @@ function CardTools({
 }) {
   return (
     // biome-ignore lint/a11y/useSemanticElements: a fieldset would bring its border and min-width into a flex row of buttons
-    <div aria-label="Put this card aside" className="fy-inbox-tools" data-inbox-card-tools="" role="group">
+    <div aria-label="Put this item aside" className="fy-inbox-tools" data-inbox-card-tools="" role="group">
       <button className="kt-btn kt-btn--sm" data-inbox-tool="skip" onClick={skip} type="button">
         Skip
       </button>
@@ -531,20 +532,6 @@ function CardTools({
       ) : null}
     </div>
   );
-}
-
-/**
- * How a page takes files with a "Not good" (a picture of what went wrong): whether the card's machine takes them with
- * an answer, and the upload into the item's own conversation (the daemon carries them to the card's ferret). A host
- * that can upload hands these in; absent either, the box is words alone.
- *
- * @pending agenda: answer uploads and push delivery run through ports
- */
-export interface AnswerFilePorts {
-  readonly answerFiles?: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
-  readonly uploadAttachment?:
-    | ((daemon: DaemonConnection, sessionId: string, file: File) => Promise<{ readonly id: string }>)
-    | undefined;
 }
 
 /** Whether this machine takes files with an answer, once it has said. */
@@ -756,7 +743,7 @@ function QueueEnd({ remaining, onReview }: { readonly remaining: number; readonl
         </span>
         <h2 className="fy-attn-end__title">All caught up for now</h2>
         <p className="fy-attn-end__text">
-          Skipped cards wait in the inbox — {remaining} {remaining === 1 ? 'is' : 'are'} still open.
+          Skipped items wait in the inbox — {remaining} {remaining === 1 ? 'is' : 'are'} still open.
         </p>
       </div>
     );

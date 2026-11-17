@@ -1,0 +1,10 @@
+{
+  "entry": [],
+  "project": ["**/*.{ts,tsx}", "!tests/**"],
+  "ignore": [
+    "daemon/holds/site.ts",
+    "daemon/proxy/firewall/marker-reader.ts",
+    "daemon/proxy/firewall/state.ts",
+    "daemon/proxy/wire/firewall.ts"
+  ]
+}

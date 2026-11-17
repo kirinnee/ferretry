@@ -141,7 +141,7 @@ function GateOptions({
   const others = draft.lanes.filter(entry => entry.id !== laneId);
   return (
     <div className="grid gap-xs" data-lane-gate={laneId}>
-      <p className="m-0 text-meta text-muted">The answers you can give a card here, and where each one sends it.</p>
+      <p className="m-0 text-meta text-muted">The answers you can give a task here, and where each one sends it.</p>
       <ul className="m-0 grid list-none gap-xs p-0">
         {options.map((option, position) => {
           const ordinal = `option ${String(position + 1)} of ${lane.name}`;
@@ -330,7 +330,7 @@ function LaneRow({
           <label
             className="flex items-center gap-xs text-meta text-muted"
             htmlFor={`${base}-gate`}
-            title="The owner must move cards into this lane."
+            title="The owner must move tasks into this lane."
           >
             <input
               id={`${base}-gate`}
@@ -389,7 +389,7 @@ function LaneRow({
       ) : null}
       <details data-lane-triggers={lane.id}>
         <summary className="cursor-pointer text-meta text-muted">
-          Moves a card in when:{' '}
+          Moves a task in when:{' '}
           {triggers.length === 0
             ? 'nothing (you move it by hand)'
             : triggers.map(trigger => TRIGGER_LABELS[trigger]).join(', ')}
@@ -408,7 +408,7 @@ function LaneRow({
               <ToggleTick on={triggers.includes(trigger)} />
               {TRIGGER_LABELS[trigger]}
               {isReportedTrigger(trigger) ? (
-                <span className="font-normal text-muted"> · reported with fy card trigger</span>
+                <span className="font-normal text-muted"> · reported with fy task trigger</span>
               ) : null}
             </button>
           ))}
@@ -438,10 +438,10 @@ function DeletePrompt({
       aria-label={`Delete ${lane?.name ?? laneId}`}
       data-lane-delete={laneId}
     >
-      <span className="text-ui text-fg">Delete “{lane?.name ?? laneId}”. Its cards go to</span>
+      <span className="text-ui text-fg">Delete “{lane?.name ?? laneId}”. Its tasks go to</span>
       <select
         className={fieldClass}
-        aria-label="Where its cards go"
+        aria-label="Where its tasks go"
         value={target}
         onChange={event => setTarget(event.currentTarget.value)}
       >
@@ -480,7 +480,7 @@ function WorkflowVariants({
   return (
     <section className="grid gap-xs" aria-label="Workflow variants" data-lane-variants="">
       <h2 className="m-0 text-title font-semibold text-fg">Workflows</h2>
-      <p className="m-0 text-meta text-muted">The lanes each kind of work walks. A card skips the lanes left out.</p>
+      <p className="m-0 text-meta text-muted">The lanes each kind of work walks. A task skips the lanes left out.</p>
       {WORKFLOWS.map((workflow: Workflow) => {
         const walked = workflowLanes(draft, workflow);
         return (
@@ -592,7 +592,7 @@ function LaneSetEditor({
             )}
             {confirming && (
               <span className="text-meta text-fg" role="alert" data-lane-confirm="">
-                Accepting does every change above now, as you: cards move and may close.
+                Accepting does every change above now, as you: tasks move and may close.
               </span>
             )}
           </span>

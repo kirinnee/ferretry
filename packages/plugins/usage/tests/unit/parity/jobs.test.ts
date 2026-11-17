@@ -1,8 +1,11 @@
 /**
  * Parity rows J-0010, J-0020, J-0028, J-0041, J-0081, J-0082, J-0086, J-0090, J-0108, J-0115, J-0124, J-0138, J-0163,
- * J-0181, J-0263, J-0264, J-0268 (docs/design/rebuild-parity.md, usage).
+ * J-0181, J-0227, J-0263, J-0264, J-0268 (docs/design/rebuild-parity.md, usage).
  */
 import { describe, expect, test } from 'bun:test';
+import type { LoginView } from '@ferretry/plugin-logins/contract';
+import { LoginChanged } from '@ferretry/plugin-logins/contract';
+import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { milliseconds } from '@ferretry/std';
 import { InsightsChanged } from '../../../contract/index.ts';
 import { HttpAnalyticsPricingFeed } from '../../../daemon/adapters/analytics/pricing-feed-source.ts';
@@ -42,6 +45,22 @@ describe('the jobs the kernel arms', () => {
     await host.runJob('usage-ingest');
 
     expect(host.published.filter(entry => entry.event === InsightsChanged.name)).toHaveLength(1);
+    await host.stop();
+  });
+
+  test('J-0227 an ended turn nudges one ingestion pass thirty seconds on, and the fifteen-minute job stays the backstop', async () => {
+    const { host, scheduled, hooks } = await usageHost();
+    const changed = () => host.published.filter(entry => entry.event === InsightsChanged.name).length;
+    expect(scheduled.find(job => job.id === 'usage-ingest')?.schedule).toEqual({ every: milliseconds(15 * 60_000) });
+
+    hooks['turn.ended']?.({ ferret: 'done', turn: 't1', outcome: 'completed', endedAt: '2026-11-16T09:00:00.000Z' });
+    await host.clock.advance(29_999);
+    await host.settle();
+    expect(changed()).toBe(0);
+
+    await host.clock.advance(1);
+    await host.settle();
+    expect(changed()).toBe(1);
     await host.stop();
   });
 
@@ -112,7 +131,19 @@ describe('the jobs the kernel arms', () => {
     expect(watches).toBe(2);
   });
 
-  test.skip('J-0028 the usage feed re-reads when the published manifest file changes — pending port: a Logins change event the feed can invalidate on (the published manifest file is Logins’, and the feed reads its list through the port per refresh)', () => {});
+  test('J-0028 a login that comes or goes shows in the feed at once, not after the cache interval', async () => {
+    const { host, logins } = await usageHost();
+    const agents = async () =>
+      (await host.request('GET', '/v1/usage')).json<{ accounts: { agent: string }[] }>().accounts.map(row => row.agent);
+    expect(await agents()).toEqual(['work']);
+
+    logins.setLogins([sampleLogin('work'), sampleLogin('home')]);
+    expect(await agents()).toEqual(['work']);
+
+    host.emit(LoginChanged, { loginId: 'home' as LoginView['id'], change: 'added' });
+    await host.settle();
+    expect((await agents()).sort()).toEqual(['home', 'work']);
+    await host.stop();
+  });
   test.skip('J-0115 the event-loop lag meter beats every interval and feeds the performance report — pending port: the kernel hands Usage no event-loop reading yet (the profile report says so in its limitations)', () => {});
-  test.skip('J-0163 timers started outside a live activity are wrapped so they do not hold the daemon busy — not Usage’s: the host’s live-activity timers (Ferrets/kernel), listed under usage in the parity table', () => {});
 });

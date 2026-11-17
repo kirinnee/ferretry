@@ -170,7 +170,7 @@ describe('StateLeaseDisk files', () => {
 });
 
 describe('StateLeaseDisk lock', () => {
-  it('should make the lock beside the leases as an owner-only file and run the work', async () => {
+  it('F-0023 should make the lock beside the leases as an owner-only file and run the work', async () => {
     // Arrange
     const { port, pool } = await home();
     const disk = new StateLeaseDisk(port, real);

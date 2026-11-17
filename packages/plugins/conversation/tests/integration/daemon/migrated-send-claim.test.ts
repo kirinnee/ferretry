@@ -17,8 +17,8 @@ import type { Instant } from '@ferretry/std';
 import { CONVERSATION_STATE, SENDS_STATE } from '../../../contract/index.ts';
 import { StateSendLedger } from '../../../daemon/delivery/adapters/state-send-ledger.ts';
 import { EntriesSendEvidence } from '../../../daemon/delivery/adapters/entries-send-evidence.ts';
-import { SendTracker } from '../../../daemon/delivery/lib/tracker.ts';
-import { defaultSendTrackerSettings } from '../../../daemon/delivery/lib/tracking.ts';
+import { SendTracker } from '../../../../../core/mailbox/daemon/lib/delivery/tracker.ts';
+import { defaultSendTrackerSettings } from '@ferretry/core-mailbox/contract';
 import type { SessionId } from '../../../daemon/seams/ferret-id.ts';
 import { memoryStatePort } from '../../support/state.ts';
 

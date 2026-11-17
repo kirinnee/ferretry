@@ -321,16 +321,12 @@ describe('what agents may control (limits.yaml agentControl)', () => {
 
 describe('the live read (GET /v1/ferrets/:ferretId/live)', () => {
   test('carries a turn count and a context reading, each of which may be unstated (null, never zero)', () => {
-    expect(FerretLiveReadSchema.parse({ turns: 7, contextPercent: 62.5, contextWindow: 200_000 })).toEqual({
-      turns: 7,
-      contextPercent: 62.5,
-      contextWindow: 200_000,
-    });
-    expect(FerretLiveReadSchema.parse({ turns: null, contextPercent: null, contextWindow: null })).toEqual({
-      turns: null,
-      contextPercent: null,
-      contextWindow: null,
-    });
+    expect(
+      FerretLiveReadSchema.parse({ turns: 7, contextPercent: 62.5, contextWindow: 200_000, contextTokens: 125_000 }),
+    ).toEqual({ turns: 7, contextPercent: 62.5, contextWindow: 200_000, contextTokens: 125_000 });
+    expect(
+      FerretLiveReadSchema.parse({ turns: null, contextPercent: null, contextWindow: null, contextTokens: null }),
+    ).toEqual({ turns: null, contextPercent: null, contextWindow: null, contextTokens: null });
   });
 
   test('is no wider than those three readings, and refuses a reading out of range', () => {

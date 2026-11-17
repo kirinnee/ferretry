@@ -2,7 +2,7 @@
  * App-half parity (rebuild-parity.tsv, S rows of the Warden page and its Settings tab). Each name starts with the row
  * it covers. Where today's row lives in the app shell (a host route, the page-slot map, the machine-panel grouping,
  * the clone and settings-search catalogs) the name says so and the test claims only what the plugin declares for the
- * shell to read. Where a row's new owner is another plugin (the usage, browsers and conversation triggers) the test
+ * shell to read. Where a row's new owner is another plugin (the browsers and conversation triggers) the test
  * claims only the Warden form's own catalog entry for it.
  */
 
@@ -11,7 +11,7 @@ import { interact, mount, must } from '@ferretry/app/testing';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { createElement, type FunctionComponent, Suspense } from 'react';
 import { renderToString } from 'react-dom/server';
-import { WARDEN_AUTO_MOVE_TRIGGERS, WARDEN_CONFIG } from '../../../contract/index.ts';
+import { WARDEN_AUTO_MOVE_TRIGGERS, WARDEN_CONFIG, WARDEN_DIALOG_RULES } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
 import app from '../../../app/index.ts';
 import { WardenCombinedTotals } from '../../../app/features/warden/warden-combined-totals.tsx';
@@ -279,13 +279,13 @@ describe('app half: the screen and the Settings tab', () => {
   });
 
   test('S-0577 S-0579 the clone-settings file list and the settings-search catalog are shell catalogs; the plugin declares the warden config document and tab they read', () => {
-    expect(manifest.data.config).toEqual([WARDEN_CONFIG]);
+    expect(manifest.data.config).toEqual([WARDEN_CONFIG, WARDEN_DIALOG_RULES]);
     expect(tabDecl).toMatchObject({ id: 'warden', order: 60 });
   });
 });
 
 describe('app half: the catalog entries of the Warden settings form', () => {
-  test('S-0453 S-0532 budget_exceeded and rate_limited: the form lists both move triggers, which the usage plugin owns', async () => {
+  test('S-0453 S-0532 budget_exceeded and rate_limited: the form says both move triggers in its own words (the Warden owns them)', async () => {
     expect(WARDEN_AUTO_MOVE_TRIGGERS).toEqual(expect.arrayContaining(['budget_exceeded', 'rate_limited']));
     const text = await formText();
     expect(text).toContain('Its login passes its hard spend budget');

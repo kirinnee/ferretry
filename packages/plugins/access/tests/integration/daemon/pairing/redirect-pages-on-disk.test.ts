@@ -23,6 +23,10 @@ import {
   onProcessExit,
 } from '../../../../cli/adapters/pair/browser-opener.ts';
 import { sweepPairingRedirectState } from '../../../../cli/adapters/pairing-redirect-sweep.ts';
+import {
+  type PairingRedirectWriteState,
+  stateRedirectWriter,
+} from '../../../../daemon/adapters/pairing/redirect-writer.ts';
 import { pairingRedirectBoot } from '../../../../daemon/adapters/pairing/boot-redirect-sweep.ts';
 import manifest from '../../../../manifest.ts';
 
@@ -67,6 +71,15 @@ async function disk() {
   return { home, port, tree, leave, left };
 }
 
+/** The CLI's view: it removes through the state, and the DAEMON's writer (over the same disk here) makes the page. */
+const cliOf = (port: StatePort) => ({
+  state: port,
+  make: (page: string) => stateRedirectWriter(port, daemonClock).write(page),
+});
+
+/** The daemon's clock, which never fires here: the sweeps these cases prove are run by hand. */
+const daemonClock = { nowMs: () => Date.now(), after: () => undefined };
+
 const OLD = PAIRING_REDIRECT_STALE_AFTER_MS + 60_000;
 
 describe('the shipped opener, with a stand-in launcher on a private PATH', () => {
@@ -82,8 +95,8 @@ describe('the shipped opener, with a stand-in launcher on a private PATH', () =>
     process.env.PATH = `${bin}:${originalPath ?? ''}`;
     const link = 'https://ferretry.example.invalid/pair#v1;u;f;code=7F3K-Q2ND';
 
-    const opened = await desktopBrowserOpener(await temp('fy-access-statehome-'), port).open(link);
-    const refused = await desktopBrowserOpener(await temp('fy-access-statehome-'), undefined).open(link);
+    const opened = await desktopBrowserOpener(cliOf(port)).open(link);
+    const refused = await desktopBrowserOpener(undefined).open(link);
     // The launcher is a detached child: wait for what it HAS DONE (written its argument), never for a time.
     while (!(await Bun.file(asked).exists())) await Bun.sleep(10);
     const given = await readFile(asked, 'utf8');
@@ -102,7 +115,7 @@ describe('the redirect page the CLI writes into the state tree', () => {
   it('should write it inside a fresh private directory and take both away when discarded', async () => {
     const { port, tree, left } = await disk();
 
-    const page = await createPairingRedirectPage(port, '<p>redirect</p>');
+    const page = await createPairingRedirectPage(cliOf(port), '<p>redirect</p>');
     const written = await readFile(page.file, 'utf8');
     const before = await left();
     await page.discard();
@@ -114,22 +127,71 @@ describe('the redirect page the CLI writes into the state tree', () => {
     should(await left()).deepEqual([]);
   });
 
-  it('should leave nothing behind when the page cannot be written', async () => {
+  it('should have the daemon leave nothing behind when it cannot write the page', async () => {
     const { port, left } = await disk();
-    const failing: Pick<StatePort, 'write' | 'pathOf' | 'remove' | 'removeEmptyDirectory' | 'createPrivateDirectory'> =
-      {
-        write: async () => {
-          throw new Error('the disk is full');
-        },
-        pathOf: (file, name) => port.pathOf(file, name),
-        remove: (file, name) => port.remove(file, name),
-        removeEmptyDirectory: (file, name) => port.removeEmptyDirectory(file, name),
-        createPrivateDirectory: (file, name) => port.createPrivateDirectory(file, name),
-      };
+    const failing: PairingRedirectWriteState = {
+      write: async () => {
+        throw new Error('the disk is full');
+      },
+      remove: (file, name) => port.remove(file, name),
+      removeEmptyDirectory: (file, name) => port.removeEmptyDirectory(file, name),
+      createPrivateDirectory: (file, name) => port.createPrivateDirectory(file, name),
+      list: file => port.list(file),
+      stat: (file, name) => port.stat(file, name),
+    };
 
-    await createPairingRedirectPage(failing, '<p>x</p>').then(
-      () => should.fail(undefined, undefined, 'the write should have failed'),
-      (error: unknown) => should((error as Error).message).equal('the disk is full'),
+    await stateRedirectWriter(failing, daemonClock)
+      .write('<p>x</p>')
+      .then(
+        () => should.fail(undefined, undefined, 'the write should have failed'),
+        (error: unknown) => should((error as Error).message).equal('the disk is full'),
+      );
+
+    should(await left()).deepEqual([]);
+  });
+
+  it('should still report the write failure when the cleanup fails too', async () => {
+    const { port } = await disk();
+    const stuck: PairingRedirectWriteState = {
+      write: async () => {
+        throw new Error('the disk is full');
+      },
+      remove: async () => {
+        throw new Error('busy');
+      },
+      removeEmptyDirectory: async () => {
+        throw new Error('busy');
+      },
+      createPrivateDirectory: (file, name) => port.createPrivateDirectory(file, name),
+      list: file => port.list(file),
+      stat: (file, name) => port.stat(file, name),
+    };
+
+    await stateRedirectWriter(stuck, daemonClock)
+      .write('<p>x</p>')
+      .then(
+        () => should.fail(undefined, undefined, 'the write should have failed'),
+        (error: unknown) => should((error as Error).message).equal('the disk is full'),
+      );
+  });
+
+  it('should take the page away again when its path cannot be named', async () => {
+    const { port, left } = await disk();
+    const cli = {
+      state: {
+        pathOf: () => {
+          throw new Error('no path');
+        },
+        remove: (file: Parameters<typeof port.remove>[0], name?: string) => port.remove(file, name),
+        removeEmptyDirectory: (file: Parameters<typeof port.removeEmptyDirectory>[0], name: string) =>
+          port.removeEmptyDirectory(file, name),
+      },
+      make: (page: string) => stateRedirectWriter(port, daemonClock).write(page),
+    };
+
+    await createPairingRedirectPage(cli, '<p>x</p>').then(
+      () => should.fail(undefined, undefined, 'the path should have failed'),
+      (error: unknown) => should((error as Error).message).equal('no path'),
     );
 
     should(await left()).deepEqual([]);

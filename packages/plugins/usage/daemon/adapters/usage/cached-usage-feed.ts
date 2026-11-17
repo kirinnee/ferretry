@@ -4,6 +4,7 @@ import {
   cachedAccounts,
   decideUsageRead,
   emptyUsageCache,
+  invalidateUsageCache,
   recordUsageRefresh,
   type UsageCacheState,
   type UsageFeedPort,
@@ -26,6 +27,7 @@ export interface CachedUsageFeedOptions {
 export class CachedUsageFeed implements UsageFeedPort {
   private state: UsageCacheState = emptyUsageCache;
   private pending?: Promise<readonly AccountUsage[]>;
+  private invalidations = 0;
   private readonly clock: () => number;
   private readonly refreshMs: number;
 
@@ -73,8 +75,19 @@ export class CachedUsageFeed implements UsageFeedPort {
     }
   }
 
+  /**
+   * The accounts changed (a login signed in or out, was added or removed): the next read probes again instead of
+   * waiting out the interval. The last good snapshot stays, so a probe that fails still answers from it. A refresh
+   * already in flight read the accounts before the change, so it cannot clear this.
+   */
+  invalidate(): void {
+    this.invalidations += 1;
+    this.state = invalidateUsageCache(this.state);
+  }
+
   /** Reads the sources in order and folds the outcome into the cache, which it then answers from. */
   private async refresh(signal?: AbortSignal): Promise<readonly AccountUsage[]> {
+    const seen = this.invalidations;
     let firstDefined: readonly AccountUsage[] | undefined;
     for (const source of this.sources) {
       const accounts = await source.read(signal).catch(() => undefined);
@@ -85,7 +98,8 @@ export class CachedUsageFeed implements UsageFeedPort {
       }
       firstDefined ??= accounts;
     }
-    this.state = recordUsageRefresh(this.state, firstDefined, this.clock(), this.refreshMs);
+    const recorded = recordUsageRefresh(this.state, firstDefined, this.clock(), this.refreshMs);
+    this.state = this.invalidations === seen ? recorded : invalidateUsageCache(recorded);
     return cachedAccounts(this.state);
   }
 }

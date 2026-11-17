@@ -28,6 +28,9 @@ const noYield = async (): Promise<void> => {};
 describe('the session index after a restart with the cache lost (BG-049)', () => {
   test('equals the one before the restart, event pointers included', async () => {
     const before = await fleet(COUNT);
+    // An append records no journal version (another writer may land a line in between); a full read does. The rebuild
+    // reads every journal in full, so the "before" index is brought to the same footing by one reconcile.
+    await before.storage.reconcile();
     const listedBefore = before.storage.listSessions();
     const replayedBefore = await before.storage.replay(idOf(COUNT - 1));
     expect(listedBefore).toHaveLength(COUNT);
@@ -164,6 +167,9 @@ describe('a rebuild with nothing to rebuild (BG-049)', () => {
 
   test('rebuilds only the sessions the index lacks', async () => {
     const world = await fleet(COUNT);
+    // Rows written by an append carry no journal version; the rebuild of a lacking row reads its journal in full and
+    // records one. Settle the index with a full read first so every row carries a version, as a booted daemon's do.
+    await world.storage.reconcile();
     const listed = world.storage.listSessions();
     const lacking = [idOf(3), idOf(41)];
     // Forget two rows, as a partial cache would.

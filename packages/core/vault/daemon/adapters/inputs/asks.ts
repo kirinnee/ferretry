@@ -58,14 +58,14 @@ export class InputAsksAdapter implements InputAgendaPort {
         subject: oneLine(card.ask),
         why: card.ask,
         context: contextOf(card),
-        howToResolve: 'Open the card and type the value in its form. Nothing is sent until you press Send.',
+        howToResolve: 'Open the input and type the value in its form. Nothing is sent until you press Send.',
         raisedBy: { kind: 'daemon' },
         ferret: sessionId,
         ...(card.blocking ? { blocking: true } : {}),
       });
       return { ok: true, id: ask.id as string as AgendaId };
     } catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : 'Asks kept no card for this request' };
+      return { ok: false, message: error instanceof Error ? error.message : 'Asks kept no item for this request' };
     }
   }
 

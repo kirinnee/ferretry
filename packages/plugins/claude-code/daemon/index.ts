@@ -16,6 +16,7 @@ import {
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { ClaudeHarness } from './adapters/claude-harness.ts';
+import { CLAUDE_DIALOG_RULES, DIALOG_NUDGES } from './dialog-rules.ts';
 import { FerretFormPane } from './adapters/ferret-form-pane.ts';
 import { PaneDirectory } from './adapters/tmux-pane.ts';
 import { factsSource, hostFacts, locationSource, npmLatest, probe, spawnRun } from './adapters/update-ports.ts';
@@ -118,6 +119,7 @@ export default implementDaemon(manifest, {
         const directory = await host.home();
         return directory.startsWith('/') ? `${directory.replace(/\/+$/u, '')}/.claude` : '';
       },
+      warn: message => kernel.log.warn(message),
     });
 
     return {
@@ -156,6 +158,8 @@ export default implementDaemon(manifest, {
           () => kernel.config.collection(CLAUDE_CODE_HOOKS as ConfigCollectionDef<HooksItem>),
           listener => kernel.config.watch(CLAUDE_CODE_HOOKS, listener),
         ),
+        // The Warden's read of the screens this plugin draws, and the one thing a ferret is told after one is declined.
+        'warden.dialog-rules.claude:dialog-rules': { rules: CLAUDE_DIALOG_RULES, nudges: DIALOG_NUDGES },
         // A fast start on a model without fast mode is refused before anything is written (today's fyd start refusal);
         // a start that names no model is judged on the model its runtime would launch with, read through Runtimes.
         'start.decide': input => fastStartDecision(input, () => uses.runtimes.current()),

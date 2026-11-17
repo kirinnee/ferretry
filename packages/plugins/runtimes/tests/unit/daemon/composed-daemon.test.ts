@@ -20,7 +20,12 @@ import { type ModelCatalogSourcesView, ModelCatalogSourcesSchema } from '@ferret
 import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
 import type { Instant } from '@ferretry/std';
 import type { KernelPorts } from '@ferretry/kernel/contract';
-import { PROFILE_ITEMS, RuntimeHomeUnreadable, RuntimesPort } from '../../../contract/index.ts';
+import {
+  type MachineBrowserPorts,
+  PROFILE_ITEMS,
+  RuntimeHomeUnreadable,
+  RuntimesPort,
+} from '../../../contract/index.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { endedSeams, fileAssembly } from '../../../daemon/host-assembly.ts';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
@@ -109,7 +114,7 @@ const put = (name: string, extra: Record<string, unknown> = {}) => ({
 /** A `machine.settings` change as a client sends it: every machine setting together, with the ones named here moved. */
 const MACHINE_SETTINGS = (moved: Record<string, unknown>) => ({
   kind: 'machine.settings',
-  agentPermissions: 'auto',
+  agentPermissions: 'skip',
   defaultRuntime: null,
   agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
   browserMode: 'headless',
@@ -361,7 +366,7 @@ describe('a real apply through the composed daemon', () => {
     const { host, world } = await compose();
 
     const staged = await host.request('POST', '/v1/runtimes/proposals', {
-      body: { change: MACHINE_SETTINGS({ agentPermissions: 'skip', publicUsageFeed: true }) },
+      body: { change: MACHINE_SETTINGS({ agentPermissions: 'auto', publicUsageFeed: true }) },
     });
 
     expect(staged.status).toBeGreaterThanOrEqual(400);
@@ -375,13 +380,13 @@ describe('a real apply through the composed daemon', () => {
       agentPermissions: string;
       publicUsageFeed: boolean;
     }>();
-    expect(machine).toMatchObject({ agentPermissions: 'auto', publicUsageFeed: false });
+    expect(machine).toMatchObject({ agentPermissions: 'skip', publicUsageFeed: false });
   });
 
-  it('C1 refuses the loosened permission mode for the owner as for anyone, and no later apply publishes bypassPermissions', async () => {
+  it('C1 refuses an agent-permissions change for the owner as for anyone, and a later apply publishes the Skip default, never Auto', async () => {
     const { host, world } = await compose();
     await host.request('POST', '/v1/runtimes/proposals', {
-      body: { change: MACHINE_SETTINGS({ agentPermissions: 'skip' }) },
+      body: { change: MACHINE_SETTINGS({ agentPermissions: 'auto' }) },
     });
 
     const applied = await stageAndApply(host, put('claude-work'));
@@ -397,8 +402,11 @@ describe('a real apply through the composed daemon', () => {
       }
       return found;
     };
-    for (const folder of ['homes', 'bin'])
-      expect((await everything(join(world.fleet, folder))).join('\n')).not.toContain('bypassPermissions');
+    for (const folder of ['homes', 'bin']) {
+      const published = (await everything(join(world.fleet, folder))).join('\n');
+      expect(published).not.toContain('"defaultMode": "auto"');
+      expect(published).not.toContain("'--permission-mode' 'auto'");
+    }
   });
 
   it('C1 saves the machine settings Runtimes does hold (default runtime, auto-resume) and reads them back', async () => {
@@ -984,6 +992,44 @@ describe('the homes the composed daemon provides', () => {
     expect((await port.tools()).length).toBeGreaterThan(0);
   });
 
+  it('machineBrowserPorts() says it cannot say while the machine view holds only the schema default (no file of Runtimes carries the setting)', async () => {
+    const { host } = await compose();
+
+    // The machine read still shows the default; the port refuses to pass that default off as a setting somebody made.
+    const machine = (await host.request('GET', '/v1/runtimes/machine')).json<MachineBrowserPorts>();
+    expect(machine.browserPorts).toBe('random');
+
+    await expect(host.provided(RuntimesPort).machineBrowserPorts()).rejects.toThrow(
+      'Runtimes holds no browserPorts setting yet, so it cannot say which ports the agent browser binds',
+    );
+  });
+
+  it('machineBrowserPorts() carries the two settings the machine view holds and nothing else of it', async () => {
+    const { host } = await compose({
+      assemble: ctx => {
+        const base = hostAssembly(ctx);
+        return {
+          ...base,
+          catalog: {
+            ...base.catalog,
+            machine: async () =>
+              ({
+                browserPorts: { cdp: 9300, relay: 9301, vnc: 5901 },
+                browserFirewallFailure: 'refuse',
+                agentPermissions: 'skip',
+                tools: [],
+              }) as never,
+          },
+        };
+      },
+    });
+
+    expect(await host.provided(RuntimesPort).machineBrowserPorts()).toStrictEqual({
+      browserPorts: { cdp: 9300, relay: 9301, vnc: 5901 },
+      browserFirewallFailure: 'refuse',
+    });
+  });
+
   it('S1 the provided port lists and reads the fleet’s installed skills through assetSkills()', async () => {
     const { host, world } = await compose();
     await mkdir(join(world.fleet, 'assets', 'skills', 'review'), { recursive: true });
@@ -1096,6 +1142,19 @@ describe('M2b the auto-resume switch through the composed daemon', () => {
     expect((await askSwitch({ file: { autoResume: true } }))?.decision).toEqual({ allow: true });
     const off = await askSwitch({ file: { autoResume: false } });
     expect(off?.decision).toEqual({ allow: false, reason: 'Auto-resume after restart is off on this machine' });
+  });
+
+  it('the provided port answers the same switch to the Warden: on, off, and undefined when it cannot be read', async () => {
+    const answer = async (autoResume: (() => boolean | undefined) | undefined) => {
+      const { host } = await compose({ assemble: ctx => ({ ...hostAssembly(ctx), autoResume }) });
+      return await host.provided(RuntimesPort).autoResume();
+    };
+
+    expect(await answer(() => true)).toBe(true);
+    expect(await answer(() => false)).toBe(false);
+    expect(await answer(() => undefined)).toBeUndefined();
+    // No assembly answer: the file decides, and a machine that never wrote the setting is on, as it always was.
+    expect(await answer(undefined)).toBe(true);
   });
 });
 

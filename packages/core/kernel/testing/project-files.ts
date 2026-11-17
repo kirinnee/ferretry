@@ -23,6 +23,7 @@ import {
 import { lexicalInRoot, RootError } from '../host/roots.ts';
 import { chainProblem, permittedMode, spellingHolds } from '../host/root-rules.ts';
 import { refuseShared } from '../host/shared-trees.ts';
+import { refuseHistory } from '../host/history-pool.ts';
 import { type ProjectUse, projectPathRefusal } from '../manifest/project-files.ts';
 
 /** How a call treats the LEAF of its name: `follow` (a link there is refused) or `keep` (it is looked at, never followed). */
@@ -232,6 +233,8 @@ export function projectFilesHandle(twin: ProjectFilesTwin): RootHandle {
     },
     copyShared: async () => refuseShared('not_internal'),
     linkCredential: async () => refuseShared('not_internal'),
+    linkHistory: async () => refuseHistory('not_internal'),
+    moveToHistoryPool: async () => refuseHistory('not_internal'),
     ensurePrivateDirectory: async path => {
       reachForWrite(path, 'make', 'keep');
     },

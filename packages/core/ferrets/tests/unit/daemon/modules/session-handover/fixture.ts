@@ -1,5 +1,5 @@
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
-import { HandoverFiles } from '../../../../../contract/handover-state.ts';
+import { HandoverFiles } from '../../../../../contract/state/handover.state.ts';
 import type { SessionHandoverNeeds } from '../../../../../daemon/modules/session-handover.ts';
 
 /**

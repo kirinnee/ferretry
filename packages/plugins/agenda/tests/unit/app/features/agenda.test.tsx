@@ -26,7 +26,7 @@ import { AgendaDrawer, AgendaLine } from '../../../../app/features/agenda/agenda
 import { inboxCardKey } from '../../../../app/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../../app/shell.ts';
 import { daemonSessionScope } from '../../../../app/shell.ts';
-import { registerComposerQuoteTarget } from '../../../../app/shell.ts';
+import { registerComposerFor } from '../../../support/app/composer-quote.ts';
 import type { TranscriptEntry } from '../../../../app/lib/transcript.ts';
 import type { AgendaCall } from '../../../../app/lib/agenda-call.ts';
 import { AgendaClientContext } from '../../../../app/lib/agenda-client-context.tsx';
@@ -656,7 +656,7 @@ describe('a request to show an item (`?attention=A5`)', () => {
     ['replied to', { parked: { reason: 'replied', at: '2026-07-31T11:50:00.000Z' } }],
     ['snoozed', { parked: { reason: 'snoozed', at: '2026-07-31T11:50:00.000Z', until: '2026-08-01T09:00:00.000Z' } }],
   ] as const) {
-    test(`opens a parked (${label}) item with where it stands and Back to my list (#B76: !A89)`, async () => {
+    test(`opens a parked (${label}) item with where it stands and Back to my list (#B76: ^A89)`, async () => {
       const view = mount({ snapshot: board([...MIXED, item('A89', extra)]), focus: target('A89') });
       const card = view.root.findByType(AgendaItemView);
       expect(card.props.item.id).toBe('A89');
@@ -755,7 +755,7 @@ describe('the open item and the composer', () => {
 describe('what the item view sends', () => {
   const composer = (draft: string) => {
     const state = { draft, replaced: [] as string[] };
-    const dispose = registerComposerQuoteTarget({
+    const dispose = registerComposerFor({
       ...scope,
       draft: () => state.draft,
       replaceDraft: next => {
@@ -847,7 +847,7 @@ describe('what the item view sends', () => {
 
   test('reads the item’s history from the conversation', () => {
     const view = open({
-      entries: [{ id: 'm1', kind: 'assistant', text: 'Looking at !A1 now.', at: 1 } as unknown as TranscriptEntry],
+      entries: [{ id: 'm1', kind: 'assistant', text: 'Looking at ^A1 now.', at: 1 } as unknown as TranscriptEntry],
     });
     const events = view.root.findByType(AgendaItemView).props.history;
     // The conversation's message about it, and nothing made up for the raise.
@@ -1305,8 +1305,7 @@ describe('a form opened in the chat (#B143)', () => {
       await landing;
     },
   });
-  const typed = (draft: string) =>
-    registerComposerQuoteTarget({ ...scope, draft: () => draft, replaceDraft: () => undefined });
+  const typed = (draft: string) => registerComposerFor({ ...scope, draft: () => draft, replaceDraft: () => undefined });
   const inputs = (view: ReturnType<typeof render>, type: string) =>
     view.root.findAll(node => node.type === 'input' && node.props.type === type);
   const yesNo = (view: ReturnType<typeof render>) =>
@@ -1465,7 +1464,7 @@ describe('an input card that ends while it is open (#B147)', () => {
       ),
     );
     expect(live().covered).toBe(false);
-    expect(textOf(sentLine(view)[0])).toContain('!A7 is closed.');
+    expect(textOf(sentLine(view)[0])).toContain('^A7 is closed.');
   });
 
   test('closes its view once the card sent from here has nothing more to show, in the card’s own words', () => {
@@ -1572,7 +1571,7 @@ describe('an input card that ends while it is open (#B147)', () => {
     const view = openInput();
     resolveA7(view, 1);
     expect(live().covered).toBe(false);
-    // The owner picks !A7 from the history, or a chat reference to it.
+    // The owner picks ^A7 from the history, or a chat reference to it.
     resolveA7(view, 2);
     expect(live().covered).toBe(true);
     expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A7');

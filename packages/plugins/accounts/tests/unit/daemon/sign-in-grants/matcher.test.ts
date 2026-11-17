@@ -9,7 +9,7 @@ import {
   type SignInSummary,
 } from '../../../../contract/routes/index.ts';
 import should from 'should';
-import { codeTargetProblem, identityOf } from '../../../../daemon/lib/vault-inputs.ts';
+import { identityOf } from '../../../../daemon/lib/vault-inputs.ts';
 import {
   type GrantSighting,
   matchSignInGrant,
@@ -17,7 +17,7 @@ import {
   type SignInGrant,
 } from '../../../../daemon/lib/sign-in-grants/matcher.ts';
 import type { InputRequestField } from '../../../../daemon/lib/vault-inputs.ts';
-import type { InputTargetFacts } from '@ferretry/core-vault/contract';
+import { codeTargetProblem, type InputTargetFacts } from '@ferretry/core-vault/contract';
 
 /**
  * THE SHARED MATCHER, one row per check (docs/input-requests.md, "Task plan fills", "Standing rule fills"): each row's

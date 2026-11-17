@@ -1,6 +1,7 @@
 import { describe, test } from 'bun:test';
 import should from 'should';
 import {
+  FY_RENDER_FORMER_TYPES,
   FY_RENDER_IMAGE_MIMES,
   FY_RENDER_LIMITS,
   FY_RENDER_MEDIA_TYPES,
@@ -40,7 +41,7 @@ describe('fy-render types', () => {
       'mermaid',
       'map',
       'chart',
-      'card',
+      'task',
       'board',
       'image',
       'video',
@@ -57,6 +58,18 @@ describe('fy-render types', () => {
     // Assert — an SVG routed through `type: image` would skip every
     // SVG check, so the vector MIME must never be reachable from here.
     should([...FY_RENDER_IMAGE_MIMES]).not.containEql('image/svg+xml');
+  });
+});
+
+describe('fy-render former types', () => {
+  test('should read the type an older message wrote, as the type it became', () => {
+    should(parseFyRenderHeaders(['type: card', 'alt: A task'])).match({ type: 'task', alt: 'A task' });
+    should(parseFyRenderHeaders(['type: task', 'alt: A task'])).match({ type: 'task', alt: 'A task' });
+  });
+
+  test('should never list a former type among the types a block is written with', () => {
+    should([...FY_RENDER_TYPES]).not.containEql('card');
+    should([...FY_RENDER_FORMER_TYPES.keys()]).eql(['card']);
   });
 });
 

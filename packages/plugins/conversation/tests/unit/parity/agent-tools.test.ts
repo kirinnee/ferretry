@@ -1,4 +1,5 @@
 /** Parity row T-0038 (docs/design/rebuild-parity.tsv): the `search_work` agent tool, finding cards and asks. */
+import { FakeMailbox } from '@ferretry/core-mailbox/contract/testing';
 import { describe, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
@@ -11,7 +12,7 @@ describe('the agent tools Conversation owns', () => {
     expect(manifest.actions.agentTools.map(tool => tool.name)).toContain('search_work');
     const host = await testHost({
       plugins: [daemon],
-      fakes: { ferrets: new FakeFerrets(), asks: new FakeAsks() },
+      fakes: { mailbox: new FakeMailbox(), ferrets: new FakeFerrets(), asks: new FakeAsks() },
       clock: fixedClock('2026-11-07T09:00:00Z'),
     });
     const answer = await host.tool('search_work', { query: 'relay carrier' });

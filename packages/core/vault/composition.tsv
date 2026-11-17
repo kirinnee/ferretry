@@ -1,0 +1,3 @@
+kind	path	limit	expires	reason
+oversize	daemon/lib/inputs/borrowed.ts	1562	2026-12-16	borrowed-input handling; secrets code, split only after a plan
+oversize	daemon/lib/inputs/service.ts	3704	2026-12-16	one InputRequestService class; secrets code, split only after an Opus plan

@@ -259,7 +259,11 @@ const RAW_KEY_PREFIXES =
 const SECRET_SOUNDING_NAME = /(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)/u;
 /** A reference: Ferretry's secret store, or the environment. */
 const SECRET_REFERENCE = /^\$\{secret:[A-Za-z0-9_.-]+\}$/u;
-const ENV_REFERENCE = /^\$\{[A-Z_][A-Z0-9_]*(?::-[^}]*)?\}$/u;
+/**
+ * An environment reference. Its default (`${NAME:-<literal>}`) is a literal a file would carry, so group 1 hands the literal
+ * to the same raw-secret test as any value: only a reference with no default, or an empty one, is a pure pointer.
+ */
+const ENV_REFERENCE = /^\$\{[A-Z_][A-Z0-9_]*(?::-([^}]*))?\}$/u;
 
 /**
  * Why one environment value may not be written, or null when it may.
@@ -275,10 +279,13 @@ const mcpEnvRefusal = (scope: SessionMcpScope, name: string, value: string): str
     return scope === 'project'
       ? `${name}: a project's .mcp.json is shared with the repo and read by Claude Code itself, so Ferretry cannot fill in \${secret:…} there. Use \${${name}} and give the ferret that variable, or add the server to This login.`
       : null;
-  if (ENV_REFERENCE.test(trimmed)) return null;
+  const reference = ENV_REFERENCE.exec(trimmed);
+  if (reference !== null && (reference[1] ?? '') === '') return null;
+  // A default's literal is a value like any other: the reference's own text is not what is judged, its literal is.
+  const literal = reference?.[1] ?? trimmed;
   const looksRaw =
-    RAW_KEY_PREFIXES.test(trimmed) ||
-    (SECRET_SOUNDING_NAME.test(name) && trimmed.length >= 16 && !/[\s/]/u.test(trimmed));
+    RAW_KEY_PREFIXES.test(literal) ||
+    (SECRET_SOUNDING_NAME.test(name) && literal.length >= 16 && !/[\s/]/u.test(literal));
   if (!looksRaw) return null;
   return scope === 'project'
     ? `${name} looks like a raw secret, and .mcp.json is shared with everyone on the repo. Use \${${name}} instead, or add the server to This login with \${secret:${name}}.`

@@ -134,7 +134,7 @@ describe('the extra demands behind a route', () => {
     });
     const names = refusedAccountNames(contextOf(governedBy({ allowed: false, refusal: 'not-granted' })));
     should(names === undefined ? undefined : bodyOf(names)).eql({
-      error: 'this device may not read the accounts a task plan names: that needs the secrets permission',
+      error: 'this device may not read the accounts a sign-in plan names: that needs the secrets permission',
       code: 'grant_not_granted',
     });
     const secret = refusedSecretWrite(contextOf(governedBy({ allowed: false, refusal: 'undetermined' })), 'write');

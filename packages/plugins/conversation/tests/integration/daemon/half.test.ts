@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import { fixedClock, MemoryStateFolder, owner, testHost } from '@ferretry/kernel/testing';
 import { instantFromEpochMs } from '@ferretry/std';
 import { ANSWERS_STATE, CONVERSATION_STATE, INBOX_STATE, QUEUE_STATE, SENDS_STATE } from '../../../contract/index.ts';
@@ -7,25 +8,35 @@ import { StateAnswerLedger } from '../../../daemon/questions/adapters/index.ts';
 import { StateQueueStore } from '../../../daemon/queue/adapters/index.ts';
 import { StateSendChannel, StateSendLedger } from '../../../daemon/delivery/adapters/index.ts';
 import { parseSessionId } from '../../../daemon/seams/ferret-id.ts';
-import type { SendRecord } from '../../../daemon/delivery/lib/index.ts';
+import type { SendRecord } from '../../../daemon/seams/ledger-types.ts';
 
 const clock = { now: () => instantFromEpochMs(1_794_052_800_000) };
 const f1 = parseSessionId('f1');
 
 describe('conversation state adapters, on the kernel state port', () => {
-  test('the queue store appends events and reads them back in order, skipping an event it does not know', async () => {
+  test('the queue store appends events and folds them into messages, skipping an event it does not know', async () => {
     const state = new MemoryStateFolder().port(CONVERSATION_STATE);
     const store = new StateQueueStore(state);
     await state.append<unknown>(QUEUE_STATE, { v: 1, kind: 'bogus' }, 'f1');
     await store.append(f1, {
       v: 1,
-      kind: 'moved',
+      kind: 'enqueued',
       at: clock.now(),
-      id: 'm1',
-      state: 'cancelled',
+      message: {
+        v: 1,
+        id: 'm1',
+        sender: 'human',
+        text: 'hi',
+        attachmentIds: [],
+        enqueuedAt: clock.now(),
+        state: 'queued',
+        stateAt: clock.now(),
+        revision: 1,
+      },
     });
-    const events = await store.read(f1);
-    expect(events.map(event => event.kind)).toEqual(['moved']);
+    await store.append(f1, { v: 1, kind: 'moved', at: clock.now(), id: 'm1', state: 'cancelled' });
+    const messages = await store.messages(f1);
+    expect(messages.map(message => [message.id, message.state, message.version])).toEqual([['m1', 'cancelled', 2]]);
   });
 
   test('the send ledger is last-write-wins per send and refuses a second accept of the same send', async () => {
@@ -86,7 +97,7 @@ describe('conversation daemon half, through the kernel test host', () => {
   const ferrets = { get: async () => ({ id: 'f1' }), resolve: async () => ({ kind: 'unknown' as const }) };
   const boot = async () =>
     await testHost({
-      plugins: [daemon],
+      plugins: [mailboxDaemon, daemon],
       fakes: { ferrets, asks: {} },
       clock: fixedClock('2026-11-06T09:00:00Z'),
     });
@@ -96,6 +107,45 @@ describe('conversation daemon half, through the kernel test host', () => {
     const response = await host.request('GET', '/v1/ferrets/f1/queue', { as: owner() });
     expect(response.status).toBe(200);
     expect(response.json()).toMatchObject({ messages: [] });
+  });
+
+  for (const [name, route, file] of [
+    ['the send ledger', '/v1/ferrets/f1/sends', SENDS_STATE],
+    ['the queue', '/v1/ferrets/f1/queue', QUEUE_STATE],
+  ] as const) {
+    test(`${name} is a conditional read: 200 with an etag, 304 for a repeat, a new etag once a line is appended`, async () => {
+      const host = await boot();
+      const first = await host.request('GET', route, { as: owner() });
+      expect(first.status).toBe(200);
+      const tag = first.headers.get('etag');
+      expect(tag).toMatch(/^"[A-Za-z0-9_-]{43}"$/u);
+
+      const repeat = await host.request('GET', route, { as: owner(), headers: { 'if-none-match': tag as string } });
+      expect(repeat.status).toBe(304);
+      expect(repeat.body).toBe('');
+
+      // Any line landing in the file moves its identity, whatever the line says.
+      host.state('conversation').plant(file, '{"v":1}\n', 'f1');
+      const changed = await host.request('GET', route, { as: owner(), headers: { 'if-none-match': tag as string } });
+      expect(changed.status).toBe(200);
+      expect(changed.headers.get('etag')).not.toBe(tag);
+    });
+  }
+
+  test('a queue nobody wrote to, of a ferret nobody knows, is not found even to a reader holding a tag', async () => {
+    const host = await testHost({
+      plugins: [mailboxDaemon, daemon],
+      fakes: {
+        ferrets: { get: async () => undefined, resolve: async () => ({ kind: 'unknown' as const }) },
+        asks: {},
+      },
+      clock: fixedClock('2026-11-06T09:00:00Z'),
+    });
+    const answered = await host.request('GET', '/v1/ferrets/f1/queue', {
+      as: owner(),
+      headers: { 'if-none-match': '*' },
+    });
+    expect(answered.status).toBe(404);
   });
 
   test('a send says plainly that the ferret’s terminal is not connected yet', async () => {
@@ -134,7 +184,7 @@ describe('conversation daemon half, through the kernel test host', () => {
 describe('the merged half', () => {
   const boot = async () =>
     await testHost({
-      plugins: [daemon],
+      plugins: [mailboxDaemon, daemon],
       fakes: {
         ferrets: {
           get: async () => ({ id: 'f1' }),
@@ -156,18 +206,13 @@ describe('the merged half', () => {
     expect(logs.json()).toMatchObject({ code: 'no_transcript' });
   });
 
-  test('a render saved is served back, and a link listing and its preview say plainly that they are not in 5.0 yet', async () => {
+  test('a link listing answers from the conversation index (empty while no harness offers history), and an unknown preview is a 404', async () => {
     const host = await boot();
     const links = await host.request('GET', '/v1/links/conversations', { as: owner() });
-    expect(links.status).toBe(503);
-    // One fixed sentence, never a raw error: the app draws `error` as it is.
-    expect(links.json()).toMatchObject({
-      code: 'conversation_harness_unavailable',
-      error: expect.stringContaining('Not in 5.0 yet'),
-    });
+    expect(links.status).toBe(200);
+    expect(links.json()).toMatchObject({ conversations: [], matched: 0, skipped: 0 });
     const preview = await host.request('GET', '/v1/links/conversations/claude-code/abc/preview', { as: owner() });
-    expect(preview.status).toBe(503);
-    expect(preview.json()).toMatchObject({ error: (links.json() as { error: string }).error });
+    expect(preview.status).toBe(404);
     const unknown = await host.request('GET', '/v1/renders/rd_000000000000000000000000/meta', { as: owner() });
     expect([400, 404]).toContain(unknown.status);
   });

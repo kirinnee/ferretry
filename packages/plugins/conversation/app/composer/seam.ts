@@ -9,14 +9,12 @@
  *   - DaemonFerretScope / daemonFerretScope / daemonFerretKey .. re-exports of `@ferretry/app` (`compose/ferret-scope.ts`).
  *   - ConversationCaller / callRefusal ...................... the plugin client's `call` (§9.6), replacing today's
  *     `DaemonFetch` / `browserFetch` / `daemonRequest`; a refusal is `DaemonCallError` (status, code, sentence).
- *   - carrierDelivery ....................................... GAP(app-shell): today's `relay-carrier.ts` walk; the 5.0
- *     client does not classify an outage yet, so this reads a `delivery` mark off the error chain and finds none.
+ *   - carrierDelivery ....................................... today's `relay-carrier.ts` walk: reads the `delivery` mark
+ *     `@ferretry/app`'s session transport puts on a carrier failure (`unsent` before the request left, `unknown` after).
  *   - devicePreference, the foreground pin scope ......... re-exports of `@ferretry/app` (GAP(ferrets): nothing sets
  *     the pinned pane in front until Ferrets' app half does).
  *   - withReferences / referencesOf / withReferencePrefix ... copies of Agenda's "re:" chip helpers (today's
  *     `agenda-reply.ts`, `answer-chip.ts`): the composer stores the chips beside an unsent message.
- *   - FerretContext ......................................... GAP(C3, Q0): today's `SessionContext`, until the Ferrets
- *     contract exports the ferret view schemas.
  *   - canSubmitComposer ..................................... copy of today's `session-screens.ts` one-liner (C3's split).
  */
 
@@ -30,6 +28,7 @@ export {
   setForegroundPinScope,
 } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { ASK_REFERENCE_SIGIL, ASK_REFERENCE_SIGIL_CLASS } from '@ferretry/core-asks/contract';
 
 // ─── the daemon this half talks to ────────────────────────────────────────────────────────────────────────────────
 
@@ -51,9 +50,9 @@ export { DaemonCallError };
 
 /**
  * Whether a request that failed on the carrier may have reached the daemon: `unsent` (proved not to have left), or
- * `unknown`; `undefined` for anything that is not a carrier outage. The 5.0 client marks an outage (S12,
- * `isCarrierOutage`) but cannot prove a request never left, so a marked outage reads `unknown` ("checking whether it
- * arrived") and never `unsent`; a `delivery` mark found down the chain still wins, as today's walk read it.
+ * `unknown`; `undefined` for anything that is not a carrier outage. The session transport marks a failure that happened
+ * before the request left as `unsent` and one at or after it as `unknown`; that `delivery` mark, found down the chain,
+ * wins. A carrier outage with no mark reads `unknown` ("checking whether it arrived").
  */
 export type CarrierDelivery = 'unsent' | 'unknown';
 
@@ -77,8 +76,10 @@ export type AgendaId = string;
  * (one already typed is not repeated). Nothing is guessed — only the chips the owner added.
  */
 export const withReferences = (text: string, ids: readonly AgendaId[]): string => {
-  const missing = [...new Set(ids)].filter(id => !new RegExp(`(?:^|\\s)!${id}(?=$|[\\s.,;:!?)])`, 'u').test(text));
-  return missing.length === 0 ? text : `${missing.map(id => `!${id}`).join(' ')} ${text}`;
+  const missing = [...new Set(ids)].filter(
+    id => !new RegExp(`(?:^|\\s)${ASK_REFERENCE_SIGIL_CLASS}${id}(?=$|[\\s.,;:!?)])`, 'u').test(text),
+  );
+  return missing.length === 0 ? text : `${missing.map(id => `${ASK_REFERENCE_SIGIL}${id}`).join(' ')} ${text}`;
 };
 
 /** Where a reference-carrying client keeps its chips, for a sender that must remember them past this send. */
@@ -110,10 +111,10 @@ export const withReferencePrefix = <T extends { readonly send: (...args: never[]
     },
   });
 
-// ─── shapes owned elsewhere (GAPs) ────────────────────────────────────────────────────────────────────────────────
+// ─── shapes owned elsewhere ───────────────────────────────────────────────────────────────────────────────────────
 
-/** GAP(ferrets, Q0): today's `SessionContext` — `@ferretry/app`'s `ContextUsage` until the Ferrets contract exports it. */
-export type { ContextUsage as FerretContext } from '@ferretry/app';
+/** The context window a ferret has used: the Ferrets contract's own shape. */
+export type { FerretContext } from '@ferretry/core-ferrets/contract';
 
 /** Copy of today's `session-screens.ts` `canSubmitComposer` (C3 ports the rest of that file). */
 export const canSubmitComposer = (draft: string, disabled: boolean, sending: boolean): boolean =>

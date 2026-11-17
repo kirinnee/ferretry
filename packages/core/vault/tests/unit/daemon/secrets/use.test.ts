@@ -45,7 +45,7 @@ describe('use without read', () => {
   it('S10 I102 I126 masks an original cut prefix before a contained typed value rewrites it', async () => {
     const vault = await vaultHolding({ TOKEN: 'prefix-fixture-secret-suffix' });
     const typed = new EphemeralValues({ now: () => 1 });
-    typed.hold('fixture', 'fixture-secret', '!A0');
+    typed.hold('fixture', 'fixture-secret', '^A0');
     const masks = new EphemeralAwareRedactor(new SecretRedactor(vault), typed);
     const runner: SecretChildRunner = {
       run: async () => ({

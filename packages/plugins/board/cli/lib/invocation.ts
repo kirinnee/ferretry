@@ -5,28 +5,32 @@
  */
 import type { VerbInvocation } from '@ferretry/kernel/manifest';
 
-const camel = (name: string): string => name.replace(/-([a-z0-9])/gu, (_, letter: string) => letter.toUpperCase());
+const kebab = (name: string): string => name.replace(/[A-Z]/gu, letter => `-${letter.toLowerCase()}`);
 
-const entries = (invocation: VerbInvocation): Map<string, string | boolean | readonly string[]> =>
-  new Map(Object.entries(invocation.options).map(([name, value]) => [camel(name), value]));
+/**
+ * The value an option holds under the camel name a verb asks for (`fooBar`), typed as `--foo-bar` (or `--fooBar`).
+ * Looked up by name, never by walking every option, so the shell can see which options a verb reads.
+ */
+const heldValue = (invocation: VerbInvocation, name: string): string | boolean | readonly string[] | undefined =>
+  invocation.options[kebab(name)] ?? invocation.options[name];
 
 /** The last string given for an option, if any. */
 export function text(invocation: VerbInvocation, name: string): string | undefined {
-  const value = entries(invocation).get(name);
+  const value = heldValue(invocation, name);
   if (typeof value === 'string') return value;
   return Array.isArray(value) ? (value[value.length - 1] as string | undefined) : undefined;
 }
 
 /** Every string given for an option, in the order given. */
 export function list(invocation: VerbInvocation, name: string): readonly string[] {
-  const value = entries(invocation).get(name);
+  const value = heldValue(invocation, name);
   if (typeof value === 'string') return [value];
   return Array.isArray(value) ? (value as readonly string[]) : [];
 }
 
 /** Whether a switch is on (`--name`, `--name=true`). */
 export function on(invocation: VerbInvocation, name: string): boolean {
-  const value = entries(invocation).get(name);
+  const value = heldValue(invocation, name);
   return value === true || value === 'true';
 }
 

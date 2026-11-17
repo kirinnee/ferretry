@@ -10,8 +10,8 @@ export FY_UPDATE_CHECK="${FY_UPDATE_CHECK:-off}"
 
 mode="${1:-}"
 group="${2:-}"
-[[ ${mode} != "unit" && ${mode} != "int" && ${mode} != "sit" && ${mode} != "realworld" ]] && echo "❌ usage: $0 <unit|int|sit|realworld> [group]" >&2 && exit 2
-[[ ${mode} == "realworld" && -n ${group} ]] && echo "❌ the realworld tier has no groups" >&2 && exit 2
+[[ ${mode} != "unit" && ${mode} != "int" && ${mode} != "sit" && ${mode} != "realworld" && ${mode} != "perf" ]] && echo "❌ usage: $0 <unit|int|sit|realworld|perf> [group]" >&2 && exit 2
+[[ (${mode} == "realworld" || ${mode} == "perf") && -n ${group} ]] && echo "❌ the ${mode} tier has no groups" >&2 && exit 2
 
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
@@ -45,6 +45,23 @@ if [[ ${mode} == "realworld" ]]; then
   [[ ${realworld_status} -ne 0 ]] && echo "❌ realworld tests failed (exit ${realworld_status})" >&2 && exit "${realworld_status}"
   echo "✅ realworld tests passed"
   exit 0
+fi
+if [[ ${mode} == "perf" ]]; then
+  # THE PERF TIER (bunfig.perf.toml): every speed or size budget, in its own CI job (`perf`) with nothing but perf
+  # tests on the runner. FY_CI_PERF_PARALLEL bun processes (default 1; CI sets it to HALF the runner's vCPUs, so every
+  # process keeps a spare core for its GC and JIT threads and a budget measures the code, not a neighbour). No ledger,
+  # so the files are dealt one by one, round robin in path order: the same split on every run. The runner, its
+  # verdict (REPORT-ONLY on a pull request, BLOCKING with one re-run of the failing files on main) and its summary
+  # live in scripts/ci/perf-tier.sh; this branch only enumerates the files.
+  # ONE enumeration, status-checked: a failing `find` must never read as an empty tier (nothing would run, green).
+  perf_list="$(mktemp)"
+  if ! { find packages -path '*/node_modules' -prune -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -path '*/tests/perf/*' -print | sort; } >"${perf_list}"; then
+    echo "❌ could not enumerate the perf test files (find or sort failed)" >&2 && rm -f "${perf_list}" && exit 1
+  fi
+  mapfile -t perf_files <"${perf_list}"
+  rm -f "${perf_list}"
+  [[ ${#perf_files[@]} -eq 0 ]] && empty_tier perf perf
+  exec ./scripts/ci/perf-tier.sh "${perf_files[@]}"
 fi
 # THE REPOSITORY CONTRACTS ARE NOT CHECKED HERE. Pages config, the hosted relay config, macOS relevance and
 # the test tiers each have a pre-commit hook, and Quick's gates part runs every hook over every file on
@@ -81,26 +98,28 @@ files=()
 # serially and is judged here, exactly as before.
 if [[ -n ${group} ]]; then
   groups="config/test-groups.json"
-  jq -e --arg mode "${mode}" --arg group "${group}" '.[$mode] // [] | any(.name == $group)' "${groups}" >/dev/null ||
-    { echo "❌ ${mode} has no test group ${group} in ${groups}" >&2 && exit 2; }
-  # The same files the bunfig's `pathIgnorePatterns` leave the tier, which is why the other tier's
-  # directory and SIT are the only exclusions. Bun would also run `*.spec.*`, `*_test.*` and
-  # `*_spec.*` files; nothing here is named like that, and a group must not silently skip one.
-  other_tier="unit"
-  [[ ${mode} == "unit" ]] && other_tier="integration"
-  stray="$(find packages -path '*/node_modules' -prune -o -type f \( -name '*.spec.*' -o -name '*_test.*' -o -name '*_spec.*' -o -name '*.test.js' -o -name '*.test.jsx' \) -print | head -n 1)"
-  [[ -n ${stray} ]] && echo "❌ test groups only collect *.test.ts(x) files, and Bun would also run ${stray}" >&2 && exit 1
-  mapfile -t files < <(
-    find packages -path '*/node_modules' -prune -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) \
-      -not -path "*/tests/${other_tier}/*" -not -path '*/tests/sit/*' -not -path '*/tests/realworld/*' -print | sort |
-      jq -R -r --slurpfile groups "${groups}" --arg mode "${mode}" --arg group "${group}" '
-        . as $file
-        | [$groups[0][$mode][] | select(any(.prefixes[]; . as $prefix | $file | startswith($prefix)))][0].name
-        | select(. == $group) | "./" + $file
-      '
-  )
-  [[ ${#files[@]} -eq 0 ]] && echo "❌ ${mode} test group ${group} holds no test files" >&2 && exit 1
+  # The group's files (and the changed-plugin scope's narrowing of them) are group-files.sh's.
+  # group-files.sh's status is CARRIED, never inferred from its output: it exits 0 with no file only for a group the
+  # scope emptied, and exits non-zero (with the reason) for everything else, a crashed filter included.
+  group_list="$(mktemp)"
+  group_status=0
+  ./scripts/ci/group-files.sh "${mode}" "${group}" >"${group_list}" || group_status=$?
+  [[ ${group_status} -ne 0 ]] && echo "❌ ${mode} test group ${group}: group-files.sh failed (exit ${group_status})" >&2 && rm -f "${group_list}" && exit "${group_status}"
+  mapfile -t files <"${group_list}"
+  rm -f "${group_list}"
   coverage_file="coverage/${mode}/groups/${group}/lcov.info"
+  if [[ ${#files[@]} -eq 0 ]]; then
+    # group-files.sh succeeded with no file: only a SCOPED unit run can do that. Leave an empty ledger and a marker, so
+    # the ledger and the timings report the group as scoped out instead of missing.
+    if [[ ${mode} == unit && -n ${FY_CI_SCOPE_FILE:-} ]]; then
+      mkdir -p "${coverage_file%/*}"
+      : >"${coverage_file}"
+      echo "scoped out" >"${coverage_file%/*}/scoped-out"
+      echo "📝 ${mode} test group ${group}: scoped out, nothing to run"
+      exit 0
+    fi
+    echo "❌ ${mode} test group ${group} holds no test files" >&2 && exit 1
+  fi
   # `--coverage-dir` loses to the bunfig's `coverageDir`, so the group gets a copy that names its own.
   config="coverage/${mode}/groups/${group}/bunfig.toml"
   mkdir -p "${config%/*}"

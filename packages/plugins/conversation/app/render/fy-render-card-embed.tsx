@@ -69,7 +69,7 @@ function FallbackRows({
       {embed.kind === 'cards' ? embed.ids.map(id => <CardRow key={id} id={id} host={host} />) : null}
       {embed.kind === 'children' ? (
         <>
-          {noteRow(embed.parent, 'The cards under this one are on the board.')}
+          {noteRow(embed.parent, 'The tasks under this one are on the board.')}
           <CardRow id={embed.parent} host={host} />
         </>
       ) : null}

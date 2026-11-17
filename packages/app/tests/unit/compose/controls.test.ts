@@ -64,6 +64,7 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   mode: 'interactive',
   density: 'compact',
   groupNeedsYou: false,
+  showStopped: true,
   chatWidth: 'full',
   composerEnterKey: 'send',
   composerPhoneEnterKey: 'send',
@@ -113,6 +114,8 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       // Never chosen: the Sessions bar opens on Interactive.
       sessionsMode: null,
       groupNeedsYou: true,
+      // A payload written before "Show stopped" was kept per device lists no stopped ferrets.
+      showStopped: false,
       // A payload written before the composer fields existed opens suggestions
       // with the @ ladder, offers $ skills and keeps Vim keys off — no version bump.
       suggestionKeys: 'ladder',
@@ -198,6 +201,15 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
     should(Object.keys(read({ showDetails: true }))).not.containEql('showDetails');
     should(read({ motion: 'reduced' }).motion).equal('reduced');
     should(read({ motion: 'none' }).motion).equal('system');
+  });
+
+  it('lists stopped ferrets only when "Show stopped" was explicitly ticked on this device', () => {
+    const read = (device: Record<string, unknown>) =>
+      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device })).device.showStopped;
+    should(read({ showStopped: true })).equal(true);
+    should(read({ showStopped: false })).equal(false);
+    should(read({ showStopped: 'yes' })).equal(false);
+    should(read({})).equal(false);
   });
 
   it('opens links in the reader’s browser unless the side panel or this computer’s browser was explicitly chosen', () => {

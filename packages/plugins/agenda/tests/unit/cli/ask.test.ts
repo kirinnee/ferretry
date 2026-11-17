@@ -123,7 +123,7 @@ describe('choice asks', () => {
     // Act + Assert
     should(() => parseAsk({ kind: 'choice', option: ['a', 'b', 'c', 'd'] })).throw(TOO_MANY_ANSWERS);
     should(TOO_MANY_ANSWERS).equal(
-      'a card offers at most 3 answers (swipe left, up, right). Split this into several items, or use --kind reply and let the owner answer in words.',
+      'an item offers at most 3 answers (swipe left, up, right). Split this into several items, or use --kind reply and let the owner answer in words.',
     );
   });
 

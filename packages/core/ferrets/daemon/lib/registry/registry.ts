@@ -79,7 +79,7 @@ export function summaryOf(
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
     ...(fast === undefined ? {} : { fast }),
-    ...(card === undefined ? {} : { card }),
+    ...(card === undefined ? {} : { task: card }),
     ...(label === undefined ? {} : { label }),
     ...(mode === undefined ? {} : { mode }),
     ...(nudgeAfterSeconds === undefined ? {} : { nudgeAfterSeconds }),

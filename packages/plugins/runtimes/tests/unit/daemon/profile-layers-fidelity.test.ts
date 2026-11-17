@@ -132,15 +132,14 @@ describe('R2 the etag profiles() gives is the kernel writer’s own', () => {
     should(await documentRevision(fs, `${PROFILES}/latin1.yaml`)).equal(before);
   });
 
-  it('R2 should have hashed the raw bytes differently for a BOM and a non-UTF-8 file (why the kernel’s reckoning is used)', async () => {
+  it('R2 should have hashed the raw bytes differently from the writer’s etag for every file (why the kernel’s reckoning is used)', async () => {
     // Arrange
     const { fs, etagOf } = await realWorld(FILES);
 
-    // Act + Assert — the raw-bytes revision (the apply's pin) differs from the writer's etag for exactly these two.
-    for (const name of ['bom', 'latin1'])
+    // Act + Assert — the raw-bytes revision (the apply's pin) is a plain sha256; the writer's etag is the daemon's keyed
+    // digest of the decoded text, so the two differ for every file (a BOM and a non-UTF-8 file differed before as well).
+    for (const name of ['bom', 'latin1', 'plain', 'crlf'])
       should(await documentRevision(fs, `${PROFILES}/${name}.yaml`)).not.equal(await etagOf(name));
-    for (const name of ['plain', 'crlf'])
-      should(await documentRevision(fs, `${PROFILES}/${name}.yaml`)).equal(await etagOf(name));
   });
 
   it('R2 should answer a stale etag of a BOM file as a conflict, and write nothing', async () => {

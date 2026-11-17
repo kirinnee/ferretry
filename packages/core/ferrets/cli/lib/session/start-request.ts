@@ -58,6 +58,8 @@ export interface StartFlags extends StartNumericFlags {
   readonly harnessFlags?: readonly string[];
   /** `fy new --auto`: let Ferretry choose the runtime. */
   readonly auto?: boolean;
+  /** `fy new`'s temporary-folder check: `false` asks it, `true` is `--allow-scratch`; absent asks none. */
+  readonly allowScratch?: boolean;
   readonly harness?: string;
   readonly login?: string;
   readonly pack?: string;
@@ -100,7 +102,7 @@ function assertNumericFlags(flags: StartNumericFlags): void {
 function cardId(value: string): string {
   const trimmed = value.trim();
   const id = (trimmed.startsWith('&') ? trimmed.slice(1) : trimmed).toUpperCase();
-  if (!FERRET_CARD_ID_PATTERN.test(id)) throw new SessionCommandError(`expected a card id like &F21, got "${value}"`);
+  if (!FERRET_CARD_ID_PATTERN.test(id)) throw new SessionCommandError(`expected a task id like &F21, got "${value}"`);
   return id;
 }
 
@@ -160,13 +162,14 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     ...(flags.teammateFallback === true ? { teammateFallback: true } : {}),
     ...(flags.title === undefined ? {} : { title: flags.title }),
     ...(flags.label === undefined ? {} : { label: flags.label }),
-    ...(flags.card === undefined ? {} : { card: cardId(flags.card) }),
+    ...(flags.card === undefined ? {} : { task: cardId(flags.card) }),
     ...(flags.model === undefined ? {} : { model: flags.model }),
     ...(flags.effort === undefined ? {} : { effort: flags.effort }),
     ...(flags.fast === undefined ? {} : { fast: flags.fast }),
     ...(compactAt?.ok === true ? { compactAt: compactAt.value } : {}),
     ...(flags.remoteControl === undefined ? {} : { remoteControl: flags.remoteControl }),
     ...(flags.auto === true ? { auto: true } : {}),
+    ...(flags.allowScratch === undefined ? {} : { allowScratch: flags.allowScratch }),
     ...(flags.harnessFlags === undefined || flags.harnessFlags.length === 0
       ? {}
       : { harnessFlags: [...flags.harnessFlags] }),

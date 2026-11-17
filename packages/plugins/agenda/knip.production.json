@@ -1,0 +1,7 @@
+{
+  "entry": ["app/views/*.tsx", "manifest/actions/*.actions.ts"],
+  "project": ["**/*.{ts,tsx}", "!tests/**"],
+  "allowed": {
+    "entry:manifest/actions/*.actions.ts": "an Agenda manifest fragment (one feature's routes, verbs, panels and hooks) is listed by the generator into the git-ignored manifest/generated/actions.ts (scripts/gen/registries.ts), which knip does not read, so each fragment file is an entry by its name: a new route edits one fragment and no list (docs/standards/architecture). Not a pending-port gap."
+  }
+}

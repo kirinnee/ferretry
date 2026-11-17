@@ -81,7 +81,9 @@ test('B2 consultsGrants on POST /v1/ferrets restores the terminal.use decision: 
     expect(relayed.decision.standing.presentation).toMatchObject({ local: false });
   else expect(relayed.outcome).not.toBe('admitted');
 
-  // The regression it replaces: without the field the same granted device carries no standing to ask the decision of.
-  const without = { ...route, consultsGrants: undefined } as typeof route;
+  // The regression it replaces: without the field the same granted device carries no standing to ask the decision of. The
+  // route also asks `fleet.configure` now (c58-sec3), and a declared capability hands the handler the same standing, so the
+  // proof drops that too: what it shows is that the FIELD, not the capability, is what restored the decision in 4.x terms.
+  const without = { ...route, consultsGrants: undefined, capability: undefined } as typeof route;
   expect(standingOf(admit(w, without, { device: 'terminal-phone' }).decision).governance).toBeUndefined();
 });

@@ -16,7 +16,7 @@
 import { CLEANUP_PROVIDERS } from '../../../contract/index.ts';
 import { Check, ExternalLink, FlaskConical, KeyRound, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
-import { cn } from '../../shell-voice.ts';
+import { cn, SecretInput, useSecretField } from '../../shell-voice.ts';
 import { useSpeedupKeys } from '../../lib/voice-store.tsx';
 import { type DeviceKeyTest, testDeviceKey } from '../../lib/stt/device-cleanup.ts';
 import type { DeviceSpeedupKeys, SpeedupKeyProvider, SpeedupKeyStatus } from '../../lib/stt/speedup-keys.ts';
@@ -76,19 +76,20 @@ export interface DeviceKeyCardProps {
 export function DeviceKeyCard({ provider, status, busy, test, error, onSave, onTest, onRemove }: DeviceKeyCardProps) {
   const fieldId = useId();
   const headingId = useId();
-  const [value, setValue] = useState('');
+  // The key lives only in the field's own value (read on Save); state knows how long it is, never what it says.
+  const key = useSecretField(typed => typed.trim().length);
   const label = CLEANUP_PROVIDERS[provider].label;
   const copy = PROVIDER_COPY[provider];
   const saved = status?.kind === 'saved';
   const held = status !== undefined && status.kind !== 'none';
   const idle = busy === null && status !== undefined;
-  const ready = value.trim().length > 0 && idle;
+  const ready = key.length > 0 && idle;
   const line = status === undefined ? undefined : savedKeyLine(status);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!ready) return;
-    void Promise.resolve(onSave(value)).then(() => setValue(''));
+    void Promise.resolve(onSave(key.read())).then(() => key.clear());
   };
 
   return (
@@ -138,16 +139,11 @@ export function DeviceKeyCard({ provider, status, busy, test, error, onSave, onT
           {held ? `Replace the ${label} key` : `${label} key`}
         </label>
         <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-          <input
+          <SecretInput
             id={fieldId}
-            // `password` so it is not read over a shoulder; `new-password` so no password manager keeps a copy.
-            type="password"
-            autoComplete="new-password"
-            spellCheck={false}
+            field={key}
             className="kt-input min-h-[44px] w-full min-w-0 flex-1 rounded-control border border-border bg-surface-2 px-2 text-fg"
-            value={value}
             placeholder="paste it here — it is never shown again"
-            onChange={event => setValue(event.target.value)}
           />
           <button type="submit" className="kt-btn min-h-[44px] justify-center" data-variant="primary" disabled={!ready}>
             <KeyRound size={14} aria-hidden="true" /> {busy === 'saving' ? 'Saving…' : 'Save'}

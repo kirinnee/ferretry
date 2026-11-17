@@ -1,33 +1,7 @@
 import type { SessionProcessOutputAvailability } from '../../protocol/session-processes.ts';
 import type { ProcessStreamTarget } from './ports.ts';
 
-/**
- * WHAT A COMMAND LINE SAYS, AND WHERE ITS OUTPUT CAN BE READ. Pure: no IO, no clock.
- *
- * Both harnesses run a tool command through a shell of their own, so the kernel's command line is the
- * wrapper, not what the agent asked for:
- *
- * - Claude Code: `zsh -c source <snapshot> … && eval '<command>' < /dev/null && pwd -P >| /tmp/claude-…-cwd`
- * - Codex: `bash -lc <command>`
- *
- * {@link commandLabel} recovers the command the agent wrote, for the row's title; the wrapper stays in
- * `command`, unedited, because the brief is that argv is shown as it is.
- */
-
-const CLAUDE_EVAL = /\beval '((?:[^']|'"'"'|'\\'')*)'(?: < \/dev\/null)? && pwd -P >\| \S*claude-[0-9a-f]+-cwd\s*$/su;
-const SHELL_DASH_C = /^(?:\S*\/)?-?(?:bash|zsh|sh|dash|ksh|fish) (?:-[a-zA-Z]*c) (.+)$/su;
-
-/** The command the agent asked for, when `argv` is a harness's wrapper around it; otherwise `undefined`. */
-export function commandLabel(argv: string): string | undefined {
-  const claude = CLAUDE_EVAL.exec(argv);
-  if (claude?.[1] !== undefined) {
-    const command = claude[1].replaceAll(`'"'"'`, `'`).replaceAll(`'\\''`, `'`).trim();
-    return command === '' || command === argv ? undefined : command;
-  }
-  const shell = SHELL_DASH_C.exec(argv);
-  const command = shell?.[1]?.trim();
-  return command === undefined || command === '' || command === argv ? undefined : command;
-}
+/** WHERE A PROCESS'S OUTPUT CAN BE READ. Pure: no IO, no clock. The harness-wrapper reading (`commandLabel`) lives in `@ferretry/std`. */
 
 /**
  * The Claude Code task id a shell's output file names (`…/tasks/<id>.output`), or `undefined`.
@@ -36,9 +10,7 @@ export function commandLabel(argv: string): string | undefined {
  * has its stdout and stderr redirected to `/tmp/claude-<uid>/<project-slug>/<session-uuid>/tasks/<id>.output`.
  * A foreground command's file is deleted when the command returns; a background one's stays.
  */
-export function claudeTaskId(path: string): string | undefined {
-  return /\/tasks\/([A-Za-z0-9_-]{1,64})\.output$/u.exec(path)?.[1];
-}
+export { claudeTaskId } from '../../../../contract/jobs.ts';
 
 /** The file a process's output can be read from: stdout's if it is a regular file, else stderr's. */
 export function outputFileOf(stdout?: ProcessStreamTarget, stderr?: ProcessStreamTarget): string | undefined {

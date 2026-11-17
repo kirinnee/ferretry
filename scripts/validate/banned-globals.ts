@@ -214,6 +214,12 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
     },
     {
       pkg: 'terminals',
+      folder: 'cli/adapters/jobs/process-ports.ts',
+      reason:
+        "the `fy job attach` process reading itself: its stdout's target under /proc (the Claude task id), its pid and cwd, the TERM/HUP/INT it must hear, the clock and timers of its poll loop and its own exit once detached; it runs in the caller's shell, outside the daemon and its kernel ports",
+    },
+    {
+      pkg: 'terminals',
       folder: 'cli/adapters/attach/tmux-attacher.ts',
       reason: 'fy itself attaches the person terminal to tmux (lead ruling)',
     },

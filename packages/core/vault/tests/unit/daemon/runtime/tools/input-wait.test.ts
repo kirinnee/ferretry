@@ -29,7 +29,7 @@ function serviceAnswering(answer: Partial<InputAgentView> | Error) {
   return { service, asked };
 }
 
-const waitFor = async (answer: Partial<InputAgentView>, input: unknown = { id: '!A7' }) => {
+const waitFor = async (answer: Partial<InputAgentView>, input: unknown = { id: '^A7' }) => {
   const { service } = serviceAnswering(answer);
   return await inputTools(service).input_wait(callOf(), input);
 };
@@ -37,40 +37,40 @@ const waitFor = async (answer: Partial<InputAgentView>, input: unknown = { id: '
 describe('the input_wait tool: where a card stands, in words', () => {
   it('I17 should tell a ferret its card still waits, and that the owner’s value is being typed', async () => {
     should((await waitFor({ state: 'pending' })).text).equal(
-      '!A7 is still waiting for the owner. Wait again with input.wait; do not type there yourself.',
+      '^A7 is still waiting for the owner. Wait again with input.wait; do not type there yourself.',
     );
     should((await waitFor({ state: 'delivering' })).text).equal(
-      "!A7: the owner's value is being typed now. Wait again with input.wait.",
+      "^A7: the owner's value is being typed now. Wait again with input.wait.",
     );
   });
 
   it('I17 should say what a delivery was and whether Enter was pressed, for a typed value and a secure copy', async () => {
     should((await waitFor({ state: 'delivered', submitted: true })).text).equal(
-      '!A7: the owner typed the value and pressed Enter. Read the terminal to see what happened.',
+      '^A7: the owner typed the value and pressed Enter. Read the terminal to see what happened.',
     );
     should((await waitFor({ state: 'delivered', submitted: false })).text).equal(
-      '!A7: the owner typed the value. Read the terminal to see what happened.',
+      '^A7: the owner typed the value. Read the terminal to see what happened.',
     );
     should((await waitFor({ state: 'delivered', source: 'sealed', submitted: true })).text).equal(
-      '!A7: the secure copy was pasted and Enter pressed. Read the terminal once its quarantine allows.',
+      '^A7: the secure copy was pasted and Enter pressed. Read the terminal once its quarantine allows.',
     );
     should((await waitFor({ state: 'delivered', source: 'sealed' })).text).equal(
-      '!A7: the secure copy was pasted. Read the terminal once its quarantine allows.',
+      '^A7: the secure copy was pasted. Read the terminal once its quarantine allows.',
     );
   });
 
   it('I17 should say a card was refused, expired or cancelled, with the reason only when there is one', async () => {
     should((await waitFor({ state: 'refused', reason: 'target_changed' })).text).equal(
-      '!A7 was refused (target_changed): the value was not typed. Look at the terminal, then raise a new request if it is still needed.',
+      '^A7 was refused (target_changed): the value was not typed. Look at the terminal, then raise a new request if it is still needed.',
     );
     should((await waitFor({ state: 'refused' })).text).equal(
-      '!A7 was refused: the value was not typed. Look at the terminal, then raise a new request if it is still needed.',
+      '^A7 was refused: the value was not typed. Look at the terminal, then raise a new request if it is still needed.',
     );
-    should((await waitFor({ state: 'expired' })).text).equal('!A7 expired without an answer.');
+    should((await waitFor({ state: 'expired' })).text).equal('^A7 expired without an answer.');
     should((await waitFor({ state: 'cancelled', reason: 'owner_declined' })).text).equal(
-      '!A7 was cancelled (owner_declined).',
+      '^A7 was cancelled (owner_declined).',
     );
-    should((await waitFor({ state: 'cancelled' })).text).equal('!A7 was cancelled.');
+    should((await waitFor({ state: 'cancelled' })).text).equal('^A7 was cancelled.');
   });
 
   it('I17 should never hand a ferret what the daemon observed', async () => {
@@ -86,7 +86,7 @@ describe('the input_wait tool: what it asks and refuses', () => {
     const { service, asked } = serviceAnswering({ state: 'pending' });
     const tools = inputTools(service);
 
-    await tools.input_wait(callOf(), { id: '!A7' });
+    await tools.input_wait(callOf(), { id: '^A7' });
     await tools.input_wait(callOf(), { id: 'A8', timeoutMs: 2_500 });
 
     should(asked).eql([
@@ -121,7 +121,7 @@ describe('the input_wait tool: what it asks and refuses', () => {
     ]) {
       const answer = await tools.input_wait(callOf(), input);
       should(answer.isError).be.true();
-      should(answer.text).equal('input_wait takes a card id like !A7 and an optional timeoutMs');
+      should(answer.text).equal('input_wait takes an input id like ^A7 and an optional timeoutMs');
     }
     should(asked).eql([]);
   });
@@ -167,7 +167,7 @@ describe('the input_wait tool: a phone approval is waited on through the service
   it('should hand a pa_ id to the approval service and never to an input card', async () => {
     const { provider, asked } = providing({ id: PA, state: 'waiting' });
 
-    const { answer, cardAsked } = await waitOn(provider, { id: `!${PA}`, timeoutMs: 5_000 });
+    const { answer, cardAsked } = await waitOn(provider, { id: `^${PA}`, timeoutMs: 5_000 });
 
     should(asked).eql([{ ferret: FERRET, id: PA, waitMs: 5_000 }]);
     should(cardAsked).eql([]);
@@ -215,7 +215,7 @@ describe('the input_wait tool: a phone approval is waited on through the service
     const { answer } = await waitOn(provider, { id: 'pa_short' });
 
     should(answer.isError).be.true();
-    should(answer.text).equal('input_wait takes a card id like !A7 and an optional timeoutMs');
+    should(answer.text).equal('input_wait takes an input id like ^A7 and an optional timeoutMs');
     should(asked).eql([]);
   });
 });

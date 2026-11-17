@@ -4,8 +4,12 @@ import {
   type AnswerOperationRecord,
   STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
 } from '../../../../daemon/questions/lib/answer-ledger.ts';
+import type { Instant } from '@ferretry/std';
+import type { Question } from '../../../../contract/index.ts';
 import {
+  paneQuestionUpgrade,
   projectStructuredQuestion,
+  storedQuestionCount,
   structuredQuestionStatePatch,
 } from '../../../../daemon/questions/lib/projection.ts';
 import type { TranscriptEvent } from '../../../../daemon/seams/transcript-types.ts';
@@ -152,5 +156,67 @@ describe('structured question projection branches', () => {
       // Assert
       should(patch).match({ status: 'awaiting_question', pendingQuestion: { toolUseId: 'tool-2' }, ...clearing });
     });
+  });
+});
+
+describe('a pane question upgraded by the transcript call for its form', () => {
+  // The pane showed the first tab of a form of three; the call lands with all three.
+  const paneQuestion: Question = {
+    format: 1,
+    toolUseId: 'pane:abc:1',
+    text: 'Ship?',
+    options: [{ label: 'Yes' }],
+    multiple: false,
+    askedAt: '2026-11-16T10:00:00.000Z' as Instant,
+  };
+  const tabbed = (first = 'Ship?'): TranscriptEvent => ({
+    kind: 'tool-call',
+    harness: 'claude',
+    role: 'assistant',
+    call: {
+      id: 'toolu_call',
+      name: 'AskUserQuestion',
+      input: {},
+      questions: [
+        { question: first, header: 'Ship', options: [{ label: 'Yes' }], multiple: false },
+        { question: 'Where?', options: [{ label: 'Prod' }, { label: 'Stage' }], multiple: false },
+        { question: 'Which checks?', options: [{ label: 'Unit' }, { label: 'Int' }], multiple: true },
+      ],
+    },
+  });
+
+  it('should store every tab of the call under the pane question’s own id and time', () => {
+    // Act
+    const upgraded = paneQuestionUpgrade(paneQuestion, projectStructuredQuestion([tabbed()]));
+
+    // Assert
+    should(upgraded?.toolUseId).equal('pane:abc:1');
+    should(upgraded?.askedAt).equal('2026-11-16T10:00:00.000Z');
+    should(upgraded?.questions.map(question => question.question)).deepEqual(['Ship?', 'Where?', 'Which checks?']);
+    should(upgraded?.questions[2]?.multiSelect).equal(true);
+    should(storedQuestionCount(paneQuestion)).equal(1);
+    should(upgraded?.questions.length).be.above(storedQuestionCount(paneQuestion));
+  });
+
+  it('should count the stored question and each of its follow-ups', () => {
+    should(storedQuestionCount({ ...paneQuestion, more: [{ text: 'Where?', options: [], multiple: false }] })).equal(2);
+  });
+
+  it('should find no upgrade in a call for another form, in no call, or in an answered one', () => {
+    should(paneQuestionUpgrade(paneQuestion, projectStructuredQuestion([tabbed('Rollback?')]))).be.undefined();
+    should(paneQuestionUpgrade(paneQuestion, projectStructuredQuestion([]))).be.undefined();
+    should(
+      paneQuestionUpgrade(
+        paneQuestion,
+        projectStructuredQuestion([
+          tabbed(),
+          { kind: 'tool-result', result: { callId: 'toolu_call' } } as TranscriptEvent,
+        ]),
+      ),
+    ).be.undefined();
+  });
+
+  it('should match the form by its words, whatever the spacing', () => {
+    should(paneQuestionUpgrade(paneQuestion, projectStructuredQuestion([tabbed('  Ship?\n')]))).not.be.undefined();
   });
 });

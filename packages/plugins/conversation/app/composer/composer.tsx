@@ -18,7 +18,6 @@ import {
   Markdown,
   PanelSlot,
   useSlotHasPanels,
-  PendingLocationChip,
   type ReferenceSurface,
   registerComposerQuoteTarget,
   shiftedComposerEnterAction,
@@ -53,6 +52,7 @@ import {
   DEFAULT_COMPOSER_SUGGESTIONS,
   useComposerAutocomplete,
 } from './composer-autocomplete.ts';
+import { ComposerLocationChip } from './composer-location-chip.tsx';
 import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
 import { type ComposerHarness, createComposerAutocompleteProviders } from './composer-autocomplete-providers.ts';
 import { useComposerDockLayout } from './composer-dock-layout.ts';
@@ -467,9 +467,8 @@ export function Composer({
 }: ComposerProps) {
   const client = useOptionalConversationClient() ?? UNCONNECTED;
   const clientDaemon = daemonOfClient(client);
-  // A daemon is its id, not the object that names it: the chat page builds a fresh `daemonConnection(...)` every
-  // render, and a scope (and with it the draft stream, the send's mark and the saved draft) rebuilt from it each time
-  // forgot every send and reloaded the sent words.
+  // A daemon is its id, not the object that names it: the chat page builds a fresh `daemonConnection(...)` every render,
+  // and a scope rebuilt from it each time forgot every send and reloaded the sent words.
   const daemonId = daemonProp?.daemonId ?? clientDaemon ?? '';
   const daemon = useMemo(() => daemonConnection(daemonId), [daemonId]);
   const ownApi = useMemo(() => composerApi(client), [client]);
@@ -572,7 +571,7 @@ export function Composer({
   // A host that reads the reference catalogs itself (the chat page, which proves the transcript's references from the
   // same arrays) owns those prefixes; a host that does not is a standalone composer whose providers read them.
   const hosted = referenceCatalogs !== undefined;
-  // "Include agent cards" in the `&` menu: a menu-only choice, off at rest, read live by the providers.
+  // "Include agent tasks" in the `&` menu: a menu-only choice, off at rest, read live by the providers.
   const [includeAgentTasks, setIncludeAgentTasks] = useState(false);
   const includeAgentTasksRef = useRef(includeAgentTasks);
   includeAgentTasksRef.current = includeAgentTasks;
@@ -1479,7 +1478,8 @@ export function Composer({
         </div>
       )}
       {location === null ? null : (
-        <PendingLocationChip
+        <ComposerLocationChip
+          daemon={daemonId}
           disabled={sending}
           draft={location}
           onPlace={place =>

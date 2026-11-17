@@ -1,0 +1,9 @@
+{
+  "entry": ["bin/*.ts"],
+  "project": ["src/**/*.ts", "bin/**/*.ts"],
+  "ignore": ["src/lib/tool-client.ts", "src/lib/update/status.ts"],
+  "allowed": {
+    "ignore:src/lib/tool-client.ts": "GAP(mcp): the agent-tool client behind `fy mcp serve`; reached when the MCP cli half lands (ports-pending.json pendingHalves.mcp [\"cli\"]); only its tests reach it until then (nelly).",
+    "ignore:src/lib/update/status.ts": "GAP(cli): the update line of `fy daemon status` (today rebuild-ref packages/cli/bin/program.ts:656 builds DaemonUpdateStatusReader, read at src/lib/daemon/controller.ts:630); no 5.0 verb renders it yet (nelly)."
+  }
+}

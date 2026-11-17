@@ -41,8 +41,6 @@ export const PendingQuestionOptionSchema = z.object({
   label: z.string().min(1),
   description: z.string().optional(),
 });
-/** @pending ferrets: The 5.0 ferret record carries no turn state, model, effort, limits or context */
-export type PendingQuestionOption = z.infer<typeof PendingQuestionOptionSchema>;
 
 export const PendingQuestionSchema = z.object({
   toolUseId: z.string().min(1),
@@ -89,8 +87,6 @@ export const ConversationConversionSchema = z.strictObject({
   keptTurns: NonNegativeIntegerSchema,
   omittedTurns: NonNegativeIntegerSchema,
 });
-/** @pending ferrets: Continue-conversation (resume a finished ferret */
-export type ConversationConversion = z.infer<typeof ConversationConversionSchema>;
 
 /** Effective, safe-to-publish session configuration. */
 export const SessionConfigSchema = z.object({
@@ -321,6 +317,7 @@ const DeclaredWaitSchema = z.object({
 export const LaunchInstructionSectionIdSchema = z.enum([
   'tools',
   'settings',
+  'jobs',
   'attention',
   'notify',
   'board',

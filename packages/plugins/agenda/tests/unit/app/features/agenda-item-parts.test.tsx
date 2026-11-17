@@ -64,9 +64,9 @@ const full = agendaItem('A47', {
 
 const conversation: readonly HistoryEvent[] = [
   { kind: 'owner', key: 'o1', at: NOW - 4_000, text: 'Why not red?' },
-  { kind: 'ferret', key: 'f1', at: NOW - 3_000, text: `Re !A47: ${'Red reads as an error. '.repeat(200)}End.` },
+  { kind: 'ferret', key: 'f1', at: NOW - 3_000, text: `Re ^A47: ${'Red reads as an error. '.repeat(200)}End.` },
   { kind: 'owner', key: 'o2', at: NOW - 2_000, text: 'OK, and green?' },
-  { kind: 'ferret', key: 'f2', at: NOW - 1_000, text: 'Re !A47: green tested well.' },
+  { kind: 'ferret', key: 'f2', at: NOW - 1_000, text: 'Re ^A47: green tested well.' },
 ];
 
 const draw = async (
@@ -354,7 +354,7 @@ describe('what it needs from you', () => {
   test('gives every card ask its own heading, and the board’s How to test when the host has it', async () => {
     await draw(full, { howToTestFor: id => (id === 'F12' ? '1. Open the badge.\n2. See it is blue.' : null) });
     const ask = one('[data-agenda-card-ask]');
-    expect(ask.querySelector('[data-agenda-card-ask-title]')?.textContent).toBe('Card &F12: your answer for the card');
+    expect(ask.querySelector('[data-agenda-card-ask-title]')?.textContent).toBe('Task &F12: your answer for the task');
     const steps = must(ask.querySelector('[data-agenda-card-ask-test]'), 'the test steps');
     expect(steps.textContent).toContain('How to test');
     expect(steps.textContent).toContain('Open the badge.');
@@ -384,7 +384,7 @@ describe('what it needs from you', () => {
     expect(root().querySelector('[data-agenda-reference="link"]')).toBeNull();
   });
 
-  // &B156: !A304 was a reply with three questions carrying "OK to build" for &F923, and the app drew no button for it.
+  // &B156: ^A304 was a reply with three questions carrying "OK to build" for &F923, and the app drew no button for it.
   test('draws a card ask’s own buttons on a thread of questions, which is still answered in words', async () => {
     const plan = {
       ...gate,

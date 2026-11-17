@@ -1,41 +1,56 @@
 import type { FerretId } from '@ferretry/core-ferrets/contract';
-import type { ConfigFileDef, ConfigPort, RootHandle, StatePort } from '@ferretry/kernel/contract';
-import { err, type Instant, ok } from '@ferretry/std';
+import type { ConfigFileDef, ConfigPort, StatePort } from '@ferretry/kernel/contract';
+import { err, type Instant, ok, type Result } from '@ferretry/std';
 import {
   CONVERSATION_CONFIG,
+  CONVERSATION_INDEX_STATE,
   type ConversationConfig,
-  FINDER_STATE,
   LINKS_STATE,
   type LinksFile,
 } from '../../contract/index.ts';
 import { ClaudeTranscriptParser } from '../reader/lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../reader/lib/transcript/codex.ts';
 import { PacedTranscriptParser } from '../reader/lib/transcript/sliced.ts';
+import type { TranscriptParser } from '../reader/lib/transcript/types.ts';
 import { conversationFiles } from './adapters/conversation-files.ts';
 import { FileConversationDescriber } from './lib/conversation-describer.ts';
 import {
-  type FinderCache,
-  type LinkCopier,
-  type LinkHarness,
-  type LinkKeeper,
-  type LinkLedger,
-  LinkService,
-} from './lib/service.ts';
+  ConversationIndex,
+  type FerretConversationNames,
+  type IndexedConversation,
+  type IndexParser,
+  type IndexSource,
+} from './lib/conversation-index.ts';
+import { type LinkCopier, type LinkKeeper, type LinkLedger, type LinkPreviewer, LinkService } from './lib/service.ts';
 import { linkRoutes } from './routes.ts';
 
 export * from './lib/service.ts';
+export type { FerretConversationNames, IndexedConversation, IndexSource } from './lib/conversation-index.ts';
+
+/** The harness plugin's own copy-on-link: `source` is the file's path below the harness's history folder (`projects/…`). */
+export type LinkImporter = (
+  harness: string,
+  input: { readonly id: string; readonly source: string },
+) => Promise<Result<void, { readonly reason: string }>>;
 
 export interface LinkNeeds {
   readonly state: StatePort;
-  /** The `harness-history` root, read-only. */
-  readonly history: RootHandle;
-  readonly harnesses: () => readonly LinkHarness[];
+  /** Every tree of transcripts the harness plugins hand over, read-only; asked at the start of each index update. */
+  readonly sources: () => Promise<readonly IndexSource[]>;
+  /** The ferret that runs each harness conversation (`"<harness>:<id>"`) and its name now, from Ferrets. */
+  readonly ferretNames: () => Promise<FerretConversationNames>;
   readonly keeper: LinkKeeper;
-  /** The `imports` root, where an owner-requested copy of a conversation file is written. */
-  readonly imports: RootHandle;
+  /**
+   * Asks a harness plugin to copy one conversation of the owner's own history into ITS shared history pool
+   * (`FerretsApi.importConversation`): the harness owns its pool, Conversation writes no other plugin's state.
+   */
+  readonly importer: LinkImporter;
   readonly now: () => Instant;
   readonly yieldToLoop?: () => Promise<void>;
   readonly clockMs: () => number;
+  /** Waits `ms`; absent, a listing waits for its refresh however long it takes. */
+  readonly sleep?: (ms: number) => Promise<void>;
+  readonly warn?: (message: string) => void;
   readonly kept: (ferret: FerretId, link: string) => void;
   /** "Keep in sync", read from `conversation.yaml` on every listing. */
   readonly keepInSync: () => boolean;
@@ -75,51 +90,84 @@ const ledger = (state: StatePort): LinkLedger => ({
   },
 });
 
-/** `finder.json`: a cache. A damaged one is dropped and rebuilt, so a read that fails answers empty. */
-const finder = (state: StatePort): FinderCache => ({
-  async read() {
-    const read = await state.read(FINDER_STATE);
-    return read.ok ? (read.value?.files ?? {}) : {};
-  },
-  async write(files) {
-    await state.write(FINDER_STATE, { format: 1, files: { ...files } });
-  },
-});
+/** The longest text the index parses without pacing: its head and tail reads, 1.25 MiB at most. */
+const DIRECT_PARSE_MAX_CHARS = 2 * 1024 * 1024;
 
 /**
- * Ferretry's own copy of a conversation, below the `imports` root at the same relative path. The harness-history root is
- * read-only (G162), so the original is never changed; the copy is written whole, so it is the file as it was when asked.
+ * Ferretry's own copy of a conversation of the owner's computer, in the harness's shared history pool at the same
+ * relative path, which the ferret then resumes. The index says where the conversation is; the harness plugin makes the
+ * copy (it owns its pool): it reads the owner's history through its read-only root, so the original is never written,
+ * linked or locked, and the copy is written whole. A conversation already in the pool needs no copy; one still in a
+ * ferret's own home (not pooled yet) is refused, since no other ferret could resume it from there.
  */
-const copier = (history: RootHandle, imports: RootHandle): LinkCopier => ({
-  async copy({ source }) {
-    const from = history.resolve(source);
-    const to = imports.resolve(source);
-    if (!from.ok || !to.ok) return err({ reason: 'That conversation file is outside the folders Ferretry may use.' });
-    const bytes = await history.readBytes(from.value);
-    await imports.writeText(to.value, new TextDecoder('utf-8').decode(bytes));
-    return ok(undefined);
+const copier = (importer: LinkImporter): LinkCopier => ({
+  async copy({ harness, id, location }) {
+    if (location.kind === 'pool') return ok(undefined);
+    if (location.kind !== 'computer')
+      return err({
+        reason: "That conversation is in a ferret's own home, not in the shared pool, so it cannot be kept.",
+      });
+    return await importer(harness, { id, source: location.path });
   },
 });
 
-/** The links: the service and its five routes. Part a's `daemon/index.ts` registers `routes` under their manifest keys. */
+/** A preview is read fresh from the one file the index names: the same read, parse and clean as a listing used to do. */
+const previewer = (
+  index: ConversationIndex,
+  parsers: ConstructorParameters<typeof FileConversationDescriber>[1],
+): LinkPreviewer => ({
+  async preview(conversation: IndexedConversation, count) {
+    const source = index.sourceOf(conversation);
+    if (source === undefined) return undefined;
+    const describer = new FileConversationDescriber(conversationFiles(source.files), parsers);
+    return await describer.preview(
+      {
+        harness: conversation.parser,
+        source: conversation.path,
+        relativePath: conversation.path,
+        nameId: conversation.row.id,
+      },
+      count,
+    );
+  },
+});
+
+/** The links: the service, the index it reads and its five routes. Part a's `daemon/index.ts` registers `routes` under their manifest keys. */
 export function buildLinks(needs: LinkNeeds) {
   const pacing = { now: needs.clockMs, yieldToLoop: needs.yieldToLoop ?? (async () => undefined) };
-  const files = conversationFiles(needs.history);
-  const describer = new FileConversationDescriber(files, {
+  const parsers = {
     claude: new PacedTranscriptParser(new ClaudeTranscriptParser(), pacing),
     codex: new PacedTranscriptParser(new CodexTranscriptParser(), pacing),
+  };
+  // The index reads at most a megabyte or so at a time and hands the loop back between files, so a read that size is parsed
+  // in one go (pacing it in slices costs half again as much); only a wider one, the rare first-4-MiB look, is sliced.
+  const direct = (parser: TranscriptParser, paced: PacedTranscriptParser): IndexParser => ({
+    async parse(input) {
+      return input.text.length <= DIRECT_PARSE_MAX_CHARS ? parser.parse(input) : await paced.parse(input);
+    },
+  });
+  const index = new ConversationIndex({
+    sqlite: () => needs.state.sqlite(CONVERSATION_INDEX_STATE),
+    sources: needs.sources,
+    ferretNames: needs.ferretNames,
+    parsers: {
+      claude: direct(new ClaudeTranscriptParser(), parsers.claude),
+      codex: direct(new CodexTranscriptParser(), parsers.codex),
+    },
+    nowMs: needs.clockMs,
+    ...(needs.sleep === undefined ? {} : { sleep: needs.sleep }),
+    ...(needs.yieldToLoop === undefined ? {} : { yieldToLoop: needs.yieldToLoop }),
+    ...(needs.warn === undefined ? {} : { warn: needs.warn }),
   });
   const service = new LinkService({
-    harnesses: needs.harnesses,
-    files,
-    describer,
+    index,
+    previewer: previewer(index, parsers),
     ledger: ledger(needs.state),
-    finder: finder(needs.state),
     keeper: needs.keeper,
-    copier: copier(needs.history, needs.imports),
+    copier: copier(needs.importer),
     now: needs.now,
     keptPublished: needs.kept,
     keepInSync: needs.keepInSync,
   });
-  return { service, routes: linkRoutes(service) } as const;
+  return { service, index, routes: linkRoutes(service) } as const;
 }

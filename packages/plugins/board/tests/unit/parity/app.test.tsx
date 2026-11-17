@@ -40,8 +40,8 @@ const daemon: PluginClient = {
         };
       case 'GET /v1/board/ids':
         return { ids: CARDS.map(entry => entry.id) };
-      case 'GET /v1/board/cards/:cardId': {
-        const found = CARDS.find(entry => entry.id === init?.params?.cardId);
+      case 'GET /v1/board/tasks/:taskId': {
+        const found = CARDS.find(entry => entry.id === init?.params?.taskId);
         if (found === undefined) throw Object.assign(new Error('no such card'), { status: 404 });
         return { card: found, laneSet: laneSetFor() };
       }
@@ -93,7 +93,10 @@ const draw = async <Props extends object>(
   return root;
 };
 
-const screen = (id: 'board' | 'card', params: ScreenProps['params']) => ({ component: half?.screens[id], params });
+const screen = (id: 'board' | 'task' | 'card', params: ScreenProps['params']) => ({
+  component: half?.screens[id],
+  params,
+});
 
 const drawBoard = async (search = '', params: ScreenProps['params'] = {}): Promise<HTMLElement> => {
   await at(`/d/studio/board${search}`);
@@ -107,8 +110,8 @@ const drawBoard = async (search = '', params: ScreenProps['params'] = {}): Promi
 };
 
 describe('the app half the shell builds', () => {
-  it('S-0341 PAGE_SLOTS Board: the board and one card are screens, and the board screen draws the board', async () => {
-    expect(Object.keys(half?.screens ?? {}).sort()).toEqual(['board', 'card']);
+  it('S-0341 PAGE_SLOTS Board: the board and one task are screens (the card screen is the old address), and the board screen draws the board', async () => {
+    expect(Object.keys(half?.screens ?? {}).sort()).toEqual(['board', 'card', 'task']);
     expect(manifest.ui?.screens?.find(entry => entry.id === 'board')?.path).toBe('board/:project?');
     const root = await drawBoard();
     expect([...root.querySelectorAll('[data-task]')].map(node => node.getAttribute('data-task'))).toEqual([
@@ -198,8 +201,8 @@ describe('the app half the shell builds', () => {
     const listing: PluginClient = {
       call: async (route: string, init?: { readonly params?: Readonly<Record<string, string>> }) => {
         if (route === 'GET /v1/board/ids') return { ids: ['F1', 'F7'] };
-        if (route === 'GET /v1/board/cards/:cardId') {
-          const found = CARDS.find(entry => entry.id === init?.params?.cardId);
+        if (route === 'GET /v1/board/tasks/:taskId') {
+          const found = CARDS.find(entry => entry.id === init?.params?.taskId);
           if (found === undefined) throw Object.assign(new Error('refused'), { status: 403 });
           return { card: found, laneSet: laneSetFor() };
         }
@@ -233,9 +236,9 @@ describe('the app half the shell builds', () => {
     expect(unproved.textContent).toBe('&F404');
   });
 
-  it('S-0298 feature board: the card is read-only status, so its page draws no answer surface', async () => {
+  it('S-0298 feature board: the task is read-only status, so its page draws no answer surface', async () => {
     const root = await draw<ScreenProps>(
-      half?.screens.card,
+      half?.screens.task,
       { params: { id: 'F1' } },
       node => (node.textContent ?? '').includes('Fix the scroller'),
       'the card page of F1',
@@ -244,6 +247,28 @@ describe('the app half the shell builds', () => {
     const buttons = [...root.querySelectorAll('button')].map(button => (button.textContent ?? '').trim());
     for (const answer of ['Done', 'Not good', 'Reopen', 'Approve', 'Answer', 'Send'])
       expect(buttons).not.toContain(answer);
+  });
+});
+
+describe('the old card address', () => {
+  it('O18 /card/<id> shows the task and moves the address to /task/<id>: links in old transcripts keep working', async () => {
+    await at('/d/studio/card/F1');
+    const root = await draw<ScreenProps>(
+      half?.screens.card,
+      { params: { id: 'F1' } },
+      node => (node.textContent ?? '').includes('Fix the scroller'),
+      'the task page of F1, reached by its old address',
+    );
+    expect(root.textContent).toContain('Fix the scroller');
+    expect(window.location.pathname).toBe('/d/studio/task/F1');
+  });
+
+  it('O18 the manifest names both screens: task/:id, and card/:id kept for the old links', () => {
+    expect(manifest.ui?.screens?.map(entry => [entry.id, entry.path])).toEqual([
+      ['board', 'board/:project?'],
+      ['task', 'task/:id'],
+      ['card', 'card/:id'],
+    ]);
   });
 });
 
@@ -402,13 +427,13 @@ describe('words and routes', () => {
 
   it('S-0367 daemonBoardCardPath: a card id after /board opens that card; /card/<id> is its own page', () => {
     expect(boardCardPath(undefined, 'F12')).toBe('/board/F12');
-    expect(cardPagePath('F12')).toBe('/card/F12');
+    expect(cardPagePath('F12')).toBe('/task/F12');
   });
 
   it('S-0367 daemonBoardCardPath: both are per daemon, so under /d/<daemon>/ on a daemon address', async () => {
     await at('/d/studio/board/F1');
     expect(boardCardPath(undefined, 'F12')).toBe('/d/studio/board/F12');
-    expect(cardPagePath('F12')).toBe('/d/studio/card/F12');
+    expect(cardPagePath('F12')).toBe('/d/studio/task/F12');
   });
 
   it('S-0368 daemonBoardForFerretPath: a ferret’s board is the board narrowed by ?ferret=', () => {

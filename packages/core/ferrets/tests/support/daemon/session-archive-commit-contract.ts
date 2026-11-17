@@ -6,7 +6,7 @@ import { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.
 import { KeyedSerialExecutor } from '../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import { createSessionArchive } from '../../../daemon/adapters/session/archive/session-archive.ts';
 import { StorageSessionLifecycleRepository } from '../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
-import { createFoundationPaths, createSessionPaths } from '../../../daemon/lib/paths.ts';
+import { createFoundationPaths, createSessionPaths } from './state-paths.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
 import { RecordingLog } from './storage.ts';
 import { archiveDeadline } from './archive-deadline.ts';
@@ -76,6 +76,9 @@ function documentsPort(docs: Map<string, Doc>, beforePersist: () => void | Promi
       throw new Error('the fixture holds no folders');
     },
     pathOf: () => {
+      throw new Error('the fixture holds no paths');
+    },
+    pinMade: async () => {
       throw new Error('the fixture holds no paths');
     },
     damaged: () => [],

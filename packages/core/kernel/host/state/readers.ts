@@ -2,7 +2,8 @@ import { err, ok, type Result } from '@ferretry/std';
 import type { JsonlRecords, StateDamage, StateFileDef } from '../../contract/index.ts';
 import { damageOf, decodeJson, describeFault, openDocument, shapeOf } from './format.ts';
 import type { HostFs } from './host-fs.ts';
-import { scanJsonl } from './jsonl-scan.ts';
+import { JsonlScanner, scanJsonl } from './jsonl-scan.ts';
+import { JSONL_CHUNK_BYTES } from './stream-lines.ts';
 import { checkSqlite, type SqliteFiles } from './sqlite-store.ts';
 
 /**
@@ -114,6 +115,42 @@ export async function readBytesFile(
   }
 }
 
+/**
+ * What {@link readJsonlRecords} would say about a JSONL file, without holding it: the file streams through the line
+ * scan and each record is checked and dropped, so a journal of any size costs one chunk and one record. The verdict
+ * is the same: a bad line anywhere wins over a record that fails its schema, whichever comes first.
+ */
+async function inspectJsonlFile(
+  fs: HostFs,
+  def: StateFileDef,
+  path: string,
+  label: string,
+): Promise<StateDamage | undefined> {
+  let problem: string | undefined;
+  let rejected: StateDamage | undefined;
+  const scanner = new JsonlScanner({
+    record: record => {
+      if (rejected !== undefined) return;
+      const at = `${label} line ${record.line}`;
+      const opened = openDocument(def, at, record.value);
+      const shape = opened.ok ? shapeOf(def, at, opened.value) : opened;
+      if (!shape.ok) rejected = { ...shape.error, file: label };
+    },
+    problem: found => {
+      problem ??= `line ${found.line}: ${found.message}`;
+    },
+    tornTail: () => undefined,
+  });
+  try {
+    const found = await fs.streamBytes(path, JSONL_CHUNK_BYTES, chunk => scanner.push(chunk));
+    if (!found) return def.required === true ? damageOf(label, 'missing') : undefined;
+  } catch (error) {
+    return damageOf(label, 'io', describeFault(error));
+  }
+  scanner.end();
+  return problem === undefined ? rejected : damageOf(label, 'unparsable', problem);
+}
+
 /** Whatever is wrong with one file on disk, or `undefined`: what boot asks of each declared file. */
 export async function inspectStateFile(
   fs: HostFs,
@@ -127,10 +164,8 @@ export async function inspectStateFile(
       const read = await readJsonDocument(fs, def, path, label);
       return read.ok ? undefined : read.error;
     }
-    case 'jsonl': {
-      const read = await readJsonlRecords(fs, def, path, label);
-      return read.ok ? undefined : read.error;
-    }
+    case 'jsonl':
+      return inspectJsonlFile(fs, def, path, label);
     case 'sqlite': {
       if ((await fs.info(path)) === undefined) return def.required === true ? damageOf(label, 'missing') : undefined;
       return checkSqlite(def, path, label, sqliteFiles);

@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { SignInIdSchema, TwoFactorIdSchema } from './account-ids.ts';
 import { MIN_SECRET_VALUE_LENGTH, SecretNameSchema } from '@ferretry/core-vault/contract';
 
 /** Field, target-matching and input-card primitives shared by canonical Accounts. */
@@ -227,146 +226,9 @@ export type SignInChoiceReason = z.infer<typeof SignInChoiceReasonSchema>;
 /** The longest project name a card's "Default for <project>" carries. */
 export const SIGN_IN_PROJECT_MAX_LENGTH = 128;
 
-/**
- * One saved login an input card may offer. `fills` is the field it would type (the password for a
- * `secret`, the code for a `code` or `private`, the username for a `plain`). `matched` is the DAEMON's decision that
- * the entry is for this target: only a matched entry is the card's one-tap primary; the rest stay
- * selectable by hand. `hinted` says the ferret named it, which never makes it matched.
- *
- * A daemon that keeps accounts and sign-ins (`accounts.signins.1`) adds four fields, all optional so an older
- * daemon's card still parses: `id` is then the ACCOUNT's handle and `signIn` the sign-in it would use here
- * (absent: an account hand-picked with no sign-in here); `primary` marks the one-tap choice, at most one and only
- * ever a matched one, with `why` it is first (and `project`, the project a "Default for ferretry" names). With
- * `primary` absent from every offer, nothing is the one-tap choice: the owner picks.
- */
-/**
- * ONE "Use code from Ferretry" button: a 2FA key of the offer's account whose seed Ferretry holds, by its id (what a
- * deliver's `factor` names) and the OWNER's label. `checked` is what the last code made from it came to, as the daemon
- * saw it (`worked`, `failed`); absent: never tried. Owner view only, like the whole offer: a ferret never learns that a
- * seed exists.
- */
-const InputCodeKeySchema = z.strictObject({
-  factor: TwoFactorIdSchema,
-  label: oneLine(TWO_FACTOR_LABEL_MAX_LENGTH),
-  checked: z.enum(['worked', 'failed']).optional(),
-});
-
-const InputSavedOfferSchema = z
-  .strictObject({
-    id: LoginEntryIdSchema,
-    label: oneLine(LOGIN_LABEL_MAX_LENGTH),
-    username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
-    fills: LoginFieldRoleSchema,
-    matched: z.boolean(),
-    hinted: z.boolean().optional(),
-    /**
-     * Where this account signs in, when that is somewhere else (place keys, names only: `liftoff.okta.com`,
-     * `sudo@kirin-box`); EMPTY when it signs in nowhere ("not linked to a site"). Only on an offer picked by hand
-     * (`matched: false`): the card puts it behind a second step and it is never the one-tap choice. Absent: an account
-     * for this very site that no sign-in matched, or an older daemon, whose card keeps it in the one list.
-     */
-    elsewhere: z.array(LoginMatchSchema).max(LOGIN_MATCH_MAX).readonly().optional(),
-    signIn: SignInIdSchema.optional(),
-    primary: z.literal(true).optional(),
-    why: SignInChoiceReasonSchema.optional(),
-    project: oneLine(SIGN_IN_PROJECT_MAX_LENGTH).optional(),
-    /**
-     * An offer that makes a one-time code: one button per key whose seed Ferretry holds, in the order a deliver without
-     * `factor` falls back on (one that worked first, then one never tried, then one that failed; newest first). Only
-     * ever on a MATCHED offer that fills `totp`, and only where the daemon may type a code it made (docs/input-requests.md,
-     * "Codes Ferretry makes"). Absent from an older daemon: the offer is one button with the account's first seed.
-     */
-    codes: z.array(InputCodeKeySchema).min(1).max(MAX_SEEDS_PER_ACCOUNT).readonly().optional(),
-  })
-  .superRefine((offer, context) => {
-    if (offer.codes !== undefined && (!offer.matched || offer.signIn === undefined || offer.fills !== 'totp'))
-      context.addIssue({
-        code: 'custom',
-        path: ['codes'],
-        message: 'only a matched offer that fills a code names the keys it makes codes from',
-      });
-    if (offer.elsewhere !== undefined && offer.matched)
-      context.addIssue({
-        code: 'custom',
-        path: ['elsewhere'],
-        message: 'an offer that signs in here is not one from somewhere else',
-      });
-    if (offer.primary === true && !offer.matched)
-      context.addIssue({ code: 'custom', path: ['primary'], message: 'only a matched offer is the one-tap choice' });
-    if (offer.primary === true && offer.signIn === undefined)
-      context.addIssue({ code: 'custom', path: ['signIn'], message: 'the one-tap choice names the sign-in it uses' });
-    if ((offer.primary === true) !== (offer.why !== undefined))
-      context.addIssue({ code: 'custom', path: ['why'], message: 'the one-tap choice, and only it, says why' });
-    if (offer.project !== undefined && offer.why !== 'project')
-      context.addIssue({ code: 'custom', path: ['project'], message: 'a project is named only by a project default' });
-  });
-
 /** A saved login named by another: its handle and its label, never what it holds. */
 const LoginEntryRefSchema = z.strictObject({ id: LoginEntryIdSchema, label: oneLine(LOGIN_LABEL_MAX_LENGTH) });
 export type LoginEntryRef = z.infer<typeof LoginEntryRefSchema>;
-
-/**
- * How the saved login this target is for signs in, when it is not a plain password: the card says "Sign in with
- * Google via 'Google (kirin@…)'", so the owner sees the ferret should be on the provider's page, not typing here.
- */
-const InputSignInSchema = z.strictObject({
-  id: LoginEntryIdSchema,
-  label: oneLine(LOGIN_LABEL_MAX_LENGTH),
-  method: LoginMethodSchema,
-  via: LoginEntryRefSchema.optional(),
-});
-
-/**
- * What an input card knows about saved logins, as the owner reads it (never the agent): the target's key
- * the daemon worked out, the entry "Save as" would suggest, and the entries that can fill the field,
- * matched first.
- */
-export const InputSavedSchema = z.strictObject({
-  match: LoginMatchSchema.optional(),
-  /**
-   * What an older app pre-fills under "Save as": `update` when that is the account the card is about, else
-   * `newAccount`. A newer app reads those two and asks the owner which one.
-   */
-  suggest: LoginEntryRefSchema.optional(),
-  /**
-   * The account "Update" would write the typed value into: the one this card is about among those that sign in here.
-   * Absent when none does, or when two or more do and nothing chose one. Saving into it takes the owner's explicit
-   * "Update" (`save.mode: 'update'`); its username is shown so the owner can tell it is the same person.
-   */
-  update: LoginEntryRefSchema.safeExtend({ username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional() }).optional(),
-  /**
-   * What "New account" would be called: a label and a CLI name from the site's provider and the username when it is
-   * known ("Google · a@gmail.com", `GOOGLE_A`), never a CLI name an account already has.
-   */
-  newAccount: LoginEntryRefSchema.optional(),
-  /**
-   * The username the FERRET typed into this page's identifier field (an email or username box) before the card was
-   * raised, as the daemon saw its own type act: plain, and only the ferret's word. It pre-fills the editable "Username"
-   * under "Save as" and can REMOVE a one-tap (`differentFrom`); it never chooses, promotes or fills an account.
-   */
-  typedUsername: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
-  /**
-   * The account that would have been the one-tap, demoted because the page is signing in someone else: the typed
-   * username is not that account's, or it has none saved. The card says "This looks like a different account" and the
-   * owner picks or types.
-   */
-  differentFrom: LoginEntryRefSchema.safeExtend({ username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional() }).optional(),
-  /** Which field a typed value would be saved as; absent when this kind of value is never saved (a code). */
-  saves: LoginFieldRoleSchema.optional(),
-  offers: z
-    .array(InputSavedOfferSchema)
-    .max(MAX_LOGIN_ENTRIES)
-    .readonly()
-    .refine(offers => offers.filter(offer => offer.primary === true).length <= 1, 'at most one offer is the primary'),
-  /** The matched entry signs in through a provider: what the card says about it. */
-  signIn: InputSignInSchema.optional(),
-  /**
-   * The board project the DAEMON resolved for the asking session (never the ferret's word): what a quiet "Always use for
-   * <project>" after a hand-tap writes as a project default. Absent: the session has no project (Unfiled), or the daemon
-   * could not tell.
-   */
-  project: z.strictObject({ id: z.string().min(1).max(200), name: oneLine(SIGN_IN_PROJECT_MAX_LENGTH) }).optional(),
-});
 
 /** The site a hint is asked for: a host, a URL or a `program@host`, as a key a saved login could match. */
 export function loginHintSite(text: string): LoginMatch | undefined {
@@ -435,7 +297,7 @@ const handleWordOf = (username: string): string => {
 };
 
 /**
- * What "New account" is called on a card ({@link InputSavedSchema} `newAccount`): the provider's name, or the place as
+ * What "New account" is called on a card ({@link InputSaved} `newAccount`, from `@ferretry/core-vault/contract`): the provider's name, or the place as
  * {@link suggestedLoginLabel} says it, then ` · <username>` when the username is known ("Google · a@gmail.com"); the
  * CLI name from the same words (`GOOGLE_A`, `GITHUB_COM_KIRINNEE`). A CLI name in `taken` gets `_2`, `_3`, … so two
  * accounts on one site never share one. Always a valid {@link LoginEntryIdSchema}; the owner can edit both.

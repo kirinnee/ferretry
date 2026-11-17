@@ -42,6 +42,7 @@ export function InfoOverview({
   const tree = worktreeFact(ferret, worktrees);
   const family = lineage(ferret, ferrets);
   const project = projectFact(ferret);
+  const task = ferret.task ?? ferret.card; // `card` is the former key
   const link = (target: FerretSummary) =>
     onOpenFerret === undefined ? (
       <span key={target.id}>{ferretName(target)}</span>
@@ -62,7 +63,7 @@ export function InfoOverview({
       <InfoAbout
         ferret={ferret}
         subFerrets={family.children}
-        {...(ferret.card === undefined ? {} : { card: ferret.card })}
+        {...(task === undefined ? {} : { card: task })}
         {...(onOpenFerret === undefined ? {} : { onOpenFerret })}
         {...about}
       />

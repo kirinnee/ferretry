@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { owner } from '@ferretry/kernel/testing';
-import { WARDEN_CONFIG, WARDEN_JEV_CHECKS, WARDEN_REPORTS, WARDEN_STATE } from '../../../contract/index.ts';
+import {
+  WARDEN_CONFIG,
+  WARDEN_DIALOG_RULES,
+  WARDEN_JEV_CHECKS,
+  WARDEN_REPORTS,
+  WARDEN_STATE,
+} from '../../../contract/index.ts';
 import { StateAutoMoveLedger } from '../../../daemon/adapters/state-store.ts';
 import { FileWardenArtifacts } from '../../../daemon/adapters/artifacts.ts';
 import { StateWardenReportFiles } from '../../../daemon/adapters/report-files.ts';
@@ -16,6 +22,7 @@ describe('storage parity', () => {
       ['reports', 'reports/*', 'opaque', 1],
       ['jev-checks', 'jev-checks/*.json', 'json', 1],
       ['remembered', 'remembered.json', 'json', 1],
+      ['dialog-frames', 'dialog-frames/*', 'opaque', 1],
     ]);
     expect([WARDEN_STATE.path, WARDEN_REPORTS.path, WARDEN_JEV_CHECKS.path]).toEqual([
       'state.json',
@@ -36,7 +43,7 @@ describe('storage parity', () => {
   });
 
   test('F-0177 F-0421 the settings are config/warden.yaml: the file under the defaults, a loosening held for the owner', async () => {
-    expect(manifest.data.config).toEqual([WARDEN_CONFIG]);
+    expect(manifest.data.config).toEqual([WARDEN_CONFIG, WARDEN_DIALOG_RULES]);
     expect(WARDEN_CONFIG.file).toBe('warden.yaml');
     expect(WARDEN_CONFIG.axis).toBe('configure');
     const { host } = await wardenHost({ config: { enabled: false } });
@@ -50,7 +57,7 @@ describe('storage parity', () => {
     expect(typeof WARDEN_CONFIG.loosens).toBe('function');
   });
 
-  test('pending F-0359 F-0081 (the running half builds no auto-move, a declared GAP): the move ledger (today auto-migrate.json) lives under its own key of state.json and survives a sweep write', async () => {
+  test('F-0359 F-0081 the move ledger (today auto-migrate.json) lives under its own key of state.json and survives a sweep write', async () => {
     const state = wardenState();
     const ledger = new StateAutoMoveLedger(state);
 

@@ -12,6 +12,7 @@ import {
   type ResolveResult,
   type RuntimeAssetSkills,
   type RuntimeHome,
+  type MachineBrowserPorts,
   type MachineTool,
   type RuntimeCheckEnvironment,
   type RuntimeHomeReader,
@@ -32,6 +33,13 @@ export interface FakeRuntimes extends RuntimesApi {
   setAssetSkills(assetSkills: RuntimeAssetSkills): void;
   /** The runtimes `catalog()` and the machine tools `tools()` answer (none until set). */
   setCatalog(runtimes: readonly RuntimeView[], tools?: readonly MachineTool[]): void;
+  /**
+   * What `machineBrowserPorts()` answers (`random` and `warn` until set: a machine whose setting says `random`). The real
+   * Runtimes REJECTS while it holds no `browserPorts` setting; a test of that case makes the fake's method reject.
+   */
+  setMachineBrowserPorts(next: MachineBrowserPorts): void;
+  /** What `autoResume()` answers (on until set; `undefined` is a switch that cannot be read). */
+  setAutoResume(next: boolean | undefined): void;
   /** What `checkEnvironment(runtime)` answers for a runtime (nothing for any other). */
   setCheckEnvironment(runtime: RuntimeId, environment: RuntimeCheckEnvironment): void;
   /**
@@ -98,6 +106,8 @@ export function fakeRuntimes(): FakeRuntimes {
   const checkEnvironments = new Map<string, RuntimeCheckEnvironment>();
   let catalog: readonly RuntimeView[] = [];
   let machineTools: readonly MachineTool[] = [];
+  let browserPorts: MachineBrowserPorts = { browserPorts: 'random', browserFirewallFailure: 'warn' };
+  let autoResume: boolean | undefined = true;
   let profiles: readonly ProfileSummary[] = [];
   let layerSets: ReadonlyMap<RuntimeId, RuntimeLayers> = new Map();
   let forced: Parameters<FakeRuntimes['setChangeOutcome']>[0];
@@ -151,6 +161,8 @@ export function fakeRuntimes(): FakeRuntimes {
     },
     catalog: async () => catalog,
     tools: async () => machineTools,
+    machineBrowserPorts: async () => browserPorts,
+    autoResume: async () => autoResume,
     // No fleet is published in memory: there are no homes until a test sets them, and a reader only for a listed id.
     homes: async () => homes,
     home: id => (homes.some(home => home.id === id) ? readers[id] : undefined),
@@ -184,6 +196,12 @@ export function fakeRuntimes(): FakeRuntimes {
     setCatalog: (next, nextTools = []) => {
       catalog = next;
       machineTools = nextTools;
+    },
+    setMachineBrowserPorts: next => {
+      browserPorts = next;
+    },
+    setAutoResume: next => {
+      autoResume = next;
     },
     checkEnvironment: async runtime => checkEnvironments.get(runtime),
     setCheckEnvironment: (runtime, environment) => {

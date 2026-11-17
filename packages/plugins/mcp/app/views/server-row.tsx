@@ -138,7 +138,7 @@ export function useMcpServerActions(host: McpActionsHost | undefined, onSignedIn
 const DOT: Readonly<Record<McpTone, string>> = { ok: 'bg-ok', warn: 'bg-warn', err: 'bg-err', none: 'bg-faint' };
 
 /** A failure: the sentence, and the raw text behind Details. */
-function PlainFailureText({ failure, spot }: { readonly failure: PlainFailure; readonly spot: string }) {
+export function PlainFailureText({ failure, spot }: { readonly failure: PlainFailure; readonly spot: string }) {
   return (
     <div className="m-0 flex w-full min-w-0 flex-col gap-0.5 text-meta" role="alert" data-mcp-failure={spot}>
       <span className="break-words text-err">{failure.headline}</span>
@@ -164,6 +164,8 @@ export interface McpServerRowProps {
   readonly compact?: boolean;
   /** Leave Sign in to a section beside the row that already offers it (a server's own page). */
   readonly offerSignIn?: boolean;
+  /** What other plugins put at the end of the status line, after Check and Sign in (the `mcp.row` slot). */
+  readonly rowSlot?: ReactNode;
 }
 
 export function McpServerRow({
@@ -173,6 +175,7 @@ export function McpServerRow({
   online = true,
   compact = false,
   offerSignIn = true,
+  rowSlot,
 }: McpServerRowProps) {
   const state = actions.checks.get(server.id);
   const result = state?.kind === 'done' ? state.result : undefined;
@@ -228,6 +231,7 @@ export function McpServerRow({
             {actions.starting === server.id ? 'Opening sign-in…' : status.signIn}
           </Button>
         )}
+        {rowSlot}
       </div>
       {status.detail === undefined || checking ? null : (
         <p className="m-0 break-words text-meta text-faint" data-mcp-detail="">

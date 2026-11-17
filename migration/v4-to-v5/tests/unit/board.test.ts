@@ -204,7 +204,7 @@ test('keeps parent, dependency and PR links, and the approval link to the ferret
   expect(plain(kept.links)).toEqual(links);
   expect(plain(kept.blocked)).toEqual({ on: 'external', reason: 'fake wait', since: AT });
   expect(plain(kept.approval)).toEqual({ ferret: 'lead', id: 'A41' });
-  expect(report.kept).toContainEqual({ what: 'card approvals linked to their ferret’s ask', count: 1 });
+  expect(report.kept).toContainEqual({ what: 'task approvals linked to their ferret’s ask', count: 1 });
 });
 
 test('dropped cards and cards in a closed lane are kept', async () => {
@@ -217,8 +217,8 @@ test('dropped cards and cards in a closed lane are kept', async () => {
   expect(report.status).toBe('converted');
   expect(plain((await card('C1')).dropped)).toEqual({ reason: 'fake superseded', at: LATER });
   expect((await card('I4')).laneId).toBe('closed');
-  expect(report.kept).toContainEqual({ what: 'cards (ids unchanged; dropped and closed cards included)', count: 2 });
-  expect(report.kept).toContainEqual({ what: 'dropped cards', count: 1 });
+  expect(report.kept).toContainEqual({ what: 'tasks (ids unchanged; dropped and closed tasks included)', count: 2 });
+  expect(report.kept).toContainEqual({ what: 'dropped tasks', count: 1 });
 });
 
 test('counters continue after the highest id, whichever is higher', async () => {
@@ -339,7 +339,7 @@ test('dry run writes nothing', async () => {
   await f.put('state/board/sweep.json', { v: 1, sweptAt: AT, nudged: {}, seen: {} });
   const report = await boardStep.run(f.ctx(true));
   expect(report.status).toBe('converted');
-  expect(report.kept).toContainEqual({ what: 'cards (ids unchanged; dropped and closed cards included)', count: 1 });
+  expect(report.kept).toContainEqual({ what: 'tasks (ids unchanged; dropped and closed tasks included)', count: 1 });
   expect(await stat(f.to).catch(() => undefined)).toBeUndefined();
 });
 
@@ -356,7 +356,7 @@ test('a card that does not map fails the step, names the card, never its content
 
 test('a card filed under another id, or of the wrong kind letter, fails', async () => {
   await f.put('state/board/tasks/F1.json', v4Card('F5'));
-  expect((await boardStep.run(f.ctx())).note).toBe("card F1 (state/board/tasks/F1.json) holds another card's id");
+  expect((await boardStep.run(f.ctx())).note).toBe("task F1 (state/board/tasks/F1.json) holds another task's id");
   await f.clean();
   f = await fixture();
   await f.put('state/board/tasks/F1.json', { ...v4Card('F1'), kind: 'bug' });
@@ -367,7 +367,7 @@ test('a top-level field v4 does not declare is named in notCarried, never valued
   await f.put('state/board/tasks/F1.json', { ...v4Card('F1'), retiredField: 'FAKE-SECRET-VALUE' });
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('converted');
-  expect(report.notCarried.map(item => item.what)).toContain('card fields v4.291.5 does not declare: retiredField');
+  expect(report.notCarried.map(item => item.what)).toContain('task fields v4.291.5 does not declare: retiredField');
   expect(JSON.stringify(report)).not.toContain('FAKE-SECRET');
   expect(JSON.stringify(await output('state/board/cards/F1.json'))).not.toContain('FAKE-SECRET');
 });
@@ -518,7 +518,7 @@ test('a history event type v4 does not have fails the step, naming the card and 
   await f.put('state/board/tasks/F2.json', v4Card('F2'));
   const report = await boardStep.run(f.ctx());
   expect(report.status).toBe('failed');
-  expect(report.note).toBe("card F1 has a history event of a type v4 does not have: 'teleported'");
+  expect(report.note).toBe("task F1 has a history event of a type v4 does not have: 'teleported'");
   expect(JSON.stringify(report)).not.toContain('FAKE-SECRET');
   expect(await exists('state/board/cards/F2.json')).toBe(false);
 });

@@ -309,11 +309,15 @@ const PANE_ACTIVITY_FORMAT =
 
 /**
  * A pane's frames read through its tmux client: one `display-message` for the metadata and the activity stamp
- * (`dead|exit|x|y|height|width|activity|history|id pid`), and one `capture-pane` for the screen — captured again only
- * when the stamp moved. A dead or missing pane answers nothing.
+ * (`dead|exit|x|y|height|width|activity|history|id pid`), and one `capture-pane` for the screen — captured again unless
+ * the stamp is unchanged and the kept capture began in a later second than the pane's last output. A dead or missing
+ * pane answers nothing.
  */
 export const SCRIPTED_PANE_FRAMES: PaneFramesFactory = port => {
-  const frames = new Map<string, { readonly activity: string; readonly visible: string }>();
+  const frames = new Map<
+    string,
+    { readonly stamp: string; readonly visible: string; readonly capturedAtSecond: number }
+  >();
   return {
     state: async (tmuxSession): Promise<PaneState | undefined> => {
       const asked = await port.execute(['display-message', '-p', '-t', tmuxSession, PANE_ACTIVITY_FORMAT]);
@@ -336,12 +340,25 @@ export const SCRIPTED_PANE_FRAMES: PaneFramesFactory = port => {
         frames.delete(tmuxSession);
         return undefined;
       }
-      const activity = fields.slice(6).join('|');
-      let visible = frames.get(tmuxSession)?.visible;
-      if (frames.get(tmuxSession)?.activity !== activity) {
+      // The terminals plugin's rule (`capturedFrameIsCurrent`): a kept frame is current only when nothing that moves
+      // with a redraw moved (cursor, size, scrollback, activity) AND it was captured in a later second than the
+      // window's last output. tmux stamps activity in whole seconds, so a capture taken in the same second as a
+      // later redraw would otherwise be served stale — a worker that looks while the pane is still blank would
+      // never see the frame drawn a moment after.
+      const stamp = fields.slice(2).join('|');
+      const kept = frames.get(tmuxSession);
+      const activityAt = number(fields[6]);
+      let visible = kept?.visible;
+      if (
+        kept === undefined ||
+        kept.stamp !== stamp ||
+        activityAt === undefined ||
+        kept.capturedAtSecond <= activityAt
+      ) {
+        const capturedAtSecond = Math.floor(Date.now() / 1_000);
         const captured = await port.execute(['capture-pane', '-p', '-t', tmuxSession]);
         visible = captured.code === 0 ? captured.stdout : '';
-        if (captured.code === 0) frames.set(tmuxSession, { activity, visible });
+        if (captured.code === 0) frames.set(tmuxSession, { stamp, visible, capturedAtSecond });
         else frames.delete(tmuxSession);
       }
       const screen = visible ?? '';

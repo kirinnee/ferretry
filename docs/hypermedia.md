@@ -77,7 +77,7 @@ A fence whose info string is exactly fy-render: `type: <type>`, `alt: <one line>
 - svg: one self-contained <svg> (CSS animation ok); no script, foreignObject or links.
 - html: a fragment, inline CSS and <script> (isolated); no network; transparent, theme-token colours.
 - chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: `fy render guide chart`.
-- card, board (live cards), map, image, video, audio, pdf: `fy render guide <type>`.
+- task, board (live tasks), map, image, video, audio, pdf: `fy render guide <type>`.
 ```fy-render
 type: mermaid
 alt: Request flow
@@ -85,7 +85,7 @@ alt: Request flow
 flowchart TB
   Phone --> Relay --> Daemon
 ```
-Renders in chat, agenda tabs, cards; never in repo files, docs, commits, PRs.
+Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.
 ````
 
 ## The supported forms
@@ -115,8 +115,8 @@ A block renders by itself once it is near the screen — there is no Render butt
 | `map`     | small JSON/YAML: centre, markers, lines, polygons | an inline interactive map (Leaflet, OpenStreetMap tiles); a coordinates list if it cannot draw   |
 | `svg`     | one `<svg>` document                              | a picture through the measured `<img>` sink — never inline SVG                                   |
 | `html`    | one self-contained fragment                       | no script: sanitized markup in a closed shadow root; with script: a live page in an opaque frame |
-| `card`    | one card reference, `&F12`                        | the board's own card, live: its lane, progress and PRs; a quiet note if it cannot be read        |
-| `board`   | card references, or `parent: &F12`                | a mini board of those cards, or of a card's children, either way grouped by lane, live           |
+| `task`    | one task reference, `&F12`                        | the board's own task, live: its lane, progress and PRs; a quiet note if it cannot be read        |
+| `board`   | task references, or `parent: &F12`                | a mini board of those tasks, or of a task's children, either way grouped by lane, live           |
 | `image`   | `src:` — or `mime:` + base64 inline               | a picture; an https image needs CORS from its host, else a link row                              |
 | `video`   | `src:`                                            | the browser's native player (https plays directly)                                               |
 | `audio`   | `src:`                                            | the browser's native player (https plays directly)                                               |

@@ -238,7 +238,7 @@ describe('history', () => {
     });
     expect(rowOf('reparented', { from: a, to: b, reason: null }).text).toBe('moved it under &F2 (was under &F1)');
     expect(rowOf('reparented', { from: a, to: null, reason: null }).text).toBe(
-      'made it a top-level card (was under &F1)',
+      'made it a top-level task (was under &F1)',
     );
   });
 

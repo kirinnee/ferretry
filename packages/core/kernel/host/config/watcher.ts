@@ -11,7 +11,9 @@
  * directory that did not exist when the watch began (`components/mcp/` on a fresh machine), so the tree
  * is not watched recursively: every directory in it is watched on its own, and the set is renewed
  * BEFORE each fingerprint — a new directory is seen by its parent's event, watched, and only then
- * fingerprinted, so nothing written into it in between can be missed.
+ * fingerprinted, so nothing written into it in between can be missed. The same renewal asks each watch it
+ * already holds to re-check itself, so a folder deleted and recreated (a watch that dies without a word)
+ * is watched again at the next read — the backstop at the latest — instead of staying deaf until restart.
  *
  * Without events it polls the fingerprint every {@link CONFIG_WATCH_INTERVAL_MS}, as it always did.
  *
@@ -39,7 +41,8 @@ export interface ConfigWatchTimers {
 export interface ConfigTreeEvents {
   /** Every directory of the tree as of now, its root included. */
   directories(): Promise<readonly string[]>;
-  subscribeDirectory(path: string, listener: () => void): { close(): void };
+  /** `recheck` re-arms the watch when the folder behind the path was replaced; the renewal calls it on every read. */
+  subscribeDirectory(path: string, listener: () => void): { close(): void; recheck?(): void };
 }
 
 export interface ConfigWatchOptions {
@@ -66,7 +69,7 @@ export interface ConfigWatchOptions {
 /** Start watching. Answers the stop. Without an initial fingerprint, the first read is the baseline. */
 export function watchConfigFiles(options: ConfigWatchOptions): () => void {
   const { timers, events } = options;
-  const watched = new Map<string, { close(): void }>();
+  const watched = new Map<string, { close(): void; recheck?(): void }>();
   let last = options.initialFingerprint;
   let pending: unknown;
   let stopped = false;
@@ -86,6 +89,9 @@ export function watchConfigFiles(options: ConfigWatchOptions): () => void {
         subscription.close();
         watched.delete(directory);
       }
+    // A watch outlives a folder that was deleted and recreated, renamed away or retargeted only as a dead one, silent:
+    // ask each watch we already hold to check it still sits on the folder its path names (a new one just did).
+    for (const subscription of watched.values()) subscription.recheck?.();
     for (const directory of current)
       if (!watched.has(directory))
         watched.set(

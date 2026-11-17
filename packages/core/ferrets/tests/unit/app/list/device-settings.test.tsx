@@ -32,3 +32,15 @@ describe('the Group Needs you row', () => {
     expect(typeof half.shell?.deviceSettings?.['needs-you']).toBe('function');
   });
 });
+
+describe('Show stopped on this device', () => {
+  it('is kept with the device controls (off until ticked) and is not a Settings row of its own', () => {
+    deviceControls().setDeviceControls({ showStopped: false });
+    expect(deviceControls().snapshot().device.showStopped).toBe(false);
+    deviceControls().setDeviceControls({ showStopped: true });
+    expect(deviceControls().snapshot().device.showStopped).toBe(true);
+    // The tick lives on the list itself; the panels are only the ones Ferrets declares.
+    expect(Object.keys(deviceSettingsPanels)).toEqual(['needs-you']);
+    deviceControls().setDeviceControls({ showStopped: false });
+  });
+});

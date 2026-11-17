@@ -3,12 +3,20 @@
  * Packs imports `RuntimeId` from here (the one plugin→plugin contract edge §2.4 allows to Runtimes).
  */
 import { type Brand, InstantSchema } from '@ferretry/std';
-import { defineConfig, defineEvent, definePort, neverLoosens, type Word } from '@ferretry/kernel/contract';
+import {
+  defineConfig,
+  defineEvent,
+  definePort,
+  type Loosens,
+  neverLoosens,
+  type Word,
+} from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { FerretsPort, HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { configDef } from './config-def.ts';
 import {
   ITEM_NAME_PATTERN,
+  type InstructionsFile,
   InstructionsFileSchema,
   ModelSetFileSchema,
   ProfileFileSchema,
@@ -20,6 +28,7 @@ import {
 import { RUNTIME_HOME_READ_MODELS, type RuntimeHomesApi } from './homes.ts';
 import { RUNTIME_LAYER_READ_MODELS, type RuntimeLayersApi } from './layers.ts';
 import type { MachineTool, RuntimeView } from './wire/index.ts';
+import type { BrowserFirewallFailureSchema, BrowserPortsSettingSchema } from './wire/shared.ts';
 
 export * from './codex-launch.ts';
 export * from './component-source.ts';
@@ -99,9 +108,30 @@ export interface RuntimesApi extends RuntimeHomesApi, RuntimeLayersApi {
   catalog(): Promise<readonly RuntimeView[]>;
   /** The harness CLIs on this machine and whether each is installed, as `GET /v1/runtimes/machine` answers. */
   tools(): Promise<readonly MachineTool[]>;
+  /**
+   * The machine's loopback-port settings, read-only: the `browserPorts` setting and what Browsers does when its own
+   * account's firewall check failed (`browserFirewallFailure`). Browsers reads them for the loopback firewall doctor and
+   * Logins reads `shared` from them. Only these two settings, never the rest of the machine view.
+   *
+   * REJECTS while no file of Runtimes holds `browserPorts` (the value is only the schema default `random`; the setting is
+   * not carried yet): Runtimes cannot say, and a reader must treat that as unknown and fail closed, never as `random`.
+   */
+  machineBrowserPorts(): Promise<MachineBrowserPorts>;
+  /**
+   * The machine's "Auto-resume after restart" switch (`runtimes.yaml` `autoResume`, on when left out): `true` on, `false`
+   * off, `undefined` when it cannot be read as it stands. It is the one setting there is for "may the machine bring a ferret
+   * back by itself" (no per-ferret one exists); the Warden's automatic revive reads it and treats anything but `true` as no.
+   * An operator's own resume never asks it.
+   */
+  autoResume(): Promise<boolean | undefined>;
 }
-/** The two members of {@link RuntimesApi} that read the published catalogue rather than the configuration files. */
-export type RuntimeFactsApi = Pick<RuntimesApi, 'catalog' | 'tools'>;
+/** What {@link RuntimesApi.machineBrowserPorts} answers (Runtimes' own copy of the two schemas, `wire/shared.ts`). */
+export interface MachineBrowserPorts {
+  readonly browserPorts: z.infer<typeof BrowserPortsSettingSchema>;
+  readonly browserFirewallFailure: z.infer<typeof BrowserFirewallFailureSchema>;
+}
+/** The members of {@link RuntimesApi} that read the published catalogue rather than the configuration files. */
+export type RuntimeFactsApi = Pick<RuntimesApi, 'catalog' | 'tools' | 'machineBrowserPorts' | 'autoResume'>;
 export const RuntimesPort = definePort<RuntimesApi>('runtimes');
 export { FerretsPort };
 
@@ -113,6 +143,8 @@ export const RUNTIMES_READ_MODELS = [
   'resolve',
   'catalog',
   'tools',
+  'machineBrowserPorts',
+  'autoResume',
   ...RUNTIME_HOME_READ_MODELS,
   ...RUNTIME_LAYER_READ_MODELS,
 ] as const;
@@ -174,8 +206,23 @@ export const PROFILE_ITEMS = configDef(
 );
 
 /**
+ * What an AGENT's write of `config/instructions/<name>.yaml` is held for: EVERY add and EVERY change (owner ruling
+ * !A525 item 9). Instructions are what a ferret is told to do, so a new or edited one is authority the owner must see;
+ * an unchanged text holds nothing. Compared as written (a re-ordered key counts as a change: it fails closed). The
+ * sentence names the file's kind, never its text. The owner's write through fy, the app or PUT /v1/config/file is never
+ * held; a hand edit or a file copied onto disk is held like any unacknowledged edit until `fy config confirm`.
+ */
+export const instructionsItemHeld: Loosens<InstructionsFile> = (before, after) =>
+  before === undefined
+    ? ['agents now run with a new instructions component']
+    : JSON.stringify(before) === JSON.stringify(after)
+      ? []
+      : ['agents now run with changed instructions'];
+
+/**
  * `config/instructions/<name>.yaml`: the instructions components. No other plugin owns this kind, so Runtimes does; the
- * profile component source reads it live as its own. An edit changes what an agent runs with, nothing it may spend.
+ * profile component source reads it live as its own. An edit changes what an agent runs with: an agent's add or change
+ * is HELD for the owner (`instructionsItemHeld`).
  */
 export const INSTRUCTION_ITEMS = configDef(
   defineConfig({
@@ -183,7 +230,7 @@ export const INSTRUCTION_ITEMS = configDef(
     name: ITEM_NAME_PATTERN,
     schema: InstructionsFileSchema,
     axis: 'configure',
-    loosens: neverLoosens,
+    loosens: instructionsItemHeld,
   }),
 );
 

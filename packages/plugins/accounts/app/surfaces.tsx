@@ -1,14 +1,17 @@
-import type { RendererProps } from '@ferretry/kernel/manifest';
+import type { PanelProps, RendererProps } from '@ferretry/kernel/manifest';
 import { AskOnScreenSchema } from '@ferretry/core-asks/contract';
 import { SignInApprovalRefSchema } from '../contract/wire.ts';
 import { AccountsSurface } from './features/accounts/accounts-surface.tsx';
+import { AlwaysUseLine } from './features/accounts/always-use-line.tsx';
 import { DeviceRuleNote } from './features/secure-copy/device-rule-note.tsx';
 import { CopyRulesSurface } from './features/secure-copy/copy-rules-surface.tsx';
+import { SignInRuleOffer } from './features/secure-copy/sign-in-rule-offer.tsx';
 import { SignInRuleSuggestionHost } from './features/secure-copy/sign-in-rule-suggestion-host.tsx';
 import { SignInRulesSurface } from './features/secure-copy/sign-in-rules-surface.tsx';
 import { TaskPlanHost } from './features/secure-copy/task-plan-host.tsx';
 import { TaskPlansSurface } from './features/secure-copy/task-plans-surface.tsx';
 import { PhoneApprovalHost } from './features/sign-in-approval/phone-approval-host.tsx';
+import { InputCodesPanel } from './features/two-factor/input-codes-panel.tsx';
 import { TwoFactorSeedHost } from './features/two-factor/two-factor-seed-host.tsx';
 import type { RuleLinkHold } from './lib/rule-link.ts';
 import { type AccountsPasskeys, useAccountsPasskeys } from './passkeys.ts';
@@ -57,6 +60,43 @@ export function secureCopyTab(client: AccountsClient, ruleLink?: RuleLinkHold) {
 export function deviceRuleNotePanel(client: AccountsClient) {
   return function DeviceRuleNotePanel({ subject }: { readonly subject?: string }) {
     return subject === undefined ? null : <DeviceRuleNote client={client} deviceId={subject} />;
+  };
+}
+
+/**
+ * `vault.input-settled`: after an input card the owner settled with a saved account, "Don't ask again" for the sign-in
+ * that tap used. The shell hands the card's ids as props (the ferret is also the `subject`); the offer re-reads
+ * everything it draws from the daemon and offers nothing it cannot prove.
+ */
+export function signInRuleOfferPanel(client: AccountsClient) {
+  // The slot's props ride beside `subject` at runtime (`PanelProps` names only the shell's own two): the offer checks their shape.
+  return function SignInRuleOfferPanel(slot: PanelProps) {
+    const asks = useAccountsPasskeys(client);
+    return (
+      <SignInRuleOffer client={client} slot={slot} {...(asks === undefined ? {} : { askPasskey: asks.signInRule })} />
+    );
+  };
+}
+
+/**
+ * `vault.input-card-codes`: under an input card that asks for a one-time code, "Set up automatic codes" (the owner's 2FA
+ * key, saved only with a passkey bound to that save). The shell hands the card's ids as props; the panel reads the
+ * accounts itself and draws nothing it cannot prove, and nothing at all where no passkey can be asked.
+ */
+export function inputCodesPanel(client: AccountsClient) {
+  return function InputCodes(slot: PanelProps) {
+    const asks = useAccountsPasskeys(client);
+    return <InputCodesPanel client={client} slot={slot} {...(asks === undefined ? {} : { addKey: asks.addKey })} />;
+  };
+}
+
+/**
+ * `vault.input-settled`: after an input card the owner settled with a saved account, one quiet "Always use for
+ * <project>". The owner's tap on it is the permission; it is drawn only for what the daemon itself would match.
+ */
+export function alwaysUsePanel(client: AccountsClient) {
+  return function AlwaysUse(slot: PanelProps) {
+    return <AlwaysUseLine client={client} slot={slot} />;
   };
 }
 

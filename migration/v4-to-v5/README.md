@@ -98,7 +98,7 @@ is not carried either; instead `state/ferrets/restarts.json` queues a v5 restart
 carried `working` and its `state.json` without v4's last turn (`turnState`, `turnStateAt`; a `created`/`starting` status
 becomes `running`), so the record goes `idle` only when v5's turn watch writes the first turn it sees itself: the
 restart runs on v5's own evidence, never on a stale v4 turn. Runtime
-`formerNames` belongs to the pending Runtimes/Logins conversion, not the Ferrets callsign ledger. The card a session
+`formerNames` belongs to the pending Runtimes/Logins conversion, not the Ferrets callsign ledger. The task a session
 was anchored to is shown through `details.json`;
 name counters, extra history artifacts and pin/option leftovers are listed in `notCarried`. Frozen
 fork plans keep their original paths and fingerprints; changing their decision would invalidate replay checks.
@@ -113,14 +113,14 @@ history cursor is recomputed; version archives are copied and set to `user_versi
 (`agenda-versions.pending.json`, `agenda-history.jsonl.pending`) fails the
 step by name. A non-empty `agenda-changes.pending.json` is queued state and is carried (an empty `[]` one is skipped). `notifications.jsonl` yields only what v5 can meet again: an ask's own buzz and the owner's opens (seen).
 
-Board cards keep their ids exactly (`&F1792` names the same card); counters continue after the highest id; parent,
-dependency, PR and approval links are kept (an approval names the same per-ferret ask `A<n>`); dropped and closed cards
-are ordinary cards. Every card is parsed by v5's strict `CardSchema`: v5 kept v4's field names (`machineId`,
+Board tasks keep their ids exactly (`&F1792` names the same task); counters continue after the highest id; parent,
+dependency, PR and approval links are kept (an approval names the same per-ferret ask `A<n>`); dropped and closed tasks
+are ordinary tasks. Every task is parsed by v5's strict `CardSchema`: v5 kept v4's field names (`machineId`,
 `projectId`, `laneId`, the ask's `text` and `source`), so only `v` → `format`, `status` → `progress` and the approval's
 `sessionId` → `ferret` change. Every actor takes v5's strict actor shape (owner `{via?}` with v4's `…Via` folded in,
 ferret `{name, ferret}` named by its callsign, daemon). Every v4 history event type maps to the v5 type of the same
 name, except `migrated` (dropped by v5), which becomes a `note` naming the legacy ref; an unknown type fails the step by
-card and type. Lane sets and the switch become one `boards/<project>.json` each (a gate's `reopen-with-agenda` is
+task and type. Lane sets and the switch become one `boards/<project>.json` each (a gate's `reopen-with-agenda` is
 `reopen-with-ask`), the sweep memory is carried whole, and each session's `focusTask`/`focusAnchor`/`boardSkip`
 becomes `state/board/focus.json`. `legacyRef`, the session an owner or the daemon acted from and the switch's
 `migratedAt` have no v5 field and are listed in `notCarried` (`src/steps/board.ts` has the full mapping).
@@ -144,11 +144,15 @@ dropped; renders become unsharded `renders/<id>.json` (`StoredRenderMetaSchema`,
 `author.ferret`) and `renders/<id>.payload` (moved unopened). A line or document v5 would refuse fails the step by
 file and line, never by value.
 
-Harness files are copied unopened under `state/<claude-code|codex>/agent-homes/`: runtime UUID directories hold
-runtime-owned files; `_shared` holds each shared transcript pool (including Codex SQLite). Modes and times of these
-opaque files are preserved. Links are omitted, never followed or re-made: the contracts do not yet declare a link
-policy or a runtime-to-ferret home mapping. Those are explicit gaps; these copies alone do not make resume ready.
-Sign-in files and `fleet/credentials/` belong to the Logins step.
+Harness files are copied unopened under `state/<claude-code|codex>/`. Runtime UUID directories go to `agent-homes/<uuid>/`
+and hold runtime-owned files. Each shared transcript pool (`fleet/shared/<claude|codex>`, excluding Codex SQLite) is
+written to that harness's ONE history pool, `history-pool/` (a folder beside `agent-homes`, never inside it; the name
+comes from the plugin contract's `historyPool` state): Claude `projects/<slug>/<id>.jsonl`, `sessions/`, `history.jsonl`
+and the rest; Codex `sessions/YYYY/MM/DD/rollout-*.jsonl`, `archived_sessions/` and `history.jsonl`. Codex `sqlite/` (including WAL/SHM) is omitted because its absolute rollout paths still name v4; Codex rebuilds its derived index from the copied rollouts. v4's
+`.leases` (a lease store, not history) is not copied. A converted ferret's recorded transcript path points into the
+pool, and the v5 harness links each ferret home to the pool when the ferret starts, so the ferret resumes its
+conversation (!A516). The step only writes the pool; it makes no link. Modes and times of these opaque files are
+preserved. Links in v4 are omitted, never followed or re-made. Sign-in files and `fleet/credentials/` belong to the Logins step.
 
 Packs (`src/steps/packs.ts`) folds `config/pack.yaml` and `config/models-guide.yaml` into one `config/packs.yaml`
 (the guide's `prompt`/`suggested` nested under `routing`, comments kept), turns each `state/pack-guide/<id>/` into
@@ -393,8 +397,9 @@ not read).
 
 ## What is left behind
 
-By owner ruling (!A516) six things are **not** carried: chat history, agents' browser sign-ins, named agent terminals, the
-Warden machine agenda item, the default routing prompt before your own routing words, and some security history (Gate
-kept-bucket and grant audit history). The list is one file, `left-behind.txt`: `migrate.sh` prints it (`preflight`,
+By owner ruling (!A516) five things are **not** carried: agents' browser sign-ins, named agent terminals, the Warden
+machine agenda item, the default routing prompt before your own routing words, and some security history (Gate kept-bucket
+and grant audit history). Harness chat history is carried: the v4 pool is written to `state/<plugin>/history-pool/` (see
+the harness homes step above), so a converted ferret resumes its real conversation from the pool. The list is one file, `left-behind.txt`: `migrate.sh` prints it (`preflight`,
 `backup` until the owner says yes, `verify`) and the converter prints and writes it (`leftBehind` in the report), each
 with the path where v4's home stays untouched.

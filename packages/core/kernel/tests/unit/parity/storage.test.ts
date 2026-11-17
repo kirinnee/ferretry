@@ -13,14 +13,21 @@
  * one owner of the path is host/identity-pin-single-source.test.ts.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { link, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { instantFromEpochMs } from '@ferretry/std';
+import { instantFromEpochMs, ok } from '@ferretry/std';
+import { z } from 'zod';
+import type { FencedPath } from '../../../contract/bound.ts';
+import { defineState } from '../../../contract/index.ts';
+import type { FerretId } from '../../../contract/ids.ts';
+import type { RootHandle } from '../../../contract/ports.ts';
 import { FerretIndexFile } from '../../../../ferrets/contract/state.ts';
 import { acceptedName } from '../../../contract/accepted.ts';
 import { nodeFs } from '../../../host/adapters/node-fs.ts';
-import { fencedReal, fenceOf, PINNED_KEY_PATHS } from '../../../host/fence-guard.ts';
+import { fencedByName, fencedReal, fenceOf, internalRootPins, PINNED_KEY_PATHS } from '../../../host/fence-guard.ts';
+import { identityKey } from '../../../host/fence-index.ts';
+import { ensureInternalRootBases, RootError, rootsPortFor } from '../../../host/roots.ts';
 import { openHome } from '../../../host/home.ts';
 import { IDENTITY_FILE, loadIdentity } from '../../../host/identity.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
@@ -252,6 +259,8 @@ describe('the generated schemas: FY_HOME/config/.schema', () => {
     schemaIsWrittenFromItsKind('accounts.json', 'sites'));
   test('F-0133 today .schema/component-hooks.json is now .schema/claude-code--hooks--item.json, written from the schema the daemon checks with', () =>
     schemaIsWrittenFromItsKind('claude-code--hooks--item.json', 'hooks'));
+  test("F-0134 today .schema/component-instructions.json is now .schema/instructions--item.json (a declared collection's item schema, Runtimes' INSTRUCTION_ITEMS), written from the schema the daemon checks with", () =>
+    schemaIsWrittenFromItsKind('instructions--item.json', 'text'));
   test('F-0135 today .schema/component-mcp.json is now .schema/mcp--item.json, written from the schema the daemon checks with', () =>
     schemaIsWrittenFromItsKind('mcp--item.json', 'command'));
   test('F-0136 today .schema/component-modelSets.json is now .schema/model-sets--item.json, written from the schema the daemon checks with', () =>
@@ -307,4 +316,120 @@ describe('the generated schemas: FY_HOME/config/.schema', () => {
     for (const [, path, property] of moved) expect(Object.keys(schemaOf(path).properties ?? {})).toContain(property);
     expect(declaredKinds().some(kind => kind.path === 'machine.yaml')).toBe(false);
   });
+});
+
+describe('the places today’s state-home fence names, as 5.0 keeps them (stateHomeFence)', () => {
+  const key = (identity: { device: bigint; inode: bigint } | undefined): string =>
+    identityKey(identity ?? { device: -1n, inode: -1n });
+
+  /** A set-up home whose Runtimes root is served: the fleet folder with one runtime's home and one asset. */
+  async function fleetHome() {
+    const home = await freshHome();
+    await openHome(fs, home, 'fyd 5.0.0', instantFromEpochMs(Date.UTC(2026, 10, 8)));
+    const declared = ['fleet'] as const;
+    await ensureInternalRootBases(fs, { home, plugin: 'runtimes' }, declared);
+    const roots = rootsPortFor(
+      fs,
+      { home, plugin: 'runtimes', worktrees: `${home}-worktrees` },
+      declared,
+      () => undefined,
+    );
+    const fleet = roots.root('fleet');
+    const at = (root: RootHandle, path: string): FencedPath => {
+      const resolved = root.resolve(path);
+      if (!resolved.ok) throw new Error(resolved.error);
+      return resolved.value;
+    };
+    await fleet.makeDirectory(at(fleet, 'homes/claude-a'));
+    await fleet.makeDirectory(at(fleet, 'assets/skills/tidy'));
+    const assets = roots.root('fleet', { subfolder: 'assets' });
+    await assets.writeText(at(assets, 'skills/tidy/SKILL.md'), '# tidy\n');
+    return { home, fleet, assets, at };
+  }
+
+  test('F-0027 the config folder is a place of the fence by its real path: one linked out of the home is fenced wherever it lives', async () => {
+    const home = await freshHome();
+    await openHome(fs, home, 'fyd 5.0.0', instantFromEpochMs(Date.UTC(2026, 10, 8)));
+    const elsewhere = join(dirname(home), 'elsewhere-config');
+    await mkdir(elsewhere);
+    await writeFile(join(elsewhere, 'warden.yaml'), 'mayActAlone: false\n');
+    await rm(join(home, 'config'), { recursive: true });
+    await symlink(elsewhere, join(home, 'config'));
+    const fence = await fenceOf(fs, home);
+    const real = await realpath(elsewhere);
+    expect(fence.places).toContain(real);
+    expect(fencedByName(fence, join(real, 'warden.yaml'))).toBe(true);
+    expect(await fencedReal(fs, fence, join(real, 'warden.yaml'))).toBe(true);
+    expect(fencedByName(fence, join(dirname(home), 'beside', 'warden.yaml'))).toBe(false);
+  });
+
+  test('F-0029 F-0046 the fleet’s assets are FY_HOME/fleet/assets, in the 0700 fleet folder the kernel makes, and open through the fleet root alone', async () => {
+    const { home, assets, at } = await fleetHome();
+    expect(await modeOf(join(home, 'fleet'))).toBe(0o700);
+    expect(await kindOf(join(home, 'fleet', 'assets', 'skills', 'tidy'))).toBe('directory');
+    expect(await assets.readText(at(assets, 'skills/tidy/SKILL.md'))).toBe('# tidy\n');
+    // Inside the fenced home it is open to no owner's root: a work folder named at the assets reaches nothing.
+    const work = rootsPortFor(fs, { home, plugin: 'ferrets', worktrees: `${home}-worktrees` }, ['work'], () => ({
+      folderOf: () => join(home, 'fleet', 'assets') as FencedPath,
+      check: (_ferret, path) => ok(path as FencedPath),
+    })).root('work', { ferret: 'F1' as FerretId });
+    const resolved = work.resolve('skills/tidy/SKILL.md');
+    const refusal = resolved.ok
+      ? await work.readText(resolved.value).then(
+          () => 'read',
+          (error: unknown) => (error instanceof RootError ? error.refusal : String(error)),
+        )
+      : resolved.error;
+    expect(refusal).toBe('fenced');
+  });
+
+  test('F-0030 FY_HOME/fleet/homes is held by identity: a harness home the fleet made is a folder the fence knows by device and inode', async () => {
+    const { home } = await fleetHome();
+    const fence = await fenceOf(fs, home);
+    expect(PINNED_KEY_PATHS).toContain('fleet/homes');
+    expect(fence.keys.has(key(await fs.identity(join(home, 'fleet', 'homes'))))).toBe(true);
+    expect(fence.keys.has(key(await fs.identity(join(home, 'fleet'))))).toBe(true);
+    expect(fence.keys.has(key(await fs.identity(join(home, 'fleet', 'assets'))))).toBe(false);
+  });
+
+  test('F-0034 the sessions folder is held by identity at today’s state/sessions and at the place 5.0 keeps it, state/ferrets/sessions', async () => {
+    const home = await freshHome();
+    await openHome(fs, home, 'fyd 5.0.0', instantFromEpochMs(Date.UTC(2026, 10, 8)));
+    for (const folder of ['state/sessions', 'state/ferrets/sessions', 'state/ferrets/other']) {
+      await mkdir(join(home, folder), { recursive: true });
+    }
+    expect(PINNED_KEY_PATHS).toContain('state/sessions');
+    expect(internalRootPins(['ferrets'])).toContain('state/ferrets/sessions');
+    const fence = await fenceOf(fs, home);
+    expect(fence.keys.has(key(await fs.identity(join(home, 'state/sessions'))))).toBe(true);
+    expect(fence.keys.has(key(await fs.identity(join(home, 'state/ferrets/sessions'))))).toBe(true);
+    expect(fence.keys.has(key(await fs.identity(join(home, 'state/ferrets/other'))))).toBe(false);
+  });
+
+  test('F-0096 a component’s folder is FY_HOME/state/<plugin>, made 0700 on the first write, and a link planted at a file there is never followed', async () => {
+    const home = await freshHome();
+    await openHome(fs, home, 'fyd 5.0.0', instantFromEpochMs(Date.UTC(2026, 10, 8)));
+    const counter = defineState({
+      name: 'counter',
+      path: 'counter.json',
+      store: 'json',
+      format: 1,
+      schema: z.strictObject({ count: z.number().int() }),
+    });
+    const port = createStatePort({ home, pluginId: 'demo', files: [counter], fs: createNodeHostFs() });
+    await port.write(counter, { count: 5 });
+    const folder = join(home, 'state', 'demo');
+    expect(await kindOf(folder)).toBe('directory');
+    expect(await modeOf(folder)).toBe(0o700);
+    expect(await modeOf(join(folder, 'counter.json'))).toBe(0o600);
+    await rm(join(folder, 'counter.json'));
+    await writeFile(join(home, 'elsewhere.json'), '{"format":1,"count":1}');
+    await symlink(join(home, 'elsewhere.json'), join(folder, 'counter.json'));
+    const read = await port.read(counter);
+    expect(read.ok).toBe(false);
+  });
+});
+
+describe('rows re-owned from Usage', () => {
+  test.skip('F-0254 F-0255 the index database has no -shm and -wal files of its own — pending port: the kernel sqlite store, which opens the file and owns its journal side files; Usage opens no database itself', () => {});
 });

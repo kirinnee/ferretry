@@ -73,7 +73,7 @@ describe('the board read', () => {
     const missing = clientOf({});
     expect(await clientBoardPort(missing).card(laptop, 'F9')).toBeNull();
     const broken = clientOf({
-      'GET /v1/board/cards/:cardId': () => {
+      'GET /v1/board/tasks/:taskId': () => {
         throw refusal(500, 'boom');
       },
     });
@@ -107,14 +107,14 @@ describe('the board writes', () => {
 
   it('hands a refusal back as a value with the daemon’s code, and a dead network as status 0', async () => {
     const refused = clientOf({
-      'POST /v1/board/cards/:cardId': () => {
+      'POST /v1/board/tasks/:taskId': () => {
         throw refusal(409, 'needs a reason', 'reason-required');
       },
     });
     const answer = await clientBoardPort(refused).act(laptop, 'F1', { action: 'move', to: 'review' } as never);
     expect(!answer.ok && answer.error).toMatchObject({ status: 409, message: 'needs a reason' });
     const down = clientOf({
-      'POST /v1/board/cards/:cardId/start': () => {
+      'POST /v1/board/tasks/:taskId/start': () => {
         throw new Error('offline');
       },
     });
@@ -122,14 +122,33 @@ describe('the board writes', () => {
     expect(!started.ok && started.error).toEqual({ status: 0, message: 'offline', boardCode: null });
   });
 
+  it('hands the gate’s refusal of a card Start back in its own words (a device without fleet.configure, or a declined passkey)', async () => {
+    // c58-sec3 r1: starting a card asks `fleet.configure`, so a `--limited` device is refused in words, never a blank failure.
+    const NOT_GIVEN =
+      'this device has not been given permission to change the settings for the fleet. Grant it at the machine with `fy device grant <device> fleet --configure`, or from a device that holds it and may manage devices.';
+    const PASSKEY = 'changing the settings for the fleet needs a passkey confirmation from this device.';
+    for (const [code, message] of [
+      ['grant_device_not_granted', NOT_GIVEN],
+      ['grant_step_up_required', PASSKEY],
+    ] as const) {
+      const refused = clientOf({
+        'POST /v1/board/tasks/:taskId/start': () => {
+          throw refusal(403, message, code);
+        },
+      });
+      const started = await clientBoardPort(refused).start(laptop, 'F1');
+      expect(!started.ok && started.error).toEqual({ status: 403, message, boardCode: null });
+    }
+  });
+
   it('sends an action key so a retried click is safe', async () => {
-    const client = clientOf({ 'POST /v1/board/cards/:cardId/start': { ok: true } });
+    const client = clientOf({ 'POST /v1/board/tasks/:taskId/start': { ok: true } });
     await clientBoardPort(client).start(laptop, 'F1', 'key-1');
     expect(client.calls[0]?.init.headers).toEqual({ [REQUEST_ID_HEADER]: 'key-1' });
   });
 
   it('says so when the daemon answers with a card it cannot read', async () => {
-    const client = clientOf({ 'POST /v1/board/cards': { nonsense: true } });
+    const client = clientOf({ 'POST /v1/board/tasks': { nonsense: true } });
     const odd = await clientBoardPort(client).create(laptop, {
       title: 'A card',
       kind: 'feature',

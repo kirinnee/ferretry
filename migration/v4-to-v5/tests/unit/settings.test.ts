@@ -250,12 +250,108 @@ test('converts every v4 config kind into the v5 file that owns it, read back wit
   expect(report.kept).toContainEqual({ what: 'instruction documents', count: 1 });
 });
 
+test('!A527 an owner-shaped warden.yaml carries every autoMigrate key and the targets list, verbatim, as autoMove', async () => {
+  await yaml(
+    'warden.yaml',
+    [
+      'enabled: true',
+      'autoMigrate:',
+      '  enabled: true',
+      '  when: [rate_limited]',
+      '  targets:',
+      '    - claude-personal-a',
+      '    - codex-personal-b',
+      '  forceStopBackground: true',
+      '  waitMinutes: 20',
+      '  maxMovesPerHour: 2',
+      '  minHeadroomPercent: 35',
+      '',
+    ].join('\n'),
+  );
+  const report = await settingsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+
+  const warden = await read('warden.yaml', WardenFileSchema);
+  expect(warden.autoMove).toEqual({
+    enabled: true,
+    when: ['rate_limited'],
+    targets: ['claude-personal-a', 'codex-personal-b'],
+    forceStopBackground: true,
+    waitMinutes: 20,
+    maxMovesPerHour: 2,
+    minHeadroomPercent: 35,
+  });
+  expect(await text('warden.yaml')).not.toContain('autoMigrate');
+  // The work logins were never named by the owner, so nothing the conversion wrote names them.
+  expect(await text('warden.yaml')).not.toContain('liftoff');
+  expect(await text('warden.yaml')).not.toContain('loai');
+});
+
+test('!A527 an explicit autoMigrate enabled: false stays false, and a warden.yaml without autoMigrate gains no autoMove', async () => {
+  await yaml('warden.yaml', 'enabled: true\nautoMigrate:\n  enabled: false\n  targets: [claude-personal-a]\n');
+  await settingsStep.run(f.ctx());
+  expect((await read('warden.yaml', WardenFileSchema)).autoMove).toEqual({
+    enabled: false,
+    targets: ['claude-personal-a'],
+  });
+
+  // Absent in v4 → absent in v5, so the home takes the new default (on).
+  const silent = await fixture();
+  try {
+    const target = join(silent.from, 'config', 'warden.yaml');
+    await mkdir(join(target, '..'), { recursive: true, mode: 0o700 });
+    await writeFile(target, 'enabled: true\nintervalMinutes: 5\n', { mode: 0o600 });
+    await settingsStep.run(silent.ctx());
+    const written = parse(await readFile(join(silent.to, 'config', 'warden.yaml'), 'utf8')) as Record<string, unknown>;
+    expect(written).not.toHaveProperty('autoMove');
+    expect(written).not.toHaveProperty('autoMigrate');
+    expect(WardenFileSchema.parse(written).intervalMinutes).toBe(5);
+  } finally {
+    await silent.clean();
+  }
+});
+
 test('agenda check: attentionNudge carries when agendaNudge is absent, and is not reported as dropped', async () => {
   await yaml('machine.yaml', 'attentionNudge: false\n');
   const report = await settingsStep.run(f.ctx());
   expect(report.status).toBe('converted');
   expect((await read('agenda.yaml', AgendaConfigSchema)).agendaNudge).toBe(false);
   expect(report.notCarried.map(item => item.what)).not.toContain('config/machine.yaml attentionNudge');
+});
+
+/** The permission mode as the owner's FILE says it (not the schema's reading, which fills in the default). */
+const rawMode = async (path: string): Promise<unknown> => {
+  const document = parse(await text(path), { version: '1.2', uniqueKeys: true }) as Record<string, unknown> | null;
+  return document === null ? undefined : document.permissionMode;
+};
+
+test('!A525 a v4 agentPermissions value is carried as the EXPLICIT value in both harness files, never rewritten', async () => {
+  for (const mode of ['skip', 'auto'] as const) {
+    await yaml('machine.yaml', `agentPermissions: ${mode}\n`);
+    expect((await settingsStep.run(f.ctx())).status).toBe('converted');
+    // The value is in the file as the owner had it; it is not left to the schema's default.
+    expect(await rawMode('harness-claude-code.yaml')).toBe(mode);
+    expect(await rawMode('harness-codex.yaml')).toBe(mode);
+    await f.clean();
+    f = await fixture();
+  }
+});
+
+test('!A525 a v4 machine.yaml with no agentPermissions writes no permissionMode: that home takes the new default (skip)', async () => {
+  await yaml('machine.yaml', 'defaultRuntime: claude-old\n');
+  expect((await settingsStep.run(f.ctx())).status).toBe('converted');
+  expect(await exists('harness-claude-code.yaml')).toBe(false);
+  expect(await exists('harness-codex.yaml')).toBe(false);
+  // What a missing file or key means to the harness plugins is the new default.
+  expect(ClaudeHarnessSchema.parse({}).permissionMode).toBe('skip');
+  expect(CodexHarnessSchema.parse({}).permissionMode).toBe('skip');
+});
+
+test('!A525 the full v4 home keeps the explicit skip in the file text', async () => {
+  await fullHome();
+  expect((await settingsStep.run(f.ctx())).status).toBe('converted');
+  expect(await rawMode('harness-claude-code.yaml')).toBe('skip');
+  expect(await rawMode('harness-codex.yaml')).toBe('skip');
 });
 
 test('the Global lessons component is dropped and every profile stops layering it (v5 gives lessons to every ferret)', async () => {

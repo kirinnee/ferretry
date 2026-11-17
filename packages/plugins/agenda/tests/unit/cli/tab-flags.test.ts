@@ -115,8 +115,8 @@ describe('show --tab', () => {
 
   it('should name the tabs it has when one is not there', () => {
     should(() => tabText(item, 'Decisions')).throw(
-      '!A4 has no tab "Decisions": its tabs are "Where we are now" (main), "The full picture" (body), "Risks" (risks)',
+      '^A4 has no tab "Decisions": its tabs are "Where we are now" (main), "The full picture" (body), "Risks" (risks)',
     );
-    should(() => tabText(agentItem('A6', 'x'), 'main')).throw('!A6 has no tabs yet');
+    should(() => tabText(agentItem('A6', 'x'), 'main')).throw('^A6 has no tabs yet');
   });
 });

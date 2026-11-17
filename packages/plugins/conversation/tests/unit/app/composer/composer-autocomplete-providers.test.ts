@@ -392,12 +392,12 @@ describe('composer reference families', () => {
   ];
 
   it('projects agents, asks and cards into canonical authored text, live agents first', async () => {
-    const provider = createReferencesProvider(optionsOf({ ':': AGENTS, '!': AGENDA, '&': TASKS }));
+    const provider = createReferencesProvider(optionsOf({ ':': AGENTS, '^': AGENDA, '&': TASKS }));
     const agents = await provider.candidates(referenceContext(2, ''));
     expect(replacements(agents)).toEqual([':zelda', ':kai', ':mona']);
     expect(agents.candidates[2]).toMatchObject({ badge: 'finished' });
     expect(agents.limit).toBe(8);
-    expect(replacements(await provider.candidates(referenceContext(3, '')))).toEqual(['!A3']);
+    expect(replacements(await provider.candidates(referenceContext(3, '')))).toEqual(['^A3']);
     const tasks = await provider.candidates(referenceContext(4, ''));
     expect(replacements(tasks)).toEqual(['&F12', '&F7']);
     expect(tasks.candidates[0]).toMatchObject({ label: '&F12', detail: 'Ship autocomplete · Build · zelda' });
@@ -426,7 +426,7 @@ describe('composer reference families', () => {
       expect(replacements((await cards?.candidates(context('&', ''))) ?? { candidates: [] })).toEqual(['&F12']);
     });
 
-    it('is offered once "Include agent cards" is on, still never when closed', async () => {
+    it('is offered once "Include agent tasks" is on, still never when closed', async () => {
       let included = false;
       const options = optionsOf({ '&': MIXED }, { getIncludeAgentTasks: () => included });
       const ladder = createReferencesProvider(options);
@@ -445,8 +445,8 @@ describe('composer reference families', () => {
 
     it('never hides an ask, an agent or any other family by this flag', async () => {
       const flagged = [entry('A3', { label: 'Choose', agentAsked: true })];
-      const provider = createReferencesProvider(optionsOf({ '!': flagged }));
-      expect(replacements(await provider.candidates(referenceContext(3, '')))).toEqual(['!A3']);
+      const provider = createReferencesProvider(optionsOf({ '^': flagged }));
+      expect(replacements(await provider.candidates(referenceContext(3, '')))).toEqual(['^A3']);
     });
   });
 
@@ -493,21 +493,21 @@ describe('composer reference families', () => {
   });
 
   it('reports a family not read yet as unknown rather than as an empty fact', async () => {
-    const provider = createReferencesProvider(optionsOf({ '!': AGENDA }));
+    const provider = createReferencesProvider(optionsOf({ '^': AGENDA }));
     expect(provider.initialCandidates?.(referenceContext(3, ''))).toBeUndefined();
     await provider.candidates(referenceContext(3, ''));
     expect(provider.initialCandidates?.(referenceContext(3, ''))).toMatchObject({ contextLabel: 'Asks' });
   });
 
   it('opens each family from its own sigil, from the very same read as the ladder', async () => {
-    const options = optionsOf({ ':': AGENTS, '!': AGENDA, '&': TASKS });
+    const options = optionsOf({ ':': AGENTS, '^': AGENDA, '&': TASKS });
     const providers = createComposerAutocompleteProviders(options);
     const ladder = providers.find(provider => provider.trigger === '@');
     const byTrigger = (trigger: ComposerTrigger) => providers.find(provider => provider.trigger === trigger);
     await ladder?.candidates(referenceContext(3, ''));
-    const direct = await byTrigger('!')?.candidates(context('!', ''));
-    expect(direct?.contextLabel).toBe('! open asks');
-    expect(replacements(direct ?? { candidates: [] })).toEqual(['!A3']);
+    const direct = await byTrigger('^')?.candidates(context('^', ''));
+    expect(direct?.contextLabel).toBe('^ open asks');
+    expect(replacements(direct ?? { candidates: [] })).toEqual(['^A3']);
     expect(replacements((await byTrigger('&')?.candidates(context('&', ''))) ?? { candidates: [] })).toEqual([
       '&F12',
       '&F7',
@@ -517,14 +517,14 @@ describe('composer reference families', () => {
       ':kai',
       ':mona',
     ]);
-    expect(options.calls.map(call => call.query.prefix).sort()).toEqual(['!', '&', ':']);
+    expect(options.calls.map(call => call.query.prefix).sort()).toEqual(['&', ':', '^']);
   });
 
   it('publishes a stable snapshot per family, and a new one only when that family moves', () => {
     let agenda: readonly ReferenceCatalogEntry[] = AGENDA;
     const options = optionsOf(
       {},
-      { hostedPrefixes: ['!', '&'], getCatalog: prefix => (prefix === '!' ? agenda : NO_CARDS) },
+      { hostedPrefixes: ['^', '&'], getCatalog: prefix => (prefix === '^' ? agenda : NO_CARDS) },
     );
     const ladder = createReferencesProvider(options);
     const [, attention] = createDirectReferenceProviders(options);
@@ -551,15 +551,15 @@ describe('composer reference families', () => {
 
   it('builds one provider per trigger, refusing crossed scopes at the boundary', () => {
     const providers = createComposerAutocompleteProviders(optionsOf({}));
-    expect(providers.map(provider => provider.trigger)).toEqual(['/', '$', '@', ':', '!', '&', '%']);
+    expect(providers.map(provider => provider.trigger)).toEqual(['/', '$', '@', ':', '^', '&', '%']);
     expect(() => createComposerAutocompleteProviders({ daemon: daemonB, scope: scopeA })).toThrow(
       'composer scope must belong to the requested daemon',
     );
   });
 
-  it('names the task menus the "Include agent cards" switch applies to', () => {
-    expect(isTaskMenuLabel('Cards')).toBe(true);
-    expect(isTaskMenuLabel('& cards')).toBe(true);
+  it('names the task menus the "Include agent tasks" switch applies to', () => {
+    expect(isTaskMenuLabel('Tasks')).toBe(true);
+    expect(isTaskMenuLabel('& tasks')).toBe(true);
     expect(isTaskMenuLabel('Asks')).toBe(false);
     expect(isTaskMenuLabel(undefined)).toBe(false);
   });

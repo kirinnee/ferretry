@@ -6,7 +6,8 @@ import { TaskPlanHost } from '../../../app/features/secure-copy/task-plan-host.t
 import { PhoneApprovalHost } from '../../../app/features/sign-in-approval/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from '../../../app/features/two-factor/two-factor-seed-host.tsx';
 import { grantRefusalNotice } from '../../../app/shell.tsx';
-import { signInApprovalCard } from '../../../app/surfaces.tsx';
+import half from '../../../app/index.ts';
+import { alwaysUsePanel, inputCodesPanel, signInApprovalCard } from '../../../app/surfaces.tsx';
 import manifest from '../../../manifest.ts';
 import { RULE_ID } from '../../support/app/sign-in-rule-fixtures.ts';
 
@@ -129,5 +130,13 @@ describe('the app half', () => {
     should(
       text(plain({ kind: 'recipe-proposal', signIn: 'si_0000000000000001', proposal: 'rp_0123456789abcdef' })),
     ).containEql('Settings › Accounts');
+  });
+
+  it('should fill every panel the manifest declares, including the two on the Vault’s input card', () => {
+    const build = half.build as unknown as (given: unknown) => { panels?: Record<string, unknown> };
+    const built = build({ client: recording({}).client });
+    should(Object.keys(built.panels ?? {}).sort()).eql((manifest.ui?.panels ?? []).map(panel => panel.id).sort());
+    should(typeof alwaysUsePanel(recording({}).client)).equal('function');
+    should(typeof inputCodesPanel(recording({}).client)).equal('function');
   });
 });

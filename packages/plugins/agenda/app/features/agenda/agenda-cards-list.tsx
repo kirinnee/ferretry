@@ -112,7 +112,7 @@ function CardRow({
           data-agenda-card-confirm=""
         >
           <p className="m-0 text-ui text-fg">
-            Close this card? It leaves the board and nothing more will happen to it. The reason is kept on the card.
+            Close this task? It leaves the board and nothing more will happen to it. The reason is kept on the task.
           </p>
           <label className="flex flex-col gap-1 text-meta text-muted">
             Reason
@@ -147,7 +147,7 @@ function CardRow({
       ) : (
         <div className="flex gap-2" data-agenda-card-buttons="">
           <button
-            aria-label={`Open card ${ref}`}
+            aria-label={`Open task ${ref}`}
             className="kt-btn kt-btn--sm min-h-[44px] min-w-0 flex-1"
             data-agenda-card-open=""
             disabled={working}
@@ -180,7 +180,7 @@ function CardRow({
             </button>
           )}
           <button
-            aria-label={`Close card ${ref}`}
+            aria-label={`Close task ${ref}`}
             className="kt-btn kt-btn--sm min-h-[44px] min-w-0 flex-1"
             data-agenda-card-close=""
             disabled={working}
@@ -213,7 +213,7 @@ export function AgendaCardsList({
   readonly renderProse?: (text: string) => ReactNode;
 }) {
   return (
-    <ul aria-label="Cards" className="m-0 flex list-none flex-col gap-4 p-0" data-agenda-cards="">
+    <ul aria-label="Tasks" className="m-0 flex list-none flex-col gap-4 p-0" data-agenda-cards="">
       {cards.map(card => (
         <CardRow actions={actions} card={card} key={card.task.id} renderProse={renderProse} />
       ))}

@@ -21,6 +21,10 @@ type CatalogRequestInit = Pick<RequestInit, 'method' | 'headers' | 'body'>;
 export const SECRET_NAMES_PATH = '/v1/secrets';
 const SECRET_NAMES_ROUTE = 'GET /v1/secrets';
 
+/** The other read beyond Catalogs' own routes: Access's paired-devices list, read only for `thisDeviceId` (the Sharing-off command). */
+export const PAIRED_DEVICES_PATH = '/v1/pair/devices';
+const PAIRED_DEVICES_ROUTE = 'GET /v1/pair/devices';
+
 interface Pattern {
   readonly key: string;
   readonly method: string;
@@ -87,6 +91,8 @@ export function catalogClientOf(client: Pick<PluginClient, 'call'>): CatalogClie
       const method = (init.method ?? 'GET').toUpperCase();
       if (method === 'GET' && url.pathname === SECRET_NAMES_PATH)
         return schema.parse(await client.call(SECRET_NAMES_ROUTE));
+      if (method === 'GET' && url.pathname === PAIRED_DEVICES_PATH)
+        return schema.parse(await client.call(PAIRED_DEVICES_ROUTE));
       const route = routeFor(method, url.pathname);
       if (route === undefined) throw new Error(`Catalogs declares no route for ${method} ${url.pathname}`);
       const query = Object.fromEntries(url.searchParams.entries());

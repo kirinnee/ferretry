@@ -388,7 +388,9 @@ const LATER_POINTERS: readonly ((value: string) => { text: string; kept: string[
 /** Before a later pointer, a part that is no secret: it points at one, or is too short; and a harmless key's value. */
 const PADDED_CONTROLS: readonly ((key: string) => string)[] = [
   key => `${key}$LONG_POINTER_NAME ${POINTER}`,
-  key => `${key}'$LONG_POINTER_NAME' ${POINTER}`,
+  // A double-quoted `$NAME` is expanded by a shell, so it points; a single-quoted one is the text `$NAME`, a value (it is
+  // hidden: `credential-words-shown-password.test.ts`).
+  key => `${key}"$LONG_POINTER_NAME" ${POINTER}`,
   // biome-ignore lint/suspicious/noTemplateCurlyInString: a pointer is the literal text `${NAME}`
   key => `${key}\${LONG_POINTER_NAME} ${POINTER}`,
   key => `${key}short== ${POINTER}`,
@@ -434,7 +436,7 @@ function paddedCases(): NestedCase[] {
  * A secret-named flag's value, with a pointer on either side (review r4 B1): the flag in each form it is written in
  * (`--flag v` as two argv words or one, `--flag=v`), the value with base64 padding, `user:pass` and `Basic` before it,
  * the pointer before it, after it, between two parts of it or as a harmless key's value. The flag is read like a
- * secret-named key; a harmless flag, a one-letter one (the declared `-p<password>` GAP) and a value composed with
+ * secret-named key; a harmless flag, a one-letter one (`-k`: a single letter names no secret) and a value composed with
  * its pointer stay as written.
  */
 const SECRET_FLAGS = ['--token', '--client-secret', '--api-key', '--x-api-key', '--password', '--access-token'];

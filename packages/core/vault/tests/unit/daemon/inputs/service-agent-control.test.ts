@@ -17,7 +17,7 @@ import { AGENT, OWNER, PAGE_LOGIN, PASSWORD, refusal, USERNAME, world } from './
 
 /** The owner's sentence, word for word (britnee's ruling on #42 SF1). */
 const OWNER_SENTENCE =
-  'Agents may no longer control browsers on this machine, so this card was not typed into the page. Turn on Browsers under What agents may control and try again, or dismiss the card.';
+  'Agents may no longer control browsers on this machine, so this input was not typed into the page. Turn on Browsers under What agents may control and try again, or dismiss the input.';
 
 /** Today's agents' sentence, word for word (rebuild-ref agent-tools/policy.ts:96-101). */
 const AGENTS_SENTENCE =

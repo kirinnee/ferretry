@@ -125,6 +125,8 @@ export default definePlugin({
       route('POST /v1/lessons/run', {
         minimum: 'operator',
         caller: 'any',
+        // c58-sec3 r1: `{spawn: true}` starts a miner ferret, so it asks what `POST /v1/ferrets` asks.
+        capability: fleetConfigure,
         noStore: true,
         audit: NOT_RECORDED,
         guard: { none: 'counts and a sentence' },
@@ -177,6 +179,8 @@ export default definePlugin({
       route('POST /v1/lessons/scan', {
         minimum: 'operator',
         caller: 'person',
+        // c58-sec3 r1: a scan starts a miner ferret per batch, so it asks what `POST /v1/ferrets` asks.
+        capability: fleetConfigure,
         noStore: true,
         audit: NOT_RECORDED,
         guard: { none: 'counts and a sentence' },
@@ -204,7 +208,11 @@ export default definePlugin({
       verb('lesson', {
         summary: 'the lessons board: what was learned from your corrections (pending ones first)',
         args: [],
-        options: [{ flag: '--state <state>', help: 'only lessons in this state' }],
+        options: [
+          { flag: '--all', help: 'every state, not just the pending ones', hidden: true },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering', hidden: true },
+          { flag: '--state <state>', help: 'only lessons in this state' },
+        ],
       }),
       verb('lesson ls', {
         summary: 'the lessons board, pending ones first (the same as bare lesson)',
@@ -266,6 +274,7 @@ export default definePlugin({
         summary: 'an estimated read of older ferrets for lessons; never starts by itself',
         args: [],
         options: [
+          { flag: '--ferrets <ids>', help: 'the same as --sessions', hidden: true },
           { flag: '--estimate', help: 'what a scan would cost, without reading anything (the default)' },
           { flag: '--start', help: 'actually run the scan' },
           {

@@ -1304,7 +1304,11 @@ export class WardenSweepService {
     const moveRun = await this.moveLimited(state, fleet, config, nowMs);
     state = moveRun.state;
     const anomalies = detected.anomalies.filter(
-      anomaly => !reviveRun.revived.has(anomaly.sessionId) && !moveRun.moved.has(anomaly.sessionId),
+      anomaly =>
+        !reviveRun.revived.has(anomaly.sessionId) &&
+        !moveRun.moved.has(anomaly.sessionId) &&
+        // Resumed by rule at its reset: the one flag that says it is still waiting there is already answered.
+        !(anomaly.kind === 'quota_reset_passed' && moveRun.resumed.has(anomaly.sessionId)),
     );
     // A card whose ferret was just started again has a ferret on it.
     const orphaned = orphans.filter(anomaly => !reviveRun.revived.has(anomaly.sessionId));
@@ -2335,22 +2339,26 @@ export class WardenSweepService {
     fleet: readonly WardenFleetSession[],
     config: WardenConfig,
     nowMs: number,
-  ): Promise<{ readonly state: WardenRuntimeState; readonly moved: ReadonlySet<string> }> {
+  ): Promise<{
+    readonly state: WardenRuntimeState;
+    readonly moved: ReadonlySet<string>;
+    readonly resumed: ReadonlySet<string>;
+  }> {
     const service = this.ports.autoMove;
-    if (service === undefined) return { state, moved: new Set() };
+    if (service === undefined) return { state, moved: new Set(), resumed: new Set() };
     try {
       // The move ledger is the mover's own, kept under its lock: only what it did is written down here.
       const result = await service.run({ fleet, config, nowMs });
-      if (result.actions.length === 0) return { state, moved: result.moved };
+      if (result.actions.length === 0) return { state, moved: result.moved, resumed: result.resumed };
       // A budget stop may have moved a ferret, and written its action, while this sweep ran: fold in every action the
       // store holds from since the sweep began that this sweep has not seen, so this write never drops one.
       let next = this.withForeignActions(state, parseWardenRuntimeState(await this.ports.state.read()), nowMs);
       for (const action of result.actions) next = this.recordAction(next, action);
       await this.ports.state.write(next);
-      return { state: next, moved: result.moved };
+      return { state: next, moved: result.moved, resumed: result.resumed };
     } catch (error) {
       this.ports.journal.record('fleet.warden_auto_move_failed', { message: failureMessage(error) });
-      return { state, moved: new Set() };
+      return { state, moved: new Set(), resumed: new Set() };
     }
   }
 
@@ -2729,7 +2737,7 @@ export class WardenSweepService {
     const board = await port.read().catch(() => undefined);
     if (board === undefined)
       this.ports.journal.record('fleet.warden_board_blind', {
-        reason: 'the board could not be read, so no card was reported orphaned or cleared this sweep',
+        reason: 'the board could not be read, so no task was reported orphaned or cleared this sweep',
       });
     return board;
   }

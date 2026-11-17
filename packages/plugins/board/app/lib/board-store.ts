@@ -25,7 +25,6 @@
 
 import type { AskListSnapshot } from '@ferretry/core-asks/contract';
 import {
-  BoardChangedSchema,
   type BoardCounts,
   type BoardProject,
   type BoardProjectId,
@@ -42,6 +41,7 @@ import {
   type LaneSet,
   type LaneSetActionRequestInput,
   type LaneSetChangeResponse,
+  safeReadChanged,
 } from '../../contract/index.ts';
 import {
   type BoardPort,
@@ -502,10 +502,10 @@ export class DaemonBoardStore {
    * ignored, and so is one for a machine nothing is watching.
    */
   noteEvent(daemonId: DaemonId, payload: unknown): void {
-    const changed = BoardChangedSchema.safeParse(payload);
+    const changed = safeReadChanged(payload);
     if (!changed.success) return;
-    this.#noteIds(daemonId, changed.data.cardIds);
-    void this.reconcile(daemonId, changed.data.cardIds);
+    this.#noteIds(daemonId, changed.data.taskIds);
+    void this.reconcile(daemonId, changed.data.taskIds);
   }
 
   /** Re-reads these cards of one machine, and only these, into every view and task page that holds them. */

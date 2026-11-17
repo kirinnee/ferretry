@@ -8,8 +8,8 @@
  *   generated script, a repository, or a test fixture.
  * - A value naming `${secret:NAME}` is **never emitted at all**. Ferretry's secret store holds it and
  *   the daemon puts it into the launch environment, so the script carries a REQUIREMENT — a guard
- *   naming the variable, the secret behind it, and what to do — and no value. See `./env-profiles.ts`
- *   for why a profile that authenticates an account is built this way.
+ *   naming the variable, the secret behind it, and what to do — and no value. A profile that
+ *   authenticates an account is built this way (`docs/secrets.md`).
  * - Every other value is a **literal**, emitted single-quoted so that no `$`, backtick or `$( )`
  *   inside it is ever interpreted. Configuration is trusted input, but a literal that silently
  *   became a command substitution would be a surprising way to find that out.
@@ -24,14 +24,12 @@ import {
   binaryName,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
-  CODEX_QUESTIONS_FEATURE,
+  CODEX_QUESTIONS_OFF_OVERRIDE,
   FERRET_SECTIONS,
-  LEAD_RULES_INSTRUCTION,
   SUB_FERRET_ENV,
   SUB_FERRET_INSTRUCTION,
   PACK_ENV,
   PACK_ROUTING_ENV,
-  SESSION_MODE_ENV,
   tomlString,
 } from './account/fixed-layer.ts';
 import type { HarnessKind } from './manifest.ts';
@@ -404,6 +402,12 @@ const CONVERSATION_ARGUMENT_PATTERNS: Readonly<Record<HarnessKind, string>> = {
  * harness. Exits ONLY when the claim is refused because somebody else is writing it. Every other
  * failure — no `fy`, a lease store that errors — prints one line and launches anyway, because a lease
  * bug must never stop the person's own CLI from starting.
+ *
+ * EXCEPT a wrapper run for a session (`FY_SESSION_ID` set): a harness this wrapper cannot check must not write
+ * unchecked, so there the failure is closed — the same status (75, which the Warden does not revive), with the
+ * reason said. A pane the DAEMON launches runs the real harness binary and never this wrapper. Only a lifecycle
+ * start (the fork binder) holds a lease and moves it onto the pane's pid (`SessionConversationLeases.moveToPane`); the
+ * other launch paths hold none yet (unit c58-36d).
  */
 const historyClaimLines = (harness: HarnessKind, fyCommand: string): readonly string[] => {
   const fy = shellPath(fyCommand);
@@ -421,9 +425,17 @@ const historyClaimLines = (harness: HarnessKind, fyCommand: string): readonly st
     '    _fy_status=$?',
     `    if [ "$_fy_status" -eq ${HISTORY_CLAIM_HELD_EXIT_CODE} ]; then exit ${HISTORY_CLAIM_HELD_EXIT_CODE}; fi`,
     '    if [ "$_fy_status" -ne 0 ]; then',
+    '      if [ -n "${FY_SESSION_ID:-}" ]; then',
+    '        echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so not launching: this session must hold its conversation before it writes" >&2',
+    `        exit ${HISTORY_CLAIM_HELD_EXIT_CODE}`,
+    '      fi',
     '      echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so launching anyway" >&2',
     '    fi',
     '  else',
+    '    if [ -n "${FY_SESSION_ID:-}" ]; then',
+    '      echo "ferretry: fy was not found, so this session could not check whether another session is writing this conversation; not launching" >&2',
+    `      exit ${HISTORY_CLAIM_HELD_EXIT_CODE}`,
+    '    fi',
     '    echo "ferretry: fy was not found, so this launch did not check whether another session is writing this conversation; launching anyway" >&2',
     '  fi',
     'fi',
@@ -545,9 +557,9 @@ const SECTIONS_VARIABLE = '_fy_sections';
 /**
  * The per-ferret sections of the appended system prompt (`FERRET_SECTIONS`, `./account/fixed-layer.ts`),
  * gathered at exec time from the switches the daemon wrote into this ferret's environment. The first is
- * the lead's notify and board rules, or a sub-ferret's two lines instead (`SUB_FERRET_ENV`). Each other is
- * appended after a blank line only when its variable is exactly `1`, so a wrapper run by hand — where
- * nothing set them — carries the lead rules and none of the rest.
+ * a sub-ferret's two lines (`SUB_FERRET_ENV`), empty for a lead: a lead's notify, board and lessons rules
+ * come from the plugins' instruction files. Each other is appended after a blank line only when its
+ * variable is exactly `1`, so a wrapper run by hand — where nothing set them — carries none of them.
  *
  * Codex's value is a TOML basic string, so each section is stored already escaped for one: escaping is
  * per character, so escaped pieces join into the escaped whole.
@@ -558,7 +570,7 @@ function ferretSectionLines(harness: HarnessKind, fyCommand: string): string[] {
   return [
     '',
     "# This ferret's own sections of the appended system prompt: each switch the daemon set to 1.",
-    `if [ "\${${SUB_FERRET_ENV}:-0}" = 1 ]; then ${SECTIONS_VARIABLE}=${quoted(`\n\n${SUB_FERRET_INSTRUCTION(fy)}`)}; else ${SECTIONS_VARIABLE}=${quoted(`\n\n${LEAD_RULES_INSTRUCTION(fy)}`)}; fi`,
+    `if [ "\${${SUB_FERRET_ENV}:-0}" = 1 ]; then ${SECTIONS_VARIABLE}=${quoted(`\n\n${SUB_FERRET_INSTRUCTION(fy)}`)}; else ${SECTIONS_VARIABLE}=''; fi`,
     ...FERRET_SECTIONS(fy).flatMap(section => [
       `if [ "\${${section.env}:-0}" = 1 ]${section.unlessEnv === undefined ? '' : ` && [ "\${${section.unlessEnv}:-0}" != 1 ]`}; then ${SECTIONS_VARIABLE}="$${SECTIONS_VARIABLE}"${quoted(`\n\n${section.text}`)}; fi`,
       ...(section.env === PACK_ENV ? packRoutingLines(quoted) : []),
@@ -618,14 +630,17 @@ function promptSnapshotLines(harness: HarnessKind, command: string): string[] {
 }
 
 /**
- * The question tool, per ferret (O3). Prepended to `"$@"` in the `=` / non-variadic spelling so the
- * prompt that follows is never swallowed as a tool name. A launch with no mode is unattended.
+ * The question tool (owner !A527): withheld from EVERY agent ferret, an interactive one included, so none stops on a form
+ * only the pane shows; it asks through the agenda. Prepended to `"$@"` in the `=` / non-variadic spelling so the prompt
+ * that follows is never swallowed as a tool name. Codex gets an explicit OFF, not silence: `-c
+ * features.default_mode_request_user_input=false` always beats `config.toml`, where a selected settings component may
+ * have switched the feature on (the same spelling as the Codex harness's launch, `CODEX_QUESTIONS_OFF`).
+ * GAP(runtimes): this wrapper has no opt-in; the `questionTool` setting governs the harness launch only.
  */
 function questionLines(harness: HarnessKind): string[] {
-  const interactive = `[ "\${${SESSION_MODE_ENV}:-}" = interactive ]`;
   return harness === 'claude'
-    ? [`${interactive} || set -- ${CLAUDE_NO_QUESTIONS_FLAG} "$@"`]
-    : [`! ${interactive} || set -- --enable ${CODEX_QUESTIONS_FEATURE} "$@"`];
+    ? [`set -- ${CLAUDE_NO_QUESTIONS_FLAG} "$@"`]
+    : [`set -- -c ${CODEX_QUESTIONS_OFF_OVERRIDE} "$@"`];
 }
 
 /** What {@link renderCommandScript} needs: the command plus its target's declared wrapper name. */

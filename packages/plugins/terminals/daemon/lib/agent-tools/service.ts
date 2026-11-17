@@ -19,6 +19,7 @@ import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/te
 import type { SurfaceControl } from './control.ts';
 import { clipOutput, isShellForeground, surfaceReference, terminalInput } from './policy.ts';
 import type { AgentToolCaller, AgentToolClock, ResolvedSurface } from './types.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /**
  * THE TERMINAL AGENT TOOLS (today's `AgentToolService`, the `terminal.*` half; the page half is Browsers').
@@ -271,7 +272,7 @@ export class TerminalToolService {
         } as InputRaise);
         if (!raised.ok) throw new AgentToolError('conflict', raised.error);
         return {
-          summary: `Asked the owner for the value (!${raised.value}) for ${reference}. Wait with input.wait; do not type there yourself.`,
+          summary: `Asked the owner for the value (${ASK_REFERENCE_SIGIL}${raised.value}) for ${reference}. Wait with input.wait; do not type there yourself.`,
           input: { id: raised.value },
         };
       }
@@ -388,7 +389,7 @@ export class TerminalToolService {
           'conflict',
           caller.kind === 'agent'
             ? `${reference} is quarantined: the owner's secret was just typed there, so you cannot read it for a short while. You can still send keys. Try again shortly, or ask the owner.`
-            : `${reference} is quarantined: a secret was just typed there. End the quarantine from its input card, or try again shortly.`,
+            : `${reference} is quarantined: a secret was just typed there. End the quarantine from its input, or try again shortly.`,
         );
       case 'input_pending':
         throw new AgentToolError(

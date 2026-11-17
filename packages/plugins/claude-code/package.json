@@ -23,12 +23,14 @@
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/plugin-runtimes": "workspace:*",
+    "@ferretry/plugin-warden": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "@ferretry/app": "workspace:*"
   },
   "sideEffects": false,
   "devDependencies": {
-    "@types/react": "^19.0.0"
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
   }
 }

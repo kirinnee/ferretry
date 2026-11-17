@@ -387,17 +387,24 @@ describe('fy-render svg and html payloads at the fence', () => {
   });
 });
 
-describe('fy-render card and board blocks', () => {
+describe('fy-render task and board blocks', () => {
   const embedOf = (...lines: string[]) => {
     const result = parseFyRender(body(...lines));
     if (!result.ok || !isFyRenderEmbedBlock(result.block)) throw new Error('expected an embed block');
     return result.block;
   };
 
-  test('should read a card block as a pointer to one card', () => {
+  test('should read a task block as a pointer to one task', () => {
+    const block = embedOf('type: task', 'alt: The lane move', '---', '&F12');
+    should(block.embed).eql({ kind: 'card', id: 'F12' });
+    should(block.type).equal('task');
+  });
+
+  test('should still read a block an older message spelled card, as the task block it became', () => {
     const block = embedOf('type: card', 'alt: The lane move', '---', '&F12');
     should(block.embed).eql({ kind: 'card', id: 'F12' });
-    should(block.type).equal('card');
+    should(block.type).equal('task');
+    should(block.source).containEql('type: card');
   });
 
   test('should read a board block as a list, or as a parent', () => {
@@ -409,18 +416,18 @@ describe('fy-render card and board blocks', () => {
   });
 
   test('should refuse a bad payload with the reason, so the fence stays an ordinary code fence', () => {
-    should(reasonOf(parseFyRender(body('type: card', 'alt: A card', '---', 'nope')))).equal(
-      '"nope" is not a card reference',
+    should(reasonOf(parseFyRender(body('type: task', 'alt: A task', '---', 'nope')))).equal(
+      '"nope" is not a task reference',
     );
     should(reasonOf(parseFyRender(body('type: board', 'alt: A board', '---', '')))).containEql('needs a payload');
   });
 
   test('should still demand an alt', () => {
-    should(parseFyRender(body('type: card', '---', '&F12')).ok).be.false();
+    should(parseFyRender(body('type: task', '---', '&F12')).ok).be.false();
   });
 
   test('should not count an embed block as a media block', () => {
-    should(isFyRenderMediaBlock(embedOf('type: card', 'alt: A card', '---', '&F12'))).be.false();
+    should(isFyRenderMediaBlock(embedOf('type: task', 'alt: A task', '---', '&F12'))).be.false();
   });
 });
 

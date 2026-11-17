@@ -1,0 +1,45 @@
+import type { ConfigPort } from '@ferretry/kernel/contract';
+import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
+import { type DialogRule, WARDEN_DIALOG_RULES } from '../contract/dialog-rules.ts';
+import type { BuiltInDialogRules } from './dialog-rules-source.ts';
+import { type ClearFrame, type DialogClearPorts, dialogWordsOf } from './lib/index.ts';
+
+/**
+ * The rules in effect: the built-in ones the harness plugins provide, then the ones the owner taught
+ * (`config/warden-dialogs.yaml`, the version in effect — a held or broken edit is not read). A built-in rule wins a tie,
+ * so a taught rule never overrides one. A harness with no provider has no built-in rules.
+ */
+export function dialogRulesInEffect(
+  config: Pick<ConfigPort, 'file'>,
+  builtIn: Pick<BuiltInDialogRules, 'rules'>,
+): () => Promise<readonly DialogRule[]> {
+  return async () => [...builtIn.rules(), ...(config.file(WARDEN_DIALOG_RULES)?.rules ?? [])];
+}
+
+/**
+ * A ferret's own pane, through Ferrets' form seam (`FerretHarness.form`): the runner reads it masked and guards every key
+ * with `kernel.act(<pane>, 'keys')`, so a Vault hold presses NOTHING and answers a refusal. Nothing here names a tmux pane.
+ */
+export function ferretClearPane(
+  ferrets: Pick<FerretsApi, 'harness' | 'prompt'>,
+): Pick<DialogClearPorts, 'frame' | 'key' | 'nudge' | 'words'> {
+  const form = async (sessionId: string) => (await ferrets.harness?.(sessionId as FerretId))?.form;
+  return {
+    words: async sessionId => dialogWordsOf(await ferrets.prompt?.(sessionId as FerretId).catch(() => undefined)),
+    frame: async (sessionId): Promise<ClearFrame | undefined> => {
+      const read = await (await form(sessionId))?.capture().catch(() => undefined);
+      return read?.ok === true ? { visible: read.value.visible, blocking: read.value.blocking ?? false } : undefined;
+    },
+    key: async (sessionId, key) => {
+      const typed = await (await form(sessionId))?.key(key).catch(() => undefined);
+      return typed?.ok === true;
+    },
+    // After a declined prompt the pane is idle (or its turn goes on): type the message, else queue it. Never awaited.
+    nudge: (sessionId, text) => {
+      void (async () => {
+        const harness = await ferrets.harness?.(sessionId as FerretId);
+        if ((await harness?.deliver({ text }))?.ok !== true) await harness?.queue(text);
+      })().catch(() => undefined);
+    },
+  };
+}

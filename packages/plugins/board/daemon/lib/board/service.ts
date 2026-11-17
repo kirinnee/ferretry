@@ -103,6 +103,7 @@ import { returnCard, returnLead } from './return-to-lead.ts';
 import { doneLane, doneMove, doneNote } from './signal-done.ts';
 import { helperCloseReason } from './sub-card-close.ts';
 import { defaultVisibility, visibilityVerdict } from './visibility.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /** Runs work one at a time per key; work under different keys runs together (the kernel's keyed serial). */
 interface BoardSerial {
@@ -228,7 +229,7 @@ export const doneMessage = (tasks: readonly Pick<Card, 'id' | 'title'>[], by: Do
   const who = by === 'owner' ? 'The owner' : `The${ADMIN_TOKEN_ACTOR_WORDS.slice('the'.length)}`;
   return named.length === 1
     ? `${who} marked ${named[0]} done.`
-    : `${who} marked these cards done: ${named.join(', ')}.`;
+    : `${who} marked these tasks done: ${named.join(', ')}.`;
 };
 
 /** Who a relocation is recorded as: the owner (with how they acted), or the daemon. */
@@ -303,28 +304,28 @@ const holderOnly = (request: CardActionRequest): boolean =>
   (request.action === 'link' && request.pr === undefined && request.branch === undefined);
 
 const SUB_FERRET_DOING: Readonly<Record<CardActionRequest['action'], string>> = {
-  move: 'move cards',
-  focus: 'change which card they work on',
-  block: 'block cards',
-  unblock: 'unblock cards',
-  depend: 'add dependencies to cards',
-  undepend: 'remove dependencies from cards',
-  drop: 'drop a card outside your own subtree',
-  reopen: 'reopen cards',
-  clarify: 'clarify cards',
-  link: 'link a commit or doc to cards',
-  assign: 'reassign a card outside your own subtree',
-  claim: 'claim cards',
-  adopt: 'adopt cards',
-  note: 'note on cards',
-  edit: 'edit cards',
-  file: 'claim files on cards',
-  order: 'reorder cards',
-  reparent: 'move cards under another card',
-  refile: 'refile cards',
-  snooze: 'snooze cards',
-  visibility: 'make cards public or private',
-  trigger: 'report events on cards',
+  move: 'move tasks',
+  focus: 'change which task they work on',
+  block: 'block tasks',
+  unblock: 'unblock tasks',
+  depend: 'add dependencies to tasks',
+  undepend: 'remove dependencies from tasks',
+  drop: 'drop a task outside your own subtree',
+  reopen: 'reopen tasks',
+  clarify: 'clarify tasks',
+  link: 'link a commit or doc to tasks',
+  assign: 'reassign a task outside your own subtree',
+  claim: 'claim tasks',
+  adopt: 'adopt tasks',
+  note: 'note on tasks',
+  edit: 'edit tasks',
+  file: 'claim files on tasks',
+  order: 'reorder tasks',
+  reparent: 'move tasks under another task',
+  refile: 'refile tasks',
+  snooze: 'snooze tasks',
+  visibility: 'make tasks public or private',
+  trigger: 'report events on tasks',
 };
 
 const subFerretDoing = (request: CardActionRequest): string => SUB_FERRET_DOING[request.action];
@@ -549,7 +550,7 @@ export class BoardService {
    * the caller's project unless one is named, and the variant's first backlog lane unless one is named.
    */
   async create(request: CardCreateRequest, caller: BoardCaller): Promise<CardResponse> {
-    await this.refuseSubFerret(caller, 'create cards');
+    await this.refuseSubFerret(caller, 'create tasks');
     // One Yes makes one card: two creates on the same approval are decided one after the other.
     if (caller.kind === 'ferret' && request.approval !== undefined) {
       const key = `board:approval:${caller.ferret}:${request.approval}`;
@@ -562,7 +563,7 @@ export class BoardService {
     const machineId = this.requireMachine();
     const owner = ferretOf(caller) ?? request.assignee;
     if (owner === undefined || owner === null) {
-      throw new BoardError('invalid', 'a card needs a ferret to own it: name its assignee, who owns it too');
+      throw new BoardError('invalid', 'a task needs a ferret to own it: name its assignee, who owns it too');
     }
     const projectId = request.projectId ?? (await this.projectOf(caller));
     const laneSet = await this.requireLaneSet(projectId);
@@ -643,7 +644,7 @@ export class BoardService {
     const machineId = this.requireMachine();
     const card = new BoardIndex((await this.ports.store.read()).cards, machineId).get({ id });
     if (card === undefined)
-      throw new BoardError('not-found', `there is no card ${formatCardRef({ id })} on this machine`);
+      throw new BoardError('not-found', `there is no task ${formatCardRef({ id })} on this machine`);
     if (card.dropped !== null) {
       throw new BoardError('invalid', `${formatCardRef(card)} is dropped; reopen it before you hand it to a helper`);
     }
@@ -776,7 +777,7 @@ export class BoardService {
       await this.refuseSubFerret(caller, subFerretDoing(request));
     }
     if (request.action === 'focus' && caller.kind !== 'ferret') {
-      throw new BoardError('invalid', 'focus is for a ferret: it names the card its session works on');
+      throw new BoardError('invalid', 'focus is for a ferret: it names the task its session works on');
     }
     const write = async (hold?: AdoptionHold) =>
       await this.write(id, async current => {
@@ -817,7 +818,7 @@ export class BoardService {
    */
   async skip(request: BoardSkipRequest, caller: BoardCaller): Promise<BoardSkipResponse> {
     if (caller.kind !== 'ferret') {
-      throw new BoardError('invalid', 'skip is for a ferret: it records why its own session has no card');
+      throw new BoardError('invalid', 'skip is for a ferret: it records why its own session has no task');
     }
     const skip = { reason: request.reason, at: this.ports.clock.now() };
     if (!(await this.ports.focus.skip(caller.ferret, skip))) {
@@ -1009,7 +1010,7 @@ export class BoardService {
     const persist = async (ready: Card): Promise<Card> => {
       await this.write(id, async current => {
         if (current !== undefined)
-          throw new BoardUnavailableError(`the counter issued ${id}, which a card already holds`);
+          throw new BoardUnavailableError(`the counter issued ${id}, which a task already holds`);
         return { task: ready, result: undefined };
       });
       return ready;
@@ -1058,7 +1059,7 @@ export class BoardService {
     if (request.action === 'trigger' && caller.kind === 'ferret' && caller.ferret !== effectiveAssignee(card)) {
       await this.refuseSubFerret(
         caller,
-        'report events on a card they are not doing',
+        'report events on a task they are not doing',
         async () => await this.claimCommand(caller, card),
       );
     }
@@ -1117,7 +1118,7 @@ export class BoardService {
       ) {
         throw new BoardError(
           error.code,
-          `${error.message}; your lead holds it: claim it first: fy card claim ${formatCardRef(card)}`,
+          `${error.message}; your lead holds it: claim it first: fy task claim ${formatCardRef(card)}`,
           error.allowed,
         );
       }
@@ -1138,7 +1139,7 @@ export class BoardService {
     if (caller.kind !== 'ferret')
       throw new BoardError(
         'forbidden',
-        `adopt is a ferret's: the owner assigns ${ref} with \`fy card assign ${ref} <ferret>\``,
+        `adopt is a ferret's: the owner assigns ${ref} with \`fy task assign ${ref} <ferret>\``,
       );
     if (card.dropped !== null) throw new BoardError('invalid', `${ref} is dropped: nothing to adopt`);
     const category = categoryOf(await this.requireLaneSet(card.projectId), card.laneId);
@@ -1212,7 +1213,7 @@ export class BoardService {
   private async claimCommand(caller: BoardCaller, card: Card): Promise<string | undefined> {
     if (caller.kind !== 'ferret') return undefined;
     const from = claimableFrom(caller, card, await ancestorsOf(caller.ferret, this.ports.parents));
-    return from === undefined ? undefined : `fy card claim ${formatCardRef(card)}`;
+    return from === undefined ? undefined : `fy task claim ${formatCardRef(card)}`;
   }
 
   /**
@@ -1233,7 +1234,7 @@ export class BoardService {
       return await this.askedByOf(card, ownerApp, { strict: true });
     } catch (error) {
       throw new BoardUnavailableError(
-        `who asked for this card cannot be settled right now: ${error instanceof Error ? error.message : String(error)}`,
+        `who asked for this task cannot be settled right now: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -1349,7 +1350,7 @@ export class BoardService {
   }
 
   private requireCard(current: Card | undefined, id: CardId): Card {
-    if (current === undefined) throw new BoardError('not-found', `there is no card &${id} on this machine`);
+    if (current === undefined) throw new BoardError('not-found', `there is no task &${id} on this machine`);
     return current;
   }
 
@@ -1397,7 +1398,7 @@ export class BoardService {
    */
   private async requireThread(caller: BoardCaller, named: string | undefined): Promise<AskRef | undefined> {
     if (named === undefined) return undefined;
-    const ref = `!${named}`;
+    const ref = `${ASK_REFERENCE_SIGIL}${named}`;
     if (caller.kind !== 'ferret') {
       throw new BoardError('invalid', `--thread names a thread on a ferret's own asks; ${ref} is not yours to name`);
     }
@@ -1407,10 +1408,10 @@ export class BoardService {
       throw new BoardError('invalid', `${ref} is not an ask you raised`);
     }
     if (item.gate || item.notice) {
-      throw new BoardError('invalid', `${ref} is not a thread: a gate ask or a notice carries no card`);
+      throw new BoardError('invalid', `${ref} is not a thread: a gate ask or a notice carries no task`);
     }
     if (item.card !== null) {
-      throw new BoardError('invalid', `${ref} is already linked to ${formatCardRef(item.card)}: one thread, one card`);
+      throw new BoardError('invalid', `${ref} is already linked to ${formatCardRef(item.card)}: one thread, one task`);
     }
     return { ferret: caller.ferret, id: named };
   }
@@ -1423,7 +1424,7 @@ export class BoardService {
     const why = linked === undefined ? 'its asks could not be read' : linked.message;
     throw new BoardError(
       'invalid',
-      `!${thread.id} was not linked to the new card, which was created without it: ${why}`,
+      `${ASK_REFERENCE_SIGIL}${thread.id} was not linked to the new task, which was created without it: ${why}`,
     );
   }
 
@@ -1531,8 +1532,8 @@ export class BoardService {
       throw new BoardError(
         'not-found',
         damaged
-          ? `card &${id} is quarantined: its file is damaged and kept as evidence`
-          : `there is no card &${id} on this machine`,
+          ? `task &${id} is quarantined: its file is damaged and kept as evidence`
+          : `there is no task &${id} on this machine`,
       );
     }
     const laneSets = await this.laneSetsOf(snapshot.cards.map(entry => entry.projectId));
@@ -1561,7 +1562,7 @@ export class BoardService {
     const session = ferretOf(caller) ?? task.owner;
     for (const projectId of projects) {
       await this.ports.changes
-        .changed(session, { projectId, cardIds: [task.id] })
+        .changed(session, { projectId, taskIds: [task.id] })
         .catch((error: unknown) => this.warn(`could not publish board.changed for ${formatCardRef(task)}`, error));
     }
     await this.ports.gates

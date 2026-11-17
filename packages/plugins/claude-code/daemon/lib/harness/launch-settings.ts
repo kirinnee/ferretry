@@ -6,8 +6,8 @@ import {
 } from '@ferretry/core-ferrets/contract';
 import { canonicalJson } from '@ferretry/std';
 import type { HarnessConfig, HooksItem, LaunchSettingsRecord, SettingsItem } from '../../../contract/index.ts';
-import { fixedLayer } from './fixed-layer.ts';
-import { settingsDocument } from './launch.ts';
+import { CLAUDE_HOME_ENV, CLAUDE_RM_WAIVER_ENV, fixedLayer, rmWaiverApplies } from './fixed-layer.ts';
+import { settingsDocument, settingsFlags } from './launch.ts';
 
 /**
  * WHAT A CLAUDE CODE LAUNCH RAN UNDER, AS FINGERPRINTS (W2-c; today's `FileLaunchSettingsDigest`, `fyd.ts:8020`).
@@ -28,6 +28,8 @@ export interface LaunchSettingsInputs {
   readonly permissionMode: HarnessConfig['permissionMode'];
   readonly settings: ReadonlyMap<string, SettingsItem>;
   readonly hooks: ReadonlyMap<string, HooksItem>;
+  /** The `dangerousRmWaiver` setting; a missing value is off. Only its EFFECT (with bypass mode) is fingerprinted. */
+  readonly dangerousRmWaiver?: boolean;
   /** The runtime the launch ran as: kept in the record so a later comparison selects the same components. */
   readonly runtime?: string;
 }
@@ -43,13 +45,25 @@ function fingerprint(value: unknown): string {
 export function launchSettingsRecord(inputs: LaunchSettingsInputs): LaunchSettingsRecord {
   const fixed = fixedLayer(inputs.permissionMode, FOLDER_STAND_IN);
   const none = new Map<string, never>();
+  const document = settingsDocument({ settings: inputs.settings, hooks: none });
+  const flags = settingsFlags(inputs.settings);
   return {
     format: 1,
     ...(inputs.runtime === undefined ? {} : { runtime: inputs.runtime }),
     sections: {
       'permission-mode': fingerprint(inputs.permissionMode),
-      'fixed-layer': fingerprint({ settings: fixed.settings, overlay: fixed.overlay }),
-      settings: fingerprint(settingsDocument({ settings: inputs.settings, hooks: none })),
+      // The rm waiver's env is hashed only when it applies (setting on AND bypass mode), so a record taken before the
+      // setting was fingerprinted, and every launch with it off or ineffective, keeps the digest it always had.
+      'fixed-layer': fingerprint({
+        settings: fixed.settings,
+        overlay: fixed.overlay,
+        env: CLAUDE_HOME_ENV,
+        ...(rmWaiverApplies(inputs.dangerousRmWaiver ?? false, inputs.permissionMode)
+          ? { rmWaiver: CLAUDE_RM_WAIVER_ENV }
+          : {}),
+      }),
+      // The flags are part of what the item runs the launch under; a document with none keeps the digest it always had.
+      settings: fingerprint(flags.length === 0 ? document : { document, flags }),
       hooks: fingerprint(settingsDocument({ settings: none, hooks: inputs.hooks }).hooks ?? {}),
     },
   };

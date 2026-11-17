@@ -9,29 +9,23 @@
  * Hypermedia, Pack and Agenda switches, the browser sign-in, the account picker — is another plugin's panel in the
  * slots the page mounts, and is not read here.
  *
- * GAPs, each said where it bites:
- *   - GAP(app-shell): no live event stream yet. Today's route subscribed `/v1/events` for the transcript's "something
- *     moved" frames and the working turn's live readout; on 5.0 the half hears its own wake-ups and Ferrets'
- *     (`client.subscribe`) and nudges the poll with each, and draws no live-feed state, because there is no feed whose
- *     state it could honestly report.
+ * What it reads live, and the one GAP it has:
+ *   - The LIVE EVENT STREAM (`GET /v1/events`, `live=1&transcript=1`) is open for the ferret on screen
+ *     (`live-ferret-stream.ts`): its `live` frames reach the page (the working line's counts, the compaction chip, the
+ *     toolbar's "Compacting") and its `transcript` frames nudge the refresh. The half's own wake-ups and Ferrets'
+ *     (`client.subscribe`) still nudge it too, and the reads stay the truth.
+ *   - A lost carrier is told apart from a refusal (`isCarrierOutage`): the refresh says nothing for it and keeps the last
+ *     good view, because the connection model already reports an outage once and retries on its own.
  *   - GAP(app-shell): no device copy of the transcript. Today's chat drew the last copy this device saw first and said
  *     "Updating…" over it; the shell has no session cache, so the chat opens on "Opening…" until the first read.
- *   - GAP(app-shell): a lost carrier is not told apart from a refusal (`isCarrierOutage`), so every failed read is said.
- *   - GAP(ferrets, Q1): "Clear stuck messages" is built (`use-stuck-message-actions.tsx`) and listed by nothing until
- *     the Ferrets Actions menu lists contributions.
  */
 
-import { useChatScrollSlot, useDaemonControls, useOptionalRouter } from '@ferretry/app';
+import { isCarrierOutage, useChatScrollSlot, useDaemonControls, useOptionalRouter } from '@ferretry/app';
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import {
-  MessageSent,
-  QuestionAnswered,
-  QuestionAsked,
-  QueueChanged,
-  type QueuedMessage,
-} from '../../contract/index.ts';
+import { QueueChanged, type QueuedMessage } from '@ferretry/core-mailbox/contract';
+import { MessageSent, QuestionAnswered, QuestionAsked } from '../../contract/index.ts';
 import { useConversationClient, useConversationDaemon } from '../client.ts';
 import { ConversationOutbox } from '../composer/conversation-outbox.tsx';
 import {
@@ -49,6 +43,7 @@ import { pendingQuestionOf, type PendingQuestion } from '../questions/question-f
 import { logSearchOf, type ChatSearchPort } from '../search/chat-search.tsx';
 import { chatReadApi, readQuestion } from './chat-reads.ts';
 import { ChatTurnContext } from './chat-turn-context.ts';
+import { useLiveFerretStream } from './live-ferret-stream.ts';
 import { type ChatSession, unreadChatSession } from './chat-session.ts';
 import {
   type ChatRefreshControl,
@@ -67,7 +62,6 @@ import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 import type { TranscriptEntry } from './transcript-entries.ts';
 import type { TranscriptHistoryStatus } from './transcript-history.ts';
 import type { TranscriptHistoryControl } from './transcript-history-row.tsx';
-import { useStuckMessageActions } from './use-stuck-message-actions.tsx';
 
 /** The browser's clock, timers and visibility, for the refresh (today's `browserWorkspaceRefreshEnvironment`). */
 const browserChatRefreshEnvironment: ChatRefreshEnvironment = {
@@ -182,6 +176,8 @@ function ChatRoute({ ask, client, daemonId, embedded, ferretId }: ChatRouteProps
       },
       onError: setError,
       onTranscriptUnbound: setTranscriptUnbound,
+      // A lost carrier is said once by the connection model: the last good view stays, and this says nothing.
+      quiet: isCarrierOutage,
     });
     refreshControl.current = control;
     return () => {
@@ -189,6 +185,9 @@ function ChatRoute({ ask, client, daemonId, embedded, ferretId }: ChatRouteProps
       if (refreshControl.current === control) refreshControl.current = null;
     };
   }, [client, ferretId]);
+
+  /** The ferret's live stream: `live` frames feed the page, `transcript` frames nudge the refresh like any wake-up. */
+  const liveActivity = useLiveFerretStream(client, ferretId, () => refreshControl.current?.nudge());
 
   /**
    * THE WAKE-UPS. A send landing, the queue moving, a question asked or answered, the ferret changing state: each
@@ -299,15 +298,6 @@ function ChatRoute({ ask, client, daemonId, embedded, ferretId }: ChatRouteProps
     () => queueActions(client, ferretId, refreshSends, outbox ?? undefined, queueWatcher(refreshControl)),
     [client, ferretId, refreshSends, outbox],
   );
-  // "Clear stuck messages": built for the ferret's Actions menu (GAP(ferrets, Q1): nothing lists it yet).
-  useStuckMessageActions({
-    client,
-    ferretId,
-    sends,
-    refresh: refreshSends,
-    view: sendViewState,
-    dismiss: dismissSends,
-  });
 
   // The pane a pinned composer talks to is this ferret while its chat is on screen.
   useEffect(() => {
@@ -356,6 +346,7 @@ function ChatRoute({ ask, client, daemonId, embedded, ferretId }: ChatRouteProps
               {...(ask === undefined ? {} : { ask })}
               entries={placedEntries}
               history={history}
+              liveActivity={liveActivity}
               onCancel={cancelSend}
               onDismiss={dismissSend}
               onExpand={toggleSend}

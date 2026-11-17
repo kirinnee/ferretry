@@ -86,8 +86,6 @@ describe('the usage state files', () => {
     await host.stop();
   });
 
-  test.skip('F-0254 F-0255 the index database has no -shm and -wal files of its own — pending port: the kernel sqlite store, which opens the file and owns its journal side files; Usage opens no database itself', () => {});
-
   test('F-0130 the compaction history is kept in compaction-history.json under the usage state folder, format 1, and read back', async () => {
     const state = memoryState();
     const history = new StateCompactionHistory(state.port);

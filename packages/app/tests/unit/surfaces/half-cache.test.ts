@@ -89,12 +89,34 @@ describe('the one client cache', () => {
     await settle();
     expect(runtime.client('d1', 'board')).toBe(ordinary);
     expect(runtime.client('d1', 'board', 'background')).toBe(background);
-    // The halves are still rebuilt on the change (the views-remount follow-up is named, not done here).
-    expect(runtime.half('d1', 'board')).not.toBe(half);
+    // Every package's standing is the same after the re-read, so the half is kept too (no view remounts).
+    expect(runtime.half('d1', 'board')).toBe(half);
     transport.emit({ name: 'kernel.plugins-changed', payload: { generation: 2 } });
     await settle();
     expect(runtime.client('d1', 'board')).toBe(ordinary);
     expect(runtime.client('d1', 'board', 'background')).toBe(background);
+    expect(runtime.half('d1', 'board')).toBe(half);
+  });
+
+  test('a standing change rebuilds the half; the clients stay the same objects', async () => {
+    const { runtime, block } = setup();
+    runtime.connection('d1');
+    await settle();
+    const ordinary = runtime.client('d1', 'board');
+    const half = runtime.half('d1', 'board');
+    expect(half).toBeDefined();
+    block(true);
+    const connection = runtime.connection('d1');
+    if (connection.kind !== 'connected') throw new Error('not connected');
+    await connection.client.refresh();
+    await settle();
+    block(false);
+    await connection.client.refresh();
+    await settle();
+    expect(runtime.client('d1', 'board')).toBe(ordinary);
+    const rebuilt = runtime.half('d1', 'board');
+    expect(rebuilt).toBeDefined();
+    expect(rebuilt).not.toBe(half);
   });
 
   test('Layouts does not re-read across a reconnect, and its layout never falls back to the default in between', async () => {

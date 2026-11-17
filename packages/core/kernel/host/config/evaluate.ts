@@ -64,7 +64,7 @@ export interface EvaluateInput {
   readonly path: string;
   readonly disk: DiskState;
   readonly accepted: AcceptedConfig | undefined;
-  /** sha256 of the text's UTF-8 bytes, hex. */
+  /** The etag of a text: the service's keyed digest of its UTF-8 bytes (`./etag.ts`); a caller with no key may use a plain sha256. */
   digest(text: string): string;
   readonly binary: string;
   /** How a text of this file is checked, when the caller keeps checks it already made; else {@link checkConfigText}. */
@@ -91,7 +91,9 @@ function acceptedCandidate(input: EvaluateInput): Candidate | undefined {
   const accepted = input.accepted;
   if (accepted === undefined) return undefined;
   const checked = checkOf(input, accepted.text);
-  return checked.ok ? { value: checked.value, text: accepted.text, etag: accepted.etag } : undefined;
+  // The stored etag is never trusted: it was made under whatever key (or none: a sha256) wrote it, and a stale one would
+  // read every kept file as changed. The etag in effect is the text's own under this caller's digest.
+  return checked.ok ? { value: checked.value, text: accepted.text, etag: input.digest(accepted.text) } : undefined;
 }
 
 const kept = (

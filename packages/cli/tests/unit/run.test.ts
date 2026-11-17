@@ -40,14 +40,14 @@ describe('runFy', () => {
     should(await runFy([], world)).equal(0);
     should(await runFy(['--help'], world)).equal(0);
     should(io.stdout()).containEql('Usage: fy <verb>');
-    should(io.stdout()).containEql('card move');
+    should(io.stdout()).containEql('task move');
   });
 
   it('should answer an unknown verb with the near ones and exit 2', async () => {
     const { world, io } = fakeWorld({ registry: registryOf(boardEntry()) });
-    should(await runFy(['card', 'zap'], world)).equal(2);
-    should(io.stderr()).containEql('unknown verb "card zap"');
-    should(io.stderr()).containEql('fy card show');
+    should(await runFy(['task', 'zap'], world)).equal(2);
+    should(io.stderr()).containEql('unknown verb "task zap"');
+    should(io.stderr()).containEql('fy task show');
   });
 
   it('should refuse an unknown leading option', async () => {
@@ -62,11 +62,37 @@ describe('runFy', () => {
     const { world } = fakeWorld({ registry: registryOf(boardEntry(calls)) });
 
     // Act
-    const code = await runFy(['card', 'move', 'c1', '--to', 'done'], world);
+    const code = await runFy(['task', 'move', 'c1', '--to', 'done'], world);
 
     // Assert
     should(code).equal(0);
     should(calls.args).deepEqual(['c1']);
+  });
+
+  it('should run the old fy card spelling as fy task, say so on stderr once, and leave it out of every help text', async () => {
+    // Arrange: the old noun is the shell's hidden alias; the plugin declares only `task`.
+    const calls: { args?: readonly string[] } = {};
+    const old = fakeWorld({ registry: registryOf(boardEntry(calls)) });
+    const current = fakeWorld({ registry: registryOf(boardEntry()) });
+
+    // Act
+    const oldCode = await runFy(['card', 'move', 'c1', '--to', 'done'], old.world);
+    const currentCode = await runFy(['task', 'move', 'c1', '--to', 'done'], current.world);
+
+    // Assert: the same verb ran, with the same words, and only the old spelling printed the hint
+    should(oldCode).equal(currentCode);
+    should(calls.args).deepEqual(['c1']);
+    should(old.io.stdout()).equal(current.io.stdout());
+    should(old.io.stderr()).equal('`fy card` is now `fy task`\n');
+    should(current.io.stderr()).equal('');
+
+    // Assert: no help lists it
+    const help = fakeWorld({ registry: registryOf(boardEntry()) });
+    await runFy(['--help'], help.world);
+    should(help.io.stdout()).not.match(/^ +card\b/mu);
+    should(help.io.stdout()).not.containEql('fy card');
+    await runFy(['help', 'task', 'move'], help.world);
+    should(help.io.stdout()).not.containEql('fy card');
   });
 
   it('should answer a skeleton half with the not-built-yet sentence and exit 69', async () => {
@@ -111,8 +137,8 @@ describe('runFy', () => {
       build: ctx => ({
         verbs: {
           board: async () => 0,
-          'card move': async () => 0,
-          'card show': async () => {
+          'task move': async () => 0,
+          'task show': async () => {
             for (const params of [{} as Record<string, string>, { id: '..' }, { id: '.' }]) {
               try {
                 ctx.client.socket?.('GET /v1/cards/:id/stream', params, {
@@ -134,7 +160,7 @@ describe('runFy', () => {
     });
 
     // Act
-    const code = await runFy(['card', 'show'], world);
+    const code = await runFy(['task', 'show'], world);
     await Bun.sleep(20);
 
     // Assert
@@ -156,11 +182,11 @@ describe('runFy', () => {
     // Arrange
     const manifest = definePlugin({
       ...boardManifest,
-      actions: { ...boardManifest.actions, cli: [verb('card show')] },
+      actions: { ...boardManifest.actions, cli: [verb('task show')] },
     });
     const half = implementCli(manifest, {
       build: ctx => ({
-        verbs: { 'card show': callsThenOk(ctx.client, 'GET /v1/cards/:id', { params: { id: 'a' } }) },
+        verbs: { 'task show': callsThenOk(ctx.client, 'GET /v1/cards/:id', { params: { id: 'a' } }) },
       }),
     });
     const { world, connects, transport } = fakeWorld({
@@ -169,7 +195,7 @@ describe('runFy', () => {
     });
 
     // Act
-    const code = await runFy(['--as-owner', 'card', 'show'], world);
+    const code = await runFy(['--as-owner', 'task', 'show'], world);
 
     // Assert
     should(code).equal(0);
@@ -180,13 +206,16 @@ describe('runFy', () => {
   it('V-0429 hands a plugin verb the words as typed, `--` included, beside the parsed args and options', async () => {
     const manifest = definePlugin({
       ...boardManifest,
-      actions: { ...boardManifest.actions, cli: [verb('card show')] },
+      actions: {
+        ...boardManifest.actions,
+        cli: [verb('task show', { options: [{ flag: '--with <name...>', help: 'the names to run with' }] })],
+      },
     });
     const heard: (readonly string[] | undefined)[] = [];
     const half = implementCli(manifest, {
       build: () => ({
         verbs: {
-          'card show': async invocation => {
+          'task show': async invocation => {
             heard.push(invocation.words);
             return 0;
           },
@@ -197,7 +226,7 @@ describe('runFy', () => {
       registry: registryOf(entry(manifest, 'h-board', half)),
       inventory: inventoryOf({ id: 'board', contract: 'h-board' }),
     });
-    await runFy(['card', 'show', '--with', 'A', 'B', '--', 'sh', '-c', 'exit 0'], world);
+    await runFy(['task', 'show', '--with', 'A', 'B', '--', 'sh', '-c', 'exit 0'], world);
     should(heard).deepEqual([['--with', 'A', 'B', '--', 'sh', '-c', 'exit 0']]);
   });
 
@@ -222,8 +251,8 @@ describe('runFy', () => {
     const half = implementCli(manifest, {
       build: ctx => ({
         verbs: {
-          'card show': callsThenOk(ctx.client, 'GET /v1/cards/:id', { params: { id: 'a' } }),
-          'card move': async () => 0,
+          'task show': callsThenOk(ctx.client, 'GET /v1/cards/:id', { params: { id: 'a' } }),
+          'task move': async () => 0,
           board: async () => 0,
         },
       }),
@@ -232,7 +261,7 @@ describe('runFy', () => {
       registry: registryOf(entry(manifest, 'h-board', half)),
       inventory: inventoryOf({ id: 'board', on: false, contract: 'h-board' }),
     });
-    should(await runFy(['card', 'show'], world)).equal(69);
+    should(await runFy(['task', 'show'], world)).equal(69);
     should(io.stderr()).containEql('Board is turned off: turn it on with `fy plugin on board`.');
     should(transport.sent).deepEqual([]);
   });
@@ -258,12 +287,12 @@ describe('runFy', () => {
     const half = implementCli(manifest, {
       build: ctx => ({
         verbs: {
-          'card move': async () => {
+          'task move': async () => {
             ran = true;
             await ctx.client.call('POST /v1/cards/:id/move', { params: { id: 'a' } });
             return 0;
           },
-          'card show': async () => 0,
+          'task show': async () => 0,
           board: async () => 0,
         },
       }),
@@ -275,7 +304,7 @@ describe('runFy', () => {
     });
 
     // Act
-    const code = await runFy(['card', 'move', 'a'], world);
+    const code = await runFy(['task', 'move', 'a'], world);
 
     // Assert
     should(ran).be.true();
@@ -286,10 +315,10 @@ describe('runFy', () => {
   });
 
   for (const argv of [
-    ['card', 'move', '-h'],
-    ['card', 'move', '-h', 'a'],
-    ['card', 'move', 'a', '--help', 'b'],
-    ['card', 'move', '--to', 'done', '-h'],
+    ['task', 'move', '-h'],
+    ['task', 'move', '-h', 'a'],
+    ['task', 'move', 'a', '--help', 'b'],
+    ['task', 'move', '--to', 'done', '-h'],
   ])
     it(`should show help for ${argv.join(' ')} and never connect or run the handler`, async () => {
       // Arrange
@@ -301,7 +330,7 @@ describe('runFy', () => {
 
       // Assert
       should(code).equal(0);
-      should(io.stdout()).startWith('Usage: fy card move [options]\n\nmove a card\n');
+      should(io.stdout()).startWith('Usage: fy task move [options]\n\nmove a card\n');
       should(calls.args).be.undefined();
       should(connects).deepEqual([]);
     });
@@ -309,14 +338,14 @@ describe('runFy', () => {
   it('should pass -h through as an argument after --', async () => {
     const calls: { args?: readonly string[] } = {};
     const { world } = fakeWorld({ registry: registryOf(boardEntry(calls)) });
-    should(await runFy(['card', 'show', '--', '-h'], world)).equal(0);
+    should(await runFy(['task', 'show', '--', '-h'], world)).equal(0);
     should(calls.args).deepEqual(['-h']);
   });
 
   it('should print a verb’s usage and summary for --help after it', async () => {
     const { world, io } = fakeWorld({ registry: registryOf(boardEntry()) });
-    should(await runFy(['card', 'move', '--help'], world)).equal(0);
-    should(io.stdout()).startWith('Usage: fy card move [options]\n\nmove a card\n');
+    should(await runFy(['task', 'move', '--help'], world)).equal(0);
+    should(io.stdout()).startWith('Usage: fy task move [options]\n\nmove a card\n');
   });
 
   it('should list a verb’s declared options under its summary for --help, and only -h for a verb that declares none', async () => {
@@ -362,7 +391,7 @@ describe('runFy', () => {
       api: 5,
       core: false,
       kinds: ['command'],
-      actions: { cli: [verb('done', { alias: 'card move --to done' })] },
+      actions: { cli: [verb('done', { alias: 'task move --to done' })] },
     });
     const { world } = fakeWorld({ registry: registryOf(boardEntry(calls), skeletonEntry(aliasPlugin)) });
     should(await runFy(['done', 'c9'], world)).equal(0);
@@ -397,7 +426,7 @@ describe('the client a plugin verb is handed opens its connection lazily', () =>
     const half = implementCli(streaming, {
       build: ctx => {
         calls.client = ctx.client as FollowingClient;
-        return { verbs: { board: async () => 0, 'card move': async () => 0, 'card show': async () => 0 } };
+        return { verbs: { board: async () => 0, 'task move': async () => 0, 'task show': async () => 0 } };
       },
     });
     const made = fakeWorld({

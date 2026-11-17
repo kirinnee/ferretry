@@ -1,3 +1,4 @@
+import type { ChildEnvironment } from '@ferretry/kernel/contract';
 import type { TmuxControlNotification } from './control-protocol.ts';
 
 /** The narrow process seam required by the tmux domain. */
@@ -75,6 +76,11 @@ export interface TmuxLaunch {
    * on a PATH the guard cannot search.
    */
   readonly envNames?: readonly string[];
+  /**
+   * That same opaque handle, for a launch guard ONLY: it asks `kernel.paths.whichFor` where `claude`/`codex` resolve on
+   * the PATH the handle will set, which neither opens nor spends it. No code in this plugin reads a value from it.
+   */
+  readonly handle?: ChildEnvironment;
 }
 
 /** Which notifications a subscriber wants: those naming this pane, this session, or (empty) all. */

@@ -39,9 +39,19 @@ const StartIdentitySchema = z.strictObject({
   detach: z.boolean().optional(),
 });
 
+/**
+ * The start body names the task it takes over as `task`. `card` is its former name, still read for one release; the
+ * stored option (`details.json`) keeps the key `card`, so both land there.
+ */
 const StartBodySchema = z
-  .strictObject({ ...StartIdentitySchema.shape, ...StartOptionsSchema.shape })
+  .strictObject({
+    ...StartIdentitySchema.shape,
+    ...StartOptionsSchema.shape,
+    task: StartOptionsSchema.shape.card,
+  })
   .superRefine((value, context) => {
+    if (value.task !== undefined && value.card !== undefined && value.task !== value.card)
+      context.addIssue({ code: 'custom', message: 'name one task: `task` and its former key differ', path: ['task'] });
     // Today's start was a union on `mode`: `auto` carries a prompt, `interactive` may start bare.
     if (value.mode === 'auto' && (value.prompt === undefined || value.prompt.trim() === ''))
       context.addIssue({ code: 'custom', message: 'an auto start needs a prompt', path: ['prompt'] });
@@ -93,7 +103,8 @@ export const parseStartBody = (value: unknown): Omit<StartRequest, 'by'> => {
   // Today's `start`: a start with no working directory would run the agent wherever the daemon happens to be, which is
   // never what a caller meant (400 `invalid_request`).
   if (body.folder === undefined) throw new ApiError(400, START_NEEDS_FOLDER, 'invalid_request');
-  for (const [key, field] of Object.entries(body))
+  const { task, ...named } = body;
+  for (const [key, field] of Object.entries({ ...named, ...(task === undefined ? {} : { card: task }) }))
     if (field !== undefined) (OPTION_KEYS.has(key) ? options : identity)[key] = field;
   return {
     ...(identity as Omit<StartRequest, 'by' | 'options'>),

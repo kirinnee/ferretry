@@ -223,7 +223,7 @@ describe('the account routes through the kernel', () => {
     should((await h.request('GET', '/v1/accounts/look-alike')).json()).match({ v: 1, groups: [] });
     // The secure-copy tools are built (a ferret with no copies is told so), and so are the two asking tools.
     should(await h.tool('secure_list', {}, { as: ferret('F1') })).match({ text: 'This session holds no copies.' });
-    should(await h.tool('task_plan', {}, { as: ferret('F1') })).match({
+    should(await h.tool('signin_plan', {}, { as: ferret('F1') })).match({
       isError: true,
       text: 'the plan is not usable: Invalid input: expected array, received undefined',
     });

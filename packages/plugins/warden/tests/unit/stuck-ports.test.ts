@@ -39,6 +39,7 @@ const message = (id: string, stateAt: string) => ({
 interface Calls {
   sends: Array<string | undefined>;
   pressed: Array<[string, unknown, string]>;
+  looks: string[];
 }
 
 function conversation(
@@ -47,7 +48,7 @@ function conversation(
   queue: unknown[] = [],
   withActs = true,
 ): { api: ConversationApi; calls: Calls } {
-  const calls: Calls = { sends: [], pressed: [] };
+  const calls: Calls = { sends: [], pressed: [], looks: [] };
   const api = {
     sends: async (_ferret: string, cursor?: string) => {
       calls.sends.push(cursor);
@@ -61,6 +62,9 @@ function conversation(
             return press;
           },
           retractedDraft: async () => 'send-back',
+          deliveryLook: async (ferret: string) => {
+            calls.looks.push(ferret);
+          },
         }
       : {}),
   } as unknown as ConversationApi;
@@ -95,6 +99,52 @@ describe('B187 the input_stuck port over Conversation', () => {
     await port.markStalled('nelly', 'a message sits unsent');
     await port.clearStalled('nelly');
     should(journal).eql(['fleet.warden_input_stalled', 'fleet.warden_input_unstalled']);
+  });
+
+  it('c58-55 the stalled mark is put on the ferret through Ferrets, and taken off again', async () => {
+    const marks: [string, boolean][] = [];
+    const journal: string[] = [];
+    const port = conversationStuckInput(
+      conversation([]).api,
+      noList,
+      { record: type => void journal.push(type) },
+      {
+        markStalled: async (ferret, stalled) => {
+          marks.push([ferret, stalled]);
+          return true;
+        },
+      },
+    );
+
+    await port.markStalled('nelly', 'a message sits unsent');
+    await port.clearStalled('nelly');
+
+    should(marks).eql([
+      ['nelly', true],
+      ['nelly', false],
+    ]);
+    should(journal).eql(['fleet.warden_input_stalled', 'fleet.warden_input_unstalled']);
+  });
+
+  it('c58-55 a refused mark throws to the sweep (which carries on), after the journal said it', async () => {
+    const journal: string[] = [];
+    const port = conversationStuckInput(
+      conversation([]).api,
+      noList,
+      { record: type => void journal.push(type) },
+      {
+        markStalled: async () => {
+          throw new Error('only the Warden marks a ferret stalled');
+        },
+      },
+    );
+
+    const refused = await port.markStalled('nelly', 'r').then(
+      () => undefined,
+      (error: Error) => error,
+    );
+    should(refused?.message).containEql('only the Warden');
+    should(journal).eql(['fleet.warden_input_stalled']);
   });
 
   it('B187 a refused or unavailable press is refused, and a Conversation without the acts offers no retraction', async () => {
@@ -147,6 +197,16 @@ describe('B187 the inbox_stuck port over Conversation', () => {
     await port.deliveryLook('nelly');
 
     should(calls.sends).have.length(2);
+  });
+
+  it('&F4744 the deliverer look reaches the Mailbox through Conversation, and is nothing without it', async () => {
+    const { api, calls } = conversation([]);
+    await conversationStuckInbox(api, noList).deliveryLook('nelly');
+    should(calls.looks).eql(['nelly']);
+
+    const without = conversation([], undefined, [], false);
+    await conversationStuckInbox(without.api, noList).deliveryLook('nelly');
+    should(without.calls.looks).eql([]);
   });
 
   it('B187 an empty queue was written never', async () => {

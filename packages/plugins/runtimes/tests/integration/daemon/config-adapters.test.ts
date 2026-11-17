@@ -219,10 +219,18 @@ describe('the config writer over the kernel’s all-or-none write', () => {
 
 describe('Runtimes’ own instructions as a component source', () => {
   it('lists the files by name and reads each without its description', async () => {
-    const { port } = await world({
-      'instructions/rules.yaml': 'text: be kind\ndescription: house rules\n',
-      'instructions/alpha.yaml': 'text: be brief\n',
-    });
+    // A file landing on disk with no accepted record is held for the owner (an add of instructions always is), so the
+    // files are put through the owner's own writer, as `fy`, the app and PUT /v1/config/file do.
+    const { port, files } = await world();
+    for (const [name, text] of [
+      ['rules', 'text: be kind\ndescription: house rules\n'],
+      ['alpha', 'text: be brief\n'],
+    ] as const) {
+      const written = await files.write('runtimes', INSTRUCTION_ITEMS as never, name, text, {
+        confirmedLoosening: true,
+      });
+      expect(written.kind).toBe('applied');
+    }
     const source = ownInstructionsSource(port);
 
     expect(await source.list()).toEqual(['alpha', 'rules']);
@@ -419,7 +427,7 @@ describe('the model in effect over Runtimes’ files', () => {
     expect(() =>
       files.editsFor(
         loaded,
-        { ...before, machine: { ...before.machine, agentPermissions: 'skip' } } as AccountModel,
+        { ...before, machine: { ...before.machine, agentPermissions: 'auto' } } as AccountModel,
         NO_MOVES,
       ),
     ).toThrow(/agentPermissions.*no file of Runtimes holds/su);

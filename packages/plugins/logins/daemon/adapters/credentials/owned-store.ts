@@ -15,8 +15,8 @@ import {
   type FleetCredentialCatalogDeps,
 } from '../../lib/credentials/credentials-service.ts';
 import {
+  type ActiveUsageRead,
   InMemoryCredentialStatusStore,
-  localCredentialFacts,
   type CredentialStatusPorts,
   type CredentialSubject,
   type LocalCredentialFacts,
@@ -26,7 +26,7 @@ import type { FleetTokenRefreshPort } from '../../lib/credentials/token-refresh.
 import { PassiveUsageRecordSchema, type PassiveUsageRecord } from '../../lib/credentials/usage.ts';
 import { classifyCredential, type CredentialMaterial } from '../../lib/shared/identity.ts';
 import type { CredentialStoreCheck, CredentialStoreInspection } from '../../lib/shared/store-inspection.ts';
-import { credentialFingerprint } from './credential-classifier.ts';
+import { activeUsageRead, factsOfMaterial, readStoreMaterial } from './material-read.ts';
 import type { AnthropicUsageProbe } from './anthropic-usage-probe.ts';
 import type { CodexUsageProbe } from './codex-usage-probe.ts';
 
@@ -150,23 +150,7 @@ export class OwnedLoginStore {
     const location = `the file ${path}`;
     let material: CredentialMaterial;
     try {
-      if (resolution.harness === 'claude' && (await this.root.lstat(path))?.kind === 'symlink') {
-        material = {
-          outcome: 'unreadable',
-          reason:
-            'the Claude credential file is a symbolic link, which Claude replaces with a private copy on its next refresh',
-        };
-      } else if (resolution.harness === 'codex' && ((await this.root.lstat(path))?.links ?? 1) > 1) {
-        material = {
-          outcome: 'unreadable',
-          reason:
-            'the Codex sign-in file has a second name (another link to it exists), so a ferret cannot be given it',
-        };
-      } else if ((await this.root.stat(path)) === undefined) material = { outcome: 'absent' };
-      else {
-        const blob = (await this.root.readText(path)).trim();
-        material = blob.length === 0 ? { outcome: 'absent' } : { outcome: 'found', blob };
-      }
+      material = await readStoreMaterial(this.root, path, resolution.harness);
     } catch (error) {
       checked.push({ location, found: 'unreadable', why: fileFailure(error) });
       throw error;
@@ -188,16 +172,16 @@ export class OwnedLoginStore {
     return { reading: classifyCredential(resolution.harness, material, this.now()), checked };
   }
 
-  #facts(resolution: StoredCredentialResolution, material: CredentialMaterial): LocalCredentialFacts {
-    return localCredentialFacts(
-      resolution.harness,
-      material,
-      material.outcome === 'found' ? credentialFingerprint(material.blob) : undefined,
-    );
+  /**
+   * Where an owned login's sign-in file is, RELATIVE to the `credentials` root: the one path a housekeeping job names
+   * (the worker is granted that root and resolves it there). A store that is not an owned one is refused, as a read is.
+   */
+  signInFile(resolution: StoredCredentialResolution): string {
+    return relative(this.#base, this.#file(resolution));
   }
 
   async local(resolution: StoredCredentialResolution): Promise<LocalCredentialFacts> {
-    return this.#facts(resolution, await this.#material(resolution, []));
+    return factsOfMaterial(resolution.harness, await this.#material(resolution, []));
   }
 
   /** Today's CredentialEmailReader: Codex's claims, or Claude's account file, kept only while its stamp holds. */
@@ -219,6 +203,21 @@ export class OwnedLoginStore {
     }
     if (stamp !== undefined) this.#emails.set(path, { stamp, email });
     return email;
+  }
+
+  /**
+   * The organisation type a Claude login's account file records (`oauthAccount.organizationType`): the ONE field read besides
+   * the email, and nothing else of the file (it sits beside tokens in some layouts, so no other key is ever looked at).
+   * Codex has none. Not kept: it is read once per publish.
+   */
+  async organizationType(source: CredentialEmailSource): Promise<string | undefined> {
+    if (source.harness === 'codex') return undefined;
+    try {
+      const root = asRecord(JSON.parse(await this.root.readText(this.#path(source.accountFile))) as unknown);
+      return nonEmpty(asRecord(root?.oauthAccount)?.organizationType);
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -263,6 +262,11 @@ export class OwnedLoginStore {
   statusPorts(options: {
     readonly anthropic: AnthropicUsageProbe;
     readonly codex: CodexUsageProbe;
+    /**
+     * The free read made elsewhere (the housekeeping worker), so the token is never read on this thread. Absent, it is
+     * made here with the probes above.
+     */
+    readonly activeUsage?: (resolution: StoredCredentialResolution) => Promise<ActiveUsageRead>;
     readonly refresh: FleetTokenRefreshPort;
     readonly usageIntervalMs: number;
     /** The vault's secret NAMES (never a value): an environment login is Ready only when each name it holds is there. */
@@ -275,17 +279,9 @@ export class OwnedLoginStore {
         if (resolution.store !== 'ferretry' || 'unavailable' in resolution) return undefined;
         return await this.#readPassive(`${resolution.ownedDirectory}/usage.json`);
       },
-      // Today's MaterialCredentialReads.active: one read, facts for that exact material, a fixed failure on throw.
-      activeUsage: async resolution => {
-        const material = await this.#material(resolution, []);
-        const local = this.#facts(resolution, material);
-        try {
-          const probe = resolution.harness === 'claude' ? options.anthropic : options.codex;
-          return { result: await probe.probeMaterial(material), local };
-        } catch {
-          return { result: { usageBased: true, ok: false, credentialSignal: 'inconclusive' }, local };
-        }
-      },
+      activeUsage:
+        options.activeUsage ??
+        (async resolution => await activeUsageRead(resolution.harness, await this.#material(resolution, []), options)),
       refresh: {
         refresh: async (target, settled) => {
           // Check now may launch a harness only inside this owned root, never on a host home.

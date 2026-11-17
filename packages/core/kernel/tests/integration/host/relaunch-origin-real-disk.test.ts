@@ -40,8 +40,10 @@ import { bindDirectory } from '../../../host/bound-directory.ts';
  * Fixture folders only.
  */
 const ferretsHalf = daemonImplementations.find(implementation => implementation.manifest.id === 'ferrets');
+const mailboxHalf = daemonImplementations.find(implementation => implementation.manifest.id === 'mailbox');
 const conversationHalf = daemonImplementations.find(implementation => implementation.manifest.id === 'conversation');
 if (ferretsHalf?.build === undefined) throw new Error('the generated registry has no ferrets half');
+if (mailboxHalf === undefined) throw new Error('the generated registry has no mailbox half');
 if (conversationHalf === undefined) throw new Error('the generated registry has no conversation half');
 const buildFerrets = ferretsHalf.build;
 
@@ -105,6 +107,7 @@ async function swappedHelper(stopped: boolean, stopLead = false) {
     everyDirectory: true,
     plugins: [
       ferrets as never,
+      mailboxHalf as never,
       conversationHalf as never,
       // The consumers whose port is asked for: the Warden's and the Conversation's own.
       implementDaemon(
@@ -258,7 +261,9 @@ test('an agent’s send that revives a stopped ferret keeps the agent’s origin
     const before = runner.starts;
     const answer = await h.request('POST', `/v1/ferrets/${childId}/send`, {
       headers: { ...asAgent(leadId), 'x-fy-request-id': 'fixture-send-revive' },
-      body: { message: 'fixture message' },
+      // A blocker goes at once: the mailbox holds a ferret's plain `action` for a minute to batch it, and the revive (and
+      // its refusal) would come with the hold's end.
+      body: { message: 'fixture message', label: 'blocker' },
     });
     expect(answer.status).toBeGreaterThanOrEqual(400);
     expect(runner.starts).toBe(before);

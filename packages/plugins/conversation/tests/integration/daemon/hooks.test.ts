@@ -1,11 +1,13 @@
+import { FakeMailbox } from '@ferretry/core-mailbox/contract/testing';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import { describe, expect, test } from 'bun:test';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import daemon from '../../../daemon/index.ts';
 import { StateDraftRepository } from '../../../daemon/drafts/adapters/index.ts';
 import { KeyedSerialExecutor } from '../../../daemon/seams/keyed-serial-executor.ts';
-import type { HarnessGate } from '../../../daemon/harness-seam.ts';
-import { buildConversationA } from '../../../daemon/host.ts';
+import type { HarnessGate } from '@ferretry/core-mailbox/contract';
+import { buildConversationA } from '../../support/conversation-half.ts';
 import { TurnBoundaries } from '../../../daemon/turns/lib/index.ts';
 import { AskIdSchema } from '@ferretry/core-asks/contract';
 import { ferretId } from '@ferretry/core-ferrets/contract/testing';
@@ -45,7 +47,7 @@ describe('message.before-send', () => {
   test('runs on the text of every send before the terminal is asked to type it', async () => {
     const { seen, implementation } = recording({ rewrite: text => `${text}!` });
     const host = await testHost({
-      plugins: [implementation],
+      plugins: [mailboxDaemon, implementation],
       fakes: {
         ferrets: {
           get: async () => summary('idle'),
@@ -64,7 +66,7 @@ describe('message.before-send', () => {
   test('a taker that refuses stops the send with its own sentence', async () => {
     const { implementation } = recording({ refuse: 'too long for the harness' });
     const host = await testHost({
-      plugins: [implementation],
+      plugins: [mailboxDaemon, implementation],
       fakes: {
         ferrets: {
           get: async () => summary('idle'),
@@ -85,7 +87,7 @@ describe('turn.ended', () => {
   test('is observed once when a working ferret goes idle, named by when its round began', async () => {
     const { seen, implementation, built } = recording();
     const host = await testHost({
-      plugins: [implementation],
+      plugins: [mailboxDaemon, implementation],
       fakes: {
         ferrets: {
           get: async () => summary('working'),
@@ -142,6 +144,7 @@ describe('an answered ask', () => {
   const build = (kernel: never, asks: { get(id: string): Promise<unknown> }) =>
     buildConversationA({
       kernel,
+      mailbox: new FakeMailbox(),
       ferrets: {
         get: async () => summary('idle'),
         list: async () => [],

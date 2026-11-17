@@ -7,6 +7,7 @@ import {
   NO_AGENT_CONTROL,
   type FerretId,
   type FerretRecord,
+  LAUNCH_SWITCH_VARIABLES,
 } from '../../../../contract/index.ts';
 import { ok, err } from '@ferretry/std';
 import {
@@ -26,6 +27,7 @@ import {
   modeSwitchDefaults,
   recordedSwitches,
   sessionModeSwitch,
+  subFerretSwitch,
   switchesOfRecord,
 } from '../../../../daemon/lib/agent-control/launch-environment.ts';
 import { instructionsAnswer } from '../../../../daemon/lib/agent-control/instructions.ts';
@@ -160,14 +162,15 @@ function launching(
   state: ReturnType<typeof persisted>,
   parts: Record<string, string>,
   mode?: 'auto' | 'interactive',
-  options: { readonly fresh?: boolean } = {},
+  options: { readonly fresh?: boolean; readonly role?: FerretRecord['role']; readonly parent?: FerretId } = {},
 ) {
   const id = ferretId('wren');
   const stopped: FerretRecord = {
     format: 1,
     id,
     name: 'wren',
-    role: 'lead',
+    role: options.role ?? 'lead',
+    ...(options.parent === undefined ? {} : { parent: options.parent }),
     ...(mode === undefined ? {} : { mode }),
     harness: 'claude-code',
     runner: 'tmux',
@@ -233,7 +236,7 @@ describe('the launch environment instructions reads is PERSISTED, through one re
     const state = persisted();
     const f = launching(state, { ...TOLD, SOME_SECRET_LOOKING_NAME: 'x' }, 'interactive');
     await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
-    expect(state.held.get(f.id)).toEqual({ ...TOLD, FY_SESSION_MODE: 'interactive' });
+    expect(state.held.get(f.id)).toEqual({ ...TOLD, FY_SESSION_MODE: 'interactive', FY_SUB_FERRET: '0' });
     expect(JSON.stringify([...state.held.values()])).not.toContain('FY_SESSION_TOKEN');
     expect(state.record.writes).toEqual([f.id]);
   });
@@ -268,21 +271,71 @@ describe('the launch environment instructions reads is PERSISTED, through one re
     const state = persisted();
     const interactive = launching(state, {}, 'interactive');
     await interactive.service.resume(interactive.id, undefined, { origin: PERSON_ORIGIN });
-    expect(state.held.get(interactive.id)).toEqual({ FY_HYPERMEDIA: '1', FY_SESSION_MODE: 'interactive' });
+    expect(state.held.get(interactive.id)).toEqual({
+      FY_HYPERMEDIA: '1',
+      FY_SESSION_MODE: 'interactive',
+      FY_SUB_FERRET: '0',
+    });
     const answer = (await instructionsAnswer(interactive.id, id => interactive.store.read(id), 'fy')).text;
     expect(answer).toContain('✓ Hypermedia: on');
 
     const autoState = persisted();
     const auto = launching(autoState, {}, 'auto');
     await auto.service.resume(auto.id, undefined, { origin: PERSON_ORIGIN });
-    expect(autoState.held.get(auto.id)).toEqual({ FY_HYPERMEDIA: '0', FY_SESSION_MODE: 'auto' });
+    expect(autoState.held.get(auto.id)).toEqual({ FY_HYPERMEDIA: '0', FY_SESSION_MODE: 'auto', FY_SUB_FERRET: '0' });
   });
 
   test('c58-18 an owner’s Hypermedia switch (a launch part) wins over the mode default', async () => {
     const state = persisted();
     const f = launching(state, { FY_HYPERMEDIA: '0' }, 'interactive');
     await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
-    expect(state.held.get(f.id)).toEqual({ FY_HYPERMEDIA: '0', FY_SESSION_MODE: 'interactive' });
+    expect(state.held.get(f.id)).toEqual({ FY_HYPERMEDIA: '0', FY_SESSION_MODE: 'interactive', FY_SUB_FERRET: '0' });
+  });
+
+  test('c58-o16b a helper is launched with FY_SUB_FERRET=1 and a lead with 0, in the pane and in the record', async () => {
+    const leadState = persisted();
+    const lead = launching(leadState, {}, 'auto');
+    await lead.service.resume(lead.id, undefined, { origin: PERSON_ORIGIN });
+    expect(lead.handed.at(-1)?.FY_SUB_FERRET).toBe('0');
+    expect(leadState.held.get(lead.id)).toMatchObject({ FY_SUB_FERRET: '0' });
+
+    const helperState = persisted();
+    const helper = launching(helperState, {}, 'auto', { role: 'helper', parent: ferretId('lead') });
+    await helper.service.resume(helper.id, undefined, { origin: PERSON_ORIGIN });
+    expect(helper.handed.at(-1)?.FY_SUB_FERRET).toBe('1');
+    expect(helperState.held.get(helper.id)).toMatchObject({ FY_SUB_FERRET: '1' });
+  });
+
+  test('c58-o16b the rule is the role: a helper with no parent (a Pack clean-up builder) is still a sub-ferret', async () => {
+    const state = persisted();
+    const helper = launching(state, {}, 'auto', { role: 'helper' });
+    await helper.service.resume(helper.id, undefined, { origin: PERSON_ORIGIN });
+    expect(helper.handed.at(-1)?.FY_SUB_FERRET).toBe('1');
+  });
+
+  test('c58-o16b no launch part can switch the sub-ferret limit off (or on): it is the record’s own fact', async () => {
+    const helper = launching(persisted(), { FY_SUB_FERRET: '0' }, 'auto', { role: 'helper', parent: ferretId('lead') });
+    await helper.service.resume(helper.id, undefined, { origin: PERSON_ORIGIN });
+    expect(helper.handed.at(-1)?.FY_SUB_FERRET).toBe('1');
+    const lead = launching(persisted(), { FY_SUB_FERRET: '1' }, 'auto');
+    await lead.service.resume(lead.id, undefined, { origin: PERSON_ORIGIN });
+    expect(lead.handed.at(-1)?.FY_SUB_FERRET).toBe('0');
+  });
+
+  test('c58-o16c a ferret with a parent is a sub-ferret even when its role says lead: the switch follows the same rule as the limits', async () => {
+    expect(subFerretSwitch('lead', ferretId('lead'))).toEqual({ FY_SUB_FERRET: '1' });
+    expect(subFerretSwitch('lead', undefined)).toEqual({ FY_SUB_FERRET: '0' });
+    expect(subFerretSwitch('helper', undefined)).toEqual({ FY_SUB_FERRET: '1' });
+    const posted = launching(persisted(), {}, 'auto', { role: 'lead', parent: ferretId('lead') });
+    await posted.service.resume(posted.id, undefined, { origin: PERSON_ORIGIN });
+    expect(posted.handed.at(-1)?.FY_SUB_FERRET).toBe('1');
+  });
+
+  test('c58-o16b the switch is one of the launch variables a launch records, and it follows role and parent', () => {
+    expect([...LAUNCH_SWITCH_VARIABLES]).toContain('FY_SUB_FERRET');
+    expect(recordedSwitches({ FY_SUB_FERRET: '1', FY_SESSION_TOKEN: 'never' })).toEqual({ FY_SUB_FERRET: '1' });
+    expect(subFerretSwitch('helper')).toEqual({ FY_SUB_FERRET: '1' });
+    expect(subFerretSwitch('lead')).toEqual({ FY_SUB_FERRET: '0' });
   });
 
   test('T-0036 a launch that is refused records nothing, and a store that fails never fails the launch', async () => {

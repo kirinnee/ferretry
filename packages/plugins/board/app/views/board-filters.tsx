@@ -62,8 +62,8 @@ export function InternalToggle({ filters, onChange }: Pick<BoardFiltersProps, 'f
       data-forced={forced ? '' : undefined}
       title={
         forced
-          ? 'Private cards show while a ferret or an activity is chosen'
-          : 'Private cards: the ferrets’ own bookkeeping, sub-cards and helper cards'
+          ? 'Private tasks show while a ferret or an activity is chosen'
+          : 'Private tasks: the ferrets’ own bookkeeping, sub-tasks and helper tasks'
       }
     >
       <input

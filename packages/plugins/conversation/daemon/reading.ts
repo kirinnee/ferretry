@@ -1,5 +1,5 @@
 import type { AsksApi } from '@ferretry/core-asks/contract';
-import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
+import type { FerretId, FerretsApi, HarnessKey } from '@ferretry/core-ferrets/contract';
 import { ApiError, type KernelPorts, type RouteHandler } from '@ferretry/kernel/contract';
 import type { ToolHandler } from '@ferretry/kernel/manifest';
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
@@ -7,7 +7,8 @@ import type { ConversationApi, ConversationRefusal, RenderBody, RenderMeta } fro
 import { buildAttachments } from './attachments/index.ts';
 import { AttachmentError } from './attachments/lib/index.ts';
 import { buildLinks, keepInSyncFrom } from './links/index.ts';
-import type { LinkHarness, LinkKeeper } from './links/lib/service.ts';
+import type { FerretConversationNames, IndexSource } from './links/index.ts';
+import type { LinkKeeper } from './links/lib/service.ts';
 import type { TranscriptOpener } from './reader/adapters/file-reads.ts';
 import type { HarnessTranscripts } from './reader/adapters/entries-source.ts';
 import { registerReader } from './reader/index.ts';
@@ -28,14 +29,12 @@ import type { TranscriptEvent } from './seams/transcript-types.ts';
  * bytes.
  */
 const HARNESS_PENDING =
-  'Not in 5.0 yet: browsing and keeping your Claude Code and Codex conversations. It waits on Ferrets listing what a harness holds.';
-
-/** THE HARNESS SEAM that is still open: Ferrets offers no list of a harness's conversations yet, so these refuse. */
-const harnessPending = (): never => {
-  throw new ApiError(503, HARNESS_PENDING, 'conversation_harness_unavailable');
-};
+  'Not in 5.0 yet: keeping your Claude Code and Codex conversations as ferrets. It waits on Ferrets starting a ferret from a conversation a harness holds.';
 
 const KEEP_PENDING = HARNESS_PENDING;
+
+/** How long after start the conversation index starts reading: after the daemon is answering, before anyone asks. */
+const INDEX_WARM_DELAY_MS = 2_000;
 
 /**
  * Structured data with every string masked — the NAMES of its properties too. A secret used as an object key is serialised
@@ -101,8 +100,9 @@ type ReadingApi = Pick<
 
 export interface ReadingHalf {
   /**
-   * The parsed tail of a CODEX ferret's transcript, for the question watch (its `request_user_input` is in the transcript
-   * while the form is open): `'unreadable'` when it cannot be read, `undefined` for a ferret that is not a Codex one.
+   * The parsed tail of a Codex or Claude Code ferret's transcript, for the question watch (Codex's `request_user_input` is
+   * in the transcript while the form is open; Claude's call lands with its result, so its tail is what says a form on the
+   * pane is over): `'unreadable'` when it cannot be read, `undefined` for any other harness.
    */
   questionEvents(ferret: string, limit?: number): Promise<readonly TranscriptEvent[] | 'unreadable' | undefined>;
   readonly routes: Readonly<Record<string, RouteHandler>>;
@@ -140,8 +140,6 @@ export function buildReading(deps: {
   readonly workSources?: () => readonly WorkSource[];
 }): ReadingHalf {
   const { kernel, ferrets, asks } = deps;
-  const history = kernel.roots.root('harness-history');
-  const imports = kernel.roots.root('imports');
 
   /**
    * The ferret's own harness transcript as RAW bytes (G162): `undefined` while no transcript is proved, `unsupported`
@@ -188,18 +186,52 @@ export function buildReading(deps: {
     now: () => kernel.clock.nowMs(),
   });
 
-  const harnesses = (): readonly LinkHarness[] => harnessPending();
+  // The transcripts the index reads: every tree each harness plugin hands over through Ferrets (the owner's own home, each
+  // ferret's home, later the pool), read-only. A harness that is off or fails offers none, and its rows stay as they were.
+  const sources = async (): Promise<readonly IndexSource[]> =>
+    ((await ferrets.historySources?.()) ?? []).flatMap(group => {
+      const parser = harnessFamily(group.harness);
+      return parser === undefined
+        ? []
+        : group.sources.map(source => ({
+            harness: group.harness,
+            parser,
+            kind: source.kind,
+            label: source.label,
+            files: source.files,
+          }));
+    });
+  // Which ferret runs each harness conversation, and its name now (Ferrets' registry, not its files): a rename shows on the
+  // next listing.
+  const ferretNames = async (): Promise<FerretConversationNames> =>
+    new Map(
+      (await ferrets.list()).flatMap(summary =>
+        summary.harnessConversation === undefined
+          ? []
+          : [
+              [
+                `${summary.harness}:${summary.harnessConversation}`,
+                { ferret: summary.id, name: summary.name },
+              ] as const,
+            ],
+      ),
+    );
   const keeper: LinkKeeper = {
     keep: async () => ({ ok: false, error: { code: 'unavailable', reason: KEEP_PENDING } }),
   };
   const links = buildLinks({
     state: kernel.state,
-    history,
-    imports,
-    harnesses,
+    sources,
+    ferretNames,
+    importer: async (harness, input) =>
+      (await ferrets.importConversation?.(harness as HarnessKey, input)) ??
+      err({ reason: 'No harness is offering to keep a copy of that conversation.' }),
     keeper,
     now: () => kernel.clock.now(),
     clockMs: () => kernel.clock.nowMs(),
+    sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
+    yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
+    warn: message => kernel.log.warn(message),
     kept: deps.onKept,
     // The version of conversation.yaml in effect, asked on every listing: an edit is live for the next one.
     keepInSync: keepInSyncFrom(kernel.config),
@@ -221,6 +253,8 @@ export function buildReading(deps: {
   });
   // Today's warm-up: the index is built a little after start, so the first search rarely waits for it.
   const cancelWarm = kernel.clock.after(milliseconds(WORK_SEARCH_WARM_DELAY_MS), () => search.service.warm());
+  // The conversation index is read a little after start, in the background, so the first link listing finds most of it done.
+  const cancelIndexWarm = kernel.clock.after(milliseconds(INDEX_WARM_DELAY_MS), () => void links.index.refresh());
 
   /** The ferret must exist, as the routes' `known` requires; the same 404 for every port member. */
   const knownFerret = async (ferret: FerretId): Promise<void> => {
@@ -305,7 +339,7 @@ export function buildReading(deps: {
   const questionEvents: ReadingHalf['questionEvents'] = async (ferret, limit = QUESTION_TAIL_EVENTS) => {
     const id = tryParseSessionId(ferret);
     const summary = id === undefined ? undefined : await ferrets.get(id);
-    if (summary === undefined || harnessFamily(summary.harness) !== 'codex') return undefined;
+    if (summary === undefined || harnessFamily(summary.harness) === undefined) return undefined;
     const read = await reader.tail(ferret, limit).catch(() => undefined);
     return read?.kind === 'read' ? read.events : 'unreadable';
   };
@@ -332,6 +366,7 @@ export function buildReading(deps: {
     },
     stop: () => {
       cancelWarm();
+      cancelIndexWarm();
       // Every transcript handle the reader opened is closed with the daemon (a harness would close an idle one in a
       // minute; the one consumer does not wait for that).
       void reader.close();

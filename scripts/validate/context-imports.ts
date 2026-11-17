@@ -31,11 +31,19 @@ export function refusal(edge: ImportEdge): string | undefined {
 
   // Rule 2: a contract's imports.
   if (from === 'contract' || from === 'kernel-contract') {
+    // Its own folders' barrels (`contract/generated/<folder>.ts`, written by the generator from `contract/<folder>/`).
+    if (from === 'contract' && to === 'generated' && same && /^\.\/generated\/[a-z-]+\.ts$/.test(edge.specifier))
+      return undefined;
     if (toStd || to === 'kernel-contract' || to === 'contract') return undefined;
     return `a contract imports only zod, @ferretry/std, @ferretry/kernel/contract and contracts, not ${name}`;
   }
   // Rule 4: a manifest's imports.
   if (from === 'manifest' || from === 'kernel-plugin') {
+    // Its own fragments' list (`manifest/generated/actions.ts`, written by the generator from `manifest/actions/`).
+    if (from === 'manifest' && to === 'generated' && same && edge.specifier === './manifest/generated/actions.ts')
+      return undefined;
+    // Its own fragments and kit (`manifest/actions/*.ts`, `manifest/kit.ts`): the same manifest, split across files.
+    if (from === 'manifest' && to === 'manifest' && same) return undefined;
     if (to === 'kernel-manifest' || to === 'kernel-contract' || to === 'contract' || toStd) return undefined;
     return `a manifest imports only @ferretry/kernel/manifest, @ferretry/kernel/contract and contracts, not ${name}`;
   }
@@ -63,6 +71,11 @@ export function refusal(edge: ImportEdge): string | undefined {
     // A half: its own area, its manifest and its contract. The Kernel's app half has the kernel's own: its manifest
     // (`plugin.ts`), the manifest SDK and the contract, the three every other half reaches by package name.
     if (to === from || to === 'manifest' || to === 'contract') return undefined;
+    // The half's own feature list (`daemon/generated/features.ts`, written by the generator from `daemon/features/`).
+    if (from === 'daemon' && to === 'generated' && /^\.\/generated\/features\.ts$/.test(edge.specifier))
+      return undefined;
+    // The half's own verb list (`cli/generated/verbs.ts`, written by the generator from `cli/verbs/`).
+    if (from === 'cli' && to === 'generated' && /^\.\/generated\/verbs\.ts$/.test(edge.specifier)) return undefined;
     if (from === 'app' && (to === 'kernel-plugin' || to === 'kernel-manifest' || to === 'kernel-contract'))
       return undefined;
     return `the ${from} half imports its own ${to} files; halves share only the manifest and the contract`;
@@ -89,6 +102,16 @@ export function refusal(edge: ImportEdge): string | undefined {
     edge.from.endsWith('/vite.config.ts') &&
     to === 'app' &&
     /\/app\/vite-[a-z][a-z-]*\.ts$/u.test(edge.specifier)
+  )
+    return undefined;
+
+  // ONE EXEMPTION: the send path is one path split by ownership (Conversation keeps the files, the Mailbox the rules), and
+  // its integration proof drives the real halves together. Only Conversation's tests may reach the Mailbox's daemon half.
+  if (
+    from === 'tests' &&
+    edge.fromPkg.name === '@ferretry/plugin-conversation' &&
+    toPkg.name === '@ferretry/core-mailbox' &&
+    to === 'daemon'
   )
     return undefined;
 

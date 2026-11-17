@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import type { DaemonId } from '../../../../app/shell.ts';
-import { registerComposerQuoteTarget } from '../../../../app/shell.ts';
+import { registerComposerFor } from '../../../support/app/composer-quote.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
@@ -73,7 +73,7 @@ const openMenu = async (target: HTMLElement): Promise<void> => {
 describe('quoting from the open agenda item', () => {
   test('selected premise text is quoted into the composer of the item’s own chat', async () => {
     let draft = '';
-    const dispose = registerComposerQuoteTarget({
+    const dispose = registerComposerFor({
       ...scope,
       draft: () => draft,
       replaceDraft: next => {

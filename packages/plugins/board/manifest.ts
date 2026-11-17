@@ -11,7 +11,7 @@ import {
   tool,
   verb,
 } from '@ferretry/kernel/manifest';
-import { AgendaContext, AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
+import { AgendaContext, AskAnswered, AsksPort, askReference, AskSources } from '@ferretry/core-asks/contract';
 import { ArchiveKeeps, FerretStarted, FerretsPort, SitrepLines, StartDecide } from '@ferretry/core-ferrets/contract';
 import { ConversationPort, ReferenceCatalog, SearchSources, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import {
@@ -26,12 +26,14 @@ import {
   CARD_STARTED_AUDIT,
   CardAskRefSchema,
   CardProgressToolInputSchema,
+  TaskProgressToolInputSchema,
   CardMoved,
   CardMoving,
   CardSchema,
   CountersFileSchema,
   cap,
   FocusFileSchema,
+  formerPath,
   GithubFileSchema,
   LANES_CHANGED_AUDIT,
   SweepFileSchema,
@@ -66,10 +68,14 @@ const BOARD_CONFIG = defineConfig({
   loosens: neverLoosens,
 }) as ConfigDef;
 
+/** A route about one task, and the same route under its former path: one descriptor, so the guard, grant and audit are one. */
+const taskRoute = <const Key extends string>(key: Key, descriptor: Parameters<typeof route>[1]) =>
+  [route(key, descriptor), route(formerPath(key), descriptor)] as const;
+
 const fleetUse = cap('fleet', 'use');
 const fleetConfigure = cap('fleet', 'configure');
-const read = { skip: 'a read of cards and lanes' } as const;
-const cardText = { none: 'cards are authored text; no pane, page or vault text' } as const;
+const read = { skip: 'a read of tasks and lanes' } as const;
+const cardText = { none: 'tasks are authored text; no pane, page or vault text' } as const;
 
 /**
  * Board (§2.3): cards and lanes for the work you ask for, with each card's progress and its PRs.
@@ -93,12 +99,12 @@ export default definePlugin({
   core: false,
   kinds: ['view', 'command', 'instruction'],
   words: [
-    { word: 'card', means: 'one piece of work you asked for', insteadOf: ['task', 'ticket'] },
-    { word: 'lane', means: 'a column a card moves through', insteadOf: ['phase', 'column'] },
+    { word: 'task', means: 'one piece of work you asked for', insteadOf: ['card', 'ticket'] },
+    { word: 'lane', means: 'a column a task moves through', insteadOf: ['phase', 'column'] },
     {
       word: 'progress',
-      means: 'one card’s now, done and next, written by its ferret',
-      insteadOf: ['status', 'sitrep (for a card)'],
+      means: 'one task’s now, done and next, written by its ferret',
+      insteadOf: ['status', 'sitrep (for a task)'],
     },
   ],
 
@@ -135,7 +141,7 @@ export default definePlugin({
         audit: read,
         guard: cardText,
       }),
-      route('GET /v1/board/cards', {
+      ...taskRoute('GET /v1/board/tasks', {
         minimum: 'operator',
         caller: 'any',
         capability: fleetUse,
@@ -143,7 +149,7 @@ export default definePlugin({
         audit: read,
         guard: cardText,
       }),
-      route('POST /v1/board/cards', {
+      ...taskRoute('POST /v1/board/tasks', {
         minimum: 'operator',
         caller: 'any',
         capability: fleetUse,
@@ -151,7 +157,7 @@ export default definePlugin({
         audit: { record: CARD_CREATED_AUDIT },
         guard: cardText,
       }),
-      route('GET /v1/board/cards/:cardId', {
+      ...taskRoute('GET /v1/board/tasks/:taskId', {
         minimum: 'operator',
         caller: 'any',
         capability: fleetUse,
@@ -159,7 +165,7 @@ export default definePlugin({
         audit: read,
         guard: cardText,
       }),
-      route('POST /v1/board/cards/:cardId', {
+      ...taskRoute('POST /v1/board/tasks/:taskId', {
         minimum: 'operator',
         caller: 'any',
         capability: fleetUse,
@@ -167,10 +173,11 @@ export default definePlugin({
         audit: { record: CARD_ACTED_AUDIT },
         guard: cardText,
       }),
-      route('POST /v1/board/cards/:cardId/start', {
+      ...taskRoute('POST /v1/board/tasks/:taskId/start', {
         minimum: 'operator',
         caller: 'person',
-        capability: fleetUse,
+        // c58-sec3 r1: starting a card starts a ferret (the card text is its prompt), so it asks what `POST /v1/ferrets` asks.
+        capability: fleetConfigure,
         noStore: true,
         audit: { record: CARD_STARTED_AUDIT },
         guard: cardText,
@@ -223,14 +230,24 @@ export default definePlugin({
       }),
     ],
     agentTools: [
-      // NEW name (§3.3): writes one card's progress; the same act as `POST /v1/board/cards/:cardId` with action `edit`.
+      // Writes one task's progress; the same act as `POST /v1/board/tasks/:taskId` with action `edit`.
+      tool('task_progress', {
+        minimum: 'authenticated',
+        caller: 'any',
+        capability: fleetUse,
+        audit: { record: CARD_ACTED_AUDIT },
+        guard: cardText,
+        summary: 'Rewrite one task’s progress (now, doneSoFar, next).',
+        input: TaskProgressToolInputSchema,
+      }),
+      // The old name of task_progress, on the same handler: an old instruction still works.
       tool('card_progress', {
         minimum: 'authenticated',
         caller: 'any',
         capability: fleetUse,
         audit: { record: CARD_ACTED_AUDIT },
         guard: cardText,
-        summary: 'Rewrite one card’s progress (now, doneSoFar, next).',
+        summary: 'old name of task_progress',
         input: CardProgressToolInputSchema,
       }),
     ],
@@ -243,19 +260,19 @@ export default definePlugin({
             flag: '--project <name|all>',
             help: "a project's name or id, or `all`; default: the board of the calling session",
           },
-          { flag: '--ferret <name>', help: 'only cards this ferret (callsign or session id) owns or is assigned' },
-          { flag: '--mine', help: 'only cards the calling session owns or is assigned' },
+          { flag: '--ferret <name>', help: 'only tasks this ferret (callsign or session id) owns or is assigned' },
+          { flag: '--mine', help: 'only tasks the calling session owns or is assigned' },
           { flag: '--kind <kind>', help: 'only bug | feature | infra | chore' },
-          { flag: '--pr <state>', help: 'only cards whose PR is none | draft | open | ci_red | merged | released' },
+          { flag: '--pr <state>', help: 'only tasks whose PR is none | draft | open | ci_red | merged | released' },
           { flag: '--activity <activity>', help: 'only active | idle | stale | orphaned | blocked' },
           { flag: '--state <state>', help: 'open | closed | dropped | all (default open)' },
-          { flag: '--closed', help: 'show the closed cards, which are hidden by default' },
+          { flag: '--closed', help: 'show the closed tasks, which are hidden by default' },
           {
             flag: '--private',
-            help: "show the private cards (the ferrets' own bookkeeping) instead of the public ones",
+            help: "show the private tasks (the ferrets' own bookkeeping) instead of the public ones",
           },
-          { flag: '--all', help: 'show public and private cards' },
-          { flag: '--query <text>', help: 'only cards whose id, title, summary or ask contain this text' },
+          { flag: '--all', help: 'show public and private tasks' },
+          { flag: '--query <text>', help: 'only tasks whose id, title, summary or ask contain this text' },
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
           { flag: '--json', help: 'print the daemon response as JSON' },
           { flag: '--md', help: 'render the board as markdown' },
@@ -314,7 +331,7 @@ export default definePlugin({
           { flag: '--json', help: 'print the daemon response as JSON' },
           { flag: '--rename <old=new>', help: 'give a lane another name, by lane id (repeatable) (default: [])' },
           { flag: '--remove <lane>', help: 'remove a lane by id (repeatable) (default: [])' },
-          { flag: '--into <lane>', help: 'the lane that receives the cards of every removed lane' },
+          { flag: '--into <lane>', help: 'the lane that receives the tasks of every removed lane' },
         ],
       }),
       verb('board workflow show', {
@@ -338,12 +355,12 @@ export default definePlugin({
           },
           {
             flag: '--auto <triggers>',
-            help: 'make the lane automatic: the triggers that move a card in, comma separated, or "none" when the ferret moves it',
+            help: 'make the lane automatic: the triggers that move a task in, comma separated, or "none" when the ferret moves it',
           },
         ],
       }),
-      verb('card new', {
-        summary: 'make a card',
+      verb('task new', {
+        summary: 'make a task',
         args: [
           { name: 'title', help: 'the title, if you would rather not repeat --title', optional: true, variadic: true },
         ],
@@ -355,7 +372,7 @@ export default definePlugin({
             flag: '-t, --title <title>',
             help: 'Keep the task title to 5 words or fewer; move scope and implementation detail into the description.',
           },
-          { flag: '--summary <line>', help: 'one line for the card face' },
+          { flag: '--summary <line>', help: 'one line for the task face' },
           { flag: '--ask <text>', help: "the human's words, verbatim" },
           { flag: '--ask-source <link>', help: 'where those words came from' },
           {
@@ -378,44 +395,44 @@ export default definePlugin({
           { flag: '--depends-on <id>', help: 'a task this one waits on (repeatable) (default: [])' },
           {
             flag: '--parent <id>',
-            help: "the task this one is part of; a sub-card is private, so never for the owner's asks",
+            help: "the task this one is part of; a sub-task is private, so never for the owner's asks",
           },
           {
             flag: '--approval <id>',
-            help: 'where the board is off: your answered "Track this on the board?" item (!A12) the owner said Yes to',
+            help: `where the board is off: your answered "Track this on the board?" item (${askReference('A12')}) the owner said Yes to`,
           },
           {
             flag: '--thread <id>',
-            help: 'the open thread on your agenda (!A12) this card carries out; the owner is already asked there, so the card is your own errand',
+            help: `the open thread on your agenda (${askReference('A12')}) this task carries out; the owner is already asked there, so the task is your own errand`,
           },
           { flag: '--assignee <who>', help: 'the ferret doing it: a callsign or a session id' },
           { flag: '--project <name>', help: 'the board to create it on; default: the board of the calling session' },
           { flag: '--lane <lane>', help: "the lane to start in; default: the workflow's first" },
           {
             flag: '--file <path>',
-            help: "a file or folder the work will touch (repeatable); overlapping an open card's claim queues this card's merge behind it (default: [])",
+            help: "a file or folder the work will touch (repeatable); overlapping an open task's claim queues this task's merge behind it (default: [])",
           },
           { flag: '--pr <url>', help: 'a pull request link (repeatable) (default: [])' },
           { flag: '--branch <branch>', help: 'the branch it is built on' },
           { flag: '--doc <path>', help: 'a document link (repeatable) (default: [])' },
-          { flag: '--related <id>', help: 'a card this belongs to: add it there as a note and create nothing' },
-          { flag: '--new', help: 'create even if a card on the same thing exists' },
+          { flag: '--related <id>', help: 'a task this belongs to: add it there as a note and create nothing' },
+          { flag: '--new', help: 'create even if a task on the same thing exists' },
           {
             flag: '--private',
-            help: "a ferret's own bookkeeping: off the default board (default for a card an agent asked for)",
+            help: "a ferret's own bookkeeping: off the default board (default for a task an agent asked for)",
           },
           {
             flag: '--public',
-            help: 'a card the owner sees on the default board (default for a card a person asked for)',
+            help: 'a task the owner sees on the default board (default for a task a person asked for)',
           },
           {
             flag: '--broad <why>',
-            help: 'create a card that gathers several outcomes, saying why it must be one card',
+            help: 'create a task that gathers several outcomes, saying why it must be one task',
           },
         ],
       }),
-      verb('card show', {
-        summary: 'one card; --yaml for the whole of it',
+      verb('task show', {
+        summary: 'one task; --yaml for the whole of it',
         args: [{ name: 'id', help: 'the task id: &F21 (or F21)' }],
         options: [
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
@@ -423,8 +440,8 @@ export default definePlugin({
           { flag: '--yaml', help: 'print the editable document `task patch` takes back, with its revision' },
         ],
       }),
-      verb('card move', {
-        summary: 'move a card to a lane, with a reason',
+      verb('task move', {
+        summary: 'move a task to a lane, with a reason',
         args: [
           { name: 'id', help: 'the task id: &F21 (or F21)' },
           { name: 'lane', help: "the lane's id or name (see `fy board lanes show`)" },
@@ -435,18 +452,23 @@ export default definePlugin({
           { flag: '--reason <why>', help: 'why it moved; required for a move back' },
         ],
       }),
-      verb('card progress', {
-        summary: 'write a card’s progress: now, done so far, next',
-        args: [{ name: 'id', help: 'the card, like &F21' }],
+      verb('task progress', {
+        summary: 'write a task’s progress: now, done so far, next',
+        args: [{ name: 'id', help: 'the task, like &F21' }],
         options: [
+          {
+            flag: '--file <path>',
+            help: 'read the progress from a YAML or JSON file (- reads standard input)',
+            hidden: true,
+          },
           { flag: '--now <text>', help: 'what is happening right now' },
           { flag: '--done <text>', help: 'what is done so far; repeat for more' },
           { flag: '--next <text>', help: 'what comes next; repeat for more' },
           { flag: '--json', help: 'print the answer as JSON' },
         ],
       }),
-      verb('card trigger', {
-        summary: 'report an outside event that moves a card',
+      verb('task trigger', {
+        summary: 'report an outside event that moves a task',
         args: [
           { name: 'id', help: 'the task id: &F21 (or F21)' },
           { name: 'event', help: 'the event: pr.review_approved | deploy.done' },
@@ -454,27 +476,27 @@ export default definePlugin({
         options: [
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
           { flag: '--json', help: 'print the daemon response as JSON' },
-          { flag: '--reason <why>', help: 'what happened, kept in the card history' },
+          { flag: '--reason <why>', help: 'what happened, kept in the task history' },
         ],
       }),
-      verb('card focus', {
-        summary: 'make this ferret’s card the one it works on',
+      verb('task focus', {
+        summary: 'make this ferret’s task the one it works on',
         args: [{ name: 'id', help: 'the task id: &F21 (or F21)' }],
         options: [
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
           { flag: '--json', help: 'print the daemon response as JSON' },
         ],
       }),
-      verb('card skip', {
-        summary: 'say this ferret needs no card, with a reason',
+      verb('task skip', {
+        summary: 'say this ferret needs no task, with a reason',
         args: [{ name: 'why', help: 'why: chit-chat, or the owner said not to track it', variadic: true }],
         options: [
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
           { flag: '--json', help: 'print the daemon response as JSON' },
         ],
       }),
-      verb('card block', {
-        summary: 'block a card on something outside',
+      verb('task block', {
+        summary: 'block a task on something outside',
         args: [
           { name: 'id', help: 'the task id: &F21 (or F21)' },
           { name: 'why', help: 'what it is waiting on', variadic: true },
@@ -484,7 +506,7 @@ export default definePlugin({
           { flag: '--json', help: 'print the daemon response as JSON' },
         ],
       }),
-      verb('card unblock', {
+      verb('task unblock', {
         summary: 'clear a block',
         args: [{ name: 'id', help: 'the task id: &F21 (or F21)' }],
         options: [
@@ -493,8 +515,8 @@ export default definePlugin({
           { flag: '--reason <why>', help: 'what changed' },
         ],
       }),
-      verb('card depend', {
-        summary: 'a card waits on another until it ships or is released',
+      verb('task depend', {
+        summary: 'a task waits on another until it ships or is released',
         args: [
           { name: 'id', help: 'the task id: &F21 (or F21)' },
           { name: 'dependency', help: 'the task it waits on' },
@@ -506,7 +528,7 @@ export default definePlugin({
           { flag: '--override <why>', help: 'owner only: let it advance although the dependency is not done' },
         ],
       }),
-      verb('card undepend', {
+      verb('task undepend', {
         summary: 'remove a dependency',
         args: [
           { name: 'id', help: 'the task id: &F21 (or F21)' },
@@ -518,8 +540,8 @@ export default definePlugin({
           { flag: '--reason <why>', help: 'why the dependency goes away' },
         ],
       }),
-      verb('card drop', {
-        summary: 'drop a card, with a reason',
+      verb('task drop', {
+        summary: 'drop a task, with a reason',
         args: [{ name: 'id', help: 'the task id: &F21 (or F21)' }],
         options: [
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
@@ -527,8 +549,8 @@ export default definePlugin({
           { flag: '--reason <why>', help: 'why it is dropped; the history keeps this' },
         ],
       }),
-      verb('card reopen', {
-        summary: 'send a card back to a lane with the owner’s words',
+      verb('task reopen', {
+        summary: 'send a task back to a lane with the owner’s words',
         args: [{ name: 'id', help: 'the task id: &F21 (or F21)' }],
         options: [
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
@@ -539,8 +561,8 @@ export default definePlugin({
           { flag: '--reason <why>', help: 'why it is being reopened' },
         ],
       }),
-      verb('card clarify', {
-        summary: 'add a clarification to a card',
+      verb('task clarify', {
+        summary: 'add a clarification to a task',
         args: [
           { name: 'id', help: 'the task id: &F21 (or F21)' },
           { name: 'text', help: 'the clarification, verbatim', variadic: true },
@@ -551,7 +573,7 @@ export default definePlugin({
           { flag: '--source <link>', help: 'where it came from' },
         ],
       }),
-      verb('card link', {
+      verb('task link', {
         summary: 'link a PR, branch, commit or doc',
         args: [{ name: 'id', help: 'the task id: &F21 (or F21)' }],
         options: [
@@ -563,8 +585,8 @@ export default definePlugin({
           { flag: '--doc <path>', help: 'a document' },
         ],
       }),
-      verb('card assign', {
-        summary: 'give a card to a ferret',
+      verb('task assign', {
+        summary: 'give a task to a ferret',
         args: [
           { name: 'id', help: 'the task id: &F21 (or F21)' },
           { name: 'who', help: 'the ferret: a callsign or a session id', optional: true },
@@ -575,16 +597,16 @@ export default definePlugin({
           { flag: '--none', help: 'unassign instead' },
         ],
       }),
-      verb('card claim', {
-        summary: 'take a card for this ferret',
+      verb('task claim', {
+        summary: 'take a task for this ferret',
         args: [{ name: 'id', help: 'the task id: &F21 (or F21)' }],
         options: [
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
           { flag: '--json', help: 'print the daemon response as JSON' },
         ],
       }),
-      verb('card adopt', {
-        summary: 'take over a card whose ferret is gone',
+      verb('task adopt', {
+        summary: 'take over a task whose ferret is gone',
         args: [{ name: 'id', help: 'the task id: &F21 (or F21)' }],
         options: [
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
@@ -592,8 +614,8 @@ export default definePlugin({
           { flag: '--reason <why>', help: 'why you take it; kept in its history' },
         ],
       }),
-      verb('card note', {
-        summary: 'add a note to a card’s transcript',
+      verb('task note', {
+        summary: 'add a note to a task’s transcript',
         args: [
           { name: 'id', help: 'the task id: &F21 (or F21)' },
           { name: 'text', help: 'what to record', variadic: true },
@@ -603,8 +625,8 @@ export default definePlugin({
           { flag: '--json', help: 'print the daemon response as JSON' },
         ],
       }),
-      verb('card order', {
-        summary: 'place a card in its lane',
+      verb('task order', {
+        summary: 'place a task in its lane',
         args: [
           { name: 'id', help: 'the task id: &F21 (or F21)' },
           { name: 'rank', help: 'a whole number', optional: true },
@@ -615,19 +637,19 @@ export default definePlugin({
           { flag: '--none', help: 'clear the rank instead' },
         ],
       }),
-      verb('card reparent', {
-        summary: 'move a card under another card',
+      verb('task reparent', {
+        summary: 'move a task under another task',
         args: [{ name: 'id', help: 'the task id: &F21 (or F21)' }],
         options: [
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
           { flag: '--json', help: 'print the daemon response as JSON' },
-          { flag: '--parent <id>', help: 'the card it goes under: &F21 (or F21)' },
-          { flag: '--none', help: 'make it a top-level card instead' },
+          { flag: '--parent <id>', help: 'the task it goes under: &F21 (or F21)' },
+          { flag: '--none', help: 'make it a top-level task instead' },
           { flag: '--reason <why>', help: 'why it moves; kept in its history' },
         ],
       }),
-      verb('card file', {
-        summary: 'claim a file for a card',
+      verb('task file', {
+        summary: 'claim a file for a task',
         args: [
           { name: 'id', help: 'the task id: &F21 (or F21)' },
           { name: 'path', help: 'the file or folder being claimed, relative to the repository' },
@@ -639,12 +661,12 @@ export default definePlugin({
           { flag: '--reason <why>', help: 'optional context' },
         ],
       }),
-      verb('card merge-gate', {
+      verb('task merge-gate', {
         summary: 'what a PR waits on before it may merge',
         args: [{ name: 'pr-url', help: 'the pull request, https://github.com/<owner>/<repo>/pull/<n>' }],
       }),
-      verb('card edit', {
-        summary: 'edit a card’s text fields',
+      verb('task edit', {
+        summary: 'edit a task’s text fields',
         args: [{ name: 'id', help: 'the task id: &F21 (or F21)' }],
         options: [
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
@@ -653,7 +675,7 @@ export default definePlugin({
             flag: '--title <title>',
             help: 'Keep the task title to 5 words or fewer; move scope and implementation detail into the description.',
           },
-          { flag: '--summary <line>', help: 'one line for the card face' },
+          { flag: '--summary <line>', help: 'one line for the task face' },
           {
             flag: '--premise <point>',
             help: 'replace why this work exists; a plain line, no leading "- " (repeat for more points) (default: [])',
@@ -672,19 +694,19 @@ export default definePlugin({
           { flag: '--how-to-test-file <path>', help: 'read How to test from a file instead' },
           {
             flag: '--status-now <md>',
-            help: "the card's status, Now: what is happening this moment (markdown); replaces that part, the others stay",
+            help: "the task's status, Now: what is happening this moment (markdown); replaces that part, the others stay",
           },
           {
             flag: '--status-done <md>',
-            help: "the card's status, Done so far: what is implemented, one bullet each with its PR link (markdown); replaces that part",
+            help: "the task's status, Done so far: what is implemented, one bullet each with its PR link (markdown); replaces that part",
           },
           {
             flag: '--status-next <md>',
-            help: "the card's status, Next: what comes after, in order (markdown); replaces that part",
+            help: "the task's status, Next: what comes after, in order (markdown); replaces that part",
           },
           {
             flag: '--status-file <path>',
-            help: "the card's current state, rewritten whole, from YAML or JSON { now, doneSoFar, next } (`-` reads stdin): **Now** / **Done so far** (PR links) / **Next** (markdown)",
+            help: "the task's current state, rewritten whole, from YAML or JSON { now, doneSoFar, next } (`-` reads stdin): **Now** / **Done so far** (PR links) / **Next** (markdown)",
           },
           {
             flag: '--visibility <public|private>',
@@ -692,8 +714,8 @@ export default definePlugin({
           },
         ],
       }),
-      verb('card patch', {
-        summary: 'edit a card from a file',
+      verb('task patch', {
+        summary: 'edit a task from a file',
         args: [{ name: 'id', help: 'the task id: &F21 (or F21)' }],
         options: [
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
@@ -701,8 +723,8 @@ export default definePlugin({
           { flag: '-f, --file <path>', help: 'the YAML or JSON document; - (the default) reads standard input' },
         ],
       }),
-      verb('card refile', {
-        summary: 'move a card to another project’s board',
+      verb('task refile', {
+        summary: 'move a task to another project’s board',
         args: [{ name: 'id', help: 'the task id: &F21 (or F21)' }],
         options: [
           { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
@@ -714,14 +736,16 @@ export default definePlugin({
       }),
     ],
     app: [
-      appAction('card.move', { on: 'card', label: 'Move', calls: 'POST /v1/board/cards/:cardId' }),
-      appAction('card.start', { on: 'card', label: 'Start a ferret', calls: 'POST /v1/board/cards/:cardId/start' }),
+      appAction('task.move', { on: 'task', label: 'Move', calls: 'POST /v1/board/tasks/:taskId' }),
+      appAction('task.start', { on: 'task', label: 'Start a ferret', calls: 'POST /v1/board/tasks/:taskId/start' }),
     ],
   },
 
   ui: {
     screens: [
       screen('board', { path: 'board/:project?', nav: { label: 'Board', icon: 'columns', order: 30 } }),
+      screen('task', { path: 'task/:id' }),
+      // Links to the old address sit in transcripts and agenda text: the screen stays, and sends the reader to `task/:id`.
       screen('card', { path: 'card/:id' }),
     ],
     panels: [
@@ -766,7 +790,7 @@ export default definePlugin({
     offers: [{ hook: CardMoving, timeoutMs: 200 }],
   },
 
-  instructions: [{ id: 'board', text: 'instructions/board.md', when: { role: 'any' } }],
+  instructions: [{ id: 'board', text: 'instructions/board.md', when: { role: 'lead' } }],
   doctor: ['board-store'],
   permissions: { roots: [], network: ['api.github.com'], spawn: ['gh', 'git', 'ssh'], secrets: [] },
 });

@@ -26,7 +26,7 @@ import { BINARY_NAME, ExitStatus } from './shell.ts';
  * name) come from `shell.ts`, and the `--open` browser launcher, the redirect sweep, the QR encoder and the
  * terminal width from `adapters/`, as today. Each is a port the kernel's CLI context still has to offer.
  *
- * `fy daemon config` (`lib/grants`) is not wired: the manifest declares no such verb and its routes are Gate's.
+ * `fy daemon config` is not Access's: it lives in Gate (`core/gate`), which owns the grants routes.
  */
 export default implementCli(manifest, {
   build(ctx) {
@@ -42,16 +42,18 @@ export default implementCli(manifest, {
 
     // `fy pair`: one construction. The screen goes out uncoloured, a QR's only job being contrast.
     const pair = (): PairController => {
-      const stateHome = host.stateHome();
+      const gateway = new ProtocolPairingGateway(client);
       return new PairController({
-        gateway: new ProtocolPairingGateway(client),
+        gateway,
         screen: { write: text => io.out(`${text}\n`) },
         progress: host.progress,
         exit,
         clock: host.clock,
         qr: new QrCodeTerminal(),
         terminal: new ProcessTerminalSize(),
-        browser: desktopBrowserOpener(stateHome, state),
+        browser: desktopBrowserOpener(
+          state === undefined ? undefined : { state, make: page => gateway.redirect(page) },
+        ),
         redirectSweeper: { sweep: async () => void (await sweepPairingRedirectState(state, host.clock.now())) },
         binaryName: BINARY_NAME,
       });

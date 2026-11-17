@@ -74,11 +74,13 @@ const KNOWN_SHAPES: readonly RegExp[] = [
 const KNOWN_SHAPES_EVERYWHERE: readonly RegExp[] = KNOWN_SHAPES.map(shape => new RegExp(shape.source, 'gu'));
 
 /**
- * A value that names a secret rather than holding one: `${secret:NAME}`, `${NAME}` or `$NAME`. Linear: anchored at
- * both ends, so it is tried from one start, and each branch is one class run with one way to end it. Tested only on a
- * value of at most {@link SCAN_WINDOW} characters: a longer one is no reference.
+ * A value that names a secret rather than holding one: `${secret:NAME}`, `${secret?:NAME}`, `${NAME}` or `$NAME`
+ * (docs/secrets.md: "a pointer is only…"). The braces hold a NAME and nothing else: `${X:-<literal>}` is a shell
+ * default, which carries a literal and so can carry a credential, and is no pointer. Linear: anchored at both ends, so
+ * it is tried from one start, and each branch is one class run with one way to end it. Tested only on a value of at
+ * most {@link SCAN_WINDOW} characters: a longer one is no reference.
  */
-const REFERENCE = /^\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
+const REFERENCE = /^\$(?:\{(?:secret\??:)?[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
 
 /**
  * A path or a URL: a scheme and `://`, or a leading `/`, `~` or `.`. Linear: anchored at the start, one class run, then
@@ -162,37 +164,71 @@ export function looksLikeRawSecret(key: string | number | undefined, value: stri
   return shannonEntropy(trimmed) >= ENTROPY_THRESHOLD;
 }
 
+/** One step of a path into a document: an object's key or a list's index. */
+type PathStep = string | number;
+
+/** A node being walked: the children still to read. */
+interface WalkFrame {
+  readonly node: unknown;
+  readonly children: readonly (readonly [PathStep, unknown])[];
+  readonly nearest: string | undefined;
+  next: number;
+}
+
+/** The (key or index, child) pairs of an object or a list; `undefined` for anything else. */
+function childrenOf(node: unknown): readonly (readonly [PathStep, unknown])[] | undefined {
+  if (Array.isArray(node)) return Array.from(node as unknown[], (item, index) => [index, item] as const);
+  if (node !== null && typeof node === 'object') return Object.entries(node);
+  return undefined;
+}
+
+/**
+ * Every node of a document, parents before their children and siblings in order, with an explicit stack and one
+ * path that grows and shrinks, so a document nested as deep as the parser allows cannot overflow the call stack and
+ * the cost is the document's size, not its depth squared. `visit` is given the node, its path (the walker's own: copy
+ * it to keep it), the node that holds it and the nearest KEY above it (`undefined` for none: an item in a list under
+ * `api_keys:` is named by `api_keys`); `false` is "do not walk below this node".
+ */
+function walkDocument(
+  root: unknown,
+  visit: (node: unknown, path: readonly PathStep[], parent: unknown, nearest: string | undefined) => boolean | void,
+): void {
+  const path: PathStep[] = [];
+  const stack: WalkFrame[] = [];
+  const enter = (node: unknown, parent: unknown, nearest: string | undefined): void => {
+    const children = visit(node, path, parent, nearest) === false ? undefined : childrenOf(node);
+    if (children !== undefined) stack.push({ node, children, nearest, next: 0 });
+  };
+  enter(root, undefined, undefined);
+  for (let frame = stack.at(-1); frame !== undefined; frame = stack.at(-1)) {
+    // Back to the path of the node whose children these are (the last child's steps are dropped).
+    path.length = stack.length - 1;
+    const child = frame.children[frame.next];
+    if (child === undefined) {
+      stack.pop();
+      continue;
+    }
+    frame.next += 1;
+    path.push(child[0]);
+    enter(child[1], frame.node, typeof child[0] === 'string' ? child[0] : frame.nearest);
+  }
+}
+
 /** Every string in `document` that looks like a raw secret, by path. */
 export function findRawSecrets(document: unknown): readonly SecretFinding[] {
   const findings: SecretFinding[] = [];
-  const visit = (value: unknown, path: readonly (string | number)[]): void => {
-    if (typeof value === 'string') {
-      // The nearest KEY names the value — an item in a list under `api_keys:` is still a key.
-      if (
-        looksLikeRawSecret(
-          path.findLast(part => typeof part === 'string'),
-          value,
-        )
-      )
-        findings.push({ path });
-      return;
+  walkDocument(document, (value, path, _parent, nearest) => {
+    // A key shaped like a token is refused like a value, and nothing below it is walked: any path under it would
+    // carry the key into a message. The finding is the object that holds it.
+    const key = path.at(-1);
+    if (typeof key === 'string' && looksLikeRawSecret(undefined, key)) {
+      findings.push({ path: path.slice(0, -1), atKey: [...path] });
+      return false;
     }
-    if (Array.isArray(value)) {
-      value.forEach((item, index) => {
-        visit(item, [...path, index]);
-      });
-      return;
-    }
-    if (value !== null && typeof value === 'object') {
-      for (const [key, item] of Object.entries(value)) {
-        // A key shaped like a token is refused like a value, and nothing below it is walked: any path under it
-        // would carry the key into a message.
-        if (looksLikeRawSecret(undefined, key)) findings.push({ path, atKey: [...path, key] });
-        else visit(item, [...path, key]);
-      }
-    }
-  };
-  visit(document, []);
+    // The nearest KEY names the value — an item in a list under `api_keys:` is still a key.
+    if (typeof value === 'string' && looksLikeRawSecret(nearest, value)) findings.push({ path: [...path] });
+    return undefined;
+  });
   return findings;
 }
 
@@ -325,22 +361,15 @@ export function findFlagSecrets(document: unknown): readonly FlagFinding[] {
       judge(word, words[index + 1], path, path);
     });
   };
-  const visit = (value: unknown, path: readonly (string | number)[]): void => {
-    if (typeof value === 'string') {
-      judgeString(value, undefined, path, path);
-    } else if (Array.isArray(value)) {
-      value.forEach((item: unknown, index) => {
-        const here = [...path, index];
-        if (typeof item === 'string') {
-          const after = value[index + 1];
-          judgeString(item, typeof after === 'string' ? after : undefined, here, [...path, index + 1]);
-        } else visit(item, here);
-      });
-    } else if (value !== null && typeof value === 'object') {
-      for (const [key, item] of Object.entries(value)) visit(item, [...path, key]);
-    }
-  };
-  visit(document, []);
+  walkDocument(document, (value, path, parent) => {
+    if (typeof value !== 'string') return;
+    const here = [...path];
+    if (!Array.isArray(parent)) return judgeString(value, undefined, here, here);
+    // An item of a list: the word after it is the item after it, when that is a string too.
+    const index = path.at(-1) as number;
+    const after: unknown = parent[index + 1];
+    judgeString(value, typeof after === 'string' ? after : undefined, here, [...path.slice(0, -1), index + 1]);
+  });
   return [...found.values()];
 }
 

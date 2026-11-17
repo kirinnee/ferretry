@@ -29,11 +29,15 @@ const KEY = defineState({ name: 'signing', path: 'signing.key', store: 'secret',
 const DOCUMENT = defineState({ name: 'tokens', path: 'tokens.json', store: 'json', format: 1 });
 const JOURNAL = defineState({ name: 'journal', path: 'journal.jsonl', store: 'jsonl', format: 1 });
 const VAULT = defineState({ name: 'vault', path: 'vault/*', store: 'opaque', format: 1 });
+const SOCKET = defineState({ name: 'socket', path: 'child.sock', store: 'opaque', format: 1 });
 const INDEX = defineState({ name: 'index', path: 'index.sqlite', store: 'sqlite', format: 1 });
 const OTHER = defineState({ name: 'other', path: 'other.sqlite', store: 'sqlite', format: 1 });
 
 const LIST = composePrivateFiles([
-  { id: 'holder', privacy: { private: ['signing.key', 'tokens.json', 'journal.jsonl', 'vault', 'index.sqlite'] } },
+  {
+    id: 'holder',
+    privacy: { private: ['signing.key', 'tokens.json', 'journal.jsonl', 'vault', 'index.sqlite', 'child.sock'] },
+  },
   { id: 'ferrets', privacy: { private: ['sessions/*/environment.json'] } },
 ]);
 
@@ -79,7 +83,7 @@ function holderPort(fs: HostFs, home: string) {
   return createStatePort({
     home,
     pluginId: 'holder',
-    files: [KEY, DOCUMENT, JOURNAL, VAULT, INDEX, OTHER],
+    files: [KEY, DOCUMENT, JOURNAL, VAULT, INDEX, OTHER, SOCKET],
     fs: createNodeHostFs(),
     pin,
   });
@@ -122,6 +126,54 @@ test('S40 update, append and createPrivateDirectory pin what they make before th
   await link(`${home}/state/holder/vault/a/secret`, `${home}/state/stranger/agent-homes/F1/vault.json`);
   // The folder was pinned at its creation; its member was written after, so only the folder's own pin is proven here.
   expect(await readOf(stranger, 'own.txt')).toBe('served:own');
+});
+
+test('S40 a private file a CHILD made at pathOf is pinned only at the next look until its owner says pinMade', async () => {
+  const fs = nodeFs(() => 'r');
+  const { home, stranger } = await layout(fs);
+  const port = holderPort(fs, home);
+  // The child (a tmux, a browser) makes the file itself, outside the port, at the path the port handed out.
+  await mkdir(`${home}/state/holder`, { recursive: true, mode: 0o700 });
+  await writeFile(port.pathOf(SOCKET), 'child-made', { mode: 0o600 });
+  await link(`${home}/state/holder/child.sock`, `${home}/state/stranger/agent-homes/F1/early.json`);
+  // No look yet: the index kept from before the file existed does not know it, so the FENCE is not what refuses it
+  // (the 250 ms window, 5 s here); only the root's own hard-link rule does.
+  expect(await readOf(stranger, 'early.json')).toBe('refused:hard_link');
+  await port.pinMade(SOCKET);
+  await link(`${home}/state/holder/child.sock`, `${home}/state/stranger/agent-homes/F1/late.json`);
+  expect(await readOf(stranger, 'late.json')).toBe('refused:fenced');
+  expect(await readOf(stranger, 'own.txt')).toBe('served:own');
+});
+
+test('S40 pinMade refuses a file that is not opaque, and asks for no look for a path no private place touches', async () => {
+  const fs = nodeFs(() => 'r');
+  const { home } = await layout(fs);
+  const port = holderPort(fs, home);
+  expect(port.pinMade(KEY)).rejects.toThrow('only an opaque file');
+  await port.pinMade(VAULT, 'plain');
+});
+
+test('S40 pinMade whose look cannot be made rejects private_unpinned', async () => {
+  const real = nodeFs(() => 'r');
+  let broken = false;
+  const fs: HostFs = {
+    ...real,
+    list: async path => {
+      if (broken) throw Object.assign(new Error(`cannot list ${path}`), { code: 'EIO' });
+      return await real.list(path);
+    },
+  };
+  const { home } = await layout(fs);
+  const port = holderPort(fs, home);
+  await mkdir(`${home}/state/holder`, { recursive: true, mode: 0o700 });
+  await writeFile(port.pathOf(SOCKET), 'child-made', { mode: 0o600 });
+  broken = true;
+  const failure = await port.pinMade(SOCKET).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(failure).toBeInstanceOf(ApiError);
+  expect((failure as ApiError).code).toBe('private_unpinned');
 });
 
 test('S41 a private file created after boot through an internal root and aliased under another name is refused fenced', async () => {
@@ -276,22 +328,28 @@ test('S40 row 32: a publish that throws AFTER its entry landed (the folder sync)
   expect(await readOf(stranger, 'stolen.json')).toBe('refused:fenced');
 });
 
+/**
+ * A look is counted by the folders it looks at (`identity`), never by the folders it lists: a look lists again only when a
+ * folder changed or is still inside the racy window of its last look (20 ms), so a runner slow enough to pass that window
+ * between `layout` and the pin looked without listing and this test once failed on a loaded CI runner. Every look probes
+ * the folders that are not resting, and none rests here (that takes a minute), so the count moves on every look.
+ */
 test('S40 a write to a path no private place touches asks for no look', async () => {
   const real = nodeFs(() => 'r');
-  let lists = 0;
+  let looks = 0;
   const fs: HostFs = {
     ...real,
-    list: async path => {
-      lists += 1;
-      return await real.list(path);
+    identity: async path => {
+      looks += 1;
+      return await real.identity(path);
     },
   };
   const { home } = await layout(fs);
-  const before = lists;
+  const before = looks;
   await pinCreated(fs, home, LIST, 'holder/unrelated.json', LOOK_MS);
-  expect(lists).toBe(before);
+  expect(looks).toBe(before);
   await pinCreated(fs, home, LIST, 'holder/signing.key', LOOK_MS);
-  expect(lists).toBeGreaterThan(before);
+  expect(looks).toBeGreaterThan(before);
 });
 
 /**

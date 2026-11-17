@@ -132,7 +132,7 @@ describe('the ferrets cli half', () => {
         cwd: '/abs',
         name: 'Fix login',
         label: 'mine',
-        card: 'F21',
+        task: 'F21',
         model: 'opus',
         fast: false,
         rc: true,
@@ -155,7 +155,7 @@ describe('the ferrets cli half', () => {
         teammateFallback: true,
         title: 'Fix login',
         label: 'mine',
-        card: 'F21',
+        task: 'F21',
         model: 'opus',
         fast: false,
         remoteControl: true,
@@ -219,7 +219,7 @@ describe('the ferrets cli half', () => {
     expect(calls[0]).toEqual({
       route: 'POST /v1/ferrets',
       init: {
-        body: { folder: '/abs', runtime: 'codex-beta', prompt: 'look', mode: 'auto' },
+        body: { folder: '/abs', runtime: 'codex-beta', prompt: 'look', mode: 'auto', allowScratch: false },
         headers: { 'x-fy-request-id': expect.any(String) },
       },
     });
@@ -229,7 +229,7 @@ describe('the ferrets cli half', () => {
         model: 'opus',
         effort: 'high',
         name: 'Look',
-        card: '&F3',
+        task: '&F3',
         cwd: '/abs',
       }),
     ).toBe(0);
@@ -240,10 +240,11 @@ describe('the ferrets cli half', () => {
         prompt: 'look',
         mode: 'auto',
         title: 'Look',
-        card: 'F3',
+        task: 'F3',
         model: 'opus',
         effort: 'high',
         auto: true,
+        allowScratch: false,
       },
     });
     const before = calls.length;
@@ -251,9 +252,20 @@ describe('the ferrets cli half', () => {
     expect(err.at(-1)).toContain('--auto picks the runtime');
     expect(await verb('new [words...]', ['look'], { cwd: '/abs' })).toBe(2);
     expect(err.at(-1)).toContain('name a --runtime, or pass --auto');
-    expect(await verb('new [words...]', ['look'], { runtime: 'codex-beta', continue: true })).toBe(2);
-    expect(err.at(-1)).toContain('--continue');
     expect(calls).toHaveLength(before);
+  });
+
+  test('V-0334 fy new and fy start name the task with --task, and the former --card still hands it over', async () => {
+    const { verb, calls } = run({ [FERRET_ROUTES.start]: { id: 'lead' }, [FERRET_ROUTES.get]: ferret });
+    const sent = (call: Call | undefined): unknown => sentBody(call)?.task;
+    expect(await verb('new [words...]', ['look'], { auto: true, task: 'F3', cwd: '/abs' })).toBe(0);
+    expect(await verb('new [words...]', ['look'], { auto: true, card: 'F4', cwd: '/abs' })).toBe(0);
+    expect(await verb('start [prompt...]', ['go'], { task: 'F5', cwd: '/abs' })).toBe(0);
+    expect(await verb('start [prompt...]', ['go'], { card: 'F6', cwd: '/abs' })).toBe(0);
+    const posts = calls.filter(call => call.route === FERRET_ROUTES.start);
+    expect(posts.map(sent)).toEqual(['F3', 'F4', 'F5', 'F6']);
+    expect(posts.map(call => sentBody(call)?.card)).toEqual([undefined, undefined, undefined, undefined]);
+    expect(await verb('start [prompt...]', ['go'], { card: 'F0', cwd: '/abs' })).toBe(2);
   });
 
   test('V-0447 a bare stop prints its modes and is a usage error', async () => {

@@ -5,7 +5,7 @@ import type { ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
 import { SecuritySurface } from '../../../../../app/features/settings/security-settings.tsx';
 import { daemonConnection, FyHttpError } from '../../../../../app/shell-grants.ts';
-import type { CredentialsPort } from '../../../../../app/lib/passkeys.ts';
+import type { CredentialsPort } from '@ferretry/app';
 import type { StepUpClient } from '../../../../../app/lib/step-up-client.ts';
 import { mount, must } from '../../../../support/app/dom.ts';
 import { render, run, runAsync } from '../../../../support/app/react.ts';

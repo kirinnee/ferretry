@@ -342,6 +342,44 @@ describe('the context every plugin cli half is handed', () => {
     should(JSON.stringify(read)).not.containEql('SENTINEL');
   });
 
+  it('should answer a declared PREFIX_* family with every set variable of that prefix, and nothing it did not declare', async () => {
+    const familyManifest = definePlugin({
+      id: 'family',
+      title: 'Family',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: ['command'],
+      actions: { routes: [route('GET /v1/family', { ...SCOPE, caller: 'any' })], cli: [verb('family')] },
+      permissions: { cliEnvReads: ['ZAI_*', 'FY_*', '*', 'AB*', 'X_*', 'OPEN_*'] },
+    });
+    const environment = {
+      ZAI_API_KEY: 'a',
+      ZAI_REGION: 'b',
+      ZHIPUAI_KEY: 'SENTINEL-undeclared-family',
+      FY_TOKEN: 'SENTINEL-admin',
+      FY_SESSION_TOKEN: 'SENTINEL-session',
+      ABCD: 'SENTINEL-no-underscore',
+      X_ONE: 'SENTINEL-one-letter',
+      OPEN_KEY: 'c',
+      PATH: 'SENTINEL-path',
+    };
+    const family = recordingProbe(familyManifest);
+    const { world } = fakeWorld({
+      registry: registryOf(family.half),
+      inventory: inventoryOf({ id: 'family', contract: 'h-family' }),
+      environment,
+    });
+    await runFy(['family'], world);
+    const read = (names: readonly string[]) => ({ ...family.context().readEnvironment?.(names) });
+
+    should(read(['ZAI_*'])).eql({ ZAI_API_KEY: 'a', ZAI_REGION: 'b' });
+    should(read(['ZHIPUAI_*'])).eql({});
+    should(read(['OPEN_*'])).eql({ OPEN_KEY: 'c' });
+    should(read(['FY_*', '*', 'AB*', 'X_*', 'ZAI_*'.toLowerCase()])).eql({});
+    should(JSON.stringify(read(['ZAI_*', 'FY_*', '*', 'AB*', 'X_*']))).not.containEql('SENTINEL');
+  });
+
   it('should let a half write only its own declared state and refuse another plugin’s', async () => {
     const { world, probe, disk } = worldWithProbe();
     await runFy(['probe'], world);

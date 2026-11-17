@@ -36,7 +36,7 @@ the page and end with it. The reference grammar is unchanged — see
 > **Not available on 5.0 yet — these come AFTER MERGE (M2, tracked in
 > [`rebuild/after-merge.json`](rebuild/after-merge.json)).** The Accounts plugin declares only `account_hint`. These
 > six are NOT declared, so the CLI builds no MCP tool for them and an agent cannot call them until each is built and
-> declared again: `account_propose`, `task_plan` (`task.plan`), `secure_copy`, `secure_list`, `secure_discard` and
+> declared again: `account_propose`, `signin_plan`, `secure_copy`, `secure_list`, `secure_discard` and
 > `secure_paste`. Every section below that describes one of them is the design it will be built to, not a thing a
 > ferret can use today.
 
@@ -48,7 +48,7 @@ The wire body is `AgentToolCallSchema` (`packages/protocol/src/lib/agent-tools.t
 (`fy browser page open <name> [url] --incognito`; `fy terminal open <name> --ask [message]`;
 `fy terminal ask <name> [message]`).
 
-A single value at a prompt (a password, passphrase, one-time or 2FA code) is `terminal.request_input`, not `terminal.ask_owner`: the owner types it on a card (or `fy input answer`), and the agent never receives it ([input-requests.md](input-requests.md)). A one-time code is sensitivity `code`: the ferret may see it, and may instead read it from an inbox it has and type it itself, only on the page of the sign-in it is for ([one-time codes](input-requests.md#one-time-codes-code)). `fy input ls|answer|cancel` is the owner's command and refuses to run inside a ferret.
+A single value at a prompt (a password, passphrase, one-time or 2FA code) is `terminal.request_input`, not `terminal.ask_owner`: the owner types it on an input (or `fy input answer`), and the agent never receives it ([input-requests.md](input-requests.md)). A one-time code is sensitivity `code`: the ferret may see it, and may instead read it from an inbox it has and type it itself, only on the page of the sign-in it is for ([one-time codes](input-requests.md#one-time-codes-code)). `fy input ls|answer|cancel` is the owner's command and refuses to run inside a ferret.
 
 **After merge (M2), not callable on 5.0 yet:** a value the agent must move but not see (a token it just minted, a key a command prints) is `secure.copy`: the daemon captures it as `sealed:<name>`, masks it everywhere it scrubs text, and the agent learns only its source, length and expiry. `secure.list` shows the session's copies and `secure.discard` lets go of one. Pasting a copy is an owner-approved input request ([secure-copy.md](secure-copy.md)).
 
@@ -308,14 +308,15 @@ Chrome prints only when headless; in **Real window** mode it is refused with one
 daemon hands the worker an already-confined absolute path (`BrowserFileAction`, daemon-only), and a download comes back as
 a staged path the daemon alone saves.
 
-## Task plan: ask once before a task
+## Sign-in plan: ask once before the work
 
-> **Not available on 5.0 yet: after merge (M2, [`rebuild/after-merge.json`](rebuild/after-merge.json)).** `task_plan`
+> **Not available on 5.0 yet: after merge (M2, [`rebuild/after-merge.json`](rebuild/after-merge.json)).** `signin_plan`
 > is not declared by the Accounts plugin, so no ferret has this tool today; this section is the design it will be built
 > to. Until then a sign-in or paste simply asks the owner each time.
 
-`task.plan(lines, expiresInSeconds?)` (MCP `task_plan`) is how a ferret asks the owner, once, to pre-approve the
-sign-ins and pastes a task will need. One call raises ONE card on the owner's agenda, up to 10 lines, for
+`signin_plan(lines, expiresInSeconds?)` is how a ferret asks the owner, once, to pre-approve the
+sign-ins and pastes its work will need. `task_plan` is the hidden old name of the same tool: it still works, on the
+same handler, so an old instruction keeps running. One call raises ONE input on the owner's agenda, up to 10 lines, for
 `expiresInSeconds` (300 to 86,400: five minutes to a day; two hours when it is left out):
 
 - `{ kind: "sign-in", signIn | site, fields: [username, password, totp], uses, why }`: a sign-in on a page;
@@ -328,12 +329,12 @@ which secret fields an account holds. Until the owner answers, each sign-in or p
 
 A ferret keeps raising `browser_request_input` / `terminal_request_input` as usual: once the owner approves a line, a
 sign-in or paste it covers is filled for the ferret, and anything no line covers still asks the owner
-([secure-copy.md](secure-copy.md), "Task plans").
+([secure-copy.md](secure-copy.md), "Sign-in plans").
 
 The old `secure.preapprove { items }` still works for an older pane: it is read as one-use paste lines through the
 same call, and answers the old `plan` shape. It is no longer listed in MCP.
 
-**The owner answers at the machine with `fy plan`** (`fy copy plan` is the same command), or on the plan's card:
+**The owner answers at the machine with `fy plan`** (`fy copy plan` is the same command), or on the plan's input:
 
 | Command                                                                                              | Does                                                        |
 | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
@@ -342,23 +343,23 @@ same call, and answers the old `plan` shape. It is no longer listed in MCP.
 | `fy plan revoke <id> [lines…]`                                                                       | ends those lines, or every line                             |
 
 Every selection, a paste-only one too (owner ruling on !A244), is only **staged**: the command asks the
-daemon to show the stage on the plan's card, and waits up to 125 seconds for the owner's passkey in the app. It then
+daemon to show the stage on the plan's input, and waits up to 125 seconds for the owner's passkey in the app. It then
 reads the plan back and prints what is really in force: Approved (also when the owner ticked other lines in the app
 meanwhile), Denied or Timed out. With `--json` the output is one JSON document and the prose goes to stderr. The CLI
 has no commit call: the machine's token cannot make the passkey proof, so no sign-in line is ever approved from the
-terminal alone. A daemon that doesn't report `task-plan.1` (an older one) is refused up front for a sign-in line and nothing is staged. The command prints a link to the plan's card (`<app>/#agenda/<id>?session=<sid>`, the app at `FY_APP_URL` or the hosted default; `FY_APP_URL` must be an absolute `https` address (`http` only on this machine), with no user name or password, or it is refused out loud and the hosted default stands), and `--open` hands it to this machine's browser.
+terminal alone. A daemon that doesn't report `task-plan.1` (an older one) is refused up front for a sign-in line and nothing is staged. The command prints a link to the plan's input (`<app>/#agenda/<id>?session=<sid>`, the app at `FY_APP_URL` or the hosted default; `FY_APP_URL` must be an absolute `https` address (`http` only on this machine), with no user name or password, or it is refused out loud and the hosted default stands), and `--open` hands it to this machine's browser.
 `--pick` takes an account handle or a `si_…` id and must be one of the line's candidates, or nothing is staged;
 a line with several candidates needs one. `--totp` ticks a code only where the ferret asked for it and the account
 can make them, and only with `--i-understand-one-factor` (the same rule and words as `fy rules`); either one without
 the other is refused before anything is read. `fy plan ls` prints each sign-in line's flags under it in the
 protocol's words (root, the one-factor code, a first fill) and ends with the honest-client line. The command asks you
-to confirm on the plan's card in the app's Inbox. A ferret's pane (and any command carrying an agent credential) is
+to confirm on the plan's input in the app's Inbox. A ferret's pane (and any command carrying an agent credential) is
 refused, whatever `--as-owner` says: these routes are the owner's.
 
-**An honest-client limit.** Every plan card, `fy plan ls` and `fy plan --help` say it in these words
+**An honest-client limit.** Every sign-in plan, `fy plan ls` and `fy plan --help` say it in these words
 (`TASK_PLAN_HONEST_LIMIT`): "This stops misuse through a ferret's tools and page text; it can't stop a ferret that
 reads Ferretry's own files." Every ferret can read Ferretry's own state-home files. Design and rules:
-[secure-copy.md](secure-copy.md#task-plans).
+[secure-copy.md](secure-copy.md#sign-in-plans).
 
 ## Suggesting a standing rule
 
@@ -369,19 +370,19 @@ reads Ferretry's own files." Every ferret can read Ferretry's own state-home fil
 `account_propose` takes `preapprove: true` (and `recipe` is then optional) to ask the owner to consider a
 [standing sign-in rule](secrets.md#standing-sign-in-rules) for one sign-in. It is a **suggestion and nothing more**:
 
-- **It holds no rule, stage or proof.** The suggestion is a line in the daemon's memory and a card on the owner's
-  agenda. No route turns it into a rule. The card's only action opens the owner's create sheet with **nothing ticked**;
+- **It holds no rule, stage or proof.** The suggestion is a line in the daemon's memory and an input on the owner's
+  agenda. No route turns it into a rule. The input's only action opens the owner's create sheet with **nothing ticked**;
   the rule is then made exactly as if the owner had started it, with a fresh passkey over the bytes the daemon builds.
-  A plain agenda answer to the card is refused (`use_input_form`), so it can never read as an approval.
-- **The card is the daemon's words.** It names the **host** from the sign-in's own place: never an account label, a
+  A plain agenda answer to the input is refused (`use_input_form`), so it can never read as an approval.
+- **The input is the daemon's words.** It names the **host** from the sign-in's own place: never an account label, a
   username or a word of the ferret's. The ferret's `why` is redacted, flattened to one line, clipped to 300 characters
   and shown only in the owner's sheet, faint and quoted.
 - **The caps are taken before anything awaits.** At most **one pending suggestion per sign-in per session** and
   **three an hour per session**, reserved in the same synchronous run that checks them, so calls sent together cannot
   all pass. A refused call gives its place back. A suggestion lives in memory only and ends after 24 hours.
-- **The card reads the same whatever the owner does.** It sits on the ferret's own agenda, which the ferret can read,
+- **The input reads the same whatever the owner does.** It sits on the ferret's own agenda, which the ferret can read,
   so it stays open, exactly as raised, until the 24 hours are up; then the **daemon** closes it with the one note "This
-  suggestion expired.". The owner says no with **Dismiss** on its card (`DELETE /v1/sign-in-rules/suggestions/:sid`),
+  suggestion expired.". The owner says no with **Dismiss** on its input (`DELETE /v1/sign-in-rules/suggestions/:sid`),
   and approving a rule for that sign-in answers it too: either way it is marked **answered** on the owner's side only,
   so it leaves the owner's list (`GET /v1/sign-in-rules/suggestions`) and the app's Inbox, and nothing the ferret reads
   changes. Closing or "Not needed" on the agenda is refused (`use_input_form`), from the owner and the ferret alike.
@@ -462,11 +463,11 @@ call.
   The user agent is never changed. A login that needs the owner's own passkey or key is handed over with
   `browser_ask_owner`. See [input requests › Pages](input-requests.md#pages).
 - **Logins go through the input bridge.** `browser_request_input` asks the owner for a form's values on one
-  card (a `plain` e-mail and a `secret` password, say) and the daemon types each into its field; the agent
+  input (a `plain` e-mail and a `secret` password, say) and the daemon types each into its field; the agent
   never holds a secret. A captcha is never solved: the agent hands the page over.
 - **A push to approve on the phone** is `push: true` on either request tool, with no prompt and no element. The
   daemon reads the number only from the provider's own challenge view, never where the agent points, and settles the
-  card when it sees the page move on; the agent waits on the `pa_` id and is never told the number. See
+  input when it sees the page move on; the agent waits on the `pa_` id and is never told the number. See
   [input requests › Approve on your phone](input-requests.md#approve-on-your-phone).
 - The CDP port listens on loopback and accepts no cross-origin WebSocket (`--remote-allow-origins` is
   gone; the worker sends no `Origin`).
@@ -575,7 +576,7 @@ ferret's session in `x-ferretry-session-id` (the honest-client fallback for a pa
 its own).
 
 - **`person` routes refuse an agent with `403 owner_only`** at the authorization boundary — before any
-  handler runs and before the body is read. They are: answering or declining an input card and its
+  handler runs and before the body is read. They are: answering or declining an input and its
   quarantines, approving a copy plan, every secure-copy rule (the profile-target setting included),
   writing a secret, a saved login, an account or a sign-in (merge, apart, recipe answers, 2FA keys and
   their staged seeds), the default account for a place (`PUT /v1/accounts/defaults`), the owner's account
@@ -607,7 +608,7 @@ its own).
   session header (an older `fy`, a pane with no credential) still starts with the body's parent, as before.
 - **`any` routes take a session credential as that session, always.** Its actor is `peer:<its session>`
   — never the owner, on the board and the agenda too — whatever any header says. That covers everything a
-  ferret's `fy` and MCP tools need: `fy send` and `fy notify`, its board card and notes, its own agenda
+  ferret's `fy` and MCP tools need: `fy send` and `fy notify`, its task and notes, its own agenda
   items, signals, starting a sub-ferret, config reads and (held) writes, input requests through the agent
   tools, `account_hint`, and session and fleet reads. (Secure copy and `account_propose` join this list after merge,
   M2: they are not declared on 5.0 yet.)
@@ -620,7 +621,7 @@ its own).
   call on the admin token cannot be told from the owner at the machine. The board and the lane sets record
   it as `admin-token` — "the admin token (the owner at this machine, or a ferret without its own
   credential)" — and never plainly as the owner; only a paired device's act is the owner's. It keeps the
-  owner's authority. On a card the label is the owner actor's own `via` (`{ kind: "owner", via: "admin-token" }`,
+  owner's authority. On an input the label is the owner actor's own `via` (`{ kind: "owner", via: "admin-token" }`,
   history, clarifications and `createdBy` alike), never a new actor kind; a lane set's confirmation keeps
   `confirmedVia` beside it. **Declared gap:** the agenda still records such a call's
   answers and closes as the owner's ("done by you") — [agenda.md](agenda.md).
@@ -764,7 +765,7 @@ a displaced tree is exactly this apply's, the names shown in a report): a swap c
 fall back to re-proving the folder by path, which a swap timed between the proof and the step could still redirect.
 There the provisioner fails closed: no name is moved aside or removed anywhere but the daemon's own folders and a fleet
 runtime's own folder — replacing an entry that is already there, a copy, and every sweep are **skipped**, and the
-result names each one ("Left … as it was"), with why descriptor reach is missing, and the daemon keeps the last apply's skips per runtime in memory (replaced by the next committed apply, lost on a restart) and serves each runtime's paths relative to its folder as `skipped` on `GET /v1/fleet/runtimes`, never the folder's own place on disk, so every device shows "N items skipped" inside that runtime's card; a rollback that would have to take
+result names each one ("Left … as it was"), with why descriptor reach is missing, and the daemon keeps the last apply's skips per runtime in memory (replaced by the next committed apply, lost on a restart) and serves each runtime's paths relative to its folder as `skipped` on `GET /v1/fleet/runtimes`, never the folder's own place on disk, so every device shows "N items skipped" inside that runtime's row; a rollback that would have to take
 back something it created there reports it instead. What that fallback still leaves is a NEW name landing in the home
 if a folder is swapped at the exact moment it is created (`O_EXCL`: never over an existing file).
 
@@ -793,7 +794,7 @@ for the one-update gap while the lock changes from SQLite to `flock`.
 
 The same tools server serves a lead and a sub-ferret; the **daemon** tells them apart by session identity
 (`config.parent`). A sub-ferret may read everything and report with `fy send`, `fy task note` and `fy task link
---pr` / `--branch`; agenda writes, `fy notify` and card moves are refused with `forbidden` and the line to tell its lead
+--pr` / `--branch`; agenda writes, `fy notify` and task moves are refused with `forbidden` and the line to tell its lead
 ([pack-mode.md](pack-mode.md#sub-ferret-limits)). Nothing here is a tool the model is withheld: the refusal is on
 the route, so it holds for an MCP call and a shell `fy` alike. A lead may `edit`, `surface`, `done` and `dismiss`
 agenda items in a sub-ferret's session with `-s <session>`, proven by lineage.
@@ -880,7 +881,7 @@ The server's own `initialize` instructions are one line; `lessons_suggest` files
 server inherited, which of those sections this ferret launched with — the `fy instructions` report
 ([hypermedia.md](hypermedia.md#delivered-as-system-instructions-per-ferret)).
 
-`search_work` {`query`, `kind`?, `open`?, `all`?} is `fy search` for a ferret: cards and agenda items by what they say
+`search_work` {`query`, `kind`?, `open`?, `all`?} is `fy search` for a ferret: tasks and agenda items by what they say
 (or an id like F303 or A3, which finds its item at any age), one text line per hit — id, kind, standing, title, the matching line.
 Old closed work is left out unless `all` is true; when it was, a last line says `N older closed items hidden`. It calls
 `GET /v1/search` through the person gateway the MCP server already holds (the route is operator-minimum plus
@@ -890,7 +891,7 @@ to search before it files (the board and agenda sections end their opening with 
 (`POST /v1/search/related`): a strong match refuses the create unless `--new` (or `--related <id>`) says what to
 do instead. `fy agenda add` also lists the caller's own open agendas first and opens a new one only with
 `--new "<why none fits>"` ([agenda.md § One channel per topic](agenda.md#one-channel-per-topic)); `fy task create` also
-lists weaker related cards and refuses an umbrella card ([board.md § One card, one outcome](board.md#one-card-one-outcome)). A daemon without `work.search.1` answers 404 and the create goes ahead with one dim line.
+lists weaker related tasks and refuses an umbrella task ([board.md § One task, one outcome](board.md#one-task-one-outcome)). A daemon without `work.search.1` answers 404 and the create goes ahead with one dim line.
 
 MCP tool names use `_` (`terminal_open`), because provider tool APIs refuse `.`; each maps one-to-one to
 the wire tool (`terminal.open`). A refusal comes back as a tool result with `isError: true` and the

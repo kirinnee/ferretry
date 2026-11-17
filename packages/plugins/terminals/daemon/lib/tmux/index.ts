@@ -7,6 +7,7 @@ export * from './contracts.ts';
 export * from './control-protocol.ts';
 export * from './controller.ts';
 export * from './delivery.ts';
+export * from './format-escape.ts';
 export * from './harness-dialog.ts';
 export * from './harness-guard.ts';
 export * from './pane.ts';

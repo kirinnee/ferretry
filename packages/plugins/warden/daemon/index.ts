@@ -1,4 +1,5 @@
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import { HARNESS_DIALOG_RULES_KEY, WardenDialogRulesClaude, WardenDialogRulesCodex } from '../contract/dialog-rules.ts';
 import manifest from '../manifest.ts';
 import { wardenFlags } from './lib/protocol.ts';
 import { toWireBlessing, toWireFlag, toWireLeave, toWireRun } from './lib/wire-map.ts';
@@ -23,7 +24,8 @@ import { createWardenSubsystem } from './subsystem.ts';
  *   sweep) and recorded as failed. The revive notice is the same send: it is journalled apart, and the resume it
  *   follows stands (`daemon/remedies.ts`), so the revive limits count it.
  * - Auto-revive resumes a ferret Ferrets reports as having died (`FerretSummary.cause`) through `FerretsApi.resume`
- *   (automatic). A failover act is a move through `FerretsApi.move`, and so is every automatic one: the sweep routes both
+ *   (automatic), only while the machine's auto-resume switch (Runtimes' `autoResume()`; there is no per-ferret one) reads
+ *   on, and at most 3 times per ferret per rolling hour. A failover act is a move through `FerretsApi.move`, and so is every automatic one: the sweep routes both
  *   through the auto-move service (`subsystem.ts`), which reads the fleet facts from Runtimes, Logins and Usage and asks
  *   Accounts ONE yes or no for the owner hold (an input card, a sign-in waiting on their phone, a plan card, a copied
  *   secret: a ferret with any is never moved, and a hold that cannot be checked is a hold). GAP: Ferrets publishes no
@@ -62,6 +64,11 @@ export default implementDaemon(manifest, {
       board: () => ctx.uses.board.current(),
       terminals: () => ctx.uses.terminals.current(),
       browsers: () => ctx.uses.browsers.current(),
+      // The built-in dialog rules live in the harness plugins; read live, so one that starts late is heard from the next look.
+      dialogRules: () => [
+        { harness: 'claude', provided: ctx.hooks.provider(WardenDialogRulesClaude, HARNESS_DIALOG_RULES_KEY) },
+        { harness: 'codex', provided: ctx.hooks.provider(WardenDialogRulesCodex, HARNESS_DIALOG_RULES_KEY) },
+      ],
     });
 
     // Arming reads the interval from `warden.yaml` and starts the timer: after `build`, in a job (§7.6 step 4).
@@ -77,7 +84,7 @@ export default implementDaemon(manifest, {
     });
 
     return {
-      routes: wardenRoutes(subsystem, ferrets),
+      routes: wardenRoutes(subsystem, ferrets, subsystem.dialogs),
       provides: {
         warden: {
           flags: async () => wardenFlags(await subsystem.status()).map(toWireFlag),

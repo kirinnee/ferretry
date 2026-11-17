@@ -1,5 +1,7 @@
+import type { RuntimeModelChoice } from '@ferretry/core-ferrets/contract';
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import { milliseconds } from '@ferretry/std';
 import { selectedComponents } from '@ferretry/plugin-runtimes/contract';
 import manifest from '../manifest.ts';
 import {
@@ -17,6 +19,7 @@ import {
   HarnessConfigSchema,
 } from '../contract/index.ts';
 import { codexHarness } from './adapters/codex-harness.ts';
+import { CODEX_DIALOG_RULES } from './dialog-rules.ts';
 import { HostCodexFacts } from './adapters/facts.ts';
 import { HostPrograms } from './adapters/host-programs.ts';
 import { NpmCodexLatest } from './adapters/npm-latest.ts';
@@ -24,9 +27,15 @@ import { packageRunner } from './adapters/package-run.ts';
 import { HostCodexProbe } from './adapters/probe.ts';
 import { CodexAppServerCatalog } from './adapters/app-server-catalog.ts';
 import { HeldFastCatalog } from './adapters/held-catalog.ts';
-import { codexUpdateRoutes, HarnessUpdateService, locateCodex } from './lib/index.ts';
+import {
+  codexRuntimeSwitch,
+  codexUpdateRoutes,
+  followCredentialEnds,
+  HarnessUpdateService,
+  locateCodex,
+} from './lib/index.ts';
 import { codexDoctor } from './lib/doctor.ts';
-import { fastStartDecision } from './lib/fast-mode.ts';
+import { CATALOG_LOADING, CODEX_NOT_FOUND, fastStartDecision } from './lib/fast-mode.ts';
 import { codexHooksSource, codexSettingsSource } from './lib/profile-components.ts';
 import { codexProjectApprovals } from './lib/project-approvals.ts';
 
@@ -144,6 +153,42 @@ export default implementDaemon(manifest, {
     };
     const routes = codexUpdateRoutes({ view, start });
 
+    const harness = codexHarness({
+      kernel,
+      // Changing a running ferret's model, effort or fast mode. The models are the held catalog's (the same list a fast
+      // start is judged against), read without spawning anything; a catalog not yet held is a stated failure, never an
+      // empty list. GAP(codex): that catalog is read without the ferret's login, so it is the list Codex advertises to
+      // nobody in particular, not this account's own.
+      runtimeSwitch: codexRuntimeSwitch({
+        choices: {
+          get: async () => {
+            await catalog.loaded();
+            catalog.refreshIfStale();
+            const held = catalog.held();
+            if (held === undefined) throw new Error(catalog.binaryMissing() ? CODEX_NOT_FOUND : CATALOG_LOADING);
+            // Never changed by anyone after it is read, so the contract's mutable arrays are safe to hand it.
+            return held as readonly RuntimeModelChoice[];
+          },
+        },
+        sleeper: { sleep: async delay => await kernel.clock.sleep(milliseconds(delay)) },
+        binaryName: 'fy',
+      }),
+      selected: async runtime => await selectedComponents(ctx.uses.runtimes.current(), runtime),
+      locate,
+      probe,
+      permissionMode: () => paths().permissionMode,
+      questionTool: () => paths().questionTool,
+      historyDirectory: async () => {
+        const home = await homeDirectory();
+        return home === '' ? undefined : `${home}/.codex/sessions`;
+      },
+      historyHome: async () => {
+        const home = await homeDirectory();
+        return home === '' ? undefined : `${home}/.codex`;
+      },
+      update: { view, start, settled: () => service.settled() },
+    });
+
     return {
       routes,
       // Which `codex` this host runs and by which rule (today's `codex` row), by the same location every start uses.
@@ -152,6 +197,8 @@ export default implementDaemon(manifest, {
       // answers `not-taken` for a Codex launch without asking, so this is the contract's answer, not MCP's gate.
       provides: { codex: { view, discovery, approvedProjectServers: codexProjectApprovals } },
       hooks: {
+        // The Warden's read of the screens this plugin draws (it has no nudge to add: a declined Codex screen says nothing).
+        'warden.dialog-rules.codex:dialog-rules': { rules: CODEX_DIALOG_RULES },
         // Runtimes' read of the `settings` components a profile names for Codex: this plugin's own items, live, no cache.
         'runtimes.components.settings.codex:components': codexSettingsSource(
           () => kernel.config.collection(CODEX_SETTINGS as ConfigCollectionDef<SettingsItem>),
@@ -172,19 +219,10 @@ export default implementDaemon(manifest, {
             () => catalog.binaryMissing(),
           );
         },
-        'harnesses:codex': codexHarness({
-          kernel,
-          selected: async runtime => await selectedComponents(ctx.uses.runtimes.current(), runtime),
-          locate,
-          probe,
-          permissionMode: () => paths().permissionMode,
-          historyDirectory: async () => {
-            const home = await homeDirectory();
-            return home === '' ? undefined : `${home}/.codex/sessions`;
-          },
-          update: { view, start, settled: () => service.settled() },
-        }),
+        'harnesses:codex': harness,
       },
+      // A ferret that stopped, or a login that was revoked, takes the sign-in out of the home it was linked into.
+      subscribers: followCredentialEnds(harness.credentials),
     };
   },
 });

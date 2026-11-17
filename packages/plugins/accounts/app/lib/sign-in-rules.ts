@@ -442,8 +442,12 @@ export interface RuleTicks {
   readonly scope: SignInRuleScope;
 }
 
-/** Where the sheet was opened from: only an owner-opened sheet starts with the usual ticks. */
-export type RuleOrigin = 'owner' | 'suggestion' | 'resume' | 'renew' | 'widen';
+/**
+ * Where the sheet was opened from: an owner-opened sheet starts with the usual ticks, and so does `offer` (the owner's
+ * own tap of "Don't ask again" on the input card they just settled with a saved account). Only a ferret's `suggestion`
+ * starts with nothing ticked.
+ */
+export type RuleOrigin = 'owner' | 'offer' | 'suggestion' | 'resume' | 'renew' | 'widen';
 
 export const lifetimeDaysOptions = signInRuleDayChoices;
 

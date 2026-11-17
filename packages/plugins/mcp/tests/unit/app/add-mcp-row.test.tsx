@@ -1,9 +1,9 @@
 /** mcp#1 — the Actions ▾ row "Add MCP server…", offered through Ferrets' `ferrets.actions-row` slot, and the panel's Add… link. */
 import type { FC } from 'react';
 import { afterEach, describe, expect, it } from 'bun:test';
-import { FerretWorkspaceActionsProvider } from '@ferretry/app';
+import type { Authority, ViewPlace } from '@ferretry/app';
 import type { ActionsRowOffer } from '@ferretry/core-ferrets/contract';
-import { type Mounted, must } from '@ferretry/app/testing';
+import { type Mounted, must, WithViewPlace } from '@ferretry/app/testing';
 import { AddMcpDialog } from '../../../app/views/add-mcp-dialog.tsx';
 import { createAddMcpRowPanel } from '../../../app/views/add-mcp-row.tsx';
 import { McpServersPanel } from '../../../app/views/servers-panel.tsx';
@@ -101,24 +101,39 @@ describe('mcp#0 the panel hides Add… from a caller who may not control the fer
     expect(document.body.querySelector('[data-add-mcp-dialog]')).toBeNull();
   });
 
-  it('reads canControl from the ferret workspace the panel sits in, and offers Add… outside one', async () => {
+  it('reads what the caller may do from the view’s place, and offers Add… outside one', async () => {
     const surfaces = createSurfaces(scriptedClient({ 'GET /v1/ferrets/:ferretId/mcp/servers': MCP }) as never);
     const Panel = surfaces.panels['mcp-servers'] as unknown as FC<{ subject?: string }>;
-    const inside = (canControl: boolean) => (
-      <FerretWorkspaceActionsProvider
-        canControl={canControl}
-        daemon="d1"
-        ferret="f1"
-        showPanel={() => undefined}
-        shows={() => true}
-      >
+    const placeOf = (authority: Authority, only?: string): ViewPlace => ({
+      daemon: 'd1',
+      machine: 'laptop',
+      online: true,
+      authority: () => authority,
+      // `only` names the one add route the caller holds; every other route is refused.
+      authorityOf: route =>
+        only === undefined || route === only ? authority : { kind: 'refused', refusal: 'not-granted' },
+      press: act => act(),
+    });
+    const inside = (place: ViewPlace) => (
+      <WithViewPlace place={place}>
         <Panel subject="f1" />
-      </FerretWorkspaceActionsProvider>
+      </WithViewPlace>
     );
-    mounted = await mountSettled(inside(false));
-    expect(mounted.container.querySelector('[data-mcp-add]')).toBeNull();
-    await unmount();
-    mounted = await mountSettled(inside(true));
+    const hidden = async (place: ViewPlace) => {
+      mounted = await mountSettled(inside(place));
+      expect(mounted.container.querySelector('[data-mcp-add]')).toBeNull();
+      await unmount();
+    };
+    await hidden(placeOf({ kind: 'refused', refusal: 'not-granted' }));
+    await hidden(placeOf({ kind: 'refused', refusal: 'device-not-granted' }));
+    await hidden(placeOf({ kind: 'unknown' }));
+    for (const authority of [{ kind: 'open' }, { kind: 'locked' }] as const) {
+      mounted = await mountSettled(inside(placeOf(authority)));
+      expect(mounted.container.querySelector('[data-mcp-add]')).not.toBeNull();
+      await unmount();
+    }
+    // One of the two add routes is enough to offer it.
+    mounted = await mountSettled(inside(placeOf({ kind: 'open' }, 'POST /v1/ferrets/:ferretId/mcp/login')));
     expect(mounted.container.querySelector('[data-mcp-add]')).not.toBeNull();
     await unmount();
     mounted = await mountSettled(<Panel subject="f1" />);
@@ -193,6 +208,7 @@ describe('mcp#0 the dialog names the login and the ferret from Ferrets’ own re
   it('mcp#1 on the panel path a reload nobody reported names the ferret in lower case mid-sentence', async () => {
     const root = await addOnLogin({ [FERRET]: new Error('down') });
     await click(root, '[data-add-mcp-reload]');
+    await click(root, '[data-add-mcp-reload-confirm]');
     expect(root.querySelector('[role="alert"]')?.textContent).toContain('whether this ferret reloaded');
   });
 });

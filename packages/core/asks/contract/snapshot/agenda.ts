@@ -219,7 +219,7 @@ export function agendaAnswerProblems(
   if (answers.length > MAX_AGENDA_CARD_ANSWERS) {
     problems.push([
       'answers',
-      `a card offers at most ${MAX_AGENDA_CARD_ANSWERS} answers (left, up, right); split it into several items, or let the reply carry the rest`,
+      `an item offers at most ${MAX_AGENDA_CARD_ANSWERS} answers (left, up, right); split it into several items, or let the reply carry the rest`,
     ]);
   }
   const directions = answers.map(answer => answer.direction);
@@ -234,7 +234,7 @@ export function agendaAnswerProblems(
     if (!allowed.has(answer.does)) {
       problems.push([
         `answers.${index}.does`,
-        `"${answer.does}" does not answer a ${ask?.kind ?? 'card with no ask'}; use ${[...allowed].join(', ')}`,
+        `"${answer.does}" does not answer a ${ask?.kind ?? 'item with no ask'}; use ${[...allowed].join(', ')}`,
       ]);
     } else if (answer.does === 'choose' && !options.includes(answer.label.trim())) {
       problems.push([`answers.${index}.label`, 'a choose answer must name one of the ask options']);
@@ -1154,14 +1154,14 @@ export const agendaInputProblems = (value: {
   readonly confirms?: unknown;
   readonly notice?: true | undefined;
 }): string[] => {
-  if (value.kind !== 'input') return value.input === undefined ? [] : ['only an input card carries an input request'];
+  if (value.kind !== 'input') return value.input === undefined ? [] : ['only an input item carries an input request'];
   return [
-    ...(value.input === undefined ? ['an input card names its input request'] : []),
-    ...(value.ask === undefined ? [] : ['an input card has no ask: the form answers it']),
-    ...(value.answers === undefined ? [] : ['an input card has no swipe answers']),
-    ...(value.steps === undefined ? [] : ['an input card has no steps']),
-    ...(value.confirms === undefined ? [] : ['an input card does not confirm a configuration change']),
-    ...(value.notice === undefined ? [] : ['an input card is not a notice']),
+    ...(value.input === undefined ? ['an input item names its input request'] : []),
+    ...(value.ask === undefined ? [] : ['an input item has no ask: the form answers it']),
+    ...(value.answers === undefined ? [] : ['an input item has no swipe answers']),
+    ...(value.steps === undefined ? [] : ['an input item has no steps']),
+    ...(value.confirms === undefined ? [] : ['an input item does not confirm a configuration change']),
+    ...(value.notice === undefined ? [] : ['an input item is not a notice']),
   ];
 };
 
@@ -1453,23 +1453,23 @@ export const StoredAgendaItemSchema = z
     if (value.phoneApproval !== undefined && value.kind !== 'info') {
       context.addIssue({
         code: 'custom',
-        message: 'only an info card presents a phone approval',
+        message: 'only an info item presents a phone approval',
         path: ['phoneApproval'],
       });
     }
     if (value.cards !== undefined && value.kind !== 'info') {
-      context.addIssue({ code: 'custom', message: 'only an info card lists cards', path: ['cards'] });
+      context.addIssue({ code: 'custom', message: 'only an info item lists tasks', path: ['cards'] });
     }
     if (value.signInRuleSuspended !== undefined && value.kind !== 'info') {
       context.addIssue({
         code: 'custom',
-        message: 'only an info card says a standing rule was suspended',
+        message: 'only an info item says a standing rule was suspended',
         path: ['signInRuleSuspended'],
       });
     }
     const asked = (value.cardAsks ?? []).map(ask => `${ask.gate.cardId}:${ask.gate.laneId}:${String(ask.gate.entry)}`);
     if (new Set(asked).size !== asked.length) {
-      context.addIssue({ code: 'custom', message: 'an agenda carries each ask about a card once', path: ['cardAsks'] });
+      context.addIssue({ code: 'custom', message: 'an agenda carries each ask about a task once', path: ['cardAsks'] });
     }
     for (const problem of agendaFormProblems(value)) {
       context.addIssue({ code: 'custom', message: problem, path: ['fields'] });
@@ -2101,7 +2101,7 @@ export const AgendaActionRequestSchema = z
     if (value.kind === 'input') {
       context.addIssue({
         code: 'custom',
-        message: 'an input card is raised by an input request (terminal_request_input), never by an agenda add',
+        message: 'an input is raised by an input request (terminal_request_input), never by an agenda add',
         path: ['kind'],
       });
     }

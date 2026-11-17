@@ -181,10 +181,15 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
     const contractDir = join('packages', 'core', 'kernel', 'contract');
     if (ownContract !== undefined) {
       await mkdir(join(dir, contractDir), { recursive: true });
-      for (const name of await readdir(join(ROOT, contractDir))) {
-        if (!name.endsWith('.ts')) continue;
-        const text = ownContract[name] ?? (await readFile(join(ROOT, contractDir, name), 'utf8'));
-        await writeFile(join(dir, contractDir, name), text);
+      // The ports barrel and its per-port files (`ports/roots.ts` holds `RootHandle`) are named relative to the contract folder.
+      await mkdir(join(dir, contractDir, 'ports'), { recursive: true });
+      for (const folder of ['', 'ports']) {
+        for (const entry of await readdir(join(ROOT, contractDir, folder))) {
+          if (!entry.endsWith('.ts')) continue;
+          const name = folder === '' ? entry : `${folder}/${entry}`;
+          const text = ownContract[name] ?? (await readFile(join(ROOT, contractDir, name), 'utf8'));
+          await writeFile(join(dir, contractDir, name), text);
+        }
       }
     }
     const files: Record<string, string> = {
@@ -687,14 +692,14 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
 
     // cc7 F3: the handle's whole API is pinned, so a new operation needs a reviewer and a guard decision.
     const ALIAS_CONTRACT = (ports: string): Record<string, string> => ({
-      'ports.ts': ports.replace(
+      'ports/roots.ts': ports.replace(
         'export interface RootHandle {',
         'export interface RootHandle {\n  linkAlias?(at: FencedPath, target: RootLinkTarget): Promise<void>;',
       ),
     });
     test('a new optional member on RootHandle fails the pin and says a reviewer decides its guard (cc7 F3)', async () => {
-      const ports = await readFile(join(ROOT, 'packages/core/kernel/contract/ports.ts'), 'utf8');
-      const own = await changesOf({}, {}, { 'ports.ts': ports });
+      const ports = await readFile(join(ROOT, 'packages/core/kernel/contract/ports/roots.ts'), 'utf8');
+      const own = await changesOf({}, {}, { 'ports/roots.ts': ports });
       expect(own, 'an unchanged copy of the contract is no change').toEqual([]);
       const changes = await changesOf({}, {}, ALIAS_CONTRACT(ports));
       const api = changes.filter(change => change.includes('linkAlias'));
@@ -708,9 +713,9 @@ describe('the guard catches every ordinary shape of a stray caller (isolated fix
     });
 
     test('a removed or renamed member of RootHandle fails the pin', async () => {
-      const ports = await readFile(join(ROOT, 'packages/core/kernel/contract/ports.ts'), 'utf8');
+      const ports = await readFile(join(ROOT, 'packages/core/kernel/contract/ports/roots.ts'), 'utf8');
       const renamed = {
-        'ports.ts': ports.replace(
+        'ports/roots.ts': ports.replace(
           '  unlink(name: FencedPath): Promise<void>;',
           '  unlinkName(name: FencedPath): Promise<void>;',
         ),

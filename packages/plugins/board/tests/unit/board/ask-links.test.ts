@@ -99,7 +99,7 @@ describe("Asks' link to cards", () => {
 
     should(found.size).equal(0);
     should(warnings).have.length(1);
-    should(warnings[0]).containEql('could not read the asks of the cards');
+    should(warnings[0]).containEql('could not read the asks of the tasks');
   });
 
   it('should stop with its signal, before and after the one read', async () => {

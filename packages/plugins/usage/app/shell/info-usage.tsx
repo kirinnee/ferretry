@@ -75,6 +75,7 @@ type Figures =
       readonly kind: 'known';
       readonly contextPercent: number | null;
       readonly contextWindow: number | null;
+      readonly contextTokens: number | null;
       readonly turns: number | null;
     };
 
@@ -85,6 +86,7 @@ function figuresOf(live: Live, analytics: Read, row: AnalyticsRawSession | null)
       kind: 'known',
       contextPercent: live.read.contextPercent,
       contextWindow: live.read.contextPercent === null ? null : live.read.contextWindow,
+      contextTokens: live.read.contextPercent === null ? null : live.read.contextTokens,
       turns: live.read.turns,
     };
   if (live.kind === 'loading' || analytics.kind === 'loading') return { kind: 'pending' };
@@ -92,6 +94,7 @@ function figuresOf(live: Live, analytics: Read, row: AnalyticsRawSession | null)
     kind: 'known',
     contextPercent: row?.contextEndPercent ?? null,
     contextWindow: null,
+    contextTokens: null,
     turns: row?.turns ?? null,
   };
 }
@@ -101,11 +104,32 @@ type Read =
   | { readonly kind: 'ready'; readonly row: AnalyticsRawSession | null }
   | { readonly kind: 'failed'; readonly reason: string };
 
+/** “124K of 200K tokens”: the used count only beside the window it is out of; the window alone says “of 200K tokens”. */
+function contextWordsOf(figures: Extract<Figures, { kind: 'known' }>): string | null {
+  if (figures.contextWindow === null) return null;
+  const window = formatTokens(figures.contextWindow);
+  return figures.contextTokens === null
+    ? `of ${window} tokens`
+    : `${formatTokens(figures.contextTokens)} of ${window} tokens`;
+}
+
 const percentOf = (value: number): number => Math.max(0, Math.min(100, Math.round(value)));
 
-function Row({ label, children }: { readonly label: string; readonly children: React.ReactNode }) {
+function Row({
+  label,
+  hint,
+  children,
+}: {
+  readonly label: string;
+  readonly hint?: string;
+  readonly children: React.ReactNode;
+}) {
   return (
-    <div className="flex min-w-0 items-baseline justify-between gap-sm text-cell" data-info-row={label}>
+    <div
+      className="flex min-w-0 items-baseline justify-between gap-sm text-cell"
+      data-info-row={label}
+      {...(hint === undefined ? {} : { title: hint })}
+    >
       <span className="text-muted">{label}</span>
       <span className="flex min-w-0 items-baseline gap-xs">{children}</span>
     </div>
@@ -189,6 +213,11 @@ export function FerretUsageInfoPanel({
   // The live reading wins: the analytics row is the end of the PREVIOUS turn while a long one runs. The row gates only
   // what the row alone holds (tokens, cost, quota); the live context, turns and Insights link stand without it.
   const figures = figuresOf(live, read, row);
+  const contextWords = figures.kind === 'known' ? contextWordsOf(figures) : null;
+  const contextHint =
+    figures.kind === 'known' && figures.contextTokens !== null && figures.contextWindow !== null
+      ? `${figures.contextTokens.toLocaleString('en-US')} of ${figures.contextWindow.toLocaleString('en-US')} tokens used in the context window`
+      : null;
   const liveTurns = live.kind === 'read' ? (live.read.turns ?? 0) : 0;
   const quota =
     row?.agent == null ? null : store.quotaFor(connection.daemonId, { state: {}, config: { agent: row.agent } });
@@ -212,7 +241,7 @@ export function FerretUsageInfoPanel({
       {read.kind === 'loading' ? <Muted>Reading…</Muted> : null}
       {read.kind === 'failed' ? <Muted>Couldn’t read: {read.reason}</Muted> : null}
       {read.kind === 'ready' && row === null && liveTurns === 0 ? <Muted>No turns recorded yet</Muted> : null}
-      <Row label="Context">
+      <Row label="Context" {...(contextHint === null ? {} : { hint: contextHint })}>
         {figures.kind === 'pending' ? (
           <Muted>Reading…</Muted>
         ) : figures.contextPercent === null ? (
@@ -220,7 +249,7 @@ export function FerretUsageInfoPanel({
         ) : (
           <>
             <Meter label="Context used" percent={figures.contextPercent} />
-            {figures.contextWindow === null ? null : <Muted>of {formatTokens(figures.contextWindow)} tokens</Muted>}
+            {contextWords === null ? null : <Muted>{contextWords}</Muted>}
           </>
         )}
       </Row>

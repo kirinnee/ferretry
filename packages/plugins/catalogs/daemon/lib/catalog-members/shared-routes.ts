@@ -22,6 +22,7 @@ import {
   ApiError,
   errorResponse,
   jsonResponse,
+  conditionalTag,
   decodeParameter,
   type ApiRequest,
   type ApiResponse,
@@ -29,7 +30,6 @@ import {
   type RoutePattern,
 } from '@ferretry/kernel/contract';
 import { parseBody } from '../body.ts';
-import { namesTag } from '../response-headers.ts';
 import type { AuditEntry } from '../audit.ts';
 import { CatalogRefusal, type CatalogRefusalCode } from '../shared-catalogs/refusal.ts';
 import type { MemberPasskeyOutcome, MemberPasskeyRefusal, MemberPasskeyService } from './passkeys.ts';
@@ -264,12 +264,12 @@ export function sharedRoutes(deps: SharedRouteDeps): readonly SharedRoute[] {
         const catalogId = requireCatalog(context, context.params.get('catalogId'));
         const current = (await deps.catalogs.catalogs()).find(catalog => catalog.id === catalogId);
         if (current === undefined) throw new ApiError(404, 'no such catalog', 'catalog_unknown');
-        const tag = `"${String(current.revision)}"`;
-        const asked = context.request.headers.get('if-none-match');
-        if (asked !== undefined && namesTag(asked, tag))
-          return { status: 304, headers: new Map([['etag', tag]]), body: '' };
+        const { etag, held } = conditionalTag(context.request, `"${String(current.revision)}"`);
+        if (held) return { status: 304, headers: new Map([['etag', etag]]), body: '' };
         const signed = await deps.catalogs.signedManifest(catalogId);
-        return jsonResponse(signed, 200, { etag: `"${String(signed.manifest.revision)}"` });
+        return jsonResponse(signed, 200, {
+          etag: conditionalTag(context.request, `"${String(signed.manifest.revision)}"`).etag,
+        });
       },
     },
     {
@@ -284,12 +284,12 @@ export function sharedRoutes(deps: SharedRouteDeps): readonly SharedRoute[] {
         // A plain read first, so an item this catalog does not offer answers 404 whatever tag was sent, and a poll that
         // has nothing new never waits behind a write or signs anything.
         const revision = await asNotOffered(async () => await deps.catalogs.versionsRevision(catalogId, itemId.data));
-        const asked = context.request.headers.get('if-none-match');
-        const known = `"${String(revision)}"`;
-        if (asked !== undefined && namesTag(asked, known))
-          return { status: 304, headers: new Map([['etag', known]]), body: '' };
+        const { etag, held } = conditionalTag(context.request, `"${String(revision)}"`);
+        if (held) return { status: 304, headers: new Map([['etag', etag]]), body: '' };
         const signed = await asNotOffered(async () => await deps.catalogs.signedVersions(catalogId, itemId.data));
-        return jsonResponse(signed, 200, { etag: `"${String(signed.versions.revision)}"` });
+        return jsonResponse(signed, 200, {
+          etag: conditionalTag(context.request, `"${String(signed.versions.revision)}"`).etag,
+        });
       },
     },
     {

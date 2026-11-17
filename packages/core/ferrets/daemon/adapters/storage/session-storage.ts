@@ -1,4 +1,4 @@
-import type { Log, StateDamage, StateFileDef, StatePort } from '@ferretry/kernel/contract';
+import type { Log, StatePort } from '@ferretry/kernel/contract';
 import {
   canonicalJsonValue,
   deepFreezeJson,
@@ -21,10 +21,8 @@ import { archiveRegistryValue, parseArchiveRegistryValue } from '../../lib/stora
 import {
   createSessionEvent,
   encodeSessionEvent,
-  type JournalLine,
   journalFingerprint,
   parseSessionEvent,
-  scanJournal,
 } from '../../lib/storage/journal.ts';
 import { planIndexRebuild, type DocumentSource, type SessionSource } from '../../lib/storage/rebuild.ts';
 import { planReconciliation } from '../../lib/storage/reconciliation.ts';
@@ -39,9 +37,29 @@ import type {
   ReplayPage,
   SessionEvent,
 } from '../../lib/storage-types.ts';
+import { journalLinesAt, readJournalScan } from './journal-read.ts';
 import { KeyedSerialExecutor } from './keyed-serial-executor.ts';
 import { ListedSessionIndex } from './listed-session-index.ts';
+import {
+  DurableEventIndexError,
+  InvalidStateDocumentError,
+  MissingSessionJournalError,
+} from './session-storage-errors.ts';
+import type {
+  ArchiveVerdict,
+  DocumentFreshness,
+  JournalRead,
+  SessionDirectorySurvey,
+  SessionInspection,
+  SessionNames,
+  SessionRead,
+  SourceCollection,
+} from './session-storage-shapes.ts';
+import { assertFleetTailLimit, fileOf, sameFingerprint } from './session-storage-support.ts';
 import { StateSqliteIndex } from './sqlite-index.ts';
+
+export { InvalidStateDocumentError } from './session-storage-errors.ts';
+export type { ArchiveVerdict, DocumentFreshness, SessionDirectorySurvey } from './session-storage-shapes.ts';
 
 /**
  * THE SESSION STORE, ON FERRETS' STATE PORT.
@@ -63,129 +81,6 @@ import { StateSqliteIndex } from './sqlite-index.ts';
  * and the archive registry, and a transform may be asynchronous (the exit observer's compare-and-set reads the pane
  * registration inside it), which `StatePort.update`'s synchronous function cannot host.
  */
-
-/**
- * The kinds of a refused document, a fixed vocabulary: the port's damage kinds for a file it could not read, and
- * `refused_write` for a value THIS daemon computed and the declared schema refused before it reached the disk (the file
- * on disk is then not what is wrong).
- */
-export type InvalidDocumentKind = StateDamage['reason'] | 'refused_write';
-
-export class InvalidStateDocumentError extends Error {
-  constructor(
-    readonly file: string,
-    readonly reason: string,
-    /** The kind, from a fixed vocabulary ({@link InvalidDocumentKind}): safe to log, never a quote of the file. */
-    readonly damage: InvalidDocumentKind = 'schema',
-    /**
-     * The file as last written: the state port's version etag (inode, size and modification time), so the same damage
-     * is the same report until the file is written again (any rewrite is a new etag, even of identical bytes; it is a
-     * write identity, not a digest of the bytes). `undefined` when the port could not say.
-     */
-    readonly etag?: string,
-  ) {
-    super(`invalid JSON document ${file}: ${reason}`);
-    this.name = 'InvalidStateDocumentError';
-  }
-}
-
-class MissingSessionJournalError extends Error {
-  constructor(
-    readonly sessionId: SessionId,
-    readonly file: string,
-  ) {
-    super(`session ${sessionId} has lost its durable journal ${file}; refusing to treat it as empty`);
-    this.name = 'MissingSessionJournalError';
-  }
-}
-
-class DurableEventIndexError extends Error {
-  readonly durable = true;
-
-  constructor(
-    readonly sessionId: SessionId,
-    options: ErrorOptions,
-  ) {
-    super(`event for ${sessionId} is durable in the journal but could not be indexed`, options);
-    this.name = 'DurableEventIndexError';
-  }
-}
-
-interface SourceCollection {
-  readonly sources: readonly SessionSource[];
-  readonly problems: readonly JournalProblem[];
-  readonly failedSessionIds: readonly string[];
-  readonly lostJournalSessionIds: readonly string[];
-}
-
-/** One session as a health tick sees it: cheap to obtain, enough to spot lost history. */
-export interface SessionDirectorySurvey {
-  readonly id: SessionId;
-  /**
-   * True when the journal is gone from a session that owes one: the index witnesses a journal the session used to
-   * have, and the state folder no longer holds it.
-   */
-  readonly journalLost: boolean;
-}
-
-type SessionInspection =
-  | { readonly kind: 'current'; readonly session?: IndexedSession }
-  | { readonly kind: 'repair'; readonly source: SessionSource | null; readonly session?: IndexedSession };
-
-/** A session's journal as read: its lines, and whether the read reached the end of the file. */
-interface JournalRead {
-  readonly lines: readonly JournalLine[];
-  readonly complete: boolean;
-}
-
-/** A session's three files as read in one pass. */
-interface SessionRead {
-  readonly source: SessionSource | undefined;
-  readonly journal: JournalRead;
-}
-
-/** Which sessions hold which files, from the state port's listings. */
-interface SessionNames {
-  readonly all: readonly string[];
-  readonly configs: ReadonlySet<string>;
-  readonly states: ReadonlySet<string>;
-  readonly histories: ReadonlySet<string>;
-}
-
-function sameFingerprint(left: JournalFingerprint | null, right: JournalFingerprint | null): boolean {
-  return (
-    left === right ||
-    (left !== null &&
-      right !== null &&
-      left.device === right.device &&
-      left.inode === right.inode &&
-      left.size === right.size &&
-      left.modifiedAtMs === right.modifiedAtMs)
-  );
-}
-
-/** Where a collection file of `id` lives, for messages: the declared path with its `*` filled. */
-function fileOf(file: StateFileDef, id: SessionId): string {
-  return file.path.replace('*', id);
-}
-
-/**
- * How fresh a read must be. Kept so every caller is unchanged; the state port proves every read, so both answer the
- * file as it is now.
- */
-export type DocumentFreshness = 'proved' | 'heard';
-
-function assertFleetTailLimit(limit: number): void {
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000)
-    throw new Error('fleet event limit must be an integer between 1 and 10000');
-}
-
-/** What the archive records of a session it is about to take: the name it answered to and what that name's hold runs from. */
-export interface ArchiveVerdict {
-  readonly name?: string;
-  /** The configuration's `createdAt` and `updatedAt`: what a callsign's hold on its name is measured from. */
-  readonly configTimes?: { readonly createdAt: string; readonly updatedAt: string };
-}
 
 export class DaemonStorage {
   private closed = false;
@@ -240,14 +135,41 @@ export class DaemonStorage {
     }
   }
 
-  /** Whether the session's journal has at least one line (the state port cannot tell an empty journal from none). */
+  /**
+   * Whether the session's journal file holds anything (one `lstat`, no read: the old read of the whole journal to see
+   * its first line cost memory in proportion to the file). A file that cannot be told about counts as present, so a
+   * transient fault never reads as lost history.
+   */
   private async journalPresent(id: SessionId): Promise<boolean> {
     try {
-      for await (const _ of this.state.lines(FerretHistoryFiles, id)) return true;
+      const version = await this.state.version(FerretHistoryFiles, id);
+      return version !== undefined && version.size > 0;
     } catch {
       return true;
     }
-    return false;
+  }
+
+  /**
+   * The journal's file identity from one `lstat` (no read). `undefined` when it is absent, cannot be told, or is not
+   * one an equal etag can be trusted for (`settled`: a device and nanosecond ctime that no caller can set back, old
+   * enough that a later write could not share it): the journal is then read in full, as before.
+   */
+  private async journalEtag(id: SessionId): Promise<string | undefined> {
+    const version = await this.state.version(FerretHistoryFiles, id).catch(() => undefined);
+    return version?.settled === true ? version.etag : undefined;
+  }
+
+  /**
+   * Whether the journal on disk is exactly the one `indexed` was last brought level with: the version its row records
+   * (written in the same row as the fields it vouches for, by a complete read of that journal) is still the file's.
+   * A row without one is unknown, which is no proof.
+   */
+  private async journalUnchanged(id: SessionId, indexed: IndexedSession): Promise<boolean> {
+    return (
+      indexed.journal !== null &&
+      indexed.journalVersion !== undefined &&
+      (await this.journalEtag(id)) === indexed.journalVersion
+    );
   }
 
   /**
@@ -257,6 +179,8 @@ export class DaemonStorage {
   private async assertJournalKept(id: SessionId): Promise<void> {
     const indexed = this.index.findSession(id);
     if (indexed === undefined || indexed.journal === null) return;
+    // The journal the index describes is still the file on disk, so it is still there: no need to read it to see.
+    if (await this.journalUnchanged(id, indexed)) return;
     if (!(await this.journalPresent(id))) throw new MissingSessionJournalError(id, fileOf(FerretHistoryFiles, id));
   }
 
@@ -271,16 +195,7 @@ export class DaemonStorage {
   }
 
   private async readJournal(id: SessionId): Promise<JournalRead> {
-    const lines: JournalLine[] = [];
-    try {
-      for await (const value of this.state.lines(FerretHistoryFiles, id)) lines.push({ value });
-      return { lines, complete: true };
-    } catch (error) {
-      lines.push({
-        damaged: `event record could not be read: ${error instanceof Error ? error.message : String(error)}`,
-      });
-      return { lines, complete: false };
-    }
+    return await readJournalScan(this.state, id);
   }
 
   private async readDocumentSource(
@@ -297,24 +212,61 @@ export class DaemonStorage {
   }
 
   private async readSession(id: SessionId): Promise<SessionRead> {
+    // Taken BEFORE the read: a journal that moves in between leaves a stale version, which never matches.
+    const etag = await this.journalEtag(id);
     const [config, state, journal] = await Promise.all([
       this.readDocumentSource(FerretConfigFile, id),
       this.readDocumentSource(FerretStateFile, id),
       this.readJournal(id),
     ]);
-    if (config === undefined && state === undefined && journal.lines.length === 0)
-      return { source: undefined, journal };
+    if (config === undefined && state === undefined && journal.count === 0) return { source: undefined, journal };
     const file = fileOf(FerretHistoryFiles, id);
-    const scan = scanJournal(journal.lines, { file, sessionId: id });
-    const fingerprint = journalFingerprint(journal.lines.length);
+    const { scan } = journal;
+    const fingerprint = journalFingerprint(journal.count);
+    // Only a journal read to its end is one the row can be said to describe: a read cut short by an io fault indexed
+    // what it got, and must be read again.
     return {
       source: {
         id,
         config,
         state,
-        journal: fingerprint === null ? undefined : { file, scan, fingerprint },
+        journal:
+          fingerprint === null
+            ? undefined
+            : { file, scan, fingerprint, ...(journal.complete && etag !== undefined ? { version: etag } : {}) },
       },
       journal,
+    };
+  }
+
+  /**
+   * A session whose journal the index row already describes, as a source with no journal read: its row's scan state
+   * and fingerprint stand in for what a read would give, and its pointers are the index's own (an empty list here
+   * means "none to add", never "none exist"). Only for a row whose recorded version is still the file's.
+   */
+  private unchangedSource(
+    id: SessionId,
+    current: IndexedSession,
+    journal: JournalFingerprint,
+    config: DocumentSource | undefined,
+    state: DocumentSource | undefined,
+  ): SessionSource {
+    return {
+      id,
+      config,
+      state,
+      journal: {
+        file: fileOf(FerretHistoryFiles, id),
+        scan: {
+          pointers: [],
+          problems: [],
+          scannedTo: journal.size,
+          lastSequence: current.lastSequence,
+          lineAtOffset: current.journalLine,
+        },
+        fingerprint: journal,
+        ...(current.journalVersion === undefined ? {} : { version: current.journalVersion }),
+      },
     };
   }
 
@@ -334,18 +286,61 @@ export class DaemonStorage {
     return { session, eventCount: plan.events.length, problems: plan.problems };
   }
 
-  private async syncSessionUnlocked(id: SessionId): Promise<{
+  /** `written: 'documents'` — only a config or state document changed, so the metadata may be all that moves. */
+  private async syncSessionUnlocked(
+    id: SessionId,
+    written?: 'documents',
+  ): Promise<{
     readonly session?: IndexedSession;
     readonly eventCount: number;
     readonly problems: readonly JournalProblem[];
   }> {
-    const source = await this.readSource(id);
+    if (written === 'documents') {
+      const refreshed = await this.refreshDocumentsUnlocked(id);
+      if (refreshed !== undefined) return refreshed;
+    }
+    const source = (await this.readSession(id)).source;
     if (source === undefined) {
       this.index.removeSession(id);
       return { eventCount: 0, problems: [] };
     }
     this.assertExpectedJournal(id, this.index.findSession(id), source.journal !== undefined);
     return this.applySource(source);
+  }
+
+  /**
+   * The index brought up to a config or state document just written (&F4319).
+   *
+   * Such a write changes the session's metadata and nothing in its journal, yet it used to re-index the session
+   * from scratch: re-read the whole journal, plan every event, and queue a `replace-session` carrying a pointer
+   * per event, which the write-behind then copies to the index worker. One journal on the owner's host held
+   * 236,562 events, so every write cost the event loop a full journal read and a structured clone of that many
+   * pointers.
+   *
+   * So when the index already holds this session and its journal is exactly the one it was last level with (same
+   * file identity, same indexed fingerprint), only the metadata is refreshed — the `refresh-metadata` step a
+   * reconcile takes for the same observation, pointers untouched. The row's journal fields (last sequence, line,
+   * fingerprint) are the ones the index already holds, which a rescan of an unchanged journal would reproduce.
+   * Anything else — a session not indexed yet, a journal that moved — is the full sync. Answers `undefined` when
+   * it did not apply, so the caller syncs in full.
+   */
+  private async refreshDocumentsUnlocked(id: SessionId): Promise<
+    | {
+        readonly session?: IndexedSession;
+        readonly eventCount: number;
+        readonly problems: readonly JournalProblem[];
+      }
+    | undefined
+  > {
+    const current = this.index.findSession(id);
+    if (current?.journal == null || !(await this.journalUnchanged(id, current))) return undefined;
+    const [config, state] = await Promise.all([
+      this.readDocumentSource(FerretConfigFile, id),
+      this.readDocumentSource(FerretStateFile, id),
+    ]);
+    const source = this.unchangedSource(id, current, current.journal, config, state);
+    // No `eventCount`: counting the pointers is a scan of every one of them, and a document write ignores it.
+    return { ...this.applyMetadataRefresh(source), eventCount: 0 };
   }
 
   async syncSession(id: SessionId): Promise<RebuildResult> {
@@ -375,9 +370,16 @@ export class DaemonStorage {
     };
   }
 
-  private async collectSources(): Promise<SourceCollection> {
+  /**
+   * Every session as a source. With `skipUnchanged` (the reconcile), a session whose index row records the version the
+   * journal file still has is not read: its documents are, its journal is the row's own (see {@link unchangedSource}),
+   * and the session is named in `unchanged` so the reconcile takes its pointers as matching. A row without a version,
+   * a version that moved, a journal that is gone: read in full, exactly as before.
+   */
+  private async collectSources(skipUnchanged: boolean): Promise<SourceCollection> {
     const names = await this.sessionNames();
     const sources: SessionSource[] = [];
+    const unchanged = new Set<string>();
     const problems: JournalProblem[] = [];
     const failedSessionIds: string[] = [];
     const lostJournalSessionIds: string[] = [];
@@ -394,9 +396,19 @@ export class DaemonStorage {
       }
       if (this.archived.has(id)) continue;
       try {
+        const current = this.index.findSession(id);
+        if (skipUnchanged && current?.journal != null && (await this.journalUnchanged(id, current))) {
+          const [config, state] = await Promise.all([
+            this.readDocumentSource(FerretConfigFile, id),
+            this.readDocumentSource(FerretStateFile, id),
+          ]);
+          sources.push(this.unchangedSource(id, current, current.journal, config, state));
+          unchanged.add(id);
+          continue;
+        }
         const source = await this.readSource(id);
         if (source) {
-          this.assertExpectedJournal(id, this.index.findSession(id), source.journal !== undefined);
+          this.assertExpectedJournal(id, current, source.journal !== undefined);
           sources.push(source);
         }
       } catch (error) {
@@ -412,13 +424,13 @@ export class DaemonStorage {
         });
       }
     }
-    return { sources, problems, failedSessionIds, lostJournalSessionIds };
+    return { sources, unchanged, problems, failedSessionIds, lostJournalSessionIds };
   }
 
   async rebuildIndex(): Promise<RebuildResult> {
     this.assertOpen();
     return await this.indexSweep(async () => {
-      const collected = await this.collectSources();
+      const collected = await this.collectSources(false);
       const plan = planIndexRebuild(collected.sources);
       this.index.replaceAll(plan);
       const problems = [...collected.problems, ...plan.problems];
@@ -544,7 +556,7 @@ export class DaemonStorage {
   async reconcile(): Promise<RebuildResult> {
     this.assertOpen();
     return await this.indexSweep(async () => {
-      const collected = await this.collectSources();
+      const collected = await this.collectSources(true);
       const sourceById = new Map(collected.sources.map(source => [source.id, source]));
       const indexed = this.index.listSessions();
       const indexedById = new Map(indexed.map(session => [session.id, session]));
@@ -557,9 +569,11 @@ export class DaemonStorage {
         const lastIndexedEventMatches =
           current === undefined
             ? false
-            : journal === null
-              ? current.journal === null && current.lastSequence === 0
-              : current.journal !== null && this.pointerMatches(source.id, current, source);
+            : collected.unchanged.has(source.id)
+              ? true
+              : journal === null
+                ? current.journal === null && current.lastSequence === 0
+                : current.journal !== null && this.pointerMatches(source.id, current, source);
         return { id: source.id, journal, lastIndexedEventMatches };
       });
       const actions = planReconciliation(
@@ -656,7 +670,7 @@ export class DaemonStorage {
           try {
             publishing();
             await this.writeDocument('config', id, document);
-            await this.syncSessionUnlocked(id);
+            await this.syncSessionUnlocked(id, 'documents');
           } finally {
             this.configChanges += 1;
           }
@@ -754,7 +768,7 @@ export class DaemonStorage {
       await this.reviveIfArchived(id);
       await this.assertJournalKept(id);
       await this.writeDocument('state', id, document);
-      await this.syncSessionUnlocked(id);
+      await this.syncSessionUnlocked(id, 'documents');
       if (this.stateListeners.size > 0) this.publishState(id, document);
     });
   }
@@ -854,7 +868,7 @@ export class DaemonStorage {
           serializeJsonDocument(next);
           publishing();
           await this.writeDocument(kind, id, next);
-          await this.syncSessionUnlocked(id);
+          await this.syncSessionUnlocked(id, 'documents');
         } finally {
           if (kind === 'config') this.configChanges += 1;
         }
@@ -912,8 +926,11 @@ export class DaemonStorage {
       const entry = encodeSessionEvent(event);
       if (inspection.kind === 'repair' && inspection.source === null) this.index.removeSession(id);
       const current = this.applySessionInspection(inspection);
-      const position = read.journal.lines.length;
+      const position = read.journal.count;
       await this.state.append(FerretHistoryFiles, entry, id);
+      // No journal version is recorded here: another writer can append to this journal (another queue) between our
+      // append and a version read, and the row would then vouch for N lines while the file holds N+1. The next full
+      // read of the journal records its version safely.
       const session: IndexedSession = {
         id,
         status: current?.status,
@@ -922,6 +939,7 @@ export class DaemonStorage {
         lastSequence: event.sequence,
         journalLine: position + 2,
         journal: journalFingerprint(position + 1),
+        journalVersion: undefined,
       };
       const pointer: EventPointer = {
         sessionId: id,
@@ -995,15 +1013,13 @@ export class DaemonStorage {
   private async resolvePointers(
     id: SessionId,
     pointers: readonly EventPointer[],
-    lines?: readonly JournalLine[],
   ): Promise<readonly SessionEvent[] | undefined> {
     if (pointers.length === 0) return [];
-    const journal = lines ?? (await this.readJournal(id)).lines;
+    const journal = await journalLinesAt(this.state, id, new Set(pointers.map(pointer => pointer.byteOffset)));
     const events: SessionEvent[] = [];
     for (const pointer of pointers) {
-      const entry = journal[pointer.byteOffset];
-      if (entry === undefined || 'damaged' in entry) return undefined;
-      const event = parseSessionEvent(entry.value, id);
+      if (!journal.has(pointer.byteOffset)) return undefined;
+      const event = parseSessionEvent(journal.get(pointer.byteOffset), id);
       if (
         event === undefined ||
         event.sequence !== pointer.sequence ||
@@ -1168,6 +1184,18 @@ export class DaemonStorage {
   listSessions(): readonly IndexedSession[] {
     this.assertOpen();
     return this.index.listSessions();
+  }
+
+  /**
+   * When a live session's newest journal event was written, by that event's own stamp, from the index alone: no
+   * journal is read. The state port reads no file's modified time, so this is what a journal "last grew" means.
+   */
+  lastEventAt(id: SessionId): string | undefined {
+    this.assertOpen();
+    const row = this.index.findSession(id);
+    return row === undefined || row.lastSequence === 0
+      ? undefined
+      : this.index.eventPointers(id, row.lastSequence - 1, 1)[0]?.time;
   }
 
   /**
@@ -1426,7 +1454,7 @@ export class DaemonStorage {
     if (read.source === undefined) throw new Error(`archived session ${id} has no readable journal`);
     const pointers = planIndexRebuild([read.source]).events.filter(pointer => pointer.sequence > afterSequence);
     const selected = pointers.slice(0, limit);
-    const events = await this.resolvePointers(id, selected, read.journal.lines);
+    const events = await this.resolvePointers(id, selected);
     if (events === undefined) throw new Error(`journal of archived session ${id} is inconsistent`);
     return {
       events,

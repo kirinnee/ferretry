@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
 import type { Admission, ConfigAccessJudgement, ConfigAccessVerdict } from '../../../contract/bound.ts';
 import { ApiError, type ApiRequest, errorResponse, headersFrom, queryFrom } from '../../../contract/http.ts';
@@ -7,7 +6,7 @@ import { configRoutes } from '../../../host/config/routes.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import kernelManifest from '../../../plugin.ts';
-import { captureLog, HOME, loginsDef, manualClock, updatesDef } from './support.ts';
+import { captureLog, HOME, loginsDef, manualClock, TEST_ETAG_KEY, testEtag, updatesDef } from './support.ts';
 
 const UPDATES = `${HOME}/config/updates.yaml`;
 const RAW_SECRET =
@@ -42,6 +41,7 @@ function world(
     clock: manualClock(),
     log: captureLog(),
     binary: 'fy',
+    etagKey: TEST_ETAG_KEY,
     defs: [
       { plugin: 'updates', def: updatesDef },
       { plugin: 'logins', def: loginsDef },
@@ -386,10 +386,10 @@ describe('POST /v1/config/confirm', () => {
   });
 
   test('R-0274 an edit that moved on disk after the review, with the SAME 12-character etag prefix, is never confirmed', async () => {
-    // Two texts whose sha256 agree on the first 12 hex characters (found by a birthday search on 48 bits).
-    const reviewed = 'limit: 6\nnote: a2641039\n';
-    const unseen = 'limit: 999999\nnote: b896126\n';
-    const etagOf = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
+    // Two texts whose etags under TEST_ETAG_KEY agree on the first 12 hex characters (a birthday search on 48 bits).
+    const reviewed = 'limit: 6\nnote: a8776176\n';
+    const unseen = 'limit: 999999\nnote: b2234749\n';
+    const etagOf = testEtag;
     expect(etagOf(unseen).slice(0, 12)).toBe(etagOf(reviewed).slice(0, 12));
     expect(etagOf(unseen)).not.toBe(etagOf(reviewed));
     const w = world();

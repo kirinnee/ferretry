@@ -1,26 +1,25 @@
-import qrcode from 'qrcode-generator';
+import { localQr } from '@ferretry/std/qr';
 import type { IQrEncoder } from '../lib/catalog-share/ports.ts';
 
 /** Light modules are drawn, dark ones left as the terminal's background, around a one-module quiet zone. */
 const QUIET = 1;
 
 /**
- * Draws a share link as a QR made of block characters, generated here and never by an image service (today's
- * `QrCodeTerminal` over `qrcode-terminal`, which is not a workspace dependency on 5.0; `qrcode-generator` is). BLOCKS,
- * NOT AN IMAGE FILE: the owner is often at the far end of an ssh session. `compact` puts two module rows in one text
- * row with half blocks so the code fits an unscrolled window; `large` spends two columns and one row per module.
+ * Draws a share link as a QR made of block characters, generated here and never by an image service. The MODULES are
+ * the workspace's one encoder (`@ferretry/std/qr`, the same one the app halves draw with; a CLI half may not import the
+ * app shell, so it lives in the shared package); this file only turns them into text. BLOCKS, NOT AN IMAGE FILE: the
+ * owner is often at the far end of an ssh session. `compact` puts two module rows in one text row with half blocks so
+ * the code fits an unscrolled window; `large` spends two columns and one row per module. A link too long for a symbol a
+ * phone reads reliably throws `QrEncodeError` rather than drawing a truncated code.
  */
 export class BlockQrEncoder implements IQrEncoder {
   async encode(value: string, size: 'compact' | 'large'): Promise<string> {
-    const code = qrcode(0, 'L');
-    code.addData(value);
-    code.make();
-    const count = code.getModuleCount();
+    const { modules, size: count } = localQr(value);
     const span = count + QUIET * 2;
     const light = (row: number, column: number): boolean => {
       const r = row - QUIET;
       const c = column - QUIET;
-      return r < 0 || c < 0 || r >= count || c >= count || !code.isDark(r, c);
+      return r < 0 || c < 0 || r >= count || c >= count || modules[r]?.[c] !== true;
     };
     const lines: string[] = [];
     if (size === 'large') {

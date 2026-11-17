@@ -151,6 +151,7 @@ async function boot(): Promise<World> {
   const h = await testHost({
     plugins: [
       real('ferrets'),
+      real('mailbox'),
       real('conversation'),
       harnessPlugin(harness),
       runnerPlugin(new FakeRunner()),

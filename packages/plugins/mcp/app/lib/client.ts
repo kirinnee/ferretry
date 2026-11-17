@@ -12,6 +12,7 @@
 import {
   FerretSummarySchema,
   type RestartResult,
+  type RestartWhen,
   RestartRequestSchema,
   RestartResultSchema,
 } from '@ferretry/core-ferrets/contract';
@@ -124,7 +125,8 @@ const PREVIEW_ROUTES = {
   project: 'POST /v1/ferrets/:ferretId/mcp/project/preview',
   login: 'POST /v1/ferrets/:ferretId/mcp/login/preview',
 } as const;
-const ADD_ROUTES = {
+/** The two writes "Add…" can send: what this device may do with them is the panel's authority to offer it. */
+export const ADD_ROUTES = {
   project: 'POST /v1/ferrets/:ferretId/mcp/project',
   login: 'POST /v1/ferrets/:ferretId/mcp/login',
 } as const;
@@ -166,13 +168,18 @@ export const addFerretMcp = async (
   );
 
 /**
- * Restarts these ferrets' CLIs with their conversations (a busy one waits for its next idle moment). The answer is Ferrets'
- * own `RestartResult`: a 200 can mean restarted, queued, skipped or failed, so the caller reads which, per ferret.
+ * Restarts these ferrets' CLIs with their conversations: `when: 'now'` restarts a busy one at once (its turn is
+ * interrupted), `'idle'` leaves it waiting for its next idle moment. The answer is Ferrets' own `RestartResult`: a 200 can
+ * mean restarted, queued, skipped or failed, so the caller reads which, per ferret.
  */
-export const restartFerrets = async (client: McpClient, ids: readonly string[]): Promise<RestartResult> =>
+export const restartFerrets = async (
+  client: McpClient,
+  ids: readonly string[],
+  when: RestartWhen,
+): Promise<RestartResult> =>
   RestartResultSchema.parse(
     await client.call(RESTART_ROUTE, {
-      body: RestartRequestSchema.parse({ scope: 'ids', ids }),
+      body: RestartRequestSchema.parse({ scope: 'ids', ids, when }),
       headers: { 'x-fy-request-id': crypto.randomUUID() },
     }),
   );

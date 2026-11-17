@@ -1,5 +1,5 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import type { InputRequestView } from '../../../app/lib/input-wire.ts';
+import type { InputRequest } from '../../../contract/index.ts';
 
 /** Obvious fakes: the only secret-shaped strings any test here uses. */
 export const FAKE_VALUE = 'fake-secret-000';
@@ -9,7 +9,7 @@ const DIGEST = 'b'.repeat(64);
 const FAR = '2099-01-01T00:00:00.000Z';
 
 /** A terminal asking for one hidden secret: the case Enter starts ticked for. */
-export function terminalRequest(patch: Partial<Record<string, unknown>> = {}): InputRequestView {
+export function terminalRequest(patch: Partial<Record<string, unknown>> = {}): InputRequest {
   return {
     id: REQUEST_ID,
     sessionId: 'hadi',
@@ -19,6 +19,7 @@ export function terminalRequest(patch: Partial<Record<string, unknown>> = {}): I
     sensitivity: 'secret',
     fields: [{ id: 'value', label: 'Password', sensitivity: 'secret' }],
     submit: 'offer-owner',
+    raisedAt: '2026-11-10T00:00:00.000Z',
     expiresAt: FAR,
     observed: {
       kind: 'terminal',
@@ -33,11 +34,11 @@ export function terminalRequest(patch: Partial<Record<string, unknown>> = {}): I
     observedDigest: DIGEST,
     state: 'pending',
     ...patch,
-  } as InputRequestView;
+  } as InputRequest;
 }
 
 /** A page asking for one password: the case Enter starts un-ticked for. */
-export function pageRequest(patch: Partial<Record<string, unknown>> = {}): InputRequestView {
+export function pageRequest(patch: Partial<Record<string, unknown>> = {}): InputRequest {
   return terminalRequest({
     target: { kind: 'page', key: 'app' },
     prompt: 'Sign in to example.test',
@@ -90,10 +91,43 @@ export const COPY_SOURCE = {
 } as const;
 
 /** A paste of a secure copy into a terminal: nothing to type, the owner allows it. */
-export function pasteRequest(patch: Partial<Record<string, unknown>> = {}): InputRequestView {
+export function pasteRequest(patch: Partial<Record<string, unknown>> = {}): InputRequest {
   return terminalRequest({
     prompt: 'the new Vercel token',
     source: COPY_SOURCE,
+    ...patch,
+  });
+}
+
+/** The one-tap account the daemon matched to this target, as an offer: handles, labels and a sign-in id, never a value. */
+export const MATCHED_OFFER = {
+  id: 'SUDO_KIRIN_BOX',
+  label: 'sudo on kirin-box',
+  username: 'kirin',
+  fills: 'password',
+  matched: true,
+  signIn: 'si_0123456789abcdef',
+  primary: true,
+  why: 'only',
+} as const;
+
+/** An account the owner may pick by hand: it signs in somewhere else, so it is never the one-tap choice. */
+export const HAND_OFFER = {
+  id: 'WORK_ADMIN',
+  label: 'Work admin',
+  fills: 'password',
+  matched: false,
+  elsewhere: ['liftoff.okta.com'],
+} as const;
+
+/** A card the daemon drew saved-login offers for: the matched account and one picked by hand. */
+export function savedRequest(patch: Partial<Record<string, unknown>> = {}): InputRequest {
+  return terminalRequest({
+    saved: {
+      match: 'sudo@kirin-box',
+      offers: [MATCHED_OFFER, HAND_OFFER],
+      project: { id: 'p1', name: 'ferretry' },
+    },
     ...patch,
   });
 }

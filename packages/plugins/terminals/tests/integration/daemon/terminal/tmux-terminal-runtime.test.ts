@@ -567,3 +567,26 @@ describe('TmuxTerminalRuntime login shell', () => {
     }
   });
 });
+
+describe('TmuxTerminalRuntime start directory', () => {
+  it('should escape the tmux start directory but record the real directory and verbatim title and name', async () => {
+    // Arrange
+    const tmux = new FakeTmux([ok()]);
+    const runtime = new TmuxTerminalRuntime(tmux, () => 1_000, plainShell);
+    // Act
+    await runtime.create({
+      id: terminal.id,
+      ownerId: terminal.ownerId,
+      title: '#(title)',
+      name: '#(name)',
+      cwd: '/r/#(touch pwned)',
+      size: { cols: 100, rows: 30 },
+    } as never);
+    // Assert
+    const argv = tmux.received[0] ?? [];
+    should(argv[argv.indexOf('-c') + 1]).equal('/r/##(touch pwned)');
+    should(argv).containEql('/r/#(touch pwned)');
+    should(argv).containEql('#(title)');
+    should(argv).containEql('#(name)');
+  });
+});

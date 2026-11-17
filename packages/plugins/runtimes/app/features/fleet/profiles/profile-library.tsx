@@ -5,13 +5,16 @@
  * a pointer. On a phone the same list opens as a picker sheet from the contents' **Add** button.
  */
 
+import { PanelSlot, useSlotHasUsablePanels } from '@ferretry/app';
 import { GripVertical } from 'lucide-react';
 import { type DragEvent, type ReactNode, useId } from 'react';
 import { createPortal } from 'react-dom';
+import { COMPONENT_MCP_SLOT } from '../../../../contract/index.ts';
 import { cn } from '../../../ui.ts';
 import { BottomSheet } from '../../../ui.ts';
 import { Button } from '../../../ui.ts';
 import { CatalogNote } from '../components/catalog-ui.tsx';
+import { currentDaemon } from '../shell/machine-route.ts';
 import { filterLibrary, ITEM_KIND_WORDS, ITEM_KINDS, type ItemKind, type ProfileItem } from './profile-model.ts';
 
 export interface LibraryFilter {
@@ -140,10 +143,31 @@ function LibraryRows({
             >
               {added ? addedLabel : 'Add'}
             </Button>
+            {item.kind === 'mcp' ? (
+              <McpStatusFooter name={item.name} usedByRuntimes={item.usedByRuntimes ?? 0} />
+            ) : null}
           </li>
         );
       })}
     </>
+  );
+}
+
+/**
+ * Where an MCP server stands, under its library row: the panel MCP contributes to `runtimes.component-mcp`, handed the
+ * component's name (the subject) and how many runtimes use it. Nothing is drawn where no panel is placed, or off a
+ * machine page, so the row reads as it did before the slot.
+ */
+export function McpStatusFooter({ name, usedByRuntimes }: { readonly name: string; readonly usedByRuntimes: number }) {
+  const daemon = currentDaemon();
+  // Optional footer: placed AND its plugin usable on THIS daemon — with MCP off, the shell's "is off" line under every
+  // row would be noise, so nothing is drawn (and the panel never mounts, so it never reads).
+  const usable = useSlotHasUsablePanels(daemon ?? '', COMPONENT_MCP_SLOT);
+  if (daemon === null || !usable) return null;
+  return (
+    <div className="col-span-2 min-w-0" data-library-mcp-status={name}>
+      <PanelSlot daemon={daemon} slot={COMPONENT_MCP_SLOT} subject={name} props={{ usedByRuntimes }} />
+    </div>
   );
 }
 

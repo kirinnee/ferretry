@@ -4,7 +4,7 @@
  */
 import { skeletonSentence } from '@ferretry/kernel/contract';
 import type { VerbHandler } from '@ferretry/kernel/manifest';
-import { parseArgs } from './argv.ts';
+import { declaredSwitches, parseArgs } from './argv.ts';
 import { type ClientDeps, type Surfaces, surfacesOf } from './client.ts';
 import { AS_OWNER_NOTE, inPane } from './credential.ts';
 import { askVerb } from './commands/ask.ts';
@@ -38,15 +38,18 @@ import {
   machineSetVerb,
   machineShowVerb,
 } from './commands/machine.ts';
+import { setupVerb } from './commands/setup.ts';
 import { statuslineVerb } from './commands/statusline.ts';
 import { wordsVerb } from './commands/words.ts';
 import { updateVerb } from './commands/update.ts';
 import { EXIT, reportFailure, ShellError } from './errors.ts';
 import { lazyClient } from './lazy-client.ts';
+import { undeclaredOption } from './option-guard.ts';
 import { declaredEnvironment, pluginEnvironment } from './plugin-env.ts';
 import { buildPluginGraph } from './plugin-graph.ts';
 import type { ShellContext, ShellVerb } from './shell-context.ts';
 import { renderGroupHelp, renderRootHelp, renderVerbHelp, usageLine, verbsUnder } from './help.ts';
+import { forwardNewToLink } from './forwards.ts';
 import { buildVerbTable, expandAlias, resolveVerb, type VerbEntry, type VerbTable } from './verbs.ts';
 import type { CliWorld } from './world.ts';
 
@@ -84,6 +87,7 @@ const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'machine install': machineInstallVerb,
   'machine export': machineExportVerb,
   'machine clone': machineCloneVerb,
+  setup: setupVerb,
   update: updateVerb,
   statusline: statuslineVerb,
 };
@@ -237,8 +241,20 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
   let resolved = resolveVerb(table, tokens);
   for (let hops = 0; resolved.kind === 'verb' && resolved.entry.alias !== undefined; hops += 1) {
     if (hops >= 4) throw new ShellError(`the alias "${resolved.entry.line}" runs another alias too many times`);
+    // A hidden alias is an old spelling: it runs, and says on stderr what replaced it.
+    if (resolved.entry.hidden === true)
+      io.err(`\`${identity.binary} ${resolved.entry.line}\` is now \`${identity.binary} ${resolved.entry.alias}\`\n`);
     tokens = expandAlias(resolved.entry, resolved.rest) ?? tokens;
     resolved = resolveVerb(table, tokens);
+  }
+  // `fy new --continue [words]` / `--since` is `fy link …`: the one verb the person meant runs, with its own sentences.
+  if (resolved.kind === 'verb') {
+    const forward = forwardNewToLink(resolved.entry, resolved.rest, identity.binary);
+    if (forward?.kind === 'refused') {
+      io.err(`${forward.message}\n`);
+      return EXIT.usage;
+    }
+    if (forward?.kind === 'forward') resolved = resolveVerb(table, forward.tokens);
   }
   if (resolved.kind === 'unknown') return unknownVerb(world, resolved);
 
@@ -249,7 +265,17 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     io.out(`${renderVerbHelp(identity.binary, entry, table)}\n`);
     return EXIT.ok;
   }
-  const invocation = parseArgs(resolved.rest);
+  const invocation = parseArgs(resolved.rest, declaredSwitches(entry.options));
+  // An option the verb does not declare is refused here, before anything connects or runs: a verb reads only the names
+  // it knows, so an undeclared one (`restart --outdated --dry-run`) would otherwise be dropped without a word.
+  const stray = undeclaredOption(entry.owner, entry.line, entry.options, invocation);
+  if (stray !== undefined) {
+    const verbLine = entry.words.join(' ');
+    io.err(
+      `${identity.binary}: unknown option ${stray} for "${verbLine}"; see \`${identity.binary} ${verbLine} --help\`\n`,
+    );
+    return EXIT.usage;
+  }
   const lacking = missingRequiredOption(entry, invocation);
   if (lacking !== undefined) {
     io.err(`error: required option '${lacking.flag}' not specified\n${usageLine(identity.binary, entry)}\n`);
@@ -282,6 +308,7 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
       surfaces,
       graph: buildPluginGraph(world.registry),
       deps,
+      runVerb: words => dispatch(words, world),
       client: caller => lazyClient(deps, caller, surfaces, inPane(world.environment)),
     };
     return await handler(context);

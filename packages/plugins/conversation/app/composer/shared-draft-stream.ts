@@ -8,8 +8,10 @@
  * The stream carries the same raw text as the two owner-only shared-draft routes (`OWN_DRAFT`); nothing
  * here masks or copies it.
  *
- * An Agenda item's own draft is named in the query (`?item=`), which the client's socket carries. GAP(app-shell), see
- * `./seam-drafts.ts`: `position` is accepted and not sent, so every stream starts from the whole draft.
+ * An Agenda item's own draft is named in the query (`?item=`), which the client's socket carries. A returning composer's
+ * position (where its copy last agreed with the daemon) rides the same query as `generation`, `epoch` and `rev`, ALL
+ * or NONE (the daemon refuses half a position): the daemon then answers with what moved since, not the whole draft.
+ * No position, or one the composer is resyncing from, asks for the whole draft.
  */
 import { type DraftClientFrame, type DraftServerFrame, DraftServerFrameSchema } from '../../contract/index.ts';
 import type { DraftPosition } from './shared-draft-sync.ts';
@@ -30,10 +32,24 @@ export interface SharedDraftStreamLink {
   close(): void;
 }
 
+/** The stream's query: the item's own draft, and the position the composer's copy stood at (all three or none). */
+const streamQuery = (
+  scope: DaemonFerretScope,
+  position: DraftPosition | undefined,
+): Readonly<Record<string, string>> | undefined => {
+  const query = {
+    ...(scope.item === undefined ? {} : { item: scope.item }),
+    ...(position === undefined
+      ? {}
+      : { generation: position.generation, epoch: String(position.epoch), rev: String(position.rev) }),
+  };
+  return Object.keys(query).length === 0 ? undefined : query;
+};
+
 export const openSharedDraftStream = async (
   client: Pick<DraftStreamClient, 'socket'>,
   scope: DaemonFerretScope,
-  _position: DraftPosition | undefined,
+  position: DraftPosition | undefined,
   handlers: SharedDraftStreamHandlers,
 ): Promise<SharedDraftStreamLink> => {
   if (client.socket === undefined) throw new Error('this client opens no live stream');
@@ -97,7 +113,7 @@ export const openSharedDraftStream = async (
       onClose: (reason, code) => end(code ?? closeCodeOf(reason), reason),
     },
     // An item's own draft is named only in the query: the bare route would stream the CHAT's draft into its composer.
-    scope.item === undefined ? undefined : { item: scope.item },
+    streamQuery(scope, position),
   );
   refuse = () => {
     socket.close();

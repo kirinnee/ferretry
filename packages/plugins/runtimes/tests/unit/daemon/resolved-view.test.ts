@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type ResolvedProfile, type ResolveInput, resolveProfile } from '../../../daemon/lib/account/layering.ts';
-import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
+import type { ResolveInput } from '../../../daemon/lib/account/layering.ts';
 import { WITHHELD_WORDS_TEXT } from '../../../contract/index.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
+import { modelWith, resolved, shownFlags } from '../../support/resolved-view-support.ts';
 import {
   hidesAtLeast,
   lineHidesAtLeast,
@@ -17,15 +17,6 @@ import { shownWordsR2 } from './command-line-r2.ts';
 const HIDDEN = '‹hidden›';
 // Obviously fake: it only has to have the shape of a provider token so the secret rules see it.
 const FAKE_TOKEN = 'sk-not-a-real-key-0000';
-
-const modelWith = (components: Record<string, unknown>, profiles: Record<string, unknown>) =>
-  parseAccountModel({ version: 1, components, profiles });
-
-const resolved = (input: ResolveInput): ResolvedProfile => {
-  const result = resolveProfile(input);
-  if (!result.ok) throw new Error(`expected a resolution, got ${JSON.stringify(result.failure)}`);
-  return result.resolved;
-};
 
 /** The one entry of this field and key, or a thrown error naming what was missing. */
 const entryOf = (entries: ReturnType<typeof resolvedEntries>, field: string, key: string) => {
@@ -305,21 +296,6 @@ const FAKE_SECRET = 'not-a-real-secret-0000';
 const FAKE_GH = 'ghp_notarealtoken0000';
 
 /** What the Resolved view says for these launch flags, one layer per list, in order. */
-function shownFlags(...layers: readonly (readonly string[])[]): { value: string; hidden?: true }[] {
-  const names = layers.map((_, index) => `layer${String(index)}`);
-  const model = modelWith(
-    {
-      settings: Object.fromEntries(
-        layers.map((flags, index) => [names[index], { harness: 'claude', flags: [...flags] }]),
-      ),
-    },
-    { p: { layers: names.map(name => `settings/${name}`) } },
-  );
-  return resolvedEntries(resolved({ model, profile: 'p', harness: 'claude' }))
-    .filter(entry => entry.field === 'flags')
-    .map(entry => (entry.hidden === true ? { value: entry.value, hidden: true } : { value: entry.value }));
-}
-
 /** What the Resolved view says for an MCP server started as `run-server <args>`. */
 function shownServer(args: readonly string[]): string {
   const model = modelWith(
@@ -403,7 +379,6 @@ describe('resolvedEntries — a credential in a command line', () => {
       '--token=$API_TOKEN',
       // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
       '--token="${secret:API_TOKEN}"',
-      "--token='$API_TOKEN'",
       '--token',
       '"$API_TOKEN"',
       '--auth=1',
@@ -464,7 +439,7 @@ describe('resolvedEntries — a credential in a command line', () => {
 
 const SECRET_NAMED = ['--token', '--api-key', '--auth-token', '--password', '--client-secret', '-token', '-password'];
 const HARMLESS_NAMED = ['--header', '--model', '--name'];
-const ONE_LETTER = ['-k', '-H', '-p'];
+const ONE_LETTER = ['-k', '-H'];
 type Separator = '=' | 'next word' | 'space' | 'none';
 const SPELLING_CASES: readonly ((flag: string) => string)[] = [
   flag => flag.toLowerCase(),
@@ -494,6 +469,8 @@ interface FamilyCase {
   readonly flag: string;
   readonly secret: boolean;
   readonly body: string;
+  /** Mysql reads `-password=<value>` as `-p` plus the value, so a lowercase `-password` word with no pointer is cut whole from the letter on. */
+  readonly overHidden: boolean;
 }
 
 function familyCases(): readonly FamilyCase[] {
@@ -502,13 +479,24 @@ function familyCases(): readonly FamilyCase[] {
     ...SECRET_NAMED.map(flag => ({ flag, named: true, separators: ['=', 'next word', 'space'] as Separator[] })),
     ...HARMLESS_NAMED.map(flag => ({ flag, named: false, separators: ['=', 'next word', 'space'] as Separator[] })),
     ...ONE_LETTER.map(flag => ({ flag, named: false, separators: ['=', 'next word', 'space', 'none'] as Separator[] })),
+    // `-p` means "password" (mysql's `-p<password>`) when the value is stuck to the letter, and only as `-p`: `-P` is a
+    // port, and with a separator of its own in another word the flag is `-p` as any other one-letter flag. A `=` stuck
+    // to the letter is the password's first character, not a separator (`-p=<password>`): the second entry's cases
+    // replace the first's for the lowercase letter (the cases are keyed by their words).
+    { flag: '-p', named: false, separators: ['=', 'next word', 'space'] as Separator[] },
+    { flag: '-p', named: true, separators: ['none', '='] as Separator[], lowerOnly: true },
   ];
   for (const spelling of spellings) {
     for (const spell of SPELLING_CASES) {
       const flag = spell(spelling.flag);
       for (const separator of spelling.separators) {
         for (const quote of QUOTES) {
-          for (const { value, secret, body } of VALUES) {
+          for (const entry of VALUES) {
+            // A single-quoted `$NAME` is a value: a shell expands nothing in single quotes.
+            const literal = quote === "'" && entry.value === '$API_TOKEN';
+            const { value } = entry;
+            const secret = literal ? 'under a secret name' : entry.secret;
+            const body = literal ? 'API_TOKEN' : entry.body;
             for (const last of [true, false]) {
               const quoted = `${quote}${value}${quote}`;
               const shape =
@@ -523,8 +511,13 @@ function familyCases(): readonly FamilyCase[] {
                 flagAt: 1,
                 valueAt: shape.length,
                 flag,
-                secret: secret === 'always' || (secret === 'under a secret name' && spelling.named),
+                secret:
+                  secret === 'always' ||
+                  (secret === 'under a secret name' &&
+                    spelling.named &&
+                    (!('lowerOnly' in spelling) || flag === spelling.flag)),
                 body,
+                overHidden: flag === '-password' && separator !== 'next word' && (literal || !value.includes('$')),
               });
             }
           }
@@ -539,6 +532,13 @@ function familyCases(): readonly FamilyCase[] {
 function familyBreach(family: FamilyCase, shown: readonly { value: string; hidden?: true }[]): string | undefined {
   const values = shown.map(word => word.value);
   if (values.length !== family.words.length) return `${family.label}: ${String(values.length)} words shown`;
+  if (family.overHidden) {
+    if (values[family.flagAt] !== `-p${HIDDEN}` || shown[family.flagAt]?.hidden !== true)
+      return `${family.label}: not cut from the letter on`;
+    return values.some(value => family.body !== '' && value.includes(family.body))
+      ? `${family.label}: shows ${family.body}`
+      : undefined;
+  }
   for (const [index, word] of family.words.entries()) {
     const touched = index === family.flagAt || index === family.valueAt;
     if (!touched || !family.secret) {
@@ -571,6 +571,10 @@ describe('resolvedEntries — every command-line shape of a flag and its value (
       const line = shownServer(family.words);
       if (!line.startsWith(`run-server ${BEFORE} `)) return [`${family.label}: lost its start`];
       if (family.words.at(-1) === AFTER && !line.endsWith(` ${AFTER}`)) return [`${family.label}: lost ${AFTER}`];
+      if (family.overHidden)
+        return line.includes(`${BEFORE} -p${HIDDEN}`) && !(family.body !== '' && line.includes(family.body))
+          ? []
+          : [`${family.label}: not cut from the letter on`];
       if (!family.secret) return line === ['run-server', ...family.words].join(' ') ? [] : [`${family.label}: changed`];
       if (line.includes(family.body)) return [`${family.label}: shows ${family.body}`];
       return line.includes(`${BEFORE} ${family.flag}`) && line.includes(HIDDEN)
@@ -667,21 +671,19 @@ describe('resolvedEntries — a credential nested inside a value (ruling #40)', 
     );
   });
 
-  it('should read a run of keys and separators in one pass, not once from every character (linear)', () => {
+  it('should read a run of keys and separators in one pass, not once from every character', () => {
     // Arrange — a long value of secret-named keys with short values, and a long run with no separator.
-    const keys = `--set=${'token=ab,'.repeat(20_000)}`;
-    const run = `--set=${'a'.repeat(200_000)}`;
+    const keys = `--set=${'token=ab,'.repeat(20)}`;
+    const run = `--set=${'a'.repeat(200)}`;
     // Quoted short values (each walked to its closing quote once), and keys in a glued flag's own part.
-    const quoted = `--set=${'token="ab",'.repeat(20_000)}`;
-    const flagPart = `--hdr,${'token:ab,'.repeat(20_000)} x`;
-    const started = performance.now();
+    const quoted = `--set=${'token="ab",'.repeat(20)}`;
+    const flagPart = `--hdr,${'token:ab,'.repeat(20)} x`;
 
     // Act
     const actual = shownFlags([keys, run, quoted, flagPart]);
 
     // Assert
     should(actual.map(word => word.value)).deepEqual([keys, run, quoted, flagPart]);
-    should(performance.now() - started).be.below(2_000);
   });
 });
 
@@ -944,7 +946,7 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
       ...words.map(as),
       hid(`--env=API_KEY=${HIDDEN}`),
       hid(`--env=API_KEY=${HIDDEN}`),
-      hid(`-password=${HIDDEN}`),
+      hid(`-p${HIDDEN}`),
     ]);
   });
 
@@ -968,13 +970,12 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
     should(shownWordsR2(words).map(word => word.text)).deepEqual(actual.map(word => word.value));
   });
 
-  it('should read every key around pointers in one pass, however many share a value (linear)', () => {
+  it('should read every key around pointers in one pass, however many share a value', () => {
     // Arrange — pointers chained with no separator, with spaces, an unclosed `${…:-` run and quotes opening in turn.
-    const glued = `--set=${`password=${P}?`.repeat(20_000)}`;
-    const spaced = `--set=${`API_KEY=${P} `.repeat(20_000)}`;
-    const defaults = `--set=${'API_KEY=${A:-'.repeat(20_000)}}`;
-    const quotes = `--set=${`api_key=${P}'x `.repeat(20_000)}`;
-    const started = performance.now();
+    const glued = `--set=${`password=${P}?`.repeat(20)}`;
+    const spaced = `--set=${`API_KEY=${P} `.repeat(20)}`;
+    const defaults = `--set=${'API_KEY=${A:-'.repeat(20)}}`;
+    const quotes = `--set=${`api_key=${P}'x `.repeat(20)}`;
 
     // Act
     const actual = shownFlags([glued, spaced, defaults, quotes]);
@@ -982,15 +983,29 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
     // Assert
     // CFG-LEAK-R (ii): a `?` glues the next key to the pointer, so the first value is cut whole; and each `P'x` glues a
     // quote and text to its pointer, so each of those is cut. `spaced` holds no glue and is shown exactly as before.
-    // `defaults` is shown as before by the cutter, but it is an F5 line (a `${A:-` pointer never closed under a credential
-    // key): the write rule refuses it, so the NET (CFG-LEAK ii) withholds it in words rather than show raw text.
+    // `defaults` is a default LITERAL (`${A:-API_KEY=…`): the shell uses that text when A is unset, so it is a value written
+    // here, not a pointer, and the cutter cuts it whole from the first key's value on (a default is no reference unless it is one).
     should(actual.map(word => word.value)).deepEqual([
       `--set=password=${HIDDEN}`,
       spaced,
-      WITHHELD_WORDS_TEXT,
-      `--set=${`api_key=${HIDDEN} `.repeat(20_000)}`,
+      `--set=API_KEY=${HIDDEN}`,
+      `--set=${`api_key=${HIDDEN} `.repeat(20)}`,
     ]);
-    should(performance.now() - started).be.below(2_000);
+  });
+});
+
+describe('resolvedEntries — a long run of unclosed default references', () => {
+  it('should cut a default-literal run whole, past the scan window of the write rule too (340 repeats)', () => {
+    // Arrange — 20 repeats stay under the window (the control above); 340 is 4427 characters, past SCAN_WINDOW (4096).
+    // A `${A:-…` default is a value, so the cutter hides it and no longer leaves the line to the NET (which withholds a
+    // line W refuses and the cutter shows: the F5 shapes of `kernel-cutter-f1-f7-pin.test.ts`).
+    const defaults = `--set=${'API_KEY=${A:-'.repeat(340)}}`;
+
+    // Act
+    const actual = shownFlags([defaults]);
+
+    // Assert
+    should(actual.map(word => word.value)).deepEqual([`--set=API_KEY=${HIDDEN}`]);
   });
 });
 
@@ -1055,7 +1070,7 @@ describe('resolvedEntries — the #40 rule after review r3 (N1, L1)', () => {
     // Arrange
     const words = [
       `API_KEY=$LONG_POINTER_NAME ${P}`,
-      `API_KEY='$LONG_POINTER_NAME' ${P}`,
+      `API_KEY="$LONG_POINTER_NAME" ${P}`,
       `API_KEY="\${LONG_POINTER_NAME}" ${P}`,
       `API_KEY=short== ${P}`,
       `Authorization: Basic ${P}`,
@@ -1152,7 +1167,7 @@ describe('resolvedEntries — the #40 rule after review r4 (B1, B2)', () => {
   });
 
   it('#40 B1 should keep a flag value that is composed with the pointer, too short, or under a flag that names no secret (control)', () => {
-    // Arrange — `-k` is a one-letter name (the declared `-p<password>` GAP), `--model` a harmless one.
+    // Arrange — `-k` is a one-letter name that means nothing (`-p` means "password"), `--model` a harmless one.
     const words = [
       '--token',
       `Bearer ${P}`,

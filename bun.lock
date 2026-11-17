@@ -24,12 +24,13 @@
       "name": "@ferretry/app",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-asks": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-conversation": "workspace:*",
         "@ferretry/plugin-layouts": "workspace:*",
+        "@ferretry/std": "workspace:*",
         "highlight.js": "^11.11.1",
         "lucide-react": "^0.468.0",
-        "qrcode-generator": "^2.0.4",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "react-markdown": "^10.1.0",
@@ -135,6 +136,17 @@
         "react-test-renderer": "^19.0.0",
       },
     },
+    "packages/core/mailbox": {
+      "name": "@ferretry/core-mailbox",
+      "version": "5.0.0",
+      "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
+        "@ferretry/kernel": "workspace:*",
+        "@ferretry/std": "workspace:*",
+        "zod": "4.4.3",
+      },
+    },
     "packages/core/vault": {
       "name": "@ferretry/core-vault",
       "version": "5.0.0",
@@ -216,6 +228,7 @@
         "zod": "4.4.3",
       },
       "devDependencies": {
+        "@ferretry/plugin-board": "workspace:*",
         "@happy-dom/global-registrator": "^20.11.1",
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
@@ -293,12 +306,12 @@
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-access": "workspace:*",
         "@ferretry/plugin-connections": "workspace:*",
+        "@ferretry/plugin-mcp": "workspace:*",
         "@ferretry/plugin-projects": "workspace:*",
         "@ferretry/plugin-runtimes": "workspace:*",
         "@ferretry/plugin-skills": "workspace:*",
         "@ferretry/std": "workspace:*",
         "lucide-react": "^0.468.0",
-        "qrcode-generator": "^2.0.4",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "zod": "4.4.3",
@@ -321,6 +334,7 @@
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-runtimes": "workspace:*",
+        "@ferretry/plugin-warden": "workspace:*",
         "@ferretry/std": "workspace:*",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
@@ -328,6 +342,7 @@
       },
       "devDependencies": {
         "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
       },
     },
     "packages/plugins/codex": {
@@ -338,7 +353,9 @@
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-logins": "workspace:*",
         "@ferretry/plugin-runtimes": "workspace:*",
+        "@ferretry/plugin-warden": "workspace:*",
         "@ferretry/std": "workspace:*",
         "react": "^19.0.0",
         "zod": "4.4.3",
@@ -377,7 +394,9 @@
         "@ferretry/core-asks": "workspace:*",
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
+        "@ferretry/core-mailbox": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-access": "workspace:*",
         "@ferretry/plugin-claude-code": "workspace:*",
         "@ferretry/std": "workspace:*",
         "@neslinesli93/qpdf-wasm": "0.3.0",
@@ -629,6 +648,7 @@
       "version": "5.0.0",
       "dependencies": {
         "@ferretry/app": "workspace:*",
+        "@ferretry/core-asks": "workspace:*",
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/core-vault": "workspace:*",
@@ -781,6 +801,7 @@
       "name": "@ferretry/std",
       "version": "5.0.0",
       "dependencies": {
+        "qrcode-generator": "^2.0.4",
         "yaml": "2.9.0",
         "zod": "4.4.3",
       },
@@ -845,6 +866,8 @@
     "@ferretry/core-ferrets": ["@ferretry/core-ferrets@workspace:packages/core/ferrets"],
 
     "@ferretry/core-gate": ["@ferretry/core-gate@workspace:packages/core/gate"],
+
+    "@ferretry/core-mailbox": ["@ferretry/core-mailbox@workspace:packages/core/mailbox"],
 
     "@ferretry/core-vault": ["@ferretry/core-vault@workspace:packages/core/vault"],
 

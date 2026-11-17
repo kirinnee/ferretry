@@ -13,7 +13,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { evalFreeVoskGlue } from '../../../../app/vite-voice.ts';
 import { VOSK_MODEL_ROLE, VOSK_RUNTIME_ROLE } from '../../../../app/lib/stt/vosk-model.ts';
 import { type VoskModule, voskRuntime } from '../../../../app/lib/stt/vosk-runtime.ts';
@@ -86,7 +86,8 @@ beforeAll(async () => {
   if (!hadSelf) Object.assign(globalThis, { self: globalThis });
   scope.self ??= {};
   scope.self.location ??= { href: 'http://127.0.0.1/assets/vosk-worker.js' };
-  LoadVosk = ((await import(glue)) as { default: LoadVosk }).default;
+  // The glue sits in `directory`, a fresh folder next to this file: a prefix the CI scope can place in this package.
+  LoadVosk = ((await import(`./${basename(directory)}/${basename(glue)}`)) as { default: LoadVosk }).default;
   // From here on, code built from a string throws — as it does under the app's policy.
   scope.Function = new Proxy(realFunction, {
     apply: () => {

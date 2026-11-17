@@ -278,7 +278,7 @@ describe('the pre-approval rules surface', () => {
   });
 });
 
-describe('making a paste rule with a passkey bound to it (!A244)', () => {
+describe('making a paste rule with a passkey bound to it (^A244)', () => {
   const STAGE = `prs_${'1'.repeat(24)}`;
   const STAGED: PasteRuleStaged = {
     stage: STAGE as PasteRuleStaged['stage'],

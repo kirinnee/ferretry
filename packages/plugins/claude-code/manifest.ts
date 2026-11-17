@@ -1,10 +1,20 @@
-import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import {
+  appAction,
+  definePlugin,
+  panel,
+  route,
+  settingsTab,
+  refusedItemOptions,
+  verb,
+} from '@ferretry/kernel/manifest';
 import {
   CLAUDE_CODE,
   CLAUDE_CODE_AGENT_HOMES,
   CLAUDE_CODE_AUDIT,
   CLAUDE_CODE_CONFIG,
   CLAUDE_CODE_DISCOVERY,
+  CLAUDE_CODE_HISTORY_ENTRIES,
+  CLAUDE_CODE_HISTORY_POOL,
   CLAUDE_CODE_LAUNCH_SETTINGS,
   CLAUDE_CODE_HOOKS,
   CLAUDE_CODE_READ_MODELS,
@@ -21,6 +31,7 @@ import {
   ProfileClaudeSettingsSource,
   RuntimesPort,
 } from '@ferretry/plugin-runtimes/contract';
+import { HARNESS_DIALOG_RULES_KEY, WardenDialogRulesClaude } from '@ferretry/plugin-warden/contract';
 
 /**
  * Claude Code (§2.3): a harness. It takes `harnesses:claude-code` from Ferrets and needs a `runners` provider only at
@@ -125,6 +136,7 @@ export default definePlugin({
         summary: 'add a settings item',
         args: [{ name: 'name', help: 'the settings item’s name' }],
         options: [
+          ...refusedItemOptions([]),
           { flag: '--file <path>', help: "the item's text, from a local file" },
           { flag: '--dry-run', help: 'show what would change, and change nothing' },
           { flag: '-y, --yes', help: 'go ahead without asking' },
@@ -135,6 +147,7 @@ export default definePlugin({
         summary: 'change a settings item; every runtime that uses it changes too',
         args: [{ name: 'name', help: 'the settings item’s name' }],
         options: [
+          ...refusedItemOptions([]),
           { flag: '--file <path>', help: "the item's text, from a local file" },
           { flag: '--dry-run', help: 'show what would change, and change nothing' },
           { flag: '-y, --yes', help: 'go ahead without asking' },
@@ -165,6 +178,7 @@ export default definePlugin({
         summary: 'add a hooks item',
         args: [{ name: 'name', help: 'the hooks item’s name' }],
         options: [
+          ...refusedItemOptions([]),
           { flag: '--file <path>', help: "the item's text, from a local file" },
           { flag: '--dry-run', help: 'show what would change, and change nothing' },
           { flag: '-y, --yes', help: 'go ahead without asking' },
@@ -175,6 +189,7 @@ export default definePlugin({
         summary: 'change a hooks item; every runtime that uses it changes too',
         args: [{ name: 'name', help: 'the hooks item’s name' }],
         options: [
+          ...refusedItemOptions([]),
           { flag: '--file <path>', help: "the item's text, from a local file" },
           { flag: '--dry-run', help: 'show what would change, and change nothing' },
           { flag: '-y, --yes', help: 'go ahead without asking' },
@@ -220,7 +235,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [CLAUDE_CODE_AGENT_HOMES, CLAUDE_CODE_DISCOVERY, CLAUDE_CODE_LAUNCH_SETTINGS],
+    state: [CLAUDE_CODE_AGENT_HOMES, CLAUDE_CODE_HISTORY_POOL, CLAUDE_CODE_DISCOVERY, CLAUDE_CODE_LAUNCH_SETTINGS],
     config: [CLAUDE_CODE_CONFIG, CLAUDE_CODE_SETTINGS, CLAUDE_CODE_HOOKS],
     readModels: CLAUDE_CODE_READ_MODELS,
     publishes: [ClaudeCodeUpdateFinished],
@@ -233,13 +248,20 @@ export default definePlugin({
       { hook: StartDecide },
       { hook: ProfileClaudeSettingsSource, key: PROFILE_COMPONENTS_KEY },
       { hook: ProfileClaudeHooksSource, key: PROFILE_COMPONENTS_KEY },
+      // The Warden clears the screens this plugin draws by rules that live here (`daemon/dialog-rules.ts`).
+      { hook: WardenDialogRulesClaude, key: HARNESS_DIALOG_RULES_KEY },
     ],
   },
+
+  // The one sentence that keeps Claude's dangerous-rm guard from stopping a Claude ferret (c58 O11b). Claude only: Codex has no such guard.
+  instructions: [{ id: 'rm-targets', text: 'instructions/rm.md', when: { role: 'any', harness: CLAUDE_CODE } }],
 
   onboarding: [{ id: 'harness', title: 'Claude Code', order: 20 }],
   doctor: ['claude-code-paths'],
 
   permissions: {
+    // Every ferret home links these entries to one pool of this plugin's own (`RootHandle.linkHistory`).
+    historyPool: { state: CLAUDE_CODE_HISTORY_POOL.name, entries: CLAUDE_CODE_HISTORY_ENTRIES },
     roots: ['agent-homes', 'harness-history'],
     network: ['registry.npmjs.org'],
     // tmux: the answers type into the ferret's pane; which, readlink, uname, printenv: the facts the kernel has no port for.

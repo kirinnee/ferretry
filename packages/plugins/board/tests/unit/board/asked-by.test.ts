@@ -69,10 +69,10 @@ describe('ownerWordsMatch', () => {
 
   it("should match pieces of two of the owner's messages joined by '...' or ' / '", () => {
     const first = 'can you make sure that auto ferrets CANNOT create agenda? i think task movement is the lead job';
-    const answer = '[answer to !A77] Approve as described';
+    const answer = '[answer to ^A77] Approve as described';
     should(
       ownerWordsMatch(
-        'can you make sure that auto ferrets CANNOT create agenda? ... [answer to !A77] Approve as described',
+        'can you make sure that auto ferrets CANNOT create agenda? ... [answer to ^A77] Approve as described',
         [first, answer],
       ),
     ).be.true();

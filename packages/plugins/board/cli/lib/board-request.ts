@@ -1,3 +1,4 @@
+import { askReference, stripAskReferenceSigil } from '@ferretry/core-asks/contract';
 import type { z } from 'zod';
 import {
   type BoardActivityFilter,
@@ -54,7 +55,7 @@ function parseOrRefuse<Output>(schema: z.ZodType<Output, unknown>, value: unknow
 // ─── references ────────────────────────────────────────────────────────────────────────────────
 
 /** `&F412` and a bare `F412` all name the same card; anything else is refused. */
-export function requireCardRef(value: string, label = 'card id'): CardRef {
+export function requireCardRef(value: string, label = 'task id'): CardRef {
   const parsed = parseCardRef(value);
   return parsed.ok ? parsed.value : refuse(`expected a ${label} like &F21, got "${value}"`);
 }
@@ -144,13 +145,14 @@ export function createPrLinks(options: BoardCreateOptions): string[] {
   return trimmedAll(options.pr).map(requirePrUrl);
 }
 
-/** The ask `--approval` / `--thread` names, in any spelling `fy ask` takes (`!A12`, `?A12`, `A12`). */
+/** The ask `--approval` / `--thread` names, in any spelling `fy ask` takes (`^A12`, the older `!A12` / `?A12`, `A12`). */
 const requireAgendaFlag = (flag: string, value: string): string => {
-  const candidate = value.trim().replace(/^[?!]/u, '');
-  const parsed = AskIdTextSchema.safeParse(candidate);
+  const parsed = AskIdTextSchema.safeParse(stripAskReferenceSigil(value));
   return parsed.success
     ? parsed.data
-    : refuse(`${flag}: "${value.trim()}" is not an ask reference — they look like !A3 (see \`fy ask list\`)`);
+    : refuse(
+        `${flag}: "${value.trim()}" is not an ask reference — they look like ${askReference('A3')} (see \`fy ask list\`)`,
+      );
 };
 
 export function buildBoardCreateRequest(
@@ -205,7 +207,7 @@ export function buildBoardCreateRequest(
     docs: trimmedAll(options.doc),
     ...(visibility === undefined ? {} : { visibility }),
   };
-  parseOrRefuse(CardCreateRequestSchema, candidate, 'cannot create this card');
+  parseOrRefuse(CardCreateRequestSchema, candidate, 'cannot create this task');
   return candidate;
 }
 
@@ -273,7 +275,7 @@ export const buildDropAction = (reason: string | undefined): CardActionRequest =
   action({ action: 'drop', reason: present(reason) ?? '' }, 'cannot drop (--reason is required)');
 
 /** Where a reopen's ask came from when the person did not say: it is still recorded as the owner's. */
-export const DEFAULT_REOPEN_SOURCE = 'the owner (fy card reopen)';
+export const DEFAULT_REOPEN_SOURCE = 'the owner (fy task reopen)';
 
 export const buildReopenAction = (options: {
   readonly to?: string;
@@ -419,7 +421,7 @@ export function buildEditAction(options: BoardEditOptions, texts: BoardEditTexts
   const visibility = visibilityOf(options.visibility);
   if (Object.keys(fields).length === 0 && visibility === undefined) {
     refuse(
-      'nothing to edit: pass --title, --summary, --premise, --context, --term, --brief, --brief-file, --how-to-test, --how-to-test-file or --visibility (the progress has its own verb: card progress)',
+      'nothing to edit: pass --title, --summary, --premise, --context, --term, --brief, --brief-file, --how-to-test, --how-to-test-file or --visibility (the progress has its own verb: task progress)',
     );
   }
   if ('title' in fields && fields.title !== undefined) {

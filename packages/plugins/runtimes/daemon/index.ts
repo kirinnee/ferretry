@@ -46,12 +46,15 @@ import {
   endedSeams,
   fileAssembly,
   checkEnvironmentSource,
+  hostClaudeAccountText,
   launchFactsSource,
   MANIFEST_REPAIR_JOB,
   manifestUnreadableProbe,
   RepairOwner,
   repairRequester,
 } from './host-assembly.ts';
+import { organizationTypeOfAccountDocument } from './lib/account-organization-type.ts';
+import { loginOrganizationType } from './lib/login-organization-type.ts';
 import { LaunchGate, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
@@ -81,7 +84,9 @@ export interface RuntimesAssembly {
     FleetCatalogService,
     'machine' | 'components' | 'profiles' | 'previewProfile' | 'runtimes' | 'propose' | 'read' | 'apply' | 'serialise'
   > &
-    Partial<Pick<FleetCatalogService, 'republish' | 'runtimesAfterLoginChange' | 'publishFromFiles'>>;
+    Partial<
+      Pick<FleetCatalogService, 'republish' | 'runtimesAfterLoginChange' | 'publishFromFiles' | 'currentRuntimeName'>
+    >;
   readonly setup: Pick<
     FleetSetupService,
     'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'forgetCloneSource' | 'recordCloneKeys' | 'executors'
@@ -118,6 +123,8 @@ export interface RuntimesAssembly {
    * carries. Absent: a start of a runtime is refused rather than launched unchecked.
    */
   readonly launchFacts?: RuntimeLaunchFactsSource;
+  /** The text of the person's own Claude account file, for the channel's default of a host-kept login. Absent: none is read. */
+  readonly hostClaudeAccount?: () => Promise<string | undefined>;
   /** What a published runtime's launch carries, for a consumer that fills `${VAR}` from it. Absent: nothing is offered. */
   readonly checkEnvironment?: (runtime: string) => Promise<RuntimeCheckEnvironment | undefined>;
   /**
@@ -144,6 +151,10 @@ export const unavailableAssembly: RuntimesAssembler = ctx => {
   const services = assembleServices(catalogDeps, unavailableSetupDeps);
   return services;
 };
+
+/** What `machineBrowserPorts()` refuses with while the machine view holds only the schema default (nothing carries the setting). */
+const BROWSER_PORTS_UNSET =
+  'Runtimes holds no browserPorts setting yet, so it cannot say which ports the agent browser binds';
 
 /** The homes of a daemon whose assembly offers none: no home is published, so no reader is handed out. */
 const noHomes: RuntimeHomesApi = { homes: async () => [], home: () => undefined };
@@ -266,6 +277,7 @@ export const hostAssembly: RuntimesAssembler = ctx => {
     ),
     profileEtag: async profile => await assembled().profileEtag(profile),
     launchFacts: launchFactsSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
+    hostClaudeAccount: hostClaudeAccountText(ctx.kernel),
     checkEnvironment: checkEnvironmentSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
     manifestUnreadable: manifestUnreadableProbe(ctx.kernel, publication),
     repair,
@@ -288,6 +300,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         harnesses: () => ctx.needs.ferrets.harnesses(),
         logins: ctx.needs.logins,
         now: () => clock.nowMs(),
+        currentName: async former => await assembly.catalog.currentRuntimeName?.(former),
       });
       // What a runtime's profile stack names, and the one act that edits a profile's layers: read live, written through
       // the kernel's config writer, never kept. The etag is the profile file's own, read when asked.
@@ -508,20 +521,45 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         },
       };
 
+      // The "Auto-resume after restart" switch, as the `auto-resume.decide` answer and `autoResume()` both read it.
+      const autoResumeOn = (): boolean | undefined =>
+        readAutoResume(assembly.autoResume, () =>
+          autoResumeSwitch(config.fileState(runtimesFile).state, config.file(runtimesFile)),
+        );
+
       // What is published, read as `GET /v1/runtimes` and `GET /v1/runtimes/machine` read it (no caller: the machine's own view).
       const facts: RuntimeFactsApi = {
+        // The machine's one switch for unattended resumes: the Warden's auto-revive reads it (no per-ferret one exists).
+        autoResume: async () => autoResumeOn(),
         catalog: async () => (await assembly.catalog.runtimes()).runtimes,
         tools: async () => (await assembly.catalog.machine(undefined)).tools,
+        // Two settings only, never the rest of the machine view: Browsers' loopback firewall and Logins' shared-ports fact.
+        // No file of Runtimes holds `browserPorts` (not carried yet, see ports-pending), so `random` here is only the schema
+        // default and nobody's choice: say that Runtimes cannot say, never pass the default off as a setting. A reader reads a
+        // refusal as "unknown" and fails closed (Logins: shared host), where a made-up `random` would turn that guard off.
+        machineBrowserPorts: async () => {
+          const { browserPorts, browserFirewallFailure } = await assembly.catalog.machine(undefined);
+          if (browserPorts === 'random') throw new Error(BROWSER_PORTS_UNSET);
+          return { browserPorts, browserFirewallFailure };
+        },
       };
 
       // ONE gate: its `start.decide` keeps the facts it read and its `launch.parts` contributes from exactly those.
-      const launchGate = new LaunchGate({ source: launchFacts });
+      // The login's organisation type, for the Claude harness's channel default: Logins names it for a login it keeps (its
+      // own account file), and for a host-kept one the person's `~/.claude.json` says. One non-secret field, never a token.
+      const organizationType = async (login: string): Promise<string | undefined> =>
+        await loginOrganizationType(
+          ctx.needs.logins,
+          async () => organizationTypeOfAccountDocument(await assembly.hostClaudeAccount?.()),
+          login,
+        );
+      const launchGate = new LaunchGate({ source: launchFacts, organizationType });
 
       return {
         routes: {
           ...fleetCatalogRoutes(assembly.catalog),
           ...fleetSetupRoutes(assembly.setup),
-          ...ferretRuntimeRoutes(assembly.runtime),
+          ...ferretRuntimeRoutes(assembly.runtime ?? ctx.needs.ferrets.runtimeControl),
         },
         provides: {
           runtimes: {
@@ -574,10 +612,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           ),
           // Whether an automatic resume may spend (W2-a): the switch, then the ferret's runtime, each a no when in doubt.
           'auto-resume.decide': autoResumeAnswer({
-            switchOn: () =>
-              readAutoResume(assembly.autoResume, () =>
-                autoResumeSwitch(config.fileState(runtimesFile).state, config.file(runtimesFile)),
-              ),
+            switchOn: autoResumeOn,
             resolve: async id => await api.resolve(id),
           }),
           // A start that names a runtime spends that runtime's login: its harness and login, or why it cannot start now.
@@ -586,6 +621,8 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
               resolve: async id => await api.resolve(id),
               default: async () => await api.default(),
               logins: ctx.needs.logins,
+              // What the runtime serves, for a move or handover to plan its model on (`catalog?`): the published view.
+              catalog: facts.catalog,
             }),
           },
           // A start's own compaction trigger is judged against its model's window, and the facts launch.parts uses are read

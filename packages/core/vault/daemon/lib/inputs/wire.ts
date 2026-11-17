@@ -1,16 +1,14 @@
 import { durationWords } from '@ferretry/std';
 import { z } from 'zod';
 import {
-  INPUT_MAX_FIELDS,
-  INPUT_PAD_BUCKET_BYTES,
-  INPUT_PROMPT_MAX_LENGTH,
+  AgendaIdSchema,
+  boundedLine,
   INPUT_QUARANTINE_SECONDS,
-  INPUT_SENSITIVITIES,
-  INPUT_VALUE_MAX_BYTES,
+  type InputActor,
+  InputDeliverBodySchema,
   InputDeliveryIdSchema,
   InputEchoSchema,
   type InputFieldRaise,
-  InputFieldIdSchema,
   type InputHoldReasonSchema,
   InputHoldSchema,
   type InputRaise,
@@ -20,33 +18,53 @@ import {
   type InputSensitivity,
   InputSensitivitySchema,
   InputSubmitModeSchema,
-  InputTargetFactsSchema,
-  InputTargetSchema,
   SurfaceKeySchema,
-} from '../../../contract/index.ts';
-import {
   CopyNameSchema,
-  CopyOriginSchema,
   CopyPlanIdSchema,
   GrantMissReasonSchema,
-  InputSavedSchema,
-  LOGIN_LABEL_MAX_LENGTH,
-  LOGIN_USERNAME_MAX_LENGTH,
   LoginEntryIdSchema,
-  oneLine,
   SignInIdSchema,
   SignInRuleIdSchema,
   SignInRuleRevisionSchema,
   TaskPlanLineNumberSchema,
   TwoFactorIdSchema,
-  BrowserRefSchema,
-} from './borrowed.ts';
+} from '../../../contract/index.ts';
+
+/** The input card's request, deliver and outcome shapes are the contract's (`contract/inputs-wire.ts`); re-exported here. */
+export {
+  type AgendaId,
+  AgendaIdSchema,
+  InputActorSchema,
+  type InputActor,
+  type InputDeliverBody,
+  InputDeliverBodySchema,
+  InputDeliverResultSchema,
+  type InputDeliverResult,
+  type InputFieldElement,
+  InputOutcomeSchema,
+  type InputRequest,
+  InputRequestListSchema,
+  type InputRequestList,
+  InputRequestSchema,
+  type InputRequestField,
+  type InputRisk,
+  inputValueProblem,
+  padInputValue,
+  unpadInputValue,
+  worstRisk,
+} from '../../../contract/index.ts';
+
+/** An ISO-8601 instant with an explicit timezone (today's `common.ts`, kept as written: an input card's times). */
+const InstantSchema = z.iso.datetime({ offset: true });
+
+const InputTargetKindSchema = z.enum(['terminal', 'page', 'secret']);
 
 /**
- * THE INPUT REQUEST WIRE (today's `protocol/src/lib/input-request.ts`, copied): what the contract
- * (`contract/inputs.ts`, `contract/targets.ts`) does not already declare. The declarations the contract carries are
- * imported from it, never repeated; everything else here is today's, byte for byte, with a browser target named
- * `page` (§4.7).
+ * THE INPUT REQUEST WIRE (today's `protocol/src/lib/input-request.ts`, copied): what the contract does not already
+ * declare. The request, the deliver body, its answer, the outcome and the pad are the contract's
+ * (`contract/inputs-wire.ts`: the owner's app reads the very same declarations) and are re-exported above; what stays
+ * here is what only the daemon uses (the agent's view, the journal events, the audit detail, the card's words), with a
+ * browser target named `page` (§4.7).
  *
  * ## THE SCHEMAS HERE HAVE NO FIELD FOR THE VALUE — EXCEPT ONE, AND IT IS PADDED
  *
@@ -57,16 +75,6 @@ import {
  * other schema here ever gains a field named or shaped like a value.
  */
 
-/** Why a card's hold lasts as long as it does (the contract's `InputHoldReasonSchema`). */
-/** An ISO-8601 instant with an explicit timezone (today's `common.ts`, kept as written: an input card's times). */
-const InstantSchema = z.iso.datetime({ offset: true });
-
-/**
- * The card an input request is drawn on, as today's agenda names it (`A12`). Asks' `AskId` is the same text; the
- * adapter to Asks parses it at the boundary (`daemon/adapters/inputs/asks.ts`).
- */
-export const AgendaIdSchema = z.string().regex(/^A[1-9][0-9]*$/u);
-export type AgendaId = z.infer<typeof AgendaIdSchema>;
 /** The longest card title today's agenda keeps; an input card's title is the daemon's own words, within it. */
 export const MAX_AGENDA_TITLE_LENGTH = 60;
 
@@ -124,65 +132,8 @@ export function lockWords(lock: InputLock): string {
     : `${String(lock.seconds)} s`;
 }
 
-const boundedLine = (maximum: number) =>
-  z
-    .string()
-    .min(1)
-    .max(maximum)
-    .regex(/^[^\p{Cc}\p{Cf}]*$/u, 'must be one line with no control characters');
-
-const HEX_DIGEST = /^[0-9a-f]{64}$/u;
-const Digest = z.string().regex(HEX_DIGEST, 'a sha-256 digest in lowercase hex');
-
-/**
- * A sensitivity as a CLIENT reads it off a request: one this build does not know (a newer daemon's) reads as
- * `secret`, the most careful, so a card is never drawn or answered as `plain` because its kind is new. A build
- * from before `code` existed has the closed enum here and refuses the whole request instead: also closed, never
- * plain. The daemon never parses a request, so this leniency is a reader's only.
- */
-const ReadInputSensitivitySchema = z.preprocess(
-  raw => (typeof raw === 'string' && !(INPUT_SENSITIVITIES as readonly string[]).includes(raw) ? 'secret' : raw),
-  InputSensitivitySchema,
-);
-
-/** The kinds of place a value can go: a terminal, a page, or the secret store. */
-const InputTargetKindSchema = z.enum(['terminal', 'page', 'secret']);
-
-/** The longest label an agent may give a field ("Email", "Password"). */
-const INPUT_FIELD_LABEL_MAX_LENGTH = 60;
 /** The id a request with one field gives it when the agent names none. */
 export const INPUT_SINGLE_FIELD_ID = 'value';
-
-const FieldLabelSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(INPUT_FIELD_LABEL_MAX_LENGTH)
-  .regex(/^[^\p{Cc}\p{Cf}]*$/u, 'must be one line with no control characters');
-
-const fieldsProblem = (fields: readonly { readonly id: string }[]): string | undefined =>
-  new Set(fields.map(field => field.id)).size === fields.length ? undefined : 'each field needs its own id';
-
-/**
- * The element a browser field names, the way every browser act names one: a snapshot's `ref` or a selector.
- * It is the agent's POINTER, never a fact: the daemon resolves it and observes what is actually there.
- */
-const InputFieldElementSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('selector'), selector: boundedLine(512) }),
-  z.strictObject({ kind: z.literal('ref'), ref: BrowserRefSchema }),
-]);
-export type InputFieldElement = z.infer<typeof InputFieldElementSchema>;
-
-/** Where a pasted value came from, as the DAEMON recorded it when the copy was captured: names, never the value. */
-const InputSourceSchema = z.strictObject({
-  kind: z.literal('sealed'),
-  name: CopyNameSchema,
-  from: CopyOriginSchema,
-  /** How many characters it holds: a count the card may show, never a sample of the value. */
-  length: z.number().int().nonnegative().optional(),
-  /** When THIS capture was read: the card is for this one, and the write opens no other under the name. */
-  capturedAt: InstantSchema.optional(),
-});
 
 /**
  * Which fields of a card "Save as" keeps, and as what, so a login's username and password are kept together in
@@ -211,22 +162,6 @@ export function inputRaiseFields(raise: Pick<InputRaise, 'sensitivity' | 'fields
 
 export type InputReason = z.infer<typeof InputReasonSchema>;
 
-/** Who did it, as the daemon's actor rule names callers: a person at the machine or a paired device. */
-export const InputActorSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('host') }),
-  z.strictObject({ kind: z.literal('device'), deviceId: boundedLine(128) }),
-  /** A paste the owner approved IN ADVANCE: the daemon delivered it under this pre-approval rule (docs/secure-copy.md). */
-  z.strictObject({ kind: z.literal('rule'), ruleId: z.string().regex(/^[0-9a-f]{32}$/u) }),
-  /** A sign-in the owner approved IN ADVANCE on a task plan: the daemon filled it under this plan line (task-plan.ts). */
-  z.strictObject({ kind: z.literal('plan'), planId: CopyPlanIdSchema, line: TaskPlanLineNumberSchema }),
-  /**
-   * A sign-in the owner approved IN ADVANCE with a standing rule: the daemon filled it under this rule, at this revision
-   * (sign-in-rules.ts). Not `rule`: that is a paste rule, with its own 32-hex id.
-   */
-  z.strictObject({ kind: z.literal('sign-in-rule'), rule: SignInRuleIdSchema, revision: SignInRuleRevisionSchema }),
-]);
-export type InputActor = z.infer<typeof InputActorSchema>;
-
 /**
  * WHO FILLED A SIGN-IN, as the login observer records it: the owner's tap from a paired `device`, the machine's admin
  * token (`host`: the owner at the machine, or a ferret that read the token), a task `plan` line, or a `rule` (a paste
@@ -253,139 +188,6 @@ export const observerByOf = (actor: InputActor): LoginObserverBy => INPUT_ACTOR_
 /** Whether a fill was the owner's own tap from a paired device: the only fill a standing rule's history counts. */
 export const ownerTapped = (by: LoginObserverBy): boolean => by === 'device';
 
-export const InputOutcomeSchema = z.strictObject({
-  at: InstantSchema,
-  by: InputActorSchema,
-  submitted: z.boolean(),
-  /** Typed by the owner, or a saved login chosen by the owner. */
-  source: z.enum(['typed', 'saved', 'sealed']),
-  /** The saved login used; the owner's card shows it, the agent never sees it. */
-  entry: LoginEntryIdSchema.optional(),
-  reason: InputReasonSchema.optional(),
-});
-
-/**
- * HOW RISKY THE VALUE IS TO TYPE where it is going, as a flag on the card and never a refusal: the owner
- * decides. green = typing hidden and a program known to ask for secrets; neutral = a one-time code, which is not
- * secret and goes where it was asked for; amber = it may show on screen, or the program is not known to ask; red =
- * not a secret, the ferret can see it. `reason` is one sentence.
- */
-const INPUT_RISK_LEVELS = ['green', 'neutral', 'amber', 'red'] as const;
-type InputRiskLevel = (typeof INPUT_RISK_LEVELS)[number];
-const InputRiskSchema = z.strictObject({
-  /** A level this build does not know (a newer daemon's) reads as `amber`: a warning, never a pass. */
-  level: z.preprocess(
-    raw => (typeof raw === 'string' && !(INPUT_RISK_LEVELS as readonly string[]).includes(raw) ? 'amber' : raw),
-    z.enum(INPUT_RISK_LEVELS),
-  ),
-  reason: boundedLine(240),
-});
-export type InputRisk = z.infer<typeof InputRiskSchema>;
-
-/**
- * One value on the card, as the owner reads it: what the agent called it, how careful the daemon is with it,
- * the element it goes into (a browser field) and its own risk flag. A `plain` field is always red: the ferret
- * can see that value, and the card says so beside it.
- */
-const InputRequestFieldSchema = z.strictObject({
-  id: InputFieldIdSchema,
-  label: FieldLabelSchema,
-  /** Read as a client reads it: a kind this build does not know is `secret`. */
-  sensitivity: ReadInputSensitivitySchema,
-  element: InputFieldElementSchema.optional(),
-  /** Absent while the daemon is re-observing. */
-  risk: InputRiskSchema.optional(),
-});
-export type InputRequestField = z.infer<typeof InputRequestFieldSchema>;
-
-const RISK_RANK: Readonly<Record<InputRiskLevel, number>> = { green: 0, neutral: 1, amber: 2, red: 3 };
-
-/** The worst of some fields' risks: what the card's header flag says. `undefined` when none is known yet. */
-export function worstRisk(risks: readonly (InputRisk | undefined)[]): InputRisk | undefined {
-  return risks.reduce<InputRisk | undefined>(
-    (worst, risk) =>
-      risk === undefined ? worst : worst === undefined || RISK_RANK[risk.level] > RISK_RANK[worst.level] ? risk : worst,
-    undefined,
-  );
-}
-
-const PreapprovalOutcomeShape = {
-  outcome: z.enum(['filled', 'did-not-apply']),
-  reason: GrantMissReasonSchema.optional(),
-};
-
-/**
- * A PRE-APPROVAL tried on a card, by its source: a task plan's line (`by: 'plan'`) or a standing sign-in rule at one
- * revision (`by: 'rule'`). Only one that did not apply says why. A source this build does not know is refused, never
- * read as another.
- */
-const InputPreapprovalSchema = z
-  .discriminatedUnion('by', [
-    z.strictObject({
-      by: z.literal('plan'),
-      plan: CopyPlanIdSchema,
-      line: TaskPlanLineNumberSchema,
-      ...PreapprovalOutcomeShape,
-    }),
-    z.strictObject({
-      by: z.literal('rule'),
-      rule: SignInRuleIdSchema,
-      revision: SignInRuleRevisionSchema,
-      ...PreapprovalOutcomeShape,
-    }),
-  ])
-  .refine(note => note.outcome === 'did-not-apply' || note.reason === undefined, {
-    path: ['reason'],
-    message: 'only a pre-approval that did not apply says why',
-  });
-
-/**
- * THE REQUEST, as the owner's card reads it. `observed` is absent while the daemon is re-observing after
- * a restart: Send stays disabled until it is back.
- */
-export const InputRequestSchema = z.strictObject({
-  id: InputRequestIdSchema,
-  /** From the agent's session credential, never from a body. */
-  sessionId: boundedLine(128),
-  /** The agenda card that presents it (`kind: 'input'`): the owner knows it as `!A<n>`. */
-  agendaItemId: AgendaIdSchema,
-  /** A paste of a secure copy: where the value comes from. The owner allows it; there is nothing to type. */
-  source: InputSourceSchema.optional(),
-  target: InputTargetSchema,
-  prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
-  /** The most careful of the fields' sensitivities: what the journal and the audit record. */
-  sensitivity: ReadInputSensitivitySchema,
-  /** The values the card asks for, in the order the daemon types them. A terminal's request has exactly one. */
-  fields: z.array(InputRequestFieldSchema).min(1).max(INPUT_MAX_FIELDS),
-  submit: InputSubmitModeSchema,
-  raisedAt: InstantSchema,
-  expiresAt: InstantSchema,
-  chain: AgendaIdSchema.optional(),
-  /** Which step of a chained login this is: 2 for the card that follows the first. Absent for a lone card. */
-  step: z.number().int().min(2).max(16).optional(),
-  observed: InputTargetFactsSchema.optional(),
-  /** The worst of the fields' risk flags; absent while the daemon is re-observing. */
-  risk: InputRiskSchema.optional(),
-  /** A digest of the facts the card showed; deliver refuses `target_changed` when it no longer matches. */
-  observedDigest: Digest.optional(),
-  /** The daemon holds a picture of a page's fields, taken before anything was typed: `GET …/shot` serves it. */
-  pictured: z.literal(true).optional(),
-  /** Saved logins: what the card may offer and what "Save as" suggests. The owner's view only. */
-  saved: InputSavedSchema.optional(),
-  /** How long the target is kept from the ferret after the write, and why: the card shows it. */
-  lock: InputHoldSchema.optional(),
-  state: InputRequestStateSchema,
-  outcome: InputOutcomeSchema.optional(),
-  /**
-   * The task plan line or standing rule that filled this card, or that was tried and did not apply (task-plan.ts,
-   * sign-in-rules.ts). The owner's view only: the card draws one line from `grantMissLineFor(preapproval)`, and none
-   * for `not-here`. The ferret is told one sentence for every plan reason and nothing at all about a rule, so a reason
-   * never says which secret fields an account holds, or which sign-ins have rules.
-   */
-  preapproval: InputPreapprovalSchema.optional(),
-});
-export type InputRequest = z.infer<typeof InputRequestSchema>;
-
 /**
  * WHAT THE AGENT IS TOLD, in the answer to its raise and in `input.wait`: where it stands and a short
  * summary of what the daemon saw — never the value, never its length, never a saved secret's name for a
@@ -410,150 +212,6 @@ export const InputAgentViewSchema = z.strictObject({
   note: z.string().max(400).optional(),
 });
 export type InputAgentView = z.infer<typeof InputAgentViewSchema>;
-
-/**
- * `POST /v1/sessions/:sid/input-requests/:id/deliver`. The one schema with a value, carried only inside
- * the sealed carrier. `padded` is {@link padInputValue}'s output, so the relay's size view reveals a
- * bucket, not a length. A saved login is named (`entry`), and the DAEMON resolves its value inside the use
- * boundary, so a saved value never passes through the app.
- *
- * A card of one field sends `padded` or `entry`. A card of several sends `fields` (each typed value, padded
- * on its own) and may add `entry` to fill the fields it did not type from a saved login; between them every
- * field is covered exactly once, which the daemon checks before it types anything.
- */
-export const InputDeliverBodySchema = z
-  .strictObject({
-    deliveryId: InputDeliveryIdSchema,
-    observedDigest: Digest,
-    padded: z
-      .string()
-      .min(1)
-      .max(INPUT_VALUE_MAX_BYTES + 2 * INPUT_PAD_BUCKET_BYTES)
-      .optional(),
-    /** Each typed value of a card with several fields, by the field it goes into. */
-    fields: z
-      .array(
-        z.strictObject({
-          field: InputFieldIdSchema,
-          padded: z
-            .string()
-            .min(1)
-            .max(INPUT_VALUE_MAX_BYTES + 2 * INPUT_PAD_BUCKET_BYTES),
-        }),
-      )
-      .min(1)
-      .max(INPUT_MAX_FIELDS)
-      .optional(),
-    /** A saved login, by its handle: the daemon types the fields the request needs from it. */
-    entry: LoginEntryIdSchema.optional(),
-    /**
-     * The sign-in the owner tapped (the offer's `signIn`), with `entry`. It MUST be one of `entry`'s account: the daemon
-     * refuses the deliver with nothing typed otherwise. The value still comes from the account; the facts the daemon
-     * sees go to this sign-in. Absent (an older app): the account's sign-in the daemon matched here, if any.
-     */
-    signIn: SignInIdSchema.optional(),
-    /**
-     * The saved account's 2FA key whose code the daemon makes ("Use code from Ferretry · Authy backup"), with `entry`:
-     * one of that offer's `codes`. The daemon refuses the deliver with nothing typed unless the key is the MATCHED
-     * account's, holds a seed and the card has a code field it may type a code it made into. Absent: the account's
-     * first key in offer order. The code is made inside the daemon and typed; no answer, event or record holds it.
-     */
-    factor: TwoFactorIdSchema.optional(),
-    /** Allow a paste: the daemon types the secure copy the request names (`request.source`), never one the body names. */
-    sealed: z.literal(true).optional(),
-    /** Press Enter / submit after typing. */
-    submit: z.boolean(),
-    /**
-     * Keep the typed value in a saved login: a new entry with this label, or the existing one with this
-     * handle (its label then stays). Saved only once it has been typed; a one-time code is never saved.
-     *
-     * `mode` is the owner's choice on the card: `new` keeps it ONLY in a new account (a CLI name that is already an
-     * account's is refused, nothing typed), `update` ONLY in the account the card offers to update (`saved.update`),
-     * never another person's. Absent (an older app): a new account only; an existing one is refused, nothing typed.
-     * `username` is the owner-confirmed username kept with it (the "Username" box), only with a `mode`, and never on a
-     * card that types a username itself.
-     */
-    save: z
-      .strictObject({
-        entry: LoginEntryIdSchema,
-        label: z
-          .string()
-          .trim()
-          .min(1)
-          .max(LOGIN_LABEL_MAX_LENGTH)
-          .regex(/^[^\p{Cc}\p{Cf}]*$/u),
-        mode: z.enum(['new', 'update']).optional(),
-        username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
-      })
-      .optional(),
-  })
-  .superRefine((body, context) => {
-    if (body.padded !== undefined && (body.entry !== undefined || body.fields !== undefined)) {
-      context.addIssue({ code: 'custom', message: 'padded is the one value of a one-field card: send it alone' });
-    }
-    if (body.signIn !== undefined && body.entry === undefined) {
-      context.addIssue({
-        code: 'custom',
-        message: 'a sign-in is one of a saved account: send it with entry',
-        path: ['signIn'],
-      });
-    }
-    if (body.factor !== undefined && body.entry === undefined) {
-      context.addIssue({
-        code: 'custom',
-        message: 'a 2FA key is one of a saved account: send it with entry',
-        path: ['factor'],
-      });
-    }
-    if (body.sealed === true && (body.padded !== undefined || body.entry !== undefined || body.fields !== undefined)) {
-      context.addIssue({ code: 'custom', message: 'sealed allows a paste: send it alone, with no value' });
-    }
-    if (body.padded === undefined && body.entry === undefined && body.fields === undefined && body.sealed !== true) {
-      context.addIssue({
-        code: 'custom',
-        message: 'send a value: padded, fields, a saved entry, or sealed for a paste',
-      });
-    }
-    if (body.fields !== undefined) {
-      const problem = fieldsProblem(body.fields.map(typed => ({ id: typed.field })));
-      if (problem !== undefined) context.addIssue({ code: 'custom', path: ['fields'], message: problem });
-    }
-    if (
-      body.save !== undefined &&
-      ((body.padded === undefined && body.fields === undefined) || body.entry !== undefined)
-    ) {
-      context.addIssue({ code: 'custom', message: 'save keeps values you typed, not a saved login', path: ['save'] });
-    }
-    if (body.save?.username !== undefined && body.save.mode === undefined) {
-      context.addIssue({
-        code: 'custom',
-        message: 'a username is kept only with the owner’s choice: send mode new or update',
-        path: ['save', 'username'],
-      });
-    }
-  });
-export type InputDeliverBody = z.infer<typeof InputDeliverBodySchema>;
-
-/** The answer to a deliver: the outcome, no value. A repeat of a `deliveryId` returns the first one. */
-export const InputDeliverResultSchema = z.strictObject({
-  id: InputRequestIdSchema,
-  deliveryId: InputDeliveryIdSchema,
-  state: InputRequestStateSchema,
-  submitted: z.boolean(),
-  reason: InputReasonSchema.optional(),
-  /**
-   * What came of "Save as", when it was asked for. The value was typed either way: a save that failed
-   * says why (`problem`, a fixed sentence) and the owner can save it from Settings instead.
-   */
-  saved: z
-    .strictObject({ entry: LoginEntryIdSchema, ok: z.boolean(), problem: z.string().max(240).optional() })
-    .optional(),
-});
-export type InputDeliverResult = z.infer<typeof InputDeliverResultSchema>;
-
-/** `GET /v1/input-requests` and `GET /v1/sessions/:sessionId/input-requests`: the requests still open, newest last. */
-export const InputRequestListSchema = z.strictObject({ requests: z.array(InputRequestSchema) });
-export type InputRequestList = z.infer<typeof InputRequestListSchema>;
 
 /** `POST …/cancel`: the owner declines. */
 export const InputCancelBodySchema = z.strictObject({});
@@ -738,59 +396,3 @@ export const InputAuditDetailSchema = z
     { path: ['signInRule'], message: 'a standing rule is recorded as by rule, with its id and revision together' },
   );
 export type InputAuditDetail = z.infer<typeof InputAuditDetailSchema>;
-
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-const LENGTH_WIDTH = 5;
-
-const hasControlCharacter = (text: string): boolean => /\p{Cc}/u.test(text);
-
-/**
- * Why a value may not be typed as a `sensitivity`, or `undefined` when it may. A `secret`, `private` or `code`
- * value with a control character or a newline would press keys ("this would press keys"); `plain` may
- * carry a Tab. Empty and over-long values are refused for every sensitivity.
- */
-export function inputValueProblem(value: string, sensitivity: InputSensitivity): string | undefined {
-  if (value === '') return 'type something to send';
-  if (encoder.encode(value).length > INPUT_VALUE_MAX_BYTES) {
-    return `a value is at most ${INPUT_VALUE_MAX_BYTES} bytes`;
-  }
-  const checked = sensitivity === 'plain' ? value.replaceAll('\t', '') : value;
-  if (hasControlCharacter(checked)) return 'this would press keys: remove the control characters or line breaks';
-  return undefined;
-}
-
-/**
- * Round a value up to a bucket for the wire: `NNNNN:` (its UTF-8 length), the value, then spaces to the
- * next multiple of {@link INPUT_PAD_BUCKET_BYTES}. The relay sees a bucket, not a password length. Throws
- * `RangeError` for a value over {@link INPUT_VALUE_MAX_BYTES}.
- */
-export function padInputValue(value: string): string {
-  const length = encoder.encode(value).length;
-  if (length > INPUT_VALUE_MAX_BYTES) throw new RangeError('value too long');
-  const head = `${String(length).padStart(LENGTH_WIDTH, '0')}:`;
-  const used = head.length + length;
-  const total = Math.max(INPUT_PAD_BUCKET_BYTES, Math.ceil(used / INPUT_PAD_BUCKET_BYTES) * INPUT_PAD_BUCKET_BYTES);
-  return `${head}${value}${' '.repeat(total - used)}`;
-}
-
-/**
- * Take the value back out of {@link padInputValue}'s output, or `undefined` when the string is not exactly
- * that: a wrong prefix, a length that does not fit, padding that is not spaces, or a size off the bucket.
- */
-export function unpadInputValue(padded: string): string | undefined {
-  const bytes = encoder.encode(padded);
-  if (bytes.length === 0 || bytes.length % INPUT_PAD_BUCKET_BYTES !== 0) return undefined;
-  const head = String.fromCharCode(...bytes.subarray(0, LENGTH_WIDTH + 1));
-  if (!/^[0-9]{5}:$/u.test(head)) return undefined;
-  const length = Number(head.slice(0, LENGTH_WIDTH));
-  const end = LENGTH_WIDTH + 1 + length;
-  if (length > INPUT_VALUE_MAX_BYTES || end > bytes.length) return undefined;
-  if (!bytes.subarray(end).every(byte => byte === 0x20)) return undefined;
-  if (
-    bytes.length !== Math.max(INPUT_PAD_BUCKET_BYTES, Math.ceil(end / INPUT_PAD_BUCKET_BYTES) * INPUT_PAD_BUCKET_BYTES)
-  ) {
-    return undefined;
-  }
-  return decoder.decode(bytes.subarray(LENGTH_WIDTH + 1, end));
-}

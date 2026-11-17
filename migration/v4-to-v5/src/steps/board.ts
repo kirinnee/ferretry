@@ -85,8 +85,8 @@ import type { Step, StepContext } from './index.ts';
 const BOARD_NOT_CARRIED: readonly NotCarried[] = [
   { what: 'derived indexes (SQLite caches)', why: 'v5 rebuilds every cache from the kept files' },
   {
-    what: 'card legacyRef',
-    why: 'CardSchema has no legacyRef (dropped as compatibility); the card id is kept, and its `migrated` history event becomes a note naming the same legacy ref',
+    what: 'task legacyRef',
+    why: 'CardSchema has no legacyRef (dropped as compatibility); the task id is kept, and its `migrated` history event becomes a note naming the same legacy ref',
   },
   {
     what: 'the session an owner or the daemon acted from (createdBy, history and clarification actors)',
@@ -100,11 +100,11 @@ const BOARD_NOT_CARRIED: readonly NotCarried[] = [
     what: 'board/switch.json migratedAt',
     why: 'BoardFileSchema has no migration marker; each board keeps its own on/off, setBy and setAt',
   },
-  { what: 'state/board/github.json', why: 'no v4 source: v4 cached PR facts on each card’s links, which are kept' },
+  { what: 'state/board/github.json', why: 'no v4 source: v4 cached PR facts on each task’s links, which are kept' },
   { what: 'config/board.yaml', why: 'no v4 source: v4 had no board settings file; v5 uses its defaults' },
   {
     what: 'state/sessions/<sid>/tasks.json and board-import.json',
-    why: 'retired v4 task lists and the one-time import marker; superseded by the cards',
+    why: 'retired v4 task lists and the one-time import marker; superseded by the tasks',
   },
 ];
 
@@ -222,12 +222,12 @@ async function eventOf(
   const type = event['type'];
   if (typeof type !== 'string' || !V4_EVENT_TYPES.has(type)) {
     const named = typeof type === 'string' && TYPE_NAME.test(type) ? `'${type}'` : 'an unreadable type';
-    throw new BoardInputError(`card ${id} has a history event of a type v4 does not have: ${named}`);
+    throw new BoardInputError(`task ${id} has a history event of a type v4 does not have: ${named}`);
   }
   let mapped = await withV5Actors(names, event, facts);
   if (type === 'migrated') {
     const legacy = V4LegacyRef.safeParse(event['legacyRef']);
-    if (!legacy.success) throw new BoardInputError(`card ${id} has a migrated event with no readable legacy ref`);
+    if (!legacy.success) throw new BoardInputError(`task ${id} has a migrated event with no readable legacy ref`);
     const { legacyRef: _legacyRef, ...rest } = mapped;
     mapped = { ...rest, type: 'note', text: `migrated from the v4 task list as ${legacy.data}` };
     facts.migratedNotes++;
@@ -235,7 +235,7 @@ async function eventOf(
   if (mapped['type'] === 'field-edited' && mapped['field'] === 'status') mapped = { ...mapped, field: 'progress' };
   const fields = V5_EVENT_FIELDS.get(mapped['type'] as string);
   if (fields === undefined) {
-    throw new BoardInputError(`card ${id} has a history event v5 cannot hold: '${type}'`);
+    throw new BoardInputError(`task ${id} has a history event v5 cannot hold: '${type}'`);
   }
   return only(mapped, fields, facts.eventFields);
 }
@@ -386,19 +386,19 @@ async function convert(ctx: StepContext): Promise<{ kept: KeptItem[]; notCarried
     highest[letter] = Math.max(highest[letter] ?? 0, Number(id.slice(1)));
     const raw = await readDocument(join(paths.tasks, file), label);
     const parsed = V4Card.safeParse(raw);
-    if (!parsed.success) throw new BoardInputError(`card ${id} (${label}) is not a v4 card`);
-    if (parsed.data.id !== id) throw new BoardInputError(`card ${id} (${label}) holds another card's id`);
+    if (!parsed.success) throw new BoardInputError(`task ${id} (${label}) is not a v4 task`);
+    if (parsed.data.id !== id) throw new BoardInputError(`task ${id} (${label}) holds another task's id`);
     const extra = unknownCardFields(raw as Record<string, unknown>);
-    if (extra === undefined) throw new BoardInputError(`card ${id} (${label}) has an unreadable field name`);
+    if (extra === undefined) throw new BoardInputError(`task ${id} (${label}) has an unreadable field name`);
     for (const field of extra) unknownFields.add(field);
     let card: Card;
     try {
       card = await mapCard(names, parsed.data, facts);
     } catch (error) {
       if (error instanceof BoardInputError) {
-        throw error.message.startsWith(`card ${id} `) ? error : new BoardInputError(`card ${id} has ${error.message}`);
+        throw error.message.startsWith(`task ${id} `) ? error : new BoardInputError(`task ${id} has ${error.message}`);
       }
-      throw new BoardInputError(`card ${id} does not fit the v5 card schema`);
+      throw new BoardInputError(`task ${id} does not fit the v5 task schema`);
     }
     cards++;
     if (card.dropped !== null) dropped++;
@@ -411,18 +411,18 @@ async function convert(ctx: StepContext): Promise<{ kept: KeptItem[]; notCarried
     });
   }
   kept.push(
-    { what: 'cards (ids unchanged; dropped and closed cards included)', count: cards },
-    { what: 'dropped cards', count: dropped },
-    { what: 'card approvals linked to their ferret’s ask', count: approvals },
-    { what: 'card history events (actors in v5 shape)', count: events },
+    { what: 'tasks (ids unchanged; dropped and closed tasks included)', count: cards },
+    { what: 'dropped tasks', count: dropped },
+    { what: 'task approvals linked to their ferret’s ask', count: approvals },
+    { what: 'task history events (actors in v5 shape)', count: events },
   );
   if (facts.migratedNotes > 0)
     kept.push({ what: 'v4 `migrated` history events kept as notes naming the legacy ref', count: facts.migratedNotes });
   if (facts.namedById > 0) kept.push({ what: 'ferret actors named by id (no v4 config left)', count: facts.namedById });
-  if (ignored > 0) kept.push({ what: 'non-card files in state/board/tasks ignored (as v4 does)', count: ignored });
+  if (ignored > 0) kept.push({ what: 'non-task files in state/board/tasks ignored (as v4 does)', count: ignored });
   if (unknownFields.size > 0)
     notCarried.push({
-      what: `card fields v4.291.5 does not declare: ${[...unknownFields].join(', ')}`,
+      what: `task fields v4.291.5 does not declare: ${[...unknownFields].join(', ')}`,
       why: 'v4 itself strips them on read; CardSchema is strict',
     });
   if (facts.eventFields.size > 0)
@@ -445,7 +445,7 @@ async function convert(ctx: StepContext): Promise<{ kept: KeptItem[]; notCarried
   const next = Object.fromEntries(
     Object.entries(V4_COUNTER_LETTERS).map(([kind, letter]) => {
       const value = Math.max(last[letter] ?? 0, highest[letter] ?? 0) + 1;
-      if (value > MAX_COUNTER) throw new BoardInputError(`the ${letter} card counter is exhausted`);
+      if (value > MAX_COUNTER) throw new BoardInputError(`the ${letter} task counter is exhausted`);
       return [kind, value];
     }),
   );
@@ -455,7 +455,7 @@ async function convert(ctx: StepContext): Promise<{ kept: KeptItem[]; notCarried
     write: async target =>
       await target.v5.json({ path: 'state/board/counters.json', format: 1, schema: CountersFileSchema }, countersFile),
   });
-  kept.push({ what: 'card id counters (continue after the highest id)', count: 1 });
+  kept.push({ what: 'task id counters (continue after the highest id)', count: 1 });
 
   // ── boards: lane sets + switch ──────────────────────────────────────────────────────────────────────────────────
   const rawSwitch = await readDocument(paths.switch, 'board/switch.json');
@@ -535,7 +535,7 @@ async function convert(ctx: StepContext): Promise<{ kept: KeptItem[]; notCarried
   if (focus.unreadable > 0)
     notCarried.push({
       what: `${focus.unreadable} unreadable focusTask, focusAnchor or boardSkip value(s) in session configs`,
-      why: 'v4 would refuse that session config; the focus is left empty (a ferret picks its card again)',
+      why: 'v4 would refuse that session config; the focus is left empty (a ferret picks its task again)',
     });
 
   for (const item of plan) await item.write(ctx);
@@ -544,7 +544,7 @@ async function convert(ctx: StepContext): Promise<{ kept: KeptItem[]; notCarried
 
 export const boardStep: Step = {
   id: 'board',
-  title: 'Board (cards, lanes, links, dependencies, history)',
+  title: 'Board (tasks, lanes, links, dependencies, history)',
   owner: ['plugin-board'],
   reads: [
     'state/board/tasks/<id>.json',

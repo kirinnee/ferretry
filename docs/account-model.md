@@ -9,13 +9,13 @@ where the two disagree, read that one and fix this one.
 
 On screen, the Claude, Codex and API-key logins that carry spend budgets are called **AI logins**, so they are not confused with Settings › Accounts (usernames and passwords for sites). Config paths and kinds (`config/logins/*.yaml`) do not change.
 
-| Thing          | Is                                                                                                                                                                                                                                                                                                                                                                                               |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Machine**    | One daemon. Everything below belongs to exactly one machine. It owns **Agent permissions** (`auto` or `skip`), the **default runtime for new agents** (optional; must be an agent runtime; chosen on the Runtimes tab), **what agents may control** (terminals/browsers/files, each on by default; Ferretry settings, off by default), and knows which tools (Claude Code, Codex) are installed. |
-| **Credential** | A login to Claude or Codex, stored once and never copied. Its store is `host` (your own `claude` / `codex` login, shared in place), `ferretry` (signed in through Ferretry) or `environment`.                                                                                                                                                                                                    |
-| **Component**  | A piece of setup saved once and referenced: Instructions, MCP servers, Skills, Settings, Hooks or a Model set.                                                                                                                                                                                                                                                                                   |
-| **Profile**    | An ordered list of layers, each a component or another profile. The newer layer wins. Its scope — Generic, Claude only or Codex only — is derived from its layers; Claude only + Codex only is refused.                                                                                                                                                                                          |
-| **Runtime**    | One credential plus one profile, under a name you type (`claude-default`), running ONE CLI. An **agent** runtime is one Ferretry may launch unattended; it gets a fixed layer applied last. On a login that drives both CLIs it runs the one it names (`harness`), else the one its profile is scoped to, else the login's first.                                                                |
+| Thing          | Is                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Machine**    | One daemon. Everything below belongs to exactly one machine. It owns **Agent permissions** (`skip` by default, which never asks; or `auto`, which asks before anything risky), the **default runtime for new agents** (optional; must be an agent runtime; chosen on the Runtimes tab), **what agents may control** (terminals/browsers/files, each on by default; Ferretry settings, off by default), and knows which tools (Claude Code, Codex) are installed. |
+| **Credential** | A login to Claude or Codex, stored once and never copied. Its store is `host` (your own `claude` / `codex` login, shared in place), `ferretry` (signed in through Ferretry) or `environment`.                                                                                                                                                                                                                                                                    |
+| **Component**  | A piece of setup saved once and referenced: Instructions, MCP servers, Skills, Settings, Hooks or a Model set.                                                                                                                                                                                                                                                                                                                                                   |
+| **Profile**    | An ordered list of layers, each a component or another profile. The newer layer wins. Its scope — Generic, Claude only or Codex only — is derived from its layers; Claude only + Codex only is refused.                                                                                                                                                                                                                                                          |
+| **Runtime**    | One credential plus one profile, under a name you type (`claude-default`), running ONE CLI. An **agent** runtime is one Ferretry may launch unattended; it gets a fixed layer applied last. On a login that drives both CLIs it runs the one it names (`harness`), else the one its profile is scoped to, else the login's first.                                                                                                                                |
 
 A credential's status is one of **Ready**, **Refresh due**, **Needs sign-in** or **Checking**. Ferretry
 never refreshes a login on a timer and never spends a model turn to learn a status. History is one pool
@@ -74,7 +74,8 @@ change, like every other. There are three ways to choose, and they ask the same 
   `--name <runtime>` or the suggested name (`claude-default`).
 
 `fy daemon start` at a terminal on a machine that is not set up ends with one line naming the app and
-`fy daemon setup`. There is no top-level `fy setup`.
+`fy daemon setup`. The top-level `fy setup` is a different verb: it finishes an install (the daemon as a
+user service, a wait until it answers, the pairing QR, then `fy onboard`), and it does not set a machine up.
 
 ## Reaching it
 
@@ -192,13 +193,11 @@ not on the host also needs a passkey step-up ([grants.md](grants.md)); nothing i
 
 ## The single file is retired
 
-A `fleet/config.yaml` — any version — is **refused, never converted**, while it is there. Nothing is
-read from it and nothing is deleted. The same sentence reaches `fy` and the browser:
-
-> _path_ is the old single-file configuration, which this Ferretry no longer reads: each login,
-> component, profile and runtime is now its own file under config/ in the state home. Move it aside (for
-> example rename it to config.yaml.old), then set this machine up again from the app or with
-> `fy daemon setup`.
+A `fleet/config.yaml` — any version — is **ignored**: this Ferretry never reads it, never converts it and
+never deletes it, and a machine that still has one boots and runs as if it were not there. Each login,
+component, profile and runtime is its own file under config/ in the state home. (Version 4 refused a stray
+single file by sentence; 5.0 does not, by owner decision — no compatibility code for a file nobody edits.
+Parity row F-0423 is removed by design.)
 
 The state home's layout version is 2. A version-1 home is upgraded in place — only its marker changes —
 so paired devices, sessions and secrets survive, and an older Ferretry refuses the upgraded home rather

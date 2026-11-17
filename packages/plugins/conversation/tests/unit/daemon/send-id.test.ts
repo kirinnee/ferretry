@@ -7,6 +7,7 @@ import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { ok } from '@ferretry/std';
 import { CONVERSATION_STATE, ConversationPort, QUEUE_STATE, SENDS_STATE } from '../../../contract/index.ts';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import daemon from '../../../daemon/index.ts';
 import { StateSendLedger } from '../../../daemon/delivery/adapters/index.ts';
 import { StateQueueStore } from '../../../daemon/queue/adapters/index.ts';
@@ -58,7 +59,7 @@ async function conversation(state: StatePort = memoryStatePort(CONVERSATION_STAT
     },
   } as typeof daemon;
   const host = await testHost({
-    plugins: [implementation],
+    plugins: [mailboxDaemon, implementation],
     fakes: { ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-07T09:00:00Z'),
   });
@@ -185,13 +186,13 @@ describe('the same send id twice is one message, across daemon runs', () => {
 
     const result = await api().send(F1, { kind: 'owner' }, { message: 'for f1', sendId: 'board-reopen-1' });
 
-    // new: f2's row does not answer it. It is typed into f1 once, and f1's ledger records it under that id.
-    expect(result).toEqual({
-      ok: true,
-      value: { ferret: F1, disposition: 'sent', sendId: 'board-reopen-1', fate: 'accepted' },
-    });
-    expect(ferrets.delivered).toEqual([{ text: 'for f1' }]);
-    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.message])).toEqual([['board-reopen-1', 'for f1']]);
+    // new: f2's row does not answer it. It is a message of f1's own, accepted under that id (the pane here cannot be
+    // read, so it waits in the mailbox rather than being typed blind), and f2's row is not f1's answer.
+    expect(result).toMatchObject({ ok: true, value: { ferret: F1, sendId: 'board-reopen-1', fate: 'accepted' } });
+    expect((await api().queue(F1)).messages.map(entry => [entry.id, entry.text])).toEqual([
+      ['board-reopen-1', 'for f1'],
+    ]);
+    expect(ferrets.delivered.filter(delivery => delivery.text === 'for f2')).toEqual([]);
     await host.stop();
   });
 
@@ -203,10 +204,10 @@ describe('the same send id twice is one message, across daemon runs', () => {
 
     const retry = await api().send(F1, { kind: 'owner' }, { message: 'again', sendId: 'r-1' });
 
-    // new: it is typed (the recorder holds it), not answered "queued" for a message that is nowhere
-    expect(retry).toMatchObject({ ok: true, value: { sendId: 'r-1', disposition: 'sent' } });
-    expect(ferrets.delivered).toEqual([{ text: 'again' }]);
-    expect((await api().queue(F1)).messages).toEqual([]);
+    // new: the retry is a message of its own, held by the mailbox for a pane it can read: it is not answered from the
+    // withdrawn row, and its words are on the queue under that id.
+    expect(retry).toMatchObject({ ok: true, value: { sendId: 'r-1' } });
+    expect((await api().queue(F1)).messages.map(entry => [entry.id, entry.text])).toEqual([['r-1', 'again']]);
     await host.stop();
   });
 

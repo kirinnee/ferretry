@@ -1,7 +1,7 @@
 /**
  * The Pinned group. Ported from today's `sessions-bar-pinned.test.tsx` (above the folders and in pin order, once, a
  * finished one stays dimmed, hidden when nothing is pinned, follows the kind filter). Left out: "above Needs you" and
- * "spans machines" (Agenda's group; the all-machines list is S-0550, open) and "leads the collapsed rail" (Unit 3).
+ * "spans machines" (Agenda's group; the all-machines list is S-0550, removed by design: the list is one machine's) and "leads the collapsed rail" (Unit 3).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { RouterProvider } from '@ferretry/app/testing';

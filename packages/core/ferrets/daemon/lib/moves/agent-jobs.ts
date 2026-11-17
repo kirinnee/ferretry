@@ -12,7 +12,7 @@ const COMMAND_WIDTH = 160;
 const basename = (word: string): string => word.split('/').at(-1) ?? '';
 
 /** `zsh -c …`, `/bin/bash -lc …`: a shell handed one command line to run. */
-function isCommandShell(argv: string): boolean {
+export function isCommandShell(argv: string): boolean {
   const words = argv.split(/\s+/u).filter(Boolean);
   if (!SHELLS.has(basename(words[0] ?? ''))) return false;
   const flags = words.slice(1).filter(word => word.startsWith('-'));

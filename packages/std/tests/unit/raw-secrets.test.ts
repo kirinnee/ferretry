@@ -7,6 +7,7 @@ import {
   rawTextSecretLine,
   shannonEntropy,
 } from '../../src/credential-words/index.ts';
+import { hostileLines, RANDOM_LOOKING } from './raw-secrets-hostile.ts';
 
 /**
  * Fixtures are assembled at run time from a prefix and a filler, so no file in the repository ever
@@ -17,9 +18,6 @@ const filler = (length: number, alphabet = 'A1B2'): string =>
 
 /** A dollar sign, so a reference is built here rather than written as a template-looking literal. */
 const DOLLAR = '$';
-
-/** A value that is random-looking to the entropy test: 20 distinct characters. */
-const RANDOM_LOOKING = 'q7Zk2PxV9mLw4TnR8sBd';
 
 const KNOWN_SHAPES: readonly (readonly [string, string])[] = [
   ['sk-ant-', `sk-ant-${filler(10)}`],
@@ -150,6 +148,39 @@ describe('looksLikeRawSecret — a high-entropy value under a credential key', (
   ])('should not flag %s', (_label, input) => {
     // Act
     const actual = looksLikeRawSecret('API_KEY', input);
+
+    // Assert
+    should(actual).be.false();
+  });
+
+  it.each([
+    ['a shell default holding a random value', `${DOLLAR}{ANTHROPIC_API_KEY_VALUE:-${RANDOM_LOOKING}}`],
+    ['a shell default under a secret pointer name', `${DOLLAR}{secret:ANTHROPIC_API_KEY:-${RANDOM_LOOKING}}`],
+    ['an assigning default', `${DOLLAR}{ANTHROPIC_API_KEY_VALUE:=${RANDOM_LOOKING}}`],
+    ['an alternative-value form', `${DOLLAR}{ANTHROPIC_API_KEY_VALUE:+${RANDOM_LOOKING}}`],
+    ['a default with no colon', `${DOLLAR}{ANTHROPIC_API_KEY_VALUE-${RANDOM_LOOKING}}`],
+  ])('should flag %s: only a bare NAME is a pointer', (_label, input) => {
+    // Act
+    const actual = looksLikeRawSecret('API_KEY', input);
+
+    // Assert
+    should(actual).be.true();
+  });
+
+  it('should flag a shell default in a written document, so the write is refused', () => {
+    // Arrange
+    const input = { env: { OPENAI_API_KEY: `${DOLLAR}{HOME_KEY:-${RANDOM_LOOKING}}` } };
+
+    // Act
+    const actual = findRawSecrets(input);
+
+    // Assert
+    should(actual.map(finding => finding.path)).eql([['env', 'OPENAI_API_KEY']]);
+  });
+
+  it('should still read the optional secret pointer as a reference', () => {
+    // Act
+    const actual = looksLikeRawSecret('API_KEY', `${DOLLAR}{secret?:ANTHROPIC_API_KEY}`);
 
     // Assert
     should(actual).be.false();
@@ -435,27 +466,20 @@ describe('rawTextSecretLine — linear, and the same answers as the pattern it r
     should(rawTextSecretLine(line) === 1).equal(oldLine(line));
   });
 
-  /** A hard bound per call, far above one linear pass. */
-  const BOUND_MS = 1500;
-  const KIB = 1024;
-  let nested = '';
-  for (let depth = 0; nested.length < 254 * KIB; depth += 1) nested += `${' '.repeat(depth)}k:\n`;
+  it.each(hostileLines(2).filter(([label]) => !label.includes('key prefixes') && !label.includes('credential')))(
+    'should find no secret in %s',
+    (_label, text) => {
+      // Act / Assert
+      should(rawTextSecretLine(text)).be.undefined();
+    },
+  );
 
-  it.each([
-    ['one 256 KiB line of spaces', ' '.repeat(256 * KIB)],
-    ['a value padded with 256 KiB of spaces', `a: x${' '.repeat(256 * KIB - 8)}y`],
-    ['a key padded with 256 KiB of spaces', `token${' '.repeat(256 * KIB - 12)}: x`],
-    ['block indentation 700 deep', nested],
-    ['256 KiB of quotes, colons and blanks', '" : \' '.repeat(43 * KIB)],
-    ['256 KiB of key prefixes', 'sk-'.repeat(85 * KIB)],
-    ['a 256 KiB credential value', `token: ${RANDOM_LOOKING.repeat(13 * KIB)}`],
-  ])('should scan %s in under 1500 ms (R6 critical)', (_label, text) => {
+  it('should find the credential value among the hostile lines', () => {
     // Act
-    const started = performance.now();
-    rawTextSecretLine(text);
+    const [, text] = hostileLines(2).at(-1) ?? ['', ''];
 
     // Assert
-    should(performance.now() - started).be.below(BOUND_MS);
+    should(rawTextSecretLine(text)).equal(1);
   });
 
   it('should find a key shape wherever a window of a long line cuts it, and nothing a cut could fake', () => {

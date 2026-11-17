@@ -48,6 +48,9 @@ import { resolveWardenLineage } from '../lib/session/provenance/lineage.ts';
 import { SessionProvenanceStamper } from '../lib/session/provenance/stamper.ts';
 import type { SessionSpawnRequest } from '../lib/session/provenance/types.ts';
 import { SessionConfigSchema } from '../lib/protocol/session.ts';
+import { markedHealth } from '../lib/ferrets/health-mark.ts';
+import { MEDIA_FOLDER, QUESTION_ASKED_FILE } from '../lib/ferrets/session-stores/pane-files.ts';
+import { repointedSessionConfig, sessionRuntimeFacts } from '../lib/ferrets/runtime-repoint.ts';
 
 /** The id a lineage question about a ferret that does not exist yet carries; it names no real session. */
 const UNSTARTED_FERRET = '(not started)';
@@ -125,12 +128,6 @@ export interface SessionFilesDeps {
 /** The folder of a ferret's own session folder its opening attachments are written to (one of `FERRET_READABLE_FOLDERS`). */
 const ATTACHMENTS_FOLDER = 'attachments';
 
-/** The folder of a ferret's own session folder its agent puts media in (`FY_MEDIA_DIR`; today's `SessionPaths.media`). */
-const MEDIA_FOLDER = 'media';
-
-/** The file Claude Code's question hook writes in a ferret's session folder (today's `SessionPaths.questionAsked`). */
-const QUESTION_ASKED_FILE = 'question-asked.json';
-
 /**
  * Ferrets' per-ferret private session files, all on the internal `sessions` root (`state/ferrets/sessions/<ferret>/`):
  * the environment (the plaintext credential, `environment.json`, `0600`), the assigned task (`turns/turn-001.md`), every
@@ -141,12 +138,13 @@ const QUESTION_ASKED_FILE = 'question-asked.json';
  * One launch gate and one serial queue for the whole process: a second of either would not see the first one's launches.
  */
 export class SessionFiles {
-  /** ONE gate, shared by the lifecycle, the resume, the sends, the exit observer and the interrupted-launch reconciler. */
+  /** ONE gate, shared by the lifecycle, the resume, the sends, the exit observer and the interrupted-launch reconciler (the latter
+   * through the registry's own record of when a launch began, since FerretsService does not register in it). */
   readonly launchGate: InMemoryLaunchGate;
   /**
    * ONE per-session mutation queue (today's `sessionMutations`): the lifecycle uses it, and so does FerretsService's
-   * start/stop/resume/revoke (the daemon binds it as `FerretsPorts.serial`). GAP(ports-pending: Session adapters): the
-   * interrupted-launch reconciler, runtime control, Pack hooks and switches, and answers are not on it yet.
+   * start/stop/resume/revoke (the daemon binds it as `FerretsPorts.serial`), and so does runtime control. GAP(ports-pending:
+   * Session adapters): Pack hooks and switches, and answers are not on it yet.
    */
   readonly serial = new KeyedSerialExecutor();
   private readonly credentials = new NodeSessionCredentialIssuer();
@@ -230,23 +228,26 @@ export class SessionFiles {
           return value === undefined ? kept : { ...kept, compactAt: value };
         });
       },
-      askedQuestion: async ferret => await this.readAskedQuestion(parseSessionId(ferret)),
-      // Claude Code's question hook records the question it asks here (`FY_QUESTION_FILE`, today's `questionAsked`):
-      // inside the ferret's own folder on the sessions root, never in its work tree.
-      questionFile: async ferret => {
-        const named = this.root(parseSessionId(ferret)).resolve(QUESTION_ASKED_FILE);
-        if (!named.ok) throw new Error('the question file of this ferret could not be named');
-        return named.value;
+      // The Warden's stalled mark: `health` alone, decided on what the locked read-modify-write reads.
+      markStalled: async (ferret, stalled) => {
+        let changed = false;
+        await this.deps.storage.updateState(parseSessionId(ferret), current => {
+          const next = markedHealth(current, stalled);
+          changed = next !== undefined;
+          return next ?? current;
+        });
+        return changed;
       },
-      // The agent's "show this" folder (`FY_MEDIA_DIR`, F-0327): `media/` in the ferret's own session folder, made `0700`.
-      mediaFolder: async ferret => {
+      runtimeFacts: async ferret => sessionRuntimeFacts(await this.deps.storage.readConfig(parseSessionId(ferret))),
+      // A rename's re-point (v4's `renameSessions`): read first, outside the lock, so a config that does not name the old
+      // runtime is never rewritten; the write is the storage's locked read-modify-write and re-checks what it reads.
+      repointRuntime: async (ferret, rename) => {
         const id = parseSessionId(ferret);
-        const named = this.root(id).resolve(MEDIA_FOLDER);
-        if (!named.ok) throw new Error('the media folder of this ferret could not be named');
-        await new OwnFolder(this.root(id)).ensure();
-        await new OwnFolder(this.mediaRoot(id)).ensure();
-        return named.value;
+        if (repointedSessionConfig(await this.deps.storage.readConfig(id), rename) === undefined) return false;
+        await this.deps.storage.updateConfig(id, current => repointedSessionConfig(current, rename) ?? current);
+        return true;
       },
+      askedQuestion: async ferret => await this.readAskedQuestion(parseSessionId(ferret)),
       assign: async (ferret, prompt) => {
         const id = parseSessionId(ferret);
         return firstTurnInstruction(await this.taskStore(id).writeAssignedTask(id, assignedTaskDocument(prompt)));
@@ -587,12 +588,12 @@ export class SessionFiles {
    * ferret the registry does not hold (none in this build reaches here) has no document to make; it records nothing and
    * says so. A document that is there and cannot take the stamp refuses the start.
    */
-  private async stampAtStart(request: SessionSpawnRequest): Promise<void> {
+  private async stampAtStart(request: SessionSpawnRequest): Promise<string | undefined> {
     const id = parseSessionId(request.id);
     await this.documented.catch(() => undefined);
     if (!(await this.ensureDocument(id))) {
       this.deps.log.warn('a ferret has no session document yet, so its spawn stamp was not recorded', { ferret: id });
-      return;
+      return undefined;
     }
     const stamped = this.stamper.stamp(request, await this.ancestry.snapshot());
     // The port admitted this start as outside the Warden's tree, reading the ancestry on its own: if lineage resolves
@@ -602,11 +603,13 @@ export class SessionFiles {
       throw new Error('a start the port admitted as outside the Warden’s tree would be stamped into it');
     const stored = await this.provenance.read(id);
     // The stored stamp wins: a start over a document that already carries one (a retried start) never rewrites it.
-    if (stored.provenance !== undefined) return;
+    if (stored.provenance !== undefined) return stored.provenance.wardenLineage ? stored.label : undefined;
     await this.provenance.write(id, {
       provenance: stamped.provenance,
       ...(stamped.label === undefined ? {} : { label: stamped.label }),
     });
+    // What the stamp FORCED (the Warden's label below the Warden) is told to the launch, which carries it to the record.
+    return stamped.provenance.wardenLineage ? stamped.label : undefined;
   }
 
   /**
@@ -620,18 +623,18 @@ export class SessionFiles {
    * `SessionConfigSchema`, throws, so the resume writes nothing and the stamp on disk stays as it was. The error names
    * the id only. A ferret that ran before the writer existed is given its document first (ruling #31b).
    */
-  private async carryOnResume(ferret: string): Promise<void> {
+  private async carryOnResume(ferret: string): Promise<string | undefined> {
     const id = parseSessionId(ferret);
     await this.documented.catch(() => undefined);
     // A ferret that ran before the writer existed gets its document now; no catch: an unreadable one brings nothing.
     await this.ensureDocument(id);
     const document = await this.deps.storage.readConfig(id);
-    if (document === undefined) return;
+    if (document === undefined) return undefined;
     const parsed = SessionConfigSchema.safeParse(document);
     if (!parsed.success)
       throw new Error(`session ${id}'s configuration is damaged, so its spawn stamp was not brought forward`);
     const { label, parent } = parsed.data;
-    await this.recorder.recordRelaunch({
+    const recorded = await this.recorder.recordRelaunch({
       id,
       ...(label === undefined ? {} : { label }),
       ...(parent === undefined ? {} : { parent }),
@@ -639,5 +642,6 @@ export class SessionFiles {
       // with no stamp and no parent was a root start, which is the human case (today's rule, word for word).
       requestedByHuman: parent === undefined,
     });
+    return recorded.provenance.wardenLineage ? recorded.label : undefined;
   }
 }

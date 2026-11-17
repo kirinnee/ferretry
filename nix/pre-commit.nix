@@ -123,11 +123,22 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # No speed or size budget in the unit tier (owner, 2026-11-16): a budget is the perf tier's, run alone; the unit
+    # tier proves behaviour (docs/standards/testing, "Performance Tests"). config/perf-pending.txt only shrinks.
+    a-unit-budgets = {
+      enable = true;
+      name = "Unit tier holds no speed or size budget";
+      entry = validator "scripts/validate/unit-budgets.sh";
+      files = "^(packages/(.*/)?tests/.*\\.tsx?|config/perf-pending\\.txt|scripts/validate/unit-budgets\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-test-tiers = {
       enable = true;
       name = "Test tiers";
       entry = validator "scripts/validate/test-tiers.sh";
-      files = "^(packages/(.*/)?tests/.*\\.test\\.tsx?|config/test-groups\\.json|nix/fmt\\.nix|scripts/(validate/test-tiers\\.sh|test/ci-sets\\.ts|ci/((quick|quick-part|parallel|integration|full-status|e2e-summary|pre-commit|gate-hook|full-gates)\\.sh|(unit-timings|gate-hooks)\\.ts))|\\.github/workflows/(ci|realworld)\\.yaml)$";
+      files = "^(packages/(.*/)?tests/.*\\.(test\\.)?tsx?|config/test-groups\\.json|bunfig\\.[a-z]+\\.toml|nix/fmt\\.nix|scripts/(validate/test-tiers\\.sh|test/(ci-sets|proof-reuse)\\.ts|ci/((quick|quick-part|parallel|integration|full-status|proof-reuse|e2e-summary|pre-commit|gate-hook|full-gates)\\.sh|(unit-timings|gate-hooks)\\.ts))|\\.github/workflows/(ci|realworld)\\.yaml)$";
       pass_filenames = false;
       language = "system";
     };
@@ -310,7 +321,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Dead-code keep markers name an open fact";
       entry = validator "scripts/validate/pending-tags.sh";
-      files = "^((.*/)?package\\.json|packages/.*\\.(ts|tsx|mts)|knip(\\.production)?\\.json|(.*/)?ports-pending\\.json|docs/rebuild/guarantees\\.tsv|scripts/validate/(pending-tags(\\.test)?\\.(sh|ts)|ports-pending\\.ts|guarantees\\.ts)|scripts/gen/lib/(workspace|imports|pending-files)\\.ts)$";
+      files = "^((.*/)?package\\.json|packages/.*\\.(ts|tsx|mts)|(.*/)?knip(\\.production)?\\.(json|ts)|(.*/)?ports-pending\\.json|docs/rebuild/guarantees\\.tsv|scripts/validate/(pending-tags(\\.test)?\\.(sh|ts)|ports-pending\\.ts|guarantees\\.ts)|scripts/gen/lib/(workspace|imports|pending-files|knip-config)\\.ts)$";
       pass_filenames = false;
       language = "system";
     };
@@ -354,6 +365,18 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # A pushed branch must contain its base's tip (owner, 2026-11-16: agents always rebase before pushing).
+    # See scripts/validate/pre-push-fresh.sh; FY_ALLOW_BEHIND_PUSH=1 pushes anyway.
+    a-pre-push-fresh = {
+      enable = true;
+      name = "Pushed branch contains its base";
+      entry = validator "scripts/validate/pre-push-fresh.sh";
+      stages = [ "pre-push" ];
+      always_run = true;
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-git-hooks-worktree = {
       enable = true;
       name = "Worktree commit linting";
@@ -384,8 +407,8 @@ pre-commit-lib.run {
     a-deadcode = {
       enable = true;
       name = "Knip repository dead code";
-      entry = bun-tool "knip --config knip.json";
-      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|^knip\\.json$|\\.(ts|tsx)$)";
+      entry = bun-tool "knip --config knip.ts";
+      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|(^|/)knip\\.json$|^knip\\.ts$|^scripts/gen/lib/knip-config\\.ts$|\\.(ts|tsx)$)";
       pass_filenames = false;
       language = "system";
     };
@@ -393,8 +416,8 @@ pre-commit-lib.run {
     a-deadcode-production = {
       enable = true;
       name = "Knip production dead code";
-      entry = bun-tool "knip --config knip.production.json";
-      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|^knip\\.production\\.json$|\\.(ts|tsx)$)";
+      entry = bun-tool "knip --config knip.production.ts";
+      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|(^|/)knip\\.production\\.json$|^knip\\.production\\.ts$|^scripts/gen/lib/knip-config\\.ts$|\\.(ts|tsx)$)";
       pass_filenames = false;
       language = "system";
     };

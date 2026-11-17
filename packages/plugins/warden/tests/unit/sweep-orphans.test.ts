@@ -55,7 +55,7 @@ describe('an orphaned card', () => {
     should(second.anomalies.map(anomaly => anomaly.kind)).eql(['orphaned_card']);
     should(subject.state().lastAnomalies?.map(anomaly => anomaly.kind)).eql(['orphaned_card']);
     should(subject.remedies.map(remedy => [remedy.action, remedy.sessionId])).eql([['nudge', 'lead']]);
-    should(subject.remedies[0]?.detail).containEql('Your card &F1 "Board store" has no ferret working on it');
+    should(subject.remedies[0]?.detail).containEql('Your task &F1 "Board store" has no ferret working on it');
     should(subject.state().orphans).eql({ F1: { assignee: 'worker', via: 'owner', to: 'lead', at: iso(NOW) } });
     should(journalTypes(subject).filter(type => type === 'fleet.warden_orphan_told')).have.length(1);
     should(subject.orphanItem.current).be.undefined();
@@ -91,7 +91,7 @@ describe('an orphaned card', () => {
     await subject.service.run({ force: false });
 
     // Assert
-    should(listed?.subject).equal('A card has nobody working on it');
+    should(listed?.subject).equal('A task has nobody working on it');
     should(listed?.context).containEql('&F1 Board store is waiting in Implement');
     should(subject.orphanItem.current).be.undefined();
     should(subject.orphanItem.writes).equal(2);
@@ -152,7 +152,7 @@ describe('an orphaned card', () => {
     await subject.service.run({ force: false });
 
     // Assert
-    should(subject.orphanItem.current?.subject).equal('A card has nobody working on it');
+    should(subject.orphanItem.current?.subject).equal('A task has nobody working on it');
     should(subject.orphanItem.opened).equal(1);
     should(subject.state().orphans?.F1).containEql({ via: 'list', to: 'machine-agenda' });
     should(journalTypes(subject)).not.containEql('fleet.warden_orphan_failed');
@@ -205,7 +205,7 @@ describe('orphaned cards on the one machine item', () => {
 
     // Assert
     should(subject.orphanItem.opened).equal(1);
-    should(subject.orphanItem.current?.subject).equal('31 cards have nobody working on them');
+    should(subject.orphanItem.current?.subject).equal('31 tasks have nobody working on them');
     const rows = subject.orphanItem.current?.context.split('\n') ?? [];
     should(rows).have.length(MAX_LISTED_ORPHANS + 1);
     should(rows.at(-1)).equal('…and 19 more.');
@@ -248,7 +248,7 @@ describe('orphaned cards on the one machine item', () => {
     should(subject.orphanItem.opened).equal(1);
     should(subject.orphanItem.writes).equal(2);
     should(before?.context).containEql('&F1');
-    should(subject.orphanItem.current?.subject).equal('3 cards have nobody working on them');
+    should(subject.orphanItem.current?.subject).equal('3 tasks have nobody working on them');
     should(subject.orphanItem.current?.context).not.containEql('&F1 ');
     should(subject.orphanItem.current?.context).containEql('&F4');
   });
@@ -269,7 +269,7 @@ describe('orphaned cards on the one machine item', () => {
     // Assert
     should(cleared).be.undefined();
     should(subject.orphanItem.opened).equal(2);
-    should(subject.orphanItem.current?.subject).equal('A card has nobody working on it');
+    should(subject.orphanItem.current?.subject).equal('A task has nobody working on it');
     should(subject.orphanItem.current?.context).containEql('&F7');
   });
 
@@ -290,7 +290,7 @@ describe('orphaned cards on the one machine item', () => {
     // Assert
     should(quiet).eql({ opened: 1, current: undefined });
     should(subject.orphanItem.opened).equal(2);
-    should(subjectNow()).equal('4 cards have nobody working on them');
+    should(subjectNow()).equal('4 tasks have nobody working on them');
     // The sweep wrote the item twice: when it first opened, and when a card joined after the owner closed it.
     should(subject.orphanItem.writes).equal(2);
   });
@@ -304,7 +304,7 @@ describe('orphaned cards on the one machine item', () => {
 
     // Assert
     const body = subject.orphanItem.current?.context ?? '';
-    should(subject.orphanItem.current?.subject).equal('10000 cards have nobody working on them');
+    should(subject.orphanItem.current?.subject).equal('10000 tasks have nobody working on them');
     should(body.split('\n')).have.length(MAX_LISTED_ORPHANS + 1);
     should(body.endsWith('…and 9988 more.')).be.true();
     should(body.length <= MAX_AGENDA_DETAIL_LENGTH).be.true();
@@ -335,7 +335,7 @@ describe('orphaned cards on the one machine item', () => {
     ]);
     should(subject.resolved).have.length(2);
     should(journalTypes(subject).filter(type => type === 'fleet.warden_orphan_cleared')).have.length(2);
-    should(subject.orphanItem.current?.subject).equal('2 cards have nobody working on them');
+    should(subject.orphanItem.current?.subject).equal('2 tasks have nobody working on them');
     should(subject.state().orphans?.F1).containEql({ via: 'list', to: 'machine-agenda' });
     should(subject.state().orphans?.F2).containEql({ via: 'list', to: 'machine-agenda' });
   });
@@ -409,7 +409,7 @@ describe('the orphaned cards item the Agenda refuses', () => {
     ]);
     should(refused[0]?.data.cards).equal(31);
     should(subject.journal.filter(entry => entry.type === 'fleet.warden_orphan_failed')).have.length(2);
-    should(subject.orphanItem.current?.subject).equal('31 cards have nobody working on them');
+    should(subject.orphanItem.current?.subject).equal('31 tasks have nobody working on them');
     should(subject.orphanItem.opened).equal(1);
     should(rememberedWhileRefused).be.undefined();
     should(Object.keys(subject.state().orphans ?? {})).have.length(31);
@@ -446,7 +446,7 @@ describe('a ferret the Warden starts again', () => {
     // Assert
     should(subject.remedies.map(remedy => remedy.action)).eql(['resume']);
     should(subject.remedies[0]?.detail).containEql("Ferretry's Warden resumed you:");
-    should(subject.remedies[0]?.detail).containEql('Your card: &F1 — Ship the thing');
+    should(subject.remedies[0]?.detail).containEql('Your task: &F1 — Ship the thing');
   });
 
   it('should be restarted onto its focus card', async () => {
@@ -476,7 +476,7 @@ describe('a ferret the Warden starts again', () => {
     // Assert
     should(subject.remedies.map(remedy => remedy.action)).eql(['restart']);
     should(subject.remedies[0]?.detail).containEql("Ferretry's Warden restarted you with your conversation intact:");
-    should(subject.remedies[0]?.detail).containEql('Your card: &F1 — Ship the thing');
+    should(subject.remedies[0]?.detail).containEql('Your task: &F1 — Ship the thing');
   });
 
   it('should keep the resume domain’s own turn for a ferret with no card, and for an interactive one', async () => {

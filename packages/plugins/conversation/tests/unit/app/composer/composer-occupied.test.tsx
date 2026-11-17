@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { COMPOSER_OCCUPIED_CODE, type ComposerResult as ComposerDraftResult } from '../../../../contract/index.ts';
+import { COMPOSER_OCCUPIED_CODE, type ComposerResult as ComposerDraftResult } from '@ferretry/core-mailbox/contract';
 import { DaemonCallError } from '@ferretry/app';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { Composer } from '../../../../app/composer/composer.tsx';

@@ -126,6 +126,16 @@ describe('the account a sign-in card offers first', () => {
     should(byName).eql({ signIn: 'si_00000000000000b1', why: 'project', project: 'ferretry' });
     should(notUnique).be.undefined();
   });
+
+  it('should not name a project whose name is not one short line, and still choose the account it defaults', () => {
+    const defaults = { projects: { 'p-1': { 'github.com': 'WORK' } } };
+    const choose = (name: string) =>
+      chosenSignIn('github.com', two, { project: { id: 'p-1', name, nameIsUnique: true }, defaults });
+
+    should(choose('x'.repeat(128))).eql({ signIn: 'si_00000000000000a1', why: 'project', project: 'x'.repeat(128) });
+    should(choose('x'.repeat(129))).eql({ signIn: 'si_00000000000000a1', why: 'project' });
+    should(choose('two\nlines')).eql({ signIn: 'si_00000000000000a1', why: 'project' });
+  });
 });
 
 describe('the words a card is given', () => {

@@ -49,6 +49,7 @@ import {
   NO_AGENDA_VERSIONS,
   versionAuthor,
 } from './versions.ts';
+import { ASK_REFERENCE_SIGIL } from '../../../contract/snapshot/ask-reference.ts';
 
 /** The heading of an item the daemon raised without wording one: plain words, never an id. */
 const DAEMON_TITLES: Readonly<Record<DaemonAgendaCause, string>> = {
@@ -71,6 +72,12 @@ export interface AgendaClock {
 /** The adapter must serialize each callback with every other callback for the same session. */
 export interface AgendaLedgerRepository {
   read(sessionId: string): Promise<AgendaLedger | null>;
+  /**
+   * What a board is NOW, as a cheap token that moves on any rewrite (a stat of the ledger file, not a read of it), so an
+   * unchanged board can be told apart without being read. A store that cannot say leaves it out, and its board is
+   * always read.
+   */
+  stamp?(sessionId: string): Promise<string>;
   /** Durable original changes, delivered outside the ledger transaction queue, including recovered mutations. */
   readonly changeOutbox?: {
     flush(sessionId: string, observer: AgendaChangeObserver): Promise<void>;
@@ -204,8 +211,8 @@ const carriedBy = (
   from: string,
 ): string =>
   asking.sessionId === from
-    ? `${formatTaskRef(task)} already asks the owner on !${asking.id}, which carries the card; put yours on it: fy agenda edit ${asking.id} --where "<each existing point>" --where "<what you need>" (--where replaces them all, so repeat the ones already there)`
-    : `${formatTaskRef(task)} already asks the owner on !${asking.id} (${asking.sessionId}'s agenda), which carries the card; add what the card needs to it: fy task note ${task.id} "<text>"`;
+    ? `${formatTaskRef(task)} already asks the owner on ${ASK_REFERENCE_SIGIL}${asking.id}, which carries the task; put yours on it: fy agenda edit ${asking.id} --where "<each existing point>" --where "<what you need>" (--where replaces them all, so repeat the ones already there)`
+    : `${formatTaskRef(task)} already asks the owner on ${ASK_REFERENCE_SIGIL}${asking.id} (${asking.sessionId}'s agenda), which carries the task; add what the task needs to it: fy task note ${task.id} "<text>"`;
 
 /**
  * An agent's ask that NAMES a card whose ask is open already is refused: two asks about one card are two things in the
@@ -261,6 +268,20 @@ export class AgendaService {
       ok: true,
       value: agendaSnapshot(current ?? emptyAgendaLedger(sessionId, this.clock.now())),
     };
+  }
+
+  /**
+   * The token of a board as it stands, for a conditional read: `undefined` when this daemon's store cannot say, so the
+   * board is read whole. The refusals of `list` stand (an unknown or reserved session), because an unchanged answer is
+   * never given to a caller who could not have the board.
+   */
+  async stamp(sessionId: string): Promise<AgendaQueryResult<string | undefined>> {
+    const unauthorized = await this.authorize(sessionId);
+    if (unauthorized !== null) return { ok: false, error: unauthorized };
+    if (this.repository.stamp === undefined) return { ok: true, value: undefined };
+    // The same look `list` takes first, so a change event waiting in the outbox is delivered by a poll that finds nothing new.
+    await this.flushChanges(sessionId);
+    return { ok: true, value: await this.repository.stamp(sessionId) };
   }
 
   /** The instant an empty board answers as its `updatedAt`: now. A ferret's board with nothing it may read answers this. */
@@ -329,8 +350,8 @@ export class AgendaService {
     const ref = formatTaskRef(focused.task);
     const warning =
       asking === UNREADABLE
-        ? `${ref}'s gate could not be read, so this was raised without the card rather than risk a second ask about it; add what the card needs to it instead: fy task note ${focused.task.id} "<text>"`
-        : `this was raised without the card: ${carriedBy(focused.task, asking, home)}`;
+        ? `${ref}'s gate could not be read, so this was raised without the task rather than risk a second ask about it; add what the task needs to it instead: fy task note ${focused.task.id} "<text>"`
+        : `this was raised without the task: ${carriedBy(focused.task, asking, home)}`;
     return { ...mutation, notes: [...(mutation.notes ?? []), warning] };
   }
 

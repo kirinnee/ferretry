@@ -165,7 +165,7 @@ function nameless(request: InputRequest): InputRequest {
 async function list(service: InputRequestService, call: CallContext, all: boolean): Promise<ApiResponse> {
   const caller = ownerOf(call);
   const requests = await service.list(caller, all ? undefined : ferretOf(call)).catch(answered);
-  const names = refusedAccountNames(call, 'read the accounts a card names') === undefined;
+  const names = refusedAccountNames(call, 'read the accounts an input names') === undefined;
   // A hold taken since the service answered still wins, now and again as the dispatcher sends it.
   const spell = (): PlainApiResponse => {
     const body: InputRequestList = {

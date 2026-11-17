@@ -39,8 +39,18 @@
  * `-H‹hidden›`). Every way of reading a word with a value (the glued flag and its value, the value stuck to a
  * one-letter flag, the whole word) is searched and what ANY of them cuts is cut, so no reading shows what another hid.
  *
- * NOT handled (declared GAPs): a JSON document inside a flag (`--settings '{"env":{"API_KEY":"v"}}'`, its keys are
- * quoted) and a plain password stuck to a one-letter flag (`-p<password>`: a single letter is no secret name). A value
+ * A JSON object or array inside a word (`--settings '{"env":{"API_KEY":"v"}}'`, its keys are quoted) is read key by
+ * key ({@link jsonCuts}): a string under a secret-named key that looks like a credential is cut, wherever in the
+ * document it sits. A one-letter flag whose letter means "password" (mysql's `-p<password>`)
+ * is read under that name FIRST, so its stuck value is cut like any value under a secret name (a value under 8
+ * characters is no credential, as everywhere, except a quoted one: `-p'a b'`) even when a longer flag glued to a value
+ * also parses: `-pabc=def12345` is cut, and so is `-port=8080808080` (over-hiding, the safe side), while a longer flag
+ * that itself names a credential (`-password=$X`) is that flag's. The letter is also read as the program reads it
+ * ({@link PASSWORD_STUCK}), where the stuck reading above does not see it: after switches clustered in front of it
+ * (`-vp<password>`, `-xp<password>`) and with a `=` or `-` as the password's first character (`-p=<password>`,
+ * `-p-<password>`; `-p=$X` still points). A reference is what a shell would EXPAND ({@link shellReferenceEnd}): `$X`,
+ * `${X}`, a default that is itself one (`${X:-$Y}`); a default LITERAL (`${X:-lit}`) and a single-quoted `'$Lit'` (a shell
+ * expands nothing in single quotes) are values, hidden under a credential name like any value ({@link judged}). A value
  * glued to a pointer with no space or `#` between them (`API_KEY=v${secret:X}`, `prefix${secret:X}`,
  * `${secret:X}?model=short`) is NOT one: CFG-LEAK-R cuts the whole value ({@link gluedToPointer}), because the write
  * rule refuses it. The same holds for raw text in ANY piece of a credential's value that holds a pointer
@@ -83,6 +93,22 @@ const GLUED_VALUE = /^(-{1,2}[A-Za-z0-9][^=\s]*)(=|\s+)([\s\S]*)$/u;
 /** A one-letter flag with its value stuck straight to it: `-Hv`. */
 const STUCK_VALUE = /^(-[A-Za-z])([^-=\s][\s\S]*)$/u;
 
+/** One-letter flags whose letter says what the value stuck to it is, by the program's own convention: `-p<password>`. */
+const STUCK_FLAG_NAMES: ReadonlyMap<string, string> = new Map([['-p', 'password']]);
+
+/**
+ * The letter whose stuck value is a password, by the program's own convention (mysql's `-p<password>`), after any flags
+ * clustered in front of it (`-vp<password>`, `-xp<password>`): the letters before the `p` are SWITCHES, the `p` takes the
+ * rest of the word, and the rest may start with `=` or `-` (`-p=<password>`, `-p-<password>`: the program reads that
+ * character as the password's first). A letter that takes a value ends the cluster, because it takes the rest of the word as
+ * that value (`-hproxy.example.com`, `-uprod_user`, `-eapiKey=v`): those words hold no `-p` flag, so only the letters that
+ * are switches in the programs that read `-p<password>` (`v` verbose, `x`, `q` quick, `s` silent, `t`, `n`, `f` force, `i`,
+ * `a`, `b`, `z`, and the ones mysql and mysqldump add: `N` skip column names, `B` batch, `C` compress, `E` vertical,
+ * `V` version, `d` no data, `l` lock tables) are read as a cluster. A cluster with another letter in it is not read, and shows what it always did. Over-hiding
+ * a longer single-dash flag that is no password (`-port=8080808080`, `-spring.profiles=x`) is accepted: the safe side.
+ */
+const PASSWORD_STUCK = /^(-[abfinqstvxzNBCEVdl]*p)(\S[\s\S]*)$/u;
+
 /** What splits a value into the pieces a token may start at: spaces, quotes and separators. */
 const PIECE_BREAK = /[\s"'`:,;=]+/u;
 
@@ -92,11 +118,28 @@ const QUOTED = /^(["'])([\s\S]*)\1$/u;
 /** A value without one pair of matching quotes around it. */
 const unquoted = (value: string): string => QUOTED.exec(value)?.[2] ?? value;
 
+/**
+ * A value as the tests judge it: without its one pair of quotes, except a single-quoted `$…`. A shell expands nothing
+ * between single quotes, so `'$Summer2024'` is the text `$Summer2024`, a value, not a reference: it keeps its quotes
+ * here, so no test reads it as one (`pointsElsewhere` sees a leading quote), and one with a `${secret:NAME}` in it is
+ * Ferretry's pointer whatever the quotes (it is judged unquoted, as always). A value shorter than a credential can be is
+ * judged unquoted: its quotes would only lengthen it.
+ */
+function judged(value: string): string {
+  const quoted = QUOTED.exec(value);
+  if (quoted === null) return value;
+  const inner = quoted[2] ?? '';
+  const literal =
+    quoted[1] === "'" &&
+    inner.startsWith('$') &&
+    inner.length >= MIN_SECRET_VALUE_LENGTH &&
+    !holdsSecretReference(inner);
+  return literal ? value : inner;
+}
+
 /** Whether a flag's value looks like a credential under the flag's name, or holds a token. */
 function secretValue(name: string, value: string, tests: CutterTests): boolean {
-  return (
-    tests.looksSecret(name, unquoted(value)) || value.split(PIECE_BREAK).some(piece => tests.looksSecret('', piece))
-  );
+  return tests.looksSecret(name, judged(value)) || value.split(PIECE_BREAK).some(piece => tests.looksSecret('', piece));
 }
 
 /**
@@ -301,8 +344,8 @@ function partHeld(text: string, ends: ValueEnds, from: number, to: number): bool
   const start = quoted ? from + 1 : from;
   const end = quoted ? to - 1 : to;
   if (end - start < MIN_SECRET_VALUE_LENGTH) return false;
-  if (text[start] !== '$') return true;
-  if (text[start + 1] === '{') return ends.close[start + 2] !== end - 1;
+  if (text[start] !== '$' || (quoted && quote === "'")) return true;
+  if (text[start + 1] === '{') return shellReferenceEnd(text, start, end) !== end;
   return !(POINTER_NAME_START.test(text[start + 1] as string) && (ends.nameEnd[start + 1] as number) >= end);
 }
 
@@ -407,8 +450,9 @@ function heldAt(
 ): boolean {
   const [start, end] = range;
   if ((ends.pointer[start] as number) <= end || end - start < MIN_SECRET_VALUE_LENGTH) return false;
-  if (text.startsWith('${', start) && ends.close[start + 2] === (ends.shownEnd[end] as number) - 1) return false;
-  return tests.looksSecret(name, unquoted(text.slice(start, end).trim()));
+  const shownEnd = ends.shownEnd[end] as number;
+  if (shellReferenceEnd(text, start, shownEnd) === shownEnd) return false;
+  return tests.looksSecret(name, judged(text.slice(start, end).trim()));
 }
 
 /**
@@ -419,12 +463,12 @@ function heldAt(
  * `prefix${secret:X}`), and one too short to be a secret is none.
  */
 function heldInPiece(name: string, piece: string, tests: CutterTests): boolean {
-  return tests.looksSecret(name, unquoted(piece.trim())) || heldParts(name, piece, tests);
+  return tests.looksSecret(name, judged(piece.trim())) || heldParts(name, piece, tests);
 }
 
 /** Whether any part of a text that a space or `#` sets apart looks like a credential, each judged on its own. */
 const heldParts = (name: string, text: string, tests: CutterTests): boolean =>
-  text.split(PART_BREAK).some(part => tests.looksSecret(name, unquoted(part)));
+  text.split(PART_BREAK).some(part => tests.looksSecret(name, judged(part)));
 
 /** A quote mark: a closing one right after a padded `=` ends the value (`"Basic <b64>="`). */
 const QUOTE_MARKS = new Set(['"', "'", '`']);
@@ -525,6 +569,124 @@ function throughPasswords(cuts: readonly Cut[], passwords: readonly Cut[]): read
   return merged(cuts).map(([from, to]) => [place(from, false), place(to, true)] as const);
 }
 
+/** A JSON document's text: an object or an array, after any blanks. */
+const JSON_DOCUMENT = /^\s*[{[]/u;
+
+/** One JSON string literal, or one of the marks that give a document its shape. */
+const JSON_TOKEN = /"(?:[^"\\]|\\.)*"|[{}[\]:,]/gu;
+
+/** One object or array of a JSON document being read: the key whose value is being read, and the key above it. */
+interface JsonFrame {
+  readonly object: boolean;
+  /** The nearest key above this one (`''` for none): an item of a list is named by the key the list is under. */
+  readonly inherited: string;
+  key: string | undefined;
+  expectKey: boolean;
+}
+
+/** A JSON string literal's text, as written when it does not parse. */
+function jsonString(literal: string): string {
+  try {
+    return String(JSON.parse(literal));
+  } catch {
+    return literal.slice(1, -1);
+  }
+}
+
+/** A key's name as a broken document may write it: bare, or in `"`, `'` or `\"`, then a `:`, `=` or blanks. */
+const JSON_KEY_ISH = /(?<![A-Za-z0-9_.-])([A-Za-z_][A-Za-z0-9_.-]*)(?:\\?["'])?[ \t]*[:=]?[ \t]*/gu;
+
+/** Whether a text parses as JSON (a document too deep for the parser does not). */
+function parses(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The cut of a document that does not parse (`{"API_KEY": v}`, `{'API_KEY':'v'}`, `{\"API_KEY\":\"v\"}`, a stray `}}}`
+ * before the key): it has no key and value pairs to read, so the first secret-named key anywhere in it (quoted with
+ * `"`, `'` or `\"`, or bare) cuts from its value to the end of the document, whatever shape that takes.
+ */
+function brokenJsonCuts(text: string, tests: CutterTests): readonly Cut[] {
+  // A key may be spelled in `\uXXXX` escapes (a key whose first letter is one): the text is read as written AND with each escape
+  // decoded, and a place found in the decoded text is mapped back to the text. The earliest secret-named key wins.
+  const reads: (readonly [string, (index: number) => number])[] = [[text, index => index]];
+  if (text.includes('\\u')) {
+    const { decoded, at } = decodedEscapes(text);
+    reads.push([decoded, index => at[index] ?? text.length]);
+  }
+  let cutFrom: number | undefined;
+  for (const [read, place] of reads) {
+    for (const found of matchesOf(JSON_KEY_ISH, read)) {
+      const from = found.index + found[0].length;
+      if (tests.namesSecret(found[1] ?? '') && from < read.length) {
+        cutFrom = Math.min(cutFrom ?? text.length, place(from));
+        break;
+      }
+    }
+  }
+  return cutFrom === undefined ? [] : [[cutFrom, text.length]];
+}
+
+/** A text with each `\uXXXX` escape decoded, and where each decoded character starts in the text. */
+function decodedEscapes(text: string): { readonly decoded: string; readonly at: readonly number[] } {
+  const at: number[] = [];
+  let decoded = '';
+  let index = 0;
+  while (index < text.length) {
+    const unicode = /^\\u([0-9a-fA-F]{4})/u.exec(text.slice(index, index + 6));
+    const piece = unicode === null ? (text[index] ?? '') : String.fromCharCode(Number.parseInt(unicode[1] ?? '0', 16));
+    for (let unit = 0; unit < piece.length; unit += 1) at.push(index);
+    decoded += piece;
+    index += unicode === null ? 1 : 6;
+  }
+  return { decoded, at };
+}
+
+/**
+ * The cuts of the strings of a JSON document inside a value (`{"env":{"API_KEY":"v"}}`) that look like credentials
+ * under the key they are held by, as W names it: the nearest key above a string, however deep. Read lexically, one
+ * pass and no recursion, so a document that does not parse is read as far as it goes and a deep one costs its length.
+ * The quotes stay: only what is between them is cut. A document that does not parse is also cut from the value of its
+ * first secret-named key to its end ({@link brokenJsonCuts}), so a shape the lexical read misses shows nothing.
+ */
+function jsonCuts(text: string, tests: CutterTests): readonly Cut[] {
+  if (!JSON_DOCUMENT.test(text)) return [];
+  return parses(text)
+    ? lexicalJsonCuts(text, tests)
+    : [...lexicalJsonCuts(text, tests), ...brokenJsonCuts(text, tests)];
+}
+
+function lexicalJsonCuts(text: string, tests: CutterTests): readonly Cut[] {
+  const cuts: Cut[] = [];
+  const frames: JsonFrame[] = [];
+  for (const token of matchesOf(JSON_TOKEN, text)) {
+    const mark = token[0];
+    const top = frames.at(-1);
+    if (mark === '{' || mark === '[')
+      frames.push({
+        object: mark === '{',
+        inherited: top === undefined ? '' : (top.key ?? top.inherited),
+        key: undefined,
+        expectKey: mark === '{',
+      });
+    else if (mark === '}' || mark === ']') frames.pop();
+    else if (mark === ':' || mark === ',') {
+      if (top?.object === true) {
+        top.expectKey = mark === ',';
+        if (mark === ',') top.key = undefined;
+      }
+    } else if (top?.object === true && top.expectKey) top.key = jsonString(mark);
+    else if (tests.looksSecret(top === undefined ? '' : (top.key ?? top.inherited), jsonString(mark)))
+      cuts.push([token.index + 1, token.index + mark.length - 1]);
+  }
+  return cuts;
+}
+
 /** The cuts of a value: each URL user's password, and each nested credential (inside one pair of quotes, kept). */
 function nestedCuts(value: string, tests: CutterTests): readonly Cut[] {
   const quoted = QUOTED.exec(value);
@@ -535,7 +697,9 @@ function nestedCuts(value: string, tests: CutterTests): readonly Cut[] {
     passwords.length === 0
       ? nestedValueCuts(inner, tests)
       : throughPasswords(nestedValueCuts(withCuts(inner, passwords), tests), passwords);
-  return [...passwords, ...nested].map(([from, to]) => [from + offset, to + offset] as const);
+  return [...passwords, ...nested, ...jsonCuts(inner, tests)].map(
+    ([from, to]) => [from + offset, to + offset] as const,
+  );
 }
 
 /**
@@ -633,12 +797,38 @@ export function shownWordWith(tests: CutterTests, word: string, before: string |
   // #37 first, whole: a value glued on or stuck to its flag, then the word under the flag before it. A nested cut
   // (#40) is only ever a FURTHER cut of a word #37 would show, so it never shows what #37 hid: `-H<token> KEY=v` is a
   // flag `-H<token>` with a value after a space, and stays `-H‹hidden›`.
-  const stuckHidden = stuck !== null && secretValue('', stuckValue, tests);
+  // A one-letter flag's letter names its value (`-p<password>`) whatever else the word could be read as: the stuck
+  // reading is judged first and hides on a letter with a known meaning, even when a longer flag glued to its value also
+  // parses (`-pabc=def12345`). That over-hides `-port=80`, which is the safe side. A longer flag that itself names a
+  // credential (`-password=$X`) is still that flag's and reads as it always did, as do `-port 80` (two words) and
+  // `--password=$X` (no one-letter flag in it).
+  const gluedFlagOwnsWord =
+    glued !== null && /^-pass(?:word|wd)?$/iu.test(gluedFlag) && pointsElsewhere(judged(gluedValue));
+  const stuckName = gluedFlagOwnsWord ? '' : (STUCK_FLAG_NAMES.get(stuckFlag) ?? '');
+  // A quoted value with a blank in it stuck to the letter (`-p'a b'`) is read as a longer flag glued to a value by the
+  // other reading (`-p'a` and `b'`); a letter with a known meaning hides it however short it is. A quoted value with no
+  // blank (`-p'short'`, `-p'$DB_PASSWORD'`) is judged by its value like any other.
+  const quotedStuck = stuckName !== '' && QUOTED.test(stuckValue) && /\s/u.test(unquoted(stuckValue));
+  const stuckHidden = stuck !== null && (secretValue(stuckName, stuckValue, tests) || quotedStuck);
+  // The password letter read as the program reads it (`PASSWORD_STUCK`): after flags clustered in front of it
+  // (`-vp<password>`) and with a `=` or `-` as the password's first character (`-p=<password>`, `-p-<password>`),
+  // which the stuck reading above (a lone letter, a value that starts with neither) does not see. It comes AFTER that
+  // reading, never instead of it: a token stuck to a letter (`-Hghp_…`, whose `p` is the token's own) is cut from the
+  // letter, which hides the most. What follows the separator says whether the word points at a variable (`-p=$X`).
+  const [, passwordFlag = '', passwordStuckValue = ''] = gluedFlagOwnsWord ? [] : (PASSWORD_STUCK.exec(word) ?? []);
+  const passwordValue = passwordStuckValue.replace(/^[=-]/u, '');
+  const passwordHidden =
+    !stuckHidden &&
+    passwordFlag !== '' &&
+    !pointsElsewhere(judged(passwordValue)) &&
+    (secretValue('password', passwordValue, tests) ||
+      (QUOTED.test(passwordValue) && /\s/u.test(unquoted(passwordValue))));
   if (glued !== null && secretValue(gluedFlag, gluedValue, tests)) {
     // A token in what the glued reading calls the flag (`-H<token>,API_KEY=v`) is cut with everything after the letter,
     // as the stuck reading cuts it (review r2 G1).
-    if (stuckHidden && secretValue('', gluedFlag.slice(stuckFlag.length), tests))
+    if (stuckHidden && (stuckName !== '' || secretValue('', gluedFlag.slice(stuckFlag.length), tests)))
       return hidden(`${stuckFlag}${HIDDEN_VALUE_TEXT}`);
+    if (passwordHidden) return hidden(`${passwordFlag}${HIDDEN_VALUE_TEXT}`);
     // A token in the flag's own part (`--x;ghp_…,tokens v`) is cut with the word, not shown beside the cut value.
     if (secretValue('', gluedFlag, tests)) return hidden(HIDDEN_VALUE_TEXT);
     // A glued flag's own part may hold a nested key of its own (`--x&API_KEY:v;Bearer sk-…`), also one stuck to its
@@ -650,6 +840,7 @@ export function shownWordWith(tests: CutterTests, word: string, before: string |
     return hidden(`${withCuts(gluedFlag, flagCuts)}${separator}${HIDDEN_VALUE_TEXT}`);
   }
   if (stuckHidden) return hidden(`${stuckFlag}${HIDDEN_VALUE_TEXT}`);
+  if (passwordHidden) return hidden(`${passwordFlag}${HIDDEN_VALUE_TEXT}`);
   const name = before !== undefined && FLAG_WORD.test(before) && !word.startsWith('-') ? before : '';
   if (secretValue(name, word, tests)) return hidden(HIDDEN_VALUE_TEXT);
   // #40: every reading of the word is searched, and what any of them cuts is cut (review r2 M2, M3): a glued flag's own
@@ -728,8 +919,48 @@ export const SECRET_TOKEN_SOURCE: string = TOKEN_FORMATS.map(([prefix, body]) =>
 /** Value prefixes of well-known token formats, and of two more whose body is not a plain run (a Google OAuth token, a JWT). */
 const SECRET_VALUE_PREFIX = new RegExp(`^(?:${TOKEN_FORMATS.map(([prefix]) => prefix).join('|')}|ya29\\.|eyJ)`, 'u');
 
-/** A value that only points somewhere else: `$NAME`, `${NAME}`, `${secret:NAME}`. */
-const INDIRECT_VALUE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]+\})$/u;
+/** How many `${X:-${Y:-…}}` defaults deep a reference is read: a deeper one is a value. */
+const MAX_POINTER_DEPTH = 8;
+
+/** The name inside `${…}`: a variable's, or a positional parameter's. */
+const BRACED_NAME = /^(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+)/u;
+
+/**
+ * Where the shell reference that starts at `from` ends (before `limit`), or -1 when none starts there: `$NAME`,
+ * `${NAME}`, `${#NAME}`, `${!NAME}`, or `${NAME<op>WORD}` with `<op>` one of `:-` `-` `:=` `=` `:?` `?` `:+` `+` and
+ * WORD empty or itself a reference (`${X:-}`, `${X:-$Y}`). A WORD that is anything else is a LITERAL (`${X:-lit}`: the
+ * shell uses it when X is unset, so it is a value that was written here), and so are the forms that cut or rewrite a
+ * value (`${X:0:3}`, `${X/a/b}`). Reads only what it follows: its cost is the reference's own length.
+ */
+function shellReferenceEnd(text: string, from: number, limit: number, depth = 0): number {
+  if (text[from] !== '$' || from + 1 >= limit) return -1;
+  const first = text[from + 1] as string;
+  if (POINTER_NAME_START.test(first)) {
+    let at = from + 2;
+    while (at < limit && POINTER_NAME_CHAR.test(text[at] as string)) at++;
+    return at;
+  }
+  if (first !== '{') return -1;
+  const marked = text[from + 2] === '#' || text[from + 2] === '!';
+  const nameFrom = from + (marked ? 3 : 2);
+  const name = BRACED_NAME.exec(text.slice(nameFrom, Math.min(limit, nameFrom + 256)));
+  if (name === null) return -1;
+  let at = nameFrom + name[0].length;
+  if (text[at] === '}') return at < limit ? at + 1 : -1;
+  if (marked) return -1;
+  if (text[at] === ':') at++;
+  if (!'-=?+'.includes(text[at] ?? '') || at >= limit) return -1;
+  at++;
+  if (text[at] === '$') {
+    if (depth >= MAX_POINTER_DEPTH) return -1;
+    at = shellReferenceEnd(text, at, limit, depth + 1);
+    if (at === -1) return -1;
+  }
+  return text[at] === '}' && at < limit ? at + 1 : -1;
+}
+
+/** Whether a whole text is one shell reference ({@link shellReferenceEnd}). */
+const isShellReference = (value: string): boolean => shellReferenceEnd(value, 0, value.length) === value.length;
 
 /**
  * Whether one environment entry looks like a secret (E7): the FLEET's rule, which refuses a secret written into an
@@ -757,7 +988,7 @@ export function looksSecretShown(name: string, value: string): boolean {
 }
 
 /** Whether a value only points at one (`$NAME`, `${NAME}`, a `${secret:NAME}` in it), and so holds none. */
-export const pointsElsewhere = (value: string): boolean => INDIRECT_VALUE.test(value) || holdsSecretReference(value);
+export const pointsElsewhere = (value: string): boolean => isShellReference(value) || holdsSecretReference(value);
 
 /**
  * The longest credential word {@link CREDENTIAL_KEY} ends in (`credentials`), with room to spare: the pattern is

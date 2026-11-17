@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type {
   FerretHarness,
@@ -138,7 +139,7 @@ async function rig(state: StatePort = memoryStatePort(CONVERSATION_STATE)) {
     },
   } as typeof daemon;
   const host = await testHost({
-    plugins: [implementation, wardenStandIn],
+    plugins: [mailboxDaemon, implementation, wardenStandIn],
     fakes: { ferrets, asks: new FakeAsks() },
     clock,
   });
@@ -161,7 +162,10 @@ async function rig(state: StatePort = memoryStatePort(CONVERSATION_STATE)) {
 
 /** The direct peer send of the incident: typed, nothing drawn within the fill's window, settled unconfirmed. */
 async function strandedSend(world: Awaited<ReturnType<typeof rig>>, sendId: string) {
-  const sent = await world.api().send(F1, { kind: 'ferret', ferret: F2 }, { message: MESSAGE, sendId });
+  // A blocker goes at once, through the mailbox's first look: a plain action would be held a minute to batch.
+  const sent = await world
+    .api()
+    .send(F1, { kind: 'ferret', ferret: F2 }, { message: MESSAGE, sendId, label: 'blocker' });
   expect(sent).toMatchObject({ ok: false, error: { code: 'send_unconfirmed' } });
   const row = await world.stored(sendId);
   expect(row).toMatchObject({ path: 'direct', fate: 'unaccounted', unaccountedReason: 'landing_unconfirmed' });
@@ -188,16 +192,18 @@ describe('B187 a stranded direct send', () => {
     await world.api().send(F1, { kind: 'ferret', ferret: F2 }, { message: 'FIXTURE later B', sendId: 's-b' });
     await advance(5 * MINUTE);
 
-    // The tracker saw the text in the box, said so once, and ONE Enter submitted it; the harness's record proved it.
-    expect(world.events()).toContain('control.send_typed_not_sent');
+    // The two sends wait in the mailbox (an action is held a minute to ride together), so nothing is typed behind the ghost
+    // and no ledger row is kept untyped for them; the look at the box finished the stranded text with ONE Enter, and the
+    // harness's record proved it.
+    expect(world.events().filter(event => event === 'control.send_deferred')).toHaveLength(0);
+    expect(world.events().filter(event => event === 'control.send_resubmitted')).toHaveLength(1);
     expect(ferrets.pane.submitted).toEqual([text]);
     expect(await world.stored('s-nelly')).toMatchObject({ fate: 'delivered' });
     expect(ferrets.pane.draft).toBeUndefined();
 
-    // The queue is clear: the two messages that waited behind it were typed, in order.
+    // The queue is clear: the two messages that waited behind it were typed together, as ONE combined turn, in order.
     expect(ferrets.pane.typed.filter(typed => typed.includes('FIXTURE later'))).toEqual([
-      expect.stringContaining('FIXTURE later A'),
-      expect.stringContaining('FIXTURE later B'),
+      expect.stringMatching(/\[2 messages from ferrets[\s\S]*FIXTURE later A[\s\S]*FIXTURE later B/u),
     ]);
     await world.host.stop();
   });

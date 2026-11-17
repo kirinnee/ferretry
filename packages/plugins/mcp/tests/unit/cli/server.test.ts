@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { CHANNEL_INSTRUCTIONS } from '../../../cli/lib/serve/channel.ts';
 import { McpServer, type McpToolResult } from '../../../cli/lib/serve/server.ts';
 import { MCP_TOOLS } from '../../../cli/lib/serve/tools.ts';
 
@@ -86,6 +87,7 @@ describe('McpServer — the tools', () => {
       'config_read',
       'lessons_suggest',
       'search_work',
+      'task_progress',
       'card_progress',
       'instructions',
       'input_wait',
@@ -93,7 +95,7 @@ describe('McpServer — the tools', () => {
     ])
       should(names).containEql(name);
     for (const name of ['secure_copy', 'secure_list', 'secure_discard', 'secure_paste']) should(names).containEql(name);
-    for (const name of ['account_propose', 'task_plan']) should(names).containEql(name);
+    for (const name of ['account_propose', 'signin_plan', 'task_plan']) should(names).containEql(name);
     should(new Set(names).size).equal(names.length);
     should(answer.result.tools).have.length(MCP_TOOLS.length);
     for (const tool of answer.result.tools) should(tool.inputSchema).have.property('type', 'object');
@@ -234,5 +236,29 @@ describe('McpServer — the tools', () => {
       { name: 'terminal_wait', args: { name: 'dev', text: 'ready', timeoutMs: 90_000 } },
       { name: 'browser_wait_for', args: { name: 'app', text: 'Done', timeoutMs: 60_000 } },
     ]);
+  });
+});
+
+describe('McpServer — the channel is declared only when the launch gave the flag', () => {
+  it('should add the claude/channel capability and the channel instructions when asked, and neither otherwise', async () => {
+    // Arrange
+    const ask = async (channel: boolean) =>
+      await new McpServer(
+        { call: async () => ({ text: 'ok' }) },
+        { name: 'ferretry', version: '9.9.9', instructions: 'One line.', channel },
+      ).handle({ jsonrpc: '2.0', id: 1, method: 'initialize' });
+
+    // Act
+    const [on, off] = [await ask(true), await ask(false)];
+
+    // Assert
+    should(on).match({
+      result: {
+        capabilities: { experimental: { 'claude/channel': {} } },
+        instructions: `One line. ${CHANNEL_INSTRUCTIONS}`,
+      },
+    });
+    should(off).match({ result: { capabilities: { tools: { listChanged: false } }, instructions: 'One line.' } });
+    should(JSON.stringify(off)).not.containEql('claude/channel');
   });
 });

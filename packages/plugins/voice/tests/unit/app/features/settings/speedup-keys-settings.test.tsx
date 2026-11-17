@@ -16,6 +16,7 @@ import {
   savedKeyLine,
 } from '../../../../../app/features/settings/speedup-keys-settings.tsx';
 import { DeviceSpeedupKeys, SPEEDUP_KEY_SHAPE_SENTENCE } from '../../../../../app/lib/stt/speedup-keys.ts';
+import { interact, mount, must, submit, typeInto } from '../../../../support/app/dom.ts';
 import { render, run, runAsync } from '../../../../support/app/react.ts';
 
 const KEY = 'gsk_test_0123456789abcdXY';
@@ -53,6 +54,18 @@ const button = (scope: ReactTestInstance, label: string): ReactTestInstance =>
 const textOf = (node: ReactTestInstance | string): string =>
   typeof node === 'string' ? node : node.children.map(textOf).join(' ');
 const text = (node: ReactTestInstance | ReactTestRenderer): string => textOf('root' in node ? node.root : node);
+
+/** The same, for a real DOM: lets WebCrypto and the vault's promises settle. */
+const settleDom = async (): Promise<void> => {
+  for (let round = 0; round < 6; round += 1)
+    await interact(async () => await new Promise(resolve => setTimeout(resolve, 3)));
+};
+const domCard = (container: HTMLElement, provider: string): HTMLElement =>
+  must(container.querySelector<HTMLElement>(`section[data-device-key="${provider}"]`), `the ${provider} card`);
+const openKeysDom = async (container: HTMLElement): Promise<void> => {
+  const add = [...container.querySelectorAll('button')].find(each => each.textContent?.trim() === 'Add key');
+  await interact(() => must(add, 'Add key').click());
+};
 
 /** The row keeps its cards behind "Add key", and its long explanation behind the (i). */
 const openKeys = (renderer: ReactTestRenderer): void =>
@@ -98,23 +111,32 @@ describe('Settings › This device › Speed-up keys', () => {
   it('should save a key, clear the field, and never show the key again', async () => {
     // Arrange
     const { keys } = vault();
-    const renderer = render(<SpeedupKeysSettings keys={keys} />);
-    await settle();
-    openKeys(renderer);
-    const groq = card(renderer, 'groq');
+    const mounted = await mount(<SpeedupKeysSettings keys={keys} />);
+    try {
+      await settleDom();
+      await openKeysDom(mounted.container);
+      const groq = domCard(mounted.container, 'groq');
+      const input = must(groq.querySelector<HTMLInputElement>('input'), 'the Groq key field');
 
-    // Act
-    run(() => groq.findByType('input').props.onChange({ target: { value: `  ${KEY}  ` } }));
-    await runAsync(async () => groq.findByType('form').props.onSubmit({ preventDefault: noop }));
-    await settle();
+      // Act
+      await typeInto(input, `  ${KEY}  `);
+      // Typed: the field holds it as its live value only, never as the `value` attribute or anywhere in the markup.
+      expect(input.getAttribute('value')).toBeNull();
+      expect(mounted.container.innerHTML).not.toContain(KEY);
+      await submit(groq.querySelector('form'));
+      await settleDom();
 
-    // Assert
-    const page = text(renderer);
-    expect(page).toContain('Saved · ends with ••XY');
-    expect(page).not.toContain(KEY);
-    expect(card(renderer, 'groq').findByType('input').props.value).toBe('');
-    expect(text(card(renderer, 'groq'))).toContain('Replace the Groq key');
-    expect(text(card(renderer, 'cerebras'))).toContain('Not saved');
+      // Assert
+      const page = mounted.container.textContent ?? '';
+      expect(page).toContain('Saved · ends with ••XY');
+      expect(page).not.toContain(KEY);
+      expect(mounted.container.innerHTML).not.toContain(KEY);
+      expect(input.value).toBe('');
+      expect(domCard(mounted.container, 'groq').textContent).toContain('Replace the Groq key');
+      expect(domCard(mounted.container, 'cerebras').textContent).toContain('Not saved');
+    } finally {
+      await mounted.unmount();
+    }
   });
 
   it('should Test a saved key against its own provider, then Remove it', async () => {
@@ -142,19 +164,23 @@ describe('Settings › This device › Speed-up keys', () => {
   it('should say why a pasted value was refused, and keep nothing', async () => {
     // Arrange
     const { keys, records } = vault();
-    const renderer = render(<SpeedupKeysSettings keys={keys} />);
-    await settle();
-    openKeys(renderer);
-    const cerebras = card(renderer, 'cerebras');
+    const mounted = await mount(<SpeedupKeysSettings keys={keys} />);
+    try {
+      await settleDom();
+      await openKeysDom(mounted.container);
+      const cerebras = domCard(mounted.container, 'cerebras');
 
-    // Act
-    run(() => cerebras.findByType('input').props.onChange({ target: { value: 'not a key' } }));
-    await runAsync(async () => cerebras.findByType('form').props.onSubmit({ preventDefault: noop }));
-    await settle();
+      // Act
+      await typeInto(cerebras.querySelector('input'), 'not a key');
+      await submit(cerebras.querySelector('form'));
+      await settleDom();
 
-    // Assert
-    expect(text(card(renderer, 'cerebras'))).toContain(SPEEDUP_KEY_SHAPE_SENTENCE);
-    expect(records.size).toBe(0);
+      // Assert
+      expect(domCard(mounted.container, 'cerebras').textContent).toContain(SPEEDUP_KEY_SHAPE_SENTENCE);
+      expect(records.size).toBe(0);
+    } finally {
+      await mounted.unmount();
+    }
   });
 
   it('should say a key this browser can no longer open is unreadable, and still allow Remove', async () => {

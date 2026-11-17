@@ -42,6 +42,8 @@ import {
   FerretStateFile,
   FerretsPort,
   Harnesses,
+  QUESTION_OPEN_KEY,
+  QuestionOpen,
   type RunnerHandle,
   type HarnessTailRecord,
   type HarnessTranscriptStamp,
@@ -54,6 +56,7 @@ import ferrets, { TURN_WATCH_JOB } from '../../../daemon/index.ts';
 import { FileHandoverReceiptStore } from '../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
 import { fleetEventsAccept, HistoryEventSource } from '../../../daemon/modules/fleet-events.ts';
 import { AUTO_RESUME_JOB } from '../../../daemon/modules/auto-resume.ts';
+import { INTERRUPTED_LAUNCH_JOB } from '../../../daemon/modules/interrupted-launches.ts';
 import { MONITOR_TICK_JOB } from '../../../daemon/modules/monitor.ts';
 import { type SessionHandoverNeeds, sessionHandoverModule } from '../../../daemon/modules/session-handover.ts';
 import type { SessionDirectorySubsystem } from '../../../daemon/lib/session/directory/subsystem.ts';
@@ -121,6 +124,25 @@ const listenerPlugin = (heard: FerretChangedPayload[], id = 'conversation') =>
     { build: () => ({ hooks: { 'ferret.changed': (payload: FerretChangedPayload) => void heard.push(payload) } }) },
   );
 
+/** Conversation's half of `turn.question-open`, as a stand-in with its real id: a ferret is asking while its id is in `open`. */
+const questionPlugin = (open: ReadonlySet<string>) =>
+  implementDaemon(
+    definePlugin({
+      id: 'conversation',
+      title: 'Conversation (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: QuestionOpen, key: QUESTION_OPEN_KEY }] },
+    }),
+    {
+      build: () => ({
+        hooks: { 'turn.question-open:question': { isOpen: async (ferret: string) => open.has(ferret) } },
+      }),
+    },
+  );
+
 /** The Vault fake, keeping each launch's environment as Ferrets handed it (names and fixture paths only). */
 class RecordingVault extends FakeVault {
   readonly asked: Readonly<Record<string, string>>[] = [];
@@ -149,14 +171,25 @@ const admitting = () =>
     { build: () => ({ hooks: { 'start.decide': async (): Promise<HookDecision> => ({ allow: true }) } }) },
   );
 
-async function host(standing: () => CallStanding = () => ownerStanding(), more: ReturnType<typeof admitting>[] = []) {
+async function host(
+  standing: () => CallStanding = () => ownerStanding(),
+  more: ReturnType<typeof admitting>[] = [],
+  /** The ferrets Conversation stores an open question for; given, a stand-in Conversation provides the probe. */
+  asking?: ReadonlySet<string>,
+) {
   const runner = new FakeRunner();
   const heard: FerretChangedPayload[] = [];
   const vault = new RecordingVault();
   const harness = new FakeHarness();
   const h = await testHost({
     everyDirectory: true,
-    plugins: [ferrets, harnessPlugin(harness), runnerPlugin(runner), listenerPlugin(heard), ...more],
+    plugins: [
+      ferrets,
+      harnessPlugin(harness),
+      runnerPlugin(runner),
+      ...(asking === undefined ? [listenerPlugin(heard)] : [listenerPlugin(heard, 'listener'), questionPlugin(asking)]),
+      ...more,
+    ],
     gate: new StandInAdmission(standing),
     fakes: { gate: new FakeGate(), vault, asks: new FakeAsks() },
     secrets: [SECRET],
@@ -236,6 +269,47 @@ describe('the turn watch (U4, ruling #27 Q3: mounted in Ferrets)', () => {
     await tick(h);
     expect((await h.provided(FerretsPort).get(id))?.state).toBe('working');
     expect(heard.at(-1)).toEqual({ ferret: id, state: 'working', previous: 'idle', change: 'state' });
+    await h.stop();
+  });
+
+  test('a stored question reads as waiting on a person: the ferret goes idle while it is open, and working again once answered', async () => {
+    const asking = new Set<string>();
+    const { h, runner, heard, harness } = await host(() => ownerStanding(), [], asking);
+    const id = await start(h, 'ivo');
+    harness.transcripts.set(id, { stamp: STAMP('/t/ivo.jsonl', 10), records: [{ kind: 'work' }] });
+    const handle = (await h.provided(FerretsPort).handle(id)) as RunnerHandle;
+    await h.runJob(TURN_WATCH_JOB);
+    runner.screens.set(handle, working('w1'));
+    await tick(h);
+    expect((await h.provided(FerretsPort).get(id))?.state).toBe('working');
+
+    // The question form is open: the transcript still says mid-turn (the harness writes its call only once answered).
+    asking.add(id);
+    runner.screens.set(handle, working('w2'));
+    await tick(h);
+    expect((await h.provided(FerretsPort).get(id))?.state).toBe('idle');
+    expect((await h.provided(FerretsPort).prompt?.(id))?.turnState).toBe('needs-input');
+    expect(heard.at(-1)).toEqual({ ferret: id, state: 'idle', previous: 'working', change: 'state' });
+
+    // Answered: the stored question is gone and the turn carries on.
+    asking.delete(id);
+    runner.screens.set(handle, working('w3'));
+    await tick(h);
+    expect((await h.provided(FerretsPort).get(id))?.state).toBe('working');
+    expect(heard.at(-1)).toEqual({ ferret: id, state: 'working', previous: 'idle', change: 'state' });
+    await h.stop();
+  });
+
+  test('with no Conversation to answer, an open question changes nothing: the turn is decided as before', async () => {
+    const { h, runner, harness } = await host();
+    const id = await start(h, 'jory');
+    harness.transcripts.set(id, { stamp: STAMP('/t/jory.jsonl', 10), records: [{ kind: 'work' }] });
+    const handle = (await h.provided(FerretsPort).handle(id)) as RunnerHandle;
+    await h.runJob(TURN_WATCH_JOB);
+    runner.screens.set(handle, working('w1'));
+    await tick(h);
+    await tick(h);
+    expect((await h.provided(FerretsPort).get(id))?.state).toBe('working');
     await h.stop();
   });
 
@@ -560,7 +634,7 @@ describe('auto-resume and the agenda hook (J-0002 J-0015)', () => {
       },
     );
 
-  test('J-0002 auto-resume is a job the daemon arms once it serves: nothing is resumed before it runs, one run resumes the ferret a host restart took down', async () => {
+  test('J-0002 J-0016 auto-resume is a job the daemon arms once it serves: nothing is resumed before it runs, one run resumes the ferret a host restart took down', async () => {
     const runner = new FakeRunner();
     const asked: AutoResumeDecideInput[] = [];
     let h = await ferretsHost([], {
@@ -614,6 +688,44 @@ describe('auto-resume and the agenda hook (J-0002 J-0015)', () => {
     await tick(h);
     await tick(h);
     expect(agenda.slice(heardBefore)).toEqual([{ ferret: id, state: 'idle', previous: 'working', change: 'state' }]);
+    await h.stop();
+  });
+});
+
+describe('interrupted launches (c58-56)', () => {
+  const statusOf = (h: TestHost, id: FerretId): unknown =>
+    JSON.parse(h.state('ferrets').raw(FerretStateFile, id) ?? '{}').status;
+
+  test('a document the dead daemon left starting, whose terminal is gone, is recorded failed when the job runs', async () => {
+    const { h: first, runner } = await host();
+    const id = await start(first, 'finch');
+    await first.settle();
+    const document = JSON.parse(first.state('ferrets').raw(FerretStateFile, id) ?? '{}') as Record<string, unknown>;
+    first.state('ferrets').plant(FerretStateFile, JSON.stringify({ ...document, status: 'starting' }), id);
+    runner.reboot();
+    await first.clock.advance(60_000);
+    const h = await first.restart();
+    expect(h.jobIds()).toContain(INTERRUPTED_LAUNCH_JOB);
+    expect(INTERRUPTED_LAUNCH_JOB).toBe('ferrets.interrupted-launches');
+    expect(statusOf(h, id)).toBe('starting');
+
+    await h.runJob(INTERRUPTED_LAUNCH_JOB);
+    await h.settle();
+    expect(statusOf(h, id)).toBe('failed');
+    expect(h.state('ferrets').raw(FerretHistoryFiles, id)).toContain('session.launch_interrupted');
+    await h.stop();
+  });
+
+  test('a launch this very process is making is never failed by the job', async () => {
+    const { h } = await host();
+    const id = await start(h, 'robin');
+    await h.settle();
+    const document = JSON.parse(h.state('ferrets').raw(FerretStateFile, id) ?? '{}') as Record<string, unknown>;
+    h.state('ferrets').plant(FerretStateFile, JSON.stringify({ ...document, status: 'starting' }), id);
+
+    await h.runJob(INTERRUPTED_LAUNCH_JOB);
+    await h.settle();
+    expect(statusOf(h, id)).toBe('starting');
     await h.stop();
   });
 });
@@ -762,7 +874,7 @@ describe('the handover reconcile loop (J-0069 J-0107 J-0245 J-0247)', () => {
 });
 
 describe('the event stream keeps proving it is alive (J-0239)', () => {
-  test('J-0239 GET /v1/events is a declared socket, and a quiet stream says idle again every 30 s; a real event re-arms the window instead', async () => {
+  test('J-0239 J-0137 GET /v1/events is a declared socket, and a quiet stream says idle again every 30 s; a real event re-arms the window instead', async () => {
     expect(manifest.actions?.sockets?.map(socket => socket.key)).toContain('GET /v1/events');
     const port = state.createStatePort({
       home: '/home/fy',
@@ -859,6 +971,9 @@ describe('the session index is rebuilt at boot (BG-049, J-0159)', () => {
     let h = await ferretsHost([]);
     const folder = h.state('ferrets');
     const written = await generatedFleet(60, folder);
+    // An append records no journal version; the rebuild reads each journal in full and does. One reconcile puts the
+    // "before" rows on the same footing, so the comparison is of what the daemon had, version included.
+    await written.storage.reconcile();
     const sessionsBefore = sessionRows(folder);
     const eventsBefore = eventRows(folder);
     expect(sessionsBefore).toHaveLength(60);
@@ -997,4 +1112,8 @@ describe('the declared-wait monitor (J-0003 J-0006 J-0070 J-0071 J-0072 J-0120)'
     expect(wake(runner)).toHaveLength(1);
     expect(JSON.parse(h.state('ferrets').raw(MonitorTickFile) ?? '{}')).toMatchObject({ armed: false, overdue: true });
   });
+});
+
+describe('rows re-owned from Usage', () => {
+  test.skip('J-0163 timers started outside a live activity are wrapped so they do not hold the daemon busy — the host’s live-activity timers, which are not Usage’s', () => {});
 });

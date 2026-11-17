@@ -78,7 +78,10 @@ const verbName = (entry: VerbEntry): string => entry.words.join(' ');
 /** The verbs under a group prefix (`terminal` → `terminal open`, …), never the prefix's own verb. */
 export function verbsUnder(table: VerbTable, prefix: readonly string[]): readonly VerbEntry[] {
   return table.entries.filter(
-    entry => entry.words.length > prefix.length && prefix.every((word, index) => entry.words[index] === word),
+    entry =>
+      entry.hidden !== true &&
+      entry.words.length > prefix.length &&
+      prefix.every((word, index) => entry.words[index] === word),
   );
 }
 
@@ -91,12 +94,13 @@ export function renderRootHelp(binary: string, table: VerbTable, titles: Readonl
     `\`${binary} <group> --help\` lists the verbs of a group such as \`terminal\` or \`device\`.`,
     '',
   ];
-  const owners = [...new Set(table.entries.map(entry => entry.owner))];
-  const all = table.entries.map(verbName);
+  const listed = table.entries.filter(entry => entry.hidden !== true);
+  const owners = [...new Set(listed.map(entry => entry.owner))];
+  const all = listed.map(verbName);
   const widest = Math.min(Math.max(0, ...all.map(each => each.length)), MAX_LEFT);
   for (const owner of owners) {
     lines.push(owner === 'shell' ? 'The shell' : (titles[owner] ?? owner));
-    const rows = table.entries
+    const rows = listed
       .filter(candidate => candidate.owner === owner)
       .map((entry): readonly [string, string] => [verbName(entry), entry.summary ?? '']);
     // One left-column width for the whole list, so the columns line up from one owner to the next.
@@ -129,7 +133,12 @@ export function renderVerbHelp(binary: string, entry: VerbEntry, table: VerbTabl
   lines.push(
     '',
     'Options:',
-    ...columns([...(entry.options ?? []).map(option => [option.flag, option.help] as const), [...pair(HELP_OPTION)]]),
+    ...columns([
+      ...(entry.options ?? [])
+        .filter(option => option.hidden !== true)
+        .map(option => [option.flag, option.help] as const),
+      [...pair(HELP_OPTION)],
+    ]),
   );
   if (below.length > 0) lines.push('', ...groupList(binary, entry.words, below));
   return lines.join('\n');

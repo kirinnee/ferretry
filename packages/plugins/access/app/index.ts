@@ -1,8 +1,10 @@
 import { provideToShell } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
-import { accessClaims } from './connect.ts';
+import { ACCESS_HOW_TO_ENABLE_LOCATION_HOOK } from '../contract/index.ts';
+import { accessClaims, accessForget } from './connect.ts';
 import { agendaItemOpenedHook, pageRegistration } from './lib/item-opened-hook.ts';
+import { howToEnableLocationHook } from './lib/location-steps-hook.ts';
 import { accessPasskey } from './step-up-shell.tsx';
 import { daemonlessPlaceholder, PAIR_SCREEN_ID, pairPage } from './pair-page.tsx';
 import { pairPhoneCommands } from './pair-phone-host.tsx';
@@ -45,6 +47,8 @@ export default provideToShell(
   }),
   {
     claims: ports => accessClaims(ports),
+    // Unpairing a machine also drops this browser's push device id for it (S12).
+    forget: accessForget(),
     passkey: ports => accessPasskey(ports),
     commands: pairPhoneCommands,
     // A pairing link's fragment on `/pair` is a live credential: the shell takes it off the address bar and the history
@@ -54,6 +58,10 @@ export default provideToShell(
     // Settings › This device: this browser's permissions and each machine's Web Push, one section per machine (S4).
     deviceSettings: { notifications: NotificationsDevicePanel },
     // Agenda's `agenda.item-opened`: opening an ask closes this device's alert lines for it and tells the machine.
-    hooks: { 'agenda.item-opened': agendaItemOpenedHook(pageRegistration) },
+    hooks: {
+      'agenda.item-opened': agendaItemOpenedHook(pageRegistration),
+      // S15: the per-device steps to switch location back on, for Conversation's location chip (and any other).
+      [ACCESS_HOW_TO_ENABLE_LOCATION_HOOK]: howToEnableLocationHook(),
+    },
   },
 );

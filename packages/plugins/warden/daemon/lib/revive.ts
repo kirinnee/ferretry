@@ -12,7 +12,8 @@
  *
  * THE LIMITS, so a crash can never become a loop. A death older than the window is last week's fleet, not
  * this crash; a session is revived once per cooldown; a session that crashed by itself (non-zero exit) is
- * revived once ever; a fleet-wide death (three sessions inside ten seconds — the tmux server went) is revived
+ * revived once ever; no ferret is revived more than {@link REVIVE_HOURLY_CAP} times in a rolling hour (the next death is
+ * left dead and the owner is told once); a fleet-wide death (three sessions inside ten seconds — the tmux server went) is revived
  * in waves, leads first, children after their lead; and a revived session that dies again within two minutes
  * (or more than half of a wave doing so) opens a circuit breaker that stops every revive for a while.
  *
@@ -51,6 +52,7 @@ type ReviveLeaveReason =
   | 'completed'
   | 'start_failed'
   | 'clean_exit'
+  | 'lease_held'
   | 'unrecorded_exit'
   | 'no_terminal_event';
 
@@ -66,6 +68,7 @@ export type ReviveRefusal =
   | 'too_old'
   | 'parent_stopped'
   | 'crash_repeat'
+  | 'hourly_cap'
   | `refused:${string}`;
 
 const TERMINAL_EVENTS: ReadonlySet<string> = new Set([
@@ -109,6 +112,12 @@ const SHELL_SIGNAL_BASE = 128;
 const SHELL_SIGNAL_LAST = 159;
 
 /**
+ * The status a runtime wrapper exits when it refuses a launch because another live writer holds the conversation
+ * (`fy history claim`, 75 = `EX_TEMPFAIL`; the runtimes plugin's `HISTORY_CLAIM_HELD_EXIT_CODE` names the same number).
+ */
+const LEASE_HELD_EXIT_CODE = 75;
+
+/**
  * Whether the session's last terminal event is an abnormal death, and which.
  *
  * `status` is the session's status NOW: only a `failed` session is a candidate, so a session someone has
@@ -125,6 +134,9 @@ export function classifyEnd(status: string, events: readonly ReviveEvent[]): End
   if (data.status !== 'failed') return { kind: 'leave', why: 'clean_exit' };
   const exitCode = typeof data.exitCode === 'number' && Number.isInteger(data.exitCode) ? data.exitCode : undefined;
   if (exitCode === 0) return { kind: 'leave', why: 'clean_exit' };
+  // The wrapper refusing a launch (`fy history claim`: another writer holds the conversation) is not a crash, and a
+  // revive would only be refused again.
+  if (exitCode === LEASE_HELD_EXIT_CODE) return { kind: 'leave', why: 'lease_held' };
   const signal = positiveInteger(data.signal);
   if (signal !== undefined) return { kind: 'revive', cause: { kind: 'signal', signal }, diedAt: last.time };
   if (exitCode !== undefined) {
@@ -182,8 +194,8 @@ export function reviveMessage(
   const notice = `Ferretry started your terminal again: it ended because ${causeText(cause)} at ${clock(diedAt)}.`;
   if (mode === 'interactive') return notice;
   return (
-    `${notice} Your conversation was resumed as it was. Re-read your last turn file and continue where you left off` +
-    (card === undefined ? '.' : `, on the card below.\n\n${focusCardBrief(card)}`)
+    `${notice} Your conversation was resumed as it was. Re-read your last turn, then continue from where you stopped` +
+    (card === undefined ? '.' : `, on the task below.\n\n${focusCardBrief(card)}`)
   );
 }
 
@@ -210,6 +222,13 @@ interface ReviveSessionRecord {
   readonly attempts: number;
   /** How many of those were for a non-zero exit — only one is ever allowed. */
   readonly crashRevives: number;
+  /**
+   * When it was revived, newest last, kept for the last {@link REVIVE_CAP_WINDOW_MS} only: the rolling-hour cap counts
+   * these. Absent in a document written before the cap existed, which reads as its one `revivedAt`.
+   */
+  readonly recent?: readonly string[];
+  /** When the owner was told it hit the cap, so one capped ferret raises one sentence an hour and not one per death. */
+  readonly capNoticedAt?: string;
 }
 
 interface ReviveBatchRecord {
@@ -245,6 +264,16 @@ const CASCADE_COUNT = 3;
 const CASCADE_SPAN_MS = 10_000;
 
 const MINUTE_MS = 60_000;
+
+/** A ferret is revived at most this many times in any rolling hour; the next death inside it is left dead. */
+export const REVIVE_HOURLY_CAP = 3;
+export const REVIVE_CAP_WINDOW_MS = 60 * MINUTE_MS;
+
+/** The revives of one ferret that still count toward the hourly cap at `nowMs`, oldest first. */
+export function revivesInCapWindow(record: ReviveSessionRecord | undefined, nowMs: number): readonly string[] {
+  if (record === undefined) return [];
+  return (record.recent ?? [record.revivedAt]).filter(at => nowMs - (instantMs(at) ?? 0) < REVIVE_CAP_WINDOW_MS);
+}
 
 /** The key a death is remembered under once it has been explained. */
 export const deathKey = (subject: Pick<ReviveSubject, 'id' | 'diedAt'>): string => `${subject.id}@${subject.diedAt}`;
@@ -362,11 +391,13 @@ export function planRevives(
           ? 'breaker_open'
           : ancestorStopped(subject.id, byId)
             ? 'parent_stopped'
-            : revivedMs !== undefined && nowMs - revivedMs < config.cooldownMinutes * MINUTE_MS
-              ? 'cooldown'
-              : subject.cause.kind === 'agent_crashed' && (record?.crashRevives ?? 0) > 0
-                ? 'crash_repeat'
-                : undefined;
+            : revivesInCapWindow(record, nowMs).length >= REVIVE_HOURLY_CAP
+              ? 'hourly_cap'
+              : revivedMs !== undefined && nowMs - revivedMs < config.cooldownMinutes * MINUTE_MS
+                ? 'cooldown'
+                : subject.cause.kind === 'agent_crashed' && (record?.crashRevives ?? 0) > 0
+                  ? 'crash_repeat'
+                  : undefined;
     if (why === undefined) accepted.push(subject);
     else refused.push({ subject, why });
   }

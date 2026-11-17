@@ -90,18 +90,27 @@ describe('the ferret’s live turns and context', () => {
     const document = JSON.parse(files.get(path) as string) as Record<string, unknown>;
 
     // Mid-turn: a turn count, a context percent and a window are in the document.
-    files.set(path, JSON.stringify({ ...document, turn: 7, contextPercent: 62, contextWindow: 200_000 }));
+    files.set(
+      path,
+      JSON.stringify({ ...document, turn: 7, contextPercent: 62, contextWindow: 200_000, contextTokens: 124_000 }),
+    );
     const live = await h.request('GET', `/v1/ferrets/${id}/live`);
     expect(live.status).toBe(200);
-    expect(FerretLiveReadSchema.parse(live.json())).toEqual({ turns: 7, contextPercent: 62, contextWindow: 200_000 });
+    expect(FerretLiveReadSchema.parse(live.json())).toEqual({
+      turns: 7,
+      contextPercent: 62,
+      contextWindow: 200_000,
+      contextTokens: 124_000,
+    });
 
     // Nothing stated about the context: null, never 0.
-    const { contextPercent: _percent, contextWindow: _window, ...bare } = document;
+    const { contextPercent: _percent, contextWindow: _window, contextTokens: _tokens, ...bare } = document;
     files.set(path, JSON.stringify({ ...bare, turn: 0 }));
     expect((await h.request('GET', `/v1/ferrets/${id}/live`)).json()).toEqual({
       turns: 0,
       contextPercent: null,
       contextWindow: null,
+      contextTokens: null,
     });
 
     // A document that does not parse states nothing.
@@ -110,6 +119,7 @@ describe('the ferret’s live turns and context', () => {
       turns: null,
       contextPercent: null,
       contextWindow: null,
+      contextTokens: null,
     });
   });
 

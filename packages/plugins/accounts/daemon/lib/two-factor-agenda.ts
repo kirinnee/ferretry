@@ -26,7 +26,7 @@ export class TwoFactorSeedAgendaAdapter implements TwoFactorSeedAgendaPort {
         why: card.why,
         context: card.context,
         howToResolve:
-          'Allow on this card in the Ferretry app, then confirm with your passkey; Deny drops it. Nothing is saved without your passkey.',
+          'Allow on this item in the Ferretry app, then confirm with your passkey; Deny drops it. Nothing is saved without your passkey.',
         raisedBy: { kind: 'daemon' },
         ferret: sessionId,
       })

@@ -27,7 +27,6 @@ const GRANTS = vaultFile('borrowed-grants.ts');
 
 /** The rule's declarations and the file each side keeps each in: the code-target rule, the form identity, the terminal rule, the grant matcher and the helpers it reads. */
 const COPIED: readonly (readonly [name: string, accounts: string, vault: string])[] = [
-  ['codeTargetProblem', INPUTS, vaultFile('saved-logins.ts')],
   ['identityOf', INPUTS, vaultFile('login-observer.ts')],
   ['SECOND_FACTOR_WINDOW_MS', INPUTS, vaultFile('login-observer.ts')],
   ['terminalHides', INPUTS, vaultFile('lock.ts')],

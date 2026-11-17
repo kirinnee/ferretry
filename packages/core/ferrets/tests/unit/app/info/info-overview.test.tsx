@@ -118,9 +118,9 @@ describe('InfoOverview', () => {
 });
 
 describe('InfoOverview — About this ferret', () => {
-  it('lists the sub-ferrets it started and the card it works on', async () => {
+  it('lists the sub-ferrets it started and the task it works on', async () => {
     const root = await show({
-      ferret: ferretOf('f1', { card: 'F12' }),
+      ferret: ferretOf('f1', { task: 'F12' }),
       ferrets: [ferretOf('c1', { name: 'sol', parent: 'f1' }), ferretOf('x', { parent: 'other' })],
     });
     const about = must(root.querySelector('[data-info-about]'), 'the about block');
@@ -129,10 +129,17 @@ describe('InfoOverview — About this ferret', () => {
     expect(about.querySelector('[data-info-card="F12"]')?.textContent).toBe('F12');
   });
 
-  it('says none, and draws no Card or Restart row, when there is nothing to say or do', async () => {
+  it('reads the former card key as the task, from a daemon that still says it', async () => {
+    const root = await show({ ferret: ferretOf('f1', { card: 'F9' }), ferrets: [] });
+    expect(
+      must(root.querySelector('[data-info-about]'), 'the about block').querySelector('[data-info-card="F9"]'),
+    ).not.toBeNull();
+  });
+
+  it('says none, and draws no Task or Restart row, when there is nothing to say or do', async () => {
     const about = must((await show()).querySelector('[data-info-about]'), 'the about block');
     expect(about.textContent).toContain('None');
-    expect(about.querySelector('[data-info-row="Card"]')).toBeNull();
+    expect(about.querySelector('[data-info-row="Task"]')).toBeNull();
     expect(about.querySelector('[data-info-restart]')).toBeNull();
   });
 

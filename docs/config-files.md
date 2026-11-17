@@ -21,7 +21,7 @@ wire).
 | `pack.yaml`                     | Pack mode: on/off, who picks a sub-ferret's model (`agent` or `jev`), the sub-ferret `limits`, the start `probe`, Jev's cap ([pack-mode.md](pack-mode.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `limits.yaml`                   | how much of the machine the ferrets may take: `enabled`, `ionice`, `fleet` and `perFerret` caps (`memoryHigh`, `memoryMax`, `swapMax`, `tasksMax`, `cpuWeight`, `cpuPercent`); on by default, every number computed from the machine; a raise, a removed cap, `enabled: false` or `ionice: false` is held for the owner ([ferret-limits.md](ferret-limits.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `models-guide.yaml`             | the routing prompt: `prompt`, plain words naming which model runs which kind of sub-task (at most 1,200 characters), read by the asking ferret and by Jev alike; absent means the one built from the catalogs ([pack-mode.md](pack-mode.md#the-routing-prompt))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `account-defaults.yaml`         | which account a sign-in card offers first: `sites`, `projects` and `folders` map a place key (a site's host, or `tool@host`) to an account handle — see [Default accounts](#default-accounts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `account-defaults.yaml`         | which account a sign-in input offers first: `sites`, `projects` and `folders` map a place key (a site's host, or `tool@host`) to an account handle — see [Default accounts](#default-accounts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `voice.yaml`                    | who cleans up dictated text (provider, style, your own prompts, conversation context), and `defaultEngine` — the speech engine (`parakeet` or `browser`) a device uses until it picks its own ([voice.md](voice.md)); transcription always runs on the device                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `presets/<id>.yaml`             | a provider preset of this machine's own, or one replacing a built-in ([provider-presets.md](provider-presets.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
@@ -98,9 +98,9 @@ that is not there). Three rules, in order:
    keeps the whole write held (a PATCH of a file with an edit held is made to both versions, rule 3, so the caller's
    one field never puts that held edit into effect; a WHOLE text is the caller's whole text). An agent's session credential, a job and a member call keep the hold. Deleting a file is an edit to its defaults and is judged the same way. The owner confirms
    a held edit by its etag — at the machine with `fy config confirm <file>`, in the app with a passkey
-   proved for that act (`loosen-config`), or by answering **Allow** on the agenda card a ferret raised with
+   proved for that act (`loosen-config`), or by answering **Allow** on the agenda item a ferret raised with
    `fy agenda add --confirms <file>` ([agenda.md](agenda.md#confirming-a-configuration-change)) — so a
-   confirmation can never put into effect an edit nobody saw. The same card's **Discard change** drops a held
+   confirmation can never put into effect an edit nobody saw. The same item's **Discard change** drops a held
    edit: the file goes back to the version in effect, or is removed when it never was in effect.
 3. **The daemon's own writes are acknowledged.** A reviewed fleet change, a first-run import, a clone and
    the Warden settings form record the text they write as accepted before writing it, so the owner's own
@@ -220,8 +220,9 @@ grant's answer; what a read shows has no "raw" class. The owner at the machine r
 - **Comments, key order and layout stay.** Only the changed scalars are rewritten. The YAML library's round trip
   normalises the spacing of a flow list and the spacing before a trailing comment. A text with nothing to hide is
   returned byte for byte.
-- **The etag is the sha256 of the text on disk**, not of what is shown, so a read of a masked file still names the
-  file a write must match (`If-Match`).
+- **The etag is a keyed digest (HMAC-SHA256) of the text on disk**, not of what is shown, so a read of a masked file
+  still names the file a write must match (`If-Match`). The key is the daemon's own and no reader holds it, so an
+  etag cannot be used to test a guess at a hidden value (`docs/secrets.md`).
 - **A masked text saved back is refused.** A write that holds more `‹hidden›` than the file on disk, or a value that
   holds one where the disk value at the same place does not, is refused as a `schema` issue at its line ("a value hidden
   from the device or agent that read this file is still ‹hidden› here; nothing was written"), so the mask is never
@@ -255,8 +256,8 @@ grant's answer; what a read shows has no "raw" class. The owner at the machine r
   unparsed text is shown as it is).
 
 What this does not do: a word shorter than 7 characters is never searched for a cut (`MIN_CUT_WORD`), and a value
-under 8 characters is no credential by a secret name (a URL's password is cut at any length); a JSON document inside a
-flag and a plain password stuck to a one-letter flag (`-p<password>`) are not cut; and a text that does not parse can
+under 8 characters is no credential by a secret name (a URL's password is cut at any length); a password stuck to `-p`
+that holds a plain `=` or blank is not cut; and a text that does not parse can
 show what neither check recognised. The full list is in [secrets.md](secrets.md#secret-shaped-values-in-a-files-text).
 
 ## Editing
@@ -293,7 +294,7 @@ plugin that declares the file (it was a file-kind name such as `machine`), `sche
 `kind` or `schema`. A confirmation names the held edit by its path and its FULL etag, and the daemon compares that etag
 with the disk inside its write queue, so a file that changed after the review is never confirmed.
 
-¹ Removing one default can still change which account a card offers first: a narrower line (a project or a folder)
+¹ Removing one default can still change which account an input offers first: a narrower line (a project or a folder)
 that is removed lets a broader `sites` line for the same place apply. Removing never adds an account or a line, and
 owner decision !A243 accepts it as tap-free.
 
@@ -311,7 +312,7 @@ what `POST /v1/config/confirm` asks: one rule, `heldEditRefusal` in `runtime/mou
 
 ## Default accounts
 
-`account-defaults.yaml` says which account a sign-in card offers first, for a place where more than one account
+`account-defaults.yaml` says which account a sign-in input offers first, for a place where more than one account
 could sign in. Three maps, each from a **place key** (a site's host such as `app.clickup.com`, or `tool@host` for a
 terminal) to an **account handle**:
 
@@ -326,12 +327,12 @@ folders:
     github.com: GITHUB_WORK
 ```
 
-The daemon feeds this file to the card and to `account_hint` ([which account is first](input-requests.md#which-account-is-first-and-why)):
+The daemon feeds this file to the input and to `account_hint` ([which account is first](input-requests.md#which-account-is-first-and-why)):
 the project is the asking session's board project and the folder its recorded working directory (Unfiled only), both
 read by the daemon and never given by a ferret. A site line also accepts a place named by an account's `match` hosts.
 Changing a line is one queued read-modify-write step, so two changes made at once cannot lose one.
 
-The card chooses by the ferret's own hint, then the project line, then the folder line, then the site line, then
+The input chooses by the ferret's own hint, then the project line, then the folder line, then the site line, then
 the only sign-in matched ([input-requests.md](input-requests.md#the-next-time-one-tap)). A default only ever
 chooses among the sign-ins the daemon already matched; it never adds one.
 
@@ -339,7 +340,7 @@ chooses among the sign-ins the daemon already matched; it never adds one.
 routes without its session id is treated as the owner at the machine, and could also write `state/config-accepted.json`
 directly. The held rule is a wall for the `config.write` door and the owner's route for a paired device.) Adding, changing or removing a line is a loosening in the sense of rule 2 — it
 changes which account the owner is offered first, in the owner's name — so a ferret's `config.write` to this file
-is only ever a **held suggestion**, removals included (!A162) ("changes which account a card offers first for `<key>` in <scope>"), and the
+is only ever a **held suggestion**, removals included (!A162) ("changes which account an input offers first for `<key>` in <scope>"), and the
 version in effect stays as the owner last confirmed it. The owner sets one line with `PUT /v1/accounts/defaults`
 (`{ scope, within?, key, account }`; `account: null` clears it): at the machine it is direct, from a paired device
 it asks the passkey step-up that confirming a held edit asks, except that **taking a default away needs no passkey** (owner decision !A243). The same holds for the owner's raw write of the file, `PUT /v1/config/file`: the daemon compares the version in effect with the new text, and a write that adds no line and changes no line's account puts the removal into effect at once; the comparison is the daemon's own and the caller's door decides who is writing, never anything a client sends. A write that removes one line and changes or adds another still asks, and nothing of it is in effect until it is confirmed. Every other door stays held: a ferret's `config.write` (any touch of this file, removals and emptying it included), and an edit made on the disk or a deletion of the file, which the daemon cannot attribute to the owner. The held item says why in its own words, "Ferretry can't tell who edited the file, so it waits for you", and a removal made through the app or `fy` takes effect at once instead. That one write goes through the comment-keeping
@@ -682,10 +683,13 @@ there too, and journalled as `fleet.warden_leftover_closed`.
 
 ### Moving a ferret that hit a limit
 
-**Off by default.** With `autoMigrate.enabled`, a ferret whose login runs out is moved to another login — the
-same session, the same chat, the same card and lineage; only the login changes. It is the migration `fy migrate`
+**On by default** (owner ruling 2026-11-15; v4 shipped it off). Unless `warden.yaml` says `enabled: false` under
+this section — an explicit `false` is kept exactly as written, including in a home converted from v4 — a ferret
+whose login runs out is moved to another login — the
+same session, the same chat, the same task and lineage; only the login changes. It is the migration `fy migrate`
 makes, through the same safety check, never with a smaller context window, and the turn the ferret is handed
-opens with why, drawn as Ferretry · Warden. A rule: no Jev, no investigation, nothing spent.
+opens with why, drawn as Ferretry · Warden. A rule: no Jev, no investigation, nothing spent. (In 5.0 the section is
+spelled `autoMove`; the converter carries every key of v4's `autoMigrate` across unchanged.)
 
 ```yaml
 autoMigrate:
@@ -704,9 +708,15 @@ autoMigrate:
   installed, signed in, not switched off, not holding spend, not out of quota — and never the login that ran out,
   or another runtime on it. `targets: []` stays within the provider (a catalog's provider, the harness's own for
   a native login; a hand-made environment login is its own provider) and takes the one with most headroom. A
-  named list is tried in order and is the only way a move crosses to another provider. When nothing qualifies
+  named list is tried in order and is the only way a move crosses to another provider. **A non-empty `targets` is
+  a hard list:** a ferret goes to a login on it or nowhere, however much room another login has — a work login
+  you did not list is never a candidate. When nothing qualifies
   the owner is told once, in one line naming every login tried and why it was refused.
-- **Never** while the ferret has an input card open, a sign-in waiting on your phone, a plan card waiting for you,
+- **Nowhere to go.** The ferret stays where it is and **resumes by itself at the reset time its login showed**, with Jev and
+  investigations off (a rule, listed as an `auto` resume under Recent triggers; once per reset; only while
+  `mayActAlone.resume` is on, and never under something of yours). The same one notice says when, in Pacific time.
+  A ferret whose limit shows no reset time waits for you.
+- **Never** while the ferret has an input open, a sign-in waiting on your phone, a sign-in plan waiting for you,
   holds a secure copy, handed a terminal or browser to the owner, or waits on a permission prompt or a dialog; never a Warden or anything a Warden started; never more than
   `maxMovesPerHour` times an hour.
 - **Headroom.** A target with less than `minHeadroomPercent` of its tightest window left is refused, with the
@@ -867,29 +877,58 @@ that key is new in 5.0, and no agent had it before.
 
 The tools reach the files that now hold what they always reached, and no more:
 
-| Before 5.0                                       | The file the tools reach                                                |
-| ------------------------------------------------ | ----------------------------------------------------------------------- |
-| `warden.yaml`, `voice.yaml`, `limits.yaml`       | the same files (`limits.yaml` also holds the agent-control switches)    |
-| `learning.yaml`                                  | `lessons.yaml`                                                          |
-| `pack.yaml`, `models-guide.yaml`                 | `packs.yaml` (the routing prompt is its `routing` block)                |
-| `account-defaults.yaml`                          | `accounts.yaml`                                                         |
-| `machine.yaml`: the default runtime, agenda mode | `runtimes.yaml`, `agenda.yaml`                                          |
-| `machine.yaml`: keep conversations in sync       | `conversation.yaml` (its `keepInSync` was `conversations.listComputer`) |
-| `logins/`, `profiles/`, `runtimes/`, `models/`   | the same folders                                                        |
-| `components/mcp/`, `components/skills/`          | `mcp/`, `skills/`                                                       |
-| `components/settings/`, `components/hooks/`      | `claude-code/settings/`, `codex/settings/`, `claude-code/hooks/`        |
-| `components/modelSets/`                          | `model-sets/`                                                           |
+| Before 5.0                                                        | The file the tools reach                                                                                                 |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `warden.yaml`, `voice.yaml`, `limits.yaml`                        | the same files (`limits.yaml` also holds the agent-control switches)                                                     |
+| `learning.yaml`                                                   | `lessons.yaml`                                                                                                           |
+| `pack.yaml`, `models-guide.yaml`                                  | `packs.yaml` (the routing prompt is its `routing` block)                                                                 |
+| `account-defaults.yaml`                                           | `accounts.yaml`                                                                                                          |
+| `machine.yaml`: the default runtime, agenda mode                  | `runtimes.yaml`, `agenda.yaml`                                                                                           |
+| `machine.yaml`: keep conversations in sync                        | `conversation.yaml` (its `keepInSync` was `conversations.listComputer`)                                                  |
+| `logins/`, `profiles/`, `runtimes/`, `models/`                    | the same folders                                                                                                         |
+| `components/mcp/`, `components/skills/`                           | `mcp/`, `skills/`                                                                                                        |
+| `components/settings/`, `components/hooks/`                       | `claude-code/settings/`, `codex/settings/`, `claude-code/hooks/`                                                         |
+| `machine.yaml`: browser mode and proxy, time zone and public feed | `browsers.yaml` (a new or re-aimed proxy is held), `usage.yaml` (any time-zone change, and the public feed on, are held) |
+| `machine.yaml`: the agent permission mode                         | `harness-claude-code.yaml`, `harness-codex.yaml` (see below)                                                             |
+| `components/modelSets/`                                           | `model-sets/`                                                                                                            |
 
 Any other file, and every person-only one (`gate.yaml`, `plugins.yaml`, `catalogs.yaml`), is refused on read,
 check and write. A file whose text holds anything shaped like a secret — parsed or not, in a comment or a tag
-included — is never shown, and an agent's text that holds one is refused. Not reached yet, each a declared GAP:
+included — is never shown, and an agent's text that holds one is refused.
 
-- `browsers.yaml` (the browser mode, proxy and ports): a new or re-aimed proxy is not held yet; before 5.0 it was.
-- `usage.yaml` (the time zone and the public feed): a time-zone change is not held yet; before 5.0 it was.
-- `harness-claude-code.yaml`, `harness-codex.yaml` (the agent permission mode): each also holds the harness
-  binary and search paths, which no agent reached before, and only the permission mode is judged.
-- `components/instructions/` (now `instructions/<name>.yaml`, a `text:` document that Runtimes owns, which an agent does
-  not reach) and `presets/` (no successor declared yet).
+`harness-claude-code.yaml` and `harness-codex.yaml` are reached by owner decision: they also hold the harness
+`binary` and `searchPaths`, which before 5.0 lived in `daemon.json`, out of an agent's reach. A path names the
+program every new ferret launches, so **any change** to either (added, changed, reordered or removed), and a
+looser permission mode, is **written and held** for the owner like every other loosening; the earlier version
+stays in effect until the owner confirms or discards it. An owner's own edit is not held. **A file that says no
+`permissionMode` means `skip`** (owner decision !A525: Claude runs with `--permission-mode bypassPermissions`, Codex
+with `approval_policy=never` and `sandbox_mode=danger-full-access`); a file that says `auto` keeps `auto`, and nothing
+rewrites an explicit value. The permission hold therefore judges explicit values: `auto` turned into `skip`, or `auto`
+with the key removed (which reads as `skip`), is held; no value turned into `auto` asks more and is not held.
+
+Both files also take `questionTool: true` (default `false`, owner !A527): by default no ferret has the harness's
+question tool, so none stops on a form only the pane shows and each asks through the agenda; `true` gives an
+**interactive** ferret the tool back (Claude keeps `AskUserQuestion`, Codex gets
+`--enable default_mode_request_user_input`), and an auto ferret never has it. It makes ferrets block rather than act,
+so it is **never held**.
+
+`harness-claude-code.yaml` also takes `channels` (unset by default): whether a Claude ferret gets Ferretry's message
+channel (the tools server loaded as a development channel). Unset, it follows each ferret's login (**on** for a `claude_max`
+login, **off** for every other type or an unreadable one); `true` or `false` wins for every login. Read at each launch;
+not a loosening, so never held ([launch-settings.md](launch-settings.md#the-claude-channel)).
+
+`harness-claude-code.yaml` also takes `dangerousRmWaiver: true` (default `false`): with it AND
+bypass mode (`permissionMode: skip`) a launch sets `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`, which waives Claude's
+dangerous-`rm` guard. It is a loosening, so an agent's edit turning it on is **held** for the owner like a looser permission
+mode (docs/harness-dialogs.md). Not reached yet, each a declared GAP:
+
+- `presets/` (no successor declared yet).
+
+`instructions/<name>.yaml` (Runtimes) and `codex/hooks/<name>.yaml` (Codex) ARE reached, by owner ruling: an agent may
+write them, but **every add and every change is held** for the owner (each file's rule holds all of them, not only a
+loosening), because instructions are what a ferret is told and a hook is a shell command. The owner's write through `fy`, the app or
+`PUT /v1/config/file` is never held; a hand edit or a file copied onto disk is held like any unacknowledged edit until
+`fy config confirm`.
 
 `agenda.yaml` also holds `deadlineWarnHours`, which before 5.0 lived in `daemon.json`, out of an agent's reach. It
 only moves when a deadline warning buzzes: no spend and no authority, so an agent may change it.
@@ -944,7 +983,7 @@ in effect moves; `ConfigPort.watchState` fires when one of the plugin's OWN file
 written or held for the owner, a held edit confirmed or discarded, a file broken or fixed, one removed — with the
 file's state (`absent`, `valid`, `invalid`, `held`) and its disk etag, never its text, a value or a sentence. The same
 moves reach an open app as one `kernel.config-changed` frame each on `GET /v1/bus` — `{ plugin, path, state, etag }`,
-the etag the one `GET /v1/config/file` answers — so a held edit arriving or a broken file wakes a settings card or a
+the etag the one `GET /v1/config/file` answers — so a held edit arriving or a broken file wakes a settings panel or a
 file editor at once. A frame reaches only a caller `GET /v1/config/file` would let read that file (that route's
 admission, then the per-file read judge, so `warden.yaml` asks for `warden`, and anything undetermined shows nothing),
 and no plugin hears the event in-process. Like every bus event it is a wake-up, at most once: the reader still reads
@@ -957,7 +996,7 @@ the file.
 - A reviewed change in the app is made against the configuration IN EFFECT. If `machine.yaml` holds a
   loosening that is waiting, a change saved from the app rewrites that file from the version in effect,
   which drops the waiting edit — confirm or revert it first.
-- There is no back-compat: a `fleet/config.yaml` is refused by sentence ([account-model.md](account-model.md)).
+- There is no back-compat: a `fleet/config.yaml` is ignored, never read, converted or refused ([account-model.md](account-model.md)).
 - Live changes ([above](#live-changes)) cover the screens that show configuration. The session page's
   "This folder" rail reads its MCP sign-ins when it opens, not when one changes elsewhere.
 - A login's status that moves on its own — a token refreshed or expired by the harness, with no route

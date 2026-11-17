@@ -45,6 +45,27 @@ barrel) — `tests/unit/entry/slices.test.ts` keeps the two in step.
   `finally`, each in its own try/catch so a cleanup failure never masks the command's result.
 - `if (import.meta.main)` guards execution — tests import the factories without running the CLI.
 
+## Verb options are declared; undeclared ones are refused
+
+The 5.0 shell (`packages/cli/src/lib/run.ts`) parses ANY `--name`, so a verb's manifest `verb(..., { options })` is the
+whole list of what it accepts. After the verb is resolved and before anything connects or runs, the shell refuses an
+option the verb does not declare — `fy: unknown option --dry-run for "restart"; see \`fy restart --help\``, exit 2, no
+daemon call (`packages/cli/src/lib/option-guard.ts`). Before this, an option a verb did not read was dropped without a
+word, and `fy restart --outdated --dry-run` restarted for real.
+
+- **Declare every option the handler reads**: the long and short spelling (`-y, --yes`), a value as `--name <value>`.
+  `--no-x` is accepted for a declared `--x`; `--help`, `-h` and `--as-owner` need no declaration; `--` ends options.
+- **A synonym, a former name, or a flag read only to refuse it with a sentence** is declared with `hidden: true`: it
+  reaches the verb and stays out of `--help`.
+- **Declare a switch without a value** (`--now`, not `--now <x>`): the parser never lets a declared switch take the
+  next word.
+- **The opt-out is one list**, `SELF_VALIDATING` in `option-guard.ts`: verbs that walk every typed option against their
+  own table and refuse the unknown themselves (browser, access, accounts, secret, agenda). A verb joins it only with
+  proof that it refuses an undeclared flag, naming it, with nothing sent.
+- **`tests/unit/verb-option-audit.test.ts` is the net**: it runs every verb of the real generated registry against a
+  recording `options` and fails for a name the code reads and the manifest does not declare. Add the declaration;
+  never remove the behaviour.
+
 ## Three-layer architecture
 
 - `src/lib/` — pure domain. NO console, NO `process.*`, NO chalk/ora/cli-progress/inquirer,

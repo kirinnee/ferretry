@@ -1,12 +1,24 @@
+import { isHarnessCommand, isHarnessWords, programOf } from '@ferretry/std';
 import type { ProcRow } from './process-table.ts';
 
 /** Why a process in the pane's tree is the agent's own and therefore restarts with its CLI. */
-type KnownProcessKind = 'ferretry-tools' | 'status-line' | 'harness' | 'language-server' | 'configured-server';
+type KnownProcessKind =
+  | 'ferretry-tools'
+  | 'status-line'
+  | 'harness'
+  | 'language-server'
+  | 'configured-server'
+  | 'job-attachment';
 
 export interface KnownProcess {
   readonly kind: KnownProcessKind;
   /** The plain-words name the confirmation shows. */
   readonly label: string;
+  /**
+   * Set on the `fy job attach|run` process itself (not on the shell around it) when the keeper proved it: the job it
+   * holds. The card lists these; the wrapper shells that only carry one stay quiet.
+   */
+  readonly attachment?: { readonly jobId: string; readonly jobName: string; readonly jobEnded?: true };
 }
 
 /** A tool server the project's own configuration asks the harness to start. */
@@ -28,9 +40,6 @@ export interface Provenance {
   readonly configuredServers: readonly ConfiguredServer[];
 }
 
-const RUNTIMES = new Set(['node', 'nodejs', 'bun', 'deno']);
-const HARNESS_NAME = /^\.?(claude|codex)(-[\w.-]+)?$/;
-const HARNESS_PATH = /\/(@anthropic-ai\/claude-code|@openai\/codex)\//;
 const LANGUAGE_SERVERS = new Set(
   'typescript-language-server tsserver gopls rust-analyzer pyright pyright-langserver pylsp clangd lua-language-server nixd nil jdtls vscode-json-language-server vscode-css-language-server bash-language-server yaml-language-server'.split(
     ' ',
@@ -41,22 +50,10 @@ const basename = (word: string): string => word.split('/').at(-1) ?? '';
 const stem = (word: string): string => basename(word).replace(/\.(?:[cm]?js|ts)$/, '');
 const tokensOf = (argv: string): readonly string[] => argv.split(/\s+/).filter(Boolean);
 
-/** The program a row runs: the script when a JavaScript runtime was handed one, else the head word. */
-function program(values: readonly string[]): string {
-  const head = values[0] ?? '';
-  if (!RUNTIMES.has(basename(head))) return head;
-  return values.slice(1).find(value => !value.startsWith('-')) ?? head;
-}
+const program = programOf;
+const isHarnessCli = isHarnessWords;
 
-function isHarnessCli(values: readonly string[]): boolean {
-  const target = program(values);
-  return HARNESS_NAME.test(stem(target)) || HARNESS_PATH.test(target);
-}
-
-/** Whether a command line runs a harness CLI (`claude`, `codex`, a wrapper named after one, or its script). */
-export function isHarnessCommand(argv: string): boolean {
-  return isHarnessCli(tokensOf(argv));
-}
+export { isHarnessCommand };
 
 /** `fy mcp serve`, however the runtime was spelled: `fy`, `/nix/store/…/bin/fy`, `bun …/fy.ts`. */
 function isToolsServer(

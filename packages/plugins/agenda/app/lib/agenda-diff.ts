@@ -509,7 +509,7 @@ const DIFF_SECTIONS = [
   { key: 'impact', label: 'Impact' },
   { key: 'urgency', label: 'Urgency' },
   { key: 'steps', label: 'Steps' },
-  { key: 'cards', label: 'Cards' },
+  { key: 'cards', label: 'Tasks' },
   { key: 'why', label: 'Why it matters' },
   { key: 'howToResolve', label: 'How to resolve' },
 ] as const;

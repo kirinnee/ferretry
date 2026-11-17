@@ -373,7 +373,7 @@ describe('SessionChatPage', () => {
     expect(refreshed).toBe(1);
   });
 
-  test('an ask’s reply is about that ask: its own draft, the !A3 prefix, and a receipt when it is sent (triage B17)', async () => {
+  test('an ask’s reply is about that ask: its own draft, the ^A3 prefix, and a receipt when it is sent (triage B17)', async () => {
     const received: unknown[] = [];
     const restored: string[] = [];
     const sentBodies: string[] = [];
@@ -403,7 +403,7 @@ describe('SessionChatPage', () => {
     expect(received).toEqual([{ words: 'hi', sendId: 's1', disposition: 'delivered' }]);
     // The route's answer is not this test's subject: the request it was given is.
     await composer.props.api.send('shared', { message: 'hi' }).catch(() => undefined);
-    expect(sentBodies.join('')).toContain('!A3');
+    expect(sentBodies.join('')).toContain('^A3');
   });
 
   test('without an ask the composer is the ferret’s own chat box: no item draft, no prefix', () => {
@@ -685,6 +685,55 @@ describe('whose turn it is', () => {
     } as FerretLiveActivity;
     run(() => hub.publish(sample));
     expect(page.root.findByType(Transcript).props.live).toEqual(sample);
+  });
+});
+
+describe('the activity line, from the pane', () => {
+  const SNAPSHOT = 'GET /v1/ferrets/:ferretId/snapshot';
+  const FRAME = ['some earlier output', '✽ Pontificating… (42s · ↓ 3.1k tokens · esc to interrupt)', '> '].join('\n');
+  const working = () =>
+    ferretView('shared', { state: { turnState: 'working', turnStateAt: '2026-10-16T08:00:00.000Z' } });
+  const settle = () => runAsync(async () => await new Promise(resolve => setTimeout(resolve, 20)));
+
+  test('reads the visible pane through Terminals’ snapshot route while the ferret works, and hands the line what it said', async () => {
+    const client = fakeClient({ [SNAPSHOT]: () => FRAME });
+    const page = draw({ session: working() }, client);
+    await settle();
+
+    expect(client.callsTo(SNAPSHOT)[0]?.params).toEqual({ ferretId: 'shared' });
+    // The visible screen, captured now: not the whole scrollback, not the stored final frame.
+    expect(client.callsTo(SNAPSHOT)[0]?.query).toEqual({ live: 'true', scope: 'screen' });
+    expect(page.root.findByType(Transcript).props.activity).toEqual({
+      harness: 'claude',
+      verb: 'Pontificating…',
+      elapsed: '42s',
+      tokens: '↓ 3.1k tokens',
+    });
+  });
+
+  test('says less, and no error, when the pane cannot be read', async () => {
+    const client = fakeClient({
+      [SNAPSHOT]: () => {
+        throw new Error('the terminal would not answer');
+      },
+    });
+    const page = draw({ session: working() }, client);
+    await settle();
+
+    expect(client.callsTo(SNAPSHOT).length).toBeGreaterThan(0);
+    expect(page.root.findByType(Transcript).props.activity).toBeNull();
+    expect(page.root.findByType(Transcript).props.busy).toBe(true);
+  });
+
+  test('reads nothing for a ferret that is not working, and nothing under an agenda item', async () => {
+    const idle = fakeClient({ [SNAPSHOT]: () => FRAME });
+    draw({ session: ferretView('shared', { state: { turnState: 'your-turn' } }) }, idle);
+    const embedded = fakeClient({ [SNAPSHOT]: () => FRAME });
+    draw({ embedded: true, session: working() }, embedded);
+    await settle();
+
+    expect(idle.callsTo(SNAPSHOT)).toHaveLength(0);
+    expect(embedded.callsTo(SNAPSHOT)).toHaveLength(0);
   });
 });
 

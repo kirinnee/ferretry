@@ -5,6 +5,7 @@ import {
   CLAUDE_CODE_CONFIG,
   CLAUDE_CODE_HOOKS,
   CLAUDE_CODE_SETTINGS,
+  HarnessConfigSchema,
   harnessConfigLoosens,
 } from '../../contract/index.ts';
 import { claudeCodeConformance, fakeClaudeCode } from '../../contract/testing/index.ts';
@@ -34,6 +35,7 @@ describe('claude-code contract', () => {
       'start.decide',
       'runtimes.components.settings.claude',
       'runtimes.components.hooks.claude',
+      'warden.dialog-rules.claude',
     ]);
   });
 
@@ -68,10 +70,63 @@ describe('claude-code contract', () => {
   });
 
   test('skipping every permission prompt is a loosening; asking again is not', () => {
-    const auto = { searchPaths: [], permissionMode: 'auto' as const };
-    const skip = { searchPaths: [], permissionMode: 'skip' as const };
+    const auto = { searchPaths: [], permissionMode: 'auto' as const, questionTool: false, dangerousRmWaiver: false };
+    const skip = { searchPaths: [], permissionMode: 'skip' as const, questionTool: false, dangerousRmWaiver: false };
     expect(harnessConfigLoosens(auto, skip)).toEqual(['agents now skip every permission prompt']);
     expect(harnessConfigLoosens(skip, auto)).toEqual([]);
     expect(CLAUDE_CODE_CONFIG.axis).toBe('configure');
+  });
+
+  test('^A525 a harness file with no permissionMode means skip; an explicit auto stays auto', () => {
+    expect(HarnessConfigSchema.parse({}).permissionMode).toBe('skip');
+    expect(HarnessConfigSchema.parse({ permissionMode: 'auto' }).permissionMode).toBe('auto');
+    expect(HarnessConfigSchema.parse({ permissionMode: 'skip' }).permissionMode).toBe('skip');
+  });
+
+  test('^A525 the hold judges explicit values: auto to skip or to nothing is a loosening, nothing to auto a tightening', () => {
+    const explicitAuto = HarnessConfigSchema.parse({ permissionMode: 'auto' });
+    const nothing = HarnessConfigSchema.parse({});
+    const explicitSkip = HarnessConfigSchema.parse({ permissionMode: 'skip' });
+    const held = ['agents now skip every permission prompt'];
+    // An agent edit that turns an explicit auto into skip, or deletes the key (= skip), is held.
+    expect(harnessConfigLoosens(explicitAuto, explicitSkip)).toEqual(held);
+    expect(harnessConfigLoosens(explicitAuto, nothing)).toEqual(held);
+    // No value (= skip) to an explicit auto asks more, never less; skip to nothing changes nothing.
+    expect(harnessConfigLoosens(nothing, explicitAuto)).toEqual([]);
+    expect(harnessConfigLoosens(explicitSkip, nothing)).toEqual([]);
+    // A file that did not exist reads as skip: creating it with skip, or with the key left out, loosens nothing.
+    expect(harnessConfigLoosens(undefined, explicitSkip)).toEqual([]);
+    expect(harnessConfigLoosens(undefined, nothing)).toEqual([]);
+    expect(harnessConfigLoosens(undefined, explicitAuto)).toEqual([]);
+  });
+
+  test('any change of the binary or the search paths is held (code execution); the file is judged by that rule', () => {
+    // What the file is judged by (the plugin's own def), not a helper the contract exports.
+    const held = CLAUDE_CODE_CONFIG.loosens;
+    const base = {
+      searchPaths: ['/a', '/b'],
+      permissionMode: 'auto' as const,
+      questionTool: false,
+      dangerousRmWaiver: false,
+    };
+    const binary = (path: string) => ({ ...base, binary: path });
+    expect(held(base, base)).toEqual([]);
+    expect(
+      held(undefined, { searchPaths: [], permissionMode: 'auto', questionTool: false, dangerousRmWaiver: false }),
+    ).toEqual([]);
+    expect(held(base, binary('/x'))).toEqual(['agents now launch a different Claude Code program (binary changed)']);
+    expect(held(binary('/x'), binary('/y'))).toHaveLength(1);
+    expect(held(binary('/x'), base)).toHaveLength(1);
+    // A first document that names a binary AND search paths changes both: each is said.
+    expect(held(undefined, binary('/x'))).toHaveLength(2);
+    expect(held(undefined, { ...binary('/x'), searchPaths: [] })).toHaveLength(1);
+    const searched = (paths: string[]) => ({ ...base, searchPaths: paths });
+    const dirs = ['agents now look for the Claude Code program in different directories (searchPaths changed)'];
+    expect(held(base, searched(['/a']))).toEqual(dirs);
+    expect(held(base, searched(['/b', '/a']))).toEqual(dirs);
+    expect(held(base, searched(['/a /b']))).toEqual(dirs);
+    expect(held(undefined, searched(['/a']))).toEqual(dirs);
+    expect(held(base, { ...base, permissionMode: 'skip', binary: '/x' })).toHaveLength(2);
+    expect(held({ ...base, permissionMode: 'skip' }, base)).toEqual([]);
   });
 });

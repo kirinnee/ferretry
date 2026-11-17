@@ -154,7 +154,7 @@ describe('the work search command source', () => {
     const entries = source('relay');
     expect(entries.map(entry => [entry.group, entry.label, entry.description])).toEqual([
       [WORK_GROUPS.card, '&F10 Harden the relay', 'Doing · brief: the relay handshake drops'],
-      [WORK_GROUPS.ask, '!A3 Pick a relay region', 'open · text: which relay should we pick'],
+      [WORK_GROUPS.ask, '^A3 Pick a relay region', 'open · text: which relay should we pick'],
     ]);
     expect(entries.map(entry => entry.id)).toEqual(['work-card:F10', 'work-ask:f1:A3']);
   });
@@ -303,10 +303,10 @@ describe('where a hit opens', () => {
 });
 
 describe('S11 the work search chips, pending line and muted rows', () => {
-  it('S11 offers the Cards/Agenda and Everything/Open chips, everything first', () => {
+  it('S11 offers the Tasks/Agenda and Everything/Open chips, everything first', () => {
     const { built } = harness();
     expect(built.filters?.map(filter => [filter.id, filter.options.map(option => option.label)])).toEqual([
-      ['kind', ['All', 'Cards', 'Agenda']],
+      ['kind', ['All', 'Tasks', 'Agenda']],
       ['state', ['Everything', 'Open']],
     ]);
   });
@@ -328,16 +328,16 @@ describe('S11 the work search chips, pending line and muted rows', () => {
     expect(pending[1]?.signal?.aborted).toBe(true);
   });
 
-  it('S11 says "Searching cards and agenda…" until the answer for these words and chips lands, then not', async () => {
+  it('S11 says "Searching tasks and agenda…" until the answer for these words and chips lands, then not', async () => {
     const { answered, pending, pause, land } = harness();
-    expect(answered('relay')).toEqual({ entries: [], pending: 'Searching cards and agenda…' });
+    expect(answered('relay')).toEqual({ entries: [], pending: 'Searching tasks and agenda…' });
     pause();
     pending[0]?.resolve(answer(card('F10')));
     await land();
     expect('pending' in (answered('relay') as object)).toBe(false);
     // a chip is a new question: the rows stay, the line is back
     const again = answered('relay', { kind: 'card', state: 'everything' }) as { entries: unknown[]; pending?: string };
-    expect(again.pending).toBe('Searching cards and agenda…');
+    expect(again.pending).toBe('Searching tasks and agenda…');
     expect(again.entries).toHaveLength(1);
     // nothing asked below two characters: no line
     expect(answered('r')).toEqual({ entries: [] });

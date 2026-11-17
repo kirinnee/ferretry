@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'bun:test';
 import { ANALYTICS_PRICING_RATE_APPLICABILITY, type AnalyticsResponse } from '../../../contract/index.ts';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { credentialUsageRows } from '../../../daemon/lib/usage/credential-usage.ts';
 import type { ReactElement } from 'react';
 import app from '../../../app/index.ts';
 import { AnalyticsOverviewPage } from '../../../app/features/analytics/analytics-overview-page.tsx';
@@ -13,7 +14,6 @@ import { AnalyticsQueryPage } from '../../../app/features/analytics/analytics-qu
 import { AnalyticsResponseView } from '../../../app/features/analytics/analytics-response-view.tsx';
 import { GlobalAnalyticsPage } from '../../../app/features/analytics/global-analytics-page.tsx';
 import { PerformanceSettings } from '../../../app/features/settings/performance-settings.tsx';
-import { MOVE_TRIGGERS } from '../../../app/lib/move-triggers.ts';
 import { daemonInsightsPath, daemonInsightsQueryPath } from '../../../app/shell.ts';
 import manifest from '../../../manifest.ts';
 import { fullReport, minimalReport } from '../contract/performance-report-fixtures.ts';
@@ -227,6 +227,77 @@ describe('usage parity · Model pricing and the session surface', () => {
     await view.unmount();
   });
 
+  it('the quota is drawn on a ferret’s row in the list, never in a top bar, for the account the row’s LOGIN names', async () => {
+    expect(manifest.ui.panels.find(entry => entry.id === 'quota')).toMatchObject({ slot: 'ferrets.list-row-mark' });
+    expect(manifest.ui.panels.some(entry => entry.slot === 'top')).toBe(false);
+    // The feed the daemon really produces: one row per LOGIN, keyed by the login id, never by a runtime's name.
+    const feedOf = () => ({
+      at: '2026-08-01T09:00:00.000Z',
+      stale: false,
+      accounts: credentialUsageRows([
+        sampleLogin('claude-auto-work', { usage: { fiveHour: { usedPercent: 42 }, weekly: {} } }),
+        sampleLogin('codex-tight', { usage: { fiveHour: { usedPercent: 95 }, weekly: {} } }),
+        sampleLogin('runtime-a', { usage: { fiveHour: { usedPercent: 91 }, weekly: {} } }),
+      ]),
+    });
+    const { half } = halfOver({ 'GET /v1/usage': feedOf });
+    const named = await mount(
+      asElement(
+        half.panels.quota({
+          subject: 'ferret-7',
+          ferret: 'ferret-7',
+          runtime: 'work-runtime',
+          login: 'claude-auto-work',
+        } as never),
+      ),
+    );
+    await settle();
+    expect(named.container.textContent).toContain('5h 42%');
+    expect(named.container.textContent).not.toContain('95%');
+    await named.unmount();
+    // A ferret whose RUNTIME carries another login's name still shows its own login's quota, never that login's.
+    const collide = await mount(
+      asElement(
+        half.panels.quota({
+          subject: 'ferret-6',
+          ferret: 'ferret-6',
+          runtime: 'runtime-a',
+          login: 'claude-auto-work',
+        } as never),
+      ),
+    );
+    await settle();
+    expect(collide.container.textContent).toContain('5h 42%');
+    expect(collide.container.textContent).not.toContain('91%');
+    await collide.unmount();
+    // A login the feed does not name draws nothing: not the account nearest its limit, not a dash, not 0%.
+    const other = await mount(
+      asElement(
+        half.panels.quota({
+          subject: 'ferret-8',
+          ferret: 'ferret-8',
+          runtime: 'runtime-a',
+          login: 'some-other-login',
+        } as never),
+      ),
+    );
+    await settle();
+    expect(other.container.textContent).toBe('');
+    await other.unmount();
+    // A runtime named like a login, with no login on the record, is never matched by name.
+    const nameOnly = await mount(
+      asElement(half.panels.quota({ subject: 'ferret-5', ferret: 'ferret-5', runtime: 'runtime-a' } as never)),
+    );
+    await settle();
+    expect(nameOnly.container.textContent).toBe('');
+    await nameOnly.unmount();
+    // A row that hands no login draws nothing either.
+    const bare = await mount(asElement(half.panels.quota({ subject: 'ferret-9' })));
+    await settle();
+    expect(bare.container.textContent).toBe('');
+    await bare.unmount();
+  });
+
   it('the composer quota is a composer.tools panel that shows the account its ferret runs on, and says unknown otherwise', async () => {
     expect(manifest.ui.panels.find(entry => entry.id === 'composer-quota')).toMatchObject({ slot: 'composer.tools' });
     const feedOf = () => ({
@@ -341,12 +412,6 @@ describe('usage parity · what the manifest declares and the half implements', (
     expect(typeof half.panels.insights).toBe('function');
   });
 
-  it('S-0453 the move trigger “its login passes its hard spend budget” is Usage’s', () => {
-    expect(MOVE_TRIGGERS.find(trigger => trigger.id === 'budget_exceeded')?.label).toBe(
-      'Its login passes its hard spend budget',
-    );
-  });
-
   it('S-0510 Model pricing is offered as the tab labelled “Model pricing” and it renders', async () => {
     const { half: pricingHalf } = halfOver({ 'GET /v1/usage/pricing': PRICING_VIEW });
     const view = await mount(asElement(pricingHalf.settings['model-pricing']({})));
@@ -366,9 +431,5 @@ describe('usage parity · what the manifest declares and the half implements', (
   it('S-0527 the palette finds Performance by the label its Settings tab declares', () => {
     const labels = manifest.ui.settings.map(entry => entry.label.toLowerCase());
     expect(labels.some(label => label.includes('performance'))).toBe(true);
-  });
-
-  it('S-0532 the move trigger “it hits a usage limit” is Usage’s', () => {
-    expect(MOVE_TRIGGERS.find(trigger => trigger.id === 'rate_limited')?.label).toBe('It hits a usage limit');
   });
 });

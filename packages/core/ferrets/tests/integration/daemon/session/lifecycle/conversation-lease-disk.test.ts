@@ -213,6 +213,36 @@ describe('ConversationLeaseStateDisk lock', () => {
     should(order).eql(['first in', 'released', 'first out', 'second in']);
   });
 
+  it('should queue two claimants of ONE disk in this process without ever polling the lock or its clock', async () => {
+    // Arrange — two launches at the same instant must not busy-wait on the kernel clock (a driven clock never wakes them)
+    const { port } = await home();
+    let sleeps = 0;
+    const counting = {
+      nowMs: () => Date.now(),
+      sleep: async (ms: number) => {
+        sleeps += 1;
+        await Bun.sleep(ms);
+      },
+    };
+    const subject = new ConversationLeaseStateDisk(port, processes, counting, process.platform);
+    const order: string[] = [];
+
+    // Act
+    const first = subject.exclusive('claude', async () => {
+      order.push('first in');
+      await Bun.sleep(30);
+      order.push('first out');
+    });
+    const second = subject.exclusive('claude', async () => {
+      order.push('second in');
+    });
+    await Promise.all([first, second]);
+
+    // Assert
+    should(order).eql(['first in', 'first out', 'second in']);
+    should(sleeps).equal(0);
+  });
+
   it('should give up with a sentence once the wait is spent, and leave the holder alone', async () => {
     // Arrange
     const { port } = await home();
@@ -393,6 +423,7 @@ describe('the daemon and `fy history claim` over ONE set of lease files', () => 
   const S = parseSessionId('mw7bp88g-50e00159');
   const sessions = (status: string) => ({
     launchOf: () => ({ harness: 'claude' as const, runtime: 'claude-review' }),
+    registryState: () => undefined,
     readState: async () => ({ status }),
   });
 

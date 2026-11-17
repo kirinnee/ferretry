@@ -1,8 +1,7 @@
 /**
- * REPLYING IS ANSWERING. An agenda item is answered from the ferret's NORMAL composer: what the owner types
- * goes as a normal message that names the items it is about (the "re:" chips, as `!A5` references), and a
- * picked option carries the typed text as its note. These are the pure decisions behind that; the composer and
- * the card do the drawing.
+ * REPLYING IS ANSWERING. An agenda item is answered from the ferret's NORMAL composer: what the owner types goes as a
+ * normal message, and a picked option carries the typed text as its note. These are the pure decisions behind that; the
+ * composer and the card do the drawing.
  */
 
 import type { AgendaItem } from '@ferretry/core-asks/contract';
@@ -24,15 +23,6 @@ export const withComposerNote = (action: InboxAction, text: string): InboxAction
     return action;
   const note = action.note === undefined || action.note.trim() === '' ? typed : `${action.note} — ${typed}`;
   return { ...action, note };
-};
-
-/**
- * A message with the items its "re:" chips name: each as a `!A5` reference at the front, in chip order, each once
- * (one already typed is not repeated). Nothing is guessed — only the chips the owner added.
- */
-export const withReferences = (text: string, ids: readonly AgendaItem['id'][]): string => {
-  const missing = [...new Set(ids)].filter(id => !new RegExp(`(?:^|\\s)!${id}(?=$|[\\s.,;:!?)])`, 'u').test(text));
-  return missing.length === 0 ? text : `${missing.map(id => `!${id}`).join(' ')} ${text}`;
 };
 
 /**

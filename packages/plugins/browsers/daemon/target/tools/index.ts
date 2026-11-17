@@ -103,7 +103,7 @@ export interface PageApprovals {
   ): Promise<{ readonly ok: true; readonly summary: string } | { readonly ok: false; readonly message: string }>;
 }
 
-/** The page an act touched (today's `ActedPage`): hosts by `../../holds/site.ts` grouping on the lock's side. */
+/** The page an act touched (today's `ActedPage`): the hosts the page was on, grouped by site on the lock's side (the Vault). */
 export interface ActedPage {
   readonly id: string;
   readonly incognito?: true;

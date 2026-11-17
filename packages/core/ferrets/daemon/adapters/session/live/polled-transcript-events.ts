@@ -2,8 +2,8 @@ import type { TranscriptFileEvents } from './file-transcript-changes.ts';
 
 /**
  * How often a followed transcript is asked whether it was written. Never faster than today's live sample (500 ms): the
- * kernel offers no file watch on a root, so the stream asks (`FileTranscriptChanges` compares each answer to the stamp it
- * took before subscribing, so a quiet file says nothing).
+ * 1 s poll IS the chosen design (britnee ruling, 2026-11-16), so the stream asks (`FileTranscriptChanges` compares each
+ * answer to the stamp it took before subscribing, so a quiet file says nothing).
  */
 export const TRANSCRIPT_POLL_MS = 1_000;
 

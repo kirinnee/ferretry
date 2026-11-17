@@ -1,0 +1,7 @@
+{
+  "entry": ["worker/src/adapters/link-store-worker.ts"],
+  "project": ["**/*.{ts,tsx}", "!tests/**"],
+  "allowed": {
+    "entry:worker/src/adapters/link-store-worker.ts": "the link-store Cloudflare Worker entry named by `main` in wrangler.link-store.jsonc; deployed by path, imported by nothing."
+  }
+}

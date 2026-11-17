@@ -1,10 +1,14 @@
 /** "Set up automatic codes" as decisions (`app/lib/automatic-codes.ts`): what a paste reads as, when Save may go, what a refusal says. */
 
 import { describe, expect, it } from 'bun:test';
+import { InputSavedSchema } from '@ferretry/core-vault/contract';
 import { MAX_SEEDS_PER_ACCOUNT, TWO_FACTOR_ERROR_CODES } from '../../../contract/routes/index.ts';
+import { list as accountList } from '../../support/app/accounts-fixtures.ts';
+import { savedPrimary, savedTwo } from '../../support/app/input-card-fixtures.ts';
 import {
   accountWords,
   addKeyActWords,
+  codesAccounts,
   type CodesAccount,
   panelHeading,
   readSeedDraft,
@@ -14,6 +18,7 @@ import {
   seedFailureWords,
   type SeedDraft,
   stageTicks,
+  startingAccount,
 } from '../../../app/lib/automatic-codes.ts';
 
 const SEED = 'JBSWY3DPEHPK3PXP';
@@ -158,8 +163,72 @@ describe('what a refusal comes to, in the owner’s words', () => {
 describe('what a saved key says', () => {
   it('says whether Ferretry typed the first code into the card', () => {
     expect(savedSeedWords({ typed: true, mismatch: false }, 'GitHub')).toBe(
-      'Saved. Ferretry typed the first code for GitHub into the card.',
+      'Saved. Ferretry typed the first code for GitHub into the input.',
     );
     expect(savedSeedWords({ mismatch: false }, 'GitHub')).toBe('Saved. Ferretry will make GitHub’s codes from now on.');
+  });
+});
+
+describe('which accounts a code card may save a key to', () => {
+  const saved = (offers: readonly Record<string, unknown>[] = [], match: string | null = 'github.com') =>
+    InputSavedSchema.parse({ ...(match === null ? {} : { match }), offers });
+  const list = accountList();
+
+  it('offers only accounts the daemon matches to the card’s place, and nothing when the card has none', () => {
+    expect(codesAccounts(saved(), list).map(each => each.id)).toEqual(['GITHUB', 'GITHUB_WORK']);
+    // Vercel signs in at vercel.com, Google nowhere: neither is offered on a github.com card.
+    expect(codesAccounts(saved(), list).some(each => each.id === 'VERCEL' || each.id === 'GOOGLE')).toBe(false);
+    expect(codesAccounts(saved([], 'vercel.com'), list).map(each => each.id)).toEqual(['VERCEL']);
+    expect(codesAccounts(saved([], 'nowhere.test'), list)).toEqual([]);
+    expect(codesAccounts(saved([], null), list)).toEqual([]);
+    expect(codesAccounts(undefined, list)).toEqual([]);
+  });
+
+  it('puts the daemon’s one-tap choice first, and reads label, username, places and how many keys hold a seed', () => {
+    const picked = codesAccounts(savedPrimary('GITHUB_WORK'), list);
+    expect(picked.map(each => each.id)).toEqual(['GITHUB_WORK', 'GITHUB']);
+    const github = picked.find(each => each.id === 'GITHUB');
+    expect(github).toEqual({
+      id: 'GITHUB',
+      label: 'GitHub',
+      username: 'kirinnee',
+      places: [{ kind: 'site', domains: ['github.com'], match: [] }],
+      seeds: 1,
+    });
+    expect(picked.find(each => each.id === 'GITHUB_WORK')?.seeds).toBe(0);
+    expect(picked.find(each => each.id === 'GITHUB_WORK')).not.toHaveProperty('username', undefined);
+  });
+});
+
+describe('which account the panel starts on', () => {
+  const list = accountList();
+  it('is the daemon’s one-tap choice when there is one', () => {
+    const accounts = codesAccounts(savedPrimary('GITHUB_WORK'), list);
+    expect(startingAccount(savedPrimary('GITHUB_WORK'), accounts)?.id).toBe('GITHUB_WORK');
+  });
+
+  it('is the only account when there is just one', () => {
+    const accounts = codesAccounts(InputSavedSchema.parse({ match: 'vercel.com', offers: [] }), list);
+    expect(startingAccount(InputSavedSchema.parse({ match: 'vercel.com', offers: [] }), accounts)?.id).toBe('VERCEL');
+  });
+
+  it('never guesses: several accounts and no one-tap choice is the owner’s pick', () => {
+    const accounts = codesAccounts(savedTwo(), list);
+    expect(accounts).toHaveLength(2);
+    expect(startingAccount(savedTwo(), accounts)).toBeUndefined();
+    expect(startingAccount(undefined, accounts)).toBeUndefined();
+    expect(startingAccount(savedTwo(), [])).toBeUndefined();
+  });
+
+  it('ignores a one-tap choice that is not among the accounts offered, and falls back on the only one left', () => {
+    const left = codesAccounts(savedPrimary('GITHUB'), list).slice(1);
+    expect(left.map(each => each.id)).toEqual(['GITHUB_WORK']);
+    expect(startingAccount(savedPrimary('GITHUB'), left)?.id).toBe('GITHUB_WORK');
+    expect(
+      startingAccount(savedPrimary('GITHUB'), [
+        ...left,
+        ...codesAccounts(InputSavedSchema.parse({ match: 'vercel.com', offers: [] }), list),
+      ]),
+    ).toBeUndefined();
   });
 });

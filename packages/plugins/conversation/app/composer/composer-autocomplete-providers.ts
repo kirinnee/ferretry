@@ -21,6 +21,7 @@
  */
 
 import { formatReference, parseReferenceToken, type Reference } from '@ferretry/app';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import {
   REFERENCE_CATALOG_FILE_MAX_ENTRIES,
   type ReferenceCatalogEntry,
@@ -93,7 +94,7 @@ export interface ComposerAutocompleteProvidersOptions {
   readonly waitForCatalog?: ComposerProviderWarmup;
   readonly hostedPrefixes?: readonly ReferenceCatalogPrefix[];
   /**
-   * The menu's "Include agent cards" switch, read live. Off (the default): a card whose ask the owner did not make
+   * The menu's "Include agent tasks" switch, read live. Off (the default): a card whose ask the owner did not make
    * (the catalog entry's `agentAsked`) is not offered, unless its id is typed exactly.
    */
   readonly getIncludeAgentTasks?: () => boolean;
@@ -591,12 +592,12 @@ const agendaCandidates = (
     ];
   });
 
-/** A project holds dozens of open cards the owner may mean; the menu shows the best of them and the query narrows it. */
+/** A project holds dozens of open tasks the owner may mean; the menu shows the best of them and the query narrows it. */
 const MAX_TASK_RESULTS = 50;
 
-const TASK_MENU_LABELS: ReadonlySet<string> = new Set(['Cards', '& cards']);
+const TASK_MENU_LABELS: ReadonlySet<string> = new Set(['Tasks', '& tasks']);
 
-/** Whether an open list is the task menu, the only one "Include agent cards" applies to. */
+/** Whether an open list is the task menu, the only one "Include agent tasks" applies to. */
 export const isTaskMenuLabel = (label: string | undefined): boolean =>
   label !== undefined && TASK_MENU_LABELS.has(label);
 
@@ -606,7 +607,7 @@ export const isTaskMenuLabel = (label: string | undefined): boolean =>
  * first, then most recently touched) is kept.
  *
  * The same holds for a card whose ask the owner did not make (another ferret's, the Warden's, an automatic card):
- * the menu offers what the owner asked for, unless the reader turns "Include agent cards" on.
+ * the menu offers what the owner asked for, unless the reader turns "Include agent tasks" on.
  */
 const taskCandidates = (
   scope: DaemonFerretScope,
@@ -631,7 +632,7 @@ const taskCandidates = (
           label: reference,
           detail: [entry.label, entry.detail ?? ''].filter(Boolean).join(' · '),
           keywords: entryKeywords(entry),
-          group: 'Cards',
+          group: 'Tasks',
           ...(entry.closed === true ? { badge: 'closed' } : {}),
           replacement: reference,
           append: 'space',
@@ -675,7 +676,7 @@ const cardHitCandidate = (
     kind: 'task',
     label: reference,
     detail: [hit.title, workProjectLabel(hit.project, projectNames)].filter(part => part !== '').join(' · '),
-    group: 'Cards',
+    group: 'Tasks',
     badge: hit.standing,
     rankPriority: -1,
     prematched: true,
@@ -761,12 +762,12 @@ const snapshotTracker = (scopeKey: string) => {
 
 // ─── the reference families, projected once ───────────────────────────────────────────────────────────────────────
 
-type ReferenceFamily = ':' | '!' | '&';
+type ReferenceFamily = ':' | typeof ASK_REFERENCE_SIGIL | '&';
 
 const FAMILY_LABELS: Readonly<Record<ReferenceFamily, { readonly ladder: string; readonly direct: string }>> = {
   ':': { ladder: 'Agents', direct: ': fleet agents' },
-  '!': { ladder: 'Asks', direct: '! open asks' },
-  '&': { ladder: 'Cards', direct: '& cards' },
+  [ASK_REFERENCE_SIGIL]: { ladder: 'Asks', direct: `${ASK_REFERENCE_SIGIL} open asks` },
+  '&': { ladder: 'Tasks', direct: '& tasks' },
 };
 
 const familyResult = (
@@ -779,7 +780,8 @@ const familyResult = (
 ): ComposerProviderResult => {
   if (family === ':')
     return { candidates: agentCandidates(scope, entries), filterQuery: query, limit: MAX_AGENT_RESULTS, contextLabel };
-  if (family === '!') return { candidates: agendaCandidates(scope, entries), filterQuery: query, contextLabel };
+  if (family === ASK_REFERENCE_SIGIL)
+    return { candidates: agendaCandidates(scope, entries), filterQuery: query, contextLabel };
   return {
     candidates: taskCandidates(scope, entries, query, includeAgentCards),
     filterQuery: query,
@@ -828,7 +830,7 @@ const familyAnswers = (
   },
 });
 
-const TIER_FAMILY: Readonly<Record<number, ReferenceFamily>> = { 2: ':', 3: '!', 4: '&' };
+const TIER_FAMILY: Readonly<Record<number, ReferenceFamily>> = { 2: ':', 3: ASK_REFERENCE_SIGIL, 4: '&' };
 
 export function createReferencesProvider(
   options: ComposerAutocompleteProvidersOptions,
@@ -856,7 +858,7 @@ export function createReferencesProvider(
     get snapshotKey() {
       return track([
         source.known(':'),
-        source.known('!'),
+        source.known(ASK_REFERENCE_SIGIL),
         source.known('&'),
         options.getIncludeAgentTasks?.(),
         options.getWorkSearch?.(),
@@ -882,7 +884,7 @@ export function createReferencesProvider(
       return await withWorkHits(
         local,
         context,
-        family === '!' ? 'ask' : 'card',
+        family === ASK_REFERENCE_SIGIL ? 'ask' : 'card',
         scope,
         options.getWorkSearch?.(),
         options.getProjectNames?.(),
@@ -892,9 +894,9 @@ export function createReferencesProvider(
 }
 
 /**
- * `:` `!` `&` — the same three families, one keystroke instead of two to four.
+ * `:` `^` `&` — the same three families, one keystroke instead of two to four.
  *
- * They exist because the tokens themselves start with these sigils: a reader who has learned that an ask is `!A3`
+ * They exist because the tokens themselves start with these sigils: a reader who has learned that an ask is `^A3`
  * should not have to learn `@@@` as well. The ladder stays because it is DISCOVERABLE — one sigil, repeated, teaches
  * four families with a legend — while a direct sigil is what you use once you know. Neither reads a catalog the other
  * does not.
@@ -918,7 +920,7 @@ export function createDirectReferenceProviders(
     initialCandidates: ({ query }) => families.initial(family, query, FAMILY_LABELS[family].direct),
     candidates: ({ query, signal }) => families.read(family, query, FAMILY_LABELS[family].direct, signal),
   });
-  return [direct(':', 'agents'), direct('!', 'attention'), direct('&', 'task')];
+  return [direct(':', 'agents'), direct(ASK_REFERENCE_SIGIL, 'attention'), direct('&', 'task')];
 }
 
 // ─── surfaces ─────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -197,7 +197,7 @@ export const cardFooterLine = (
   bin: string,
   parent: CardRef | null = null,
 ): string =>
-  `Your card is ${formatCardRef({ id })} on the ${project === undefined ? "project's" : project} board${parent === null ? '' : `, under ${formatCardRef(parent)}`}; the daemon moves it for you (\`${bin} card note\` adds progress).`;
+  `Your task is ${formatCardRef({ id })} on the ${project === undefined ? "project's" : project} board${parent === null ? '' : `, under ${formatCardRef(parent)}`}; the daemon moves it for you (\`${bin} task note\` adds progress).`;
 
 /** A card request the daemon fills for a start. */
 const startRequest = (fields: {
@@ -262,7 +262,7 @@ export class FerretCards {
             ...(project === undefined ? {} : { project }),
           },
           notes: [
-            `You already had ${formatCardRef(twin)} ("${twin.title}") for this work, so it was assigned to the helper instead of making a second card.`,
+            `You already had ${formatCardRef(twin)} ("${twin.title}") for this work, so it was assigned to the helper instead of making a second task.`,
           ],
         };
       }
@@ -276,7 +276,7 @@ export class FerretCards {
         const name = project ?? (await this.ports.projects.nameOf(childBoard));
         return {
           notes: [
-            `No card was made for the helper: the ${name} board is off and you hold no card for this work. \`${this.ports.bin} new --card <id>\` hands it one.`,
+            `No task was made for the helper: the ${name} board is off and you hold no task for this work. \`${this.ports.bin} new --task <id>\` hands it one.`,
           ],
         };
       }
@@ -284,7 +284,7 @@ export class FerretCards {
       const notes =
         parent === null
           ? [
-              `The helper's card has no parent, so it is at the top level of the board: \`${this.ports.bin} card reparent ${formatCardRef({ id })} --parent <id>\` moves it, and \`${this.ports.bin} card focus <id>\` (or \`--card <id>\`) says where your helpers' cards go next time.`,
+              `The helper's task has no parent, so it is at the top level of the board: \`${this.ports.bin} task reparent ${formatCardRef({ id })} --parent <id>\` moves it, and \`${this.ports.bin} task focus <id>\` (or \`--task <id>\`) says where your helpers' tasks go next time.`,
             ]
           : [];
       return {
@@ -300,7 +300,7 @@ export class FerretCards {
         notes,
       };
     } catch (error) {
-      const note = `No card was made for the helper: ${said(error)}`;
+      const note = `No task was made for the helper: ${said(error)}`;
       this.ports.diagnostics.warn(note);
       return { notes: [note] };
     }
@@ -317,7 +317,7 @@ export class FerretCards {
   async startOn(lead: string | undefined, id: CardId, ordinary = true): Promise<DelegationOutcome> {
     if (!ordinary) {
       return {
-        refusal: `--card is for an ordinary ferret: a worker the daemon starts for itself takes no card`,
+        refusal: `--task is for an ordinary ferret: a worker the daemon starts for itself takes no task`,
         notes: [],
       };
     }
@@ -347,7 +347,7 @@ export class FerretCards {
     } catch (error) {
       const refusal = `${formatCardRef({ id: delegation.id })} could not be handed to the new session: ${said(error)}`;
       await stop(refusal).catch((stopped: unknown) => {
-        this.ports.diagnostics.warn(`could not stop ${ferret} after a refused card: ${said(stopped)}`);
+        this.ports.diagnostics.warn(`could not stop ${ferret} after a refused task: ${said(stopped)}`);
       });
       return { refusal };
     }
@@ -356,7 +356,7 @@ export class FerretCards {
   private async ownerStart(id: CardId): Promise<DelegationOutcome> {
     const { cards } = await this.ports.board.snapshot();
     const card = cards.find(each => each.id === id);
-    if (card === undefined) return { refusal: `there is no card ${formatCardRef({ id })} on this machine`, notes: [] };
+    if (card === undefined) return { refusal: `there is no task ${formatCardRef({ id })} on this machine`, notes: [] };
     return { delegation: ownerDelegation(card), notes: [] };
   }
 
@@ -364,7 +364,7 @@ export class FerretCards {
   private async unavailable(id: CardId): Promise<string | undefined> {
     const { cards, laneSets } = await this.ports.board.snapshot();
     const card = cards.find(each => each.id === id);
-    if (card === undefined) return `there is no card ${formatCardRef({ id })} on this machine`;
+    if (card === undefined) return `there is no task ${formatCardRef({ id })} on this machine`;
     if (card.dropped !== null) return `${formatCardRef(card)} is dropped; reopen it before you start a ferret on it`;
     if (cardCategory(card, laneSets) === 'closed')
       return `${formatCardRef(card)} is closed; reopen it before you start a ferret on it`;
@@ -442,7 +442,7 @@ export class FerretCards {
       if (delegation !== undefined && !(await this.licensed(placed.projectId, delegation.parent))) {
         return {
           notes: [
-            `No card was made for the helper: the ${placed.project} board is off and you hold no card on it for this work.`,
+            `No task was made for the helper: the ${placed.project} board is off and you hold no task on it for this work.`,
           ],
         };
       }
@@ -469,7 +469,7 @@ export class FerretCards {
       for (const note of placed.notes) this.ports.diagnostics.warn(`${formatCardRef(card)}: ${note}`);
       return { card: await this.workStarted(card, start.ferret), project: placed.project, notes: placed.notes };
     } catch (error) {
-      const note = `No card was made for ${start.ferret}: ${said(error)}`;
+      const note = `No task was made for ${start.ferret}: ${said(error)}`;
       this.ports.diagnostics.warn(note);
       return { notes: [note] };
     }
@@ -532,7 +532,7 @@ export class FerretCards {
     try {
       outcome = await this.ports.board.signalDone(ferret, message);
     } catch (error) {
-      this.ports.diagnostics.warn(`could not record ${ferret}'s done on its card: ${said(error)}`);
+      this.ports.diagnostics.warn(`could not record ${ferret}'s done on its task: ${said(error)}`);
       return null;
     }
     return outcome;
@@ -567,7 +567,7 @@ export class FerretCards {
         projectId: adopted.projectId,
         project,
         notes: [
-          `${project} was registered as a project, so the card is on its board${adopted.proposed ? '; its lanes were proposed for the owner to confirm (an ask)' : ''}.`,
+          `${project} was registered as a project, so the task is on its board${adopted.proposed ? '; its lanes were proposed for the owner to confirm (an ask)' : ''}.`,
         ],
       };
     }
@@ -590,7 +590,7 @@ export class FerretCards {
       projectId: UNFILED_PROJECT_ID,
       project: unfiled,
       notes: [
-        `${project} has no lanes yet, so the card is on the ${unfiled} board: propose them with \`${this.ports.bin} board lanes propose --template <template>\`, then refile the card to ${project}.`,
+        `${project} has no lanes yet, so the task is on the ${unfiled} board: propose them with \`${this.ports.bin} board lanes propose --template <template>\`, then refile the task to ${project}.`,
       ],
     };
   }

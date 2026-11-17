@@ -1,4 +1,7 @@
 import { Database } from 'bun:sqlite';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Result } from '@ferretry/std';
 import { err, ok } from '@ferretry/std';
 import type { StateFileDef } from '../contract/define.ts';
@@ -35,9 +38,27 @@ export class MemoryStateFolder {
   readonly directories = new Map<string, { readonly mode: number; readonly modifiedMs: number }>();
   /** Planted links are metadata only; the test store never follows one. */
   readonly symlinks = new Map<string, string>();
+  /** Files planted with a second name; a roots view refuses them just as the real disk does. */
+  readonly hardLinks = new Set<string>();
   readonly modified = new Map<string, number>();
   private crashArmed = false;
   crashed = false;
+  private realRoot: string | undefined;
+
+  /**
+   * A real, empty folder that stands for this store on the disk, made on the first `pathOf` and removed when the process
+   * exits. The files themselves stay in memory; only the path handed out to a caller that opens one itself (the
+   * conversation leases' lock) is real, so such a caller finds nothing there and a launch that leases a conversation runs
+   * under a test host.
+   */
+  realFolder(): string {
+    if (this.realRoot === undefined) {
+      const root = mkdtempSync(join(tmpdir(), 'fy-memory-state-'));
+      process.once('exit', () => rmSync(root, { recursive: true, force: true }));
+      this.realRoot = root;
+    }
+    return this.realRoot;
+  }
 
   constructor(readonly nowMs: () => number = () => 0) {}
 
@@ -211,8 +232,16 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
   };
   const write = async <Shape>(file: StateFileDef<string, Shape>, value: Shape, name?: string): Promise<void> => {
     guard(file);
-    if (file.store === 'jsonl' || file.store === 'sqlite' || file.store === 'sqlite-cache')
+    if (file.store === 'sqlite' || file.store === 'sqlite-cache')
       throw new TypeError(`state ${file.name}: a ${file.store} file is not written with write()`);
+    if (file.store === 'jsonl') {
+      // As the real port: a jsonl file is replaced whole from an array of records, one stamped line each.
+      if (!Array.isArray(value))
+        throw new TypeError(`state ${file.name}: a jsonl file is written from an array of records`);
+      folder.files.set(pathOf(file, name), value.map(record => `${stamp(file, record)}\n`).join(''));
+      folder.landed();
+      return;
+    }
     if (isBytes(file)) {
       if (!(value instanceof Uint8Array) && typeof value !== 'string')
         throw new TypeError(`state ${file.name}: a ${file.store} file holds bytes`);
@@ -306,7 +335,7 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
       if (stored === undefined) return undefined;
       const size = typeof stored === 'string' ? new TextEncoder().encode(stored).byteLength : stored.byteLength;
       // content-addressed: equal etags mean the same bytes (the real port's moves on any rewrite or append)
-      return { size, etag: `${size}:${Bun.hash(stored).toString(36)}` };
+      return { size, etag: `${size}:${Bun.hash(stored).toString(36)}`, settled: true };
     },
     async records(file, name) {
       guard(file);
@@ -374,7 +403,13 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
     pathOf(file, name) {
       guard(file);
       if (file.store !== 'opaque') throw new TypeError(`state ${file.name}: only an opaque file's path is handed out`);
-      return `/memory-state/${pathOf(file, name)}`;
+      return `${folder.realFolder()}/${pathOf(file, name)}`;
+    },
+    async pinMade(file, name) {
+      guard(file);
+      pathOf(file, name);
+      if (file.store !== 'opaque')
+        throw new TypeError(`state ${file.name}: only an opaque file is made outside the port`);
     },
     sqlite(file, name): SqliteHandle {
       guard(file);

@@ -70,6 +70,12 @@ export interface VerbOptionDecl {
   readonly help: string;
   /** The verb refuses to run without it (`error: required option '--scope <scope>' not specified`), before any handler. */
   readonly required?: boolean;
+  /**
+   * Accepted but not listed by `--help`: a synonym, a former name an agent's old instructions still use, or a flag the
+   * verb reads only to refuse it with a sentence of its own. The shell refuses every option a verb does not declare, so an
+   * option the verb's code reads is declared — listed, or hidden.
+   */
+  readonly hidden?: boolean;
 }
 
 /** One positional argument a verb takes, as `fy <verb> --help` lists it under Arguments. */
@@ -104,7 +110,7 @@ export interface VerbDecl<Verb extends string = string> {
 /** A button or menu item on a thing, naming the route it calls; hidden when Gate would refuse this device. */
 export interface AppActionDecl<Id extends string = string> {
   readonly id: Id;
-  readonly on: 'card' | 'ferret' | 'ask' | 'page' | 'terminal' | 'project' | 'daemon';
+  readonly on: 'task' | 'ferret' | 'ask' | 'page' | 'terminal' | 'project' | 'daemon';
   readonly label: string;
   /** A route key of this plugin or of a contract it consumes. */
   readonly calls: string;
@@ -254,6 +260,24 @@ export interface ProcessesPermission {
   readonly environment: readonly string[];
 }
 
+/** One entry a history pool may hold: a name in a harness home, and whether the pool keeps it as a folder or a file. */
+export interface HistoryPoolEntryDecl {
+  /** One plain segment (`projects`, `history.jsonl`): never hidden, never a path, never on the kernel's deny list. */
+  readonly name: string;
+  /** What the kernel makes in the pool on first use: a `0700` folder, or an empty `0600` file. */
+  readonly kind: 'folder' | 'file';
+}
+
+/**
+ * `permissions.historyPool`: the pool's state tree and the closed list of entries that may be linked to it.
+ * `state` is the NAME of one of the plugin's own `data.state` defs, which must be an opaque `<folder>/*` tree
+ * (`history-pool/*`); the pool is `state/<plugin>/<folder>`, outside every root, so it is never a credential home.
+ */
+export interface HistoryPoolPermission {
+  readonly state: string;
+  readonly entries: readonly HistoryPoolEntryDecl[];
+}
+
 /** What it may touch outside its own folder (§3.7). Anything undeclared is refused by the kernel ports. */
 export interface Permissions {
   readonly roots?: readonly RootName[];
@@ -283,6 +307,8 @@ export interface Permissions {
   readonly hostFacts?: true;
   /** It reads THIS process's own `/proc/self/io` and `/proc/self/stat` through `kernel.selfCounters` (Usage's profile), and no other file or pid. */
   readonly selfCounters?: true;
+  /** It lists the directories the host polls instead of watching through `kernel.fileEvents.polled()` (Usage's profile); it watches none. */
+  readonly fileEvents?: true;
   /**
    * It asks `kernel.paths.checkDirectory` whether an owner-named absolute path is a directory (Ferrets' session
    * working directory, today's resolver). The check answers for ANY absolute path with no root and no fence, so a
@@ -304,8 +330,10 @@ export interface Permissions {
   readonly whichOverrides?: readonly string[];
   /**
    * The shell variables this plugin's `fy` half may read through `CliContext.readEnvironment` (Logins: the variable
-   * names its provider presets declare, for `fy login add --from-env`), by exact name; `'*'` or a pattern matches no
-   * variable. `CliContext.env` is unchanged. Absent or empty: every read answers nothing, whatever the shell holds.
+   * names its provider presets declare, for `fy login add --from-env`), by exact name or as one family
+   * (`ZAI_*`: a prefix of at least two characters ending in an underscore, then `*`, which answers every set variable
+   * of that prefix when it is asked for by that same spelling); a bare `'*'`, any other pattern and every `FY_` name or
+   * family match no variable. `CliContext.env` is unchanged. Absent or empty: every read answers nothing, whatever the shell holds.
    */
   readonly cliEnvReads?: readonly string[];
   /**
@@ -320,6 +348,14 @@ export interface Permissions {
    * nothing. Only the plugin that may hold `credentials` can mint, whatever it declares. Absent: every mint is refused.
    */
   readonly shareCredentials?: readonly string[];
+  /**
+   * It links a harness home's HISTORY entries to ONE shared pool of its own through `RootHandle.linkHistory` on its
+   * `agent-homes` handle (Claude Code and Codex: every ferret on the harness reads and continues any other's
+   * conversations). The kernel makes `<ferret home>/<entry>` a symlink to the real path of
+   * `state/<plugin>/<pool folder>/<entry>`; the list is fixed and closed, and the kernel's own deny list (sign-ins,
+   * settings, instruction files, `skills`, `plugins`, any hidden name) holds whatever is declared. See {@link HistoryPoolPermission}.
+   */
+  readonly historyPool?: HistoryPoolPermission;
   /**
    * It asks `kernel.processes` about this user's live processes and SIGTERMs one that runs from its own folder
    * (Runtimes: an ended Codex ferret's app-server pair). `environment` lists, by exact name, the variables `usersOf`
@@ -402,9 +438,10 @@ export interface PublicFileDecl {
  * a private file CREATED (or replaced) later THROUGH THE DAEMON's state port or internal roots is pinned before that
  * write returns: those writers ask the index to look again first, so a first write has no window. Root calls made
  * after the write returns are covered; a root call already running alongside the write is not. A private file made
- * OUTSIDE the daemon is pinned only at the index's next look, within 250 ms (as in v4): a file the CLI's own state
- * port makes (Access's `fy pair --open` redirect page under `pairing-redirects`), and a file a child process makes
- * inside a private folder. An entry met through any root under another name, a bind mount included, is refused
+ * OUTSIDE the daemon is pinned only at the index's next look, within 250 ms (as in v4): a file a child process makes
+ * inside a private folder, unless its owner tells the port with `pinMade` once the child has made it. (A file the CLI's own state port makes is built without the pin, so a private file is never
+ * made there: Access's `fy pair --open` redirect page under `pairing-redirects` is made by the daemon,
+ * `POST /v1/pair/redirect`.) An entry met through any root under another name, a bind mount included, is refused
  * `fenced` (fail closed). A look that cannot be made fails closed too: the write rejects with `private_unpinned` and
  * every root refuses until a look can be made, and the daemon says once "A private file of <plugin> could not be
  * pinned, so no folder is opened until it can be: <reason>." (again after a private write's look has succeeded in

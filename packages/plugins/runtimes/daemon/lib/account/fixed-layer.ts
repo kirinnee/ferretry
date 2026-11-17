@@ -5,8 +5,8 @@
  * Only agent runtimes get it (F1). Its contents are exactly three things and never a credential or
  * an identity (F3): no trust prompt, no onboarding screens, and the permission mode from the
  * machine's **Agent permissions** (F4). Two carried-over launch flags join it because nobody is
- * there to answer an UNATTENDED agent: Claude's `--disallowed-tools=AskUserQuestion` (owner question O3,
- * now per ferret — an interactive ferret has the owner and keeps its question tool) and Codex's `--no-alt-screen`.
+ * there to answer an UNATTENDED agent: Claude's `--disallowed-tools=AskUserQuestion` (withheld from every ferret,
+ * owner !A527) and Codex's `--no-alt-screen`.
  *
  * It also puts the Ferretry tools in every agent runtime — the `fy mcp serve` MCP server, through which
  * an agent drives terminals and browser pages by name — and a short instruction saying they exist and
@@ -50,10 +50,9 @@
  *   still turns it on for the one ferret that asks (`remoteControlArgs`), and only an org policy lock
  *   can outrank us. Codex has nothing to switch: its `remote_control` feature is removed (0.156.1) and
  *   its remote control is a separate `codex remote-control` daemon, not a session startup behaviour.
- * - The overlay carries one `PreToolUse` hook for `AskUserQuestion` ({@link CLAUDE_QUESTION_HOOKS}).
- *   Claude Code 2.1.281 writes an `AskUserQuestion` call to its transcript only once the form is answered,
- *   so the daemon, which reads the transcript, never saw an open question; the hook hands it the call as
- *   it is asked. Fast mode's replacement overlay copies the whole file, hooks included.
+ * - The overlay carries NO question hook (M7). Claude Code 2.1.281 writes an `AskUserQuestion` call to its transcript
+ *   only once the form is answered, so the conversation plugin's question watch reads an open form off the pane
+ *   instead (`questions/lib/watch.ts`).
  * - Codex's one-shot notices (the full-access warning, the rate-limit model nudge, the model
  *   migration prompts) are hidden with ONE `-c notice={…}` inline table, which merges with
  *   `config.toml`'s own `[notice]` like the trust table does.
@@ -76,6 +75,7 @@ import {
   sameSettingsValue,
   settingsKey,
 } from './layering.ts';
+import { FERRETRY_MCP_ARGS, FERRETRY_MCP_SERVER } from '../../../contract/tools-server.ts';
 import type { AgentPermissions } from './schema.ts';
 import { AGENDA_ENV, HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from './pane-contract.ts';
 
@@ -203,44 +203,21 @@ const CODEX_PERMISSIONS: Readonly<
 };
 
 /**
- * O3: an unattended (`auto`) ferret has nobody to answer a question, so the tool that asks one is
- * withheld. An INTERACTIVE ferret has the owner, so it keeps it — which makes this per FERRET, not per
- * runtime: the wrapper (`../wrappers.ts`) applies the flag at exec time unless the daemon-written
- * {@link SESSION_MODE_ENV} is `interactive`. A launch with no mode is treated as unattended.
+ * Owner !A527 (was O3): the tool that asks a question is withheld from EVERY agent ferret, an interactive one
+ * included, so none stops on a form only the pane shows; it asks through the agenda. The wrapper
+ * (`../wrappers.ts`) applies the flag at exec time.
  */
 export const CLAUDE_NO_QUESTIONS_FLAG = '--disallowed-tools=AskUserQuestion';
 
+/**
+ * Codex's question feature switched explicitly OFF (owner !A527), as the `-c` value the wrapper prepends: an override
+ * beats `config.toml`, where a selected settings component may have turned `default_mode_request_user_input` on.
+ * Copied from the Codex plugin's `CODEX_QUESTIONS_OFF` (a plugin never imports another's daemon code).
+ */
+export const CODEX_QUESTIONS_OFF_OVERRIDE = 'features.default_mode_request_user_input=false';
+
 /** Claude's "start Remote Control in every session" preference. */
 const CLAUDE_REMOTE_CONTROL_KEY = 'remoteControlAtStartup';
-
-/**
- * The launch variable naming the file a ferret's question hook writes, set by the daemon per session
- * (its own state folder). Unset — a person's own terminal, an older daemon — the hook writes nothing.
- */
-const QUESTION_ASKED_FILE_ENV = 'FY_QUESTION_FILE';
-
-/**
- * The hook that tells the daemon a question is open. Claude Code 2.1.281 keeps an `AskUserQuestion` call
- * out of its transcript until the form is answered, so the daemon — which reads the transcript — saw no
- * question at all and offered only the Console. `PreToolUse` fires before the form is drawn, with the real
- * `tool_use_id` and the whole input on stdin: copied whole into {@link QUESTION_ASKED_FILE_ENV} (a rename,
- * so a reader never sees half a file). Its exit is always 0 and it prints nothing, even when the file
- * cannot be written, so it never changes what Claude decides; stdin is drained on every path, so Claude
- * never writes into a closed pipe.
- */
-export const CLAUDE_QUESTION_HOOK_COMMAND = `if [ -n "$${QUESTION_ASKED_FILE_ENV}" ] && cat 2>/dev/null > "$${QUESTION_ASKED_FILE_ENV}.tmp" && mv -f "$${QUESTION_ASKED_FILE_ENV}.tmp" "$${QUESTION_ASKED_FILE_ENV}" 2>/dev/null; then :; else cat > /dev/null 2>&1; fi; exit 0`;
-
-/**
- * The overlay's `hooks` block. In the OVERLAY only, never a `settings` entry: an entry is written over the
- * profile's settings, and would replace whatever `PreToolUse` hooks a person keeps there. Claude merges the
- * hooks of every settings source, so the overlay adds one beside theirs.
- */
-export const CLAUDE_QUESTION_HOOKS: SettingsObject = {
-  PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
-};
-
-/** Codex gates `request_user_input` outside Plan mode behind this feature; only interactive ferrets enable it. */
-export const CODEX_QUESTIONS_FEATURE = 'default_mode_request_user_input';
 
 /** The launch variable naming a ferret's mode (`interactive` or `auto`); written by the daemon at creation. */
 export { SESSION_MODE_ENV };
@@ -248,12 +225,6 @@ export { SESSION_MODE_ENV };
 export const CODEX_NO_ALT_SCREEN_FLAG = '--no-alt-screen';
 
 const CARRIED_FLAGS: ReadonlySet<string> = new Set([CLAUDE_NO_QUESTIONS_FLAG, CODEX_NO_ALT_SCREEN_FLAG]);
-
-/** The name the Ferretry tools server is registered under, in both harnesses. */
-const FERRETRY_MCP_SERVER = 'ferretry';
-
-/** How the harness starts the tools server: the `fy` the wrapper already uses, as `fy mcp serve`. */
-const FERRETRY_MCP_ARGS: readonly string[] = ['mcp', 'serve'];
 
 /**
  * The variables the tools server needs from the agent's environment: where the daemon is, and the
@@ -275,8 +246,10 @@ export const FERRETRY_MCP_ENV_VARS: readonly string[] = [
 ];
 
 /**
- * THE PER-FERRET SECTIONS of the appended system prompt: passive learning ({@link PASSIVE_LEARNING_ENV}),
- * hypermedia ({@link HYPERMEDIA_ENV}) and Pack mode ({@link PACK_ENV}).
+ * THE PER-FERRET SECTIONS of the appended system prompt: hypermedia ({@link HYPERMEDIA_ENV}), Pack mode
+ * ({@link PACK_ENV}) and the agenda ({@link AGENDA_ENV}). The notify and board rules (Agenda and Board's
+ * `instructions/*.md`, for `role: lead`) and the lessons teaching (Lessons' launch part) are said by those
+ * plugins, not here.
  *
  * A runtime's wrapper is materialised once and serves every ferret launched on it, so a section cannot
  * be a static launch argument: it would be on for all of them or none. The daemon writes each switch
@@ -290,14 +263,11 @@ export const FERRETRY_MCP_ENV_VARS: readonly string[] = [
  * They are system instructions rather than the tools server's MCP `initialize` text because a
  * harness weighs the system prompt far above a server's instructions, which an agent can ignore.
  *
- * Passive learning: whether this ferret is told to file lessons. A running ferret switched on or off
- * is told so with a queued, non-interrupting message, because its environment is fixed.
+ * Passive learning (`FY_LEARNING_PASSIVE`, written by Lessons' launch part): whether this ferret is told to
+ * file lessons. A running ferret switched on or off is told so with a queued, non-interrupting message,
+ * because its environment is fixed.
  */
 export { PASSIVE_LEARNING_ENV };
-
-/** The teaching a ferret that is instructed to learn carries. Short on purpose — it is in every prompt. */
-export const LESSONS_INSTRUCTION = (fy: string): string =>
-  `Lessons: when the owner corrects you or you learn a lasting preference of theirs, file one imperative rule: \`${fy} lesson suggest "<rule>" --scope global|repo\` (or lessons_suggest); global = every ferret, repo = this project. File each once.`;
 
 /**
  * HYPERMEDIA — a per-FERRET section of the appended system prompt, carried exactly like passive learning
@@ -324,7 +294,7 @@ export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
     '- svg: one self-contained <svg> (CSS animation ok); no script, foreignObject or links.',
     '- html: a fragment, inline CSS and <script> (isolated); no network; transparent, theme-token colours.',
     `- chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: \`${fy} render guide chart\`.`,
-    `- card, board (live cards), map, image, video, audio, pdf: \`${fy} render guide <type>\`.`,
+    `- task, board (live tasks), map, image, video, audio, pdf: \`${fy} render guide <type>\`.`,
     '```fy-render',
     'type: mermaid',
     'alt: Request flow',
@@ -332,7 +302,7 @@ export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
     'flowchart TB',
     '  Phone --> Relay --> Daemon',
     '```',
-    'Renders in chat, agenda tabs, cards; never in repo files, docs, commits, PRs.',
+    'Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.',
   ].join('\n');
 
 /**
@@ -366,7 +336,7 @@ export const PACK_ROUTING_ENV = 'FY_PACK_ROUTING';
 
 /** One per-ferret section: the name a surface shows it by, the variable that turns it on, and its text. */
 export interface FerretSection {
-  readonly id: Extract<LaunchInstructionSectionId, 'hypermedia' | 'pack' | 'agenda' | 'learning'>;
+  readonly id: Extract<LaunchInstructionSectionId, 'hypermedia' | 'pack' | 'agenda'>;
   readonly env: string;
   readonly text: string;
   /** A switch that, when `1`, keeps the section out even though {@link env} is on: a sub-ferret has no agenda. */
@@ -378,12 +348,11 @@ export const FERRET_SECTIONS = (fy: string): readonly FerretSection[] => [
   { id: 'hypermedia', env: HYPERMEDIA_ENV, text: HYPERMEDIA_INSTRUCTION(fy) },
   { id: 'pack', env: PACK_ENV, text: PACK_INSTRUCTION(fy) },
   { id: 'agenda', env: AGENDA_ENV, text: AGENDA_INSTRUCTION(fy), unlessEnv: SUB_FERRET_ENV },
-  { id: 'learning', env: PASSIVE_LEARNING_ENV, text: LESSONS_INSTRUCTION(fy) },
 ];
 
 /** The built-in instruction: the tools exist, and how names work. Short on purpose — it is in every prompt. */
 export const AGENT_TOOLS_INSTRUCTION =
-  "Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value on a card; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code) and the surface unreadable ~2 min after. The card flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never solve captchas, create passkeys, spoof a browser or identity, or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask.";
+  "Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value in an input; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code) and the surface unreadable ~2 min after. The input flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never solve captchas, create passkeys, spoof a browser or identity, or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask. Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.";
 
 /** Claude's `--mcp-config` document for the tools server: a JSON string, so no file has to exist. */
 export const claudeToolsConfig = (fyCommand: string): SettingsObject => ({
@@ -393,7 +362,9 @@ export const claudeToolsConfig = (fyCommand: string): SettingsObject => ({
       command: fyCommand,
       args: [...FERRETRY_MCP_ARGS],
       // Claude passes a stdio server the agent's whole environment; the admin token must not be in it.
-      env: { FY_TOKEN: '' },
+      env: {
+        FY_TOKEN: '',
+      },
     },
   },
 });
@@ -466,36 +437,9 @@ export const AGENDA_INSTRUCTION = (fy: string): string =>
   ].join('\n');
 
 /**
- * NOTIFY — how an agent tells the human something outside a reply. Every agent runtime gets it, in a
- * rule short enough to sit in every prompt; the bigger, switchable teaching of an agenda is
- * {@link AGENDA_INSTRUCTION}. docs/notifications.md quotes this text verbatim.
- */
-export const NOTIFY_INSTRUCTION = (fy: string): string =>
-  `Notify: the owner reads the Inbox, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run \`${fy} notify "<summary>" [--body "<detail>"]\`: a quiet Inbox notice. Add \`--ping\` only when it must reach their phone now. Never notify progress or chatter.`;
-
-/**
- * BOARD — whether a ferret makes a card at all, and how it works one it has (`board-design.md` §3.2), in every
- * agent runtime's prompt. The board is OPT-IN (owner, 2026-11-01: "board is overkill — most ferrets should not
- * use tasks or boards — ask before doing that"): a card only where the project's board is switched on, under a
- * card the ferret holds, or on the owner's Yes; otherwise the ferret asks first. The daemon ENFORCES it
- * (`board/opt-in.ts`), and the rule says it overrides other instructions, because a person's own CLAUDE.md that
- * says to record every task was outvoting it. The board moves what a signal moves (a
- * start, a PR, a release); this is the rest, which only the ferret knows. The daemon's turn-end check backs it
- * up on a board that is on (`board/turn-check.ts` in the daemon). The board runs itself (the owner, 2026-11-04: "TASK
- * no longer have user interactivity anymore! agenda tracks all those"): a card never asks — every answer, test and
- * Done rides the card's agenda, which moves the card — and one card is one outcome, never an umbrella (`fy task
- * create` lists the related cards and refuses a broad one without `--broad`). Public cards are the owner's asks, so
- * the board answers "what's the sitrep?"; planning is a phase, not a reason to skip a card; the title and summary say
- * what the work is doing; and the card's `status` (Now / Done so far / Next) is rewritten whole at each step.
- * docs/board.md quotes this text verbatim.
- */
-export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: opt-in, enforced; overrides other task rules. Card only if \`${fy} board status\` is on, under your card (\`--parent\`), or on the owner's Yes (\`--approval !A<n>\`). Public=the owner's asks ("status of all I asked?"): top-level, never \`--private\`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: \`${fy} task show <id> --yaml\`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then \`${fy} task patch <id> --file f\`. \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\`/\`block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
-
-/**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon
- * writes {@link SUB_FERRET_ENV} `1` from the session's `parent`, and the wrapper then swaps the notify and
- * board rules for {@link SUB_FERRET_INSTRUCTION} and leaves out the agenda section: the daemon refuses a
+ * writes {@link SUB_FERRET_ENV} `1` for `role: helper` or a `parent`, and the wrapper then adds
+ * {@link SUB_FERRET_INSTRUCTION} (a lead's notify and board rules come from the plugins' instruction files) and leaves out the agenda section: the daemon refuses a
  * sub-ferret the agenda and the board's moves, so a prompt that taught them would only teach refusals.
  */
 export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
@@ -507,22 +451,19 @@ export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   [
     `Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (\`${fy} send <lead-callsign> "<message>"\`) only for a result, a blocker or a decision it must make. Label every send: \`--kind blocker\` (stuck until answered; at once), \`--kind action\` (default; to do; batched a minute), \`--kind fyi\` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.`,
-    `With a card: each step, \`${fy} task show <id> --yaml\`, rewrite its status (now/doneSoFar/next, PR links) and howToTest, then \`${fy} task patch <id> --file f\`; \`${fy} task note\` adds history. Link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's card? \`${fy} task claim <id>\`, don't ask. No card? Make none.`,
+    `With a task: each step, \`${fy} task show <id> --yaml\`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then \`${fy} task patch <id> --file f\`; \`${fy} task note\` adds history. Link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's task? \`${fy} task claim <id>\`, don't ask. No task? Make none.`,
   ].join('\n');
-
-/** What a lead is told after the base instruction: the notify rule, then the board rules. */
-export const LEAD_RULES_INSTRUCTION = (fy: string): string => `${NOTIFY_INSTRUCTION(fy)}\n\n${BOARD_INSTRUCTION(fy)}`;
 
 /**
  * What every agent runtime is told, whoever it is: the tools and the settings rules. The wrapper appends
- * a lead's {@link LEAD_RULES_INSTRUCTION} or a sub-ferret's {@link SUB_FERRET_INSTRUCTION} after it.
+ * a sub-ferret's {@link SUB_FERRET_INSTRUCTION} after it.
  */
 export const AGENT_BASE_INSTRUCTION = (fy: string): string =>
   `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}`;
 
 /** One section every agent runtime is told, whatever its switches: its id and its exact text. */
 export interface AlwaysOnSection {
-  readonly id: 'tools' | 'settings' | 'notify' | 'board' | 'sub-ferret';
+  readonly id: 'tools' | 'settings' | 'sub-ferret';
   readonly text: string;
 }
 
@@ -533,12 +474,7 @@ export interface AlwaysOnSection {
 export const ALWAYS_ON_SECTIONS = (fy: string, subFerret = false): readonly AlwaysOnSection[] => [
   { id: 'tools', text: AGENT_TOOLS_INSTRUCTION },
   { id: 'settings', text: SET_UP_FERRETRY_INSTRUCTION(fy) },
-  ...(subFerret
-    ? [{ id: 'sub-ferret' as const, text: SUB_FERRET_INSTRUCTION(fy) }]
-    : [
-        { id: 'notify' as const, text: NOTIFY_INSTRUCTION(fy) },
-        { id: 'board' as const, text: BOARD_INSTRUCTION(fy) },
-      ]),
+  ...(subFerret ? [{ id: 'sub-ferret' as const, text: SUB_FERRET_INSTRUCTION(fy) }] : []),
 ];
 
 /**
@@ -564,10 +500,9 @@ export function instructionDigest(text: string): string {
  * tool is left in.
  *
  * Read off the same constants the wrapper renders (`../wrappers.ts`), so it cannot describe a prompt
- * the wrapper would not build: the tools, settings, notify and board sections always (each with its {@link instructionDigest}), each {@link FERRET_SECTIONS}
- * entry whose variable is exactly `1`, and the question tool only for a launch whose
- * {@link SESSION_MODE_ENV} is `interactive` (O3) — the same rule for Claude and Codex. It describes an
- * AGENT runtime's wrapper, the only kind a session can be started on.
+ * the wrapper would not build: the tools and settings sections always (and the sub-ferret section for a sub-ferret) (each with its {@link instructionDigest}), each {@link FERRET_SECTIONS}
+ * entry whose variable is exactly `1`. The question tool is never left in (owner !A527), so `questions` is always
+ * `false`. It describes an AGENT runtime's wrapper, the only kind a session can be started on.
  */
 export function launchInstructions(fy: string, env: Readonly<Record<string, string>>): SessionLaunchInstructions {
   const mode = env[SESSION_MODE_ENV] === 'interactive' ? 'interactive' : 'auto';
@@ -588,7 +523,7 @@ export function launchInstructions(fy: string, env: Readonly<Record<string, stri
         }),
     ],
     mode,
-    questions: mode === 'interactive',
+    questions: false,
   };
 }
 
@@ -643,7 +578,6 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
           permissions: { defaultMode: mode },
           [CLAUDE_REMOTE_CONTROL_KEY]: false,
           ...(skip ? { skipDangerousModePermissionPrompt: true } : { skipAutoPermissionPrompt: true }),
-          hooks: CLAUDE_QUESTION_HOOKS,
         },
         claudeJson: {
           hasCompletedOnboarding: true,

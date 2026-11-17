@@ -120,7 +120,9 @@ describe('tmux runner message delivery', () => {
     const { runner, server, handle, hold } = subject();
     hold();
 
-    await expect(runner.deliver(handle, { text: 'work' })).rejects.toThrow('input card');
+    await expect(runner.deliver(handle, { text: 'work' })).rejects.toThrow(
+      'The owner is filling in an input for this; wait for it.',
+    );
     expect(
       server.calls.some(call => call[0] === 'send-keys' || call[0] === 'load-buffer' || call[0] === 'paste-buffer'),
     ).toBe(false);
@@ -131,7 +133,9 @@ describe('tmux runner message delivery', () => {
     const { runner, server, handle, holdAfterBuffer } = subject();
     holdAfterBuffer();
 
-    await expect(runner.deliver(handle, { text: 'first line\nsecond line' })).rejects.toThrow('input card');
+    await expect(runner.deliver(handle, { text: 'first line\nsecond line' })).rejects.toThrow(
+      'The owner is filling in an input for this; wait for it.',
+    );
     expect(server.calls.some(call => call[0] === 'paste-buffer')).toBe(false);
     expect(server.heldBuffers()).toEqual([]);
     expect(server.composer).toBe('');
@@ -194,7 +198,7 @@ describe('#23 pane-queue: a queued message is typed only through kernel.act and 
 
     const queued = runner.queue(handle, `queue this ${FIXTURE_SECRET}`);
 
-    await expect(queued).rejects.toThrow('input card');
+    await expect(queued).rejects.toThrow('The owner is filling in an input for this; wait for it.');
     await queued.catch((error: unknown) => {
       expect(String(error instanceof Error ? error.message : error)).not.toContain(FIXTURE_SECRET);
     });

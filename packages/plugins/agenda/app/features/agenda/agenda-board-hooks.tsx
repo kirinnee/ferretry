@@ -145,7 +145,7 @@ export const useCardBoards = (
   return { laneEditor: editors.editorFor, cardBoard };
 };
 
-const ELSEWHERE = 'That card is on another machine, so it cannot be changed from here.';
+const ELSEWHERE = 'That task is on another machine, so it cannot be changed from here.';
 
 /** A notice's Start and Close, over the provided hook; a card of another daemon is refused, never sent. */
 const agendaCardsBoardOf = (answer: AgendaCardAnswer, daemonId: DaemonId): AgendaCardsBoard => ({

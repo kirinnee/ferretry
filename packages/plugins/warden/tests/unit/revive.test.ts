@@ -115,6 +115,12 @@ describe('which deaths are revivable', () => {
     should(classifyEnd('failed', [event('session.stopped', ago(300)), exited({ pane: 'gone' })]).kind).equal('revive');
   });
 
+  it('should leave a session whose wrapper exited 75 (conversation held), so a refused revive is not a revive loop', () => {
+    // Act / Assert — exit 75 is `fy history claim` refusing: another writer holds the conversation, nothing crashed
+    should(classifyEnd('failed', [exited({ exitCode: 75 })])).deepEqual({ kind: 'leave', why: 'lease_held' });
+    should(classifyEnd('failed', [exited({ exitCode: 74 })]).kind).equal('revive');
+  });
+
   it('should leave a session that is not failed now, or has no terminal event', () => {
     // Act / Assert
     should(classifyEnd('running', [exited({ pane: 'gone' })])).deepEqual({ kind: 'leave', why: 'not_failed' });
@@ -150,7 +156,9 @@ describe('the plain words for a death', () => {
     should(message).startWith(
       'Ferretry started your terminal again: it ended because it was killed by a signal (SIGKILL) at 2026-10-30 11:59 UTC.',
     );
-    should(message).containEql('Re-read your last turn file and continue');
+    should(message).equal(
+      'Ferretry started your terminal again: it ended because it was killed by a signal (SIGKILL) at 2026-10-30 11:59 UTC. Your conversation was resumed as it was. Re-read your last turn, then continue from where you stopped.',
+    );
   });
 
   it('should name the focus card an auto session carries on with, and give an interactive one none', () => {
@@ -162,9 +170,9 @@ describe('the plain words for a death', () => {
     const interactive = reviveMessage({ kind: 'tmux_crashed' }, '2026-10-30T11:59:00.000Z', 'interactive', card);
 
     // Assert
-    should(auto).containEql('continue where you left off, on the card below.\n\nYour card: &F1 — Ship the thing');
+    should(auto).containEql('continue from where you stopped, on the task below.\n\nYour task: &F1 — Ship the thing');
     should(auto).containEql('The ask, verbatim (owner):\nbuild the board');
-    should(interactive).not.containEql('Your card');
+    should(interactive).not.containEql('Your task');
   });
 
   it('should tell an interactive session the notice and nothing to do', () => {

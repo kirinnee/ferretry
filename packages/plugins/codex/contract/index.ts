@@ -10,7 +10,6 @@ import {
   definePort,
   defineState,
   type Loosens,
-  neverLoosens,
 } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { configDef } from './config-def.ts';
@@ -21,11 +20,15 @@ import {
   type Discovery,
   type HarnessCliView,
   type HarnessConfig,
+  type HooksItem,
   HooksItemSchema,
+  type SettingsItem,
   SettingsItemSchema,
 } from './wire.ts';
+import { launchFlagsLoosen } from './launch-flags.ts';
 
 export * from './wire.ts';
+export { launchFlagsKept } from './launch-flags.ts';
 
 /** The harness key and plugin id. */
 export const CODEX = 'codex' as const;
@@ -91,6 +94,28 @@ export const CODEX_AGENT_HOMES = defineState({
   format: 1,
 });
 
+/**
+ * The ONE history pool every Codex ferret shares (docs/design/shared-history.md): a plain folder of this plugin's state,
+ * never inside `agent-homes`. `sqlite` in it is Codex's state database folder, reached by `CODEX_SQLITE_HOME` (an env var,
+ * not a link); the entries below are linked into each ferret home. `auth.json` and `config.toml` stay the ferret's own.
+ */
+export const CODEX_HISTORY_POOL = defineState({
+  name: 'historyPool',
+  path: 'history-pool/*',
+  store: 'opaque',
+  format: 1,
+});
+
+/** The entries of a Codex home that are history (v4's list), each linked to the same name in the pool. */
+export const CODEX_HISTORY_ENTRIES = [
+  { name: 'sessions', kind: 'folder' },
+  { name: 'archived_sessions', kind: 'folder' },
+  { name: 'history.jsonl', kind: 'file' },
+] as const;
+
+/** The folder of the pool that holds Codex's SQLite state (`CODEX_SQLITE_HOME`). */
+export const CODEX_POOL_SQLITE = 'sqlite';
+
 export const CODEX_DISCOVERY = defineState({
   name: 'discovery',
   path: 'discovery.json',
@@ -114,6 +139,11 @@ export const CodexRolloutBindingSchema = z.strictObject({
   baseline: z.array(z.string()),
   /** Whether the baseline saw every rollout already there (absent in a binding written before it was recorded). */
   baselineComplete: z.boolean().optional(),
+  /** A pooled launch of a NEW conversation: the first day (`YYYY-MM-DD`) its rollout can be filed under; older days are never read. */
+  since: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
   native: z.string().optional(),
 });
 export type CodexRolloutBinding = z.infer<typeof CodexRolloutBindingSchema>;
@@ -139,8 +169,10 @@ export const CodexLaunchSettingsRecordSchema = z.strictObject({
     'permission-mode': SectionDigestSchema,
     'fixed-layer': SectionDigestSchema,
     settings: SectionDigestSchema,
+    /** Absent on a record written before hooks were fingerprinted: its hooks are unknown until the next start or resume. */
+    hooks: SectionDigestSchema.optional(),
   }),
-  /** The runtime this launch ran as (a name, not a secret): the selection of settings is read for it again. */
+  /** The runtime this launch ran as (a name, not a secret): the selection of settings and hooks is read for it again. */
   runtime: z.string().min(1).max(128).optional(),
 });
 export type CodexLaunchSettingsRecord = z.infer<typeof CodexLaunchSettingsRecordSchema>;
@@ -155,11 +187,33 @@ export const CODEX_LAUNCH_SETTINGS = defineState({
 
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────
 
-/** Today's `machineLoosening` rule for the permission mode, kept word for word. */
+/**
+ * The `machineLoosening` rule for the permission mode. An unset mode means `skip` (owner decision !A525), so only an
+ * EXPLICIT `auto` going to `skip` (or being removed, which reads as `skip`) is a loosening; no value to an explicit
+ * `auto` is a tightening.
+ */
 export const harnessConfigLoosens: Loosens<HarnessConfig> = (before, after) =>
-  (before?.permissionMode ?? 'auto') === 'auto' && after.permissionMode === 'skip'
+  before?.permissionMode === 'auto' && after.permissionMode === 'skip'
     ? ['agents now skip every permission prompt']
     : [];
+
+/**
+ * Any change to the harness `binary` or `searchPaths` (added, removed or changed, never judged by its value): the path
+ * names the program every new ferret launches, so it is code execution and the owner's to approve (owner decision
+ * !A525). Pure and total; the sentences name what changed, never a path.
+ */
+const harnessPathsChange: Loosens<HarnessConfig> = (before, after) => [
+  ...(before?.binary === after.binary ? [] : ['agents now launch a different Codex program (binary changed)']),
+  ...(JSON.stringify(before?.searchPaths ?? []) === JSON.stringify(after.searchPaths)
+    ? []
+    : ['agents now look for the Codex program in different directories (searchPaths changed)']),
+];
+
+/** What an agent's edit of this file is HELD for: a looser permission mode, or any change of where the program is. */
+const harnessConfigHeld: Loosens<HarnessConfig> = (before, after) => [
+  ...harnessConfigLoosens(before, after),
+  ...harnessPathsChange(before, after),
+];
 
 /** `config/harness-codex.yaml`: the binary, the search directories and the permission mode. */
 export const CODEX_CONFIG = configDef(
@@ -167,28 +221,51 @@ export const CODEX_CONFIG = configDef(
     file: 'harness-codex.yaml',
     schema: HarnessConfigSchema,
     axis: 'configure',
-    loosens: harnessConfigLoosens,
+    loosens: harnessConfigHeld,
   }),
 );
 
-/** `config/codex/settings/<name>.yaml`. Today a component edit changes what an agent runs with, never what it may spend. */
+/**
+ * A settings item loosens when an edit adds a launch flag that sets the approval policy or sandbox (`--sandbox`, `-a`,
+ * `--full-auto`, `-c approval_policy=…`): the same loosening as a looser `permissionMode`, so an agent's edit waits for
+ * the owner and the owner's own edit does not. The launch drops those flags anyway (`./launch-flags.ts`); the hold is so
+ * none is ever written unseen.
+ */
+export const settingsItemLoosens: Loosens<SettingsItem> = (before, after) =>
+  launchFlagsLoosen(before?.flags ?? [], after.flags ?? []);
+
+/** `config/codex/settings/<name>.yaml`: a config document and its launch flags. */
 export const CODEX_SETTINGS = configDef(
   defineConfig({
     collection: 'codex/settings',
     name: ITEM_NAME_PATTERN,
     schema: SettingsItemSchema,
     axis: 'configure',
-    loosens: neverLoosens,
+    loosens: settingsItemLoosens,
   }),
 );
 
-/** `config/codex/hooks/<name>.yaml`. Same shape as Claude Code's hooks items; Runtimes renders them as the runtime's `hooks.json`. */
+/**
+ * What an AGENT's write of `config/codex/hooks/<name>.yaml` is held for: EVERY add and EVERY change (owner ruling !A525
+ * item 9). A hook is a shell command Codex runs on an event, so a new or edited one is code the owner must see; an
+ * unchanged file holds nothing. Compared as written (a re-ordered key counts as a change: it fails closed). The sentence
+ * never names a command. The owner's write through fy, the app or PUT /v1/config/file is never held; a hand edit or a
+ * file copied onto disk is held like any unacknowledged edit until `fy config confirm`.
+ */
+export const hooksItemHeld: Loosens<HooksItem> = (before, after) =>
+  before === undefined
+    ? ['agents now run a new Codex hooks component']
+    : JSON.stringify(before) === JSON.stringify(after)
+      ? []
+      : ['agents now run changed Codex hooks'];
+
+/** `config/codex/hooks/<name>.yaml`. Same shape as Claude Code's hooks items; Runtimes renders them as the runtime's `hooks.json`. An agent's add or change is HELD (`hooksItemHeld`). */
 export const CODEX_HOOKS = configDef(
   defineConfig({
     collection: 'codex/hooks',
     name: ITEM_NAME_PATTERN,
     schema: HooksItemSchema,
     axis: 'configure',
-    loosens: neverLoosens,
+    loosens: hooksItemHeld,
   }),
 );

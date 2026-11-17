@@ -153,7 +153,7 @@ export function configRoutes(sources: ConfigRouteSources): Readonly<{
         schema: schemaFileName(target.def),
         exists: read.exists,
         text,
-        // The etag stays the digest of the disk text, so `If-Match` keeps working for every editor.
+        // The etag is the keyed digest of the disk text (`./etag.ts`), so `If-Match` keeps working for every editor.
         etag: read.etag,
         state,
         issues,

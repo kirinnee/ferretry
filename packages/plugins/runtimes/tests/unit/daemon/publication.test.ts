@@ -13,9 +13,34 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { MissingFleetSecretsError, resolveSecretEnvironment } from '../../../daemon/lib/env-profiles.ts';
 import type { RuntimeIds } from '../../../daemon/lib/account/ids.ts';
 import { FleetPublication, PublishedFleetInventory } from '../../../daemon/lib/service/publication.ts';
+
+/** The refusal a launch gets when a secret its account names is not in the store (a stand-in for Ferrets' own). */
+class MissingFleetSecretsError extends Error {
+  constructor(readonly names: readonly string[]) {
+    super(`the secret store holds no secret named ${names.join(', ')}`);
+  }
+}
+
+/** Resolve each `${secret:NAME}` variable against the store; refuse naming every missing one. */
+const resolveSecretEnvironment = (
+  account: { readonly env: Readonly<Record<string, string>> },
+  values: ReadonlyMap<string, string>,
+): Readonly<Record<string, string>> => {
+  const reference = /\$\{secret:([A-Z][A-Z0-9_]*)\}/gu;
+  const missing = new Set<string>();
+  for (const value of Object.values(account.env)) {
+    for (const [, name] of value.matchAll(reference)) if (name !== undefined && !values.has(name)) missing.add(name);
+  }
+  if (missing.size > 0) throw new MissingFleetSecretsError([...missing]);
+  return Object.fromEntries(
+    Object.entries(account.env).map(([variable, value]) => [
+      variable,
+      value.replace(reference, (_match, name: string) => values.get(name) ?? ''),
+    ]),
+  );
+};
 
 /** One published account, as much of it as a launch's environment reads. */
 interface CoreAccount {
@@ -37,7 +62,7 @@ class FleetLaunchEnvironment {
   async forWrapper(wrapper: string): Promise<Readonly<Record<string, string>>> {
     const account = (await this.inventory.accounts()).find(published => published.wrapper === wrapper);
     if (account === undefined || Object.keys(account.secretEnv).length === 0) return {};
-    return resolveSecretEnvironment({ id: account.id, env: account.secretEnv }, await this.secrets.values());
+    return resolveSecretEnvironment({ env: account.secretEnv }, await this.secrets.values());
   }
 }
 

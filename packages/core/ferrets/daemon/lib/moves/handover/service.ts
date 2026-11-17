@@ -66,7 +66,7 @@ function sourceLostRemedy(receipt: HandoverReceipt): string {
     `${receipt.sourceSessionId} stopped outside this handover, so there is no predecessor left to hand ` +
     `anything over from and the handover is recorded as failed. ${replacement} was already accepted onto ` +
     `board ${receipt.board?.boardId ?? 'none'} and nothing in this daemon revokes a grant, so it is still ` +
-    `there: decide whether to let it take over — start it and have it run \`fy task-board invite-verify\` ` +
+    `there: decide whether to let it take over — start it and check that it can act on the board ` +
     `— or to stop it and re-seat the board yourself.`
   );
 }
@@ -864,8 +864,8 @@ export class SessionHandoverService {
       reason,
       `This handover passed the point of no return, so nothing was undone and nothing was destroyed: ` +
         `${receipt.sourceSessionId} is still running and still a member of its board. Decide whether to let ` +
-        `${receipt.replacementSessionId ?? 'the replacement'} take over — start it and have it run ` +
-        '`fy task-board invite-verify` — or to stop it and leave the predecessor in place.',
+        `${receipt.replacementSessionId ?? 'the replacement'} take over — start it and check that it can act on the board ` +
+        '— or to stop it and leave the predecessor in place.',
     );
   }
 

@@ -14,7 +14,7 @@
 import { AskOnScreenSchema } from '@ferretry/core-asks/contract';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listInputRequests } from '../../lib/input-api.ts';
-import type { InputRequestView } from '../../lib/input-wire.ts';
+import type { InputRequest } from '../../../contract/index.ts';
 import type { VaultClient } from '../../shell.tsx';
 import { InputCard } from './input-card.tsx';
 
@@ -34,14 +34,14 @@ export interface InputCardHostProps {
 
 type Read =
   | { readonly kind: 'loading' }
-  | { readonly kind: 'open'; readonly request: InputRequestView }
+  | { readonly kind: 'open'; readonly request: InputRequest }
   | { readonly kind: 'gone' }
   | { readonly kind: 'unreadable' }
   | { readonly kind: 'failed'; readonly text: string };
 
 /** Whether a listed request is the one this ask is the card of. */
 export function isAskRequest(
-  request: InputRequestView,
+  request: InputRequest,
   ask: { readonly ref: { readonly [key: string]: unknown }; readonly context?: string | undefined },
 ): boolean {
   if (typeof ask.ref.request === 'string') return request.id === ask.ref.request;

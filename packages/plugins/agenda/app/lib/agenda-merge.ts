@@ -5,7 +5,7 @@
  * keeps the button from offering what it would refuse.
  */
 
-import { type AgendaId, type AgendaItem, agendaTitle } from '@ferretry/core-asks/contract';
+import { ASK_REFERENCE_SIGIL, type AgendaId, type AgendaItem, agendaTitle } from '@ferretry/core-asks/contract';
 import { isGateItem, firstOpenGate } from './gate-items.ts';
 
 /** Whether the item is closed: a closed item is never merged into or from. */
@@ -68,7 +68,7 @@ const clipped = (title: string): string => {
 export const PICKER_LEAD = 'Merge this item with which open agenda?';
 
 /** The checkbox that makes the other agenda the survivor. Short: the picker already showed its title. */
-export const flipLabel = (picked: AgendaItem): string => `Keep !${picked.id} instead`;
+export const flipLabel = (picked: AgendaItem): string => `Keep ${ASK_REFERENCE_SIGIL}${picked.id} instead`;
 
 /** The words of the confirm step: what is asked and what happens, then the button. No title is repeated. */
 export interface MergeWords {
@@ -82,10 +82,10 @@ export interface MergeWords {
  * id alone (the picker just showed its title) and the one open is "this item".
  */
 export const mergeWords = (choice: MergeChoice, viewed: AgendaId): MergeWords => {
-  const name = (item: AgendaItem): string => (item.id === viewed ? 'this item' : `!${item.id}`);
+  const name = (item: AgendaItem): string => (item.id === viewed ? 'this item' : `${ASK_REFERENCE_SIGIL}${item.id}`);
   const absorbed = name(choice.absorbed);
   const survivor = name(choice.survivor);
-  const closes = `${absorbed} closes; ${survivor} keeps its ask. Both conversations and all cards are kept.`;
+  const closes = `${absorbed} closes; ${survivor} keeps its ask. Both conversations and all tasks are kept.`;
   return {
     question: `Merge ${absorbed} into ${survivor}?`,
     outcome: closes.charAt(0).toUpperCase() + closes.slice(1),
@@ -94,7 +94,7 @@ export const mergeWords = (choice: MergeChoice, viewed: AgendaId): MergeWords =>
 };
 
 /** A candidate in the picker: its reference and its title, so the owner picks by what it says. */
-export const candidateLine = (item: AgendaItem): string => `!${item.id} ${agendaTitle(item)}`;
+export const candidateLine = (item: AgendaItem): string => `${ASK_REFERENCE_SIGIL}${item.id} ${agendaTitle(item)}`;
 
 /** One reference line an item shows for where it came from or went. `text` is written for the one reference renderer. */
 export interface LineageLine {
@@ -122,7 +122,7 @@ export const lineageTitles = (
 /** `!A5 (the title)`, or `!A5` where the board does not hold it. */
 const named = (id: AgendaId, titles: LineageTitles): string => {
   const title = titles[id];
-  return title === undefined ? `!${id}` : `!${id} (${clipped(title)})`;
+  return title === undefined ? `${ASK_REFERENCE_SIGIL}${id}` : `${ASK_REFERENCE_SIGIL}${id} (${clipped(title)})`;
 };
 
 const list = (ids: readonly AgendaId[], titles: LineageTitles): string => ids.map(id => named(id, titles)).join(', ');

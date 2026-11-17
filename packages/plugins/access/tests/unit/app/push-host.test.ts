@@ -24,8 +24,13 @@ const pushCapable = (register: (url: string, options: { scope: string }) => Prom
 });
 
 describe('the page’s push host', () => {
-  it('keeps working memory-only when the browser refuses its storage, and shares its two stores between every host', () => {
-    // Arrange: a browser whose storage throws on the first touch (a blocked-cookies profile).
+  it('keeps working memory-only when the browser refuses its storage, and shares its two stores between every host', async () => {
+    // Arrange: the stores are made on the page's FIRST host, and another test file of the same process may have made
+    // them already, so this test loads its own copy of the module (a query makes it a separate instance).
+    const { browserPushHost: freshPushHost } = (await import(
+      `../../../app/lib/push-host.ts?blocked-storage=${Date.now()}`
+    )) as typeof import('../../../app/lib/push-host.ts');
+    // A browser whose storage throws on the first touch (a blocked-cookies profile).
     const restore = stubbed({ localStorage: undefined });
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
@@ -35,8 +40,8 @@ describe('the page’s push host', () => {
     });
     try {
       // Act
-      const first = browserPushHost();
-      const second = browserPushHost();
+      const first = freshPushHost();
+      const second = freshPushHost();
 
       // Assert: the page's switch and its banner must agree, so there is one of each.
       expect(second.devices).toBe(first.devices);

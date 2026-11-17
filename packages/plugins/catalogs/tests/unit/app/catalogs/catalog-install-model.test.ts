@@ -12,6 +12,7 @@ import {
   heldHint,
   installRefusal,
   installRequest,
+  installIsAt,
   installsFor,
   installState,
   openCatalogFile,
@@ -300,5 +301,38 @@ describe('installed items', () => {
     should(installsFor(installs, 'skill', 'pdf-tools')).have.length(1);
     should(installsFor(installs, 'mcp', 'pdf-tools')).have.length(1);
     should(installsFor(installs, 'mcp', 'nope')).have.length(0);
+  });
+
+  describe('which copy an install wrote', () => {
+    const project = (projectRoot: string, harness: 'claude' | 'codex' = 'claude') => ({
+      ...installRecord(),
+      target: { scope: 'project' as const, projectRoot, harness },
+    });
+    const at = (path: string, scope: string, runtimes: readonly string[] = []) => ({ path, scope, runtimes });
+
+    it('a runtime install is the ferretry copy of the runtimes that read it, and no other', () => {
+      const runtime = installRecord();
+      should(installIsAt(runtime, at('/fleet/assets/skills/pdf-tools/SKILL.md', 'ferretry', ['box']))).be.true();
+      should(installIsAt(runtime, at('/fleet/assets/skills/pdf-tools/SKILL.md', 'ferretry', ['other']))).be.false();
+      should(installIsAt(runtime, at('/fleet/assets/skills/pdf-tools/SKILL.md', 'ferretry'))).be.false();
+      should(installIsAt(runtime, at('/home/k/.claude/skills/pdf-tools/SKILL.md', 'user', ['box']))).be.false();
+      should(installIsAt(runtime, at('/work/app/.claude/skills/pdf-tools/SKILL.md', 'project', ['box']))).be.false();
+    });
+
+    it('a project install is the one project row in its harness folder under its root', () => {
+      const claude = project('/work/app');
+      should(installIsAt(claude, at('/work/app/.claude/skills/pdf-tools/SKILL.md', 'project'))).be.true();
+      should(installIsAt(claude, at('/work/app/.agents/skills/pdf-tools/SKILL.md', 'project'))).be.false();
+      should(installIsAt(claude, at('/work/other/.claude/skills/pdf-tools/SKILL.md', 'project'))).be.false();
+      should(installIsAt(claude, at('/work/app/.claude/skills/pdf-tools/SKILL.md', 'user'))).be.false();
+      const codex = project('/work/app', 'codex');
+      should(installIsAt(codex, at('/work/app/.agents/skills/pdf-tools/SKILL.md', 'project'))).be.true();
+      should(installIsAt(codex, at('/work/app/.claude/skills/pdf-tools/SKILL.md', 'project'))).be.false();
+    });
+
+    it('spells a root with a trailing slash or /./ the same as the row path', () => {
+      const spelled = project('/work//app/./');
+      should(installIsAt(spelled, at('/work/app/.claude/skills/pdf-tools/SKILL.md', 'project'))).be.true();
+    });
   });
 });

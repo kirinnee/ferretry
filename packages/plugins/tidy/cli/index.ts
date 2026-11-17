@@ -2,6 +2,7 @@ import { implementCli, type VerbInvocation } from '@ferretry/kernel/manifest';
 import { type ScratchPlanView, type ScratchSweepView, TIDY_CODES, type TidyPlan } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { renderApplied, renderDryRun, renderScratchPlan, renderScratchSweep, type TidyOutcome } from './lib/render.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 const OK = 0;
 const FAILED = 1;
@@ -97,8 +98,8 @@ export default implementCli(manifest, {
         for (const each of plan.drop) {
           const outcome = { reference: `&${each.id}`, title: each.title };
           try {
-            await client.call('POST /v1/board/cards/:cardId', {
-              params: { cardId: each.id },
+            await client.call('POST /v1/board/tasks/:taskId', {
+              params: { taskId: each.id },
               body: { action: 'drop', reason: why },
             });
             dropped.push(outcome);
@@ -108,7 +109,7 @@ export default implementCli(manifest, {
         }
         const closed: TidyOutcome[] = [];
         for (const each of plan.close) {
-          const outcome = { reference: `!${each.id}`, title: each.subject };
+          const outcome = { reference: `${ASK_REFERENCE_SIGIL}${each.id}`, title: each.subject };
           try {
             await client.call('POST /v1/ferrets/:ferretId/agenda', {
               params: { ferretId: plan.ferret },

@@ -70,7 +70,8 @@ export default definePlugin({
       route('POST /v1/pack/routing/clean-up', {
         minimum: 'operator',
         caller: 'person',
-        capability: packUse,
+        // c58-sec3 r1: a clean-up starts a ferret, so it asks what `POST /v1/ferrets` asks.
+        capability: cap('fleet', 'configure'),
         noStore: true,
         audit: { record: AUDIT_KINDS['session.opened'] },
         guard: { none: 'answers a run id and a sentence' },
@@ -147,7 +148,7 @@ export default definePlugin({
       }),
       verb('pack [id]', {
         summary:
-          'a table of every live ferret in a pack: model, state, card and its last line (defaults to the calling ferret)',
+          'a table of every live ferret in a pack: model, state, task and its last line (defaults to the calling ferret)',
         args: [{ name: 'id', help: 'a ferret in the pack; defaults to the calling ferret', optional: true }],
         options: [{ flag: '--json', help: 'print the answer as JSON' }],
       }),
@@ -227,5 +228,6 @@ export default definePlugin({
   // to start while no folder for its ferret is handed to Pack mode, and the probe and the clean-up ferret run through
   // Runtimes and Ferrets.
   // Jev's ranking went with `fy new` (it ranked only `new --auto`), so nothing here calls out or spends.
-  permissions: { roots: [], network: [], spawn: [], secrets: [] },
+  // `checkDirectory`: the temporary-folder check resolves each temporary root through its links, read-only.
+  permissions: { roots: [], network: [], spawn: [], secrets: [], checkDirectory: true },
 });

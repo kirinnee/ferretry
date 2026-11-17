@@ -6,6 +6,7 @@
  * host.
  */
 import type { CompactAt } from '../../protocol/compact-at.ts';
+import type { RuntimeSwitchAccount } from '../../../../contract/kinds/runtime-switch.ts';
 import type { HarnessKind } from './fleet.ts';
 
 export type { HarnessKind } from './fleet.ts';
@@ -83,27 +84,20 @@ export interface CoreAccount extends FleetManifestAccount {
 }
 
 /**
- * INJECTED: supplied by an adapter over the published fleet manifest.
- *
- * Answers an empty fleet for a manifest that is not there, and THROWS for one that is there and unreadable.
- * Every caller therefore fails closed by default.
- */
-export interface AccountInventoryPort {
-  accounts(): Promise<readonly CoreAccount[]>;
-}
-
-/**
  * Look an account up by the executable name a usage row or a running session carries. Ambiguity is
  * refused rather than resolved: two accounts sharing an executable name is a manifest defect, and
  * silently picking the first was how the source attached one account's quota to another's session.
  */
-export function findAccountByAgent(accounts: readonly CoreAccount[], agent: string): CoreAccount | undefined {
+export function findAccountByAgent<Account extends { readonly agent: string }>(
+  accounts: readonly Account[],
+  agent: string,
+): Account | undefined {
   const matches = accounts.filter(account => account.agent === agent);
   return matches.length === 1 ? matches[0] : undefined;
 }
 
 /** The models an account may actually be asked for right now. */
-export function servableModels(account: CoreAccount): readonly CoreAccountModel[] {
+export function servableModels(account: RuntimeSwitchAccount): RuntimeSwitchAccount['models'] {
   return account.available ? account.models.filter(model => model.available) : [];
 }
 

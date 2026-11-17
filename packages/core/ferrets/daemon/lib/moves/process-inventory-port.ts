@@ -1,3 +1,4 @@
+import type { RunnerPaneIdentity } from '../../../contract/index.ts';
 import type { ProcessObservation } from './inflight-report.ts';
 import type { ProcRow } from './process-table.ts';
 
@@ -20,6 +21,8 @@ export interface ProcessProbePort {
    * and the full table must be read instead.
    */
   descendants?(rootPid: number): Promise<readonly ProcRow[] | undefined>;
+  /** Where this process's stdout points (`readlink /proc/<pid>/fd/1`), or undefined when it is not readable. */
+  stdoutPath?(pid: number): Promise<string | undefined>;
   /** The process working directory, or undefined when it is not readable. */
   workingDirectory(pid: number): Promise<string | undefined>;
   /**
@@ -29,6 +32,19 @@ export interface ProcessProbePort {
   listening?(pids: readonly number[]): Promise<ReadonlySet<number> | undefined>;
 }
 
+/**
+ * The pane a move looks at, reached through the ferret's own runner (c58-37): addressed by the ferret, never by a tmux
+ * session name, so what is read is the pane the registry's handle names RIGHT NOW. Both answers are three-valued on
+ * purpose: "proved absent" is an observation (an empty tree, no footer), "cannot tell" is a blind spot the gate refuses on.
+ */
+export interface MovePane {
+  /** The pane's root process and start; `'gone'` only when PROVED absent; `undefined` when the runner cannot tell. */
+  identify(): Promise<RunnerPaneIdentity | 'gone' | undefined>;
+  /** What the pane last showed; `undefined` when it is PROVED absent. Rejects when the runner cannot read it. */
+  screen(): Promise<string | undefined>;
+}
+
 export interface ProcessInventoryPort {
-  collect(tmuxSession: string): Promise<ProcessObservation>;
+  /** `ferret` is whose pane it is: the job keeper is asked which attachments that ferret holds. */
+  collect(pane: MovePane, ferret?: string): Promise<ProcessObservation>;
 }

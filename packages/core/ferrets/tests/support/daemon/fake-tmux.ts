@@ -11,7 +11,6 @@
  * failure set in `failures` under a method or command name makes that call throw (or, for a raw command, answer
  * non-zero) with the given message.
  */
-import type { ProcessIncarnation } from '../../../daemon/lib/protocol/process-incarnation.ts';
 import {
   harnessExitReason,
   PANE_PROOF_FORMAT,
@@ -206,15 +205,6 @@ export class FakeTmux implements TmuxController, TmuxCommandPort {
         return ok(`${pane.dead ? 1 : 0}|${pane.exitStatus ?? ''}|${pane.signal ?? ''}\n`);
     }
     return ok();
-  }
-}
-
-/** A start time for every pid the fake hands out; `gone` pids have none, as a reaped process has not. */
-export class FakeIncarnation implements ProcessIncarnation {
-  readonly gone = new Set<number>();
-
-  async startOf(pid: number): Promise<number | undefined> {
-    return this.gone.has(pid) ? undefined : pid * 10;
   }
 }
 

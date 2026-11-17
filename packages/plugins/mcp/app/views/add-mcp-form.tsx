@@ -45,6 +45,7 @@ import {
   restartFerrets,
   startMcpSignIn,
 } from '../lib/client.ts';
+import type { RestartWhen } from '@ferretry/core-ferrets/contract';
 import { changeRefusalSentence } from '../lib/refusal.ts';
 import { mcpRedirectUri } from '../lib/sign-in-model.ts';
 import { FormFailure, FormField, FormFoot } from './form-parts.tsx';
@@ -444,6 +445,7 @@ function AddedStep({
   readonly channel?: McpSignInChannelFactory;
   readonly host: AddMcpHost;
 }) {
+  const id = useId();
   const [busy, setBusy] = useState<'reload' | 'sign-in' | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [flow, setFlow] = useState<McpOAuthFlow | null>(null);
@@ -451,6 +453,10 @@ function AddedStep({
   const [queued, setQueued] = useState<string | null>(null);
   const [others, setOthers] = useState<readonly OtherFerret[]>([]);
   const [reloadAll, setReloadAll] = useState(false);
+  // v4 restarted at once, so that stays the default; "when idle" is the choice that interrupts nothing.
+  const [when, setWhen] = useState<RestartWhen>('now');
+  // "Restart now" interrupts a turn, so it is asked once before anything is sent.
+  const [confirming, setConfirming] = useState(false);
   const redirectUri = useMemo(() => mcpRedirectUri(origin), [origin]);
 
   // A login add reaches every ferret on that runtime: read who else is alive on it, once, when more than this one run there.
@@ -470,9 +476,10 @@ function AddedStep({
   const reload = async (): Promise<void> => {
     setBusy('reload');
     setFailure(null);
+    setConfirming(false);
     try {
       const otherIds = reloadAll ? others.map(other => other.id) : [];
-      const result = await restartFerrets(client, [ferretId, ...otherIds]);
+      const result = await restartFerrets(client, [ferretId, ...otherIds], when);
       const report = reloadReport(result, ferretId, agentName, otherIds);
       // A retry is for this ferret (and any other that was not reloaded or queued): the ones already dealt with stay out.
       const settled = dealtWith(result, otherIds);
@@ -547,33 +554,94 @@ function AddedStep({
         <label className="fy-action-form__check">
           <input checked={reloadAll} onChange={event => setReloadAll(event.target.checked)} type="checkbox" />
           <span>
-            Also reload the other {others.length} ferret{others.length === 1 ? '' : 's'} on this login now
+            Also reload the other {others.length} ferret{others.length === 1 ? '' : 's'} on this login
           </span>
         </label>
+      ) : null}
+      {queued === null && !confirming ? (
+        <fieldset className="fy-action-form__fieldset" data-add-mcp-when="">
+          <legend className="fy-action-form__label">Reload</legend>
+          <div className="fy-choice-cards">
+            <ChoiceCard
+              checked={when === 'now'}
+              name={`${id}-when`}
+              onChange={() => setWhen('now')}
+              title="Restart now"
+              value="now"
+            >
+              At once, even in the middle of a turn: that turn is interrupted and the conversation resumes.
+            </ChoiceCard>
+            <ChoiceCard
+              checked={when === 'idle'}
+              name={`${id}-when`}
+              onChange={() => setWhen('idle')}
+              title="When each ferret is idle"
+              value="idle"
+            >
+              Nothing is interrupted: a ferret that is working reloads at its next idle moment.
+            </ChoiceCard>
+          </div>
+        </fieldset>
       ) : null}
       {queued === null ? null : (
         <p className="fy-action-form__note" data-add-mcp-queued="" role="status">
           {queued}
         </p>
       )}
+      {confirming ? (
+        <p className="fy-action-form__note" data-add-mcp-confirm="" role="alert">
+          Restart{' '}
+          {reloadAll && others.length > 0
+            ? `${agentName} and ${others.length} other ferret${others.length === 1 ? '' : 's'}`
+            : agentName}{' '}
+          now? A ferret that is working has its current turn interrupted; its conversation resumes.
+        </p>
+      ) : null}
       <FormFailure message={failure} />
       <div className="fy-action-form__foot">
-        <Button disabled={busy !== null} onClick={host.close} size="sm" type="button" variant="ghost">
-          {queued === null ? 'Later' : 'Close'}
-        </Button>
-        {queued === null ? (
-          <Button
-            data-add-mcp-reload=""
-            disabled={busy !== null}
-            onClick={() => void reload()}
-            size="sm"
-            type="button"
-            variant="primary"
-          >
-            <RotateCw aria-hidden="true" size={14} />
-            {busy === 'reload' ? 'Reloading…' : 'Reload this ferret'}
-          </Button>
-        ) : null}
+        {confirming ? (
+          <>
+            <Button
+              disabled={busy !== null}
+              onClick={() => setConfirming(false)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Back
+            </Button>
+            <Button
+              data-add-mcp-reload-confirm=""
+              disabled={busy !== null}
+              onClick={() => void reload()}
+              size="sm"
+              type="button"
+              variant="primary"
+            >
+              <RotateCw aria-hidden="true" size={14} />
+              Restart now
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button disabled={busy !== null} onClick={host.close} size="sm" type="button" variant="ghost">
+              {queued === null ? 'Later' : 'Close'}
+            </Button>
+            {queued === null ? (
+              <Button
+                data-add-mcp-reload=""
+                disabled={busy !== null}
+                onClick={() => (when === 'now' ? setConfirming(true) : void reload())}
+                size="sm"
+                type="button"
+                variant="primary"
+              >
+                <RotateCw aria-hidden="true" size={14} />
+                {busy === 'reload' ? 'Reloading…' : 'Reload this ferret'}
+              </Button>
+            ) : null}
+          </>
+        )}
       </div>
       {flow === null ? null : (
         <McpSignInSheet

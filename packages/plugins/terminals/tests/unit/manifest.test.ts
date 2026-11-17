@@ -7,7 +7,7 @@ const tools = manifest.actions.agentTools;
 
 describe('terminals manifest', () => {
   test("declares today's terminal, process, console, snapshot, attach and surface routes and the viewer stream", () => {
-    expect(routes).toHaveLength(17);
+    expect(routes).toHaveLength(26);
     expect(routes.map(route => route.key)).toContain('GET /v1/ferrets/:ferretId/snapshot');
     expect(manifest.actions.sockets.map(socket => socket.key)).toEqual([
       'GET /v1/ferrets/:ferretId/terminals/:terminalId/stream',
@@ -40,12 +40,10 @@ describe('terminals manifest', () => {
       else expect(entry.guard).toBe('secrets');
     }
   });
-  test('takes the terminal input target, the tmux runner and the %terminal reference menu', () => {
-    expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual([
-      'input.targets:terminal',
-      'runners:tmux',
-      'reference.catalog:%terminal',
-    ]);
+  test('takes the terminal input target, the tmux runner, the %terminal reference menu and contributes the job keeper', () => {
+    expect(
+      manifest.hooks.takes.map(take => ('key' in take ? `${take.hook.name}:${take.key}` : take.hook.name)),
+    ).toEqual(['input.targets:terminal', 'runners:tmux', 'reference.catalog:%terminal', 'jobs.keeper']);
   });
   test('declares the tmux-release doctor row and selftest, and takes no contributed doctor hook', () => {
     expect(manifest.doctor).toContain('tmux-release');

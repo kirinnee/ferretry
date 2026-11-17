@@ -136,6 +136,13 @@ group's 100% is exactly what one serial run would conclude. If a file is only co
 groups, the job names it with each group's hit/found count; give it a test in the group that owns
 it. Locally, `task test` still runs each tier serially and judges it the same way.
 
+**A pull request into `rebuild/5.0-after` that only touches plugins runs a SCOPED unit tier** (the changed plugins, their dependents and
+every platform package; `scripts/ci/scope.ts`, [CI/CD](../ci-cd/index.md)). The ledger is then judged for the packages that ran and says
+"SCOPED ... NOT the complete unit production ledger"; the complete ledger is still the `full-ci` run's and `main`'s. A test you write
+for a plugin is picked up with no list to edit: the plugin's folder is the whole contract, so a test that exercises another plugin's
+code must live in a plugin that depends on it (a `package.json` dependency, a manifest `needs`/`uses`, or an `@ferretry/<package>` import
+all count), or its owner's tests will not run when the other plugin changes.
+
 ---
 
 ## Unit Tests (White-Box)
@@ -518,6 +525,35 @@ The binary driver cannot report coverage, and that is correct: SIT is black-box.
 behaviour — exit codes, stdout/stderr content, and journeys completing — not on a percentage.
 
 ---
+
+## Performance Tests (the perf tier)
+
+**Owner, 2026-11-16: "split those out as performance test. dont mix performance and correctness test together."**
+A test whose claim is a SPEED or SIZE budget - no synchronous slice of 100 ms while a tick writes 3,600 tasks,
+linear time on adversarial input, a reload within a CPU bound, a memory ceiling - lives in `<package>/tests/perf/`,
+never in `tests/unit/`.
+
+- **Its own runner; report-only on a PR, blocking on `main`.** `scripts/ci/test.sh perf` runs the tier (`bunfig.perf.toml`) in
+  `FY_CI_PERF_PARALLEL` processes (default 1; CI: 2 on a 4x8, half its vCPUs), and the ONE `Performance Tests` CI
+  job runs it on a runner with nothing else, on exactly Quick's events, beside Quick. **A pull request only REPORTS it**
+  (the job shows what went over budget and exits 0; Full CI does not count it): the same tests took 618-2273 ms on
+  identical code across 52 perf jobs (suite wall 121-327 s), and no budget was raised for it. **`main` BLOCKS**, after one automatic re-run of just the
+  failing files, one process per file; `perf-failed: <files>` in the job summary names a file that failed twice
+  (`scripts/ci/perf-tier.sh`, [CI/CD](../ci-cd/index.md#performance-tests-report-only-on-prs-blocking-on-main)). A budget measured next to other test processes measures the neighbours: on the first run of the parallel
+  unit groups a slice budget read 128-164 ms against 100 because of where the test sat, not what the code did.
+  `task test:perf` runs it locally - on a quiet machine, or the numbers mean nothing.
+- **The correctness half stays in unit at a small size.** A file that proved both "the answer is right" and "it came
+  fast" splits: the answer is checked in unit on an input small enough to be instant, the budget moves to perf at the
+  size that makes it meaningful. The unit coverage ledger must stay green without the perf tier - perf has no ledger.
+- **The gate.** `scripts/validate/unit-budgets.sh` (hook `a-unit-budgets`, tested by `unit-budgets.test.ts`) refuses
+  a unit file that reads a real clock, CPU or memory counter (`performance.now`, `Bun.nanoseconds`, `process.hrtime`,
+  `process.cpuUsage` / `threadCpuUsage` / `resourceUsage` / `memoryUsage`), uses the `linear-time` helper, or feeds a
+  `Date.now()` difference or a named duration to an upper bound. A fake that REPLACES a clock marks its line
+  `// not-a-budget: <reason>`, printed for the reviewer. `config/perf-pending.txt` lists the files not moved yet; it
+  only shrinks (every listed path must also be on the base's list: CI's `FY_BUDGET_BASE` - the pull request's base, a push's `before`, or the default branch's tip, never the after-merge ledger's base - else `FY_CHECK_BASE`; the change that introduces the
+  list is the bootstrap, and an unreadable base fails), and a listed file with nothing left to move fails too. Empty list = no timing claim in the unit tier.
+- GAP: a helper OUTSIDE `tests/unit/` that measures time on a unit test's behalf is seen only through the
+  `linear-time` name; give any new timing helper a name the gate matches, or put it under `tests/perf/`.
 
 ## What Ferretry Does Not Test (Yet)
 

@@ -57,4 +57,34 @@ describe('whose turn it is, in the ferret toolbar', () => {
       }
     }
   });
+
+  it('says "Compacting" while the page’s live sample says a compaction runs, whatever the turn, and only for its own ferret', async () => {
+    const compacting = (ferret: string, turnState: 'working' | 'your-turn' | undefined) => (
+      <ChatTurnContext.Provider value={{ ferret, turnState, compacting: true }}>
+        <TurnPanel subject="ferret-hadi" />
+      </ChatTurnContext.Provider>
+    );
+    mounted = await mount(compacting('ferret-hadi', 'working'));
+    expect(turnOf(mounted.container)?.textContent).toBe('Compacting');
+    expect(turnOf(mounted.container)?.hasAttribute('data-ferret-compacting')).toBe(true);
+
+    await mounted.render(compacting('ferret-hadi', 'your-turn'));
+    expect(turnOf(mounted.container)?.textContent).toBe('Compacting');
+
+    // Not told for another ferret, and never drawn for a ferret whose turn the chat did not read.
+    await mounted.render(compacting('someone-else', 'working'));
+    expect(turnOf(mounted.container)).toBeNull();
+    await mounted.render(compacting('ferret-hadi', undefined));
+    expect(turnOf(mounted.container)).toBeNull();
+  });
+
+  it('is back to the turn word once the compaction is not running', async () => {
+    mounted = await mount(
+      <ChatTurnContext.Provider value={{ ferret: 'ferret-hadi', turnState: 'working', compacting: false }}>
+        <TurnPanel subject="ferret-hadi" />
+      </ChatTurnContext.Provider>,
+    );
+    expect(turnOf(mounted.container)?.textContent).toBe('Working');
+    expect(turnOf(mounted.container)?.hasAttribute('data-ferret-compacting')).toBe(false);
+  });
 });

@@ -12,6 +12,7 @@
  * - `terminal_ask_owner` and `terminal_request_input` are not acts: they raise through the control store and Vault.
  */
 import { createHash } from 'node:crypto';
+import { join } from 'node:path';
 import { ferretOf } from '@ferretry/core-gate/contract';
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import {
@@ -35,9 +36,12 @@ import {
   jsonResponse,
 } from '@ferretry/kernel/contract';
 import { type DaemonContext, implementDaemon, type ToolResult } from '@ferretry/kernel/manifest';
+import type { RedactionScope } from '@ferretry/kernel/contract';
+import type { JsonValue } from '@ferretry/std';
 import { err, instantFromEpochMs, milliseconds } from '@ferretry/std';
 import { z } from 'zod';
 import {
+  type JobView,
   SurfaceControlRequestSchema,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
@@ -51,8 +55,8 @@ import {
   type TerminalsConfig,
   TerminalWaitInputSchema,
 } from '../contract/index.ts';
-import manifest from '../manifest.ts';
-import { hostPlatform, hostUserId, stat } from './adapters/host/fs.ts';
+import manifest, { JobAttachments, JobFiles } from '../manifest.ts';
+import { hostPlatform, hostUserId, readText, signalProcess, stat } from './adapters/host/fs.ts';
 import { ExecutableCodePrograms } from './adapters/system/executable-code-programs.ts';
 import { KernelProgramProof } from './adapters/system/kernel-program-proof.ts';
 import {
@@ -74,6 +78,7 @@ import {
 import { ControlModeTmuxProcess, type ControlChild } from './adapters/tmux/control-tmux-process.ts';
 import { KernelTmuxProcess, TMUX_PROGRAM } from './adapters/tmux/kernel-tmux-process.ts';
 import { TmuxRunner, ferretTmuxSession } from './adapters/tmux/tmux-runner.ts';
+import { paneProcessHost } from './adapters/tmux/pane-process-host.ts';
 import { tmuxAvailabilityDoctor } from './adapters/tmux/tmux-availability-check.ts';
 import { RealHarnessLaunchGuard } from './adapters/tmux/harness-launch-guard.ts';
 import { boundedSpawn } from './adapters/tmux/bounded.ts';
@@ -111,6 +116,15 @@ import type { TerminalRuntimePort } from './lib/terminal/contracts.ts';
 import type { TmuxCommandPort } from './lib/tmux/contracts.ts';
 import { TerminalsReferenceMenu } from './lib/reference-menu.ts';
 import { snapshotRoute } from './lib/runtime/mounts/session-snapshot.ts';
+import { jobRouteHandlers, type JobSubsystem } from './lib/runtime/mounts/jobs.ts';
+import { JobService, JobServiceError } from './adapters/jobs/job-service.ts';
+import { executableIdentityOf, trustedExecutables } from './adapters/jobs/executable-identity.ts';
+import { harnessAncestor } from './adapters/jobs/harness-ancestry.ts';
+import type { JobKeeperSource } from '@ferretry/core-ferrets/contract';
+import { StateJobFiles } from './adapters/jobs/job-files.ts';
+import { JobRuntimeError, TmuxJobRuntime } from './adapters/jobs/tmux-job-runtime.ts';
+import { EMPTY_ATTACHMENTS } from './lib/jobs/attachments.ts';
+import type { AttachmentStore, JobFilesPort, JobRuntimePort } from './lib/jobs/contracts.ts';
 import { buildProcesses, type ProcessHostReads, type RunnerPane } from './processes.ts';
 import { processIncarnationFor } from './adapters/session/processes/process-incarnation.ts';
 
@@ -118,6 +132,12 @@ import { processIncarnationFor } from './adapters/session/processes/process-inca
 const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
 /** How often finished ferrets' terminals are swept (J-0088). */
 const CLOSE_FINISHED_EVERY_MS = 5 * 60_000;
+/** How often finished jobs past the retention window are deleted. */
+const JOB_RETENTION_EVERY_MS = 10 * 60_000;
+/** How often attachments whose harness died are asked to detach. */
+const JOB_ORPHAN_EVERY_MS = 15_000;
+/** How long after a job ended its attachment is left to report it before the backstop treats it as unattended. */
+const JOB_BACKSTOP_GRACE_MS = 10_000;
 /** The CLI's binary name, as `packages/cli/package.json` declares it (the two-name model). */
 const BINARY_NAME = 'fy';
 
@@ -141,6 +161,13 @@ export interface TerminalsOverrides {
   };
   /** The host reads behind the pane proof and the Warden's looks (the daemon: `/proc` or `ps`, per platform). */
   readonly processHost?: ProcessHostReads;
+  /** The job keeper's files and tmux sessions (the daemon: the state tree and `TmuxJobRuntime` over `tmux`). */
+  readonly jobs?: {
+    readonly files?: JobFilesPort;
+    readonly runtime?: JobRuntimePort;
+    /** The identities of the `fy` executable the daemon trusts as an attachment (the daemon: beside its own executable and on its PATH). */
+    readonly trustedExecutables?: () => Promise<readonly string[]>;
+  };
 }
 
 /**
@@ -576,7 +603,12 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
   // reads the environment. Armed, no launch may reach the owner's real Claude Code or Codex, found on the daemon's PATH
   // as the kernel states it at each launch; a refusal is logged here and answered `real_harness`.
   const launchGuard = kernel.hostFacts.launchGuard().active
-    ? new RealHarnessLaunchGuard(() => kernel.hostFacts.launchGuard().searchPath)
+    ? new RealHarnessLaunchGuard(
+        () => kernel.hostFacts.launchGuard().searchPath,
+        undefined,
+        // A launch whose handle sets PATH is searched on that PATH, unspent (`permissions.which`).
+        async (name, env) => await kernel.paths.whichFor(name, env),
+      )
     : undefined;
   const runner = new TmuxRunner({
     tmux,
@@ -587,6 +619,8 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     instantOf: seconds => instantFromEpochMs(seconds * 1_000),
     now: () => kernel.clock.now(),
     wrap: async (ferret, command) => await processes.limits.command(ferret, command),
+    // `identify` and `signalDescendant` (c58-37): the pane's root start, and the one proved-descendant signal.
+    processes: paneProcessHost(kernel.spawn),
     remember: async (ferret, running) => await remember(ferret, running.handle, running.pid),
     delivery: {
       act: kernel.act.bind(kernel),
@@ -602,6 +636,178 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
     },
   });
+
+  // ─── background jobs (docs/jobs.md) ─────────────────────────────────────────────────────────────────────────────
+  const attachmentStore: AttachmentStore = {
+    read: async () => {
+      const read = await kernel.state.read(JobAttachments);
+      return read.ok ? (read.value ?? EMPTY_ATTACHMENTS) : EMPTY_ATTACHMENTS;
+    },
+    update: async change => {
+      const updated = await kernel.state.update(JobAttachments, current => change(current ?? EMPTY_ATTACHMENTS));
+      return updated.ok ? updated.value : EMPTY_ATTACHMENTS;
+    },
+  };
+  const jobService = new JobService(
+    overrides.jobs?.files ?? new StateJobFiles(kernel.state, JobFiles),
+    overrides.jobs?.runtime ??
+      new TmuxJobRuntime(tmux, loginShell, processes.limits, () => liveTerminalEnvironment(kernel)),
+    attachmentStore,
+    {
+      // Which process a pid is, by its start: undefined when none runs, 'unknown' when the host cannot say.
+      startOf: async pid => {
+        try {
+          const start = await incarnation.startOf(pid);
+          return start === undefined ? undefined : String(start);
+        } catch {
+          return 'unknown';
+        }
+      },
+      harnessOf: async pid => (hostPlatform === 'linux' ? await harnessAncestor(pid) : undefined),
+      // The command line: /proc where there is one, else `ps` (macOS). `undefined` = no such process; 'unknown' = cannot say.
+      argvOf: async pid => {
+        try {
+          if (hostPlatform === 'linux') {
+            const words = (await readText(`/proc/${pid}/cmdline`)).split('\0').filter(word => word !== '');
+            return words.length === 0 ? 'unknown' : words.join(' ');
+          }
+          const ran = await kernel.spawn.run('ps', ['-o', 'args=', '-p', String(pid)]);
+          const text = ran.stdout.trim();
+          return ran.exitCode === 0 && text !== '' ? text : ran.exitCode === 1 ? undefined : 'unknown';
+        } catch (error) {
+          return (error as { code?: string }).code === 'ENOENT' ? undefined : 'unknown';
+        }
+      },
+      // WHICH FILE a pid runs, and which files are the `fy` this daemon knows (docs/jobs.md): the argv above is only text.
+      executableOf: async pid =>
+        await executableIdentityOf(pid, {
+          platform: hostPlatform,
+          lsof: async args => {
+            const ran = await kernel.spawn.run('lsof', args);
+            return { exitCode: ran.exitCode, stdout: ran.stdout };
+          },
+        }),
+      trustedExecutables:
+        overrides.jobs?.trustedExecutables ??
+        (async () =>
+          await trustedExecutables({
+            execPath: process.execPath,
+            which: async name => await kernel.paths.which(name),
+            sourceEntry: join(import.meta.dir, '../../../cli/bin/fy.ts'),
+            binaryName: BINARY_NAME,
+          })),
+      kill: async pid => {
+        try {
+          signalProcess(pid, 'SIGKILL');
+        } catch {
+          // already gone
+        }
+      },
+    },
+    {
+      resolve: async reference => {
+        const ferret = await ferrets.get(reference as FerretId).catch(() => undefined);
+        return ferret === undefined ? undefined : { id: ferret.id, cwd: ferret.folder };
+      },
+    },
+    { now: nowMs },
+    { next: hex12 },
+    {
+      isDirectory: async path => {
+        try {
+          return (await stat(path)).isDirectory();
+        } catch {
+          return false;
+        }
+      },
+      sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
+      onEvent: event => log.info('job', event),
+      binaryName: BINARY_NAME,
+    },
+  );
+  const jobError = (error: unknown): never => {
+    if (error instanceof JobServiceError)
+      throw new ApiError(
+        { not_found: 404, capacity: 409, bad_request: 400, conflict: 409 }[error.code],
+        error.message,
+        error.code,
+      );
+    if (error instanceof JobRuntimeError) throw new ApiError(502, error.message, 'upstream_failed');
+    throw error;
+  };
+  /**
+   * A command line and a job's log are text a secret can ride in: every answer that carries either is built inside one
+   * `Redaction.read`, inside an act (§7.3). Lines, never part of one, are what an output chunk is cut on.
+   */
+  const shownJobs = async <T>(
+    ferret: string,
+    build: () => Promise<T>,
+    mask: (scope: RedactionScope, value: T) => T,
+  ): Promise<T> => {
+    const answer = await kernel.act(targetRef('terminal', `job:${ferret}`), 'read', async () => {
+      const value = await build();
+      const masked = await kernel.redaction.read(scope => mask(scope, value));
+      return { kind: 'content' as const, data: masked as unknown as JsonValue };
+    });
+    if (!answer.ok) throw new ApiError(423, 'jobs are held right now; try again in a moment', 'held');
+    return answer.value.data as unknown as T;
+  };
+  const maskJob = (scope: RedactionScope, job: JobView): JobView => ({ ...job, command: scope.text(job.command) });
+  const jobSubsystem: JobSubsystem = {
+    list: async ferret =>
+      await shownJobs(
+        ferret,
+        async () => await jobService.list(ferret),
+        (scope, view) => ({
+          ...view,
+          jobs: view.jobs.map(job => maskJob(scope, job)),
+        }),
+      ).catch(jobError),
+    start: async (ferret, input, startedBy) =>
+      await shownJobs(ferret, async () => await jobService.start(ferret, input, startedBy), maskJob).catch(jobError),
+    get: async (ferret, key) =>
+      await shownJobs(ferret, async () => await jobService.get(ferret, key), maskJob).catch(jobError),
+    output: async (ferret, key, request) =>
+      await shownJobs(
+        ferret,
+        async () => await jobService.output(ferret, key, request),
+        (scope, view) => ({
+          ...view,
+          text: scope.text(view.text),
+          job: maskJob(scope, view.job),
+        }),
+      ).catch(jobError),
+    stop: async (ferret, key) =>
+      await shownJobs(ferret, async () => await jobService.stop(ferret, key), maskJob).catch(jobError),
+    registerAttachment: async (ferret, input) => await jobService.registerAttachment(ferret, input).catch(jobError),
+    unregisterAttachment: async (ferret, id) => await jobService.unregisterAttachment(ferret, id).catch(jobError),
+    listAttachments: async ferret => await jobService.listAttachments(ferret).catch(jobError),
+    detachAll: async (ferret, key) => await jobService.detachAll(ferret, key).catch(jobError),
+  };
+  kernel.jobs.add({
+    id: 'jobs-retention',
+    schedule: { every: milliseconds(JOB_RETENTION_EVERY_MS) },
+    run: async () => {
+      await jobService.sweep();
+    },
+  });
+
+  kernel.jobs.add({
+    id: 'jobs-orphan-attachments',
+    schedule: { every: milliseconds(JOB_ORPHAN_EVERY_MS) },
+    run: async () => {
+      await jobService.sweepOrphans();
+    },
+  });
+  /** What the moves and the completion backstop ask of the keeper (the `jobs.keeper` hook, docs/jobs.md). */
+  const jobKeeper: JobKeeperSource = {
+    attachments: async ferret => await jobService.keptAttachments(ferret).catch(() => []),
+    detach: async ferret => await jobService.detachAll(ferret),
+    jobs: async ferret => await jobService.keptJobs(ferret).catch(() => []),
+    markReported: async (ferret, ids) => await jobService.markJobsReported(ferret, ids),
+    endedUnattached: async () => await jobService.endedUnattached(JOB_BACKSTOP_GRACE_MS).catch(() => []),
+    backstopCutOver: async () => await jobService.backstopCutOver().catch(() => undefined),
+  };
 
   // ─── jobs ───────────────────────────────────────────────────────────────────────────────────────────────────────
   kernel.jobs.add({
@@ -633,6 +839,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
   return {
     routes: {
       ...routes,
+      ...jobRouteHandlers(jobSubsystem),
       ...processes.routes,
       // The ferret's pane as text, redacted inside one read of the pane's target (a hold refuses it).
       'GET /v1/ferrets/:ferretId/snapshot': async (call: CallContext) =>
@@ -726,6 +933,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       'runners:tmux': runner,
       // The composer's `%terminal` menu (reference.catalog): the ferret's terminals. Asked only while Conversation is on.
       'reference.catalog:%terminal': new TerminalsReferenceMenu(provided),
+      'jobs.keeper': () => [{ id: 'terminals', item: jobKeeper }],
     },
     subscribers: {
       'vault.holds-changed': (payload: {

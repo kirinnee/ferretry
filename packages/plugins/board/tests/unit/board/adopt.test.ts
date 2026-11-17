@@ -216,7 +216,7 @@ describe('adopting an orphaned card', () => {
 
       // Assert
       should(error.code).equal('forbidden');
-      should(error.message).containEql("You are a helper, so you can't adopt cards");
+      should(error.message).containEql("You are a helper, so you can't adopt tasks");
       unchanged(ports);
     });
 
@@ -339,7 +339,7 @@ describe('adopting an orphaned card', () => {
       const byDaemon = await refusal(service.act('F1', adopt, { kind: 'daemon' }));
 
       // Assert
-      should(byOwner.message).containEql('fy card assign &F1 <ferret>');
+      should(byOwner.message).containEql('fy task assign &F1 <ferret>');
       should(byDaemon.code).equal('forbidden');
       unchanged(ports);
     });

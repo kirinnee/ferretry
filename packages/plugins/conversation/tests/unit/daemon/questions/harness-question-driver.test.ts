@@ -1,7 +1,12 @@
 import { describe, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { PendingQuestion, StructuredQuestionAnswer } from '../../../../daemon/seams/protocol.ts';
+import type { PendingQuestion } from '@ferretry/core-mailbox/contract';
+import type { Instant } from '@ferretry/std';
+import type { Question } from '../../../../contract/index.ts';
+import { paneQuestionUpgrade, projectStructuredQuestion } from '../../../../daemon/questions/lib/projection.ts';
+import type { TranscriptEvent } from '../../../../daemon/seams/transcript-types.ts';
+import type { StructuredQuestionAnswer } from '../../../../daemon/seams/protocol.ts';
 import should from 'should';
 import {
   StructuredQuestionDriveError,
@@ -683,6 +688,60 @@ describe('a tabbed four-question form (Claude Code 2.1.281)', () => {
       'Enter',
     ]);
     should(pane.pasted).deepEqual(['Only if it is on Zoom']);
+  });
+
+  it('answers every tab of a form the pane showed one tab of, once the transcript call upgrades the stored question', async () => {
+    // The pane showed the first tab only: that is all the stored pane question held.
+    const [first] = pending.questions;
+    if (first === undefined) throw new Error('the fixture holds no question');
+    const stored: Question = {
+      format: 1,
+      toolUseId: 'pane:abc:1',
+      text: first.question,
+      ...(first.header === undefined ? {} : { header: first.header }),
+      options: (first.options ?? []).map(({ label, description }) => ({
+        label,
+        ...(description === undefined ? {} : { description }),
+      })),
+      multiple: false,
+      askedAt: '2026-11-16T10:00:00.000Z' as Instant,
+    };
+    // Then the transcript's AskUserQuestion call lands, carrying all four.
+    const call = {
+      kind: 'tool-call',
+      timestamp: '2026-11-16T10:00:05.000Z',
+      call: {
+        id: pending.toolUseId,
+        name: 'AskUserQuestion',
+        input: {},
+        questions: pending.questions.map(item => ({
+          question: item.question,
+          ...(item.header === undefined ? {} : { header: item.header }),
+          options: item.options ?? [],
+          multiple: item.multiSelect === true,
+        })),
+      },
+    } as unknown as TranscriptEvent;
+    const upgraded = paneQuestionUpgrade(stored, projectStructuredQuestion([call]));
+    should(upgraded?.questions).have.length(4);
+    should(upgraded?.toolUseId).equal('pane:abc:1');
+
+    const pane = new ScriptedPane(run('fresh'));
+    const { drive } = journalled(pane);
+    await drive.drive(ID, upgraded as PendingQuestion, [
+      ...pick('Lunch only', 'Decline'),
+      { kind: 'other', text: 'Only if it is on Zoom' },
+      ...pick('Maybe'),
+    ]);
+
+    // The same keys that submit the four-tab form when it was bound whole: every tab answered, then Submit.
+    should(pane.keys).deepEqual([
+      ...['Down', 'Down', 'Enter'],
+      ...['Down', 'Enter'],
+      ...['Down', 'Down', 'Enter'],
+      ...['Down', 'Down', 'Enter'],
+      'Enter',
+    ]);
   });
 
   it('pauses, sending nothing, when a tab holds typed text this drive has no evidence for', async () => {

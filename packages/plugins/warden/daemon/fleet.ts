@@ -15,7 +15,7 @@ import {
   withLivenessLedger,
 } from './lib/index.ts';
 
-const HARNESS_OF: Readonly<Record<string, 'claude' | 'codex'>> = { 'claude-code': 'claude', codex: 'codex' };
+export const HARNESS_OF: Readonly<Record<string, 'claude' | 'codex'>> = { 'claude-code': 'claude', codex: 'codex' };
 
 interface TurnMemory {
   /** The conversation's own turn id last seen, and the ordinal the sweep counts it as. */
@@ -333,21 +333,48 @@ export async function transcriptDigest(conversation: ConversationApi, ferret: Fe
  */
 export function withRateLimited(
   fleet: readonly WardenFleetSession[],
-  limited: ReadonlySet<string>,
+  limited: LimitedFerrets,
 ): readonly WardenFleetSession[] {
   if (limited.size === 0) return fleet;
-  return fleet.map(session =>
-    limited.has(session.config.id) && !isTerminalStatus(session.state.status)
-      ? { ...session, state: { ...session.state, status: 'rate_limited' as const } }
-      : session,
-  );
+  return fleet.map(session => {
+    if (!limited.has(session.config.id) || isTerminalStatus(session.state.status)) return session;
+    // The reset time the harness showed rides along: it is what the auto-move waits for and resumes at.
+    const resetAt = limited.get(session.config.id);
+    return {
+      ...session,
+      state: {
+        ...session.state,
+        status: 'rate_limited' as const,
+        ...(resetAt === undefined ? {} : { quota: { resetAt } }),
+      },
+    };
+  });
 }
 
-/** The ferrets Ferrets says are parked on a limit now; none when it cannot say (the move then sees no limit). */
-export async function limitedFerrets(ferrets: Pick<FerretsApi, 'paneLimits'>): Promise<ReadonlySet<string>> {
+/** The ferrets parked on a usage limit, each with when it resets (epoch ms; absent when the harness gave no time). */
+export type LimitedFerrets = ReadonlyMap<string, number | undefined>;
+
+/**
+ * The ferrets Ferrets says are parked on a limit now, with their reset times; none when it cannot say (the move then sees
+ * no limit). Ferrets stops publishing a limit the moment its reset passes, which is exactly when a ferret that waited
+ * for it is due to be resumed: `waiting` names the ferrets the Warden remembers waiting, and each one whose limit is no
+ * longer published is read again through its prompt, which still carries the limit (and its past reset time) while the
+ * session document says it is parked on one. A ferret whose prompt cannot be read is simply not limited this sweep.
+ */
+export async function limitedFerrets(
+  ferrets: Pick<FerretsApi, 'paneLimits' | 'prompt'>,
+  waiting: readonly string[] = [],
+): Promise<LimitedFerrets> {
+  const limited = new Map<string, number | undefined>();
   try {
-    return new Set((await ferrets.paneLimits?.())?.map(limit => limit.ferret) ?? []);
+    for (const limit of (await ferrets.paneLimits?.()) ?? []) limited.set(limit.ferret, limit.retryAt);
   } catch {
-    return new Set();
+    return new Map();
   }
+  for (const id of waiting) {
+    if (limited.has(id)) continue;
+    const prompt = await ferrets.prompt?.(id as FerretId).catch(() => undefined);
+    if (prompt?.limit !== undefined) limited.set(id, prompt.limit.retryAt);
+  }
+  return limited;
 }

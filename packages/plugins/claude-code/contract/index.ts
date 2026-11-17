@@ -22,10 +22,13 @@ import {
   type HarnessCliView,
   type HarnessConfig,
   HooksItemSchema,
+  type SettingsItem,
   SettingsItemSchema,
 } from './wire.ts';
+import { launchFlagsLoosen } from './launch-flags.ts';
 
 export * from './wire.ts';
+export { launchFlagsKept } from './launch-flags.ts';
 
 /** The harness key and plugin id. */
 export const CLAUDE_CODE = 'claude-code' as const;
@@ -99,6 +102,32 @@ export const CLAUDE_CODE_AGENT_HOMES = defineState({
   format: 1,
 });
 
+/**
+ * The ONE history pool every Claude ferret shares (docs/design/shared-history.md): a plain folder of this plugin's
+ * state, never inside `agent-homes`, so it is never a credential home. Each ferret home links the entries below to it
+ * (`RootHandle.linkHistory`); a sign-in, a setting and an instruction file stay the ferret's own.
+ */
+export const CLAUDE_CODE_HISTORY_POOL = defineState({
+  name: 'historyPool',
+  path: 'history-pool/*',
+  store: 'opaque',
+  format: 1,
+});
+
+/** The entries of a Claude home that are history (v4's list), each linked to the same name in the pool. */
+export const CLAUDE_CODE_HISTORY_ENTRIES = [
+  { name: 'projects', kind: 'folder' },
+  { name: 'sessions', kind: 'folder' },
+  { name: 'session-env', kind: 'folder' },
+  { name: 'file-history', kind: 'folder' },
+  { name: 'plans', kind: 'folder' },
+  { name: 'tasks', kind: 'folder' },
+  { name: 'todos', kind: 'folder' },
+  { name: 'shell-snapshots', kind: 'folder' },
+  { name: 'paste-cache', kind: 'folder' },
+  { name: 'history.jsonl', kind: 'file' },
+] as const;
+
 export const CLAUDE_CODE_DISCOVERY = defineState({
   name: 'discovery',
   path: 'discovery.json',
@@ -138,11 +167,40 @@ export const CLAUDE_CODE_LAUNCH_SETTINGS = defineState({
 
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────
 
-/** Today's `machineLoosening` rule for the permission mode, kept word for word. */
+/**
+ * The `machineLoosening` rule for the permission mode. An unset mode means `skip` (owner decision !A525), so only an
+ * EXPLICIT `auto` going to `skip` (or being removed, which reads as `skip`) is a loosening; no value to an explicit
+ * `auto` is a tightening.
+ */
 export const harnessConfigLoosens: Loosens<HarnessConfig> = (before, after) =>
-  (before?.permissionMode ?? 'auto') === 'auto' && after.permissionMode === 'skip'
+  before?.permissionMode === 'auto' && after.permissionMode === 'skip'
     ? ['agents now skip every permission prompt']
     : [];
+
+/**
+ * Any change to the harness `binary` or `searchPaths` (added, removed or changed, never judged by its value): the path
+ * names the program every new ferret launches, so it is code execution and the owner's to approve (owner decision
+ * !A525). Pure and total; the sentences name what changed, never a path.
+ */
+const harnessPathsChange: Loosens<HarnessConfig> = (before, after) => [
+  ...(before?.binary === after.binary ? [] : ['agents now launch a different Claude Code program (binary changed)']),
+  ...(JSON.stringify(before?.searchPaths ?? []) === JSON.stringify(after.searchPaths)
+    ? []
+    : ['agents now look for the Claude Code program in different directories (searchPaths changed)']),
+];
+
+/** Turning the dangerous-rm waiver on (it defaults off, so no value to `true` is a loosening too). */
+const rmWaiverLoosens: Loosens<HarnessConfig> = (before, after) =>
+  before?.dangerousRmWaiver !== true && after.dangerousRmWaiver
+    ? ['agents now run Claude Code with its dangerous-rm guard waived (bypass mode only)']
+    : [];
+
+/** What an agent's edit of this file is HELD for: a looser permission mode or rm guard, or any change of where the program is. */
+const harnessConfigHeld: Loosens<HarnessConfig> = (before, after) => [
+  ...harnessConfigLoosens(before, after),
+  ...rmWaiverLoosens(before, after),
+  ...harnessPathsChange(before, after),
+];
 
 /** `config/harness-claude-code.yaml`: the binary, the search directories and the permission mode. */
 export const CLAUDE_CODE_CONFIG = configDef(
@@ -150,18 +208,26 @@ export const CLAUDE_CODE_CONFIG = configDef(
     file: 'harness-claude-code.yaml',
     schema: HarnessConfigSchema,
     axis: 'configure',
-    loosens: harnessConfigLoosens,
+    loosens: harnessConfigHeld,
   }),
 );
 
-/** `config/claude-code/settings/<name>.yaml`. Today a component edit changes what an agent runs with, never what it may spend. */
+/**
+ * A settings item loosens when an edit adds a launch flag that sets the permission mode (`--permission-mode`, the skip
+ * switches): the same loosening as a looser `permissionMode`, so an agent's edit waits for the owner and the owner's own
+ * edit does not. The launch drops those flags anyway (`./launch-flags.ts`); the hold is so none is ever written unseen.
+ */
+export const settingsItemLoosens: Loosens<SettingsItem> = (before, after) =>
+  launchFlagsLoosen(before?.flags ?? [], after.flags ?? []);
+
+/** `config/claude-code/settings/<name>.yaml`: a settings document and its launch flags. */
 export const CLAUDE_CODE_SETTINGS = configDef(
   defineConfig({
     collection: 'claude-code/settings',
     name: ITEM_NAME_PATTERN,
     schema: SettingsItemSchema,
     axis: 'configure',
-    loosens: neverLoosens,
+    loosens: settingsItemLoosens,
   }),
 );
 

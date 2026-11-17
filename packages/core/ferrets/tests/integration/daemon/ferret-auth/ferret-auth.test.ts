@@ -355,7 +355,7 @@ describe('a ferret authenticates end to end (merge bar 7)', () => {
     expect(statSync(overlay).mode & 0o777).toBe(0o600);
   };
 
-  test('(d) Claude env login in a project whose .claude/settings.local.json blanks ANTHROPIC_BASE_URL: the PROJECT wins, the start is not refused, and no credential is in an argv (!A500)', async () => {
+  test('(d) Claude env login in a project whose .claude/settings.local.json blanks ANTHROPIC_BASE_URL: the PROJECT wins, the start is not refused, and no credential is in an argv (^A500)', async () => {
     const provider = startFakeProvider(FAKE_TOKEN);
     cleanups.push(() => provider.stop());
     const daemon = await boot(provider, () => ({}), FAKE_TOKEN, undefined, {
@@ -382,7 +382,7 @@ describe('a ferret authenticates end to end (merge bar 7)', () => {
     expectNoCredentialAnywhere(daemon, launched?.argv);
   });
 
-  test('(d2) Claude env login whose store-held token the project also sets: not refused, the project’s value wins, no credential in an argv (!A500)', async () => {
+  test('(d2) Claude env login whose store-held token the project also sets: not refused, the project’s value wins, no credential in an argv (^A500)', async () => {
     const provider = startFakeProvider(FAKE_TOKEN);
     cleanups.push(() => provider.stop());
     const daemon = await boot(provider, () => ({}), FAKE_TOKEN, undefined, {
@@ -571,11 +571,14 @@ describe('a start by runtime reaches the provider signed in (merge bar 11)', () 
       'new',
       '--runtime',
       'rt',
+      '--allow-scratch',
       '--mode',
       'interactive',
       '--cwd',
       daemon.folder,
       'say hello',
+      // The test's folder is a temporary one, which `fy new` refuses unless asked; this test is about the login.
+      '--allow-scratch',
     ]);
     const listing = JSON.parse((await daemon.call('GET', '/v1/ferrets')).text) as { id: string; runtime?: string }[];
     expect(listing.find(ferret => ferret.id === id)?.runtime).toBe('rt');
@@ -711,6 +714,7 @@ describe('a start by runtime reaches the provider signed in (merge bar 11)', () 
       'new',
       '--runtime',
       'rt-off',
+      '--allow-scratch',
       '--mode',
       'interactive',
       '--cwd',
@@ -770,6 +774,7 @@ describe('a start by runtime reaches the provider signed in (merge bar 11)', () 
         'new',
         '--runtime',
         runtime,
+        '--allow-scratch',
         '--mode',
         'interactive',
         '--cwd',

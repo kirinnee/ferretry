@@ -8,7 +8,7 @@ import { STEP_UP_ACTS } from '@ferretry/core-gate/contract';
 import should from 'should';
 import type { z } from 'zod';
 import { type DaemonConnection, daemonConnection, FyHttpError, toBase64Url } from '../../../app/shell-grants.ts';
-import { type CredentialsPort, PasskeyCeremonyError, passkeySentence } from '../../../app/lib/passkeys.ts';
+import { type CredentialsPort, PasskeyCeremonyError, passkeySentence } from '@ferretry/app';
 import {
   addPasskeyCeremony,
   browserCredentials,

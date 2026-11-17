@@ -34,14 +34,15 @@
 import { gateOf } from '../../lib/gate-items.ts';
 import type { AgendaCardAnswer, AgendaItem } from '@ferretry/core-asks/contract';
 import { GitCompareArrows, Merge } from 'lucide-react';
-import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { DoneCloseSource } from '../../lib/agenda-done-close.ts';
-import { composerQuoteTarget, useQuoteMenu } from '../../shell.ts';
+import { composerQuoteTarget, ferretScopeOf, useQuoteMenu } from '../../shell.ts';
 import { answerAction } from '../../lib/agenda-answers.ts';
 import type { DaemonId, DaemonSessionScope } from '../../lib/machine.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
-import type { HistoryEvent } from '../../lib/agenda-history.ts';
+import { type HistoryEvent, withDeviceEvents } from '../../lib/agenda-history.ts';
+import { useDeviceOutboxHistory } from '../../hooks/use-device-outbox-history.ts';
 import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import type { LineageTitles } from '../../lib/agenda-merge.ts';
 import { versionCount } from '../../lib/agenda-revisions.ts';
@@ -82,6 +83,11 @@ export interface AgendaItemViewProps {
    * scope, so this view names a scope and imports no composer). Absent: nothing to quote into.
    */
   readonly quoteScope?: DaemonSessionScope | null;
+  /**
+   * The ferret the item is on, when the host has no `quoteScope` to name it: with it the History also draws the owner's
+   * words still on this device ("Saved on this device"). Absent both: the History draws what the machine holds.
+   */
+  readonly outboxScope?: DaemonSessionScope | null;
   /** The machine the item is on: with it, an item that offers to close its card draws "Done · closes &F12". */
   readonly daemonId?: DaemonId;
   /**
@@ -184,6 +190,7 @@ export function AgendaItemView({
   renderProse,
   closeLabel = 'Back to the chat',
   quoteScope = null,
+  outboxScope = null,
   settled,
   parkedNote,
   inputForm,
@@ -218,7 +225,10 @@ export function AgendaItemView({
   const latest = shown >= count;
   const showVersion = (version: number): void => setPicked(version >= count ? null : { id: item.id, version });
   useScrollPadding(body, top, dock);
-  const quote = useQuoteMenu(root, quoteScope);
+  const quote = useQuoteMenu(root, quoteScope === null ? null : ferretScopeOf(quoteScope));
+  // The owner's words this device still holds (Conversation's outbox), shown once, with the receipt they have earned.
+  const deviceWords = useDeviceOutboxHistory(outboxScope ?? quoteScope, item.id);
+  const shownHistory = useMemo(() => withDeviceEvents(history, deviceWords), [history, deviceWords]);
   const map = swipeMap(item);
   const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
@@ -297,7 +307,7 @@ export function AgendaItemView({
     (merge !== undefined && latest);
   // Request changes IS the owner's words: sent with what the composer holds, or the owner is put in the composer first.
   const requestChanges = (answer: AgendaCardAnswer): void => {
-    const composer = quoteScope === null ? null : composerQuoteTarget(quoteScope);
+    const composer = quoteScope === null ? null : composerQuoteTarget(ferretScopeOf(quoteScope));
     const words = composer?.draft().trim() ?? '';
     if (words === '') {
       composer?.replaceDraft(composer.draft());
@@ -396,7 +406,7 @@ export function AgendaItemView({
             diffOpen={diffFor === item.id}
             mergeOpen={mergeFor === item.id}
             onMergeClose={() => setMergeFor(null)}
-            history={history}
+            history={shownHistory}
             {...(itemKey === undefined ? {} : { itemKey })}
             {...(versions === undefined ? {} : { versions })}
             {...(merge === undefined ? {} : { merge })}

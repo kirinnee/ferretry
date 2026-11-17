@@ -131,6 +131,16 @@ const SHELL_VERB_LINES: readonly ShellVerbLine[] = [
     options: [{ flag: '-y, --yes', help: 'skip the typed word' }],
   },
   {
+    verb: 'setup',
+    summary: 'finish installing: run the daemon as a user service, check it, pair your phone, then the first run',
+    args: [],
+    options: [
+      YES,
+      { flag: '--check', help: 'say whether the daemon answers and what is present, and change nothing' },
+      JSON_OPTION,
+    ],
+  },
+  {
     verb: 'update',
     summary: 'update this machine, restart its daemon, and roll back if the new version does not serve',
     args: [],
@@ -142,6 +152,9 @@ const SHELL_VERB_LINES: readonly ShellVerbLine[] = [
       { flag: '--when-idle', help: 'wait until every turn has finished before restarting the daemon' },
       { flag: '--switch-to-profile', help: 'move a nix-shell install onto the nix profile' },
       { flag: '--report <file>', help: 'write the result of the update to this file' },
+      // The daemon's Update button starts `fy update --run --to <version> --report <file>` (update-host.ts): the one
+      // word the launch adds to the verb, read by nothing and never typed by a person.
+      { flag: '--run', help: 'how the daemon launches an update: no other meaning', hidden: true },
       JSON_OPTION,
     ],
   },
@@ -217,6 +230,7 @@ const SHELL_VERB_LINES: readonly ShellVerbLine[] = [
       { flag: '--clarify <text>', help: 'mark an answer review as needing clarification, and say what' },
       { flag: '--other <text>', help: 'answer with something that is not a listed option' },
       { flag: '--answer <text>', help: 'answer an open question in words' },
+      { flag: '--text <text>', help: 'the same as --answer', hidden: true },
       { flag: '--done', help: 'close the ask without a response' },
     ],
   },
@@ -232,15 +246,16 @@ const SHELL_VERB_LINES: readonly ShellVerbLine[] = [
  * The spellings today's `fy` had for verbs the 5.0 split renamed, each running the verb that replaced it (v4 parity: a
  * person's habit, a script and an agent's old instructions still work). Thin by design: the alias adds no behaviour, no
  * option and no help of its own, and every word after it is handed to the new verb. The docs/design/rebuild-parity.tsv
- * rows name the old and the new spelling together (V-0232, V-0241, V-0245 … V-0248, V-0250, V-0436).
+ * rows name the old and the new spelling together (V-0232, V-0245 … V-0248, V-0250; V-0436 is the shell's own `setup` verb, no longer an alias).
  */
 const SHELL_ALIAS_LINES = [
   { verb: 'daemon tunnel', alias: 'tunnel' },
   { verb: 'daemon update', alias: 'update' },
-  { verb: 'daemon setup', alias: 'onboard' },
   { verb: 'daemon import', alias: 'runtime link' },
-  { verb: 'setup', alias: 'onboard' },
-] as const satisfies readonly { readonly verb: string; readonly alias: string }[];
+  // The Board's old noun: typed from habit, from an old transcript or from an agent's old instructions. It runs
+  // `task` and says so on stderr; it is not listed in `--help`.
+  { verb: 'card', alias: 'task', hidden: true },
+] as const satisfies readonly { readonly verb: string; readonly alias: string; readonly hidden?: true }[];
 
 export interface VerbEntry {
   /** The words a person types, in order. */
@@ -256,6 +271,8 @@ export interface VerbEntry {
   readonly options?: readonly VerbOptionDecl[];
   /** An alias (a data plugin's, or one of the shell's old spellings): the verb line it runs. */
   readonly alias?: string;
+  /** Left out of `--help`: an old spelling that still runs, and says what replaced it on stderr. */
+  readonly hidden?: true;
   /** Declared the default of its group: the bare group runs it. */
   readonly default?: true;
 }
@@ -318,6 +335,7 @@ export function buildVerbTable(registry: CommandRegistry): VerbTable {
         },
       ],
       alias: old.alias,
+      ...('hidden' in old ? { hidden: true as const } : {}),
     });
   for (const plugin of registry.plugins)
     for (const decl of declaredVerbs(plugin)) {

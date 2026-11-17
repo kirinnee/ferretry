@@ -14,7 +14,7 @@ import {
   parseCompactAt,
 } from '../../contract/index.ts';
 import { type FormEvent, useId, useRef, useState } from 'react';
-import { FormFailure, FormField, FormFoot } from './form-parts.tsx';
+import { FormFailure, FormField, FormFoot } from '@ferretry/app/ui';
 import './compact-at.css';
 /** Where a form sits: it can close itself and say one line once it is done. */
 export interface CompactAtFormHost {

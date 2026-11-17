@@ -9,7 +9,7 @@ import {
 } from '../../../../../daemon/lib/session/monitor/index.ts';
 import type { SessionSendService } from '../../../../../daemon/lib/session/peers/send.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
-import type { DeclaredWait } from '../../../../../daemon/lib/session/signal/index.ts';
+import type { DeclaredWait } from '../../../../../daemon/lib/session/signal/types.ts';
 
 /**
  * A tick that is still in flight when the daemon stops must do nothing more.

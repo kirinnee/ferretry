@@ -1,4 +1,5 @@
-import type { PendingQuestion, SessionState } from '../../seams/protocol.ts';
+import type { PendingQuestion, SessionState } from '@ferretry/core-mailbox/contract';
+import type { Question } from '../../../contract/index.ts';
 import type { TranscriptEvent, TranscriptQuestion } from '../../seams/transcript-types.ts';
 import {
   type AnswerOperationRecord,
@@ -185,6 +186,35 @@ export function projectStructuredQuestion(events: readonly TranscriptEvent[]): S
   }
   if (pending !== undefined) return { kind: 'pending', question: pending };
   return resolvedToolUseId === undefined ? { kind: 'none' } : { kind: 'resolved', toolUseId: resolvedToolUseId };
+}
+
+const words = (text: string): string => text.replace(/\s+/gu, ' ').trim();
+
+/** How many questions a stored `question.json` holds: the first, then each of `more`. */
+export const storedQuestionCount = (stored: Question): number => 1 + (stored.more?.length ?? 0);
+
+/**
+ * The transcript's open call for a question the PANE showed, kept under the pane question's id and time.
+ *
+ * The pane shows only the tab on screen, so a form of several questions is stored as its first. When the transcript's
+ * `AskUserQuestion` call for that same form lands, it carries every question: this is that call as the pane question's
+ * upgrade — the whole `questions[]`, bound to the id the answer ledger and the Agenda card already name, so nothing is
+ * retired and asked again. `undefined` when the projection is not an open call whose first question is the stored one's
+ * words (another form is another question, which the caller treats as such).
+ */
+export function paneQuestionUpgrade(
+  stored: Question,
+  projection: StructuredQuestionProjection,
+): PendingQuestion | undefined {
+  if (projection.kind !== 'pending') return undefined;
+  const { question } = projection;
+  if (words(question.questions[0]?.question ?? '') !== words(stored.text)) return undefined;
+  return {
+    toolUseId: stored.toolUseId,
+    questions: question.questions,
+    askedAt: stored.askedAt,
+    lastSeenAt: stored.askedAt,
+  };
 }
 
 /** State patch for a projection.  It is intentionally partial: storage keeps timestamps and other monitor evidence. */

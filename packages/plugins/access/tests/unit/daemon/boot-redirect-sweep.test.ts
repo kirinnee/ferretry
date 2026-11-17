@@ -3,9 +3,13 @@ import { DEFAULT_GATE_CONFIG } from '@ferretry/core-gate/contract';
 import type { KernelPorts } from '@ferretry/kernel/contract';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
 import { fixedClock } from '@ferretry/kernel/testing';
-import { PairingRedirectsFile } from '../../../contract/index.ts';
+import { PAIRING_REDIRECT_STALE_AFTER_MS, PairingRedirectsFile } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
 import type { PairingRedirectStatePort } from '../../../daemon/adapters/pairing/boot-redirect-sweep.ts';
+import {
+  type PairingRedirectWriteState,
+  stateRedirectWriter,
+} from '../../../daemon/adapters/pairing/redirect-writer.ts';
 import manifest from '../../../manifest.ts';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import {
@@ -14,12 +18,13 @@ import {
 } from '../../../cli/adapters/pair/browser-opener.ts';
 import { sweepPairingRedirectState as cliSweep } from '../../../cli/adapters/pairing-redirect-sweep.ts';
 
-function fixture() {
+/** `held`: the daemon is already running, so it holds the home lock the whole time (as it does after boot). */
+function fixture(options: { readonly held?: boolean } = {}) {
   const clock = fixedClock('2026-11-06T09:00:00.000Z');
   const nodes = new Map<string, { kind: 'file' | 'directory' | 'symlink'; modifiedMs: number }>();
   const calls: string[] = [];
   const warnings: string[] = [];
-  let locked = false;
+  let locked = options.held === true;
   const check = () => {
     expect(locked).toBe(true);
   };
@@ -122,9 +127,8 @@ test('P106 daemon boot treats an absent redirect tree as a no-op', async () => {
   expect(f.calls).toEqual(['listen']);
 });
 
-test('P106 CLI writes the same private opaque tree that daemon boot and the next pair sweep', async () => {
-  const f = fixture();
-  const state: PairingRedirectCliStatePort & PairingRedirectStatePort = {
+function writable(f: ReturnType<typeof fixture>) {
+  const state: PairingRedirectCliStatePort & PairingRedirectStatePort & PairingRedirectWriteState = {
     ...f.state,
     createPrivateDirectory: async (file, name) => {
       expect(file.name).toBe(PairingRedirectsFile.name);
@@ -138,7 +142,15 @@ test('P106 CLI writes the same private opaque tree that daemon boot and the next
     },
     pathOf: (file, name) => `/fixture/state/access/${file.path.replace('*', name ?? '')}`,
   };
-  const page = await createPairingRedirectPage(state, '<html>fixture</html>');
+  return state;
+}
+
+test('P106 CLI writes the same private opaque tree that daemon boot and the next pair sweep', async () => {
+  const f = fixture();
+  const state = writable(f);
+  // The daemon makes the page; its own writer runs here over the same fixture state.
+  const cli = { state, make: (made: string) => stateRedirectWriter(state, f.clock).write(made) };
+  const page = await createPairingRedirectPage(cli, '<html>fixture</html>');
   expect(page.file).toMatch(/^\/fixture\/state\/access\/pairing-redirects\/pair-open-[A-Za-z0-9]{6}\/pairing.html$/u);
   expect(PairingRedirectsFile.mode).toBe(0o600);
   await f.boot();
@@ -146,8 +158,54 @@ test('P106 CLI writes the same private opaque tree that daemon boot and the next
   await f.clock.advance(30_001);
   await f.underLock(async () => await cliSweep(state, f.clock.nowMs()));
   expect(f.nodes.size).toBe(0);
-  await createPairingRedirectPage(state, '<html>fixture</html>');
+  await createPairingRedirectPage(cli, '<html>fixture</html>');
   await f.clock.advance(30_001);
   await f.boot();
+  expect(f.nodes.size).toBe(0);
+});
+
+const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+
+test('P106 the daemon removes a page nobody collected on its own timer, once it is older than the stale age', async () => {
+  const f = fixture({ held: true });
+  const writer = stateRedirectWriter(writable(f), f.clock);
+  // A lost 201 / a killed CLI / an FY_HOME mismatch: nothing but the daemon ever removes this page.
+  const directory = await writer.write('<html>fake page</html>');
+  const page = `${directory}/pairing.html`;
+  expect(f.nodes.has(page)).toBe(true);
+  await f.clock.advance(PAIRING_REDIRECT_STALE_AFTER_MS);
+  await flush();
+  // Exactly the stale age is not yet stale: a page this young may still be on its way to a browser.
+  expect(f.nodes.has(page)).toBe(true);
+  await f.clock.advance(1);
+  await flush();
+  expect(f.nodes.has(page)).toBe(false);
+  expect(f.nodes.has(directory)).toBe(false);
+  expect(f.warnings).toEqual([]);
+});
+
+test('P106 the daemon timer leaves a younger page alone and takes it on its own turn', async () => {
+  const f = fixture({ held: true });
+  const writer = stateRedirectWriter(writable(f), f.clock);
+  const first = await writer.write('<html>first</html>');
+  await f.clock.advance(20_000);
+  const second = await writer.write('<html>second</html>');
+  await f.clock.advance(10_001);
+  await flush();
+  expect(f.nodes.has(`${first}/pairing.html`)).toBe(false);
+  expect(f.nodes.has(`${second}/pairing.html`)).toBe(true);
+  await f.clock.advance(20_000);
+  await flush();
+  expect(f.nodes.size).toBe(0);
+});
+
+test('P106 the daemon timer is harmless when the CLI already took the page away', async () => {
+  const f = fixture({ held: true });
+  const state = writable(f);
+  const directory = await stateRedirectWriter(state, f.clock).write('<html>fake</html>');
+  await state.remove(PairingRedirectsFile, `${directory}/pairing.html`);
+  await state.removeEmptyDirectory(PairingRedirectsFile, directory);
+  await f.clock.advance(PAIRING_REDIRECT_STALE_AFTER_MS + 1);
+  await flush();
   expect(f.nodes.size).toBe(0);
 });

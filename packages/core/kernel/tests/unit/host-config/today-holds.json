@@ -205,7 +205,7 @@
   },
   {
     "today": "accountDefaults",
-    "words": "changes which account a card offers first for ${line.key} in ${accountDefaultScopeWords(line)}"
+    "words": "changes which account a sign-in item offers first for ${line.key} in ${accountDefaultScopeWords(line)}"
   },
   {
     "today": "login",

@@ -11,6 +11,7 @@ import { RecipeValueError } from './secrets/login-recipes.ts';
 import { SecureCopyError } from './secure-copy/errors.ts';
 import { SignInRuleSuggestionError } from './sign-in-rules/suggestions.ts';
 import { TaskPlanError, type TaskPlanService } from './task-plans/service.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /**
  * THE AGENT'S TWO ASKING TOOLS: `account_propose` (a recipe for a sign-in and/or a standing-rule suggestion) and
@@ -57,7 +58,7 @@ const recipeWords = (proposed: LoginRecipeProposed & { readonly signIn: SignInId
   const where = `${proposed.login} [${proposed.signIn}]`;
   return proposed.state === 'applied'
     ? `The recipe of ${where} was updated (the owner allows that for this sign-in).`
-    : `Proposed a recipe for ${where}${proposed.agendaItemId === undefined ? '' : ` (!${proposed.agendaItemId})`}; the owner approves or declines it. You do not need to wait.`;
+    : `Proposed a recipe for ${where}${proposed.agendaItemId === undefined ? '' : ` (${ASK_REFERENCE_SIGIL}${proposed.agendaItemId})`}; the owner approves or declines it. You do not need to wait.`;
 };
 
 /** One refused sentence, or the fixed one when the error is not one of the services' own. */
@@ -75,6 +76,8 @@ const refusalWords = (error: unknown, fallback: string): string => {
 
 export function proposalTools(deps: ProposalToolDeps): {
   readonly account_propose: ToolHandler;
+  readonly signin_plan: ToolHandler;
+  /** The old name of `signin_plan`, on the same handler: an old instruction still works. */
   readonly task_plan: ToolHandler;
 } {
   const say = async (text: string, isError: boolean, data?: unknown): Promise<ToolResult> => {
@@ -131,7 +134,7 @@ export function proposalTools(deps: ProposalToolDeps): {
     // is not reported as failed; on its own it is the call's refusal.
     try {
       const made = await deps.suggestions.suggest(ferret, { signIn: call.signIn, why: call.why });
-      const said = `Suggested a standing rule for ${made.host} (!${made.agenda}); the owner decides, and you will not hear back. Do not ask again.`;
+      const said = `Suggested a standing rule for ${made.host} (${ASK_REFERENCE_SIGIL}${made.agenda}); the owner decides, and you will not hear back. Do not ask again.`;
       return await say([words, said].filter(word => word !== '').join(' '), false, { recipe: filed });
     } catch (error) {
       const said = refusalWords(error, SUGGESTION_FAILED);
@@ -144,14 +147,14 @@ export function proposalTools(deps: ProposalToolDeps): {
     }
   });
 
-  const task_plan = guarded(async (ferret, input) => {
+  const signin_plan = guarded(async (ferret, input) => {
     const plan = await deps.plans.propose(ferret, input as Parameters<TaskPlanService['propose']>[1]);
     return await say(
-      `Asked the owner to approve ${plural(plan.lines.length, 'line')} in advance (!${plan.agendaItemId}). Keep raising browser_request_input / terminal_request_input as usual: covered sign-ins and pastes are filled for you once the owner approves; anything else still asks.`,
+      `Asked the owner to approve ${plural(plan.lines.length, 'line')} in advance (${ASK_REFERENCE_SIGIL}${plan.agendaItemId}). Keep raising browser_request_input / terminal_request_input as usual: covered sign-ins and pastes are filled for you once the owner approves; anything else still asks.`,
       false,
       { taskPlan: taskPlanAgentView(plan) },
     );
   });
 
-  return { account_propose, task_plan };
+  return { account_propose, signin_plan, task_plan: signin_plan };
 }

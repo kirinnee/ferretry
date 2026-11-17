@@ -1,7 +1,4 @@
 import { describe, it } from 'bun:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import should from 'should';
 import {
@@ -10,6 +7,8 @@ import {
   launchCommand,
   questionArguments,
   settingsDocument,
+  settingsFlags,
+  channelsOn,
 } from '../../../daemon/lib/harness/launch.ts';
 import {
   API_KEY_SEED_NAME,
@@ -17,11 +16,8 @@ import {
   API_KEY_SEED_SHELL,
 } from '../../../daemon/lib/harness/api-key-seed.ts';
 import { parseEntries, parseEntry, parseUsage } from '../../../daemon/lib/harness/transcript.ts';
-import {
-  CLAUDE_QUESTION_HOOK_COMMAND,
-  CLAUDE_QUESTION_HOOKS,
-  CLAUDE_PROMPTS_SEEN,
-} from '../../../daemon/lib/harness/fixed-layer.ts';
+import { CLAUDE_PROMPTS_SEEN, fixedLayer } from '../../../daemon/lib/harness/fixed-layer.ts';
+import { CLAUDE_COMPACTION_HOOKS } from '../../../daemon/lib/harness/compaction.ts';
 import pending from '../../../ports-pending.json';
 
 const settings = new Map([
@@ -77,32 +73,7 @@ describe('settingsDocument', () => {
 });
 
 describe('homeText', () => {
-  it('question hook writes the complete tool input quietly and drains input when unset or unwritable', async () => {
-    const folder = await mkdtemp(join(tmpdir(), 'claude-question-hook-'));
-    const body = JSON.stringify({ tool_use_id: 'question-1', tool_input: { questions: [{ question: 'Which?' }] } });
-    const file = join(folder, 'question.json');
-    try {
-      for (const target of [file, undefined, join(folder, 'missing/question.json')]) {
-        const child = Bun.spawn(['sh', '-c', CLAUDE_QUESTION_HOOK_COMMAND], {
-          env: { PATH: '/usr/bin:/bin', ...(target === undefined ? {} : { FY_QUESTION_FILE: target }) },
-          // A `Buffer`, not a `Blob`: once a DOM suite has registered happy-dom in this process (the unit tier runs every
-          // package in one), the global `Blob` is happy-dom's and `Bun.spawn` refuses it as stdio.
-          stdin: Buffer.from(body),
-          stdout: 'pipe',
-          stderr: 'pipe',
-        });
-        should(await child.exited).equal(0);
-        should(await new Response(child.stdout).text()).equal('');
-        should(await new Response(child.stderr).text()).equal('');
-      }
-      should(await readFile(file, 'utf8')).equal(body);
-      should(await Bun.file(`${file}.tmp`).exists()).equal(false);
-    } finally {
-      await rm(folder, { recursive: true, force: true });
-    }
-  });
-
-  it('applies fixed launch precedence, onboarding and trust, and keeps the question hook in its own overlay', () => {
+  it('applies fixed launch precedence, onboarding and trust, and keeps the compaction hooks in its own overlay', () => {
     for (const permissionMode of ['auto', 'skip'] as const) {
       const userHook = { matcher: 'Read', hooks: [{ type: 'command', command: 'true' }] };
       const text = homeText({
@@ -140,7 +111,7 @@ describe('homeText', () => {
         ...(permissionMode === 'skip'
           ? { skipDangerousModePermissionPrompt: true }
           : { skipAutoPermissionPrompt: true }),
-        hooks: CLAUDE_QUESTION_HOOKS,
+        hooks: { ...CLAUDE_COMPACTION_HOOKS },
       });
       should(JSON.parse(text.claudeJson)).eql({
         hasCompletedOnboarding: true,
@@ -266,15 +237,20 @@ describe('launchCommand', () => {
     home: '/state/claude-code/agent-homes/f1',
     permissionMode: 'auto' as const,
     hasMcp: false,
-    // Interactive keeps the question tool, so these argv assertions are about the rest of the argv only.
+    // An opted-in interactive ferret keeps the question tool, so these argv assertions are about the rest of the argv only.
     mode: 'interactive' as const,
+    questionTool: true,
     conversation: { kind: 'new' as const, id: 'c-1' },
   };
 
   it('starts claude in the home with a session id and the auto permission mode', () => {
     should(launchCommand(base)).eql([
       'env',
+      '-u',
+      'CLAUDE_CODE_CHILD_SESSION',
       'CLAUDE_CONFIG_DIR=/state/claude-code/agent-homes/f1',
+      'DISABLE_AUTOUPDATER=1',
+      'CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1',
       API_KEY_SEED_SHELL,
       '-c',
       API_KEY_SEED_SCRIPT,
@@ -297,7 +273,7 @@ describe('launchCommand', () => {
       model: 'claude-opus-5-5',
       conversation: { kind: 'resume', id: 'c-9' },
     });
-    should(argv.slice(9)).eql([
+    should(argv.slice(argv.indexOf('--permission-mode'))).eql([
       '--permission-mode',
       'bypassPermissions',
       '--mcp-config',
@@ -307,6 +283,113 @@ describe('launchCommand', () => {
       '--model',
       'claude-opus-5-5',
     ]);
+  });
+});
+
+describe('launchCommand with settings flags', () => {
+  const base = {
+    binary: '/opt/bin/claude',
+    home: '/state/claude-code/agent-homes/f1',
+    permissionMode: 'auto' as const,
+    hasMcp: true,
+    mode: 'interactive' as const,
+    conversation: { kind: 'resume' as const, id: 'c-1' },
+    model: 'claude-opus-5-5',
+    questionTool: false,
+  };
+  /** The words after the seeded shell's own: what claude is `exec`ed with. */
+  const claudeWords = (argv: readonly string[]): readonly string[] => argv.slice(argv.indexOf(base.binary));
+  const OVERLAY = '/state/claude-code/agent-homes/f1/launch-settings.json';
+  /** The disposable word the launch puts right after the items' flags. */
+  const OVERLAY_COPY = `--settings=${OVERLAY}`;
+
+  it('passes every flag, any flag, as its own word (its value attached) and in order, before the launch’s own flags', () => {
+    const flags = ['--some-future-flag', 'a value with spaces', '--verbose', '--add-dir', '/a', '--add-dir=/b'];
+    const words = claudeWords(launchCommand({ ...base, flags }));
+
+    should(words.slice(1, 5)).eql([
+      '--some-future-flag=a value with spaces',
+      '--verbose',
+      '--add-dir=/a',
+      '--add-dir=/b',
+    ]);
+    should(words.slice(5, 8)).eql([OVERLAY_COPY, '--settings', OVERLAY]);
+  });
+
+  it('a bare --, a subcommand and a positional in the items never reach the argv, so the launch’s flags stay flags', () => {
+    const words = claudeWords(launchCommand({ ...base, flags: ['mcp', '--', 'update', '--keep', '--'] }));
+
+    should(words.slice(0, 4)).eql(['/opt/bin/claude', '--keep', OVERLAY_COPY, '--settings']);
+    should(words.includes('--')).be.false();
+    should(words.includes('mcp')).be.false();
+  });
+
+  it('an item flag left valueless at the end (--model, --add-dir) takes the disposable word, never a launch flag', () => {
+    for (const last of ['--model', '--add-dir']) {
+      const words = claudeWords(launchCommand({ ...base, flags: ['--verbose', last] }));
+      const at = words.indexOf(last);
+
+      should(words.slice(at, at + 4)).eql([last, OVERLAY_COPY, '--settings', OVERLAY]);
+    }
+  });
+
+  it('keeps the launch’s own flags authoritative: the permission mode, the conversation, the home files and the model', () => {
+    const words = claudeWords(
+      launchCommand({
+        ...base,
+        flags: [
+          '--permission-mode',
+          'bypassPermissions',
+          '--dangerously-skip-permissions',
+          '--session-id',
+          'evil',
+          '--resume',
+          'other',
+          '--settings',
+          'x.json',
+          '--mcp-config',
+          'x.json',
+          '--model',
+          'cheap',
+          '--keep',
+        ],
+      }),
+    );
+
+    should(words).eql([
+      '/opt/bin/claude',
+      '--model=cheap',
+      '--keep',
+      OVERLAY_COPY,
+      '--settings',
+      OVERLAY,
+      '--permission-mode',
+      'auto',
+      CLAUDE_NO_QUESTIONS_FLAG,
+      '--mcp-config',
+      '/state/claude-code/agent-homes/f1/mcp.json',
+      '--resume',
+      'c-1',
+      // The model the launch decides is LAST, so it wins over the item's own `--model`.
+      '--model',
+      'claude-opus-5-5',
+    ]);
+  });
+
+  it('is the same argv with no flags, and with none given', () => {
+    should(launchCommand({ ...base, flags: [] })).eql(launchCommand(base));
+  });
+});
+
+describe('settingsFlags', () => {
+  it('appends every selected item’s flags item by item in name order, and skips an item with none', () => {
+    const items = new Map([
+      ['z-last', { settings: {}, flags: ['--a', '1'] }],
+      ['a-none', { settings: { theme: 'dark' } }],
+      ['m-middle', { settings: {}, flags: ['--b'] }],
+    ]);
+
+    should(settingsFlags(items)).eql(['--b', '--a', '1']);
   });
 });
 
@@ -473,37 +556,130 @@ describe('transcript', () => {
   });
 });
 
-describe('the question tool, per ferret (v4: only an interactive Claude keeps AskUserQuestion)', () => {
-  const inputs = (mode?: 'interactive' | 'auto') => ({
+describe('the question tool (^A527: withheld from every ferret unless the questionTool setting opts in)', () => {
+  const inputs = (mode?: 'interactive' | 'auto', questionTool = false) => ({
     binary: '/opt/bin/claude',
     home: '/fy/agent-homes/f1',
     permissionMode: 'auto' as const,
     hasMcp: false,
+    questionTool,
     conversation: { kind: 'new' as const, id: 'conv-1' },
     ...(mode === undefined ? {} : { mode }),
   });
 
   it('spells the flag exactly as the Runtimes wrapper does', () => {
     should(CLAUDE_NO_QUESTIONS_FLAG).equal('--disallowed-tools=AskUserQuestion');
-    should(questionArguments('interactive')).eql([]);
-    should(questionArguments('auto')).eql([CLAUDE_NO_QUESTIONS_FLAG]);
-    should(questionArguments(undefined)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
   });
 
-  it('keeps the tool for an interactive launch and withholds it from an auto one or one with no mode, new or resumed', () => {
+  it('withholds the tool by default from an interactive ferret, an auto one and one with no mode', () => {
+    should(questionArguments('interactive', false)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
+    should(questionArguments('auto', false)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
+    should(questionArguments(undefined, false)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
+  });
+
+  it('keeps the tool only for an interactive ferret, and only with the setting on: an auto one or one with no mode stays withheld', () => {
+    should(questionArguments('interactive', true)).eql([]);
+    should(questionArguments('auto', true)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
+    should(questionArguments(undefined, true)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
+  });
+
+  it('carries the flag in every default argv, new or resumed', () => {
     for (const conversation of [
       { kind: 'new' as const, id: 'c' },
       { kind: 'resume' as const, id: 'c' },
     ]) {
-      should(launchCommand({ ...inputs('interactive'), conversation })).not.containEql(CLAUDE_NO_QUESTIONS_FLAG);
-      should(launchCommand({ ...inputs('auto'), conversation })).containEql(CLAUDE_NO_QUESTIONS_FLAG);
-      should(launchCommand({ ...inputs(), conversation })).containEql(CLAUDE_NO_QUESTIONS_FLAG);
+      for (const mode of ['interactive', 'auto', undefined] as const)
+        should(launchCommand({ ...inputs(mode), conversation })).containEql(CLAUDE_NO_QUESTIONS_FLAG);
+      should(launchCommand({ ...inputs('interactive', true), conversation })).not.containEql(CLAUDE_NO_QUESTIONS_FLAG);
     }
   });
 
-  it('adds nothing else: an interactive argv is an auto argv without the one flag', () => {
-    should(launchCommand(inputs('auto')).filter(argument => argument !== CLAUDE_NO_QUESTIONS_FLAG)).eql(
-      launchCommand(inputs('interactive')),
+  it('adds nothing else: an opted-in interactive argv is a default argv without the one flag', () => {
+    should(launchCommand(inputs('interactive')).filter(argument => argument !== CLAUDE_NO_QUESTIONS_FLAG)).eql(
+      launchCommand(inputs('interactive', true)),
     );
+  });
+
+  // M7: a runtime that turns the tool back on has its open form read off the pane, so the layer writes no hook for it.
+  it('writes no PreToolUse hook on AskUserQuestion, so the flag overlay carries the compaction hooks alone', () => {
+    for (const mode of ['auto', 'skip'] as const) {
+      should(fixedLayer(mode, '/f').overlay.hooks).eql({ ...CLAUDE_COMPACTION_HOOKS });
+      should(JSON.stringify(fixedLayer(mode, '/f'))).not.containEql('AskUserQuestion');
+    }
+  });
+});
+
+describe('Ferretry’s message channel in a launch (the pure parts)', () => {
+  const FLAG = '--dangerously-load-development-channels=server:ferretry';
+  const account = (organizationType?: string): LaunchPart => ({
+    kind: 'account',
+    ...(organizationType === undefined ? {} : { organizationType }),
+  });
+  const inputs = {
+    folder: '/work',
+    permissionMode: 'auto' as const,
+    instructions: [],
+    settings: new Map(),
+    hooks: new Map(),
+  };
+
+  it('is on for a claude_max login unless the setting says otherwise, and off for every other type or none', () => {
+    should([
+      channelsOn(undefined, [account('claude_max')]),
+      channelsOn(undefined, [account('claude_enterprise')]),
+      channelsOn(undefined, [account('claude_team')]),
+      channelsOn(undefined, [account()]),
+      channelsOn(undefined, []),
+      channelsOn(false, [account('claude_max')]),
+      channelsOn(true, [account('claude_enterprise')]),
+      channelsOn(true, []),
+    ]).eql([true, false, false, false, false, false, true, true]);
+  });
+
+  it('adds the tools server (last, FY_TOKEN emptied, the launch marker set) and the instruction only when on', () => {
+    const on = homeText({
+      ...inputs,
+      channels: true,
+      fyCommand: '/opt/fy',
+      parts: [{ kind: 'mcp', name: 'ferretry', config: { command: 'someone-else' } }],
+    });
+    const server = (JSON.parse(on.mcp ?? '{}') as { mcpServers: Record<string, unknown> }).mcpServers.ferretry;
+
+    should(server).eql({
+      type: 'stdio',
+      command: '/opt/fy',
+      args: ['mcp', 'serve'],
+      env: { FY_TOKEN: '', FERRETRY_CHANNEL: '1' },
+    });
+    should(on.memory).containEql('<channel source="ferretry">');
+
+    const defaulted = homeText({ ...inputs, channels: true, parts: [] });
+    should(
+      (JSON.parse(defaulted.mcp ?? '{}') as { mcpServers: { ferretry: { command: string } } }).mcpServers.ferretry
+        .command,
+    ).equal('fy');
+
+    const off = homeText({ ...inputs, parts: [] });
+    should(off.mcp).be.undefined();
+    should(off.memory).not.containEql('<channel');
+  });
+
+  it('puts the channel flag in the argv once, names the MCP file even with no profile server, and is otherwise unchanged', () => {
+    const base = {
+      binary: '/opt/bin/claude',
+      home: '/h',
+      permissionMode: 'auto' as const,
+      hasMcp: false,
+      questionTool: true,
+      mode: 'interactive' as const,
+      conversation: { kind: 'new' as const, id: 'c-1' },
+    };
+    const on = launchCommand({ ...base, channels: true });
+
+    should(on.filter(word => word === FLAG)).have.length(1);
+    should(on[on.indexOf('--mcp-config') + 1]).equal('/h/mcp.json');
+    should(on.indexOf(FLAG)).be.below(on.indexOf('--session-id'));
+    should(launchCommand({ ...base, channels: false })).eql(launchCommand(base));
+    should(launchCommand(base)).not.containEql('--mcp-config');
   });
 });

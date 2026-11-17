@@ -1,41 +1,59 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { ProcessObservation } from '../../../../daemon/lib/moves/inflight-report.ts';
-import {
-  type MoveTargetView,
-  MovePreflight,
-  type PaneSnapshotPort,
-} from '../../../../daemon/lib/moves/preflight-service.ts';
-import type { ProcessInventoryPort } from '../../../../daemon/lib/moves/process-inventory-port.ts';
+import { type MoveTargetView, MovePreflight } from '../../../../daemon/lib/moves/preflight-service.ts';
+import type { MovePane, ProcessInventoryPort } from '../../../../daemon/lib/moves/process-inventory-port.ts';
 
 class StubInventory implements ProcessInventoryPort {
-  readonly sessions: string[] = [];
+  /** The pane each collect was handed: the preflight addresses a pane only through the view's own. */
+  readonly panes: MovePane[] = [];
 
   constructor(private readonly observation: ProcessObservation) {}
 
-  async collect(tmuxSession: string): Promise<ProcessObservation> {
-    this.sessions.push(tmuxSession);
+  async collect(pane: MovePane): Promise<ProcessObservation> {
+    this.panes.push(pane);
     return this.observation;
   }
 }
 
-class StubPanes implements PaneSnapshotPort {
-  readonly sessions: string[] = [];
+class StubPanes implements MovePane {
+  /** How many times the footer was read. */
+  reads = 0;
 
-  /** `undefined` is a pane the adapter CONFIRMED is gone; an `Error` is one it could not read. */
+  /** `undefined` is a pane the runner PROVED is gone; an `Error` is one it could not read. */
   constructor(private readonly text: string | Error | undefined) {}
 
-  async visible(tmuxSession: string): Promise<string | undefined> {
-    this.sessions.push(tmuxSession);
+  async identify(): Promise<undefined> {
+    return undefined;
+  }
+
+  async screen(): Promise<string | undefined> {
+    this.reads += 1;
     if (this.text instanceof Error) throw this.text;
     return this.text;
   }
 }
 
-const view = (overrides: Partial<MoveTargetView> = {}): MoveTargetView => ({
+/** The preflight reading one pane: the view a test builds names everything but the pane, which is the test's own. */
+class PreflightOver extends MovePreflight {
+  constructor(
+    inventory: ProcessInventoryPort,
+    private readonly pane: MovePane,
+  ) {
+    super(inventory);
+  }
+
+  override async inspect(
+    target: Omit<MoveTargetView, 'pane'>,
+    ...rest: [chatTail?: readonly unknown[], options?: { readonly requesterPid?: number }]
+  ) {
+    return await super.inspect({ ...target, pane: this.pane }, ...rest);
+  }
+}
+
+const view = (overrides: Partial<Omit<MoveTargetView, 'pane'>> = {}): Omit<MoveTargetView, 'pane'> => ({
   sessionId: 'session-1',
   harness: 'claude',
-  tmuxSession: 'fy-session-1',
   status: 'waiting',
   turn: 3,
   openTools: [],
@@ -51,21 +69,21 @@ const chatTail = [
 ];
 
 describe('MovePreflight', () => {
-  it('should join every signal into one report keyed on the target pane', async () => {
+  it('should join every signal into one report over the target pane', async () => {
     // Arrange
     const inventory = new StubInventory({
       kind: 'observed',
       processes: [{ pid: 900, argv: 'vitest run', verdict: 're_armable' }],
     });
     const panes = new StubPanes('');
-    const preflight = new MovePreflight(inventory, panes);
+    const preflight = new PreflightOver(inventory, panes);
 
     // Act
     const report = await preflight.inspect(view({ status: 'tool_running', openTools: ['tool-1'] }), chatTail);
 
     // Assert
-    should(inventory.sessions).deepEqual(['fy-session-1']);
-    should(panes.sessions).deepEqual([]);
+    should(inventory.panes).deepEqual([panes]);
+    should(panes.reads).equal(0);
     should(report.openTools).deepEqual([
       {
         toolUseId: 'tool-1',
@@ -99,11 +117,11 @@ describe('MovePreflight', () => {
     const inventory = new StubInventory({ kind: 'observed', processes: [] });
 
     // Act
-    const codex = await new MovePreflight(inventory, panes).inspect(view({ harness: 'codex' }));
-    const claude = await new MovePreflight(inventory, new StubPanes('2 background terminals running')).inspect(view());
+    const codex = await new PreflightOver(inventory, panes).inspect(view({ harness: 'codex' }));
+    const claude = await new PreflightOver(inventory, new StubPanes('2 background terminals running')).inspect(view());
 
     // Assert
-    should(panes.sessions).deepEqual(['fy-session-1']);
+    should(panes.reads).equal(1);
     should(codex.codexBackgroundTerminals).equal(2);
     should(codex.worstVerdict).equal('unknown');
     should(claude.codexBackgroundTerminals).equal(0);
@@ -112,7 +130,7 @@ describe('MovePreflight', () => {
 
   it('should turn an unreadable codex pane into a blind spot rather than a zero count', async () => {
     // Arrange
-    const preflight = new MovePreflight(
+    const preflight = new PreflightOver(
       new StubInventory({ kind: 'observed', processes: [] }),
       new StubPanes(new Error('no server running')),
     );
@@ -136,7 +154,7 @@ describe('MovePreflight', () => {
     // Blind-spotting it would refuse the move of every dead codex session — the exact case an
     // operator moves a session for — on evidence that could not exist.
     // Arrange
-    const preflight = new MovePreflight(
+    const preflight = new PreflightOver(
       new StubInventory({ kind: 'observed', processes: [] }),
       new StubPanes(undefined),
     );
@@ -153,7 +171,7 @@ describe('MovePreflight', () => {
 
   it('should refuse a session whose pane could not be walked at all', async () => {
     // Arrange
-    const preflight = new MovePreflight(
+    const preflight = new PreflightOver(
       new StubInventory({ kind: 'unobservable', reason: 'the pane pid could not be resolved: no server running' }),
       new StubPanes(''),
     );
@@ -168,7 +186,7 @@ describe('MovePreflight', () => {
 
   it('should expose the report, forensic record, outcome and handoff it exists to produce', async () => {
     // Arrange
-    const preflight = new MovePreflight(
+    const preflight = new PreflightOver(
       new StubInventory({
         kind: 'observed',
         processes: [{ pid: 900, argv: 'rm -rf work', verdict: 'destructive_to_interrupt' }],
@@ -203,10 +221,51 @@ describe('MovePreflight', () => {
   });
 });
 
+describe('a Claude tool shell the move finds mid-turn', () => {
+  const foreground = {
+    pid: 40,
+    argv: '/usr/bin/zsh -c eval sleep 299',
+    startedSecondsAgo: 30,
+    verdict: 'unknown' as const,
+    toolShell: 40,
+    claudeTaskId: 'task1',
+  };
+
+  it('should be a neutral "command the agent is running" when the state records no open tools, and never a background job', async () => {
+    // Arrange — turnState working, a foreground `sleep 299` writing to tasks/<id>.output, openTools ABSENT (what production has).
+    const preflight = new PreflightOver(
+      new StubInventory({ kind: 'observed', processes: [foreground] }),
+      new StubPanes(''),
+    );
+
+    // Act
+    const report = await preflight.inspect(
+      view({ status: 'tool_running', turnState: 'working', openTools: undefined }),
+    );
+    const card = preflight.describe(report);
+
+    // Assert
+    should(report.processes[0]?.agentCommand).be.true();
+    should(report.processes[0]?.unkeptJob).be.undefined();
+    const title = card.items.find(item => item.pid === 40)?.title ?? '';
+    should(title).containEql('a command the agent is running');
+    should(title).not.containEql('background job');
+  });
+
+  it('should be called a background job only when the state RECORDS its open tools and none of them is this shell', async () => {
+    const preflight = new PreflightOver(
+      new StubInventory({ kind: 'observed', processes: [foreground] }),
+      new StubPanes(''),
+    );
+    const report = await preflight.inspect(view({ status: 'tool_running', turnState: 'working', openTools: [] }));
+    should(report.processes[0]?.unkeptJob).be.true();
+  });
+});
+
 describe('the agent’s own jobs a refusal names', () => {
   it('should hand back only the blocking processes the agent started from its tool shell', async () => {
     // Arrange
-    const preflight = new MovePreflight(
+    const preflight = new PreflightOver(
       new StubInventory({
         kind: 'observed',
         processes: [

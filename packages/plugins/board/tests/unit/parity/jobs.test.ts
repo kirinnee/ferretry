@@ -37,7 +37,7 @@ describe('jobs parity', () => {
     const { host } = await boot({ spawn: nothingInstalled(asked) });
     expect(host.jobIds()).toContain('board-github-watch');
     const card = await makeCard(host);
-    const linked = await host.request('POST', `/v1/board/cards/${card.id}`, {
+    const linked = await host.request('POST', `/v1/board/tasks/${card.id}`, {
       body: { action: 'link', pr: 'https://github.com/kirinnee/ferretry/pull/940' },
       headers: as('owner'),
     });
@@ -138,15 +138,15 @@ describe('jobs parity', () => {
     ferrets.setState(ferretId('g0'), 'stopped');
     const card = await makeCard(host, { projectId: project.id, assignee: 'g0' });
 
-    const started = await host.request('POST', `/v1/board/cards/${card.id}/start`, { headers: as('owner') });
+    const started = await host.request('POST', `/v1/board/tasks/${card.id}/start`, { headers: as('owner') });
     expect(started.status).toBe(200);
-    const result = started.json<{ card: string; ferret: string; started: boolean }>();
+    const result = started.json<{ task: string; ferret: string; started: boolean }>();
 
     expect(result.started).toBe(true);
     expect((await ferrets.get(result.ferret as never))?.folder).toBe(folder);
 
-    const read = await host.request('GET', `/v1/board/cards/${card.id}`, { headers: as('owner') });
-    expect(read.json<{ card: { assignee: string | null } }>().card.assignee).toBe(result.ferret);
+    const read = await host.request('GET', `/v1/board/tasks/${card.id}`, { headers: as('owner') });
+    expect(read.json<{ task: { assignee: string | null } }>().task.assignee).toBe(result.ferret);
   });
 
   test('J-0091 the work search no longer watches the board’s directory: Board hands Conversation its cards through search.sources, which re-indexes by identity', async () => {
@@ -157,7 +157,7 @@ describe('jobs parity', () => {
     const before = (await contribution?.item.list()) ?? [];
     expect(before.map(work => work.key)).toEqual([`card:${made.id}`]);
     expect((await contribution?.item.list())?.[0]).toBe(before[0]);
-    await world.host.request('POST', `/v1/board/cards/${made.id}`, {
+    await world.host.request('POST', `/v1/board/tasks/${made.id}`, {
       body: { action: 'note', text: 'a change the search must see' },
       headers: as('owner'),
     });
@@ -174,7 +174,7 @@ describe('jobs parity', () => {
     expect(afterFirstSearch.map(work => work.key)).toEqual([`card:${first.id}`]);
 
     const second = await makeCard(world.host);
-    await world.host.request('POST', `/v1/board/cards/${first.id}`, {
+    await world.host.request('POST', `/v1/board/tasks/${first.id}`, {
       body: { action: 'note', text: 'zebra crossing' },
       headers: as('owner'),
     });

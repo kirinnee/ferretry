@@ -14,6 +14,14 @@ export interface HostFileInfo {
   readonly regularFile: boolean;
   readonly directory: boolean;
   readonly symlink?: boolean;
+  /** The device the file lives on. Absent where the host has no such thing (the in-memory host). */
+  readonly device?: bigint;
+  /**
+   * The status-change time to the nanosecond. Every write, rename and truncate moves it and no caller can set it back
+   * (`utimes` sets the modification time, never this), so unlike {@link modifiedAtMs} it cannot be forged. Absent
+   * where the host has no such clock.
+   */
+  readonly changedAtNs?: bigint;
 }
 
 export interface HostDirEntry {
@@ -37,6 +45,12 @@ export interface HostFs {
    * A link is refused, never followed.
    */
   readTail(path: string, maxBytes: number): Promise<{ readonly bytes: Uint8Array; readonly from: number } | undefined>;
+  /**
+   * Hands a regular file to `onChunk` in pieces of at most `chunkBytes`, in order, holding only one piece: `false`
+   * when the file does not exist. A piece is reused after `onChunk` returns, so it must be copied to be kept. A
+   * link is refused, never followed; a fault, or a throw from `onChunk`, ends the read and rejects.
+   */
+  streamBytes(path: string, chunkBytes: number, onChunk: (chunk: Uint8Array) => void | Promise<void>): Promise<boolean>;
   /** `lstat`: `undefined` when the path does not exist. */
   info(path: string): Promise<HostFileInfo | undefined>;
   /** The entries of a directory; `[]` when it does not exist. */
@@ -120,16 +134,38 @@ export function createNodeHostFs(options: NodeHostFsOptions = {}): HostFs {
         await handle.close();
       }
     },
+    async streamBytes(path, chunkBytes, onChunk) {
+      let handle: FileHandle;
+      try {
+        handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      } catch (error) {
+        if (isMissing(error)) return false;
+        throw error;
+      }
+      try {
+        if (!(await handle.stat()).isFile()) throw new Error('not a regular file');
+        const buffer = new Uint8Array(chunkBytes);
+        for (;;) {
+          const { bytesRead } = await handle.read(buffer, 0, chunkBytes, null);
+          if (bytesRead === 0) return true;
+          await onChunk(buffer.subarray(0, bytesRead));
+        }
+      } finally {
+        await handle.close();
+      }
+    },
     async info(path) {
       try {
-        const stats = await lstat(path);
+        const stats = await lstat(path, { bigint: true });
         return {
-          size: stats.size,
-          modifiedAtMs: stats.mtimeMs,
-          inode: stats.ino,
+          size: Number(stats.size),
+          modifiedAtMs: Number(stats.mtimeNs) / 1_000_000,
+          inode: Number(stats.ino),
           regularFile: stats.isFile(),
           directory: stats.isDirectory(),
           symlink: stats.isSymbolicLink(),
+          device: stats.dev,
+          changedAtNs: stats.ctimeNs,
         };
       } catch (error) {
         if (isMissing(error)) return undefined;

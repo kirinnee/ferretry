@@ -361,7 +361,8 @@ const MOVE_TRIGGERS: readonly { readonly id: WardenAutoMoveTrigger; readonly lab
 
 /**
  * Moving a ferret that hit a limit (`autoMove`). A rule, not a layer: it needs no AI and spends nothing, so it
- * is offered whenever the Warden is on. Off is the default; an agent that turns it on waits for the owner.
+ * is offered whenever the Warden is on. On is the default (an explicit off in warden.yaml is kept); an agent that turns
+ * it back on waits for the owner.
  */
 function MoveToAnotherLogin({
   value,
@@ -387,7 +388,7 @@ function MoveToAnotherLogin({
     >
       <LayerRow
         title="Move the ferret to another login"
-        detail="Same chat, same card — only the login changes. It goes to a login of the same kind that is ready, switched on, under its budget and has quota left. Off: the Warden tells you and you move it."
+        detail="Same chat, same task — only the login changes. It goes to a login of the same kind that is ready, switched on, under its budget and has quota left; with none, it waits and carries on at the reset. Off: the Warden tells you and you move it."
         on={moving.enabled}
         onToggle={enabled => setMoving({ enabled })}
       >
@@ -484,7 +485,7 @@ function MoveToAnotherLogin({
           />
         </div>
         <p className="m-0 text-meta leading-base text-muted">
-          Never while it has a card open for you, holds a secret, or waits on a prompt. Every move is listed under
+          Never while it has an input open for you, holds a secret, or waits on a prompt. Every move is listed under
           Recent triggers.
         </p>
       </LayerRow>

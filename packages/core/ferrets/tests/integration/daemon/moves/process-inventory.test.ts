@@ -8,43 +8,49 @@ import {
   PaneProcessInventory,
   type ProcessHostFacts,
   ProjectMcpServers,
-  TmuxPaneSnapshot,
 } from '../../../../daemon/adapters/moves/process-inventory.ts';
 import type { ConfiguredServer } from '../../../../daemon/lib/moves/harness-provenance.ts';
-import type { ProcessProbePort, ProcessTableRead } from '../../../../daemon/lib/moves/process-inventory-port.ts';
-import {
-  PANE_PROOF_FORMAT,
-  type TmuxCommandPort,
-  type TmuxCommandResult,
-} from '../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
+import type {
+  MovePane,
+  ProcessProbePort,
+  ProcessTableRead,
+} from '../../../../daemon/lib/moves/process-inventory-port.ts';
+import type { RunnerPaneIdentity } from '../../../../contract/index.ts';
 
 /**
- * A tmux that answers per COMMAND, because absence is now two questions rather than one.
- *
- * `has-session` is what the adapters ask after a failed read to tell "this session is gone" from
- * "tmux would not answer", so a fake that returned one result for every command could not express
- * the difference the adapters exist to draw. It defaults to a server that CONFIRMS the session is
- * there, which is the conservative half: a case must opt into absence.
+ * A pane as its runner reports it: the identity it answers (`'gone'` when PROVED absent, `undefined` when it cannot tell, a
+ * thrown error when it breaks) and the screen it shows. The inventory addresses a pane only through this.
  */
-class FakeTmux implements TmuxCommandPort {
-  readonly calls: Array<readonly string[]> = [];
-
-  constructor(
-    private readonly result: TmuxCommandResult,
-    private readonly hasSession: TmuxCommandResult = { code: 0, stdout: '', stderr: '' },
-  ) {}
-
-  async execute(arguments_: readonly string[]): Promise<TmuxCommandResult> {
-    this.calls.push(arguments_);
-    return arguments_[0] === 'has-session' ? this.hasSession : this.result;
-  }
+function pane(
+  identity: RunnerPaneIdentity | 'gone' | undefined | Error,
+  screen = '',
+): MovePane & { readonly asked: number } {
+  const state = { asked: 0 };
+  return {
+    get asked() {
+      return state.asked;
+    },
+    identify: async () => {
+      state.asked += 1;
+      if (identity instanceof Error) throw identity;
+      return identity;
+    },
+    screen: async () => screen,
+  };
 }
 
-/** The pane proof tmux prints for a live pane running `pid`. */
-const livePane = (pid: number): string => `%3|${String(pid)}|0|1792626406\n`;
+/** A live pane whose root is `pid`. */
+const livePane = (pid: number) =>
+  pane({ handle: '%3' as RunnerPaneIdentity['handle'], pid, processStart: '1792626406' });
 
-/** What tmux answers about a session it does not have. */
-const NO_SUCH_SESSION: TmuxCommandResult = { code: 1, stdout: '', stderr: "can't find session: isolated-session\n" };
+/** The inventory over a probe, reading the pane it is handed (a test says which; there is no session name to look up). */
+const inventory = (
+  target: MovePane,
+  probe: ProcessProbePort,
+  provenanceOf: ConstructorParameters<typeof PaneProcessInventory>[1],
+) => ({
+  collect: async (_name?: string) => await new PaneProcessInventory(probe, provenanceOf).collect(target),
+});
 
 class FakeProbe implements ProcessProbePort {
   readonly workingDirectoryCalls: number[] = [];
@@ -74,13 +80,13 @@ const provenance = {
 };
 
 describe('PaneProcessInventory', () => {
-  it('should inspect only pane descendants through the socket-scoped tmux port', async () => {
+  it('should inspect only the descendants of the root the runner names', async () => {
     // Arrange
-    const tmux = new FakeTmux({ code: 0, stdout: livePane(100), stderr: '' });
+    const target = livePane(100);
     const probe = new FakeProbe(table('100 1 50 harness\n200 100 20 npm test\n300 1 10 unrelated'));
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, probe, provenance).collect('isolated-session');
+    const actual = await inventory(target, probe, provenance).collect();
 
     // Assert
     should(actual).deepEqual({
@@ -96,88 +102,46 @@ describe('PaneProcessInventory', () => {
         },
       ],
     });
-    should(tmux.calls).deepEqual([['display-message', '-p', '-t', 'isolated-session', PANE_PROOF_FORMAT]]);
+    should(target.asked).equal(1);
     should(probe.workingDirectoryCalls).deepEqual([200, 100]);
   });
 
-  it('should report an unresolvable pane as unobservable while the session still exists', async () => {
-    // tmux answers the second question — the session IS there — so the failed pane-pid read is a
-    // genuine blind spot: something is running under a pane nobody could inspect.
+  it('should report a pane the runner cannot place as unobservable, a blind spot the gate refuses on', async () => {
+    // A runner with no `identify`, or one that cannot tell, is not "no work": something may run under a pane nobody could inspect.
     // Arrange
-    const tmux = new FakeTmux({ code: 1, stdout: '', stderr: "no server running on '/tmp/fy.sock'\n" });
+    const target = pane(undefined);
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table('')), provenance).collect(
-      'isolated-session',
-    );
+    const actual = await inventory(target, new FakeProbe(table('')), provenance).collect();
 
     // Assert
     should(actual).deepEqual({
       kind: 'unobservable',
-      reason: "the pane pid could not be resolved: no server running on '/tmp/fy.sock'",
+      reason: 'the runner could not say which process the pane runs',
     });
   });
 
-  it('should report a pane tmux confirms is gone as an empty observation, not a blind spot', async () => {
-    // THE COMMONEST MOVE THERE IS. A session whose account died has no pane at all, and a
-    // failed pane-pid read used to be unobservable unconditionally — which made the report carry an
-    // `unknown` verdict and the gate refuse the very move the operator was trying to make. tmux is
-    // asked outright, and a session it says does not exist ran nothing.
+  it('should report a pane the runner PROVES gone as an empty observation, not a blind spot', async () => {
+    // THE COMMONEST MOVE THERE IS. A ferret whose account died has no pane at all, and "I could not look" would refuse the very
+    // move the operator is trying to make. Only a pane the runner proves absent ran nothing.
     // Arrange
-    const tmux = new FakeTmux({ code: 1, stdout: '', stderr: 'no server running\n' }, NO_SUCH_SESSION);
-
-    // Act
-    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table('')), provenance).collect(
-      'isolated-session',
-    );
-
-    // Assert
-    should(actual).deepEqual({ kind: 'observed', processes: [] });
-    should(tmux.calls).deepEqual([
-      ['display-message', '-p', '-t', 'isolated-session', PANE_PROOF_FORMAT],
-      ['has-session', '-t', 'isolated-session'],
-    ]);
-  });
-
-  it('should report a silent tmux failure with its exit code', async () => {
-    // Arrange
-    const tmux = new FakeTmux({ code: 3, stdout: '', stderr: '   ' });
-
-    // Act
-    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table('')), provenance).collect(
-      'isolated-session',
-    );
-
-    // Assert
-    should(actual).deepEqual({
-      kind: 'unobservable',
-      reason: 'the pane pid could not be resolved: tmux exited 3',
-    });
-  });
-
-  it('should reject a pane pid that cannot own a process tree', async () => {
-    // Arrange
-    const tmux = new FakeTmux({ code: 0, stdout: 'not-a-pid\n', stderr: '' });
-
-    // Act
-    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table('')), provenance).collect(
-      'isolated-session',
-    );
-
-    // Assert
-    should(actual).deepEqual({
-      kind: 'unobservable',
-      reason: 'tmux reported an unusable pane pid "not-a-pid"',
-    });
-  });
-
-  it('should report a dead pane as running nothing, with or without the pid tmux 3.8 no longer prints', async () => {
-    // Arrange — tmux 3.8 blanks a dead pane's pid; 3.6a and 3.7 keep it, but its process is gone either way.
-    const on38 = new FakeTmux({ code: 0, stdout: '%3||1|1792626406\n', stderr: '' });
     const probe = new FakeProbe(table(''));
 
     // Act
-    const actual = await new PaneProcessInventory(on38, probe, provenance).collect('isolated-session');
+    const actual = await inventory(pane('gone'), probe, provenance).collect();
+
+    // Assert
+    should(actual).deepEqual({ kind: 'observed', processes: [] });
+    should(probe.workingDirectoryCalls).deepEqual([]);
+  });
+
+  it('should report a dead pane the runner keeps as running nothing, with no pid to look under', async () => {
+    // Arrange — a dead pane has no root process; its identity carries a handle and nothing else.
+    const target = pane({ handle: '%3' as RunnerPaneIdentity['handle'] });
+    const probe = new FakeProbe(table(''));
+
+    // Act
+    const actual = await inventory(target, probe, provenance).collect();
 
     // Assert — observed, not a blind spot, and no process was looked for.
     should(actual).deepEqual({ kind: 'observed', processes: [] });
@@ -186,11 +150,10 @@ describe('PaneProcessInventory', () => {
 
   it('should surface a failed process-table read as the blind spot it is', async () => {
     // Arrange
-    const tmux = new FakeTmux({ code: 0, stdout: livePane(100), stderr: '' });
     const probe = new FakeProbe({ kind: 'failed', reason: 'ps exited 1: cannot allocate memory' });
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, probe, provenance).collect('isolated-session');
+    const actual = await inventory(livePane(100), probe, provenance).collect();
 
     // Assert
     should(actual).deepEqual({
@@ -199,17 +162,17 @@ describe('PaneProcessInventory', () => {
     });
   });
 
-  it('should report a rejected session name instead of silently seeing nothing', async () => {
-    // Arrange — an invalid tmux target throws inside the address validator.
-    const tmux = new FakeTmux({ code: 0, stdout: livePane(100), stderr: '' });
+  it('should report a runner that breaks as a blind spot, never as an empty pane', async () => {
+    // Arrange
+    const target = pane(new Error('the runner is not running'));
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table('')), provenance).collect('NOT A SESSION');
+    const actual = await inventory(target, new FakeProbe(table('')), provenance).collect();
 
     // Assert
     should(actual).deepEqual({
       kind: 'unobservable',
-      reason: 'the pane could not be inspected: session must be a lowercase tmux name',
+      reason: 'the pane could not be inspected: the runner is not running',
     });
   });
 });
@@ -392,10 +355,49 @@ describe('KernelProcessProbe, reading one subtree from procfs', () => {
 
     // Assert
     should(actual).deepEqual([
-      { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js' },
+      { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js', command: 'node x.js' },
       { pid: 201, ppid: 100, startedSecondsAgo: 10, argv: '[kw)x]' },
-      { pid: 300, ppid: 100, startedSecondsAgo: 0, argv: 'echo a?b' },
+      // The display copy has the newline as `?`; the exact command keeps it, so a multi-line command can be judged per line.
+      { pid: 300, ppid: 100, startedSecondsAgo: 0, argv: 'echo a?b', command: 'echo a\nb' },
     ]);
+  });
+
+  describe('a multi-line Claude tool command', () => {
+    const wrapper = (payload: string): string =>
+      "/usr/bin/zsh\0-c\0source /h/shell-snapshots/snapshot-zsh-1-ab.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB 2>/dev/null || true && eval '" +
+      payload +
+      "' < /dev/null && pwd -P >| /tmp/claude-99ff-cwd\0";
+    const MULTI_LINE = 'echo start\ngit stash\nbun test\ngit stash pop';
+    const pane = (): FakeProc =>
+      new FakeProc()
+        .set('stat', `cpu 1 2 3\nbtime ${String(BOOT_SECONDS)}\n`)
+        .set('100/task/100/children', '200')
+        .set('200/stat', stat(200, 'zsh', 100, 50_000))
+        .set('200/cmdline', wrapper(MULTI_LINE));
+    const paneInventory = (probe: ProcessProbePort) => inventory(livePane(100), probe, provenance);
+
+    it('should judge EVERY line when the kernel gave the words (the stash in the middle is seen)', async () => {
+      // Act
+      const observed = await paneInventory(probeOver(pane())).collect('session-1');
+
+      // Assert — judged by its first line alone this was `echo`: safe_to_kill, and the gate passed.
+      should(observed).containDeep({
+        kind: 'observed',
+        processes: [{ pid: 200, verdict: 'destructive_to_interrupt' }],
+      });
+    });
+
+    it('should refuse to unwrap the lossy `ps` form, whose newlines are already `?`', async () => {
+      // Arrange — what `ps` prints for the same process: every control character is a `?`.
+      const lossy = wrapper(MULTI_LINE).replaceAll('\0', ' ').replaceAll('\n', '?').trim();
+      const probe = new FakeProbe(table(`100 1 50 harness\n200 100 20 ${lossy}`));
+
+      // Act
+      const observed = await paneInventory(probe).collect('session-1');
+
+      // Assert — not unwrapped, so not judged by `echo start`: it blocks.
+      should(observed).containDeep({ kind: 'observed', processes: [{ pid: 200, verdict: 'unknown' }] });
+    });
   });
 
   it('should hand the question back to the full table whenever procfs cannot answer it', async () => {
@@ -439,7 +441,7 @@ describe('KernelProcessProbe, reading one subtree from procfs', () => {
 describe('PaneProcessInventory, over a probe that reads one subtree', () => {
   it('should not read the full table when the probe can read the subtree', async () => {
     // Arrange
-    const tmux = new FakeTmux({ code: 0, stdout: livePane(100), stderr: '' });
+    const target = livePane(100);
     let tables = 0;
     const probe: ProcessProbePort = {
       processTable: async () => {
@@ -451,7 +453,7 @@ describe('PaneProcessInventory, over a probe that reads one subtree', () => {
     };
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, probe, provenance).collect('fy-session');
+    const actual = await inventory(target, probe, provenance).collect('fy-session');
 
     // Assert
     should(actual).match({ kind: 'observed', processes: [{ pid: 200, argv: 'sleep 30', cwd: '/work' }] });
@@ -460,7 +462,7 @@ describe('PaneProcessInventory, over a probe that reads one subtree', () => {
 
   it('should read the full table when the probe cannot read the subtree', async () => {
     // Arrange
-    const tmux = new FakeTmux({ code: 0, stdout: livePane(100), stderr: '' });
+    const target = livePane(100);
     const probe: ProcessProbePort = {
       processTable: async () => table('  200   100 00:05 sleep 30\n  300     1 00:05 other\n'),
       descendants: async () => undefined,
@@ -468,58 +470,10 @@ describe('PaneProcessInventory, over a probe that reads one subtree', () => {
     };
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, probe, provenance).collect('fy-session');
+    const actual = await inventory(target, probe, provenance).collect('fy-session');
 
     // Assert
     should(actual).match({ kind: 'observed', processes: [{ pid: 200, argv: 'sleep 30' }] });
-  });
-});
-
-describe('TmuxPaneSnapshot', () => {
-  it('should capture the visible pane through the socket-scoped tmux port', async () => {
-    // Arrange
-    const tmux = new FakeTmux({ code: 0, stdout: '2 background terminals running\n', stderr: '' });
-
-    // Act
-    const actual = await new TmuxPaneSnapshot(tmux).visible('isolated-session');
-
-    // Assert
-    should(actual).equal('2 background terminals running\n');
-    should(tmux.calls).deepEqual([['capture-pane', '-p', '-t', 'isolated-session']]);
-  });
-
-  it('should raise a capture failure rather than return an empty pane', async () => {
-    // Both fakes confirm the session exists, so a failed capture is a pane that could not be read —
-    // which the preflight must record as a blind spot rather than as an empty codex footer.
-    // Arrange
-    const reported = new FakeTmux({ code: 1, stdout: '', stderr: "can't find pane\n" });
-    const silent = new FakeTmux({ code: 2, stdout: '', stderr: '' });
-
-    // Act + Assert
-    await should(new TmuxPaneSnapshot(reported).visible('isolated-session')).be.rejectedWith(
-      "tmux could not capture the pane: can't find pane",
-    );
-    await should(new TmuxPaneSnapshot(silent).visible('isolated-session')).be.rejectedWith(
-      'tmux could not capture the pane: exited 2',
-    );
-  });
-
-  it('should answer nothing at all for a pane tmux confirms is gone', async () => {
-    // `undefined` is the codex footer of a session that no longer has a terminal: there is nothing
-    // to count, which is different from a footer that could not be read. Raising here would make
-    // every stopped codex session refuse its own move on evidence nobody could have produced.
-    // Arrange
-    const tmux = new FakeTmux({ code: 1, stdout: '', stderr: "can't find pane\n" }, NO_SUCH_SESSION);
-
-    // Act
-    const actual = await new TmuxPaneSnapshot(tmux).visible('isolated-session');
-
-    // Assert
-    should(actual).be.undefined();
-    should(tmux.calls).deepEqual([
-      ['capture-pane', '-p', '-t', 'isolated-session'],
-      ['has-session', '-t', 'isolated-session'],
-    ]);
   });
 });
 
@@ -531,11 +485,11 @@ const fixtureTable = (name: string): ProcessTableRead => ({
 describe('PaneProcessInventory, over real process tables', () => {
   it('should not call the harness’s own Ferretry tools server unknown (the owner’s refusal)', async () => {
     // Arrange — `claude` IS the pane process here, as tmux reports it, and `fy mcp serve` is its child.
-    const tmux = new FakeTmux({ code: 0, stdout: livePane(3887833), stderr: '' });
+    const target = livePane(3887833);
     const probe = new FakeProbe(fixtureTable('linux-owner-case.txt'));
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, probe, provenance).collect('fy-session');
+    const actual = await inventory(target, probe, provenance).collect('fy-session');
 
     // Assert
     should(actual).deepEqual({
@@ -556,7 +510,7 @@ describe('PaneProcessInventory, over real process tables', () => {
 
   it('should read the project’s configured servers from the pane directory and explain macOS npx servers', async () => {
     // Arrange
-    const tmux = new FakeTmux({ code: 0, stdout: livePane(412), stderr: '' });
+    const target = livePane(412);
     const asked: string[] = [];
     const servers = {
       read: async (directory: string): Promise<readonly ConfiguredServer[]> => {
@@ -566,7 +520,7 @@ describe('PaneProcessInventory, over real process tables', () => {
     };
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, new FakeProbe(fixtureTable('macos-claude-pane.txt')), {
+    const actual = await inventory(target, new FakeProbe(fixtureTable('macos-claude-pane.txt')), {
       ...provenance,
       servers,
     }).collect('fy-session');
@@ -588,7 +542,7 @@ describe('PaneProcessInventory, over real process tables', () => {
 
   it('should leave configured servers unexplained when the pane directory is not readable', async () => {
     // Arrange — macOS has no /proc, so the working directory is unknown and nothing is read or guessed.
-    const tmux = new FakeTmux({ code: 0, stdout: livePane(412), stderr: '' });
+    const target = livePane(412);
     const servers = {
       read: async (): Promise<readonly ConfiguredServer[]> => {
         throw new Error('must not be asked');
@@ -596,8 +550,8 @@ describe('PaneProcessInventory, over real process tables', () => {
     };
 
     // Act
-    const actual = await new PaneProcessInventory(
-      tmux,
+    const actual = await inventory(
+      target,
       { processTable: async () => fixtureTable('macos-claude-pane.txt'), workingDirectory: async () => undefined },
       { ...provenance, servers },
     ).collect('fy-session');
@@ -687,7 +641,7 @@ describe('KernelProcessProbe, looking up pids wherever they are', () => {
 
     // Assert
     should([...actual.entries()]).deepEqual([
-      [200, { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js' }],
+      [200, { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js', command: 'node x.js' }],
     ]);
   });
 
@@ -711,5 +665,29 @@ describe('KernelProcessProbe, looking up pids wherever they are', () => {
     // Assert
     should([...found.keys()]).deepEqual([200]);
     await should(unreadable).be.rejectedWith('ps exited 1: cannot allocate memory');
+  });
+});
+
+describe('PaneProcessInventory and the job keeper on the gate path', () => {
+  const rows = table('100 1 50 claude\n200 100 20 fy job attach build');
+  const collect = async (attachments: () => Promise<never[] | { pid: number; jobId: string; jobName: string }[]>) =>
+    await new PaneProcessInventory(new FakeProbe(rows), {
+      ...provenance,
+      attachments,
+      keeperTimeoutMs: 20,
+      sleep: async ms => await new Promise<void>(done => setTimeout(done, ms)),
+    }).collect(livePane(100), 'ferret-a');
+  const attach = (observed: Awaited<ReturnType<typeof collect>>) =>
+    observed.kind === 'observed' ? observed.processes.find(entry => entry.pid === 200) : undefined;
+
+  it('should know the attachment the keeper proves', async () => {
+    const found = attach(await collect(async () => [{ pid: 200, jobId: 'abc', jobName: 'build' }]));
+    should(found?.known?.kind).equal('job-attachment');
+  });
+
+  it('should fail closed when the keeper does not answer in time: no attachment is proven, the classifier decides', async () => {
+    const found = attach(await collect(async () => await new Promise<never>(() => undefined)));
+    should(found?.known).be.undefined();
+    should(found?.verdict).not.equal('safe_to_kill');
   });
 });

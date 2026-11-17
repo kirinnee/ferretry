@@ -1,0 +1,10 @@
+# token<TAB>reason<TAB>until
+#
+# A whitespace-free token that a SENTENCE quotes and that is not renamed with the text around it, so the `vocabulary`
+# check does not count its word. Token-keyed (not line-keyed), so it survives edits; a token that no scanned text holds
+# is a finding, so this list cannot rot. `until` is `step2` (it goes with the step-2 rename of identifiers) or `stored`
+# (a name on disk or in a stored ref; never renamed). A new entry is a reviewed decision, not a way to add text.
+#
+card-agenda:	the sourceRef prefix of the agenda the daemon opened for a piece of work; stored in obligations and agenda files, never renamed (O18 plan 1b)	stored
+{card}	the template placeholder over the stored ask-ref field `card` (packages/plugins/board/daemon/index.ts, the ask.sources:card title); a field name on disk, never renamed	stored
+--card	the former name of `--task` on `start` and `new`, still read for agents' old instructions and declared hidden so the shell accepts it (packages/core/ferrets/cli/verbs/start.verb.ts); goes with the step-2 rename	step2

@@ -100,7 +100,7 @@ describe('mutatingWork', () => {
     ['a read', call('Read', { file_path: '/w/a.ts' })],
     ['a search for the words', call('Grep', { pattern: 'git commit' })],
     ['a status', call('Bash', { command: 'git status && git log --oneline' })],
-    ['a board read', call('Bash', { command: 'zz card show F1 && zz newsletter' })],
+    ['a board read', call('Bash', { command: 'zz task show F1 && zz newsletter' })],
     ['another binary', call('Bash', { command: 'fy new "x"' })],
     ['a command that is not text', call('Bash', { command: 42 })],
     ['an input that is not an object', call('Bash', 'git push')],
@@ -134,7 +134,7 @@ describe('mutatingWork', () => {
   it('should never check a turn the nudge itself started, nor one an older tagged nudge started', () => {
     // Arrange
     const events = [owner(boardCheckMessage('zz')), call('Edit', {})];
-    const older = [owner('[board] You changed code this turn without a card. Create one…'), call('Edit', {})];
+    const older = [owner('[board] You changed code this turn without a task. Create one…'), call('Edit', {})];
 
     // Act + Assert
     should(mutatingWork(events, 'zz')).eql([]);
@@ -149,7 +149,7 @@ describe('the board check words', () => {
 
     // Assert
     should(message).equal(
-      'You changed code this turn without a card. Create one (zz task create …) or record why not: zz task skip "<why>"',
+      'You changed code this turn without a task. Create one (zz task new …) or record why not: zz task skip "<why>"',
     );
   });
 
@@ -251,7 +251,7 @@ describe('BoardTurnCheck', () => {
     const gone = harness({
       focus: { id: 'F9' },
       card: async () => {
-        throw new BoardError('not-found', 'there is no card on this machine');
+        throw new BoardError('not-found', 'there is no task on this machine');
       },
     });
 

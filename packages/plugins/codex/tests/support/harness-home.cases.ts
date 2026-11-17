@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LaunchSpec, Runner, RunSpec } from '@ferretry/core-ferrets/contract';
 import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/testing';
 import { defineState, type FerretId, type SharedCredential } from '@ferretry/kernel/contract';
+import { buildSnapshot } from '@ferretry/kernel/host';
 import { ok } from '@ferretry/std';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { CODEX_SETTINGS } from '../../contract/index.ts';
@@ -116,6 +118,38 @@ export function harnessHomeCases(): void {
 
   const ENV = {} as RunSpec['env'];
 
+  describe('the AGENTS.md a launch writes carries the job keeper words (F4316)', () => {
+    // The ACTIVE path: a manifest `instructions` entry -> the kernel snapshot (text read from the real
+    // `instructions/jobs.md`) -> the launch's instruction list -> the file Codex reads. Terminals' own unit test pins the
+    // declaration; this builds the real Codex home from it for auto and interactive ferrets, lead and helper.
+    const JOBS_FILE = join(import.meta.dir, '../../../terminals/instructions/jobs.md');
+    const snapshot = buildSnapshot(
+      [
+        {
+          id: 'terminals',
+          instructions: [{ id: 'jobs', text: 'instructions/jobs.md', when: { role: 'any' } }],
+        } as never,
+      ],
+      [],
+      () => readFileSync(JOBS_FILE, 'utf8'),
+    );
+    const JOBS = readFileSync(JOBS_FILE, 'utf8').trim();
+
+    for (const mode of ['auto', 'interactive'] as const)
+      for (const role of ['lead', 'helper'] as const)
+        test(`a ${mode} ${role} reads them`, async () => {
+          const { harness } = build();
+          const home = await harness.homeFor('f2' as FerretId);
+          const instructions = snapshot.instructions.filter(
+            entry => entry.when.role === undefined || entry.when.role === 'any' || entry.when.role === role,
+          );
+          await harness.prepareHome({ ...spec('f2', home), role, mode, instructions } as unknown as LaunchSpec);
+          const agents = await readFile(join(home, 'AGENTS.md'), 'utf8');
+          expect(agents).toContain(JOBS);
+          expect(agents).toContain('Codex: exec_command with a short yield_time_ms');
+        });
+  });
+
   describe('the Codex harness over the real kernel roots', () => {
     test('S42 the home homeFor names ends 0700 before launch, a link at agent-homes/<ferret> is refused, and nothing runs', async () => {
       const { harness } = build();
@@ -177,6 +211,7 @@ export function harnessHomeCases(): void {
       const config = await readFile(join(home, 'config.toml'), 'utf8');
       expect(config).toBe(
         [
+          'check_for_update_on_startup = false',
           'model = "gpt-5"',
           '',
           '[shell_environment_policy]',
@@ -202,14 +237,16 @@ export function harnessHomeCases(): void {
         ...spec('f2', home),
         runtime: 'work',
       } as LaunchSpec);
-      expect(await readFile(join(home, 'config.toml'), 'utf8')).toBe('model = "gpt-5"\n');
+      expect(await readFile(join(home, 'config.toml'), 'utf8')).toBe(
+        'check_for_update_on_startup = false\nmodel = "gpt-5"\n',
+      );
 
-      // A profile that names no settings component gets none, so no config.toml settings at all.
+      // A profile that names no settings component gets none: only Ferretry's own default is in its config.toml.
       await build(items, { selected: selectSettings() }).harness.prepareHome({
         ...spec('f2', home),
         runtime: 'bare',
       } as LaunchSpec);
-      await expect(readFile(join(home, 'config.toml'), 'utf8')).rejects.toThrow();
+      expect(await readFile(join(home, 'config.toml'), 'utf8')).toBe('check_for_update_on_startup = false\n');
     });
 
     test('settings items merge in name order (the later wins), beside the MCP servers a launch adds, and a launch server replaces a settings one', async () => {
@@ -248,17 +285,47 @@ export function harnessHomeCases(): void {
       await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
       await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
 
-      expect(warned).toHaveLength(1);
-      expect(warned[0]).toContain('no configuration port');
+      // (A composition with no pool also says, once, that the ferret goes on with its own history.)
+      const said = warned.filter(message => !message.includes('its own history'));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain('no configuration port');
     });
 
-    test('no settings item and no server writes no config.toml at all, as before', async () => {
+    test('O11b no settings item and no server still writes the one top-level key that answers the update prompt', async () => {
       const { harness } = build();
       const home = await harness.homeFor('f2' as FerretId);
 
       await harness.prepareHome(spec('f2', home));
 
-      expect(await readdir(home)).not.toContain('config.toml');
+      expect(await readFile(join(home, 'config.toml'), 'utf8')).toBe('check_for_update_on_startup = false\n');
+    });
+
+    test('O11b a settings item that sets check_for_update_on_startup keeps the person’s value, true included', async () => {
+      for (const value of [true, false]) {
+        const { harness } = build(new Map([['mine', { settings: { check_for_update_on_startup: value } }]]));
+        const home = await harness.homeFor('f2' as FerretId);
+
+        await harness.prepareHome(spec('f2', home));
+
+        const config = await readFile(join(home, 'config.toml'), 'utf8');
+        expect(config).toBe(`check_for_update_on_startup = ${String(value)}\n`);
+      }
+    });
+
+    test('a settings item that unsets the update key leaves nothing to say: a config.toml an earlier launch left is removed', async () => {
+      const home = join(AGENT_HOMES(), 'f2');
+      const present = async () => (await lstat(join(home, 'config.toml')).catch(() => undefined)) !== undefined;
+      // an earlier launch's file (a reused home) that this launch's settings no longer say anything for
+      await writeFile(join(home, 'config.toml'), 'check_for_update_on_startup = false\n');
+      const { harness } = build(new Map([['quiet', { settings: { check_for_update_on_startup: null } }]]));
+
+      const plan = await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
+
+      expect(await present()).toBe(false);
+      expect(plan.files.map(file => String(file).split('/').pop())).toEqual(['AGENTS.md']);
+      // and with nothing left to clear, a second launch has nothing to remove and does not fail
+      await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
+      expect(await present()).toBe(false);
     });
 
     test('S42 first launch on a fresh FY_HOME: the kernel made the agent-homes base 0700 at boot, the launch makes the ferret home under it', async () => {
@@ -396,9 +463,10 @@ export function harnessHomeCases(): void {
       await harness.prepareHome(spec('f2', home));
 
       expect(await kind(join(home, 'auth.json'))).toBe('absent');
-      expect(warned).toHaveLength(1);
-      expect(warned[0]).toContain('auth.json was a file, not the login’s link');
-      expect(warned[0]).not.toContain('a stale copy');
+      const said = warned.filter(message => !message.includes('its own history'));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain('auth.json was a file, not the login’s link');
+      expect(said[0]).not.toContain('a stale copy');
     });
 
     test('a stale FILE is replaced by the link when a credential is given', async () => {
@@ -411,6 +479,142 @@ export function harnessHomeCases(): void {
 
       expect(await kind(join(home, 'auth.json'))).toBe('link');
       expect(await readFile(join(home, 'auth.json'), 'utf8')).toBe(FAKE);
+    });
+
+    // ─── the link ends with the ferret or the login (c58-69): the sign-in is in a home only while it is wanted ───────────
+
+    /** A launch of `ferret` under `login`, its credential minted for it: the link is there when this returns. */
+    async function linkedFor(harness: ReturnType<typeof build>['harness'], ferret: string, login: string) {
+      const home = await harness.homeFor(ferret as FerretId);
+      const { credential, canonical } = await mintedCredential();
+      await harness.prepareHome({ ...spec(ferret, home), login, credential } as LaunchSpec);
+      expect(await kind(join(home, 'auth.json'))).toBe('link');
+      return { home, canonical };
+    }
+
+    test('a ferret that stopped has the sign-in taken out of its home, and the login’s own file stays', async () => {
+      const { harness } = build();
+      const { home, canonical } = await linkedFor(harness, 'f2', 'work');
+
+      await harness.credentials.released('f2');
+
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
+      expect(await readFile(canonical, 'utf8')).toBe(FAKE);
+    });
+
+    test('a stop clears a link this daemon did not place (it was restarted since the launch)', async () => {
+      const { harness } = build();
+      const { home } = await linkedFor(harness, 'f2', 'work');
+      const { harness: restarted } = build();
+
+      await restarted.credentials.released('f2');
+
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
+    });
+
+    test('a revoked login clears every home it was linked into, and no other login’s', async () => {
+      const { harness } = build();
+      const one = await linkedFor(harness, 'f2', 'work');
+      const two = await linkedFor(harness, 'f3', 'work');
+      const other = await linkedFor(harness, 'f4', 'spare');
+
+      await harness.credentials.revoked('work');
+
+      expect(await kind(join(one.home, 'auth.json'))).toBe('absent');
+      expect(await kind(join(two.home, 'auth.json'))).toBe('absent');
+      expect(await kind(join(other.home, 'auth.json'))).toBe('link');
+      expect(await readFile(one.canonical, 'utf8')).toBe(FAKE);
+    });
+
+    test('a login that was revoked once clears nothing a second time, and a relaunch under it links again', async () => {
+      const { harness } = build();
+      const { home } = await linkedFor(harness, 'f2', 'work');
+      await harness.credentials.revoked('work');
+      const { credential } = await mintedCredential();
+      await harness.prepareHome({ ...spec('f2', home), login: 'work', credential } as LaunchSpec);
+
+      await harness.credentials.revoked('nobody');
+      expect(await kind(join(home, 'auth.json'))).toBe('link');
+
+      await harness.credentials.revoked('work');
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
+    });
+
+    test('a ferret relaunched without a credential is no longer cleared by its old login', async () => {
+      const { harness } = build();
+      const { home } = await linkedFor(harness, 'f2', 'work');
+      await harness.prepareHome(spec('f2', home));
+      await writeFile(join(home, 'auth.json'), 'written by something else');
+
+      await harness.credentials.revoked('work');
+
+      expect(await readFile(join(home, 'auth.json'), 'utf8')).toBe('written by something else');
+    });
+
+    test('a login-less launch is never cleared by a revoked login', async () => {
+      const { harness } = build();
+      const home = await harness.homeFor('f2' as FerretId);
+      const { credential } = await mintedCredential();
+      await harness.prepareHome({ ...spec('f2', home), credential } as LaunchSpec);
+
+      await harness.credentials.revoked('work');
+
+      expect(await kind(join(home, 'auth.json'))).toBe('link');
+    });
+
+    test('a file Codex wrote in the link’s place is a copy of the sign-in and goes too; a folder stays', async () => {
+      const { harness } = build();
+      const { home } = await linkedFor(harness, 'f2', 'work');
+      await rm(join(home, 'auth.json'));
+      await writeFile(join(home, 'auth.json'), FAKE);
+
+      await harness.credentials.released('f2');
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
+
+      await mkdir(join(home, 'auth.json'));
+      await writeFile(join(home, 'auth.json', 'keep'), 'x');
+      await harness.credentials.released('f2');
+      expect(await readFile(join(home, 'auth.json', 'keep'), 'utf8')).toBe('x');
+    });
+
+    test('a ferret with no home, or no sign-in in it, is cleared without a word', async () => {
+      const warned: string[] = [];
+      const { harness } = build(new Map(), { warned });
+      await harness.homeFor('f2' as FerretId);
+
+      await harness.credentials.released('never-started');
+      await harness.credentials.released('f2');
+
+      expect(warned).toEqual([]);
+    });
+
+    test('a removal that fails says so once by ferret id and never throws, and the next launch still clears the link', async () => {
+      const warned: string[] = [];
+      const { harness } = build(new Map(), { warned });
+      const { home } = await linkedFor(harness, 'f2', 'work');
+      await chmod(home, 0o500);
+      try {
+        await harness.credentials.released('f2');
+      } finally {
+        await chmod(home, 0o700);
+      }
+
+      expect(warned.filter(message => message.includes('f2'))).toHaveLength(1);
+      expect(warned.join(' ')).not.toContain(home);
+      expect(await kind(join(home, 'auth.json'))).toBe('link');
+      await harness.prepareHome(spec('f2', home));
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
+    });
+
+    test('an id that is not one plain name is refused without touching anything', async () => {
+      const warned: string[] = [];
+      const { harness } = build(new Map(), { warned });
+      const { home } = await linkedFor(harness, 'f2', 'work');
+
+      await harness.credentials.released('../f2');
+
+      expect(await kind(join(home, 'auth.json'))).toBe('link');
+      expect(warned.filter(message => message.includes('../f2'))).toHaveLength(1);
     });
 
     test('a folder at auth.json is refused, never removed', async () => {
@@ -442,7 +646,7 @@ export function harnessHomeCases(): void {
     });
   });
 
-  // ─── skills: Skills' shared folders linked into the Codex home (kernel batch #10, owner decision !A466) ──────────────
+  // ─── skills: Skills' shared folders linked into the Codex home (kernel batch #10, owner decision ^A466) ──────────────
 
   describe('F-0006 prepareHome links the selected skills into the Codex home', () => {
     const INSTALLED = defineState({ name: 'installed', path: 'installed/*', store: 'opaque', format: 1 });

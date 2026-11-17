@@ -209,6 +209,9 @@ export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handl
   effort: z.string().min(1).optional(),
   /** Whether it was launched in the harness's fast mode. */
   fast: z.boolean().optional(),
+  /** The task it works on, from the stored start option `card`. */
+  task: FerretCardIdSchema.optional(),
+  /** The former name of `task`: read for one release, never written. */
   card: FerretCardIdSchema.optional(),
   title: FerretTitleSchema.optional(),
   pinnedAt: InstantSchema.optional(),

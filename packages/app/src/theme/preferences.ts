@@ -78,12 +78,12 @@ export const THEME_FAMILIES: readonly ThemeFamily[] = Object.freeze([
   {
     id: 'blueprint',
     label: 'Blueprint',
-    blurb: 'Technical drawing — drafting caps on a hairline grid, plates not cards.',
+    blurb: 'Technical drawing — drafting caps on a hairline grid, plates, not boxes.',
   },
   {
     id: 'broadsheet',
     label: 'Broadsheet',
-    blurb: 'Newsprint: serif at column density, hairline rules, no cards at all.',
+    blurb: 'Newsprint: serif at column density, hairline rules, no boxes at all.',
   },
   { id: 'wayfinding', label: 'Wayfinding', blurb: 'Transit signage — heavy grotesque, colour bars, huge targets.' },
   { id: 'ledger', label: 'Ledger', blurb: 'Green-bar accounting paper: banded rows, tabular figures, restrained ink.' },

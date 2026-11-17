@@ -10,6 +10,12 @@ This file is a pure index — the linked documents own their subjects.
   Scripts, Taskfiles, and tests derive the binary name (`jq -r '.bin | to_entries[0].key'`).
   Renames go through `scripts/local/rename.sh --product <name> | --bin <name>` — never
   hand-sprinkle either name. See [Architecture](docs/standards/architecture/index.md).
+- **IMPORTANT: one feature, one folder**: a feature lives in its own plugin folder; touching a shared or
+  cross-plugin file is the exception and the PR body must name each such file under `## Outside files` with a
+  reason (enforced by `scripts/ci/one-folder.ts`). See [Architecture](docs/standards/architecture/index.md).
+- **A feature adds files and lines; it never rewrites shared code**: each package declares its composition files in
+  `<package>/composition.tsv`; a PR that edits one needs a `## Contract change` section (enforced by
+  `scripts/ci/composition-guard.ts`). See [Architecture](docs/standards/architecture/index.md).
 - **No `@semantic-release/github`**: GoReleaser owns the GitHub release (`cd.yaml` on the `v*.*.*` tag).
   See [Semantic Release](docs/standards/semantic-release/index.md).
 - **The Homebrew cask is committed into this repo** under `Casks/` — there is no separate tap repo.
@@ -136,7 +142,7 @@ login is shared in place and never seeded. A `config.yaml` that is not `version:
 never converted** — the sentence tells the person to move it aside and set the machine up again.
 There is no switch, no old reader and no migration: the old account system is deleted.
 
-`packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
+`packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `^attention` (the old `!A3` is still read, never written: `!` is shell mode in agent composers), `/skill` or
 `$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one
 renderer and one click behaviour. The authoring and implementation contract is
 [docs/reference-standard.md](docs/reference-standard.md) — implement against that document, and
@@ -275,8 +281,8 @@ What is enforced, the defaults with a worked example and the one optional owner 
 [docs/ferret-limits.md](docs/ferret-limits.md).
 
 `packages/daemon` also owns the **project board**: one board per project (Unfiled for work outside any git
-repository), cards with lanes in six fixed categories, authority from ownership and lineage, staleness, the
-GitHub watcher that moves a card when its PR or release does, and the agenda and dependency links between cards.
+repository), tasks with lanes in six fixed categories, authority from ownership and lineage, staleness, the
+GitHub watcher that moves a task when its PR or release does, and the agenda and dependency links between tasks.
 The contract, the CLI verbs and the declared gaps are [docs/board.md](docs/board.md); the one-time import of the
 old per-session task files is [docs/board-import.md](docs/board-import.md). Implement against those documents.
 

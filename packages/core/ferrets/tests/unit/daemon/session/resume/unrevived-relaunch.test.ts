@@ -1,8 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  moveIntentOf,
   RESTAMPED_RECORD_KEYS,
   restoreRestamped,
+  settleInterruptedMove,
   settleRejectedRelaunch,
   settleUnrevivedRelaunch,
 } from '../../../../../daemon/lib/session/resume/index.ts';
@@ -139,3 +141,55 @@ describe('settling a move whose resume was refused or threw', () => {
     }
   });
 });
+
+describe('settling a move a crash interrupted', () => {
+  const BOOT = Date.parse('2026-11-16T10:00:00.000Z');
+  const BEFORE = '2026-11-16T09:00:00.000Z';
+  const source = { agent: 'claude-a', model: 'm1', launchReasoningEffort: 'high', name: 'kept' };
+  const stamped = (at = BEFORE) => ({
+    ...source,
+    agent: 'claude-b',
+    model: 'm2',
+    name: 'renamed',
+    pendingMove: moveIntentOf(source, { from: 'claude-a', to: 'claude-b', at }),
+  });
+
+  it('should put config.json back to the source when the record is still on it, and keep later writes', () => {
+    const verdict = settleInterruptedMove(stamped(), 'claude-a', BOOT);
+
+    should(verdict.kind).equal('rolled_back');
+    if (verdict.kind !== 'rolled_back') return;
+    should(verdict.document).eql({ ...source, name: 'renamed' });
+  });
+
+  it('should only drop the intent when the record is on the target', () => {
+    const verdict = settleInterruptedMove(stamped(), 'claude-b', BOOT);
+
+    should(verdict.kind).equal('cleared');
+    if (verdict.kind !== 'cleared') return;
+    should(verdict.document).eql(omitIntent(stamped()));
+  });
+
+  it('should leave a move of this boot, an unreadable record and a document with no intent alone', () => {
+    should(settleInterruptedMove(stamped('2026-11-16T10:00:01.000Z'), 'claude-a', BOOT).kind).equal('none');
+    should(settleInterruptedMove(stamped(), undefined, BOOT).kind).equal('none');
+    should(settleInterruptedMove(source, 'claude-a', BOOT).kind).equal('none');
+  });
+
+  it('should drop an intent it cannot read and put nothing back from it', () => {
+    const verdict = settleInterruptedMove({ ...source, pendingMove: { from: 'x' } }, 'claude-a', BOOT);
+
+    should(verdict.kind).equal('cleared');
+    if (verdict.kind !== 'cleared') return;
+    should(verdict.document).eql(source);
+  });
+
+  it('should drop the intent when a rollback of the move itself restores the keys', () => {
+    should(restoreRestamped(source, stamped())).eql({ ...source, name: 'renamed' });
+  });
+});
+
+function omitIntent(config: Record<string, unknown>): Record<string, unknown> {
+  const { pendingMove: _intent, ...rest } = config;
+  return rest;
+}

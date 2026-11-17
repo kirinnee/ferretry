@@ -10,6 +10,7 @@ import {
 const report = (input: Partial<AssembleInflightReportInput>) =>
   assembleInflightReport({
     status: 'waiting',
+    turnState: 'working',
     turn: 13,
     openTools: [],
     processes: { kind: 'observed', processes: [] },
@@ -93,7 +94,8 @@ describe('the in-flight inventory, in plain words', () => {
     const ps = describeInflight(
       report({ processes: { kind: 'unobservable', reason: 'the process table could not be read: ps exited 1' } }),
     );
-    const quiet = describeInflight(report({ status: 'running' }));
+    // A harness-reported subprocess the walk cannot find (a busy status alone is now a re-armable turn).
+    const quiet = describeInflight(report({ status: 'running', subprocessSince: '2026-07-31T00:00:00.000Z' }));
     const other = describeInflight(report({ processes: { kind: 'unobservable', reason: 'tmux would not answer' } }));
 
     // Assert
@@ -125,10 +127,12 @@ describe('the in-flight inventory, in plain words', () => {
     should(actual.items.map(item => item.title)).deepEqual([
       'The agent is in the middle of a Bash call that changes things',
       'The agent is in the middle of a Bash call Ferretry can’t classify',
-      'Codex has 1 background terminal Ferretry can’t see into',
+      'Codex has 1 background terminal Ferretry can’t see into — a background job Ferretry is not keeping; it stops when the ferret moves. Start long jobs with `fy job run` so they survive.',
       'The agent is in the middle of a Read call',
     ]);
-    should(plural.items[0]?.title).equal('Codex has 3 background terminals Ferretry can’t see into');
+    should(plural.items[0]?.title).equal(
+      'Codex has 3 background terminals Ferretry can’t see into — background jobs Ferretry is not keeping; they stop when the ferret moves. Start long jobs with `fy job run` so they survive.',
+    );
   });
 
   it('should say the blocker and how many more there are in one sentence', () => {
@@ -149,9 +153,26 @@ describe('the in-flight inventory, in plain words', () => {
     // Arrange — the owner's refusal: status running, turn 13, only `fy mcp serve` below the pane.
     const actual = report({ status: 'running', turn: 13, processes: seen(ownTools) });
 
-    // Assert
-    should(actual.worstVerdict).equal('safe_to_kill');
-    should(describeInflight(actual).items).deepEqual([]);
+    // Assert — the helper is not counted as something the turn was doing, so the session is mid-turn (re-armable) and
+    // the helper is only the CLI relaunch it always is.
+    should(actual.midTurn).be.true();
+    should(actual.worstVerdict).equal('re_armable');
+    should(describeInflight(actual).items.map(item => [item.kind, item.blocks])).deepEqual([['turn', false]]);
     should(describeInflight(actual).restartsWithCli).equal(1);
+  });
+
+  it('should list a busy session with nothing open as a re-armable turn that does not block', () => {
+    // Arrange
+    const actual = report({ status: 'thinking', processes: seen() });
+
+    // Assert
+    should(describeInflight(actual).items).deepEqual([
+      {
+        kind: 'turn',
+        verdict: 're_armable',
+        title: 'The agent is mid-turn, thinking — moving interrupts this turn; the new session is told to pick it up',
+        blocks: false,
+      },
+    ]);
   });
 });

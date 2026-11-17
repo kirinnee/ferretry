@@ -175,8 +175,8 @@ token, by the rule above. Shape is a floor, not a guarantee: the store is the on
   sealing values out (`POST /v1/secrets/exports/:importId`). So a confused or prompt-injected agent cannot
   swap `GITHUB_TOKEN` for a value it controls, or delete it. It can still list names and **use** a secret
   by name. A ferret gets a value into the store the way it gets any secret from the owner: an input
-  request (the owner sees a card and types it) or a sealed copy pasted into the store ([secure
-  copy](secure-copy.md)); both show the owner a card. The owner's `fy secret set` in a normal shell and
+  request (the owner sees an input and types it) or a sealed copy pasted into the store ([secure
+  copy](secure-copy.md)); both show the owner an input. The owner's `fy secret set` in a normal shell and
   the app's write-only form keep working. Every one of these is a `caller: 'person'` route, refused with
   `403 owner_only` at the authorization boundary to a ferret on its own session credential, to the admin
   token naming a ferret's session, and to a warden (`callerIsAgent`, [agent-tools.md](agent-tools.md#who-a-ferret-may-be-every-route-says)).
@@ -656,15 +656,26 @@ per-document plan (one refused document writes nothing of the set).
 - **Residuals in a broken file.** A file that does not parse cannot be rebuilt around its cuts: it is withheld
   (`unparsed`) when its raw text holds a word the cutter would cut, and shown as it is when none does. What neither
   check recognises is shown.
-- **Not cut:** a JSON document inside a flag (its keys are quoted), a plain password stuck to a one-letter flag
-  (`-p<password>`), and the other cases named in the header of `packages/std/src/credential-words/words.ts`. (A value glued to a
+- **A JSON document inside a word is read key by key, and `-p<password>` is a password.** A word that starts with `{`
+  or `[` (`--settings '{"env":{"API_KEY":"v"}}'`, also glued with `=` or inside one pair of quotes) has each string under a
+  secret-named key cut, wherever it sits, the nearest key above it naming it; the read is lexical, so a document that does not
+  parse is read as far as it goes, and it is also cut from the value of its first secret-named key (quoted with `"`, `'` or
+  `\"`, or bare, and also with its `\uXXXX` escapes decoded) to its end. A one-letter flag whose letter means "password" (`-p`, mysql's) is read under that
+  name when the value is stuck to it (`-pHunter2Hunter2` is `-p‹hidden›`; a value under 8 characters is no credential, as
+  everywhere); a longer flag glued to its value (`-password=$X`) is that flag's, and a `=` or blank inside a stuck value
+  (`-pabc=def12345`) is still shown: a counted gap.
+- **Not cut:** the other cases named in the header of `packages/std/src/credential-words/words.ts`. (A value glued to a
   pointer is cut, see above.)
 - **A flag's value in a file it was already in.** W is new-only, so a file that already holds such a value keeps
   working and is shown masked on every read; nothing removes it.
 - **E3: a `--token-file` path is cut on read.** The read mask reads `--token-file` as a secret-named flag, so the path
   after it is shown as `‹hidden›` (checked: `--token-file` then `/home/me/.config/tool/token`), though W accepts a path
   there. A person sees `‹hidden›` where a path stood, and a text saved back with it is refused until the real text is
-  typed at the machine.
+  typed at the machine. Runtimes' MCP `command` shows such a path (`srv --token-file ~/.config/tool/token`, `srv --key
+/home/u/.ssh/id_ed25519`): a part the cutter cut that is no value, as W reads it: the word right after a flag word, a real
+  multi-segment path (`~/…`, `./…`, `../…`, `/a/b…`, never a bare `/x` or `~x`) with no `$ { } # ? @ : =` in it and no
+  segment the token test refuses alone, which the cutter shows whole when read alone. A URL is never one, and nothing
+  after `KEY=` or `Header:` is.
 - **W and the mask agree by construction.** The cutter and W are one implementation, and each consumer runs W on what
   its cutter shows and withholds what W still refuses: the kernel doors withhold the file (`unmaskable`), and
   Runtimes' views withhold the item in words (the Resolved view's server line or flag, a component's whole args or flags
@@ -683,9 +694,11 @@ per-document plan (one refused document writes nothing of the set).
     warning: withheld whole when W refuses it (as one string or as the words it splits into, so `srv --token` beside the
     argument `v` is one pair) or when the word cutter, run on it as one string or word by word, cuts a VALUE
     (`curl -H "Authorization: Bearer v"`, `srv -H Cookie: session=v`). A part the cutter cuts that is a pointer (`$X`,
-    `${X}`, `${secret:X}`) is no value: `env API_KEY=$API_KEY srv` is shown as written. A **`url`** (`writtenWithheld`) is withheld
+    `${X}`, `${secret:X}`), quoted or not, is no value: `env API_KEY="$API_KEY" npx -y @scope/pkg` is shown as written, and so is
+    a path (above). A **`url`** (`writtenWithheld`) is withheld
     whole when W refuses it or the cutter would cut any part of it (a `?token=v` query is W-accepted but real); a Resolved url
-    whose path W refuses (`/mcp --token v`, shown %-encoded) is withheld as the detail's is.
+    whose path W refuses (`/mcp --token v`, shown %-encoded) is withheld as the detail's is: the path is judged with its
+    %-escapes read run by run, so a malformed one beside it (`https://h/%zz/mcp%20--token%20v`) does not keep the valid ones from being read.
   - **An environment or settings value shown under its name** (hidden when W refuses it, as when the name or shape says
     credential), including a list or a nested table (`{x: ['--token', v]}`, `{servers: [{token: v}]}`), in the detail and in the
     Resolved rows, and the Resolved model row.
@@ -699,11 +712,11 @@ per-document plan (one refused document writes nothing of the set).
     value under a credential key by the entropy of the whole value, so a long value that is mostly one repeated character is
     accepted at any length; the 4,096-character window only bounds each pattern's cost. Netted by W's VALUE rule too:
     instruction lines (an instruction Runtimes writes keeps its text in the component YAML, where a string with blanks is
-    read as words; a flag at the end of one line pairs with the value starting the next line (a blank or spaces-only
-    line between them breaks the pairing: a counted gap, `cfg-leak-d-residuals`)), and hooks by the parsed document
+    read as words; a flag at the end of one line pairs with the value starting the next non-blank line: blank and spaces-only
+    lines between them do not break the pairing, as W reads the string), and hooks by the parsed document
     (the lines of each path W refuses are withheld; a refused list item withholds its whole list, because `--token` and its
     value are two lines; a text that does not parse as JSON is netted by the lines alone, and a document nested past 200
-    levels is withheld whole).
+    levels is withheld whole, however deep the parser reads it: W's walkers are iterative).
   - **The "command not found" warning** names the command only when the detail shows it.
 
   The fields shown as written without a net are names and paths, not values: a component's `file` and `directory`, a skill's items,
@@ -716,15 +729,15 @@ per-document plan (one refused document writes nothing of the set).
   (E3) and the whole value of a word that glues text to a pointer. A word of blanks that does not start with a flag
   (`srv --token v`) is no gap: the read splits it into words and cuts `v`.
 
-- **GAP: the etag is a digest oracle.** A file's etag is the sha256 of its disk text and goes to every `fleet.use`
-  reader (`GET /v1/config/file`, the `kernel.config-changed` frame, `GET /v1/config/status`). A hidden value that is
-  long and high-entropy cannot be recovered from it; a short or low-entropy one (an 8-14 character password) can be
-  guessed offline when the rest of the file is known. Remedy, after merge: a keyed etag (an HMAC with a daemon-local
-  key), kernel-wide.
-- **GAP: the route descriptor sentence.** The descriptor of `GET /v1/config/file` says a configuration file never
-  holds a raw value. That stays partly false for a file written before the flag rule: it can hold a secret under a
-  flag name, shown masked on every read. The descriptor is hashed (contract 9.6), so the sentence is corrected when the
-  contract next opens.
+- **The etag is keyed, not a digest oracle.** A file's etag goes to every `fleet.use` reader (`GET /v1/config/file`, the
+  `kernel.config-changed` frame, `GET /v1/config/status`). It is an HMAC-SHA256 of the disk text under a key derived
+  from the daemon's identity (an Ed25519 signature of a fixed purpose label, hashed: the same after every restart,
+  held by no file of its own), so a reader cannot test a guess at a short hidden value offline, as a plain sha256 let
+  them when the rest of the file was known. The stored accepted record's etag is recomputed on read, never trusted.
+  What stays: two etags still show that a file changed, and a reader who holds the identity's private key (the host
+  owner) can compute any etag, which gives them nothing the file does not.
+- **The route descriptor sentence is exact.** The descriptor of `GET /v1/config/file` says a raw secret is refused on
+  write and that a file written before the flag rule can still hold one under a flag name, shown masked on every read.
 
 ## Accounts and sign-ins: the store
 
@@ -769,7 +782,7 @@ ties them to that site's page any more. Give such an account its site in Setting
 
 An older daemon reads `login-entries.json` with its `v: 1` schema, so a `v: 2` index is **damaged** to it, never
 empty: its list says so, every change to a saved login refuses, its boot sweep keeps everything, saved values stay
-masked, and no card offers a saved login. To go back:
+masked, and no input offers a saved login. To go back:
 
 1. Stop the daemon.
 2. `mv ~/.ferretry/state/login-entries.v1.json ~/.ferretry/state/login-entries.json`
@@ -818,7 +831,7 @@ its body is read, exactly as for the vault (honest-client until a ferret has its
 **handles only**, never a value, and every change to it is held for the owner when anyone else makes it, a ferret's removal included; the OWNER's own write
 that only REMOVES lines needs no passkey (an edit made on the disk is held even then: Ferretry can't tell who edited the file, so it waits for you; owner decision !A243; [Default accounts](config-files.md#default-accounts)). `PUT /v1/accounts/defaults { scope, within?, key, account }`
 is the owner's own write of one line (`account: null` clears it): a ferret is refused before its body is read, a
-paired device needs the passkey step-up for loosening a configuration file, and the line is in effect at once (it is refused with `409 no_sign_in_here` for an account with no sign-in on that key). The card and `account_hint` read the file ([which account is first](input-requests.md#which-account-is-first-and-why)). The
+paired device needs the passkey step-up for loosening a configuration file, and the line is in effect at once (it is refused with `409 no_sign_in_here` for an account with no sign-in on that key). The input and `account_hint` read the file ([which account is first](input-requests.md#which-account-is-first-and-why)). The
 account acts keep the lines true in the same act: a rename moves them, a delete drops them, a merge points them at the
 account that kept the sign-ins, and a handle that is created (or renamed to) never inherits a line left for an old
 account of the same name. If that rewrite fails the account act stands and the leftover line, which names no account,
@@ -848,7 +861,7 @@ cannot say which sign-in it means, and guessing would be a lossy write. A fact t
 sign-in it was typed at (`AccountDirectory.observeSignIn`, the input service's only writer), and only at one of
 that sign-in's own places; anything else is not kept.
 
-**Advertised.** The card is sign-in aware on the daemon's side ([one tap](input-requests.md#the-next-time-one-tap)):
+**Advertised.** The input is sign-in aware on the daemon's side ([one tap](input-requests.md#the-next-time-one-tap)):
 its offers name the sign-in, and a deliver's `signIn` must be one of the account's. The daemon reports
 `accounts.signins.1` and `accounts.2fa-keys.1` now that the app draws the [Accounts screen](#the-accounts-screen); an
 older daemon, which reports neither, keeps today's saved-logins surface.
@@ -859,7 +872,7 @@ An account keeps a list of **2FA keys** (at most 8): an authenticator app (`totp
 codes (`sms`, its last digits only), an inbox that gets email codes (`email`), a push app (`push`) or a security key.
 Only a `totp` key can hold a value — its **seed** — and then Ferretry makes that account's codes ("automatic codes").
 At most 4 seeds per account (a backup app, a re-enrolled authenticator). Every other kind is a label and a few plain
-facts, so a card can say where a code went. The seed rests in `login-secrets.json` like the password; the index
+facts, so an input can say where a code went. The seed rests in `login-secrets.json` like the password; the index
 names its seal, never the value. The code is `packages/daemon/src/lib/secrets/two-factor-seeds.ts`.
 
 **A seed is saved only with a passkey, every time, from every caller — the machine itself included.** A saved seed
@@ -883,15 +896,15 @@ pairing code, widening a device or any other act takes. Both directions are test
   Seeds saved before this release keep working; they are not asked again.
 - **A key that says it is for another account** (its issuer or account name does not fit) is refused
   (`409 factor_mismatch`) unless the owner ticked "save it here anyway". The warning is advice: the passkey is the act.
-- **Set up from a code card** (`request`): it saves only to the account the daemon matched for that card
-  (`409 not_this_cards_account`), so a ferret cannot steer which account a card's key lands on. Staged from a paired
-  device, the save then types the new key's first code into that card ("use it now", `typed` on the answer, `submit`
+- **Set up from a code input** (`request`): it saves only to the account the daemon matched for that input
+  (`409 not_this_cards_account`), so a ferret cannot steer which account an input's key lands on. Staged from a paired
+  device, the save then types the new key's first code into that input ("use it now", `typed` on the answer, `submit`
   on the stage), under every check a "Use code from Ferretry" tap gets
   ([input requests](input-requests.md#codes-ferretry-makes)); staged from the machine, it types nothing.
 - **At most 4 seeds wait at once on the whole daemon, 2 per caller, and callers that are not a paired device share
   only 3** (`429`), so nobody fills its memory by staging and a ferret holding junk stages never keeps the owner's
-  app from staging. **Only the caller that staged a seed, or a paired device, may read, drop or card it** (another
-  caller is told it is not waiting): the stage id is on the agenda card, so knowing it proves nothing.
+  app from staging. **Only the caller that staged a seed, or a paired device, may read, drop or commit it** (another
+  caller is told it is not waiting): the stage id is on the agenda item, so knowing it proves nothing.
   Every stage route is `caller: 'person'`, so a ferret on its own session credential (or naming its session) is
   refused all of them before the body is read, and a session credential is keyed as its own caller even so.
   **What is still honest-client:** a ferret that reads the admin token and sends no session at all counts as the
@@ -904,18 +917,18 @@ pairing code, widening a device or any other act takes. Both directions are test
 - **Removing a key never asks for a passkey**: it only narrows what this machine can do. Its seed is swept with it.
 
 **From the command line**, `fy account factor add <ACCOUNT> --totp` shows the warning, takes the key at a hidden
-prompt (a base32 key or an `otpauth://totp` link), stages it and puts a card in the app's Inbox — "Save automatic codes to
-your account on github.com? Asked by fy on kirin-box at 14:02 UTC" — then waits. The card's words name the place only
-(agenda text is every ferret's to read); the app's card names the account and what the key says it is for, read from
+prompt (a base32 key or an `otpauth://totp` link), stages it and puts an item in the app's Inbox — "Save automatic codes to
+your account on github.com? Asked by fy on kirin-box at 14:02 UTC" — then waits. The item's words name the place only
+(agenda text is every ferret's to read); the app's item names the account and what the key says it is for, read from
 the stage on a route that reads the accounts. Allow it in the app with your passkey and it
 prints "Saved"; Deny, or two minutes, and nothing is saved. It first asks the daemon whether it reports
 `accounts.2fa-keys.1`, and on one that does not (v4.190 to v4.196 list accounts but have no 2FA key routes) says
 "this machine's daemon is too old for 2FA keys: update it (fy daemon update), then run this again" before anything is
-typed. Every Inbox card belongs to a session. Run from the owner's own terminal, where no session is current, the daemon puts
-the card under the most recently active live session, so the card still reaches the owner's Inbox and `--session <id>`
+typed. Every Inbox item belongs to a session. Run from the owner's own terminal, where no session is current, the daemon puts
+the item under the most recently active live session, so the item still reaches the owner's Inbox and `--session <id>`
 is not needed (it still works, and names the session when you want a particular one). Where no session is running at
 all the daemon answers `409 no_session` and says so. A ferret's pane is refused as before. When
-the app's address is known (`FY_APP_URL`, or the hosted default) it prints the card's link,
+the app's address is known (`FY_APP_URL`, or the hosted default) it prints the item's link,
 `<app>/#agenda/<id>?session=<sid>&machine=<this daemon's id>`, as `fy plan approve` does. The CLI has no way to save a seed itself.
 
 The rest of `fy account` is in [input requests](input-requests.md#managing-them): accounts, sign-ins (`site`), recipes,
@@ -924,10 +937,10 @@ is a person route; a ferret's call is refused by the daemon and `fy` reports tha
 `PUT /v1/secrets/logins/:id` with a `totp` seed — today's app form and `fy account edit --totp` — answers
 `403 add_2fa_key_needs_passkey` with where to go instead; `totp: null` (remove the seed) still works there.
 
-The card is answered by its Allow (the passkey ceremony, then the commit) or Deny (drop the stage). An agenda answer
-saves nothing, so an app from before these cards shows the daemon's words and cannot save.
+The item is answered by its Allow (the passkey ceremony, then the commit) or Deny (drop the stage). An agenda answer
+saves nothing, so an app from before these items shows the daemon's words and cannot save.
 
-**The app draws this card itself** (`TwoFactorSeedHost`, in the Inbox and the agenda panel, wherever an item carries the
+**The app draws this item itself** (`TwoFactorSeedHost`, in the Inbox and the agenda panel, wherever an item carries the
 daemon's `twoFactorSeed` reference; a ferret's words that merely copy the title draw nothing). The reference names the
 stage alone: an account's handle is often its label and username, and every ferret and any device reads the agenda, so
 the app reads the stage, and the account it is for, by the stage id (`GET /v1/accounts/seed-stages/:stage`). An older
@@ -937,7 +950,7 @@ the stage was staged with "save it here anyway" (the daemon marks that with `TWO
 shared constant), **Allow** and **Deny**. Allow is the same shared flow as the "Set up automatic codes" panel: the
 `add-2fa-key` passkey bound to THAT stage (`useAddKeyStepUp`), then the commit with no body. A dismissed passkey leaves
 the stage waiting (it expires in two minutes), so the owner can try again or Deny; Deny drops the stage with no passkey. The
-card reads only where the stage stands (`GET /v1/accounts/seed-stages/:stage`) and the account's name; it never holds
+item reads only where the stage stands (`GET /v1/accounts/seed-stages/:stage`) and the account's name; it never holds
 the key.
 
 | Route (owner only, `secrets`/`configure`)                  | Does                                                                                | Passkey                    |
@@ -945,7 +958,7 @@ the key.
 | `POST /v1/accounts/:id/factors`                            | add a key with no value (`sms`, `email`, `push`, `security-key`, a `totp` you hold) | no                         |
 | `PATCH` / `DELETE /v1/accounts/:id/factors/:tf`            | relabel; remove (its seed swept)                                                    | never                      |
 | `POST /v1/accounts/:id/factors/seed`                       | stage a seed (memory, two minutes); answers what was read                           | no (it saves nothing)      |
-| `GET /v1/accounts/seed-stages/:stage`                      | where a stage stands, and its account, by the stage id alone (the card's read)      | no                         |
+| `GET /v1/accounts/seed-stages/:stage`                      | where a stage stands, and its account, by the stage id alone (the item's read)      | no                         |
 | `GET` / `DELETE /v1/accounts/:id/factors/seed/:stage`      | where a stage stands; drop it                                                       | no                         |
 | `POST /v1/accounts/:id/factors/seed/:stage/commit`         | save it                                                                             | **yes, bound to `:stage`** |
 | `POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app` | put it on the agenda `{ session }` so the owner confirms it                         | no (it saves nothing)      |
@@ -966,7 +979,7 @@ in a terminal for up to 7** ([below](#terminal-rules-sudo-su-or-doas)). Rules ar
 **The app draws rules, and the daemon reports `sign-in-rules.1`.** The service, the file, the routes, suspension,
 history and the fills through the shared matcher ([input requests › Standing rule fills](input-requests.md#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret))
 are matched by the screens in the app: the sheet (Accounts › a sign-in › Standing rule, and "Don’t ask again for this
-sign-in…" on an input card the owner just filled by hand), the rule card (narrow, revoke, resume, approve again), a
+sign-in…" on an input the owner just filled by hand), the rule item (narrow, revoke, resume, approve again), a
 ferret's suggestion, and Settings › Secure copy › Standing sign-in rules, where a rule staged on the machine with
 `fy rules add` waits for this device's passkey. Every warning (root, one factor, the automatic recipe) is drawn from the
 rule's structured flags, never from its words. Each is one protocol constant, said the same in the app and `fy rules`:
@@ -976,9 +989,9 @@ rule's structured flags, never from its words. Each is one protocol constant, sa
   `AUTOMATED_CODE_ACK_WORDS`: "I understand this makes the sign-in one factor, with no one to approve a code."
 - The automatic recipe (`SIGN_IN_RULE_AUTO_RECIPE_WARNING`, amber): "This sign-in applies its recipe by itself, so the
   form it fills is one a ferret may have written."
-- "You'll still be asked" (`stillAskedFor('rule')`, one list with the plan card's): push approvals, security keys and
+- "You'll still be asked" (`stillAskedFor('rule')`, one list with the plan item's): push approvals, security keys and
   passkeys, captchas, a sign-in whose form changed since you approved it, ssh, scp, npm or docker login, gh and any
-  program but `sudo`, `su` and `doas`, and SMS and email codes or a code you did not tick. Every rule card has ONE shape: a plain `does` line, label/value `rows`
+  program but `sudo`, `su` and `doas`, and SMS and email codes or a code you did not tick. Every rule item has ONE shape: a plain `does` line, label/value `rows`
   (the protocol's `SignInRuleRowLabelSchema`: Machine or Site, Account, Types, Who, Until, Uses, and Code key on a rule
   that types the code), a Note line under the rows where one applies (the history, or the rule it replaces), ONE red
   block, and "How it's
@@ -1117,7 +1130,7 @@ A rule is **suspended**, and stays suspended until a new passkey approves it aga
 
 A label, a password change, `verified`, a pending proposal and a default suspend nothing. Changing a fact back resumes
 nothing. Every suspension is persisted, audited (`sign-in-rule-suspended` with its reason) and shown in the owner's
-list. No card is raised in a ferret's session for it, so a ferret learns nothing about rules.
+list. No input is raised in a ferret's session for it, so a ferret learns nothing about rules.
 
 If the file can't be written, the rule stays suspended in memory as `store-write-failed`, and so does a use that
 couldn't be counted. Every later write carries it, the sweep retries the write, and the daemon tries once more when it
@@ -1134,13 +1147,13 @@ passkey dialog, Settings and `fy rules`, never from the summary's words.
 
 It fills only where every check of a terminal plan line holds ([input requests › Standing rule
 fills](input-requests.md#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret)): the program **proved by
-the kernel**, never by its name (a shell that renamed itself `sudo` has no key, so no rule is even tried and the card is
+the kernel**, never by its name (a shell that renamed itself `sudo` has no key, so no rule is even tried and the input is
 a plain one); every process of its foreground group setuid root; echo off; line mode; the proved tool and this machine
 exactly the pinned key; one password field; the form the owner's taps have history with. A miss types nothing,
 suspends nothing and tells the ferret nothing it would not be told with no rule. The rule is asked once more inside the
 terminal's own turn, right before the guarded tmux write (`proceed()`), so a revoke that lands then types nothing.
 
-Every terminal rule card, sheet and Settings row carries two more lines beside the honest-client one, verbatim. The first
+Every terminal rule item, sheet and Settings row carries two more lines beside the honest-client one, verbatim. The first
 is the red block, with the accepted race (`SIGN_IN_RULE_TERMINAL_RESIDUAL`) as its second sentence; the second is under "How
 it's checked":
 
@@ -1159,7 +1172,7 @@ itself; under a restricted sudoers it could set a password the ferret then knows
 **Its own feature, now reported.** Terminal rules are their own feature, `sign-in-rules-terminal.1`, a compile-time
 name in the protocol's daemon features. Nothing reads it from config, the environment, a route or a file. This build
 reports it (owner decision !A226, with the risk below accepted), and a terminal rule still fills only beside
-`sign-in-rules.1`, which this build also reports: a daemon that did not would leave every sign-in a plain card. A build that does not report it refuses
+`sign-in-rules.1`, which this build also reports: a daemon that did not would leave every sign-in a plain input. A build that does not report it refuses
 to stage a sudo, su or doas rule (`409 terminal_off`), says the same in the eligibility, and offers no terminal
 rule to the matcher, so a terminal rule already in the file never fills there.
 
@@ -1172,8 +1185,8 @@ before anything is checked again. What a rule adds is that a swap is SEEN, when 
 1. it types the password **without Enter**, then has the kernel prove again that the **same setuid process still leads
    the foreground group** (same pid and group, still sudo, su or doas setuid root, echo off, line mode) before it sends
    Enter; if it does not, the line is erased, the request ends and the rule is suspended;
-2. a write **tmux's guard refused**, after a look that matched the card, types nothing and suspends the rule too. A
-   screen that merely changed before the write still just redraws the card.
+2. a write **tmux's guard refused**, after a look that matched the input, types nothing and suspends the rule too. A
+   screen that merely changed before the write still just redraws the input.
 
 Both suspend with `program-changed` ("the program reading the terminal changed while Ferretry was typing"), sticky,
 audited and shown to the owner only, so the rule **cannot be retried under that approval**.
@@ -1209,10 +1222,10 @@ Two more limits are declared:
   before any write succeeds. The rule's drift, its proof and its expiry are found again at load; a suspension caused
   by an event (a page script, a page that did not move on, a failed write) is not.
 - **Timing.** A raise a rule was tried on answers later than one no rule is about, even when the rule misses without
-  being suspended (out of scope, say): the accounts are read, the miss is audited and the card is made to buzz. A
+  being suspended (out of scope, say): the accounts are read, the miss is audited and the input is made to buzz. A
   ferret that measures its raises could so learn that some rule is about a sign-in, without spending it. Likewise an
   account change that suspends a rule takes one rules-file write and an audit record longer than one that does not.
-  What a ferret reads (its view, its words, its agenda card) stays byte-identical either way, save a refusal in the last
+  What a ferret reads (its view, its words, its agenda item) stays byte-identical either way, save a refusal in the last
   milliseconds before typing, which can leave its page held for that moment (input-requests.md, "Standing rule
   fills"). This is accepted.
 
@@ -1233,11 +1246,11 @@ Every route is `caller: 'person'` ([grants.md](grants.md)).
 | `DELETE /v1/sign-in-rules/:id`                        | revoke one rule                                                   | `secrets.use`                       |
 | `POST /v1/accounts/:id/sign-in-rules/revoke`          | revoke every rule of an account                                   | `secrets.use`                       |
 | `GET /v1/sign-in-rules/suggestions`                   | the rules ferrets suggested, still waiting (memory only)          | `secrets.use`                       |
-| `DELETE /v1/sign-in-rules/suggestions/:sid`           | turn a suggestion down, on the owner's side only: its card stays  | `secrets.use`                       |
+| `DELETE /v1/sign-in-rules/suggestions/:sid`           | turn a suggestion down, on the owner's side only: its item stays  | `secrets.use`                       |
 
 Each change is a kept `security.changed` record ([audit.md](audit.md)). None holds a username or a value.
 
-A ferret's suggestion of a rule (`account_propose` with `preapprove`) raises a card and a line in memory and nothing
+A ferret's suggestion of a rule (`account_propose` with `preapprove`) raises an item and a line in memory and nothing
 else: [agent tools › Suggesting a standing rule](agent-tools.md#suggesting-a-standing-rule).
 
 ### The owner's command: `fy rules`
@@ -1263,20 +1276,20 @@ any other (older, silent, or one whose health read failed) keeps the saved-login
   one is saved), _2FA keys_ and _Sites_. Under its name it shows its **name in the terminal** (its handle,
   `GOOGLE_A`): the name `fy account` uses. It has the shape of a secret name for history's sake, but it is **not an
   environment variable** and `${secret:…}` cannot reach it; the app never calls it a handle.
-- **A card's "Save to Accounts"** keeps an account as a username and a password together: a **new** account named
+- **An input's "Save to Accounts"** keeps an account as a username and a password together: a **new** account named
   "Google · a@gmail.com" by default, or an explicit **Update** of the same person's account, never one with another
   username ([Save as](input-requests.md#the-first-time-save-as)). The username kept is the one the owner confirmed on the
-  card, so the Accounts list shows it.
+  input, so the Accounts list shows it.
 - **2FA keys** — each key by its label and plain facts with a usage record: _Last code worked on <date>_,
   _Not used yet_ or _Last code did not work on <date>_ (red, the only one drawn as a warning). It is a record of what the
   daemon saw, which a ferret can steer, and not a check that the key belongs to the account, so it is never drawn as a
   check mark and never gates a pre-approval. Adding an SMS, email, push or security key sends no value. Automatic codes
-  (a seed) go through the SAME panel the code card uses ([Set up automatic codes](input-requests.md#2fa-seeds-opt-in-per-entry)):
+  (a seed) go through the SAME panel the code input uses ([Set up automatic codes](input-requests.md#2fa-seeds-opt-in-per-entry)):
   stage, the two ticks, then the `add-2fa-key` passkey bound to that stage. There is no second path: a seed is never
   sent to `POST …/factors`.
 - **Site (a sign-in)** — _Method_, _Recipe_ (plain text, never Markdown; a ferret's recipe is labelled as unreviewed, and
   its proposals are shown as a diff to approve or decline), _What Ferretry saw_ (facts, never values) and _Defaults_.
-- **Defaults** — a default only decides which account a card lists first; the tap is still the permission. It is
+- **Defaults** — a default only decides which account an input lists first; the tap is still the permission. It is
   `config/account-defaults.yaml`, set per host with `PUT /v1/accounts/defaults`. A default may be set on any host the
   sign-in NAMES, a site's `match` hosts included (the daemon checks `placeHosts`, and so does the screen). A file that
   does not parse is shown as unreadable, never as "no defaults".
@@ -1285,7 +1298,7 @@ any other (older, silent, or one whose health read failed) keeps the saved-login
   A daemon without the route simply shows no banner.
 
 Every write is a person route (`secrets` configure, operator minimum) so a ferret cannot make it; no response and no
-screen holds a password, a seed or a code. The one-tap on a card comes only from the daemon's `primary` offer.
+screen holds a password, a seed or a code. The one-tap on an input comes only from the daemon's `primary` offer.
 
 ## Damaged is not empty
 
@@ -1353,6 +1366,12 @@ says the keys were not copied, and the _Copy secrets from…_ list offers them a
 actually holds and the receiving one does not are asked for. **A key already on the receiving machine is never
 written by Clone, in any mode, for any reason** — when the source has a newer one, Clone only says so — below.
 
+**5.0 state (declared GAP, parity rows S-0057 and S-0495).** The Clone preview in 5.0 does not run the sealed copy
+above or report its keys to `POST /v1/runtimes/clone/keys`: a key the source holds and this machine does not is **named**
+(_Add these API keys here_, with each name) and **never carried**, so the person adds each with `fy secret set NAME`. Read
+"copies with its key", "the same sealed copy" and "copied with its login" in this section as the design of that copy, which
+is not built.
+
 #### A key that is newer on the source (reported, never copied)
 
 **Owner decision (Option A, design §14.4): a copy never writes or overwrites a secret-store entry or a
@@ -1368,12 +1387,12 @@ was last copied, `docs/design/account-model.md` §3.8): when the **source** last
 `updatedAt`) and the instant **this** machine's copy filed it. A later review compares those two with what each list
 says now:
 
-| The source…                     | This machine…            | Outcome   | In the Clone preview                                                                      |
-| ------------------------------- | ------------------------ | --------- | ----------------------------------------------------------------------------------------- |
-| holds it, this machine does not | —                        | `missing` | Copied with its login, as always                                                          |
-| changed it since the copy       | has not changed it since | `newer`   | **A newer `X` exists on _source_.** Clone does not replace it: run `fy secret set X` here |
-| changed it since the copy       | changed it too           | `both`    | The same, plus _You changed it on this machine too_                                       |
-| has not changed it              | (anything)               | `same`    | Nothing is said                                                                           |
+| The source…                     | This machine…            | Outcome   | In the Clone preview                                                                         |
+| ------------------------------- | ------------------------ | --------- | -------------------------------------------------------------------------------------------- |
+| holds it, this machine does not | —                        | `missing` | Named, never carried: _Add these API keys here_; run `fy secret set X` (GAP: S-0057, S-0495) |
+| changed it since the copy       | has not changed it since | `newer`   | **A newer `X` exists on _source_.** Clone does not replace it: run `fy secret set X` here    |
+| changed it since the copy       | changed it too           | `both`    | The same, plus _You changed it on this machine too_                                          |
+| has not changed it              | (anything)               | `same`    | Nothing is said                                                                              |
 
 A key both machines hold that no earlier copy recorded is `same`: nothing says the source moved on.
 
@@ -1541,8 +1560,8 @@ jev:
 reference. Without it the guard answers `not_set` and nothing leaves the machine. It is not a setting: a settings
 save never writes it and keeps the line as it is.
 
-The settings card says which of these a key is in. **Key set** means it is stored and `warden.yaml` names it. **Key not
-named** means it is stored but `warden.yaml` has no `jev.key` line, so nothing is sent; the card offers **Use stored
+The settings panel says which of these a key is in. **Key set** means it is stored and `warden.yaml` names it. **Key not
+named** means it is stored but `warden.yaml` has no `jev.key` line, so nothing is sent; the panel offers **Use stored
 key**, which writes that one reference (`POST /v1/warden/jev-key`, no body, no value) as the caller's own act: in effect
 when the caller is the owner, otherwise held for the owner and shown as "Waiting for your approval". The settings read
 says only `jevKey: named | not_named`.
@@ -1642,7 +1661,7 @@ What it does NOT protect against:
 - **Code running in this page.** An XSS or a malicious deploy can spend the key while the tab is open
   — it cannot carry the wrapping key away, but it can call `send`. Same limit as the pairing key.
 - **Anyone using this browser profile.** Whoever can open Ferretry in it can dictate on your key. A
-  device you hand to somebody else should have its keys removed first (Remove on each card).
+  device you hand to somebody else should have its keys removed first (Remove on each key).
 - **The provider.** As with the daemon's keys: Groq or Cerebras receives the recognised text, your word
   list and the conversation `voice.yaml` allows, and can bill the key. Never audio.
 - **A browser that clears site data.** Clearing it deletes the key; the screen then says it is not
@@ -1666,8 +1685,13 @@ the kernel makes ONE symlink to it at `<the ferret's Codex home>/auth.json` (and
 Codex reads it, and refreshes it in place, so the link keeps pointing at the one file. A login with no usable sign-in
 refuses the start with one sentence, before any pane exists. The residual is the same-user one: the agent runs as the
 same user and Codex's sandbox reads anywhere, so an agent's shell command can `cat` that file, exactly as in the old
-account model. The link outlives a revocation until the next launch of that ferret clears it, and two ferrets refreshing
-one login in the same instant can race on its single-use refresh token (both declared gaps).
+account model. Codex takes the link back out of the ferret's home when the ferret stops or goes away, and out of every home
+it linked when its login is removed, signed out or switched off (it also removes a file Codex wrote in the link's place,
+which is a copy of the same sign-in). That ends the link; it does not hide it, because while the link is there the agent can
+read it, and a copy an agent made for itself is not Codex's to find. Two declared gaps remain. Which ferret holds which login
+is kept in memory, so after a daemon restart a revoked login clears nothing until each of its ferrets stops or is launched
+again (a stop clears the link whether or not this daemon placed it). And two ferrets refreshing one login in the same
+instant can race on its single-use refresh token.
 
 Every ferret on a login shares that ONE `auth.json`, and each runs as the same user, so **any ferret on a login can
 rewrite the shared file** and so change the account for every other ferret on it (or hard-link it, which makes the next
@@ -1749,6 +1773,159 @@ production module and derives the surface; measured 2026-11-12, Linux x64). It i
 and ordinary asset links that land in a runtime credential home becoming copies. The ruling that scopes it, quoted exactly:
 
 > "if the re-review proves only Runtimes' provisioning (fleet-disk.ts, file-provisioner.ts) reaches fleet.linkTo on the fleet root, ALSO add a fitness test that fails if any other module calls it there, so a future caller can't slip in before the after-merge move. Then fix4 is fine for merge; the last-look-to-rename race stays a declared GAP."
+
+## A harness's history pool in every ferret's home
+
+Each ferret has its own harness home (`state/<plugin>/agent-homes/<ferret>`, used as `CLAUDE_CONFIG_DIR` / `CODEX_HOME`),
+and the kernel refuses every link inside `agent-homes` except `linkCredential`. That left no plugin able to pool history,
+so a ferret resumed on a conversation another ferret started began a new one. The **history-pool door** is the one narrow
+link that lets a harness plugin pool, and it is built so it can share history and nothing else.
+
+**What it adds, said plainly.** Any ferret on a harness can read and continue any other ferret's conversations on that
+harness. That is the owner's ask and v4's behaviour (v4 linked each login home's history entries to `fleet/shared/<harness>`).
+A conversation can hold anything its ferret saw or typed: a pasted token, a file's text, a command's output. Pooling makes
+those transcripts readable by every ferret on the harness, exactly as v4 did; it does not make them readable to anyone else.
+Claude's pooled list also includes `session-env`, `shell-snapshots` and `paste-cache`. These can contain environment
+values or pasted secrets. They stay pooled for v4 parity: **any ferret on that harness can read them**, just as it can
+read the transcripts.
+
+**The door.** `RootHandle.linkHistory(home, entry)` on an `agent-homes` handle makes `<home>/<entry>` a symlink to the REAL
+path of `<pool>/<entry>`, where the pool is the caller's own `state/<plugin>/<folder>/` (outside the ferret-home tree, so never a
+credential home). It is on `RootHandle`, beside `linkCredential` and `copyShared`, because it writes into the handle's root
+through the same checked, no-follow folder descriptors, and the handle already knows its plugin. A plugin declares it in its
+manifest and can use nothing else of it:
+
+```ts
+permissions: {
+  roots: ['agent-homes'],
+  historyPool: {
+    state: 'history-pool',            // the NAME of its own opaque `history-pool/*` state def
+    entries: [{ name: 'projects', kind: 'folder' }, { name: 'history.jsonl', kind: 'file' } /* … */],
+  },
+},
+```
+
+The kernel names the target from the declaration; the caller passes a home and an entry name, never a path. Each refusal
+below is made BEFORE anything is written, with a closed reason (`HistoryPoolError.refusal`, or a `RootError` for a disk
+fact), identically on the real roots port and the testing host (`tests/unit/testing/history-pool-parity.test.ts`):
+
+| Refusal                   | When                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `not_internal`            | the handle is not an `agent-homes` handle                                                                                                                                                                                                                                                                                                                                                                    |
+| `not_permitted`           | the manifest lacks `permissions.historyPool`                                                                                                                                                                                                                                                                                                                                                                 |
+| `denied`                  | the entry is on the fixed deny list, whatever the manifest says: `.credentials.json`, `.claude.json`, any `settings*.json`, `auth.json`, `config.toml`, `CLAUDE.md`, `AGENTS.md`, `skills`, `plugins`, any name starting with `.`, a `/` or `\`, NUL, `..`, any name that looks like a credential (`credential`, `secret`, `token`, `oauth`, `passw`); compared case-insensitively, because macOS folds case |
+| `not_listed`              | a legal name that the manifest's closed list does not name (exact, case-sensitive)                                                                                                                                                                                                                                                                                                                           |
+| `not_own`                 | the pool is not the caller's own opaque `<one folder>/*` state tree, sits in a root the kernel makes (`agent-homes`, `credentials`, …), or holds a private place of the plugin                                                                                                                                                                                                                               |
+| `not_home`                | `home` is not exactly one ferret home folder at the top of `agent-homes` (the root itself, a folder two deep, and a scoped handle that is not one home)                                                                                                                                                                                                                                                      |
+| `exists`                  | anything (a folder, a file, a link) is already at `<home>/<entry>`: never an overwrite. A caller with a real folder moves it aside with `rename` first                                                                                                                                                                                                                                                       |
+| `outside` / `link_escape` | the home is missing (this call never makes one) or is, or sits behind, a link; or the pool folder, or the entry in it, is a link (nothing is followed, nothing is made behind it)                                                                                                                                                                                                                            |
+| `changed` / `hard_link`   | the pool already holds the wrong kind at the entry (or a file where the pool folder belongs), or a file with a second name; or the link made did not land on the pool entry's real path, or the pool entry is no longer the one proved when it was made (a different inode, kind or link count, found again after the link is published): the link THIS call made is taken back                              |
+| `no_descriptor_reach`     | a host that reaches an open folder by no descriptor path (macOS today): the link is never made by a path a swapped parent could redirect                                                                                                                                                                                                                                                                     |
+
+The pool base is made `0700` at boot; the entry in it is made on first use by the kernel. What is already in the pool is kept as it is.
+The pool is reached by ONE descent (`reachHistoryEntry` in `host/roots.ts`): the plugin's state folder is checked once and is
+the anchor; the pool folder and then the entry are opened from their parent's descriptor with `O_DIRECTORY | O_NOFOLLOW`
+(a `0700` folder, or an empty `0600` file made exclusively), and every component that is already there is judged by name
+first and must be the very folder opened (same device and inode). An EXISTING pool folder swapped for a link, or for
+another directory of the plugin's state (an agent home), after the check is refused (`link_escape` / `changed`) before
+anything is made in it; a pool folder that did not exist yet is the "pool absent when first made" gap below. After the link is published the kernel proves it as `linkCredential` proves its source: the link lands on the pool
+entry's real path, and the entry is reached AGAIN from the anchor (no link on the way, the declared kind, the hard-link
+count, the private-place fence) and is the same file or folder it held when it made the link; otherwise it takes back the
+link it made and refuses.
+
+**Reading, writing and moving into the pool (PR 3).** `RootsPort.historyPool(): RootHandle` synchronously returns a
+writable internal view of only the caller's own declared opaque, non-private pool tree. The kernel makes its base
+`0700` at boot, before plugin code runs. Permission (`not_permitted`), ownership/private-place (`not_own`), then the
+declared `agent-homes` root (`not_declared`) are checked in that order. The view uses the regular RootHandle machinery:
+whole or windowed reads, `openBytes`, listing, writes and copies, fenced to that pool with the same immutable/private
+guards. Every held read or write starts with the same `reachHistoryEntry` proof from the checked plugin state folder,
+then descends from that held pool descriptor. A link at any level is
+never followed, including a link pointing elsewhere inside the pool. A hard-linked file is not read. The view cannot
+reach homes, credentials, another plugin's state, or other state of its own plugin. It has no `linkHistory` or
+`moveToHistoryPool` door (`not_internal`). It is never either end of `linkTo` or link-mode `copyTree`, nor the place of
+`linkCredential` or link-mode `copyShared` (`link_escape`); copying bytes into it remains allowed.
+
+`RootHandle.moveToHistoryPool(from, pool, to): Promise<void>` moves ONE regular-file leaf by atomic no-replace rename from a ferret's home to
+that plugin's minted pool view (a forged view or another plugin's is `not_own`). The source is
+`<agent-homes>/<ferret>/<listed entry>/...`, or the listed entry itself; a home/root name is `not_home`, and the same
+fixed deny list and closed entry list still apply (`denied`, `not_listed`). The target is `<same entry>/...` or
+`.conflicts/<same ferret>/<same entry>/...`; other shapes are `denied`, and `.conflicts` is special only in that first
+position. Parents are made `0700` only inside the pool. Both parents are held through the no-follow descriptor walk,
+then Linux `renameat2(RENAME_NOREPLACE)` moves between those held parent descriptors. An existing target is
+`HistoryPoolError('exists')`, including one created concurrently: the source stays in place and the target is never replaced.
+Only regular-file leaves move; a folder, link or other kind is `not_file`, and a source file with another hard link is
+`hard_link`. A placed credential is refused by the same placed/private guards. A folder cannot carry an unchecked descendant
+through this door.
+Private-place guards hold at both ends; the pool end reuses `reachHistoryEntry` and its held base, including the
+device/inode check that refuses a real agent home swapped into the pool's place DURING this call. It does not establish
+where an already-planted real folder came from. Another device is `changed`, with no copy fallback. A host without
+atomic descriptor-relative no-replace rename (including macOS today) refuses `no_descriptor_reach`; there is no plain-rename
+fallback. Refusals before the syscall move no file; empty target-parent folders already made may remain. A failed
+post-move proof attempts atomic no-replace restoration; if the source name was taken meanwhile, the file can remain
+in the pool. For a proven hard-linked inode, the kernel instead drops its pool name when restoration fails (another
+name retains the bytes); the identity/link-count look and unlink have the same-user leaf-swap window described below. The harness then keeps its pending marker and refuses this launch rather than resuming from incomplete history.
+
+**Existing homes and interrupted merges.** Before moving any leaf of an entry, the shared harness helper preflights
+all names, kinds, link counts, depth and move count, and performs zero-byte reads through the kernel's private-place guards.
+A preflight refusal moves nothing in that entry and the launch continues on its own history with one sentence. Empty folders
+are recreated in the pool and removed only when empty from the source. Concurrent target creation is a conflict: the leaf
+is kept at `history-pool/.conflicts/<ferret>/<entry>/...` (with a numbered suffix if necessary), never overwritten.
+A pre-pool home's `history.jsonl` is kept WHOLE in `.conflicts`, never concatenated with the pool's history.
+An unexpected failure after a leaf moves refuses the launch with a clear retry sentence, so it cannot silently start a new
+conversation from a half-moved home. A per-entry `.history-pool-pending-<entry>` marker in that home preserves that refusal
+across failed retries; a successful retry finishes the remaining leaves, links the entry, and clears the marker.
+A pre-pool Codex ferret's own SQLite index is no longer used on its first pooled launch: `CODEX_SQLITE_HOME` selects the
+pool's index, which Codex builds from rollouts. A pooled sessions home refuses its launch if the shared SQLite folder cannot be prepared; it never falls back to a stale local database. The v4 migrator likewise omits `fleet/shared/codex/sqlite/` (including its
+WAL/SHM files), whose absolute rollout paths still name v4; it never imports that database into the v5 pool.
+
+**What it does not touch.** `credentialHomeLinkVerdict` is unchanged: `linkTo` and `copyTree` link mode still refuse every
+link into or out of `agent-homes` and `credentials`, the pool link included. The pool is not a credential's place or source:
+`linkCredential` links `<home>/<file>` one level only (so never into a pooled folder) and also refuses, defence in depth,
+any place or source at or under the plugin's pool (`poolCredentialVerdict`). A sign-in file, a settings file, an instruction
+file, a skill or a plugin folder is never a pooled entry, so a ferret's login, credentials and settings stay its own. The
+kernel's own reads and writes never follow a pool link out of the root (`link_escape`); only the harness child does.
+
+**Declared gaps.**
+
+- **The source leaf can change after its check.** The history move uses atomic no-replace rename, so the former
+  target-absence look-then-rename gap is closed for this door. A same-user writer can still swap a source leaf or add a
+  hard link between its last proof and the move; a post-move identity/link-count proof attempts a no-replace restoration
+  on mismatch. Descriptor-held parents prevent a swapped ancestor from redirecting the operation, but the syscall is not
+  conditional on the source inode. When a hard-linked target cannot be restored, its pool name is removed only after
+  checking it still names that inode with another link; a same-user writer can replace it between this look and unlink.
+  Generic `RootHandle.rename` retains its separately declared look-then-rename gap.
+
+- **Same-user reach.** The agent runs as the same user, so a ferret on a harness can read, rewrite or delete any pooled
+  transcript, and so can poison what another ferret resumes (a rewritten history is read as that ferret's own past). The
+  kernel cannot stop the child that holds the link; the door only guarantees it is a link to the harness's own pool.
+- **A link outlives a revocation.** Removing `permissions.historyPool` stops new links only; a link made stays until its
+  holder removes it (`unlink`).
+- **macOS.** There is no descriptor-relative `symlinkat` in the held-folder steps yet, so on a host with no
+  `/proc/self/fd` the door refuses `no_descriptor_reach` rather than link by a path. Pooling on macOS waits for that step.
+- **Pool entry swapped by a ferret.** A ferret can replace a pool entry with a link (it writes the pool through its own
+  link). The next `linkHistory` for that entry refuses (`link_escape`) and links nothing; a link already made then points at
+  the replacement. The kernel does not repair the pool.
+- **A race can leave the pool folder.** The pool folder and entry are made after every other check; a name that appears
+  in the home in that instant is refused `exists`, and a pool entry replaced after the link is published is refused
+  `changed` (its link taken back). In both the pool folder and entry made are left (empty or as found, and owner-only): the
+  refusal writes nothing in the home or outside the pool, but "nothing is made" is true of the checks that come first.
+- **Pool absent when first made.** When the pool folder (or an entry) does not exist yet, a same-user actor that renames
+  a real folder into its name in the instant before the kernel makes it has that folder adopted as the pool (the make
+  finds it, opens it without following a link, and uses it), whatever it already holds. This adds nothing the same actor
+  could not do with no race at all, by planting the folder before the first link: an existing pool is kept as it is found,
+  and a link still only ever names a declared entry. The kernel does not judge an adopted pool's owner, mode or contents.
+- **The take-back is by name.** When the proof after publishing fails, the name at the link's place is unlinked through
+  the held home folder without re-checking it is still this call's link; it only ever removes one name in that ferret's
+  own home.
+- **A link made later is not re-proved.** The proof is made when this call makes the link; a pool entry replaced afterwards is
+  the "pool entry swapped by a ferret" gap above.
+- **The testing host has no identities.** A name in a home that is an alias of a private place (`fenced` in production) is
+  `exists` on the testing host, as for `linkCredential`; every other refusal here is mirrored (`history-pool-parity.test.ts`).
+- **Fitness test.** `linkHistory` and the new `moveToHistoryPool` extend the `RootHandle` authority surface and are recorded in
+  `scripts/gen/tests/fleet-link-callers.snapshot.json` with its guard: the `agent-homes` handle only, the plugin's own pool
+  only, and no other root. The move is separately guarded to regular history leaves and atomic no-replace moves into the
+  minted pool; it does not relax the generic credential-home link rule. Its snapshot addition was independently reviewed
+  against these guards.
 
 ## Sign-in tokens the usage read sends
 

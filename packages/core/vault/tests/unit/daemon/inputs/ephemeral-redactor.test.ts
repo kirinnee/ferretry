@@ -63,7 +63,7 @@ describe('EphemeralAwareRedactor', () => {
 
   it('I102 masks original cut prefixes that contain a whole typed value', async () => {
     const typed = new EphemeralValues({ now: () => 1 });
-    typed.hold('s1', 'fixture-secret', '!A0');
+    typed.hold('s1', 'fixture-secret', '^A0');
     const redactor = new EphemeralAwareRedactor(
       new SecretRedactor({ values: async () => new Map([['TOKEN', 'prefix-fixture-secret-suffix']]) }),
       typed,
@@ -73,13 +73,13 @@ describe('EphemeralAwareRedactor', () => {
 
   it('I102 retains typed and sealed labels for cut prefixes and does not mask replacement text', async () => {
     const typed = new EphemeralValues({ now: () => 1 });
-    typed.hold('s1', 'fixture-secret', '!A0');
-    typed.hold('s1', 'redacted', '!A1');
+    typed.hold('s1', 'fixture-secret', '^A0');
+    typed.hold('s1', 'redacted', '^A1');
     typed.holdUntil('s1', 'copy-fixture-value', '[sealed:copy]', 10_000);
     const redactor = new EphemeralAwareRedactor(NO_REDACTION, typed);
-    should(await redactor.batch(scrub => scrub.text('fixture-sec', true))).equal('[redacted:input !A0]');
+    should(await redactor.batch(scrub => scrub.text('fixture-sec', true))).equal('[redacted:input ^A0]');
     should(await redactor.batch(scrub => scrub.text('copy-fixt', true))).equal('[sealed:copy]');
-    should(await redactor.redact('fixture-secret')).equal('[redacted:input !A0]');
+    should(await redactor.redact('fixture-secret')).equal('[redacted:input ^A0]');
   });
 
   it('should fail exactly as the vault does when it cannot be opened', async () => {

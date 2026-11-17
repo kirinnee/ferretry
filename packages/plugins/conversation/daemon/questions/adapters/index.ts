@@ -4,3 +4,4 @@ export * from './question-answering.ts';
 export * from './state-answer-ledger.ts';
 export * from './state-asked-question.ts';
 export * from './question-asks.ts';
+export * from './pane-question.ts';

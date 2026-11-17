@@ -6,6 +6,7 @@ import { ProfileSecrets } from '@ferretry/core-vault/contract';
 import { ITEM_NAME_PATTERN as StdItemNamePattern } from '@ferretry/std';
 import {
   INSTRUCTION_ITEMS,
+  instructionsItemHeld,
   ITEM_NAME_PATTERN,
   MODEL_SET_ITEMS,
   PROFILE_ITEMS,
@@ -301,5 +302,24 @@ describe('runtime file shell (Q18)', () => {
     const named = RuntimeFileSchema.parse({ login: 'claude-main', profile: 'default', shell: 'nix-dev' });
     expect(named.shell).toBe('nix-dev');
     expect(RuntimeFileSchema.safeParse({ login: 'claude-main', profile: 'default', shell: 'a/b' }).success).toBe(false);
+  });
+});
+
+describe('instructions items: an agent add or change is HELD, never applied (owner ruling !A525 item 9)', () => {
+  const before = { text: 'Be kind.' };
+
+  test('the collection judges with instructionsItemHeld, not neverLoosens', () => {
+    expect(INSTRUCTION_ITEMS.loosens).toBe(instructionsItemHeld);
+  });
+
+  test('a new item is held, a changed one is held, an unchanged one is not', () => {
+    expect(instructionsItemHeld(undefined, before)).toHaveLength(1);
+    expect(instructionsItemHeld(before, { text: 'Be kind. Run the build.' })).toHaveLength(1);
+    expect(instructionsItemHeld(before, { ...before, description: 'd' })).toHaveLength(1);
+    expect(instructionsItemHeld(before, { ...before })).toEqual([]);
+  });
+
+  test('the sentence never names the text', () => {
+    expect(instructionsItemHeld(before, { text: 'SECRET-LOOKING words' }).join(' ')).not.toContain('SECRET');
   });
 });

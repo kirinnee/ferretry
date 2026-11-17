@@ -1,6 +1,6 @@
 /**
  * CHAT POLISH, in a real browser: a ferret's message at rest is its first line with "Show more",
- * several image reads are ONE tool group, and the task picker carries an "Include agent cards" switch.
+ * several image reads are ONE tool group, and the task picker carries an "Include agent tasks" switch.
  *
  * The scene (`tests/integration/fixtures/chat-polish-scene.tsx`) is the real `Transcript` and the real
  * popover. Set `FY_CHAT_POLISH_SHOTS_DIR` to keep it at a phone and a desktop, light and dark.
@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 

@@ -17,6 +17,7 @@ import {
 import { refusedWith, refuseOwnerCommandInPane, showUntrusted, unique } from '../shared.ts';
 import { fromText, toText } from './controller.ts';
 import type { PlanPorts } from './ports.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /** Options every `fy plan` command accepts. */
 export interface PlanCommandOptions {
@@ -92,7 +93,7 @@ function renderPlan(plan: TaskPlan): string {
     ...lineFlags(line),
   ]);
   return [
-    `${plan.id.slice(0, 8)}  !${plan.agendaItemId}  ${plan.state}  session ${plan.sessionId}  until ${plan.expiresAt}`,
+    `${plan.id.slice(0, 8)}  ${ASK_REFERENCE_SIGIL}${plan.agendaItemId}  ${plan.state}  session ${plan.sessionId}  until ${plan.expiresAt}`,
     ...lines,
   ].join('\n');
 }
@@ -167,7 +168,7 @@ export class PlanController {
     say(TASK_PLAN_HONEST_LIMIT);
     const card = await this.ports.gateway.confirmInApp(plan.sessionId, plan.id, staged.stage);
     say(
-      `Confirm it with your passkey on the plan's card !${card.agendaItemId} in the app's Inbox (session ${plan.sessionId}).\nNothing is approved until you do; waiting up to ${String(TASK_PLAN_STAGE_TTL_SECONDS / 60)} minutes…`,
+      `Confirm it with your passkey on the plan's item ${ASK_REFERENCE_SIGIL}${card.agendaItemId} in the app's Inbox (session ${plan.sessionId}).\nNothing is approved until you do; waiting up to ${String(TASK_PLAN_STAGE_TTL_SECONDS / 60)} minutes…`,
     );
     await this.#showCard(plan, card.agendaItemId, options, say);
     const state = await this.#wait(plan, staged.stage);
@@ -197,7 +198,7 @@ export class PlanController {
     const daemonId = machine === undefined ? undefined : await machine().catch(() => undefined);
     const link = `${appOrigin.replace(/\/+$/u, '')}/${agendaDeepLinkFragment(agendaItemId, plan.sessionId, daemonId)}`;
     if (appOriginNote !== undefined) say(appOriginNote);
-    say(`Open the card: ${link}`);
+    say(`Open the item: ${link}`);
     if (options.open !== true) return;
     say(
       openLink !== undefined && (await openLink(link))

@@ -69,6 +69,8 @@ export default definePlugin({
       route('POST /v1/ferrets/:id/runtime', {
         minimum: 'operator',
         caller: 'any',
+        // c58-sec3 r1: a model/effort switch relaunches the ferret on another runtime, as a move does.
+        capability: cap('fleet', 'configure'),
         noStore: true,
         audit: { skip: 'the runtime subsystem records the control outcome' },
         guard: { none: 'runtime control; no pane text' },

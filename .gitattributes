@@ -1,0 +1,19 @@
+# merge=union: files that are NOTHING BUT a list of entries, one per line, under a fixed header.
+# The registry rule ("a registry is merge-safe by construction"), point 4. Two adds that
+# land in the same gap keep both lines instead of conflicting; `scripts/gen/registries.ts --check` then says if the two
+# lines are in the wrong order, and regenerating (or moving the line) fixes it. Order never matters to what the file means
+# for these three (barrels of re-exports and a composed interface), and the test in
+# scripts/gen/tests/registry-merge-safe.test.ts holds this list to files that are pure entry lists.
+#
+# Not here, on purpose: any file with a body that is code rather than an entry (plugins.ts, commands.ts, surfaces.ts,
+# slim.ts, glossary.ts, features.ts, verbs.ts, actions.ts, slots.ts, app-hooks.ts: openers and closers a union could
+# duplicate or order wrongly), plugin-styles.css (its order is the CSS cascade), and every JSON file (`ports-pending.json`,
+# `knip*.json`, `contract-hashes.json`: a union would write invalid JSON).
+packages/core/ferrets/contract/generated/hooks.ts merge=union
+packages/core/ferrets/contract/generated/kinds.ts merge=union
+packages/core/ferrets/contract/generated/ferrets-api.ts merge=union
+
+# Every package's composition.tsv (scripts/ci/lib/composition.ts): a header, then one entry per line, sorted. Nothing but entries,
+# so two features' adds in the same gap keep both lines; the `composition` check (scripts/validate/composition.ts) then says if the
+# two are out of order. No slash in the pattern, so it matches in every folder and at the repository root.
+composition.tsv merge=union

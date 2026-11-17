@@ -5,9 +5,11 @@
  * Unit 3's: the glyph is on the remainder line.)
  */
 import { afterEach, describe, expect, it } from 'bun:test';
+import type { ComponentProps } from 'react';
 import { FerretRow } from '../../../../app/features/list/ferret-row.tsx';
 import { RowMenuContext, type RowMenuRequest } from '../../../../app/features/list/row-menu-context.ts';
-import type { FerretSummary } from '../../../../contract/index.ts';
+import { WithSlotPanels } from '@ferretry/app/testing';
+import { FERRET_LIST_ROW_MARK_SLOT, type FerretSummary } from '../../../../contract/index.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { summary as ferretSummary } from './support.ts';
 
@@ -86,5 +88,104 @@ describe('the row menu seam', () => {
     expect(document.activeElement).toBe(row);
     await mounted?.unmount();
     expect(requests[0]?.focusRow()).toBe(false);
+  });
+});
+
+describe('the marks other plugins draw on a row', () => {
+  const place = (ferret: FerretSummary) => (
+    <WithSlotPanels
+      slots={{
+        [FERRET_LIST_ROW_MARK_SLOT]: [
+          {
+            plugin: 'usage',
+            id: 'quota',
+            view: props => (
+              <b data-test-mark={`${String(props.ferret)}:${String(props.runtime)}:${String(props.login)}`}>quota</b>
+            ),
+          },
+        ],
+      }}
+    >
+      <ul>
+        <FerretRow active={false} daemon="alpha" ferret={ferret} />
+      </ul>
+    </WithSlotPanels>
+  );
+
+  it('hands the ferret, its runtime and its login to what a plugin contributes to the row-mark slot', async () => {
+    mounted = await mount(place(ferretSummary('a', { runtime: 'claude-main', login: 'work-login' })));
+    const marks = must(mounted.container.querySelector('[data-sbar-marks]'), 'the marks line');
+    expect(marks.querySelector('[data-test-mark]')?.getAttribute('data-test-mark')).toBe('a:claude-main:work-login');
+    expect(marks.textContent).toBe('quota');
+  });
+
+  it('hands no login for a ferret whose record names none, never the runtime in its place', async () => {
+    mounted = await mount(place(ferretSummary('a', { runtime: 'claude-main' })));
+    expect(mounted.container.querySelector('[data-test-mark]')?.getAttribute('data-test-mark')).toBe(
+      'a:claude-main:undefined',
+    );
+  });
+
+  it('draws no marks line for a ferret that names no runtime, so nothing is asked for an unknown account', async () => {
+    mounted = await mount(place({ ...ferretSummary('a'), runtime: undefined }));
+    expect(mounted.container.querySelector('[data-sbar-marks]')).toBeNull();
+    expect(mounted.container.querySelector('[data-test-mark]')).toBeNull();
+  });
+});
+
+describe('the pin button and the sub-ferret chevron', () => {
+  const place = (props: Partial<ComponentProps<typeof FerretRow>>, ferret = ferretSummary('a')) =>
+    mount(
+      <ul>
+        <FerretRow active={false} daemon="alpha" ferret={ferret} {...props} />
+      </ul>,
+    );
+
+  it('draws a pin button only when asked, which pins an unpinned ferret and unpins a pinned one', async () => {
+    mounted = await place({});
+    expect(mounted.container.querySelector('[data-sbar-pin]')).toBeNull();
+    await mounted.unmount();
+
+    const calls: boolean[] = [];
+    mounted = await place({ onPin: pinned => calls.push(pinned) }, ferretSummary('a', { title: 'Task a' }));
+    const pin = must(mounted.container.querySelector<HTMLButtonElement>('[data-sbar-pin]'), 'the pin button');
+    expect(pin.getAttribute('aria-label')).toBe('Pin Task a');
+    expect(pin.getAttribute('aria-pressed')).toBe('false');
+    await interact(() => pin.click());
+    await mounted.unmount();
+
+    mounted = await place(
+      { onPin: pinned => calls.push(pinned) },
+      ferretSummary('a', { title: 'Task a', pinnedAt: '2026-11-02T10:00:00.000Z' }),
+    );
+    const unpin = must(mounted.container.querySelector<HTMLButtonElement>('[data-sbar-pin]'), 'the unpin button');
+    expect(unpin.getAttribute('aria-label')).toBe('Unpin Task a');
+    expect(unpin.getAttribute('aria-pressed')).toBe('true');
+    await interact(() => unpin.click());
+    expect(calls).toEqual([true, false]);
+  });
+
+  it('draws the sub-ferrets only while the branch is open, and says how many there are', async () => {
+    let flips = 0;
+    mounted = await place({
+      branch: { count: 2, open: false, toggle: () => (flips += 1) },
+      children: <li data-test-kid="">kid</li>,
+    });
+    const toggle = must(mounted.container.querySelector<HTMLButtonElement>('[data-sbar-branch-toggle]'), 'the chevron');
+    expect(toggle.getAttribute('aria-label')).toBe('Show 2 sub-ferrets of home-manager');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(mounted.container.querySelector('[data-test-kid]')).toBeNull();
+    await interact(() => toggle.click());
+    expect(flips).toBe(1);
+    await mounted.unmount();
+
+    mounted = await place({
+      branch: { count: 1, open: true, toggle: () => undefined },
+      children: <li data-test-kid="">kid</li>,
+    });
+    expect(mounted.container.querySelector('[data-sbar-branch-toggle]')?.getAttribute('aria-label')).toContain(
+      'Hide 1 sub-ferret of',
+    );
+    expect(mounted.container.querySelector('.fy-sbar__children [data-test-kid]')).not.toBeNull();
   });
 });

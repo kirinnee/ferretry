@@ -1,5 +1,5 @@
 /**
- * The input card's decisions as pure functions (`app/lib/input-card.ts`, `app/lib/input-wire.ts`): the expiry words,
+ * The input card's decisions as pure functions (`app/lib/input-card.ts`, `contract/inputs-wire.ts`): the expiry words,
  * the field attributes, the sentence a refused field becomes, and the sentence every failed Send becomes. Only obvious
  * fakes appear here.
  */
@@ -12,7 +12,7 @@ import {
   type InputFailure,
   typedBody,
 } from '../../../app/lib/input-card.ts';
-import { InputRequestViewSchema } from '../../../app/lib/input-wire.ts';
+import { InputRequestSchema } from '../../../contract/index.ts';
 import { FAKE_VALUE, terminalRequest } from '../../support/app/input-fixtures.ts';
 
 const NOW = Date.parse('2026-11-10T00:00:00.000Z');
@@ -90,7 +90,7 @@ describe('what a card of several fields says about a refused one', () => {
 describe('a risk level this build does not know', () => {
   const read = (level: string, onRequest = false) => {
     const risk = { level, reason: 'Seen from a newer daemon.' };
-    return InputRequestViewSchema.parse(
+    return InputRequestSchema.parse(
       terminalRequest({
         fields: [{ id: 'value', label: 'Password', sensitivity: 'secret', ...(onRequest ? {} : { risk }) }],
         ...(onRequest ? { risk } : {}),
@@ -127,12 +127,12 @@ describe('a failed Send, in words', () => {
 
   it('says the secret store changed when a secret target moved', () => {
     expect(text(inputFailure(refusal(409, 'target_rebound'), 'secret'))).toBe(
-      'The secret store changed. Check the card and send again.',
+      'The secret store changed. Check the input and send again.',
     );
   });
 
   it('says the page changed for a page target and for a target it was not told', () => {
-    const page = 'The page changed. Check the card and send again.';
+    const page = 'The page changed. Check the input and send again.';
     expect(text(inputFailure(refusal(409, 'target_rebound'), 'page'))).toBe(page);
     expect(text(inputFailure(refusal(409, 'target_rebound')))).toBe(page);
   });

@@ -21,8 +21,9 @@
  *
  * Pure and total: the service gathers the facts and throws the refusal.
  */
-import type { Card } from '../../../contract/index.ts';
+import { type Card, TRACK_ASK_COMMAND } from '../../../contract/index.ts';
 import type { AnsweredAsk } from './ports.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /** The question the owner's Yes must answer: "Track this on the board?", in the ferret's words for "this". */
 export const TRACK_QUESTION = /^\s*track\b[^?]*\bon the board\b\s*\??\s*$/iu;
@@ -68,7 +69,7 @@ export const approvalProblem = (
   caller: string,
   usedBy: Pick<Card, 'id'> | undefined,
 ): string | null => {
-  const ref = `!${id}`;
+  const ref = `${ASK_REFERENCE_SIGIL}${id}`;
   if (ask === undefined) return `${ref} is not an answered ask on your ledger`;
   if (ask.raisedBy !== 'ferret' || ask.raisedByFerret !== caller) return `${ref} is not an ask you raised`;
   if (!isYesNo(ask)) return `${ref} is not a yes/no question`;
@@ -77,7 +78,7 @@ export const approvalProblem = (
   }
   if (ask.answer?.by !== 'owner') return `${ref} was not answered by the owner`;
   if (ask.answer.choice?.trim().toLowerCase() !== YES) return `the owner did not answer Yes to ${ref}`;
-  if (usedBy !== undefined) return `${ref} already made &${usedBy.id}; one Yes makes one card`;
+  if (usedBy !== undefined) return `${ref} already made &${usedBy.id}; one Yes makes one task`;
   return null;
 };
 
@@ -87,9 +88,9 @@ export const approvalProblem = (
  */
 export const offBoardRefusal = (board: string, problem?: string): string =>
   [
-    `The ${board} board is off, so this work needs no card: put only what the owner must decide or do in an ask (fy ask …).`,
+    `The ${board} board is off, so this work needs no task: put only what the owner must decide or do on your agenda (fy agenda add …).`,
     problem === undefined ? undefined : `The approval does not count: ${problem}.`,
-    `To track it anyway, ask first: fy ask -k yesno "Track this on the board?" — then, once the owner says Yes, fy card new … --approval !A<n>.`,
+    `To track it anyway, ask first: ${TRACK_ASK_COMMAND} — then, once the owner says Yes, fy task new … --approval <ask>.`,
   ]
     .filter((line): line is string => line !== undefined)
     .join(' ');

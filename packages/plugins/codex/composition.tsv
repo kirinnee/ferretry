@@ -1,0 +1,3 @@
+kind	path	limit	expires	reason
+composition	daemon/adapters/codex-harness.ts	-	-	the one factory that returns the whole Harness for Codex
+registry	daemon/harness/parts/index.ts	-	-	the Codex harness parts registry: one sorted `export * as <name>` line per part; list.ts builds the ordered list from it

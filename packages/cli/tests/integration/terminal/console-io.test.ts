@@ -1,3 +1,4 @@
+import { PassThrough } from 'node:stream';
 import { afterAll, afterEach, describe, it, spyOn } from 'bun:test';
 import should from 'should';
 import { ConsoleIo } from '../../../src/adapters/terminal/console-io.ts';
@@ -45,6 +46,18 @@ describe('ConsoleIo', () => {
     should(err.mock.calls).eql([['note\n']]);
   });
 
+  it('can ask a question only where stdin and stdout are both a terminal, so a script is never asked', () => {
+    const io = new ConsoleIo();
+    setTty(process.stdin, true);
+    setTty(process.stdout, true);
+    should(typeof io.ask).eql('function');
+    setTty(process.stdout, false);
+    should(io.ask).be.undefined();
+    setTty(process.stdin, false);
+    setTty(process.stdout, true);
+    should(io.ask).be.undefined();
+  });
+
   it('is a terminal only when stdin and stdout both are', () => {
     const io = new ConsoleIo();
     setTty(process.stdin, true);
@@ -55,5 +68,43 @@ describe('ConsoleIo', () => {
     setTty(process.stdin, false);
     setTty(process.stdout, true);
     should(io.isTty).be.false();
+  });
+
+  /** Types one line into the process's own stdin once the question is on stderr, as a person at a terminal would. */
+  async function answerWith(line: string): Promise<{ answer: string; asked: string }> {
+    // A stream of its own: the real stdin may be closed or shared with other files, and would end the question.
+    const input = new PassThrough();
+    const stdin = Object.getOwnPropertyDescriptor(process, 'stdin');
+    Object.defineProperty(process, 'stdin', { value: input, configurable: true });
+    restores.push(() => {
+      if (stdin !== undefined) Object.defineProperty(process, 'stdin', stdin);
+    });
+    setTty(input as never, true);
+    setTty(process.stdout, true);
+    const err = spyOn(process.stderr, 'write').mockImplementation(() => true);
+    restores.push(() => err.mockRestore());
+    const ask = new ConsoleIo().ask;
+    if (ask === undefined) throw new Error('expected a terminal');
+    const pending = ask('Continue?');
+    // readline attaches to stdin as ask starts; let it settle before the line arrives.
+    input.write(line);
+    const answer = await pending;
+    return { answer, asked: err.mock.calls.map(call => String(call[0])).join('') };
+  }
+
+  it('asks on stderr and returns what the person typed, without the line break', async () => {
+    const { answer, asked } = await answerWith('yes\n');
+    should(answer).eql('yes');
+    should(asked).containEql('Continue? ');
+  });
+
+  it('returns an empty answer when the person just presses enter', async () => {
+    const { answer } = await answerWith('\n');
+    should(answer).eql('');
+  });
+
+  it('closes its prompt after answering, so a second question is a fresh one', async () => {
+    should((await answerWith('one\n')).answer).eql('one');
+    should((await answerWith('two\n')).answer).eql('two');
   });
 });

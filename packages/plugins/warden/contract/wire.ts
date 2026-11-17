@@ -90,8 +90,13 @@ export const WardenAutoMoveConfigSchema = z.strictObject({
   maxMovesPerHour: z.number().int().min(1).max(6),
   minHeadroomPercent: z.number().int().min(0).max(90),
 });
+/**
+ * ON by default (owner ruling 2026-11-15, !A527; v4 shipped it off): a ferret that runs out of tokens goes to a login with
+ * room, or waits and resumes at the reset. An explicit `autoMove.enabled: false` in `warden.yaml` is kept as written, and
+ * `targets` is a hard list: a non-empty one is the only place a ferret may be moved to.
+ */
 export const DEFAULT_WARDEN_AUTO_MOVE = {
-  enabled: false,
+  enabled: true,
   when: ['rate_limited', 'budget_exceeded'],
   targets: [],
   forceStopBackground: false,
@@ -356,6 +361,9 @@ export const WardenFlagSchema = z.strictObject({
   assignedWarden: z.boolean().optional(),
   ledger: LivenessLedgerSchema.optional(),
   subject: z.string().min(1).optional(),
+  /** The board task an orphaned-task flag is about. */
+  task: z.strictObject({ id: z.string().min(1) }).optional(),
+  /** The key this flag carried one release ago; read, never written (`task` is the one the daemon sends). */
   card: z.strictObject({ id: z.string().min(1) }).optional(),
 });
 export type WardenFlag = z.infer<typeof WardenFlagSchema>;

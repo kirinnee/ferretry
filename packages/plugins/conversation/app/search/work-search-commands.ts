@@ -37,11 +37,11 @@ export const WORK_SEARCH_LIMIT = 20;
 export const MAX_WORK_ROWS_PER_KIND = 6;
 
 /** The words the bar shows while the daemon's search is still out (today's palette said the same). */
-const WORK_PENDING_LINE = 'Searching cards and agenda…';
+const WORK_PENDING_LINE = 'Searching tasks and agenda…';
 
 /**
  * The chips the bar draws for this source (S11), as today's palette drew them: which kind, and whether closed work is
- * among the answer. The first option of each is the resting one: everything, so a finished card is still findable.
+ * among the answer. The first option of each is the resting one: everything, so a finished task is still findable.
  */
 const WORK_FILTERS: readonly CommandBarFilter[] = [
   {
@@ -49,7 +49,7 @@ const WORK_FILTERS: readonly CommandBarFilter[] = [
     label: 'Kind of work',
     options: [
       { id: 'all', label: 'All' },
-      { id: 'card', label: 'Cards' },
+      { id: 'card', label: 'Tasks' },
       { id: 'ask', label: 'Agenda' },
     ],
   },
@@ -64,7 +64,7 @@ const WORK_FILTERS: readonly CommandBarFilter[] = [
 ];
 
 /** The heading each kind is listed under. */
-export const WORK_GROUPS = { card: 'Cards', ask: 'Asks' } as const;
+export const WORK_GROUPS = { card: 'Tasks', ask: 'Asks' } as const;
 
 /** The names a row is drawn with, when the machine's Projects and Ferrets have given them (each absent until then). */
 export interface WorkRowNames {

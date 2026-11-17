@@ -1,5 +1,6 @@
 /** What `fy gc` and `fy tidy` print. Copied from today's `lib/scratch/render.ts` and `lib/tidy/render.ts`, in 5.0's words. */
 import type { ScratchPlanView, ScratchSweepView, TidyPlan } from '../../contract/index.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /** Compact byte counts. */
 function humanBytes(bytes: number): string {
@@ -56,7 +57,7 @@ export interface TidyResult {
 }
 
 const card = (id: string) => `&${id}`;
-const ask = (id: string) => `!${id}`;
+const ask = (id: string) => `${ASK_REFERENCE_SIGIL}${id}`;
 
 function section(heading: string, rows: readonly string[]): string[] {
   return rows.length === 0 ? [] : ['', heading, ...rows.map(row => `  ${row}`)];
@@ -79,13 +80,13 @@ export function renderDryRun(plan: TidyPlan, binary: string, ferret?: string): s
   const { drop, close, keep } = lines(plan);
   if (drop.length === 0 && close.length === 0) {
     return [
-      'Nothing to tidy: no card to drop and no ask to close.',
+      'Nothing to tidy: no task to drop and no ask to close.',
       ...section(`Kept (${String(keep.length)})`, keep),
     ].join('\n');
   }
   return [
     'Dry run: nothing changed.',
-    ...section(`Would drop ${String(drop.length)} card(s)`, drop),
+    ...section(`Would drop ${String(drop.length)} task(s)`, drop),
     ...section(`Would close ${String(close.length)} ask(s)`, close),
     ...section(`Would keep ${String(keep.length)}`, keep),
     '',
@@ -103,10 +104,10 @@ export function renderApplied(plan: TidyPlan, result: TidyResult): string {
   const done = (outcomes: readonly TidyOutcome[]) => outcomes.filter(outcome => outcome.error === undefined).length;
   const failed = [...result.dropped, ...result.closed].filter(outcome => outcome.error !== undefined).length;
   return [
-    `Tidied: dropped ${String(done(result.dropped))} card(s), closed ${String(done(result.closed))} ask(s)${
+    `Tidied: dropped ${String(done(result.dropped))} task(s), closed ${String(done(result.closed))} ask(s)${
       failed === 0 ? '.' : `; ${String(failed)} failed.`
     }`,
-    ...section('Cards', result.dropped.map(outcomeRow)),
+    ...section('Tasks', result.dropped.map(outcomeRow)),
     ...section('Asks', result.closed.map(outcomeRow)),
     ...section(`Kept (${String(plan.keep.length)})`, lines(plan).keep),
   ].join('\n');

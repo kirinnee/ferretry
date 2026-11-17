@@ -1,0 +1,75 @@
+name: One Folder
+
+# THE ONE-FOLDER RULE (docs/standards/architecture, "One feature, one folder"): a pull request into rebuild/5.0-after
+# that changes a file outside its own plugin folder must name that file, with a reason, under `## Outside files` in its
+# body. scripts/ci/one-folder.ts decides.
+#
+# The same job also runs the COMPOSITION GUARD (scripts/ci/composition-guard.ts): a PR that edits a file a package declares in
+# its composition.tsv must name it under `## Contract change`, unless it only adds one sorted line to a registry.
+#
+# A workflow of its own, not a job of ci.yaml, because it reads the PULL REQUEST BODY: every `edited` event has to
+# re-run it so that fixing the body clears it. ci.yaml deliberately runs nothing on an edit that changed no base (its
+# contract, scripts/test/ci-sets.ts), and its Full CI verdict needs every job it holds, which a job that only exists
+# on one base could never satisfy. This is its own red check on the pull request and nothing else waits for it.
+#
+# `branches` is the PR's BASE: any other base never starts a run. The script checks the base again, so a retarget away
+# from rebuild/5.0-after passes.
+on:
+  pull_request:
+    branches: [rebuild/5.0-after]
+    types: [opened, synchronize, reopened, edited]
+
+# A newer event for the same pull request (a pushed fix, an edited body) supersedes the run for the old one.
+concurrency:
+  group: one-folder-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  one-folder:
+    name: One Folder
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    env:
+      FY_ONE_FOLDER_EVENT: ${{ github.event_name }}
+      FY_ONE_FOLDER_BASE_REF: ${{ github.event.pull_request.base.ref }}
+      FY_ONE_FOLDER_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      FY_ONE_FOLDER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-nix
+      # The merge-base the rule diffs against: the same fetch the changed-plugin scope uses.
+      - name: Fetch the history the diff needs
+        env:
+          FY_SCOPE_EVENT: ${{ github.event_name }}
+          FY_SCOPE_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          FY_SCOPE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          FY_SCOPE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: ./scripts/ci/scope-fetch.sh
+      - name: Check every file outside the home folder is explained
+        env:
+          # The body comes from the event payload, as data: never interpolated into a script, never a `gh` call.
+          FY_ONE_FOLDER_PR_BODY: ${{ github.event.pull_request.body }}
+        run: ./scripts/ci/in-devshell.sh bun scripts/ci/one-folder.ts
+      # THE COMPOSITION GUARD (docs/standards/architecture, "A feature adds files and lines; it never rewrites shared code"):
+      # a PR that edits a file a package declares in its composition.tsv must name it under `## Contract change`.
+      # Same job, same body, same merge-base fetch; scripts/ci/composition-guard.ts decides. It runs even when the step
+      # above failed, so one run shows both verdicts.
+      - name: Check every edited composition file is named under Contract change
+        if: ${{ !cancelled() }}
+        env:
+          FY_ONE_FOLDER_PR_BODY: ${{ github.event.pull_request.body }}
+        run: ./scripts/ci/in-devshell.sh bun scripts/ci/composition-guard.ts
+      # THE SIZE/CHURN CHECK (scripts/ci/size-churn.ts, plan H6): a source file this PR changes that is over 1,500 lines, or that
+      # 6 or more of the last 80 merges edited, fails unless its package's composition.tsv declares it `oversize` (limit, expiry).
+      # The churn window is 80 merges of history behind the base, deeper than the merge-base fetch above gives, so it deepens
+      # the base first (best effort: a checkout that stays shallow measures fewer merges, says so, and can only pass more).
+      - name: Fetch the merge history the churn window needs
+        if: ${{ !cancelled() }}
+        run: git fetch --no-tags --quiet --depth=2000 origin "${FY_ONE_FOLDER_BASE_SHA}" || echo "size/churn - the deeper fetch failed; the churn window is what the checkout holds"
+      - name: Check every changed source file is within the size and churn limits
+        if: ${{ !cancelled() }}
+        run: ./scripts/ci/in-devshell.sh bun scripts/ci/size-churn.ts

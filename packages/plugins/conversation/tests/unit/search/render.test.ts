@@ -18,8 +18,8 @@ const answer = (hits: WorkHit[], rest: Partial<WorkSearchResponse> = {}): WorkSe
 
 describe('renderSearch', () => {
   test('says which kind matched nothing, and how many older closed items were left out', () => {
-    expect(renderSearch('relay', undefined, answer([]))).toBe('No cards or asks match “relay”.');
-    expect(renderSearch('relay', 'card', answer([]))).toBe('No cards match “relay”.');
+    expect(renderSearch('relay', undefined, answer([]))).toBe('No tasks or asks match “relay”.');
+    expect(renderSearch('relay', 'card', answer([]))).toBe('No tasks match “relay”.');
     expect(renderSearch('relay', 'ask', answer([], { olderHidden: 1 }))).toBe(
       'No asks match “relay”.\n1 older closed item hidden — search_work again with all: true',
     );
@@ -45,7 +45,7 @@ describe('renderSearch', () => {
     );
     expect(text.split('\n')).toEqual([
       '&F1 card [Todo] Relay carrier — the relay carrier choice',
-      '!A3 ask [open] (ask of zoe) Which relay? — a long question',
+      '^A3 ask [open] (ask of zoe) Which relay? — a long question',
     ]);
   });
 

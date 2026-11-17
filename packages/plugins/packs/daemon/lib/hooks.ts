@@ -1,6 +1,7 @@
 import type { HookDecision } from '@ferretry/kernel/contract';
 import type { PackConfig } from '../../contract/index.ts';
 import { admitChild, type PackLaunchFacts, packLaunchDefault, type ParentFacts } from './admission.ts';
+import { isScratchPath, scratchRefusal } from './scratch.ts';
 
 /**
  * Whose limits a `start.decide` is judged against: the parent of a START. A resume relaunches a ferret that was
@@ -12,6 +13,28 @@ export function limitedParent(input: {
   readonly by: string;
 }): string | undefined {
   return input.by === 'resume' ? undefined : input.parent;
+}
+
+/**
+ * The temporary-folder refusal (`fy new` without `--allow-scratch`): only a start that ASKED the check (`allowScratch`
+ * false — `fy start` sends none) and is not a relaunch is held to it. `undefined` means this check has no objection.
+ *
+ * It judges the directory the start will REALLY be in (`realFolder`, the kernel's bound identity, every link resolved),
+ * never the spelling: a link spelled in /tmp to a project is allowed, a link in a project into /tmp is refused. `roots`
+ * are resolved the same way ({@link resolveScratchRoots}). With no bound directory the spelling is all there is.
+ */
+export function scratchDecision(
+  input: {
+    readonly folder: string;
+    readonly realFolder?: string | undefined;
+    readonly by: string;
+    readonly allowScratch?: boolean | undefined;
+  },
+  roots: readonly string[],
+): HookDecision | undefined {
+  const where = input.realFolder ?? input.folder;
+  if (input.allowScratch !== false || input.by === 'resume' || !isScratchPath(where, roots)) return undefined;
+  return { allow: false, reason: scratchRefusal(where) };
 }
 
 /**

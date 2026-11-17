@@ -32,8 +32,8 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 | `treefmt`                   | formatting: Biome (TS/JS/JSON/CSS), prettier (Markdown/YAML/HTML), actionlint, nixfmt, shfmt                                                                      |
 | `a-biome`                   | Biome lint on TS/JS (Biome formats through `treefmt`, configured in the same `biome.json`)                                                                        |
 | `typecheck`                 | `tsc --noEmit` across the workspace, one run per machine at a time (see below)                                                                                    |
-| `a-deadcode`                | Knip, repository view (`knip.json`) — includes tests                                                                                                              |
-| `a-deadcode-production`     | Knip, production view (`knip.production.json`) — from the bin entry                                                                                               |
+| `a-deadcode`                | Knip, repository view (`knip.ts`) — includes tests                                                                                                                |
+| `a-deadcode-production`     | Knip, production view (`knip.production.ts`) — from the bin entry                                                                                                 |
 | `a-shellcheck`              | shellcheck on every `*.sh` and `scripts/host/ferretry-loopback-firewall`                                                                                          |
 | `a-enforce-exec`            | tracked shell scripts are executable                                                                                                                              |
 | `a-action-pins-trusted`     | trusted GitHub Actions pin a major tag                                                                                                                            |
@@ -58,15 +58,29 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 | `a-pages-config`            | the PWA build and the Pages deployment publish the same directory                                                                                                 |
 | `a-relay-config`            | relay code, bindings, discovery and deployment configuration agree                                                                                                |
 | `a-rebuild-checks`          | the Ferretry 5.0 checks (redesign §7.9) through their one entry, `scripts/gen/check.ts`                                                                           |
+| `a-unit-budgets`            | no speed or size budget in the unit tier (the perf tier owns them); `config/perf-pending.txt` only shrinks                                                        |
 | `a-test-tiers`              | tier placement and budgets; complete groups; Quick/Full event, verdict and run-all contracts                                                                      |
 | `a-job-ceilings`            | every workflow job states `timeout-minutes`, so a wedged job fails in minutes                                                                                     |
 | `a-commit-msg`              | conventional commit subject (`commit-msg` stage)                                                                                                                  |
+| `a-pre-push-fresh`          | a pushed branch contains its base's tip (`pre-push` stage; `FY_ALLOW_BEHIND_PUSH=1` pushes anyway)                                                                |
 
 The root `typecheck` project does not include `scripts/test/**`, and the E2E harness project does,
 under the same strictness plus `strict`. `task test:e2e` typechecks that project before running any
 journey, so a type error in a fixture such as `ci-sets.ts` used to pass Quick and then fail every E2E
 shard in seconds (E2E is advisory, so the PR still went green). `a-e2e-harness-typecheck` runs the exact
 command `scripts/test/run-e2e.sh` runs, in Quick's parallel buckets, so it fails first.
+
+**Where a package's Knip settings live.** Each package owns its own entry points, ignores and kept exports:
+`<package>/knip.json` is its workspace block for the repository view and `<package>/knip.production.json` for the
+production view (a package owns them when it is `packages/std`, `packages/cli`, `packages/app` or
+`packages/core|plugins/<id>`). A package with no special setting has no file; the `packages/core/*` and
+`packages/plugins/*` blocks in the root cover it. The root `knip.ts` and `knip.production.ts` keep only what is global
+(the rules, the tags, the root workspace `.` and those two globs) and call `composeKnip`
+(`scripts/gen/lib/knip-config.ts`), which reads every package's file into the one config Knip runs. A setting that keeps
+code alive without a pending-port tie (an entry that is no test, view or bin file, `ignoreDependencies`,
+`ignoreIssues`) names its reason in the same file, in an `allowed` object (`"entry:app/surfaces.tsx": "why"`).
+`a-pending-tags` refuses a package key in a root config, a root `knip.json`, and a file outside a package folder, so the
+settings cannot grow back into a file every feature edits.
 
 Two Knip passes exist on purpose: the production view starts from the binary entry point and
 therefore catches files that only tests reach, which the repository view considers used.
@@ -129,6 +143,33 @@ pre-commit run a-commit-msg --hook-stage commit-msg --commit-msg-filename .git/C
 
 > `pre-commit run` stashes unstaged changes for the duration of the run. Finish or stage
 > in-flight edits before running it if anything else is writing to the tree.
+
+## Pushing a branch that is behind its base
+
+Agents rebase their own branch before every push (owner, 2026-11-16). `a-pre-push-fresh` enforces it on the
+`pre-push` stage through `scripts/validate/pre-push-fresh.sh`: after a quiet `git fetch origin <base>` it refuses
+the push unless `git merge-base --is-ancestor origin/<base> <pushed sha>` holds, and says:
+
+```text
+<branch> is behind <base>: rebase onto origin/<base> first (or merge it on a shared branch). Set FY_ALLOW_BEHIND_PUSH=1 to push anyway.
+```
+
+- **Branch and commit** are the push's DESTINATION (`refs/heads/<branch>`) and the pushed sha, so `git push origin <sha>:refs/heads/<branch>` is gated like a branch push.
+- **Base** is `git config branch.<name>.ferretry-base` when set, else the branch this one was cut from (its upstream
+  while that is another branch, as after `git worktree add -b <name> origin/<base>`), else the nearest of origin's
+  long-lived branches (`origin/HEAD`'s branch, `main`, and the version-named `rebuild/<digit>*` and
+  `release/<digit>*`; never a PR branch such as `rebuild/c58-…`) read from refs already fetched: the one
+  whose fork point with the pushed commit is newest. When several are equally near the push passes if it contains
+  any of them, and when no base can be told with confidence it passes with a warning. Set `ferretry-base` to
+  be certain. No network call asks a PR's base (`gh pr view` is not used).
+- **Rebase** your own branch (`git fetch && git rebase origin/<base>`, then `git push --force-with-lease`). On a
+  release, integration or stacked branch, merge the base in instead; never rewrite those.
+- **Skipped:** tag pushes, branch deletes and a push of the base branch itself.
+- **Offline:** when the fetch fails the push is allowed, with a warning. The gate never blocks on the network.
+- **Escape:** `FY_ALLOW_BEHIND_PUSH=1 git push …`. `scripts/validate/pre-push-fresh.sh --help` prints the same.
+- Only the first branch of a multi-ref push is checked (pre-commit runs a `pre-push` hook once per push).
+
+The hook is installed by the same devshell launcher as `pre-commit` and `commit-msg` (`nix/git-hooks.nix`).
 
 ## `.pre-commit-config.yaml` is generated
 

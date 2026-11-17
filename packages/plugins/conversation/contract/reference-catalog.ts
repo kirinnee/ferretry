@@ -1,5 +1,6 @@
 import { type CallStanding, type CapabilityDemand, defineHook } from '@ferretry/kernel/contract';
 import { z } from 'zod';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 /**
@@ -11,7 +12,16 @@ import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
  *
  * A prefix nobody provides answers no entries, never an error: the menu for it is simply empty.
  */
-export const REFERENCE_CATALOG_PREFIXES = [':', '@', '&', '!', '/', '$', '%terminal', '%browser'] as const;
+export const REFERENCE_CATALOG_PREFIXES = [
+  ':',
+  '@',
+  '&',
+  ASK_REFERENCE_SIGIL,
+  '/',
+  '$',
+  '%terminal',
+  '%browser',
+] as const;
 export const ReferenceCatalogPrefixSchema = z.enum(REFERENCE_CATALOG_PREFIXES);
 export type ReferenceCatalogPrefix = z.infer<typeof ReferenceCatalogPrefixSchema>;
 
@@ -52,7 +62,7 @@ export const ReferenceCatalogEntrySchema = z.strictObject({
   closed: z.boolean().optional(),
   /**
    * The ask behind this entry was not the owner's (another ferret's, the Warden's, an automatic card): the `&` menu
-   * hides it unless the reader turns "Include agent cards" on, or types its id exactly. Absent means the owner's own.
+   * hides it unless the reader turns "Include agent tasks" on, or types its id exactly. Absent means the owner's own.
    * Only the cards' provider (Board) sets it.
    */
   agentAsked: z.boolean().optional(),

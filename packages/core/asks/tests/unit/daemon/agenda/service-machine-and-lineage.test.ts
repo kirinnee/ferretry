@@ -377,7 +377,7 @@ describe('an ask about a card that the asker’s own agenda already carries', ()
     // Assert
     should(refused).containDeep({ ok: false, error: { code: 'invalid' } });
     should(!refused.ok && refused.error.message).startWith(
-      '&F12 already asks the owner on !A3, which carries the card; put yours on it: fy agenda edit A3 --where',
+      '&F12 already asks the owner on ^A3, which carries the task; put yours on it: fy agenda edit A3 --where',
     );
   });
 });

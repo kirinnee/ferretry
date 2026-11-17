@@ -141,7 +141,7 @@ const external = (overrides: Partial<Card> = {}): Card => {
     createdBy: { kind: 'ferret', name: 'child', ferret: 'child' },
     ask: { text: 'make the gates ask me', source: 'owner' },
     summary: 'Gates raise one ask',
-    howToTest: '1. Open the Inbox\n2. Answer the card',
+    howToTest: '1. Open the Inbox\n2. Answer the task',
     history: [{ seq: 1, at: NOW, actor: { kind: 'ferret', name: 'child', ferret: 'child' }, type: 'created', laneId }],
     ...overrides,
     laneId,
@@ -663,7 +663,7 @@ describe('a gate that cannot reach its neighbours says so and goes on', () => {
 
     await w.gates.sweep();
 
-    should(w.warnings.some(warning => warning.includes('the sweep of stray card asks failed'))).be.true();
+    should(w.warnings.some(warning => warning.includes('the sweep of stray task asks failed'))).be.true();
   });
 
   it('should warn and go on to the next card when one card’s ask cannot be put', async () => {

@@ -7,8 +7,10 @@
  * the risk flag, then the way in: one masked field per value, each with a local eye that is not remembered, and "Press
  * Enter for me".
  *
- * THE VALUES LIVE ONLY IN THE CONTROLLED FIELDS until Send (I6). They are never put in a draft store, storage, a query
- * cache, a URL or a log; every field is cleared on Send, when the card unmounts and when the page is hidden.
+ * THE VALUES LIVE ONLY IN THE FIELDS' OWN DOM NODES until Send (I6): the fields are UNCONTROLLED, so React never copies
+ * what is typed into the `value` attribute (and so not into the page's markup). The card keeps only whether each field
+ * is filled and what is wrong with it, reads the values once on Send, and never puts them in a draft store, storage, a
+ * query cache, a URL or a log; every field is cleared on Send, when the card unmounts and when the page is hidden.
  *
  * ENTER (I51): the tick starts on for an owner default and for a terminal secret, off for a browser page; the
  * agent presses it itself when it said so, and then there is no tick at all.
@@ -17,13 +19,29 @@ import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 
 import { cancelInput, deliverInput } from '../../lib/input-api.ts';
 import {
   defaultSubmit,
+  differentFromWords,
   expiryWords,
   fieldAttributes,
-  fieldProblem,
   fieldsOf,
+  fieldStateOf,
+  type FieldState,
   type InputCardField,
   inputFailure,
+  offerBody,
+  offerCodes,
+  offerElsewhereWords,
+  offerFillsWords,
+  offerSentWords,
+  offersCodesSlot,
   offersPressEnter,
+  offerWhyWords,
+  offerWords,
+  HIDE_OTHER_ACCOUNTS_WORDS,
+  oneFactorLine,
+  OTHER_ACCOUNT_WORDS,
+  savedChoices,
+  settledSlotProps,
+  signInNote,
   allowWords,
   pastedWords,
   pasteField,
@@ -40,11 +58,17 @@ import {
   typedBody,
   typedReady,
 } from '../../lib/input-card.ts';
-import type { InputRequestView } from '../../lib/input-wire.ts';
+import type { InputRequest, InputSavedOffer } from '../../../contract/index.ts';
 import { Eye, EyeOff, ShieldAlert, type VaultClient } from '../../shell.tsx';
+import { CodeButtons, CodesSlot } from './code-offers.tsx';
+import { FieldShot } from './field-shot.tsx';
+import { SettledSlot } from './settled-slot.tsx';
+
+/** The style hook of the input box: a class name, kept as it is (not owner text). */
+const INPUT_CLASS = 'fy-input-card';
 
 export interface InputCardProps {
-  readonly request: InputRequestView;
+  readonly request: InputRequest;
   readonly client: VaultClient;
   /** Who is asking, as the page names the ferret. */
   readonly agentName?: string;
@@ -75,7 +99,7 @@ const useNow = (fixed: number | undefined): number => {
 
 /** What the daemon saw at the target, as one short statement; `undefined` while it looks again. */
 function factsOf(
-  request: InputRequestView,
+  request: InputRequest,
 ): { program: string; verb: string; echo?: string; promptLine?: string } | undefined {
   const seen = request.observed;
   if (seen === undefined) return undefined;
@@ -103,7 +127,6 @@ type Nodes = Map<string, HTMLInputElement>;
 interface FieldInputProps {
   readonly field: InputCardField;
   readonly nodes: Nodes;
-  readonly value: string;
   readonly revealed: boolean;
   readonly disabled: boolean;
   readonly many: boolean;
@@ -113,18 +136,7 @@ interface FieldInputProps {
   readonly onEnter: () => void;
 }
 
-function FieldInput({
-  field,
-  nodes,
-  value,
-  revealed,
-  disabled,
-  many,
-  problem,
-  onChange,
-  onReveal,
-  onEnter,
-}: FieldInputProps) {
+function FieldInput({ field, nodes, revealed, disabled, many, problem, onChange, onReveal, onEnter }: FieldInputProps) {
   const inputId = useId();
   const attributes = fieldAttributes(field.sensitivity, revealed);
 
@@ -158,14 +170,13 @@ function FieldInput({
           id={inputId}
           onChange={event => onChange(event.target.value)}
           onKeyDown={event => {
-            if (event.key === 'Enter' && value !== '') {
+            if (event.key === 'Enter' && event.currentTarget.value !== '') {
               event.preventDefault();
               onEnter();
             }
           }}
           ref={attach}
           spellCheck={false}
-          value={value}
         />
         {!revealable(field.sensitivity) ? null : (
           <button
@@ -196,31 +207,86 @@ function FieldInput({
 }
 
 interface FormProps {
-  readonly request: InputRequestView;
+  readonly request: InputRequest;
   readonly fields: readonly InputCardField[];
   readonly client: VaultClient;
   readonly blocked: string | undefined;
   readonly busy: boolean;
   readonly cancel: ReactNode;
-  readonly onSettled: (words: string) => void;
+  /** Sent: the words it settled in, and the saved account the owner tapped (none for a typed value). */
+  readonly onSettled: (words: string, used?: InputSavedOffer) => void;
   readonly onSending: (sending: boolean) => void;
   readonly onRefresh?: (() => void) | undefined;
+  /** What an installed plugin draws under the saved accounts while the card asks a code (the codes slot), if anything. */
+  readonly codesSlot?: ReactNode;
 }
 
-function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onSending, onRefresh }: FormProps) {
+interface OfferButtonProps {
+  readonly offer: InputSavedOffer;
+  readonly disabled: boolean;
+  readonly onUse: () => void;
+}
+
+/**
+ * ONE SAVED ACCOUNT, one tap. It shows the owner's own words (the account's label and username, what it would type,
+ * why it is first); the value is the daemon's and never reaches this card, so there is nothing here to echo. A click
+ * that is the second or later of one gesture (`detail > 1`) chooses nothing.
+ */
+function OfferButton({ offer, disabled, onUse }: OfferButtonProps) {
+  const why = offerWhyWords(offer);
+  const elsewhere = offerElsewhereWords(offer);
+  const primary = offer.primary === true;
+  return (
+    <button
+      aria-label={`Use ${offerWords(offer)}`}
+      className={`flex min-h-[44px] w-full min-w-0 flex-col items-start gap-0.5 rounded-control border bg-surface-2 px-3 py-2 text-left text-fg ${primary ? 'border-accent' : 'border-border-strong'}`}
+      data-input-offer={offer.id}
+      data-input-primary={primary ? '' : undefined}
+      disabled={disabled}
+      onClick={event => {
+        // A double click or double tap lands its second click wherever the first one's change left a button: only the
+        // first click of a gesture is a choice, so the owner never delivers an account they did not aim at.
+        if (event.detail > 1) return;
+        onUse();
+      }}
+      type="button"
+    >
+      <span className="block min-w-0 break-words text-left font-medium">{offerWords(offer)}</span>
+      <span className="block min-w-0 break-words text-left text-meta font-normal" data-input-offer-detail="">
+        {[offerFillsWords(offer), why, elsewhere].filter(each => each !== undefined).join(' · ')}
+      </span>
+    </button>
+  );
+}
+
+function InputForm({
+  request,
+  fields,
+  client,
+  blocked,
+  busy,
+  cancel,
+  onSettled,
+  onSending,
+  onRefresh,
+  codesSlot,
+}: FormProps) {
   const nodes = useRef<Nodes>(new Map());
-  const [values, setValues] = useState<Readonly<Record<string, string>>>({});
+  // Whether each field is filled and what is wrong with it: never the value, which stays in the field's own node.
+  const [states, setStates] = useState<Readonly<Record<string, FieldState>>>({});
   const [revealed, setRevealed] = useState<Readonly<Record<string, boolean>>>({});
   const [submit, setSubmit] = useState(() => defaultSubmit(request));
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   // A send the daemon never answered keeps its id, so pressing Send again cannot type twice.
-  const pending = useRef<string | null>(null);
+  const pending = useRef<{ readonly key: string; readonly id: string } | null>(null);
   const many = fields.length !== 1;
+  const choices = savedChoices(request);
+  const [showOther, setShowOther] = useState(false);
 
-  /** Empties the controlled state AND the DOM nodes: a typed value is not kept one moment past where it is needed. */
+  /** Empties what the card knows of the fields AND the DOM nodes: a typed value is not kept one moment past where it is needed. */
   const clear = useCallback((): void => {
-    setValues({});
+    setStates({});
     setRevealed({});
     for (const node of nodes.current.values()) node.value = '';
   }, []);
@@ -235,12 +301,24 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
   }, [clear]);
 
   const off = blocked !== undefined || sending || busy;
-  const ready = typedReady(fields, values);
+  const ready = typedReady(fields, states);
 
-  const send = async (): Promise<void> => {
+  /** A send the daemon never answered keeps its id (so pressing again cannot type twice); another choice takes a new one. */
+  const deliveryIdFor = (key: string): string => {
+    if (pending.current?.key !== key) pending.current = { key, id: crypto.randomUUID() };
+    return pending.current.id;
+  };
+
+  /** A tap on a saved account: the daemon types from it, so nothing is typed here and nothing is sent but its handle. */
+  const tapOffer = async (offer: InputSavedOffer, factor?: string): Promise<void> => {
     if (off) return;
-    pending.current ??= crypto.randomUUID();
-    const built = typedBody({ request, fields, values, submit, deliveryId: pending.current });
+    const built = offerBody(
+      request,
+      offer,
+      submit,
+      deliveryIdFor(`offer:${offer.id}:${offer.signIn ?? ''}:${factor ?? ''}`),
+      factor,
+    );
     if (!built.ok) {
       setFailure(built.problem);
       return;
@@ -248,7 +326,37 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
     setFailure(null);
     setSending(true);
     onSending(true);
-    // Kept in this call only, to check an answer against: never logged, stored or sent.
+    clear();
+    try {
+      await deliverInput(client, request, built.body);
+      pending.current = null;
+      onSettled(offerSentWords(request, offer, factor), offer);
+    } catch (cause) {
+      const words = inputFailure(cause, request.target.kind);
+      if (words.definitive) pending.current = null;
+      setFailure(words.text);
+      if (words.kind === 'changed') onRefresh?.();
+    } finally {
+      setSending(false);
+      onSending(false);
+    }
+  };
+
+  const send = async (): Promise<void> => {
+    if (off) return;
+    const deliveryId = deliveryIdFor('typed');
+    // Read from the fields once, here, and kept in this call only.
+    const values: Record<string, string> = {};
+    for (const each of fields) values[each.key] = nodes.current.get(each.key)?.value ?? '';
+    const built = typedBody({ request, fields, values, submit, deliveryId });
+    if (!built.ok) {
+      setFailure(built.problem);
+      return;
+    }
+    setFailure(null);
+    setSending(true);
+    onSending(true);
+    // To check an answer against: never logged, stored or sent.
     const typed = fields.map(each => values[each.key] ?? '');
     // The body now holds the padded values; the fields do not keep them a moment longer.
     clear();
@@ -267,67 +375,133 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
     }
   };
 
+  /** One account: a button per code key when it makes codes here, else the one "use saved" button. */
+  const drawOffer = (offer: InputSavedOffer) => {
+    const keys = offerCodes(request, offer);
+    return keys.length > 0 ? (
+      <CodeButtons
+        disabled={off}
+        key={offer.id + (offer.signIn ?? '')}
+        keys={keys}
+        offer={offer}
+        onUse={factor => void tapOffer(offer, factor)}
+      />
+    ) : (
+      <OfferButton
+        disabled={off}
+        key={offer.id + (offer.signIn ?? '')}
+        offer={offer}
+        onUse={() => void tapOffer(offer)}
+      />
+    );
+  };
+
   return (
-    <form
-      className="flex min-w-0 flex-col gap-3"
-      data-input-form=""
-      onSubmit={event => {
-        event.preventDefault();
-        if (ready) void send();
-      }}
-    >
-      {fields.map(field => (
-        <FieldInput
-          disabled={off}
-          field={field}
-          key={field.key}
-          many={many}
-          nodes={nodes.current}
-          onChange={value => setValues(current => ({ ...current, [field.key]: value }))}
-          onEnter={() => {
-            // Enter inside a field sends only when every field is typed.
-            if (ready) void send();
-          }}
-          onReveal={() => setRevealed(current => ({ ...current, [field.key]: !current[field.key] }))}
-          problem={many ? fieldProblem(field, values[field.key] ?? '') : undefined}
-          revealed={revealed[field.key] === true}
-          value={values[field.key] ?? ''}
-        />
-      ))}
-      {!offersPressEnter(request) ? null : (
-        <label className="flex min-h-[44px] items-center gap-2 text-cell text-fg">
-          <input
-            checked={submit}
-            data-input-enter=""
-            onChange={event => setSubmit(event.target.checked)}
-            type="checkbox"
+    <div className="flex min-w-0 flex-col gap-3">
+      {choices === undefined ? null : (
+        <div className="flex min-w-0 flex-col gap-2" data-input-saved="">
+          <p className="m-0 text-cell font-medium text-fg">Use a saved login</p>
+          {signInNote(request) === undefined ? null : (
+            <p className="m-0 text-meta text-muted" data-input-sign-in="">
+              {signInNote(request)}
+            </p>
+          )}
+          {differentFromWords(request) === undefined ? null : (
+            <p className="m-0 text-meta text-warn" data-input-different="" role="status">
+              {differentFromWords(request)}
+            </p>
+          )}
+          {choices.matched.map(drawOffer)}
+          {oneFactorLine(request, choices.matched) === undefined ? null : (
+            <p className="m-0 text-meta text-warn" data-input-one-factor="" role="note">
+              {oneFactorLine(request, choices.matched)}
+            </p>
+          )}
+          {choices.other.length === 0 ? null : (
+            <>
+              {/* The toggle never moves: the list is drawn BELOW it, so no account is ever drawn under a finger that just tapped it. */}
+              <button
+                aria-expanded={showOther}
+                className="kt-btn min-h-[44px] justify-center"
+                data-input-other-toggle=""
+                disabled={off}
+                onClick={() => setShowOther(current => !current)}
+                type="button"
+              >
+                {showOther ? HIDE_OTHER_ACCOUNTS_WORDS : OTHER_ACCOUNT_WORDS}
+              </button>
+              {!showOther ? null : (
+                <div className="flex min-w-0 flex-col gap-2" data-input-other="">
+                  {choices.other.map(drawOffer)}
+                </div>
+              )}
+            </>
+          )}
+          <p className="m-0 text-meta text-faint">Or type it yourself:</p>
+        </div>
+      )}
+      {/* Outside the form: what a plugin draws here has buttons and fields of its own. */}
+      {codesSlot}
+      <form
+        className="flex min-w-0 flex-col gap-3"
+        data-input-form=""
+        onSubmit={event => {
+          event.preventDefault();
+          if (ready) void send();
+        }}
+      >
+        {fields.map(field => (
+          <FieldInput
+            disabled={off}
+            field={field}
+            key={field.key}
+            many={many}
+            nodes={nodes.current}
+            onChange={value => setStates(current => ({ ...current, [field.key]: fieldStateOf(field, value) }))}
+            onEnter={() => {
+              // Enter inside a field sends only when every field is typed.
+              if (ready) void send();
+            }}
+            onReveal={() => setRevealed(current => ({ ...current, [field.key]: !current[field.key] }))}
+            problem={many ? states[field.key]?.problem : undefined}
+            revealed={revealed[field.key] === true}
           />
-          Press Enter for me
-        </label>
-      )}
-      {failure === null ? null : (
-        <p className="m-0 text-meta text-err" data-input-failure="" role="alert">
-          {failure}
-        </p>
-      )}
-      <div className="flex flex-wrap items-center justify-end gap-2" data-input-actions="">
-        {cancel}
-        <button
-          className="kt-btn min-h-[44px] justify-center"
-          data-input-send=""
-          data-variant="primary"
-          disabled={off || !ready}
-          type="submit"
-        >
-          {sending ? 'Sending…' : 'Send'}
-        </button>
-      </div>
-    </form>
+        ))}
+        {!offersPressEnter(request) ? null : (
+          <label className="flex min-h-[44px] items-center gap-2 text-cell text-fg">
+            <input
+              checked={submit}
+              data-input-enter=""
+              onChange={event => setSubmit(event.target.checked)}
+              type="checkbox"
+            />
+            Press Enter for me
+          </label>
+        )}
+        {failure === null ? null : (
+          <p className="m-0 text-meta text-err" data-input-failure="" role="alert">
+            {failure}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center justify-end gap-2" data-input-actions="">
+          {cancel}
+          <button
+            className="kt-btn min-h-[44px] justify-center"
+            data-input-send=""
+            data-variant="primary"
+            disabled={off || !ready}
+            type="submit"
+          >
+            {sending ? 'Sending…' : 'Send'}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
 interface PasteSectionProps {
-  readonly request: InputRequestView;
+  readonly request: InputRequest;
   readonly client: VaultClient;
   readonly blocked: string | undefined;
   readonly busy: boolean;
@@ -482,12 +656,20 @@ export function InputCard({
   const now = useNow(fixedNow);
   const fields = fieldsOf(request);
   const [settled, setSettled] = useState<string | null>(null);
+  // The saved account the owner tapped, once the card settled on it: the slot after the card is offered for it.
+  const [used, setUsed] = useState<InputSavedOffer | null>(null);
   // The paste section ended the request (a takeover, a gone copy) before the refreshed request arrived.
   const [pasteEnded, setPasteEnded] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const holding = sending || cancelling;
+  // A panel in a slot of the card is still offering something: the card keeps the view while it does.
+  const [codesHold, setCodesHold] = useState(false);
+  const [settledHold, setSettledHold] = useState(false);
+  const refreshing = useRef(onRefresh);
+  refreshing.current = onRefresh;
+  const refresh = useCallback((): void => refreshing.current?.(), []);
+  const holding = sending || cancelling || (settled === null && codesHold) || (settled !== null && settledHold);
   const told = useRef<string | null>(null);
   const hold = useRef(onHold);
   hold.current = onHold;
@@ -531,7 +713,7 @@ export function InputCard({
   return (
     <section
       {...(embedded ? { 'aria-label': title } : { 'aria-labelledby': headingId })}
-      className={`fy-input-card flex min-w-0 flex-col gap-3${embedded ? '' : ' kt-panel p-panel'}`}
+      className={`${INPUT_CLASS} flex min-w-0 flex-col gap-3${embedded ? '' : ' kt-panel p-panel'}`}
       data-input-embedded={embedded ? '' : undefined}
       data-input-request={request.id}
       data-input-state={settled === null ? request.state : 'settled'}
@@ -635,9 +817,12 @@ export function InputCard({
       )}
 
       {settled !== null ? (
-        <p className="m-0 text-ui text-fg" data-input-settled="" role="status">
-          {settled}
-        </p>
+        <>
+          <p className="m-0 text-ui text-fg" data-input-settled="" role="status">
+            {settled}
+          </p>
+          {used === null ? null : <SettledSlot hold={setSettledHold} slot={settledSlotProps(request, used)} />}
+        </>
       ) : request.source !== undefined ? (
         // A paste of a secure copy has nothing to type: the owner allows it, and the daemon pastes what the request names.
         <>
@@ -673,6 +858,9 @@ export function InputCard({
               {blocked}
             </p>
           ) : null}
+          {request.pictured === true && request.target.kind === 'page' ? (
+            <FieldShot client={client} fields={fields} request={request} />
+          ) : null}
           <InputForm
             blocked={blocked}
             busy={cancelling}
@@ -681,11 +869,27 @@ export function InputCard({
             fields={fields}
             onRefresh={onRefresh}
             onSending={setSending}
-            onSettled={words => {
+            onSettled={(words, offer) => {
               setSettled(words);
+              setUsed(offer ?? null);
               onDone();
             }}
             request={request}
+            {...(offersCodesSlot(request) && request.saved !== undefined
+              ? {
+                  codesSlot: (
+                    <CodesSlot
+                      slot={{
+                        requestId: request.id,
+                        ferretId: request.sessionId,
+                        saved: request.saved,
+                        refresh,
+                        hold: setCodesHold,
+                      }}
+                    />
+                  ),
+                }
+              : {})}
           />
           {problem === null ? null : (
             <p className="m-0 text-meta text-err" data-input-cancel-failure="" role="alert">

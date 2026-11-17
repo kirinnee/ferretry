@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { createSessionArchive } from '../../../../../daemon/adapters/session/archive/session-archive.ts';
-import { createFoundationPaths, createSessionPaths } from '../../../../../daemon/lib/paths.ts';
+import { createFoundationPaths, createSessionPaths } from '../../../../support/daemon/state-paths.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import type { IndexedSession } from '../../../../../daemon/lib/storage-types.ts';
 import type { OpenCardStanding } from '../../../../../daemon/lib/session/peers/board.ts';

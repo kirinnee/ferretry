@@ -52,7 +52,9 @@ type RouteContext = CallContext;
  * `destructive_to_interrupt` or `unknown` verdict is a 409 `move_refused` carrying the inventory
  * as data (`inflight`) so a person can read what is running; the PWA's "Restart anyway" resends the
  * request with the flag after an explicit confirm. A forced move is journalled
- * (`session.move_forced`) with the inventory it went past, and the forensic report says FORCED.
+ * (`session.move_forced`) with the inventory it went past, and the forensic report says FORCED. A refusal is journalled too
+ * (`session.move_refused`: target, verdict, cause, the blockers it stopped on, who asked) so refusals can be counted;
+ * it is the only write a refusal makes.
  * The unattended callers — the warden's failover and the quota loop — send `false` and cannot
  * choose otherwise: a loop with no human watching may not decide that work is expendable. That holds
  * for `autoMove.forceStopBackground` too: it lets the Warden stop the ferret's own background jobs
@@ -143,6 +145,8 @@ export interface SessionMoveSubsystem {
       readonly model?: string;
       readonly allowContextDowngrade: boolean;
       readonly forceInflight: boolean;
+      /** The `fy` process that made the request, when it sent its pid: see `requesterCall`. Honoured only for a self-move (`movedBy` is `session:<this session>`). */
+      readonly requesterPid?: number;
       /** Omitted, the bound conversation is resumed or the move refused. */
       readonly conversation?: MoveConversation;
       /** Words that open the turn the relaunched agent is handed — why it was moved. Never set by the route. */
@@ -297,6 +301,7 @@ async function move(
     ...(request.model === undefined ? {} : { model: request.model }),
     allowContextDowngrade: request.allowContextDowngrade,
     forceInflight: request.forceInflight,
+    ...(request.requesterPid === undefined ? {} : { requesterPid: request.requesterPid }),
     ...(request.conversation === undefined ? {} : { conversation: request.conversation }),
     movedBy: moverOf(context),
     origin: launchOriginOf(context),

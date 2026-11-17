@@ -79,7 +79,7 @@ describe("a start's card", () => {
     should(made.createdBy).deepEqual({ kind: 'daemon' });
     should(ports.focus.focused.get('child')).deepEqual({ id: 'F2' });
     should(ports.focus.focused.has('lead')).be.false();
-    should(ports.changes.events).deepEqual([{ ferret: 'lead', event: { projectId: PROJECT, cardIds: ['F2'] } }]);
+    should(ports.changes.events).deepEqual([{ ferret: 'lead', event: { projectId: PROJECT, taskIds: ['F2'] } }]);
   });
 
   it('should refuse a parent that is not a card here, and a board with no lanes', async () => {

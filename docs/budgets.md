@@ -55,7 +55,7 @@ when an edit is held. `--dry-run` and `--json` work as usual.
 Lowering or adding a limit **tightens** spending and applies at once. Raising a limit, removing one,
 removing a period or the whole `budget`, and **any** change to `timeZone` **loosen** it: the
 edit is held and the tighter version stays in effect until the owner confirms it (`fy config confirm`, a
-passkey in the app, or **Allow** on an agenda card), exactly like every other loosening
+passkey in the app, or **Allow** on an agenda item), exactly like every other loosening
 ([config-files.md](config-files.md#how-a-file-is-read)). A zone is held even when it is the first one set:
 moving the day boundary to a zone where the next day has already begun would reset a day that is over budget
 and lift its hold.

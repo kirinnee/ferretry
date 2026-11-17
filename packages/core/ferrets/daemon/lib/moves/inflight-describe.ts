@@ -1,6 +1,14 @@
+import { commandLabel } from '@ferretry/std';
 import type { InflightItem, MoveRefusal } from '../../../contract/move.ts';
 import type { InflightReport } from './inflight-report.ts';
 import { age, truncate } from './render-text.ts';
+import {
+  AGENT_COMMAND_SENTENCE,
+  terminalsOf,
+  UNKEPT_JOB_SENTENCE,
+  UNKEPT_JOBS_SENTENCE,
+  unseenCodexTerminals,
+} from './unkept-jobs.ts';
 import { type InflightVerdict, verdictBlocksMove } from './verdict.ts';
 
 const DETAIL_WIDTH = 120;
@@ -53,7 +61,31 @@ function itemsOf(report: InflightReport): readonly InflightItem[] {
       blocks: verdictBlocksMove(tool.verdict),
     });
   for (const entry of report.processes) {
+    const attachment = entry.known?.attachment;
+    if (attachment !== undefined) {
+      // A kept job's attachment: safe to kill, and the move asks it to detach first. The job itself is untouched.
+      items.push({
+        kind: 'process',
+        verdict: 'safe_to_kill',
+        title: entry.known?.label ?? `attachment to job ${attachment.jobName}`,
+        detail: `fy job attach ${attachment.jobId}`,
+        age: age(entry.startedSecondsAgo),
+        blocks: false,
+      });
+      continue;
+    }
     if (entry.known !== undefined) continue;
+    if (entry.unkeptJob === true || entry.agentCommand === true) {
+      items.push({
+        kind: 'process',
+        verdict: entry.verdict,
+        title: `${truncate(commandLabel(entry.argv) ?? entry.argv, DETAIL_WIDTH)} — ${entry.unkeptJob === true ? UNKEPT_JOB_SENTENCE : AGENT_COMMAND_SENTENCE}`,
+        age: age(entry.startedSecondsAgo),
+        blocks: verdictBlocksMove(entry.verdict),
+        ...(entry.toolShell === undefined ? {} : { pid: entry.pid, backgroundJob: true as const }),
+      });
+      continue;
+    }
     items.push({
       kind: 'process',
       verdict: entry.verdict,
@@ -65,13 +97,27 @@ function itemsOf(report: InflightReport): readonly InflightItem[] {
       ...(entry.toolShell === undefined ? {} : { pid: entry.pid, backgroundJob: true as const }),
     });
   }
-  if (report.codexBackgroundTerminals > 0)
+  if (report.midTurn)
+    items.push({
+      kind: 'turn',
+      verdict: 're_armable',
+      title: `The agent is mid-turn, ${report.status === 'thinking' ? 'thinking' : 'working'} — moving interrupts this turn; the new session is told to pick it up`,
+      blocks: false,
+    });
+  if (report.codexBackgroundTerminals > 0) {
+    // The footer counts terminals the tree already listed as processes: say only the ones nothing else names. The item stays
+    // (and blocks) either way, because the count is what the gate refuses on.
+    const unseen = unseenCodexTerminals(report);
     items.push({
       kind: 'terminal',
       verdict: 'unknown',
-      title: `Codex has ${report.codexBackgroundTerminals} background terminal${report.codexBackgroundTerminals === 1 ? '' : 's'} Ferretry can’t see into`,
+      title:
+        unseen === 0
+          ? `Codex counts ${terminalsOf(report.codexBackgroundTerminals)}, all listed above`
+          : `Codex has ${terminalsOf(unseen)}${unseen === report.codexBackgroundTerminals ? '' : ' more'} Ferretry can’t see into — ${unseen === 1 ? UNKEPT_JOB_SENTENCE : UNKEPT_JOBS_SENTENCE}`,
       blocks: true,
     });
+  }
   const blockers = items.filter(item => item.blocks);
   return [
     ...blockers.filter(item => item.verdict === 'destructive_to_interrupt'),
@@ -94,7 +140,9 @@ export function describeInflight(report: InflightReport): MoveRefusal {
     turn: report.turn,
     blockedBy,
     items: [...items],
-    restartsWithCli: report.processes.filter(entry => entry.known !== undefined).length,
+    restartsWithCli: report.processes.filter(
+      entry => entry.known !== undefined && entry.known.kind !== 'job-attachment',
+    ).length,
   };
 }
 

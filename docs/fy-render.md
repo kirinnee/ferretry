@@ -15,9 +15,9 @@ opaque-origin frame on its own static shell, with no storage, no reach into the 
 and no ordinary network ([The interactive `html` frame](#the-interactive-html-frame)).
 `image`, `video`, `audio` and `pdf` with a `src:` header name bytes that live in the session's
 workspace or behind an https link, and are read or fetched once the block is near the viewport
-([Media from `src:`](#media-from-src)). `card` and `board` are not illustrations at all: they are
-**pointers** to cards on the board, drawn live with the board's own card and nothing an author typed
-([Cards and boards](#cards-and-boards)).
+([Media from `src:`](#media-from-src)). `task` and `board` are not illustrations at all: they are
+**pointers** to tasks on the board, drawn live with the board's own task and nothing an author typed
+([Tasks and boards](#tasks-and-boards)).
 
 Running an interactive page is the owner's decision, made with the residual stated rather than hidden:
 a frame that runs script can still navigate itself, prerender and open WebRTC, and no browser bounds a
@@ -64,7 +64,7 @@ alt: A ten by ten square, filled solid
 
 | Key    | Required                                             | Value                                                                                                        |
 | ------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `type` | yes, **and on the FIRST line**                       | one of `html`, `svg`, `lottie`, `mermaid`, `map`, `chart`, `card`, `board`, `image`, `video`, `audio`, `pdf` |
+| `type` | yes, **and on the FIRST line**                       | one of `html`, `svg`, `lottie`, `mermaid`, `map`, `chart`, `task`, `board`, `image`, `video`, `audio`, `pdf` |
 | `alt`  | yes                                                  | ≤ 200 characters, one line, no control characters                                                            |
 | `mime` | for an inline `image` only                           | one of `image/png`, `image/jpeg`, `image/gif`, `image/webp`                                                  |
 | `src`  | for `video`, `audio`, `pdf`; or instead of an `mime` | `@path` in the session's workspace, or an `https://` URL; ≤ 2048 characters                                  |
@@ -117,8 +117,8 @@ that stay with the shells.
 | `map`     | 32 KiB                           | a blank payload; invalid JSON/YAML (aliases refused); more than 100 markers, 50 lines+polygons or 2,000 vertices; a coordinate off the globe; a zoom outside 0–18; a label over 80 or a popup over 500 characters — each falls back to a coordinates list, never a blank block                                        |
 | `chart`   | 64 KiB                           | a blank payload; invalid JSON/YAML (aliases refused); any key the chart language does not name (a colour included); more than 12 series, 500 points a series, 500 labels, 30 frames or 10,000 points across every frame; a title over 120 or a name or label over 80 characters — each falls back to the source fence |
 | `lottie`  | 1 MiB                            | invalid JSON; a non-object root; a **string-valued** `"x"` expression key at any depth, or an array containing one at any index; more than 500 layers; deeper than 64 levels                                                                                                                                          |
-| `card`    | 2 KiB                            | a payload that is not exactly one card reference such as `&F12`; a `parent:` line                                                                                                                                                                                                                                     |
-| `board`   | 2 KiB                            | more than 12 cards listed; a repeated card; a word that is not a card reference; a `parent:` line mixed with a list or naming anything but one card                                                                                                                                                                   |
+| `task`    | 2 KiB                            | a payload that is not exactly one task reference such as `&F12`; a `parent:` line                                                                                                                                                                                                                                     |
+| `board`   | 2 KiB                            | more than 12 tasks listed; a repeated task; a word that is not a task reference; a `parent:` line mixed with a list or naming anything but one task                                                                                                                                                                   |
 | `image`   | 2 MiB decoded (≈ 2.7 MiB base64) | anything that is not canonical base64; bytes that disagree with the declared MIME; a declared size over 8192 per axis or 16,777,216 pixels; animation; a container that fails the selected admission checks below                                                                                                     |
 | `src:`    | no payload at all                | a workspace file over **1 MiB** (the daemon's own per-file view limit, mirrored, not chosen); an https `image` over 2 MiB; an `image` whose fetched bytes fail the same admission checks below                                                                                                                        |
 
@@ -164,11 +164,11 @@ percentage on one axis cannot carry an oversized length on the other.
 
 ## Where a block renders, and where it cannot
 
-Rendering is gated by `MarkdownProps.enableFyRender`, which **defaults to `false`**. A `card` or `board` block needs one thing more: a board to read, which the surface lends as `MarkdownProps.cardEmbed`. A chat gets it from `sessionReferenceSurface` and the Inbox and a card's detail from `DaemonTaskReferences`, the same two providers that prove `&F12`; a surface that lends none leaves the block an ordinary fence. Exactly one
+Rendering is gated by `MarkdownProps.enableFyRender`, which **defaults to `false`**. A `task` or `board` block needs one thing more: a board to read, which the surface lends as `MarkdownProps.cardEmbed`. A chat gets it from `sessionReferenceSurface` and the Inbox and a task's detail from `DaemonTaskReferences`, the same two providers that prove `&F12`; a surface that lends none leaves the block an ordinary fence. Exactly one
 production call site sets it: `ChatProse` in `packages/pwa/src/components/chat-prose.tsx`. Three
 surfaces draw through it, all of them text the owner's own ferrets (or the owner) wrote on the owner's
-daemon: an assistant's message, an agenda card, and a board card's detail (its summary, premise,
-context, brief and How to test, [board.md](board.md#how-a-card-reads)). Every other `<Markdown>`
+daemon: an assistant's message, an agenda item, and a board task's detail (its summary, premise,
+context, brief and How to test, [board.md](board.md#how-a-task-reads)). Every other `<Markdown>`
 consumer — file previews, warden reports, and the composer's own preview once it lands — gets the
 inert escaped fence automatically by not passing it, with no new code on those surfaces.
 
@@ -188,7 +188,7 @@ Two properties this feature must never change, and does not:
 
 | Type               | Renders as                                                                              | Why                                                                                                          |
 | ------------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `card`, `board`    | the board's own `BoardCard`, read from the daemon; a `board` is framed, grouped by lane | A pointer, not bytes: nothing an author wrote is drawn — [Cards and boards](#cards-and-boards)               |
+| `task`, `board`    | the board's own `BoardCard`, read from the daemon; a `board` is framed, grouped by lane | A pointer, not bytes: nothing an author wrote is drawn — [Tasks and boards](#tasks-and-boards)               |
 | `svg`              | `<img src="data:image/svg+xml,…">`                                                      | The measured boundary — see below                                                                            |
 | `image` (inline)   | `<img src="data:{mime};base64,…">`                                                      | No script surface exists in a raster decode                                                                  |
 | `html` (no script) | a static fragment in a closed shadow root, sanitized by DOMPurify                       | Nothing runs; [The `html` fragment](#the-html-fragment) says what is stripped and what contains the rest     |
@@ -202,42 +202,44 @@ Two properties this feature must never change, and does not:
 | `audio`            | the browser's native `<audio controls>`                                                 | As `video`                                                                                                   |
 | `pdf`              | a file row: workspace Open / Download of a minted `blob:`; https link                   | Measured: Chromium blocks its PDF viewer in a sandboxed frame, and the app policy refuses `blob:` frames     |
 
-### Cards and boards
+### Tasks and boards
 
-**A `card` or `board` block names work; the board says what the work is.** The payload is a card
+**A `task` or `board` block names work; the board says what the work is.** The payload is a task
 reference and nothing else: no title, no lane, no status. What is drawn is read from the board when the
-block is drawn, so a block can never say something the board does not.
+block is drawn, so a block can never say something the board does not. A message written before the
+rename holds the type under its former name, `card`: it is still read, as `task`, for good, because a
+saved message is never rewritten. Everything written now says `task`.
 
-- `card` — exactly one reference: `&F12`.
-- `board` — either cards listed one per line or separated by spaces (an optional leading `- `), at
-  most 12, none twice; or one line, `parent: &F12`, which shows that card's children. Both forms draw
-  **one framed mini board**: a lane head (name and count, the Board's own) per lane with its cards under
-  it, lanes in the project's lane-set order. A list that spans projects groups by project first; a card
-  in a lane its lane set does not know goes under "Elsewhere", last. At most 24 cards are shown, then
-  "N more on the board."; cards that could not be shown (missing, unreadable) follow as notes, last.
+- `task` — exactly one reference: `&F12`.
+- `board` — either tasks listed one per line or separated by spaces (an optional leading `- `), at
+  most 12, none twice; or one line, `parent: &F12`, which shows that task's children. Both forms draw
+  **one framed mini board**: a lane head (name and count, the Board's own) per lane with its tasks under
+  it, lanes in the project's lane-set order. A list that spans projects groups by project first; a task
+  in a lane its lane set does not know goes under "Elsewhere", last. At most 24 tasks are shown, then
+  "N more on the board."; tasks that could not be shown (missing, unreadable) follow as notes, last.
 
-Each card is the real `BoardCard` the Board page draws, read-only: its title, lane, progress and the
-PRs it links. It reads as it does on the Board (the card's padding and the gap between cards are the Board's own tokens, in chat and in the agenda alike), and the whole card opens it. The ferret is
+Each task is the real `BoardCard` the Board page draws, read-only: its title, lane, progress and the
+PRs it links. It reads as it does on the Board (the task's padding and the gap between tasks are the Board's own tokens, in chat and in the agenda alike), and the whole task opens it. The ferret is
 named by its callsign (from the app's fleet, or the surface's own list), and every age ticks on a local
-clock every 30 seconds — a clock, not a daemon read. Clicking it opens the card exactly as a written `&F12` does (`onTaskOpen`), because
+clock every 30 seconds — a clock, not a daemon read. Clicking it opens the task exactly as a written `&F12` does (`onTaskOpen`), because
 the daemon's answer is the proof the reference standard asks for
 ([reference-standard.md](reference-standard.md)).
 
-- **Proof before link.** A card is a link only after the daemon has answered for it. One that does not
+- **Proof before link.** A task is a link only after the daemon has answered for it. One that does not
   exist, or cannot be read, or has not been answered yet, is never a link: the first two draw a quiet
-  file row (a warning icon, the reference, one muted sentence — "No card with this id." or "This card
+  file row (a warning icon, the reference, one muted sentence — "No task with this id." or "This task
   could not be read."), the last an empty placeholder. Never a broken frame. For `parent: &F12` the
-  parent is proved first: if it does not exist the block says "No card with this id.", not "No cards
+  parent is proved first: if it does not exist the block says "No task with this id.", not "No tasks
   under this one.". Children are read from the whole board; when that read was cut short
-  (4 × 500 cards), the block says the list may be incomplete and links the parent.
-- **Live, with no timer.** Each card is watched with `beat: false`, so it is re-read only when the
+  (4 × 500 tasks), the block says the list may be incomplete and links the parent.
+- **Live, with no timer.** Each task is watched with `beat: false`, so it is re-read only when the
   fleet feed delivers a `board.changed` that names it, and a parent's children come from one shared
-  whole-board view that is re-read the same way. A card that moves lane or changes redraws in place.
+  whole-board view that is re-read the same way. A task that moves lane or changes redraws in place.
   Unmounting releases the watch, and a store timer that no holder wants any more is cleared. The block
   never polls.
-- **One renderer.** It draws wherever `ChatProse` draws — chat messages, agenda bodies, a board card's
-  detail — and nowhere else. Spec: `packages/pwa/src/lib/fy-render-embed.ts`; component:
-  `packages/pwa/src/components/fy-render-card-embed.tsx`.
+- **One renderer.** It draws wherever `ChatProse` draws — chat messages, agenda bodies, a board task's
+  detail — and nowhere else. Spec: `packages/plugins/conversation/app/render/fy-render-embed.ts`; component:
+  `packages/plugins/conversation/app/render/fy-render-card-embed.tsx`.
 
 ### Maps
 
@@ -775,7 +777,7 @@ unsafe". Read an acceptance as "this is within the caps", never as "this will re
 
 **An illustration renders by itself, inline, as if it were part of the message.** The owner asked for
 it in those words — "make it inline, as if it's native. no need to have a special hypermedia block" —
-and this build does exactly that. There is no Render control, no card around the picture, no caption
+and this build does exactly that. There is no Render control, no frame around the picture, no caption
 under it and no status line beside it. A picture is sized to the message column and bounded in
 height (`min(60dvh, 720px)`), an `html` block is a static fragment in the column's own type and
 colours, and a PDF is the same compact file row an attachment is.
@@ -846,7 +848,7 @@ on a fine one it stays small.
 | `src:` `image` / `video`          |  yes   |    yes     |             the player's             |
 | `src:` `audio`                    |   —    |     —      |             the player's             |
 | `pdf` and every media refusal row |   —    |     —      |                  —                   |
-| `card`, `board`                   |   —    |     —      |     the card's own link opens it     |
+| `task`, `board`                   |   —    |     —      |     the task's own link opens it     |
 
 An audio player gets no icons because its own controls fill that corner and there is nothing to see
 in fullscreen; a file row has its own Open and Download actions.
@@ -892,9 +894,9 @@ ten minutes, or an interactive page that stopped responding keeps its place with
 "This animation stopped.", "This interactive illustration stopped after ten minutes.", "…stopped
 because it stopped responding." — and **Replay** / **Run again**. No code block, no error mark.
 
-**A card that cannot be shown is a file row too.** A `card` or `board` block whose card does not
-exist, or cannot be read, draws the same compact row as a refused media file, with the card's reference
-and one muted sentence — see [Cards and boards](#cards-and-boards). A block whose payload is wrong never
+**A task that cannot be shown is a file row too.** A `task` or `board` block whose task does not
+exist, or cannot be read, draws the same compact row as a refused media file, with the task's reference
+and one muted sentence — see [Tasks and boards](#tasks-and-boards). A block whose payload is wrong never
 gets that far: it is the ordinary fence above.
 
 **Media refusals are file rows.** A workspace file that is missing, denied to this reader, not
@@ -961,7 +963,7 @@ renders as an ordinary escaped fence.
 
 ## Guide for agents
 
-`fy render guide [type]` prints this section and nothing else: the `### overview` body when no type is named, or that type's `###` body when one is. `image`, `video`, `audio` and `pdf` share the `### media` section, because they name bytes the same way, and `card` and `board` share `### card`, because they name cards the same way. The CLI ships a byte-exact copy of this whole section in the binary (`RENDER_GUIDE_SECTION` in `packages/cli/src/lib/render/guide-text.ts`), and the `render-guide-doc` contract in `scripts/validate/cli-contracts.sh` fails the commit that lets the copy disagree with this section — so this section is the one owner of the text: edit it here, then copy the section whole into that constant.
+`fy render guide [type]` prints this section and nothing else: the `### overview` body when no type is named, or that type's `###` body when one is. `image`, `video`, `audio` and `pdf` share the `### media` section, because they name bytes the same way, and `task` and `board` share `### task`, because they name tasks the same way. The CLI ships a byte-exact copy of this whole section in the binary (`RENDER_GUIDE_SECTION` in `packages/cli/src/lib/render/guide-text.ts`), and the `render-guide-doc` contract in `scripts/validate/cli-contracts.sh` fails the commit that lets the copy disagree with this section — so this section is the one owner of the text: edit it here, then copy the section whole into that constant.
 
 Two shapes are deliberately absent from this section. An example fence, because the copy ships in the CLI's TypeScript source, where `no-fy-render-in-docs.sh` refuses a fence opener. And the per-type detail: the sections below distil the contract the rest of this document holds, and where the two disagree the contract wins and this section is wrong.
 
@@ -1040,9 +1042,9 @@ save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `
 
 That is `image`, `video`, `audio` and `pdf` — they name bytes instead of carrying them, and nothing follows the `---`. `media:<file>` is the one for anything you MADE: `$FY_MEDIA_DIR` is your session's media folder, outside every repository, so no ignore rules decide whether it can be shown; name the file by its path inside that folder. `src: @workspace/path` is written as an `@file` reference without a line, read with the reader's access — gitignored and protected files are never served, at most 1 MiB. For `src: https://…`, video and audio play directly; an image must come from a host that allows cross-origin reads (at most 2 MiB) or becomes a link; a pdf is always a link. `http:`, `data:` and `blob:` are refused. Extensions: image png/jpg/jpeg/gif/webp, video mp4/m4v/webm/ogv/mov, audio mp3/m4a/aac/wav/ogg/oga/opus/weba/flac, pdf. An `image` may instead be inline — `mime: image/png|jpeg|gif|webp` with a base64 payload, still, matching the declared type, ≤ 2 MiB decoded — `src:` or `mime:`, never both.
 
-### card
+### task
 
-`card` and `board` point at cards on the board and show them live; they draw no picture and carry no bytes. `card`: the payload is one reference, `&F12`. `board`: references one per line or separated by spaces (at most 12, none twice), or a single line `parent: &F12` to show that card's children. Either form draws a framed mini board grouped by lane. The reader sees the real board card — title, lane, progress, its PRs — and it redraws by itself when the card moves; you write no title or status, so there is nothing to keep true. Prefer one block to pasting a status that goes stale. A card that does not exist or cannot be read shows as a quiet note, never a link. Chat messages and agenda bodies only. Caps: 2 KiB, 12 listed cards, 24 children shown. A repeated or non-card reference, a `parent:` mixed with a list, or `parent:` on a `card` makes the block a plain code fence.
+`task` and `board` point at tasks on the board and show them live; they draw no picture and carry no bytes. `task`: the payload is one reference, `&F12`. `board`: references one per line or separated by spaces (at most 12, none twice), or a single line `parent: &F12` to show that task's children. Either form draws a framed mini board grouped by lane. The reader sees the real board task — title, lane, progress, its PRs — and it redraws by itself when the task moves; you write no title or status, so there is nothing to keep true. Prefer one block to pasting a status that goes stale. A task that does not exist or cannot be read shows as a quiet note, never a link. Chat messages and agenda bodies only. Caps: 2 KiB, 12 listed tasks, 24 children shown. A repeated or non-task reference, a `parent:` mixed with a list, or `parent:` on a `task` makes the block a plain code fence.
 
 ### lottie
 
@@ -1209,11 +1211,11 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
     emulation, not on a physical phone. Anyone who considers this unacceptable can map `chart` to
     source-only; nothing else depends on it.
 
-18. **A card block goes stale if the fleet feed drops.** `card` and `board` are live on `board.changed`
-    alone, with no timer by design, so a reader whose feed is down sees the last cards read until the
-    block remounts (scrolling it away and back, reopening the page) or another view of the same card
+18. **A task block goes stale if the fleet feed drops.** `task` and `board` are live on `board.changed`
+    alone, with no timer by design, so a reader whose feed is down sees the last tasks read until the
+    block remounts (scrolling it away and back, reopening the page) or another view of the same task
     re-reads it. The Board page keeps its own beat. Nothing here is wrong when it is stale, only old;
-    it is shown as read, and the card's own page is one click away.
+    it is shown as read, and the task's own page is one click away.
 
 ## Evidence
 

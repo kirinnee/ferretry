@@ -14,7 +14,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { diskSessionsRoots, type MemoryStateFolder } from '@ferretry/kernel/testing';
-import { TransferPlanFiles } from '../../../../contract/transfer-state.ts';
+import { TransferPlanFiles } from '../../../../contract/state/transfer-plan.state.ts';
 import type { RootHandle } from '@ferretry/kernel/contract';
 import type { SessionId } from '../../../../daemon/lib/session-id.ts';
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';

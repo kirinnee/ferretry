@@ -342,7 +342,7 @@ function CardAskBlock({
   return (
     <div className="fy-card__gate-row" data-agenda-attached-gate={ask.gate.cardId} data-agenda-card-ask={ask.key}>
       <h5 className="fy-card__label fy-card__card-ask-title" data-agenda-card-ask-title="">
-        Card &amp;{ask.gate.cardId}: your answer for the card
+        Task &amp;{ask.gate.cardId}: your answer for the task
       </h5>
       <p className="fy-card__gate-lead">{attachedGateLead(ask.gate)}</p>
       {ask.howToTest === null || ask.howToTest.trim() === '' ? null : (
@@ -353,7 +353,7 @@ function CardAskBlock({
       )}
       {offer === null ? null : (
         <p className="fy-card__reply-offer" data-agenda-reply-offer="">
-          <span>You replied “{offer.reply}”. Use it as your answer for the card?</span>
+          <span>You replied “{offer.reply}”. Use it as your answer for the task?</span>
           <button
             className="kt-btn fy-card__reply-offer-use"
             data-agenda-reply-offer-use={offer.label}
@@ -545,7 +545,7 @@ export function AgendaItemCard({
 
   return (
     <article
-      aria-label={`${meta.label} card`}
+      aria-label={`${meta.label} item`}
       className="fy-card"
       data-agenda-card-v6={item.id}
       data-agenda-version={shown}

@@ -148,11 +148,31 @@ describe('the subtree table', () => {
       ports({ a: [{ kind: 'card', text: 'Fix it', ref: '&F7', lane: 'Implement', pr }] }),
     ).view('root' as FerretId);
     const [a, b] = view?.rows ?? [];
-    // A ferret that named no model runs the default; a card line adds its reference, its lane and its PR (and no excerpt).
-    expect(a).toMatchObject({ id: 'a', model: 'default', card: { ref: '&F7', lane: 'Implement' }, pr });
+    // A ferret that named no model runs the default; a task line adds its reference, its lane and its PR (and no excerpt).
+    expect(a).toMatchObject({ id: 'a', model: 'default', task: { ref: '&F7', lane: 'Implement' }, pr });
     expect(a?.last).toBeUndefined();
+    expect(b?.task).toBeUndefined();
     expect(b?.card).toBeUndefined();
     expect(b?.pr).toBeUndefined();
+  });
+
+  it('should read a task line, and the former card kind, as the row’s task', async () => {
+    const registry = new FerretRegistry([
+      ferret('root'),
+      ferret('a', { parent: 'root' }),
+      ferret('b', { parent: 'root' }),
+    ]);
+    const view = await new SubtreeService(
+      registry,
+      ports({
+        a: [{ kind: 'task', text: 'Fix it', ref: '&F7', lane: 'Implement' }],
+        b: [{ kind: 'card', text: 'Old', ref: '&F8' }],
+      }),
+    ).view('root' as FerretId);
+    const [a, b] = view?.rows ?? [];
+    expect(a?.task).toEqual({ ref: '&F7', lane: 'Implement' });
+    expect(b?.task).toEqual({ ref: '&F8' });
+    expect(a?.card).toBeUndefined();
   });
 
   it('should show the model each ferret is actually running: observed over requested, and an observed one for a default launch', async () => {
@@ -203,7 +223,7 @@ describe('the subtree table', () => {
     // ... yet EVERY row keeps its card, its lane and its PR, the ended one and the live ones past the budget included.
     expect(rows).toHaveLength(5);
     for (const row of rows) {
-      expect(row.card).toMatchObject({ lane: 'Review' });
+      expect(row.task).toMatchObject({ lane: 'Review' });
       expect(row.pr).toEqual(pr);
     }
     expect(rows.find(row => row.id === 'done')?.last).toBeUndefined();

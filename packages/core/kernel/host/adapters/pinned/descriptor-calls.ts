@@ -1,5 +1,8 @@
 import { dlopen, FFIType, type Pointer, read } from 'bun:ffi';
-import { constants as osConstants } from 'node:os';
+import { constants as osFsConstants } from 'node:fs';
+import { lstat, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { constants as osConstants, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { LIBC } from './directory-syscalls.ts';
 
 /**
@@ -131,3 +134,105 @@ export function loadDescriptorCalls(library: string = LIBC, errnoSymbol: string 
 
 /** `O_CLOEXEC`, which this runtime neither exports nor adds to an open given numeric flags (copied from today's `descriptor-calls.ts`). */
 export const O_CLOEXEC = process.platform === 'darwin' ? 0x1000000 : 0o2000000;
+
+/**
+ * `renameat2(RENAME_NOREPLACE)` between two held folders: the one call that moves a name AND refuses, in the kernel and
+ * atomically, when the target name is taken (`EEXIST`, the source left where it was). The history-pool move needs it:
+ * a look for "nothing at the target" followed by `renameat(2)` replaces whatever a writer creates in between.
+ *
+ * Linux only (glibc 2.28+ exports it; the kernel has had it since 3.15). macOS spells it `renameatx_np(RENAME_EXCL)`,
+ * which is not bound here: a macOS host has no no-replace move and the caller refuses `no_descriptor_reach`. A filesystem
+ * that does not support the flag answers `EINVAL` per call; the caller refuses that the same way, never falling back to
+ * a plain rename.
+ *
+ *   int renameat2(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, unsigned int flags);
+ */
+export interface NoReplaceRename {
+  /** Moves `fromName` in `fromFd` to `toName` in `toFd`; throws with `code` `EEXIST` (nothing moved) when `toName` is taken. */
+  renameNoReplace(fromFd: number, fromName: string, toFd: number, toName: string): void;
+}
+
+/** `RENAME_NOREPLACE` from `<linux/fs.h>`. */
+const RENAME_NOREPLACE = 1;
+
+/**
+ * Loads `renameat2`, or throws one sentence (see {@link refusalSentence}). A platform other than Linux throws: nothing
+ * there is bound. The caller self-tests what it loads ({@link selfTestNoReplaceRename}) before trusting it.
+ */
+export function loadNoReplaceRename(
+  library: string = LIBC,
+  errnoSymbol: string = ERRNO,
+  platform: string = process.platform,
+): NoReplaceRename {
+  if (platform !== 'linux') throw new Error(refusalSentence(`no renameat2 on ${platform}`));
+  let symbols: Record<string, (...args: never[]) => unknown>;
+  try {
+    symbols = dlopen(library, {
+      renameat2: {
+        args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.u32],
+        returns: FFIType.i32,
+      },
+      [errnoSymbol]: { args: [], returns: FFIType.ptr },
+    }).symbols as unknown as Record<string, (...args: never[]) => unknown>;
+  } catch (error) {
+    throw new Error(refusalSentence(error instanceof Error ? (error.message.split('\n')[0] ?? 'unknown') : 'unknown'));
+  }
+  const errnoOf = symbols[errnoSymbol] as unknown as () => Pointer | null;
+  const call = symbols as unknown as {
+    renameat2(from: number, fromName: Uint8Array, to: number, toName: Uint8Array, flags: number): number;
+  };
+  return {
+    renameNoReplace: (fromFd, fromName, toFd, toName) => {
+      const status = call.renameat2(
+        fromFd,
+        cString(fromName, 'rename'),
+        toFd,
+        cString(toName, 'rename'),
+        RENAME_NOREPLACE,
+      );
+      if (status === 0) return;
+      const at = errnoOf();
+      const errno = at === null ? 0 : read.i32(at, 0);
+      const code = errnoNames.get(errno) ?? `errno ${String(errno)}`;
+      throw Object.assign(new Error(`${code}: rename`), { code, errno });
+    },
+  };
+}
+
+/**
+ * Proves a loaded {@link NoReplaceRename} does what it says on THIS host, in a fresh private folder of `scratch`: a move
+ * onto a taken name throws `EEXIST` and leaves both files as they were, and a move onto a free name moves. Anything else
+ * (a wrong binding, a kernel or filesystem without the flag) rejects, and the caller then has no no-replace move. The
+ * folder is removed afterwards whatever happened. Every file step is asynchronous (the daemon's main thread answers every
+ * client); the two `renameat2` calls are one syscall each, like the other descriptor calls here.
+ */
+export async function selfTestNoReplaceRename(calls: NoReplaceRename, scratch: string = tmpdir()): Promise<void> {
+  const folder = await mkdtemp(join(scratch, 'fy-noreplace-'));
+  try {
+    await writeFile(join(folder, 'a'), 'a', { mode: 0o600 });
+    await writeFile(join(folder, 'b'), 'b', { mode: 0o600 });
+    const held = await open(folder, osFsConstants.O_RDONLY | osFsConstants.O_DIRECTORY);
+    try {
+      let refused: string | undefined;
+      try {
+        calls.renameNoReplace(held.fd, 'a', held.fd, 'b');
+      } catch (error) {
+        refused = (error as { code?: string }).code;
+      }
+      if (refused !== 'EEXIST') throw new Error(`renameat2 self-test: a taken name answered ${refused ?? 'success'}`);
+      if ((await readFile(join(folder, 'a'), 'utf8')) !== 'a' || (await readFile(join(folder, 'b'), 'utf8')) !== 'b')
+        throw new Error('renameat2 self-test: a refused move changed a file');
+      calls.renameNoReplace(held.fd, 'a', held.fd, 'c');
+      const left = await lstat(join(folder, 'a')).then(
+        () => true,
+        () => false,
+      );
+      if (left || (await readFile(join(folder, 'c'), 'utf8')) !== 'a')
+        throw new Error('renameat2 self-test: a free name was not moved');
+    } finally {
+      await held.close();
+    }
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+}

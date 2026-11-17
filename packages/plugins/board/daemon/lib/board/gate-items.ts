@@ -49,6 +49,7 @@ import {
   tryItVerdict,
 } from './gate-policy.ts';
 import type { CardWriteObserver } from './service.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /** An open `card` ask, as the obligations port reports it. */
 export interface OpenCardAskEntry {
@@ -233,7 +234,7 @@ export class GateItems implements CardWriteObserver {
     signal?.throwIfAborted();
     await this.closeStrays(signal).catch((error: unknown) => {
       if (signal?.aborted === true) throw error;
-      this.ports.diagnostics.warn(`the sweep of stray card asks failed: ${errorText(error)}`);
+      this.ports.diagnostics.warn(`the sweep of stray task asks failed: ${errorText(error)}`);
     });
     return raised;
   }
@@ -255,7 +256,7 @@ export class GateItems implements CardWriteObserver {
       };
     } catch (error) {
       // "Not asking" would let a second ask through: with Asks unreadable, no card is reconciled this pass.
-      this.ports.diagnostics.warn(`the asks of the cards could not be read, so none was put: ${errorText(error)}`);
+      this.ports.diagnostics.warn(`the asks of the tasks could not be read, so none was put: ${errorText(error)}`);
       return 0;
     }
     for (const card of cards) {
@@ -287,7 +288,7 @@ export class GateItems implements CardWriteObserver {
     if (!answer.human) {
       return refused(
         'forbidden',
-        `only the owner answers !${answer.ask.id}'s question: it decides where ${formatCardRef({ id: cardId })} goes next`,
+        `only the owner answers ${ASK_REFERENCE_SIGIL}${answer.ask.id}'s question: it decides where ${formatCardRef({ id: cardId })} goes next`,
       );
     }
     const card = await this.ports.board.card(cardId);
@@ -497,7 +498,7 @@ export class GateItems implements CardWriteObserver {
         action: 'reopen',
         to: target.lane.id,
         reason: clipAtWord(words, MAX_BOARD_REASON_LENGTH),
-        ask: { text: words, source: `owner (ask !${answer.ask.id})` },
+        ask: { text: words, source: `owner (ask ${ASK_REFERENCE_SIGIL}${answer.ask.id})` },
         ...(carried === undefined ? {} : { attachments: carried }),
       },
       answer,
@@ -517,7 +518,7 @@ export class GateItems implements CardWriteObserver {
     await this.ports.words
       .told(
         task,
-        `${formatCardRef(task)}: the owner said ${decision.option.label} on !${answer.ask.id}${said}. Mark !${answer.ask.id} done once nothing more is expected.`,
+        `${formatCardRef(task)}: the owner said ${decision.option.label} on ${ASK_REFERENCE_SIGIL}${answer.ask.id}${said}. Mark ${ASK_REFERENCE_SIGIL}${answer.ask.id} done once nothing more is expected.`,
         `card-ask-${task.id}-${String(gate.entry)}-${answer.answerId}`,
       )
       .catch((error: unknown) =>
@@ -532,13 +533,13 @@ export class GateItems implements CardWriteObserver {
     if (decision.kind !== 'option' || decision.option.outcome !== 'reopen-with-ask') {
       return {
         code: 'invalid',
-        message: `only a Not good takes files, and !${answer.ask.id} was answered otherwise`,
+        message: `only a Not good takes files, and ${ASK_REFERENCE_SIGIL}${answer.ask.id} was answered otherwise`,
       };
     }
     if (files.from !== answer.ask.ferret) {
       return {
         code: 'invalid',
-        message: `the files for !${answer.ask.id} must be uploaded to the ferret it is on`,
+        message: `the files for ${ASK_REFERENCE_SIGIL}${answer.ask.id} must be uploaded to the ferret it is on`,
       };
     }
     if (this.ports.files === undefined) {
@@ -572,7 +573,7 @@ export class GateItems implements CardWriteObserver {
   private async notYet(task: Card, words: string, answer: GateAnswer): Promise<void> {
     const refusal = await this.act(
       task.id,
-      { action: 'clarify', text: words, source: `owner (ask !${answer.ask.id})` },
+      { action: 'clarify', text: words, source: `owner (ask ${ASK_REFERENCE_SIGIL}${answer.ask.id})` },
       answer,
     );
     if (refusal !== undefined)
@@ -631,14 +632,14 @@ const decide = (gate: CardGate, answer: GateAnswer): Decision | GateRefusal => {
     if (option === undefined || note === '') {
       return {
         code: 'invalid',
-        message: `!${answer.ask.id} is answered with one of its options: ${gate.options.map(each => each.label).join(', ')}`,
+        message: `${ASK_REFERENCE_SIGIL}${answer.ask.id} is answered with one of its options: ${gate.options.map(each => each.label).join(', ')}`,
       };
     }
     return { kind: 'option', option, note: null, ...words(note) };
   }
   const choice = gateChoice(gate, answer.choice);
   if (choice.kind === 'unknown') {
-    return { code: 'invalid', message: `!${answer.ask.id} has no option ${answer.choice}` };
+    return { code: 'invalid', message: `${ASK_REFERENCE_SIGIL}${answer.ask.id} has no option ${answer.choice}` };
   }
   if (choice.kind === 'not-yet') return { kind: 'not-yet', note: note === '' ? null : note, ...words(note) };
   if (choice.option.outcome === 'reopen-with-ask' && note === '') {

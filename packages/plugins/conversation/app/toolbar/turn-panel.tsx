@@ -6,17 +6,26 @@
  * can neither lag the conversation beside it nor draw an older answer that landed late.
  *
  * Nothing is drawn for a ferret that is stopped or starting, one the chat could not read or the observer has said nothing
- * about: a missing reading is never drawn as a turn. A compaction in progress is NOT drawn here: it exists only on the
- * live event frame the chat subscribes to, and this panel adds no second subscriber.
+ * about: a missing reading is never drawn as a turn. A compaction in progress is drawn as "Compacting": it exists only on
+ * the live event frame the chat subscribes to, so the page hands it over in the same context ({@link useChatCompacting})
+ * and this panel adds no second subscriber. It is drawn only for a ferret the chat has a turn reading of, and a ferret
+ * that is stopped has none.
  */
 
-import { useChatTurn } from '../chat/chat-turn-context.ts';
+import { useChatCompacting, useChatTurn } from '../chat/chat-turn-context.ts';
 
 const WORDS = { working: 'Working', 'your-turn': 'Your turn', 'needs-input': 'Needs you' } as const;
 
 export function TurnPanel({ subject }: { readonly subject?: string }) {
   const turn = useChatTurn(subject);
+  const compacting = useChatCompacting(subject);
   if (turn === undefined) return null;
+  if (compacting)
+    return (
+      <span className="text-meta text-muted" data-ferret-turn={turn} data-ferret-compacting="">
+        Compacting
+      </span>
+    );
   return (
     <span className="text-meta text-muted" data-ferret-turn={turn}>
       {WORDS[turn]}

@@ -42,7 +42,7 @@ const ferret = (id: string) => ({ kind: 'ferret' as const, name: id, ferret: id 
 const event = (fields: Record<string, unknown>): CardEvent =>
   CardEventSchema.parse({ seq: 2, at: AT, actor: ferret(DENISHA), ...fields });
 
-const header = 'Ferretry — 3 cards · 0 closed hidden · 0 stale · 0 orphaned · 0 active';
+const header = 'Ferretry — 3 tasks · 0 closed hidden · 0 stale · 0 orphaned · 0 active';
 
 describe('prLabel', () => {
   it('should say there is no PR when none is linked', () => {
@@ -86,7 +86,7 @@ describe('activityLabel', () => {
     should(activityLabel(card({ activity: 'stale' }))).equal('stale');
   });
 
-  it('should rank dropped over blocked over blocked by deps, and never say a card waits on the owner', () => {
+  it('should rank dropped over blocked over blocked by deps, and never say a task waits on the owner', () => {
     // Arrange
     const dropped = { reason: 'superseded', at: AT };
     const blocked = { on: 'external' as const, reason: 'vendor', since: AT };
@@ -100,7 +100,7 @@ describe('activityLabel', () => {
 });
 
 describe('whoLabel', () => {
-  it('should show owner→assignee when somebody else has the card', () => {
+  it('should show owner→assignee when somebody else has the task', () => {
     // Act + Assert
     should(whoLabel(card({ assignee: KIRIN }), names)).equal('denisha→kirin');
   });
@@ -139,7 +139,7 @@ describe('renderBoard', () => {
     card({ id: 'F2', title: 'Fix thing', laneId: 'implement', assignee: KIRIN, activity: 'active' }),
   ];
 
-  it('should print the header, then each lane in Kanban order with its cards', () => {
+  it('should print the header, then each lane in Kanban order with its tasks', () => {
     // Act
     const text = renderBoard(response({ cards: rows }), [project()], names, 'Ferretry');
 
@@ -224,12 +224,12 @@ describe('renderBoard', () => {
       .and.not.containEql(long);
   });
 
-  it('should say so when no card matches', () => {
+  it('should say so when no task matches', () => {
     // Act
     const text = renderBoard(response(), [project()], names, 'Ferretry');
 
     // Assert
-    should(text).equal('Ferretry — 0 cards · 0 closed hidden · 0 stale · 0 orphaned · 0 active\n\nno cards match');
+    should(text).equal('Ferretry — 0 tasks · 0 closed hidden · 0 stale · 0 orphaned · 0 active\n\nno tasks match');
   });
 
   it('should show the counts the daemon sent', () => {
@@ -242,18 +242,18 @@ describe('renderBoard', () => {
     );
 
     // Assert
-    should(text.split('\n')[0]).equal('Ferretry — 0 cards · 7 closed hidden · 1 stale · 2 orphaned · 3 active');
+    should(text.split('\n')[0]).equal('Ferretry — 0 tasks · 7 closed hidden · 1 stale · 2 orphaned · 3 active');
   });
 
-  it('should note that more cards exist than the page holds', () => {
+  it('should note that more tasks exist than the page holds', () => {
     // Act
     const text = renderBoard(response({ nextCursor: 'abc' }), [project()], names, 'Ferretry');
 
     // Assert
-    should(text).containEql('more cards exist than this page holds');
+    should(text).containEql('more tasks exist than this page holds');
   });
 
-  it('should list a card the daemon could not read, with why', () => {
+  it('should list a task the daemon could not read, with why', () => {
     // Act
     const text = renderBoard(
       response({ quarantined: [{ id: 'F9', reason: 'bad history' }] }),
@@ -280,7 +280,7 @@ describe('renderBoard', () => {
 
     // Assert
     const lines = text.split('\n');
-    should(lines[0]).startWith('all projects — 3 cards');
+    should(lines[0]).startWith('all projects — 3 tasks');
     should(lines.filter(line => line.startsWith('# '))).eql(['# Ferretry', '# Other', '# unfiled']);
     should(lines).containEql('Investigate (1)').and.containEql('Todo (1)');
     should(lines.indexOf('# Ferretry')).be.below(lines.indexOf('# Other'));
@@ -304,13 +304,13 @@ describe('renderBoard', () => {
     const text = renderBoard(response({ cards: [card()] }), [], names, 'this board');
 
     // Assert
-    should(text.split('\n')[0]).startWith('this board — 1 cards');
+    should(text.split('\n')[0]).startWith('this board — 1 tasks');
     should(text).containEql('Todo (1)');
   });
 });
 
 describe('renderBoardMarkdown', () => {
-  it('should print a heading per lane and a table of its cards', () => {
+  it('should print a heading per lane and a table of its tasks', () => {
     // Arrange
     const cards = [
       card({ id: 'F1', title: 'Rename | widget', assignee: KIRIN }),
@@ -327,7 +327,7 @@ describe('renderBoardMarkdown', () => {
 
     // Assert
     should(text.split('\n')).eql([
-      '# Ferretry — 2 cards · 0 closed hidden · 0 stale · 0 orphaned · 0 active',
+      '# Ferretry — 2 tasks · 0 closed hidden · 0 stale · 0 orphaned · 0 active',
       '',
       '## Todo (1)',
       '',
@@ -353,17 +353,17 @@ describe('renderBoardMarkdown', () => {
 
     // Assert
     const lines = text.split('\n');
-    should(lines[0]).startWith('# all projects — 2 cards');
+    should(lines[0]).startWith('# all projects — 2 tasks');
     should(lines).containEql('## Ferretry').and.containEql('### Todo (1)');
     should(lines).containEql('## Other').and.containEql('### Fix (1)');
   });
 
-  it('should say so when no card matches', () => {
+  it('should say so when no task matches', () => {
     // Act
     const text = renderBoardMarkdown(response(), [project()], names, 'Ferretry');
 
     // Assert
-    should(text.split('\n').slice(-2)).eql(['', 'No cards match.']);
+    should(text.split('\n').slice(-2)).eql(['', 'No tasks match.']);
   });
 });
 
@@ -419,7 +419,7 @@ describe('renderCard', () => {
         { term: 'lane', meaning: 'a column' },
       ],
       brief: 'rename it everywhere',
-      howToTest: '1. Run fy card show\n2. See the new name',
+      howToTest: '1. Run fy task show\n2. See the new name',
       progress: { now: 'renaming', doneSoFar: '- the type', next: '' },
       rollup: {
         children: 2,
@@ -458,7 +458,7 @@ describe('renderCard', () => {
   const child = (id: string, laneId: string) =>
     card({ id, title: `Child ${id}`, laneId, parent: { id: 'F7' }, activity: 'active' });
 
-  it('should print the face, the ask, then every section the card has', () => {
+  it('should print the face, the ask, then every section the task has', () => {
     // Act
     const text = renderCard(full(), lanes, [child('F11', 'implement'), child('F12', 'todo')], names);
 
@@ -483,7 +483,7 @@ describe('renderCard', () => {
     should(lines).containEql('Brief').and.containEql('  rename it everywhere');
     should(lines)
       .containEql('How to test')
-      .and.containEql('  1. Run fy card show')
+      .and.containEql('  1. Run fy task show')
       .and.containEql('  2. See the new name');
   });
 
@@ -531,7 +531,7 @@ describe('renderCard', () => {
     should(lines).not.containEql('  Next');
   });
 
-  it('should leave Progress out for a card with none, or with every part empty', () => {
+  it('should leave Progress out for a task with none, or with every part empty', () => {
     // Act
     const none = renderCard(card(), lanes, [], names);
     const empty = renderCard(card({ progress: { now: '', doneSoFar: ' ', next: '' } }), lanes, [], names);
@@ -541,7 +541,7 @@ describe('renderCard', () => {
     should(empty).not.match(/Progress/u);
   });
 
-  it('should leave How to test out for a card without one', () => {
+  it('should leave How to test out for a task without one', () => {
     // Act
     const text = renderCard(card(), lanes, [], names);
 
@@ -549,7 +549,7 @@ describe('renderCard', () => {
     should(text).not.match(/How to test/u);
   });
 
-  it('should leave the children section out for a card with none', () => {
+  it('should leave the children section out for a task with none', () => {
     // Act
     const text = renderCard(card(), lanes, [], names);
 
@@ -569,7 +569,7 @@ describe('renderCard', () => {
     should(lines).containEql('Blocks').and.containEql('  &F8, &F9');
   });
 
-  it('should list the links, the files and the agendas that carry the card', () => {
+  it('should list the links, the files and the agendas that carry the task', () => {
     // Act
     const lines = renderCard(full(), lanes, [], names).split('\n');
 
@@ -581,7 +581,7 @@ describe('renderCard', () => {
       .and.containEql('  commit  abc123')
       .and.containEql('  doc     docs/a.md');
     should(lines).containEql('Files').and.containEql('  src/a.ts').and.containEql('  src/b.ts');
-    should(lines).containEql('On the agenda').and.containEql('  !A1, !A2');
+    should(lines).containEql('On the agenda').and.containEql('  ^A1, ^A2');
     should(lines.some(line => line.includes('waiting on you'))).be.false();
   });
 
@@ -590,7 +590,7 @@ describe('renderCard', () => {
     const lines = renderCard(card({ openAsks: [{ ferret: DENISHA, id: 'A1' }] }), lanes, [], names).split('\n');
 
     // Assert
-    should(lines).containEql('  !A1');
+    should(lines).containEql('  ^A1');
     should(lines.some(line => line.includes('waiting on you:'))).be.false();
   });
 
@@ -647,7 +647,7 @@ describe('renderCard', () => {
     );
   });
 
-  it('should print a dropped card as dropped, with why, and leave empty parts out', () => {
+  it('should print a dropped task as dropped, with why, and leave empty parts out', () => {
     // Arrange
     const dropped = card({ dropped: { reason: 'superseded', at: AT } });
 
@@ -721,7 +721,7 @@ describe('renderActed', () => {
   ];
 
   for (const [verb, past] of verbs) {
-    it(`should say what ${verb} did and where the card stands now`, () => {
+    it(`should say what ${verb} did and where the task stands now`, () => {
       // Act
       const line = renderActed(
         verb,

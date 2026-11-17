@@ -6,6 +6,7 @@ import {
   parseGateFollowupReference,
 } from '@ferretry/core-asks/contract';
 import { AGENDA_NUDGE_MARK, nothingTyped } from './turn-nudge.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /**
  * THE SILENCE NUDGE (docs/agenda.md § States), as v4's `rest-nudge.ts` did it. An item the owner replied to or answered
@@ -165,7 +166,7 @@ export function restNudgesDue(
 
 /** The one message a ferret is nudged with, naming every item due. Short on purpose: it starts a turn. */
 export function restNudgeMessage(items: readonly RestItem[], binary: string): string {
-  const named = items.map(item => `!${item.id} «${agendaTitle(item)}»`).join(', ');
+  const named = items.map(item => `${ASK_REFERENCE_SIGIL}${item.id} «${agendaTitle(item)}»`).join(', ');
   const first = items[0]?.id ?? 'A1';
   const them = items.length === 1 ? 'it' : 'each';
   return `${AGENDA_NUDGE_MARK} The owner replied on ${named} and is waiting on you. Answer ${them}: \`${binary} agenda answer ${first} "<text>"\` (back to their list), \`${binary} agenda rest ${first} --why "<what you are doing>"\` while you work on it, or \`${binary} agenda done ${first}\` when nothing more is expected.`;

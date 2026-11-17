@@ -14,9 +14,13 @@ export {
   WorkFoldersPort,
 } from '@ferretry/kernel/contract';
 export * from './app-hooks.ts';
+export * from './callsign.ts';
+export * from './compaction-text.ts';
 export * from './agent-address.ts';
 export * from './file-reference.ts';
 export * from './instructions-report.ts';
+export * from './history.ts';
+export * from './job-keeping.ts';
 export * from './hooks.ts';
 export * from './ids.ts';
 export * from './kinds.ts';
@@ -26,6 +30,7 @@ export * from './transcript-bytes.ts';
 export * from './port.ts';
 export * from './records.ts';
 export * from './skill-home.ts';
+export * from './history-pool-home.ts';
 export * from './slots.ts';
 export * from './state.ts';
 export { type CompactAtParse, checkCompactAt, parseCompactAt } from './view/compact-at.ts';
@@ -34,10 +39,7 @@ export * from './subtree.ts';
 export * from './fork.ts';
 export * from './handover.ts';
 export * from './move.ts';
-export * from './handover-state.ts';
-export * from './transfer-state.ts';
 export * from './sessions-root.ts';
-export * from './move-state.ts';
 
 /**
  * The ferret view (today's session view, moved here whole): what `GET /v1/ferrets/:ferretId` describes for a reader,
@@ -54,8 +56,7 @@ export {
 } from './view/session-live.ts';
 export * from './view/session-search.ts';
 export * from './pins.ts';
-export * from './ferret-files.ts';
 export * from './session-restart.ts';
-export * from './start-requests.ts';
 export * from './worktrees.ts';
 export * from './view/event-stream.ts';
+export * from './view/runtime-control.ts';

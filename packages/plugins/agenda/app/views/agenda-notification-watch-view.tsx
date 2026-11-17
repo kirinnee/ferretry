@@ -3,7 +3,7 @@
  * DAEMON at the frame root, outside the router, so the fleet-diff watch keeps running whatever page is open. It draws
  * nothing. Each instance watches ITS daemon's ferrets over its own background-origin client: a call to a locked machine
  * waits for the unlock and never raises a prompt, and nothing here asks for notification permission — that is the reader's
- * control (`useNotificationControls`), this only reads it.
+ * control, which Access owns (its per-machine switch writes the record this reads), so this only reads it.
  *
  * The runtime is made here, not by the half's fleet: the fleet keeps the ordinary client of each machine and a background
  * client handed to it would replace that one.

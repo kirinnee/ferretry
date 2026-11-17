@@ -14,7 +14,6 @@ import {
   formSentSummary,
   planFormSend,
   sendForm,
-  withFormSend,
 } from '../../../app/lib/agenda-form-send.ts';
 
 const FIELDS = [
@@ -143,26 +142,6 @@ describe('sendForm', () => {
       'Pick an answer or type something',
     );
     expect(scheduled).toHaveLength(0);
-  });
-});
-
-describe('withFormSend', () => {
-  test('replaces send with the form’s answer and leaves the other methods alone', async () => {
-    const chat = { send: (_text: string) => 'chat', other: () => 'other' };
-    let answered = 0;
-    const wrapped = withFormSend(chat, () => {
-      answered += 1;
-    });
-    await wrapped.send('hello');
-    expect(answered).toBe(1);
-    expect(wrapped.other()).toBe('other');
-  });
-
-  test('lets the form’s one error line through the composer’s send', () => {
-    const wrapped = withFormSend({ send: (_text: string) => 'chat' }, () => {
-      throw new Error('Pick an answer or type something');
-    });
-    expect(() => wrapped.send('x')).toThrow('Pick an answer or type something');
   });
 });
 

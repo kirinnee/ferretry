@@ -17,7 +17,13 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type ApiRequest, type EventDef, headersFrom, queryFrom } from '@ferretry/kernel/contract';
+import {
+  type ApiRequest,
+  CORE_IDS as KERNEL_CORE_IDS,
+  type EventDef,
+  headersFrom,
+  queryFrom,
+} from '@ferretry/kernel/contract';
 import { buildModelOnly, buildReleases, type Release } from '../../../../../scripts/test/two-release/releases.ts';
 import { type StartedDaemon, startDaemon } from '../../../../../scripts/test/two-release/daemon.ts';
 import { hits, hitTotal, resetCounters } from '../../../../../scripts/test/two-release/hits.ts';
@@ -32,7 +38,7 @@ import { expectFyExit, type FyRun } from '../support/fy-run-report.ts';
 import { waitFor } from '../support/wait-for.ts';
 
 /** The packages every release carries unchanged: the core pieces, Access, and Connections (its direct carrier serves the paired session). */
-const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets', 'access', 'connections'] as const;
+const CORE_IDS = [...KERNEL_CORE_IDS, 'access', 'connections'] as const;
 const EXIT_UNAVAILABLE = 69;
 const UPDATE = 'restart the daemon with `fy daemon restart`';
 

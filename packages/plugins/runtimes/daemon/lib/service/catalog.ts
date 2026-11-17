@@ -958,12 +958,13 @@ function netTextLines(text: string, mode: TextMode): { readonly text: string; re
   // An instructions text is also a VALUE (held in the component YAML): the write rule's flag test reads a string with
   // blanks as words, and a flag may end one line while its value starts the next.
   const flagged = (line: string): boolean => mode === 'instructions' && findFlagSecrets({ text: line }).length > 0;
+  // The last word of the last line that held one: a flag, then blank lines, then its value is still a flag and its value.
   let before = '';
   const lines = text.split('\n').map((unit, index) => {
     const carriage = unit.endsWith('\r') ? '\r' : '';
     const line = carriage === '' ? unit : unit.slice(0, -1);
-    const last = lastWordOf(before);
-    before = line;
+    const last = before;
+    before = lastWordOf(line) || last;
     if (document === 'whole' || document?.has(index) === true) {
       withheld = true;
       return `${WITHHELD_LINE}${carriage}`;

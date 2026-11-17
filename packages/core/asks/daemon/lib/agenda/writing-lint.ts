@@ -263,7 +263,7 @@ export function lintAgendaWriting(item: AgendaWriting): string[] {
   const backReferences = collect(fields, BACK_REFERENCE);
   if (backReferences.size > 0) {
     warnings.push(
-      `points elsewhere (${quoted([...backReferences.keys()])}) in ${whereFound(backReferences)}: the owner reads this card alone, often days later; say the thing itself on the card instead`,
+      `points elsewhere (${quoted([...backReferences.keys()])}) in ${whereFound(backReferences)}: the owner reads this item alone, often days later; say the thing itself on the item instead`,
     );
   }
 
@@ -282,7 +282,7 @@ export function lintAgendaWriting(item: AgendaWriting): string[] {
   const vague = vagueOptions(item);
   if (vague.length > 0) {
     warnings.push(
-      `options ${quoted(vague)} do not say what choosing them does: give each a few words ("Ship it today") or a description, so the card can be answered without reading anything else`,
+      `options ${quoted(vague)} do not say what choosing them does: give each a few words ("Ship it today") or a description, so the item can be answered without reading anything else`,
     );
   }
 
@@ -344,7 +344,7 @@ export function lintAgendaWriting(item: AgendaWriting): string[] {
   ];
   if (headed.length > 0) {
     warnings.push(
-      `markdown headings (# …) in ${headed.join(', ')}: the card draws them as huge titles; write short points (- …) or a bold lead instead`,
+      `markdown headings (# …) in ${headed.join(', ')}: the item draws them as huge titles; write short points (- …) or a bold lead instead`,
     );
   }
   // THE BODY MAY BE SEVERAL KINDS OF CONTENT IN ONE TAB (&F946): a hint, never a refusal — only the ferret knows

@@ -50,6 +50,9 @@ export * from './config.ts';
 // What a catalog refuses: the `publish` layer on `@ferretry/std/credential-words`, the one owner of the word rule.
 export { envEntryRefused, firstRefusedWord, refusedLine } from './lib/command-line.ts';
 export * from './inputs.ts';
+export * from './inputs-wire.ts';
+export * from './input-slots.ts';
+export * from './input-card-slots.ts';
 export * from './masks.ts';
 export * from './profile-secrets.ts';
 export * from './phone.ts';

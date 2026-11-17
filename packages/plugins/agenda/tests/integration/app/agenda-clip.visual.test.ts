@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
@@ -133,33 +133,6 @@ describe('the snooze choices in the open item’s ⋯ menu', () => {
         }
       });
 });
-
-const scrollBox = async (tab: Page) =>
-  await tab.evaluate(() => {
-    const read = (query: string) => {
-      const element = document.querySelector(query);
-      if (element === null) throw new Error(`nothing matches ${query}`);
-      const { top, bottom, height } = element.getBoundingClientRect();
-      return { top, bottom, height };
-    };
-    const step = document.querySelector('.fy-inbox-step') as HTMLElement;
-    return {
-      scroller: read('.fy-inbox-step'),
-      head: read('.fy-totest__top'),
-      actions: read('.fy-totest__actions'),
-      scroll: step.scrollHeight,
-      client: step.clientHeight,
-      top: step.scrollTop,
-    };
-  });
-
-const scrollTo = async (tab: Page, to: number | 'end'): Promise<void> => {
-  await tab.evaluate((target: number | 'end') => {
-    const step = document.querySelector('.fy-inbox-step') as HTMLElement;
-    step.scrollTop = target === 'end' ? step.scrollHeight : target;
-  }, to);
-  await framesSettled(tab);
-};
 
 describe('option labels that carry Markdown, in the open item', () => {
   for (const { name } of VIEWPORTS)

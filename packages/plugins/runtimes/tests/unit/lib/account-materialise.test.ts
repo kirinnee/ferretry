@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AGENT_BASE_INSTRUCTION, CLAUDE_QUESTION_HOOKS, tomlString } from '../../../daemon/lib/account/fixed-layer.ts';
+import { AGENT_BASE_INSTRUCTION, tomlString } from '../../../daemon/lib/account/fixed-layer.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../../daemon/lib/account/ids.ts';
 import {
   FIXED_SETTINGS_FILE,
@@ -769,7 +769,6 @@ describe('materialiseFleet', () => {
         permissions: { defaultMode: 'auto' },
         remoteControlAtStartup: false,
         skipAutoPermissionPrompt: true,
-        hooks: CLAUDE_QUESTION_HOOKS,
       });
       should(only(result, `${HOME_A}/settings.json`)).match({
         layers: [{ settings: { permissions: { defaultMode: 'auto' } } }],
@@ -794,7 +793,6 @@ describe('materialiseFleet', () => {
             permissions: { defaultMode: 'bypassPermissions' },
             remoteControlAtStartup: false,
             skipDangerousModePermissionPrompt: true,
-            hooks: CLAUDE_QUESTION_HOOKS,
           },
           null,
           2,
@@ -824,6 +822,26 @@ describe('materialiseFleet', () => {
       should(JSON.stringify(only(result, `${HOME_B}/config.toml`))).not.containEql('projects');
     });
 
+    it('should default a machine that names no agent permissions to Skip, and materialise bypass wrappers for it', () => {
+      // Arrange — a fresh machine: nothing in `machine` names agentPermissions (a v4 home without it parses the same way)
+      const model = modelOf({
+        runtimes: {
+          'claude-agent': { credential: 'claude-you', profile: 'default', agent: true },
+          'codex-agent': { credential: 'codex-work', profile: 'default', agent: true },
+        },
+      });
+
+      // Act
+      const result = plan(model);
+
+      // Assert — the model says what ferrets really run: Skip, never Auto
+      should(model.machine.agentPermissions).equal('skip');
+      should(wrapperOf(result, 'claude-agent')).containEql(`'--permission-mode' 'bypassPermissions'`);
+      should(wrapperOf(result, 'claude-agent')).not.containEql(`'--permission-mode' 'auto'`);
+      should(wrapperOf(result, 'codex-agent')).containEql(`'-c' 'approval_policy="never"'`);
+      should(wrapperOf(result, 'codex-agent')).containEql(`'-c' 'sandbox_mode="danger-full-access"'`);
+    });
+
     it('should refuse to launch a Claude agent in Auto mode on a Claude that does not accept it (O4)', () => {
       // Act
       const result = plan(agents('auto'), { acceptsAutoPermissionMode: false });
@@ -841,11 +859,11 @@ describe('materialiseFleet', () => {
     });
   });
 
-  // A project's own `.claude` settings win over a login's environment (v4 before 4.291.9; owner, !A500). Claude Code ranks
+  // A project's own `.claude` settings win over a login's environment (v4 before 4.291.9; owner, ^A500). Claude Code ranks
   // a folder's `env` above the process environment and a `--settings` file above the folder, so the ONLY way a login's value
   // could beat a repo's is by being written into a `--settings` file. It never is: the login's variables are the process
   // environment the wrapper exports, and nothing else.
-  describe('a login’s environment is not pinned: a project’s .claude env wins (owner, !A500)', () => {
+  describe('a login’s environment is not pinned: a project’s .claude env wins (owner, ^A500)', () => {
     const OVERLAY = `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`;
     const SECRET_VALUE = 'FIXTURE-LOGIN-TOKEN-4471';
 

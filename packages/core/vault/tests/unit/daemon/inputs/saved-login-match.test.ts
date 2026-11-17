@@ -1,10 +1,9 @@
 import { describe, it } from 'bun:test';
 import type { AccountSummary, InputSaved, SignInSummary } from '../../../../daemon/lib/inputs/borrowed.ts';
-import type { InputTargetFacts } from '../../../../contract/index.ts';
+import { codeTargetProblem, type InputTargetFacts } from '../../../../contract/index.ts';
 import should from 'should';
 import {
   codeCardKeys,
-  codeTargetProblem,
   signInOfAt,
   remoteHostOf,
   type SavedListing,

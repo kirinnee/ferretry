@@ -16,7 +16,9 @@ import {
 } from '../protocol/agenda.ts';
 import { agendaListSnapshot } from '../protocol/agenda-list.ts';
 import { type ApiActor, ferretOf, isHumanAdminActor, parseActor } from '@ferretry/core-gate/contract';
+import { createHash } from 'node:crypto';
 import {
+  answerWhenChanged,
   ApiError,
   type ApiResponse,
   type CallContext,
@@ -141,16 +143,41 @@ const servedAgendaListSnapshot = (context: Call, snapshot: AgendaSnapshot) =>
  * cannot be read is left off: the board is the answer.
  */
 async function withReplies(replies: HeldReplies, sessionId: string, snapshot: AgendaSnapshot): Promise<AgendaSnapshot> {
+  return withHeld(snapshot, await heldRepliesOf(replies, sessionId));
+}
+
+/** What the outbox holds for a ferret, or what it could not say. Small, and read fresh: it moves with the clock and the composer. */
+async function heldRepliesOf(replies: HeldReplies, sessionId: string) {
   const [held, delivery] = await Promise.all([
     replies.pending(sessionId).catch(() => undefined),
     replies.delivery(sessionId).catch(() => undefined),
   ]);
-  return {
-    ...snapshot,
-    ...(held === undefined ? {} : { replies: held }),
-    ...(delivery === undefined ? {} : { delivery }),
-  };
+  return { held, delivery };
 }
+
+const withHeld = (
+  snapshot: AgendaSnapshot,
+  { held, delivery }: Awaited<ReturnType<typeof heldRepliesOf>>,
+): AgendaSnapshot => ({
+  ...snapshot,
+  ...(held === undefined ? {} : { replies: held }),
+  ...(delivery === undefined ? {} : { delivery }),
+});
+
+/**
+ * The validator of a board read, from the board's stamp (a stat of its ledger file) and the little the outbox adds
+ * (`dueAt`, what is in flight), never from the board itself. It also names the projection the reader asked for (channel
+ * 2 answers resolved items as headers), because that is a different body from the same board.
+ */
+const boardTag = (
+  sessionId: string,
+  stamp: string,
+  channel: boolean,
+  held: Awaited<ReturnType<typeof heldRepliesOf>>,
+): string =>
+  `"${createHash('sha256')
+    .update(JSON.stringify([sessionId, stamp, channel, held.held ?? null, held.delivery ?? null]))
+    .digest('base64url')}"`;
 
 /**
  * A board as the CALLER reads it. The owner and a device read it whole. A FERRET reads every Warden-sourced item through
@@ -222,15 +249,28 @@ async function list(
   context: Call,
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
-  const result = await agenda.list(sessionId);
-  return result.ok
-    ? jsonResponse(
-        servedAgendaListSnapshot(
-          context,
-          await readableSnapshot(agenda, reach, context, await withReplies(replies, sessionId, result.value)),
-        ),
-      )
-    : refusal(result.error);
+  const build = async (held: Awaited<ReturnType<typeof heldRepliesOf>>): Promise<ApiResponse> => {
+    const result = await agenda.list(sessionId);
+    return result.ok
+      ? jsonResponse(
+          servedAgendaListSnapshot(
+            context,
+            await readableSnapshot(agenda, reach, context, withHeld(result.value, held)),
+          ),
+        )
+      : refusal(result.error);
+  };
+  // A FERRET reads a board cut by whose items it may see (lineage, other boards), which no stamp of this ledger names, so
+  // only the owner's and a device's read is conditional: that is the app's poll, and the measured cost.
+  if (ferretOf(context) !== undefined) return await build(await heldRepliesOf(replies, sessionId));
+  // The stamp is read BEFORE the board, so a write in between leaves the body newer than its tag (one needless full
+  // answer), never a stale 304.
+  const stamp = await agenda.stamp(sessionId);
+  if (!stamp.ok) return refusal(stamp.error);
+  const held = await heldRepliesOf(replies, sessionId);
+  if (stamp.value === undefined) return await build(held);
+  const tag = boardTag(sessionId, stamp.value, readsAgendaHeaders(context.request.headers), held);
+  return await answerWhenChanged(context.request, tag, () => build(held));
 }
 
 /**
@@ -340,7 +380,7 @@ async function apply(
     request.cardAsk === undefined &&
     request.gate !== true
   )
-    throw new ApiError(400, 'files can only come with the answer to a card ask', 'invalid');
+    throw new ApiError(400, 'files can only come with the answer to a task ask', 'invalid');
   const sourced =
     request.action === 'resolve' && sources !== undefined
       ? await sources({
@@ -363,7 +403,7 @@ async function apply(
     (request.cardAsk !== undefined || request.gate === true) &&
     request.response === undefined
   )
-    throw new ApiError(400, 'an attached card answer needs a response', 'invalid');
+    throw new ApiError(400, 'an attached task answer needs a response', 'invalid');
   // An answer to a card's gate moves the card first; only a move that went through answers the item.
   const gated =
     sourced === undefined && request.action === 'resolve' && request.response !== undefined && gates !== undefined
@@ -381,7 +421,7 @@ async function apply(
       : undefined;
   // Files belong to a card's gate answer: an answer that is not one has nothing to carry them to.
   if (request.action === 'resolve' && request.attachments !== undefined && gated === undefined) {
-    throw new ApiError(400, 'files can only come with the answer to a card ask', 'invalid');
+    throw new ApiError(400, 'files can only come with the answer to a task ask', 'invalid');
   }
   // Not needed on a gate item asks the same grant an answer does.
   if (request.action === 'dismiss' && gates !== undefined) {

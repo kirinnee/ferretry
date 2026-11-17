@@ -1,7 +1,12 @@
 import { type LedgerSendRecord } from '../../../../app/lib/transcript.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { AgendaItemHistory } from '../../../../app/features/agenda/agenda-item-history.tsx';
-import type { HistoryEvent } from '../../../../app/lib/agenda-history.ts';
+import {
+  type DeviceWords,
+  deviceEvents,
+  type HistoryEvent,
+  withDeviceEvents,
+} from '../../../../app/lib/agenda-history.ts';
 import { clockOfInstant } from '../../../../app/shell.ts';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
@@ -155,7 +160,7 @@ describe('the Conversation of an open agenda item', () => {
   });
 
   test('draws Ferretry’s own words under its name', async () => {
-    const root = await draw([{ kind: 'ferret', key: 'd', at: AT, text: 'Closed as merged into !A2.', daemon: true }]);
+    const root = await draw([{ kind: 'ferret', key: 'd', at: AT, text: 'Closed as merged into ^A2.', daemon: true }]);
     const row = must(root.querySelector('[data-history="daemon"]'), 'daemon row');
     expect(row.querySelector('header')?.textContent).toContain('Ferretry');
     expect(row.textContent).not.toContain('Lizzette');
@@ -207,5 +212,78 @@ describe('the owner’s ticks, the chat’s own', () => {
     expect(mark.getAttribute('aria-label')).toContain('On the machine');
     await interact(() => mark.click());
     expect(root.querySelector('[data-send-reason]')?.textContent).toContain('the ferret has not replied to it yet');
+  });
+});
+
+describe('the owner’s words still on this device', () => {
+  const BASE = {
+    references: ['^A3'] as readonly string[],
+    createdAt: new Date(AT).toISOString(),
+  };
+  const device = (words: readonly DeviceWords[], history: readonly HistoryEvent[] = []) =>
+    withDeviceEvents(history, deviceEvents('A3', words));
+
+  test('draws an outbox entry that names the item as “Saved on this device”, with the chat’s one tick', async () => {
+    const root = await draw(
+      device([{ ...BASE, id: 'send-1', message: 'ship it tonight', reason: 'waiting for the machine' }]),
+    );
+    const mark = must(root.querySelector('[data-history="owner"] [data-send-receipt]'), 'the receipt');
+    expect(mark.getAttribute('data-send-receipt')).toBe('saved');
+    expect(mark.getAttribute('aria-label')).toContain('Saved on this device');
+    expect(mark.querySelector('[data-receipt-mark="saved"]')).not.toBeNull();
+    expect(root.querySelector('[data-history="owner"] .fy-hist__said')?.textContent).toBe('ship it tonight');
+    await interact(() => (mark as HTMLButtonElement).click());
+    expect(root.querySelector('[data-send-reason]')?.textContent).toContain(
+      'goes to the machine when it can be reached',
+    );
+  });
+
+  test('draws one the machine refused as “Not sent”, with the reason', async () => {
+    const root = await draw(
+      device([{ ...BASE, id: 'send-2', message: 'no way', reason: 'the ferret is gone', refused: true }]),
+    );
+    const mark = must(root.querySelector('[data-send-receipt]'), 'the receipt');
+    expect(mark.getAttribute('data-send-receipt')).toBe('failed');
+    expect(mark.getAttribute('aria-label')).toContain('Not sent');
+    await interact(() => (mark as HTMLButtonElement).click());
+    expect(root.querySelector('[data-send-reason]')?.textContent).toContain('the ferret is gone');
+  });
+
+  test('leaves out an entry that names another item', async () => {
+    const root = await draw(device([{ ...BASE, references: ['^A9'], id: 'send-3', message: 'about nine' }]));
+    expect(root.querySelector('[data-agenda-history]')).toBeNull();
+  });
+
+  test('also reads an entry whose own words cite the item (an older send, no references)', async () => {
+    const root = await draw(device([{ ...BASE, references: [], id: 'send-4', message: '^A3 still there?' }]));
+    expect(root.querySelector('[data-history="owner"] .fy-hist__said')?.textContent).toBe('still there?');
+  });
+
+  test('draws once, with the ledger’s receipt, when the machine already has the words', async () => {
+    const delivered: HistoryEvent = {
+      kind: 'owner',
+      key: 'row-1',
+      at: AT,
+      text: 'ship it tonight',
+      reached: {
+        via: 'transcript',
+        answered: false,
+        send: { sendId: 'send-1', fate: 'delivered' } as LedgerSendRecord,
+      },
+    };
+    const root = await draw(device([{ ...BASE, id: 'send-1', message: 'ship it tonight' }], [delivered]));
+    expect(root.querySelectorAll('[data-history="owner"]')).toHaveLength(1);
+    expect(must(root.querySelector('[data-send-receipt]'), 'the receipt').getAttribute('data-send-receipt')).toBe(
+      'delivered',
+    );
+  });
+
+  test('puts the unsent words after earlier ones, in the order said', async () => {
+    const earlier: HistoryEvent = { kind: 'ferret', key: 'f', at: AT - 10, text: 'Question?' };
+    const later: HistoryEvent = { kind: 'ferret', key: 'g', at: AT + 10, text: 'Hmm.' };
+    const root = await draw(device([{ ...BASE, id: 'send-5', message: 'mine' }], [earlier, later]));
+    expect([...root.querySelectorAll('[data-agenda-history] li')].map(row => row.getAttribute('data-history'))).toEqual(
+      ['ferret', 'owner', 'ferret'],
+    );
   });
 });

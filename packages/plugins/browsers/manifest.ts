@@ -1,7 +1,8 @@
-import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
+import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { GatePort } from '@ferretry/core-gate/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { AgentControlPort, FerretsPort } from '@ferretry/core-ferrets/contract';
+import { browsersLoosens } from './contract/config-loosens.ts';
 import { InputTargets, VaultPort } from '@ferretry/core-vault/contract';
 import { PairingWindowPort } from '@ferretry/plugin-access/contract';
 import { ShareWindowPort } from '@ferretry/plugin-catalogs/contract';
@@ -210,7 +211,7 @@ export default definePlugin({
       tool('browser_ask_owner', { ...TOOL, guard: GUARD_NONE, summary: 'hand a page to the owner' }),
       tool('browser_request_input', {
         ...TOOL,
-        guard: { none: 'raises an input card through the Vault; answers its state, never a value' },
+        guard: { none: 'raises an input through the Vault; answers its state, never a value' },
         summary: 'ask the owner to type a password or code into a page',
       }),
     ],
@@ -754,7 +755,7 @@ export default definePlugin({
         file: 'browsers.yaml',
         schema: BrowsersConfigSchema,
         axis: 'configure',
-        loosens: neverLoosens,
+        loosens: browsersLoosens,
       }) as ConfigDef,
     ],
     readModels: ['state', 'pages'],

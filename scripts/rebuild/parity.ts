@@ -61,6 +61,7 @@ const owners = [
   'gate',
   'vault',
   'ferrets',
+  'mailbox',
   'asks',
   'access',
   'connections',
@@ -91,7 +92,7 @@ const owners = [
   'cli',
   'app',
 ];
-const core = new Set(['kernel', 'gate', 'vault', 'ferrets', 'asks']);
+const core = new Set(['kernel', 'gate', 'vault', 'ferrets', 'mailbox', 'asks']);
 const packagePath = (owner: string) =>
   owner === 'app' || owner === 'cli'
     ? `packages/${owner}`
@@ -245,8 +246,7 @@ function renamed(what: string): string {
       .replace(/\/v1\/ferrets\/:(?:sessionId|sid|id)(?=\/|$)(\/runtime(?:-models)?$)?/, (_match, runtime?: string) =>
         runtime === undefined ? '/v1/ferrets/:ferretId' : `/v1/ferrets/:id${runtime}`,
       )
-      .replace(/^fy task\b/, 'fy card')
-      .replace(/^fy card status\b/, 'fy card progress')
+      .replace(/^fy task status\b/, 'fy task progress')
       .replace(/^fy (?:credentials?|login)\b/, 'fy login')
       .replace(/^fy learning\b/, 'fy lesson')
       .replace(/^fy harness update(?: \[harness\])?$/, 'fy harness {claude-code|codex} update')
@@ -293,12 +293,15 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
   if (kind === 'V' && (what === 'fy fleet' || what === 'fy fleet recommend <task...>'))
     return 'removed by design (v4 `fy fleet` read a routing.json 4.291.17 no longer ships and printed only "no routing catalog"; `fy recommend` replaces it, no alias; proved by test(s) V-0260 V-0261)';
   if (kind === 'V' && what === 'fy board import')
-    return "removed by design (the v4-to-v5 converter turns old per-session task files into cards: 5.0 has no v4 readers, and `fy board import` exits 2 naming board's sub-verbs; proved by test(s) V-0086)";
+    return "removed by design (the v4-to-v5 converter turns old per-session task files into tasks: 5.0 has no v4 readers, and `fy board import` exits 2 naming board's sub-verbs; proved by test(s) V-0086)";
   if (kind === 'V' && what === 'fy import')
     return 'removed by design (§1.4: imports are links; its one verb is `fy link`)';
   if (kind === 'R' && /legacy-tasks/.test(file)) return 'removed by design (§9.1, §9.2: per-ferret tasks/old readers)';
   if (kind === 'F' && (/\/cgroups\//.test(what) || /\/cgroups\/legacy-documents/.test(file)))
     return 'removed by design (§9.2: old cgroups directory)';
+  // Owner ruling (lead, 2026-11-17): v4 refused a stray fleet/config.yaml by sentence; 5.0 ignores it, with no compat code (F-0423).
+  if (kind === 'F' && what === '{locations.fleetDirectory}/config.yaml')
+    return 'removed by design (owner ruling 2026-11-17: 5.0 ignores a stray fleet/config.yaml; v4 refused it by sentence, no compat deadweight)';
   if (kind === 'F' && /fleet\/config\.yaml|account\/document\.ts/.test(what + file))
     return 'removed by design (§9.2: fleet/config.yaml)';
   return undefined;
@@ -415,6 +418,45 @@ const REOWNED: Readonly<Record<string, string>> = {
   'S-0382': 'catalogs',
   'S-0373': 'onboarding',
   'V-0241': 'onboarding',
+  // Parity rows filed under Ferrets whose 5.0 code is another owner's (Ferrets may not import it): re-owned, none removed
+  // (c58-89). Each stays `[ ]` until its new owner ticks it with a test. Conversation declares the verbs reply, interrupt
+  // and compact-at, the chat screen and its page, hypermedia, session search, the compact-at, hypermedia, answer and log
+  // routes, and the send scheduler's timer.
+  'V-0374': 'conversation',
+  'V-0291': 'conversation',
+  'V-0432': 'conversation',
+  'S-0229': 'conversation',
+  'S-0230': 'conversation',
+  'S-0353': 'conversation',
+  'S-0404': 'conversation',
+  'S-0379': 'conversation',
+  'S-0308': 'conversation',
+  'S-0325': 'conversation',
+  'J-0179': 'conversation',
+  'R-0145': 'conversation',
+  'R-0226': 'conversation',
+  'R-0227': 'conversation',
+  'R-0335': 'conversation',
+  'R-0158': 'conversation',
+  'R-0159': 'conversation',
+  'R-0160': 'conversation',
+  // The send, interrupt, composer, ledger and handoff-read routes are Mailbox's (packages/core/mailbox/manifest.ts).
+  'R-0153': 'mailbox',
+  'R-0172': 'mailbox',
+  'R-0173': 'mailbox',
+  'R-0339': 'mailbox',
+  'R-0350': 'mailbox',
+  'R-0366': 'mailbox',
+  'R-0367': 'mailbox',
+  'R-0368': 'mailbox',
+  'R-0369': 'mailbox',
+  // The attach route is Terminals'; the dialog and permission answers are Claude Code's (declared once, for either harness).
+  'R-0142': 'terminals',
+  'R-0343': 'claude-code',
+  'R-0357': 'claude-code',
+  // Instruction files are kernel-loaded config items; the kernel host writes logs/fyd.log.
+  'F-0157': 'kernel',
+  'F-0043': 'kernel',
 };
 
 const SHELL_DAEMON_VERBS: ReadonlySet<string> = new Set([
@@ -1913,11 +1955,11 @@ const out: string[] = [
   '- T-0032 (config_read), T-0033 (config_validate) and T-0034 (config_write), with boot and every reload, are also tightened by design on SIZE and SHAPE, not a parity break: today’s 256 KiB cap held at the wire and at the disk read only; in 5.0 the same cap is checked inside the one check every door uses, before anything parses or scans the text (boot, reload, an accepted record read back, a file that grew after its size was read, config_read, config_validate, config_write), so a text over it is refused in one fixed sentence that quotes nothing, config_read shows no text of it, its last good version stays in effect and boot carries on. Two shapes today read on are refused too, located: a mapping key that is a mapping or a list (or an alias to one), and aliases whose read-out value weighs more than 10 000 plus 2 per character of the file, a string weighing its length (today the library counted aliases, not what they read out to).',
   '- V-0428 (`fy secret set NAME`) is tightened by design, not a parity break: v4 read standard input to its end even on a terminal, so a value typed there was echoed on the screen and in its scrollback, and nothing said how to finish. 5.0 asks `value for NAME (hidden; press Enter when done): ` on stderr when standard input is a terminal, turns echo off, reads one line, restores the terminal on every way out (Ctrl-C, or a SIGINT sent to the process, ends with status 130) and refuses an empty line; piped input is read exactly as before. Pinned by `packages/core/vault/tests/unit/cli/secret-set-tty.test.ts` and `packages/cli/tests/integration/terminal/hidden-prompt.test.ts`.',
   '- AGENDA-SEND-NOW-COMPOSER (agenda "Send now" into the owner\'s composer) is tightened by design, not a parity break: today `AgendaReplyBatcher.sendNow` skipped the composer check, so a Send now typed into a draft the owner was writing and merged with it, though its doc said it never types into a non-empty composer. 5.0 types nothing into a non-empty or unreadable composer: the answers stay queued in order and are rechecked, and a Send now into an empty composer types once, with the held answers. Pinned by `packages/core/asks/tests/unit/daemon/agenda/reply-batch.test.ts` ("should never type on \\"Send now\\" into a composer that holds text, and keep the answers queued in order", with its siblings for an unreadable composer and for a composer that empties).',
-  "- R-0349 (the owner's input-request deliver) is tightened by design for a page card, not a parity break (#42 SF1): \"What agents may control › Browsers\" is read at the page target, the one gate every write into a ferret's page passes, so the owner's Send on a page card raised while Browsers was on is refused once it is off (today it typed whatever the switch said). Nothing is typed or held, the card goes back to pending and can be sent again once Browsers is on, and the owner is told \"Agents may no longer control browsers on this machine, so this card was not typed into the page. Turn on Browsers under What agents may control and try again, or dismiss the card.\" The agents' sentence (T-0024 browser_request_input, T-0042 secure_paste) is today's, unchanged. A terminal card's Send still types while Terminals is off, as today.",
+  "- R-0349 (the owner's input-request deliver) is tightened by design for a page input, not a parity break (#42 SF1): \"What agents may control › Browsers\" is read at the page target, the one gate every write into a ferret's page passes, so the owner's Send on a page input raised while Browsers was on is refused once it is off (today it typed whatever the switch said). Nothing is typed or held, the input goes back to pending and can be sent again once Browsers is on, and the owner is told \"Agents may no longer control browsers on this machine, so this input was not typed into the page. Turn on Browsers under What agents may control and try again, or dismiss the input.\" The agents' sentence (T-0024 browser_request_input, T-0042 secure_paste) is today's, unchanged. A terminal input's Send still types while Terminals is off, as today.",
   "- Renaming a runtime is changed by design, not a parity break (ruling #52, kernel batch item 4, user-visible): today the rename rewrote every mention of the runtime in `warden.yaml` and `learning.yaml` in the same act (`renamedRuntimeMentions`, `rebuild-ref/packages/fleet/src/lib/config-files/render.ts`). In 5.0 no plugin writes another plugin's file, so Runtimes publishes `runtimes.renamed { from, to }` and Warden and Lessons each re-point their own file through `writeAsOwner` a moment later. Until a file is re-pointed (or while a re-point is held for the owner) that plugin's status says its file names a runtime that no longer exists. Pinned by a Warden and a Lessons test of the re-point when that wiring lands (GAP in ports-pending `runtimes`).",
   '- A locked machine\'s Inbox row is worded differently, not a parity break (ruling #55, shell contract S2): the passkey lock is v4\'s own rule and asks at the same moments (background reads of a machine not on screen wait, anything pressed asks at once). In 5.0 the Inbox row of a locked machine says "Locked — unlock <machine> to see its items" with an Unlock button, where v4 showed the machine as locked in the Machines list only.',
   '- R-0295 (applying an account-model change) is changed by design, not a parity break (#52 Q3, the cross-plugin set deferred): today\u2019s apply wrote every document a change touched as ONE set inside the provisioner\u2019s rollback, across what are now Runtimes\u2019 files (`runtimes.yaml`, `runtimes/`, `profiles/`, `model-sets/`), Logins\u2019 (`logins/<id>.yaml`) and the harness plugins\u2019 (`claude-code/settings`, `codex/settings`). In 5.0 a set is all-or-none per OWNER: Runtimes writes its own documents through `ConfigPort.writeAll` (one held document holds the set; an intent record is rolled back on load), and every other owner writes its own file when it hears `runtimes.applied`. A crash between owners can therefore leave a login naming a runtime that is not there yet; the next boot says so in a sentence ("names a runtime this machine does not have"), never fixes it silently. One set across owners would be Gate\u2019s (every owner\u2019s judge and a set-level held record) and is deferred past 5.0.',
-  "- AK-B1…AK-B13 (Board) and AK-A1…AK-A10 (Agenda) are the session archive's keep signals, today's `board: boardWorld.board.snapshot()` and `hasOpenAgendaItem` (`fyd.ts:11777-11779`; no inventory row of their own, J-0185 is the pass that reads them): archive default off today; takers answer for when it is on. Both take Ferrets' `session.archive-keeps` hook, so neither plugin reaches the other. Board answers every card (owner, assignee, dropped, lane category); Ferrets keeps today's rule over it (not dropped, lane not `closed` or `shipped`, unknown lane in flight). Agenda answers whether the ferret's own board holds an active item. A source that fails, an answer that is not the ferret's own board, and an agenda board with entries that did not parse all reject, which keeps the ferret live: the last is tightened by design (today the unparsed entries were skipped). Board answers only ferret ids (AK-B9…AK-B13; AK-B13: one odd card beside a good one, and the good card's finished ferret still archives): a stored party that is not a ferret id is left out, a card whose owner is not one answers its assignee as owner, and a card with neither is left out, so one odd card never makes the whole answer unreadable; Board checks its answer with Ferrets' contract `ArchiveCardStandingsSchema`, the schema Ferrets parses it with. A quarantined card keeps nobody, as today. NOT carried: today's revive on a card write (`fyd.ts:2087`) and on an agenda ledger write (`fyd.ts:9746`), which needs a retain or revive port in Ferrets' contract (declared in GAP(archive) and docs/session-archive.md). Pinned by `packages/plugins/board/tests/unit/board/archive-keeps.test.ts` and `packages/plugins/agenda/tests/unit/daemon/archive-keeps.test.ts`.",
+  "- AK-B1…AK-B13 (Board) and AK-A1…AK-A10 (Agenda) are the session archive's keep signals, today's `board: boardWorld.board.snapshot()` and `hasOpenAgendaItem` (`fyd.ts:11777-11779`; no inventory row of their own, J-0185 is the pass that reads them): archive default off today; takers answer for when it is on. Both take Ferrets' `session.archive-keeps` hook, so neither plugin reaches the other. Board answers every task (owner, assignee, dropped, lane category); Ferrets keeps today's rule over it (not dropped, lane not `closed` or `shipped`, unknown lane in flight). Agenda answers whether the ferret's own board holds an active item. A source that fails, an answer that is not the ferret's own board, and an agenda board with entries that did not parse all reject, which keeps the ferret live: the last is tightened by design (today the unparsed entries were skipped). Board answers only ferret ids (AK-B9…AK-B13; AK-B13: one odd task beside a good one, and the good task's finished ferret still archives): a stored party that is not a ferret id is left out, a task whose owner is not one answers its assignee as owner, and a task with neither is left out, so one odd task never makes the whole answer unreadable; Board checks its answer with Ferrets' contract `ArchiveCardStandingsSchema`, the schema Ferrets parses it with. A quarantined task keeps nobody, as today. NOT carried: today's revive on a task write (`fyd.ts:2087`) and on an agenda ledger write (`fyd.ts:9746`), which needs a retain or revive port in Ferrets' contract (declared in GAP(archive) and docs/session-archive.md). Pinned by `packages/plugins/board/tests/unit/board/archive-keeps.test.ts` and `packages/plugins/agenda/tests/unit/daemon/archive-keeps.test.ts`.",
   '- The login staging route (`POST /v1/logins/changes`, `login.add` and `login.env`) and the Paste variables screen (v4 `paste-variables.tsx` with `provider-model.ts` `prefillFrom` and `one-click-login.tsx` `oneClickDraft`) are tightened by design, not a parity break: v4 copied every pasted plain value into a plain field and accepted any address, so a gateway key typed into a deliberately empty `ANTHROPIC_API_KEY` (Custom gateway, OpenRouter, Vercel AI Gateway) or a `https://user:password@…` address was shown in clear, sent, and written into `logins/<id>.yaml` when short enough to slip past the length floors. 5.0 differs in four ways, all one rule (`plainPaste` in `packages/plugins/logins/contract/secret-shape.ts`): (1) a pasted value is withheld from its plain field when the variable is credential-named, the value is token-shaped, the address carries a user and password (with or without a scheme), or a credential-named query parameter (`?key=…`, `?token=…`, `?sig=…`) holds a key (an Azure-style `…?api-version=…` base URL is still filled in), or a credential-named header line (`Authorization: Bearer …`, `x-api-key: …`, whatever the variable is called) holds a key; (2) the form says which variables were left out, by name and reason, never the value; (3) a pasted value is never copied into a variable the preset leaves empty on purpose, which keeps its `\'\'`; (4) the daemon refuses `login.add` and `login.env` for a value with a token shape, at ANY length, and, under a name with a credential word anywhere in it (`TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`, `AUTH`, ...), for every value that is not exactly one allowed shape: a placeholder under 8 characters with no `$` (`OPENAI_API_KEY=ollama`, `dummy`, `hunter2`, accepted as plain by the daemon as in v4, since the secret store cannot hold one either); one `${secret:NAME}` reference, or several with nothing between them; a scheme word (one word of letters and `-`, at most 16 characters, no digit: `Bearer`, `Api-Token`, `ApiKey`) then whitespace then references; a header name, `:` or `=`, then either of those (`Authorization: Bearer ${secret:K}`); `$NAME` or `${NAME}` with an upper-case environment variable name; a number of up to 12 digits or a flag word (`true`, `false`, `yes`, `no`, `on`, `off`, `oauth`, `none`, `apikey`); or one address that passes the address check. It is an allowlist, so a key cannot hide in text a blocklist forgot. Under ANY name the daemon also refuses a header list (any value, such as `ANTHROPIC_CUSTOM_HEADERS`, `OTEL_EXPORTER_OTLP_HEADERS`, `GATEWAY_EXTRA` or a JSON `{"api_key":"…"}` body, split on line ends and commas, a folded line joined, each piece split on its first `:` or `=` and URL-decoded; in a variable named `…HEADER(S)` a header with no credential name is refused too when its value holds a token shape or a key-like run) holding a credential-named header (`Authorization`, `Cookie`, `x-api-key`...) whose value is not a placeholder or a reference, and an address, with or without a scheme, with a literal password, a key as the user (also with an empty password), or a credential-named query or fragment parameter (`key`, `token`, `sig`, `pass`, `pwd`, any `...signature`, its name decoded and trimmed) holding 8 or more characters outside a reference, where v4 refused only values of 8 or more characters (16 for a bare token) and never an address; `AUTH`-style flags (`CLAUDE_CODE_SKIP_BEDROCK_AUTH=1`) and a credential word in the middle of a name (`CLAUDE_CODE_API_KEY_HELPER_TTL_MS=3600000`) are accepted as flags and numbers. The browser still never PREFILLS a pasted value under a name that ends in a credential word into a plain field, whatever its length, except a whole `${secret:NAME}`, and the person types the placeholder themselves. A short `sk-` value is still refused, by its token shape. A `${...}` that is not an upper-case variable name or a valid `${secret:NAME}` is not an indirection. Under a credential name an address is allowed only with an `http`, `https`, `ws`, `wss`, `socks5` or `socks5h` scheme, no fragment, no bare query, short query values and no key-like run (24 or more letters, digits and `_` with a digit and entropy of 3.5 or more), and an absolute or `~/` path is allowed too; a PEM private-key header is a token shape. The rule is a declared heuristic (docs/secrets.md names its residual GAPs). It runs in time linear in the value, and a file value is at most 4096 characters, as on the wire: a longer one is refused and not scanned. The same rule is applied to a login FILE by its schema, so Edit as YAML and `config_write` refuse the same values, naming the variable and never the value, and `config_read` withholds the text of such a file exactly as for a raw key, whatever else is wrong with a file that parses (one refusal of this rule is enough; an `env` that is not a map of NAME: value strings is itself such a refusal), and withholds the text of any login file that fails its check, whatever the reason (a key outside `env`, a file that does not parse as YAML at all): a file that fails is reported invalid; an edit keeps the last good version in effect, but a file saved before this rule is not in effect until it is fixed. Pinned by `packages/plugins/logins/tests/unit/app/sign-ins-tab.test.tsx` ("keeps a pasted gateway key and a user:password address out of every field and out of the staged change") and `packages/plugins/logins/tests/unit/changes/derive.test.ts` ("should refuse a short gateway key under a credential-named variable, naming the variable and never the value").',
   "- project .claude env wins over a login's env (v4 before 4.291.9; owner, !A500). Proved by `packages/plugins/runtimes/tests/unit/lib/account-materialise.test.ts` (nothing pinned in `fixed.json`, no `--settings` for an interactive runtime), `packages/plugins/runtimes/tests/unit/lib/launch-gate.test.ts`, `packages/plugins/claude-code/tests/unit/harness/login-env-not-pinned.test.ts` and `packages/core/kernel/tests/integration/host/launch-wiring.test.ts` (a folder that sets a store-held key is not refused).",
   "- v4 4.291.13 regenerates an unreadable manifest at boot; 5.0's regeneration is on rebuild/manifest-regen (pending).",

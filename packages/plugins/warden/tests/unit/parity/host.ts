@@ -4,6 +4,7 @@ import type { Log } from '@ferretry/kernel/contract';
 import { config as hostConfig, state as hostState } from '@ferretry/kernel/host';
 import type { DaemonImplementation, Manifest } from '@ferretry/kernel/manifest';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
+import { fakeRuntimes } from '@ferretry/plugin-runtimes/contract/testing';
 import { fixedClock, testHost } from '@ferretry/kernel/testing';
 import { WARDEN_CONFIG } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
@@ -60,12 +61,15 @@ export async function wardenHost(options: { readonly config?: unknown; readonly 
   const ferrets = new FakeFerrets();
   const asks = new FakeAsks();
   const conversation = fakeConversation();
+  // Runtimes answers the machine's auto-resume switch (on until a test says otherwise): the auto-revive asks it.
+  const runtimes = fakeRuntimes();
   const clock = fixedClock('2026-11-07T12:00:00.000Z');
   const host = await testHost({
     plugins: [options.realConfig === undefined ? daemon : over(options.realConfig)],
     fakes: { ferrets, asks, conversation },
+    uses: { runtimes },
     clock,
   });
   if (options.config !== undefined) host.setConfig('warden.yaml', options.config);
-  return { host, ferrets, asks, conversation, clock };
+  return { host, ferrets, asks, conversation, clock, runtimes };
 }

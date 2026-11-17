@@ -4,7 +4,7 @@ import { AgendaSwipeDeck, dragOffset } from '../../../../app/features/agenda/age
 import { swipeTargets } from '../../../../app/lib/agenda-answers.ts';
 import type { InboxCard } from '../../../../app/lib/agenda-inbox.ts';
 import { daemonConnection, daemonId } from '../../../../app/shell.ts';
-import { registerComposerQuoteTarget } from '../../../../app/shell.ts';
+import { registerComposerFor } from '../../../support/app/composer-quote.ts';
 import {
   agendaItem,
   choices,
@@ -287,7 +287,7 @@ describe('the open Inbox item', () => {
       } as never),
       sessionView('sess-3'),
     );
-    const unregister = registerComposerQuoteTarget({
+    const unregister = registerComposerFor({
       daemonId: formCard.daemonId,
       sessionId: formCard.view.config.id,
       item: formCard.item.id,
@@ -316,7 +316,7 @@ describe('the open Inbox item', () => {
   it('carries what is typed in the ferret’s composer as a quick reply’s note, and empties it', async () => {
     const fake = fakeInbox();
     let draft = 'only after the smoke test';
-    const unregister = registerComposerQuoteTarget({
+    const unregister = registerComposerFor({
       daemonId: shipIt.daemonId,
       sessionId: shipIt.view.config.id,
       item: shipIt.item.id,
@@ -414,8 +414,8 @@ describe('the open Inbox item’s History', () => {
         readConversation: async card => {
           asked.push(card.key);
           return [
-            { id: '1', kind: 'assistant', text: 'Asking about !A2 — ship it?', at: NOW - 3_600_000 },
-            { id: '2', kind: 'user', text: 'Hold until Monday !A2', at: NOW - 1_800_000 },
+            { id: '1', kind: 'assistant', text: 'Asking about ^A2 — ship it?', at: NOW - 3_600_000 },
+            { id: '2', kind: 'user', text: 'Hold until Monday ^A2', at: NOW - 1_800_000 },
           ];
         },
       }),

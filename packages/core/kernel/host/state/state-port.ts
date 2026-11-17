@@ -12,11 +12,12 @@ import {
 } from '../../contract/index.ts';
 import { StoreDamagedError, UndeclaredStateFileError } from './errors.ts';
 import { encodeDocument, stateLabel } from './format.ts';
-import type { HostFs } from './host-fs.ts';
-import { isInternalRootFolder } from '../internal-roots.ts';
+import type { HostFileInfo, HostFs } from './host-fs.ts';
+import { isInternalRootFolder } from '../../contract/internal-roots.ts';
 import { assertRecordSize } from './jsonl-scan.ts';
 import { readBytesFile, readJsonDocument, readJsonlLines, readJsonlRecords } from './readers.ts';
 import { KeyedSerialExecutor } from './serial-executor.ts';
+import { streamJsonlLines } from './stream-lines.ts';
 import { nodeSqliteFiles, openSqlite, type SqliteFiles } from './sqlite-store.ts';
 
 const PRIVATE_FILE_MODE = 0o600;
@@ -24,6 +25,16 @@ const PRIVATE_DIRECTORY_MODE = 0o700;
 
 /** A name that fills the `*` of a collection path: one path segment, no dots-only, no separators. */
 const COLLECTION_NAME = /^[A-Za-z0-9_][A-Za-z0-9._%~-]{0,200}$/u;
+
+/** Within this of now, a status-change time is not yet a stamp a later write would have to move (the fence's racy window). */
+const RACY_NS = 20_000_000n;
+
+/** {@link StateVersion.settled}: a fine-grained, device-and-ctime stamp that is old enough that no later write shares it. */
+function settled(info: HostFileInfo): boolean {
+  const changed = info.changedAtNs;
+  if (changed === undefined || info.device === undefined) return false;
+  return changed % 1_000_000n !== 0n && BigInt(Date.now()) * 1_000_000n - changed > RACY_NS;
+}
 
 export interface StateDamageEvent {
   readonly damage: StateDamage;
@@ -97,6 +108,18 @@ function validatePath(def: StateFileDef): void {
     throw new UndeclaredStateFileError(
       `state ${def.name}: "${def.path}" sits under "${segments[0]}", a folder the kernel makes for a root`,
     );
+}
+
+/** The text of a jsonl file made of `value`, an array of records, each line encoded and bounded as an append would. */
+function jsonlRecords(def: StateFileDef, value: unknown): string {
+  if (!Array.isArray(value)) throw new TypeError(`state ${def.name}: a jsonl file is written from an array of records`);
+  return value
+    .map(record => {
+      const line = encodeDocument(def, record, false);
+      assertRecordSize(line);
+      return `${line}\n`;
+    })
+    .join('');
 }
 
 export function createStatePort(options: StatePortOptions): HostStatePort {
@@ -295,11 +318,16 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
 
     async write<Shape>(def: StateFileDef<string, Shape>, value: Shape, name?: string): Promise<void> {
       const at = locate(def, name);
-      if (def.store === 'jsonl' || def.store === 'sqlite' || def.store === 'sqlite-cache')
+      if (def.store === 'sqlite' || def.store === 'sqlite-cache')
         throw new TypeError(`state ${def.name}: a ${def.store} file is not written with write()`);
+      // A jsonl file is replaced WHOLE from its records, atomically and on the same chain as its appends: the one way a
+      // log is compacted (a rotation) without a reader ever seeing half of it.
+      const records = def.store === 'jsonl' ? jsonlRecords(def, value) : undefined;
       await serial.run(at.path, async () => {
         await guardWrite(def, at);
-        if (def.store === 'json') await fs.writeAtomic(at.path, `${encodeDocument(def, value, true)}\n`, fileMode(def));
+        if (records !== undefined) await fs.writeAtomic(at.path, records, fileMode(def));
+        else if (def.store === 'json')
+          await fs.writeAtomic(at.path, `${encodeDocument(def, value, true)}\n`, fileMode(def));
         else {
           if (!(value instanceof Uint8Array) && typeof value !== 'string')
             throw new TypeError(`state ${def.name}: a ${def.store} file holds bytes`);
@@ -349,15 +377,41 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     },
 
     async *lines<Shape>(def: StateFileDef<string, Shape>, name?: string): AsyncIterable<Shape> {
-      // Today's journal read: a bad line is skipped and the rest still read (records() counts what was skipped).
-      for (const record of (await lenient(def, name, undefined)).records) yield record;
+      // Today's journal read, as a stream: the file is read a piece at a time and a record is handed out as soon as its
+      // line is complete, so a journal of any size costs one piece. A bad line is skipped and the rest still read
+      // (records() counts what was skipped).
+      const at = locate(def, name);
+      if (def.store !== 'jsonl') throw new TypeError(`state ${def.name}: only a jsonl file is read line by line`);
+      const stream = streamJsonlLines(fs, def, at.path, at.label);
+      try {
+        for (;;) {
+          const step = await stream.next();
+          if (!step.done) {
+            yield step.value;
+            continue;
+          }
+          // An io fault (or a missing required file) ends the read; records already handed out stand.
+          if (!step.value.ok) {
+            note(def, step.value.error);
+            if (def.onDamaged === 'subsystem') throw new StoreDamagedError(step.value.error);
+          }
+          return;
+        }
+      } finally {
+        await stream.return({ ok: true, value: 0 });
+      }
     },
 
     async version(def: StateFileDef, name?: string): Promise<StateVersion | undefined> {
       const at = locate(def, name);
       const info = await fs.info(at.path);
       if (info === undefined) return undefined;
-      return { size: info.size, etag: `${info.inode}:${info.size}:${info.modifiedAtMs}` };
+      const stamp = info.changedAtNs === undefined ? '' : `:${String(info.device)}:${String(info.changedAtNs)}`;
+      return {
+        size: info.size,
+        etag: `${info.inode}:${info.size}:${info.modifiedAtMs}${stamp}`,
+        settled: settled(info),
+      };
     },
 
     async records<Shape>(def: StateFileDef<string, Shape>, name?: string): Promise<JsonlRecords<Shape>> {
@@ -397,6 +451,13 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
       const at = locate(def, name);
       if (def.store !== 'opaque') throw new TypeError(`state ${def.name}: only an opaque file's path is handed out`);
       return at.path;
+    },
+
+    async pinMade(def: StateFileDef, name?: string): Promise<void> {
+      const at = locate(def, name);
+      if (def.store !== 'opaque')
+        throw new TypeError(`state ${def.name}: only an opaque file is made outside the port`);
+      await pinned(at);
     },
 
     sqlite(def: StateFileDef, name?: string): SqliteHandle {

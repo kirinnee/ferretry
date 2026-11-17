@@ -1,10 +1,7 @@
 /**
- * THE ATTACHMENTS' AND MENUS' STAND-INS: names the attachment gallery and the reference menus take from files other
- * porters own, copied here (today's code, renamed to the words) until those files land, so each is replaced by an
- * import in one place.
- *
- *   - loadTranscriptImageBlob, transcriptImageCacheId, transcriptImageHandleOf, transcriptImageErrorMessage
- *       ....... GAP(C3): copies of today's `lib/transcript-image-source.ts` (C3's `chat/transcript-image-source.ts`)
+ * THE TRANSCRIPT-IMAGE SOURCE: the one place the attachment gallery loads, names and reads back a transcript image
+ * (loadTranscriptImageBlob, transcriptImageCacheId, transcriptImageHandleOf, transcriptImageErrorMessage). It is the
+ * only source of these; nothing else in the plugin holds a copy of them.
  */
 
 import {

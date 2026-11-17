@@ -1,0 +1,9 @@
+# Repository-tooling tests (under scripts/) that run in the Static Checks job instead of Quick's `scripts` part.
+# One path per line. scripts/ci/quick-part.sh reads this list for BOTH parts: `scripts` runs every other
+# scripts test, `guards` runs exactly these (scripts/ci/static-tests.test.ts proves the two sets cover all of them
+# and never overlap). Only a whole-tree checker belongs here: one that opens the real repository's TypeScript
+# program and so needs the CPU and memory the six unit groups are using at the same moment.
+#
+# fleet-link-callers: ~25 s alone, but timed out at 180 s beside the unit groups on an 8x16 (PR 1715 runs
+# 43840838787 and two more, and on a 4x8 in dispatch run 43825305638).
+scripts/gen/tests/fleet-link-callers.test.ts

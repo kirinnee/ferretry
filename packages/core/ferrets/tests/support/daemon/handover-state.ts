@@ -5,7 +5,7 @@
  */
 import type { StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
-import { HandoverFiles } from '../../../contract/handover-state.ts';
+import { HandoverFiles } from '../../../contract/state/handover.state.ts';
 
 export function memoryHandoverState(folder: MemoryStateFolder = new MemoryStateFolder()): {
   readonly folder: MemoryStateFolder;

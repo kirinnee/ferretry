@@ -137,11 +137,23 @@ tasks:
     cmds:
       - task: int:default
 
+  test:app:
+    desc: Run the real-Chromium app tests (the shell's own and every plugin's tests/integration/app) without coverage
+    cmds:
+      # The int tier's own config and budget, narrowed by path: `packages/app/tests/integration` is the shell's browser
+      # tests (the notification tap among them) and `tests/integration/app/` is each plugin's app-half browser tests.
+      - ./scripts/test/swept.sh bun test --config=bunfig.int.toml --timeout 120000 packages/app/tests/integration tests/integration/app/
+
   test:sit:
     desc: Run black-box journeys through the freshly compiled binary
     deps: [compile]
     cmds:
       - SIT_DRIVER=binary CLI_BIN=dist/bin/{{.ARTIFACT}} ./scripts/test/swept.sh bun test --config=bunfig.sit.toml
+
+  test:perf:
+    desc: Run the perf suite (speed and size budgets) alone, in one process
+    cmds:
+      - ./scripts/ci/test.sh perf
 
   test:realworld:
     desc: Run the non-blocking realworld suite (machine-dependent timing, memory and rate claims)

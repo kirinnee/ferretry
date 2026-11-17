@@ -1,0 +1,5 @@
+{
+  "entry": [],
+  "project": ["**/*.{ts,tsx}", "!tests/**"],
+  "ignore": ["app/harness/pair-from-menu.tsx"]
+}

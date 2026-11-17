@@ -1,3 +1,4 @@
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import type { CliContext, VerbHandler, VerbInvocation } from '@ferretry/kernel/manifest';
 import type {
   KeepResult,
@@ -10,8 +11,12 @@ import type {
 import { RENDER_GUIDE_TYPES, renderGuideSection, renderGuideSectionName } from './guide.ts';
 import { RENDER_GUIDE_SECTION } from './guide-text.ts';
 
-/** What the reading verbs need of the CLI: the generated client and the terminal. */
-type Context = Pick<CliContext<never>, 'client' | 'io'>;
+/** What the reading verbs need of the CLI: the generated client, the terminal and (for `--since`) the time. */
+type Context = Pick<CliContext<never>, 'client' | 'io' | 'clock'>;
+
+/** `<n>d`, `<n>h` or `<n>w` — the only duration grammar `--since` accepts (v4's). */
+const SINCE_PATTERN = /^(\d+)(d|h|w)$/u;
+const SINCE_UNIT_MS = { h: 3_600_000, d: 86_400_000, w: 7 * 86_400_000 } as const;
 
 const BIN = 'fy';
 
@@ -36,8 +41,8 @@ const number = (invocation: VerbInvocation, name: string): number | undefined =>
 const flat = (text: string): string => text.replace(/\s+/gu, ' ').trim();
 const clip = (text: string, width: number): string => (text.length <= width ? text : `${text.slice(0, width - 1)}…`);
 
-/** `&F303` for a card, `!A3` for an ask: how a hit is cited. */
-const reference = (hit: WorkHit): string => `${hit.kind === 'card' ? '&' : '!'}${hit.id}`;
+/** `&F303` for a card, `^A3` for an ask: how a hit is cited. */
+const reference = (hit: WorkHit): string => `${hit.kind === 'card' ? '&' : ASK_REFERENCE_SIGIL}${hit.id}`;
 
 /** The matching line, unless it only repeats the title or the id the reader already sees. */
 const matchLine = (hit: WorkHit): string => {
@@ -63,19 +68,30 @@ function renderHits(hits: readonly WorkHit[], own: string | undefined): string[]
   });
 }
 
+const INDEXING_LINE =
+  'Still reading your conversation history; this list is what is read so far. Run it again in a moment.';
+
 function renderListing(listing: LinkListing): string {
-  if (listing.conversations.length === 0) return 'No conversations match.';
+  const indexing = listing.indexing === true ? [INDEXING_LINE] : [];
+  if (listing.conversations.length === 0) return ['No conversations match.', ...indexing].join('\n');
   const lines = listing.conversations.map(row => {
     const kept = row.keptBy === undefined ? '' : `  (kept by ${row.keptBy})`;
+    const also = row.alsoOnComputer === true ? '  (also in your own history)' : '';
     const floor = row.turnsAtLeast === true ? '+' : '';
-    return `${row.id}  ${row.harness}  ${row.lastActivityAt.slice(0, 16).replace('T', ' ')}  ${String(row.turns)}${floor} turns  ${row.name ?? clip(flat(row.preview), 60)}${kept}`;
+    return `${row.id}  ${row.harness}  ${row.lastActivityAt.slice(0, 16).replace('T', ' ')}  ${String(row.turns)}${floor} turns  ${clip(flat(row.name ?? row.preview), 80)}${kept}${also}`;
   });
   const more =
     listing.matched > listing.conversations.length
       ? [`Showing ${String(listing.conversations.length)} of ${String(listing.matched)}.`]
       : [];
-  const skipped = listing.skipped > 0 ? [`${String(listing.skipped)} could not be read and are not listed.`] : [];
-  return [...lines, ...more, ...skipped].join('\n');
+  const where = Object.entries(listing.skippedBy ?? {}).map(([harness, count]) => `${String(count)} ${harness}`);
+  const skipped =
+    listing.skipped > 0
+      ? [
+          `${String(listing.skipped)} could not be read and are not listed${where.length > 0 ? ` (${where.join(', ')})` : ''}.`,
+        ]
+      : [];
+  return [...lines, ...more, ...skipped, ...indexing].join('\n');
 }
 
 function renderKeep(result: KeepResult): string {
@@ -95,7 +111,15 @@ function renderTranscriptPage(page: TranscriptPage): string {
  * The reading verbs: logs, search, render guide, link (list, preview, keep) and transcript. Each is one client call and one
  * rendering; a refusal is a sentence on stderr and a non-zero exit, never a stack.
  */
-export function readingVerbs({ client, io }: Context) {
+export function readingVerbs({ client, io, clock }: Context) {
+  /** `--since` is a duration on the command line and an ISO instant on the wire: this is the bridge (v4's `sinceInstant`). */
+  const sinceInstant = (value: string): string => {
+    const match = SINCE_PATTERN.exec(value.trim());
+    if (match === null) throw new Usage(`--since takes <n>d, <n>h or <n>w (e.g. 7d), not ${JSON.stringify(value)}`);
+    const ago = Number(match[1]) * SINCE_UNIT_MS[match[2] as 'd' | 'h' | 'w'];
+    if (clock === undefined) throw new Error('--since needs the shell’s clock, which this fy does not give a verb yet');
+    return new Date(clock.nowMs() - ago).toISOString();
+  };
   const guarded =
     (run: (invocation: VerbInvocation) => Promise<number | void>): VerbHandler =>
     async invocation => {
@@ -143,7 +167,9 @@ export function readingVerbs({ client, io }: Context) {
       const query = words(invocation);
       if (query === '') throw new Usage(`say what to look for: ${BIN} search <words...>`);
       const kind = option(invocation, 'kind');
-      if (kind !== undefined && kind !== 'card' && kind !== 'ask') throw new Usage('--kind is one of card | ask');
+      // `card` is the name this option took before the rename; the daemon reads both (`wire-search.ts`).
+      if (kind !== undefined && kind !== 'task' && kind !== 'card' && kind !== 'ask')
+        throw new Usage('--kind is one of task | ask');
       const limit = number(invocation, 'limit');
       const answer = await client.call<WorkSearchResponse>('GET /v1/search', {
         query: {
@@ -163,7 +189,7 @@ export function readingVerbs({ client, io }: Context) {
               `${String(answer.olderHidden)} older closed ${answer.olderHidden === 1 ? 'item' : 'items'} hidden — ${BIN} search --all ${query}`,
             ];
       if (answer.hits.length === 0) {
-        const subject = kind === 'card' ? 'cards' : kind === 'ask' ? 'asks' : 'cards or asks';
+        const subject = kind === 'card' || kind === 'task' ? 'tasks' : kind === 'ask' ? 'asks' : 'tasks or asks';
         return print([`No ${subject} match “${query}”.`, ...older].join('\n'));
       }
       const more =
@@ -187,7 +213,9 @@ export function readingVerbs({ client, io }: Context) {
           ...(q === '' ? {} : { q }),
           ...(option(invocation, 'harness') === undefined ? {} : { harness: option(invocation, 'harness') as string }),
           ...(option(invocation, 'source') === undefined ? {} : { source: option(invocation, 'source') as string }),
-          ...(option(invocation, 'since') === undefined ? {} : { since: option(invocation, 'since') as string }),
+          ...(option(invocation, 'since') === undefined
+            ? {}
+            : { since: sinceInstant(option(invocation, 'since') as string) }),
           ...(limit === undefined ? {} : { limit: String(limit) }),
         },
       });

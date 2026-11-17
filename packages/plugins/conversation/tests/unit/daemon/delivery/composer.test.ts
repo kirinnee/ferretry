@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
@@ -11,7 +12,7 @@ describe('the composer action (G33, design D2 #7: Conversation owns it, with Ter
     const ferrets = new FakeFerrets();
     ferrets.add({ id: ferretId('f1') });
     const host = await testHost({
-      plugins: [daemon],
+      plugins: [mailboxDaemon, daemon],
       fakes: { ferrets, asks: new FakeAsks() },
       clock: fixedClock('2026-11-07T09:00:00Z'),
     });

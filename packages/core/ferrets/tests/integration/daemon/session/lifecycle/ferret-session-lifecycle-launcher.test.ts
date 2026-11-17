@@ -64,6 +64,35 @@ function fixture(options: { readonly runner?: Runner | undefined; readonly handl
 }
 
 describe('FerretSessionLifecycleLauncher', () => {
+  describe('panePid', () => {
+    it('should answer the pid of the process the live pane runs, and nothing for a pane it cannot see', async () => {
+      // Arrange
+      const live = fixture();
+      const started = await live.runner.start({ ferret: ferretId(ID) } as never);
+      const handle = started.ok ? started.value.handle : undefined;
+      const seen = new FerretSessionLifecycleLauncher({
+        launch: async () => ok(ferretId(ID)),
+        stop: async () => undefined,
+        refusal: async () => undefined,
+        handleOf: () => handle,
+        runner: () => live.runner,
+        sleep: async () => undefined,
+        nowMs: () => 0,
+      });
+
+      // Act
+      const pid = await seen.panePid(record);
+      const none = await fixture({ handle: undefined }).subject.panePid(record);
+      const gone = await fixture({ handle: '%99' as RunnerHandle }).subject.panePid(record);
+
+      // Assert
+      should(pid).equal(started.ok ? started.value.pid : undefined);
+      should(pid).be.a.Number();
+      should(none).be.undefined();
+      should(gone).be.undefined();
+    });
+  });
+
   describe('alive', () => {
     it('should say a live pane is alive', async () => {
       // Arrange

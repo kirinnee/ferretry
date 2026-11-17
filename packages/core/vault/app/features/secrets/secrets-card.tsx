@@ -6,14 +6,17 @@
  * affordance. The mask is not a UI decision that could be undone by a button — it is the only thing that exists. A
  * listed secret shows its name, that it exists, and when it last changed (S4).
  *
- * THE VALUE IS HELD ONLY IN THE CONTROLLED FIELD, and is cleared the moment Save is pressed (not when the daemon
- * answers), when the page is hidden and when the card goes away. A refused save therefore asks for it again.
+ * THE VALUE IS HELD ONLY IN THE UNCONTROLLED FIELD, read through a ref when Save is pressed. It is never a `value` prop:
+ * React copies a controlled value into the input's `value` attribute, where outerHTML and DOM snapshots show it. React
+ * state holds only how many characters are typed (enough to enable Save and say "too short"), never the characters.
+ * The field is emptied the moment Save is pressed (not when the daemon answers), when the page is hidden and when the
+ * card goes away. A refused save therefore asks for it again.
  *
  * THE HONEST SENTENCE IS ON THE SCREEN, not only in a document nobody opens. "Agents cannot see these" would be false;
  * the true statement is that agents USE them without holding one, and that this is not a defence against an agent
  * deliberately trying to leak one.
  */
-import { type FormEvent, useEffect, useId, useState } from 'react';
+import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { MIN_SECRET_VALUE_LENGTH, type SecretList, SecretNameSchema } from '../../../contract/index.ts';
 import { AlertTriangle, KeyRound, Plus, RefreshCw, Trash2 } from '../../shell.tsx';
 import { SECRET_LIMIT, SECRET_MASK, SECRET_PROMISE } from './secrets-api.ts';
@@ -28,12 +31,12 @@ export interface SecretsCardProps {
 
 /** Why a draft cannot be saved yet, or nothing. Kept beside the form so the button's disabled state and the message a
  *  person reads can never disagree. */
-function secretDraftProblem(name: string, value: string, held: readonly string[]): string | undefined {
+function secretDraftProblem(name: string, valueLength: number, held: readonly string[]): string | undefined {
   const trimmed = name.trim();
-  if (trimmed === '' || value === '') return undefined;
+  if (trimmed === '' || valueLength === 0) return undefined;
   if (!SecretNameSchema.safeParse(trimmed).success)
     return 'A name is uppercase letters, digits and underscores — it becomes an environment variable.';
-  if (value.length < MIN_SECRET_VALUE_LENGTH)
+  if (valueLength < MIN_SECRET_VALUE_LENGTH)
     return `At least ${MIN_SECRET_VALUE_LENGTH} characters. A shorter value cannot be masked out of output safely.`;
   return held.includes(trimmed) ? `${trimmed} already exists — saving replaces it.` : undefined;
 }
@@ -52,20 +55,30 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
   const nameId = useId();
   const valueId = useId();
   const [name, setName] = useState('');
-  const [value, setValue] = useState('');
+  // The field itself holds the value; this is only how much of it is typed, never what it says.
+  const valueField = useRef<HTMLInputElement>(null);
+  const [valueLength, setValueLength] = useState(0);
   const held = list.secrets.map(secret => secret.name);
-  const problem = secretDraftProblem(name, value, held);
+  const problem = secretDraftProblem(name, valueLength, held);
   const ready =
     name.trim() !== '' &&
-    value.length >= MIN_SECRET_VALUE_LENGTH &&
+    valueLength >= MIN_SECRET_VALUE_LENGTH &&
     SecretNameSchema.safeParse(name.trim()).success &&
     busy === null;
   const unresolved = list.references.filter(reference => !reference.resolved);
 
+  /** Empties the field itself and what is known about it. */
+  const clearValue = (): void => {
+    if (valueField.current !== null) valueField.current.value = '';
+    setValueLength(0);
+  };
+
   // A page sent to the background drops what was typed: nobody is watching it.
   useEffect(() => {
     const hide = (): void => {
-      if (document.visibilityState === 'hidden') setValue('');
+      if (document.visibilityState !== 'hidden') return;
+      if (valueField.current !== null) valueField.current.value = '';
+      setValueLength(0);
     };
     document.addEventListener('visibilitychange', hide);
     return () => document.removeEventListener('visibilitychange', hide);
@@ -74,9 +87,9 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!ready) return;
-    const sending = value;
+    const sending = valueField.current?.value ?? '';
     // The value leaves the field now, not when the daemon answers.
-    setValue('');
+    clearValue();
     void Promise.resolve(onPut(name.trim(), sending)).then(() => setName(''));
   };
 
@@ -201,9 +214,9 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
               type="password"
               autoComplete="new-password"
               className="kt-input min-h-[44px] w-full rounded-control border border-border bg-surface-2 px-2 text-fg"
-              value={value}
+              ref={valueField}
               placeholder="paste it here — it is never shown again"
-              onChange={event => setValue(event.target.value)}
+              onChange={event => setValueLength(event.target.value.length)}
             />
           </label>
           <button type="submit" className="kt-btn min-h-[44px] justify-center" data-variant="primary" disabled={!ready}>

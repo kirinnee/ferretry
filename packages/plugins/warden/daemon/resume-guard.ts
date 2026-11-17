@@ -7,7 +7,8 @@ import type { FerretSummary } from '@ferretry/core-ferrets/contract';
  *
  * GAP(ferrets): today the restart was ONE resume told to replace the live pane (`replaceLiveTerminal`) and these checks
  * ran inside it. Ferrets has no such resume yet, so the Warden stops then resumes, and runs the same checks first. The
- * `kill_failed` refusal (a previous shutdown not confirmed) has no fact in `FerretSummary`, so it is not checked here.
+ * `kill_failed` refusal (a previous shutdown not confirmed) has no fact in `FerretSummary`, so it is not checked here:
+ * Ferrets' own resume reads the session document and refuses it (the Warden counts that as a refusal, not a revive).
  */
 export class WardenResumeRefused extends Error {
   constructor(message: string) {

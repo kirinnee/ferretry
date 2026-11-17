@@ -58,7 +58,7 @@ import {
   within,
 } from './fence-guard.ts';
 import { identityKey, type TruncationWatcher } from './fence-index.ts';
-import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from './internal-roots.ts';
+import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from '../contract/internal-roots.ts';
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
 import {
   credentialFileListed,
@@ -83,6 +83,18 @@ import {
 } from './shared-trees.ts';
 import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } from './processes.ts';
 import { type ProjectUse, projectFilesScope, projectPathRefusal } from '../manifest/project-files.ts';
+import { poolStateFolder } from '../manifest/history-pool.ts';
+import type { HistoryPoolPermission } from '../manifest/types.ts';
+import {
+  historyEntryFor,
+  historyMoveNames,
+  historyRoot,
+  isFerretHome,
+  ownHistoryPool,
+  poolCredentialVerdict,
+  poolEntryFolder,
+  refuseHistory,
+} from './history-pool.ts';
 import {
   anchorWalk,
   chainFault,
@@ -439,6 +451,13 @@ interface Scope {
    * written through it.
    */
   readonly heldFrom?: string;
+  /** A pool view starts every held walk with the same state-anchored proof as linkHistory, and borrows its held folder. */
+  readonly historyPool?: {
+    readonly home: string;
+    readonly plugin: string;
+    readonly folder: string;
+    readonly privateFiles: PrivatePlaces;
+  };
 }
 
 /** `real` is what the disk resolved `path` to: a literal scope refuses a name that resolved elsewhere (a link swapped in). */
@@ -463,7 +482,8 @@ async function openCheckedFolder(
   tolerateUnsupported = false,
 ): Promise<OpenedDirectory | undefined> {
   if (!within(scope.base.real, real)) refuse('link_escape');
-  if (scope.heldFrom !== undefined && !tolerateUnsupported) return await openHeldFolder(scope, scope.heldFrom, real);
+  if (scope.heldFrom !== undefined && (!tolerateUnsupported || scope.historyPool !== undefined))
+    return await openHeldFolder(scope, scope.heldFrom, real);
   const folder = await scope.fs.openDirectory(real).catch((error: unknown) => {
     // Today's `fsync*Directory` tolerated EINVAL/ENOTSUP/EPERM at the OPEN too: only the sync asks for this.
     if (tolerateUnsupported && ['EINVAL', 'ENOTSUP', 'EPERM'].includes(errnoOf(error) ?? '')) return undefined;
@@ -775,13 +795,37 @@ async function openFolderBelow(
   make: boolean,
 ): Promise<{ readonly folder: OpenedDirectory; readonly real: string; readonly created: readonly string[] }> {
   if (!within(anchor, full) || !within(scope.base.real, full)) return refuse('link_escape');
-  const segments = relative(anchor, full)
+  let parent = anchor;
+  let named: FileIdentity | undefined;
+  let folder: OpenedDirectory;
+  if (scope.historyPool === undefined) {
+    named = await scope.fs.identity(anchor).catch(() => undefined);
+    folder = await scope.fs.openDirectory(anchor).catch(() => refuse('changed'));
+  } else {
+    const pool = scope.historyPool;
+    const reached = await reachHistoryEntry(
+      scope.fs,
+      pool.home,
+      pool.plugin,
+      pool.folder,
+      'folder',
+      scope.immutable,
+      pool.privateFiles,
+      false,
+    );
+    if (reached.directory === undefined || reached.real !== scope.base.real) {
+      await reached.close();
+      return refuse('changed');
+    }
+    // Ownership of the held pool folder passes to this walk; the ordinary close paths below let it go.
+    folder = reached.directory;
+    parent = reached.real;
+    named = reached.identity;
+  }
+  const segments = relative(parent, full)
     .split('/')
     .filter(part => part !== '');
-  const named = await scope.fs.identity(anchor).catch(() => undefined);
-  let folder = await scope.fs.openDirectory(anchor).catch(() => refuse('changed'));
   const created: string[] = [];
-  let parent = anchor;
   try {
     if (named === undefined || !same(folder.identity, named)) refuse('changed');
     // No path and no C calls reach this open folder: the leaf would be acted on by a path a link could redirect.
@@ -1308,6 +1352,8 @@ interface SourceAccess {
 
 /** Every handle the kernel made, with the plugin it was made for and its checked resolvers (for `copyTree`). */
 const HANDLES = new WeakMap<object, SourceAccess>();
+/** Identity-only pool views: a normal root handle cannot be passed off as one. */
+const POOL_VIEWS = new WeakSet<object>();
 
 /** One minted shared tree: how to reach its folder again (the minter's own checks), and where it came from. */
 interface SharedEntry {
@@ -1369,6 +1415,20 @@ interface HandleSetup {
   readonly daemonUid?: number;
   /** The manifest's `permissions.projectFiles`: the relative set a `project-files` handle may reach. */
   readonly projectFiles?: readonly string[];
+  /** The history-pool door (`linkHistory`): given to an `agent-homes` handle only. */
+  readonly history?: HistoryDoor;
+  /** A pool view has agent-homes' checks but no history door and no link operations. */
+  readonly poolView?: true;
+}
+
+/** What `RootHandle.linkHistory` needs beyond the handle: the caller's declaration, its state files, and the root's top folder. */
+interface HistoryDoor {
+  /** The manifest's `permissions.historyPool`; absent, every `linkHistory` is refused `not_permitted`. */
+  readonly permission: HistoryPoolPermission | undefined;
+  /** The plugin's declared state files: the pool must be one of its own opaque trees. */
+  readonly stateFiles: readonly StateFileDef[];
+  /** `agent-homes`' own folder (`<home>/state/<plugin>/agent-homes`): a ferret home is exactly one folder below it. */
+  readonly top: string;
 }
 
 /** What a held owner's root needs to judge every walk beneath it: the disk, the home it must not reach, the proven stores. */
@@ -1757,6 +1817,107 @@ async function renameChecked(
   }
 }
 
+/** Errnos of a no-replace move that mean THIS filesystem or kernel has no such move: refused like a host without one. */
+const NO_NOREPLACE: ReadonlySet<string> = new Set(['EINVAL', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP']);
+
+/**
+ * The history-pool move of ONE regular file (`moveToHistoryPool`): both parents opened checked and held, the source looked
+ * at through its held parent without following it (a regular file with one name, passing `guard`), then
+ * `renameat2(RENAME_NOREPLACE)` between the two held descriptors. A taken target is `exists` with the source untouched,
+ * decided by the kernel in the same call (no look-then-move window on the target). A host with no no-replace move
+ * (macOS, a `renameat2` that did not load or failed its self-test, a filesystem without the flag) is
+ * `no_descriptor_reach`: there is no plain-rename fallback.
+ *
+ * The source checks and the move are still two calls (a same-user writer can swap the leaf or add a hard link in
+ * between), so the file is looked at AGAIN at its new name through the held target folder: a different inode, kind or a
+ * second name moves it straight back (no-replace again) and refuses `changed` / `hard_link`. A move back that cannot be
+ * made (its old name taken meanwhile) still refuses, and leaves: a file with a second name DROPPED from the pool (its
+ * other name keeps the bytes), a one-name file at the pool name, or nothing when another actor took the new name first.
+ * So a refusal from this function does not say the source is still at its old name: the caller treats any refusal
+ * after the move began as "maybe moved" and looks again.
+ */
+async function moveFileNoReplace(
+  from: Checked,
+  to: Checked,
+  guard: (found: FileIdentity) => void | Promise<void>,
+): Promise<void> {
+  const fromParent = dirname(from.full);
+  const toParent = dirname(to.full);
+  const source = await openCheckedFolder(from.scope, fromParent);
+  try {
+    const target = await openCheckedFolder(to.scope, toParent);
+    try {
+      const sourceName = basename(from.full);
+      const targetName = basename(to.full);
+      const move = source.renameNoReplace;
+      const back = target.renameNoReplace;
+      if (move === undefined || back === undefined) return refuse('no_descriptor_reach');
+      await refuseHeldName(from.scope, from.full);
+      await refuseHeldName(to.scope, to.full);
+      const fromAt = await entry(from.scope, source, fromParent, sourceName);
+      const toAt = await entry(to.scope, target, toParent, targetName);
+      const moving = await from.scope.fs.identity(fromAt);
+      if (moving === undefined) return refuse('outside');
+      if (moving.kind !== 'file') return refuseHistory('not_file');
+      if (moving.links > 1) return refuse('hard_link');
+      await guard(moving);
+      await move(sourceName, target, targetName).catch((error: unknown) => {
+        const code = errnoOf(error);
+        if (code === 'EEXIST') return refuseHistory('exists');
+        if (code !== undefined && NO_NOREPLACE.has(code)) return refuse('no_descriptor_reach');
+        return refuse('changed');
+      });
+      const landed = await to.scope.fs.identity(toAt).catch(() => undefined);
+      const verdict =
+        landed === undefined || landed.kind !== 'file' || !same(landed, moving)
+          ? ('changed' as const)
+          : landed.links > 1
+            ? ('hard_link' as const)
+            : undefined;
+      if (verdict !== undefined) {
+        const restored = await back(targetName, source, sourceName).then(
+          () => true,
+          () => false,
+        );
+        // Not moved back (its old name was taken meanwhile): a file with a second name must still not stay in the pool.
+        // Another name holds its bytes, so dropping the pool name loses nothing; it is dropped only while that name is
+        // still the very file judged (GAP, declared: the look and the `unlink` are two calls, in the pool's own folder).
+        if (!restored && landed?.kind === 'file' && landed.links > 1) {
+          const now = await to.scope.fs.identity(toAt).catch(() => undefined);
+          if (now?.kind === 'file' && same(now, landed) && now.links > 1)
+            await to.scope.fs.unlink(toAt).catch(() => undefined);
+        }
+        refuse(verdict);
+      }
+    } finally {
+      await target.close();
+    }
+  } finally {
+    await source.close();
+  }
+}
+
+/** The same placed-credential guard for a rename within a root and a move into the pool. */
+async function placedMoveGuard(source: Checked): Promise<(found: FileIdentity) => Promise<void>> {
+  const recorded = PLACED_LINKS.affected(source.full);
+  const stillPlaced = async (path: string, mark: string): Promise<boolean> => {
+    const now = await source.scope.fs.identity(path);
+    return now?.kind === 'link' && linkMark(now) === mark;
+  };
+  const checkChildren = async (): Promise<void> => {
+    const carried: string[] = [];
+    for (const [path, mark] of recorded) if (await stillPlaced(path, mark)) carried.push(path);
+    const verdict = placedLinkMoveVerdict(carried);
+    if (verdict !== undefined) refuse(verdict);
+  };
+  await checkChildren();
+  return async found => {
+    const movingMark = recorded.find(([path]) => path === source.full)?.[1];
+    if (movingMark !== undefined && found.kind === 'link' && linkMark(found) === movingMark) refuse('link_escape');
+    await checkChildren();
+  };
+}
+
 /**
  * `unlink` through the checked folder: the parent is opened without following a link and proven, the leaf is looked at
  * WITHOUT following it, and only a link is removed (`unlink(2)` on the name: what it points at is never opened). A
@@ -1951,6 +2112,12 @@ function rootHandle(setup: HandleSetup): RootHandle {
     await pinned(full);
     return made;
   };
+  /** The pool's own folder (`<home>/state/<plugin>/<pool folder>`) when this handle's plugin declared one, else `undefined`. */
+  const historyPoolBase = (): string | undefined => {
+    const door = setup.history;
+    const folder = door?.permission === undefined ? undefined : poolStateFolder(door.permission, door.stateFiles);
+    return folder === undefined ? undefined : join(pluginStateFolder(home, plugin), folder);
+  };
   const readOnly = READ_ONLY_ROOTS.has(name);
   const projectRoot = name === 'project-files';
   /**
@@ -1984,7 +2151,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
     path: FencedPath,
     resolved: { readonly full: string; readonly base: CheckedBase },
   ): void => {
-    if (!projectRoot && !attachmentsScope) return;
+    if (!projectRoot && !attachmentsScope && setup.poolView !== true) return;
     const lexical = lexicalInRoot(home, root, ownerRoot, path);
     if (!lexical.ok) throw new RootError(lexical.error);
     if (relative(resolved.base.real, resolved.full) !== relative(absolute(root, 'a root'), lexical.value))
@@ -1995,7 +2162,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
    * file with a second name — it may be a file from anywhere, and a replace must never touch it (S49).
    */
   const leafWritable = async (scope: Scope, full: string): Promise<void> => {
-    if (!projectRoot) return;
+    if (!projectRoot && setup.poolView !== true) return;
     const found = await leafIdentity(scope, full);
     if (found === undefined) return;
     if (found.kind === 'link') refuse('link_escape');
@@ -2038,7 +2205,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
         if (error instanceof RootError && error.refusal === 'hard_link') {
           // Only a root this kernel publishes into (internal, writable) can hold its OWN leftover; a read-only, an
           // owner's or an outside root (`worktrees`) never loses a name to a read. At most one adoption per call.
-          if (!adoptionTried && !readOnly && isKernelMadeRoot(name)) {
+          if (!adoptionTried && !readOnly && isKernelMadeRoot(name) && setup.poolView !== true) {
             adoptionTried = true;
             const adopted = await real(path)
               .then(async ({ full, scope }) => await adoptLeftoverName(scope, full, random))
@@ -2105,6 +2272,14 @@ function rootHandle(setup: HandleSetup): RootHandle {
         ...(descent === undefined ? {} : { descent }),
         ...(attachmentsScope ? { descent: resolved.value.base.real, ownedBelow: true as const } : {}),
         ...(anchorReal === undefined ? {} : { heldFrom: anchorReal }),
+        ...(setup.poolView !== true
+          ? {}
+          : {
+              literal: true as const,
+              descent: resolved.value.base.real,
+              heldFrom: resolved.value.base.real,
+              historyPool: { home, plugin, folder: basename(root as string), privateFiles },
+            }),
       },
     };
   };
@@ -2344,6 +2519,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
     },
     copyTree: async (source, from, to, options) => {
       writable();
+      if (options?.link === true && (setup.poolView === true || POOL_VIEWS.has(source))) refuse('link_escape');
       gate(to, 'tree');
       const known = HANDLES.get(source);
       if (known === undefined || known.plugin !== plugin) return refuse('not_declared');
@@ -2384,6 +2560,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
       });
     },
     copyShared: async (tree, to, options) => {
+      if (options?.link === true && setup.poolView === true) refuse('link_escape');
       // The destination: an internal root the kernel makes, writable. Checked before the tree is even looked at.
       if (!receivingRoot(name)) return refuseShared('not_internal');
       writable();
@@ -2421,6 +2598,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
       return await privateChain(fs, home, lexical.value, setup.daemonUid);
     },
     linkCredential: async (credential, to) => {
+      if (setup.poolView === true) return refuse('link_escape');
       // The destination first: an internal, writable root the kernel makes (`agent-homes`), before the credential is opened.
       if (!receivingRoot(name)) return refuseShared('not_internal');
       writable();
@@ -2449,6 +2627,9 @@ function rootHandle(setup: HandleSetup): RootHandle {
         };
         const reached = await lookAgain();
         const placed = await realParent(to, true);
+        // The history pool is never a credential's place or source (a sign-in is shared with a ferret, never pooled).
+        const pool = historyPoolBase();
+        if (poolCredentialVerdict(pool, [placed.full, reached.real]) !== undefined) refuse('link_escape');
         // No link on the way: the folder `to` names, as this root names it, is the very folder reached.
         if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
           refuse('link_escape');
@@ -2498,6 +2679,135 @@ function rootHandle(setup: HandleSetup): RootHandle {
         throw error;
       }
       claim.spend();
+    },
+    linkHistory: async (ferretHome: FencedPath, entryName: string) => {
+      // The destination and the permission first, then the name: nothing about the disk is asked until all of them hold.
+      if (!historyRoot(name) || setup.poolView === true) return refuseHistory('not_internal');
+      writable();
+      const door = setup.history;
+      const permission = door?.permission;
+      const declared = historyEntryFor(permission, entryName);
+      // The pool is the plugin's OWN opaque `<folder>/*` state tree and nothing that holds a private place: the kernel
+      // names the target from the declaration, never from anything the caller passed.
+      const pooled =
+        door === undefined || permission === undefined
+          ? undefined
+          : poolEntryFolder(permission, door.stateFiles, entryName);
+      if (door === undefined || pooled === undefined || holdsPrivate(plugin, pooled, privateFiles.files))
+        return refuseHistory('not_own');
+      // `home` is exactly one ferret home, at the top of `agent-homes`.
+      const root = base();
+      if (root === undefined) return refuse('outside');
+      const lexical = lexicalInRoot(home, root, ownerRoot, ferretHome);
+      if (!lexical.ok) return refuse(lexical.error);
+      if (!isFerretHome(door.top, lexical.value)) return refuseHistory('not_home');
+      const placed = await real(ferretHome);
+      // No link on the way: the folder `home` names, as this root names it, is the very folder reached.
+      if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
+        refuse('link_escape');
+      // The home must already be there: this call never makes one (`outside`).
+      const made = await openFolderMaking(placed.scope, placed.full, 0o700, false);
+      try {
+        // The link is made only through the held, checked folder: a host with no descriptor path to it refuses.
+        if (made.folder.entryPath(entryName) === undefined) return refuse('no_descriptor_reach');
+        const leafAt = await entry(placed.scope, made.folder, made.real, entryName);
+        await refuseHeldName(placed.scope, join(made.real, entryName));
+        if ((await fs.identity(leafAt)) !== undefined) return refuseHistory('exists');
+        // Every refusal is behind us. The pool folder and its entry are made now (first use), `0700` / `0600`, through
+        // no-follow descriptors anchored at the checked plugin state folder, and HELD: the identity proved here is the one the
+        // link must still reach after it is published.
+        const target = await reachHistoryEntry(fs, home, plugin, pooled, declared.kind, immutable, privateFiles, true);
+        try {
+          if ((await fs.identity(leafAt)) !== undefined) return refuseHistory('exists');
+          await fs.symlink(target.real, leafAt).catch((error: unknown) => {
+            if (errnoOf(error) === 'EEXIST') return refuseHistory('exists');
+            return refuse('changed');
+          });
+          // PROVED before it stays, as `linkCredential` proves its source: the entry at the name is a link; followed, it lands
+          // on the pool entry's real path; and the pool entry is judged AGAIN from the anchor down (no link on the way, its
+          // declared kind, its hard-link count, the private-place fence) and is the very inode held above. A swap of the
+          // target after the first look is taken back: only the link THIS call made is removed.
+          const failure = await (async (): Promise<unknown> => {
+            try {
+              const itself = await fs.identity(leafAt);
+              const landed = await fs.realpath(leafAt);
+              const again = await reachHistoryEntry(
+                fs,
+                home,
+                plugin,
+                pooled,
+                declared.kind,
+                immutable,
+                privateFiles,
+                false,
+              );
+              try {
+                const there = await fs.identity(landed);
+                const holds =
+                  itself?.kind === 'link' &&
+                  landed === target.real &&
+                  again.real === target.real &&
+                  same(target.identity, again.identity) &&
+                  same(target.identity, there);
+                return holds ? undefined : new RootError('changed');
+              } finally {
+                await again.close().catch(() => undefined);
+              }
+            } catch (error) {
+              return error;
+            }
+          })();
+          if (failure !== undefined) {
+            await fs.unlink(leafAt).catch(() => undefined);
+            throw failure instanceof RootError ? failure : new RootError('changed');
+          }
+        } finally {
+          await target.close().catch(() => undefined);
+        }
+      } finally {
+        await made.folder.close();
+      }
+    },
+    moveToHistoryPool: async (from, pool, to) => {
+      if (!historyRoot(name) || setup.history === undefined || setup.poolView === true)
+        return refuseHistory('not_internal');
+      writable();
+      const permission = setup.history.permission;
+      const folder = ownHistoryPool(permission, setup.history.stateFiles);
+      if (holdsPrivate(plugin, folder, privateFiles.files)) return refuseHistory('not_own');
+      const known = HANDLES.get(pool);
+      if (!POOL_VIEWS.has(pool) || known === undefined || known.plugin !== plugin) return refuseHistory('not_own');
+      const root = base();
+      if (root === undefined) return refuse('outside');
+      const lexical = lexicalInRoot(home, root, ownerRoot, from);
+      if (!lexical.ok) return refuse(lexical.error);
+      // The pool view itself fences `to`; this lexical check also proves the naming rule before making parents.
+      const poolBase = join(pluginStateFolder(home, plugin), folder);
+      const destination = lexicalInRoot(home, poolBase, false, to);
+      if (!destination.ok) return refuse(destination.error);
+      historyMoveNames(permission, setup.history.top, lexical.value, poolBase, destination.value);
+      const reached = await realParent(from);
+      const sourceAnchor = await fs.realpath(home).catch(() => refuse('outside'));
+      const source = { ...reached, scope: { ...reached.scope, literal: true as const, heldFrom: sourceAnchor } };
+      if (relative(source.scope.base.real, source.full) !== relative(root, lexical.value)) refuse('link_escape');
+      const guard = await placedMoveGuard(source);
+      // Prove the source before creating anything: ONE regular file (a folder's children were never each proved, so a
+      // folder never moves whole), one name, no placed credential, and a host with a no-replace move.
+      const held = await openCheckedFolder(source.scope, dirname(source.full));
+      try {
+        const found = await fs.identity(await entry(source.scope, held, dirname(source.full), basename(source.full)));
+        if (found === undefined) return refuse('outside');
+        if (found.kind !== 'file') return refuseHistory('not_file');
+        if (found.links > 1) return refuse('hard_link');
+        await guard(found);
+        if (held.renameNoReplace === undefined) return refuse('no_descriptor_reach');
+      } finally {
+        await held.close();
+      }
+      await pool.makeDirectory(dirname(destination.value) as FencedPath);
+      const target = await known.realParent(to);
+      await pinning(target.full, async () => await moveFileNoReplace(source, target, guard));
+      PLACED_LINKS.forgetUnder(source.full);
     },
     ensurePrivateDirectory: async path => {
       writable();
@@ -2609,6 +2919,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
     },
     linkTo: async (at: FencedPath, target: RootLinkTarget) => {
       writable();
+      if (setup.poolView === true || POOL_VIEWS.has(target?.root ?? {})) refuse('link_escape');
       if (!takesLinks(name)) return refuse('read_only');
       const known = HANDLES.get(target?.root ?? {});
       if (known === undefined || known.plugin !== plugin) return refuse('not_declared');
@@ -2668,31 +2979,8 @@ function rootHandle(setup: HandleSetup): RootHandle {
       // judged by what was recorded at link time and what the link is now, never by its name. The record is KEPT through
       // the whole decision: the early look below may find the link swapped for something else, and the held-source look
       // (`renameChecked`'s guard) must still know which link was placed, or a swap that is undone in between goes through.
-      const recorded = PLACED_LINKS.affected(source.full);
-      const stillPlaced = async (path: string, mark: string): Promise<boolean> => {
-        const now = await source.scope.fs.identity(path);
-        return now?.kind === 'link' && linkMark(now) === mark;
-      };
-      const carried: string[] = [];
-      for (const [path, mark] of recorded) if (await stillPlaced(path, mark)) carried.push(path);
-      const verdict = placedLinkMoveVerdict(carried);
-      if (verdict !== undefined) return refuse(verdict);
-      await pinning(
-        target.full,
-        async () =>
-          await renameChecked(source, target, async found => {
-            // The entry the held folder is about to move, looked at again: the very link placed is never carried off...
-            const movingMark = recorded.find(([path]) => path === source.full)?.[1];
-            if (movingMark !== undefined && found.kind === 'link' && linkMark(found) === movingMark)
-              refuse('link_escape');
-            // ...nor a folder holding a recorded link that is back (or still) there now.
-            const again: string[] = [];
-            for (const [path, mark] of recorded)
-              if (path !== source.full && (await stillPlaced(path, mark))) again.push(path);
-            const late = placedLinkMoveVerdict(again);
-            if (late !== undefined) refuse(late);
-          }),
-      );
+      const guard = await placedMoveGuard(source);
+      await pinning(target.full, async () => await renameChecked(source, target, guard));
       // The move was made: what was recorded below the old name is no longer there.
       PLACED_LINKS.forgetUnder(source.full);
     },
@@ -2845,6 +3133,7 @@ export async function ensureInternalRootBases(
   fs: HostFs,
   layout: Pick<RootLayout, 'home' | 'plugin'>,
   declared: readonly RootName[],
+  history?: Pick<RootsOptions, 'historyPool' | 'stateFiles' | 'privateFiles'>,
 ): Promise<readonly RootBaseRefusal[]> {
   const refusals: RootBaseRefusal[] = [];
   for (const name of new Set(declared)) {
@@ -2854,6 +3143,28 @@ export async function ensureInternalRootBases(
       const base = internalRootBase(home, layout.plugin, name);
       if (base === undefined) continue;
       await ensureHomeRootBase(fs, home, absolute(base, 'a root'));
+      if (name === 'agent-homes' && history?.historyPool !== undefined) {
+        const folder = ownHistoryPool(history.historyPool, history.stateFiles ?? []);
+        if (holdsPrivate(layout.plugin, folder, history.privateFiles ?? [])) refuse('fenced');
+        const made = await reachHistoryEntry(
+          fs,
+          home,
+          layout.plugin,
+          folder,
+          'folder',
+          async () => [],
+          {
+            files: history.privateFiles ?? [],
+            recheckMs: 0,
+          },
+          true,
+        );
+        try {
+          await (made.directory ?? refuse('changed')).chmod(0o700);
+        } finally {
+          await made.close();
+        }
+      }
     } catch (error) {
       if (error instanceof RootError) refusals.push({ name, refusal: error.refusal });
       else refusals.push({ name, refusal: 'changed', code: errnoCode(error) });
@@ -2917,6 +3228,8 @@ export interface RootsOptions {
   readonly shareCredentials?: readonly string[];
   /** The manifest's `permissions.projectFiles`, for the `project-files` root; absent, every name of it is refused. */
   readonly projectFiles?: readonly string[];
+  /** The manifest's `permissions.historyPool` (`RootHandle.linkHistory`); absent, every history link is refused. */
+  readonly historyPool?: HistoryPoolPermission;
   /** The plugin's declared state files: a shared named tree must be one of its own opaque ones. */
   readonly stateFiles?: readonly StateFileDef[];
   /**
@@ -2968,6 +3281,32 @@ export function rootsPortFor(
     life.live = false;
   });
   const port: RootsPort = {
+    historyPool: () => {
+      const folder = ownHistoryPool(options.historyPool, options.stateFiles ?? []);
+      if (holdsPrivate(layout.plugin, folder, privateFiles.files)) return refuseHistory('not_own');
+      if (!allowed.has('agent-homes') || !mayHoldRoot(layout.plugin, 'agent-homes')) return refuse('not_declared');
+      const poolBase = absolute(join(pluginStateFolder(home, layout.plugin), folder), 'a history pool');
+      const handle = rootHandle({
+        fs,
+        home,
+        name: 'agent-homes',
+        plugin: layout.plugin,
+        base: () => poolBase,
+        anchor: home,
+        scopedParent: undefined,
+        linkFreeFolders: () => undefined,
+        check: () => undefined,
+        immutable,
+        random,
+        pins: options.pins,
+        privateFiles,
+        poolView: true,
+        ...(options.setMode === true ? { setMode: true } : {}),
+        ...(daemonUid === undefined ? {} : { daemonUid }),
+      });
+      POOL_VIEWS.add(handle);
+      return handle;
+    },
     harnessFile: absolutePath => {
       const refusal = harnessFileRefusal({
         plugin: layout.plugin,
@@ -3122,6 +3461,15 @@ export function rootsPortFor(
         ...(options.setMode === true ? { setMode: true } : {}),
         ...(daemonUid === undefined ? {} : { daemonUid }),
         ...(options.projectFiles === undefined ? {} : { projectFiles: options.projectFiles }),
+        ...(name === 'agent-homes' && internal !== undefined
+          ? {
+              history: {
+                permission: options.historyPool,
+                stateFiles: options.stateFiles ?? [],
+                top: absolute(internal, 'a root'),
+              },
+            }
+          : {}),
       });
     },
   };
@@ -3161,6 +3509,123 @@ async function privateChain(
     if (fault !== undefined) return err(chainProblem(component, fault, entry));
   }
   return ok(undefined);
+}
+
+/**
+ * What a pool component already on disk is, judged by NAME and never followed: nothing is `undefined`; a link is
+ * `link_escape`; the wrong kind is `changed`; otherwise its identity, to be proved again once the component is open.
+ */
+async function poolComponent(fs: HostFs, path: string, kind: 'directory' | 'file'): Promise<FileIdentity | undefined> {
+  const found = await fs.identity(path).catch(() => undefined);
+  if (found === undefined) return undefined;
+  if (found.kind === 'link') return refuse('link_escape');
+  if (found.kind !== kind) return refuse('changed');
+  return found;
+}
+
+/** A history-pool entry held open: its real path, the identity it was proved to have, and the folder(s) kept open for the proof. */
+interface HeldHistoryEntry {
+  readonly real: string;
+  readonly identity: FileIdentity;
+  /** Folder entries hand their descriptor to a pool view's ordinary no-follow walk. */
+  readonly directory?: OpenedDirectory;
+  close(): Promise<void>;
+}
+
+/**
+ * The pool entry `linkHistory` points at (and, for `make`, makes on first use), reached BY DESCRIPTOR and answered held:
+ * the ONE descent into a plugin's history pool (`<home>/state/<plugin>/<folder>`, `folder` = `history-pool/projects`).
+ *
+ * The plugin's state folder is checked once (no link from the home down) and is the ANCHOR. Everything below it is
+ * opened from its parent's open descriptor with `O_DIRECTORY | O_NOFOLLOW` (`openFolderBelow`, then `openChild`), so a
+ * pool folder or entry swapped for a link after the check answers `link_escape` instead of being followed, and nothing is
+ * ever made by a path another directory could be substituted behind. Every component that already exists is judged BY NAME
+ * before anything is made (a link is `link_escape`, the wrong kind `changed`, nothing is touched), and the folder opened
+ * must be that very folder (same device and inode): a pool folder swapped for another real directory of the same
+ * state folder (an agent home renamed into its place) is `changed` before a thing is created in it. A folder is `0700`; a
+ * file is an empty `0600` made exclusively; a file with a second name is `hard_link`; a private place is `fenced`.
+ *
+ * Without `make` nothing is created: a missing component is refused. That is the proof `linkHistory` asks AGAIN after the
+ * link is published, and it is the call a later caller (a pool handle that moves a file in) makes to reach the same
+ * entry. A single-folder `folder` reaches the pool base itself (boot and pool views); a folder answer also hands its
+ * descriptor to the view's ordinary walk, so arbitrary nested reads/writes and move targets use this SAME proof.
+ * The caller closes the answer or transfers ownership of its directory to that walk.
+ */
+async function reachHistoryEntry(
+  fs: HostFs,
+  home: string,
+  plugin: string,
+  folder: string,
+  kind: 'folder' | 'file',
+  immutable: () => Promise<readonly string[]>,
+  privateFiles: PrivatePlaces,
+  make: boolean,
+): Promise<HeldHistoryEntry> {
+  const stateBase = absolute(pluginStateFolder(home, plugin), 'a state folder');
+  // The state folder is checked down to the POOL folder (a file or a link there stops the walk, and the walk never goes below it).
+  const baseOnly = !folder.includes('/') && kind === 'folder';
+  const poolFolder = baseOnly ? folder : dirname(folder);
+  const resolved = await resolveChecked(fs, home, stateBase, false, join(stateBase, poolFolder), home, privateFiles);
+  if (!resolved.ok) return refuse(resolved.error);
+  const anchor = resolved.value.base.real;
+  const poolAt = join(anchor, poolFolder);
+  if (resolved.value.full !== poolAt) return refuse('link_escape');
+  const expected = join(anchor, folder);
+  const leaf = basename(expected);
+  // The pool is `<folder>/<entry>` directly below the anchor: one folder, then the entry (a declared `state` is one plain folder).
+  if (dirname(poolAt) !== anchor || (!baseOnly && dirname(expected) !== poolAt)) return refuse('link_escape');
+  const scope: Scope = { fs, base: resolved.value.base, ownerRoot: false, immutable, descent: anchor };
+  // Everything that is already there is judged by name BEFORE a folder is made or opened.
+  const poolBefore = await poolComponent(fs, poolAt, 'directory');
+  const leafBefore =
+    poolBefore === undefined || baseOnly
+      ? undefined
+      : await poolComponent(fs, expected, kind === 'folder' ? 'directory' : 'file');
+  const pool = await openFolderBelow(scope, anchor, poolAt, 0o700, make);
+  try {
+    if (poolBefore !== undefined && !same(poolBefore, pool.folder.identity)) return refuse('changed');
+    if (baseOnly)
+      return {
+        real: poolAt,
+        identity: pool.folder.identity,
+        directory: pool.folder,
+        close: async () => await pool.folder.close(),
+      };
+    if (kind === 'folder') {
+      const child = await pool.folder
+        .openChild(leaf, make ? { mode: 0o700 } : undefined)
+        .catch((error: unknown) => refuseChild(error));
+      try {
+        if (leafBefore !== undefined && !same(leafBefore, child.folder.identity)) return refuse('changed');
+        const problem = await folderProblem(scope, expected, child.folder.identity);
+        if (problem !== undefined) return refuse(problem);
+      } catch (error) {
+        await child.folder.close();
+        throw error;
+      }
+      await pool.folder.close();
+      return {
+        real: expected,
+        identity: child.folder.identity,
+        directory: child.folder,
+        close: async () => await child.folder.close(),
+      };
+    }
+    const at = await entry(scope, pool.folder, pool.real, leaf);
+    if (make && (await fs.identity(at)) === undefined)
+      await fs.writeNew(at, '', 0o600).catch((error: unknown) => {
+        if (errnoOf(error) !== 'EEXIST') return refuse('changed');
+      });
+    const found = await fs.identity(at);
+    if (found?.kind !== 'file') return refuse('changed');
+    if (leafBefore !== undefined && !same(leafBefore, found)) return refuse('changed');
+    const problem = await fileProblem(scope, expected, found);
+    if (problem !== undefined) return refuse(problem);
+    return { real: expected, identity: found, close: async () => await pool.folder.close() };
+  } catch (error) {
+    await pool.folder.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 /** A shared tree's folder must exist, be a folder, and pass its source's own checks NOW (at mint, as at every copy). */

@@ -38,7 +38,7 @@ const MAX_ASK_SUBJECT_LENGTH = 240;
 const MAX_ASK_BODY_LENGTH = 64_000;
 
 /** What a card's ask asks of the owner beside its buttons: the buttons move the card; the ferret closes it. */
-const CARD_ASK_HOW_TO_RESOLVE = "Answer the card's ask here (its buttons move the card); reply to talk it over.";
+const CARD_ASK_HOW_TO_RESOLVE = "Answer the task's ask here (its buttons move the task); reply to talk it over.";
 import { cardVisibility } from './visibility.ts';
 
 /** Where an option leads, or why it leads nowhere on this board. */
@@ -173,7 +173,7 @@ const howToTestOf = (
 };
 
 const pointerTo = (task: Pick<Card, 'id'>) => (length: number) =>
-  `How to test is ${length.toLocaleString('en-US')} characters, too long to show here (the most is ${MAX_ASK_BODY_LENGTH.toLocaleString('en-US')}). Open the card (${formatCardRef(task)}) for the full steps.`;
+  `How to test is ${length.toLocaleString('en-US')} characters, too long to show here (the most is ${MAX_ASK_BODY_LENGTH.toLocaleString('en-US')}). Open the task (${formatCardRef(task)}) for the full steps.`;
 
 /**
  * The ask the daemon raises through Asks when a card enters a gate (source `card`, #1552): ONE obligation per entry into
@@ -285,7 +285,7 @@ export const tryItVerdict = (card: TryItFacts, gate: Pick<CardGate, 'options'>):
   if (gateStyle(gate) !== 'try-it') return { kind: 'ask' };
   const holding = card.blockedBy?.length ?? 0;
   if (holding > 0) {
-    return { kind: 'wait', why: `it waits on ${String(holding)} other ${holding === 1 ? 'card' : 'cards'}` };
+    return { kind: 'wait', why: `it waits on ${String(holding)} other ${holding === 1 ? 'task' : 'tasks'}` };
   }
   if (card.blocked !== null && card.blocked !== undefined) {
     return { kind: 'wait', why: `it is blocked: ${card.blocked.reason}` };
@@ -294,10 +294,10 @@ export const tryItVerdict = (card: TryItFacts, gate: Pick<CardGate, 'options'>):
   if (building > 0) {
     return {
       kind: 'wait',
-      why: `it is an umbrella card: ${String(building)} of its sub-cards ${building === 1 ? 'is' : 'are'} still being built`,
+      why: `it is an umbrella task: ${String(building)} of its sub-tasks ${building === 1 ? 'is' : 'are'} still being built`,
     };
   }
-  if (cardVisibility(card) === 'private') return { kind: 'nothing', why: 'it is a private card' };
+  if (cardVisibility(card) === 'private') return { kind: 'nothing', why: 'it is a private task' };
   if (card.kind === 'chore') return { kind: 'nothing', why: 'it is internal work, with nothing a person sees' };
   if ((card.howToTest?.trim() ?? '') === '') return { kind: 'nothing', why: 'it has no steps to try' };
   if (saysNothingToTry(card.howToTest)) return { kind: 'nothing', why: 'its steps say there is nothing to try' };

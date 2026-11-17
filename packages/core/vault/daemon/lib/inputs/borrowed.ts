@@ -1,6 +1,53 @@
 import { NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { MIN_SECRET_VALUE_LENGTH, SecretNameSchema } from '../../../contract/index.ts';
+import {
+  oneLine,
+  type GrantMissReason,
+  SignInIdSchema,
+  SignInRuleIdSchema,
+  TwoFactorIdSchema,
+  LOGIN_USERNAME_MAX_LENGTH,
+  LoginEntryIdSchema,
+  type LoginEntryId,
+  LOGIN_LABEL_MAX_LENGTH,
+  LOGIN_MATCH_MAX,
+  LoginMatchSchema,
+  type LoginFieldRole,
+  type LoginEntryRef,
+  InputSavedSchema,
+  CopyNameSchema,
+  type CopyName,
+  CopyOriginSchema,
+  TWO_FACTOR_LABEL_MAX_LENGTH,
+  MAX_LOGIN_ENTRIES,
+  type SignInChoiceReason,
+  LoginFieldRoleSchema,
+  LoginMethodSchema,
+  type LoginMatch,
+  SIGN_IN_PROJECT_MAX_LENGTH,
+  SecretNameSchema,
+} from '../../../contract/index.ts';
+
+/** The declarations an input card carries live in the contract (`contract/inputs-wire.ts`); re-exported here for the daemon. */
+export {
+  oneLine,
+  type GrantMissReason,
+  LOGIN_USERNAME_MAX_LENGTH,
+  type LoginEntryId,
+  LOGIN_MATCH_MAX,
+  LOGIN_PASSWORD_MIN_LENGTH,
+  LoginMatchSchema,
+  type LoginFieldRole,
+  type InputCodeKey,
+  type InputSavedOffer,
+  type LoginEntryRef,
+  type InputSignIn,
+  InputSavedSchema,
+  type InputSaved,
+  type CopyName,
+  CopyOriginSchema,
+  type CopyOrigin,
+} from '../../../contract/index.ts';
 
 /**
  * THE NEIGHBOURS' WIRE THE INPUT SERVICE READS (copied, not owned). Today's input requests read the saved logins,
@@ -92,15 +139,6 @@ function sha256Hex(text: string): string {
 
 // ─── from login-entries.ts ───
 
-/** A one-line text field: trimmed, at most `maximum` characters, no control or format characters. */
-export const oneLine = (maximum: number) =>
-  z
-    .string()
-    .trim()
-    .min(1)
-    .max(maximum)
-    .regex(/^[^\p{Cc}\p{Cf}]*$/u, 'must be one line with no control characters');
-
 // ─── from sign-in-rules.ts ───
 
 /**
@@ -142,55 +180,6 @@ export type SignInRuleSuspension = z.infer<typeof SignInRuleSuspensionSchema>;
 
 // ─── from task-plan.ts ───
 
-/**
- * WHY A PRE-APPROVAL DID NOT FILL, or why a line can't be pre-approved at all. Each has one fixed sentence
- * ({@link grantMissWords}); the ferret is never told which ({@link TASK_PLAN_MISS_AGENT_NOTE}).
- */
-const GRANT_MISS_REASONS = [
-  'expired',
-  'other-session',
-  'stopped',
-  'used-up',
-  'sign-in-gone',
-  'place-changed',
-  'recipe-changed',
-  'not-here',
-  'field-not-covered',
-  'code-not-ticked',
-  'ferret-named-another',
-  'account-lacks-field',
-  'rate',
-  'not-https',
-  'frame',
-  'password-field',
-  'field-hidden',
-  'challenge',
-  'scripted',
-  'code-target',
-  'form-changed',
-  'not-proved',
-  'not-system',
-  'did-not-move-on',
-  // A standing sign-in rule only (sign-in-rules.ts).
-  'suspended',
-  'out-of-scope',
-  'account-changed',
-  'factor-changed',
-  'proof-invalid',
-  'no-history',
-  'code-without-sign-in',
-  'scripted-origin',
-  'program-changed',
-  // At propose time only: the line is `unavailable`.
-  'not-in-accounts',
-  'via-provider',
-  'tool-not-covered',
-] as const;
-
-export const GrantMissReasonSchema = z.enum(GRANT_MISS_REASONS);
-
-export type GrantMissReason = z.infer<typeof GrantMissReasonSchema>;
-
 // ─── from sign-in-rules.ts ───
 
 /** The suspension a fill's miss causes, or `undefined` for a miss that leaves the rule as it was. */
@@ -201,33 +190,13 @@ export const signInRuleSuspensionOf = (reason: GrantMissReason): SignInRuleSuspe
 
 // ─── from account-ids.ts ───
 
-/** A sign-in's id: `si_` and 16 lowercase hex digits. Random on create. */
-export const SignInIdSchema = z.string().regex(/^si_[0-9a-f]{16}$/u, 'a sign-in id is si_ and 16 hex digits');
-
-/**
- * A STANDING SIGN-IN RULE (`sr_` and 24 hex digits, sign-in-rules.ts): the owner's passkey-signed permission to fill one
- * sign-in for any ferret, until it expires. Kept on disk. Its id survives a resume, renew or widen (`revision` + 1).
- */
-export const SignInRuleIdSchema = z
-  .string()
-  .regex(/^sr_[0-9a-f]{24}$/u, 'a standing sign-in rule is sr_ and 24 hex digits');
-
 // ─── from sign-in-rules.ts ───
 
 const SIGN_IN_RULE_FACTORS_DOMAIN = 'ferretry.sign-in-rule.factors.v1';
 
 // ─── from account-ids.ts ───
 
-/**
- * A 2FA key's id: `tf_` and 12 lowercase hex digits. Immutable and never shown to people (the CLI and plan lines
- * only): a card names a key by its owner-written label. Random on add.
- */
-export const TwoFactorIdSchema = z.string().regex(/^tf_[0-9a-f]{12}$/u, 'a 2FA key id is tf_ and 12 hex digits');
-
 // ─── from login-entries.ts ───
-
-/** The longest label the owner gives a 2FA key ("Okta Verify on Pixel", "Phone ••42"). */
-const TWO_FACTOR_LABEL_MAX_LENGTH = 60;
 
 // ─── from accounts.ts ───
 
@@ -246,8 +215,6 @@ const factorShape = <Time extends z.ZodType<string>>(time: Time) => ({
 });
 
 // ─── from login-entries.ts ───
-
-export const LOGIN_USERNAME_MAX_LENGTH = 256;
 
 /** How the code is made from the seed (RFC 6238). Not secret: an authenticator shows these. */
 const TotpParametersSchema = z.strictObject({
@@ -347,26 +314,7 @@ export const factorFingerprint = (keys: readonly TwoFactorKeySummary[]): string 
 
 // ─── from browser-target.ts ───
 
-/** A ref as a snapshot writes it: `e12`, or `f1e3` inside a frame. */
-const BROWSER_REF_PATTERN = /^(?:f\d{1,6})?e\d{1,7}$/u;
-
-export const BrowserRefSchema = z
-  .string()
-  .trim()
-  .regex(BROWSER_REF_PATTERN, 'a ref is what a page snapshot names an element: e12, or f1e3 inside a frame');
-
 // ─── from surface-names.ts ───
-
-/**
- * How a call names an EXISTING surface: its name, or the id the daemon minted for it (`%terminal:`
- * references written before names existed still work). A `%terminal:` / `%browser:` prefix is
- * accepted and dropped, so an agent can pass a reference exactly as a person wrote it.
- */
-const SurfaceKeySchema = z
-  .string()
-  .trim()
-  .transform(value => value.replace(/^%(?:terminal|browser):/u, ''))
-  .pipe(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u, 'not a surface name or id'));
 
 const SurfaceKindSchema = z.enum(['terminal', 'browser']);
 
@@ -408,18 +356,9 @@ export type TwoFactorId = z.infer<typeof TwoFactorIdSchema>;
 
 export type SignInRuleId = z.infer<typeof SignInRuleIdSchema>;
 
-/** A standing rule's revision: 1 when created, one more on each resume, renew or widen. Part of the signed bytes. */
-export const SignInRuleRevisionSchema = z.number().int().min(1).max(1_000_000);
-
 // ─── from secure-copy.ts ───
 
-/** A plan card: at most this many planned pastes, each said in at most this many characters, waiting this long. */
-const COPY_PLAN_MAX_ITEMS = 10;
-
 // ─── from task-plan.ts ───
-
-/** Most lines on one plan. */
-const TASK_PLAN_MAX_LINES = COPY_PLAN_MAX_ITEMS;
 
 /**
  * The terminal tools a terminal sign-in line may be for: setuid-root programs that read the password with getpass.
@@ -465,19 +404,7 @@ export function grantFilledLineFor(note: { readonly by: 'plan'; readonly line: n
 /** What the FERRET is told when a plan did not fill a card: the same sentence for every reason. */
 export const TASK_PLAN_MISS_AGENT_NOTE = "Your task plan didn't cover this, so the owner was asked.";
 
-/** A line of a plan, numbered from 0 (the owner reads it from 1). */
-export const TaskPlanLineNumberSchema = z
-  .number()
-  .int()
-  .min(0)
-  .max(TASK_PLAN_MAX_LINES - 1);
-
 // ─── from login-entries.ts ───
-
-/** The fields an entry can hold, and which of them are secret. */
-const LOGIN_FIELD_ROLES = ['username', 'password', 'totp'] as const;
-
-const LoginFieldRoleSchema = z.enum(LOGIN_FIELD_ROLES);
 
 // ─── from task-plan.ts ───
 
@@ -489,67 +416,6 @@ export type SignInField = z.infer<typeof SignInFieldSchema>;
 // ─── from login-entries.ts ───
 
 /**
- * SAVED LOGINS: the password manager the input bridge places values from (docs/input-requests.md, "Saved
- * logins").
- *
- * A saved login is a LABELLED ENTRY, the way a password manager keeps one: a label the owner reads
- * ("GitHub (kirinnee)"), what it is for (`match`: `sudo@kirin-box`, `github.com`), and its fields:
- *
- * - `username`: PLAIN. Stored as text, shown on the card, and allowed to reach the ferret, because a
- *   username is typed where the ferret can see it anyway.
- * - `password`: SECRET. Sealed in the daemon's vault; no route, command or API returns it.
- * - `totp`: SECRET, OPT-IN. A 2FA seed, sealed the same way. The daemon makes the current code inside the
- *   use boundary and types it into a `code` (or `private`) field; neither the seed nor the code is ever returned (the
- *   code's text is masked from text reads, but the ferret may see it on screen).
- *
- * ## THE SAME RULE AS EVERY OTHER SECRET: USE, NEVER READ
- *
- * A value travels IN, on {@link PutLoginEntryRequestSchema}, and never travels back. Everything a client
- * may learn about an entry is {@link LoginEntrySummarySchema}: the label, what it matches, the username,
- * WHICH secret fields exist, and when it changed. No value, no length, no digest. A saved value leaves the
- * daemon only into the target of an input request the owner tapped "Use" on.
- */
-
-/** An entry's handle: the shape of a secret name, because the CLI and the card name it (`SUDO_KIRIN_BOX`). */
-export const LoginEntryIdSchema = SecretNameSchema;
-
-export type LoginEntryId = z.infer<typeof LoginEntryIdSchema>;
-
-export const LOGIN_LABEL_MAX_LENGTH = 80;
-
-export const LOGIN_MATCH_MAX = 16;
-
-/** Most entries one daemon keeps: a list a person can read, not a database. */
-const MAX_LOGIN_ENTRIES = 256;
-
-/**
- * The shortest password an entry keeps. A REDACTION constraint, exactly as {@link MIN_SECRET_VALUE_LENGTH}
- * is: a saved value is masked wherever the daemon scrubs text, and a very short value would mask ordinary
- * words. A shorter password can still be TYPED on a card; it just cannot be saved.
- */
-export const LOGIN_PASSWORD_MIN_LENGTH = MIN_SECRET_VALUE_LENGTH;
-
-/**
- * What an entry is for, as the daemon names a target: `program@host` for a terminal (`sudo@kirin-box`,
- * `ssh@build.example.com`), or a web host for a page (`github.com`, `localhost:8443`). Lowercase. The DAEMON
- * works out a target's key from what it observed; an agent never says what matches.
- */
-export const LoginMatchSchema = z
-  .string()
-  .max(320)
-  .regex(
-    /^(?:[a-z0-9][a-z0-9._+-]{0,63}@)?[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::[0-9]{1,5})?$/u,
-    'a program@host or a web host, lowercase',
-  );
-
-type LoginMatch = z.infer<typeof LoginMatchSchema>;
-
-export type LoginFieldRole = z.infer<typeof LoginFieldRoleSchema>;
-
-/** Most 2FA keys of one account that hold a seed: a re-enrolled second authenticator, a backup app. */
-const MAX_SEEDS_PER_ACCOUNT = 4;
-
-/**
  * WHERE THE SIGN-IN HAPPENS: a web host, exactly as a page's origin names it (`app.vercel.com`,
  * `accounts.google.com`, `localhost:8443`). Separate from `match`, which says what the entry is FOR (the site
  * the work is on). A page card's one-tap choice is an entry whose login domain is the page's host EXACTLY:
@@ -559,58 +425,6 @@ const LoginDomainSchema = z
   .string()
   .max(260)
   .regex(/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::[0-9]{1,5})?$/u, 'a web host, lowercase, like app.vercel.com');
-
-/**
- * HOW A SAVED LOGIN SIGNS IN. `password` types what the entry holds. An identity-provider method means the site
- * signs in through that provider ("Continue with Google"): the ferret clicks it, and the PROVIDER's page is
- * filled from the provider's own saved login, named by `via` (this site → the "Google (kirin@…)" entry).
- *
- * THERE IS NO PASSKEY METHOD, and an `sso` name that says passkey, WebAuthn or a security key is refused: the
- * agent browser has passkeys switched off (docs/input-requests.md, "Passkeys are off"), so a login that needs
- * one is the owner's hands, never a saved login.
- */
-const LOGIN_METHODS = ['password', 'google', 'github', 'microsoft', 'apple', 'sso'] as const;
-
-const LoginMethodKindSchema = z.enum(LOGIN_METHODS);
-
-type LoginMethodKind = z.infer<typeof LoginMethodKindSchema>;
-
-const LOGIN_SSO_NAME_MAX_LENGTH = 40;
-
-/**
- * What is wrong with a method, as issues: an SSO method names its provider, only SSO does, and a password sign-in
- * goes via nothing. `link` is the provider it goes via, however the caller spells it (a handle here, an account key
- * in the stored sign-in of accounts.ts), so both shapes keep one rule.
- */
-function loginMethodIssues(
-  kind: LoginMethodKind,
-  name: string | undefined,
-  link: string | undefined,
-  linkPath: string,
-): readonly { readonly path: string[]; readonly message: string }[] {
-  return [
-    ...(kind === 'sso' && name === undefined
-      ? [{ path: ['name'], message: 'name the SSO provider, as its button says it' }]
-      : []),
-    ...(kind !== 'sso' && name !== undefined ? [{ path: ['name'], message: 'only other SSO takes a name' }] : []),
-    ...(kind === 'password' && link !== undefined
-      ? [{ path: [linkPath], message: 'a password sign-in is not via another login' }]
-      : []),
-  ];
-}
-
-const LoginMethodSchema = z
-  .strictObject({
-    kind: LoginMethodKindSchema,
-    /** `sso` only: the provider's name as the site's button says it ("Okta", "Company SSO"). */
-    name: oneLine(LOGIN_SSO_NAME_MAX_LENGTH).optional(),
-    /** An identity-provider method only: the saved login of that provider, whose page it fills. */
-    via: LoginEntryIdSchema.optional(),
-  })
-  .superRefine((method, context) => {
-    for (const issue of loginMethodIssues(method.kind, method.name, method.via, 'via'))
-      context.addIssue({ code: 'custom', ...issue });
-  });
 
 // ─── from login-recipes.ts ───
 
@@ -669,169 +483,6 @@ const LoginRecipeSchema = z
   );
 
 // ─── from login-entries.ts ───
-
-/**
- * Why a card's primary offer is first (accounts.ts `chosenSignIn`): the ferret named it, a project, folder or
- * site default chose it, or it is the only account that signs in here. Absent on every other offer.
- */
-const SIGN_IN_CHOICE_REASONS = ['ferret', 'project', 'folder', 'site', 'only'] as const;
-
-const SignInChoiceReasonSchema = z.enum(SIGN_IN_CHOICE_REASONS);
-
-type SignInChoiceReason = z.infer<typeof SignInChoiceReasonSchema>;
-
-/** The longest project name a card's "Default for <project>" carries. */
-const SIGN_IN_PROJECT_MAX_LENGTH = 128;
-
-/**
- * One saved login an input card may offer. `fills` is the field it would type (the password for a
- * `secret`, the code for a `code` or `private`, the username for a `plain`). `matched` is the DAEMON's decision that
- * the entry is for this target: only a matched entry is the card's one-tap primary; the rest stay
- * selectable by hand. `hinted` says the ferret named it, which never makes it matched.
- *
- * A daemon that keeps accounts and sign-ins (`accounts.signins.1`) adds four fields, all optional so an older
- * daemon's card still parses: `id` is then the ACCOUNT's handle and `signIn` the sign-in it would use here
- * (absent: an account hand-picked with no sign-in here); `primary` marks the one-tap choice, at most one and only
- * ever a matched one, with `why` it is first (and `project`, the project a "Default for ferretry" names). With
- * `primary` absent from every offer, nothing is the one-tap choice: the owner picks.
- */
-/**
- * ONE "Use code from Ferretry" button: a 2FA key of the offer's account whose seed Ferretry holds, by its id (what a
- * deliver's `factor` names) and the OWNER's label. `checked` is what the last code made from it came to, as the daemon
- * saw it (`worked`, `failed`); absent: never tried. Owner view only, like the whole offer: a ferret never learns that a
- * seed exists.
- */
-const InputCodeKeySchema = z.strictObject({
-  factor: TwoFactorIdSchema,
-  label: oneLine(TWO_FACTOR_LABEL_MAX_LENGTH),
-  checked: z.enum(['worked', 'failed']).optional(),
-});
-
-export type InputCodeKey = z.infer<typeof InputCodeKeySchema>;
-
-const InputSavedOfferSchema = z
-  .strictObject({
-    id: LoginEntryIdSchema,
-    label: oneLine(LOGIN_LABEL_MAX_LENGTH),
-    username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
-    fills: LoginFieldRoleSchema,
-    matched: z.boolean(),
-    hinted: z.boolean().optional(),
-    /**
-     * Where this account signs in, when that is somewhere else (place keys, names only: `liftoff.okta.com`,
-     * `sudo@kirin-box`); EMPTY when it signs in nowhere ("not linked to a site"). Only on an offer picked by hand
-     * (`matched: false`): the card puts it behind a second step and it is never the one-tap choice. Absent: an account
-     * for this very site that no sign-in matched, or an older daemon, whose card keeps it in the one list.
-     */
-    elsewhere: z.array(LoginMatchSchema).max(LOGIN_MATCH_MAX).readonly().optional(),
-    signIn: SignInIdSchema.optional(),
-    primary: z.literal(true).optional(),
-    why: SignInChoiceReasonSchema.optional(),
-    project: oneLine(SIGN_IN_PROJECT_MAX_LENGTH).optional(),
-    /**
-     * An offer that makes a one-time code: one button per key whose seed Ferretry holds, in the order a deliver without
-     * `factor` falls back on (one that worked first, then one never tried, then one that failed; newest first). Only
-     * ever on a MATCHED offer that fills `totp`, and only where the daemon may type a code it made (docs/input-requests.md,
-     * "Codes Ferretry makes"). Absent from an older daemon: the offer is one button with the account's first seed.
-     */
-    codes: z.array(InputCodeKeySchema).min(1).max(MAX_SEEDS_PER_ACCOUNT).readonly().optional(),
-  })
-  .superRefine((offer, context) => {
-    if (offer.codes !== undefined && (!offer.matched || offer.signIn === undefined || offer.fills !== 'totp'))
-      context.addIssue({
-        code: 'custom',
-        path: ['codes'],
-        message: 'only a matched offer that fills a code names the keys it makes codes from',
-      });
-    if (offer.elsewhere !== undefined && offer.matched)
-      context.addIssue({
-        code: 'custom',
-        path: ['elsewhere'],
-        message: 'an offer that signs in here is not one from somewhere else',
-      });
-    if (offer.primary === true && !offer.matched)
-      context.addIssue({ code: 'custom', path: ['primary'], message: 'only a matched offer is the one-tap choice' });
-    if (offer.primary === true && offer.signIn === undefined)
-      context.addIssue({ code: 'custom', path: ['signIn'], message: 'the one-tap choice names the sign-in it uses' });
-    if ((offer.primary === true) !== (offer.why !== undefined))
-      context.addIssue({ code: 'custom', path: ['why'], message: 'the one-tap choice, and only it, says why' });
-    if (offer.project !== undefined && offer.why !== 'project')
-      context.addIssue({ code: 'custom', path: ['project'], message: 'a project is named only by a project default' });
-  });
-
-export type InputSavedOffer = z.infer<typeof InputSavedOfferSchema>;
-
-/** A saved login named by another: its handle and its label, never what it holds. */
-const LoginEntryRefSchema = z.strictObject({ id: LoginEntryIdSchema, label: oneLine(LOGIN_LABEL_MAX_LENGTH) });
-
-export type LoginEntryRef = z.infer<typeof LoginEntryRefSchema>;
-
-/**
- * How the saved login this target is for signs in, when it is not a plain password: the card says "Sign in with
- * Google via 'Google (kirin@…)'", so the owner sees the ferret should be on the provider's page, not typing here.
- */
-const InputSignInSchema = z.strictObject({
-  id: LoginEntryIdSchema,
-  label: oneLine(LOGIN_LABEL_MAX_LENGTH),
-  method: LoginMethodSchema,
-  via: LoginEntryRefSchema.optional(),
-});
-
-export type InputSignIn = z.infer<typeof InputSignInSchema>;
-
-/**
- * What an input card knows about saved logins, as the owner reads it (never the agent): the target's key
- * the daemon worked out, the entry "Save as" would suggest, and the entries that can fill the field,
- * matched first.
- */
-export const InputSavedSchema = z.strictObject({
-  match: LoginMatchSchema.optional(),
-  /**
-   * What an older app pre-fills under "Save as": `update` when that is the account the card is about, else
-   * `newAccount`. A newer app reads those two and asks the owner which one.
-   */
-  suggest: LoginEntryRefSchema.optional(),
-  /**
-   * The account "Update" would write the typed value into: the one this card is about among those that sign in here.
-   * Absent when none does, or when two or more do and nothing chose one. Saving into it takes the owner's explicit
-   * "Update" (`save.mode: 'update'`); its username is shown so the owner can tell it is the same person.
-   */
-  update: LoginEntryRefSchema.safeExtend({ username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional() }).optional(),
-  /**
-   * What "New account" would be called: a label and a CLI name from the site's provider and the username when it is
-   * known ("Google · a@gmail.com", `GOOGLE_A`), never a CLI name an account already has.
-   */
-  newAccount: LoginEntryRefSchema.optional(),
-  /**
-   * The username the FERRET typed into this page's identifier field (an email or username box) before the card was
-   * raised, as the daemon saw its own type act: plain, and only the ferret's word. It pre-fills the editable "Username"
-   * under "Save as" and can REMOVE a one-tap (`differentFrom`); it never chooses, promotes or fills an account.
-   */
-  typedUsername: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
-  /**
-   * The account that would have been the one-tap, demoted because the page is signing in someone else: the typed
-   * username is not that account's, or it has none saved. The card says "This looks like a different account" and the
-   * owner picks or types.
-   */
-  differentFrom: LoginEntryRefSchema.safeExtend({ username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional() }).optional(),
-  /** Which field a typed value would be saved as; absent when this kind of value is never saved (a code). */
-  saves: LoginFieldRoleSchema.optional(),
-  offers: z
-    .array(InputSavedOfferSchema)
-    .max(MAX_LOGIN_ENTRIES)
-    .readonly()
-    .refine(offers => offers.filter(offer => offer.primary === true).length <= 1, 'at most one offer is the primary'),
-  /** The matched entry signs in through a provider: what the card says about it. */
-  signIn: InputSignInSchema.optional(),
-  /**
-   * The board project the DAEMON resolved for the asking session (never the ferret's word): what a quiet "Always use for
-   * <project>" after a hand-tap writes as a project default. Absent: the session has no project (Unfiled), or the daemon
-   * could not tell.
-   */
-  project: z.strictObject({ id: z.string().min(1).max(200), name: oneLine(SIGN_IN_PROJECT_MAX_LENGTH) }).optional(),
-});
-
-export type InputSaved = z.infer<typeof InputSavedSchema>;
 
 /**
  * The role a request's one field takes from an entry, by the request's sensitivity: a one-time `code` (and a `private`
@@ -1039,55 +690,8 @@ export const COPY_AFTER_MASK_SECONDS = 600;
 /** The prefix a handle is written with. */
 const COPY_HANDLE_PREFIX = 'sealed:';
 
-const boundedLine = (maximum: number) =>
-  z
-    .string()
-    .min(1)
-    .max(maximum)
-    .regex(/^[^\p{Cc}\p{Cf}]*$/u, 'must be one line with no control characters');
-
-/** A copy's name, chosen by the agent: a lowercase letter, then lowercase letters, digits, `_` or `-`. */
-const COPY_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,39}$/u;
-
-export const CopyNameSchema = z
-  .string()
-  .regex(COPY_NAME_PATTERN, 'a copy name is a lowercase letter, then up to 39 lowercase letters, digits, _ or -');
-
-export type CopyName = z.infer<typeof CopyNameSchema>;
-
 /** The handle an agent is told to write for a copy. */
 export const copyHandle = (name: CopyName): string => `${COPY_HANDLE_PREFIX}${name}`;
-
-/**
- * WHERE A COPY CAME FROM, as the daemon saw it: the page's origin (from the browser, never the agent) or the
- * program's base name. Never the arguments, never a URL path.
- */
-export const CopyOriginSchema = z.strictObject({
-  kind: z.enum(['browser', 'clipboard', 'command']),
-  /** `scheme://host[:port]` of the page, for a page or clipboard copy. */
-  origin: boundedLine(256).optional(),
-  /** The program's base name, for a command copy. */
-  program: boundedLine(64).optional(),
-  /**
-   * The file that ran, for a command copy: found by the daemon on the command's PATH, so the owner sees WHICH
-   * `vercel` printed the value (`/usr/local/bin/vercel`, or one in a folder the ferret could have written to).
-   */
-  path: boundedLine(1024).optional(),
-  /**
-   * The account the daemon (and every ferret) runs as could change that file or put another in its place: its
-   * file or its folder is writable. A pre-approval rule never matches such a program; the owner is asked.
-   */
-  replaceable: z.literal(true).optional(),
-  /**
-   * A page copy of a form field's VALUE: whatever was typed into it, by the agent too, so it says nothing about
-   * the page that holds it. A pre-approval rule never matches it; the owner is asked.
-   */
-  editable: z.literal(true).optional(),
-  /** The surface it was read from, for a page or clipboard copy. */
-  surface: SurfaceKeySchema.optional(),
-});
-
-export type CopyOrigin = z.infer<typeof CopyOriginSchema>;
 
 /**
  * Whether the agent may ALREADY have seen the value before it was sealed, said honestly:
@@ -1123,8 +727,6 @@ export const CopyMetaSchema = z.strictObject({
 });
 
 export type CopyMeta = z.infer<typeof CopyMetaSchema>;
-
-export const CopyPlanIdSchema = z.string().regex(/^[0-9a-f]{32}$/u, 'a 128-bit hex id');
 
 // ─── from accounts.ts ───
 
@@ -1484,7 +1086,11 @@ export function chosenSignIn(
     const byProject =
       pickedBy(lineOfProject(defaults, project.id), key, matched) ??
       (project.nameIsUnique ? pickedBy(lineOfProject(defaults, project.name), key, matched) : undefined);
-    if (byProject !== undefined) return { signIn: byProject.id, why: 'project', project: project.name };
+    if (byProject !== undefined) {
+      // A name that is not one short line would make the whole card unreadable: the card then just does not name it.
+      const shown = oneLine(SIGN_IN_PROJECT_MAX_LENGTH).safeParse(project.name);
+      return { signIn: byProject.id, why: 'project', ...(shown.success ? { project: shown.data } : {}) };
+    }
   } else {
     const byFolder = pickedBy(folderMap(context), key, matched);
     if (byFolder !== undefined) return { signIn: byFolder.id, why: 'folder' };

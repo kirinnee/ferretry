@@ -22,13 +22,26 @@ this page, which is still how a message reaches the pane.
 - **Log** — `channel/queue.jsonl` beside the session, append-only and flushed to disk before an accept
   answers (`FileSessionQueueStore`). The queue is the fold of that log (`foldQueue`), which applies only a
   move that is legal from where the message stands, so a replayed or stale line changes nothing.
+  **5.0 rotates it** (`StateQueueStore`, `lib/rotation.ts`): `queue.jsonl` is a short LIVE SEGMENT, and at 2,000
+  events its finished messages (`read`, `cancelled`, `failed`) are sealed into an immutable shard,
+  `queue-shards/<ferret>~<through>.json`, while its open ones are carried into `queue-carry/<ferret>~<base>.json` — a
+  document, not records of the log, because a record is capped at 1 MiB and a long open message that later gains a wait
+  reason can pass it. The new segment's first line is `{"kind":"segment","base":N,"accepted":M,"carried":K}`: `base` is
+  how many events came before the segment, so a message's `version` (the position of its latest change) and its place in
+  the list survive any number of rotations unchanged, and a file with no header is a segment at base 0, so every log
+  written before rotation reads as it did. The shard and the carry file are written first and the live file replaced
+  second, all atomically, and a reader uses only shards at or before the live `base` and only the carry file of that
+  `base`: a crash between leaves the old segment authoritative. A rotation runs under the per-ferret queue lock every
+  append already holds; one that cannot be written (the disk) is logged once with the ferret, the events and the size
+  and tried again at the next append. (Why: one ferret's log reached 29.5 MB / 228,788 lines for 1,727 messages and
+  every look re-read all of it, several times, every five seconds.)
 - **Order** — a person's message first, then a ferret's, then the daemon's; acceptance order within each;
   one message (or one combined delivery, [below](#labels-and-combined-delivery)) typing at a time
   (`planDelivery`). The daemon's notice may pass a ferret message that is still being HELD for combining —
   a Warden alert never waits behind a ferret's note — but never one that is due. A daemon notice to an interactive
   session is never in the delivery order (`boardOnly`): that session is the owner's own chat. Being out of the order
   does NOT keep it out of the pane — the queue hands it to the direct path, which types it — so a producer that must
-  not type into that chat holds it back itself. The board's alerts do: they go to the card's working ferret and its
+  not type into that chat holds it back itself. The board's alerts do: they go to the task's working ferret and its
   leads first, and one whose recipient is interactive is journalled on it, never typed
   ([board.md](board.md#who-a-board-alert-is-for)).
 - **Ready** — the deliverer types the next message as soon as the agent's input box is EMPTY, mid-turn
@@ -67,10 +80,10 @@ this page, which is still how a message reaches the pane.
 - **No board news and no board alert is typed into the owner's own chat** (an interactive session): board news
   is not sent at all ([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)), and a board
   alert is journalled instead (below). The other daemon notices still are typed there; see **Every producer**.
-- **Board alerts reach the card's working ferret first.** A stale card, a red CI or a PR closed unmerged is addressed to
-  the card's assignee, else its nearest live lead. When the only one left is an interactive session, the alert is
+- **Board alerts reach the task's working ferret first.** A stale task, a red CI or a PR closed unmerged is addressed to
+  the task's assignee, else its nearest live lead. When the only one left is an interactive session, the alert is
   NOT sent: `BoardAlerts` (`lib/board/alert-sends.ts`) journals it on that session as `board.alert-withheld`
-  and a red CI or closed-unmerged PR on a private card is noted on its nearest public ancestor that is open on the default board (an archived one is skipped; with none, it is
+  and a red CI or closed-unmerged PR on a private task is noted on its nearest public ancestor that is open on the default board (an archived one is skipped; with none, it is
   journalled only), so the board shows it ([board.md](board.md#who-a-board-alert-is-for)); a mode that cannot be read is sent to as before. Before this, a lead
   the owner chats with had 177 alerts typed into it as turns in three days (2026-10-31 to 2026-11-03) — 158 "CI is red",
   17 stale, 2 closed unmerged — 134 on the `direct` path and 43 on `native-inline`, every one `senderKind: daemon`.
@@ -83,7 +96,7 @@ this page, which is still how a message reaches the pane.
   words. Holding those back too is a declared GAP — each tells the session something about its own turn or the
   owner's own words, so it needs its own home before it can stop being typed. The
   owner's agenda answers are no longer batched, held for a working ferret or held for a draft: the queue
-  does all three (&C38); their receipt and reopen-as-a-card still come from the agenda outbox. A send
+  does all three (&C38); their receipt and reopen-as-a-task still come from the agenda outbox. A send
   failure told back to a ferret, and a held message released after a revive, keep the direct path.
 - **A page, not the log** — `GET …/queue` answers the same WINDOW `GET …/sends` does (`lib/session/queue/page.ts`
   over `windowPage` in `lib/session/send/page.ts`, one owner of the rule): the newest `limit` messages (default
@@ -162,7 +175,7 @@ this page, which is still how a message reaches the pane.
   as **Not sent** and not retried. **Edit** and **Cancel** act on the outbox copy locally; once the message has
   left they fall through to the daemon queue's PATCH/DELETE. The `now` flag rides the outbox untouched, and so
   do the Agenda items a reply is about (the composer's "re" chips, `referencesOf`): they are stored beside the
-  words and sent as the `!A3` prefix on every attempt, so a reply that leaves after a reload is still about its
+  words and sent as the `^A3` prefix on every attempt, so a reply that leaves after a reload is still about its
   item, while an edit shows only what was typed.
 - **Queue views** — the chat header's ⋯ menu has **Message queue** (that ferret: `/d/<id>/queue/<session>`), and
   **All queues** (`/d/<id>/queue`, also in Find / ⌘K) lists every ferret with something waiting across every

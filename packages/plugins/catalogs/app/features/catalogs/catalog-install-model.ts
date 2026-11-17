@@ -327,4 +327,37 @@ export function installsFor(
   return installs.filter(install => install.provenance.kind === kind && install.provenance.name === name);
 }
 
+/** Where one skill row's copy lives, as Skills' `skills.row` slot names it. */
+export interface SkillLocation {
+  /** Absolute path of the copy's SKILL.md. */
+  readonly path: string;
+  /** 'project', 'user' (the harness home's own folder) or 'ferretry' (a skill item a runtime's profile layers). */
+  readonly scope: string;
+  /** The runtimes this copy is read by. */
+  readonly runtimes: readonly string[];
+}
+
+/** An absolute path without `//`, `/./` or a trailing slash, so a root spelled either way names one folder. */
+const flatPath = (path: string): string =>
+  path
+    .split('/')
+    .filter(part => part !== '' && part !== '.')
+    .join('/');
+
+/**
+ * Whether `install` wrote THE copy at `location`, not merely a skill of the same name. A project install wrote
+ * `<root>/.claude/skills/<name>/` (Claude) or `<root>/.agents/skills/<name>/` (Codex), so only the project row whose
+ * SKILL.md is in that folder is its copy; a runtime install is a skill item the runtime's profile layers, which
+ * Skills lists as `ferretry` for the runtimes that read it. A `user` folder is somebody's own and never an install's.
+ */
+export function installIsAt(install: CatalogInstall, location: SkillLocation): boolean {
+  const { target } = install;
+  if (target.scope === 'runtime') return location.scope === 'ferretry' && location.runtimes.includes(target.runtime);
+  const folder = target.harness === 'claude' ? '.claude' : '.agents';
+  return (
+    location.scope === 'project' &&
+    flatPath(location.path) === flatPath(`${target.projectRoot}/${folder}/skills/${install.provenance.name}/SKILL.md`)
+  );
+}
+
 export const REMOVE_NOTE = 'This takes out what the install wrote. Your other files are not touched.';

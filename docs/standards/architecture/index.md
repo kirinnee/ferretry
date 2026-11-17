@@ -50,6 +50,126 @@ follows the same internal conventions (three layers, test tiers, lint gates) —
 deliberate deviation from the upstream diene template's one-repo-per-package rule, because
 Ferretry is one product, not a template fleet.
 
+## A feature is a file, not an edit to the composition root
+
+A plugin's daemon `build()` keeps composition (stores, ports, the service, shared guards) and **loses
+the per-feature wiring**: where many features would each add a route, a socket, a job or a port
+member to one big file, the plugin has a folder of feature files instead. A new feature adds ONE file
+and edits no shared one. Ferrets is the first plugin on this shape
+(`packages/core/ferrets/daemon/features/`):
+
+- **One file per feature**, named `<name>.feature.ts`, default-exporting `{ id, register(f) }`
+  (`FerretsFeature`). `register` builds the feature from the shared composition `f`
+  (`FerretsContext`: the kernel, the registry, the service, the session store and the shared guards
+  such as `pathFerret` and `mayAct`), adds its jobs through `f.kernel.jobs`, and returns what it
+  serves: `{ routes, sockets, port }`.
+- **No list to edit.** `scripts/gen/registries.ts` lists every `daemon/features/*.feature.ts` (or
+  `daemon/features/<f>/<f>.feature.ts`) into the
+  git-ignored `daemon/generated/features.ts` (the same generator that writes the plugin registries,
+  re-run by install, build, test and typecheck), and `build()` registers that list through
+  `registerFeatures`, which is the plugin kit's `composeFeatures<Ctx, Port>(label, …)` from
+  `@ferretry/kernel/manifest` labelled `ferrets` (every plugin composes its features the same way). A route, a socket or a port member two features both serve, or two features with
+  one id, throws at boot naming both; `tests/unit/daemon/features/registration.test.ts` pins that the
+  features serve exactly the routes and sockets the manifest declares.
+- **A feature never imports another.** Something two features share, or something the service's ports
+  call lazily, goes in `FerretsContext` (built once in `index.ts`) or in `LateBindings` (a value a
+  feature assigns and the composition reads when a call is made).
+- **Features register in file-name order**, so a feature may not depend on another's registration
+  side effects, and two jobs started by the same boot have no order between them.
+
+Other plugins adopt the same folder when a feature there would otherwise edit its root; the generator
+picks up any package with a `daemon/features/*.feature.ts`.
+
+## One feature, one folder
+
+**IMPORTANT.** One feature lives in its own plugin folder. Touching a shared or cross-plugin file (another plugin,
+`packages/core/*`, `packages/app`, root configs, scripts) is the exception: the PR body must name each such file and say
+why.
+
+Why: parallel work collides on shared files. In one week of merges into `rebuild/5.0-after`, `ports-pending.json` was
+touched by 53 PRs, `knip.production.json` by 15, the core ferrets daemon `index.ts` by 12 and its `service.ts` by 11. Each
+of those is a merge conflict waiting for the next PR. Splitting `ports-pending.json` into one file per owning package took
+it to zero. Prefer that shape: when a shared list keeps growing, give each plugin its own file and let one reader compose
+them.
+
+Enforced on every pull request into `rebuild/5.0-after` by `scripts/ci/one-folder.ts` (the `One Folder` workflow, `.github/workflows/one-folder.yaml`):
+
+- The PR's own diff (merge-base, so a merge from the base never counts) is split into the home package, which is the one
+  with the most changed lines, or the ones on a `Home: <package>[, <package>]` line of the body, and everything else.
+- Every other file must appear under a `## Outside files` heading of the PR body, by path or glob, with a reason:
+  `- packages/core/kernel/src/x.ts: the new port has to be registered here`.
+- Never needs a reason: `bun.lock`, `nix/ferretry.nix` and `nix/bun-deps.inputs` when a `package.json` changed, generated
+  registries.
+- Editing the body re-runs the job, so fixing the body clears it. The PR template carries the empty section.
+
+## A feature adds files and lines; it never rewrites shared code
+
+**The rule.** A new feature lands as new files in its own folder. It does not change code that other features share:
+a manifest literal, a wiring `index.ts`, a big service class, a state machine. The one shared thing a feature MAY touch
+is a **registry**, and only by adding its own line to it.
+
+This holds at both levels:
+
+- **Between plugins:** a plugin's code lives in its own package folder (the One Folder rule).
+- **Inside a plugin:** each feature of the plugin lives in its own folder (`<plugin>/<side>/features/<feature>/`), and the
+  plugin's manifest, wiring and contract barrel are assembled from registries of those features. A plugin is not a
+  second place for a big shared file to grow.
+
+**A registry is merge-safe by construction.** So two features added at the same time never collide:
+
+1. One entry per line, and nothing else on that line.
+2. Entries are sorted, so two new entries land in different places.
+3. No shared closing line to edit: no trailing separator that the next entry must change, no `]` or `}` that moves.
+   (Every entry ends with its own comma, or the list is a plain list of imports.)
+4. Where the file is nothing but entries, `.gitattributes` marks it `merge=union`.
+5. Each registry has a test that makes two independent one-line adds on two branches and proves they 3-way merge and
+   rebase cleanly.
+
+A registry may be written by hand or generated (`scripts/gen/registries.ts`, `folderRegistry`). Generation is a
+convenience, not a requirement. Either way, adding a feature is a new folder plus at most one new line per registry.
+
+**Why.** This is the Open/Closed Principle applied to the files themselves: the code is open to new features and closed
+to edits of what is already there. When features share a file, unrelated work collides in it: merge conflicts,
+re-reviews of code nobody changed, and one feature's mistake breaking another. We measured it on the 5.0 rebuild:
+
+| Window                                                      | PRs | Edited a shared file | Edited one of the four biggest shared files |
+| ----------------------------------------------------------- | --- | -------------------- | ------------------------------------------- |
+| Before (40 merges to 2026-11-15 11:28pm PST)                | 40  | 22                   | 10 (25%)                                    |
+| After the core split (14 merges from 2026-11-16 7:06am PST) | 14  | 2                    | 2 (14%)                                     |
+| After the guard (to be measured)                            |     |                      |                                             |
+
+The old standard already described OCP. It did not prevent this, because nothing checked it, and the shared lists were
+ordinary code, so the easy path was to edit them anywhere.
+
+**What enforces it.**
+
+1. **Registry tests** prove each registry takes two independent adds without a conflict.
+2. **One Folder** (CI): a PR names its home package folder; files outside it must be explained under `## Outside files`.
+3. **Composition guard** (CI, U9): every package declares its composition files (registries and the few hand-written
+   seams that remain). A PR that edits one fails unless its body has a `## Contract change` section that names each
+   file and says why. Exempt: a pure one-line ADD to a registry, and line DELETIONS from a `ports-pending.json` ledger.
+4. **Size and churn check** (CI, H6, `scripts/ci/size-churn.ts`, in the One Folder job): a source file (`.ts`/`.tsx`,
+   not a test or generated) that the PR changes fails if it has more than 1,500 lines, or if 6 or more of the last 80
+   merges edited it (one merge is one PR). The way out is a split, or an `oversize` row (limit, expiry date, reason) in
+   the package's `composition.tsv`: the file may not grow past the limit, and once the date passes, any PR touching it
+   fails until it is split or renewed. A `registry` file is exempt from churn. `bun scripts/ci/size-churn.ts --all`
+   judges the whole tree; `--replay [ref] [count]` shows what the rule would have flagged on past merges.
+5. **Rebase before pushing.** Before every push, rebase your own branch onto the latest base and push it with
+   `--force-with-lease`. Never rewrite a shared branch (`main`, a release or integration branch, or a branch another PR
+   stacks on): bring the base into it with a merge instead. A pre-push hook refuses a branch that does not contain its
+   base's tip. Conflicts are met by the author, at their desk, not by the reviewer.
+
+**The honest exception.** A real change to a contract (a new port member, a new state file shape) still edits the
+contract. That is allowed. Say so under `## Contract change`, keep it to the contract file, and put the behaviour in the
+feature folder.
+
+**How to add a feature.**
+
+1. Make a folder under the plugin's `features/`, with the feature's manifest fragment, wiring and code.
+2. Add one line for it to each registry it belongs in (or run `bun scripts/gen/registries.ts`).
+3. Do not edit the plugin's `manifest.ts`, `daemon/index.ts` or any other feature's files.
+4. Rebase onto the base branch, then push.
+
 ## The PWA renders on the client only
 
 `packages/pwa` is client-rendered. Its app root, when it is assembled, **must mount with

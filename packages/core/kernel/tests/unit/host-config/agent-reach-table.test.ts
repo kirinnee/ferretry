@@ -97,7 +97,7 @@ const ROWS: readonly Row[] = [
     base: 'sites: {}\n',
     loosening: {
       text: 'sites:\n  github.com: HOME\n',
-      sentence: 'changes which account a card offers first for github.com',
+      sentence: 'changes which account a sign-in item offers first for github.com',
     },
   },
   {
@@ -118,6 +118,17 @@ const ROWS: readonly Row[] = [
     path: 'conversation.yaml',
     base: 'keepInSync: true\n',
     neverLoosens: { text: 'keepInSync: false\n', why: "today's machineLoosening judged no conversations key" },
+  },
+  {
+    // Owner decision ^A525: reachable; a looser permission mode is held here, a binary/searchPaths change below.
+    path: 'harness-claude-code.yaml',
+    base: 'permissionMode: auto\n',
+    loosening: { text: 'permissionMode: skip\n', sentence: 'agents now skip every permission prompt' },
+  },
+  {
+    path: 'harness-codex.yaml',
+    base: 'permissionMode: auto\n',
+    loosening: { text: 'permissionMode: skip\n', sentence: 'agents now skip every permission prompt' },
   },
   {
     path: 'logins/work.yaml',
@@ -154,11 +165,19 @@ const ROWS: readonly Row[] = [
   {
     path: 'claude-code/settings/a.yaml',
     base: 'settings:\n  theme: dark\n',
+    loosening: {
+      text: 'settings:\n  theme: dark\nflags:\n  - --dangerously-skip-permissions\n',
+      sentence: 'a launch flag sets the permission mode (--dangerously-skip-permissions)',
+    },
     secretAdded: 'settings:\n  theme: dark\n  env:\n    TOKEN: ${secret:OWNER_KEY}\n',
   },
   {
     path: 'codex/settings/a.yaml',
     base: 'settings:\n  model: m\n',
+    loosening: {
+      text: 'settings:\n  model: m\nflags:\n  - --sandbox\n  - danger-full-access\n',
+      sentence: 'a launch flag sets the permission mode (--sandbox)',
+    },
     secretAdded: 'settings:\n  model: m\n  env:\n    TOKEN: ${secret:OWNER_KEY}\n',
   },
   {
@@ -167,9 +186,58 @@ const ROWS: readonly Row[] = [
     secretAdded: 'hooks:\n  Stop:\n    - command: ${secret:OWNER_KEY}\n',
   },
   {
+    // T-0034 c58-54: today's browserProxyLoosening, ported as Browsers' `loosens`.
+    path: 'browsers.yaml',
+    base: 'mode: headless\n',
+    loosening: {
+      text: 'mode: headless\nproxy:\n  url: http://proxy.example:8080\n',
+      sentence: 'the agent browser now sends its traffic through the proxy at http://proxy.example:8080',
+    },
+  },
+  {
+    // T-0034 c58-54: today's time-zone rule (ANY change) and public-feed rule, ported as Usage's `loosens`.
+    path: 'usage.yaml',
+    base: 'publicFeed: false\n',
+    loosening: {
+      text: 'publicFeed: false\ntimeZone: Pacific/Kiritimati\n',
+      sentence: "budgets now reset in Pacific/Kiritimati instead of the host's time zone",
+    },
+  },
+  {
     path: 'model-sets/fast.yaml',
     base: 'models:\n  - a\ndefault: a\n',
     secretAdded: 'models:\n  - a\ndefault: a\nclonedFromKey: ${secret:OWNER_KEY}\n',
+  },
+];
+
+/**
+ * Owner ruling !A525 item 9 ("agents may write config/instructions and codex/hooks behind an owner hold"): for these two
+ * files EVERY agent add and EVERY agent change is HELD, not only a loosening, so they cannot share the rows above (whose
+ * first test has the agent write the base into effect). Each is proved below by its own tests.
+ */
+interface HoldEveryRow {
+  readonly path: string;
+  /** Written by the owner (confirmed): in effect. */
+  readonly base: string;
+  /** A different text the agent writes over it. */
+  readonly changed: string;
+  readonly addSentence: string;
+  readonly changeSentence: string;
+}
+const HOLD_EVERY: readonly HoldEveryRow[] = [
+  {
+    path: 'instructions/guide.yaml',
+    base: 'text: Be kind.\n',
+    changed: 'text: Be kind. Also run the build.\n',
+    addSentence: 'agents now run with a new instructions component',
+    changeSentence: 'agents now run with changed instructions',
+  },
+  {
+    path: 'codex/hooks/h.yaml',
+    base: 'hooks: {}\n',
+    changed: 'hooks:\n  Stop:\n    - command: echo done\n',
+    addSentence: 'agents now run a new Codex hooks component',
+    changeSentence: 'agents now run changed Codex hooks',
   },
 ];
 
@@ -223,13 +291,13 @@ describe('T-0034 R-0073 every file in the agent’s reach is a row, and nothing 
 
   test('R-0073 T-0034 the declared files an agent may name are exactly the rows', () => {
     const reachable = DECLARED.filter(({ def }) => agentMayName(samplePath(def))).map(({ def }) => placeOf(def));
-    const rowPlaces = ROWS.map(row => placeOf(owning(row.path).def));
+    const rowPlaces = [...ROWS, ...HOLD_EVERY].map(row => placeOf(owning(row.path).def));
     expect(reachable.toSorted()).toEqual([...new Set(rowPlaces)].toSorted());
-    for (const row of ROWS) expect(agentMayName(row.path)).toBe(true);
+    for (const row of [...ROWS, ...HOLD_EVERY]) expect(agentMayName(row.path)).toBe(true);
   });
 
   test('T-0034 no row is person-only', () => {
-    for (const row of ROWS) expect(owning(row.path).def.personOnly).toBeUndefined();
+    for (const row of [...ROWS, ...HOLD_EVERY]) expect(owning(row.path).def.personOnly).toBeUndefined();
   });
 
   test('T-0034 every row proves a held loosening, or says why no edit of it loosens', () => {
@@ -237,6 +305,70 @@ describe('T-0034 R-0073 every file in the agent’s reach is a row, and nothing 
       expect(row.loosening !== undefined || row.secretAdded !== undefined || row.neverLoosens !== undefined).toBe(true);
   });
 });
+
+for (const row of HOLD_EVERY)
+  describe(`T-0034 ${row.path}: every agent add and every agent change is HELD (owner ruling !A525 item 9)`, () => {
+    const ownerWrites = async (files: ReturnType<typeof world>['files'], text: string): Promise<void> => {
+      const { plugin, def } = owning(row.path);
+      const name = def.shape === 'file' ? undefined : row.path.slice(def.collection.length + 1, -'.yaml'.length);
+      expect((await files.write(plugin, def, name, text, { confirmedLoosening: true })).kind).toBe('applied');
+      await files.reload();
+    };
+    const agentWrites = async (agent: ReturnType<typeof world>['agent'], text: string) =>
+      await agent.run(call({ tool: 'config.write', path: row.path, text }), ferret);
+
+    test(`T-0032 T-0033 ${row.path}: an agent may read it and validate a text`, async () => {
+      const { agent, files } = world();
+      await files.reload();
+      const starter = await agent.run(call({ tool: 'config.read', path: row.path }), ferret);
+      expect(starter.summary).toBe(`${row.path} does not exist yet; this is the starter a new one begins with.`);
+      const checked = await agent.run(call({ tool: 'config.validate', path: row.path, text: row.base }), ferret);
+      expect(checked).toEqual({ summary: `${row.path} checks.`, issues: [] });
+    });
+
+    test(`T-0034 ${row.path}: an agent's ADD is HELD and NOT applied`, async () => {
+      const { agent, files } = world();
+      await files.reload();
+      const answer = await agentWrites(agent, row.base);
+      expect(answer.summary).toStartWith(`Wrote ${row.path}, but it loosens what this machine allows (`);
+      expect(answer.summary).toContain(row.addSentence);
+      expect(answer.summary).toContain(`--confirms ${row.path}`);
+      expect(inEffect(files, row.path)).toBeUndefined();
+      expect(files.status().held.map(held => held.path)).toEqual([row.path]);
+    });
+
+    test(`T-0034 ${row.path}: an agent's CHANGE of one the owner wrote is HELD and the owner's version stays in effect`, async () => {
+      const { agent, files } = world();
+      await files.reload();
+      await ownerWrites(files, row.base);
+      const before = inEffect(files, row.path);
+      expect(before).toBeDefined();
+      const answer = await agentWrites(agent, row.changed);
+      expect(answer.summary).toStartWith(`Wrote ${row.path}, but it loosens what this machine allows (`);
+      expect(answer.summary).toContain(row.changeSentence);
+      expect(inEffect(files, row.path)).toEqual(before);
+      expect(files.status().held.map(held => held.path)).toEqual([row.path]);
+    });
+
+    test(`T-0034 ${row.path}: an agent's write of the very same text changes nothing, so nothing is held`, async () => {
+      const { agent, files } = world();
+      await files.reload();
+      await ownerWrites(files, row.base);
+      const answer = await agentWrites(agent, row.base);
+      expect(answer.summary).toBe(`Wrote ${row.path}; it is in effect.`);
+      expect(files.status().held).toEqual([]);
+    });
+
+    test(`T-0034 ${row.path}: a raw secret is refused, nothing is written, and the value is never repeated`, async () => {
+      const { agent, files, fs } = world();
+      await files.reload();
+      await ownerWrites(files, row.base);
+      const answer = await agentWrites(agent, `${row.changed}apiToken: ${FAKE_SECRET}\n`);
+      expect(answer.summary).toBe(`Nothing was written: ${row.path} does not check. Fix each issue and try again.`);
+      expect(JSON.stringify(answer)).not.toContain(FAKE_SECRET);
+      expect(await fs.readText(`${HOME}/config/${row.path}`)).toBe(row.base);
+    });
+  });
 
 for (const row of ROWS)
   describe(`T-0034 ${row.path}, written by an agent through the real ${owning(row.path).plugin} def`, () => {
@@ -369,22 +501,45 @@ const TODAY_HOLDS: readonly TodayHold[] = [
   { today: 'machine', words: 'agents may now control project files', door: [controlOn('files')] },
   { today: 'machine', words: 'agents may now control Ferretry settings', door: [controlOn('ferretrySettings')] },
   { today: 'machine', words: 'agents may now control page scripts', door: [controlOn('pageScripts')] },
-  { today: 'machine', words: 'agents now skip every permission prompt', out: 'harness-claude-code.yaml' },
+  {
+    today: 'machine',
+    words: 'agents now skip every permission prompt',
+    door: [
+      { path: 'harness-claude-code.yaml', base: 'permissionMode: auto\n', text: 'permissionMode: skip\n' },
+      { path: 'harness-codex.yaml', base: 'permissionMode: auto\n', text: 'permissionMode: skip\n' },
+    ],
+  },
   {
     today: 'machine',
     words:
       'budgets now reset in ${after.machine.timeZone ?? "the host\'s time zone"} instead of ${before.machine.timeZone ?? "the host\'s time zone"}',
-    out: 'usage.yaml',
+    door: [
+      { path: 'usage.yaml', base: 'timeZone: UTC\n', text: 'timeZone: America/Los_Angeles\n' },
+      { path: 'usage.yaml', base: 'timeZone: UTC\n', text: 'budgets: {}\n' },
+      { path: 'usage.yaml', base: 'budgets: {}\n', text: 'timeZone: UTC\n' },
+    ],
   },
   {
     today: 'machine',
     words: 'any process on this host can now read quota percentages and account labels without a credential',
-    out: 'usage.yaml',
+    door: [{ path: 'usage.yaml', base: 'publicFeed: false\n', text: 'publicFeed: true\n' }],
   },
   {
     today: 'machine',
     words: 'the agent browser now sends its traffic through the proxy at ${after.url}',
-    out: 'browsers.yaml',
+    door: [
+      { path: 'browsers.yaml', base: 'mode: headless\n', text: 'proxy:\n  url: http://proxy.example:8080\n' },
+      {
+        path: 'browsers.yaml',
+        base: 'proxy:\n  url: http://proxy.example:8080\n',
+        text: 'proxy:\n  url: http://other.example:8080\n',
+      },
+      {
+        path: 'browsers.yaml',
+        base: 'proxy:\n  url: http://proxy.example:8080\n',
+        text: 'proxy:\n  url: http://proxy.example:8080\n  username: ${secret:PROXY_USER}\n  password: ${secret:PROXY_PASS}\n',
+      },
+    ],
   },
   // warden.yaml → warden.yaml
   {
@@ -580,7 +735,7 @@ const TODAY_HOLDS: readonly TodayHold[] = [
   // account-defaults.yaml → accounts.yaml: a line added, changed or taken away, by an agent
   {
     today: 'accountDefaults',
-    words: 'changes which account a card offers first for ${line.key} in ${accountDefaultScopeWords(line)}',
+    words: 'changes which account a sign-in item offers first for ${line.key} in ${accountDefaultScopeWords(line)}',
     door: [
       { path: 'accounts.yaml', base: 'sites: {}\n', text: 'sites:\n  github.com: HOME\n' },
       { path: 'accounts.yaml', base: 'sites:\n  github.com: HOME\n', text: 'sites:\n  github.com: WORK\n' },
@@ -706,6 +861,10 @@ const TODAY_KINDS_OF: Readonly<Record<string, readonly string[]>> = {
   'runtimes.yaml': [],
   'agenda.yaml': [],
   'conversation.yaml': [],
+  'harness-claude-code.yaml': ['machine'],
+  'harness-codex.yaml': ['machine'],
+  'browsers.yaml': ['machine'],
+  'usage.yaml': ['machine'],
   logins: ['login'],
   runtimes: ['runtime'],
   profiles: [],
@@ -715,6 +874,9 @@ const TODAY_KINDS_OF: Readonly<Record<string, readonly string[]>> = {
   'claude-code/settings': [],
   'codex/settings': [],
   'claude-code/hooks': [],
+  // Owner ruling !A525 item 9: no today's rule judged them; every agent add or change is held (HOLD_EVERY).
+  instructions: [],
+  'codex/hooks': [],
   'model-sets': [],
 };
 
@@ -764,17 +926,7 @@ describe('T-0034 every declared file outside the reach is refused on read, valid
 
   test('R-0073 the files kept out include the person-only ones and the ones whose loosenings are not ported', () => {
     const places = outside.map(({ def }) => placeOf(def));
-    for (const place of [
-      'gate.yaml',
-      'plugins.yaml',
-      'catalogs.yaml',
-      'browsers.yaml',
-      'usage.yaml',
-      'harness-claude-code.yaml',
-      'harness-codex.yaml',
-      'endpoints',
-    ])
-      expect(places).toContain(place);
+    for (const place of ['gate.yaml', 'plugins.yaml', 'catalogs.yaml', 'endpoints']) expect(places).toContain(place);
   });
 
   for (const { plugin, def } of outside)
@@ -799,4 +951,184 @@ describe('T-0034 every declared file outside the reach is refused on read, valid
       }
       expect(await fs.readText(`${HOME}/config/${path}`).catch(() => undefined)).toBeUndefined();
     });
+});
+
+/**
+ * Owner decision ^A525: an agent may edit the two harness files through the config tools, and a looser permission mode
+ * or ANY change of the harness `binary` / `searchPaths` (a path is code execution) is HELD for the owner through the
+ * same writer and hold every other file uses; an owner's edit is not held.
+ */
+const HARNESS_FILES = [
+  { path: 'harness-claude-code.yaml', program: 'Claude Code' },
+  { path: 'harness-codex.yaml', program: 'Codex' },
+] as const;
+
+for (const { path, program } of HARNESS_FILES)
+  describe(`T-0034 ${path}: an agent edits it; a binary/searchPaths change and a looser mode are held`, () => {
+    /** The owner's own write (confirmed), then a reload: what the agent then edits is this. */
+    const ownerWrites = async (files: ReturnType<typeof world>['files'], text: string): Promise<void> => {
+      const { plugin, def } = owning(path);
+      expect((await files.write(plugin, def, undefined, text, { confirmedLoosening: true })).kind).toBe('applied');
+      await files.reload();
+    };
+    const agentWrites = async (agent: ReturnType<typeof world>['agent'], text: string) =>
+      await agent.run(call({ tool: 'config.write', path, text }), ferret);
+
+    const HELD: readonly {
+      readonly name: string;
+      readonly base: string;
+      readonly text: string;
+      readonly said: string;
+    }[] = [
+      {
+        name: 'a binary added',
+        base: 'permissionMode: auto\n',
+        text: 'binary: /opt/evil/bin\n',
+        said: 'binary changed',
+      },
+      { name: 'a binary changed', base: 'binary: /opt/a\n', text: 'binary: /opt/b\n', said: 'binary changed' },
+      { name: 'a binary removed', base: 'binary: /opt/a\n', text: 'permissionMode: auto\n', said: 'binary changed' },
+      {
+        name: 'a search path added',
+        base: 'permissionMode: auto\n',
+        text: 'searchPaths: [/opt/x]\n',
+        said: 'searchPaths changed',
+      },
+      {
+        name: 'a search path changed',
+        base: 'searchPaths: [/opt/x]\n',
+        text: 'searchPaths: [/opt/y]\n',
+        said: 'searchPaths changed',
+      },
+      {
+        name: 'search paths reordered',
+        base: 'searchPaths: [/a, /b]\n',
+        text: 'searchPaths: [/b, /a]\n',
+        said: 'searchPaths changed',
+      },
+      {
+        name: 'search paths emptied',
+        base: 'searchPaths: [/opt/x]\n',
+        text: 'searchPaths: []\n',
+        said: 'searchPaths changed',
+      },
+      {
+        name: 'one path split into two',
+        base: 'searchPaths: ["/a /b"]\n',
+        text: 'searchPaths: [/a, /b]\n',
+        said: 'searchPaths changed',
+      },
+      {
+        name: 'a binary and a looser mode together',
+        base: 'permissionMode: auto\n',
+        text: 'binary: /opt/b\npermissionMode: skip\n',
+        said: 'agents now skip every permission prompt',
+      },
+      {
+        name: 'a looser permission mode',
+        base: 'permissionMode: auto\n',
+        text: 'permissionMode: skip\n',
+        said: 'agents now skip every permission prompt',
+      },
+    ];
+
+    for (const held of HELD)
+      test(`${held.name}: HELD, the tighter version stays in effect, approval applies it, refusal leaves it`, async () => {
+        for (const verdict of ['approve', 'refuse'] as const) {
+          const { agent, files, fs } = world();
+          await files.reload();
+          await ownerWrites(files, held.base);
+          const before = inEffect(files, path);
+          const answer = await agentWrites(agent, held.text);
+          expect(answer.summary).toStartWith(`Wrote ${path}, but it loosens what this machine allows (`);
+          expect(answer.summary).toContain(held.said);
+          expect(answer.summary).toContain(`--confirms ${path}`);
+          expect(inEffect(files, path)).toEqual(before);
+          expect(files.held().map(edit => edit.path)).toEqual([path]);
+          const id = files.held()[0]?.id as string;
+          if (verdict === 'approve') {
+            expect(await files.writer().confirm(id)).toBe(true);
+            await files.reload();
+            expect(inEffect(files, path)).not.toEqual(before);
+            expect(files.held()).toEqual([]);
+          } else {
+            expect(await files.writer().discard(id)).toBe(true);
+            await files.reload();
+            expect(inEffect(files, path)).toEqual(before);
+            expect(files.held()).toEqual([]);
+            expect(await fs.readText(`${HOME}/config/${path}`)).toBe(held.base);
+          }
+        }
+      });
+
+    test('the sentence names the program and what changed, never a path', async () => {
+      const { agent, files } = world();
+      await files.reload();
+      await ownerWrites(files, 'binary: /opt/old/secretish-name\nsearchPaths: [/opt/old]\n');
+      const answer = await agentWrites(agent, 'binary: /opt/new/secretish-name\nsearchPaths: [/opt/new]\n');
+      expect(answer.summary).toContain(`${program} program (binary changed)`);
+      expect(answer.summary).toContain(`${program} program in different directories (searchPaths changed)`);
+      expect(answer.summary).not.toContain('/opt/');
+    });
+
+    const APPLIED: readonly { readonly name: string; readonly base: string; readonly text: string }[] = [
+      { name: 'a permission mode tightened', base: 'permissionMode: skip\n', text: 'permissionMode: auto\n' },
+      {
+        name: 'a comment added, binary and search paths as they were',
+        base: 'binary: /opt/a\nsearchPaths: [/a, /b]\n',
+        text: '# kept\nbinary: /opt/a\nsearchPaths: [/a, /b]\n',
+      },
+      { name: 'the same document written again', base: 'permissionMode: auto\n', text: 'permissionMode: auto\n' },
+      {
+        name: 'the mode tightened while the binary is left as it was',
+        base: 'binary: /opt/a\npermissionMode: skip\n',
+        text: 'binary: /opt/a\npermissionMode: auto\n',
+      },
+    ];
+    for (const applied of APPLIED)
+      test(`${applied.name}: applied at once, nothing held`, async () => {
+        const { agent, files } = world();
+        await files.reload();
+        await ownerWrites(files, applied.base);
+        const answer = await agentWrites(agent, applied.text);
+        expect(answer.summary).toBe(`Wrote ${path}; it is in effect.`);
+        expect(files.held()).toEqual([]);
+      });
+
+    test('a first write that names no binary and no search paths is applied', async () => {
+      const { agent, files } = world();
+      await files.reload();
+      expect((await agentWrites(agent, 'permissionMode: auto\n')).summary).toBe(`Wrote ${path}; it is in effect.`);
+      expect(files.held()).toEqual([]);
+    });
+
+    test('an OWNER edit of the binary and the search paths is applied, not held', async () => {
+      const { files } = world();
+      await files.reload();
+      await ownerWrites(files, 'binary: /opt/a\nsearchPaths: [/a]\n');
+      const { plugin, def } = owning(path);
+      const outcome = await files.write(plugin, def, undefined, 'binary: /opt/b\nsearchPaths: [/b]\n', {
+        confirmedLoosening: true,
+      });
+      expect(outcome.kind).toBe('applied');
+      expect(files.held()).toEqual([]);
+      expect(inEffect(files, path)).toMatchObject({ binary: '/opt/b', searchPaths: ['/b'] });
+    });
+
+    test('it is listed to an agent once it exists, and an agent reads it through the config tool', async () => {
+      const { agent, files } = world();
+      await files.reload();
+      await ownerWrites(files, 'binary: /opt/a\n');
+      const listing = await agent.run(call({ tool: 'config.read' }), ferret);
+      expect(listing.files?.map(file => file.path)).toContain(path);
+      const read = await agent.run(call({ tool: 'config.read', path }), ferret);
+      expect(read.summary).toBe(`${path} (ok).`);
+    });
+  });
+
+test('T-0034 the reach grew by exactly the two harness files: no other file became reachable', () => {
+  const reachable = DECLARED.filter(({ def }) => agentMayName(samplePath(def))).map(({ def }) => placeOf(def));
+  for (const { path } of HARNESS_FILES) expect(reachable).toContain(path);
+  for (const place of ['gate.yaml', 'plugins.yaml', 'endpoints']) expect(reachable).not.toContain(place);
+  for (const place of ['browsers.yaml', 'usage.yaml']) expect(reachable).toContain(place);
 });

@@ -1,0 +1,4 @@
+# Unit-tier files that still hold a speed or size budget (scripts/validate/test-tiers.sh, rule 2b).
+# Each moves its budget to <package>/tests/perf/ and keeps its correctness checks in unit at a small size; then
+# its line goes. A listed file that no longer holds a budget, or a budget in an unlisted file, fails the gate.
+# This list only shrinks; empty means the unit tier holds no timing claim.

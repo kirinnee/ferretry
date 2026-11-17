@@ -86,12 +86,17 @@ describe('the launch argv', () => {
       binary: '/opt/bin/claude',
       home: '/state/claude-code/agent-homes/f1',
       permissionMode: 'auto',
+      questionTool: false,
       hasMcp: false,
       conversation: { kind: 'new', id: 'c-1' },
     });
-    expect(argv.slice(0, 7)).toEqual([
+    expect(argv.slice(0, 11)).toEqual([
       'env',
+      '-u',
+      'CLAUDE_CODE_CHILD_SESSION',
       'CLAUDE_CONFIG_DIR=/state/claude-code/agent-homes/f1',
+      'DISABLE_AUTOUPDATER=1',
+      'CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1',
       API_KEY_SEED_SHELL,
       '-c',
       API_KEY_SEED_SCRIPT,
@@ -105,6 +110,7 @@ describe('the launch argv', () => {
       binary: '/a/claude',
       home: '/h/one',
       permissionMode: 'auto',
+      questionTool: false,
       hasMcp: false,
       conversation: { kind: 'new', id: 'c-1' },
     });
@@ -112,12 +118,13 @@ describe('the launch argv', () => {
       binary: '/b/claude',
       home: '/h/two',
       permissionMode: 'skip',
+      questionTool: false,
       hasMcp: true,
       model: 'claude-opus-5-5',
       conversation: { kind: 'resume', id: 'c-2' },
     });
-    expect(one[4]).toBe(API_KEY_SEED_SCRIPT);
-    expect(two[4]).toBe(API_KEY_SEED_SCRIPT);
+    expect(one[one.indexOf(API_KEY_SEED_SHELL) + 2]).toBe(API_KEY_SEED_SCRIPT);
+    expect(two[two.indexOf(API_KEY_SEED_SHELL) + 2]).toBe(API_KEY_SEED_SCRIPT);
     for (const word of ['/a/claude', '/b/claude', '/h/one', '/h/two', 'c-1', 'c-2', 'claude-opus-5-5'])
       expect(API_KEY_SEED_SCRIPT.includes(word)).toBe(false);
     // The value reaches jq through its environment, never as an argument a process listing would show.

@@ -6,7 +6,7 @@ import {
   type HarnessForm,
 } from '@ferretry/core-ferrets/contract';
 import { ApiError } from '@ferretry/kernel/contract';
-import { deliveryAnswer, refusalAnswer } from '../../harness-seam.ts';
+import { deliveryAnswer, refusalAnswer } from '@ferretry/core-mailbox/contract';
 import { tryParseSessionId } from '../../seams/ferret-id.ts';
 import type { QuestionPaneState, StructuredQuestionPane } from './harness-question-driver.ts';
 

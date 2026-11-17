@@ -97,7 +97,7 @@ function notice(shape: TerminalCapture): TerminalCapture {
   const message = [
     'Kept from view: a secret was just typed into this terminal.',
     'It is hidden for a short while so it cannot be read off the screen.',
-    'End the hold from its input card to open it to the ferret again.',
+    'End the hold from its input to open it to the ferret again.',
   ];
   const lines = Array.from({ length: shape.rows }, (_, row) => message[row] ?? '');
   return { lines, cols: shape.cols, rows: shape.rows, cursorX: 0, cursorY: 0, historySize: 0 };

@@ -25,13 +25,16 @@ on:
       - 'packages/cli/package.json'
       - 'packages/core/kernel/package.json'
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    # `edited` fires for a title, body AND base change; only a changed base (`changes.base`) is acted on, because the
+    # scope below is decided from the base ref and a retarget (to main: FULL) must supersede the old base's run. Every
+    # other edit skips every job (the unrelated-label shape: its own run-id group, nothing cancelled).
+    types: [opened, synchronize, reopened, labeled, edited]
   workflow_dispatch:
     inputs:
       quick_shape:
         description: >-
-          Quick Checks machine for this dispatch only: 8x16 (the pull-request shape) or 4x8 (what main's push run
-          uses, so a branch can measure main's shape before merge). Pull requests and main ignore it.
+          Quick Checks machine for this dispatch only: 8x16 (the shape of every pull request and main push) or 4x8
+          (to measure a smaller shape). Pull requests and main ignore it.
         type: choice
         options: ['8x16', '4x8']
         default: '8x16'
@@ -49,11 +52,11 @@ on:
 concurrency:
   group: >-
     ${{ github.workflow }}-${{
-      github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && format('pr-{0}', github.event.pull_request.number)
+      github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) && format('pr-{0}', github.event.pull_request.number)
       || (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'main'
       || github.run_id
     }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
 
 # THE ONE SWITCH of the strict Appendix D report (the `strict-guarantees` job below). Workflow-level, so the job that
 # counts and the `Full CI` verdict (scripts/ci/full-status.sh) read the same value. See docs/standards/ci-cd.
@@ -61,31 +64,84 @@ env:
   FY_STRICT_GUARANTEES_BLOCKING: 'true'
 
 jobs:
+  # Can this push to `main` skip the full set because the merged pull request already proved this exact tree?
+  # scripts/ci/proof-reuse.sh decides and FAILS CLOSED (docs/standards/ci-cd, "Proof reuse on main"). Every expensive
+  # job below `needs` it and starts with `!cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true')`: a proof job that
+  # died before sealing leaves `decided` empty, so the jobs run exactly as they did before this job existed. It runs on every
+  # event that runs anything (the same guard as `quick`), so the graph has one shape; off `main` it answers "no"
+  # in a second, and an unrelated label or a retitle still runs no job at all.
+  proof:
+    name: Proof Reuse
+    if: ${{ (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: read
+      pull-requests: read
+      actions: read
+    # GitHub, not Namespace: a few API calls and no Nix (docs/standards/ci-cd, "Runners").
+    runs-on: ubuntu-latest
+    # NON-BLOCKING at workflow level: a crashed, timed-out or cancelled proof job must not fail the CI workflow (Release
+    # listens to the workflow conclusion). With `continue-on-error` the job's `result` reads `success` even when it
+    # failed (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error),
+    # so `result` cannot tell consumers whether the decision finished. `decided` can: only the LAST step writes it, and
+    # only `if: success()`, so any earlier failure or a timeout leaves it empty.
+    continue-on-error: true
+    outputs:
+      decided: ${{ steps.seal.outputs.decided }}
+      proved: ${{ steps.decide.outputs.proved }}
+      proof: ${{ steps.decide.outputs.proof }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - id: decide
+        name: Decide whether the merged pull request already proved this tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MACOS_SMOKE: ${{ vars.MACOS_SMOKE }}
+        run: ./scripts/ci/proof-reuse.sh
+      - id: seal
+        name: Seal the decision (last step; runs only if everything before it succeeded)
+        if: ${{ success() }}
+        run: echo 'decided=true' >>"${GITHUB_OUTPUT}"
+
   # Shared setup once, then independent processes with separate logs and coverage directories.
   quick:
     name: Quick Checks
-    if: ${{ github.event.action != 'labeled' || github.event.label.name == 'full-ci' }}
+    needs: proof
+    if: ${{ !cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 20
     permissions:
       contents: read
-    # Main only refreshes the cache and waits for the full release gates; its smaller Quick
-    # machine preserves tsc/Nix cache commits without paying 8 units on every main push.
-    # A dispatch picks its own shape (`quick_shape`), so main's 4x8 can be measured on a branch before merge.
+    # What the changed-plugin scope (scripts/ci/scope.ts, docs/standards/ci-cd "Changed-plugin scope") reads. Only a pull
+    # request into rebuild/5.0-after without the `full-ci` label is ever scoped; every other run is FULL, and
+    # these are empty or ignored there.
+    env:
+      FY_SCOPE_EVENT: ${{ github.event_name }}
+      FY_SCOPE_BASE_REF: ${{ github.event.pull_request.base.ref }}
+      FY_SCOPE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      FY_SCOPE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      FY_SCOPE_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+    # One shape on every event, main included: the six unit groups and the scripts tests do not fit a 4x8 (measured on
+    # dispatch run 43825305638: 8.4 min and the real-tree TypeScript guard in scripts/gen/tests/fleet-link-callers.test.ts
+    # timed out at 180 s with three parts at once; the 8x16 ran the same parts in 3.8 min). Main's Quick only runs when no
+    # pull request proved the merged tree, so it is the fallback and must be the shape that is green.
+    # A dispatch may still pick a shape (`quick_shape`) to measure one.
     runs-on: >-
       ${{ fromJSON(format('["nscloud-ubuntu-24.04-amd64-{0}-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]',
-        (github.event_name == 'push' && github.ref == 'refs/heads/main' && '4x8')
-        || (github.event_name == 'workflow_dispatch' && inputs.quick_shape)
+        (github.event_name == 'workflow_dispatch' && inputs.quick_shape)
         || '8x16')) }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
+      - name: Mount the tsc cache
         id: cache
         if: runner.environment == 'self-hosted'
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
-          cache: nix
           path: ~/.cache/ferretry-tsc
       - uses: ./.github/actions/install-nix
       # The only-down checks (ports-pending, after-merge) need the commit they may not grow from; a one-commit
@@ -95,20 +151,28 @@ jobs:
           FY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           # Only a push's `before`: a pull request's own earlier head is never the base (check-base.sh says why).
           FY_PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+          FY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: ./scripts/ci/check-base.sh
+      # The merge-base the changed-plugin scope diffs against; best effort, a miss makes the scope FULL.
+      - name: Fetch the history the changed-plugin scope diffs
+        run: ./scripts/ci/scope-fetch.sh
       - name: Run the quick set
         env:
-          FY_CI_QUICK_PARALLEL: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.quick_shape == '4x8')) && '3' || '6' }}
-          FY_CI_GATE_PARALLEL: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.quick_shape == '4x8')) && '2' || '4' }}
-          # quick.sh derives FY_TSC_CACHE_DIR from $HOME, the same directory the cache action mounts
-          # above, and on main deletes it first so the cache a pull request reads is a clean proof.
+          # SIX parts on the 8x16 (six unit groups + scripts, longest first; scripts and anything past six start as the
+          # first groups end). Measured: six and four at a time ran the kernel-heavy groups equally fast (252-283 s), so
+          # the CPU is not oversubscribed; the board watcher-stall budget miss seen in both was heap state, not cores
+          # (see config/test-groups.json's board placement in docs/standards/ci-cd).
+          FY_CI_QUICK_PARALLEL: ${{ (github.event_name == 'workflow_dispatch' && inputs.quick_shape == '4x8') && '3' || '6' }}
+          # The tsc cache is the Static Checks job's (typecheck runs there); quick.sh still empties a local one on main.
           FY_CI_MAIN: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '' }}
           FY_CI_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          # The static parts (format, gates, build) are the `static` job's, which runs beside this one.
+          FY_CI_STATIC_JOB: '1'
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/quick.sh
       - name: Upload unit coverage
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-unit
           path: coverage/unit/
@@ -117,7 +181,7 @@ jobs:
       - name: Upload scripts test results
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-scripts
           path: coverage/scripts/
@@ -125,30 +189,126 @@ jobs:
       - name: Upload quick part results
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: quick-parts
           path: |
             coverage/ci/quick/*.log
             coverage/ci/quick/*.tsv
-            coverage/ci/quick/hooks/
-            coverage/ci/quick/static/
           if-no-files-found: warn
       - name: Prune the Nix store cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && runner.environment == 'self-hosted'
         run: ./scripts/ci/nix-store-hygiene.sh
 
+  # The static parts of the quick set - formatting, every pre-commit gate (typecheck included) and the build checks -
+  # BESIDE the unit tier instead of after it (`quick.sh --static`). They read no test result and are never scoped: the
+  # same events as Quick, the whole tree. On Quick's runner they started only after its ~13 min of tests and added
+  # ~105 s; here they finish while the tests run. An 8x16 with the limits they had there (three parts, four gates):
+  # on a 4x8 typecheck's tsc (TypeScript 7) was OOM-killed on the 8 GB, with four gates at once AND with two.
+  static:
+    name: Static Checks
+    needs: proof
+    if: ${{ !cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    runs-on:
+      [
+        nscloud-ubuntu-24.04-amd64-8x16-with-cache,
+        nscloud-cache-tag-ferretry-nix,
+        nscloud-cache-size-10gb,
+        nscloud-cache-allow-commit-from-main,
+      ]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Mount the tsc cache
+        id: cache
+        if: runner.environment == 'self-hosted'
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          path: ~/.cache/ferretry-tsc
+      - uses: ./.github/actions/install-nix
+      # The only-down gates (ports-pending, after-merge) need the commit they may not grow from.
+      - name: Fetch the base the only-down checks compare against
+        env:
+          FY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          FY_PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+          FY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: ./scripts/ci/check-base.sh
+      - name: Run the static parts
+        env:
+          FY_CI_QUICK_PARALLEL: '3'
+          FY_CI_GATE_PARALLEL: '4'
+          # quick.sh derives FY_TSC_CACHE_DIR from $HOME, the directory mounted above, and on main empties it first.
+          FY_CI_MAIN: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '' }}
+          FY_CI_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/quick.sh --static
+      - name: Upload static part results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: static-parts
+          path: |
+            coverage/ci/quick/hooks/
+            coverage/ci/quick/static/
+          if-no-files-found: warn
+
+  # THE PERF TIER (bunfig.perf.toml, `scripts/ci/test.sh perf`): every speed or size budget, kept out of the unit groups
+  # (owner, 2026-11-16: "dont mix performance and correctness test together"). On exactly Quick's events, BESIDE Quick.
+  # REPORT-ONLY on a pull request, BLOCKING on a push to main (lead ruling 2026-11-16): runner load swings the same
+  # tests 618-2273 ms on identical code (52 perf jobs, suite wall 121-327 s), so a budget cannot gate a PR. On a PR the
+  # job shows what went over budget and exits 0 (and Full CI does not count it, scripts/ci/full-status.sh); on main a
+  # failing file is re-run ONCE and fails the job only if it fails again (scripts/ci/perf-tier.sh). Not a required
+  # check. NEVER skipped by a proof reuse (it does not `need` `proof`): an advisory PR run is no proof of main's perf, so
+  # every push to main runs it and the verdict requires its success (scripts/ci/full-status.sh). ONE job with its processes inside (owner: one unit job, one perf job, parallel inside). Two processes
+  # on a 4x8: half the vCPUs, so each keeps a spare core for its GC/JIT threads and a budget measures the code, not a
+  # neighbour. The 4x8 also starts within seconds where an 8x16 queued a median ~5 minutes.
+  perf:
+    name: Performance Tests
+    if: ${{ !cancelled() && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    runs-on:
+      [
+        nscloud-ubuntu-24.04-amd64-4x8-with-cache,
+        nscloud-cache-tag-ferretry-nix,
+        nscloud-cache-size-10gb,
+        nscloud-cache-allow-commit-from-main,
+      ]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-nix
+      - name: Run the perf tier
+        env:
+          FY_CI_PERF_PARALLEL: '2'
+          FY_PERF_REPORT_ONLY: ${{ github.event_name == 'pull_request' }}
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh perf
+      - name: Upload perf results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: perf-results
+          path: coverage/perf/
+          if-no-files-found: warn
+
   # Starts immediately, before Namespace provisioning. A new head has no full proof yet.
   full-pending:
     name: Full CI Pending
-    if: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    if: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 5
     permissions:
       contents: read
       statuses: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           sparse-checkout: scripts/ci
@@ -164,7 +324,8 @@ jobs:
   # by guessing.
   int:
     name: Integration Tests
-    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    needs: proof
+    if: ${{ !cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -176,21 +337,16 @@ jobs:
         nscloud-cache-allow-commit-from-main,
       ]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: ./.github/actions/install-nix
       - name: Run every integration group and its ledger
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/integration.sh
       - name: Upload integration coverage
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-int
           path: coverage/int/
@@ -198,7 +354,7 @@ jobs:
       - name: Upload integration part results
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: integration-parts
           path: |
@@ -220,8 +376,8 @@ jobs:
   # job whatever its result, so even a failed setup step or the timeout cannot turn Full CI red.
   strict-guarantees:
     name: Strict Guarantees
-    needs: [quick, int]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    needs: [quick, int, proof]
+    if: ${{ !cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -232,14 +388,9 @@ jobs:
         || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: ./.github/actions/install-nix
       # A report the earlier jobs failed to upload is a missing artifact here, not a reason to stop: the count then
       # says "no JUnit report found" rather than guessing.
@@ -270,7 +421,8 @@ jobs:
   # per-hook buckets and not in compile, which runs SIT and whose binaries the smokes and darwin wait for. A job of
   # its own, in the verdict's needs, so it overlaps compile instead of lengthening the critical path.
   full-gates:
-    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    needs: proof
+    if: ${{ !cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 15
     name: Full Gates
     permissions:
@@ -284,20 +436,16 @@ jobs:
         || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: ./.github/actions/install-nix
       - name: Run the full-only static gates
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/full-gates.sh
 
   compile:
-    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    needs: proof
+    if: ${{ !cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 20
     name: Compile Binaries + SIT
     permissions:
@@ -312,17 +460,12 @@ jobs:
         || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: Say that the macOS smoke was skipped
         if: ${{ vars.MACOS_SMOKE == 'skip' }}
         run: ./scripts/ci/macos-smoke-skipped.sh
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: ./.github/actions/install-nix
       - name: Cross-compile standalone binaries
         run: ./scripts/ci/in-devshell.sh ./scripts/release/compile.sh
@@ -332,7 +475,7 @@ jobs:
       - name: Upload binaries
         id: upload_3
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cli-binaries
           path: dist/bin/
@@ -341,7 +484,7 @@ jobs:
       # now and then) is retried once from the same files; a second failure fails the job as before.
       - name: Upload binaries (retry)
         if: steps.upload_3.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cli-binaries
           path: dist/bin/
@@ -355,10 +498,10 @@ jobs:
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh sit
 
   smoke:
-    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    if: ${{ !cancelled() && needs.compile.result == 'success' && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 10
     name: Smoke ${{ matrix.target }}
-    needs: compile
+    needs: [compile, proof]
     permissions:
       contents: read
     strategy:
@@ -371,7 +514,7 @@ jobs:
             runs_on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs_on }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: Download compiled binaries
@@ -406,8 +549,8 @@ jobs:
   # "macOS runner shortage"). Unset, or any other value, runs the smoke exactly as above.
   smoke-darwin:
     name: Smoke darwin-arm64
-    needs: compile
-    if: ${{ vars.MACOS_SMOKE != 'skip' && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    needs: [compile, proof]
+    if: ${{ !cancelled() && needs.compile.result == 'success' && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (vars.MACOS_SMOKE != 'skip' && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null))) }}
     permissions:
       contents: read
     uses: ./.github/workflows/smoke-darwin.yaml
@@ -416,18 +559,19 @@ jobs:
 
   full:
     name: Full CI
-    needs: [quick, full-pending, int, strict-guarantees, full-gates, compile, smoke, smoke-darwin]
-    if: ${{ always() && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    needs: [proof, quick, static, perf, full-pending, int, strict-guarantees, full-gates, compile, smoke, smoke-darwin]
+    if: ${{ always() && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null)) }}
     timeout-minutes: 5
     permissions:
       contents: read
       statuses: write
       issues: write
-      pull-requests: read
+      # Write: the verdict removes the full-ci label after a failed set (with read the DELETE was HTTP 403).
+      pull-requests: write
       actions: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           sparse-checkout: scripts/ci
@@ -439,4 +583,7 @@ jobs:
           MACOS_SMOKE: ${{ vars.MACOS_SMOKE }}
           EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PROOF_DECIDED: ${{ needs.proof.outputs.decided }}
+          PROOF_REUSED: ${{ needs.proof.outputs.proved }}
+          PROOF_URL: ${{ needs.proof.outputs.proof }}
         run: ./scripts/ci/full-status.sh verdict

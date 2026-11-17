@@ -59,4 +59,28 @@ describe('the hooks net reads scalars that are not strings', () => {
     // Assert
     should(found).equal('whole');
   });
+
+  for (const depth of [1_000, 100_000]) {
+    it(`should withhold the whole text, not throw, when a refused command sits beside a list nested ${String(depth)} deep`, () => {
+      // Arrange: past what the call stack allows a recursive walker; the parser still reads it
+      const text = `{"command":"tool --token ${V}","deep":${'['.repeat(depth)}${']'.repeat(depth)}}`;
+
+      // Act
+      const found = hooksDocumentRefusedLines(text);
+
+      // Assert
+      should(found).equal('whole');
+    });
+  }
+
+  it('should list nothing, not throw, when a list nested 100,000 deep holds nothing refused', () => {
+    // Arrange
+    const text = `{"command":"tool --quiet","deep":${'['.repeat(100_000)}${']'.repeat(100_000)}}`;
+
+    // Act
+    const found = hooksDocumentRefusedLines(text);
+
+    // Assert
+    should(found).equal(undefined);
+  });
 });

@@ -865,7 +865,7 @@ describe('exportBundle origin keys', () => {
 });
 
 describe('the setup.import executor', () => {
-  it('should describe the import, then write config, components, skills, the record and the secret', async () => {
+  it('F-0199 should describe the import, then write config, components, skills, the record and the secret', async () => {
     // Arrange
     const { service, applied, secrets } = world();
 
@@ -2667,7 +2667,7 @@ intervalMinutes: 5
     const controls = (patch: object) => [
       {
         path: 'controls' as const,
-        text: JSON.stringify({ agentPermissions: 'auto', agentControl: { files: true }, ...patch }),
+        text: JSON.stringify({ agentPermissions: 'skip', agentControl: { files: true }, ...patch }),
       },
     ];
 
@@ -2675,7 +2675,7 @@ intervalMinutes: 5
       const own = files({});
       const w = await copied(own);
       const bundle = await sourceAt();
-      const settings = controls({ agentPermissions: 'skip', agentControl: { files: false, browsers: false } });
+      const settings = controls({ agentPermissions: 'auto', agentControl: { files: false, browsers: false } });
       const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
       const keys = Object.fromEntries(review.settings[0]?.keys.map(key => [key.key, key.outcome]) ?? []);
       should(keys).deepEqual({
@@ -2693,7 +2693,7 @@ intervalMinutes: 5
       const machine = machineOf(w.applied[0]?.documents ?? []);
       should(machine.agentControl.files).equal(false);
       should(machine.agentControl.browsers).equal(true);
-      should(machine.agentPermissions).equal('auto');
+      should(machine.agentPermissions).equal('skip');
       should(own.writes).deepEqual([]);
       should(Object.keys(settingsOf(w, 'controls')).toSorted()).containEql('agentControl.files');
     });

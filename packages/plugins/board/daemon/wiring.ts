@@ -589,7 +589,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
         };
         const handed = await ferretCards.startOn(started.parent, started.card as CardId);
         if (handed.delegation === undefined)
-          return await stop(handed.refusal ?? `card ${started.card} cannot be handed over`);
+          return await stop(handed.refusal ?? `task ${started.card} cannot be handed over`);
         await ferretCards.takeOver(handed.delegation, started.ferret, stop);
         return;
       }
@@ -603,7 +603,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
       });
       for (const note of opened.notes) kernel.log.info(`${started.ferret}: ${note}`);
     } catch (error) {
-      diagnostics.warn(`the card of ${started.ferret} could not be made: ${String(error)}`);
+      diagnostics.warn(`the task of ${started.ferret} could not be made: ${String(error)}`);
     }
   };
 
@@ -616,7 +616,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     if (shaped === undefined) return { refused: 'that question can no longer be read, so nothing was moved' };
     const outcome = await gates.answer(shaped);
     // An answer to a `card` entry that is not a gate's moved nothing: it is refused, so Asks keeps the ask open.
-    if (!outcome.handled) return { refused: 'that question is not a card’s gate, so nothing was moved' };
+    if (!outcome.handled) return { refused: 'that question is not a task’s gate, so nothing was moved' };
     if ('applied' in outcome) return 'applied';
     return { refused: outcome.refused.message };
   };

@@ -1,0 +1,4 @@
+kind	path	limit	expires	reason
+composition	contract/index.ts	-	-	the asks contract barrel
+oversize	contract/snapshot/agenda.ts	2170	2026-12-16	the agenda snapshot contract; one type per concern to split out
+oversize	daemon/lib/agenda/state-machine.ts	2998	2026-12-16	pure reducer of 142 functions; cold, a split is risk without payoff

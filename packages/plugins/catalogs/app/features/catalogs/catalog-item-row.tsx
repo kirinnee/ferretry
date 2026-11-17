@@ -29,7 +29,7 @@ import { useDaemonClient } from '../../lib/client-context.tsx';
 import { AddToCatalogSheet, type AddToCatalogSheetProps } from './add-to-catalog-sheet.tsx';
 import { CatalogAddToast, type CatalogToast } from './catalog-add-toast.tsx';
 import { removeCatalogInstall } from './catalog-installs-api.ts';
-import { installRefusal, installsFor, REMOVE_NOTE } from './catalog-install-model.ts';
+import { installIsAt, installRefusal, installsFor, REMOVE_NOTE, type SkillLocation } from './catalog-install-model.ts';
 import { FailureLine } from './catalog-parts.tsx';
 import type { CatalogRowsHost, CatalogRowsRead } from './catalog-row-tools.tsx';
 import { canAdd, ownedMatches, removeLabel, rowChips, sharedItemFor } from './catalog-row-model.ts';
@@ -63,11 +63,23 @@ export interface CatalogItemRowProps {
   readonly kind: 'skill' | 'mcp';
   /** The skill or server name, which installs are matched by. */
   readonly itemName: string;
+  /**
+   * Which copy this row is, when one machine can hold several of the name (a runtime's and a project's): only an install
+   * that wrote THAT copy is the row's, so its chip, Uninstall and the loss of Publish follow it alone. Without it, a row
+   * is every install of its kind and name.
+   */
+  readonly location?: SkillLocation;
   /** What the row shows in mono: the invocation, or the server's name. */
   readonly label: string;
   /** What Publish points at, and what a catalog's items are matched against. */
   readonly source: CatalogItemSource;
-  readonly scope: RowScope;
+  /** Required unless `controls`: the row's own scope chip. */
+  readonly scope?: RowScope;
+  /**
+   * The host already draws the name, scope and description (Skills' row does): draw only what catalogs add — the
+   * "v3" / "from Ines · v2" chip and the ⋯ — to sit at the end of the host's line.
+   */
+  readonly controls?: boolean;
   /** One line under the name. The whole text is the row's tooltip. */
   readonly description?: string;
   /** "Overridden by a Project skill": a quiet line under the description. */
@@ -93,9 +105,11 @@ export function CatalogItemRow({
   read,
   kind,
   itemName,
+  location,
   label,
   source,
   scope,
+  controls = false,
   description,
   note,
   onUse,
@@ -117,7 +131,12 @@ export function CatalogItemRow({
   const [toast, setToast] = useState<ToastState | null>(null);
   const [sheetStart, setSheetStart] = useState<SheetStart>({});
 
-  const installs = read === undefined ? [] : installsFor(read.installs, kind, itemName);
+  const installs =
+    read === undefined
+      ? []
+      : installsFor(read.installs, kind, itemName).filter(
+          install => location === undefined || installIsAt(install, location),
+        );
   const matches = read === undefined ? [] : ownedMatches(read.catalogs, source);
   const chips = rowChips(installs, matches);
   const addable = host !== undefined && canAdd(installs);
@@ -249,25 +268,32 @@ export function CatalogItemRow({
   };
 
   const nameClass = 'flex min-w-0 flex-col items-start gap-0.5 rounded-control px-xs py-xs text-left';
+  const chipNodes = (
+    <>
+      {chips.version === null ? null : (
+        <span className="fy-info-chip" data-tone="muted" data-row-version="">
+          {chips.version}
+        </span>
+      )}
+      {chips.from === null ? null : (
+        <span className="fy-info-chip" data-tone="accent" title={chips.from.title} data-row-from="">
+          {chips.from.text}
+        </span>
+      )}
+    </>
+  );
   const nameBlock = (
     <>
       <span className="flex max-w-full min-w-0 flex-wrap items-center gap-x-xs gap-y-0.5">
         <span className="min-w-0 truncate font-mono text-cell text-fg" data-row-label="">
           {label}
         </span>
-        <span className="fy-info-chip" data-tone={scope.tone} title={scope.title} data-row-scope="">
-          {scope.label}
-        </span>
-        {chips.version === null ? null : (
-          <span className="fy-info-chip" data-tone="muted" data-row-version="">
-            {chips.version}
+        {scope === undefined ? null : (
+          <span className="fy-info-chip" data-tone={scope.tone} title={scope.title} data-row-scope="">
+            {scope.label}
           </span>
         )}
-        {chips.from === null ? null : (
-          <span className="fy-info-chip" data-tone="accent" title={chips.from.title} data-row-from="">
-            {chips.from.text}
-          </span>
-        )}
+        {chipNodes}
       </span>
       {description === undefined ? null : (
         <span className="block max-w-full truncate text-meta text-muted" title={description} data-row-description="">
@@ -284,8 +310,16 @@ export function CatalogItemRow({
 
   return (
     <div className="flex min-w-0 flex-col" data-catalog-item-row={itemName} data-catalog-item-kind={kind}>
-      <div className={cn('flex min-w-0 flex-wrap items-start gap-x-xs gap-y-0', dimmed && 'opacity-70')}>
-        {onUse === undefined ? (
+      <div
+        className={cn(
+          'flex min-w-0 flex-wrap gap-x-xs gap-y-0',
+          controls ? 'items-center' : 'items-start',
+          dimmed && 'opacity-70',
+        )}
+      >
+        {controls ? (
+          chipNodes
+        ) : onUse === undefined ? (
           <div className={cn(nameClass, 'min-h-row min-w-[8rem] flex-1')}>{nameBlock}</div>
         ) : (
           <button

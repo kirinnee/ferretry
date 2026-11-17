@@ -89,6 +89,7 @@ import {
   withCardAsks,
   withoutCardAsks,
 } from './card-asks.ts';
+import { ASK_REFERENCE_SIGIL } from '../../../contract/snapshot/ask-reference.ts';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;
@@ -1020,7 +1021,7 @@ function frozenSuggestion(ledger: AgendaLedger, command: AgendaCommand): AgendaM
   if (target?.item.signInRuleSuggestion === undefined) return undefined;
   return failure(
     'use_input_form',
-    `${command.id} is a ferret's rule suggestion: Dismiss it on its card in the app. The ferret is not told; the card leaves its list when it expires`,
+    `${command.id} is a ferret's rule suggestion: Dismiss it on its item in the app. The ferret is not told; the item leaves its list when it expires`,
   );
 }
 
@@ -1065,14 +1066,14 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
     return failure('forbidden', 'stable agenda source references are reserved for trusted daemon producers');
   }
   if ((request.discussion === true || request.cardAsks !== undefined) && actor.kind !== 'daemon') {
-    return failure('forbidden', 'only the daemon raises a follow-up or an ask about a card');
+    return failure('forbidden', 'only the daemon raises a follow-up or an ask about a task');
   }
   const noticeProblem = agendaNoticeProblems(request)[0];
   if (noticeProblem !== undefined) return failure('invalid', noticeProblem);
   const offerCloseProblem = agendaOfferCloseProblems(request)[0];
   if (offerCloseProblem !== undefined) return failure('invalid', offerCloseProblem);
   if (request.offerClose === true && request.task === undefined) {
-    return failure('invalid', 'there is no card to close: name it with --task F12 (--offer-close needs a card)');
+    return failure('invalid', 'there is no task to close: name it with --task F12 (--offer-close needs a task)');
   }
   const optionDetailProblem = agendaOptionDetailProblems(request)[0];
   if (optionDetailProblem !== undefined) return failure('invalid', optionDetailProblem);
@@ -1337,7 +1338,7 @@ function addressById(
     if (target.item.taskPlan !== undefined) {
       return failure(
         'use_input_form',
-        `${command.id} is a task plan: answer it on its card in the app, where a sign-in is confirmed with your passkey`,
+        `${command.id} is a task plan: answer it on its item in the app, where a sign-in is confirmed with your passkey`,
       );
     }
     // A ferret's standing-rule suggestion opens the owner's create sheet with nothing ticked: an agenda answer would
@@ -1350,20 +1351,20 @@ function addressById(
     }
     // A paste plan is answered by the owner's plan route, which makes its rules: an agenda answer would make none.
     if (target.item.copyPlan !== undefined) {
-      return failure('use_input_form', `${command.id} is a paste plan: answer it on its card, or with fy plan approve`);
+      return failure('use_input_form', `${command.id} is a paste plan: answer it on its item, or with fy plan approve`);
     }
     // A staged 2FA seed is saved only by the passkey ceremony its card runs: an agenda answer would save nothing.
     if (target.item.twoFactorSeed !== undefined) {
       return failure(
         'use_input_form',
-        `${command.id} saves a 2FA key: allow it on its card in the app, with your passkey`,
+        `${command.id} saves a 2FA key: allow it on its item in the app, with your passkey`,
       );
     }
     // An approval on the phone is answered by the phone and settled by what the daemon sees: never by an agenda answer.
     if (target.item.phoneApproval !== undefined) {
       return failure(
         'use_input_form',
-        `${command.id} is a sign-in to approve on your phone: approve it there, or tap Not me on its card`,
+        `${command.id} is a sign-in to approve on your phone: approve it there, or tap Not me on its item`,
       );
     }
     // An answer to a confirmation is the owner's decision about a configuration change: never a ferret's.
@@ -2415,7 +2416,7 @@ function merge(ledger: AgendaLedger, command: MergeCommand): AgendaMutation {
   }
   for (const entry of [into, from]) {
     if (!plainThread(entry.item)) {
-      return failure('invalid', `${entry.item.id} is a gate, a notice or a card the daemon acts on: it is not merged`);
+      return failure('invalid', `${entry.item.id} is a gate, a notice or an item the daemon acts on: it is not merged`);
     }
   }
   const survivor = into.item;
@@ -2431,7 +2432,7 @@ function merge(ledger: AgendaLedger, command: MergeCommand): AgendaMutation {
   if (cards.length > MAX_AGENDA_CARDS || related.length > MAX_AGENDA_CARDS || links.length > MAX_AGENDA_LINKS) {
     return failure(
       'full',
-      `${command.id} and ${command.from} hold more cards or links together than one item keeps (${MAX_AGENDA_CARDS} cards, ${MAX_AGENDA_LINKS} links): close what is done first`,
+      `${command.id} and ${command.from} hold more tasks or links together than one item keeps (${MAX_AGENDA_CARDS} tasks, ${MAX_AGENDA_LINKS} links): close what is done first`,
     );
   }
   // Every card ask of both rides the one item, once per card and entry; the absorbed item keeps none.
@@ -2466,7 +2467,7 @@ function merge(ledger: AgendaLedger, command: MergeCommand): AgendaMutation {
     kept,
     bare,
     command.actor,
-    `merged into !${command.id}`,
+    `merged into ${ASK_REFERENCE_SIGIL}${command.id}`,
     command.at,
     'dismissed',
     'dismissed',
@@ -2500,7 +2501,7 @@ function split(ledger: AgendaLedger, command: SplitCommand): AgendaMutation {
     );
   }
   if (!plainThread(target.item)) {
-    return failure('invalid', `${command.id} is a gate, a notice or a card the daemon acts on: it is not split`);
+    return failure('invalid', `${command.id} is a gate, a notice or an item the daemon acts on: it is not split`);
   }
   const original = target.item;
   const moving = command.moveCards ?? [];
@@ -2510,7 +2511,7 @@ function split(ledger: AgendaLedger, command: SplitCommand): AgendaMutation {
     (original.relatedTasks ?? []).some(card => sameCard(card, ref)) ||
     (original.cardAsks ?? []).some(ask => ask.gate.cardId === ref.id);
   const missing = moving.find(ref => !holds(ref));
-  if (missing !== undefined) return failure('invalid', `${formatTaskRef(missing)} is not a card of ${command.id}`);
+  if (missing !== undefined) return failure('invalid', `${formatTaskRef(missing)} is not a task of ${command.id}`);
   const made = raise(ledger, { action: 'raise', actor: target.origin, request: command.request, at: command.at });
   if (!made.ok) return made;
   if (made.change !== 'created' || made.item === undefined) {
@@ -2902,7 +2903,7 @@ function restateConfirms(ledger: AgendaLedger, command: RestateConfirmsCommand):
  */
 function cardAsk(ledger: AgendaLedger, command: CardAskCommand): AgendaMutation {
   if (command.actor.kind !== 'daemon')
-    return failure('forbidden', 'only the daemon puts an ask about a card on an agenda');
+    return failure('forbidden', 'only the daemon puts an ask about a task on an agenda');
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
   if (target === undefined) {
     const closed = ledger.entries.find(entry => entry.lifecycle === 'addressed' && entry.item.id === command.id);
@@ -2915,7 +2916,7 @@ function cardAsk(ledger: AgendaLedger, command: CardAskCommand): AgendaMutation 
     return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   }
   if (target.item.notice === true) {
-    return failure('invalid', `${command.id} is a notice, so it carries no ask about a card`);
+    return failure('invalid', `${command.id} is a notice, so it carries no ask about a task`);
   }
   const outcome = applyCardAsk(target.item, command.operation, command.at, {
     stage: (item, stage) => ({ ...item, ...staged(item, stage, command.at) }),
@@ -2937,11 +2938,11 @@ function cardAsk(ledger: AgendaLedger, command: CardAskCommand): AgendaMutation 
  * already names another card is refused: one thread, one card.
  */
 function linkTask(ledger: AgendaLedger, command: LinkTaskCommand): AgendaMutation {
-  if (command.actor.kind !== 'daemon') return failure('forbidden', 'only the daemon may link a thread to a card');
+  if (command.actor.kind !== 'daemon') return failure('forbidden', 'only the daemon may link a thread to a task');
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
   if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   if (target.item.notice === true) {
-    return failure('invalid', `${command.id} is a notice, so it carries no card`);
+    return failure('invalid', `${command.id} is a notice, so it carries no task`);
   }
   const linked = target.item.task;
   if (linked !== undefined && linked !== null) {

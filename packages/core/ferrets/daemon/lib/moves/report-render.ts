@@ -1,3 +1,5 @@
+import { commandLabel } from '@ferretry/std';
+import { AGENT_COMMAND_SENTENCE, terminalsOf, UNKEPT_JOB_SENTENCE, unseenCodexTerminals } from './unkept-jobs.ts';
 import type { InflightReport } from './inflight-report.ts';
 import { age, escapeCell, truncate, verdictLabels } from './render-text.ts';
 
@@ -8,13 +10,31 @@ export function renderInflightCli(report: InflightReport): string {
   ];
   for (const tool of report.openTools)
     lines.push(`  tool  [${verdictLabels[tool.verdict]}] ${tool.name}: ${truncate(tool.summary, 90)}`);
-  for (const entry of report.processes)
-    lines.push(
-      `  proc  [${verdictLabels[entry.verdict]}] pid ${entry.pid} (${age(entry.startedSecondsAgo)}): ${truncate(entry.argv, 90)}`,
-    );
+  for (const entry of report.processes) {
+    const attachment = entry.known?.attachment;
+    if (attachment !== undefined)
+      lines.push(
+        `  kept  [${verdictLabels[entry.verdict]}] pid ${entry.pid}: ${entry.known?.label ?? `attachment to job ${attachment.jobName}`}`,
+      );
+    else if (entry.known?.kind === 'job-attachment') continue;
+    else if (entry.unkeptJob === true || entry.agentCommand === true)
+      lines.push(
+        `  proc  [${verdictLabels[entry.verdict]}] pid ${entry.pid} (${age(entry.startedSecondsAgo)}): ${truncate(commandLabel(entry.argv) ?? entry.argv, 90)} — ${entry.unkeptJob === true ? UNKEPT_JOB_SENTENCE : AGENT_COMMAND_SENTENCE}`,
+      );
+    else
+      lines.push(
+        `  proc  [${verdictLabels[entry.verdict]}] pid ${entry.pid} (${age(entry.startedSecondsAgo)}): ${truncate(entry.argv, 90)}`,
+      );
+  }
   if (report.codexBackgroundTerminals > 0)
-    lines.push(`  codex ${report.codexBackgroundTerminals} background terminal(s) [UNKNOWN — no argv, unaccountable]`);
+    lines.push(
+      unseenCodexTerminals(report) === 0
+        ? `  codex ${terminalsOf(report.codexBackgroundTerminals)}, all listed above`
+        : `  codex ${terminalsOf(unseenCodexTerminals(report))} [UNKNOWN — no argv, unaccountable]`,
+    );
   for (const blindSpot of report.blindSpots) lines.push(`  blind [UNKNOWN] ${blindSpot}`);
+  if (report.midTurn)
+    lines.push('  turn  [RE-ARMABLE] the agent is mid-turn; nothing open — the new session is told to pick it up');
   if (nothingObserved(report)) lines.push('  (no open tools or descendant processes observed)');
   return lines.join('\n');
 }
@@ -24,6 +44,7 @@ function nothingObserved(report: InflightReport): boolean {
     report.openTools.length === 0 &&
     report.processes.length === 0 &&
     report.codexBackgroundTerminals === 0 &&
+    !report.midTurn &&
     report.blindSpots.length === 0
   );
 }
@@ -66,8 +87,11 @@ export function renderInflightReport(report: InflightReport, meta: ReportMeta): 
   lines.push(
     ...openToolSection(report),
     ...processSection(report),
+    ...keptJobsSection(report),
+    ...unkeptJobsSection(report),
     ...codexSection(report),
     ...blindSpotSection(report),
+    ...requesterSection(report),
   );
   if (nothingObserved(report)) lines.push('_No open tools or descendant processes were observed at move time._', '');
   lines.push(...guidance());
@@ -104,10 +128,48 @@ function processSection(report: InflightReport): readonly string[] {
   ];
 }
 
-function codexSection(report: InflightReport): readonly string[] {
-  if (report.codexBackgroundTerminals === 0) return [];
+/** The kept jobs this ferret's attachments hold: they survive the move and are re-attached afterwards. */
+function keptJobsSection(report: InflightReport): readonly string[] {
+  const held = report.processes.flatMap(entry =>
+    entry.known?.attachment === undefined || entry.known.attachment.jobEnded === true
+      ? []
+      : [{ pid: entry.pid, ...entry.known.attachment }],
+  );
+  if (held.length === 0) return [];
   return [
-    `### Codex background terminals: ${report.codexBackgroundTerminals}`,
+    '### Kept jobs (attachments)',
+    '',
+    "Ferretry keeps these jobs; only the agent's attachment to each is ended by the move. **Nothing was lost** — re-attach with the command shown.",
+    '',
+    ...held.map(
+      job => `- job \`${escapeCell(job.jobName)}\` (attachment pid ${job.pid}): \`fy job attach ${job.jobId}\``,
+    ),
+    '',
+  ];
+}
+
+/** Background jobs the agent started that Ferretry does not keep: they stop with the move. */
+function unkeptJobsSection(report: InflightReport): readonly string[] {
+  const jobs = report.processes.filter(entry => entry.unkeptJob === true);
+  if (jobs.length === 0) return [];
+  return [
+    '### Background jobs Ferretry is not keeping',
+    '',
+    'These stop when the ferret moves. Re-run one only if still needed — with `fy job run` so it survives next time.',
+    '',
+    ...jobs.map(
+      entry =>
+        `- pid ${entry.pid} (${age(entry.startedSecondsAgo)}): \`${escapeCell(commandLabel(entry.argv) ?? entry.argv)}\``,
+    ),
+    '',
+  ];
+}
+
+function codexSection(report: InflightReport): readonly string[] {
+  const unseen = unseenCodexTerminals(report);
+  if (unseen === 0) return [];
+  return [
+    `### Codex background terminals: ${unseen}`,
     '',
     'Their children are NOT under the pane pid and carry no argv — they are **unaccountable**. Treat as unknown: ' +
       'check the pane for what they were doing before re-running anything.',
@@ -125,6 +187,29 @@ function blindSpotSection(report: InflightReport): readonly string[] {
     'The inspection could not rule these out, so the work they might hide is **unaccounted for**:',
     '',
     ...report.blindSpots.map(blindSpot => `- ${escapeCell(blindSpot)}`),
+    '',
+  ];
+}
+
+/** The request's own call, which the gate left out: kept in the record so the exclusion is auditable. */
+function requesterSection(report: InflightReport): readonly string[] {
+  const call = report.requesterCall ?? [];
+  const turn = report.midTurn
+    ? [
+        '### Mid-turn',
+        '',
+        'The session was mid-turn with no open tool, process or codex terminal: the turn is interrupted and the new session is told to re-read where it stopped and continue. **re-armable**.',
+        '',
+      ]
+    : [];
+  if (call.length === 0) return turn;
+  return [
+    ...turn,
+    '### The call that asked for this move (not counted)',
+    '',
+    "The move was requested from this session's own tool call, proven from the process tree. The move ends that call, so it is not work the move interrupts:",
+    '',
+    ...call.map(entry => `- pid ${entry.pid}: \`${escapeCell(entry.argv)}\``),
     '',
   ];
 }

@@ -530,7 +530,7 @@ function MachineStaged({
       ) : null}
       {canUsePasskey ? null : (
         <p className="m-0 text-meta text-warn" data-task-plan-no-passkey="">
-          This device cannot confirm with a passkey. Deny, or open this card on a device that can.
+          This device cannot confirm with a passkey. Deny, or open this item on a device that can.
         </p>
       )}
       <div className="flex flex-wrap items-center justify-end gap-2" data-task-plan-actions="">

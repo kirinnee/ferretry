@@ -547,7 +547,7 @@ describe('what the ferret is told (invariant 24)', () => {
   });
 
   it('should give the ferret one sentence for every miss', () => {
-    should(TASK_PLAN_MISS_AGENT_NOTE).equal("Your task plan didn't cover this, so the owner was asked.");
+    should(TASK_PLAN_MISS_AGENT_NOTE).equal("Your sign-in plan didn't cover this, so the owner was asked.");
     should(TaskPlanAgentViewSchema.safeParse(taskPlanAgentView(plan())).success).be.true();
   });
 });
@@ -573,7 +573,7 @@ describe('approving: the owner only narrows (invariant 9)', () => {
     };
 
     should(refused({ lines: [{ line: 0 }] })).equal('pick one of the accounts first');
-    should(refused({ lines: [{ line: 0, signIn: SUDO }] })).equal('pick one of the accounts the card lists');
+    should(refused({ lines: [{ line: 0, signIn: SUDO }] })).equal('pick one of the accounts the input lists');
     should(refused({ lines: [{ line: 0, signIn: GITHUB_B, totp: true }] })).equal(
       'this account has no automatic codes',
     );
@@ -596,7 +596,7 @@ describe('approving: the owner only narrows (invariant 9)', () => {
     should(refused({ lines: [{ line: 0, signIn: GITHUB_A, totp: true }] }, codeOnly)).equal('accepted');
   });
 
-  it('should ask for the passkey whenever any line is ticked, a paste line too, and never for a decline (!A244)', () => {
+  it('should ask for the passkey whenever any line is ticked, a paste line too, and never for a decline (^A244)', () => {
     const needs = (approval: TaskPlanApproval) => {
       const selection = taskPlanSelection(plan(), approval);
       return selection.ok && taskPlanSelectionNeedsPasskey(selection.lines);
@@ -740,7 +740,7 @@ describe('why a line did not apply', () => {
 
   it('should say the line from 1, as the owner reads it, and nothing for not-here', () => {
     should(grantMissLine(1, 'form-changed')).equal(
-      "Task plan line 2 didn't apply: the sign-in form changed since you approved it.",
+      "Sign-in plan line 2 didn't apply: the sign-in form changed since you approved it.",
     );
     should(grantMissLine(0, 'not-here')).be.undefined();
   });
@@ -775,7 +775,7 @@ describe('why a line did not apply', () => {
 
   it('I216 should word a filled card for the owner only, naming its source and the place, never an account or a value', () => {
     should(grantFilledLineFor({ by: 'plan', line: 1 }, 'github.com')).equal(
-      'Filled under your task plan (line 2) on github.com.',
+      'Filled under your sign-in plan (line 2) on github.com.',
     );
     should(grantFilledLineFor({ by: 'rule' }, 'sudo@kirin-box')).equal(
       'Filled under your standing sign-in rule on sudo@kirin-box.',
@@ -787,7 +787,7 @@ describe('why a line did not apply', () => {
   });
 
   it('I226 should tell the ferret one fixed sentence whatever the reason, and never a word about a rule', () => {
-    should(TASK_PLAN_MISS_AGENT_NOTE).equal("Your task plan didn't cover this, so the owner was asked.");
+    should(TASK_PLAN_MISS_AGENT_NOTE).equal("Your sign-in plan didn't cover this, so the owner was asked.");
     should(TASK_PLAN_MISS_AGENT_NOTE).not.match(/rule|suspend|form|script|passkey|proof/iu);
     // The reasons the owner reads are never the ferret's: every one of them differs from the ferret's sentence.
     for (const reason of GRANT_MISS_REASONS) {

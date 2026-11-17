@@ -84,7 +84,13 @@ function formPane(runner: FakeRunner, asks = 'Deploy?') {
 
 async function boot(runner: FakeRunner): Promise<{ host: TestHost; ferret: string }> {
   const host = await testHost({
-    plugins: [real('ferrets'), real('conversation'), harnessPlugin(new FakeHarness()), runnerPlugin(runner)],
+    plugins: [
+      real('ferrets'),
+      real('mailbox'),
+      real('conversation'),
+      harnessPlugin(new FakeHarness()),
+      runnerPlugin(runner),
+    ],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
     everyDirectory: true,

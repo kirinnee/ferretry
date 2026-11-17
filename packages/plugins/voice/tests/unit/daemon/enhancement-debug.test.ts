@@ -6,17 +6,15 @@
 import { describe, it } from 'bun:test';
 import { TRACE_REDACTED } from '../../../contract/index.ts';
 import should from 'should';
-import {
-  type AuthorizedOutcome,
-  DEFAULT_CLEANUP_SETTINGS,
-  type EnhancementAuthorizer,
-  type EnhancementHttpRequest,
-  type EnhancementReport,
-  enhancementErrorView,
-  type SttEnhancementError,
-  SttEnhancementService,
-  type SttMonotonicClockPort,
-} from '../../../daemon/lib/stt/index.ts';
+import { DEFAULT_CLEANUP_SETTINGS, enhancementErrorView } from '../../../daemon/lib/stt/enhancement.ts';
+import { type EnhancementReport, SttEnhancementService } from '../../../daemon/lib/stt/enhancer.ts';
+import { SttEnhancementError } from '../../../daemon/lib/stt/errors.ts';
+import type {
+  AuthorizedOutcome,
+  EnhancementAuthorizer,
+  EnhancementHttpRequest,
+  SttMonotonicClockPort,
+} from '../../../daemon/lib/stt/ports.ts';
 
 class ScriptedAuthorizer implements EnhancementAuthorizer {
   readonly sent: EnhancementHttpRequest[] = [];

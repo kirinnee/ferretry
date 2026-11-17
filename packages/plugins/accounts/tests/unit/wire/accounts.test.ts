@@ -557,6 +557,9 @@ describe('which sign-in a card offers first (invariants 10 and 11)', () => {
     expect(signInChoiceWords({ why: 'folder' }, KEY_HERE)).toBe('Default for this folder');
     expect(signInChoiceWords({ why: 'site' }, KEY_HERE)).toBe('Default for app.clickup.com');
     expect(signInChoiceWords({ why: 'only' }, KEY_HERE)).toBe('Only account here');
+    // "Only account here" is the words of the `only` reason and of nothing else.
+    for (const why of ['ferret', 'project', 'folder', 'site'] as const)
+      expect(signInChoiceWords({ why, project: 'ferretry' }, KEY_HERE)).not.toBe('Only account here');
   });
 });
 

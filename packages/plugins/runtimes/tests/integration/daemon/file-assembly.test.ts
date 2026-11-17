@@ -3,11 +3,13 @@
  * change that lands configuration documents ALL OR NONE before the fleet, and what is still unavailable and says so.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
+import type { FleetCatalogServiceDeps } from '../../../daemon/lib/service/catalog-service.ts';
 import { configThenFleet, fileFleetCatalogDeps } from '../../../daemon/adapters/account-model-files.ts';
 import { readTextFolder } from '../../../daemon/adapters/setup-files.ts';
-import { fileAssembly, fleetHost } from '../../../daemon/host-assembly.ts';
+import { fileAssembly, fleetHost, hostClaudeAccountText } from '../../../daemon/host-assembly.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { ConfigWriteInvalid } from '../../../daemon/lib/service/ports.ts';
 import { FleetApplyAfterConfigError, type FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
@@ -47,6 +49,26 @@ describe('the host the file adapters stand on', () => {
     await expect(host.files.readText(join(world.home, 'machine.yaml'))).rejects.toThrow(
       /outside the folders Runtimes may read/u,
     );
+  });
+});
+
+describe('the person’s own Claude account file, read through the same host mount', () => {
+  it('gives the text of ~/.claude.json, and nothing for a missing file, a link or one larger than an account file', async () => {
+    const world = await fleetWorld();
+    const read = hostClaudeAccountText(kernelOver(world).kernel);
+    expect(await read()).toBeUndefined();
+
+    await writeFile(join(world.person, '.claude.json'), '{"oauthAccount":{"organizationType":"claude_max"}}');
+    expect(await read()).toBe('{"oauthAccount":{"organizationType":"claude_max"}}');
+
+    await rm(join(world.person, '.claude.json'));
+    await writeFile(join(world.person, 'elsewhere.json'), '{"oauthAccount":{"organizationType":"claude_max"}}');
+    await symlink(join(world.person, 'elsewhere.json'), join(world.person, '.claude.json'));
+    expect(await read()).toBeUndefined();
+
+    await rm(join(world.person, '.claude.json'));
+    await writeFile(join(world.person, '.claude.json'), `{"pad":"${'x'.repeat(2 * 1024 * 1024)}"}`);
+    expect(await read()).toBeUndefined();
   });
 });
 
@@ -97,6 +119,58 @@ describe('the composed catalogue and setup', () => {
 
     const machine = await services.catalog.machine(undefined);
     expect(machine).toMatchObject({ format: 'none' });
+  });
+
+  describe('c58-28b the catalogue is given the session records, so a rename re-points them', () => {
+    const rename = { from: 'work', to: 'play', fromWrapper: '/fleet/bin/work', toWrapper: '/fleet/bin/play' };
+    const depsOf = async (ferrets: object): Promise<FleetCatalogServiceDeps> => {
+      const world = await fleetWorld();
+      const needs = {
+        logins: { list: async () => ({ logins: [] }), environmentTemplates: async () => [] },
+        loginChanges: {},
+        ferrets,
+      } as never;
+      const services = fileAssembly(
+        { kernel: kernelOver(world).kernel, needs, hooks: { provider: () => 'unavailable' } },
+        new FleetPublication(),
+      );
+      // The service keeps what it was given; reading it is how this proves what the composition passed.
+      return (services.catalog as unknown as { deps: FleetCatalogServiceDeps }).deps;
+    };
+
+    it('reads the records and moves them through Ferrets’ port, a ferret state read as a session status', async () => {
+      const ferrets = new FakeFerrets();
+      ferrets.setRuntimeRecords([
+        {
+          id: ferretId('one'),
+          name: 'one',
+          harness: 'claude',
+          agent: 'work',
+          executable: '/fleet/bin/work',
+          state: 'working',
+        },
+        { id: ferretId('two'), name: 'two', harness: 'codex', agent: 'other', state: 'stopped' },
+      ]);
+
+      const deps = await depsOf(ferrets);
+
+      expect(await deps.sessionRecords?.()).toEqual([
+        { id: 'one', name: 'one', harness: 'claude', agent: 'work', executable: '/fleet/bin/work', status: 'running' },
+        { id: 'two', name: 'two', harness: 'codex', agent: 'other', status: 'stopped' },
+      ]);
+      expect(await deps.renameSessions?.(rename)).toBe(1);
+      expect(ferrets.repoints).toEqual([rename]);
+      expect((await deps.sessionRecords?.())?.map(record => record.agent)).toEqual(['play', 'other']);
+    });
+
+    it('passes none when this Ferrets offers neither member, and the card says only what it knows', async () => {
+      const deps = await depsOf({ list: async () => [] });
+      const half = await depsOf({ list: async () => [], runtimeRecords: async () => [] });
+
+      expect(deps.sessionRecords).toBeUndefined();
+      expect(deps.renameSessions).toBeUndefined();
+      expect(half.sessionRecords).toBeUndefined();
+    });
   });
 
   it('S144 R8 a path that climbs out of the setup folder is never read as one of the fleet’s own records: a sign-in under credentials/ stays unread', async () => {

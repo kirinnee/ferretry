@@ -195,13 +195,13 @@ mapping.
 
 ### 3.7 History
 
-| Rule | Statement                                                                                                                                                                                                                                                                                                                                     |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| H1   | There is **one history pool per harness per machine**, `<FY_HOME>/fleet/shared/<harness>/` (the path the old opt-in pool used), shared by **every runtime of that harness**. It is always on and not a setting.                                                                                                                               |
-| H2   | **One live writer per conversation**, enforced by a conversation lease (§9.3).                                                                                                                                                                                                                                                                |
-| H3   | History never carries identity or auth. The pooled entries stay exactly as `shared-history.ts` defines them (Claude: `projects`, `sessions`, `session-env`, `file-history`, `plans`, `tasks`, `todos`, `shell-snapshots`, `paste-cache`, `history.jsonl`; Codex: `sessions`, `archived_sessions`, `history.jsonl`, plus `CODEX_SQLITE_HOME`). |
-| H4   | So a conversation started on one runtime can be resumed on another runtime of the same harness, even on another credential.                                                                                                                                                                                                                   |
-| H5   | Continuing a Claude conversation in Codex, or the reverse, is a **separate, later design** (§12).                                                                                                                                                                                                                                             |
+| Rule | Statement                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| H1   | There is **one history pool per harness per machine**, `<FY_HOME>/state/<plugin>/history-pool/` in 5.0 (`state/claude-code/history-pool`, `state/codex/history-pool`; v4 used `fleet/shared/<harness>/`, and the migrator copies that pool here), shared by **every runtime of that harness**: the harness links each ferret home's history entries to it when the ferret starts. It is always on and not a setting. How: `docs/design/shared-history.md`. |
+| H2   | **One live writer per conversation**, enforced by a conversation lease (§9.3).                                                                                                                                                                                                                                                                                                                                                                             |
+| H3   | History never carries identity or auth. The pooled entries stay exactly as `shared-history.ts` defines them (Claude: `projects`, `sessions`, `session-env`, `file-history`, `plans`, `tasks`, `todos`, `shell-snapshots`, `paste-cache`, `history.jsonl`; Codex: `sessions`, `archived_sessions`, `history.jsonl`, plus `CODEX_SQLITE_HOME`).                                                                                                              |
+| H4   | So a conversation started on one runtime can be resumed on another runtime of the same harness, even on another credential.                                                                                                                                                                                                                                                                                                                                |
+| H5   | Continuing a Claude conversation in Codex, or the reverse, is a **separate, later design** (§12).                                                                                                                                                                                                                                                                                                                                                          |
 
 ### 3.8 Clone machine
 
@@ -1045,7 +1045,7 @@ A failure returns the reason and the command to run by hand (E2). Detection afte
 
 Pooling makes two writers on one conversation more likely, so H2 is enforced:
 
-- **Lease:** `<FY_HOME>/fleet/shared/<harness>/.leases/<conversation-id>` records the holder's pid
+- **Lease:** `<FY_HOME>/state/ferrets/conversation-leases/<harness>/<conversation-id>.lease` (v4: `fleet/shared/<harness>/.leases/`) records the holder's pid
   and process start time. A lease whose holder is dead (or whose pid now has a different start time)
   is stale and may be taken. Every read-decide-write runs under an exclusive `flock(2)` on
   `.leases/.lock`, which the kernel drops when its holder closes it or dies. The pool is the agents' to
@@ -1262,12 +1262,14 @@ Each is easy to change later.
   are created **with the agent flag on**: running agents is Ferretry's purpose, and the person's own
   `claude` stays their own CLI.
 - **O3 — `--disallowed-tools=AskUserQuestion`** belongs to the Claude fixed layer (agent runtimes
-  only), but is **per ferret**: an unattended (`auto`) ferret has nobody to answer, so the wrapper
-  withholds the tool; an **interactive** ferret has the owner and keeps it, and the PWA shows its
-  question as an answerable card. The daemon writes `FY_SESSION_MODE` (`interactive`|`auto`) into the
-  ferret's launch environment at creation and the generated wrapper prepends the flag at exec time
-  unless it is `interactive` (a launch with no mode is unattended). Codex gates `request_user_input`
-  behind `default_mode_request_user_input`, so the same line passes `--enable` for an interactive
+  only). **Superseded by owner !A527: it is now withheld from EVERY ferret, an interactive one included**
+  (no ferret stops on a form only the pane shows; it asks through the agenda), and the generated wrapper always
+  prepends the flag. A per-harness `questionTool: true` (docs/launch-settings.md) gives an interactive ferret the tool
+  back on the harness launch path, where the PWA shows its question as an answerable card. The original text follows.
+  The daemon writes `FY_SESSION_MODE` (`interactive`|`auto`) into the
+  ferret's launch environment at creation and the generated wrapper prepended the flag at exec time
+  unless it was `interactive` (a launch with no mode is unattended). Codex gates `request_user_input`
+  behind `default_mode_request_user_input`, so the same line passed `--enable` for an interactive
   ferret only. **Codex 0.164 exits on that flag unless `--no-daemon` is also passed** ("Cannot use the shared
   background server: This session requires default_mode_request_user_input"); 0.145 rejects `--no-daemon`, so
   the wrapper has to add it only where it is accepted.

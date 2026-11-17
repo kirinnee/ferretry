@@ -4,9 +4,9 @@ import { refuse } from './errors.ts';
 /** Who a board standing is, in words. The daemon sends the standing names; a person reads these. */
 const STANDING_WORDS: Readonly<Record<string, string>> = {
   'owner-human': 'the owner (a person, from the app or the CLI outside a ferret)',
-  owner: "the card's owner ferret",
-  ancestor: "a ferret above the card's owner (its lead)",
-  'assignee-lead': "a ferret above the card's assignee (for drop and reassign only)",
+  owner: "the task's owner ferret",
+  ancestor: "a ferret above the task's owner (its lead)",
+  'assignee-lead': "a ferret above the task's assignee (for drop and reassign only)",
   assignee: 'the ferret it is assigned to',
   daemon: 'the daemon itself',
   reader: 'anyone who can read the board',

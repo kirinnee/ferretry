@@ -1,4 +1,4 @@
-import type { PackRow, PackTable } from '../../contract/index.ts';
+import { type PackRow, type PackTable, taskOfRow } from '../../contract/index.ts';
 import type { IPackGateway } from './gateway.ts';
 
 /** Paints a cell amber; the identity when the terminal is not a person's. */
@@ -6,7 +6,7 @@ export interface ICellColour {
   amber(cell: string): string;
 }
 
-const HEADER: readonly string[] = ['FERRET', 'MODEL', 'STATE', 'CARD', 'PR', 'LAST'];
+const HEADER: readonly string[] = ['FERRET', 'MODEL', 'STATE', 'TASK', 'PR', 'LAST'];
 const STATE_COLUMN = 2;
 
 /** `3m`, `2h`, `5d`: the coarsest whole unit, `now` under a minute. */
@@ -22,8 +22,10 @@ export function sinceLabel(nowMs: number, instant: string): string {
 const stateCell = (row: PackRow, nowMs: number): string =>
   row.state === 'ended' && row.endedAt !== undefined ? `ended ${sinceLabel(nowMs, row.endedAt)}` : row.state;
 
-const cardCell = (row: PackRow): string =>
-  row.card === undefined ? '-' : [row.card.ref, row.card.lane].filter(part => part !== undefined).join(' ');
+const cardCell = (row: PackRow): string => {
+  const task = taskOfRow(row);
+  return task === undefined ? '-' : [task.ref, task.lane].filter(part => part !== undefined).join(' ');
+};
 
 /** `#42 CI passing` for an open PR, `#42 merged` once CI no longer matters, `-` without one. */
 export function prCell(pr: PackRow['pr']): string {

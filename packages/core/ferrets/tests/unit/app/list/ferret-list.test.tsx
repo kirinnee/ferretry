@@ -49,6 +49,8 @@ let mounted: Mounted | undefined;
 beforeEach(() => {
   // The kind a device remembers is part of the app's controls, which live in the browser's own storage.
   localStorage.clear();
+  // The controls are one store per page, so what a test set must be put back for the next.
+  deviceControls().setDeviceControls({ showStopped: false, density: null });
 });
 afterEach(async () => {
   await mounted?.unmount();
@@ -145,6 +147,18 @@ describe('the ferret list as a column', () => {
 
     await click(tick, 'Show stopped');
     expect(ids(root)).not.toContain('old-1');
+  });
+
+  it('keeps "Show stopped" on this device: it survives the list being drawn again, and starts off', async () => {
+    const stopped = ferretSummary('old-1', { name: 'ora', title: 'Finished work', state: 'stopped', mode: 'auto' });
+    const root = await draw(listDaemon([...FERRETS, stopped]));
+    expect(deviceControls().snapshot().device.showStopped).toBe(false);
+    await click(root.querySelector('[data-sbar-show-stopped] input'), 'Show stopped');
+    expect(deviceControls().snapshot().device.showStopped).toBe(true);
+    await mounted?.unmount();
+    const again = await draw(listDaemon([...FERRETS, stopped]), '/d/alpha/ferrets/hadi-1/chat', 'keep');
+    expect(ids(again)).toContain('old-1');
+    expect(again.querySelector<HTMLInputElement>('[data-sbar-show-stopped] input')?.checked).toBe(true);
   });
 
   it('S-0405 keeps the open ferret listed even when it has stopped', async () => {
@@ -290,5 +304,80 @@ describe('the ferret list as a column', () => {
     await click(root.querySelector('[data-sbar-session="nameless"]'), 'a ferret row');
     expect(root.querySelector('[data-sbar-session="nameless"]')?.getAttribute('aria-current')).toBe('page');
     expect(daemon.reads).toBe(1);
+  });
+});
+
+describe('sub-ferrets, the pin button and density', () => {
+  const lead = ferretSummary('lead-1', { name: 'lia', title: 'Lead task', folder: '/work/tree', mode: 'auto' });
+  const kid = ferretSummary('kid-1', {
+    name: 'kai',
+    title: 'Kid task',
+    folder: '/work/tree',
+    mode: 'auto',
+    parent: 'lead-1' as never,
+  });
+
+  it('draws a sub-ferret under its parent, collapsed until the chevron is pressed', async () => {
+    const root = await draw(listDaemon([lead, kid]), '/d/alpha/ferrets');
+    expect(ids(root)).toEqual(['lead-1']);
+    const toggle = must(root.querySelector('[data-sbar-branch-toggle]'), 'the chevron');
+    expect(toggle.textContent).toBe('1');
+    // The group still counts both: a child is a ferret like any other.
+    expect(root.querySelector('.fy-sbar__group .fy-sbar__count')?.textContent).toBe('2');
+    await click(toggle, 'the chevron');
+    expect(ids(root)).toEqual(['lead-1', 'kid-1']);
+    expect(
+      root.querySelector('[data-sbar-row="lead-1"] .fy-sbar__children [data-sbar-session="kid-1"]'),
+    ).not.toBeNull();
+    await click(root.querySelector('[data-sbar-branch-toggle]'), 'the chevron');
+    expect(ids(root)).toEqual(['lead-1']);
+  });
+
+  it('opens the branch by itself when the open ferret is a sub-ferret', async () => {
+    const root = await draw(listDaemon([lead, kid]), '/d/alpha/ferrets/kid-1/chat');
+    expect(ids(root)).toEqual(['lead-1', 'kid-1']);
+    expect(root.querySelector('[data-sbar-session="kid-1"]')?.getAttribute('aria-current')).toBe('page');
+  });
+
+  it('pins from the row button through the daemon, and says so when the daemon refuses', async () => {
+    const daemon = listDaemon([lead]);
+    const asked: string[] = [];
+    let refuse = false;
+    const client = {
+      ...daemon.client,
+      call: (async (route: string, ...rest: unknown[]) => {
+        if (route.endsWith('/pin') || route.endsWith('/unpin')) {
+          asked.push(route);
+          if (refuse) throw new Error('only a person may pin');
+          return undefined;
+        }
+        return await (daemon.client.call as (route: string, ...rest: unknown[]) => Promise<unknown>)(route, ...rest);
+      }) as typeof daemon.client.call,
+    };
+    window.history.pushState(null, '', '/d/alpha/ferrets');
+    deviceControls().setDeviceControls({ sessionsMode: 'all' });
+    mounted = await mount(
+      <RouterProvider screens={SCREENS}>
+        <FerretList client={client} />
+      </RouterProvider>,
+    );
+    await settle();
+    const root = mounted.container;
+    await click(root.querySelector('[data-sbar-pin]'), 'the pin button');
+    expect(asked).toEqual(['POST /v1/ferrets/:ferretId/pin']);
+    expect(daemon.reads).toBeGreaterThan(1);
+
+    refuse = true;
+    await click(root.querySelector('[data-sbar-pin]'), 'the pin button');
+    expect(root.querySelector('[data-sbar-pin-failure]')?.textContent).toBe('only a person may pin');
+  });
+
+  it('marks the list with the device density, full until one was chosen', async () => {
+    const root = await draw(listDaemon([lead]), '/d/alpha/ferrets');
+    expect(root.querySelector('[data-ferret-list]')?.getAttribute('data-sbar-density')).toBe('full');
+    await mounted?.unmount();
+    deviceControls().setDeviceControls({ density: 'compact' });
+    const compact = await draw(listDaemon([lead]), '/d/alpha/ferrets', 'keep');
+    expect(compact.querySelector('[data-ferret-list]')?.getAttribute('data-sbar-density')).toBe('compact');
   });
 });

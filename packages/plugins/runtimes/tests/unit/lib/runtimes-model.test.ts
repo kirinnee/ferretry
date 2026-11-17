@@ -48,6 +48,12 @@ describe('the model Runtimes assembles from its own files', () => {
     expect(assembled.sources).toBe(4);
   });
 
+  it('reports the agent permissions ferrets really run on a fresh machine: skip, never auto', () => {
+    const assembled = assembleRuntimesModel(files());
+
+    expect(assembled.model.machine.agentPermissions).toBe('skip');
+  });
+
   it('reads runtimes.yaml as the machine default runtime and the auto-resume switch', () => {
     const assembled = assembleRuntimesModel(
       files({ settings: { defaultRuntime: 'claude-default', autoResume: false } }),
@@ -252,7 +258,7 @@ describe('C1 the parts of the model no file of Runtimes holds', () => {
 
   it('names every machine setting a change moves except the two runtimes.yaml holds', () => {
     const next = withMachine({
-      agentPermissions: 'skip',
+      agentPermissions: 'auto',
       publicUsageFeed: true,
       browserMode: 'window',
       defaultRuntime: 'claude-default',

@@ -47,8 +47,11 @@ import {
   questionAnswerApi,
 } from '../questions/question-form.tsx';
 import { ChatSearch, type ChatSearchPort } from '../search/chat-search.tsx';
-import { displayCallsign } from '../transcript/callsign.ts';
-import { sessionTurn, UNREAD_PANE } from '../transcript/session-activity.ts';
+import { displayCallsign } from '@ferretry/core-ferrets/contract';
+import { usePaneActivity } from '../transcript/live-activity.tsx';
+import { paneFrameReader } from '../transcript/pane-frame-reader.ts';
+import { sessionTurn } from '../transcript/session-activity.ts';
+import { ChatTurnContext, useChatTurnReading } from './chat-turn-context.ts';
 import { aboveComposerProps } from './above-composer-props.ts';
 import { readHandoff } from './chat-reads.ts';
 import type { LedgerSendRecord } from './send-ledger.ts';
@@ -283,14 +286,26 @@ export function SessionChatPage({
     [client, askId],
   );
   // LIVE is not WORKING. `running` means the agent's terminal is up; whose turn it is comes from the daemon's turn
-  // watcher (`state.turnState`, read through `session-activity.ts`). The pane is the Terminals plugin's to read, so the
-  // chat reads none (`UNREAD_PANE`) and a ferret with no `turnState` falls back to its status mark.
+  // watcher (`state.turnState`, read through `session-activity.ts`). The pane is Terminals' to read, and the line says
+  // what the harness itself says on it, so the page reads one visible frame through Terminals' snapshot route while the
+  // ferret works. A page drawn under an agenda item reads none: viewing an item must not open a terminal.
   const working = session.state.turnState === 'working';
+  const readPane = useMemo(
+    () => (embedded ? undefined : paneFrameReader(client, ferretId)),
+    [client, ferretId, embedded],
+  );
+  const pane = usePaneActivity(readPane, working);
   // A ferret the chat could not read claims nothing: no spinner over a turn nobody saw start.
   const statusLive =
     !isUnread(session) && session.state.turnState === undefined && statusMark(session).klass === 'active';
   const liveSample = useLiveActivity(liveActivity);
-  const turn = sessionTurn(session, UNREAD_PANE);
+  const turn = sessionTurn(session, pane);
+  const compacting = liveSample?.compaction?.phase === 'running';
+  const outerTurn = useChatTurnReading();
+  const toolbarTurn = useMemo(
+    () => (outerTurn === null ? null : { ...outerTurn, compacting }),
+    [outerTurn, compacting],
+  );
   const busy = turn === 'working' || (turn === null && statusLive);
   const question = TERMINAL_STATUSES.has(session.state.status) ? null : (asked ?? null);
   const awaitingAnswer = question !== null || session.state.status === 'awaiting_question';
@@ -355,7 +370,12 @@ export function SessionChatPage({
 
   const header = (
     <>
-      {embedded ? null : <PanelSlot daemon={daemonId} slot="ferret.toolbar" subject={ferretId} />}
+      {embedded ? null : (
+        // The toolbar's turn word is told of a compaction the page's live sample says is running.
+        <ChatTurnContext.Provider value={toolbarTurn}>
+          <PanelSlot daemon={daemonId} slot="ferret.toolbar" subject={ferretId} />
+        </ChatTurnContext.Provider>
+      )}
       {liveSample?.compaction?.phase === 'running' || liveStream !== undefined ? (
         <div className="flex items-center gap-2 px-3" data-chat-status="">
           {liveSample?.compaction?.phase === 'running' ? <CompactionChip compaction={liveSample.compaction} /> : null}
@@ -383,7 +403,7 @@ export function SessionChatPage({
       <div className="fy-chat-log">
         <div className="fy-chat-log__messages" data-chat-messages="" ref={messagesRef}>
           <Transcript
-            activity={null}
+            activity={pane.activity}
             activityFallback={session.state.activity ?? null}
             live={liveSample}
             turnStartedAt={working ? (session.state.turnStateAt ?? null) : null}

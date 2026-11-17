@@ -9,9 +9,10 @@ import type {
 import { type BackgroundViewProps, provideToShell, type ShellProvides } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
-import { CONVERSATION_ADD_TO_CHAT_HOOK } from '../contract/app-hooks.ts';
+import { CONVERSATION_ADD_TO_CHAT_HOOK, CONVERSATION_DEVICE_OUTBOX_HOOK } from '../contract/app-hooks.ts';
 import { addToChatFor } from './composer/add-to-chat.ts';
 import { clearAttachmentCaches } from './composer/attachment-blob-cache.ts';
+import { deviceOutboxFor } from './composer/device-outbox-hook.ts';
 import { documentDraftStore, documentRestoreStore } from './composer/drafts.ts';
 import { lazyComponent } from './lazy.ts';
 import { conversationPlaces } from './command-bar.ts';
@@ -60,7 +61,7 @@ export default provideToShell(
         );
         return surfaces;
       };
-      const screen = (id: 'chat' | 'links') =>
+      const screen = (id: 'chat' | 'links' | 'queues') =>
         lazyComponent<ScreenProps>(async () => (await surfacesOf()).screens[id] as AppComponent<ScreenProps>);
       const panel = (
         id:
@@ -71,10 +72,11 @@ export default provideToShell(
           | 'turn'
           | 'files-search'
           | 'interrupt-row'
+          | 'stuck-messages-row'
           | 'agenda-conversation',
       ) => lazyComponent<PanelProps>(async () => (await surfacesOf()).panels[id] as AppComponent<PanelProps>);
       return {
-        screens: { chat: screen('chat'), links: screen('links') },
+        screens: { chat: screen('chat'), links: screen('links'), queues: screen('queues') },
         panels: {
           attachments: panel('attachments'),
           queue: panel('queue'),
@@ -85,6 +87,7 @@ export default provideToShell(
           'message-marks': notDrawnPerDaemon,
           'files-search': panel('files-search'),
           'interrupt-row': panel('interrupt-row'),
+          'stuck-messages-row': panel('stuck-messages-row'),
           'agenda-conversation': panel('agenda-conversation'),
         },
         settings: {
@@ -104,7 +107,11 @@ export default provideToShell(
   {
     commands: context => [conversationPlaces(context), workSearchCommandSource(context)],
     // S15: the shared "Add to chat" any surface calls (Board's cards today), over this plugin's own daemon.
-    hooks: { [CONVERSATION_ADD_TO_CHAT_HOOK]: ({ daemon }) => addToChatFor(daemon) },
+    hooks: {
+      [CONVERSATION_ADD_TO_CHAT_HOOK]: ({ daemon }) => addToChatFor(daemon),
+      // This device's unsent words for a ferret, read only (Agenda's History draws "Saved on this device" from it).
+      [CONVERSATION_DEVICE_OUTBOX_HOOK]: ({ daemon }) => deviceOutboxFor(daemon),
+    },
     // S12: a later pairing that mints the same daemon id must not read this machine's unsent words back,
     forget: (daemon: string) => {
       documentDraftStore.clearDaemon(daemon);

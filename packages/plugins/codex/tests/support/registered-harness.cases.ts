@@ -52,6 +52,20 @@ export function registeredHarnessCases(): void {
         ],
       });
 
+    test('(no guarantees row) the registered half listens for a ferret that stopped and a login that was revoked, and a ferret with no Codex home says nothing', async () => {
+      const box = fixture();
+      const { subscribers } = box.buildHalf() as unknown as {
+        subscribers: Record<string, (payload: unknown) => Promise<void>>;
+      };
+      expect(Object.keys(subscribers).sort()).toEqual(['ferrets.changed', 'logins.changed']);
+
+      await subscribers['ferrets.changed']?.({ ferret: 'f1', generation: 1, state: 'stopped' });
+      await subscribers['ferrets.changed']?.({ ferret: 'f1', generation: 2, gone: true });
+      await subscribers['logins.changed']?.({ loginId: 'work', change: 'removed' });
+
+      expect(box.warnings).toEqual([]);
+    });
+
     test('(no guarantees row) the held fast-start catalog is read by ONE job on the worker lane, once after start; there is no timer', () => {
       const box = fixture();
       box.buildHalf();
@@ -247,6 +261,32 @@ export function registeredHarnessCases(): void {
       expect(box.rootsUsed.every(root => ['agent-homes', 'harness-history'].includes(root.name))).toBe(true);
       expect(box.reads.every(path => path.endsWith('.jsonl') || path.endsWith('rollout-binding.json'))).toBe(true);
       expect((await box.build().transcript.read(spec.ferret)).length).toBe(entries.length);
+    });
+
+    test('historySources offers the owner’s ~/.codex and each ferret home as read-only trees', async () => {
+      const box = fixture();
+      const harness = box.build();
+      const spec = box.spec();
+      await harness.start(spec, box.runner, ENV);
+      box.files.set(
+        '/fixture-owner/.codex/sessions/2026/10/20/rollout-import.jsonl',
+        header('import-native', '/elsewhere'),
+      );
+      box.files.set(`${spec.home}/sessions/2026/10/20/rollout-mine.jsonl`, header('mine', spec.home));
+
+      const sources = await harness.historySources?.();
+
+      const owner = sources?.find(source => source.kind === 'computer');
+      const mine = sources?.find(source => source.kind === 'ferret-home' && source.label === spec.ferret);
+      expect(owner?.label).toBe('owner');
+      expect((await owner?.files.entries('sessions/2026/10/20'))?.map(entry => entry.name)).toEqual([
+        'rollout-import.jsonl',
+      ]);
+      expect((await mine?.files.entries('sessions/2026/10/20'))?.map(entry => entry.name)).toEqual([
+        'rollout-mine.jsonl',
+      ]);
+      expect(Object.keys(owner?.files ?? {}).sort()).toEqual(['entries', 'read', 'stat']);
+      expect(box.rootsUsed.every(root => ['agent-homes', 'harness-history'].includes(root.name))).toBe(true);
     });
 
     test('U5 a newest record larger than the tail window reads as a turn at work, never as no records', async () => {

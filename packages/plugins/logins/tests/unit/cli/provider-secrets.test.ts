@@ -463,6 +463,23 @@ describe('login add --from-env', () => {
     should(JSON.stringify(made.gateway.calls)).not.containEql(ANTHROPIC);
   });
 
+  it('should tell a provider the shell names only through a PREFIX_* family, and read nothing outside the families', async () => {
+    // Arrange — no exact name a preset declares is set: only ZAI_REGION, which only the `ZAI_*` detect family names.
+    const familyOnly = { ...zai, detect: { hosts: ['api.z.ai'], variables: ['ZAI_*'], keyPrefixes: [] } };
+    const made = world(
+      { shell: { ZAI_REGION: 'eu', GITHUB_TOKEN: 'SENTINEL-other' } },
+      { presets: () => ({ presets: [familyOnly] }) as never },
+    );
+
+    // Act
+    await loginAdd(made.deps, inv([], { 'from-env': true, yes: true, 'dry-run': true }));
+
+    // Assert
+    should(made.out.text('warn')).containEql('Detected Z.ai GLM from ZAI_REGION.');
+    should(PRESET_ENV_NAMES).containEql('ZAI_*').and.containEql('ZHIPUAI_*');
+    should(everythingSeen(made)).not.containEql('SENTINEL-other');
+  });
+
   it('should read only the variables the presets declare, never the rest of the shell', async () => {
     const made = world({ shell: { ...shell, GITHUB_TOKEN: 'SENTINEL-other', ANTHROPIC_API_KEY: '' } });
     const asked: (readonly string[])[] = [];

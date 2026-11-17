@@ -159,7 +159,7 @@ export const HarnessUpdateUnverifiedBodySchema = z.looseObject({
 
 // ─── config (config/harness-codex.yaml, codex/settings/*.yaml, codex/hooks/*.yaml) ──────────────
 
-/** How the fixed layer sets the harness's permission mode: `auto` asks before anything risky, `skip` never asks. */
+/** How the fixed layer sets the harness's permission mode: `skip` never asks (the default: owner decision !A525), `auto` asks before anything risky. */
 export const PermissionModeSchema = z.enum(['auto', 'skip']);
 
 /** A path an operator writes: absolute or `~`-relative (docs/harness-paths.md). Never a credential. */
@@ -175,14 +175,26 @@ export const HarnessConfigSchema = z.strictObject({
   binary: HarnessPathSchema.optional(),
   /** Directories to look in, in order, on top of what the daemon inherited. */
   searchPaths: z.array(HarnessPathSchema).default([]),
-  permissionMode: PermissionModeSchema.default('auto'),
+  permissionMode: PermissionModeSchema.default('skip'),
+  /**
+   * Opt a harness's question tool back in (owner !A527: off by default, so no ferret stops on a prompt only the pane
+   * shows). `true` gives an INTERACTIVE ferret the tool again; an auto ferret never has it. It makes ferrets block
+   * rather than act, so it is never held.
+   */
+  questionTool: z.boolean().default(false),
 });
 export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 
 /** A settings component: the harness's own settings document, as data. Values never hold a raw secret (`${secret:NAME}` only). */
 export const SettingsItemSchema = z.strictObject({
   description: z.string().optional(),
-  settings: z.record(z.string(), z.unknown()),
+  settings: z.record(z.string(), z.unknown()).default({}),
+  /**
+   * Launch flags: argv words in order, ANY flag (no name allowlist, owner decision !A525), each passed to Codex as its own
+   * word, never through a shell and never re-split. The kernel's write rule refuses a flag value that looks like a
+   * secret. Which flags the launch keeps for itself is `./launch-flags.ts`.
+   */
+  flags: z.array(z.string().min(1)).optional(),
 });
 export type SettingsItem = z.infer<typeof SettingsItemSchema>;
 

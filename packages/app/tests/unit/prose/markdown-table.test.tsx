@@ -45,7 +45,7 @@ describe('MarkdownTable', () => {
     should(tables().map(table => table.dataset.mdTableView)).eql(['cards', 'cards']);
     const group = must(view.container.querySelector('fieldset'), 'the view switch');
     should(group.getAttribute('aria-label')).equal('Table view');
-    should(button(group, 'Cards').getAttribute('aria-pressed')).equal('true');
+    should(button(group, 'Stacked').getAttribute('aria-pressed')).equal('true');
     should(group.querySelector('[data-md-table-full]')).be.null();
 
     await interact(() => button(group, 'Table').click());
@@ -65,7 +65,7 @@ describe('MarkdownTable', () => {
     await interact(() => must(sheet.querySelector<HTMLButtonElement>('[data-sheet-swipe]'), 'close').click());
     should(full.getAttribute('aria-expanded')).equal('false');
 
-    await interact(() => button(group, 'Cards').click());
+    await interact(() => button(group, 'Stacked').click());
     should(tables().map(table => table.dataset.mdTableView)).eql(['cards', 'cards']);
     await view.unmount();
   });

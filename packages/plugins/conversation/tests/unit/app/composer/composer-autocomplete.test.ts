@@ -40,7 +40,7 @@ const candidate = (
 describe('COMPOSER_REFERENCE_TIERS', () => {
   test('should list the four families in frequency order, sigil run matching tier', () => {
     // Assert — kept as data so provider routing, UI teaching and tests cannot drift.
-    should(COMPOSER_REFERENCE_TIERS.map(item => item.label)).deepEqual(['Files', 'Agents', 'Asks', 'Cards']);
+    should(COMPOSER_REFERENCE_TIERS.map(item => item.label)).deepEqual(['Files', 'Agents', 'Asks', 'Tasks']);
     should(COMPOSER_REFERENCE_TIERS.every(item => item.trigger === '@'.repeat(item.tier))).equal(true);
   });
 
@@ -56,7 +56,7 @@ describe('COMPOSER_REFERENCE_TIERS', () => {
   test('should name each family the direct sigil that opens it, files excepted', () => {
     // Assert — one table, read from both ends: the ladder teaches it and the
     // direct providers route by it.
-    should(COMPOSER_REFERENCE_TIERS.map(item => item.direct)).deepEqual([undefined, ':', '!', '&']);
+    should(COMPOSER_REFERENCE_TIERS.map(item => item.direct)).deepEqual([undefined, ':', '^', '&']);
   });
 });
 
@@ -233,7 +233,7 @@ describe('detectComposerTrigger for the direct family sigils', () => {
     { value: 'ask :zelda', trigger: ':', query: 'zelda', start: 4 },
     { value: 'track &F1', trigger: '&', query: 'F1', start: 6 },
     { value: '&F12', trigger: '&', query: 'F12', start: 0 },
-    { value: 'resolve !A3', trigger: '!', query: 'A3', start: 8 },
+    { value: 'resolve ^A3', trigger: '^', query: 'A3', start: 8 },
     { value: 'run $sum', trigger: '$', query: 'sum', start: 4 },
     { value: '(:zel', trigger: ':', query: 'zel', start: 1 },
     { value: 'line\n&B7', trigger: '&', query: 'B7', start: 5 },
@@ -261,8 +261,9 @@ describe('detectComposerTrigger for the direct family sigils', () => {
     should(detect('$HOME')).be.null();
     should(detect('echo $PATH')).be.null();
     should(detect('&x1')).be.null();
-    should(detect('!B3')).be.null();
-    should(detect('!a3')).be.null();
+    should(detect('^B3')).be.null();
+    should(detect('^a3')).be.null();
+    should(detect('!A3')).be.null(); // `!` is shell mode in the agent composers: a picker never opens on it
     should(detect(':1zelda')).be.null();
   });
 
@@ -272,7 +273,7 @@ describe('detectComposerTrigger for the direct family sigils', () => {
     should(detect('a:b')).be.null();
     should(detect('R&D3')).be.null();
     should(detect('US$5')).be.null();
-    should(detect('done!A3')).be.null();
+    should(detect('done^A3')).be.null();
   });
 
   test('should answer about the sigil nearest the caret', () => {
@@ -292,7 +293,7 @@ describe('detectComposerTrigger for the direct family sigils', () => {
     const cases: readonly [string, string][] = [
       [':zel', ':zelda'],
       ['&F1', '&F12'],
-      ['!A', '!A3'],
+      ['^A', '^A3'],
       ['$sum', '/summary'],
     ];
 
@@ -314,7 +315,7 @@ describe('detectComposerTrigger for the direct family sigils', () => {
 
   test('should terminate rather than rescan a rejected leading sigil', () => {
     // Act & Assert — the `lastIndexOf(-1)` freeze, once per new sigil.
-    for (const value of [':a b', '&F1 x', '!A3 x', '$a b', ':: ', '&& ']) should(detect(value)).be.null();
+    for (const value of [':a b', '&F1 x', '^A3 x', '$a b', ':: ', '&& ']) should(detect(value)).be.null();
   });
 });
 
@@ -361,13 +362,14 @@ describe('detectComposerTrigger refusals', () => {
     should(detectComposerTrigger('@src', { start: -3, end: -3 })).be.null();
   });
 
-  test('should read ! as Attention only, never as the shell mode it once was', () => {
-    // Act & Assert — `!A3` opens the Attention family; a command line does not
+  test('should read ^ as Attention, and ! as nothing: it is the shell mode of the agent composers', () => {
+    // Act & Assert — `^A3` opens the Attention family; a command line does not
     // open anything, and there is no dormant branch that could run one.
     should(detect('!')).be.null();
+    should(detect('!A3')).be.null();
     should(detect('!git status')).be.null();
     should(detect('!ls')).be.null();
-    should(detect('!A3')).match({ trigger: '!', query: 'A3' });
+    should(detect('^A3')).match({ trigger: '^', query: 'A3' });
   });
 });
 
@@ -426,12 +428,12 @@ describe('replaceComposerTrigger', () => {
   test('should insert the canonical reference syntax for the tasks and agenda tiers', () => {
     // Act
     const task = replaceComposerTrigger('track @@@@F1', detected('track @@@@F1'), '&F12');
-    const agenda = replaceComposerTrigger('resolve @@@A', detected('resolve @@@A'), '!A3');
+    const agenda = replaceComposerTrigger('resolve @@@A', detected('resolve @@@A'), '^A3');
 
     // Assert — the browse trigger is `@`; what lands in the draft is the grammar
     // `findReferences` parses.
     should(task).deepEqual({ value: 'track &F12 ', selection: { start: 11, end: 11 } });
-    should(agenda).deepEqual({ value: 'resolve !A3 ', selection: { start: 12, end: 12 } });
+    should(agenda).deepEqual({ value: 'resolve ^A3 ', selection: { start: 12, end: 12 } });
   });
 });
 
@@ -456,7 +458,7 @@ describe('composerSuggestionsAllow', () => {
     });
     for (const value of ['@sr', '@@ott', '@@@A3', '$sum', '/sum', '%term'])
       should(allow(DEFAULT_COMPOSER_SUGGESTIONS, value)).equal(true);
-    for (const value of [':zel', '!A3']) should(allow(DEFAULT_COMPOSER_SUGGESTIONS, value)).equal(false);
+    for (const value of [':zel', '^A3']) should(allow(DEFAULT_COMPOSER_SUGGESTIONS, value)).equal(false);
   });
 
   test('should map each choice of keys onto the switches', () => {
@@ -471,7 +473,7 @@ describe('composerSuggestionsAllow', () => {
     should(allow(symbols, '@@ott')).equal(false);
     should(allow(symbols, ':zel')).equal(true);
     const both = composerSuggestionSwitches('both', true);
-    for (const value of ['@src', '@@ott', ':zel', '!A3']) should(allow(both, value)).equal(true);
+    for (const value of ['@src', '@@ott', ':zel', '^A3']) should(allow(both, value)).equal(true);
   });
 
   test('should suppress the whole @ ladder, bare @ included', () => {
@@ -485,7 +487,7 @@ describe('composerSuggestionsAllow', () => {
   test('should suppress the three direct sigils together and nothing else', () => {
     // Act & Assert
     const suggestions = off({ directReferenceSuggestions: false });
-    for (const value of [':zel', '&F1', '!A3']) should(allow(suggestions, value)).equal(false);
+    for (const value of [':zel', '&F1', '^A3']) should(allow(suggestions, value)).equal(false);
     for (const value of ['$sum', '/sum', '@@ott', '%term']) should(allow(suggestions, value)).equal(true);
   });
 

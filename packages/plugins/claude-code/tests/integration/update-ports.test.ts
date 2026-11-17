@@ -45,6 +45,8 @@ const spawnWith = (env: Record<string, string> = {}, path = `${folder}:${process
 const config = (document: Partial<HarnessConfig>): HarnessConfig => ({
   searchPaths: [],
   permissionMode: 'auto',
+  questionTool: false,
+  dangerousRmWaiver: false,
   ...document,
 });
 

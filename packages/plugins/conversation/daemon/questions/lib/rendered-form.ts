@@ -1,4 +1,5 @@
-import type { PendingQuestion, StructuredQuestionAnswer } from '../../seams/protocol.ts';
+import type { PendingQuestion } from '@ferretry/core-mailbox/contract';
+import type { StructuredQuestionAnswer } from '../../seams/protocol.ts';
 
 /**
  * Reading a harness's native question form off a captured pane.
@@ -750,4 +751,61 @@ export function numberedFormShown(screen: QuestionScreen): boolean {
 export function formHeaderShows(screen: QuestionScreen, question: RenderedQuestion): boolean {
   const block = lastBlock(screen);
   return block !== undefined && headerIs(block.form, question);
+}
+
+/** The question a live Claude form asks, read off the screen alone (no hook payload, no transcript). */
+export interface OpenForm {
+  readonly header?: string;
+  readonly question: string;
+  readonly options: readonly { readonly label: string; readonly description?: string }[];
+  readonly multiple: boolean;
+}
+
+/** Claude's own footer under a question form: a permission prompt or a numbered list in prose never draws both hints. */
+const QUESTION_FOOTER = [/enter to select/iu, /esc to cancel/iu] as const;
+/** How far below its last row a form's footer may sit (a `Chat about this` row, a rule and a blank line come first). */
+const FOOTER_REACH = 12;
+
+/**
+ * The structured question Claude is asking on this screen, or `undefined` when the screen shows none.
+ *
+ * POSITIVE EVIDENCE ONLY, so an ordinary numbered list (a plan, a changelog, an answer to a question) is never read as
+ * a question: the form's own structural top (a rule, then Claude's tab strip or its `☐ Header` chip), exactly one
+ * selection cursor on the rows, and Claude's own footer (`Enter to select`, `Esc to cancel`) below them. A permission
+ * prompt or dialog is the runner's reader's to claim first, not this one's. The free-form row is Claude's own and is
+ * not an option. A tabbed form of several questions shows one tab at a time, so only the visible question is read;
+ * its header is left out because the strip does not say which tab is open.
+ */
+export function readOpenForm(screen: QuestionScreen): OpenForm | undefined {
+  const block = lastBlock(screen);
+  const last = block?.rows.at(-1);
+  if (block === undefined || block.form === undefined || last === undefined || formFrame(screen)?.cursors !== 1)
+    return undefined;
+  const below = screen.lines.slice(last.line + 1, last.line + 1 + FOOTER_REACH).join('\n');
+  if (!QUESTION_FOOTER.every(hint => hint.test(below))) return undefined;
+  const form = block.form.filter(line => line.trim() !== '');
+  const first = form[0] ?? '';
+  const strip = stripTabs(first);
+  const chip = strip === undefined && !GUTTER.test(first) ? TAB.exec(first.trim())?.groups : undefined;
+  if (strip === undefined && chip === undefined) return undefined;
+  const tab = strip?.length === 2 ? TAB.exec(strip[0] ?? '')?.groups : chip;
+  const question = compact(
+    form
+      .slice(1)
+      .map(line => line.replace(GUTTER, ''))
+      .join(' '),
+  );
+  const options = block.rows
+    .filter(row => !FREE_FORM_ROWS.some(free => free.pattern.test(row.text)))
+    .map(row => {
+      const description = compact(row.continuation.join(' '));
+      return { label: row.text, ...(description === '' ? {} : { description }) };
+    });
+  if (question === '' || options.length === 0) return undefined;
+  return {
+    ...(tab?.label === undefined ? {} : { header: tab.label }),
+    question,
+    options,
+    multiple: block.rows.some(row => row.checked !== undefined),
+  };
 }
