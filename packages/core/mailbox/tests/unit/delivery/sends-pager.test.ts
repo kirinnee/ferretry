@@ -212,6 +212,39 @@ describe('the page of sends cut from the end of the ledger', () => {
     should(ledger.lists).be.above(2);
   });
 
+  it('should read the whole ledger for a row the end of the log does not hold', async () => {
+    // Arrange — an end that answers nothing, as a window past the cap would.
+    const ledger = ledgerOf(120);
+    const empty = async (): Promise<SendLedgerTail> => ({ records: [], size: 10 });
+    const pager = new SendsPager(
+      Object.assign(Object.create(ledger) as FakeLedger, {
+        recent: async (id: string, maxBytes: number) => (maxBytes === 1 ? await ledger.recent(id, 1) : await empty()),
+      }),
+    );
+
+    // Act + Assert
+    should(await pager.page(A, { limit: 25 })).eql(await wholePage(ledger, A, { limit: 25 }));
+  });
+
+  it('should keep the index of the sessions looked at last, and read a dropped one again', async () => {
+    // Arrange — ten sessions, one more than the eight kept.
+    const ledger = new FakeLedger();
+    const ids = Array.from({ length: 10 }, (_, n) => `ferret-${n}`);
+    for (const id of ids) ledger.append(id, row(1));
+    const pager = new SendsPager(ledger);
+    for (const id of ids) await pager.page(parseSessionId(id), { limit: 10 });
+    const built = ledger.lists;
+
+    // Act
+    await pager.page(parseSessionId('ferret-9'), { limit: 10 });
+    const kept = ledger.lists;
+    await pager.page(parseSessionId('ferret-0'), { limit: 10 });
+
+    // Assert
+    should(kept).equal(built);
+    should(ledger.lists).equal(built + 1);
+  });
+
   it('should page from the whole ledger when it cannot read its end', async () => {
     // Arrange
     const ledger = ledgerOf(120, false);

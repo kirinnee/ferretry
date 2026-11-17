@@ -285,6 +285,24 @@ describe('the send ledger and the queue', () => {
     expect(unknown.message).toContain('nope');
   });
 
+  it('answers a page the subsystem cut itself, and refuses a cursor it says names no send', async () => {
+    const { subsystem } = build({ value: [] });
+    const routes = sessionSendRoutes({
+      ...subsystem,
+      sendsPage: async (_id, query) =>
+        query.before === 'nope'
+          ? undefined
+          : { sends: [row('s9', '2026-11-09T00:00:00.000Z')] as never, nextCursor: null },
+    });
+
+    const page = await answerOf(routes, 'GET', SENDS, { params: ID });
+    expect(page.status).toBe(200);
+    expect((page.json as { sends: Array<{ sendId: string }> }).sends.map(each => each.sendId)).toEqual(['s9']);
+    expect((await refusalOf(routes, 'GET', SENDS, { params: ID, query: { before: 'nope' } })).code).toBe(
+      'invalid_cursor',
+    );
+  });
+
   it('pages the queue and refuses a cursor that names none of its messages', async () => {
     const { subsystem } = build({ value: [] });
     const routes = sessionSendRoutes(subsystem);
