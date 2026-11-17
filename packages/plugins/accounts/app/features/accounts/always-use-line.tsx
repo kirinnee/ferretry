@@ -16,10 +16,11 @@
 import { isInputSettledSlotProps } from '@ferretry/core-vault/contract';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  alwaysUseExplainWords,
+  type AlwaysUseWords,
+  alwaysUseExplainParts,
   alwaysUseFailureWords,
   alwaysUseFor,
-  alwaysUseSavedWords,
+  alwaysUseSavedParts,
 } from '../../lib/always-use.ts';
 import { type AccountsClient, putAccountDefault, readAccounts } from './accounts-api.ts';
 
@@ -31,6 +32,32 @@ export interface AlwaysUseLineProps {
 }
 
 type Phase = 'idle' | 'writing' | 'saved';
+
+/**
+ * A project's name is one unit: a name like `demo-project` must not break after its hyphen ("…in demo-" / "project.").
+ * It is an inline box, so it moves to the next line whole, and only a name wider than the line itself breaks inside.
+ * Punctuation right after the name stays with it, so a lone "." never starts a line.
+ */
+function ProjectName({ name, glued = '' }: { readonly name: string; readonly glued?: string }) {
+  return (
+    <span className="inline-block max-w-full break-words align-bottom" data-input-always-project="">
+      {name}
+      {glued}
+    </span>
+  );
+}
+
+/** A sentence with the project's name kept whole. */
+function Sentence({ words }: { readonly words: AlwaysUseWords }) {
+  const glued = /^[.,;:!?]*/u.exec(words.after)?.[0] ?? '';
+  return (
+    <>
+      {words.before}
+      <ProjectName glued={glued} name={words.project} />
+      {words.after.slice(glued.length)}
+    </>
+  );
+}
 
 export function AlwaysUseLine({ client, slot }: AlwaysUseLineProps) {
   const props = useMemo(() => (isInputSettledSlotProps(slot) ? slot : undefined), [slot]);
@@ -92,7 +119,7 @@ export function AlwaysUseLine({ client, slot }: AlwaysUseLineProps) {
     <div className="flex min-w-0 flex-col gap-1" data-input-always="">
       {phase === 'saved' ? (
         <p className="m-0 text-meta text-ok" data-input-always-saved="" role="status">
-          {alwaysUseSavedWords(always)}
+          <Sentence words={alwaysUseSavedParts(always)} />
         </p>
       ) : (
         <>
@@ -103,9 +130,11 @@ export function AlwaysUseLine({ client, slot }: AlwaysUseLineProps) {
             onClick={() => void write()}
             type="button"
           >
-            Always use for {always.project}
+            Always use for <ProjectName name={always.project} />
           </button>
-          <p className="m-0 text-meta text-muted">{alwaysUseExplainWords(always)}</p>
+          <p className="m-0 text-meta text-muted">
+            <Sentence words={alwaysUseExplainParts(always)} />
+          </p>
         </>
       )}
       {failure === null ? null : (

@@ -55,13 +55,26 @@ export const alwaysUseFor = (slot: InputSettledSlotProps, list: AccountList): Al
   };
 };
 
+/** A sentence with the project's name in it: what comes before, the name, and what comes after (the sentence is the three joined). */
+export interface AlwaysUseWords {
+  readonly before: string;
+  readonly project: string;
+  readonly after: string;
+}
+
 /** The sentence after the write. */
-export const alwaysUseSavedWords = (always: AlwaysUse): string =>
-  `${always.label} is now the default for ${always.project} at ${always.key}.`;
+export const alwaysUseSavedParts = (always: AlwaysUse): AlwaysUseWords => ({
+  before: `${always.label} is now the default for `,
+  project: always.project,
+  after: ` at ${always.key}.`,
+});
 
 /** What the button says it would do, under it. */
-export const alwaysUseExplainWords = (always: AlwaysUse): string =>
-  `Makes ${always.label} the default for ${always.key} in ${always.project}.`;
+export const alwaysUseExplainParts = (always: AlwaysUse): AlwaysUseWords => ({
+  before: `Makes ${always.label} the default for ${always.key} in `,
+  project: always.project,
+  after: '.',
+});
 
 /** A refused or failed write, in fixed words: a grant refusal says so, anything else says nothing changed. Never an echo. */
 export const alwaysUseFailureWords = (error: unknown): string =>
