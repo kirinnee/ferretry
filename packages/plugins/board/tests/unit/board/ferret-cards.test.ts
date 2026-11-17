@@ -173,7 +173,7 @@ describe('a session started with a brief', () => {
       to: 'implement',
       auto: true,
       trigger: 'work.started',
-      actor: { kind: 'daemon' },
+      actor: { kind: 'daemon', ferret: 'worker' },
     });
     should(focus.focused.get('worker')).deepEqual({ id: 'F1' });
   });
@@ -450,7 +450,7 @@ describe('a session started with a brief', () => {
       should(focus.focused.get('child')).deepEqual({ id: 'F2' });
       should(focus.anchors.get('child')).deepEqual({ id: 'F2' });
       should(focus.focused.get('lead')).deepEqual({ id: 'F1' });
-      should(stored(ports, 'F2').createdBy).deepEqual({ kind: 'daemon' });
+      should(stored(ports, 'F2').createdBy).deepEqual({ kind: 'daemon', ferret: 'lead' });
     });
 
     it("should prefer the card the brief names over the lead's anchor", async () => {
@@ -660,7 +660,7 @@ describe('a session started with a brief', () => {
         to: 'plan',
         auto: true,
         trigger: 'work.started',
-        actor: { kind: 'daemon' },
+        actor: { kind: 'daemon', ferret: 'child' },
       });
       should(opened.card).match({ laneId: 'plan' });
       should([...ports.store.cards.keys()].sort()).deepEqual(['F1', 'F9']);

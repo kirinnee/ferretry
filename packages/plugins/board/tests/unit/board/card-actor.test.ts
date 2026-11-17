@@ -47,12 +47,14 @@ describe('the card actor is exactly one of three strict shapes', () => {
     ['the owner on the admin token', { kind: 'owner', via: 'admin-token' }],
     ['a ferret, by name and id', { kind: 'ferret', name: 'Denisha', ferret: 'lead' }],
     ['the daemon', { kind: 'daemon' }],
+    ['the daemon, with the ferret whose session caused its act', { kind: 'daemon', ferret: 'lead' }],
   ])('should store %s in history, clarifications and createdBy', (_label, actor) => {
     should(CardSchema.safeParse(withActor(actor)).success).be.true();
   });
 
   it.each([
-    ['a daemon that names a ferret', { kind: 'daemon', ferret: 'lead' }],
+    ['a daemon that names its ferret by a name', { kind: 'daemon', ferret: 'lead', name: 'Denisha' }],
+    ['a daemon that names an empty ferret', { kind: 'daemon', ferret: '' }],
     ['an owner that names a ferret', { kind: 'owner', ferret: 'lead' }],
     ['an owner acting some other way', { kind: 'owner', via: 'device' }],
     ['a ferret with no name', { kind: 'ferret', ferret: 'lead' }],

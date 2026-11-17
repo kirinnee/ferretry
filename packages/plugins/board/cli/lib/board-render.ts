@@ -193,6 +193,9 @@ export function renderBoardMarkdown(
 const actorLabel = (event: CardEvent, names: FerretNames): string => {
   const actor = boardEventActor(event);
   if (actor.kind === 'ferret') return names(actor.ferret);
+  // The daemon's own act, with the ferret whose session caused it: "daemon via lanie" (the id when unnamed).
+  if (actor.kind === 'daemon')
+    return actor.ferret === undefined ? actor.kind : `${actor.kind} via ${names(actor.ferret)}`;
   return actor.kind === 'owner' && actor.via === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : actor.kind;
 };
 
