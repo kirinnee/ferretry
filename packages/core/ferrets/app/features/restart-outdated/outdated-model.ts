@@ -25,6 +25,7 @@ const SECTION_WORDS: Readonly<Record<LaunchInstructionSectionId, string>> = {
   agenda: 'agenda',
   asks: 'asks',
   learning: 'learning',
+  'rm-targets': 'rm rule',
 };
 
 const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`;
