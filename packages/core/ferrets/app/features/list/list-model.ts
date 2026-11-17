@@ -24,6 +24,12 @@
  * which registered project a folder belongs to is Projects' answer (`ferrets.list-scope`): its key and name when it
  * covers the folder, else the normalised folder named by its base name.
  *
+ * SUB-FERRETS. A ferret started by another (`parent`) is drawn UNDER its parent when both are in the same list (the same
+ * Pinned, Needs you or folder group), collapsed behind the parent's chevron. Whatever is not nested under a listed
+ * parent stays where it was: a child whose parent is pinned, filtered out or in another folder is a row of its own, so
+ * no ferret ever vanishes into a collapsed branch it cannot be found in. A branch opens by itself while it holds the
+ * open ferret or one that waits on the owner. The counts are unchanged: a child counts as the ferret it is.
+ *
  * FOLDER MODE. While the focus names a group, only that group's ferrets are drawn (Pinned and Needs you included: a
  * focus is the reader's word that nothing else matters now). A focus on a folder no project covers and no ferret is in
  * is STALE (`scopeIsStale`) and the list asks Projects to drop it, once the registry has been read (`known`).
@@ -208,6 +214,61 @@ export const ferretListView = (
     ...listTallies(ferrets, filter, keep, needing),
   };
 };
+
+/** One row of the list with the sub-ferrets drawn under it. */
+export interface FerretNode {
+  readonly ferret: FerretSummary;
+  readonly children: readonly FerretNode[];
+}
+
+/**
+ * The rows as a forest: a ferret whose parent is in the same rows nests under it, in the order the rows came in. A
+ * parent chain that loops back on itself (no daemon writes one) is not nested at all, so it can never recurse or drop
+ * a row.
+ */
+export const nestRows = (rows: readonly FerretSummary[]): readonly FerretNode[] => {
+  const byId = new Map(rows.map(ferret => [ferret.id, ferret] as const));
+  const nestsUnder = (ferret: FerretSummary): boolean => {
+    const seen = new Set<string>([ferret.id]);
+    let at: FerretSummary | undefined = ferret;
+    while (at?.parent !== undefined) {
+      const up: FerretSummary | undefined = byId.get(at.parent);
+      if (up === undefined) return at !== ferret;
+      if (seen.has(up.id)) return false;
+      seen.add(up.id);
+      at = up;
+    }
+    return at !== ferret;
+  };
+  const nested = new Map<string, FerretSummary[]>();
+  const roots: FerretSummary[] = [];
+  for (const ferret of rows) {
+    if (ferret.parent !== undefined && nestsUnder(ferret)) {
+      const siblings = nested.get(ferret.parent);
+      if (siblings === undefined) nested.set(ferret.parent, [ferret]);
+      else siblings.push(ferret);
+    } else roots.push(ferret);
+  }
+  const node = (ferret: FerretSummary): FerretNode => ({
+    ferret,
+    children: (nested.get(ferret.id) ?? []).map(node),
+  });
+  return roots.map(node);
+};
+
+/** Every ferret under a node, not the node itself. */
+export const descendantsOf = (node: FerretNode): readonly FerretSummary[] =>
+  node.children.flatMap(child => [child.ferret, ...descendantsOf(child)]);
+
+/**
+ * Whether a branch is open before the reader touches it: closed, unless it holds the open ferret or one that waits on
+ * the owner (an answer that sat behind a collapsed row would be an unanswered ferret).
+ */
+export const openByDefault = (
+  node: FerretNode,
+  isOpen: (ferret: FerretSummary) => boolean,
+  needing?: NeedingYou,
+): boolean => descendantsOf(node).some(ferret => isOpen(ferret) || needsYou(ferret, needing));
 
 /** The kind segments in the order they are drawn (Interactive first: what a new device opens on), in the reader's words. */
 export const MODE_SEGMENTS: readonly { readonly mode: ModeFilter; readonly label: string; readonly hint: string }[] = [

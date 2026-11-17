@@ -5,7 +5,9 @@
  * "Pinned" group; then one group per folder. The open ferret (the route's `:ferret`) is always listed and marked
  * `aria-current="page"`. A row is one link to the ferret's chat.
  *
- * The kind is kept for this device in the app's controls (`sessionsMode`); "Show stopped" lasts while the list does.
+ * The kind, "Show stopped" and the row density are kept for this device in the app's controls (`sessionsMode`,
+ * `showStopped`, `density`): ticking it on the phone does not change the laptop. A ferret started by another is drawn
+ * under it, collapsed behind a chevron (`list-model.ts`); every row has a pin button beside its ⋯ menu.
  *
  * NEEDS YOU. Under Pinned, a "Needs you" group gathers the ferrets with open items waiting on the owner (the Agenda says
  * which, through `ferrets.needs-you`) while the device's "Group Needs you at the top" is on; with it off they stay in
@@ -24,6 +26,8 @@ import {
   isFerretsNeedsYou,
 } from '../../../contract/index.ts';
 import type { LiveFerretsClient } from '../../lib/client.ts';
+import type { FerretSummary } from '../../../contract/index.ts';
+import { setFerretPinned } from '../header/ferret-operations.ts';
 import { folderBaseName } from '../new-ferret/recent-folders.ts';
 import { useListScope } from './use-list-scope.ts';
 import { useNeedsYou } from './use-needs-you.ts';
@@ -37,9 +41,12 @@ import {
   DEFAULT_LIST_FILTER,
   emptyMessage,
   type FerretListFilter,
+  type FerretNode,
   ferretListView,
   MODE_SEGMENTS,
   type NeedingYou,
+  nestRows,
+  openByDefault,
   scopeIsStale,
 } from './list-model.ts';
 import { STALE_LIST, useFerretList } from './use-ferret-list.ts';
@@ -82,7 +89,10 @@ export function FerretListBody({
   const openFerret = router === null ? undefined : ferretOfRoute(router.route);
   const { read, retry } = useFerretList(client);
   const { device, set } = useDeviceControls();
-  const [showStopped, setShowStopped] = useState(DEFAULT_LIST_FILTER.showStopped);
+  const showStopped = device.showStopped;
+  // The branches the reader flipped from how they would open by themselves (`openByDefault`). Kept while the list lives.
+  const [flipped, setFlipped] = useState<ReadonlySet<string>>(() => new Set());
+  const [pinFailure, setPinFailure] = useState<string | null>(null);
   const restart = useRestartOutdated(client, read.kind === 'ready' ? read.ferrets : null, request =>
     restartFerrets(client, request),
   );
@@ -120,23 +130,50 @@ export function FerretListBody({
     scope?.snapshot,
   );
   const focused = scope?.snapshot.scope ?? null;
-  const row = (ferret: (typeof read.ferrets)[number]): ReactNode => {
+  const pin = (ferret: FerretSummary) => (pinned: boolean) => {
+    setPinFailure(null);
+    setFerretPinned(client, ferret.id, pinned).then(retry, (reason: unknown) =>
+      setPinFailure(reason instanceof Error ? reason.message : String(reason)),
+    );
+  };
+  const flip = (id: string) => () =>
+    setFlipped(previous => {
+      const next = new Set(previous);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  const node = ({ ferret, children }: FerretNode): ReactNode => {
     const waiting: FerretNeedsYou | undefined = needing.get(ferret.id);
+    const branch =
+      children.length === 0
+        ? undefined
+        : {
+            count: children.length,
+            open:
+              openByDefault({ ferret, children }, candidate => candidate.id === openFerret, needing) !==
+              flipped.has(ferret.id),
+            toggle: flip(ferret.id),
+          };
     return (
       <FerretRow
         active={ferret.id === openFerret}
         daemon={daemon}
         ferret={ferret}
         key={ferret.id}
+        onPin={pin(ferret)}
         overlayKey={client}
+        {...(branch === undefined ? {} : { branch })}
         {...(waiting === undefined ? {} : { needsYou: waiting })}
         {...navigation}
-      />
+      >
+        {children.length === 0 ? undefined : children.map(node)}
+      </FerretRow>
     );
   };
+  const rows = (ferrets: readonly FerretSummary[]): ReactNode => nestRows(ferrets).map(node);
   const empty = view.pinned.length === 0 && view.needsYou.length === 0 && view.groups.length === 0;
   return (
-    <div className="fy-sbar__ferrets" data-ferret-list="">
+    <div className="fy-sbar__ferrets" data-ferret-list="" data-sbar-density={device.density ?? 'full'}>
       <div className="fy-sbar__filters">
         <fieldset aria-label="Show ferrets" className="fy-sbar__segment">
           {MODE_SEGMENTS.map(segment => (
@@ -158,7 +195,7 @@ export function FerretListBody({
           <label className="fy-sbar__stopped" data-sbar-show-stopped="">
             <input
               checked={showStopped}
-              onChange={event => setShowStopped(event.currentTarget.checked)}
+              onChange={event => set({ showStopped: event.currentTarget.checked })}
               type="checkbox"
             />
             <span>Show stopped</span>
@@ -168,6 +205,11 @@ export function FerretListBody({
         </div>
       </div>
       <RestartOutdatedResult restart={restart} />
+      {pinFailure === null ? null : (
+        <p className="fy-sbar__empty" data-sbar-pin-failure="" role="alert">
+          {pinFailure}
+        </p>
+      )}
       {scope === undefined || focused === null ? null : (
         <div className="fy-sbar__scope" data-sbar-scope="">
           <span className="truncate">{scope.snapshot.groupOf(focused)?.name ?? folderBaseName(focused)}</span>
@@ -189,7 +231,7 @@ export function FerretListBody({
                   <span className="truncate">Pinned</span>
                   <span className="fy-sbar__count">{view.pinned.length}</span>
                 </h2>
-                <ul>{view.pinned.map(row)}</ul>
+                <ul>{rows(view.pinned)}</ul>
               </section>
             )}
             {view.needsYou.length === 0 ? null : (
@@ -202,7 +244,7 @@ export function FerretListBody({
                   <span className="truncate">Needs you</span>
                   <span className="fy-sbar__count">{view.needsYou.length}</span>
                 </h2>
-                <ul>{view.needsYou.map(row)}</ul>
+                <ul>{rows(view.needsYou)}</ul>
               </section>
             )}
             {view.groups.map(group => (
@@ -223,7 +265,7 @@ export function FerretListBody({
                   )}
                   <span className="fy-sbar__count">{group.rows.length}</span>
                 </h2>
-                <ul>{group.rows.map(row)}</ul>
+                <ul>{rows(group.rows)}</ul>
               </section>
             ))}
           </>

@@ -3,7 +3,7 @@
  * kind and directory describes), over `FerretSummary`.
  *
  * Left out, with the reason (the owner is not Ferrets): who needs the reader (Agenda's open items), the question a
- * waiting ferret asks (Conversation's), guide-builder ferrets (Packs' label), and how much a row says (density, Unit 3).
+ * waiting ferret asks (Conversation's) and guide-builder ferrets (Packs' label).
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -18,6 +18,9 @@ import {
   listedBeforeMode,
   listTallies,
   matchesMode,
+  descendantsOf,
+  nestRows,
+  openByDefault,
 } from '../../../../app/features/list/list-model.ts';
 import { summary as ferretSummary } from './support.ts';
 
@@ -192,5 +195,46 @@ describe('which ferrets the list lists', () => {
     expect(emptyMessage({ mode: 'auto', showStopped: false }, 2)).toBe(
       'No live agent ferrets — 2 stopped. Tick Show stopped.',
     );
+  });
+});
+
+describe('sub-ferrets nest under their parent', () => {
+  const shape = (nodes: ReturnType<typeof nestRows>): unknown =>
+    nodes.map(node => (node.children.length === 0 ? node.ferret.id : { [node.ferret.id]: shape(node.children) }));
+
+  test('a child whose parent is in the same rows nests under it, in the order the rows came in', () => {
+    const rows = [
+      ferret('lead'),
+      ferret('solo'),
+      ferret('b', { parent: 'lead' }),
+      ferret('a', { parent: 'lead' }),
+      ferret('deep', { parent: 'a' }),
+    ];
+    expect(shape(nestRows(rows))).toEqual([{ lead: ['b', { a: ['deep'] }] }, 'solo']);
+  });
+
+  test('a child whose parent is not among the rows stays a row of its own, so none is lost in a collapsed branch', () => {
+    const rows = [ferret('orphan', { parent: 'elsewhere' }), ferret('lead'), ferret('kid', { parent: 'lead' })];
+    expect(nestRows(rows).map(node => String(node.ferret.id))).toEqual(['orphan', 'lead']);
+    expect(
+      nestRows(rows)
+        .flatMap(descendantsOf)
+        .map(each => String(each.id)),
+    ).toEqual(['kid']);
+  });
+
+  test('a parent loop (no daemon writes one) nests nothing and drops nothing', () => {
+    const rows = [ferret('x', { parent: 'y' }), ferret('y', { parent: 'x' }), ferret('self', { parent: 'self' })];
+    expect(nestRows(rows).map(node => String(node.ferret.id))).toEqual(['x', 'y', 'self']);
+    expect(nestRows(rows).every(node => node.children.length === 0)).toBe(true);
+  });
+
+  test('a branch is closed by default, and opens itself for the open ferret or one that waits on the owner', () => {
+    const [lead] = nestRows([ferret('lead'), ferret('kid', { parent: 'lead' }), ferret('kin', { parent: 'kid' })]);
+    if (lead === undefined) throw new Error('no node');
+    expect(openByDefault(lead, () => false)).toBe(false);
+    expect(openByDefault(lead, each => each.id === 'kin')).toBe(true);
+    const needing = new Map([['kid', { count: 1, ask: '', latestAt: ago(1) }]]);
+    expect(openByDefault(lead, () => false, needing as never)).toBe(true);
   });
 });
