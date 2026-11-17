@@ -1,5 +1,5 @@
 import { definePlugin, route } from '@ferretry/kernel/manifest';
-import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
+import { FERRET_WAKE_KEY, FerretChanged, FerretWake, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { DeliveryWays, MailboxHosts, MailboxPort, QueueChanged } from './contract/index.ts';
 import {
   cap,
@@ -50,7 +50,7 @@ export default definePlugin({
   // The Mailbox offers the delivery-way slot and contributes the first way itself (the ferret's terminal, through Ferrets).
   hooks: {
     offers: [{ hook: MailboxHosts }, { hook: DeliveryWays }],
-    takes: [{ hook: FerretChanged }, { hook: DeliveryWays }],
+    takes: [{ hook: FerretChanged }, { hook: DeliveryWays }, { hook: FerretWake, key: FERRET_WAKE_KEY }],
   },
   actions: {
     routes: [

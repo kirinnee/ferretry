@@ -4,7 +4,8 @@
  * `serviceWaiting`). One kernel job ticks it; nothing else does.
  *
  * WHAT A TICK DOES is the monitor service's own (daemon/lib/session/monitor/service.ts): ends a park whose deadline has
- * passed (the signal slice re-checks it under its own lock), tells the ferret through the harness seam, holds a status
+ * passed (the signal slice re-checks it under its own lock), tells the ferret through the Mailbox (the harness seam
+ * only when nothing provides `ferrets.wake`), holds a status
  * that drifted off `waiting`, and writes `checks/waiting.json` into the ferret's own session folder. The loop then
  * publishes its own record (`monitor-tick.json`) whether or not the tick worked, so a loop that stopped never looks
  * like a fleet with nothing parked.

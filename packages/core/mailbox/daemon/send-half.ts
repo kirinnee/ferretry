@@ -25,7 +25,7 @@ import { CancellableTimers } from './adapters/cancellable-timers.ts';
 import type { ClaudeChannel, MailboxRefusal, SendChannel, SendEvidenceSource, SendLedger } from '../contract/index.ts';
 import { ClockSendScheduler } from './adapters/index.ts';
 import { type QueuedSend, SendPathDeliveryView, SendPathQueueTransport } from './adapters/send-path-delivery.ts';
-import { defaultQueueDeliverySettings, QueueDeliverer, QueueingSends } from './lib/queue/index.ts';
+import { defaultQueueDeliverySettings, QueueDeliverer, Senders } from './lib/queue/index.ts';
 import { type LedgerPath as SendPath } from '../contract/index.ts';
 import {
   defaultSendTrackerSettings,
@@ -753,6 +753,8 @@ export function buildSendHalf(deps: SendHalfDeps) {
      * with no sender session, so nothing retries it and a notice that cannot be delivered never notifies anybody.
      */
     readonly notice?: true;
+    /** The session monitor is waking a ferret whose declared wait ended: Ferretry · Monitor, never reviving a stopped one. */
+    readonly monitor?: true;
     /** The queue's own entry under `sendId` is what is delivered, so it is not an earlier send of that id. */
     readonly queued?: true;
     /** Who the daemon is, when it is the sender: the sender chip, in place of the one a flag names. */
@@ -1376,15 +1378,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
     target: async (id: SessionId) => await readTarget(id),
     timer: (milliseconds: number) => timers.after(milliseconds),
   };
-  const ownerSends = new QueueingSends(queueingPorts, 'human');
-  const wardenSends = new QueueingSends(queueingPorts, 'daemon', 'Warden');
-  const agendaSends = new QueueingSends(queueingPorts, 'daemon', 'Agenda');
-  const noticeSends = new QueueingSends(queueingPorts, 'daemon', 'Delivery');
-  /**
-   * An agent's credential that names no ferret (the Warden's or Agenda's token over the route, which carries no flag): it is
-   * the daemon's, never a person's, so it never takes the owner's lane.
-   */
-  const unnamedAgentSends = new QueueingSends(queueingPorts, 'daemon');
+  const senders = new Senders(queueingPorts);
   /**
    * EVERY SEND PATH goes in here: the owner, a ferret, the Warden, Agenda and the daemon's own notices. The message is
    * written to the queue, answered as the queue and the ledger say it stands (the same words a repeat of its id gets), and
@@ -1392,27 +1386,23 @@ export function buildSendHalf(deps: SendHalfDeps) {
    */
   const submit = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
     const stopped = TERMINAL_SEND_STATUSES.has((await readTarget(ferret)).status);
-    // Agenda's own words never revive a stopped ferret: refused before anything is kept, as the typing send refuses it.
-    if (request.agenda === true && stopped)
+    // Agenda's own words and a monitor's wake never revive a stopped ferret: refused before anything is kept.
+    if ((request.agenda === true || request.monitor === true) && stopped)
       throw new SessionSendError(
         'refused',
-        'the ferret is stopped and an Agenda message never revives it, so nothing was typed',
+        `the ferret is stopped and ${request.monitor === true ? 'a wake' : 'an Agenda message'} never revives it, so nothing was typed`,
       );
     // The ferret's terminal is opened first, as the typing send opens it: a ferret with no terminal to reach, or one
     // Ferrets will not let this caller touch, is refused here in plain words, before anything is kept or queued.
     if (!stopped) await terminal.bind(ferret);
     const unnamedAgent = request.origin.kind === 'agent' && request.senderSessionId === undefined;
-    const daemon = request.warden === true || request.agenda === true || request.notice === true || unnamedAgent;
-    const sends =
-      request.warden === true
-        ? wardenSends
-        : request.agenda === true
-          ? agendaSends
-          : request.notice === true
-            ? noticeSends
-            : unnamedAgent
-              ? unnamedAgentSends
-              : ownerSends;
+    const daemon =
+      request.warden === true ||
+      request.agenda === true ||
+      request.notice === true ||
+      request.monitor === true ||
+      unnamedAgent;
+    const sends = senders.pick({ ...request, unnamedAgent });
     // Refused before anything is kept, as the typing send refuses it: a message with nothing in it is no message.
     const message = payloadOf(request.message);
     const label = bannerLabel(request.label);

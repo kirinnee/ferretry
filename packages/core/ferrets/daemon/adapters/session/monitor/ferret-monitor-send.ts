@@ -8,6 +8,9 @@ function reason(failure: HarnessDeliveryFailure): string {
 }
 
 /**
+ * THE NO-MAILBOX FALLBACK: a wake goes through the Mailbox when one provides `ferrets.wake` (`MailboxMonitorSend`); this
+ * is the route a daemon composed without one still wakes its ferrets by.
+ *
  * A woken ferret is told its wait is over through the harness seam Ferrets already owns: one `deliver`, and when the
  * pane is visibly at work, the same text put into the pane's own queue, so the wake lands the moment the turn ends.
  *

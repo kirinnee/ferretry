@@ -144,6 +144,16 @@ describe('a producer sending through the queue', () => {
     });
   });
 
+  it('should chip a session monitor’s wake as Ferretry · Monitor, the daemon’s own', async () => {
+    const { sends, enqueued } = world('auto', 'daemon', { feature: 'Monitor' });
+
+    await sends.send({ id: ID, sendId: 'wake:session-1:t', message: 'your wait is over' });
+
+    should(enqueued).containDeep([
+      { id: 'wake:session-1:t', sender: 'daemon', by: { kind: 'ferretry', feature: 'Monitor' } },
+    ]);
+  });
+
   it('should queue a send that stops the turn first as an interrupt, keeping its place', async () => {
     // `fy send --now` is a flag on a queued message, not a separate path (owner, 2026-10-30).
     const urgent = world('auto', 'human');

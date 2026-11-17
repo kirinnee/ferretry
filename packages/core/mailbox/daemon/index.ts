@@ -18,6 +18,7 @@ import { waysDoctor } from './ways/registry.ts';
 import { MAILBOX_HOST_MISSING, type MailboxHostSource, requireMailboxHost } from './lib/host-slot.ts';
 import { NotifyingSessionQueueStore } from './lib/queue/index.ts';
 import { routeTable } from './lib/api.ts';
+import { wakeDelivery } from './lib/wake.ts';
 import { addressedByCallsign } from './lib/ferret-address.ts';
 import { maskedBody } from './lib/masked-body.ts';
 import { type MailboxParts, sendApi, sendRoutes } from './mailbox-api.ts';
@@ -169,6 +170,8 @@ export default implementDaemon(manifest, {
       provides: { mailbox: api },
       hooks: {
         'ferret.changed': follow,
+        // A ferret whose declared wait ended is woken by a queued Ferretry · Monitor message (Ferrets cannot import this package).
+        'ferrets.wake:mailbox': wakeDelivery(parts),
         'mailbox.delivery-way': () => paneWayContributions(needs.ferrets),
       },
       doctor: {
