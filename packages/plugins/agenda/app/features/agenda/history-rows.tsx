@@ -13,9 +13,11 @@ import type { LedgerSendRecord } from '../../lib/transcript.ts';
 
 /** How far the owner's words got, as far as the item knows. */
 export interface OwnerWordsReach {
-  readonly via: 'transcript' | 'item';
+  readonly via: 'transcript' | 'item' | 'device';
   readonly answered: boolean;
   readonly send?: LedgerSendRecord | undefined;
+  /** With `via: 'device'`: why the words still wait on this device, and whether the machine said no. */
+  readonly outbox?: { readonly reason: string | undefined; readonly refused: boolean } | undefined;
 }
 
 export interface HistoryReceipt {
@@ -29,7 +31,8 @@ export interface HistoryReceipt {
     | 'cancelled'
     | 'unconfirmed'
     | 'typed'
-    | 'held';
+    | 'held'
+    | 'saved';
   readonly name: string;
   readonly detail: string;
 }
@@ -56,6 +59,21 @@ const historyReceipt = (reached: OwnerWordsReach | undefined): HistoryReceipt =>
     if (send.fate === 'queued') return { kind: 'queued', name: 'Queued', detail: 'on the machine’s queue' };
     return { kind: 'sending', name: 'Sending', detail: 'on its way' };
   }
+  // Still in this device's outbox: the chat's own words for it (send-receipt-model.ts `outboxReceipt`).
+  if (reached?.via === 'device') {
+    const outbox = reached.outbox;
+    if (outbox?.refused === true)
+      return {
+        kind: 'failed',
+        name: 'Not sent',
+        detail: outbox.reason ?? 'the machine would not take it; edit or cancel it in the chat',
+      };
+    return {
+      kind: 'saved',
+      name: 'Saved on this device',
+      detail: `kept on this device; goes to the machine when it can be reached${outbox?.reason === undefined ? '' : ` (${outbox.reason})`}`,
+    };
+  }
   if (reached?.via === 'transcript')
     return { kind: 'read', name: 'Read', detail: 'the ferret’s transcript shows it as a message from you' };
   if (reached?.answered === true)
@@ -72,6 +90,8 @@ function ReceiptMark({ kind }: { readonly kind: HistoryReceipt['kind'] }) {
     return <Ban aria-hidden="true" className="fy-receipt-mark" data-receipt-mark={kind} size={12} />;
   if (kind === 'unconfirmed')
     return <CircleHelp aria-hidden="true" className="fy-receipt-mark" data-receipt-mark={kind} size={12} />;
+  if (kind === 'saved')
+    return <Check aria-hidden="true" className="fy-receipt-mark" data-receipt-mark="saved" size={12} />;
   if (kind === 'queued') return <Check aria-hidden="true" className="fy-receipt-mark" size={12} />;
   return <CheckCheck aria-hidden="true" className="fy-receipt-mark" data-receipt-mark={kind} size={12} />;
 }
