@@ -1,6 +1,7 @@
 import { milliseconds } from '@ferretry/std';
-import { AutoResumeDecide, DAEMON_ORIGIN, Runners } from '../../contract/index.ts';
+import { AutoResumeDecide, DAEMON_ORIGIN, FerretHistoryFiles, Runners } from '../../contract/index.ts';
 import { boundedReason } from '../lib/ferrets/auto-resume.ts';
+import { NoLongerOwed } from '../lib/session/auto-resume/index.ts';
 import type { SessionId } from '../lib/session-id.ts';
 import { SessionStateSchema } from '../lib/protocol/session.ts';
 import { AUTO_RESUME_JOB, buildAutoResume } from '../modules/auto-resume.ts';
@@ -13,6 +14,8 @@ function register(f: FerretsContext): FeatureContribution | undefined {
   // through the ordinary resume, staggered, two at a time, each only on Runtimes' OWN yes (RULING #27 Q5: no answer, no
   // resume, no spend). A person's stop, resume or archive in between wins (`expect`, judged under the ferret's queue).
   const autoResume = buildAutoResume({
+    // Registered as the daemon starts, before anything serves: a ferret settled gone from here on is the restart's.
+    bootedAt: kernel.clock.now(),
     state: kernel.state,
     // The held records (with the runner handle the list view leaves out): the handle is what the settle compares.
     records: () =>
@@ -25,6 +28,19 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       const state = SessionStateSchema.safeParse(await sessionStore.readState(ferret as unknown as SessionId));
       return state.success ? state.data.status : undefined;
     },
+    // When the limited login resets, as the document says: a `rate_limited` ferret is resumed at boot only past it.
+    quota: async ferret => {
+      const state = SessionStateSchema.safeParse(await sessionStore.readState(ferret as unknown as SessionId));
+      const quota = state.success ? state.data.quota : undefined;
+      return quota === undefined ? undefined : { atLimit: quota.atLimit === true, retryAt: quota.retryAt };
+    },
+    // What the sweep's settle said the ferret was doing (idle or mid-turn): only the journal still knows.
+    exitedFrom: async ferret => {
+      const tail = await kernel.state.tail(FerretHistoryFiles, { maxBytes: 64 * 1024, name: ferret });
+      const exited = tail.records.findLast(record => record.type === 'session.exited');
+      const data = exited?.data as { readonly from?: unknown } | undefined;
+      return typeof data?.from === 'string' ? data.from : undefined;
+    },
     gone: async ferret => {
       const runner = hooks.provider(Runners, 'tmux');
       return runner !== 'unavailable' && runner.gone !== undefined && (await runner.gone(ferret)) === true;
@@ -34,12 +50,20 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     // Why a resume was refused (a start.decide taker's sentence, a launch's message) is kept in the journal and the
     // summary, so it is bounded as Runtimes' own refusal is.
     resume: async (ferret, message, expect) => {
+      // Whether the resume was refused by `expect` itself (judged under the ferret's queue), as distinct from any other
+      // refusal or failure: only that one says another path got there first.
+      let notOwed = false;
+      const judged = (record: Parameters<typeof expect>[0]): boolean => {
+        const owed = expect(record);
+        if (!owed) notOwed = true;
+        return owed;
+      };
       const resumed = await service
-        .resume(ferret, message, { actor: 'daemon', automatic: true, expect, origin: DAEMON_ORIGIN })
+        .resume(ferret, message, { actor: 'daemon', automatic: true, expect: judged, origin: DAEMON_ORIGIN })
         .catch((error: unknown) => {
           throw new Error(boundedReason(error instanceof Error ? error.message : String(error)));
         });
-      if (!resumed.ok) throw new Error(boundedReason(resumed.error.reason));
+      if (!resumed.ok) throw new (notOwed ? NoLongerOwed : Error)(boundedReason(resumed.error.reason));
     },
     history: appendHistory,
     clock: { now: () => kernel.clock.now(), nowMs: () => kernel.clock.nowMs() },

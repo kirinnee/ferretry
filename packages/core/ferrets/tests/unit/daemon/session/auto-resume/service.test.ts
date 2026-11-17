@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { AutoResumeSummary } from '../../../../../daemon/lib/protocol/auto-resume.ts';
 import should from 'should';
+import { NoLongerOwed } from '../../../../../daemon/lib/session/auto-resume/policy.ts';
 import { AutoResumeService } from '../../../../../daemon/lib/session/auto-resume/service.ts';
 import {
   type AutoResumeCandidate,
@@ -23,6 +24,8 @@ class Harness {
   subjects = new Map<string, AutoResumeSubject>();
   unavailable = new Map<string, string>();
   refused = new Map<string, string>();
+  /** The refusals that are the resume's own "no longer owed" (the `expect` said no), not a gate or a failed launch. */
+  notOwed = new Set<string>();
   resumed: { id: string; message: string | undefined }[] = [];
   journal: { id: string; outcome: AutoResumeOutcome }[] = [];
   summaries: AutoResumeSummary[] = [];
@@ -58,7 +61,7 @@ class Harness {
       resumer: {
         resume: async (id, message) => {
           const refusal = this.refused.get(id);
-          if (refusal !== undefined) throw new Error(refusal);
+          if (refusal !== undefined) throw this.notOwed.has(id) ? new NoLongerOwed(refusal) : new Error(refusal);
           this.resumed.push({ id, message });
         },
       },
@@ -264,6 +267,71 @@ describe('auto-resume service', () => {
       skipped: [{ sessionId: 'a', reason: 'the previous terminal shutdown was not confirmed' }],
     });
   });
+
+  for (const up of ['starting', 'working', 'idle'])
+    it(`W3-2 should stand down, saying nothing, when the revive is refused because another path left the session ${up}`, async () => {
+      // Arrange: the Warden (or a message, or a person) resumed it between the pass's check and its own resume.
+      const h = new Harness();
+      h.ledger = [candidate('a')];
+      h.fail('a');
+      h.refused.set('a', 'it is no longer owed this resume');
+      h.notOwed.add('a');
+      const ports = h.ports();
+      const resume = ports.resumer.resume;
+      ports.resumer.resume = async (id, message) => {
+        h.subjects.set(id, { status: up, mode: 'auto' });
+        await resume(id, message);
+      };
+
+      // Act
+      const actual = await new AutoResumeService(ports, SETTINGS).run();
+
+      // Assert: no skipped line, no summary, nothing left owed.
+      should(actual).equal(undefined);
+      should(h.journal).deepEqual([]);
+      should(h.summaries).deepEqual([]);
+      should(h.ledger).deepEqual([]);
+    });
+
+  it('W3-2 should still say why when the "no longer owed" revive left the session stopped (the owner stopped it)', async () => {
+    const h = new Harness();
+    h.ledger = [candidate('a')];
+    h.fail('a');
+    h.refused.set('a', 'it is no longer owed this resume');
+    h.notOwed.add('a');
+    const ports = h.ports();
+    const resume = ports.resumer.resume;
+    ports.resumer.resume = async (id, message) => {
+      h.subjects.set(id, { status: 'stopped', mode: 'auto' });
+      await resume(id, message);
+    };
+
+    const actual = await new AutoResumeService(ports, SETTINGS).run();
+
+    should(actual?.skipped).deepEqual([{ sessionId: 'a', reason: 'it is no longer owed this resume' }]);
+  });
+
+  for (const left of ['starting', 'working', 'stopped'])
+    it(`W3-3 should say why when the revive FAILED (not a "no longer owed" refusal) and left the record ${left}: a failed launch whose pane would not stop leaves it starting`, async () => {
+      const h = new Harness();
+      h.ledger = [candidate('a')];
+      h.fail('a');
+      h.refused.set('a', 'the failed launch still has a process that could not be stopped');
+      const ports = h.ports();
+      const resume = ports.resumer.resume;
+      ports.resumer.resume = async (id, message) => {
+        h.subjects.set(id, { status: left, mode: 'auto' });
+        await resume(id, message);
+      };
+
+      const actual = await new AutoResumeService(ports, SETTINGS).run();
+
+      should(actual?.skipped).deepEqual([
+        { sessionId: 'a', reason: 'the failed launch still has a process that could not be stopped' },
+      ]);
+      should(h.journal.map(entry => entry.outcome.kind)).deepEqual(['skipped']);
+      should(h.summaries).have.length(1);
+    });
 
   it('should skip with the text of a non-error refusal', async () => {
     const h = new Harness();
