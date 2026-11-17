@@ -1092,5 +1092,26 @@ describe('LessonsService', () => {
       should(progress.message).equal('cancelled by the owner');
       should(world.store.state.scan?.state).equal('cancelled');
     });
+
+    it('should ask every miner to stop when the first refuses, then report and keep the scan running', async () => {
+      // Arrange
+      const world = lessonsWorld();
+      world.miner.refuseStop.add('miner-0');
+      world.store.state = {
+        scan: scanRecord({
+          state: 'running',
+          ferretIds: ['s1', 's2'],
+          batches: [
+            { minerFerretId: 'miner-0', ferretIds: ['s1'] },
+            { minerFerretId: 'miner-1', ferretIds: ['s2'] },
+          ],
+        }),
+      };
+
+      // Act / Assert
+      await should(world.service.cancelScan()).be.rejectedWith({ reason: 'unavailable' });
+      should(world.miner.stopped).deepEqual(['miner-0', 'miner-1']);
+      should(world.store.state.scan?.state).equal('running');
+    });
   });
 });
