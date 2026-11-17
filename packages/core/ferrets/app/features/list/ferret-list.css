@@ -316,7 +316,7 @@
   color: var(--muted);
   opacity: 0;
 }
-.fy-sbar__row:hover .fy-sbar__more,
+.fy-sbar__row:hover > .fy-sbar__more,
 .fy-sbar__more:focus-visible {
   opacity: 1;
 }
@@ -331,4 +331,84 @@
     right: 0;
     opacity: 1;
   }
+}
+
+/* SUB-FERRETS, THE PIN BUTTON AND DENSITY. */
+/* A ferret with sub-ferrets: its chevron and count sit at the row's right edge, always drawn; the ⋯ and pin buttons
+   hover over the title to its left. The sub-ferrets are an indented list under the row. */
+.fy-sbar__session[data-sbar-branch] {
+  padding-right: 44px;
+}
+.fy-sbar__branch,
+.fy-sbar__pin {
+  position: absolute;
+  top: 4px;
+  display: inline-flex;
+  min-width: 28px;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-2xs);
+}
+.fy-sbar__branch {
+  right: 4px;
+}
+.fy-sbar__pin {
+  right: 32px;
+  opacity: 0;
+}
+.fy-sbar__pin[aria-pressed='true'] {
+  color: var(--accent);
+}
+/* A pinned ferret's pin is filled, so it never differs from an unpinned one by colour alone. */
+.fy-sbar__pin[aria-pressed='true'] svg {
+  fill: currentColor;
+}
+.fy-sbar__row:hover > .fy-sbar__pin,
+.fy-sbar__pin:focus-visible,
+.fy-sbar__pin[aria-pressed='true'] {
+  opacity: 1;
+}
+/* Beats `.fy-sbar__list ul` (no padding), which would flatten the nesting. The hover rules above use `>` so a parent's
+   hover reveals its own buttons, never its sub-ferrets'. */
+.fy-sbar__list .fy-sbar__children {
+  padding: 0 0 0 14px;
+}
+@media (pointer: coarse) {
+  .fy-sbar__branch,
+  .fy-sbar__pin {
+    min-width: var(--target-floor, 44px);
+    min-height: var(--target-floor, 44px);
+    top: 0;
+  }
+  .fy-sbar__branch {
+    right: 0;
+  }
+  .fy-sbar__pin {
+    right: var(--target-floor, 44px);
+    opacity: 1;
+  }
+  .fy-sbar__session[data-sbar-branch] {
+    padding-right: var(--target-floor, 44px);
+  }
+}
+/* DENSITY (the device's `density`): full is the list as drawn above. Compact drops the folder and the marks (the title,
+   the ferret and what it asks stay); minimal is one line, the title and its badge. */
+[data-sbar-density='compact'] .fy-sbar__session {
+  padding-block: 3px;
+}
+[data-sbar-density='compact'] .fy-sbar__dir,
+[data-sbar-density='compact'] .fy-sbar__marks {
+  display: none;
+}
+[data-sbar-density='minimal'] .fy-sbar__session {
+  padding-block: 2px;
+}
+[data-sbar-density='minimal'] .fy-sbar__detail {
+  display: none;
 }

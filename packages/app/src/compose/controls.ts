@@ -116,6 +116,11 @@ export interface DeviceControls {
    * Ferrets' list (`features/list/ferret-list.tsx`), set in Settings › This device › "Group Needs you at the top".
    */
   readonly groupNeedsYou: boolean;
+  /**
+   * List the stopped ferrets in Ferrets' list ("Show stopped"). Default off. Kept on THIS device, so ticking it on the
+   * phone does not change the laptop; read and set by `features/list/ferret-list.tsx`.
+   */
+  readonly showStopped: boolean;
   /** Chat pane horizontal measure; inert on a phone, which is already narrower. */
   readonly chatWidth: ChatWidthPreference;
   /** Bare Enter on a keyboard (desktop). null = the default, Enter sends. */
@@ -177,6 +182,7 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   mode: 'all',
   density: null,
   groupNeedsYou: true,
+  showStopped: false,
   chatWidth: 'readable',
   composerEnterKey: null,
   composerPhoneEnterKey: null,
@@ -271,6 +277,7 @@ const readDeviceControls = (value: unknown): DeviceControls => {
     density:
       fields.density === 'full' || fields.density === 'compact' || fields.density === 'minimal' ? fields.density : null,
     groupNeedsYou: readFlag(fields.groupNeedsYou, DEFAULT_DEVICE_CONTROLS.groupNeedsYou),
+    showStopped: readFlag(fields.showStopped, DEFAULT_DEVICE_CONTROLS.showStopped),
     chatWidth:
       fields.chatWidth === 'full' || fields.chatWidth === 'balanced' || fields.chatWidth === 'readable'
         ? fields.chatWidth
