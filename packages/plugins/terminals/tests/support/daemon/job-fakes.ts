@@ -9,6 +9,7 @@ export class MemoryFiles implements JobFilesPort {
   readonly exits = new Map<string, JobExit>();
   readonly logs = new Map<string, string>();
   readonly stops = new Set<string>();
+  readonly reported = new Set<string>();
   failWrite = false;
   private key = (owner: string, id: string): string => `${owner}/${id}`;
   async create(owner: string, id: string): Promise<string> {
@@ -34,6 +35,12 @@ export class MemoryFiles implements JobFilesPort {
   }
   async requestStop(owner: string, id: string): Promise<void> {
     this.stops.add(this.key(owner, id));
+  }
+  async isReported(owner: string, id: string): Promise<boolean> {
+    return this.reported.has(this.key(owner, id));
+  }
+  async markReported(owner: string, id: string): Promise<void> {
+    this.reported.add(this.key(owner, id));
   }
   async outputSize(owner: string, id: string): Promise<number> {
     return Buffer.byteLength(this.logs.get(this.key(owner, id)) ?? '');
@@ -78,6 +85,14 @@ export function memoryService(over: { isDirectory?: (path: string) => Promise<bo
   const starts = new Map<number, string | undefined | 'unknown'>();
   const killed: number[] = [];
   const immortal = new Set<number>();
+  /** The harness each attachment pid sits under, as the host would find it when the attachment registers. */
+  const harnesses = new Map<number, { readonly pid: number; readonly start: string }>();
+  /** What `argvOf` answers for a pid (default: a `fy job attach` line); `'unknown'` = unreadable. */
+  const argvs = new Map<number, string | undefined | 'unknown'>();
+  /** The file identity a pid runs (default: the trusted `fy`); `'unknown'` = unreadable. */
+  const executables = new Map<number, string | 'unknown'>();
+  /** The identities the daemon knows as `fy`. */
+  const trusted: string[] = ['file:fy'];
   let counter = 0;
   const service = new JobService(
     files,
@@ -85,6 +100,10 @@ export function memoryService(over: { isDirectory?: (path: string) => Promise<bo
     { read: async () => attachments, update: async change => (attachments = change(attachments)) },
     {
       startOf: async pid => (starts.has(pid) ? starts.get(pid) : undefined),
+      harnessOf: async pid => harnesses.get(pid),
+      argvOf: async pid => (starts.has(pid) ? (argvs.has(pid) ? argvs.get(pid) : `fy job attach ${pid}`) : undefined),
+      executableOf: async pid => executables.get(pid) ?? 'file:fy',
+      trustedExecutables: async () => trusted,
       kill: async pid => {
         killed.push(pid);
         if (!immortal.has(pid)) starts.delete(pid);
@@ -98,7 +117,8 @@ export function memoryService(over: { isDirectory?: (path: string) => Promise<bo
       sleep: async ms => {
         clock.now += ms;
       },
+      binaryName: 'fy',
     },
   );
-  return { service, files, runtime, clock, starts, killed, immortal };
+  return { service, files, runtime, clock, starts, killed, immortal, harnesses, argvs, executables, trusted };
 }

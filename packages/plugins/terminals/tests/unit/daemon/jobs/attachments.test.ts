@@ -7,6 +7,7 @@ import {
   entriesOf,
   withDetaching,
   withEntry,
+  withOrphansDetaching,
   withoutEntry,
   withoutStale,
 } from '../../../../daemon/lib/jobs/attachments.ts';
@@ -83,5 +84,41 @@ describe('the attachment registry stays bounded', () => {
     should(state.entries).have.length(JOB_MAX_ATTACHMENTS_PER_JOB);
     should(state.entries.map(item => item.id)).not.containEql('id-0');
     should(state.entries.map(item => item.id)).containEql(`id-${JOB_MAX_ATTACHMENTS_PER_JOB + 4}`);
+  });
+});
+
+describe('orphaned attachments', () => {
+  const held = (id: string, pid: number, harness?: { pid: number; start: string }): AttachmentEntry => ({
+    ...entry(id, 's', pid),
+    ...(harness === undefined ? {} : { harness }),
+  });
+
+  it('should mark an attachment whose recorded harness is gone or was replaced, and no other', () => {
+    // Arrange
+    const state = [
+      held('1', 10, { pid: 900, start: 'h-900' }), // harness alive, same process
+      held('2', 11, { pid: 901, start: 'h-901' }), // harness gone
+      held('3', 12, { pid: 902, start: 'h-902' }), // its pid was reused
+      held('4', 13), // never under a harness (a person's terminal)
+      held('5', 14, { pid: 903, start: 'h-903' }), // the host cannot say
+    ].reduce(withEntry, EMPTY_ATTACHMENTS);
+    const now = new Map<number, string | undefined | 'unknown'>([
+      [900, 'h-900'],
+      [901, undefined],
+      [902, 'h-other'],
+      [903, 'unknown'],
+    ]);
+
+    // Act
+    const result = withOrphansDetaching(state, now);
+
+    // Assert
+    should(result.marked).equal(2);
+    should(result.state.entries.map(item => item.detaching)).deepEqual([false, true, true, false, false]);
+  });
+
+  it('should not count an attachment already asked to detach', () => {
+    const state = withEntry(EMPTY_ATTACHMENTS, { ...held('1', 10, { pid: 901, start: 'h' }), detaching: true });
+    should(withOrphansDetaching(state, new Map([[901, undefined]])).marked).equal(0);
   });
 });

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ApiError } from '@ferretry/kernel/contract';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
+import { milliseconds } from '@ferretry/std';
 import { FERRET_SESSIONS_ROOT } from '../contract/index.ts';
 import type manifest from '../manifest.ts';
 import type { DaemonStorage } from './adapters/storage/session-storage.ts';
@@ -67,6 +68,11 @@ export interface MovesOwn {
   readonly storage: DaemonStorage;
   /** The binary name a person drives, which the gate recognises a ferret's own `fy` calls by. */
   readonly clientName: string;
+  /**
+   * The job keeper (Terminals' `jobs.keeper` hook), read at the moment of a move; unbound, no attachment is known, none is
+   * detached and the hand-over has no jobs section (the gate classifies as it always did).
+   */
+  readonly jobs?: SessionMoveNeeds['jobs'];
   /** The relaunch-settings read, over the ferret's own harness (W2-c); unbound, the read answers 503. */
   readonly launch?: SessionMoveNeeds['launch'];
   /** The session environment on each ferret's own folder of the `sessions` root; unbound, a fork refuses before it writes. */
@@ -156,9 +162,14 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
           toolsServerArguments: ['mcp', 'serve'],
           statuslineSubcommand: 'statusline',
           servers: { read: async () => [] },
+          // The keeper's proven attachments of the ferret; no keeper installed, none is ever known. A keeper that does not
+          // answer in time proves none (fail closed).
+          attachments: async ferret => (await own.jobs?.()?.attachments(ferret)) ?? [],
+          sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
         }),
       ),
       askAgent: unboundFn('Queueing a message'),
+      ...(own.jobs === undefined ? {} : { jobs: own.jobs }),
       transcripts: unbound('The transcript reader'),
       paneIdentity: unboundFn('The pane identity'),
       signals: unbound('Signalling a process'),

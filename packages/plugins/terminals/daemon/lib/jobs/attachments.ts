@@ -34,6 +34,10 @@ export function withEntry(state: AttachmentsState, entry: AttachmentEntry): Atta
   return { ...state, entries: [...others.filter(existing => !evicted.has(existing.id)), entry] };
 }
 
+/** Records the backstop's cut-over the FIRST time only: a later call (a restarted daemon) leaves the earlier instant alone. */
+export const withCutOver = (state: AttachmentsState, nowMs: number): AttachmentsState =>
+  state.backstopCutOverMs === undefined ? { ...state, backstopCutOverMs: nowMs } : state;
+
 export const withoutEntry = (state: AttachmentsState, id: string): AttachmentsState => ({
   ...state,
   entries: state.entries.filter(entry => entry.id !== id),
@@ -66,6 +70,26 @@ export function withoutStale(
       return now === 'unknown' || now === entry.processStart;
     }),
   };
+}
+
+/**
+ * Marks as detaching every entry whose recorded harness is gone: `harnessNow` is what the host reports for a harness pid
+ * right now (`undefined` when no such process runs; `'unknown'` when it cannot say, which never condemns). An entry that
+ * recorded no harness (a person's own terminal) is never an orphan. Answers the new state and how many it newly marked.
+ */
+export function withOrphansDetaching(
+  state: AttachmentsState,
+  harnessNow: ReadonlyMap<number, string | undefined | 'unknown'>,
+): { readonly state: AttachmentsState; readonly marked: number } {
+  let marked = 0;
+  const entries = state.entries.map(entry => {
+    if (entry.harness === undefined || entry.detaching) return entry;
+    const now = harnessNow.get(entry.harness.pid);
+    if (now === 'unknown' || now === entry.harness.start) return entry;
+    marked += 1;
+    return { ...entry, detaching: true };
+  });
+  return { state: { ...state, entries }, marked };
 }
 
 /** Entries of one ferret, oldest first. */

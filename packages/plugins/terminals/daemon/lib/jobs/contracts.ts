@@ -16,6 +16,10 @@ export interface JobFilesPort {
    * leave running. Empty when the wrapper has tracked none, or its file is absent.
    */
   readTracked(owner: string, id: string): Promise<readonly TrackedProcess[]>;
+  /** Whether the ferret was told how this job ended (a live attachment read its end, or a message was queued). */
+  isReported(owner: string, id: string): Promise<boolean>;
+  /** Records that the ferret was told: an empty `reported` file in the job's folder, gone with the folder. */
+  markReported(owner: string, id: string): Promise<void>;
   /** Asks the wrapper to stop the job: writes `stop`, which the wrapper's watcher turns into SIGTERM on the job's tree. */
   requestStop(owner: string, id: string): Promise<void>;
   outputSize(owner: string, id: string): Promise<number>;
@@ -64,6 +68,24 @@ export interface AttachmentStore {
 /** Proof of which process a pid is: an opaque start reading, or `undefined` when no such process runs, or `'unknown'`. */
 export interface ProcessProof {
   startOf(pid: number): Promise<string | undefined | 'unknown'>;
+  /**
+   * The nearest ancestor of `pid` that runs a harness CLI, with the start read for it — or `undefined` when none does
+   * (a person's own terminal) or this host cannot walk ancestry. It is read once, when an attachment registers.
+   */
+  /**
+   * The command line of a running process (`undefined` when none runs, `'unknown'` when the host cannot say). The keeper
+   * registers ONLY a process that runs `<fy> job attach|run`: a forged registry entry for any other program would otherwise
+   * make the move gate call it safe.
+   */
+  argvOf(pid: number): Promise<string | undefined | 'unknown'>;
+  /**
+   * The identity of the FILE a process runs (opaque; equal means the same file), or `'unknown'` when the host cannot read it.
+   * A command line is only text any program can set, so an attachment must ALSO run the daemon-known `fy`.
+   */
+  executableOf(pid: number): Promise<string | 'unknown'>;
+  /** The identities of the `fy` executable the daemon knows (empty when it can tell of none: nothing then qualifies). */
+  trustedExecutables(): Promise<readonly string[]>;
+  harnessOf?(pid: number): Promise<{ readonly pid: number; readonly start: string } | undefined>;
   /** SIGKILL to one pid. The caller has just re-proved with `startOf` which process that pid is. */
   kill(pid: number): Promise<void>;
 }

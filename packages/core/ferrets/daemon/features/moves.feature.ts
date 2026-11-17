@@ -3,6 +3,7 @@ import { milliseconds } from '@ferretry/std';
 import {
   type FerretId,
   type RunnerHandle,
+  JobKeeper,
   type RuntimeStartResolution,
   Harnesses,
   RUNTIME_START_DEADLINE_MS,
@@ -10,6 +11,9 @@ import {
   Runners,
   RuntimeStart,
 } from '../../contract/index.ts';
+import { FerretMonitorSend } from '../adapters/session/monitor/index.ts';
+import { bindBackstopAsk } from '../lib/moves/job-backstop-send.ts';
+import { runJobBackstop } from '../lib/moves/jobs-handover.ts';
 import type { SessionId } from '../lib/session-id.ts';
 import { boundConversation } from '../lib/ferrets/bound-conversation.ts';
 import { ferretsRestartResume } from '../lib/ferrets/move-resume.ts';
@@ -20,6 +24,9 @@ import { relaunchSettings } from '../modules/relaunch-settings.ts';
 import { buildMoves, MOVE_ROUTE_KEYS } from '../moves.ts';
 import { movesDeps } from '../moves-deps.ts';
 import type { FeatureContribution, FerretsContext, FerretsFeature } from './types.ts';
+
+/** How often kept jobs that ended unattended are looked for. */
+const JOB_BACKSTOP_EVERY_MS = 15_000;
 
 function register(f: FerretsContext): FeatureContribution | undefined {
   const {
@@ -92,9 +99,12 @@ function register(f: FerretsContext): FeatureContribution | undefined {
   // Moves and forks (ferrets-c): today's fork, handover and move modules, built once. The archive the session store
   // keeps is read before the first of their routes answers; the handover's reconcile loop is armed once the daemon
   // serves (today: beside the warden sweep) and disarmed when it stops.
+  /** Terminals' job keeper, if it is installed: asked when a move happens, never held. */
+  const keeper = () => hooks.contributions(JobKeeper)[0]?.item;
   const moves = buildMoves(
     ctx,
     movesDeps(ctx, {
+      jobs: keeper,
       storage: sessionStore,
       clientName: 'fy',
       move: {
@@ -186,6 +196,31 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     run: async () => {
       await storeLoaded;
       kernel.lifecycle.onStop(moves.arm());
+    },
+  });
+
+  // THE COMPLETION BACKSTOP: a kept job that ended while no attachment was live tells its ferret once (a live attachment
+  // already reports the exit itself, so the keeper leaves those out). It rides the send the monitor's wakes already use (typed
+  // when the pane is idle, queued under the job's id when busy) — deliberately NOT `movesDeps`' `askAgent`, which would also
+  // switch on the ask-to-stop-jobs route. With no keeper installed it does nothing.
+  const backstopAsk = bindBackstopAsk(
+    async ferret => await service.harness(ferret as FerretId),
+    new FerretMonitorSend(async ferret => await service.harness(ferret)),
+  );
+  // THE FLOOD GUARD'S CUT-OVER is the keeper's own, written once on the very first run and never moved (not this daemon's boot:
+  // a restart or update must not turn a job that ended during the downtime into history).
+  kernel.jobs.add({
+    id: 'ferrets.job-completion-backstop',
+    schedule: { every: milliseconds(JOB_BACKSTOP_EVERY_MS) },
+    run: async () => {
+      await storeLoaded;
+      const source = keeper();
+      if (source === undefined) return;
+      await runJobBackstop({
+        keeper: source,
+        askAgent: backstopAsk,
+        log: kernel.log.child('ferrets'),
+      });
     },
   });
 

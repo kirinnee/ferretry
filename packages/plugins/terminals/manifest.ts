@@ -1,7 +1,7 @@
 import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { HoldsChanged, InputTargets, VaultPort } from '@ferretry/core-vault/contract';
-import { AgentControlPort, FerretsPort, Runners } from '@ferretry/core-ferrets/contract';
+import { AgentControlPort, FerretsPort, JobKeeper, Runners } from '@ferretry/core-ferrets/contract';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 import {
   AUDIT,
@@ -642,6 +642,8 @@ export default definePlugin({
       { hook: Runners, key: 'tmux' },
       /** The composer's `%terminal` menu is this plugin's: the terminals the ferret holds (reference.catalog). */
       { hook: ReferenceCatalog, key: '%terminal' },
+      /** The job keeper is this plugin's: the moves ask it which attachments a ferret holds and to detach them (docs/jobs.md). */
+      { hook: JobKeeper },
     ],
   },
 

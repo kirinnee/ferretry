@@ -287,12 +287,14 @@ describe('move in-flight reporting', () => {
     should(gateInflight(actual)).deepEqual({
       proceed: false,
       forced: false,
-      reason: 'refused: Codex has 2 background terminals Ferretry can’t see into',
+      reason:
+        'refused: Codex has 2 background terminals Ferretry can’t see into — background jobs Ferretry is not keeping; they stop when the ferret moves. Start long jobs with `fy job run` so they survive.',
     });
     should(gateInflight(actual, { force: true })).deepEqual({
       proceed: true,
       forced: true,
-      reason: 'forced past Codex has 2 background terminals Ferretry can’t see into',
+      reason:
+        'forced past Codex has 2 background terminals Ferretry can’t see into — background jobs Ferretry is not keeping; they stop when the ferret moves. Start long jobs with `fy job run` so they survive.',
     });
   });
 

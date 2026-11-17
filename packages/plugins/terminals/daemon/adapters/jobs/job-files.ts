@@ -3,7 +3,7 @@ import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
 import { JobExitSchema, type JobExit, type JobMeta, JobMetaSchema } from '../../../contract/index.ts';
 import type { JobFilesPort, TrackedProcess } from '../../lib/jobs/contracts.ts';
 
-const JOB_FILES = ['job.json', 'exit.json', 'exit.json.tmp', 'stop', 'tracked', 'output.log'] as const;
+const JOB_FILES = ['job.json', 'exit.json', 'exit.json.tmp', 'stop', 'tracked', 'output.log', 'reported'] as const;
 const ID = /^[a-f0-9]{12}$/u;
 
 /**
@@ -75,6 +75,19 @@ export class StateJobFiles implements JobFilesPort {
       if (match !== null) found.push({ pid: Number(match[1]), start: match[2] ?? '' });
     }
     return found;
+  }
+
+  async isReported(owner: string, id: string): Promise<boolean> {
+    try {
+      await stat(this.path(owner, id, 'reported'));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async markReported(owner: string, id: string): Promise<void> {
+    await this.state.write(this.tree, '' as never, this.name(owner, id, 'reported'));
   }
 
   async requestStop(owner: string, id: string): Promise<void> {

@@ -158,13 +158,31 @@ export const AttachmentEntrySchema = z.strictObject({
   /** The process's start as the host reported it when the entry was made (opaque; equal means the same process). */
   processStart: z.string().min(1).max(64),
   claudeTaskId: z.string().optional(),
+  /**
+   * The identity of the FILE the process ran when it registered (`dev:ino`, plus the script under a JavaScript runtime).
+   * Absent on an entry an earlier daemon wrote: such an entry is never trusted as a kept attachment (fail closed).
+   */
+  executable: z.string().min(1).max(512).optional(),
+  /**
+   * The harness CLI that held the attachment when it registered (pid + start), when one did. If it is gone later the
+   * attachment is an orphan — its harness was killed without a word — and the next sweep asks it to detach.
+   */
+  harness: z.strictObject({ pid: z.number().int().positive(), start: z.string().min(1).max(64) }).optional(),
   registeredAt: z.string(),
   detaching: z.boolean(),
 });
 export type AttachmentEntry = z.infer<typeof AttachmentEntrySchema>;
 
 /** The kernel stamps `format` on write and strips it on read, so the schema holds only the entries. */
-export const AttachmentsStateSchema = z.object({ entries: z.array(AttachmentEntrySchema).default([]) });
+export const AttachmentsStateSchema = z.object({
+  entries: z.array(AttachmentEntrySchema).default([]),
+  /**
+   * THE COMPLETION BACKSTOP'S ONE-TIME CUT-OVER (epoch ms): written the first time the backstop ever runs and never moved. A job
+   * that ended before it is history (the hand-over and `fy job list` already show it); one that ended after it is news, however
+   * many times the daemon restarted since. Absent until that first run.
+   */
+  backstopCutOverMs: z.number().int().nonnegative().optional(),
+});
 export type AttachmentsState = z.infer<typeof AttachmentsStateSchema>;
 
 // ─── attachments ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -201,7 +219,8 @@ export type JobAttachmentListView = z.infer<typeof JobAttachmentListViewSchema>;
 
 export const JobDetachAllViewSchema = z.strictObject({ detached: NonNegativeIntegerSchema });
 
-/** The Claude Code task id a path names (`…/tasks/<id>.output`), or `undefined`. One rule for the CLI and the Processes view. */
-export function claudeTaskId(path: string): string | undefined {
-  return /\/tasks\/([A-Za-z0-9_-]{1,64})\.output$/u.exec(path)?.[1];
-}
+/**
+ * The Claude Code task id a path names (`…/tasks/<id>.output`), or `undefined`. The rule lives in `@ferretry/std` — one
+ * reading for the CLI, the Processes view and the move gate.
+ */
+export { claudeTaskId } from '@ferretry/std';
