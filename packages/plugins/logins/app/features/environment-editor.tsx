@@ -8,9 +8,15 @@
  * live only in the input node's own value (never in `rows`, never in a `value` attribute a DOM snapshot would show). They
  * are read when Save is pressed and emptied once the change is applied; React state holds only WHICH rows have something
  * typed. A plain row is a visible value edited in place and stays an ordinary controlled field.
+ *
+ * A TYPED VALUE CAN VANISH: the field empties itself when the page is hidden, and the editor empties it after a held
+ * change. A row that had something typed and is empty now WITHOUT the person emptying it is "wiped": Save refuses it
+ * ("X needs a value") instead of sending it as "keep", which would silently drop the replacement. After a held change
+ * every row that had a value typed is wiped the same way, so a second Save asks for it again (the plain rows still
+ * hold what was edited, as they always did).
  */
 
-import { type MutableRefObject, useEffect, useMemo, useRef, useState } from 'react';
+import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LoginEnvironment } from '../../contract/index.ts';
 import { type EditRow, editRows, envChange, rowsChanged } from '../lib/environment-edit.ts';
 import type { LoginChanges } from '../lib/login-changes.ts';
@@ -33,7 +39,10 @@ const KEPT: Readonly<Record<'secret' | 'hidden', string>> = {
 /** The two things the editor does to a masked row's field: read it on Save, empty it once applied. */
 interface MaskedHandle {
   readonly read: () => string;
-  readonly clear: () => void;
+  /** Empties the field. `reask` keeps the row marked as one that needs its value typed again. */
+  readonly clear: (reask: boolean) => void;
+  /** Whether a value the person typed was emptied without them emptying it. */
+  readonly wiped: () => boolean;
 }
 
 /** A row whose value is masked: only a plain row is shown (and edited) as text. */
@@ -47,25 +56,54 @@ interface MaskedValueProps {
   readonly handles: MutableRefObject<Map<string, MaskedHandle>>;
   /** Told whether this row has anything typed (never what). */
   readonly onFilled: (rowKey: string, filled: boolean) => void;
+  /** Told whether this row's typed value was wiped (see the file comment). */
+  readonly onWiped: (rowKey: string, wiped: boolean) => void;
   /** Told on every keystroke, so a refusal that was about the old text goes away. */
   readonly onEdit: () => void;
 }
 
 /** One masked, uncontrolled value input, registered with the editor by the row's key. */
-function MaskedValue({ rowKey, label, placeholder, handles, onFilled, onEdit }: MaskedValueProps) {
+function MaskedValue({ rowKey, label, placeholder, handles, onFilled, onWiped, onEdit }: MaskedValueProps) {
   const field = useSecretField();
   const { read, clear, filled } = field;
+  /** How much the person last left typed in the field: above 0 while empty means something emptied it. */
+  const typed = useRef(0);
+  const wiped = useRef(false);
+  const markWiped = useCallback(
+    (next: boolean): void => {
+      wiped.current = next;
+      onWiped(rowKey, next);
+    },
+    [onWiped, rowKey],
+  );
   useEffect(() => {
-    handles.current.set(rowKey, { read, clear });
+    handles.current.set(rowKey, {
+      read,
+      clear: reask => {
+        const had = typed.current > 0;
+        typed.current = 0;
+        clear();
+        if (reask && had) markWiped(true);
+      },
+      wiped: () => wiped.current,
+    });
     return () => {
       handles.current.delete(rowKey);
     };
-  }, [handles, rowKey, read, clear]);
+  }, [handles, rowKey, read, clear, markWiped]);
   useEffect(() => {
     onFilled(rowKey, filled);
-  }, [onFilled, rowKey, filled]);
+    // Emptied while the person had left text in it (the page was hidden): not their doing.
+    if (!filled && typed.current > 0) markWiped(true);
+  }, [onFilled, rowKey, filled, markWiped]);
   // A row that leaves the screen (removed, or the editor closed) has nothing typed any more.
-  useEffect(() => () => onFilled(rowKey, false), [onFilled, rowKey]);
+  useEffect(
+    () => () => {
+      onFilled(rowKey, false);
+      onWiped(rowKey, false);
+    },
+    [onFilled, onWiped, rowKey],
+  );
   return (
     <SecretInput
       field={field}
@@ -73,10 +111,27 @@ function MaskedValue({ rowKey, label, placeholder, handles, onFilled, onEdit }: 
       aria-label={label}
       autoComplete="off"
       placeholder={placeholder}
-      onTyped={onEdit}
+      onTyped={length => {
+        typed.current = length;
+        if (length > 0 && wiped.current) markWiped(false);
+        onEdit();
+      }}
     />
   );
 }
+
+/** A setter for "this row's key is in the set", that changes nothing (and re-renders nothing) when it already is. */
+const keyMarker =
+  (set: (update: (current: ReadonlySet<string>) => ReadonlySet<string>) => void) =>
+  (rowKey: string, on: boolean): void => {
+    set(current => {
+      if (current.has(rowKey) === on) return current;
+      const next = new Set(current);
+      if (on) next.add(rowKey);
+      else next.delete(rowKey);
+      return next;
+    });
+  };
 
 export function EnvironmentEditor({
   loginId,
@@ -93,15 +148,10 @@ export function EnvironmentEditor({
   const handles = useRef(new Map<string, MaskedHandle>());
   /** The keys of the masked rows that have something typed. Keys only, never a value. */
   const [filled, setFilled] = useState<ReadonlySet<string>>(new Set());
-  const markFilled = useRef((rowKey: string, isFilled: boolean): void => {
-    setFilled(current => {
-      if (current.has(rowKey) === isFilled) return current;
-      const next = new Set(current);
-      if (isFilled) next.add(rowKey);
-      else next.delete(rowKey);
-      return next;
-    });
-  }).current;
+  /** The keys of the masked rows whose typed value was wiped. Keys only. */
+  const [wiped, setWiped] = useState<ReadonlySet<string>>(new Set());
+  const markFilled = useRef(keyMarker(setFilled)).current;
+  const markWiped = useRef(keyMarker(setWiped)).current;
 
   const patch = (index: number, change: Partial<EditRow>): void => {
     changes.clear();
@@ -113,7 +163,13 @@ export function EnvironmentEditor({
     const edit = envChange(
       loginId,
       rows.map(row =>
-        isMasked(row) && !row.removed ? { ...row, value: handles.current.get(row.key)?.read() ?? '' } : row,
+        isMasked(row) && !row.removed
+          ? {
+              ...row,
+              value: handles.current.get(row.key)?.read() ?? '',
+              wiped: handles.current.get(row.key)?.wiped() ?? false,
+            }
+          : row,
       ),
     );
     if (edit.kind === 'refused') {
@@ -122,10 +178,12 @@ export function EnvironmentEditor({
     }
     const result = await changes.apply(edit.change);
     if (result.kind === 'applied') {
-      for (const handle of handles.current.values()) handle.clear();
+      // A held edit has not taken effect: keep the editor open, so the sentence that says so stays on screen. What was
+      // typed is gone from it, so a second Save asks for it again instead of keeping the old secret.
+      const held = result.outcome.outcome === 'held';
+      for (const handle of handles.current.values()) handle.clear(held);
       await reload();
-      // A held edit has not taken effect: keep the editor open, so the sentence that says so stays on screen.
-      if (result.outcome.outcome !== 'held') onDone();
+      if (!held) onDone();
     }
   };
 
@@ -156,6 +214,7 @@ export function EnvironmentEditor({
               placeholder={row.kind === 'secret' || row.kind === 'hidden' ? '(kept)' : ''}
               handles={handles}
               onFilled={markFilled}
+              onWiped={markWiped}
               onEdit={changes.clear}
             />
           ) : (
@@ -200,7 +259,7 @@ export function EnvironmentEditor({
         busyLabel="Saving…"
         refusal={changes.refusal}
         submitLabel="Save variables"
-        disabled={!rowsChanged(start, rows) && filled.size === 0}
+        disabled={!rowsChanged(start, rows) && filled.size === 0 && wiped.size === 0}
         onSubmit={() => void save()}
       >
         <Button type="button" data-env-cancel="" onClick={onDone}>

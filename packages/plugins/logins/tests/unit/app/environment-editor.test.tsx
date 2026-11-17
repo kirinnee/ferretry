@@ -23,6 +23,14 @@ const ENVIRONMENT: LoginEnvironment = {
   test: { available: false, reason: 'No preset.' },
 };
 
+const hidePage = async (hidden: boolean): Promise<void> => {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => (hidden ? 'hidden' : 'visible'),
+  });
+  await interact(() => document.dispatchEvent(new Event('visibilitychange')));
+};
+
 const until = async (shown: () => boolean, what: string): Promise<void> => {
   for (let elapsed = 0; elapsed < 2_000 && !shown(); elapsed += 10)
     await interact(() => new Promise(resolve => setTimeout(resolve, 10)));
@@ -275,6 +283,95 @@ describe('what is typed over a secret or into a new row', () => {
     expect(t.stages()[0]?.body).toMatchObject({ env: { ODD_TOKEN: { keep: true } } });
     expect(t.stages()[0]?.body).toHaveProperty('env');
     expect(JSON.stringify(t.stages()[0]?.body)).not.toContain('ANTHROPIC_AUTH_TOKEN');
+    await t.view.unmount();
+  });
+
+  it('is refused at Save, not sent as keep, when the page was hidden after it was typed', async () => {
+    const t = await setup();
+    await click(t.c.querySelector('[data-login-env-edit]'), 'Edit variables');
+    await typeInto(t.field('ANTHROPIC_BASE_URL value'), 'https://gw.example.test/v1');
+    await typeInto(t.field('ANTHROPIC_AUTH_TOKEN value'), REPLACEMENT);
+    await hidePage(true);
+    await hidePage(false);
+    expect(t.field('ANTHROPIC_AUTH_TOKEN value').value).toBe('');
+    await click(t.c.querySelector('[data-change-submit]'), 'Save variables');
+    await until(() => t.c.textContent?.includes('ANTHROPIC_AUTH_TOKEN needs a value') === true, 'the refusal');
+    expect(t.stages()).toHaveLength(0);
+    // Typing it again clears the wipe: the replacement goes out, and the old secret is not kept.
+    await typeInto(t.field('ANTHROPIC_AUTH_TOKEN value'), REPLACEMENT);
+    await click(t.c.querySelector('[data-change-submit]'), 'Save variables');
+    await until(() => t.stages().length === 1, 'the stage');
+    expect(t.stages()[0]?.body).toMatchObject({ env: { ANTHROPIC_AUTH_TOKEN: REPLACEMENT } });
+    await t.view.unmount();
+  });
+
+  it('refuses a new row whose value was wiped, and names the variable', async () => {
+    const t = await setup();
+    await click(t.c.querySelector('[data-login-env-edit]'), 'Edit variables');
+    await click(t.c.querySelector('[data-env-add]'), 'Add a variable');
+    await typeInto(t.field('New variable name'), 'EXTRA_SETTING');
+    await typeInto(t.field('EXTRA_SETTING value'), NEW_VALUE);
+    await hidePage(true);
+    await hidePage(false);
+    await click(t.c.querySelector('[data-change-submit]'), 'Save variables');
+    await until(() => t.c.textContent?.includes('EXTRA_SETTING needs a value') === true, 'the refusal');
+    expect(t.stages()).toHaveLength(0);
+    await t.view.unmount();
+  });
+
+  it('turns Save on for a wiped value alone, so the refusal says why, and does not count a value the person emptied', async () => {
+    const t = await setup();
+    await click(t.c.querySelector('[data-login-env-edit]'), 'Edit variables');
+    const submit = t.c.querySelector('[data-change-submit]') as HTMLButtonElement;
+    await typeInto(t.field('ODD_TOKEN value'), REPLACEMENT);
+    await typeInto(t.field('ODD_TOKEN value'), '');
+    await hidePage(true);
+    await hidePage(false);
+    // Emptied by the person, not wiped: still nothing to save, and still kept as it is.
+    expect(submit.disabled).toBe(true);
+    await typeInto(t.field('ODD_TOKEN value'), REPLACEMENT);
+    await hidePage(true);
+    await hidePage(false);
+    expect(submit.disabled).toBe(false);
+    await click(submit, 'Save variables');
+    await until(() => t.c.textContent?.includes('ODD_TOKEN needs a value') === true, 'the refusal');
+    expect(t.stages()).toHaveLength(0);
+    await t.view.unmount();
+  });
+
+  it('asks for the values again after a held change, instead of refusing nothing or keeping the old secret', async () => {
+    const t = await setup({
+      [APPLY]: { outcome: 'held', sentences: ['ANTHROPIC_AUTH_TOKEN now points somewhere new'] },
+    });
+    await click(t.c.querySelector('[data-login-env-edit]'), 'Edit variables');
+    await typeInto(t.field('ANTHROPIC_AUTH_TOKEN value'), REPLACEMENT);
+    await typeInto(t.field('ANTHROPIC_BASE_URL value'), 'https://gw.example.test/v1');
+    await click(t.c.querySelector('[data-change-submit]'), 'Save variables');
+    await until(() => t.reloads() === 1, 'the reload');
+    expect(t.stages()).toHaveLength(1);
+    // A second Save is refused in a sentence, and sends nothing: not the old secret kept under the new URL.
+    await click(t.c.querySelector('[data-change-submit]'), 'Save variables again');
+    await until(() => t.c.textContent?.includes('ANTHROPIC_AUTH_TOKEN needs a value') === true, 'the second refusal');
+    expect(t.stages()).toHaveLength(1);
+    // Typing the value again lets it go out.
+    await typeInto(t.field('ANTHROPIC_AUTH_TOKEN value'), REPLACEMENT);
+    await click(t.c.querySelector('[data-change-submit]'), 'Save variables once more');
+    await until(() => t.stages().length === 2, 'the second stage');
+    expect(t.stages()[1]?.body).toMatchObject({ env: { ANTHROPIC_AUTH_TOKEN: REPLACEMENT } });
+    await t.view.unmount();
+  });
+
+  it('asks for a new row’s value again after a held change, naming the variable', async () => {
+    const t = await setup({ [APPLY]: { outcome: 'held', sentences: ['EXTRA_SETTING points somewhere new'] } });
+    await click(t.c.querySelector('[data-login-env-edit]'), 'Edit variables');
+    await click(t.c.querySelector('[data-env-add]'), 'Add a variable');
+    await typeInto(t.field('New variable name'), 'EXTRA_SETTING');
+    await typeInto(t.field('EXTRA_SETTING value'), NEW_VALUE);
+    await click(t.c.querySelector('[data-change-submit]'), 'Save variables');
+    await until(() => t.reloads() === 1, 'the reload');
+    await click(t.c.querySelector('[data-change-submit]'), 'Save variables again');
+    await until(() => t.c.textContent?.includes('EXTRA_SETTING needs a value') === true, 'the second refusal');
+    expect(t.stages()).toHaveLength(1);
     await t.view.unmount();
   });
 
