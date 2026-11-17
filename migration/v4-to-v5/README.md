@@ -151,8 +151,11 @@ comes from the plugin contract's `historyPool` state): Claude `projects/<slug>/<
 and the rest; Codex `sessions/YYYY/MM/DD/rollout-*.jsonl`, `archived_sessions/` and `history.jsonl`. Codex `sqlite/` (including WAL/SHM) is omitted because its absolute rollout paths still name v4; Codex rebuilds its derived index from the copied rollouts. v4's
 `.leases` (a lease store, not history) is not copied. A converted ferret's recorded transcript path points into the
 pool, and the v5 harness links each ferret home to the pool when the ferret starts, so the ferret resumes its
-conversation (!A516). The step only writes the pool; it makes no link. Modes and times of these opaque files are
-preserved. Links in v4 are omitted, never followed or re-made. Sign-in files and `fleet/credentials/` belong to the Logins step.
+conversation (!A516). A converted ferret that has a v4 conversation id is also readable BEFORE that first start: the step
+writes the binding v5 proves its transcript from (Claude: `agent-homes/<ferret>/conversation.json` and the `projects` link
+to the pool; Codex: `state/codex/rollouts/<ferret>.json` and the `sessions` link), the same shapes the harness writes at a
+launch; a ferret with no recorded conversation gets none, and the report line "converted ferret homes bound" counts them.
+Modes and times of these opaque files are preserved. Links in v4 are omitted, never followed or re-made. Sign-in files and `fleet/credentials/` belong to the Logins step.
 
 Packs (`src/steps/packs.ts`) folds `config/pack.yaml` and `config/models-guide.yaml` into one `config/packs.yaml`
 (the guide's `prompt`/`suggested` nested under `routing`, comments kept), turns each `state/pack-guide/<id>/` into
