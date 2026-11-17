@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { FERRETRY_MCP_ARGS } from '@ferretry/plugin-runtimes/contract';
 import should from 'should';
 import pkg from '../../package.json' with { type: 'json' };
 import { standInDaemon, HEALTH } from '../integration/support/stand-in-daemon.ts';
@@ -165,7 +166,32 @@ describe('fy mcp serve credential (SIT)', () => {
     should(everythingSent(seen)).not.containEql(ADMIN_FILE_TOKEN);
   });
 
-  it('refuses --as-owner and sends nothing', async () => {
+  it('serves the argv Ferretry itself writes for the tools server, which the option guard must keep accepting', async () => {
+    const { url, seen } = daemon();
+    const result = await run(
+      [...FERRETRY_MCP_ARGS],
+      { FY_URL: url, FY_SESSION_TOKEN: PANE_TOKEN, FY_SESSION_ID: 'pane-1', FERRETRY_CHANNEL: '1' },
+      CALL,
+    );
+    should(result.code).equal(0);
+    should(result.err).not.containEql('unknown option');
+    should(seen.filter(request => request.path === '/v1/agent/tools').length).equal(1);
+  });
+
+  it('refuses an option `mcp serve` does not declare, naming it, and sends nothing', async () => {
+    const { url, seen } = daemon();
+    const result = await run(
+      ['mcp', 'serve', '--zz-unknown'],
+      { FY_URL: url, FY_SESSION_TOKEN: PANE_TOKEN, FY_SESSION_ID: 'pane-1', FY_TOKEN: OWNER_TOKEN },
+      CALL,
+    );
+    should(result.code).equal(2);
+    should(result.err).containEql('unknown option --zz-unknown for "mcp serve"');
+    should(result.out).equal('');
+    should(seen).eql([]);
+  });
+
+  it('refuses --as-owner', async () => {
     const { url, seen } = daemon();
     const result = await run(
       ['--as-owner', 'mcp', 'serve'],

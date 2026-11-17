@@ -21,6 +21,7 @@ import { serveHalf, toolDoor } from '../src/generated/slim.ts';
 import type { ClientDeps } from '../src/lib/client.ts';
 import { paneCredential } from '../src/lib/credential.ts';
 import { mcpServeInvocation } from '../src/lib/entry/route.ts';
+import { unknownServeOption } from '../src/lib/entry/serve-guard.ts';
 import { toolSurfaces } from '../src/lib/entry/tool-door.ts';
 import { EXIT, reportFailure, ShellError } from '../src/lib/errors.ts';
 import { resolveHome } from '../src/lib/home.ts';
@@ -40,6 +41,13 @@ export async function execute(argv: readonly string[]): Promise<number> {
     if (invocation.asOwner)
       throw new ShellError(
         `${binary}: \`mcp serve\` acts only as the ferret whose pane credential it holds; --as-owner is refused. Nothing was sent.`,
+        EXIT.usage,
+      );
+    // The full router refuses an option the verb does not declare before it connects; this slim root does the same.
+    const stray = unknownServeOption(invocation.rest);
+    if (stray !== undefined)
+      throw new ShellError(
+        `${binary}: unknown option ${stray} for "mcp serve"; see \`${binary} mcp serve --help\`. Nothing was sent.`,
         EXIT.usage,
       );
     // Only the pane's own `fys_` credential. `FY_TOKEN` is not read here, so it cannot be sent, whatever it holds.
