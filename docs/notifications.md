@@ -59,7 +59,7 @@ counts toward a stop or a deadline while it sleeps.
 ### Quiet inputs: filled in advance, never buzzed
 
 An input that is filled the moment it is raised, under a paste rule the owner approved in advance
-([secure copy](secure-copy.md)), a task plan line ([input requests](input-requests.md#task-plan-fills-a-sign-in-the-owner-approved-in-advance))
+([secure copy](secure-copy.md)), a sign-in plan line ([input requests](input-requests.md#sign-in-plan-fills-a-sign-in-the-owner-approved-in-advance))
 or a standing sign-in rule ([input requests](input-requests.md#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret)),
 is raised and closed at once: it was never the owner's to answer, so it must not buzz. While the daemon fills it, the
 input is QUIET (`InputRequestService.quietCard`): `AgendaBuzz` leaves it out of the owner's items, so it makes neither

@@ -659,7 +659,7 @@ included, and each proof is bound to the one staged thing it commits (`subject`:
 selection `tps_…`, the staged rule `srs_…`, or the staged paste change `prs_…`, which only the device it is bound to
 gets a challenge for; never another's), opens no step-up window, and is never the fresh proof another act takes; a
 held window is never enough ([secrets.md](secrets.md#2fa-keys),
-[secure-copy.md](secure-copy.md#task-plans), [secure-copy.md](secure-copy.md#approving-in-advance)). A standing rule's
+[secure-copy.md](secure-copy.md#sign-in-plans), [secure-copy.md](secure-copy.md#approving-in-advance)). A standing rule's
 proof is also a **stored proof** (`STEP_UP_ACTS_STORED_PROOF`): its challenge is derived from the rule's signed bytes
 and the daemon keeps the assertion, claimed only through `ClaimStoredProof`, never as a fresh proof. Its options
 answer only the paired device the stage waits on; any other caller, or a stage that is not waiting, gets
@@ -1033,6 +1033,10 @@ command says so at the moment somebody might be tempted to do that instead.
 <device>` re-opens a device's passkey window for ten minutes) or a device narrowed to nothing is repaired
   at the machine — and there is no version of this that is both unbypassable and recoverable. Recoverable
   is the one that was chosen. A browser tab left open on the host is no longer the exception: it is governed.
+  What that keyboard can change includes the **`instructions` and `hooks` components** a runtime carries: an
+  instruction is text every ferret on that runtime reads and follows, and a hook is a command its harness runs on this
+  host as the owner. Writing either from the command line asks no capability and no step-up, as every other host act
+  does not; the same writes from a governed device are `fleet` acts, and the grant is what bounds them.
 - **A step-up is per device and per app session, and bounds nothing about what the confirmed act does.**
   Within its window a step-up covers any number of `configure` acts and any number of `terminal.use`
   streams. It says "the person holding this device agreed recently", not "this particular diff was read".
