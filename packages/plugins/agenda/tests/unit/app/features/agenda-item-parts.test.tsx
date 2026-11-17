@@ -5,7 +5,10 @@ import { AgendaItemView, type AgendaItemViewProps } from '../../../../app/featur
 import type { HistoryEvent } from '../../../../app/lib/agenda-history.ts';
 import type { InboxAction } from '../../../../app/lib/agenda-inbox.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { ensureDom, interact, type Mounted, mount, must } from '@ferretry/app/testing';
+
+// Alone, nothing has registered a DOM yet when `beforeEach` reads `window` ("window is not defined").
+ensureDom();
 
 let view: Mounted | null = null;
 beforeEach(() => {

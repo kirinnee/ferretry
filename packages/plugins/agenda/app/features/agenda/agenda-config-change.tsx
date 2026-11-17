@@ -7,12 +7,17 @@
  * where the daemon's words say so, the line that says Allow applies it, and — when the change was edited
  * after the card was raised — a warning to read it again, since the card now shows the new one.
  *
+ * The held TEXT is the machine's own configuration file, so when the card knows its machine it links to Settings ›
+ * Configuration files, where that file's held edit is read in full and confirmed. A card without a machine (a
+ * harness) says where to read it instead.
+ *
  * It draws nothing for an item that confirms nothing. It sends nothing: the card's own answers (Allow, Deny,
  * Discard change) do, and the daemon decides whether the change is still the one shown.
  */
 
 import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { FileCog, TriangleAlert } from 'lucide-react';
+import { daemonSettingsHref, RouteLink, useOptionalRouter } from '../../shell.ts';
 
 /** One loosening, split into what moves and its two values when the daemon's words name them. */
 export interface ConfigChangeLine {
@@ -53,7 +58,15 @@ function ChangeLine({ line }: { readonly line: ConfigChangeLine }) {
 }
 
 /** The change an item confirms, or nothing when it confirms none. */
-export function AgendaConfigChange({ item }: { readonly item: Pick<AgendaItem, 'confirms'> }) {
+export function AgendaConfigChange({
+  item,
+  daemonId,
+}: {
+  readonly item: Pick<AgendaItem, 'confirms'>;
+  /** The machine the card is on: with it the card links to that machine's Configuration files. */
+  readonly daemonId?: string | undefined;
+}) {
+  const router = useOptionalRouter();
   const confirms = item.confirms;
   if (confirms === undefined) return null;
   return (
@@ -79,6 +92,19 @@ export function AgendaConfigChange({ item }: { readonly item: Pick<AgendaItem, '
           <ChangeLine key={words} line={configChangeLine(words)} />
         ))}
       </ul>
+      <p className="fy-attn-change__text" data-agenda-held-text="">
+        {daemonId === undefined ? (
+          <>Read the held text in Settings › Configuration files.</>
+        ) : (
+          <RouteLink
+            data-agenda-held-text-link=""
+            onNavigate={router === null ? undefined : to => router.navigate(to)}
+            to={daemonSettingsHref(daemonId, 'kernel', 'files')}
+          >
+            Read the held text of {confirms.path}
+          </RouteLink>
+        )}
+      </p>
       <p className="fy-attn-change__allow" data-agenda-allow-applies="">
         <strong>Allow applies this change.</strong> Deny keeps it held; Discard change puts {confirms.path} back.
       </p>

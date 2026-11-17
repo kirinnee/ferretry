@@ -50,8 +50,13 @@
 .fy-attn-change__from {
   color: var(--muted);
 }
-.fy-attn-change__allow {
+.fy-attn-change__allow,
+.fy-attn-change__text {
   margin: 0;
+}
+.fy-attn-change__text a {
+  color: var(--accent);
+  text-decoration: underline;
 }
 .fy-attn-change__head svg,
 .fy-attn-change__restated svg {

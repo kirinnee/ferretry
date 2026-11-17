@@ -126,6 +126,8 @@ export interface AgendaItemCardProps {
   readonly history?: readonly HistoryEvent[] | undefined;
   /** Names the item on this device (its machine, conversation and id), so its folded parts are remembered per item. */
   readonly itemKey?: string | undefined;
+  /** The machine the item is on: a held configuration change links to that machine's Configuration files. */
+  readonly daemonId?: string | undefined;
   /** A card's How to test, read from the board the app holds: what a card ask shows under its heading. Absent: none. */
   readonly howToTestFor?: ((cardId: string) => string | null | undefined) | undefined;
   /** The versions the machine keeps for the item: the Changes panel reads them. Absent: no diff. */
@@ -402,6 +404,7 @@ export function AgendaItemCard({
   formKey,
   history = [],
   itemKey,
+  daemonId,
   howToTestFor,
   versions,
   merge,
@@ -605,7 +608,7 @@ export function AgendaItemCard({
       {latest ? <AgendaDelivery busy={busy} ferret={ferret} item={item} onAct={onAct} /> : null}
       <TermLayer renderProse={renderProse} terms={terms}>
         {/* 2. PREMISE AND CONTEXT (a held config change first, which stands in for the premise). */}
-        {latest ? <AgendaConfigChange item={item} /> : null}
+        {latest ? <AgendaConfigChange daemonId={daemonId} item={item} /> : null}
         {gated || (premise === null && context === null) ? null : (
           <div className="fy-card__part" data-agenda-part="premise">
             <Situation context={context} premise={premise} renderProse={renderProse} />

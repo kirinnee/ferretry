@@ -39,6 +39,7 @@ export {
   clockOfInstant,
   composerQuoteTarget,
   daemonOfClient,
+  daemonSettingsHref,
   ListRefresh,
   type ListRefreshEnvironment,
   MachineDeadlineError,
