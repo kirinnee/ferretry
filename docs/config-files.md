@@ -205,6 +205,7 @@ anywhere, or a high-entropy value under a key ending `KEY`, `TOKEN`, `SECRET`, `
 — is refused like a file that does not parse, and the issue never repeats the value. The text is scanned
 line by line as well as by value, so a key left in a YAML comment or a tag is refused the same way, its issue
 naming only the line. Before 5.0 a comment was not scanned and such a file was accepted.
+A shell default (`${NAME:-literal}`, with `-` `=` `+` as well) is judged by its LITERAL alone, by the same tests, whatever its NAME: an empty one, a path, and a `${NAME:?message}` message are not secrets, and a random literal is one under a long plain NAME too; `$NAME`, `${NAME}` and `${secret:NAME}` stay pure pointers.
 
 ## What a read shows
 

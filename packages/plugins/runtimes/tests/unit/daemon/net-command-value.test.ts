@@ -320,3 +320,23 @@ describe('(I) a command is withheld in every view when the cutter cuts a value i
     should(WITHHELD).equal('withheld');
   });
 });
+
+describe('a shell default is a value, never a pointer', () => {
+  const withheld = (command: string): boolean => commandWithheld(command);
+
+  it.each([
+    ['a short literal', 'env API_KEY=${X:-hunter2} srv'],
+    ['an empty default', 'env API_KEY=${X:-} srv'],
+    ['a message', 'env API_KEY=${X:?hunter2} srv'],
+    ['a long literal', `env API_KEY=\${X:-${V}} srv`],
+    ['a default under a long plain name', `env API_KEY=\${${'A'.repeat(60)}:-${V}} srv`],
+  ])('should withhold a command whose cut is %s, so the default is never shown as written', (_label, command) => {
+    should(withheld(command)).be.true();
+  });
+
+  it('should still show a pointer as written', () => {
+    should(withheld('env API_KEY=${X} srv')).be.false();
+    should(withheld('env API_KEY=$X srv')).be.false();
+    should(withheld('env API_KEY="${secret:X}" srv')).be.false();
+  });
+});

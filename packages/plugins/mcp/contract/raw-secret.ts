@@ -2,6 +2,8 @@
  * Config-file raw-secret refusal copied from today's fleet/lib/config-files/secrets.ts.
  * MCP uses the nested-env rule: no top-level origin-id exemption applies here. Pure, with no IO.
  */
+import { judgedText } from '@ferretry/std/credential-words';
+
 export const RAW_SECRET_MESSAGE = 'this looks like a raw secret (an API key or token)';
 export const RAW_SECRET_FIX = `store the value with \`fy secret set NAME\`, then write \${secret:NAME} here instead — a secret value never goes in a configuration file`;
 
@@ -19,8 +21,6 @@ const KNOWN_SHAPES: readonly RegExp[] = [
   /\bglpat-[A-Za-z0-9_-]{16,}/u,
 ];
 const CREDENTIAL_KEY = /(?:(?:key|token|secret|password|passwd)s?|credentials?)$/iu;
-// A pointer holds a NAME and nothing else: `${NAME:-<literal>}` carries a literal and so can carry a credential.
-const REFERENCE = /^\$(?:\{(?:secret\??:)?[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
 const MIN_SECRET_LENGTH = 16;
 const ENTROPY_THRESHOLD = 3.5;
 
@@ -40,8 +40,9 @@ function shannonEntropy(value: string): number {
 export function looksLikeRawSecret(key: string, value: string): boolean {
   if (KNOWN_SHAPES.some(shape => shape.test(value))) return true;
   if (!CREDENTIAL_KEY.test(key)) return false;
-  const trimmed = value.trim();
-  if (REFERENCE.test(trimmed) || trimmed.length < MIN_SECRET_LENGTH || /\s/u.test(trimmed)) return false;
+  // A pointer holds nothing and a default (`${NAME:-<literal>}`) holds its literal, judged alone: the std rule's reading.
+  const trimmed = judgedText(value.trim()).trim();
+  if (trimmed.length < MIN_SECRET_LENGTH || /\s/u.test(trimmed)) return false;
   if (/^(?:[a-z][a-z0-9+.-]*:\/\/|[/~.])/iu.test(trimmed)) return false;
   return shannonEntropy(trimmed) >= ENTROPY_THRESHOLD;
 }
