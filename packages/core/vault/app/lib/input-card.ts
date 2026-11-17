@@ -6,19 +6,21 @@
  * these return.
  *
  * NO FUNCTION HERE STORES A VALUE. The typed value comes in as an argument, goes out inside one
- * {@link InputDeliverBodyView} (padded) and is never kept.
+ * {@link InputDeliverBody} (padded) and is never kept.
  */
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import {
+  type InputDeliverBody,
+  type InputRequest,
   type InputRequestField,
-  type InputRequestView,
-  type InputDeliverBodyView,
   type InputRisk,
+  type InputSettledSlotProps,
+  type InputSavedOffer,
   inputValueProblem,
   padInputValue,
-} from './input-wire.ts';
-import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
+} from '../../contract/index.ts';
 
-type Sensitivity = InputRequestView['sensitivity'];
+type Sensitivity = InputRequest['sensitivity'];
 
 /** One value the card asks for: a request has one to four, each with its own sensitivity and its own risk flag. */
 export interface InputCardField {
@@ -30,7 +32,7 @@ export interface InputCardField {
 }
 
 /** The fields of a request, in the order the daemon types them. */
-export const fieldsOf = (request: InputRequestView): readonly InputCardField[] =>
+export const fieldsOf = (request: InputRequest): readonly InputCardField[] =>
   request.fields.map((field: InputRequestField) => ({
     key: field.id,
     sensitivity: field.sensitivity,
@@ -46,19 +48,19 @@ const NEEDS: Readonly<Record<Sensitivity, string>> = {
 };
 
 /** A card with a secret AND a plain field is a login; every other card is named by its strongest field. */
-const needsWords = (request: InputRequestView): string => {
+const needsWords = (request: InputRequest): string => {
   const kinds = new Set(request.fields.map(field => field.sensitivity));
   return kinds.has('secret') && kinds.has('plain') ? 'a login' : NEEDS[request.sensitivity];
 };
 
 /** `!A7 · Hadi needs a password` — the ask reference first, because it is how the owner names the card. */
-export const titleWords = (request: InputRequestView, agentName: string): string =>
+export const titleWords = (request: InputRequest, agentName: string): string =>
   request.source === undefined
     ? `${ASK_REFERENCE_SIGIL}${request.agendaItemId} · ${agentName} needs ${needsWords(request)}`
     : `${ASK_REFERENCE_SIGIL}${request.agendaItemId} · ${agentName} wants to paste a sealed value`;
 
 /** Where a value goes, as the owner writes it: `%terminal:dev`, `%browser:app`, or "the secret NAME". */
-export const targetRef = (request: InputRequestView): string =>
+export const targetRef = (request: InputRequest): string =>
   request.target.kind === 'secret'
     ? `the secret ${request.target.key}`
     : `%${request.target.kind === 'page' ? 'browser' : 'terminal'}:${request.target.key}`;
@@ -66,7 +68,7 @@ export const targetRef = (request: InputRequestView): string =>
 const REOBSERVING = 'Ferretry is looking at the target again';
 
 /** Why Send is off right now, or `undefined`. The RISK never appears here: it flags, it does not refuse. */
-export const sendBlock = (request: InputRequestView, now: number): string | undefined => {
+export const sendBlock = (request: InputRequest, now: number): string | undefined => {
   if (request.state !== 'pending') return 'This request is no longer waiting for a value.';
   if (Date.parse(request.expiresAt) <= now) return 'This request has expired.';
   if (request.observed === undefined || request.observedDigest === undefined) return REOBSERVING;
@@ -74,13 +76,13 @@ export const sendBlock = (request: InputRequestView, now: number): string | unde
 };
 
 /** Whether "Press Enter for me" is drawn at all: the agent presses it itself for `agent`. */
-export const offersPressEnter = (request: InputRequestView): boolean => request.submit !== 'agent';
+export const offersPressEnter = (request: InputRequest): boolean => request.submit !== 'agent';
 
 /**
  * What the Enter tick starts as (I51): on for an owner default and for a terminal secret, off for a browser page and
  * for every other terminal value.
  */
-export const defaultSubmit = (request: InputRequestView): boolean =>
+export const defaultSubmit = (request: InputRequest): boolean =>
   request.submit === 'owner-default' ||
   (request.submit === 'offer-owner' && request.target.kind === 'terminal' && request.sensitivity === 'secret');
 
@@ -121,17 +123,32 @@ const PLAIN_NOTICE = 'Not secret: the ferret can see this value.';
 export const plainFlagWords = (field: InputCardField): string => field.risk?.reason ?? PLAIN_NOTICE;
 
 /** What is wrong with a typed value of this field, shown under it; nothing for an empty one. */
-export const fieldProblem = (field: InputCardField, value: string): string | undefined =>
+const fieldProblem = (field: InputCardField, value: string): string | undefined =>
   value === '' ? undefined : inputValueProblem(value, field.sensitivity);
 
+/**
+ * What the card keeps of a typed field: whether it holds anything and what is wrong with it, never the value (the value
+ * stays in the field's own node until Send).
+ */
+export interface FieldState {
+  readonly filled: boolean;
+  readonly problem: string | undefined;
+}
+
+/** The state a field is in after a value was typed; the value itself is not kept. */
+export const fieldStateOf = (field: InputCardField, value: string): FieldState => ({
+  filled: value !== '',
+  problem: fieldProblem(field, value),
+});
+
 /** Whether Send may go: one typed value, or EVERY field of a larger card typed and fine. */
-export const typedReady = (fields: readonly InputCardField[], values: Readonly<Record<string, string>>): boolean =>
+export const typedReady = (fields: readonly InputCardField[], states: Readonly<Record<string, FieldState>>): boolean =>
   fields.length > 0 &&
-  fields.every(field => (values[field.key] ?? '') !== '') &&
-  (fields.length === 1 || fields.every(field => fieldProblem(field, values[field.key] ?? '') === undefined));
+  fields.every(field => states[field.key]?.filled === true) &&
+  (fields.length === 1 || fields.every(field => states[field.key]?.problem === undefined));
 
 export interface TypedFieldsSend {
-  readonly request: InputRequestView;
+  readonly request: InputRequest;
   readonly fields: readonly InputCardField[];
   readonly values: Readonly<Record<string, string>>;
   readonly submit: boolean;
@@ -139,10 +156,10 @@ export interface TypedFieldsSend {
 }
 
 export type BuiltBody =
-  | { readonly ok: true; readonly body: InputDeliverBodyView }
+  | { readonly ok: true; readonly body: InputDeliverBody }
   | { readonly ok: false; readonly problem: string };
 
-const enterFor = (request: InputRequestView, submit: boolean): boolean => offersPressEnter(request) && submit;
+const enterFor = (request: InputRequest, submit: boolean): boolean => offersPressEnter(request) && submit;
 
 /**
  * What typing the values of a card sends: a card of one field sends `padded`, a card of several sends each value padded
@@ -172,10 +189,138 @@ export const typedBody = ({ request, fields, values, submit, deliveryId }: Typed
   };
 };
 
+// ─── saved logins (docs/input-requests.md, "Saved logins") ────────────────────────────────────────────────────────────
+
+/**
+ * The saved accounts the daemon offers for this card, split the way the card draws them. The daemon decides what may be
+ * offered (an account that holds every field, a code only where a code may be typed, nothing by hand on a page a sign-in
+ * reaches through a provider) and in what order: this only reads its list. NOTHING HERE HOLDS A VALUE: an offer is an
+ * account's handle, its label and the sign-in the tap would use, and the daemon opens the value itself at the write.
+ */
+export interface SavedChoices {
+  /** Accounts the daemon matched to this target, the one-tap choice first. Each is one tap. */
+  readonly matched: readonly InputSavedOffer[];
+  /** Accounts the owner may pick by hand: behind "Use another account…", never the one-tap choice. */
+  readonly other: readonly InputSavedOffer[];
+}
+
+/** What the card may offer from saved accounts, or `undefined` when it offers none (and a paste never does). */
+export const savedChoices = (request: InputRequest): SavedChoices | undefined => {
+  const offers = request.saved?.offers ?? [];
+  if (request.source !== undefined || offers.length === 0) return undefined;
+  const matched = offers.filter(offer => offer.matched);
+  return {
+    matched: [...matched.filter(offer => offer.primary === true), ...matched.filter(offer => offer.primary !== true)],
+    other: offers.filter(offer => !offer.matched),
+  };
+};
+
+/** Words for the button that opens the hand-picked accounts. */
+export const OTHER_ACCOUNT_WORDS = 'Use another account…';
+
+/** Words for the same button while the hand-picked accounts are drawn below it. */
+export const HIDE_OTHER_ACCOUNTS_WORDS = 'Hide other accounts';
+
+/** The account as the owner named it, with the username it holds when it has one ("GitHub · kirinnee"). */
+export const offerWords = (offer: InputSavedOffer): string =>
+  offer.username === undefined || offer.label.includes(`(${offer.username})`)
+    ? offer.label
+    : `${offer.label} · ${offer.username}`;
+
+const FILLS_WORDS: Readonly<Record<InputSavedOffer['fills'], string>> = {
+  password: 'types its password',
+  totp: 'types a one-time code Ferretry makes',
+  username: 'types its username',
+};
+
+/** What a tap on the offer would type, in words: the field's kind, never a value. */
+export const offerFillsWords = (offer: InputSavedOffer): string => FILLS_WORDS[offer.fills];
+
+const WHY_WORDS: Readonly<Record<NonNullable<InputSavedOffer['why']>, string>> = {
+  ferret: 'The ferret named this account',
+  project: 'The default for this project',
+  folder: 'The default for this folder',
+  site: 'The default for this site',
+  only: 'The only account that signs in here',
+};
+
+/** Why the one-tap choice is first, when the daemon said. */
+export const offerWhyWords = (offer: InputSavedOffer): string | undefined =>
+  offer.why === undefined
+    ? undefined
+    : offer.why === 'project' && offer.project !== undefined
+      ? `The default for ${offer.project}`
+      : WHY_WORDS[offer.why];
+
+/** Where a hand-picked account signs in, when that is somewhere else; `undefined` for one the daemon did not place. */
+export const offerElsewhereWords = (offer: InputSavedOffer): string | undefined =>
+  offer.elsewhere === undefined
+    ? undefined
+    : offer.elsewhere.length === 0
+      ? 'Not linked to a site'
+      : `Signs in at ${offer.elsewhere.join(', ')}`;
+
+const PROVIDER_WORDS = { google: 'Google', github: 'GitHub', microsoft: 'Microsoft', apple: 'Apple' } as const;
+
+/**
+ * How the account this target is for signs in, when it is not a plain password: the owner reads that the ferret should
+ * be on the provider's page ("Sign in with Google via “Google · kirin”"). `undefined` for a password sign-in.
+ */
+export const signInNote = (request: InputRequest): string | undefined => {
+  const signIn = request.saved?.signIn;
+  if (signIn === undefined || signIn.method.kind === 'password') return undefined;
+  const provider = signIn.method.kind === 'sso' ? (signIn.method.name ?? 'SSO') : PROVIDER_WORDS[signIn.method.kind];
+  return `Sign in with ${provider}${signIn.via === undefined ? '' : ` via “${signIn.via.label}”`}`;
+};
+
+/** The daemon's demotion of the one-tap: the page is signing in someone else than the account it would have used. */
+export const differentFromWords = (request: InputRequest): string | undefined => {
+  const other = request.saved?.differentFrom;
+  return other === undefined ? undefined : `This looks like a different account from ${other.label}.`;
+};
+
+/**
+ * What tapping a saved account sends: the account's handle and the sign-in it would use, never a value. The DAEMON opens
+ * the value inside its use boundary and checks the offer again at the write, so a stale card cannot type from an account
+ * that is no longer offered.
+ */
+export const offerBody = (
+  request: InputRequest,
+  offer: InputSavedOffer,
+  submit: boolean,
+  deliveryId: string,
+): BuiltBody =>
+  request.observedDigest === undefined
+    ? { ok: false, problem: REOBSERVING }
+    : {
+        ok: true,
+        body: {
+          deliveryId,
+          observedDigest: request.observedDigest,
+          entry: offer.id,
+          ...(offer.signIn === undefined ? {} : { signIn: offer.signIn }),
+          submit: enterFor(request, submit),
+        },
+      };
+
+/** What the card says once a saved account was used: the account and the target, never the value. */
+export const offerSentWords = (request: InputRequest, offer: InputSavedOffer): string =>
+  `Used ${offerWords(offer)} for ${targetRef(request)}.`;
+
+/** What the settled card hands a panel in the slot after it: ids and names the owner saw on the card. */
+export const settledSlotProps = (request: InputRequest, offer: InputSavedOffer): InputSettledSlotProps => ({
+  ferret: request.sessionId,
+  request: request.id,
+  entry: offer.id,
+  ...(offer.signIn === undefined ? {} : { signIn: offer.signIn }),
+  ...(request.saved?.match === undefined ? {} : { place: request.saved.match }),
+  ...(request.saved?.project === undefined ? {} : { project: request.saved.project }),
+});
+
 // ─── a paste of a secure copy (docs/secure-copy.md) ───────────────────────────────────────────────────────────────────
 
 /** What allowing a paste sends: no value, only that the owner allows the copy the REQUEST names. */
-export const sealedBody = (request: InputRequestView, submit: boolean, deliveryId: string): BuiltBody =>
+export const sealedBody = (request: InputRequest, submit: boolean, deliveryId: string): BuiltBody =>
   request.observedDigest === undefined
     ? { ok: false, problem: REOBSERVING }
     : {
@@ -184,7 +329,7 @@ export const sealedBody = (request: InputRequestView, submit: boolean, deliveryI
       };
 
 /** "sealed:vercel_token": the handle a paste card pastes (where it came from is a row of its own). */
-export const pastedWords = (request: InputRequestView): string | undefined =>
+export const pastedWords = (request: InputRequest): string | undefined =>
   request.source === undefined ? undefined : `sealed:${request.source.name}`;
 
 const SOURCE_KIND_WORDS: Readonly<Record<'browser' | 'clipboard' | 'command', string>> = {
@@ -197,7 +342,7 @@ const SOURCE_KIND_WORDS: Readonly<Record<'browser' | 'clipboard' | 'command', st
  * How much was copied and what kind of place it came from: "40 characters · what a command printed". A count and a kind
  * only, both the daemon's: never a prefix, a digest or a class of the value (a handle is all the owner is shown of it).
  */
-export const pasteSize = (request: InputRequestView): string | undefined => {
+export const pasteSize = (request: InputRequest): string | undefined => {
   const source = request.source;
   if (source === undefined) return undefined;
   const kind = SOURCE_KIND_WORDS[source.from.kind];
@@ -210,7 +355,7 @@ export const pasteSize = (request: InputRequestView): string | undefined => {
  * The page field a paste goes into, as the DAEMON saw it (its type and name), with the ferret's own label kept apart as
  * the claim it is. Nothing for a terminal or the secret store.
  */
-export const pasteField = (request: InputRequestView): string | undefined => {
+export const pasteField = (request: InputRequest): string | undefined => {
   const facts = request.observed;
   if (request.source === undefined || facts?.kind !== 'page') return undefined;
   const asked = request.fields[0];
@@ -225,15 +370,15 @@ export const pasteField = (request: InputRequestView): string | undefined => {
 };
 
 /** Whether allowing this paste overwrites a secret the store holds now: the old value is gone for good. */
-export const replacesSecret = (request: InputRequestView): boolean =>
+export const replacesSecret = (request: InputRequest): boolean =>
   request.source !== undefined && request.observed?.kind === 'secret' && request.observed.exists;
 
 /** The approval's own words: replacing a secret says so. */
-export const allowWords = (request: InputRequestView): string =>
+export const allowWords = (request: InputRequest): string =>
   replacesSecret(request) ? 'Replace secret' : 'Allow paste';
 
 /** The two ends of a paste card: where its copy came from, and what the daemon saw reading the destination. */
-export function pasteRoute(request: InputRequestView): { readonly from: string; readonly to: string } | undefined {
+export function pasteRoute(request: InputRequest): { readonly from: string; readonly to: string } | undefined {
   const source = request.source;
   if (source === undefined) return undefined;
   const from =
@@ -278,13 +423,13 @@ interface HttpFailure {
   readonly message?: unknown;
 }
 
-const SURFACE_WORDS: Readonly<Record<InputRequestView['target']['kind'], string>> = {
+const SURFACE_WORDS: Readonly<Record<InputRequest['target']['kind'], string>> = {
   page: 'page',
   terminal: 'terminal',
   secret: 'secret store',
 };
 
-const reboundWords = (kind: InputRequestView['target']['kind'] | undefined): string =>
+const reboundWords = (kind: InputRequest['target']['kind'] | undefined): string =>
   kind === 'terminal'
     ? 'The terminal redrew its prompt. Check it and send again.'
     : kind === 'secret'
@@ -313,7 +458,7 @@ const carriesTypedValue = (message: string, typed: readonly string[]): boolean =
  */
 export const inputFailure = (
   error: unknown,
-  kind?: InputRequestView['target']['kind'],
+  kind?: InputRequest['target']['kind'],
   typed: readonly string[] = [],
 ): InputFailure => {
   const failure = (error !== null && typeof error === 'object' ? error : {}) as HttpFailure;
@@ -355,4 +500,4 @@ export const inputFailure = (
 };
 
 /** What the card says once a Send was answered. */
-export const sentWords = (request: InputRequestView): string => `Sent to ${targetRef(request)}.`;
+export const sentWords = (request: InputRequest): string => `Sent to ${targetRef(request)}.`;

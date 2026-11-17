@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, spyOn } from 'bun:test';
 import { InputCard } from '../../../app/features/input/input-card.tsx';
-import { padInputValue } from '../../../app/lib/input-wire.ts';
+import { padInputValue } from '../../../contract/index.ts';
 import { click, press, settle, typeInto } from '../../support/app/dom-form.ts';
 import { interact, mount, must } from '../../support/app/dom.ts';
 import {
@@ -15,7 +15,12 @@ import {
   terminalRequest,
 } from '../../support/app/input-fixtures.ts';
 
-const DELIVERED = { id: REQUEST_ID, state: 'delivered', submitted: true };
+const DELIVERED = {
+  id: REQUEST_ID,
+  deliveryId: '123e4567-e89b-42d3-a456-426614174000',
+  state: 'delivered',
+  submitted: true,
+};
 const NOW = Date.parse('2026-11-10T00:00:00.000Z');
 
 const q = <T extends Element>(root: ParentNode, selector: string): T => must(root.querySelector<T>(selector), selector);
@@ -56,6 +61,42 @@ async function hidePage(): Promise<() => void> {
 }
 
 describe('the input card holds a typed value only in its field', () => {
+  it('I6 never puts what is typed into the markup: not in the page, not in the value attribute, shown or hidden', async () => {
+    const { mounted } = await card();
+    try {
+      const input = field(mounted.container);
+      await typeInto(input, FAKE_VALUE);
+      // The field holds it for the keyboard, and nothing else does: React does not copy it into the `value` attribute.
+      expect(input.value).toBe(FAKE_VALUE);
+      expect(input.getAttribute('value')).toBeNull();
+      expect(mounted.container.innerHTML).not.toContain(FAKE_VALUE);
+      // Showing what was typed changes the field's type, and still copies nothing into the markup.
+      await click(q(mounted.container, '[data-input-reveal]'));
+      expect(input.type).toBe('text');
+      expect(input.value).toBe(FAKE_VALUE);
+      expect(input.getAttribute('value')).toBeNull();
+      expect(mounted.container.innerHTML).not.toContain(FAKE_VALUE);
+      // Typing on: Send goes by what is in the field, so it is ready with a value and not before.
+      expect(q<HTMLButtonElement>(mounted.container, '[data-input-send]').disabled).toBe(false);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('I6 keeps Send off for an empty field and on again once something is typed', async () => {
+    const { mounted } = await card();
+    try {
+      const send = q<HTMLButtonElement>(mounted.container, '[data-input-send]');
+      expect(send.disabled).toBe(true);
+      await typeInto(field(mounted.container), FAKE_VALUE);
+      expect(send.disabled).toBe(false);
+      await typeInto(field(mounted.container), '');
+      expect(send.disabled).toBe(true);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
   it('I6 clears the field the moment Send is pressed, before the daemon answers, and keeps nothing after', async () => {
     const hold = held();
     const { mounted, calls } = await card(terminalRequest(), async () => {

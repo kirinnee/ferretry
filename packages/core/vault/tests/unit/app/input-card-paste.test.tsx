@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'bun:test';
 import { InputCard } from '../../../app/features/input/input-card.tsx';
 import { inputFailure, pasteRoute, sealedBody, titleWords } from '../../../app/lib/input-card.ts';
-import { InputRequestViewSchema } from '../../../app/lib/input-wire.ts';
+import { InputRequestSchema } from '../../../contract/index.ts';
 import { click, settle } from '../../support/app/dom-form.ts';
 import { mount, must } from '../../support/app/dom.ts';
 import {
@@ -19,7 +19,12 @@ import {
 } from '../../support/app/input-fixtures.ts';
 
 const NOW = Date.parse('2026-11-10T00:00:00.000Z');
-const DELIVERED = { id: REQUEST_ID, state: 'delivered', submitted: true };
+const DELIVERED = {
+  id: REQUEST_ID,
+  deliveryId: '123e4567-e89b-42d3-a456-426614174000',
+  state: 'delivered',
+  submitted: true,
+};
 const SENTINEL = 'FAKE-SC-7f3a91';
 
 const q = <T extends Element>(root: ParentNode, selector: string): T => must(root.querySelector<T>(selector), selector);
@@ -45,7 +50,7 @@ async function card(request = pasteRequest(), answer?: () => Promise<unknown>, r
 
 describe('the paste card’s words', () => {
   it('should read a paste request’s source, which the app used to ignore', () => {
-    const read = InputRequestViewSchema.safeParse(pasteRequest());
+    const read = InputRequestSchema.safeParse(pasteRequest());
 
     expect(read.success).toBe(true);
     expect(read.success && read.data.source).toMatchObject({ kind: 'sealed', name: 'vercel' });
