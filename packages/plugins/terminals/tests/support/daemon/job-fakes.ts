@@ -89,6 +89,10 @@ export function memoryService(over: { isDirectory?: (path: string) => Promise<bo
   const harnesses = new Map<number, { readonly pid: number; readonly start: string }>();
   /** What `argvOf` answers for a pid (default: a `fy job attach` line); `'unknown'` = unreadable. */
   const argvs = new Map<number, string | undefined | 'unknown'>();
+  /** The file identity a pid runs (default: the trusted `fy`); `'unknown'` = unreadable. */
+  const executables = new Map<number, string | 'unknown'>();
+  /** The identities the daemon knows as `fy`. */
+  const trusted: string[] = ['file:fy'];
   let counter = 0;
   const service = new JobService(
     files,
@@ -98,6 +102,8 @@ export function memoryService(over: { isDirectory?: (path: string) => Promise<bo
       startOf: async pid => (starts.has(pid) ? starts.get(pid) : undefined),
       harnessOf: async pid => harnesses.get(pid),
       argvOf: async pid => (starts.has(pid) ? (argvs.has(pid) ? argvs.get(pid) : `fy job attach ${pid}`) : undefined),
+      executableOf: async pid => executables.get(pid) ?? 'file:fy',
+      trustedExecutables: async () => trusted,
       kill: async pid => {
         killed.push(pid);
         if (!immortal.has(pid)) starts.delete(pid);
@@ -114,5 +120,5 @@ export function memoryService(over: { isDirectory?: (path: string) => Promise<bo
       binaryName: 'fy',
     },
   );
-  return { service, files, runtime, clock, starts, killed, immortal, harnesses, argvs };
+  return { service, files, runtime, clock, starts, killed, immortal, harnesses, argvs, executables, trusted };
 }

@@ -34,7 +34,11 @@ export interface MoveTargetView {
   /** The session is stopped on a tool-permission prompt; see `AssembleInflightReportInput.awaitingPermission`. */
   readonly awaitingPermission?: boolean;
   readonly turn: number;
-  readonly openTools: readonly string[];
+  /**
+   * The tool calls the session has open, or `undefined` when its state does not RECORD them (today nothing writes them): an
+   * unrecorded list is UNKNOWN, never "none", so it cannot be used to claim that a shell is a background job.
+   */
+  readonly openTools: readonly string[] | undefined;
   readonly subprocessSince?: string;
 }
 
@@ -66,14 +70,22 @@ const everyOpenToolIdentified = (tools: readonly OpenToolInfo[]): boolean =>
 /**
  * Words the Claude tool shells whose stdout is `…/tasks/<id>.output`. CLAUDE WRITES EVERY BASH CALL'S STDOUT THERE, so such a
  * shell is a `run_in_background` job only when it outlived its call, and that is claimed ONLY when every open tool is
- * identified and none matches the shell's command. A shell an open call matches is that call, still running (unchanged).
+ * identified and none matches the shell's command (calls NOT recorded at all are unknown, never "none": then only a session at
+ * its prompt, with no turn running, is believed). A shell an open call matches is that call, still running (unchanged).
  * Anything else — including every shell when the open calls cannot be identified — is neutrally "a command the agent is
  * running" and stays out of the hand-over's list of stopped background jobs. Only wording changes; the verdict is untouched.
  */
-export function withUnkeptJobs(processes: ProcessObservation, openTools: readonly OpenToolInfo[]): ProcessObservation {
+export function withUnkeptJobs(
+  processes: ProcessObservation,
+  /** `undefined` = the session does not record its open tool calls (unknown, not none). */
+  openTools: readonly OpenToolInfo[] | undefined,
+  /** The session is at its prompt with no turn in progress: no foreground call can be running, so a call-less shell outlived its call. */
+  atPrompt = false,
+): ProcessObservation {
   if (processes.kind !== 'observed') return processes;
-  const open = new Set(openTools.filter(tool => tool.name === 'Bash').map(tool => tool.summary));
-  const certain = everyOpenToolIdentified(openTools);
+  const open = new Set((openTools ?? []).filter(tool => tool.name === 'Bash').map(tool => tool.summary));
+  // BACKGROUND IS CLAIMED ONLY ON POSITIVE EVIDENCE: the calls are recorded and every one is identified, or no turn is running.
+  const certain = openTools === undefined ? atPrompt : everyOpenToolIdentified(openTools);
   return {
     kind: 'observed',
     processes: processes.processes.map(entry => {
@@ -116,8 +128,9 @@ export class MovePreflight {
         ? { kind: 'observed', processes: collected.processes.filter(entry => !own.has(entry.pid)) }
         : collected;
     const codex = await this.countBackgroundTerminals(view);
-    const openTools = withoutRequesterTool(joinOpenTools(view.openTools, chatTail), call);
-    const processesMarked = withUnkeptJobs(processes, openTools);
+    const openTools = withoutRequesterTool(joinOpenTools(view.openTools ?? [], chatTail), call);
+    const atPrompt = view.turnState === 'your-turn' && view.awaitingPermission !== true;
+    const processesMarked = withUnkeptJobs(processes, view.openTools === undefined ? undefined : openTools, atPrompt);
     const report = assembleInflightReport({
       status: view.status,
       ...(view.turnState === undefined ? {} : { turnState: view.turnState }),

@@ -37,6 +37,7 @@ export async function handOffJobs(ports: JobsMovePorts, ferret: string, report: 
   if (keeper === undefined) return { section: undefined, told: [] };
   await detachAttachments(keeper, ferret, {
     sleep: ports.sleep,
+    nowMs: ports.nowMs,
     log: ports.log,
     ...(ports.keeperTimeoutMs === undefined ? {} : { timeoutMs: ports.keeperTimeoutMs }),
   });

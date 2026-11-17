@@ -172,17 +172,20 @@ describe('a move with a kept job, on a real tmux', () => {
     });
     const preflight = new MovePreflight(inventory);
 
-    // Act — the gate looks at the pane
-    const report = await preflight.inspect({
-      sessionId: 'ferret-a',
-      harness: 'claude',
-      // The ferret's pane, as its runner names it: the root process the stand-in harness runs under.
-      pane: { identify: async () => ({ handle: 'pane-1' as never, pid: w.panePid }), screen: async () => undefined },
-      status: 'running',
-      turnState: 'working',
-      turn: 3,
-      openTools: [],
-    });
+    // Act — the gate looks at the pane, mid-turn. PRODUCTION SHAPE: the state records no open tool calls (`undefined`), so the
+    // shell Claude wrote its stdout to `tasks/<id>.output` for may be a foreground call and is NOT called a background job.
+    const look = async (openTools: readonly string[] | undefined) =>
+      await preflight.inspect({
+        sessionId: 'ferret-a',
+        harness: 'claude',
+        // The ferret's pane, as its runner names it: the root process the stand-in harness runs under.
+        pane: { identify: async () => ({ handle: 'pane-1' as never, pid: w.panePid }), screen: async () => undefined },
+        status: 'running',
+        turnState: 'working',
+        turn: 3,
+        openTools,
+      });
+    const report = await look(undefined);
     const card = preflight.describe(report);
 
     // Assert — the card names both
@@ -190,11 +193,17 @@ describe('a move with a kept job, on a real tmux', () => {
     should(kept).be.ok();
     should(kept?.title).equal('attachment to job build (kept; re-attach after the move)');
     should(kept?.blocks).be.false();
-    const unkept = card.items.find(item => item.title.includes('a background job Ferretry is not keeping'));
+    should(card.items.some(item => item.title.includes('a background job Ferretry is not keeping'))).be.false();
+    const neutral = card.items.find(item => item.title.startsWith('sleep 300 — '));
+    should(neutral?.title).equal('sleep 300 — a command the agent is running; it stops when the ferret moves.');
+    // The state DOES record its open tools and none is open: now the same shell is positively a background job.
+    const recorded = await look([]);
+    const recordedCard = preflight.describe(recorded);
+    const unkept = recordedCard.items.find(item => item.title.includes('a background job Ferretry is not keeping'));
     should(unkept?.title).startWith('sleep 300 — a background job Ferretry is not keeping');
     should(unkept?.title).endWith('Start long jobs with `fy job run` so they survive.');
     should(
-      preflight.document(report, {
+      preflight.document(recorded, {
         sessionId: 'ferret-a',
         targetAgent: 'x',
         forced: false,
@@ -203,12 +212,17 @@ describe('a move with a kept job, on a real tmux', () => {
     ).containEql('### Background jobs Ferretry is not keeping');
 
     // Act — the move: detach first, THEN the kill
-    const gone = await detachAttachments(keeper, 'ferret-a', { sleep, log: { warn: () => undefined } });
+    const gone = await detachAttachments(keeper, 'ferret-a', {
+      sleep,
+      nowMs: () => Date.now(),
+      log: { warn: () => undefined },
+    });
     const detachedAt = Date.now();
     const log = readFileSync(w.events, 'utf8');
     w.tmux('kill-session', '-t', 'ferret');
     await until(() => (alive(w.attachmentPid) ? undefined : true), 'the ferret’s processes to end');
-    const handover = jobsHandover(await keeper.jobs(), report, Date.now());
+    const handover = jobsHandover(await keeper.jobs(), recorded, Date.now());
+    const unrecorded = jobsHandover(await keeper.jobs(), report, Date.now());
 
     // Assert — the attachment exited 75 before the kill, and the job never noticed
     should(gone).be.true();
@@ -218,6 +232,9 @@ describe('a move with a kept job, on a real tmux', () => {
     should(alive(w.jobPid)).be.true();
     should(handover).containEql('re-attach: run `fy job attach abc123abc123` as a background Bash');
     should(handover).containEql('- `sleep 300`: re-run it with `fy job run …` if you still need it');
+    // an unrecorded foreground shell is never listed as a stopped background job, nor does the section say nothing was stopped
+    should(unrecorded).not.containEql('sleep 300');
+    should(unrecorded).not.match(/nothing was stopped/iu);
     attachmentPids = [];
   }, 60_000);
 
@@ -229,6 +246,7 @@ describe('a move with a kept job, on a real tmux', () => {
     const queue: string[] = [];
     const ports = {
       keeper: {
+        backstopCutOver: async () => 0,
         endedUnattached: async () =>
           alive(w.jobPid) || told.has(JOB.id)
             ? []
@@ -325,7 +343,7 @@ describe('a move with a kept job, on a real tmux', () => {
           status: 'running',
           turnState: 'working',
           turn: 3,
-          openTools: [],
+          openTools: undefined,
         }),
       refused: async () => undefined,
       view: async () => ({}) as never,

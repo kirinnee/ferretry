@@ -34,6 +34,10 @@ export function withEntry(state: AttachmentsState, entry: AttachmentEntry): Atta
   return { ...state, entries: [...others.filter(existing => !evicted.has(existing.id)), entry] };
 }
 
+/** Records the backstop's cut-over the FIRST time only: a later call (a restarted daemon) leaves the earlier instant alone. */
+export const withCutOver = (state: AttachmentsState, nowMs: number): AttachmentsState =>
+  state.backstopCutOverMs === undefined ? { ...state, backstopCutOverMs: nowMs } : state;
+
 export const withoutEntry = (state: AttachmentsState, id: string): AttachmentsState => ({
   ...state,
   entries: state.entries.filter(entry => entry.id !== id),

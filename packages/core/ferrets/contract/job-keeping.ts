@@ -56,4 +56,10 @@ export interface JobKeeperSource {
    * reported it itself). The completion backstop reads this.
    */
   endedUnattached(): Promise<readonly UnreportedEnd[]>;
+  /**
+   * THE FLOOD GUARD'S ONE-TIME CUT-OVER (epoch ms): the instant the backstop first ran, kept in the keeper's own state and never
+   * moved, so a daemon restart or update does not make it forget which jobs are history. The first call ever records `now`.
+   * `undefined` when it cannot be known: the backstop then does nothing that pass.
+   */
+  backstopCutOver(): Promise<number | undefined>;
 }

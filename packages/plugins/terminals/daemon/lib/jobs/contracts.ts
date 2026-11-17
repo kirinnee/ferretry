@@ -78,6 +78,13 @@ export interface ProcessProof {
    * make the move gate call it safe.
    */
   argvOf(pid: number): Promise<string | undefined | 'unknown'>;
+  /**
+   * The identity of the FILE a process runs (opaque; equal means the same file), or `'unknown'` when the host cannot read it.
+   * A command line is only text any program can set, so an attachment must ALSO run the daemon-known `fy`.
+   */
+  executableOf(pid: number): Promise<string | 'unknown'>;
+  /** The identities of the `fy` executable the daemon knows (empty when it can tell of none: nothing then qualifies). */
+  trustedExecutables(): Promise<readonly string[]>;
   harnessOf?(pid: number): Promise<{ readonly pid: number; readonly start: string } | undefined>;
   /** SIGKILL to one pid. The caller has just re-proved with `startOf` which process that pid is. */
   kill(pid: number): Promise<void>;

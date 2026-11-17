@@ -73,6 +73,20 @@ describe('an attachment to a kept job, as the gate sees it', () => {
     should(byPid.get(6012)?.known).be.undefined();
   });
 
+  it('should BLOCK a forged `fy job attach` the keeper did not list: its executable was not proved, so the move refuses', () => {
+    // Arrange — a perl whose $0 reads `fy job attach x` runs under a tool shell. The keeper (which now proves the FILE, not the
+    // text) refused to register it, so its list is empty: the gate falls back to the classifier, which does not know the program.
+    const rows = pane(row(6001, 5001, tool('perl masq.pl')), row(6002, 6001, 'fy job attach abc123abc123'));
+
+    // Act
+    const processes = inventory(rows, []);
+    const decision = gateInflight(report(processes));
+
+    // Assert
+    should(processes.find(entry => entry.pid === 6002)?.known).be.undefined();
+    should(decision.proceed).be.false();
+  });
+
   it('should treat the tool shell that carries only the attachment as safe too, and the card lists the attachment once', () => {
     // Arrange
     const rows = pane(row(6001, 5001, tool('fy job attach build')), row(6002, 6001, 'fy job attach build'));
@@ -326,6 +340,19 @@ describe('when a tool shell is a background job and when it is only a command', 
   it('should not claim it while an open Bash call has no command text', () => {
     const open = [{ toolUseId: 't1', name: 'Bash', summary: 'Bash', verdict: 'unknown' as const }];
     should(flags(withUnkeptJobs(observed(), open))?.unkeptJob).be.undefined();
+  });
+
+  it('should not claim a background job when the state records no open tool calls at all (unknown is not "none")', () => {
+    // Arrange — production shape: nothing writes the open tool list, so a mid-turn foreground `sleep 299` cannot be told from a job.
+    const entry = flags(withUnkeptJobs(observed(), undefined));
+
+    // Assert
+    should(entry?.unkeptJob).be.undefined();
+    should(entry?.agentCommand).be.true();
+  });
+
+  it('should believe an unrecorded list only for a session at its prompt, where no foreground call can be running', () => {
+    should(flags(withUnkeptJobs(observed(), undefined, true))?.unkeptJob).be.true();
   });
 
   it('should claim a background job only when every open tool is identified and none matches the shell', () => {

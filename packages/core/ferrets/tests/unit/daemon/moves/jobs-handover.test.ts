@@ -50,8 +50,6 @@ describe('the "Your jobs" section of the hand-over', () => {
         '',
         'Ferretry kept these background jobs running through the move:',
         '- `build` (id abc123abc123, running 60m): re-attach: run `fy job attach abc123abc123` as a background Bash',
-        '',
-        'Nothing was stopped by the move.',
       ].join('\n'),
     );
   });
@@ -70,7 +68,7 @@ describe('the "Your jobs" section of the hand-over', () => {
     // Assert
     should(text).containEql('These background jobs finished since you last saw them:');
     should(text).not.containEql('kept these background jobs');
-    should(text).containEql('Nothing was stopped by the move.');
+    should(text).not.match(/nothing was stopped/iu);
     should(text).containEql('- `tests` (id bbb) ended with exit code 3; `fy job logs bbb`');
     should(text).containEql('- `gone` (id ddd) ended without an exit record');
     should(text).not.containEql('lint');
@@ -108,7 +106,28 @@ describe('the "Your jobs" section of the hand-over', () => {
     });
     const text = jobsHandover([job({ id: 'abc', name: 'build', state: 'running' })], subject, NOW) ?? '';
     should(text).not.containEql('merge-all');
-    should(text).containEql('Nothing was stopped by the move.');
+    should(text).not.match(/nothing was stopped/iu);
+  });
+
+  it('should make no "nothing was stopped" claim when a foreground command or an unnamed process was stopped', () => {
+    // Arrange — a restart stopped a foreground `sleep 299` (an agent command, not a known background job) and a process nobody recognised.
+    const foreground: ProcessInfo = { ...stopped, argv: 'sleep 299', unkeptJob: undefined, agentCommand: true };
+    const unnamed: ProcessInfo = { ...stopped, argv: 'mystery --serve', unkeptJob: undefined, agentCommand: undefined };
+    const subject = assembleInflightReport({
+      status: 'running',
+      turn: 1,
+      openTools: [],
+      processes: { kind: 'observed', processes: [foreground, unnamed] },
+      codexBackgroundTerminals: 0,
+    });
+
+    // Act
+    const text = jobsHandover([job({ id: 'abc', name: 'build', state: 'running' })], subject, NOW) ?? '';
+
+    // Assert
+    should(text).not.match(/nothing was stopped/iu);
+    should(text).not.containEql('The move stopped these background jobs');
+    should(text).not.containEql('sleep 299');
   });
 
   it('should say what each combination of subsections holds, and never contradict itself', () => {
@@ -134,8 +153,8 @@ describe('the "Your jobs" section of the hand-over', () => {
       should(text.includes('kept these background jobs running through the move')).equal(one.kept);
       should(text.includes('finished since you last saw them')).equal(one.finished);
       should(text.includes('The move stopped these background jobs')).equal(one.stopped);
-      // "nothing was stopped" is said exactly when the stopped list is empty.
-      should(/nothing was stopped/iu.test(text)).equal(!one.stopped);
+      // Nothing here ever claims "nothing was stopped": the restart notice owns the account of what the move stopped.
+      should(/nothing was stopped/iu.test(text)).equal(false);
     }
   });
 
@@ -176,10 +195,15 @@ describe('the "Your jobs" section of the hand-over', () => {
 describe('detaching the attachments before the pane is killed', () => {
   // The keeper's bound is measured on the same sleep: it is told apart by its (huge) length, and settles a macrotask late.
   const BOUND = 999_999;
-  const io = (slept: number[] = []) => ({
+  // A clock the sleeps drive: time passes only as the code sleeps (or as a slow keeper "takes" it).
+  const io = (slept: number[] = [], clock = { now: 0 }) => ({
     timeoutMs: BOUND,
+    nowMs: () => clock.now,
     sleep: async (ms: number) => {
-      if (ms !== BOUND) slept.push(ms);
+      if (ms !== BOUND) {
+        slept.push(ms);
+        clock.now += ms;
+      }
       await new Promise<void>(done => setTimeout(done, 0));
     },
     log: { warn: () => undefined },
@@ -232,6 +256,29 @@ describe('detaching the attachments before the pane is killed', () => {
     should(slept.reduce((sum, ms) => sum + ms, 0)).equal(4000);
   });
 
+  it('should stay inside its total wait even when every keeper question is slow (not 16 polls of 5 s each)', async () => {
+    // Arrange — each keeper answer "takes" 5 s of the clock and the attachment never leaves.
+    const clock = { now: 0 };
+    const calls: string[] = [];
+    const slow = async <T>(value: T, what: string): Promise<T> => {
+      calls.push(what);
+      clock.now += 5_000;
+      return value;
+    };
+    const keeper = {
+      attachments: async () => await slow([{ pid: 1, jobId: 'j', jobName: 'n' }], 'attachments'),
+      detach: async () => await slow(1, 'detach'),
+    };
+
+    // Act
+    const gone = await detachAttachments(keeper, 'ferret-a', io([], clock));
+
+    // Assert — the two questions already spent the 4 s total, so it stops there: no poll loop of 5 s answers (the old ~95 s)
+    should(gone).be.false();
+    should(calls).deepEqual(['attachments', 'detach']);
+    should(clock.now).equal(10_000);
+  });
+
   it('should never throw: a keeper that fails is logged and the move goes ahead', async () => {
     // Arrange
     const warnings: string[] = [];
@@ -245,6 +292,7 @@ describe('detaching the attachments before the pane is killed', () => {
     // Act
     const gone = await detachAttachments(keeper, 'ferret-a', {
       sleep: async () => undefined,
+      nowMs: () => 0,
       log: { warn: message => void warnings.push(message) },
     });
 
@@ -270,6 +318,7 @@ describe('the completion backstop', () => {
     const sent: { ferret: string; id: string }[] = [];
     const ports = {
       keeper: {
+        backstopCutOver: async () => 0,
         endedUnattached: async () => (told.has(ended.id) ? [] : [{ ferret: 'ferret-a', job: ended }]),
         markReported: async (_ferret: string, ids: readonly string[]) => {
           for (const id of ids) told.add(id);
@@ -296,6 +345,7 @@ describe('the completion backstop', () => {
     const marked: string[] = [];
     const queued = await runJobBackstop({
       keeper: {
+        backstopCutOver: async () => 0,
         endedUnattached: async () => [{ ferret: 'ferret-a', job: ended }],
         markReported: async (_f, ids) => void marked.push(...ids),
       },
@@ -310,6 +360,7 @@ describe('the completion backstop', () => {
     const marked: string[] = [];
     const queued = await runJobBackstop({
       keeper: {
+        backstopCutOver: async () => 0,
         endedUnattached: async () => [{ ferret: 'ferret-a', job: ended }],
         markReported: async (_f, ids) => void marked.push(...ids),
       },
@@ -326,6 +377,7 @@ describe('the completion backstop', () => {
     const other = job({ id: 'zzz', name: 'lint', state: 'exited', exitCode: 0, unreported: true });
     const queued = await runJobBackstop({
       keeper: {
+        backstopCutOver: async () => 0,
         endedUnattached: async () => [
           { ferret: 'ferret-a', job: ended },
           { ferret: 'ferret-b', job: other },
@@ -361,6 +413,7 @@ describe('the completion backstop', () => {
     });
     const queued = await runJobBackstop({
       keeper: {
+        backstopCutOver: async () => Date.parse('2026-11-16T00:00:00.000Z'),
         endedUnattached: async () => [
           { ferret: 'ferret-a', job: before },
           { ferret: 'ferret-a', job: after },
@@ -371,7 +424,6 @@ describe('the completion backstop', () => {
         sent.push(message.id);
         return true;
       },
-      cutOverMs: Date.parse('2026-11-16T00:00:00.000Z'),
       log: { warn: () => undefined },
     });
     should(queued).equal(1);
@@ -379,11 +431,80 @@ describe('the completion backstop', () => {
     should(marked).deepEqual(['old', 'new']);
   });
 
+  it('should keep the cut-over across a daemon restart: a job that ended while the daemon was down is told, not history', async () => {
+    // Arrange — the keeper's persisted cut-over is written by the very first call and returned unchanged afterwards, as a
+    // restarted daemon (a fresh backstop with a later boot time) would find it.
+    let persisted: number | undefined;
+    let clock = Date.parse('2026-11-16T00:00:00.000Z');
+    const keeperOf = (jobs: readonly KeptJob[], marked: string[]) => ({
+      backstopCutOver: async () => (persisted ??= clock),
+      endedUnattached: async () => jobs.map(one => ({ ferret: 'ferret-a', job: one })),
+      markReported: async (_f: string, ids: readonly string[]) => void marked.push(...ids),
+    });
+    const old = job({
+      id: 'old',
+      name: 'old',
+      state: 'exited',
+      exitCode: 0,
+      unreported: true,
+      endedAt: '2026-11-15T23:00:00.000Z',
+    });
+    const sent: string[] = [];
+    const ask = async (_f: string, message: { id: string }) => {
+      sent.push(message.id);
+      return true as const;
+    };
+    const log = { warn: () => undefined };
+
+    // Act — the first run ever: the old job is history. The daemon is then down; a job ends; the daemon restarts an hour later.
+    const firstMarked: string[] = [];
+    await runJobBackstop({ keeper: keeperOf([old], firstMarked), askAgent: ask, log });
+    const duringDowntime = job({
+      id: 'down',
+      name: 'down',
+      state: 'exited',
+      exitCode: 1,
+      unreported: true,
+      endedAt: '2026-11-16T00:20:00.000Z',
+    });
+    clock = Date.parse('2026-11-16T01:00:00.000Z');
+    const secondMarked: string[] = [];
+    const queued = await runJobBackstop({ keeper: keeperOf([duringDowntime], secondMarked), askAgent: ask, log });
+
+    // Assert — the first run swallowed only the history; the restart still told the job that ended after the one-time cut-over
+    should(firstMarked).deepEqual(['old']);
+    should(sent).deepEqual(['job-ended-down']);
+    should(queued).equal(1);
+    should(secondMarked).deepEqual(['down']);
+    should(persisted).equal(Date.parse('2026-11-16T00:00:00.000Z'));
+  });
+
+  it('should do nothing, and say so, while the keeper cannot give a cut-over (never treat every old job as news)', async () => {
+    const warnings: string[] = [];
+    const sent: string[] = [];
+    const queued = await runJobBackstop({
+      keeper: {
+        backstopCutOver: async () => undefined,
+        endedUnattached: async () => [{ ferret: 'ferret-a', job: ended }],
+        markReported: async () => undefined,
+      },
+      askAgent: async (_f, message) => {
+        sent.push(message.id);
+        return true;
+      },
+      log: { warn: message => void warnings.push(message) },
+    });
+    should(queued).equal(0);
+    should(sent).deepEqual([]);
+    should(warnings).have.length(1);
+  });
+
   it('should leave a job untold, and log, when its message cannot be queued', async () => {
     const warnings: string[] = [];
     const marked: string[] = [];
     await runJobBackstop({
       keeper: {
+        backstopCutOver: async () => 0,
         endedUnattached: async () => [{ ferret: 'ferret-a', job: ended }],
         markReported: async (_f, ids) => void marked.push(...ids),
       },

@@ -7,6 +7,7 @@ import { StateJobFiles } from '../../../../daemon/adapters/jobs/job-files.ts';
 import { TmuxJobRuntime } from '../../../../daemon/adapters/jobs/tmux-job-runtime.ts';
 import { type AttachmentsState, EMPTY_ATTACHMENTS } from '../../../../daemon/lib/jobs/attachments.ts';
 import type { AttachmentStore, ProcessProof } from '../../../../daemon/lib/jobs/contracts.ts';
+import { executableIdentityOf } from '../../../../daemon/adapters/jobs/executable-identity.ts';
 import { BunTmuxProcess } from './host-spawn.ts';
 
 export const tree = defineState({ name: 'jobs', path: 'jobs/*', store: 'opaque', format: 1 });
@@ -50,6 +51,18 @@ class TableProof implements ProcessProof {
     if (!this.real) return this.starts.has(pid) ? `fy job attach ${pid}` : undefined;
     const raw = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');
     return raw === '' ? undefined : raw.split('\0').join(' ').trim();
+  }
+  /** What a pid runs, in table mode (default: the trusted `fy`); real mode reads the host's own /proc. */
+  readonly executables = new Map<number, string | 'unknown'>();
+  /** The identities the daemon knows as `fy` (real mode: the files the test names). */
+  trusted: string[] = ['file:fy'];
+  async executableOf(pid: number): Promise<string | 'unknown'> {
+    if (this.executables.has(pid)) return this.executables.get(pid) ?? 'unknown';
+    if (!this.real) return 'file:fy';
+    return await executableIdentityOf(pid, { platform: 'linux', lsof: async () => ({ exitCode: 1, stdout: '' }) });
+  }
+  async trustedExecutables(): Promise<readonly string[]> {
+    return this.trusted;
   }
   constructor(private readonly real: boolean) {}
   async startOf(pid: number): Promise<string | undefined> {

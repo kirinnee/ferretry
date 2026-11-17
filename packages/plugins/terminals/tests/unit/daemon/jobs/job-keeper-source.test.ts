@@ -168,6 +168,90 @@ describe('what the moves read from the job keeper', () => {
   });
 });
 
+describe("the completion backstop's one-time cut-over lives in the keeper's own state", () => {
+  it('should be written by the first call and returned unchanged by every later one, whatever happens to the registry in between', async () => {
+    // Arrange
+    const { service, clock, starts } = memoryService();
+    const first = clock.now;
+
+    // Act — the first run ever, then a daemon restart an hour later, with registry traffic in between
+    const written = await service.backstopCutOver();
+    clock.now += 3_600_000;
+    const job = await service.start('ferret-a', { command: 'sleep 99' }, person);
+    starts.set(3001, 'start-3001');
+    await service.registerAttachment('ferret-a', { jobId: job.id, pid: 3001 });
+    await service.sweepOrphans();
+    const again = await service.backstopCutOver();
+
+    // Assert
+    should(written).equal(first);
+    should(again).equal(first);
+  });
+});
+
+describe('an attachment must RUN the fy executable, not merely say so (the executable is proved, not the text)', () => {
+  it('should refuse a process whose argv reads `fy job attach` but whose file is some other program', async () => {
+    // Arrange — `exec -a "fy job attach x" sleep 600`: the argv is right, the file is not `fy`.
+    const { service, starts, argvs, executables } = memoryService();
+    const job = await service.start('ferret-a', { command: 'sleep 99', name: 'watch' }, person);
+    starts.set(2001, 'start-2001');
+    argvs.set(2001, 'fy job attach abc123abc123');
+    executables.set(2001, 'file:perl');
+
+    // Act
+    const forged = service.registerAttachment('ferret-a', { jobId: job.id, pid: 2001 });
+
+    // Assert
+    await should(forged).be.rejectedWith(/does not run the `fy` executable this daemon knows/u);
+    should(await service.keptAttachments('ferret-a')).deepEqual([]);
+  });
+
+  it('should refuse when the executable cannot be read, and when the daemon knows no fy at all (fail closed)', async () => {
+    const { service, starts, executables, trusted } = memoryService();
+    const job = await service.start('ferret-a', { command: 'sleep 99' }, person);
+    starts.set(2002, 'start-2002');
+    executables.set(2002, 'unknown');
+    await should(service.registerAttachment('ferret-a', { jobId: job.id, pid: 2002 })).be.rejectedWith(/executable/u);
+    executables.delete(2002);
+    trusted.splice(0);
+    await should(service.registerAttachment('ferret-a', { jobId: job.id, pid: 2002 })).be.rejectedWith(/executable/u);
+  });
+
+  it('should stop listing an attachment whose process now runs another file, or whose file is no longer trusted', async () => {
+    // Arrange — a real `fy job attach` registers, then the process execs something else (same pid, same start).
+    const { service, starts, executables, trusted } = memoryService();
+    const job = await service.start('ferret-a', { command: 'sleep 99' }, person);
+    starts.set(2003, 'start-2003');
+    await service.registerAttachment('ferret-a', { jobId: job.id, pid: 2003 });
+    should((await service.keptAttachments('ferret-a')).map(entry => entry.pid)).deepEqual([2003]);
+
+    // Act + Assert — it runs another file now
+    executables.set(2003, 'file:perl');
+    should(await service.keptAttachments('ferret-a')).deepEqual([]);
+    // the same file, but the daemon no longer knows it as fy
+    executables.delete(2003);
+    trusted.splice(0);
+    should(await service.keptAttachments('ferret-a')).deepEqual([]);
+  });
+
+  it('should not list an entry an earlier daemon wrote without an executable (it was never proved)', async () => {
+    const { service, starts } = memoryService();
+    const job = await service.start('ferret-a', { command: 'sleep 99' }, person);
+    starts.set(2004, 'start-2004');
+    const view = await service.registerAttachment('ferret-a', { jobId: job.id, pid: 2004 });
+    should(view.id).be.a.String();
+    // Drop the stored identity the way a pre-upgrade entry lacks it.
+    const store = (
+      service as unknown as { attachments: { update(c: (s: { entries: object[] }) => unknown): Promise<unknown> } }
+    ).attachments;
+    await store.update(state => ({
+      ...state,
+      entries: state.entries.map(entry => ({ ...entry, executable: undefined })),
+    }));
+    should(await service.keptAttachments('ferret-a')).deepEqual([]);
+  });
+});
+
 describe('registering an attachment is for `fy job attach|run` processes only', () => {
   it('should refuse a running pid that is some other program, so a forged entry never reaches the move gate', async () => {
     // Arrange

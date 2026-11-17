@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -9,14 +9,19 @@ import {
   JobOutputViewSchema,
   JobViewSchema,
 } from '../../../../../contract/index.ts';
+import { fileIdentity } from '../../../../../daemon/adapters/jobs/executable-identity.ts';
 import { MemoryFiles, MemoryRuntime } from '../../../../support/daemon/job-fakes.ts';
 import { FERRET, jsonBody, type MountHalf, mountHalf } from './support.ts';
 
 /** The real half over in-memory job files and a keeper the test controls (the test host's state is not on disk). */
-const mount = async () => {
+const mount = async (trusted: readonly string[] = []) => {
   const files = new MemoryFiles();
   const runtime = new MemoryRuntime();
-  return { files, runtime, half: await mountHalf({ jobs: { files, runtime } }) };
+  return {
+    files,
+    runtime,
+    half: await mountHalf({ jobs: { files, runtime, trustedExecutables: async () => trusted } }),
+  };
 };
 
 /**
@@ -106,12 +111,14 @@ describe('the job mount', () => {
   });
 
   it('should register, list, detach and unregister an attachment', async () => {
-    const { half } = await mount();
-    const job = JobViewSchema.parse(jsonBody(await start(half)));
-
-    // A real process whose command line is `fy job attach …` (the keeper registers nothing else), and one that is not.
+    // A real process whose command line is `fy job attach …` and that runs the trusted executable (the keeper registers nothing
+    // else): a bun script stands in for `fy`, trusted as the runtime plus that script, the source-checkout shape.
     const folder = mkdtempSync(join(tmpdir(), 'fy-attach-'));
     writeFileSync(join(folder, 'fy.ts'), 'setInterval(() => undefined, 1000);');
+    const { half } = await mount([
+      `${await fileIdentity(Bun.which('bun') ?? 'bun')}#${realpathSync(join(folder, 'fy.ts'))}`,
+    ]);
+    const job = JobViewSchema.parse(jsonBody(await start(half)));
     const attacher = Bun.spawn(['bun', join(folder, 'fy.ts'), 'job', 'attach', job.id]);
     const stranger = Bun.spawn(['sleep', '30']);
     let id = '';

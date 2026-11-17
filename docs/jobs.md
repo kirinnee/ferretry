@@ -152,32 +152,40 @@ SIGKILLed 60 s after the client leaves. A job the keeper holds is none of those 
 
 **The gate knows attachments.** Ferrets imports no plugin, so the keeper reaches it through the `jobs.keeper` hook (`JobKeeperSource`,
 `core-ferrets/contract/job-keeping.ts`; Terminals contributes it). A process is a `job-attachment` (a `KnownProcess`, `safe_to_kill`) only when
-**both** hold: the keeper's registry lists its **pid** (the keeper has already pruned any entry whose pid now has another start) **and** its own
+**all** hold: the keeper's registry lists its **pid** (the keeper has already pruned any entry whose pid now has another start), its own
 command line is `<fy> job attach|run …` (`isJobAttachCommand` in `@ferretry/std`, the one reading the keeper also uses), **and** it sits in this
-pane's tree. Neither alone is enough: the registry takes any running pid the ferret's credential names, so a forged entry for another program
-stays whatever the classifier says; and an `fy job attach` the registry does not list stays whatever the classifier says too. The keeper itself
-refuses to register a pid whose command line is not `fy job attach|run`, and refuses when it cannot read it. The Claude tool shell around an attachment
+pane's tree. The keeper lists a registry entry only while the process **runs the `fy` executable the daemon knows**: a command line is text any
+program can set (`exec -a "fy job attach x" sleep 600`, or a perl that sets `$0`), so the FILE is proved, not the text. On Linux that is
+`dev:ino` of what `/proc/<pid>/exe` reaches; on macOS the first text mapping `lsof -a -p <pid> -d txt -Fn` reports (resolved); under a JavaScript runtime
+(`bun fy.ts`, a source checkout) the runtime's file plus the real path of the script it was handed, which must be this checkout's own CLI entry. The
+trusted identities are the `fy` installed beside the daemon's own executable and the one on the daemon's search path (a bare runtime is never trusted).
+The identity is stored in the entry when it registers and re-read, and re-compared, every time the gate asks; an entry with none (an earlier daemon wrote
+it), an executable that cannot be read, or one that changed, is not an attachment (fail closed). Neither check alone is enough: the registry takes any running
+pid the ferret's credential names, so a forged entry for another program stays whatever the classifier says; and an `fy job attach` the registry does not
+list stays whatever the classifier says too. The keeper itself refuses to register a pid whose command line is not `fy job attach|run` or whose executable is not
+proved, and refuses when it cannot read either. The Claude tool shell around an attachment
 (`zsh -c … eval 'fy job attach x'`) is safe too, but only when everything that shell started is the attachment or another command shell AND the rest of
 each such shell's own program, with the attach call taken out, classifies safe (the rule of `requester-call.ts`): `fy job attach x && make` has not
 started `make` yet, so that shell keeps its own verdict. An attachment to a job that has already ended is listed as exiting, not as "kept;
 re-attach after the move". A keeper that cannot answer within 5 s proves nothing, and the classifier decides alone (fail closed).
 
 **Detach before the kill.** After the gate passes and before the pane is killed, the move asks the keeper to detach every attachment of
-the ferret (each prints its detach message and exits 75), then waits up to 4 s for them to be gone. The jobs are untouched. A keeper that
-fails or hangs (each question is bounded to 5 s), or an attachment that will not leave, is logged and the move goes on: the kill breaks the attachment anyway.
+the ferret (each prints its detach message and exits 75), then waits for them to be gone: 4 s IN TOTAL on the move's clock, the keeper questions included
+(each is bounded to 1.5 s), so a slow keeper cannot stretch it. The jobs are untouched. A keeper that fails or hangs, or an attachment that will not
+leave, is logged and the move goes on: the kill breaks the attachment anyway.
 
 **Un-kept background jobs are named, never silently lost, and a foreground command is never called one.** Whether they BLOCK is still the
 classifier's verdict; only the words the move shows change. CLAUDE WRITES EVERY BASH CALL'S STDOUT TO `tasks/<id>.output`, foreground calls included, so
 that path never proves a call was backgrounded.
 
-| Harness | What is recognised                                                                                                                                                                                     |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Claude  | A tool shell with that stdout (`claudeTaskId`, in `@ferretry/std`) that no open Bash call accounts for, **and only when every open tool call is identified** (name known; a Bash call's command known) |
-| Codex   | The direct children of any `codex app-server` visible in the pane's tree, plus the footer's background-terminal count less those children (no job is counted twice)                                    |
+| Harness | What is recognised                                                                                                                                                                                                                                                                                        |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude  | A tool shell with that stdout (`claudeTaskId`, in `@ferretry/std`) that no open Bash call accounts for, **and only when the state RECORDS the open tool calls and every one is identified** (name known; a Bash call's command known) — or the session is at its prompt, where no foreground call can run |
+| Codex   | The direct children of any `codex app-server` visible in the pane's tree, plus the footer's background-terminal count less those children (no job is counted twice)                                                                                                                                       |
 
 Each recognised one reads: `<command> — a background job Ferretry is not keeping; it stops when the ferret moves. Start long jobs with `fy job run` so they survive.`
-A tool shell that cannot be ruled foreground (some open call is unidentified, as every one is while the transcript tail is unread, which is
-the case on this base) reads `<command> — a command the agent is running; it stops when the ferret moves.` and is left out of the hand-over's
+A tool shell that cannot be ruled foreground (the state records no open tool calls at all, which is the case on this base: **unrecorded is unknown,
+never "none"**; or some open call is unidentified) reads `<command> — a command the agent is running; it stops when the ferret moves.` and is left out of the hand-over's
 stopped list. The same items are in the refusal, the terminal table and the forensic report (`move-inflight.md`, "Background jobs Ferretry is
 not keeping"); a kept job's attachment is listed as `attachment to job <name> (kept; re-attach after the move)`.
 
@@ -185,8 +193,9 @@ not keeping"); a kept job's attachment is listed as `attachment to job <name> (k
 own: **Ferretry kept these background jobs running through the move** lists each running job with its name, id, age and the exact line
 `re-attach: run `fy job attach <id>` as a background Bash`; **These background jobs finished since you last saw them** lists each job that ended
 unseen with its exit code and `fy job logs <id>`; **The move stopped these background jobs, which Ferretry was not keeping** lists the recognised
-un-kept ones (Codex terminals included), each with "re-run it with `fy job run …` if you still need it". "Nothing was stopped by the move." is
-said only when that last list is empty.
+un-kept ones (Codex terminals included), each with "re-run it with `fy job run …` if you still need it". The section **never** claims "nothing was
+stopped": that list holds only the background jobs positively recognised, while a move also stops foreground commands and processes Ferretry cannot
+name, and the restart notice above it owns the whole account of what was stopped.
 
 _Seen_ is a record in the job's folder (an empty `reported` file, gone with the job): it is written when a live attachment is served the end of
 the log (it prints the exit itself), when the hand-over told the new session, or when the backstop queued its message. A job that ended
@@ -198,9 +207,12 @@ job told. The keeper leaves out any job an attachment is live on (that attachmen
 attachment is about to). The pass runs every 15 s. The message goes through the send Ferrets already owns for the monitor's wakes
 (`FerretMonitorSend`: typed when the pane is idle, queued under the job's id when it is busy), bound in `features/moves.feature.ts` (`bindBackstopAsk`);
 it is deliberately NOT `movesDeps`' `askAgent`, which would also switch on the ask-to-stop-jobs route. A ferret that is not held right now is
-skipped quietly (nothing marked, no warning) and tried again next pass. **Flood guard:** a job that ended before this daemon's backstop first ran is
+skipped quietly (nothing marked, no warning) and tried again next pass. **Flood guard:** a job that ended before the backstop FIRST EVER ran is
 history (the hand-over and `fy job list` show it): the first pass marks it told without a message, so an upgrade never messages every old job.
-A job that ends while the daemon is down is treated the same way after the next start.
+That cut-over is ONE instant, written by the keeper into its own state (`backstopCutOverMs`, in the attachment registry's document) on the first run and never
+moved, so a daemon restart or update does not make it forget: a job that ends while the daemon is down is told after the next start. With no cut-over the
+pass does nothing. A message queued behind a busy pane is marked told at queue time (the send answers nothing more than "done", so delivery cannot be told
+apart); a daemon restart before the pane takes it may lose it, and the ferret still sees the job in `fy job list`.
 
 **Orphaned attachments.** An attachment records the harness CLI above it (pid + start, found through procfs; Linux only) when it registers. A harness
 that was SIGKILLed leaves the tool shell and the attachment running, reparented to init; every 15 s the keeper asks such an attachment to detach
@@ -211,6 +223,9 @@ that was SIGKILLed leaves the tool shell and the attachment running, reparented 
 - Agent instructions telling agents to start long jobs with `fy job run` and re-attach after a move (part 3).
 - `detach` also asks an attachment in a person's own terminal (outside the pane) to let go.
 - During a move the hand-over and the backstop can both tell the same job if it ends in that window (the two are not atomic).
+- The detach runs before the relaunch, and a relaunch that then refuses (the pane changed, the spawn failed) leaves the attachments already let go.
+- A pipeline (`fy job attach x | tee log`) is read as the attach call as a whole; only wording is affected (a live pipeline child still blocks).
+- The backstop re-reads every ended job of a ferret that is gone for good, every 15 s, until retention deletes it.
 - Jobs of a ferret that finished or was removed are not yet closed with its terminals; they end on their own or are stopped.
 - Limits are constants, not owner configuration.
 - Orphan detection needs procfs; on macOS an attachment records no harness and is never swept.

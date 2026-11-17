@@ -159,6 +159,11 @@ export const AttachmentEntrySchema = z.strictObject({
   processStart: z.string().min(1).max(64),
   claudeTaskId: z.string().optional(),
   /**
+   * The identity of the FILE the process ran when it registered (`dev:ino`, plus the script under a JavaScript runtime).
+   * Absent on an entry an earlier daemon wrote: such an entry is never trusted as a kept attachment (fail closed).
+   */
+  executable: z.string().min(1).max(512).optional(),
+  /**
    * The harness CLI that held the attachment when it registered (pid + start), when one did. If it is gone later the
    * attachment is an orphan — its harness was killed without a word — and the next sweep asks it to detach.
    */
@@ -169,7 +174,15 @@ export const AttachmentEntrySchema = z.strictObject({
 export type AttachmentEntry = z.infer<typeof AttachmentEntrySchema>;
 
 /** The kernel stamps `format` on write and strips it on read, so the schema holds only the entries. */
-export const AttachmentsStateSchema = z.object({ entries: z.array(AttachmentEntrySchema).default([]) });
+export const AttachmentsStateSchema = z.object({
+  entries: z.array(AttachmentEntrySchema).default([]),
+  /**
+   * THE COMPLETION BACKSTOP'S ONE-TIME CUT-OVER (epoch ms): written the first time the backstop ever runs and never moved. A job
+   * that ended before it is history (the hand-over and `fy job list` already show it); one that ended after it is news, however
+   * many times the daemon restarted since. Absent until that first run.
+   */
+  backstopCutOverMs: z.number().int().nonnegative().optional(),
+});
 export type AttachmentsState = z.infer<typeof AttachmentsStateSchema>;
 
 // ─── attachments ──────────────────────────────────────────────────────────────────────────────────────────────────

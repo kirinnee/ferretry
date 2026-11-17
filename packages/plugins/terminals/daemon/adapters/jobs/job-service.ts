@@ -26,6 +26,7 @@ import {
   type AttachmentEntry,
   entriesOf,
   withDetaching,
+  withCutOver,
   withEntry,
   withoutEntry,
   withOrphansDetaching,
@@ -437,8 +438,17 @@ export class JobService {
         'bad_request',
         `pid ${input.pid} is not a \`${this.options.binaryName} job attach\` process`,
       );
+    // THE EXECUTABLE IS PROVED, NOT THE TEXT: a program that merely names itself `fy job attach` runs some other file.
+    const executable = await this.proof.executableOf(input.pid).catch(() => 'unknown' as const);
+    const trusted = await this.proof.trustedExecutables().catch(() => [] as readonly string[]);
+    if (executable === 'unknown' || !trusted.includes(executable))
+      throw new JobServiceError(
+        'bad_request',
+        `pid ${input.pid} does not run the \`${this.options.binaryName}\` executable this daemon knows`,
+      );
     const entry: AttachmentEntry = {
       id: this.ids.next(),
+      executable,
       sessionId: session.id,
       jobId: job.meta.id,
       pid: input.pid,
@@ -494,7 +504,18 @@ export class JobService {
     const session = await this.session(reference);
     const [live, rows] = await Promise.all([this.liveAttachments(session.id), this.rows(session.id)]);
     const found = new Map(rows.map(row => [row.meta.id, row]));
-    return live.flatMap(entry => {
+    // The gate trusts this list, so each entry's FILE is re-proved now (not only when it registered): the process must still
+    // run the executable it registered with, and that must still be the daemon-known `fy`. Anything unreadable drops out.
+    const trusted = await this.proof.trustedExecutables().catch(() => [] as readonly string[]);
+    const proven = await Promise.all(
+      live.map(async entry => {
+        if (entry.executable === undefined || !trusted.includes(entry.executable)) return undefined;
+        const now = await this.proof.executableOf(entry.pid).catch(() => 'unknown' as const);
+        return now === entry.executable ? entry : undefined;
+      }),
+    );
+    return proven.flatMap(entry => {
+      if (entry === undefined) return [];
       const row = found.get(entry.jobId);
       if (row === undefined) return [];
       const ended = jobState(row.exit, row.running !== undefined) !== 'running';
@@ -546,6 +567,16 @@ export class JobService {
 
   private async liveAttachmentsAll(): Promise<readonly AttachmentEntry[]> {
     return (await this.prune()).entries;
+  }
+
+  /**
+   * The completion backstop's cut-over instant: written on the first call ever (now) and returned unchanged by every later one,
+   * across daemon restarts. `undefined` when it cannot be read or written: the backstop then does nothing this pass rather than
+   * guess (a missing cut-over would treat every old job as news).
+   */
+  async backstopCutOver(): Promise<number | undefined> {
+    const state = await this.attachments.update(current => withCutOver(current, this.clock.now()));
+    return state.backstopCutOverMs;
   }
 
   /** Asks every attachment of the ferret (or of one job) to detach: each exits on its next poll; no job is touched. */

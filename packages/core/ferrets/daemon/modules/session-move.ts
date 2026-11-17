@@ -175,8 +175,8 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
         ...(state.turnState === undefined ? {} : { turnState: state.turnState }),
         ...(state.permissionRequest === undefined ? {} : { awaitingPermission: true }),
         turn: state.turn,
-        // The state document's own record of the tool calls this session has open.
-        openTools: state.openTools ?? [],
+        // The state document's own record of the tool calls this session has open: ABSENT is unknown, never "none".
+        openTools: state.openTools,
         ...(state.subprocessSince === undefined ? {} : { subprocessSince: state.subprocessSince }),
       },
       // The session's OWN transcript, resolved from the provenance its start recorded. A session

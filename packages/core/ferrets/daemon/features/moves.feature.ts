@@ -207,8 +207,8 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     async ferret => await service.harness(ferret as FerretId),
     new FerretMonitorSend(async ferret => await service.harness(ferret)),
   );
-  // THE FLOOD GUARD'S CUT-OVER: jobs that ended before this daemon's backstop first ran are history, not news.
-  const backstopStartedMs = kernel.clock.nowMs();
+  // THE FLOOD GUARD'S CUT-OVER is the keeper's own, written once on the very first run and never moved (not this daemon's boot:
+  // a restart or update must not turn a job that ended during the downtime into history).
   kernel.jobs.add({
     id: 'ferrets.job-completion-backstop',
     schedule: { every: milliseconds(JOB_BACKSTOP_EVERY_MS) },
@@ -219,7 +219,6 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       await runJobBackstop({
         keeper: source,
         askAgent: backstopAsk,
-        cutOverMs: backstopStartedMs,
         log: kernel.log.child('ferrets'),
       });
     },

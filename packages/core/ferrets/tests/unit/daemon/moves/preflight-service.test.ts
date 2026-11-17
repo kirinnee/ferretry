@@ -221,6 +221,47 @@ describe('MovePreflight', () => {
   });
 });
 
+describe('a Claude tool shell the move finds mid-turn', () => {
+  const foreground = {
+    pid: 40,
+    argv: '/usr/bin/zsh -c eval sleep 299',
+    startedSecondsAgo: 30,
+    verdict: 'unknown' as const,
+    toolShell: 40,
+    claudeTaskId: 'task1',
+  };
+
+  it('should be a neutral "command the agent is running" when the state records no open tools, and never a background job', async () => {
+    // Arrange — turnState working, a foreground `sleep 299` writing to tasks/<id>.output, openTools ABSENT (what production has).
+    const preflight = new PreflightOver(
+      new StubInventory({ kind: 'observed', processes: [foreground] }),
+      new StubPanes(''),
+    );
+
+    // Act
+    const report = await preflight.inspect(
+      view({ status: 'tool_running', turnState: 'working', openTools: undefined }),
+    );
+    const card = preflight.describe(report);
+
+    // Assert
+    should(report.processes[0]?.agentCommand).be.true();
+    should(report.processes[0]?.unkeptJob).be.undefined();
+    const title = card.items.find(item => item.pid === 40)?.title ?? '';
+    should(title).containEql('a command the agent is running');
+    should(title).not.containEql('background job');
+  });
+
+  it('should be called a background job only when the state RECORDS its open tools and none of them is this shell', async () => {
+    const preflight = new PreflightOver(
+      new StubInventory({ kind: 'observed', processes: [foreground] }),
+      new StubPanes(''),
+    );
+    const report = await preflight.inspect(view({ status: 'tool_running', turnState: 'working', openTools: [] }));
+    should(report.processes[0]?.unkeptJob).be.true();
+  });
+});
+
 describe('the agent’s own jobs a refusal names', () => {
   it('should hand back only the blocking processes the agent started from its tool shell', async () => {
     // Arrange

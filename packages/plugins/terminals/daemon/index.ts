@@ -12,6 +12,7 @@
  * - `terminal_ask_owner` and `terminal_request_input` are not acts: they raise through the control store and Vault.
  */
 import { createHash } from 'node:crypto';
+import { join } from 'node:path';
 import { ferretOf } from '@ferretry/core-gate/contract';
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import {
@@ -117,6 +118,7 @@ import { TerminalsReferenceMenu } from './lib/reference-menu.ts';
 import { snapshotRoute } from './lib/runtime/mounts/session-snapshot.ts';
 import { jobRouteHandlers, type JobSubsystem } from './lib/runtime/mounts/jobs.ts';
 import { JobService, JobServiceError } from './adapters/jobs/job-service.ts';
+import { executableIdentityOf, trustedExecutables } from './adapters/jobs/executable-identity.ts';
 import { harnessAncestor } from './adapters/jobs/harness-ancestry.ts';
 import type { JobKeeperSource } from '@ferretry/core-ferrets/contract';
 import { StateJobFiles } from './adapters/jobs/job-files.ts';
@@ -160,7 +162,12 @@ export interface TerminalsOverrides {
   /** The host reads behind the pane proof and the Warden's looks (the daemon: `/proc` or `ps`, per platform). */
   readonly processHost?: ProcessHostReads;
   /** The job keeper's files and tmux sessions (the daemon: the state tree and `TmuxJobRuntime` over `tmux`). */
-  readonly jobs?: { readonly files?: JobFilesPort; readonly runtime?: JobRuntimePort };
+  readonly jobs?: {
+    readonly files?: JobFilesPort;
+    readonly runtime?: JobRuntimePort;
+    /** The identities of the `fy` executable the daemon trusts as an attachment (the daemon: beside its own executable and on its PATH). */
+    readonly trustedExecutables?: () => Promise<readonly string[]>;
+  };
 }
 
 /**
@@ -671,6 +678,24 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
           return (error as { code?: string }).code === 'ENOENT' ? undefined : 'unknown';
         }
       },
+      // WHICH FILE a pid runs, and which files are the `fy` this daemon knows (docs/jobs.md): the argv above is only text.
+      executableOf: async pid =>
+        await executableIdentityOf(pid, {
+          platform: hostPlatform,
+          lsof: async args => {
+            const ran = await kernel.spawn.run('lsof', args);
+            return { exitCode: ran.exitCode, stdout: ran.stdout };
+          },
+        }),
+      trustedExecutables:
+        overrides.jobs?.trustedExecutables ??
+        (async () =>
+          await trustedExecutables({
+            execPath: process.execPath,
+            which: async name => await kernel.paths.which(name),
+            sourceEntry: join(import.meta.dir, '../../../cli/bin/fy.ts'),
+            binaryName: BINARY_NAME,
+          })),
       kill: async pid => {
         try {
           signalProcess(pid, 'SIGKILL');
@@ -781,6 +806,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     jobs: async ferret => await jobService.keptJobs(ferret).catch(() => []),
     markReported: async (ferret, ids) => await jobService.markJobsReported(ferret, ids),
     endedUnattached: async () => await jobService.endedUnattached(JOB_BACKSTOP_GRACE_MS).catch(() => []),
+    backstopCutOver: async () => await jobService.backstopCutOver().catch(() => undefined),
   };
 
   // ─── jobs ───────────────────────────────────────────────────────────────────────────────────────────────────────

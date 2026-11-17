@@ -25,7 +25,8 @@ describe('the Terminals host-fs seam', () => {
     // The seam hands free-path readFile/open/readdir to its importers and the banned-globals check cannot see an
     // import of it. A new importer must be added here on purpose, with a reviewer looking at what it reads.
     // job-files.ts reads only a job's own log and exit record (open/readFile/stat on paths the state port handed out);
-    // harness-ancestry.ts reads /proc/<pid>/{stat,cmdline} to find the harness an attachment sits under.
+    // harness-ancestry.ts reads /proc/<pid>/{stat,cmdline} to find the harness an attachment sits under;
+    // executable-identity.ts reads /proc/<pid>/{exe,cmdline,cwd} (and stats files) to prove WHICH file an attachment runs.
     expect(importers()).toEqual(
       [
         'daemon/adapters/cgroups/disk-scheduler.ts',
@@ -33,6 +34,7 @@ describe('the Terminals host-fs seam', () => {
         'daemon/adapters/cgroups/host-facts.ts',
         'daemon/adapters/cgroups/proc-placements.ts',
         'daemon/adapters/cgroups/service-weights.ts',
+        'daemon/adapters/jobs/executable-identity.ts',
         'daemon/adapters/jobs/harness-ancestry.ts',
         'daemon/adapters/jobs/job-files.ts',
         'daemon/adapters/session/processes/listening.ts',

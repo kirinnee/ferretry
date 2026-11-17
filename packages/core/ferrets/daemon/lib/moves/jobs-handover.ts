@@ -48,8 +48,7 @@ export function jobsHandover(jobs: readonly KeptJob[], report: InflightReport, n
   const finished = jobs.filter(job => job.state !== 'running' && job.unreported);
   if (running.length === 0 && finished.length === 0) return undefined;
   const lines = ['Your jobs'];
-  // EACH SUBSECTION SAYS ONLY WHAT IS TRUE OF IT: "kept" for the running ones, "finished" for the ended ones, and "nothing was
-  // stopped" only when the stopped list below is empty.
+  // EACH SUBSECTION SAYS ONLY WHAT IS TRUE OF IT: "kept" for the running ones, "finished" for the ended ones.
   if (running.length > 0) {
     lines.push('', 'Ferretry kept these background jobs running through the move:');
     for (const job of running)
@@ -62,9 +61,10 @@ export function jobsHandover(jobs: readonly KeptJob[], report: InflightReport, n
     for (const job of finished)
       lines.push(`- \`${job.name}\` (id ${job.id}) ${endedWith(job)}; \`fy job logs ${job.id}\``);
   }
+  // NO "nothing was stopped" CLAIM, EVER: the stopped list below is only the background jobs positively known, while the move
+  // also stops foreground commands and processes it cannot name, and the restart notice above owns that whole account.
   const stopped = stoppedJobs(report);
-  if (stopped.length === 0) lines.push('', 'Nothing was stopped by the move.');
-  else {
+  if (stopped.length > 0) {
     lines.push('', 'The move stopped these background jobs, which Ferretry was not keeping:');
     for (const item of stopped) lines.push(`- ${item}: re-run it with \`fy job run …\` if you still need it`);
   }
@@ -90,7 +90,7 @@ export function backstopMessage(job: KeptJob): { readonly id: string; readonly t
 }
 
 export interface BackstopPorts {
-  readonly keeper: Pick<JobKeeperSource, 'endedUnattached' | 'markReported'>;
+  readonly keeper: Pick<JobKeeperSource, 'endedUnattached' | 'markReported' | 'backstopCutOver'>;
   /**
    * The session message queue: one Ferretry-authored message, deduped by id; answers whether it was sent, `'unavailable'` when
    * no queue is bound yet (the pass then stops quietly and nothing is marked told), or `'not-held'` when that ferret cannot be
@@ -100,22 +100,21 @@ export interface BackstopPorts {
     ferret: string,
     message: { readonly id: string; readonly text: string },
   ) => Promise<boolean | 'unavailable' | 'not-held'>;
-  /**
-   * THE FLOOD GUARD. The instant this backstop first ran (the daemon's start): a job that ended BEFORE it is history the
-   * hand-over and `fy job list` already show, so it is marked told without a message. Otherwise the first pass would message
-   * every job that ended before the backstop existed. Absent, nothing is treated as history.
-   */
-  readonly cutOverMs?: number;
   readonly log: { warn(message: string, fields?: Record<string, unknown>): void };
 }
 
-/** Ended before the backstop first ran (an end with no readable time is never history: it is told). */
-const isHistory = (job: KeptJob, cutOverMs: number | undefined): boolean => {
+/** Ended before the backstop FIRST ever ran (an end with no readable time is never history: it is told). */
+const isHistory = (job: KeptJob, cutOverMs: number): boolean => {
   const endedAt = job.endedAt === undefined ? Number.NaN : Date.parse(job.endedAt);
-  return cutOverMs !== undefined && Number.isFinite(endedAt) && endedAt < cutOverMs;
+  return Number.isFinite(endedAt) && endedAt < cutOverMs;
 };
 
 /**
+ * THE FLOOD GUARD is the keeper's persisted one-time cut-over ({@link JobKeeperSource.backstopCutOver}): a job that ended BEFORE the
+ * backstop first ever ran is history (the hand-over and `fy job list` already show it) and is marked told without a message, so
+ * the first pass does not message every old job. It is written once and never moved, so a daemon restart or update does not turn
+ * a job that ended during the downtime into history. With no cut-over the pass does nothing.
+ *
  * One backstop pass: for every kept job that ended with no live attachment and nobody told, queue ONE message to the owning
  * ferret and record it as told. The dedupe id is per job, so a retry after a crash cannot send twice; the keeper already
  * leaves out any job an attachment is live on (that attachment reports the exit itself). A ferret that cannot be reached
@@ -123,9 +122,14 @@ const isHistory = (job: KeptJob, cutOverMs: number | undefined): boolean => {
  */
 export async function runJobBackstop(ports: BackstopPorts): Promise<number> {
   let queued = 0;
+  const cutOverMs = await ports.keeper.backstopCutOver().catch(() => undefined);
+  if (cutOverMs === undefined) {
+    ports.log.warn('the job completion backstop has no cut-over yet; it will try again next pass');
+    return 0;
+  }
   for (const { ferret, job } of await ports.keeper.endedUnattached()) {
     try {
-      if (isHistory(job, ports.cutOverMs)) {
+      if (isHistory(job, cutOverMs)) {
         await ports.keeper.markReported(ferret, [job.id]);
         continue;
       }
