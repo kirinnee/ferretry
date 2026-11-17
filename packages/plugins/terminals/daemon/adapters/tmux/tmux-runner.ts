@@ -997,11 +997,23 @@ export class TmuxRunner implements Runner {
       }
       if (how === 'polite' && !facts.dead) {
         // The harness's own interrupt first; the session goes once the pane is dead or the caller asks again `now`.
-        await this.options.tmux.execute(['send-keys', '-t', handle, 'C-c']);
+        // A refusal is thrown: a polite stop that reached nothing is never taken for one that did.
+        const pressed = await this.options.tmux.execute(['send-keys', '-t', handle, 'C-c']);
+        if (pressed.code !== 0)
+          throw new Error(
+            `could not interrupt ${facts.session}: ${pressed.stderr.trim() || `tmux exited ${String(pressed.code)}`}`,
+          );
         return;
       }
       // Only a ferret's session is ever killed through a handle: a pane id of a person's shell is not ours to end.
-      if (isFerretSession(facts.session)) await this.options.tmux.execute(killSessionArguments(facts.session));
+      if (isFerretSession(facts.session)) {
+        const killed = await this.options.tmux.execute(killSessionArguments(facts.session));
+        // A session that went away between the read and the kill is the stop already made; any other refusal is not.
+        if (killed.code !== 0 && !/can't find session/iu.test(killed.stderr) && !isTmuxServerAbsent(killed.stderr))
+          throw new Error(
+            `could not stop ${facts.session}: ${killed.stderr.trim() || `tmux exited ${String(killed.code)}`}`,
+          );
+      }
     } finally {
       this.#stopEpoch += 1;
       this.#frames.delete(handle);
@@ -1021,8 +1033,28 @@ export class TmuxRunner implements Runner {
       return;
     }
     const exact = `=${session}`;
-    const present = await this.options.tmux.execute(['has-session', '-t', exact]).catch(() => undefined);
-    if (present === undefined || present.code !== 0) return;
+    // Only an ANSWER that the session is not there stops nothing. A has-session that throws, or fails any other way, proves
+    // nothing about the session, and returning quietly would let the caller settle a possibly live ferret `stopped`.
+    const present = await this.options.tmux.execute(['has-session', '-t', exact]).catch((error: unknown) => {
+      throw new Error(
+        `could not check whether ${session} is running (${error instanceof Error ? error.message : String(error)}), so it was not stopped; it may still be running`,
+      );
+    });
+    if (present.code !== 0) {
+      if (
+        /can't find session/iu.test(present.stderr) ||
+        isServerEmpty(present.stderr) ||
+        isTmuxServerAbsent(present.stderr)
+      )
+        return;
+      const why = present.stderr.trim() || `tmux exited ${String(present.code)}`;
+      this.options.log?.warn(`Could not check whether ${session} is running, so it was not stopped: ${why}`, {
+        session,
+      });
+      throw new Error(
+        `could not check whether ${session} is running (${why}), so it was not stopped; it may still be running`,
+      );
+    }
     if (how === 'polite') {
       const panes = await this.options.tmux
         .execute(['list-panes', '-s', '-t', exact, '-F', '#{pane_dead}'])
