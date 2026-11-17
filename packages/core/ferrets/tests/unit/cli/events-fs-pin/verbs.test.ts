@@ -4,6 +4,7 @@ import cli from '../../../../cli/index.ts';
 import { FS_ROUTES } from '../../../../cli/lib/fs/gateway.ts';
 import { PIN_ROUTES } from '../../../../cli/lib/pins/gateway.ts';
 import manifest from '../../../../manifest.ts';
+import { sessionView } from '../session/session-fixtures.ts';
 
 /**
  * Today's `fy events` (and `fy view`), `fy fs …` and `fy pin …` (v4 packages/cli/src/lib/{reads,filesystem,pins}) on the
@@ -20,6 +21,12 @@ interface World {
   /** The frames the journal socket plays after it opens, as the daemon's JSON text. */
   readonly frames?: readonly unknown[];
   readonly env?: Readonly<Record<string, string>>;
+  /** The session id the daemon resolves a typed reference to (a callsign); a reference not listed is its own id. */
+  readonly resolves?: Readonly<Record<string, string>>;
+  /** A route the daemon refuses, with the status and sentence it answers. */
+  readonly refuses?: Readonly<Record<string, { readonly status: number; readonly message: string }>>;
+  /** How the journal socket ends after its frames: the reason and code a close carries (no code: a failure). */
+  readonly closes?: readonly [reason: string, code?: number];
 }
 
 function run(world: World = {}) {
@@ -30,6 +37,12 @@ function run(world: World = {}) {
   const client: PluginClient = {
     call: async (route, init) => {
       calls.push(init === undefined ? { route } : { route, init: init as Call['init'] });
+      const refusal = world.refuses?.[route];
+      if (refusal !== undefined) throw Object.assign(new Error(refusal.message), { status: refusal.status });
+      if (route === 'GET /v1/ferrets/:ferretId' && world.answers?.[route] === undefined) {
+        const reference = (init as Call['init'])?.params?.ferretId ?? '';
+        return sessionView({ id: world.resolves?.[reference] ?? reference, name: reference }) as never;
+      }
       return world.answers?.[route] as never;
     },
     subscribe: () => () => undefined,
@@ -38,6 +51,7 @@ function run(world: World = {}) {
       sockets.push(record);
       queueMicrotask(() => {
         for (const frame of world.frames ?? []) listeners.onFrame(JSON.stringify(frame));
+        if (world.closes !== undefined) listeners.onClose(...world.closes);
       });
       return {
         send: () => undefined,
@@ -99,7 +113,8 @@ describe('fy events — one ferret’s journal, read through the stream socket',
       `#8 ${AT} turn.started (daemon) {"n":8}`,
       `#9 ${AT} turn.started turn=2 (daemon) {"n":9}`,
     ]);
-    expect(world.calls).toEqual([]);
+    // The only thing asked of the daemon besides the socket is who `wren` is.
+    expect(world.calls).toEqual([{ route: 'GET /v1/ferrets/:ferretId', init: { params: { ferretId: 'wren' } } }]);
   });
 
   test('V-0258 --limit stops after that many events and closes the socket', async () => {
@@ -141,6 +156,56 @@ describe('fy events — one ferret’s journal, read through the stream socket',
     const stuck = run({ frames: [event(4), event(4)] });
     expect(await stuck.verb('events <id>', ['wren'], { after: '3' })).toBe(1);
     expect(stuck.err.at(-1)).toContain('non-advancing event sequence #4');
+  });
+
+  test('V-0258 a callsign is resolved by the daemon and the socket is opened with the ferret’s id, three calls in a row', async () => {
+    for (let call = 1; call <= 3; call += 1) {
+      const world = run({
+        resolves: { kraig: 'mwk8l2ul-d4357aff' },
+        frames: [
+          event(1, { sessionId: 'mwk8l2ul-d4357aff' }),
+          { ...opening, scope: { kind: 'session', sessionId: 'mwk8l2ul-d4357aff', after: 0 } },
+        ],
+      });
+      expect(await world.verb('events <id>', ['kraig'])).toBe(0);
+      expect(world.calls).toEqual([{ route: 'GET /v1/ferrets/:ferretId', init: { params: { ferretId: 'kraig' } } }]);
+      expect(world.sockets[0]?.query).toEqual({ after: '0', sessionId: 'mwk8l2ul-d4357aff' });
+      expect(world.out).toEqual([`#1 ${AT} turn.started (daemon) {"n":1}`]);
+      expect(world.err).toEqual([]);
+    }
+  });
+
+  test('V-0258 a name two ferrets hold is refused with the daemon’s sentence before any socket opens', async () => {
+    const message =
+      'the name kraig is held by 2 sessions on this machine: a (working), b (working); address one by its session id';
+    const world = run({ refuses: { 'GET /v1/ferrets/:ferretId': { status: 409, message } } });
+    expect(await world.verb('events <id>', ['kraig'])).toBe(1);
+    expect(world.err.at(-1)).toBe(message);
+    expect(world.sockets).toEqual([]);
+  });
+
+  test('V-0258 a reference the daemon does not list is still tried as an id (an archived ferret), and a refusal says no ferret', async () => {
+    const archived = run({
+      refuses: { 'GET /v1/ferrets/:ferretId': { status: 404, message: 'no ferret old-one' } },
+      frames: [
+        event(1, { sessionId: 'old-one' }),
+        { ...opening, scope: { kind: 'session', sessionId: 'old-one', after: 0 } },
+      ],
+    });
+    expect(await archived.verb('events <id>', ['old-one'])).toBe(0);
+    expect(archived.sockets[0]?.query).toEqual({ after: '0', sessionId: 'old-one' });
+    const missing = run({
+      refuses: { 'GET /v1/ferrets/:ferretId': { status: 404, message: 'no ferret nosuch' } },
+      closes: ['WebSocket stream failed: the daemon refused the stream (HTTP 404)'],
+    });
+    expect(await missing.verb('events <id>', ['nosuch'])).toBe(1);
+    expect(missing.err).toEqual(['no ferret nosuch']);
+  });
+
+  test('V-0258 a stream that fails for another reason shows that reason once, never a doubled sentence', async () => {
+    const world = run({ closes: ['WebSocket stream failed: the daemon refused the stream (HTTP 403)'] });
+    expect(await world.verb('events <id>', ['wren'])).toBe(1);
+    expect(world.err).toEqual(['WebSocket stream failed: the daemon refused the stream (HTTP 403)']);
   });
 
   test('V-0258 declares v4’s flags: --after, --limit and --json (and no view alias: v4 aliases are removed by design)', () => {

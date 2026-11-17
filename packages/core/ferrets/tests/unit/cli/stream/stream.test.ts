@@ -14,6 +14,7 @@ import { ClientEventStream, EVENTS_SOCKET } from '../../../../cli/lib/stream/gat
 import type { IEventStream, StreamScope } from '../../../../cli/lib/stream/ports.ts';
 import { renderEvent } from '../../../../cli/lib/stream/render.ts';
 import manifest from '../../../../manifest.ts';
+import { sessionView } from '../session/session-fixtures.ts';
 
 /** Today's `fy stream [id]` (reads/controller.ts, reads/commands.ts) over the journal socket `GET /v1/events`. */
 
@@ -233,7 +234,7 @@ describe('V-0452 fy stream [id] — interruption', () => {
 });
 
 /** A PluginClient whose `socket` the test drives by hand. */
-function socketWorld() {
+function socketWorld(resolves: Readonly<Record<string, string>> = {}) {
   const opened: { key: string; params: unknown; query: unknown; listeners: PluginSocketListeners }[] = [];
   const closed: { code?: number; reason?: string }[] = [];
   const socket: PluginSocket = {
@@ -242,7 +243,11 @@ function socketWorld() {
       void closed.push({ ...(code === undefined ? {} : { code }), ...(reason === undefined ? {} : { reason }) }),
   };
   const client: PluginClient = {
-    call: async () => ({}) as never,
+    // `GET /v1/ferrets/:ferretId` is who a typed reference is; the daemon resolves a callsign to the id.
+    call: async (_route, init) => {
+      const reference = (init as { params?: { ferretId?: string } } | undefined)?.params?.ferretId ?? '';
+      return sessionView({ id: resolves[reference] ?? reference, name: reference }) as never;
+    },
     subscribe: () => () => undefined,
     socket: (key, params, listeners, query) => {
       opened.push({ key, params, query, listeners });
@@ -348,6 +353,25 @@ describe('V-0452 fy stream [id] — the shell’s socket', () => {
     await expect(second).rejects.toThrow();
   });
 
+  test('V-0452 a failure the transport already worded is shown once, and one it did not is framed once', async () => {
+    const worded = socketWorld();
+    const first = new ClientEventStream(worded.client).follow(
+      { after: 0 },
+      () => undefined,
+      new AbortController().signal,
+    );
+    worded.opened[0]?.listeners.onClose('WebSocket stream failed: the daemon refused the stream (HTTP 404)');
+    await expect(first).rejects.toThrow(/^WebSocket stream failed: the daemon refused the stream \(HTTP 404\)$/u);
+    const bare = socketWorld();
+    const second = new ClientEventStream(bare.client).follow(
+      { after: 0 },
+      () => undefined,
+      new AbortController().signal,
+    );
+    bare.opened[0]?.listeners.onClose('WebSocket stream failed');
+    await expect(second).rejects.toThrow(/^WebSocket stream failed$/u);
+  });
+
   test('V-0452 a shell with no socket says so instead of opening a raw connection', async () => {
     const client: PluginClient = { call: async () => ({}) as never, subscribe: () => () => undefined };
     await expect(
@@ -380,8 +404,8 @@ describe('V-0452 fy stream [id] — the shell’s socket', () => {
 });
 
 /** The verb itself, built over the same shell client as the other verbs. */
-function verbWorld() {
-  const world = socketWorld();
+function verbWorld(resolves: Readonly<Record<string, string>> = {}) {
+  const world = socketWorld(resolves);
   const out: string[] = [];
   const err: string[] = [];
   const half = cli.build?.({
@@ -399,6 +423,11 @@ function verbWorld() {
   };
 }
 
+/** Lets the verb's own awaits (who the ferret is, then the socket) run. */
+const settle = async (): Promise<void> => {
+  for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+};
+
 describe('V-0452 fy stream [id] — the verb', () => {
   test('V-0452 the manifest declares the verb', () => {
     expect((manifest.actions.cli ?? []).some(decl => decl.verb === 'stream [id]')).toBe(true);
@@ -407,7 +436,7 @@ describe('V-0452 fy stream [id] — the verb', () => {
   test('V-0452 fy stream wren --after 7 --json follows one ferret and ends 0 on SIGINT', async () => {
     const world = verbWorld();
     const exit = world.run(['wren'], { after: '7', json: true });
-    await Promise.resolve();
+    await settle();
     expect(world.opened[0]).toMatchObject({ key: 'GET /v1/events', query: { after: '7', sessionId: 'wren' } });
     world.opened[0]?.listeners.onFrame(JSON.stringify(event('wren', 8)));
     process.emit('SIGINT');
@@ -416,10 +445,27 @@ describe('V-0452 fy stream [id] — the verb', () => {
     expect(world.closed).toEqual([{ code: 1000, reason: 'event stream cancelled' }]);
   });
 
+  test('V-0452 fy stream <callsign> follows the ferret by the id the daemon resolved, three calls in a row', async () => {
+    for (let call = 1; call <= 3; call += 1) {
+      const world = verbWorld({ kraig: 'mwk8l2ul-d4357aff' });
+      const exit = world.run(['kraig']);
+      await settle();
+      expect(world.opened[0]).toMatchObject({
+        key: 'GET /v1/events',
+        query: { after: '0', sessionId: 'mwk8l2ul-d4357aff' },
+      });
+      world.opened[0]?.listeners.onFrame(JSON.stringify(event('mwk8l2ul-d4357aff', 1)));
+      process.emit('SIGINT');
+      expect(await exit).toBe(0);
+      expect(world.err).toEqual([]);
+      expect(world.out).toHaveLength(1);
+    }
+  });
+
   test('V-0452 fy stream with no id follows the fleet; --after there exits 2 without opening a socket', async () => {
     const fleet = verbWorld();
     const exit = fleet.run([]);
-    await Promise.resolve();
+    await settle();
     expect(fleet.opened[0]?.query).toEqual({ after: '0' });
     process.emit('SIGTERM');
     expect(await exit).toBe(0);
@@ -435,7 +481,7 @@ describe('V-0452 fy stream [id] — the verb', () => {
     expect(await bad.run(['wren'], { after: true })).toBe(2);
     const dead = verbWorld();
     const exit = dead.run(['wren']);
-    await Promise.resolve();
+    await settle();
     dead.opened[0]?.listeners.onClose('no ferret wren', 1008);
     expect(await exit).toBe(1);
     expect(dead.err).toEqual(['WebSocket stream closed unexpectedly: no ferret wren (code 1008)']);
