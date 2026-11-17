@@ -120,6 +120,14 @@ shows in its own row and here only after the next launch. It holds section names
 prompt text. A ferret last launched before the field existed has none, and the row says "Recorded from the
 next launch".
 
+### Where a plugin's instruction words come from
+
+A plugin declares an instruction in its manifest (`instructions: [{ id, text: 'instructions/<file>.md', when }]`). The kernel
+snapshot reads the words through `instructionText`, and `fyd` answers it from `packages/core/kernel/src/generated/instructions.ts`:
+`scripts/gen/registries.ts` writes one text import per declared file, keyed `<plugin id>/<path>`, so the compiled `fyd` carries the
+words. A declaration without that map reaches no ferret, and a file the map cannot read is left out rather than guessed.
+`scripts/gen/tests/instruction-texts.test.ts` pins it over the real workspace.
+
 ### Instructions that changed since the launch
 
 A harness reads its appended system prompt once, at launch, and neither Claude Code nor Codex can re-read

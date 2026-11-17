@@ -20,7 +20,7 @@ import { holdUntilStopped, startedByLaunchd } from './refusal-hold.ts';
 import { filterByLevel, renderSettings, settingsForRun } from './home-settings.ts';
 import { stopOnSignalReporting } from './stop-signals.ts';
 import { bootTimings } from './session/timings.ts';
-import { fileLogSink, realAdapters } from './wiring.ts';
+import { bundledInstructionText, fileLogSink, realAdapters } from './wiring.ts';
 
 interface GeneratedRegistry {
   readonly daemonImplementations: readonly DaemonImplementation[];
@@ -104,6 +104,7 @@ async function main(): Promise<number> {
     version: VERSION,
     binaries: { ...PRODUCT_BINARIES, client: BINARY },
     implementations: registry.daemonImplementations,
+    instructionText: await bundledInstructionText(),
     adapters: realAdapters(home, sink, {
       binary: BINARY,
       release: VERSION,
