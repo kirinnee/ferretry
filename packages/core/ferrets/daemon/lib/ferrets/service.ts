@@ -12,6 +12,7 @@ import { agentControl, effectiveLimits, revokeToken, turnUsage } from './insight
 import { repointRuntime, runtimeRecords } from './runtime-records.ts';
 import { lastSnapshot, prompt, turnObserved, turns } from './turns.ts';
 import { KeyedSerialExecutor } from './serial.ts';
+import { typePointer } from './pointer-retry.ts';
 import type { SerialExecutor } from '../ports.ts';
 import { claimConversationLease, conversationLeaseGuard } from './conversation-lease-guard.ts';
 import type { FerretLaunchLeases } from './launch-leases.ts';
@@ -2309,8 +2310,9 @@ export class FerretsService implements FerretsApi {
   /**
    * Types the revive's pointer into the new pane (today's revive delivers after the relaunch). Through the runner's own
    * `deliver`, which acts on the pane for each write itself, so it is NOT wrapped in a second act. The turn was counted
-   * before the relaunch (today's order), so a delivery that does not land leaves the ferret running with its turn
-   * counted and its document on disk; the next revive takes the next number. The failure is said, never quoted.
+   * before the relaunch (today's order). A pane that was not ready for it is probed again and the pointer typed again,
+   * a bounded number of times ({@link typePointer}, today's revive); one that never takes it leaves the ferret running with
+   * its turn counted and its document on disk, and the next revive takes the next number. The failure is said, never quoted.
    */
   private async deliverTurn(
     ferret: FerretId,
@@ -2321,7 +2323,13 @@ export class FerretsService implements FerretsApi {
     const handle = this.registry.get(ferret)?.handle as RunnerHandle | undefined;
     try {
       if (handle === undefined) throw new Error('no pane');
-      await runner.deliver(handle, { text: turn.instruction });
+      await typePointer(
+        runner,
+        handle,
+        turn.instruction,
+        () => this.registry.get(ferret)?.handle === handle,
+        ms => this.pause(ms),
+      );
       tellCarried(carried, { text: turn.instruction, turn: turn.turn, file: turn.file });
     } catch {
       return failed(
@@ -2486,6 +2494,12 @@ export class FerretsService implements FerretsApi {
         `the ${record.harness} harness named a home that holds the homes of other ferrets, so it was not started`,
       );
     return ok(home);
+  }
+
+  /** Waits `ms` on the kernel clock; resolves at once where no clock is bound (a unit fixture). */
+  private pause(ms: number): Promise<void> {
+    const after = this.ports.after;
+    return after === undefined ? Promise.resolve() : new Promise(resolve => void after(ms, resolve));
   }
 
   /**
