@@ -157,10 +157,12 @@ export class FakeRunner implements Runner {
   }
   /** What the next `identify` answers instead of the live pane: a test's own `'gone'`, or `undefined` for a runner that cannot tell. */
   identity: 'gone' | undefined | 'live' = 'live';
-  async identify(handle: RunnerHandle): Promise<RunnerPaneIdentity | 'gone' | undefined> {
+  async identify(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerPaneIdentity | 'gone' | undefined> {
     if (this.identity !== 'live') return this.identity;
     const live = this.#live.get(handle);
     if (live === undefined) return 'gone';
+    // As the tmux runner does: another ferret's pane behind the handle is not this ferret's, so it is unknown.
+    if (ferret !== undefined && live.ferret !== ferret) return undefined;
     return { handle, ...(live.pid === undefined ? {} : { pid: live.pid }), processStart: String(live.startedAt) };
   }
   async signal(): Promise<void> {}

@@ -368,9 +368,10 @@ export class TmuxRunner implements Runner {
    * The pane behind `handle` now, read only (`list-panes -a`: the one question tmux answers EXACTLY by pane id, where
    * `display-message -t %n` answers the current pane for an id that is gone). `'gone'` only when a server that answered
    * does not list the pane, or tmux says it has no server; every other failure proves nothing and is `undefined`. A pane
-   * outside a ferret's session is not vouched for (`undefined`). A dead pane tmux keeps has no pid.
+   * outside a ferret's session, or (with `ferret` named) in another ferret's, is not vouched for (`undefined`). A dead pane
+   * tmux keeps has no pid.
    */
-  async identify(handle: RunnerHandle): Promise<RunnerPaneIdentity | 'gone' | undefined> {
+  async identify(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerPaneIdentity | 'gone' | undefined> {
     if (!PANE_ID.test(handle)) return undefined;
     const listed = await this.options.tmux.execute(['list-panes', '-a', '-F', PANE_FACTS]).catch(() => undefined);
     if (listed === undefined) return undefined;
@@ -380,7 +381,9 @@ export class TmuxRunner implements Runner {
       .map(parsePaneFacts)
       .find(candidate => candidate?.paneId === handle);
     if (facts === undefined) return 'gone';
-    if (!isFerretSession(facts.session)) return undefined;
+    // Another ferret's pane behind a stale handle: it is not THIS ferret's pane, so nothing about it (its process tree
+    // above all) is told for this ferret. Not `'gone'` either: the ferret's own pane may be elsewhere, so it is unknown.
+    if (!isFerretSession(facts.session) || !TmuxRunner.owns(facts, ferret)) return undefined;
     if (facts.dead || facts.pid <= 0) return { handle };
     const start = await this.options.processes?.startOf(facts.pid).catch(() => undefined);
     return { handle, pid: facts.pid, ...(start === undefined ? {} : { processStart: String(start) }) };
@@ -937,11 +940,19 @@ export class TmuxRunner implements Runner {
       const panes = await this.options.tmux.execute(['list-panes', '-s', '-t', exact, '-F', '#{pane_dead}']);
       const live = panes.code === 0 && panes.stdout.split('\n').some(line => line.trim() === '0');
       if (live) {
-        await this.options.tmux.execute(['send-keys', '-t', exact, 'C-c']);
+        // `send-keys` wants a PANE target: `=fy-<id>` alone is parsed as a pane name and tmux answers "can't find pane",
+        // while `=fy-<id>:` is the exact session's active pane. A refusal is thrown, so a polite stop that reached
+        // nothing is never taken for one that did (the caller would settle the ferret `stopped` over a running session).
+        const pressed = await this.options.tmux.execute(['send-keys', '-t', `${exact}:`, 'C-c']);
+        if (pressed.code !== 0)
+          throw new Error(`could not interrupt ${session}: ${pressed.stderr.trim() || `tmux exited ${pressed.code}`}`);
         return;
       }
     }
-    await this.options.tmux.execute(['kill-session', '-t', exact]);
+    const killed = await this.options.tmux.execute(['kill-session', '-t', exact]);
+    // A session that went away between the check and the kill is the stop already made; any other refusal is not.
+    if (killed.code !== 0 && !/can't find session/iu.test(killed.stderr) && !isTmuxServerAbsent(killed.stderr))
+      throw new Error(`could not stop ${session}: ${killed.stderr.trim() || `tmux exited ${killed.code}`}`);
   }
 
   async signal(handle: RunnerHandle, signal: 'interrupt' | 'terminate', ferret?: FerretId): Promise<void> {

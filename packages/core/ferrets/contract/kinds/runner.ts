@@ -218,9 +218,10 @@ export interface Runner {
    * restart with the runner's server and pids are reused, so a bare handle could name another pane later. `'gone'` ONLY when
    * the pane is PROVED absent; `undefined` when the runner cannot tell, which a caller must treat as unknown, never as
    * gone. It never writes, and it names no path, credential or screen text. Absent: the runner cannot say, and a move
-   * finds the pane unknown (it refuses unless the person forces it).
+   * finds the pane unknown (it refuses unless the person forces it). With `ferret` named, a pane that is another
+   * ferret's (a stale handle) is unknown too (`undefined`): its process tree is not told for this ferret.
    */
-  identify?(handle: RunnerHandle): Promise<RunnerPaneIdentity | 'gone' | undefined>;
+  identify?(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerPaneIdentity | 'gone' | undefined>;
   /**
    * Additive (c58-37, the Warden's "ask to stop background jobs"): ONE signal to ONE pid, delivered only if that pid, with
    * this start, descends from this pane's root at the moment of the call. `false`: not delivered (not a descendant, the

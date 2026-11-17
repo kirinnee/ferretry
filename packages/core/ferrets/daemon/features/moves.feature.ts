@@ -54,7 +54,10 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     const record = registry.get(id as unknown as FerretId);
     if (record?.handle === undefined) return 'gone' as const;
     const runner = runnerOf(id as unknown as FerretId);
-    return runner?.identify === undefined ? undefined : await runner.identify(record.handle as RunnerHandle);
+    // With the ferret named: a stale handle that now names another ferret's pane must not take stock of ITS processes.
+    return runner?.identify === undefined
+      ? undefined
+      : await runner.identify(record.handle as RunnerHandle, id as unknown as FerretId);
   };
   const pane = (id: SessionId): MovePane => ({
     identify: async () => await identify(id),
