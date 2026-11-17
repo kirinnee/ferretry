@@ -26,7 +26,7 @@ const pr = (number: number, changes?: PrLink['changes'], state: PrLink['state'] 
   ...(changes === undefined ? {} : { changes }),
 });
 
-/** A card a person asked for, with steps to try and no PR: the case that is asked. */
+/** A task a person asked for, with steps to try and no PR: the case that is asked. */
 const tryable = (overrides: Partial<Task> = {}): Task =>
   boardTask({
     ask: { text: 'make it', source: 'owner' },
@@ -101,7 +101,7 @@ describe('tryItVerdict', () => {
         kind: 'nothing',
         why: 'it is a private task',
       });
-      // No stored visibility: a ferret's own card reads as private by the daemon's default.
+      // No stored visibility: a ferret's own task reads as private by the daemon's default.
       should(tryItVerdict(tryable({ ask: { text: 'tidy', source: 'session:lead' }, askedBy: 'agent' }), TRY_IT)).match({
         kind: 'nothing',
         why: 'it is a private task',
@@ -146,7 +146,7 @@ describe('tryItVerdict', () => {
 
     it('does not count a PR that is not merged', () => {
       should(tryItVerdict(tryable(withPrs(pr(1, 'docs-tests', 'open'))), TRY_IT)).eql({ kind: 'ask' });
-      // An open code PR beside merged docs PRs does not stop the card from having nothing merged to try.
+      // An open code PR beside merged docs PRs does not stop the task from having nothing merged to try.
       should(tryItVerdict(tryable(withPrs(pr(1, 'docs-tests'), pr(2, 'code', 'open'))), TRY_IT)).eql({
         kind: 'nothing',
         why: 'its PRs change only docs and tests',

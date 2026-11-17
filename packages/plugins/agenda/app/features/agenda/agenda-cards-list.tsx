@@ -1,17 +1,17 @@
 /**
- * THE CARDS A NOTICE IS ABOUT (`AgendaItem.cards`) — one row per card, each with its own three buttons on ONE line:
- * Open, Start a ferret, Close (a phone's width holds them; the accessible names say the card: "Open card &B1"). The line is the daemon's own (it says the card, where it waits and why nothing
+ * THE TASKS A NOTICE IS ABOUT (`AgendaItem.cards`) — one row per task, each with its own three buttons on ONE line:
+ * Open, Start a ferret, Close (a phone's width holds them; the accessible names say the task: "Open task &B1"). The line is the daemon's own (it says the task, where it waits and why nothing
  * will happen); the buttons are the owner's, and each goes through the same authorization as the board's own
  * (`AgendaCardsHost`). Got it is not here: it dismisses the whole notice and stays on the answer row.
  *
- * The notice does not repeat its subject above the list: every card's line is here, so each says which card its
+ * The notice does not repeat its subject above the list: every task's line is here, so each says which task its
  * buttons are for.
  *
- * A card a live ferret already holds is not started a second time: the daemon answers with that ferret, the row's
+ * A task a live ferret already holds is not started a second time: the daemon answers with that ferret, the row's
  * line says so in place of "no ferret is assigned" (which would now be untrue), and Start becomes "Open its chat",
  * which goes to that ferret.
  *
- * Close asks first, in the row: the card leaves the board, so the owner sees what is about to happen, may edit the
+ * Close asks first, in the row: the task leaves the board, so the owner sees what is about to happen, may edit the
  * reason the daemon will record, and must say yes. A refusal is shown on the row in the daemon's words and the
  * buttons stay, so the owner can try the other one.
  */
@@ -21,7 +21,7 @@ import { type ReactNode, useState } from 'react';
 import type { z } from 'zod';
 import { defaultAgendaProse } from './agenda-prose.tsx';
 
-/** A board card's id (`B12`), as an ask names it. */
+/** A board task's id (`B12`), as an ask names it. */
 export type BoardTaskId = z.infer<typeof BoardTaskIdSchema>;
 
 /** What a button did: a plain sentence either way, so the row can say it without knowing the board. */
@@ -30,20 +30,20 @@ export type AgendaCardOutcome =
   | { readonly ok: false; readonly message: string };
 
 export interface AgendaCardsActions {
-  /** Shows the card. */
+  /** Shows the task. */
   readonly open: (id: BoardTaskId) => void;
-  /** Starts a new ferret on the card; `ferret` in the answer means one already held it and nothing was started. */
+  /** Starts a new ferret on the task; `ferret` in the answer means one already held it and nothing was started. */
   readonly start: (id: BoardTaskId) => Promise<AgendaCardOutcome>;
-  /** Shows the chat of the ferret that holds the card. */
+  /** Shows the chat of the ferret that holds the task. */
   readonly openChat: (sessionId: string) => void;
-  /** Drops the card, with the reason the board records. */
+  /** Drops the task, with the reason the board records. */
   readonly close: (id: BoardTaskId, reason: string) => Promise<AgendaCardOutcome>;
 }
 
 /** What the owner's Close records when they do not say more. */
 const NOBODY_TAIL = /\s+is waiting in .*, but no ferret is assigned, so nothing will happen to it\.$/u;
 
-/** The row's line once a live ferret holds the card: the daemon's words about the card, minus "nobody is on it". */
+/** The row's line once a live ferret holds the task: the daemon's words about the task, minus "nobody is on it". */
 const heldLine = (line: string, ref: string): string => {
   const head = line.replace(NOBODY_TAIL, '').trim();
   return `${head === line.trim() || head === '' ? ref : head} — a ferret has picked it up.`;

@@ -8,7 +8,7 @@
  * session list costs no request: the boards themselves are read only for the sessions it names.
  *
  * NEWEST NEEDING YOU FIRST, in both places: a conversation sorts by when its newest open item was
- * raised (`latestAt`), and a card by when its own item was (`waitingSince`).
+ * raised (`latestAt`), and a task by when its own item was (`waitingSince`).
  *
  * NOTHING HERE MIXES MACHINES. Every entry and card carries the `DaemonId` it was read from, and every
  * key is `(daemonId, sessionId, itemId)`: two machines' `A3` in two same-named sessions are unrelated.
@@ -134,14 +134,14 @@ export const unreadTotal = (entries: readonly UnreadSession[]): number =>
 
 /**
  * THE INBOX COUNT: the one number the sidebar's Inbox entry, the top bar, the tab bar and the Inbox page's
- * heading all show. A conversation whose board is held counts what that board puts in the deck — `cards`, plain
+ * heading all show. A conversation whose board is held counts what that board puts in the deck — `tasks`, plain
  * notifications included and answers still in their undo window left out — and one whose board is not held yet
- * (or could not be read) counts its summary's needs-you items, which are all a device knows of it. Then the cards
+ * (or could not be read) counts its summary's needs-you items, which are all a device knows of it. Then the tasks
  * waiting for a try.
  *
  * The summary and the board disagree on purpose, so the two must never be mixed for one conversation: the
  * summary leaves notifications out and keeps an item waiting on its ferret for more information in, and the deck
- * does the opposite. The badges used to add up summaries while the page counted cards, and read different numbers
+ * does the opposite. The badges used to add up summaries while the page counted tasks, and read different numbers
  * for the same Inbox.
  */
 export const inboxCount = (
@@ -274,7 +274,7 @@ export const inboxTargetFromSearch = (search: string): InboxTarget | null => {
   return sessionId === null || sessionId.trim() === '' || id === null ? null : { sessionId, id };
 };
 
-/** One card in the inbox: an open item, the conversation it belongs to, and the machine that runs it. */
+/** One task in the inbox: an open item, the conversation it belongs to, and the machine that runs it. */
 export interface InboxCard {
   /** `(daemonId, sessionId, itemId)`, collision-safe. */
   readonly key: string;
@@ -323,7 +323,7 @@ export const isOnOwner = (item: AgendaItem): boolean => item.notice === true || 
 /**
  * The deck: every open item on the OWNER's turn (a plain notification included), of every unread
  * conversation whose board has been read, newest first. An item on the ferret's turn is not in it — it
- * comes back as a card when the ferret updates it. `hidden` holds the keys the reader already answered and may still undo — they
+ * comes back as a task when the ferret updates it. `hidden` holds the keys the reader already answered and may still undo — they
  * leave the deck at once.
  */
 export const inboxCards = (
@@ -332,7 +332,7 @@ export const inboxCards = (
   hidden: ReadonlySet<string> = new Set(),
 ): readonly InboxCard[] => collectCards(entries, boardFor, hidden, isOnOwner);
 
-/** The items on the FERRET's turn, as cards of the same shape and order as the deck's: the "With ferrets" section. */
+/** The items on the FERRET's turn, as tasks of the same shape and order as the deck's: the "With ferrets" section. */
 export const withFerretTasks = (
   entries: readonly UnreadSession[],
   boardFor: (daemonId: DaemonId, sessionId: string) => BoardItems | undefined,
@@ -481,9 +481,9 @@ export const updatedSinceAsked = (
 };
 
 /**
- * The item's answers as actions, the recommended one first: the card's right, up and left answers, then
- * an old choice's options past the third (buttons only). The answers are the card's own
- * (`agendaCardAnswers`); see `agenda-answers.ts`.
+ * The item's answers as actions, the recommended one first: the task's right, up and left answers, then
+ * an old choice's options past the third (buttons only). The answers are the task's own
+ * (`agendaTaskAnswers`); see `agenda-answers.ts`.
  */
 export const inboxOptions = (item: Parameters<typeof answerActions>[0]): readonly InboxAction[] => answerActions(item);
 
@@ -500,7 +500,7 @@ export const hasAgendaBrief = (item: AgendaBrief): boolean =>
 
 /**
  * The item's `why`, or `null` when it only repeats the summary. The CLI used to fill `why` with the
- * subject, which drew the same sentence twice; a card never draws it twice.
+ * subject, which drew the same sentence twice; a task never draws it twice.
  */
 export const visibleWhy = (item: Pick<AgendaItem, 'subject' | 'why'>): string | null => {
   const why = item.why.trim();
@@ -510,7 +510,7 @@ export const visibleWhy = (item: Pick<AgendaItem, 'subject' | 'why'>): string | 
 export type SwipeMap = Readonly<Partial<Record<SwipeDirection, InboxAction>>>;
 
 /**
- * What each swipe does to a card: the card's own answers by direction, carrying `reply` as their note.
+ * What each swipe does to a task: the task's own answers by direction, carrying `reply` as their note.
  * A direction with no answer is absent and never commits; a review's "Needs changes" is absent until
  * the reply has text, because it IS that text (`swipeTargets` keeps it, for the stamp and the box).
  */
@@ -526,7 +526,7 @@ export const SWIPE_SLOP_PX = 10;
 const SWIPE_MINIMUM_PX = 96;
 const SWIPE_MAXIMUM_PX = 160;
 
-/** How far a card must travel to commit, for a card this wide: a clear distance, never a flick. */
+/** How far a task must travel to commit, for a task this wide: a clear distance, never a flick. */
 export const swipeThreshold = (width: number): number =>
   Math.min(SWIPE_MAXIMUM_PX, Math.max(SWIPE_MINIMUM_PX, width * 0.35));
 
@@ -540,7 +540,7 @@ export interface SwipeIntent {
 }
 
 /**
- * Reads a drag of `(dx, dy)` on a card `width` wide. The dominant axis wins; a drag down is no
+ * Reads a drag of `(dx, dy)` on a task `width` wide. The dominant axis wins; a drag down is no
  * answer (the deck hands the browser every drag it must not read: see `agenda-swipe-deck.tsx`). A
  * direction with no action never commits.
  */
@@ -584,7 +584,7 @@ export interface PendingAgendaAction {
   readonly deadline: number;
 }
 
-/** An answer the daemon refused, kept so the card can come back with the reason. */
+/** An answer the daemon refused, kept so the task can come back with the reason. */
 export interface FailedAgendaAction {
   readonly key: string;
   readonly card: InboxCard;
@@ -643,8 +643,8 @@ export class DeferredAgendaActions {
   }
 
   /**
-   * Holds `action` for `card`, stamped with the ask version the card SHOWS now, so an undo window that outlasts the
-   * ferret's replacing the ask still sends the answer to the ask it was given to. Answering the same card again
+   * Holds `action` for `task`, stamped with the ask version the task SHOWS now, so an undo window that outlasts the
+   * ferret's replacing the ask still sends the answer to the ask it was given to. Answering the same task again
    * replaces what was held.
    */
   schedule(card: InboxCard, action: InboxAction): void {
@@ -727,7 +727,7 @@ export class DeferredAgendaActions {
 }
 
 /**
- * The card a link names: `#agenda/A3?session=<id>&machine=<daemon id>`. The session is optional only because an id alone
+ * The task a link names: `#agenda/A3?session=<id>&machine=<daemon id>`. The session is optional only because an id alone
  * is per-session; the machine is optional because a link from an older `fy` names none.
  */
 export interface AgendaDeepLink {
@@ -736,7 +736,7 @@ export interface AgendaDeepLink {
   readonly machine?: DaemonId;
 }
 
-/** The card a location hash names, or `null` for any other hash (the join fragment among them): the protocol's one grammar. */
+/** The task a location hash names, or `null` for any other hash (the join fragment among them): the protocol's one grammar. */
 export const agendaDeepLinkFromHash = (hash: string): AgendaDeepLink | null => {
   const found = hash.startsWith('#agenda/') ? agendaDeepLinkFromFragment(hash) : null;
   if (found === null) return null;

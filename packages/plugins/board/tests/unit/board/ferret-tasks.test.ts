@@ -48,7 +48,7 @@ interface Options {
   readonly proposed?: LaneSet | 'fail';
   readonly world?: Partial<ServiceWorld>;
   readonly adoption?: FerretTasksPorts['adoption'];
-  /** The board refuses to move a card on the session's start. */
+  /** The board refuses to move a task on the session's start. */
   readonly failTrigger?: boolean;
   /** The boards that are off; absent means every board is on. */
   readonly off?: readonly BoardProjectId[];
@@ -899,7 +899,7 @@ describe('a session started with a brief', () => {
     });
 
     it('should stop the second of two starts racing for a lead’s card, and keep the first one’s assignment', async () => {
-      // Arrange: both starts judge the card while the lead alone holds it.
+      // Arrange: both starts judge the task while the lead alone holds it.
       const { subject, ports } = build({ cards: [boardTask({ id: 'F9', owner: 'lead' })] });
       const { stopped, stop } = stopper();
       const first = await subject.startOn('lead', 'F9');
@@ -972,7 +972,7 @@ describe('a session started with a brief', () => {
     });
 
     it('should start the session, naming no board, when the board’s name cannot be looked up after the card is assigned', async () => {
-      // Arrange: the name is read for the preflight, then the lookup fails once the card has been assigned.
+      // Arrange: the name is read for the preflight, then the lookup fails once the task has been assigned.
       let failing = false;
       const { subject, ports, warnings } = build({
         cards: [boardTask({ id: 'F9', owner: 'lead' })],

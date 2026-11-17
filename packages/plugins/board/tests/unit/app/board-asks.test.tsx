@@ -167,7 +167,7 @@ describe('board-app: the card’s Agenda asks (v4 parity)', () => {
     ]);
     expect(reads).toEqual([LEAD]);
 
-    // LIVE: a later agenda snapshot for the SAME, unchanged, mounted card updates its rows (no board refresh, no remount).
+    // LIVE: a later agenda snapshot for the SAME, unchanged, mounted task updates its rows (no board refresh, no remount).
     current = snapshot({
       items: [open('A1', { title: 'Retitled: OK to build?' })],
       resolved: [resolved('A8', 'F3', { resolvedAt: '2026-08-01T11:30:00.000Z' }), resolved('A7', 'F3')],

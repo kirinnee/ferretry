@@ -43,7 +43,7 @@ const ok = (mutation: AgendaMutation): AgendaLedger => {
   return mutation.ledger;
 };
 
-/** A ferret's board that carries one open card ask, written where the daemon reads it. */
+/** A ferret's board that carries one open task ask, written where the daemon reads it. */
 async function home(options: typeof gate.options = gate.options): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'card-ask-answers-'));
   const raised = ok(
@@ -84,7 +84,7 @@ afterEach(async () => {
   await Promise.all(halves.splice(0).map(async half => await half.close()));
 });
 
-/** The card source: it moves the card as told, and records what it was asked. */
+/** The task source: it moves the task as told, and records what it was asked. */
 function board(outcome: 'applied' | { readonly refused: string } = 'applied', apply = true) {
   const applied: AskAnswer[] = [];
   const spec: AskSourceSpec = {

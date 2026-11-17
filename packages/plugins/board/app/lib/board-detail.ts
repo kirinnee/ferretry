@@ -1,8 +1,8 @@
 /**
- * WHAT A CARD'S DETAIL SAYS, AS PLAIN VALUES.
+ * WHAT A TASK'S DETAIL SAYS, AS PLAIN VALUES.
  *
  * The drawer draws; this file decides. The history rows (what happened, in words, with the boring runs
- * folded) and the PR and release lines. The card is read-only status and never asks (#1552), so nothing
+ * folded) and the PR and release lines. The task is read-only status and never asks (#1552), so nothing
  * here composes a message for the owner to send. Nothing here reads the clock or the network, so every
  * state is a value-to-value test.
  */
@@ -39,7 +39,7 @@ export const laneNameOf = (laneSet: Lanes | null, laneId: string): string =>
 export const kindLabel = (kind: TaskView['kind']): string =>
   ({ bug: 'Bug', feature: 'Feature', infra: 'Infra', chore: 'Chore' })[kind];
 
-/** The words for the card's liveness; a card in a verify lane waits for the owner, whatever it derived. */
+/** The words for the task's liveness; a task in a verify lane waits for the owner, whatever it derived. */
 export const activityText = (task: Pick<TaskView, 'activity'>, category: LaneCategory | null): string => {
   if (category === 'verify') return 'Waiting for you to try it';
   switch (task.activity) {
@@ -252,7 +252,7 @@ export const historyRows = (history: readonly TaskEvent[], context: HistoryConte
 // What is worth a section, and who said the ask
 // ---------------------------------------------------------------------------------------------------
 
-/** A prose field the card actually has; an empty one earns no section. */
+/** A prose field the task actually has; an empty one earns no section. */
 export const written = (text: string): boolean => text.trim() !== '';
 
 /** A run of consecutive steps, or a label/heading between runs. A step keeps the number it was written with. */
@@ -360,7 +360,7 @@ const FIELD_WORDS: Readonly<Record<BoardEditableField, string>> = {
   progress: 'the progress',
 };
 
-/** The card has a PR, a branch, a doc or a release to show. */
+/** The task has a PR, a branch, a doc or a release to show. */
 export const hasLinks = (task: Pick<TaskView, 'links' | 'shippedIn'>): boolean =>
   task.links.prs.length > 0 || task.links.branch !== null || task.links.docs.length > 0 || task.shippedIn !== null;
 
@@ -396,7 +396,7 @@ export const askOrigin = (
   };
 };
 
-/** Who opened a card, as its byline says it. The admin token is said for what it is: it may be either. */
+/** Who opened a task, as its byline says it. The admin token is said for what it is: it may be either. */
 const askAuthor = (author: TaskActor, names: FerretNames): string => {
   if (author.kind === 'owner') return author.via === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : 'you';
   if (author.kind === 'ferret') return names(author.ferret);
@@ -406,7 +406,7 @@ const askAuthor = (author: TaskActor, names: FerretNames): string => {
 const RAW_PREFIX = /^\s*\([^()\n]{1,60}\)\s*/u;
 
 /**
- * The ask as the owner reads it: a ferret opening a card on someone's behalf leaves a raw note in front of the
+ * The ask as the owner reads it: a ferret opening a task on someone's behalf leaves a raw note in front of the
  * words ("(sada, found live) Fix the thing"); the byline already says who, so the note is dropped. Words that
  * are only a parenthesis stay as they are.
  */

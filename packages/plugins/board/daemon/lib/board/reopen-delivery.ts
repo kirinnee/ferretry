@@ -1,15 +1,15 @@
 /**
- * DELIVERING A REOPEN (`board-design.md` §2.9): the card's ferret is told `&F412 was reopened by the owner: …`
+ * DELIVERING A REOPEN (`board-design.md` §2.9): the task's ferret is told `&F412 was reopened by the owner: …`
  * without anyone telling it separately. The ladder, first rung that takes it:
  *
- * 1. the card's assignee, if it is alive — the line is queued like any owner message;
+ * 1. the task's assignee, if it is alive — the line is queued like any owner message;
  * 2. the assignee, if it is stopped or finished but resumable — it is resumed with the line (`fy resume`);
- * 3. the card's owner ferret (the lead), the same two ways;
- * 4. nobody: the card is left orphaned, which the board shows (U5).
+ * 3. the task's owner ferret (the lead), the same two ways;
+ * 4. nobody: the task is left orphaned, which the board shows (U5).
  *
  * The ordinary send path makes the alive-or-resume decision, so a reopen and a person's own message to the
  * same ferret can never disagree about it. A send the relaunch refused is HELD for an explicit revive: the
- * ferret still gets it then, but nobody is working the card now, so the next rung is told as well.
+ * ferret still gets it then, but nobody is working the task now, so the next rung is told as well.
  *
  * FILES THE OWNER ATTACHED ("Not good" with a picture) ride the same line to whichever rung takes it: the
  * messenger carries them out of the session they were uploaded to, so the ferret that is told gets them.
@@ -39,7 +39,7 @@ export interface ReopenMessenger {
   deliver(ferret: string, message: string, key: string, attachments?: BoardReopenAttachments): Promise<ReopenDelivery>;
 }
 
-/** The idempotency key of one reopen: the card and the history event that reopened it. */
+/** The idempotency key of one reopen: the task and the history event that reopened it. */
 export const reopenKey = (notice: Pick<ReopenNotice, 'task'>): string =>
   `board-reopen-${notice.task.id}-${notice.task.history.at(-1)?.seq ?? 0}`;
 
@@ -78,7 +78,7 @@ export class ReopenDeliveryLadder implements ReopenNotifier {
   }
 }
 
-/** The ferrets a card's news goes to, in order: its assignee, then its owner ferret. */
+/** The ferrets a task's news goes to, in order: its assignee, then its owner ferret. */
 export const rungsOf = (task: Pick<Task, 'assignee' | 'owner'>): readonly string[] => [
   ...new Set([effectiveAssignee(task), task.owner]),
 ];

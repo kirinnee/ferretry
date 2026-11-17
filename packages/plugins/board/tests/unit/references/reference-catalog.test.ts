@@ -178,7 +178,7 @@ describe('board provides the & reference menu (reference.catalog)', () => {
     expect(byId.get('F5')?.agentAsked).toBe(true);
     // A person's ask wins (askedBy person, or the owner's own chat: origin human), as the app's split reads it.
     for (const id of ['F2', 'F3', 'F4']) expect(byId.get(id)).not.toHaveProperty('agentAsked');
-    // A view that says neither falls back to who raised the card.
+    // A view that says neither falls back to who raised the task.
     const [raised, helper] = await catalog([
       view({ id: 'F6', owner: 'f1', createdBy: owner }),
       view({ id: 'F7', owner: 'f1' }),
@@ -203,7 +203,7 @@ describe('board provides the & reference menu (reference.catalog)', () => {
     expect(route?.capability).toBeDefined();
     expect(catalog([]).demand).toEqual(route?.capability as never);
     expect(catalog([]).demand).toEqual(cap('fleet', 'use'));
-    // …and the card list a caller reaches from a single card is asked the same, so no read here is easier than a route.
+    // …and the task list a caller reaches from a single task is asked the same, so no read here is easier than a route.
     const task = manifest.actions.routes.find(each => each.key === 'GET /v1/board/tasks');
     expect(task?.capability).toEqual(route?.capability as never);
   });

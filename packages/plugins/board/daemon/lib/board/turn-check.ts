@@ -5,23 +5,23 @@ import { BoardError } from './errors.ts';
 /**
  * THE BACKSTOP UNDER THE BOARD RULE (`board-design.md` §3.4, "Turn-end check").
  *
- * A ferret on a board that is ON is told to have a card before its first edit for a new ask (the fixed
+ * A ferret on a board that is ON is told to have a task before its first edit for a new ask (the fixed
  * layer's `Board:` section). A prose rule is not reliable, so when a turn ends the daemon reads it: if the turn did
  * MUTATING work — an edit tool, a git commit or push, a `fy new`, a `gh pr create` — while the session had
- * no focus card in an open lane, the ferret gets ONE queued message telling it to make one, or to record
- * why not with `fy card skip "<why>"`.
+ * no focus task in an open lane, the ferret gets ONE queued message telling it to make one, or to record
+ * why not with `fy task skip "<why>"`.
  *
  * - **Only where the board is on** (`board-switch.ts`). The board is opt-in, so a ferret on a board that is
- *   off has nothing to be told: most work needs no card.
+ *   off has nothing to be told: most work needs no task.
  * - **Evidence, not inference.** Only the turn's own tool calls count. A read-only turn (questions,
  *   research, a plan) never triggers it, however long.
  * - **At most once an hour per session.** The send id carries the hour, so a turn end observed twice (a
  *   replayed journal, a restart) is one send, and the check remembers when it last spoke so two turns in
  *   the same hour are one nudge.
- * - **A recorded skip silences it** until the session takes a card, which clears the skip (the session owns
+ * - **A recorded skip silences it** until the session takes a task, which clears the skip (the session owns
  *   both facts, `config.focusCard` and `config.boardSkip`).
  * - **A turn the nudge started is never checked**, so a reply to it cannot start a loop.
- * - **Silence when unsure.** A card or a session that cannot be read says nothing rather than guessing.
+ * - **Silence when unsure.** A task or a session that cannot be read says nothing rather than guessing.
  *
  * Pure except {@link BoardTurnCheck}, which reads and sends through its ports.
  */
@@ -106,7 +106,7 @@ export const boardCheckMessage = (binary: string): string =>
 export const boardCheckSendId = (ferret: string, now: number): string =>
   `board-check-${ferret}-${Math.floor(now / BOARD_CHECK_INTERVAL_MS)}`;
 
-/** Whether a card is still being worked: in a lane that is not `closed`, and not dropped. */
+/** Whether a task is still being worked: in a lane that is not `closed`, and not dropped. */
 export const isOpenTask = (response: TaskResponse): boolean => {
   if (response.card.dropped !== null) return false;
   const lane = response.laneSet?.lanes.find(candidate => candidate.id === response.card.laneId);
@@ -121,12 +121,12 @@ export interface BoardTurnCheckPorts {
   readonly boardOn: (ferret: string) => Promise<boolean>;
   /** The newest transcript events, oldest first. */
   readonly tail: (ferret: string, limit: number) => Promise<readonly TranscriptEvent[]>;
-  /** The session's focus card and standing skip (`config.focusCard`, `config.boardSkip`). */
+  /** The session's focus task and standing skip (`config.focusCard`, `config.boardSkip`). */
   readonly focus: {
     focusOf(ferret: string): Promise<TaskRef | null>;
     skipOf(ferret: string): Promise<BoardSkip | null>;
   };
-  /** One card with its board's lanes; a card that is gone is refused `not-found`. */
+  /** One task with its board's lanes; a task that is gone is refused `not-found`. */
   readonly card: (ref: TaskRef) => Promise<TaskResponse>;
   /** The ordinary send; the same id twice is one message. */
   readonly send: (ferret: string, sendId: string, message: string) => Promise<void>;
@@ -137,7 +137,7 @@ export interface BoardTurnCheckPorts {
 
 /**
  * Runs the check at a turn end. Every failure is swallowed by the caller: a check that cannot read the
- * transcript, the session or the card says nothing.
+ * transcript, the session or the task says nothing.
  */
 export class BoardTurnCheck {
   private readonly lastNudged = new Map<string, number>();

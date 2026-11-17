@@ -42,7 +42,7 @@ export interface StartFlags extends StartNumericFlags {
   /** A task title (`--name <title>`), free-form, kept verbatim. */
   readonly title?: string;
   readonly label?: string;
-  /** An existing card the new ferret takes over (`--card`): `&F21`, or `F21`. */
+  /** An existing task the new ferret takes over (`--task`): `&F21`, or `F21`. */
   readonly card?: string;
   readonly model?: string;
   readonly effort?: string;
@@ -96,8 +96,8 @@ function assertNumericFlags(flags: StartNumericFlags): void {
 }
 
 /**
- * A card reference a person or ferret typed: `&F412` or a bare `F412`, in any case (today's `parseTaskRef`). Anything
- * that is not exactly one card id is refused in today's words.
+ * A task reference a person or ferret typed: `&F412` or a bare `F412`, in any case (today's `parseTaskRef`). Anything
+ * that is not exactly one task id is refused in today's words.
  */
 function taskId(value: string): string {
   const trimmed = value.trim();

@@ -37,7 +37,7 @@ export interface BriefFlags extends AskFlags {
   readonly where?: string | readonly string[];
   /** `--detail`: the context explained from zero, as Markdown (drawn folded away). */
   readonly detail?: string;
-  /** The card's heading and the push's title: what this is about, in a few plain words. Required. */
+  /** The task's heading and the push's title: what this is about, in a few plain words. Required. */
   readonly title?: string;
   /** The one-line ask, when it is not given as words; `summary` is the older name for it. */
   readonly ask?: string;
@@ -282,7 +282,7 @@ export function composeAddRequest(
 
 /**
  * The file `--confirms` names, when it names one. The daemon writes a confirmation's card itself — Allow,
- * Deny and Discard change — so the flags that choose a card's kind or answers are refused beside it.
+ * Deny and Discard change — so the flags that choose a task's kind or answers are refused beside it.
  */
 function confirmsFrom(
   flags: BriefFlags,
@@ -330,7 +330,7 @@ function askLineFrom(summary: string | undefined): string {
   return line;
 }
 
-/** The card's title: required, one line, and short enough to head a notification. */
+/** The task's title: required, one line, and short enough to head a notification. */
 function titleFrom(raw: string | undefined): string {
   if (raw === undefined) {
     throw new Error(

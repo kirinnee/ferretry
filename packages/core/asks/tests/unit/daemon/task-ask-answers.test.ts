@@ -15,7 +15,7 @@ const GATE = {
   options: [{ id: 'done', label: 'Done', outcome: 'next' }],
 } as const;
 
-/** One open item carrying one open card ask, and the operations the agenda was asked to record. */
+/** One open item carrying one open task ask, and the operations the agenda was asked to record. */
 function board() {
   const recorded: TaskAskOperation[] = [];
   const agenda = {

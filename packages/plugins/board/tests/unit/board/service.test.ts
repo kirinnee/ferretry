@@ -68,7 +68,7 @@ const create = (input: Partial<TaskCreateRequestInput> = {}) =>
   });
 const action = (input: TaskActionRequestInput) => CardActionRequestSchema.parse(input);
 
-/** A service over a store already holding `cards`. */
+/** A service over a store already holding `tasks`. */
 const serviceWith = (tasks: readonly Task[], overrides: Partial<ServiceWorld> = {}) => {
   const ports = world({ store: new MemoryBoardStore(tasks), ...overrides });
   return { ports, service: new BoardService(ports) };
@@ -147,7 +147,7 @@ describe('creating a card', () => {
   });
 
   it('should refuse a board with no lanes, naming the proposal command', async () => {
-    // Act: the owner has no session, so the card goes to Unfiled, which has no lanes here.
+    // Act: the owner has no session, so the task goes to Unfiled, which has no lanes here.
     const error = await refusal(serviceWith([]).service.create(create({ assignee: 'worker' }), owner));
 
     // Assert
@@ -449,7 +449,7 @@ describe('moving a card', () => {
   });
 
   it("should let a lead move its helper's card through lineage", async () => {
-    // Arrange: grandchild's card is owned by child, whose parent is lead.
+    // Arrange: grandchild's task is owned by child, whose parent is lead.
     const { ports, service } = serviceWith([boardTask({ owner: 'child', assignee: 'grandchild' })]);
 
     // Act
@@ -986,7 +986,7 @@ describe('everything else on a card', () => {
   });
 
   it('should refuse a patch written against an older revision, and apply one written against the current', async () => {
-    // Arrange: the card's revision is the seq of its newest history event (`cardRevision`)
+    // Arrange: the task's revision is the seq of its newest history event (`taskRevision`)
     const { ports, service } = serviceWith([]);
     const created = await service.create(create({}), lead);
     const read = taskRevision(created.card);
@@ -1220,7 +1220,7 @@ describe('everything else on a card', () => {
   });
 
   it('should refuse a write that would leave the card invalid', async () => {
-    // Arrange: a card already at the clarification bound.
+    // Arrange: a task already at the clarification bound.
     const full = boardTask({
       clarifications: Array.from({ length: 128 }, () => ({
         text: 't',
@@ -1506,7 +1506,7 @@ describe('refiling a card', () => {
   });
 
   it('should take a named lane, and let the daemon refile too', async () => {
-    // Arrange — quick work walks no Plan gate, so the lane named is past none (docs/board.md § Cards show progress)
+    // Arrange — quick work walks no Plan gate, so the lane named is past none (docs/board.md § Tasks show progress)
     const { ports, service } = serviceWith([boardTask({ workflow: 'quick' })]);
 
     // Act
@@ -1553,7 +1553,7 @@ describe('refiling a card', () => {
     { name: 'into the closed lane of its category', laneId: undefined },
     { name: 'into the closed lane it names', laneId: 'closed' },
   ])('should carry a task that is already closed $name, past the gate', async ({ laneId }) => {
-    // Arrange: Merged closes on the `pr` board, so the card is closed there already.
+    // Arrange: Merged closes on the `pr` board, so the task is closed there already.
     const { ports, service } = serviceWith([boardTask({ projectId: OTHER_PROJECT, laneId: 'merged' })]);
 
     // Act
@@ -1775,9 +1775,9 @@ describe('reading the board', () => {
   });
 
   /**
-   * One card's read derived the whole board (every card's activity, every ferret's lineage) to show one card:
+   * One task's read derived the whole board (every task's activity, every ferret's lineage) to show one task:
    * ~140 ms for a 2.8 KB answer. Its neighbourhood alone gives it the same view; Asks is read once for every
-   * open card ask, so an ask about this card on another card's ferret's ledger still shows.
+   * open task ask, so an ask about this task on another task's ferret's ledger still shows.
    */
   it('should derive one card from its neighbourhood alone and give it the view the whole board gives it', async () => {
     // Arrange
@@ -1846,7 +1846,7 @@ describe('reading the board', () => {
   });
 
   describe('the orphaned cards, one snapshot', () => {
-    /** Derives every card as `orphaned` unless it is named, counting each derivation. */
+    /** Derives every task as `orphaned` unless it is named, counting each derivation. */
     const orphanedExcept = (named: Readonly<Record<string, 'active' | 'idle'>> = {}) => {
       const derivations: number[] = [];
       const activity = {
@@ -2255,7 +2255,7 @@ describe('lanes follow PR facts at the write', () => {
   });
 
   it('should keep a card waiting at the Plan gate where it is, whatever its linked PR says', async () => {
-    // Arrange — only the owner passes a gate (docs/board.md § Cards show progress)
+    // Arrange — only the owner passes a gate (docs/board.md § Tasks show progress)
     const { ports, service } = serviceWith([boardTask({ laneId: 'plan' }), holding(known({ releasedIn: RELEASE }))], {
       runningVersion: () => '4.114.0',
     });
@@ -2316,7 +2316,7 @@ describe('lanes follow PR facts at the write', () => {
           ]),
         ),
       });
-    // Quick work walks no Plan gate: these cases are about where the facts land a card, not about a gate.
+    // Quick work walks no Plan gate: these cases are about where the facts land a task, not about a gate.
     const unfiledAt = (laneId: string, prs: readonly PrLink[], workflow: Task['workflow'] = 'quick'): Task =>
       boardTask({
         projectId: UNFILED_PROJECT_ID,
@@ -2326,7 +2326,7 @@ describe('lanes follow PR facts at the write', () => {
       });
 
     it('should stop a design-first card at the board’s Plan gate, whatever its PRs say', async () => {
-      // Arrange — the review's exploit: a card done on the quick board comes back past a Plan it never had
+      // Arrange — the review's exploit: a task done on the quick board comes back past a Plan it never had
       const { ports, service } = unfiledWorld(unfiledAt('to-test', [known({ releasedIn: RELEASE })], 'design-first'));
 
       // Act

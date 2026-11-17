@@ -63,9 +63,9 @@ import { SUB_TASK_ASK_WARNING, umbrellaRefusal, umbrellaSignals } from './umbrel
 
 const asJson = (value: unknown): string => JSON.stringify(value, null, 2);
 
-/** Every card a single `fy board` page asks for; a board longer than this says so rather than paging. */
+/** Every task a single `fy board` page asks for; a board longer than this says so rather than paging. */
 const BOARD_PAGE = 500;
-/** The most related cards a create lists beside a strong match. */
+/** The most related tasks a create lists beside a strong match. */
 const MAX_RELATED_HITS = 5;
 
 export const ALL_PROJECTS = 'all';
@@ -90,7 +90,7 @@ export function resolveFerretRef(typed: string, directory: readonly FerretDirect
 
 /**
  * A typed lane, its id or its name, any case, to the lane's id, against the board's own lane set. `hint` is a
- * guide appended to the refusal when the lane is not the board's (`card move` passes the lane guide).
+ * guide appended to the refusal when the lane is not the board's (`task move` passes the lane guide).
  */
 export function resolveLaneRef(laneSet: LaneSet | null, typed: string, hint?: string): string {
   const wanted = typed.trim();
@@ -120,15 +120,15 @@ export interface BoardViewFlags extends BoardViewOptions, BoardCommonOptions {
 export interface TaskCreateFlags extends BoardCreateOptions, BoardCommonOptions {
   /** Create even when the related-work check found a strong match. */
   readonly new?: boolean | undefined;
-  /** A card to note instead of creating a new one. */
+  /** A task to note instead of creating a new one. */
   readonly related?: string | undefined;
-  /** `--broad "<why this must be one card>"`: create a card the umbrella check would refuse. */
+  /** `--broad "<why this must be one task>"`: create a task the umbrella check would refuse. */
   readonly broad?: string | undefined;
 }
 
 export interface TaskEditFlags extends BoardEditOptions, BoardCommonOptions {}
 
-/** `fy card patch`: the YAML or JSON document; `-` (the default) reads standard input. */
+/** `fy task patch`: the YAML or JSON document; `-` (the default) reads standard input. */
 export interface TaskPatchFlags extends BoardCommonOptions {
   readonly file?: string | undefined;
 }
@@ -146,14 +146,14 @@ export interface BoardControllerDependencies {
   readonly ownFerret: string | undefined;
   /** Whether the shell gave this half an environment at all: without one, `FY_SESSION_ID` cannot be read. */
   readonly environment?: boolean;
-  /** Asks the daemon whether a new card duplicates one; absent, creates are never checked. */
+  /** Asks the daemon whether a new task duplicates one; absent, creates are never checked. */
   readonly related?: RelatedCheck | undefined;
 }
 
 /**
- * `fy board` and the `fy card` verbs. Each verb builds its request from the typed words (pure, in `board-request`),
- * resolves the names a person typed against the daemon's own lists, sends it, and prints where the card stands
- * afterwards. A card never asks (#1552): there is no answer verb here.
+ * `fy board` and the `fy task` verbs. Each verb builds its request from the typed words (pure, in `board-request`),
+ * resolves the names a person typed against the daemon's own lists, sends it, and prints where the task stands
+ * afterwards. A task never asks (#1552): there is no answer verb here.
  */
 export class BoardController {
   constructor(private readonly deps: BoardControllerDependencies) {}
@@ -215,7 +215,7 @@ export class BoardController {
     }
   }
 
-  /** `fy card show <id>`: one card in full. */
+  /** `fy task show <id>`: one task in full. */
   async show(idText: string, options: BoardCommonOptions & { readonly yaml?: boolean }): Promise<void> {
     const ref = requireTaskRef(idText);
     const { card: task, laneSet } = await this.gateway.card(ref.id);
@@ -279,7 +279,7 @@ export class BoardController {
     if (options.json === true) return this.deps.output.success(asJson(taskWire.card(response)));
     const names = ferretNames(await this.directory());
     this.deps.output.success(renderActed(verb, response.card, response.laneSet, names));
-    // A claim that clashed with another card's queued this one behind it (docs/design/clash-queue.md): say so.
+    // A claim that clashed with another task's queued this one behind it (docs/design/clash-queue.md): say so.
     if (verb === 'file' || verb === 'create') {
       for (const line of queuedLines(response.card))
         this.deps.output.diagnostic(`${formatTaskRef(response.card)} ${line}`);
@@ -287,9 +287,9 @@ export class BoardController {
   }
 
   /**
-   * The checks of a create, before anything is made. `--related <card>` turns the create into a note on that card
-   * (true: nothing is created). An umbrella card, many outcomes in one, is refused unless `--broad "<why>"` says why
-   * it must be one (docs/board.md § One card, one outcome). Then the related cards are listed, weak matches too, with
+   * The checks of a create, before anything is made. `--related <task>` turns the create into a note on that task
+   * (true: nothing is created). An umbrella task, many outcomes in one, is refused unless `--broad "<why>"` says why
+   * it must be one (docs/board.md § One task, one outcome). Then the related tasks are listed, weak matches too, with
    * `--related F12` offered so the work is added to one instead; a strong duplicate refuses; `--new` skips the check.
    */
   private async noteInsteadOfCreate(
@@ -330,7 +330,7 @@ export class BoardController {
         `${binary} task new … --new          it really is separate; create it anyway`,
       ],
     });
-    // Nothing strong: the weaker matches are still worth a look, and adding to one beats a new card.
+    // Nothing strong: the weaker matches are still worth a look, and adding to one beats a new task.
     const tasks = response.matches.filter(match => match.hit.kind === 'card').slice(0, MAX_RELATED_HITS);
     if (tasks.length > 0 && options.json !== true) {
       this.deps.output.diagnostic(
@@ -344,7 +344,7 @@ export class BoardController {
     return false;
   }
 
-  /** `fy card new`: the card, then one `link` per `--pr` because a create has no field for them. */
+  /** `fy task new`: the task, then one `link` per `--pr` because a create has no field for them. */
   async create(titleWords: readonly string[], options: TaskCreateFlags): Promise<void> {
     const prLinks = createPrLinks(options);
     const texts = await this.resolveTexts(options);
@@ -404,8 +404,8 @@ export class BoardController {
   }
 
   /**
-   * `fy card skip "<why>"` (board-design.md §3.4): the calling ferret's work needs no card (chit-chat, or the owner
-   * said not to track it), so the turn-end check stays quiet until the ferret takes a card.
+   * `fy task skip "<why>"` (board-design.md §3.4): the calling ferret's work needs no task (chit-chat, or the owner
+   * said not to track it), so the turn-end check stays quiet until the ferret takes a task.
    */
   async skip(why: readonly string[], options: BoardCommonOptions) {
     const reason = why.join(' ').trim();
@@ -517,9 +517,9 @@ export class BoardController {
   }
 
   /**
-   * `fy card progress <id>`: the progress parts `--file` and `--now` / `--done` / `--next` come to: the file's three
+   * `fy task progress <id>`: the progress parts `--file` and `--now` / `--done` / `--next` come to: the file's three
    * parts with each named flag replacing its part, or the flags' parts alone. The daemon merges what is sent into the
-   * card's current progress in the card's own write, so nothing is read here.
+   * task's current progress in the task's own write, so nothing is read here.
    */
   async progress(idText: string, options: TaskProgressFlags) {
     const ref = requireTaskRef(idText);
@@ -535,8 +535,8 @@ export class BoardController {
   }
 
   /**
-   * `fy card patch <id> --file <f>`: the card's words as ONE YAML or JSON document (docs/board.md § Patch). The
-   * values that differ from the card go as ONE edit action; a document that changes nothing sends nothing.
+   * `fy task patch <id> --file <f>`: the task's words as ONE YAML or JSON document (docs/board.md § Patch). The
+   * values that differ from the task go as ONE edit action; a document that changes nothing sends nothing.
    */
   async patch(idText: string, options: TaskPatchFlags) {
     const ref = requireTaskRef(idText);

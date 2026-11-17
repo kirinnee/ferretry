@@ -14,7 +14,7 @@ import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
  * on a doubling backoff, so an owner's reply is never left unanswered in a list nobody reads.
  *
  * - **Only `waiting-on-ferret`.** A ferret that took the item on (`rest --why`, `working`) said what it is doing: never
- *   nudged. A snoozed item is the owner's. A notice, and a card the daemon raised for nobody's ferret, are not the
+ *   nudged. A snoozed item is the owner's. A notice, and a task the daemon raised for nobody's ferret, are not the
  *   ferret's to answer.
  * - **One message per ferret per sweep.** Every item of one ferret that is due goes in ONE message.
  * - **HARD CAP: {@link AGENDA_REST_NUDGE_LIMIT} nudges per item per rest** (v4 had none: it nudged daily for ever). A
@@ -139,7 +139,7 @@ export function restNudgeDueAt(item: RestItem, records: Readonly<Record<string, 
     : undefined;
 }
 
-/** An item the ferret speaks for: its own, and a gate follow-up or card agenda the daemon raised on its behalf. */
+/** An item the ferret speaks for: its own, and a gate follow-up or task agenda the daemon raised on its behalf. */
 const spokenFor = (item: RestItem): boolean =>
   item.notice !== true &&
   (item.raisedBy === 'agent' ||

@@ -30,7 +30,7 @@ const serviceWith = (tasks: readonly Task[], overrides: Partial<ServiceWorld> = 
 };
 const stored = (ports: ServiceWorld, id = 'F1'): Task => ports.store.cards.get(id) as Task;
 
-/** A stored card whose actor sites (createdBy, the created event, one clarification) all hold `actor`, as JSON. */
+/** A stored task whose actor sites (createdBy, the created event, one clarification) all hold `actor`, as JSON. */
 const withActor = (actor: unknown, extra: Record<string, unknown> = {}): unknown => {
   const base = boardTask();
   return {

@@ -171,7 +171,7 @@ describe('board daemon half', () => {
     expect(open[0]?.entry.startsWith(`gate:${made.id}:to-test:`)).toBe(true);
     expect(open[0]?.kind).toBe('choice');
 
-    // Another write of the same card, still at the gate, asks nothing new.
+    // Another write of the same task, still at the gate, asks nothing new.
     await host.request('POST', `/v1/board/tasks/${made.id}`, {
       body: { action: 'note', text: 'still here' },
       headers: as('owner'),
@@ -217,7 +217,7 @@ describe('board daemon half', () => {
     expect(after.json<{ task: { laneId: string } }>().task.laneId).toBe('closed');
     const history = after.json<{ task: { history: { type: string }[] } }>().task.history.length;
 
-    // A replay of the same answer finds the card gone from that gate: nothing moves, nothing is written.
+    // A replay of the same answer finds the task gone from that gate: nothing moves, nothing is written.
     await apply(answer('an_000000000000000000000001', 'Done'));
     const again = await host.request('GET', `/v1/board/tasks/${made.id}`, { headers: as('owner') });
     expect(again.json<{ task: { history: unknown[] } }>().task.history.length).toBe(history);
@@ -263,7 +263,7 @@ describe('board daemon half', () => {
     expect(body.tasks.map(each => each.id)).toContain(kept.id);
     expect(body.quarantined.map(each => each.id)).toEqual(['F77']);
     expect(again.state('board').files.get('cards/F77.json')).toBe('{ this is not a card');
-    // The damaged card's number is skipped, never handed out again.
+    // The damaged task's number is skipped, never handed out again.
     const next = await again.request('POST', '/v1/board/tasks', { body: NEW_TASK, headers: as('owner') });
     expect(next.status).toBe(200);
     expect(next.json<{ task: { id: string } }>().task.id).not.toBe('F77');

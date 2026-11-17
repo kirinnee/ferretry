@@ -1,5 +1,5 @@
 /**
- * THE CARD OF AN OPEN AGENDA ITEM — everything the owner reads and answers, in the spec's eight parts, top to bottom
+ * THE TASK OF AN OPEN AGENDA ITEM — everything the owner reads and answers, in the spec's eight parts, top to bottom
  * (`agenda-item-sections.ts` owns the order; the view's sticky row above holds the title):
  *
  *   1 head          the STATE chip ("Needs you", "Resting · waiting on Zoe") and the STAGE chip ("Question", "Test"),
@@ -7,10 +7,10 @@
  *                   Merge with… and Not needed are the view's ⋯ menu's; this draws what they open (the ↓ swipe skips)
  *   2 premise       PREMISE and CONTEXT — the two fields every item carries — as two tinted blocks
  *   3 detail        the context explained from zero (`detail`), FOLDED
- *   4 references    ONE TABLE of every term and every link (PR, card, file, page), each with a plain meaning; links
+ *   4 references    ONE TABLE of every term and every link (PR, task, file, page), each with a plain meaning; links
  *                   are drawn by the one reference renderer — FOLDED
- *   5 needs         "WHAT I NEED FROM YOU" (`agenda-need.tsx`): exactly the ask, by the card's shape, then why the
- *                   recommendation, the steps, the impact, EVERY CARD ASK with its own buttons, and the answer row;
+ *   5 needs         "WHAT I NEED FROM YOU" (`agenda-need.tsx`): exactly the ask, by the task's shape, then why the
+ *                   recommendation, the steps, the impact, EVERY TASK ASK with its own buttons, and the answer row;
  *                   marked out while the item needs the owner. When the ferret answered the owner's question, one line
  *                   "Answered: see Where we are now" opens the main tab and brings it into view
  *   6 tabs          THE LIVE DOCUMENT AS TABS (`agenda-tabs.tsx`, &F923): "Where we are now" first and open — the
@@ -23,8 +23,8 @@
  *
  * A part the item does not carry is not drawn. Nothing is cut short: a long report, reply or edit line is drawn whole.
  * Terms are dotted-underlined where the premise, the context and the options use them (`agenda-terms.tsx`). Picking
- * an earlier version redraws the card as it read then, read-only, with the way back to the latest. A one-row answer
- * docks at the foot of the open item (`answerDock`) so it stays in reach; a card ask's buttons stay in the item.
+ * an earlier version redraws the task as it read then, read-only, with the way back to the latest. A one-row answer
+ * docks at the foot of the open item (`answerDock`) so it stays in reach; a task ask's buttons stay in the item.
  */
 
 import {
@@ -105,20 +105,20 @@ export interface AgendaItemCardProps {
   readonly inputForm?: ReactNode;
   /** A ferret's paste plan (`CopyPlanHost`): drawn in the answer row's place, its Allow and Decline are the answer. */
   readonly planForm?: ReactNode;
-  /** The cards a machine notice is about (`AgendaCardsHost`): each with its own Open, Start and Close. Got it stays the answer. */
+  /** The tasks a machine notice is about (`AgendaCardsHost`): each with its own Open, Start and Close. Got it stays the answer. */
   readonly cardsForm?: ReactNode;
   /**
    * A review's Request changes: the host sends the composer's words as the change asked for, or puts the owner in
-   * the composer when it is empty. Absent: the card says to type the changes there instead.
+   * the composer when it is empty. Absent: the task says to type the changes there instead.
    */
   readonly onRequestChanges?: ((answer: AgendaTaskAnswer) => void) | undefined;
   /**
-   * Where a one-row answer (choice, approval, to-do, notice, review) is drawn instead of at the card's foot: the open
-   * item's sticky dock, so the buttons stay in reach while a long card scrolls. Absent: the row ends the card.
+   * Where a one-row answer (choice, approval, to-do, notice, review) is drawn instead of at the task's foot: the open
+   * item's sticky dock, so the buttons stay in reach while a long task scrolls. Absent: the row ends the task.
    */
   readonly answerDock?: HTMLElement | null | undefined;
   /**
-   * Names the picks of a form card whose fields are answered here, because a composer sends them (the Inbox). Absent: a
+   * Names the picks of a form task whose fields are answered here, because a composer sends them (the Inbox). Absent: a
    * form's fields are drawn to read, and the owner is told to fill them in in the Inbox.
    */
   readonly formKey?: string | undefined;
@@ -128,7 +128,7 @@ export interface AgendaItemCardProps {
   readonly itemKey?: string | undefined;
   /** The machine the item is on: a held configuration change links to that machine's Configuration files. */
   readonly daemonId?: string | undefined;
-  /** A card's How to test, read from the board the app holds: what a card ask shows under its heading. Absent: none. */
+  /** A task's How to test, read from the board the app holds: what a task ask shows under its heading. Absent: none. */
   readonly howToTestFor?: ((cardId: string) => string | null | undefined) | undefined;
   /** The versions the machine keeps for the item: the Changes panel reads them. Absent: no diff. */
   readonly versions?: AgendaVersionsView | undefined;
@@ -136,7 +136,7 @@ export interface AgendaItemCardProps {
   readonly merge?: AgendaMergeView | undefined;
   /**
    * The version the head's ⋯ menu shows (`agenda-item-menu.tsx`), and the way back to the latest: the view owns the
-   * picker, so the card only draws what was picked. Absent or past the newest: the latest version.
+   * picker, so the task only draws what was picked. Absent or past the newest: the latest version.
    */
   readonly shown?: number | undefined;
   readonly onShowVersion?: ((version: number) => void) | undefined;
@@ -157,7 +157,7 @@ const forConfirmation = (item: AgendaItem): AgendaItem => {
   return rest;
 };
 
-/** One written part of a card's status: its key, the label it is drawn under, and its Markdown. */
+/** One written part of a task's status: its key, the label it is drawn under, and its Markdown. */
 interface StatusPart {
   readonly key: string;
   readonly label: string;
@@ -165,9 +165,9 @@ interface StatusPart {
 }
 
 /**
- * PREMISE and CONTEXT as two tinted blocks: each label above its points. A board card draws the same two, with its
- * STATUS (the card's current state: Now / Done so far / Next, each Markdown, the empty ones left out) as a calm block
- * above them; an agenda card never has one.
+ * PREMISE and CONTEXT as two tinted blocks: each label above its points. A board task draws the same two, with its
+ * STATUS (the task's current state: Now / Done so far / Next, each Markdown, the empty ones left out) as a calm block
+ * above them; an agenda task never has one.
  */
 function Situation({
   premise,
@@ -323,8 +323,8 @@ function ReferencesTable({
 }
 
 /**
- * ONE CARD ASK inside "What I need from you": its own heading ("Card &F559: your answer for the card"),
- * the card and what it waits on, its How to test when the ask carries one, and ITS buttons (Done / Not good, or OK to
+ * ONE TASK ASK inside "What I need from you": its own heading ("Task &F559: your answer for the task"),
+ * the task and what it waits on, its How to test when the ask carries one, and ITS buttons (Done / Not good, or OK to
  * build) — tap only, so the arrows and swipes stay the item's own.
  */
 function TaskAskBlock({
@@ -417,7 +417,7 @@ export function AgendaItemCard({
   onMergeClose,
 }: AgendaItemCardProps) {
   const count = versionCount(current);
-  // Absent follows the latest version, so an edit that lands while the card is open shows at once.
+  // Absent follows the latest version, so an edit that lands while the task is open shows at once.
   const shown = Math.min(picked ?? count, count);
   const latest = shown >= count;
   const item = latest ? current : itemAtVersion(current, shown);
@@ -425,7 +425,7 @@ export function AgendaItemCard({
   const model = cardModel(item);
   const meta = agendaTypeMeta(item);
   const foldKey = itemKey ?? item.id;
-  // THE TABS (&F923): the open one is remembered per item on this device; a notice draws its body in its ask, and a card
+  // THE TABS (&F923): the open one is remembered per item on this device; a notice draws its body in its ask, and a task
   // gate's body is its How to test, so for those the full picture is not a tab.
   const [remembered, setRemembered] = useState(() => readTab(foldKey));
   const tabsPart = useRef<HTMLElement | null>(null);
@@ -435,14 +435,14 @@ export function AgendaItemCard({
     setRemembered(id);
     writeTab(foldKey, id, id === tabs[0]?.id);
   };
-  // Opening a tab from elsewhere on the card ("Answered: see …", a section in Changes) also brings the tabs into view.
+  // Opening a tab from elsewhere on the task ("Answered: see …", a section in Changes) also brings the tabs into view.
   const showTab = (id: string): void => {
     selectTab(id);
     if (typeof tabsPart.current?.scrollIntoView === 'function') tabsPart.current.scrollIntoView({ block: 'start' });
   };
   const changedTabIds = useChangedTabs(current, versions, latest);
   // The head's description: the item's summary under its title, drawn whole (the view's sticky row holds the title).
-  // A gate item repeats nothing, and a notice drawn with its cards lists them as rows (its summary is the same lines,
+  // A gate item repeats nothing, and a notice drawn with its tasks lists them as rows (its summary is the same lines,
   // for an older app): neither has one.
   const description = cardsForm === undefined ? agendaCardHead(item).description : null;
   // The segment LEADS WITH THE ASK, whatever the header above it says (a form's is its header's, said once): the lone question, else the item's one-line
@@ -452,18 +452,18 @@ export function AgendaItemCard({
   const seen = new Set<number>();
   const mark = (text: string): string => markTerms(text, terms, seen);
   const premise = read.premise?.trim() ? mark(read.premise) : null;
-  // A notice with cards lists them as rows with buttons, so its context (the same lines, for an older app) says nothing more.
+  // A notice with tasks lists them as rows with buttons, so its context (the same lines, for an older app) says nothing more.
   const answerable = latest && settled === undefined;
   const isInput = inputForm !== undefined && item.kind === 'input';
-  // Only a card that is DRAWN says the agent's prompt itself, under the daemon's facts, so only then does the context keep
-  // just the daemon's own lines: a settled record and an older version draw no card, and keep the prompt as written.
+  // Only a task that is DRAWN says the agent's prompt itself, under the daemon's facts, so only then does the context keep
+  // just the daemon's own lines: a settled record and an older version draw no task, and keep the prompt as written.
   const inputDrawn = isInput && answerable;
   const contextText = inputDrawn ? inputContextLines(read.context) : read.context;
   const context = cardsForm === undefined && contextText?.trim() ? mark(contextText) : null;
 
   const formFields = item.fields ?? [];
   const formPicks = useFormPicks(formKey ?? item.id, formFields);
-  // A gate item is a card to try or approve: its steps are the card's How to test.
+  // A gate item is a task to try or approve: its steps are the task's How to test.
   const gated = gateOf(item) !== undefined;
   const pull = useDownSwipe(() => onSkip?.(), swipeable && onSkip !== undefined);
 
@@ -510,10 +510,10 @@ export function AgendaItemCard({
     answerable && onRequestChanges !== undefined && model.requestChanges !== undefined
       ? { answer: model.requestChanges, onTap: () => onRequestChanges(model.requestChanges as AgendaTaskAnswer) }
       : undefined;
-  // Every card ask the item carries is answered HERE, inside the item, with its own buttons: never docked, never a
+  // Every task ask the item carries is answered HERE, inside the item, with its own buttons: never docked, never a
   // separate item. Only the latest version is answerable, so an earlier one draws none.
   const taskAsks = latest && settled === undefined ? itemTaskAsks(item, howToTestFor) : [];
-  // The owner already said yes in words ("build", "ok to build!"): offer it as the card ask's answer (&B155).
+  // The owner already said yes in words ("build", "ok to build!"): offer it as the task ask's answer (&B155).
   const replyOffer = taskAsks.length === 0 ? null : replyApproval(item, history);
   const replies = (
     <AgendaQuickReplies
@@ -529,9 +529,9 @@ export function AgendaItemCard({
       {...(requestChanges === undefined ? {} : { requestChanges })}
     />
   );
-  // Only a row of buttons docks; a card answered in words has none, and its note or error stays in the card.
-  // With card asks the item's own row is not docked: it sits inline under its ask, labelled, so two button sets never
-  // share the foot of the view and the card ask's buttons are never covered. An item answered in words (a reply, its
+  // Only a row of buttons docks; a task answered in words has none, and its note or error stays in the task.
+  // With task asks the item's own row is not docked: it sits inline under its ask, labelled, so two button sets never
+  // share the foot of the view and the task ask's buttons are never covered. An item answered in words (a reply, its
   // questions) has no row to label: it gets no "Your answer for this item" heading over nothing (&B156).
   const ownRow = model.notice || model.answers.length > 0 || requestChanges !== undefined;
   const rowInline = taskAsks.length > 0 && !isInput && planForm === undefined && ownRow;
@@ -562,7 +562,7 @@ export function AgendaItemCard({
             <span className="fy-card__state" data-agenda-state={state.state}>
               {state.label}
             </span>
-            {/* A standalone card gate says its stage in its own meta line (Test, Plan to approve): said once. */}
+            {/* A standalone task gate says its stage in its own meta line (Test, Plan to approve): said once. */}
             {gated ? null : (
               <span
                 className="fy-card__type"
@@ -631,7 +631,7 @@ export function AgendaItemCard({
             <ReferencesTable renderProse={renderProse} rows={references} />
           </AgendaFold>
         )}
-        {/* 5. WHAT I NEED FROM YOU: the ask, then every card ask with its own buttons, then the answer row. While the item
+        {/* 5. WHAT I NEED FROM YOU: the ask, then every task ask with its own buttons, then the answer row. While the item
             needs the owner it is marked out, so the one thing to do is the thing the eye lands on. */}
         <div
           className="fy-card__part"

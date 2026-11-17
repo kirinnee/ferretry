@@ -1,24 +1,24 @@
 /**
- * CARDS SHOW PROGRESS; THEIR ASKS RIDE THE AGENDA (docs/board.md § Cards show progress; their asks ride the agenda).
- * A card never asks the owner itself. When an owner-asked card reaches a lane whose stage is a gate (OK to build, or
+ * TASKS SHOW PROGRESS; THEIR ASKS RIDE THE AGENDA (docs/board.md § Tasks show progress; their asks ride the agenda).
+ * A task never asks the owner itself. When an owner-asked task reaches a lane whose stage is a gate (OK to build, or
  * Done / Not good), the Board raises ONE obligation through Asks (source `card`, entry `gate:<card>:<lane>:<entry>`,
- * redesign §7.4 rule 4), keeps it in line with the card whatever moved it, and applies the owner's answer to the card.
+ * redesign §7.4 rule 4), keeps it in line with the task whatever moved it, and applies the owner's answer to the task.
  *
- * - **Attaching.** After every committed write of a card ({@link GateItems.written}, by any path: a move, a trigger,
- *   PR facts, a refile, `fy signal done`) and once at boot ({@link GateItems.backfill}), a card at a gate has its ask
+ * - **Attaching.** After every committed write of a task ({@link GateItems.written}, by any path: a move, a trigger,
+ *   PR facts, a refile, `fy signal done`) and once at boot ({@link GateItems.backfill}), a task at a gate has its ask
  *   open once. Raising is idempotent by `(source, entry)`, so a second look raises nothing new; an ask the owner
  *   answered is never asked again (`CardObligations.answered`).
- * - **Leaving.** A card no longer at that gate (moved on by the owner on the Board, dropped, refiled) has its open ask
- *   withdrawn quietly. A try-it gate whose card is blocked takes its ask back until it is unblocked.
+ * - **Leaving.** A task no longer at that gate (moved on by the owner on the Board, dropped, refiled) has its open ask
+ *   withdrawn quietly. A try-it gate whose task is blocked takes its ask back until it is unblocked.
  * - **Answering** ({@link GateItems.answer}): only a human, through Asks' own answer route (which Gate admitted). Asks
- *   calls the source's `apply` BEFORE it records the answer (#1552); this applies it BY ANSWER ID, once: the card moves
+ *   calls the source's `apply` BEFORE it records the answer (#1552); this applies it BY ANSWER ID, once: the task moves
  *   FIRST, as the owner, through the board, expecting to find it at that gate by that entry, so a replayed answer finds
- *   the card gone and moves nothing. The ferret is then told. Asks runs `apply` inside that ferret's own turn of
+ *   the task gone and moves nothing. The ferret is then told. Asks runs `apply` inside that ferret's own turn of
  *   writes, so NOTHING here closes or raises an ask while an answer is being applied (that would wait on the turn that
  *   waits on it): an applied answer is reconciled once Asks has recorded it ({@link GateItems.recorded}, from
  *   `asks.answered`), and a refused one only after `apply` has returned.
  *
- * An internal card (its lead's bookkeeping) never asks: its owner ferret or a lead passes its gate itself. Nor does a
+ * An internal task (its lead's bookkeeping) never asks: its owner ferret or a lead passes its gate itself. Nor does a
  * sub-card at a lane the owner tries things in: the owner tests the parent.
  */
 import type { AskDraft } from '@ferretry/core-asks/contract';
@@ -51,7 +51,7 @@ import {
 import type { TaskWriteObserver } from './service.ts';
 import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
-/** An open `card` ask, as the obligations port reports it. */
+/** An open `task` ask, as the obligations port reports it. */
 export interface OpenTaskAskEntry {
   /** The Asks entry id: `gate:<card>:<lane>:<entry>`. */
   readonly entry: string;
@@ -63,7 +63,7 @@ export interface OpenTaskAskEntry {
 }
 
 /**
- * The `card` source's obligations in Asks, as the Board lib uses them. The adapter maps each onto `AsksApi` (raise,
+ * The `task` source's obligations in Asks, as the Board lib uses them. The adapter maps each onto `AsksApi` (raise,
  * close, open, answers) and onto the `AskAnswered` wake-up; the lib never imports a plugin.
  *
  * `raise` is idempotent by `(source, entry)`: a second raise of an entry that is open or answered changes nothing.
@@ -73,44 +73,44 @@ export interface TaskObligations {
   raise(draft: AskDraft): Promise<boolean>;
   /** Withdraws the open ask of `entry`; nothing when it is not open. */
   withdraw(entry: string, reason: 'withdrawn' | 'superseded'): Promise<void>;
-  /** Every open `card` ask, or the open ones of one card. A read that fails THROWS: "not asking" would let a second ask through. */
+  /** Every open `task` ask, or the open ones of one task. A read that fails THROWS: "not asking" would let a second ask through. */
   open(task?: TaskId): Promise<readonly OpenTaskAskEntry[]>;
-  /** The entries of this card's asks the owner has already answered: each has been asked, for good. */
+  /** The entries of this task's asks the owner has already answered: each has been asked, for good. */
   answered(task: TaskId): Promise<ReadonlySet<string>>;
-  /** {@link open} for every card in ONE scan, grouped by card: what a whole-board pass reads instead of one scan per card. */
+  /** {@link open} for every task in ONE scan, grouped by task: what a whole-board pass reads instead of one scan per task. */
   openAll(): Promise<ReadonlyMap<TaskId, readonly OpenTaskAskEntry[]>>;
-  /** {@link answered} for every card in ONE scan, grouped by card. */
+  /** {@link answered} for every task in ONE scan, grouped by task. */
   answeredAll(): Promise<ReadonlyMap<TaskId, ReadonlySet<string>>>;
 }
 
-/** What one whole-board pass reads of Asks once: the open and the answered `card` asks of every card. */
+/** What one whole-board pass reads of Asks once: the open and the answered `task` asks of every task. */
 interface AsksPass {
   readonly open: ReadonlyMap<TaskId, readonly OpenTaskAskEntry[]>;
   readonly answered: ReadonlyMap<TaskId, ReadonlySet<string>>;
 }
 
-/** The board as the card asks read and write it: one card or every card, and the owner's act on one. */
+/** The board as the task asks read and write it: one task or every task, and the owner's act on one. */
 export interface GateBoard {
   card(id: TaskId): Promise<GateTask | undefined>;
   cards(): Promise<readonly GateTask[]>;
   /**
-   * Applies one action as `caller`; throws the board's refusal. `expect` is checked in the same write: the card must
+   * Applies one action as `caller`; throws the board's refusal. `expect` is checked in the same write: the task must
    * still sit in that lane by that entry, or nothing is written.
    */
   act(id: TaskId, request: TaskActionRequest, caller: BoardCaller, expect?: GateExpectation): Promise<void>;
   /**
-   * The daemon's own move of a card out of a try-it lane into the closed lane, reason beside it: the one pass of a gate
-   * that is not the owner's. Written only while the card still sits at `expect`; `false` when it did not close.
+   * The daemon's own move of a task out of a try-it lane into the closed lane, reason beside it: the one pass of a gate
+   * that is not the owner's. Written only while the task still sits at `expect`; `false` when it did not close.
    */
   closeNothingToTry(id: TaskId, expect: GateExpectation, reason: string): Promise<boolean>;
 }
 
-/** Tells a card's ferret the owner's answer, through the reopen ladder. */
+/** Tells a task's ferret the owner's answer, through the reopen ladder. */
 interface GateWords {
   told(task: Task, message: string, key: string): Promise<void>;
 }
 
-/** Where the files an answer carries are moved to the card's ferret, answering their ids as they are THERE; rejects when one cannot be carried. */
+/** Where the files an answer carries are moved to the task's ferret, answering their ids as they are THERE; rejects when one cannot be carried. */
 interface GateFiles {
   carry(from: string, to: string, ids: readonly string[]): Promise<readonly string[]>;
 }
@@ -136,11 +136,11 @@ export interface GateItemsDependencies {
   readonly diagnostics: { warn(message: string): void };
 }
 
-/** What answering a card ask came to. */
+/** What answering a task ask came to. */
 export type GateAnswerOutcome =
-  /** Not an answer to a card ask. */
+  /** Not an answer to a task ask. */
   | { readonly handled: false }
-  /** The answer was applied (or repeats one that was): the card moved, or stayed for a Not yet. */
+  /** The answer was applied (or repeats one that was): the task moved, or stayed for a Not yet. */
   | { readonly handled: true; readonly applied: true }
   | { readonly handled: true; readonly refused: GateRefusal };
 
@@ -149,7 +149,7 @@ export interface GateRefusal {
   readonly message: string;
 }
 
-/** One answer to a card ask, as the adapter read it from Asks (`asks.answered` -> `answers`). */
+/** One answer to a task ask, as the adapter read it from Asks (`asks.answered` -> `answers`). */
 export interface GateAnswer {
   /** The answer's own id: each answer is applied once, by this id. */
   readonly answerId: string;
@@ -163,19 +163,19 @@ export interface GateAnswer {
   readonly text?: string | undefined;
   /** Files the owner brings with a Not good, uploaded to THIS ask's ferret (`from` is its ferret). */
   readonly attachments?: BoardReopenAttachments | undefined;
-  /** Whether the answerer is the owner (a device or the host). Only a human answers a card ask. */
+  /** Whether the answerer is the owner (a device or the host). Only a human answers a task ask. */
   readonly human: boolean;
   /** Who the board records the move as: the owner's app, or the admin token at the machine. */
   readonly caller: BoardCaller;
 }
 
-/** Where a card's ask is open now. */
+/** Where a task's ask is open now. */
 export interface GateAsking {
   readonly ferret: string;
   readonly id: string;
 }
 
-/** Where an answer expects the card to be when its move is written: the gate's lane, by the entry it asked about. */
+/** Where an answer expects the task to be when its move is written: the gate's lane, by the entry it asked about. */
 export interface GateExpectation {
   readonly laneId: string;
   readonly entry: number;
@@ -196,18 +196,18 @@ const serially = async <T>(queues: Map<TaskId, Promise<unknown>>, key: TaskId, w
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 export class GateItems implements TaskWriteObserver {
-  /** Cards whose ask is being answered right now: their own writes are the answer's, not a card moving on. */
+  /** Tasks whose ask is being answered right now: their own writes are the answer's, not a task moving on. */
   private readonly answering = new Set<TaskId>();
-  /** One answer per card at a time: the tail of each card's queue of answers. */
+  /** One answer per task at a time: the tail of each task's queue of answers. */
   private readonly answers = new Map<TaskId, Promise<unknown>>();
-  /** One pass over a card's asks at a time, so two writes of one card never raise its ask twice. */
+  /** One pass over a task's asks at a time, so two writes of one task never raise its ask twice. */
   private readonly passes = new Map<TaskId, Promise<unknown>>();
-  /** The answers already applied in this run: a replay of one is a no-op even before the card is read. */
+  /** The answers already applied in this run: a replay of one is a no-op even before the task is read. */
   private readonly applied = new Set<string>();
 
   constructor(private readonly ports: GateItemsDependencies) {}
 
-  /** A card was written: its ask follows its lane. Never rejects. */
+  /** A task was written: its ask follows its lane. Never rejects. */
   async written(id: TaskId): Promise<void> {
     if (this.answering.has(id)) return;
     const task = await this.ports.board.card(id).catch(() => undefined);
@@ -218,14 +218,14 @@ export class GateItems implements TaskWriteObserver {
   }
 
   /**
-   * At boot: every card's ask is brought in line with its lane — one at a gate gets its ask, one whose card moved on
-   * while the daemon was down loses it. Each card on its own; returns how many asks it raised.
+   * At boot: every task's ask is brought in line with its lane — one at a gate gets its ask, one whose task moved on
+   * while the daemon was down loses it. Each task on its own; returns how many asks it raised.
    */
   async backfill(signal?: AbortSignal): Promise<number> {
     return await this.reconcileAll(task => task, signal);
   }
 
-  /** Every card at a gate is looked at again, and asks nothing is waiting for are closed; returns how many asks it raised. */
+  /** Every task at a gate is looked at again, and asks nothing is waiting for are closed; returns how many asks it raised. */
   async sweep(signal?: AbortSignal): Promise<number> {
     const raised = await this.reconcileAll(
       task => (gateOf(task, this.ports.lanes) === undefined ? undefined : task),
@@ -240,9 +240,9 @@ export class GateItems implements TaskWriteObserver {
   }
 
   /**
-   * One pass over every card. Asks is read ONCE for the pass (every open and every answered `card` ask, grouped by
-   * card) and each card takes its own slice, so a board of N cards costs two scans, not 2N (v4 read only the card's
-   * own holders). A stopped pass (`signal`) ends before the next card.
+   * One pass over every task. Asks is read ONCE for the pass (every open and every answered `task` ask, grouped by
+   * task) and each task takes its own slice, so a board of N tasks costs two scans, not 2N (v4 read only the task's
+   * own holders). A stopped pass (`signal`) ends before the next task.
    */
   private async reconcileAll(choose: (task: GateTask) => GateTask | undefined, signal?: AbortSignal): Promise<number> {
     let raised = 0;
@@ -255,7 +255,7 @@ export class GateItems implements TaskWriteObserver {
         answered: await this.ports.obligations.answeredAll(),
       };
     } catch (error) {
-      // "Not asking" would let a second ask through: with Asks unreadable, no card is reconciled this pass.
+      // "Not asking" would let a second ask through: with Asks unreadable, no task is reconciled this pass.
       this.ports.diagnostics.warn(`the asks of the tasks could not be read, so none was put: ${errorText(error)}`);
       return 0;
     }
@@ -272,14 +272,14 @@ export class GateItems implements TaskWriteObserver {
   }
 
   /**
-   * The owner's answer to a card ask: the card moves first, as the owner, and a refusal says why. `handled: false` for
+   * The owner's answer to a task ask: the task moves first, as the owner, and a refusal says why. `handled: false` for
    * an entry that is not a gate's. Applied once per answer id.
    */
   async answer(answer: GateAnswer): Promise<GateAnswerOutcome> {
     const reference = parseGateReference(answer.entry);
     if (reference === undefined) return { handled: false };
     if (this.applied.has(answer.answerId)) return { handled: true, applied: true };
-    // Answers to one card take turns: the second reads the board the first one left.
+    // Answers to one task take turns: the second reads the board the first one left.
     return await serially(this.answers, reference.cardId, async () => await this.answerAlone(answer, reference.cardId));
   }
 
@@ -327,7 +327,7 @@ export class GateItems implements TaskWriteObserver {
   }
 
   /**
-   * Asks has recorded an answer to `entry` (`asks.answered`): the card's asks follow it now that the answered one is
+   * Asks has recorded an answer to `entry` (`asks.answered`): the task's asks follow it now that the answered one is
    * no longer open. Never rejects.
    */
   async recorded(entry: string): Promise<void> {
@@ -347,7 +347,7 @@ export class GateItems implements TaskWriteObserver {
       );
   }
 
-  /** Brings one card's ask in line with its lane, one pass per card at a time; `true` when it raised a new ask. */
+  /** Brings one task's ask in line with its lane, one pass per task at a time; `true` when it raised a new ask. */
   private async reconcile(task: GateTask, pass?: AsksPass): Promise<boolean> {
     return await serially(this.passes, task.task.id, async () => await this.reconcileAlone(task, pass));
   }
@@ -366,15 +366,15 @@ export class GateItems implements TaskWriteObserver {
       seen === undefined || asked.has(gateReference(seen))
         ? undefined
         : tryItVerdict({ ...task, blockedBy: boardTask.blockedBy, building: boardTask.building }, seen);
-    // Nothing to try: the card closes, so what follows is the card as it stands NOW, past that gate.
+    // Nothing to try: the task closes, so what follows is the task as it stands NOW, past that gate.
     const closed =
       seen !== undefined && verdict?.kind === 'nothing' && (await this.closeNothing(boardTask, seen, verdict.why));
     if (verdict?.kind === 'nothing' && !closed) return false;
     const gate = closed ? undefined : seen;
-    // Blocked: the card is not ready to try, so nothing is asked, and an ask still waiting for the owner is taken back
-    // (the card stays where it is; the next look after it is unblocked asks again).
+    // Blocked: the task is not ready to try, so nothing is asked, and an ask still waiting for the owner is taken back
+    // (the task stays where it is; the next look after it is unblocked asks again).
     const wanted = gate === undefined || verdict?.kind === 'wait' ? undefined : gateReference(gate);
-    // Every open ask of this card but the one its lane asks now goes.
+    // Every open ask of this task but the one its lane asks now goes.
     for (const open of openNow) {
       if (open.entry !== wanted) await this.ports.obligations.withdraw(open.entry, 'withdrawn');
     }
@@ -387,9 +387,9 @@ export class GateItems implements TaskWriteObserver {
   }
 
   /**
-   * The daemon closes a card with nothing to try, with one plain reason in its history and no question. `true` once the
-   * card is closed; `false` when it moved on first (the next look reads it as it is). The card's own write is not a
-   * reason to look again, so it is not read as a card moving on while it is written.
+   * The daemon closes a task with nothing to try, with one plain reason in its history and no question. `true` once the
+   * task is closed; `false` when it moved on first (the next look reads it as it is). The task's own write is not a
+   * reason to look again, so it is not read as a task moving on while it is written.
    */
   private async closeNothing(task: GateTask, gate: TaskGate, why: string): Promise<boolean> {
     this.answering.add(task.task.id);
@@ -404,7 +404,7 @@ export class GateItems implements TaskWriteObserver {
     }
   }
 
-  /** The ferrets a card's ask belongs to: the home of its assignee first, then the home of its owner ferret. */
+  /** The ferrets a task's ask belongs to: the home of its assignee first, then the home of its owner ferret. */
   private async askersOf(task: Pick<Task, 'assignee' | 'owner'>): Promise<readonly string[]> {
     const homes = await Promise.all(
       [effectiveAssignee(task), task.owner].map(async each => await this.ports.homes.of(each).catch(() => each)),
@@ -413,7 +413,7 @@ export class GateItems implements TaskWriteObserver {
   }
 
   /**
-   * Where this card's ask is open now, or `undefined` when it is not. A board or Asks that cannot be read THROWS:
+   * Where this task's ask is open now, or `undefined` when it is not. A board or Asks that cannot be read THROWS:
    * "not asking" would let a second ask through.
    */
   async asking(taskId: TaskId): Promise<GateAsking | undefined> {
@@ -427,7 +427,7 @@ export class GateItems implements TaskWriteObserver {
 
   /**
    * The sweep for stray and duplicate asks (docs/agenda.md § One ask per thing, in the Board's own terms): an open
-   * `card` ask whose card is gone or no longer at that gate is withdrawn; a card with two open asks keeps the one for
+   * `task` ask whose task is gone or no longer at that gate is withdrawn; a task with two open asks keeps the one for
    * the gate it is at now (or the newest entry) and the other goes. Raising is idempotent by entry, so a twin of ONE
    * entry cannot exist; this catches the asks of different entries a missed write left behind.
    */
@@ -436,10 +436,10 @@ export class GateItems implements TaskWriteObserver {
     for (const open of await this.ports.obligations.open())
       byTask.set(open.cardId, [...(byTask.get(open.cardId) ?? []), open]);
     if (byTask.size === 0) return;
-    // The cards come from ONE read of the board here, taken AFTER the reconcile above has raised and withdrawn asks (a
-    // second whole-board read per sweep, on purpose: the reconcile's list is older, and judging a card that moved since by
-    // its old lane would withdraw the live ask of its new gate). It is skipped when no card ask is open. A derivation per
-    // card with an open ask would read the whole board each time. A card this read did not have (written since) is looked
+    // The tasks come from ONE read of the board here, taken AFTER the reconcile above has raised and withdrawn asks (a
+    // second whole-board read per sweep, on purpose: the reconcile's list is older, and judging a task that moved since by
+    // its old lane would withdraw the live ask of its new gate). It is skipped when no task ask is open. A derivation per
+    // task with an open ask would read the whole board each time. A task this read did not have (written since) is looked
     // for on its own.
     const known = new Map((await this.ports.board.cards()).map(each => [each.task.id, each] as const));
     for (const [taskId, opens] of byTask) {
@@ -464,7 +464,7 @@ export class GateItems implements TaskWriteObserver {
     return this.answering.has(taskId);
   }
 
-  /** Moves the card as the answer says; a refusal when the board would not. */
+  /** Moves the task as the answer says; a refusal when the board would not. */
   private async apply(
     boardTask: GateTask,
     gate: TaskGate,
@@ -491,7 +491,7 @@ export class GateItems implements TaskWriteObserver {
     const words = decision.words ?? '';
     const carried = await this.carried(task, answer);
     if (carried !== undefined && 'code' in carried) return carried;
-    // The reopen tells the card's ferret the owner's words; the talk about the rework stays on THIS ask's ledger.
+    // The reopen tells the task's ferret the owner's words; the talk about the rework stays on THIS ask's ledger.
     return await this.act(
       task.id,
       {
@@ -506,7 +506,7 @@ export class GateItems implements TaskWriteObserver {
     );
   }
 
-  /** The card moved on the owner's answer: its ferret is told. A Not good is told by the reopen itself, with the owner's words. */
+  /** The task moved on the owner's answer: its ferret is told. A Not good is told by the reopen itself, with the owner's words. */
   private async tellAnswered(
     task: Task,
     gate: TaskGate,
@@ -552,8 +552,8 @@ export class GateItems implements TaskWriteObserver {
   }
 
   /**
-   * The answer's files, moved to the card's ferret BEFORE the board is touched, so a file that cannot be carried
-   * leaves the card where it is. The reopen then names them where the ferret holds them.
+   * The answer's files, moved to the task's ferret BEFORE the board is touched, so a file that cannot be carried
+   * leaves the task where it is. The reopen then names them where the ferret holds them.
    */
   private async carried(task: Task, answer: GateAnswer): Promise<BoardReopenAttachments | GateRefusal | undefined> {
     const files = answer.attachments;
@@ -569,7 +569,7 @@ export class GateItems implements TaskWriteObserver {
     }
   }
 
-  /** "Not yet" with words: kept on the card as the owner's, and told to its ferret. The card stays where it is. */
+  /** "Not yet" with words: kept on the task as the owner's, and told to its ferret. The task stays where it is. */
   private async notYet(task: Task, words: string, answer: GateAnswer): Promise<void> {
     const refusal = await this.act(
       task.id,

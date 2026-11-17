@@ -1,7 +1,7 @@
 /**
- * THE SECTIONS OF A CARD'S DETAIL: plain headed blocks in one flowing page, each drawing one fact and deciding nothing.
+ * THE SECTIONS OF A TASK'S DETAIL: plain headed blocks in one flowing page, each drawing one fact and deciding nothing.
  * Every text a ferret wrote (summary, premise, context, brief, How to test) is Markdown drawn by the chat's one
- * renderer (`cardProse`), so references and code read the same everywhere on a card.
+ * renderer (`taskProse`), so references and code read the same everywhere on a task.
  */
 
 import { type TaskView, formatTaskRef } from '../../../contract/index.ts';
@@ -263,7 +263,7 @@ export function DependencyChips({ task, onOpen }: { readonly task: TaskView; rea
   );
 }
 
-/** What the card waits on and what waits on it, or one line saying nothing. Read-only: the owner edits no dependency. */
+/** What the task waits on and what waits on it, or one line saying nothing. Read-only: the owner edits no dependency. */
 export function DependsLine({ task, onOpen }: { readonly task: TaskView; readonly onOpen: (id: string) => void }) {
   const none = task.dependsOn.length === 0 && task.blocks.length === 0;
   return none ? (
@@ -361,7 +361,7 @@ export const prIconName = (pr: TaskView['links']['prs'][number]) =>
             ? 'pr-pending'
             : 'pr-pass';
 
-/** The card's history as a timeline, newest first: who, what, how long ago, and the note behind it muted below. */
+/** The task's history as a timeline, newest first: who, what, how long ago, and the note behind it muted below. */
 export function HistorySection({
   task,
   context,
@@ -403,7 +403,7 @@ export function HistorySection({
 }
 
 /**
- * The card's asks, one row each: blocking first, then open, then answered. A list is only a list: a row opens the
+ * The task's asks, one row each: blocking first, then open, then answered. A list is only a list: a row opens the
  * ask in the Agenda (the same view a `!A5` click opens), where it is answered; nothing is answered here.
  */
 export function AsksList({

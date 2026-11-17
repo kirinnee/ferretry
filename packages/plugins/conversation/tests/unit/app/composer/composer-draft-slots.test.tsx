@@ -1,5 +1,5 @@
 /**
- * &B142 — EACH INBOX CARD HAS ITS OWN DRAFT. The chat box and every card of one ferret used to be ONE shared
+ * &B142 — EACH INBOX CARD HAS ITS OWN DRAFT. The chat box and every task of one ferret used to be ONE shared
  * draft, so typing in the chat showed under the Inbox card of a different item. A composer now binds to a draft
  * SLOT: the chat's (no `draftSlot`) or an agenda item's.
  *
@@ -190,7 +190,7 @@ interface Box {
   readonly unmount: () => Promise<void>;
 }
 
-/** One composer: the chat's (no `slot`) or an item's card. */
+/** One composer: the chat's (no `slot`) or an item's task. */
 const box = async (
   machine: Daemon,
   drafts: DaemonDraftStore,
@@ -233,12 +233,12 @@ describe('a draft slot (B142)', () => {
   });
 
   test('typing in an Inbox card never reaches the chat draft, and typing in the chat never reaches the card', async () => {
-    // Arrange — the chat box and the card of ^A5, one ferret, one machine.
+    // Arrange — the chat box and the task of ^A5, one ferret, one machine.
     const machine = new Daemon();
     const drafts = store();
     const chat = await box(machine, drafts);
     const task = await box(machine, drafts, { slot: A5 });
-    // The chat's stream names no item; the card's names its own.
+    // The chat's stream names no item; the task's names its own.
     expect(machine.asked).toEqual([null, 'A5']);
 
     // Act
@@ -287,7 +287,7 @@ describe('a draft slot (B142)', () => {
     await task.it.send();
 
     expect(task.sent.map(body => body.message)).toEqual(['done here']);
-    // The card streams its own draft, so its send names that slot for the daemon to clear.
+    // The task streams its own draft, so its send names that slot for the daemon to clear.
     expect(task.sent[0]?.sharedDraft?.slot).toBe('A5');
     expect(task.it.shown()).toBe('');
     expect(machine.held('chat').text).toBe('still typing in the chat');

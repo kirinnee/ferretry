@@ -20,8 +20,8 @@ import {
 } from './board-support.ts';
 
 /**
- * A `card` / `board` block in chat, drawn by the Board: the real card and lane header, read from the board, live on
- * `board.changed` with no timer, and never a link for a card that was not read.
+ * A `task` / `board` block in chat, drawn by the Board: the real task and lane header, read from the board, live on
+ * `board.changed` with no timer, and never a link for a task that was not read.
  */
 
 let view: Mounted | null = null;
@@ -34,7 +34,7 @@ const lanes = laneSetFor();
 const changed = (...taskIds: string[]) => ({ projectId: PROJECT, taskIds });
 const names = ferretNamer(new Map([['mvuc7tsf-0c3d50df', 'nimbus']]));
 
-/** A store whose machine serves `cards` by id; the map is mutable so a test can move one, and `fail` ids refuse. */
+/** A store whose machine serves `tasks` by id; the map is mutable so a test can move one, and `fail` ids refuse. */
 const serving = (
   tasks: Map<string, TaskView>,
   fail: Set<string> = new Set(),

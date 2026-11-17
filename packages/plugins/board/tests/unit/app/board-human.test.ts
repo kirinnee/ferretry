@@ -38,7 +38,7 @@ describe('who asked for a card', () => {
   });
 
   it('keeps a card the daemon says is for the owner, though no owner message proved its ask', () => {
-    // `askedBy: agent` is the stricter "no owner message matches the ask", which only the cards to test wait on.
+    // `askedBy: agent` is the stricter "no owner message matches the ask", which only the tasks to test wait on.
     expect(taskAsker({ askedBy: 'agent', origin: 'human' })).toBe('person');
     expect(isAgentTask({ askedBy: 'agent', origin: 'human' })).toBe(false);
     expect(isAgentTask({ askedBy: 'agent', origin: 'agent' })).toBe(true);

@@ -181,7 +181,7 @@ export function sessionStateDocument(
   return { format: 1, ...listedOnly(body, STATE_KEYS, dropped) };
 }
 
-/** The card a v4 session was anchored to (or last touched), when it is a card on this machine. */
+/** The task a v4 session was anchored to (or last touched), when it is a task on this machine. */
 function task(raw: Json): unknown {
   for (const key of ['focusAnchor', 'focusTask']) {
     const ref = raw[key];

@@ -136,7 +136,7 @@ export interface Harness {
   readonly raises: { readonly sessionId: string; readonly request: WardenEscalationRaise }[];
   readonly resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[];
   /**
-   * The ONE machine item of orphaned cards, as a board holds it: what it says now, how often the sweep asked
+   * The ONE machine item of orphaned tasks, as a board holds it: what it says now, how often the sweep asked
    * (`syncs`, landed or refused), how often the board was written (`writes`: a changed wording, an item opened or
    * closed) and how many times an item was OPENED (`opened`: a recreated item is a new id).
    */
@@ -192,7 +192,7 @@ export function harness(
     readonly revive?: WardenReviveService;
     /** Moving a ferret that hit a limit, when a test is about it. */
     readonly autoMove?: WardenAutoMoveService;
-    /** The project boards, when a test is about cards. */
+    /** The project boards, when a test is about tasks. */
     readonly board?: WardenBoardPort;
     /** The send ledgers, when a test is about who answered whom. */
     readonly exchanges?: WardenExchangeReader;
@@ -234,7 +234,7 @@ export function harness(
   const provenance = new Map<string, WardenSpawnProvenance>();
   const boards = new Map<string, readonly WardenEscalationBoardItem[]>();
   const raises: { readonly sessionId: string; readonly request: WardenEscalationRaise }[] = [];
-  /** The newest card text raised per `[sessionId, sourceRef]`. */
+  /** The newest task text raised per `[sessionId, sourceRef]`. */
   const tasks = new Map<string, WardenEscalationRaise>();
   const resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[] = [];
   const orphanItem: { current: OrphanItem | undefined; syncs: number; writes: number; opened: number } = {
@@ -292,7 +292,7 @@ export function harness(
     },
     costs: { costUsd: async wardenId => await (options.cost?.(wardenId) ?? Promise.resolve(undefined)) },
     // By default the feed reads the SAME fake board the escalation writes: the Warden page is a thin read
-    // of the Warden's own cards.
+    // of the Warden's own tasks.
     feed: {
       board: async sessionId =>
         options.feedBoards === undefined
@@ -371,7 +371,7 @@ export function harness(
         orphanItem.syncs += 1;
         const refusal = options.itemRefusal?.();
         if (refusal !== undefined) throw new Error(refusal);
-        // As the port does: an item that is not open stays closed unless a card joined the list.
+        // As the port does: an item that is not open stays closed unless a task joined the list.
         if (item !== undefined && !announce && orphanItem.current === undefined) return;
         if (JSON.stringify(item) === JSON.stringify(orphanItem.current)) return;
         orphanItem.writes += 1;

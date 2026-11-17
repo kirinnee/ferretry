@@ -3,7 +3,7 @@ import type { RawWork, WorkSource } from '@ferretry/plugin-conversation/contract
 import type { Task, LaneSet } from '../../contract/index.ts';
 import type { LaneSets } from '../lib/board/index.ts';
 
-/** What Board reads of itself to hand its cards over: every card as stored, with the lanes of each board. */
+/** What Board reads of itself to hand its tasks over: every task as stored, with the lanes of each board. */
 export interface BoardTasks {
   snapshot(): Promise<{ readonly cards: readonly Task[]; readonly laneSets: LaneSets }>;
 }
@@ -17,12 +17,12 @@ const instantMs = (at: string): number => {
 };
 
 /**
- * A card as work for the search (today's `cardDocument`). Old closed work is kept: the index decides what its window
- * hides, so a query can still ask for all of it. A card on a board whose lanes cannot be read stands as open under its
+ * A task as work for the search (today's `cardDocument`). Old closed work is kept: the index decides what its window
+ * hides, so a query can still ask for all of it. A task on a board whose lanes cannot be read stands as open under its
  * lane id: findable beats hidden.
  *
- * THE FIELDS ARE A WHITELIST, as they were: the text the owner already reads on the card. Nothing is indexed by walking
- * the card, so a field added to it later is not searchable until it is named here on purpose. Conversation scrubs every
+ * THE FIELDS ARE A WHITELIST, as they were: the text the owner already reads on the task. Nothing is indexed by walking
+ * the task, so a field added to it later is not searchable until it is named here on purpose. Conversation scrubs every
  * text before it indexes or shows it.
  */
 export const taskWork = (task: Task, laneSet: LaneSet | undefined): RawWork => {
@@ -63,13 +63,13 @@ export const taskWork = (task: Task, laneSet: LaneSet | undefined): RawWork => {
 };
 
 /**
- * Board's cards as a work source, handed to Conversation through `search.sources` so `fy search` and `search_work` find
- * them. The store hands back fresh card objects on every read, so a piece of work is kept as the same object while its
+ * Board's tasks as a work source, handed to Conversation through `search.sources` so `fy search` and `search_work` find
+ * them. The store hands back fresh task objects on every read, so a piece of work is kept as the same object while its
  * text and standing read the same: the search re-indexes by identity.
  */
 export class BoardWorkSource implements WorkSource {
   readonly id = 'board';
-  /** Read on every search: the store is in memory and the identity-stable works make the re-index cheap, so a card made a moment ago is found. */
+  /** Read on every search: the store is in memory and the identity-stable works make the re-index cheap, so a task made a moment ago is found. */
   readonly cheap = true;
   private readonly kept = new Map<string, { readonly signature: string; readonly work: RawWork }>();
 

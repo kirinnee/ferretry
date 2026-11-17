@@ -1,23 +1,23 @@
 /**
  * THE MERGE GATE (docs/design/clash-queue.md § The merge gate): whether a PR may merge as far as the board's queue
- * goes. Decided from ONE read of the board, so a card that moves while it is asked cannot slip between pages.
+ * goes. Decided from ONE read of the board, so a task that moves while it is asked cannot slip between pages.
  *
- * A PR ships a MERGE UNIT: every card not dropped that links it, and every card not dropped that rides one of those
- * cards' shipping units (`ShippingUnits`: a helper of a linking card, finished or not, and an umbrella lead above one).
+ * A PR ships a MERGE UNIT: every task not dropped that links it, and every task not dropped that rides one of those
+ * tasks' shipping units (`ShippingUnits`: a helper of a linking task, finished or not, and an umbrella lead above one).
  *
  * The PR waits on two things, both read from the board as it is NOW:
  *
- * - **The clash order, derived live.** Shipping units change after a claim lands (a card links its PR, a helper
- *   finishes, a card is reparented), so the depends-on the daemon wrote at claim time can be stale. The gate does not
+ * - **The clash order, derived live.** Shipping units change after a claim lands (a task links its PR, a helper
+ *   finishes, a task is reparented), so the depends-on the daemon wrote at claim time can be stale. The gate does not
  *   trust it: for every other unit whose claims clash with this unit's, the unit that claimed FIRST merges first. Each
- *   unit has ONE rank: the earliest claim of any card riding it (an umbrella lead's counts for every unit under it),
- *   then the earliest claim of the cards riding only it, then its key. A rank never depends on the pair being
+ *   unit has ONE rank: the earliest claim of any task riding it (an umbrella lead's counts for every unit under it),
+ *   then the earliest claim of the tasks riding only it, then its key. A rank never depends on the pair being
  *   compared, so the order is total and no set of PRs ever waits on each other in a circle through it. A unit
- *   whose shipping card has shipped or was dropped holds nothing, nor does an umbrella lead's own unit while one of
+ *   whose shipping task has shipped or was dropped holds nothing, nor does an umbrella lead's own unit while one of
  *   its child units can still hold (it never ships by itself; its claims count through that unit). A lead waives one wait with
- *   `fy card undepend`.
- * - **The dependencies a person added** (not the daemon's own claim-time ones), on a card outside the unit that is not
- *   done. A card inside the unit, or one linking the same PR, ships in the same merge and never holds it.
+ *   `fy task undepend`.
+ * - **The dependencies a person added** (not the daemon's own claim-time ones), on a task outside the unit that is not
+ *   done. A task inside the unit, or one linking the same PR, ships in the same merge and never holds it.
  */
 import {
   type BoardMergeGateResponse,
@@ -39,12 +39,12 @@ const samePr =
   (link: Pick<PrLink, 'repo' | 'number'>): boolean =>
     link.repo.toLowerCase() === pr.repo.toLowerCase() && link.number === pr.number;
 
-/** Whether two refs name the same card: the same id, both on this machine or both on the same other one. */
+/** Whether two refs name the same task: the same id, both on this machine or both on the same other one. */
 const sameRef = (index: BoardIndex, left: TaskRef, right: TaskRef): boolean =>
   left.id === right.id &&
   (index.isLocal(left) ? index.isLocal(right) : !index.isLocal(right) && left.machineId === right.machineId);
 
-/** One claim with the moment it was made: its last `file-claimed`, else the card's creation (a card born with it). */
+/** One claim with the moment it was made: its last `file-claimed`, else the task's creation (a task born with it). */
 interface Claim {
   readonly card: Task;
   readonly path: string;
@@ -81,7 +81,7 @@ const isClaimTimeWait = (task: Task, on: TaskRef, index: BoardIndex): boolean =>
   return event?.actor.kind === 'daemon' && event.override === undefined;
 };
 
-/** Whether a card of the unit waived a wait on this card: it removed that dependency on purpose. */
+/** Whether a task of the unit waived a wait on this task: it removed that dependency on purpose. */
 const waived = (unit: readonly Task[], target: string, index: BoardIndex): boolean =>
   unit.some(task =>
     task.history.some(event => event.type === 'undepended' && event.task.id === target && index.isLocal(event.task)),
@@ -89,7 +89,7 @@ const waived = (unit: readonly Task[], target: string, index: BoardIndex): boole
 
 /**
  * The live clash waits of a unit (see the module doc): one per other unit that clashes with it and claimed first,
- * named on the unit card whose claim clashes and on the other unit's shipping card.
+ * named on the unit task whose claim clashes and on the other unit's shipping task.
  */
 const clashWaits = (
   unit: readonly Task[],
@@ -121,7 +121,7 @@ const clashWaits = (
   const rankOf = (key: string): Rank => [anyRider.get(key) ?? Infinity, ownRider.get(key) ?? Infinity, key];
   const myRank = [...keys].map(rankOf).sort(compareRanks)[0] ?? rankOf('');
   const waits: BoardMergeWait[] = [];
-  /** The unit's shipping card when that unit can still hold a merge: there, not dropped, and not shipped. */
+  /** The unit's shipping task when that unit can still hold a merge: there, not dropped, and not shipped. */
   const holding = (key: string): Task | undefined => {
     const target = board.index.get({ id: key as Task['id'] });
     if (target === undefined || target.dropped !== null) return undefined;
@@ -133,7 +133,7 @@ const clashWaits = (
     if (target === undefined) continue;
     // An umbrella lead never ships by itself while a child unit can: its claims count through that unit instead.
     if ([...units.rides(target)].some(other => other !== key && holding(other) !== undefined)) continue;
-    // A card riding both units (an umbrella lead) belongs to neither side of this pair.
+    // A task riding both units (an umbrella lead) belongs to neither side of this pair.
     const mine = unit.filter(task => !units.rides(task).has(key)).flatMap(claimsOf);
     const theirs = tasks.flatMap(claimsOf);
     const clash = mine.find(claim =>
@@ -149,7 +149,7 @@ const clashWaits = (
 
 /**
  * The gate's answer for a PR URL, from one board read: its merge unit, what the unit waits on (see the module doc), and
- * the cards that could not be read (any of them might link the PR). `null` when the URL is not a GitHub PR.
+ * the tasks that could not be read (any of them might link the PR). `null` when the URL is not a GitHub PR.
  */
 export const mergeGateOf = (
   url: string,
@@ -161,7 +161,7 @@ export const mergeGateOf = (
   const live = board.index.cards.filter(task => task.dropped === null);
   const linking = live.filter(linksPr);
   const units = new ShippingUnits(board.index);
-  // Unit KEYS, not card ids: a linking card may share its unit (and so its key) with a card that links another PR too.
+  // Unit KEYS, not task ids: a linking task may share its unit (and so its key) with a task that links another PR too.
   const ids = new Set(linking.map(task => task.id));
   const keys = new Set(linking.map(task => units.key(task)));
   const unit =
@@ -171,7 +171,7 @@ export const mergeGateOf = (
   const inUnit = new Set(unit.map(task => task.id));
   const added = unit.flatMap(task =>
     blockedBy(task, board.index, board.laneSets).flatMap((on): BoardMergeWait[] => {
-      // `get` answers only for a card on this machine, so a remote card that shares an id is never "inside".
+      // `get` answers only for a task on this machine, so a remote task that shares an id is never "inside".
       const blocker = board.index.get(on);
       if (blocker !== undefined && (inUnit.has(blocker.id) || linksPr(blocker))) return [];
       if (isClaimTimeWait(task, on, board.index)) return [];

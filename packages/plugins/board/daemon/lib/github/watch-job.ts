@@ -1,7 +1,7 @@
 /**
  * THE BOARD'S GITHUB WATCH, AS ONE JOB (folded from the c50 `board-github` module; board-design.md §3.1).
  *
- * The watcher runs the host's own `gh`, links the PRs a card's work opened, and nudges through the board's nudge path. It
+ * The watcher runs the host's own `gh`, links the PRs a task's work opened, and nudges through the board's nudge path. It
  * serves no route, so it contributes nothing to the mounted surface: it owns the alert path every board nudge passes
  * through ({@link BoardAlerts}) and the Unfiled board's refile ({@link UnfiledRefiler}). Two jobs, armed after listen:
  * the watch, and the refile once at start.
@@ -12,19 +12,19 @@
  * - `kernel.jobs.add` with the two jobs {@link GithubWatch.jobs} returns, given the kernel clock's `sleep`. The watch
  *   is ONE long run (`onceAfterStart`): a first tick `WATCH_FIRST_TICK_MS` (20 s) after start, then one
  *   `WATCH_TICK_MS` (30 s) after each tick FINISHES, every delay jittered by ±10% ({@link GitHubWatcher.watch}). The
- *   refile runs once, {@link BOOT_REFILE_DELAY_MS} after start, whether or not the watch is on: a card that became
+ *   refile runs once, {@link BOOT_REFILE_DELAY_MS} after start, whether or not the watch is on: a task that became
  *   refilable while the daemon was down moves without waiting for the watch.
- * - `kernel.events` / the Board service's `afterWrite` is NOT involved: the watcher writes cards through
+ * - `kernel.events` / the Board service's `afterWrite` is NOT involved: the watcher writes tasks through
  *   {@link WatchedBoard.act} (the Board service, as `{ kind: 'daemon' }`), so every write goes through the one section.
  * - `ports.gh` = a `GhRunner` over `kernel.spawn` (`gh` with the host's own login; never a token of ours);
- *   `ports.copies` = `WorkingCopies` over `kernel.spawn` (`git` in a card's working copy).
+ *   `ports.copies` = `WorkingCopies` over `kernel.spawn` (`git` in a task's working copy).
  * - `ports.transcripts` = the Conversation contract's transcript tail (`ConversationApi`) mapped to {@link FerretTranscriptTail};
  *   `ports.ferretFolders.cwdOf` = `FerretsApi.get(ferret)` folder; `ports.projects` = `ProjectsApi` (folders and ids).
  * - `alerts.mode` = the ferret's send mode (Conversation's queue); `alerts.send` = `ConversationApi.send` with a fresh
  *   send id; `alerts.withheld` = the journal of a withheld alert on that ferret (Conversation).
  * - `roster` = the Ferrets contract's live roster as {@link FerretRoster}; `helpers` = {@link HelperDirectory}.
  * - `refiler.sessions` (`FerretBoards`) = the project a ferret's folder belongs to, registering its repository by
- *   `ProjectAdoption`'s rules; `refiler.lanes.propose` = the inferred lane proposal as the card's ferret.
+ *   `ProjectAdoption`'s rules; `refiler.lanes.propose` = the inferred lane proposal as the task's ferret.
  * - `clock` = `kernel.clock` (`now()` as an instant string, `random()` for jitter); `diagnostics.warn` = the log.
  */
 import { milliseconds } from '@ferretry/std';
@@ -48,9 +48,9 @@ import { UnfiledRefiler, type UnfiledRefilerPorts } from './unfiled.ts';
 export interface GithubWatchNeeds {
   /** The ordinary send path and the journal of what was held back. */
   readonly alerts: Omit<BoardAlertPorts, 'surface'>;
-  /** Where a withheld alert about a private card is noted. */
+  /** Where a withheld alert about a private task is noted. */
   readonly surface: AlertSurfacePorts;
-  /** The live ferrets, so a nudge is routed to the card's assignee, else the nearest live lead, else the owner. */
+  /** The live ferrets, so a nudge is routed to the task's assignee, else the nearest live lead, else the owner. */
   readonly roster: () => Promise<FerretRoster>;
   readonly helpers: HelperDirectory;
   readonly refiler: UnfiledRefilerPorts;
@@ -100,7 +100,7 @@ export const githubWatchJob = (needs: GithubWatchNeeds): GithubWatch => {
     clock: needs.clock,
     diagnostics: needs.diagnostics,
     unfiled,
-    // The board's nudge path: the message as it is, from "Ferretry · Board" as metadata. It goes to the card's assignee,
+    // The board's nudge path: the message as it is, from "Ferretry · Board" as metadata. It goes to the task's assignee,
     // else the nearest live lead above it, else the owner (notice-route.ts). With nobody alive it falls back to who the
     // alert went to before routing, via nudgeTarget (a helper's lead).
     nudges: {

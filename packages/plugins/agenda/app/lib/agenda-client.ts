@@ -541,7 +541,7 @@ export class DaemonAgendaClient {
   }
 
   /**
-   * Merges `from` into `id`: both conversations and every card are kept, `id` survives and
+   * Merges `from` into `id`: both conversations and every task are kept, `id` survives and
    * `from` closes as "merged into !id".
    */
   merge(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, from: string): Promise<void> {

@@ -188,7 +188,7 @@ describe('a move with a kept job, on a real tmux', () => {
     const report = await look(undefined);
     const task = preflight.describe(report);
 
-    // Assert — the card names both
+    // Assert — the task names both
     const kept = task.items.find(item => item.title.startsWith('attachment to job build'));
     should(kept).be.ok();
     should(kept?.title).equal('attachment to job build (kept; re-attach after the move)');

@@ -13,7 +13,7 @@ const AT = '2026-11-07T09:00:00.000Z' as Instant;
 export function fakeBoard(): BoardApi {
   const tasks = new Map<string, Task>();
   const counters = { bug: 0, feature: 0, infra: 0, chore: 0 };
-  /** A ferret's write focuses it on the card (the real board does the same); the owner has no focus. */
+  /** A ferret's write focuses it on the task (the real board does the same); the owner has no focus. */
   const focus = new Map<string, string>();
   const view = (task: Task): TaskView => ({
     ...task,
@@ -45,7 +45,7 @@ export function fakeBoard(): BoardApi {
     },
     cards: async query =>
       [...tasks.values()].filter(task => query.project === undefined || task.projectId === query.project).map(view),
-    // The cursor is the offset of the next card; the last page's is `null`.
+    // The cursor is the offset of the next task; the last page's is `null`.
     cardsPage: async query => {
       const all = [...tasks.values()]
         .filter(task => query.project === undefined || task.projectId === query.project)
@@ -56,7 +56,7 @@ export function fakeBoard(): BoardApi {
     },
     // The fake has no lane sets of its own: a consumer names a lane by its id.
     laneSets: async () => [],
-    // The fake's views are all `active`, so no card is ever orphaned here.
+    // The fake's views are all `active`, so no task is ever orphaned here.
     orphanedCards: async () => ({
       cards: [...tasks.values()].map(view).filter(each => each.activity === 'orphaned'),
       laneSets: [],
@@ -146,7 +146,7 @@ export function fakeBoard(): BoardApi {
 
 export function boardConformance(name: string, make: () => BoardApi | Promise<BoardApi>): void {
   describe(`BoardApi conformance: ${name}`, () => {
-    // The owner makes a card for a ferret (a card needs one to own it); a ferret's own cards need an approved board.
+    // The owner makes a task for a ferret (a task needs one to own it); a ferret's own tasks need an approved board.
     const create = (api: BoardApi, assignee = 'f1') =>
       api.create('owner', {
         kind: 'feature',
@@ -211,7 +211,7 @@ export function boardConformance(name: string, make: () => BoardApi | Promise<Bo
       expect((await api.progress('f1' as FerretId, firstId, { now: 'building' })).ok).toBe(true);
       const focus = await api.focusOf('f1' as FerretId);
       expect(focus?.card.id).toBe(firstId);
-      // The lanes of the card's board come with it (`null` for a board with none).
+      // The lanes of the task's board come with it (`null` for a board with none).
       expect(focus?.laneSet === null || focus?.laneSet?.projectId === focus?.card.projectId).toBe(true);
       expect((await api.progress('f1' as FerretId, secondId, { now: 'building' })).ok).toBe(true);
       expect((await api.focusOf('f1' as FerretId))?.card.id).toBe(secondId);

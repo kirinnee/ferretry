@@ -1,19 +1,19 @@
 /**
  * THE PER-CHAT "TASKS" TAB: the board filtered to this ferret, drawn small, as a Kanban or a List.
  *
- * Every view draws the same cards (`chatDrawn`), so switching changes how they are arranged and nothing else:
- *  - **List** (the default): the focus card, the cards it owns (one collapsible lane each), then the cards its
+ * Every view draws the same tasks (`chatDrawn`), so switching changes how they are arranged and nothing else:
+ *  - **List** (the default): the focus task, the tasks it owns (one collapsible lane each), then the tasks its
  *    sub-ferrets hold as a mini tree.
- *  - **Kanban**: one narrow column per lane that holds one of this ferret's cards, scrolling
+ *  - **Kanban**: one narrow column per lane that holds one of this ferret's tasks, scrolling
  *    sideways, snapping a column at a time.
  *
  * The tab has two sizes, one renderer: `side` in the Info panel, and `page` when the host lets it fill the chat
- * (`onExpand`), where the same cards and lanes are drawn at the Board page's density. "Show private" is the
- * Board page's own toggle and filter: off, only the owner's cards are drawn; on, an agent card sits under the
- * human card it serves.
+ * (`onExpand`), where the same tasks and lanes are drawn at the Board page's density. "Show private" is the
+ * Board page's own toggle and filter: off, only the owner's tasks are drawn; on, an agent task sits under the
+ * human task it serves.
  *
- * A card opens in the host's drawer (`onOpenCard`), never by leaving the chat. "Add to chat" is a card action:
- * it puts the card's `&F18` into THIS session's draft. The tab is READ-ONLY: a card has no owner buttons (no Done,
+ * A task opens in the host's drawer (`onOpenCard`), never by leaving the chat. "Add to chat" is a task action:
+ * it puts the task's `&F18` into THIS session's draft. The tab is READ-ONLY: a task has no owner buttons (no Done,
  * no Not good, no lane menu), cannot be dragged and no lane takes a drop. The owner answers in the agenda.
  */
 
@@ -42,7 +42,7 @@ export interface BoardSideTabProps {
   readonly now: number;
   readonly view: BoardSideView;
   readonly onView: (view: BoardSideView) => void;
-  /** Opens a card's detail where the reader is, over the chat. */
+  /** Opens a task's detail where the reader is, over the chat. */
   readonly onOpenCard: (task: BoardTaskOf) => void;
   /** `side` in the Info panel; `page` when the tab fills the chat. */
   readonly density?: BoardDensity;

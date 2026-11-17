@@ -38,7 +38,7 @@ interface Row {
   readonly args?: string[];
   readonly options?: Options;
   readonly answers?: Record<string, unknown>;
-  /** The route the verb reaches, and (for a card write) what its body must hold. */
+  /** The route the verb reaches, and (for a task write) what its body must hold. */
   readonly route: string;
   readonly body?: object;
   /** Not in the manifest's verb list yet: the half answers it, and the manifest line is the lead's to add. */

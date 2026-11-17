@@ -2,12 +2,12 @@
  * CLASHING WORK WAITS ITS TURN (docs/design/clash-queue.md, &I38). The owner: _"make sure that features that will
  * conflcit gets "queued up", and add depends on on the board, and wait for that feature to be built before merging."_
  *
- * A card says what it will touch with its advisory file claims (`files`). When a claim lands, the card that claimed
- * LATER is queued behind every open card on the same board that already claims a clashing path: the daemon adds a
+ * A task says what it will touch with its advisory file claims (`files`). When a claim lands, the task that claimed
+ * LATER is queued behind every open task on the same board that already claims a clashing path: the daemon adds a
  * `dependsOn` (`until: shipped`) and a note naming the paths, in the same write as the claim. First come, first
- * merged. The work itself still runs in parallel; only the merge waits (the merger asks `fy card merge-gate`).
+ * merged. The work itself still runs in parallel; only the merge waits (the merger asks `fy task merge-gate`).
  *
- * Pure: the caller hands in the card, the claims it just made, and the board as read inside the board-wide
+ * Pure: the caller hands in the task, the claims it just made, and the board as read inside the board-wide
  * dependency section, so two clashing claims are decided one after the other and cannot miss each other.
  */
 import {
@@ -25,7 +25,7 @@ import { ShippingUnits } from './shipping-unit.ts';
 /** How much of each path a note quotes, so two long paths still fit in one note. */
 const QUOTED_PATH_LENGTH = 400;
 
-/** The prefix of the note a queued card carries; `fy card file` and `fy card new` print these notes back. */
+/** The prefix of the note a queued task carries; `fy task file` and `fy task new` print these notes back. */
 export const CLASH_QUEUED_PREFIX = 'queued behind';
 
 /**
@@ -51,27 +51,27 @@ export const claimsClash = (a: string, b: string): boolean => {
   return left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
 };
 
-/** One card a claim queues behind, and the first pair of paths that clash. */
+/** One task a claim queues behind, and the first pair of paths that clash. */
 interface Clash {
-  /** The card to wait on: the one whose PR ships the clashing work (`ShippingUnits.shippingCard`). */
+  /** The task to wait on: the one whose PR ships the clashing work (`ShippingUnits.shippingCard`). */
   readonly card: TaskRef;
-  /** The card that claims the clashing path, when it is not {@link task} itself (a helper of it). */
+  /** The task that claims the clashing path, when it is not {@link task} itself (a helper of it). */
   readonly via?: TaskRef;
-  /** The path this card claims. */
+  /** The path this task claims. */
   readonly ours: string;
-  /** The path the other card already claims. */
+  /** The path the other task already claims. */
   readonly theirs: string;
 }
 
-/** What a claim means for the queue: the cards to wait on, and the clashes that cannot be queued (and why). */
+/** What a claim means for the queue: the tasks to wait on, and the clashes that cannot be queued (and why). */
 export interface ClashPlan {
   readonly waits: readonly Clash[];
   readonly unqueued: readonly (Clash & { readonly why: string })[];
 }
 
 /**
- * Whether a card can hold another back: not dropped, and its work not shipped yet. A card on a board whose lanes this
- * read does not hold (a lead on another board) counts: dismissing it would hide a real clash, while a wait on a card
+ * Whether a task can hold another back: not dropped, and its work not shipped yet. A task on a board whose lanes this
+ * read does not hold (a lead on another board) counts: dismissing it would hide a real clash, while a wait on a task
  * that did ship is read as done wherever its lanes are known (`blockedBy`, the merge gate).
  */
 const inQueue = (task: Task, laneSets: LaneSets): boolean => {
@@ -80,7 +80,7 @@ const inQueue = (task: Task, laneSets: LaneSets): boolean => {
   return category === undefined || !isBlockerDone(category, 'shipped');
 };
 
-/** Whether the card's ferret already took this card out of its queue on purpose (`fy card undepend`). */
+/** Whether the task's ferret already took this task out of its queue on purpose (`fy task undepend`). */
 const releasedOnPurpose = (task: Task, other: TaskRef, index: BoardIndex): boolean =>
   task.history.some(event => event.type === 'undepended' && event.task.id === other.id && index.isLocal(event.task));
 
@@ -99,8 +99,8 @@ const addEdge = (edges: Map<string, Set<string>>, from: string, to: string): voi
 };
 
 /**
- * The waits between shipping units, as the board stands: an edge from every unit a card rides to the unit of each
- * card it still waits on. A blocker whose lanes are unknown still counts, so a cycle is over-reported, never missed.
+ * The waits between shipping units, as the board stands: an edge from every unit a task rides to the unit of each
+ * task it still waits on. A blocker whose lanes are unknown still counts, so a cycle is over-reported, never missed.
  */
 const unitWaits = (index: BoardIndex, laneSets: LaneSets, units: ShippingUnits): Map<string, Set<string>> => {
   const edges = new Map<string, Set<string>>();
@@ -131,11 +131,11 @@ const reaches = (edges: ReadonlyMap<string, ReadonlySet<string>>, to: string, fr
 };
 
 /**
- * The cards a claim queues this card behind (docs/design/clash-queue.md § Detecting a clash): for each card on the same
- * board whose claims clash, not dropped and whose shipping card has not shipped (a helper that already closed still
- * counts while its lead's PR is open), that card's SHIPPING CARD (`ShippingUnits`). Skipped: a card in the same
- * shipping unit (they merge together), and a shipping card it already depends on or took out of its queue on purpose.
- * A clash whose wait would close a cycle between units — or between cards — or would pass the most dependencies a card
+ * The tasks a claim queues this task behind (docs/design/clash-queue.md § Detecting a clash): for each task on the same
+ * board whose claims clash, not dropped and whose shipping task has not shipped (a helper that already closed still
+ * counts while its lead's PR is open), that task's SHIPPING TASK (`ShippingUnits`). Skipped: a task in the same
+ * shipping unit (they merge together), and a shipping task it already depends on or took out of its queue on purpose.
+ * A clash whose wait would close a cycle between units — or between tasks — or would pass the most dependencies a task
  * may hold, is reported, not added.
  */
 export const planClashes = (
@@ -156,7 +156,7 @@ export const planClashes = (
     if (other.projectId !== task.projectId || other.files.length === 0) continue;
     const pair = firstClash(claimed, other.files);
     if (pair === undefined) continue;
-    // Same unit first: a clashing card that merges with this one says nothing about the other cards its target ships.
+    // Same unit first: a clashing task that merges with this one says nothing about the other tasks its target ships.
     if (units.sameUnit(task, other)) continue;
     const target = units.shippingCard(other);
     if (decided.has(target.id) || target.id === task.id || !inQueue(target, laneSets)) continue;
@@ -197,7 +197,7 @@ const overlap = (clash: Clash): string => {
   return clash.via === undefined ? words : `${words} (claimed by ${formatTaskRef(clash.via)}, which ships in it)`;
 };
 
-/** The note a queued card carries: who it waits on and why. */
+/** The note a queued task carries: who it waits on and why. */
 const queuedNote = (clash: Clash): string =>
   `${CLASH_QUEUED_PREFIX} ${formatTaskRef(clash.card)} to merge: ${overlap(clash)}. It can be built now; its PR merges after ${formatTaskRef(clash.card)} ships.`;
 
@@ -223,7 +223,7 @@ export interface ClashContext {
 const DAEMON: TaskActor = { kind: 'daemon' };
 
 /**
- * The card with its claims queued: one `depended` event and one note per card it now waits on, and a note per clash
+ * The task with its claims queued: one `depended` event and one note per task it now waits on, and a note per clash
  * that could not be queued. The events are the daemon's. Unchanged when nothing clashes.
  */
 export const queueBehindClashes = (task: Task, claimed: readonly string[], context: ClashContext): Task => {

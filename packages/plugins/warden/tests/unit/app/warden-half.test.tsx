@@ -60,7 +60,7 @@ const WARDEN = {
   'GET /v1/warden/config': { config: wardenConfig(), accounts: [], warnings: [] },
 };
 
-/** The Jev and LLM layers on, so the card draws the key line and the login and model fields. */
+/** The Jev and LLM layers on, so the task draws the key line and the login and model fields. */
 const LAYERS_ON = {
   'GET /v1/warden/config': {
     config: wardenConfig({ layers: { jev: true, llm: true } }),
@@ -421,12 +421,12 @@ describe('the settings card hears the files it reads move on the daemon', () => 
     await settleReach();
     expect(asked).toEqual(['alpha']);
     expect(rereads).toBe(0);
-    // A held edit arriving or discarded, a broken file and a fixed one all wake the card, not only a version in effect.
+    // A held edit arriving or discarded, a broken file and a fixed one all wake the task, not only a version in effect.
     for (const state of ['held', 'invalid', 'valid', 'absent'] as const) {
       await live.publish(ConfigChanged.name, frame('warden.yaml', state));
     }
     expect(rereads).toBe(4);
-    // Another file the card does not read, and another event, wake nothing.
+    // Another file the task does not read, and another event, wake nothing.
     await live.publish(ConfigChanged.name, frame('learning.yaml'));
     await live.publish('warden.flagged');
     expect(rereads).toBe(4);
@@ -583,7 +583,7 @@ describe('the settings card hears the files it reads move on the daemon', () => 
     expect(live.count(WardenConfigChanged.name)).toBe(0);
     expect(live.count(ConfigChanged.name)).toBe(0);
 
-    // A card that does not show the Warden's own settings does not wake for them.
+    // A task that does not show the Warden's own settings does not wake for them.
     const other = await mount(<Probe kinds={['credentials']} />);
     await settleReach();
     await live.publish(WardenConfigChanged.name, {});
@@ -614,7 +614,7 @@ describe('the settings card hears the files it reads move on the daemon', () => 
     };
     const fileRead = kernelConfig.CONFIG_FILE_READ;
     const taskRead = declared('GET /v1/warden/config', manifest.actions?.routes);
-    // The card opens (warden.use), and the kernel would not show this device a config frame (fleet.use).
+    // The task opens (warden.use), and the kernel would not show this device a config frame (fleet.use).
     expect(admission.admit({ table: 'route', descriptor: taskRead, request, params: new Map() }).outcome).toBe(
       'admitted',
     );

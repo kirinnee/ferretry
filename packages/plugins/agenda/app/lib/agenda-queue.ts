@@ -23,14 +23,14 @@ export interface AgendaQueueSource extends AgendaStateSource {
   readonly cardAsks?: readonly Pick<AgendaTaskAsk, 'answer'>[] | undefined;
 }
 
-/** A blocker goes first: the ferret said it is stuck now, or the agenda carries a card ask the owner has yet to answer. */
+/** A blocker goes first: the ferret said it is stuck now, or the agenda carries a task ask the owner has yet to answer. */
 const isBlocker = (item: AgendaQueueSource): boolean => item.blockingNow === true || hasOpenTaskAsk(item);
 
 const byClock = (left: string, right: string): number => Date.parse(left) - Date.parse(right);
 
 /**
  * THE NEEDS-YOU QUEUE: every item whose state is `needs-you`, each AT MOST ONCE (the first of any repeat of its
- * key wins), blockers first (`blockingNow`, or an open card ask), then by when each started needing the owner (`agendaNeedsYouSince`), then by key.
+ * key wins), blockers first (`blockingNow`, or an open task ask), then by when each started needing the owner (`agendaNeedsYouSince`), then by key.
  * `keyOf` names an item across boards (the roll-up keys by session too); on one board its id is enough.
  */
 export function needsYouQueue<Item extends AgendaQueueSource>(

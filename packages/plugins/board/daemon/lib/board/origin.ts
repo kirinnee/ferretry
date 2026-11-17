@@ -1,22 +1,22 @@
 /**
- * WHO A CARD IS FOR: the owner's ask, or an agent's own work (`docs/board.md` § Human and agent cards). The
- * Board shows the owner's cards and folds the rest under them, so this is the one place that decides it.
+ * WHO A TASK IS FOR: the owner's ask, or an agent's own work (`docs/board.md` § Human and agent tasks). The
+ * Board shows the owner's tasks and folds the rest under them, so this is the one place that decides it.
  *
- * A card is **human** when the owner asked for it:
+ * A task is **human** when the owner asked for it:
  *
  * 1. the owner made it (the Board page, a paired device, the admin CLI);
  * 2. its ask's source names the owner (`owner`, "owner via lead jaeda", "owner (board move)"), whoever wrote
- *    the card down;
+ *    the task down;
  * 3. a ferret recorded it from a session the OWNER started (`session:<id>`, or the recording ferret itself
  *    when the source names no session): only the owner talks in such a session.
  *
- * Everything else is **agent**: the card of a helper a lead started (`fy new` and `fy start` from a
- * ferret, ask `session:<lead>`), the daemon's own cards (the board import's untriaged asks), and a card a
+ * Everything else is **agent**: the task of a helper a lead started (`fy new` and `fy start` from a
+ * ferret, ask `session:<lead>`), the daemon's own tasks (the board import's untriaged asks), and a task a
  * helper recorded from its own brief. A session this daemon does not know reads as owner-started: a
- * card is never hidden from the owner on a guess.
+ * task is never hidden from the owner on a guess.
  *
  * The rule cannot tell a top-level ferret's own idea from the owner's words in that ferret's chat; both read
- * as human, which errs toward showing the owner a card.
+ * as human, which errs toward showing the owner a task.
  */
 import type { Task, TaskAskedBy, TaskId, TaskOrigin, TaskRef } from '../../../contract/index.ts';
 import type { TaskAudience } from './authority.ts';
@@ -34,8 +34,8 @@ export interface OriginFacts {
 }
 
 /**
- * The session whose words a ferret-made card records, when it takes a session's lineage to decide the
- * card's origin; `undefined` when the card decides without one (the owner made it, its source names the
+ * The session whose words a ferret-made task records, when it takes a session's lineage to decide the
+ * task's origin; `undefined` when the task decides without one (the owner made it, its source names the
  * owner, or the daemon made it).
  */
 export const askFerretOf = (task: Pick<Task, 'createdBy' | 'ask'>): string | undefined => {
@@ -43,7 +43,7 @@ export const askFerretOf = (task: Pick<Task, 'createdBy' | 'ask'>): string | und
   return SESSION_SOURCE.exec(task.ask.source.trim())?.[1] ?? task.createdBy.ferret;
 };
 
-/** Whether the owner asked for this card (see the file header). Pure and total. */
+/** Whether the owner asked for this task (see the file header). Pure and total. */
 export const taskOrigin = (task: Pick<Task, 'createdBy' | 'ask'>, facts: OriginFacts): TaskOrigin => {
   if (task.createdBy.kind === 'owner' || NAMES_OWNER.test(task.ask.source)) return 'human';
   if (task.createdBy.kind === 'daemon') return 'agent';
@@ -52,7 +52,7 @@ export const taskOrigin = (task: Pick<Task, 'createdBy' | 'ask'>, facts: OriginF
 };
 
 /**
- * The nearest ancestor of a card on this machine whose origin is `human`, never the card itself; `null`
+ * The nearest ancestor of a task on this machine whose origin is `human`, never the task itself; `null`
  * when none is (a parent on another machine ends the walk, and a loop in `parent` is walked once).
  */
 export const humanParentOf = (
@@ -71,11 +71,11 @@ export const humanParentOf = (
 };
 
 /**
- * Whether a PERSON asked for this card, for the surfaces that wait on the owner (the Inbox's cards to test): the
- * stricter sibling of {@link cardOrigin}. The card stores the answer ({@link decideAskedBy}, at creation); this
- * reads it from the ask's source alone, which is all a card without a stored one has: a person's only when the source
+ * Whether a PERSON asked for this task, for the surfaces that wait on the owner (the Inbox's cards to test): the
+ * stricter sibling of {@link taskOrigin}. The task stores the answer ({@link decideAskedBy}, at creation); this
+ * reads it from the ask's source alone, which is all a task without a stored one has: a person's only when the source
  * names the owner (the Board page's `owner (board)`, "owner via lead jaeda"). A top-level ferret's own follow-up
- * (`session:<lead>`, a review finding) reads as `agent` here although `cardOrigin` shows it; it stays on the Board.
+ * (`session:<lead>`, a review finding) reads as `agent` here although `taskOrigin` shows it; it stays on the Board.
  */
 export const taskAskedBy = (task: Pick<Task, 'ask'>): TaskAskedBy =>
   NAMES_OWNER.test(task.ask.source) ? 'person' : 'agent';
@@ -84,7 +84,7 @@ export const taskAskedBy = (task: Pick<Task, 'ask'>): TaskAskedBy =>
 export const MIN_OWNER_MATCH = 24;
 
 /**
- * The letters and digits alone, case ignored. A ferret that files the owner's message as a card joins its lines
+ * The letters and digits alone, case ignored. A ferret that files the owner's message as a task joins its lines
  * with a full stop, drops a dash or mends a split word ("can yo uhelp"), and that is still the owner's ask.
  */
 const normalized = (text: string): string => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
@@ -117,7 +117,7 @@ export const ownerWordsMatch = (askText: string, words: readonly string[]): bool
 const SESSION_IN_SOURCE = /\b([a-z0-9]{8}-[a-f0-9]{8})\b/u;
 
 /**
- * The session whose owner's words can prove a card's ask, whoever wrote the card down: the session its source
+ * The session whose owner's words can prove a task's ask, whoever wrote the task down: the session its source
  * names, else the recording ferret's own. A ferret on the admin token is stored as the owner and the board
  * import as the daemon, and both still copy an ask from a session the owner talks in.
  */
@@ -127,7 +127,7 @@ export const wordsFerretOf = (task: Pick<Task, 'createdBy' | 'ask'>): string | u
   (task.createdBy.kind === 'ferret' ? task.createdBy.ferret : undefined);
 
 /**
- * Who asked for a card that is being written, from the facts known once: the owner's own app (an owner caller
+ * Who asked for a task that is being written, from the facts known once: the owner's own app (an owner caller
  * that is not the admin token, which a ferret can hold too), an ask source that names the owner, or an ask that
  * matches a message the owner sent the session it came from. `words` is read only when the first two do not
  * decide. Anything else, an unknown session included, is the agent's.
@@ -138,8 +138,8 @@ export const decideAskedBy = async (
   said: (ferret: string) => Promise<readonly string[]>,
 ): Promise<TaskAskedBy> => {
   if (ownerApp || taskAskedBy(task) === 'person') return 'person';
-  // A card the daemon wrote is one it wrote for a session it started (`fy new`, `fy start`: `BoardService.spawn`, the
-  // only writer of a daemon-made card), so it is that ferret's errand: the brief is a ferret's words, and a long quote
+  // A task the daemon wrote is one it wrote for a session it started (`fy new`, `fy start`: `BoardService.spawn`, the
+  // only writer of a daemon-made task), so it is that ferret's errand: the brief is a ferret's words, and a long quote
   // of the owner inside it proves nothing. Only a source naming the owner (the app's New session) makes it a person's,
   // and that was decided above.
   if (task.createdBy.kind === 'daemon') return 'agent';
@@ -148,12 +148,12 @@ export const decideAskedBy = async (
 };
 
 /**
- * Who a card's gates ask: the ONE reading the gates use (docs/board.md § Cards show progress), and the CONSERVATIVE
- * one, because it decides who may pass them. A card is INTERNAL — its owner ferret and leads pass its gates, and the
+ * Who a task's gates ask: the ONE reading the gates use (docs/board.md § Tasks show progress), and the CONSERVATIVE
+ * one, because it decides who may pass them. A task is INTERNAL — its owner ferret and leads pass its gates, and the
  * owner is never asked — only when it is positively a ferret's own errand: the daemon made it, or the session that
  * REALLY wrote it (`createdBy`, never the ask's source, which the ferret writes) was started by a ferret; AND no
  * person asked for it (`askedBy`). `startedByFerret` answers for `createdBy`'s session alone. Anything else — a
- * top-level ferret's card, whatever its ask says; a lineage that could not be read — is EXTERNAL: the owner decides.
+ * top-level ferret's task, whatever its ask says; a lineage that could not be read — is EXTERNAL: the owner decides.
  */
 export const taskAudience = (
   task: Pick<Task, 'createdBy' | 'ask' | 'askedBy'>,

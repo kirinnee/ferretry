@@ -32,14 +32,14 @@ export interface BoundAgendaContext {
 }
 
 /**
- * The agenda's lineage and card context, bound from `agenda.context` (docs/agenda.md). Each unavailable answer is the
+ * The agenda's lineage and task context, bound from `agenda.context` (docs/agenda.md). Each unavailable answer is the
  * SAFE side of its question, not the permissive one:
  *
  * - **which ferrets exist**: none does, so a write for an unknown ferret is refused (never "any well-formed id");
  * - **who started whom**: unreadable, said so ({@link SubFerretDirectory.readable}), so a raise is refused rather than
  *   put on the owner's agenda by a ferret that cannot be placed;
- * - **a card's gate**: it rejects, which the service reads as "asking", so no second ask gets through;
- * - **a focus card / the to-test lane**: Board being off leaves an item with the card it was raised with, which cannot
+ * - **a task's gate**: it rejects, which the service reads as "asking", so no second ask gets through;
+ * - **a focus task / the to-test lane**: Board being off leaves an item with the task it was raised with, which cannot
  *   widen anything.
  */
 export function agendaContext(source: AgendaContextSource, warn: (message: string) => void): BoundAgendaContext {

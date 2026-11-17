@@ -4,7 +4,7 @@ import { BoardError, BoardService, type TaskMoveInput } from '../../../daemon/li
 import { boardTask, MemoryBoardStore, world } from './support.ts';
 
 /**
- * `card.moving` is asked at the board service's ONE write, so every path that changes a card's lane — an owner's
+ * `card.moving` is asked at the board service's ONE write, so every path that changes a task's lane — an owner's
  * act, a daemon trigger (the watcher, a release), a gate answer, a refile, the sweep — is asked, not only the route's
  * move; and `board.task-moved` is told once the move landed.
  */

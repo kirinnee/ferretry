@@ -1,13 +1,13 @@
 /**
- * THE CARD A RESUMED FERRET CONTINUES (`board-design.md` §3.4): when the Warden starts a dead ferret again —
- * an auto-revive, or a verdict's resume or restart — the turn it hands over names the ferret's focus card,
- * so the successor carries on the same card rather than rediscovering what it was doing.
+ * THE TASK A RESUMED FERRET CONTINUES (`board-design.md` §3.4): when the Warden starts a dead ferret again —
+ * an auto-revive, or a verdict's resume or restart — the turn it hands over names the ferret's focus task,
+ * so the successor carries on the same task rather than rediscovering what it was doing.
  *
- * The block says what the card is (id, title, lane), what the owner asked for in their own words (the ask
+ * The block says what the task is (id, title, lane), what the owner asked for in their own words (the ask
  * and every clarification, verbatim), where the work is (its links) and what happened to it last (the
- * newest history lines, in the words `fy card show` uses).
+ * newest history lines, in the words `fy task show` uses).
  *
- * Pure: the card arrives already read (`WardenBoardPort.focusCard`).
+ * Pure: the task arrives already read (`WardenBoardPort.focusCard`).
  */
 import {
   type TaskView,
@@ -17,11 +17,11 @@ import {
   type PrLink,
 } from '@ferretry/plugin-board/contract';
 
-/** A ferret's focus card, with the lanes of its board so the lane reads by name. */
+/** A ferret's focus task, with the lanes of its board so the lane reads by name. */
 export interface WardenFocusTask {
   readonly task: TaskView;
   readonly laneSet: LaneSet | null;
-  /** The ferret was started by another ferret: it may not move cards, so the brief does not tell it to. */
+  /** The ferret was started by another ferret: it may not move tasks, so the brief does not tell it to. */
   readonly subFerret?: boolean;
 }
 
@@ -33,7 +33,7 @@ const laneName = (laneSet: LaneSet | null, id: string): string =>
 
 const prLine = (pr: PrLink): string => `PR #${String(pr.number)} ${pr.url} (${pr.draft ? 'draft' : pr.state})`;
 
-/** The card, as the block a resumed ferret reads. Session ids stay ids: the Warden holds no directory. */
+/** The task, as the block a resumed ferret reads. Session ids stay ids: the Warden holds no directory. */
 export function focusTaskBrief(boardTask: WardenFocusTask): string {
   const { task, laneSet } = boardTask;
   const ref = formatTaskRef(task);
@@ -77,7 +77,7 @@ export function focusTaskBrief(boardTask: WardenFocusTask): string {
 export type WardenResumeAct = 'resume' | 'restart';
 
 /**
- * The turn a verdict's resume or restart hands a ferret that has a focus card. A ferret with none is
+ * The turn a verdict's resume or restart hands a ferret that has a focus task. A ferret with none is
  * resumed with the resume domain's own default turn, as before.
  */
 export function wardenResumeMessage(act: WardenResumeAct, reason: string, task: WardenFocusTask): string {

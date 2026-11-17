@@ -1132,7 +1132,7 @@ describe('the action verbs', () => {
   });
 
   it('should send only the parts --now/--done/--next name, without reading the task', async () => {
-    // Arrange — the daemon merges them into the card's progress in its own write, so concurrent edits never undo each other.
+    // Arrange — the daemon merges them into the task's progress in its own write, so concurrent edits never undo each other.
     const gateway = new FakeGateway();
     gateway.cardView = boardTask({ id: 'F1', progress: { now: 'old', doneSoFar: '- done', next: '1. next' } });
     const { controller } = harness(gateway);
@@ -1376,7 +1376,7 @@ describe('fy task new — related work', () => {
     // Act
     await controller.create([], base);
 
-    // Assert — only cards are offered; the agenda match is not a card to note.
+    // Assert — only tasks are offered; the agenda match is not a task to note.
     should(gateway.createCalls).have.length(1);
     const listed = log.find(line => line.startsWith('diag: Related tasks')) ?? '';
     should(listed).containEql('prefer adding to one (a note, nothing created)');

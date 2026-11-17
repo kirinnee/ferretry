@@ -1,7 +1,7 @@
 /**
- * THE CARD'S AGENDA ASKS, joined to the agenda (v4 parity: the card sheet's "Agenda asks" section).
+ * THE TASK'S AGENDA ASKS, joined to the agenda (v4 parity: the task sheet's "Agenda asks" section).
  *
- * A card never asks (#1552): its asks live in the Agenda. The card says WHICH asks are open (`openAsks`) and the
+ * A task never asks (#1552): its asks live in the Agenda. The task says WHICH asks are open (`openAsks`) and the
  * ferret's agenda says what each one is; an answered or dismissed ask is kept only in that agenda's ledger. This file
  * is the pure join of the two, the reading is `board-client.ts`'s (`agenda`) and the drawing is the detail's.
  */
@@ -35,7 +35,7 @@ interface ResolvedAskRow {
 
 export interface TaskAsks {
   readonly open: readonly OpenAskRow[];
-  /** Asks about this card that are answered or dismissed, newest first. */
+  /** Asks about this task that are answered or dismissed, newest first. */
   readonly resolved: readonly ResolvedAskRow[];
   /** The agendas are still being read: an empty list is not yet "no asks". */
   readonly reading: boolean;
@@ -46,7 +46,7 @@ export const askHeading = (item: { readonly subject: string; readonly title?: st
   (item.title ?? '').trim() === '' ? item.subject.trim() : (item.title as string).trim();
 
 /**
- * The card's open asks (from its own `openAsks`, so none is missed) and its resolved ones (the agenda's ledger, the
+ * The task's open asks (from its own `openAsks`, so none is missed) and its resolved ones (the agenda's ledger, the
  * only place an answered ask is kept), blocking first.
  */
 export const collectAsks = (task: TaskView, agendas: readonly SessionAgenda[]): TaskAsks => {
@@ -67,7 +67,7 @@ export const collectAsks = (task: TaskView, agendas: readonly SessionAgenda[]): 
   };
 };
 
-/** The ferrets whose agendas can hold this card's asks: the ones that raised an open ask, the owner, the assignee. */
+/** The ferrets whose agendas can hold this task's asks: the ones that raised an open ask, the owner, the assignee. */
 export const askSessions = (task: Pick<TaskView, 'openAsks' | 'owner' | 'assignee'>): readonly string[] => [
   ...new Set([...task.openAsks.map(ask => ask.ferret), task.owner, ...(task.assignee === null ? [] : [task.assignee])]),
 ];

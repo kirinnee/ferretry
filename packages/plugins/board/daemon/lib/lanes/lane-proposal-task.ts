@@ -1,9 +1,9 @@
 /**
  * THE ASK A LANE PROPOSAL RAISES (shown on the Agenda): one choice for the owner, "Lanes for <project>:
- * A → B → …", with Accept and Edit. The card's words and shape live here, and so does what an answer to it
+ * A → B → …", with Accept and Edit. The task's words and shape live here, and so does what an answer to it
  * means; raising it is `LaneSetService`'s and answering it is the agenda's.
  *
- * The card is keyed by project AND version, so a set proposed again gets a card of its own and an Accept
+ * The task is keyed by project AND version, so a set proposed again gets a task of its own and an Accept
  * of an older one names a version that has moved on.
  */
 import { MAX_ASK_DETAIL_LENGTH, MAX_ASK_SUBJECT_LENGTH } from '@ferretry/core-asks/contract';
@@ -25,10 +25,10 @@ export interface LaneProposalTask {
   readonly options: readonly { readonly label: string; readonly description: string }[];
   /**
    * One line — who proposes what, and that the board waits for the owner — then, on a change that decides
-   * something, a Markdown list of what accepting it would do, one bullet per thing: the card draws its why.
+   * something, a Markdown list of what accepting it would do, one bullet per thing: the task draws its why.
    */
   readonly why: string;
-  /** Edit, on a card whose change does something the owner decides: read it before accepting it. */
+  /** Edit, on a task whose change does something the owner decides: read it before accepting it. */
   readonly recommendation?: { readonly decision: string; readonly why: string };
   readonly howToResolve: string;
 }
@@ -39,8 +39,8 @@ const EDIT = {
 };
 
 /**
- * A lane card's answers, ← and →, in the owner's one model (→ is yes): Accept on the right, Edit on the left, or, on
- * a card with no Accept, Later on the left and Edit on the right.
+ * A lane task's answers, ← and →, in the owner's one model (→ is yes): Accept on the right, Edit on the left, or, on
+ * a task with no Accept, Later on the left and Edit on the right.
  */
 const answered = (
   left: { readonly label: string; readonly description: string },
@@ -61,21 +61,21 @@ export const laneProposalTask = (projectName: string, laneSet: LaneSet): LanePro
   };
 };
 
-/** How long a proposer's name may run on the card, so it never crowds out what the change would do. */
+/** How long a proposer's name may run on the task, so it never crowds out what the change would do. */
 const MAX_PROPOSER_NAME = 60;
 
-/** The answer of a card with no Accept that leaves the proposal waiting. Never an Accept, so it confirms nothing. */
+/** The answer of a task with no Accept that leaves the proposal waiting. Never an Accept, so it confirms nothing. */
 export const LANE_CHANGE_LATER = 'Later';
 
-/** Why a card whose change decides something recommends Edit. */
+/** Why a task whose change decides something recommends Edit. */
 export const LANE_CHANGE_READ_FIRST = 'It changes what only you decide: read it in the lane editor before you accept.';
 
 /**
- * The card a ferret's change to lanes the project already has raises (`docs/board.md` § A ferret's lane change
+ * The task a ferret's change to lanes the project already has raises (`docs/board.md` § A ferret's lane change
  * waits for the owner): one line saying who proposes it and that NOTHING changes until the owner accepts, then
  * everything it would do that only the owner decides as a bullet list under it (`laneChangeLines`: like removals
  * told once).
- * Then Edit is recommended. A bullet is never cut short: the ones that do not fit are counted — and then the card has
+ * Then Edit is recommended. A bullet is never cut short: the ones that do not fit are counted — and then the task has
  * no Accept, so a change the owner has not read in full is accepted only in the lane editor, which lists it all.
  */
 export const laneChangeTask = (projectName: string, live: LaneSet, pending: PendingLaneSet): LaneProposalTask => {
@@ -100,7 +100,7 @@ export const laneChangeTask = (projectName: string, live: LaneSet, pending: Pend
 };
 
 /**
- * The intro and, under it, the bullets that fit a card, WHOLE, and a last one counting the rest; `hidden`: some did
+ * The intro and, under it, the bullets that fit a task, WHOLE, and a last one counting the rest; `hidden`: some did
  * not fit. One always fits: a lane's name is at most 40 characters, so a line is a few hundred at most.
  */
 const bullets = (intro: string, lines: readonly string[]): { readonly why: string; readonly hidden: boolean } => {

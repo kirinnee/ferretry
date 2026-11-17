@@ -1,6 +1,6 @@
 /**
- * HOW ONE HISTORY EVENT OF A CARD READS, in words — the one spelling every surface uses: `fy card show`
- * draws it, and the Warden hands a resumed ferret the last lines of its card in it.
+ * HOW ONE HISTORY EVENT OF A TASK READS, in words — the one spelling every surface uses: `fy task show`
+ * draws it, and the Warden hands a resumed ferret the last lines of its task in it.
  *
  * Pure. The caller says how a lane id and a session id read, because only it holds the lane set and the
  * session directory.

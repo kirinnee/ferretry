@@ -13,13 +13,13 @@ import type {
   OpenTaskAskEntry,
 } from '../lib/board/index.ts';
 
-/** The Asks source this plugin registers: a card's gate entry is an obligation `{ source: 'card', ref, entry }`. */
+/** The Asks source this plugin registers: a task's gate entry is an obligation `{ source: 'card', ref, entry }`. */
 export const TASK_SOURCE = 'card' as SourceKey;
 
 const taskOf = (entry: string): TaskId | undefined => parseGateReference(entry)?.cardId as TaskId | undefined;
 
 /**
- * The `card` source's obligations in Asks (#1552: the agenda asks, the card shows). `raise` is idempotent by
+ * The `task` source's obligations in Asks (#1552: the agenda asks, the task shows). `raise` is idempotent by
  * `(source, entry)`; `open` THROWS when Asks cannot be read, because "not asking" would let a second ask through.
  */
 export class AsksTaskObligations implements TaskObligations {
@@ -70,8 +70,8 @@ export class AsksTaskObligations implements TaskObligations {
 }
 
 /**
- * What a card carries in Asks: every open gate ask of the `card` source, with the card its entry names, in ONE read
- * (`AsksApi.open`); and every open ask a ferret raised about a card, read from the boards' agenda items that name it
+ * What a task carries in Asks: every open gate ask of the `task` source, with the card its entry names, in ONE read
+ * (`AsksApi.open`); and every open ask a ferret raised about a task, read from the boards' agenda items that name it
  * (`AsksApi.snapshots`, the link `fy agenda ls` shows as `&F9`).
  */
 export class AsksTaskAskReader implements TaskAskReader {
@@ -146,7 +146,7 @@ export class AsksOptIn {
 }
 
 /**
- * The asks a card may be made to carry out (`fy card new --thread`). Asks has no way to link an ask to a card, so a
+ * The asks a task may be made to carry out (`fy task new --thread`). Asks has no way to link an ask to a task, so a
  * thread reads as open and unlinked and the link is refused in words (GAP: an Asks link would close it).
  */
 export class AsksThreads implements BoardThreads {

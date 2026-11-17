@@ -2,8 +2,8 @@
  * THE BOARD'S WRITES, as one small set of verbs a page calls: move, reopen, depend, undepend, note, link, drop,
  * edit, create, and answer an agenda ask.
  *
- * EVERY VERB NAMES A CARD BY `(daemonId, taskId)`. A card lives on one machine, so a verb is sent to that
- * machine's daemon and no other; there is no "the card named F12" across the fleet.
+ * EVERY VERB NAMES A TASK BY `(daemonId, taskId)`. A task lives on one machine, so a verb is sent to that
+ * machine's daemon and no other; there is no "the task named F12" across the fleet.
  *
  * A REFUSAL IS A VALUE. Each verb answers `BoardResult` with {@link BoardMutationError}; nothing throws
  * for an expected refusal (needs a reason, owner only, a dependency cycle). The two the PWA can know
@@ -52,7 +52,7 @@ type BoardMutation = BoardResult<TaskView, BoardMutationError>;
 
 type BoardStart = BoardResult<TaskStartResponse, BoardMutationError>;
 
-/** A card, named by its machine and id, with what a move needs to be checked: its lane and its lane set. */
+/** A task, named by its machine and id, with what a move needs to be checked: its lane and its lane set. */
 interface BoardTaskTarget {
   readonly daemonId: DaemonId;
   readonly id: TaskId;
@@ -71,8 +71,8 @@ type BoardEdit = Omit<Action<'edit'>, 'action'>;
 
 export interface BoardActions {
   /**
-   * Moves a card. A move back needs `reason` (refused here without a round trip when it is missing). An owner's
-   * move back may carry `attachments`, already uploaded to the card's ferret.
+   * Moves a task. A move back needs `reason` (refused here without a round trip when it is missing). An owner's
+   * move back may carry `attachments`, already uploaded to the task's ferret.
    */
   moveCard(
     target: BoardMoveTarget,
@@ -80,7 +80,7 @@ export interface BoardActions {
     reason?: string,
     attachments?: BoardReopenAttachments,
   ): Promise<BoardMutation>;
-  /** Reopens a closed card into a lane, with the owner's reason and the ask as said. */
+  /** Reopens a closed task into a lane, with the owner's reason and the ask as said. */
   reopen(
     target: BoardTaskTarget,
     to: string,
@@ -94,14 +94,14 @@ export interface BoardActions {
   note(target: BoardTaskTarget, text: string): Promise<BoardMutation>;
   link(target: BoardTaskTarget, link: BoardLinkTarget): Promise<BoardMutation>;
   drop(target: BoardTaskTarget, reason: string): Promise<BoardMutation>;
-  /** Starts a new ferret on the card (or names the live one that holds it); `key` makes a retry of one click safe. */
+  /** Starts a new ferret on the task (or names the live one that holds it); `key` makes a retry of one click safe. */
   start(target: BoardTaskTarget, key?: string): Promise<BoardStart>;
   editField(target: BoardTaskTarget, edit: BoardEdit): Promise<BoardMutation>;
-  /** Puts a card aside until `until` (an instant), or wakes it now with `null`. The owner's own, kept on the card. */
+  /** Puts a task aside until `until` (an instant), or wakes it now with `null`. The owner's own, kept on the task. */
   snoozeTask(target: BoardTaskTarget, until: string | null): Promise<BoardMutation>;
-  /** Puts the card under another card, or at the top level with `parent: null`. */
+  /** Puts the task under another task, or at the top level with `parent: null`. */
   reparent(target: BoardTaskTarget, parent: Action<'reparent'>['parent'], reason?: string): Promise<BoardMutation>;
-  /** Opens a card the owner writes, on one machine. */
+  /** Opens a task the owner writes, on one machine. */
   create(daemonId: DaemonId, request: TaskCreateRequestInput): Promise<BoardMutation>;
   /** The owner picks a template for a project with no lanes: proposed, then confirmed in the same breath. */
   adoptTemplate(daemonId: DaemonId, projectId: BoardProjectId, template: LaneTemplateName): Promise<LaneMutation>;

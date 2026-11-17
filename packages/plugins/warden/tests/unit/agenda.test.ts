@@ -21,7 +21,7 @@ const session = (
   state: { status: status as NonNullable<FleetSessionLike['state']['status']> },
 });
 
-/** A Warden card, as the board holds it. */
+/** A Warden task, as the board holds it. */
 const task = (overrides: Partial<AgendaItem> = {}): AgendaItem => ({
   id: 'A1',
   source: 'agent-raised',

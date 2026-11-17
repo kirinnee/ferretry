@@ -1,27 +1,27 @@
 /**
  * THE GITHUB WATCHER (`board-design.md` §3.1 items 4 and 7): polls GitHub for the PRs on the board, links
- * the ones a card's work opened, and moves cards on the facts — opened, ready, checks, merged, released,
+ * the ones a task's work opened, and moves tasks on the facts — opened, ready, checks, merged, released,
  * and running on this machine.
  *
  * The daemon has no public endpoint, so GitHub cannot call it; the watcher asks instead, through the host's
  * own `gh` (see `ports.ts`). One tick:
  *
  *   1. reads the board as stored, and the repository each registered project's `origin` names;
- *   2. gathers, per repository, the linked PRs GitHub can still change and the branches a card's work is on
- *      (the card's `links.branch`, and the branch its assignee's folder has checked out);
+ *   2. gathers, per repository, the linked PRs GitHub can still change and the branches a task's work is on
+ *      (the task's `links.branch`, and the branch its assignee's folder has checked out);
  *   3. polls each repository that is DUE — one GraphQL query for all of it — and schedules its next poll a
  *      minute out while it has an open PR, ten minutes out when it has none;
  *   4. looks for the first release containing each merge (`releases.ts`), at a bounded number of compares;
- *   5. writes each card that changed through `BoardService.recordPullRequests`, as the daemon, and queues
+ *   5. writes each task that changed through `BoardService.recordPullRequests`, as the daemon, and queues
  *      the nudges that write handed back;
- *   6. refiles the Unfiled cards that belong on a project's board (`unfiled.ts`): a PR in its repository, or
- *      the folder the card's ferret works in.
+ *   6. refiles the Unfiled tasks that belong on a project's board (`unfiled.ts`): a PR in its repository, or
+ *      the folder the task's ferret works in.
  *
  * Auto-link from a session (its branch, its own `gh pr create`) applies only when that session is the
- * assignee of exactly ONE card still before shipping: a lead assigned to forty cards opens PRs for all of
- * them, and which card a PR belongs to is then not the watcher's to guess.
+ * assignee of exactly ONE task still before shipping: a lead assigned to forty tasks opens PRs for all of
+ * them, and which task a PR belongs to is then not the watcher's to guess.
  *
- * `gh` missing or signed out: every card's PR state simply stays where it is (`unknown` for a new link),
+ * `gh` missing or signed out: every task's PR state simply stays where it is (`unknown` for a new link),
  * the board's diagnostics hear it ONCE, and the watcher looks again at the idle pace. It never throws out
  * of a tick; a failure is reported and the next tick runs.
  */
@@ -91,15 +91,15 @@ export interface GitHubWatcherPorts {
 export interface WatchReport {
   /** The repositories polled, as `owner/name`. */
   readonly polled: readonly string[];
-  /** The cards written. */
+  /** The tasks written. */
   readonly written: readonly string[];
-  /** The cards refiled. */
+  /** The tasks refiled. */
   readonly refiled: readonly string[];
   /** Whether GitHub could be reached at all this tick. */
   readonly reachable: boolean;
 }
 
-/** A branch a card's work is on, in one repository, and how the watcher knows. */
+/** A branch a task's work is on, in one repository, and how the watcher knows. */
 interface BranchCandidate {
   readonly repo: string;
   readonly branch: string;
@@ -160,7 +160,7 @@ export class GitHubWatcher {
   }
 
   /**
-   * One tick that never rejects, as the job runs it: when `signal` aborts, no further card is written and the Unfiled
+   * One tick that never rejects, as the job runs it: when `signal` aborts, no further task is written and the Unfiled
    * refile is skipped. A failure is reported to the board's diagnostics.
    */
   async run(signal?: AbortSignal): Promise<WatchReport | null> {
@@ -215,7 +215,7 @@ export class GitHubWatcher {
     return projects;
   }
 
-  /** The branches and `gh pr create` URLs each linkable card's work points at. */
+  /** The branches and `gh pr create` URLs each linkable task's work points at. */
   private async candidates(
     watched: readonly Task[],
     laneSets: LaneSets,
@@ -309,7 +309,7 @@ export class GitHubWatcher {
   /**
    * The repositories with a linked PR nobody has asked GitHub about yet, and those PRs: a repository is
    * polled at once rather than when its cadence next comes round, so a PR linked after it merged moves its
-   * card within one tick. Each PR gets that one early look, whatever GitHub answers.
+   * task within one tick. Each PR gets that one early look, whatever GitHub answers.
    */
   private freshRepositories(watched: readonly Task[]): ReadonlyMap<string, readonly string[]> {
     const fresh = new Map<string, string[]>();
@@ -384,10 +384,10 @@ export class GitHubWatcher {
   }
 
   // -------------------------------------------------------------------------------------------------
-  // Per card
+  // Per task
   // -------------------------------------------------------------------------------------------------
 
-  /** One card's update from this tick's answers: what was observed, what to link, which releases were found. */
+  /** One task's update from this tick's answers: what was observed, what to link, which releases were found. */
   private async updateFor(
     task: Task,
     candidates: TaskCandidates,
@@ -425,7 +425,7 @@ export class GitHubWatcher {
     return { link, observed, releases, runningVersion: this.runningVersion() };
   }
 
-  /** The release each merged, unreleased PR of the card first shipped in, as far as this tick can tell. */
+  /** The release each merged, unreleased PR of the task first shipped in, as far as this tick can tell. */
   private async releasesFor(
     task: Task,
     observed: readonly PrObservation[],
@@ -465,8 +465,8 @@ export class GitHubWatcher {
   }
 
   /**
-   * Whether an update would change the card, decided by the same rules the write applies, on the card as
-   * this tick read it. It keeps a poll that learned nothing from costing a card write.
+   * Whether an update would change the task, decided by the same rules the write applies, on the task as
+   * this tick read it. It keeps a poll that learned nothing from costing a task write.
    */
   private wouldChange(task: Task, update: PrUpdate, index: BoardIndex, laneSets: LaneSets): boolean {
     const laneSet = laneSets.get(task.projectId);
@@ -482,7 +482,7 @@ export class GitHubWatcher {
     return dry.task !== null;
   }
 
-  /** Writes one card's update and queues its nudges. `true` when the card was written. */
+  /** Writes one task's update and queues its nudges. `true` when the task was written. */
   private async record(task: Task, update: PrUpdate): Promise<boolean> {
     try {
       const outcome = await this.ports.board.recordPullRequests(task.id, update);

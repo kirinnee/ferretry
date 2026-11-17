@@ -3,7 +3,7 @@ import type { KernelPorts } from '@ferretry/kernel/contract';
 import { machineIdOf } from '../../../daemon/wiring.ts';
 import { as, boot, makeTask, TEST_IDENTITY } from '../../integration/daemon/harness.ts';
 
-/** D2 #13: a card's machine is the daemon's id from the kernel's identity port — never a made-up `'local'`. */
+/** D2 #13: a task's machine is the daemon's id from the kernel's identity port — never a made-up `'local'`. */
 describe('D2 #13 the machine a card is made on', () => {
   test('is the daemon id the kernel identity port gives, stored on the card', async () => {
     const { host } = await boot();

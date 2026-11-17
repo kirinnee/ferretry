@@ -1,6 +1,6 @@
 /**
- * A card's text as the card detail draws it: paragraphs, bullet and numbered lists, `code`, **bold**, links, and a
- * `&F12` card reference as a link to that card. This is the small renderer the Board needs of its own; the chat's full
+ * A task's text as the task detail draws it: paragraphs, bullet and numbered lists, `code`, **bold**, links, and a
+ * `&F12` task reference as a link to that task. This is the small renderer the Board needs of its own; the chat's full
  * Markdown (fy-render blocks, every reference kind) belongs to Conversation and the shell.
  */
 

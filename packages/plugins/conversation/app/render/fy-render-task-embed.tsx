@@ -1,20 +1,20 @@
 /**
- * A `card` OR `board` BLOCK: the board's own cards, inline in a message or an agenda body.
+ * A `task` OR `board` BLOCK: the board's own tasks, inline in a message or an agenda body.
  *
  * It is not an illustration, so it has none of an illustration's chrome (no source panel, no fullscreen, no sandbox): the
  * block is a POINTER (`fy-render-embed.ts`) and everything drawn is read from the board by the plugin that owns it.
- * Conversation draws no card itself: each card id is mounted through the `reference:&` renderer the Board declares
- * (`RendererView`), which is the one thing in the app that knows how to prove a card and link it.
+ * Conversation draws no task itself: each task id is mounted through the `reference:&` renderer the Board declares
+ * (`RendererView`), which is the one thing in the app that knows how to prove a task and link it.
  *
- *  - PROOF BEFORE LINK. The Board's renderer answers with a link only for a card it read; a card it could not read, or
+ *  - PROOF BEFORE LINK. The Board's renderer answers with a link only for a task it read; a task it could not read, or
  *    one with no Board to ask, stays the written `&F12` as plain text, never a link.
  *  - ONE RENDERER. A host that has no board to read (`cardEmbed` absent) never reaches this file: the fence stays an
  *    ordinary code fence, as any block this build cannot draw does.
  *
- * THE MINI BOARD IS THE BOARD'S. The whole block (one card, a list, or a `parent:` form's children grouped by lane) is mounted through the
+ * THE MINI BOARD IS THE BOARD'S. The whole block (one task, a list, or a `parent:` form's children grouped by lane) is mounted through the
  * `reference:&board` renderer the Board declares, handed what the block names and nothing the author typed. Only where
- * no Board answers for it (a harness, a build without it) does a block fall back to one `reference:&` row per card, and
- * the `parent:` form to a note saying whose cards it names, with the parent's reference as the way in.
+ * no Board answers for it (a harness, a build without it) does a block fall back to one `reference:&` row per task, and
+ * the `parent:` form to a note saying whose tasks it names, with the parent's reference as the way in.
  */
 
 import { RendererView } from '@ferretry/app';
@@ -30,7 +30,7 @@ export interface FyRenderTaskEmbedHost {
 export interface FyRenderTaskEmbedProps {
   readonly block: FyRenderEmbedBlock;
   readonly host: FyRenderTaskEmbedHost;
-  /** Opens a card the way a written `&F12` does; absent, the Board's own link is the way in. */
+  /** Opens a task the way a written `&F12` does; absent, the Board's own link is the way in. */
   readonly onTaskOpen?: ((id: string, opener?: HTMLElement | null) => void) | undefined;
 }
 
@@ -54,7 +54,7 @@ function CardRow({ id, host }: { readonly id: string; readonly host: FyRenderTas
   );
 }
 
-/** What a block draws where no Board answers for the mini board: one reference row per card, a note for `parent:`. */
+/** What a block draws where no Board answers for the mini board: one reference row per task, a note for `parent:`. */
 function FallbackRows({
   embed,
   host,
@@ -80,7 +80,7 @@ function FallbackRows({
 export function FyRenderTaskEmbed({ block, host }: FyRenderTaskEmbedProps) {
   const { embed } = block;
   return (
-    // biome-ignore lint/a11y/useSemanticElements: a fieldset draws a border and legend; this is a plain labelled group of cards.
+    // biome-ignore lint/a11y/useSemanticElements: a fieldset draws a border and legend; this is a plain labelled group of tasks.
     <div className="fy-card-embed" data-fy-card-embed={block.type} role="group" aria-label={block.alt}>
       <RendererView
         daemon={host.daemon}

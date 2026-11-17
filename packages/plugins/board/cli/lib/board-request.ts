@@ -54,7 +54,7 @@ function parseOrRefuse<Output>(schema: z.ZodType<Output, unknown>, value: unknow
 
 // ─── references ────────────────────────────────────────────────────────────────────────────────
 
-/** `&F412` and a bare `F412` all name the same card; anything else is refused. */
+/** `&F412` and a bare `F412` all name the same task; anything else is refused. */
 export function requireTaskRef(value: string, label = 'task id'): TaskRef {
   const parsed = parseTaskRef(value);
   return parsed.ok ? parsed.value : refuse(`expected a ${label} like &F21, got "${value}"`);
@@ -93,9 +93,9 @@ export interface BoardCreateOptions {
   readonly workflow?: string;
   readonly dependsOn?: readonly string[];
   readonly parent?: string;
-  /** The owner's Yes a card rests on where the board is off: an agenda item (`!A12`). */
+  /** The owner's Yes a task rests on where the board is off: an agenda item (`!A12`). */
   readonly approval?: string;
-  /** The caller's own open agenda thread this card carries out (`!A12`): the card is then the ferret's own errand. */
+  /** The caller's own open agenda thread this task carries out (`!A12`): the task is then the ferret's own errand. */
   readonly thread?: string;
   readonly assignee?: string;
   readonly pr?: readonly string[];
@@ -104,9 +104,9 @@ export interface BoardCreateOptions {
   readonly file?: readonly string[];
   readonly project?: string;
   readonly lane?: string;
-  /** `--private`: a card for the ferrets' own bookkeeping, off the default board. */
+  /** `--private`: a task for the ferrets' own bookkeeping, off the default board. */
   readonly private?: boolean;
-  /** `--public`: a card the owner sees on the default board. */
+  /** `--public`: a task the owner sees on the default board. */
   readonly public?: boolean;
 }
 
@@ -123,7 +123,7 @@ const trimmedAll = (values: readonly string[] | undefined): string[] =>
   (values ?? []).map(value => value.trim()).filter(value => value.length > 0);
 
 /**
- * `--premise` / `--context` as the card stores them: one flag is its text, several are one bullet each. Absent
+ * `--premise` / `--context` as the task stores them: one flag is its text, several are one bullet each. Absent
  * (never passed) is `undefined`; passed but blank is `''`, so an edit can clear the field.
  */
 const singlePoint = (value: string): string => (/[\r\n]/u.test(value) ? value : stripListMarker(value));
@@ -221,7 +221,7 @@ const words = (value: readonly string[]): string => value.join(' ').trim();
 export const buildMoveAction = (to: string, reason: string | undefined): TaskActionRequest =>
   action({ action: 'move', to, ...(present(reason) === undefined ? {} : { reason: present(reason) }) }, 'cannot move');
 
-/** An external event (a deploy finished, a review approved) reported for a card; the daemon moves the card if a lane waits on it. */
+/** An external event (a deploy finished, a review approved) reported for a task; the daemon moves the task if a lane waits on it. */
 export function buildTriggerAction(event: string, reason?: string): TaskActionRequest {
   const parsed = ExternalLaneTriggerSchema.safeParse(event.trim());
   if (!parsed.success) {
@@ -323,7 +323,7 @@ export const buildAssignAction = (assignee: string | null): TaskActionRequest =>
 /** `claim` names no one: the daemon takes the caller's own session from its credential. */
 export const buildClaimAction = (): TaskActionRequest => action({ action: 'claim' }, 'cannot claim');
 
-/** `adopt` names no one either: the caller is the adopter, and `reason` (optional) is kept in the card's history. */
+/** `adopt` names no one either: the caller is the adopter, and `reason` (optional) is kept in the task's history. */
 export const buildAdoptAction = (reason: string | undefined): TaskActionRequest =>
   action({ action: 'adopt', ...(present(reason) === undefined ? {} : { reason: present(reason) }) }, 'cannot adopt');
 
@@ -385,7 +385,7 @@ export interface BoardEditOptions {
   readonly briefFile?: string;
   readonly howToTest?: string;
   readonly howToTestFile?: string;
-  /** `public` or `private`: who sees the card on the default board. */
+  /** `public` or `private`: who sees the task on the default board. */
   readonly visibility?: string;
 }
 
@@ -457,9 +457,9 @@ export interface BoardViewOptions {
   readonly closed?: boolean;
   readonly query?: string;
   readonly mine?: boolean;
-  /** Show the private cards alone. */
+  /** Show the private tasks alone. */
   readonly private?: boolean;
-  /** Show public and private cards. */
+  /** Show public and private tasks. */
   readonly all?: boolean;
 }
 
@@ -470,7 +470,7 @@ export interface BoardViewResolved {
 }
 
 /**
- * The board shows public cards. `--private` shows the rest and `--all` shows both. A board scoped to one ferret
+ * The board shows public tasks. `--private` shows the rest and `--all` shows both. A board scoped to one ferret
  * (`--mine`, `--ferret`) is that ferret's own work, so it shows both unless `--private` says otherwise.
  */
 function boardVisibilityOf(options: BoardViewOptions, resolved: BoardViewResolved): 'public' | 'private' | undefined {
@@ -479,7 +479,7 @@ function boardVisibilityOf(options: BoardViewOptions, resolved: BoardViewResolve
   return 'public';
 }
 
-/** The `--activity` choices: the board's filters (a card's asks ride the agenda, so there is no waiting filter). */
+/** The `--activity` choices: the board's filters (a task's asks ride the agenda, so there is no waiting filter). */
 export const BOARD_ACTIVITY_CHOICES: readonly BoardActivityFilter[] = BoardActivityFilterSchema.options;
 
 export function buildBoardQuery(options: BoardViewOptions, resolved: BoardViewResolved): BoardQueryInput {
@@ -518,7 +518,7 @@ export function buildBoardQuery(options: BoardViewOptions, resolved: BoardViewRe
 
 // ─── progress ──────────────────────────────────────────────────────────────────────────────────
 
-/** The options of `fy card progress`: the parts it replaces, or a file holding all three. */
+/** The options of `fy task progress`: the parts it replaces, or a file holding all three. */
 export interface BoardProgressOptions {
   readonly now?: string;
   readonly done?: string;
@@ -527,7 +527,7 @@ export interface BoardProgressOptions {
   readonly file?: string;
 }
 
-/** `fy card progress`: the one edit that writes the parts named; the daemon merges them into the card's progress. */
+/** `fy task progress`: the one edit that writes the parts named; the daemon merges them into the task's progress. */
 export function buildProgressAction(progress: Partial<Progress> | undefined): TaskActionRequest {
   if (progress === undefined || Object.keys(progress).length === 0) {
     refuse('nothing to write: pass --now, --done, --next or --file');

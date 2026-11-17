@@ -463,8 +463,8 @@ interface WardenInvestigationCostReader {
 }
 
 /**
- * The project boards, as the Warden reads them (`board-design.md` §3.4): the cards it reports orphaned, and
- * the card a ferret it starts again is told to carry on with. Every method is total.
+ * The project boards, as the Warden reads them (`board-design.md` §3.4): the tasks it reports orphaned, and
+ * the task a ferret it starts again is told to carry on with. Every method is total.
  */
 /** The send ledgers, read-only: what a sub-ferret and its parent last sent each other (`report-overdue.ts`). */
 export interface WardenExchangeReader {
@@ -549,9 +549,9 @@ function markInboxInvestigated(state: WardenRuntimeState, spawned: readonly stri
 }
 
 export interface WardenBoardPort {
-  /** Every card as the board derives it; `undefined` when the board could not be read. */
+  /** Every task as the board derives it; `undefined` when the board could not be read. */
   read(): Promise<WardenBoardRead | undefined>;
-  /** A session's focus card, in full; `undefined` when it has none or it could not be read. */
+  /** A session's focus task, in full; `undefined` when it has none or it could not be read. */
   focusCard(sessionId: string): Promise<WardenFocusTask | undefined>;
 }
 
@@ -560,11 +560,11 @@ interface WardenFeedReader {
   board(sessionId: string): Promise<AgendaBoardInput | undefined>;
 }
 
-/** Where the owner is told about orphaned cards nobody can be messaged about. Each call throws when the Agenda refuses it. */
+/** Where the owner is told about orphaned tasks nobody can be messaged about. Each call throws when the Agenda refuses it. */
 interface WardenOrphanList {
   /**
-   * The ONE machine item listing every such card, kept current: the same item as the list changes, nothing written
-   * when it is the same, closed when `undefined` (no card is left). `announce`: a card joined the list since the
+   * The ONE machine item listing every such task, kept current: the same item as the list changes, nothing written
+   * when it is the same, closed when `undefined` (no task is left). `announce`: a task joined the list since the
    * item last landed, so an item the owner closed is raised again; without it an item that is not open stays closed.
    */
   sync(item: OrphanItem | undefined, announce: boolean): Promise<void>;
@@ -601,8 +601,8 @@ export interface WardenSweepPorts {
   readonly autoMove?: WardenAutoMoveService;
   /**
    * The project boards, looked up each time they are read: Board is an optional plugin, so it can be off or not loaded.
-   * Absent, or answering `undefined`: no card is reported orphaned, and a resumed ferret is told no card.
-   * Present: every orphaned card (all pages), its lane by name, and a resumed ferret's focus card.
+   * Absent, or answering `undefined`: no task is reported orphaned, and a resumed ferret is told no task.
+   * Present: every orphaned task (all pages), its lane by name, and a resumed ferret's focus task.
    */
   readonly board?: () => WardenBoardPort | undefined;
   /** The send ledgers. Absent: no sub-ferret is reported overdue. */
@@ -1262,9 +1262,9 @@ export class WardenSweepService {
         : undefined;
     const collapsed = collapseUnwatchedFleet(raw.anomalies, unwatched);
     const detected: WardenDetectResult = { anomalies: collapsed, fingerprint: fingerprintAnomalies(collapsed) };
-    // ORPHANED CARDS are flagged beside the ferrets' anomalies and shown with them, but they are about a card,
+    // ORPHANED TASKS are flagged beside the ferrets' anomalies and shown with them, but they are about a task,
     // not a ferret: they never reach Jev, an investigation or the spawn fingerprint, which stay the ferrets'
-    // own. A card left for a week must not hold the recovery edge of every unrelated anomaly closed.
+    // own. A task left for a week must not hold the recovery edge of every unrelated anomaly closed.
     const board = await this.readBoard();
     const orphans = board === undefined ? [] : detectOrphanedTasks(board, fleet, nowMs);
     // OVERDUE REPORTS, likewise beside them and never to Jev or an investigation: the rule is facts and its
@@ -1310,7 +1310,7 @@ export class WardenSweepService {
         // Resumed by rule at its reset: the one flag that says it is still waiting there is already answered.
         !(anomaly.kind === 'quota_reset_passed' && moveRun.resumed.has(anomaly.sessionId)),
     );
-    // A card whose ferret was just started again has a ferret on it.
+    // A task whose ferret was just started again has a ferret on it.
     const orphaned = orphans.filter(anomaly => !reviveRun.revived.has(anomaly.sessionId));
 
     state = await this.handleInbox({ inbox, state, config, at, force: options.force });
@@ -2629,7 +2629,7 @@ export class WardenSweepService {
         });
       } else if (act.action === 'nudge') await this.ports.remedies.nudge(targetId, words.nudge);
       else if (act.action === 'resume' || act.action === 'restart') {
-        // The ferret started again carries on with its card (`focus-card.ts`). Only an auto one is handed
+        // The ferret started again carries on with its task (`focus-task.ts`). Only an auto one is handed
         // a turn: an interactive one is somebody's terminal, and keeps the resume domain's own behaviour.
         const task = target.config.mode === 'auto' ? await this.focusCard(targetId) : undefined;
         const message = task === undefined ? undefined : wardenResumeMessage(act.action, words.resumeReason, task);
@@ -2724,7 +2724,7 @@ export class WardenSweepService {
     );
   }
 
-  /** A ferret's focus card, or `undefined` when there is no board, no card, or it cannot be read. */
+  /** A ferret's focus task, or `undefined` when there is no board, no task, or it cannot be read. */
   private async focusCard(sessionId: string): Promise<WardenFocusTask | undefined> {
     const port = this.ports.board?.();
     return await port?.focusCard(sessionId).catch(() => undefined);
@@ -2743,9 +2743,9 @@ export class WardenSweepService {
   }
 
   /**
-   * Tell somebody about each orphaned card, once per episode: a live owner ferret gets a message, every other card is
-   * a row of the ONE machine item, which a card leaves when a ferret is on it again (`orphans.ts`, `orphan-item.ts`).
-   * A message that could not be queued puts the card on the list. Per-card asks an earlier Warden left on ferret
+   * Tell somebody about each orphaned task, once per episode: a live owner ferret gets a message, every other task is
+   * a row of the ONE machine item, which a task leaves when a ferret is on it again (`orphans.ts`, `orphan-item.ts`).
+   * A message that could not be queued puts the task on the list. Per-card asks an earlier Warden left on ferret
    * boards are closed here, once. Clearing runs with the Warden off, as escalations' does.
    */
   private async escalateOrphans(input: {
@@ -2795,7 +2795,7 @@ export class WardenSweepService {
       // A message that could not be typed is a row of the list instead.
       listed.push(tell.fallback);
     }
-    // The cards that JOIN the list now: news for the owner, so a closed item is raised again for them. A card the
+    // The tasks that JOIN the list now: news for the owner, so a closed item is raised again for them. A task the
     // list already held is not, so an item the owner dismissed ("Got it") stays dismissed until one joins.
     const joined = listed.filter(task => memory[task.id] === undefined);
     const landed = await this.syncOrphanItem(listed, joined.length > 0);
@@ -2809,9 +2809,9 @@ export class WardenSweepService {
   }
 
   /**
-   * Keep the ONE machine item current with the cards listed (closed when there are none), and raise it again for a
-   * card that joined. A refusal (the machine's board is full, Asks is off) is tried again next sweep, which is one
-   * attempt of one item, never one per card, and the cards stay news until it lands; it is journalled when the reason
+   * Keep the ONE machine item current with the tasks listed (closed when there are none), and raise it again for a
+   * task that joined. A refusal (the machine's board is full, Asks is off) is tried again next sweep, which is one
+   * attempt of one item, never one per task, and the tasks stay news until it lands; it is journalled when the reason
    * changes, not on every repeat of the same one. Says whether it landed.
    */
   private async syncOrphanItem(tasks: readonly OrphanedTask[], announce: boolean): Promise<boolean> {

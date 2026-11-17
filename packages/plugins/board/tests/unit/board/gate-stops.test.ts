@@ -29,9 +29,9 @@ import {
 } from './support.ts';
 
 /**
- * A GATE IS PASSED ONLY BY THE OWNER (docs/board.md § Cards show progress): their answer to its item, or their own
- * move — and, on an internal card, its owner ferret's or a lead's. A ferret's move, a daemon trigger, PR facts,
- * `fy signal done` and a refile may bring a card INTO a gate; none takes it out of one or past one.
+ * A GATE IS PASSED ONLY BY THE OWNER (docs/board.md § Tasks show progress): their answer to its item, or their own
+ * move — and, on an internal task, its owner ferret's or a lead's. A ferret's move, a daemon trigger, PR facts,
+ * `fy signal done` and a refile may bring a task INTO a gate; none takes it out of one or past one.
  */
 
 /** The classic lanes with Review/CI made a gate too: Todo, Plan*, Implement, Review/CI*, Merged, Released, To test*, Closed. */
@@ -246,7 +246,7 @@ describe('the daemon’s moves stop at a gate', () => {
   });
 
   it('keeps a card in a verify lane with no owner gate when PR facts would move it', async () => {
-    // Arrange — an open PR beside the shipped one used to pull a card back out of To test
+    // Arrange — an open PR beside the shipped one used to pull a task back out of To test
     const world = serviceOver(
       [
         taskFor('external', 'tested', {
@@ -364,7 +364,7 @@ describe('the security review’s ways past a gate (&F364 PR B)', () => {
   });
 
   it('refuses a named lane past a gate of the other board, even for a card past no gate here', async () => {
-    // Arrange — the second hop alone: a card in Merged, refiled by name into Released past Plan
+    // Arrange — the second hop alone: a task in Merged, refiled by name into Released past Plan
     const world = serviceOver([taskFor('external', 'merged')]);
 
     // Act
@@ -450,7 +450,7 @@ describe('the security review’s ways past a gate (&F364 PR B)', () => {
   });
 
   it('reads a top-level ferret’s own card as the owner’s: it cannot pass its own Plan gate by paraphrasing', async () => {
-    // Arrange — lead has no parent; its card says a session of its own asked, and askedBy says agent
+    // Arrange — lead has no parent; its task says a session of its own asked, and askedBy says agent
     const world = serviceOver([
       taskFor('external', 'plan', {
         owner: 'lead',
@@ -546,7 +546,7 @@ describe('who a card’s gates ask comes only from what the daemon recorded (kya
   };
 
   it('reads a card the daemon made for a fy new as internal, and lets its lead pass the gate', async () => {
-    // Arrange — the daemon's own record of the card: createdBy daemon, written by the spawn alone
+    // Arrange — the daemon's own record of the task: createdBy daemon, written by the spawn alone
     const world = await spawned('session:lead');
 
     // Act
@@ -571,7 +571,7 @@ describe('who a card’s gates ask comes only from what the daemon recorded (kya
   });
 
   it('never makes an owner’s card internal by handing it to a helper, refiling or reopening it', async () => {
-    // Arrange — the owner made it; lead hands it to child (fy new --card)
+    // Arrange — the owner made it; lead hands it to child (fy new --task)
     const world = serviceOver([
       taskFor('external', 'plan', {
         owner: 'lead',
@@ -642,7 +642,7 @@ describe('a refile never skips a gate of the other board (kyan R2)', () => {
   });
 
   it('stops an unnamed refile back at the first gate it would skip', async () => {
-    // Arrange — the review's (b): a card that reached the quick board's To test comes home unnamed
+    // Arrange — the review's (b): a task that reached the quick board's To test comes home unnamed
     const world = twoBoards(taskFor('external', 'to-test', { projectId: OTHER_PROJECT }));
 
     // Act

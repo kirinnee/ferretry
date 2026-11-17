@@ -1,13 +1,13 @@
 /**
- * A card's read-time view (`board-design.md` §2.4, "derived at read time, never stored"): the stored card
- * plus what follows from the other cards, session liveness and the agenda.
+ * A task's read-time view (`board-design.md` §2.4, "derived at read time, never stored"): the stored task
+ * plus what follows from the other tasks, session liveness and the agenda.
  *
- * - `blockedBy`, `blocks`, `rollup`, `suggestedLane` and `shippedIn` are computed here, from the cards.
+ * - `blockedBy`, `blocks`, `rollup`, `suggestedLane` and `shippedIn` are computed here, from the tasks.
  * - `lastTouchedAt`, `touchedBy` and `activity` come from the {@link ActivityDeriver} port.
- * - `openAsks` comes from the {@link CardAskLinkSource} port (U7).
- * - `askedBy` is the one the card was stored with, else (a card from before it was stored) read from its ask's source (`origin.ts`).
- * - `origin` and `humanParent` come from the card and its ancestors (`origin.ts`), with the lineage of the
- *   sessions a card was recorded from read through the {@link FerretParents} port.
+ * - `openAsks` comes from the {@link TaskAskLinkSource} port (U7).
+ * - `askedBy` is the one the task was stored with, else (a task from before it was stored) read from its ask's source (`origin.ts`).
+ * - `origin` and `humanParent` come from the task and its ancestors (`origin.ts`), with the lineage of the
+ *   sessions a task was recorded from read through the {@link FerretParents} port.
  */
 import {
   type Task,
@@ -32,7 +32,7 @@ export interface DerivationInputs {
   readonly origins?: OriginFacts;
 }
 
-/** A card the deriver said nothing about has had no activity anyone measured. */
+/** A task the deriver said nothing about has had no activity anyone measured. */
 export const UNOBSERVED: TaskActivityFacts = { lastTouchedAt: null, touchedBy: null, activity: 'idle' };
 const NO_ASKS: TaskAsks = { open: [], asking: [] };
 const OWNER_STARTED: OriginFacts = { startedByFerret: () => false };
@@ -42,7 +42,7 @@ const rank = (category: LaneCategory): number => LANE_CATEGORIES.indexOf(categor
 const later = (left: string | null, right: string | null): string | null =>
   left === null ? right : right === null || left >= right ? left : right;
 
-/** The live (not dropped) children of a card. */
+/** The live (not dropped) children of a task. */
 const liveChildren = (task: Task, index: BoardIndex): readonly Task[] =>
   index.children(task.id).filter(child => child.dropped === null);
 
@@ -105,7 +105,7 @@ export const suggestedLaneOf = (task: Task, inputs: DerivationInputs): string | 
   return null;
 };
 
-/** One card's whole view. */
+/** One task's whole view. */
 export const deriveView = (task: Task, inputs: DerivationInputs): TaskView => {
   const activity = inputs.activity.get(task.id) ?? UNOBSERVED;
   const asks = inputs.asks.get(task.id) ?? NO_ASKS;
@@ -132,9 +132,9 @@ export const deriveView = (task: Task, inputs: DerivationInputs): TaskView => {
 };
 
 /**
- * What one card's view reads ({@link deriveView}): the card, every live descendant (its roll-up and the
+ * What one task's view reads ({@link deriveView}): the task, every live descendant (its roll-up and the
  * activity rolled up into it) and every ancestor on this machine (its human parent). A loop in `parent`
- * is walked once. Deriving these alone gives that card exactly the view a whole-board read gives it.
+ * is walked once. Deriving these alone gives that task exactly the view a whole-board read gives it.
  */
 export const neighbourhoodOf = (task: Task, index: BoardIndex): readonly Task[] => {
   const seen = new Map<TaskId, Task>([[task.id, task]]);
@@ -153,8 +153,8 @@ export const neighbourhoodOf = (task: Task, index: BoardIndex): readonly Task[] 
 };
 
 /**
- * Asks the two ports about a set of cards at once, so a page costs one call to each. The agenda
- * answers first: an open card ask on its agenda keeps a card from going stale. Asks is read once for the set,
+ * Asks the two ports about a set of tasks at once, so a page costs one call to each. The agenda
+ * answers first: an open task ask on its agenda keeps a task from going stale. Asks is read once for the set,
  * so a neighbourhood costs the same one read as the whole board.
  */
 export const gatherDerivation = async (
@@ -175,8 +175,8 @@ export const gatherDerivation = async (
 };
 
 /**
- * Which of the sessions the cards were recorded from a ferret started, asked once per session. A session
- * whose lineage cannot be read reads as the owner's, so a card is never hidden on a failed read.
+ * Which of the sessions the tasks were recorded from a ferret started, asked once per session. A session
+ * whose lineage cannot be read reads as the owner's, so a task is never hidden on a failed read.
  */
 const originFacts = async (tasks: readonly Task[], parents: FerretParents): Promise<OriginFacts> => {
   const sessions = [...new Set(tasks.flatMap(task => askFerretOf(task) ?? []))];

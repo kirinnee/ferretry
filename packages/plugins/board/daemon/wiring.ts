@@ -131,7 +131,7 @@ export interface BoardWiringNeeds {
 /** Everything the plugin assembles, so `index.ts` stays a table of what is provided. */
 export interface BoardWorld {
   readonly service: BoardService;
-  /** Board's cards as work, for Conversation's `search.sources`: `fy search` and `search_work` find them. */
+  /** Board's tasks as work, for Conversation's `search.sources`: `fy search` and `search_work` find them. */
   readonly workSource: BoardWorkSource;
   readonly lanes: LaneSetService;
   readonly switches: BoardSwitchService;
@@ -155,23 +155,23 @@ export interface BoardWorld {
   readonly sweepTick: (signal?: AbortSignal) => Promise<void>;
   readonly lines: (ferret: string) => Promise<readonly SitrepLine[]>;
   readonly heldBy: (ferret: string) => Promise<readonly TaskView[]>;
-  /** The lane set of every project that has a card (`BoardApi.laneSets`). */
+  /** The lane set of every project that has a task (`BoardApi.laneSets`). */
   readonly laneSets: () => Promise<readonly LaneSet[]>;
-  /** Every open orphaned card with every board's lanes, from one snapshot (`BoardApi.orphanedCards`). */
+  /** Every open orphaned task with every board's lanes, from one snapshot (`BoardApi.orphanedCards`). */
   readonly orphanedCards: () => Promise<OrphanedTasks>;
-  /** The card a ferret works on with its lane set, when it is on this machine (`BoardApi.focusOf`). Not-found is `undefined`. */
+  /** The task a ferret works on with its lane set, when it is on this machine (`BoardApi.focusOf`). Not-found is `undefined`. */
   readonly focusCard: (ferret: string) => Promise<FocusTask | undefined>;
   /** `turn.ended` (Conversation): the turn-end check and the gate check, each failure said, never thrown. */
   readonly turnEnded: (ferret: string) => Promise<void>;
-  /** `ferret.started` (Ferrets): the started ferret's card (today's `SessionCards`). Never rejects. */
+  /** `ferret.started` (Ferrets): the started ferret's task (today's `SessionCards`). Never rejects. */
   readonly ferretStarted: (started: FerretStartedPayload) => Promise<void>;
 }
 
 /**
- * The machine a card is made on: the daemon's id from the kernel's read-only identity port {daemonId, daemonName}
+ * The machine a task is made on: the daemon's id from the kernel's read-only identity port {daemonId, daemonName}
  * (lead decisions DECISIONS-1 #1, D2 #13; today's `attachmentDaemonId`). GAP: that port is the kernel porter's and is
- * not on 5.0 yet, so until it merges this reads nothing — and a card is then refused ("the daemon identity is not
- * open yet") rather than stamped with a made-up id that a stored card would keep for good. Board stays in
+ * not on 5.0 yet, so until it merges this reads nothing — and a task is then refused ("the daemon identity is not
+ * open yet") rather than stamped with a made-up id that a stored task would keep for good. Board stays in
  * `ports-pending.json` until it lands.
  */
 export const machineIdOf = (kernel: KernelPorts): string | undefined => {
@@ -181,7 +181,7 @@ export const machineIdOf = (kernel: KernelPorts): string | undefined => {
 
 const KEPT_START_KEYS = 256;
 
-/** The labels of the ferrets the daemon starts for itself (today's `ordinaryFerret`): no card is made for them. */
+/** The labels of the ferrets the daemon starts for itself (today's `ordinaryFerret`): no task is made for them. */
 const DAEMON_WORKER_LABELS: ReadonlySet<string> = new Set(['ferretry-learning', 'ferretry-guide-builder']);
 
 export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
@@ -211,7 +211,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   const ferretProjects = new FerretProjects(facts, registry, probe, ['/tmp', '/var/tmp', '/private/tmp']);
   const switches = new BoardSwitchService(new BoardSwitchFiles(files), clock);
 
-  // The lane service moves cards through the board service, which reads the lane service: bound late.
+  // The lane service moves tasks through the board service, which reads the lane service: bound late.
   let board: BoardService | undefined;
   const boardService = (): BoardService => {
     if (board === undefined) throw new Error('the board service is not built yet');
@@ -270,7 +270,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     }
     return current;
   };
-  // gates are told after every committed write of a card; bound late for the same reason as the lanes.
+  // gates are told after every committed write of a task; bound late for the same reason as the lanes.
   let gateItems: GateItems | undefined;
   const service = new BoardService({
     store,
@@ -304,7 +304,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   });
   board = service;
 
-  // ── gates: the card's entry into a gate lane is an obligation Asks shows; answering it moves the card ─────────
+  // ── gates: the card's entry into a gate lane is an obligation Asks shows; answering it moves the task ─────────
   const gateTask = async (stored: Task, view?: TaskView): Promise<GateTask> => {
     const response = await service.card(stored.id);
     const name = (await lanes.project(stored.projectId))?.name;
@@ -324,7 +324,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
       const stored = (await service.snapshot()).cards.find(task => task.id === id);
       return stored === undefined ? undefined : await gateTask(stored);
     },
-    // One sweep and one snapshot for the whole board; every card is built from them (v4's one-sweep shape), with no
+    // One sweep and one snapshot for the whole board; every task is built from them (v4's one-sweep shape), with no
     // per-card derivation.
     cards: async () => {
       const { views, laneSets } = await service.sweepBoard();
@@ -358,7 +358,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   });
   gateItems = gates;
 
-  // ── starting a ferret on a card ───────────────────────────────────────────────────────────────────────────────
+  // ── starting a ferret on a task ───────────────────────────────────────────────────────────────────────────────
   const startResults = new Map<string, import('../contract/index.ts').TaskStartResponse>();
   const startPorts: StartOnTaskPorts = {
     card: async id => await service.card(id),
@@ -377,11 +377,11 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     stuck: async () => new Map(),
     exclusive: async (id, work) => await serial.run(`board:start:${id}`, work),
     start: async ({ card: task, folder, name, prompt }) => {
-      // Only the owner reaches this (`startOnCard` refuses any other caller before the port is asked), so it is a person's start.
+      // Only the owner reaches this (`startOnTask` refuses any other caller before the port is asked), so it is a person's start.
       const started = await ferrets.start({ folder, name, prompt, by: 'board' }, PERSON_ORIGIN);
       if (!started.ok) throw new TaskStartRefused(started.error.reason);
       const ferret = started.value;
-      // The new ferret holds the card from the first turn: assigned as the owner's act, and its focus.
+      // The new ferret holds the task from the first turn: assigned as the owner's act, and its focus.
       await service.assignForOwner(
         task.id,
         ferret,
@@ -525,7 +525,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
       readable,
       boardOn,
       tail: tailEvents,
-      // GAP: Asks' summary carries no card for a ferret's own ask, so a duplicate of a card's gate ask is not found.
+      // GAP: Asks' summary carries no task for a ferret's own ask, so a duplicate of a task's gate ask is not found.
       open: async ferret =>
         (await asks.open({ ferret: FerretIdSchema.parse(ferret), state: 'open' })).map(
           (ask): GateCheckItem => ({
@@ -556,7 +556,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
         .catch((error: unknown) => diagnostics.warn(`the board ${name} check of ${ferret} failed: ${String(error)}`));
   };
 
-  // ── a started ferret's card (Ferrets' `ferret.started`; today's SessionCards) ───────────────────────────────
+  // ── a started ferret's task (Ferrets' `ferret.started`; today's SessionCards) ───────────────────────────────
   const ferretTasks = new FerretTasks({
     board: service,
     lanes,
@@ -576,12 +576,12 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     bin: 'fy',
   });
   const ferretStarted = async (started: FerretStartedPayload): Promise<void> => {
-    // The board's own start assigned its card already; a daemon worker (a learning miner, a guide builder) is not work
+    // The board's own start assigned its task already; a daemon worker (a learning miner, a guide builder) is not work
     // on a board. GAP: a warden's lineage is not in the payload, so a warden's helper is not told apart.
     if (started.by === 'board' || (started.label !== undefined && DAEMON_WORKER_LABELS.has(started.label))) return;
     try {
       if (started.card !== undefined) {
-        // `--card`: handed over, or the ferret is stopped with the reason (today refused it before the launch; the
+        // `--task`: handed over, or the ferret is stopped with the reason (today refused it before the launch; the
         // observe hook runs once the record is written, so the stop comes just after).
         const stop = async (reason: string): Promise<void> => {
           diagnostics.warn(`stopping ${started.ferret}: ${reason}`);
@@ -608,8 +608,8 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   };
 
   /**
-   * Asks calls this BEFORE it records the answer (#1552: the card moves first): a refusal leaves the ask open and is the
-   * sentence the owner is told. A replay finds the card gone from that gate and moves nothing.
+   * Asks calls this BEFORE it records the answer (#1552: the task moves first): a refusal leaves the ask open and is the
+   * sentence the owner is told. A replay finds the task gone from that gate and moves nothing.
    */
   const applyAnswer = async (answer: AskAnswer): Promise<'applied' | { readonly refused: string }> => {
     const shaped = await gateAnswerOf(asks, answer);
@@ -673,7 +673,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     focusCard: async ferret => {
       const ref = await focus.focusOf(ferret);
       if (ref === null) return undefined;
-      // A card of another machine is not answered here: its id means nothing in this store (today's guard).
+      // A task of another machine is not answered here: its id means nothing in this store (today's guard).
       if (ref.machineId !== undefined && ref.machineId !== machineId()) return undefined;
       try {
         return await service.card(ref.id);

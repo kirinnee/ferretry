@@ -11,7 +11,7 @@ const tasksOf = (count: number, from = 1): TaskView[] =>
     taskView({ id: `F${String(from + each)}`, owner: 'lead', assignee: 'worker' }, { activity: 'orphaned' }),
   );
 
-/** Board's contract with the reads the reader uses: the orphaned cards in one read, the classic lanes, some focus cards. */
+/** Board's contract with the reads the reader uses: the orphaned tasks in one read, the classic lanes, some focus tasks. */
 const boardOf = (
   tasks: readonly TaskView[],
   options: { readonly focus?: Readonly<Record<string, FocusTask>> } = {},
@@ -52,7 +52,7 @@ describe('the Warden’s board reader', () => {
   });
 
   test('a card that leaves or joins the orphaned set between reads cannot make the read skip or repeat another', async () => {
-    // Arrange: a board that changes after every read it answers (a ferret picks up the first card; a new card is orphaned)
+    // Arrange: a board that changes after every read it answers (a ferret picks up the first task; a new task is orphaned)
     let orphaned = tasksOf(600);
     const board: BoardApi = {
       ...fakeBoard(),
@@ -69,7 +69,7 @@ describe('the Warden’s board reader', () => {
     // Act
     const read = await boardReader(board, nobodyIsAHelper).read();
 
-    // Assert: exactly the snapshot, each card once
+    // Assert: exactly the snapshot, each task once
     const ids = read?.views.map(view => view.id) ?? [];
     expect(ids).toEqual(tasksOf(600).map(view => view.id));
     expect(new Set(ids).size).toBe(600);

@@ -6,9 +6,9 @@ import { taskAskReference } from '../../../daemon/lib/protocol/agenda-task-asks.
 import { agendaService } from './routes/support.ts';
 
 /**
- * A card ask a v4 ledger carries (`item.cardAsks`, an item such as `^A1 [task]` on `&I1`): the Board's `card` source
- * must see it as the card's ask, or a restart raises a SECOND one for the same gate (the duplicate the owner saw after
- * conversion). The carrier keeps its own source (`ferret`); only a read FOR the `card` source lists the carried asks.
+ * A task ask a v4 ledger carries (`item.cardAsks`, an item such as `^A1 [task]` on `&I1`): the Board's `task` source
+ * must see it as the task's ask, or a restart raises a SECOND one for the same gate (the duplicate the owner saw after
+ * conversion). The carrier keeps its own source (`ferret`); only a read FOR the `task` source lists the carried asks.
  */
 
 const GATE = {
@@ -26,7 +26,7 @@ const REFERENCE = taskAskReference({ gate: GATE });
 const boards = { ferrets: async () => ['s1'] };
 const TASK_SOURCE: AskSourceSpec = { schema: undefined as never, title: 'Card', form: false };
 
-/** One ferret's own `A1` carrying one card ask, on the real engine. */
+/** One ferret's own `A1` carrying one task ask, on the real engine. */
 async function carried() {
   const agenda = agendaService();
   await agenda.raise(

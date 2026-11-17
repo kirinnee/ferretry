@@ -20,8 +20,8 @@ import { boardTask, lanes, OTHER_PROJECT, PROJECT } from '../../support/board.ts
 
 /**
  * Board's half of `session.archive-keeps` (ruling #46). The archive is OFF by default today and in 5.0 (no `afterHours`
- * in `archive.yaml`); these takers answer for when the owner turns it on. Today's rule (`sessionsOnOpenCards`, which
- * Ferrets keeps): a card holds its owner and assignee live unless it is dropped or its lane is `closed` or `shipped`;
+ * in `archive.yaml`); these takers answer for when the owner turns it on. Today's rule (`sessionsOnOpenTasks`, which
+ * Ferrets keeps): a task holds its owner and assignee live unless it is dropped or its lane is `closed` or `shipped`;
  * a lane Board cannot name is in flight.
  */
 
@@ -75,7 +75,7 @@ describe('AK-B Board answers the archive: every card, as today read it', () => {
       { owner: 'lead', assignee: 'helper', dropped: false, category: 'active' },
       { owner: 'other', assignee: null, dropped: false, category: 'backlog' },
     ]);
-    // A ferret that neither owns nor holds a card is named by none.
+    // A ferret that neither owns nor holds a task is named by none.
     expect(standings.some(each => each.owner === 'stranger' || each.assignee === 'stranger')).toBe(false);
   });
 
@@ -171,7 +171,7 @@ describe('AK-B Board answers only ferret ids, so one odd stored card never stops
       { owner: 'helper', assignee: null, dropped: false, category: 'active' },
       { owner: 'lead', assignee: null, dropped: false, category: 'backlog' },
     ]);
-    // The assignee is still kept live by the card, exactly as today (owner and assignee keep alike).
+    // The assignee is still kept live by the task, exactly as today (owner and assignee keep alike).
     expect(standings.map(keptToday)).toEqual([true, true]);
     expect(meetsFerretsBoundary(standings)).toBe(true);
   });
@@ -198,11 +198,11 @@ describe('AK-B Board answers only ferret ids, so one odd stored card never stops
 
   test('AK-B13 one odd card beside a good one: Ferrets still reads the answer, so the good card’s finished ferret can archive', async () => {
     const tasks = [
-      // An odd card still in flight: its owner is a callsign, not a ferret id, and it names nobody else.
+      // An odd task still in flight: its owner is a callsign, not a ferret id, and it names nobody else.
       boardTask({ id: 'F1', owner: ':lead', assignee: null, laneId: 'implement' }),
-      // A good card that is done: it no longer holds its owner, so that ferret may archive.
+      // A good task that is done: it no longer holds its owner, so that ferret may archive.
       boardTask({ id: 'F2', owner: 'finished', assignee: null, laneId: 'closed' }),
-      // A good card in flight: it holds its owner and assignee.
+      // A good task in flight: it holds its owner and assignee.
       boardTask({ id: 'F3', owner: 'busy', assignee: 'helper', laneId: 'implement' }),
     ];
     // Stored as-is, the odd party fails Ferrets' boundary, which would make the WHOLE answer unreadable and keep every
@@ -219,14 +219,14 @@ describe('AK-B Board answers only ferret ids, so one odd stored card never stops
     // Ferrets parses Board's answer with this schema: it is readable, so the pass decides on it.
     const read = ArchiveCardStandingsSchema.safeParse(standings);
     if (!read.success) throw new Error('Ferrets would read this answer as unreadable and keep every ferret');
-    // Today's rule over what Ferrets read: only an open card's owner and assignee are kept.
+    // Today's rule over what Ferrets read: only an open task's owner and assignee are kept.
     const kept = new Set<string>(
       read.data
         .filter(each => !each.dropped && each.category !== 'closed' && each.category !== 'shipped')
         .flatMap(each => [each.owner, ...(each.assignee === null ? [] : [each.assignee])]),
     );
     expect([...kept].sort()).toEqual(['busy', 'helper']);
-    // The good card's finished ferret is not kept, so the archive may take it.
+    // The good task's finished ferret is not kept, so the archive may take it.
     expect(kept.has('finished')).toBe(false);
   });
 });
@@ -263,7 +263,7 @@ describe('AK-B Board takes session.archive-keeps through Ferrets’ contract onl
       const [only] = contributions;
       if (only?.item.kind !== 'board') throw new Error('no board source');
       expect(await only.item.cards()).toEqual([]);
-      // A card written through the booted plugin is answered by the hook: the hook reads Board's real store.
+      // A task written through the booted plugin is answered by the hook: the hook reads Board's real store.
       const made = await host.provided(BoardPort).create(
         'owner',
         CardCreateRequestSchema.parse({

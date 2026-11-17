@@ -1,14 +1,14 @@
 // VENDORED from v4.291.5 (64fd8cbcc811e2341f1ab18be170d76106a44852) packages/protocol/src/lib/agenda-card.ts, verbatim.
 // The converter's own frozen v4 reader: never imported by the product. Do not edit; re-vendor instead.
 /**
- * AN AGENDA ITEM AS A CARD: its title, its kind and its answers by swipe direction.
+ * AN AGENDA ITEM AS A TASK: its title, its kind and its answers by swipe direction.
  *
  * The one place those are decided, so the CLI that raises an item, the daemon that pushes it and the
- * app that draws it agree. An item raised before cards had titles carries none of these fields; every
+ * app that draws it agree. An item raised before tasks had titles carries none of these fields; every
  * reader goes through the functions here, which derive them from the item's ask and summary, so an old
  * item reads exactly as it did — never a parse failure, never a second migration.
  *
- * The defaults (docs/agenda.md, "Answering a card"):
+ * The defaults (docs/agenda.md, "Answering a task"):
  *
  * | kind       | ←               | ↑ (optional)      | →             |
  * | ---------- | --------------- | ----------------- | ------------- |
@@ -23,14 +23,14 @@
  * | form       |                 |                   |               |
  * | input      |                 |                   |               |
  *
- * WHAT A CARD SHOWS IS ITS SHAPE (`agendaShape`), and the buttons follow it for every item, old or new: a card
+ * WHAT A TASK SHOWS IS ITS SHAPE (`agendaShape`), and the buttons follow it for every item, old or new: a task
  * asked in words — one open question, several questions, or a question mixed with steps — has NO buttons (the
- * reply box is the answer); a to-do has only Mark as done (and a Skip its ferret added); a notice or an info card
- * only Got it. An item stored with more answers than its shape takes keeps them in its record, never on its card.
+ * reply box is the answer); a to-do has only Mark as done (and a Skip its ferret added); a notice or an info task
+ * only Got it. An item stored with more answers than its shape takes keeps them in its record, never on its task.
  *
  * ONE MEANING FOR EVERY SWIPE: a row of options reads in the options list's order — the first ←, the second ↑,
  * the third → (two: ← and →; one: ↑) — wherever the recommendation sits, so a swipe means the same in the Inbox
- * deck, on the card, in the item view and in what the CLI prints. The recommended option is the one kept on the
+ * deck, on the task, in the item view and in what the CLI prints. The recommended option is the one kept on the
  * row when there are more than three, and is tagged where it lands. Swipe ↓ is never an answer.
  *
  * YES AND NO HAVE ONE FIXED PLACE: a row of exactly Yes and No is always No ← · Yes →, whatever order the ferret
@@ -51,7 +51,7 @@ import {
 } from './agenda.ts';
 import { plainLabel } from './plain-label.ts';
 
-/** The words a yes-or-no card's two options are. */
+/** The words a yes-or-no task's two options are. */
 export const YES_LABEL = 'Yes';
 export const NO_LABEL = 'No';
 
@@ -75,7 +75,7 @@ export const yesNoOrder = <T>(items: readonly T[], labelOf: (item: T) => string)
   return [...items].sort((a, b) => Number(no(b)) - Number(no(a)));
 };
 
-/** The default label of each answer a card can give, when the ferret did not word it. */
+/** The default label of each answer a task can give, when the ferret did not word it. */
 export const DEFAULT_ANSWER_LABELS: Readonly<Record<Exclude<AgendaAnswerEffect, 'choose'>, string>> = {
   approve: 'Approve',
   reject: 'Deny',
@@ -110,7 +110,7 @@ export const isDefaultAnswerLabel = (does: AgendaAnswerEffect, label: string): b
 };
 
 /**
- * The fixed answer EVERY card a ferret raised carries besides its own (at most three): talk it through
+ * The fixed answer EVERY task a ferret raised carries besides its own (at most three): talk it through
  * before answering. It never takes one of the three direction slots — the app gives it its own button (docs/agenda.md, "Discuss").
  */
 export const DISCUSS_LABEL = 'Discuss';
@@ -131,7 +131,7 @@ export const GOT_IT_LABEL = 'Got it';
 /** The order the answer bar lays answers out in: the same order the swipes point. */
 export const ANSWER_DIRECTIONS: readonly AgendaDirection[] = ['left', 'up', 'right'];
 
-/** What the card fields are read from: an item, or a request to raise one. */
+/** What the task fields are read from: an item, or a request to raise one. */
 export interface AgendaTaskSource extends AgendaBrief {
   readonly subject: string;
   readonly ask?: AgendaAsk | undefined;
@@ -144,7 +144,7 @@ export interface AgendaTaskSource extends AgendaBrief {
 export const isYesNoAsk = (ask: AgendaAsk | undefined): boolean =>
   ask?.kind === 'multiple-choice' && isYesNoPair(ask.options.map(option => option.label));
 
-/** The kind an ask means, for an item that does not say (raised before cards had kinds). */
+/** The kind an ask means, for an item that does not say (raised before tasks had kinds). */
 export const kindOfAsk = (ask: AgendaAsk | undefined): AgendaKind => {
   switch (ask?.kind) {
     case undefined:
@@ -162,13 +162,13 @@ export const kindOfAsk = (ask: AgendaAsk | undefined): AgendaKind => {
   }
 };
 
-/** The card's kind: the one it was raised with, else the one its ask means. */
+/** The task's kind: the one it was raised with, else the one its ask means. */
 export const agendaTaskKind = (item: Pick<AgendaTaskSource, 'kind' | 'ask'>): AgendaKind =>
   item.kind ?? kindOfAsk(item.ask);
 
 /**
- * The chip each kind wears, in plain words for what the OWNER does with the card (docs/agenda.md, "The kind chip").
- * The one map every surface reads — the card's pill, the Inbox chip, the header and the row's meta line.
+ * The chip each kind wears, in plain words for what the OWNER does with the task (docs/agenda.md, "The kind chip").
+ * The one map every surface reads — the task's pill, the Inbox chip, the header and the row's meta line.
  */
 export const AGENDA_KIND_LABELS: Readonly<Record<AgendaKind, string>> = {
   reply: 'Question',
@@ -182,7 +182,7 @@ export const AGENDA_KIND_LABELS: Readonly<Record<AgendaKind, string>> = {
   input: 'Type in',
 };
 
-/** The chip of a card waiting for the owner to try the work (a gate in a verify lane): it is a choice, but it asks for a test. */
+/** The chip of a task waiting for the owner to try the work (a gate in a verify lane): it is a choice, but it asks for a test. */
 export const TEST_KIND_LABEL = 'Test';
 
 /** The chip word of an item or a request: the kind's plain word. */
@@ -226,7 +226,7 @@ const optionLabel = (options: readonly AgendaAskOption[], wanted: string): Agend
 /**
  * A choice's answers: which options sit on the row — the recommended one (or the first) and the first others, three
  * at most. Their directions are then the options list's order (`inOptionOrder`). Options past the third have no
- * direction; the card offers them in its options list.
+ * direction; the task offers them in its options list.
  */
 const choiceAnswers = (options: readonly AgendaAskOption[], recommended: string | undefined): AgendaTaskAnswer[] => {
   const middle = (recommended === undefined ? undefined : optionLabel(options, recommended)) ?? options[0];
@@ -248,7 +248,7 @@ export interface UpAnswer {
 }
 
 /**
- * The answers a card of `kind` offers by default, given its ask (for a choice's options), the option it
+ * The answers a task of `kind` offers by default, given its ask (for a choice's options), the option it
  * recommends, and the optional up answer a task or a permission takes. Laid out left · up · right.
  */
 export const defaultAgendaAnswers = (
@@ -335,7 +335,7 @@ const inOptionOrder = (
 };
 
 /**
- * WHAT A CARD NEEDS FROM THE OWNER, AND SO HOW IT LOOKS — one shape per kind (docs/agenda.md, "What I need from
+ * WHAT A TASK NEEDS FROM THE OWNER, AND SO HOW IT LOOKS — one shape per kind (docs/agenda.md, "What I need from
  * you"); `agenda-shape.ts` holds the words each is taught and drawn with:
  *
  * - `choice`: ONE question, each option explained, the options as buttons.
@@ -345,7 +345,7 @@ const inOptionOrder = (
  * - `reply`: one open question, answered in the reply box: no buttons.
  * - `answers`: several questions, or a question mixed with steps: a numbered list of each answer wanted, all of
  *   them given in one reply — no buttons.
- * - `form`: structured fields on the card (pick one, pick many, yes/no) and one free-text field in the reply box,
+ * - `form`: structured fields on the task (pick one, pick many, yes/no) and one free-text field in the reply box,
  *   all sent together as one numbered answer — no buttons (the form's own Send).
  * - `todo`: numbered steps, then Mark as done.
  * - `info`: something to know (a notice too), Got it.
@@ -363,13 +363,13 @@ export type AgendaShape =
   | 'info'
   | 'input';
 
-/** What a card's shape is read from: its kind, ask, questions and steps, and whether it is a notice. */
+/** What a task's shape is read from: its kind, ask, questions and steps, and whether it is a notice. */
 export type AgendaShapeSource = Pick<AgendaTaskSource, 'kind' | 'ask' | 'questions' | 'steps'> & {
   readonly notice?: true | undefined;
   readonly confirms?: unknown;
 };
 
-/** The card's shape, from its stored fields alone, so an item raised before shapes reads in one too. */
+/** The task's shape, from its stored fields alone, so an item raised before shapes reads in one too. */
 export const agendaShape = (item: AgendaShapeSource): AgendaShape => {
   if (item.notice === true) return 'info';
   const kind = agendaTaskKind(item);
@@ -395,7 +395,7 @@ export const agendaShape = (item: AgendaShapeSource): AgendaShape => {
   }
 };
 
-/** The answers a shape keeps on its card: none when the reply box is the answer, only Mark as done or Got it. */
+/** The answers a shape keeps on its task: none when the reply box is the answer, only Mark as done or Got it. */
 const SHAPE_KEEPS: Readonly<Partial<Record<AgendaShape, (answer: AgendaTaskAnswer) => boolean>>> = {
   reply: () => false,
   answers: () => false,
@@ -406,8 +406,8 @@ const SHAPE_KEEPS: Readonly<Partial<Record<AgendaShape, (answer: AgendaTaskAnswe
 };
 
 /**
- * The card's answers, left · up · right: the ones it was raised with, else its kind's defaults — which
- * is how an item from before cards reads (its choice keeps on its row what its brief recommends) — a row of
+ * The task's answers, left · up · right: the ones it was raised with, else its kind's defaults — which
+ * is how an item from before tasks reads (its choice keeps on its row what its brief recommends) — a row of
  * options always in the options list's order (`inOptionOrder`), and only those its shape offers (`SHAPE_KEEPS`).
  */
 export const agendaTaskAnswers = (item: AgendaTaskSource & AgendaShapeSource): AgendaTaskAnswer[] => {
@@ -420,14 +420,14 @@ export const agendaTaskAnswers = (item: AgendaTaskSource & AgendaShapeSource): A
   ).filter(keeps);
 };
 
-/** The answer a direction gives on this card, if any. */
+/** The answer a direction gives on this task, if any. */
 export const answerInDirection = (
   answers: readonly AgendaTaskAnswer[],
   direction: AgendaDirection,
 ): AgendaTaskAnswer | undefined => answers.find(each => each.direction === direction);
 
 /**
- * The choice options a card offers as buttons but NOT as swipes: an old item's options past the third.
+ * The choice options a task offers as buttons but NOT as swipes: an old item's options past the third.
  * New items cannot have any (the CLI refuses more than three).
  */
 export const unswipedChoices = (item: AgendaTaskSource): AgendaAskOption[] => {
@@ -463,7 +463,7 @@ export const AGENDA_ANSWER_TEXT_CHARS = 24;
 export const AGENDA_ANSWER_TEXT_CHARS_OF_THREE = 20;
 
 /**
- * WHAT AN ANSWER'S BUTTON SAYS — on the item view's row, the docked row, a card ask, the deck's arrow keys and the
+ * WHAT AN ANSWER'S BUTTON SAYS — on the item view's row, the docked row, a task ask, the deck's arrow keys and the
  * CLI's answers line alike: the option's own short label ("No", "Only blockers") as plain words (`plainLabel`, so
  * "**Ship** it" says "Ship it"), cut at a word only when it is very long — past 24 characters, or 20 on a row of three
  * (`slots`, the buttons drawn on the row). Never its description, never a bare letter, never empty. The answer it sends
@@ -476,7 +476,7 @@ export const agendaAnswerText = (label: string, slots = 1): string => {
 };
 
 /**
- * The card's title: the one it was raised with, else — an item from before titles — the start of its
+ * The task's title: the one it was raised with, else — an item from before titles — the start of its
  * ask, cut at a word to fit a lock screen's heading.
  */
 export const agendaTitle = (item: Pick<AgendaTaskSource, 'title' | 'subject'>): string => {
@@ -484,7 +484,7 @@ export const agendaTitle = (item: Pick<AgendaTaskSource, 'title' | 'subject'>): 
   return title !== '' ? title : clipAtWord(item.subject, AGENDA_PUSH_TITLE_LENGTH);
 };
 
-/** Whether the card has a title of its own, rather than one cut from its ask. */
+/** Whether the task has a title of its own, rather than one cut from its ask. */
 export const hasOwnTitle = (item: Pick<AgendaTaskSource, 'title' | 'subject'>): boolean =>
   (item.title?.trim() ?? '') !== '';
 

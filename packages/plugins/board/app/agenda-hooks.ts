@@ -1,22 +1,22 @@
 /**
  * WHAT BOARD PROVIDES TO AGENDA'S ASKS: the three app hooks Agenda offers (`agenda.card-answer`,
  * `agenda.lane-proposal`, `agenda.card-reference`), each built per daemon over this half's own client and the one
- * runtime its views share (`boardRuntimeOf`). Agenda draws the ask; Board acts on the card. Neither half imports the
+ * runtime its views share (`boardRuntimeOf`). Agenda draws the ask; Board acts on the task. Neither half imports the
  * other: the hook names and the value shapes are the agreement, and Agenda narrows what it is given.
  *
  * - `agenda.card-answer` — an ask's "Done · closes" and a notice's Start and Close. Done is the board's own one-tap
  *   answer (`boardDone`: the board's declared Done lane, else its first closing lane), planned as every owner move is
  *   (`planMove`), and sent as ONE `POST /v1/board/cards/:cardId` `{ action: 'move', to }`: the request today's Done
- *   sent. A card that is already closed sends nothing; one the board has no Done for is refused here, before any
+ *   sent. A task that is already closed sends nothing; one the board has no Done for is refused here, before any
  *   request. The daemon's route still decides: its refusal comes back in its own words.
- *   Done is exactly-once per card while a move is in flight: a second tap (the screen and the side panel both showing
+ *   Done is exactly-once per task while a move is in flight: a second tap (the screen and the side panel both showing
  *   one ask, or two clicks in a frame) is answered by the first one's outcome and sends nothing more.
  * - `agenda.lane-proposal` — Edit on a lane proposal opens the project's lane editor (`laneEditDestination`).
- * - `agenda.card-reference` — `&F12` proves only against the card ids this machine holds (`createCardReferenceResolver`
- *   over `GET /v1/board/ids`, kept live by `board.changed`), and opens the card's page.
+ * - `agenda.card-reference` — `&F12` proves only against the task ids this machine holds (`createTaskReferenceResolver`
+ *   over `GET /v1/board/ids`, kept live by `board.changed`), and opens the task's page.
  *
  * Not here, on purpose: "Not good" and "Send back". Those were the to-test rows of today's task list, which 5.0 deleted;
- * they are card asks answered through Asks (the card's own gate), so no Board move backs them and `board-move.ts` is
+ * they are task asks answered through Asks (the task's own gate), so no Board move backs them and `board-move.ts` is
  * reached only through Done's `planMove`.
  */
 
@@ -32,12 +32,12 @@ import { THIS_MACHINE } from './lib/machine.ts';
 import { boardPath, taskPagePath } from './lib/paths.ts';
 import { type BoardRuntime, boardRuntimeOf } from './views/runtime.ts';
 
-/** A card write's answer, as Agenda reads it. */
+/** A task write's answer, as Agenda reads it. */
 type Write<Value = undefined> =
   | ({ readonly ok: true } & (Value extends undefined ? unknown : { readonly value: Value }))
   | { readonly ok: false; readonly status: number; readonly message: string };
 
-/** One card as an ask reads it. */
+/** One task as an ask reads it. */
 interface TaskView {
   readonly status: 'idle' | 'loading' | 'ready' | 'failed';
   readonly missing: boolean;
@@ -56,7 +56,7 @@ const taskIdOf = (written: string): TaskId | undefined => {
   return parsed.success ? parsed.data : undefined;
 };
 
-/** The board's one-tap answer for a card as read: where Done moves it, or that it is already closed. */
+/** The board's one-tap answer for a task as read: where Done moves it, or that it is already closed. */
 const doneOf = (state: BoardTaskState) => {
   const { task, laneSet } = state;
   if (task === null) return null;
@@ -73,14 +73,14 @@ const STATUS: Readonly<Record<BoardTaskState['status'], TaskView['status']>> = {
 
 /** `agenda.card-answer` over one daemon's runtime. */
 const taskAnswer = (runtime: BoardRuntime) => {
-  // One Done per card at a time: a tap while its move is in flight gets that move's outcome, not a second request.
+  // One Done per task at a time: a tap while its move is in flight gets that move's outcome, not a second request.
   const doing = new Map<TaskId, Promise<Write>>();
   const { store } = runtime;
   const actions = createBoardActions({
     store,
     connection: daemonId => (daemonId === THIS_MACHINE.daemonId ? THIS_MACHINE : undefined),
   });
-  // A view is the same object while the store's card state is (useSyncExternalStore compares snapshots by identity).
+  // A view is the same object while the store's task state is (useSyncExternalStore compares snapshots by identity).
   const views = new WeakMap<BoardTaskState, TaskView>();
   const IDLE: TaskView = Object.freeze({ status: 'idle', missing: false, closed: false });
   const viewOf = (state: BoardTaskState): TaskView => {
@@ -95,13 +95,13 @@ const taskAnswer = (runtime: BoardRuntime) => {
     views.set(state, view);
     return view;
   };
-  /** The card's one-tap Done: where it moves, planned as every owner move is, and sent as ONE request. */
+  /** The task's one-tap Done: where it moves, planned as every owner move is, and sent as ONE request. */
   const move = async (id: TaskId): Promise<Write> => {
     const state = store.taskState(THIS_MACHINE.daemonId, id);
     if (state.status !== 'ready' || state.task === null) return refused(UNREAD);
     const done = doneOf(state);
     if (done === null) return refused(NO_DONE);
-    // A closed card's one-tap answer is Reopen: for a Done there is nothing left to do, and nothing is sent.
+    // A closed task's one-tap answer is Reopen: for a Done there is nothing left to do, and nothing is sent.
     if (done.kind === 'reopen') return { ok: true };
     const plan = planMove(state.laneSet, state.task.laneId, done.laneId);
     if (plan.kind === 'stay') return { ok: true };
@@ -170,7 +170,7 @@ const taskReference = (runtime: BoardRuntime, daemon: string) => {
         last = { ids, proves: createTaskReferenceResolver([], ids ?? undefined) };
       return last.proves;
     },
-    // Always under THIS hook's daemon, and only for a real card id: anything else opens the daemon's board.
+    // Always under THIS hook's daemon, and only for a real task id: anything else opens the daemon's board.
     href: (id: string): string => {
       const task = taskIdOf(id);
       return task === undefined ? boardPath(undefined, daemon) : taskPagePath(task, daemon);

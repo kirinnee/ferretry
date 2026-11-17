@@ -454,7 +454,7 @@ describe('what a verdict does', () => {
     // Assert
     should(subject.remedies).be.empty();
     should(subject.state().actions?.[0]).match({ action: 'stop', outcome: 'held' });
-    // A held act becomes a Warden card only while its flag still stands; this ferret is no longer flagged.
+    // A held act becomes a Warden task only while its flag still stands; this ferret is no longer flagged.
     should(feed.items).be.empty();
     should(journalTypes(subject)).containEql('fleet.warden_action_held');
   });
@@ -510,7 +510,7 @@ describe('what a verdict does', () => {
     }
     for (const line of typed) {
       should(line).not.match(/other-9|0\.45678|migration/u);
-      // A resume or restart with no focus card is handed the resume domain's own default turn (empty here).
+      // A resume or restart with no focus task is handed the resume domain's own default turn (empty here).
       if (line !== '') should(line).containEql('it asked a question and nobody has answered');
     }
     should(typed.filter(line => line !== '')).have.length(2);

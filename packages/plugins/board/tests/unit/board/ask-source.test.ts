@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { as, boot, makeTask } from '../../integration/daemon/harness.ts';
 
-/** Lead data-loss gap: a card keeps where its ask was said (today's `ask.source`), stored and served. */
+/** Lead data-loss gap: a task keeps where its ask was said (today's `ask.source`), stored and served. */
 describe('a card’s ask source', () => {
   test('is stored with the ask text and read back as it was said', async () => {
     const { host } = await boot();

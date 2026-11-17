@@ -27,7 +27,7 @@ const call = (name: string, input: unknown): TranscriptEvent =>
   ({ kind: 'tool-call', role: 'assistant', call: { id: name, name, input } }) as TranscriptEvent;
 const raising = call('Bash', { command: 'zz ask add --title "Try it" "please test" --card F412' });
 
-/** The ferret's own item on a card, raised after the turn began, unless told otherwise. */
+/** The ferret's own item on a task, raised after the turn began, unless told otherwise. */
 const mine = (overrides: Partial<GateCheckItem> = {}): GateCheckItem => ({
   id: 'A44',
   raisedBy: 'agent',
@@ -44,7 +44,7 @@ const gate = (overrides: Partial<GateCheckItem> = {}): GateCheckItem => ({
   ...overrides,
 });
 
-/** A card in To test (a gate) on the support board, unless told otherwise. */
+/** A task in To test (a gate) on the support board, unless told otherwise. */
 const response = (overrides: Parameters<typeof boardTask>[0] = {}): TaskResponse =>
   ({
     card: { ...boardTask({ id: 'F412', laneId: 'tested', ...overrides }) },

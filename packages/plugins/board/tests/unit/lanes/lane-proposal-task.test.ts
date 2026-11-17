@@ -62,7 +62,7 @@ describe('laneProposalReference and laneProposalCard', () => {
 
 describe('laneChangeCard', () => {
   const live: LaneSet = { ...LANES, ...LANE_TEMPLATES['pr-release-verify'], confirmedBy: 'owner' };
-  /** Plan/Design made automatic, and Released · to test gone with its cards closed. */
+  /** Plan/Design made automatic, and Released · to test gone with its tasks closed. */
   const risky: PendingLaneSet = {
     version: 3,
     baseVersion: 2,
@@ -106,7 +106,7 @@ describe('laneChangeCard', () => {
   });
 
   it('should tell lanes removed the same way as one bullet', () => {
-    // Arrange: fourteen gates removed with their cards closed.
+    // Arrange: fourteen gates removed with their tasks closed.
     const gates = Array.from({ length: 14 }, (_, index) => ({
       id: `gate-${String(index)}`,
       name: `Owner review ${String(index).padStart(2, '0')}`,
@@ -165,7 +165,7 @@ describe('laneChangeCard', () => {
         .every(line => line.startsWith('- ')),
     ).be.true();
     should(task.recommendation).be.undefined();
-    // A change the card cannot show in full is accepted only in the lane editor.
+    // A change the task cannot show in full is accepted only in the lane editor.
     should(task.options).deepEqual([
       { label: LANE_CHANGE_LATER, description: 'Leave it waiting; the board keeps its lanes' },
       {

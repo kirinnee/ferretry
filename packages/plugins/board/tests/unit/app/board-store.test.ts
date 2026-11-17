@@ -219,7 +219,7 @@ describe('DaemonBoardStore live updates', () => {
     store.noteEvent(laptop.daemonId, event(['F1']));
     await flush();
     expect(tasksOf(store, key, laptop.daemonId)).toEqual(['F1:review']);
-    // The older read settles last, still describing the card where it was.
+    // The older read settles last, still describing the task where it was.
     held.resolve(boardAnswer([boardTask('F1', { laneId: 'implement' })], { projectId: PROJECT, laneSet: lanes }));
     await flush();
     expect(tasksOf(store, key, laptop.daemonId)).toEqual(['F1:review']);

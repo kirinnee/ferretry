@@ -214,7 +214,7 @@ describe('chatChip', () => {
 });
 
 describe('chatCards and "Internal"', () => {
-  // The chat reads every card (the chip must find a sub-ferret's own focus); what it draws is chatCards'.
+  // The chat reads every task (the chip must find a sub-ferret's own focus); what it draws is chatTasks'.
   const everyTask = (tasks: Parameters<typeof boardModelOf>[0]) =>
     boardModelOf(tasks, { ...NO_BOARD_FILTERS, agents: true });
   const mixed = () =>
@@ -262,7 +262,7 @@ describe('chatCards and "Internal"', () => {
   });
 
   it('draws a top-level ferret’s cards the owner asked for in its chat, though no owner message proves the ask', async () => {
-    // Shaped like the owner's report: a top-level lead's cards are `origin: human` (only the owner talks in its
+    // Shaped like the owner's report: a top-level lead's tasks are `origin: human` (only the owner talks in its
     // chat), but the daemon stored `askedBy: agent` where the ask's words did not match an owner message.
     const filed = (id: string, laneId: string, extra: Record<string, unknown> = {}) =>
       boardTask(id, { owner: SELF, laneId, origin: 'human', askedBy: 'agent', ...extra });

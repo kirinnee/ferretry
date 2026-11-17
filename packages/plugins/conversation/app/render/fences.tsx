@@ -77,11 +77,11 @@ export function tolerateAuthoringNoise(source: string): string {
   return source.replace(/\r\n?/gu, '\n');
 }
 
-/** What a surface lends the blocks it draws: the file reader for a `src: @path`, and the board to ask for a card. */
+/** What a surface lends the blocks it draws: the file reader for a `src: @path`, and the board to ask for a task. */
 export interface FyRenderFenceHost {
   /**
    * Reads a workspace file for a media block's `src: @path`, as the reader. A path goes in and bytes or a refusal come
-   * out — never a client, URL or token. Without it a workspace `src:` shows a card saying the view cannot read it.
+   * out — never a client, URL or token. Without it a workspace `src:` shows a task saying the view cannot read it.
    */
   readonly readWorkspaceMedia?: FyRenderWorkspaceReader | undefined;
   /** The daemon whose board a `task` or `board` block asks. Without it those blocks stay ordinary code fences. */

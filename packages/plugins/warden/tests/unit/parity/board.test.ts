@@ -23,17 +23,17 @@ class RefusingAsks extends FakeAsks {
   }
 }
 
-/** The same card, owned by `lead`, a live auto ferret that the Warden may type to. */
+/** The same task, owned by `lead`, a live auto ferret that the Warden may type to. */
 const ownedByLead: TaskView = taskView({ owner: 'lead', assignee: 'worker' }, { activity: 'orphaned' });
 
 /**
- * Board's contract fake, answering the orphaned cards given (one by default) in one snapshot, recording every read.
+ * Board's contract fake, answering the orphaned tasks given (one by default) in one snapshot, recording every read.
  * Its lane sets are the classic ones, so a lane reads by name.
  */
 function boardWithOrphan(task: TaskView | readonly TaskView[] = orphaned): {
   readonly board: BoardApi;
   readonly reads: number[];
-  /** Change which cards the board calls orphaned, between two runs. */
+  /** Change which tasks the board calls orphaned, between two runs. */
   readonly set: (next: readonly TaskView[]) => void;
 } {
   let all: readonly TaskView[] = Array.isArray(task) ? task : [task as TaskView];
@@ -55,9 +55,9 @@ function boardWithOrphan(task: TaskView | readonly TaskView[] = orphaned): {
 }
 
 interface WardenOptions {
-  /** A live auto ferret `lead` the card's owner is, so the sweep can type to it. */
+  /** A live auto ferret `lead` the task's owner is, so the sweep can type to it. */
   readonly liveOwner?: boolean;
-  /** A finished ferret `lead` beside `worker`, so cards of two ferrets can be orphaned. */
+  /** A finished ferret `lead` beside `worker`, so tasks of two ferrets can be orphaned. */
   readonly stoppedLead?: boolean;
   /** Conversation refuses every send. */
   readonly sendRefused?: boolean;
@@ -92,7 +92,7 @@ async function wardenWith(board: BoardApi | undefined, options: WardenOptions = 
   /** The notices standing on a ferret's board, as `source`/`entry` pairs. */
   const notices = async (ferret: string) =>
     (await fake.open({ ferret: ferretId(ferret), state: 'open' })).map(ask => String(ask.entry));
-  /** The ONE item of orphaned cards on the machine board: its entries (an ask each), and what its newest wording says. */
+  /** The ONE item of orphaned tasks on the machine board: its entries (an ask each), and what its newest wording says. */
   const machineItem = async () => {
     const open = await fake.open({ ferret: ferretId('machine-agenda'), state: 'open' });
     const subjects = (await fake.snapshots({ ferret: 'machine-agenda' }))[0]?.items.map(item => item.subject) ?? [];
@@ -149,7 +149,7 @@ describe('Board, an optional use of the Warden', () => {
     expect(ran.status).toBe(200);
     expect(reads.length).toBeGreaterThan(0);
     expect(kinds(ran.json())).toContainEqual(['orphaned_card', 'worker']);
-    // Its owner ferret is not on this machine, so nobody is typed to: the card is a row of the machine item, and no
+    // Its owner ferret is not on this machine, so nobody is typed to: the task is a row of the machine item, and no
     // ask is raised on the assignee's board.
     expect(typed).toEqual([]);
     expect(await notices('worker')).toEqual([]);
@@ -189,7 +189,7 @@ describe('Board, an optional use of the Warden', () => {
   });
 
   test('more than one page of orphaned cards: every one is flagged, once, from one read', async () => {
-    // Arrange: 1,203 cards, more than two pages of 500
+    // Arrange: 1,203 tasks, more than two pages of 500
     const tasks = Array.from({ length: 1203 }, (_, each) =>
       taskView({ id: `F${String(each + 1)}`, owner: 'gone', assignee: 'worker' }, { activity: 'orphaned' }),
     );

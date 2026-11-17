@@ -4,9 +4,9 @@ import { FyRenderTaskEmbed } from '../../../../app/render/fy-render-task-embed.t
 import { type FyRenderParsedBlock, isFyRenderEmbedBlock, parseFyRender } from '../../../../app/render/fy-render.ts';
 
 /**
- * A `card` / `board` block draws each card through the Board's own `reference:&` renderer (`RendererView`), so with no
+ * A `task` / `board` block draws each task through the Board's own `reference:&` renderer (`RendererView`), so with no
  * shell mounted — a harness, this test — the way in is the written reference as plain text, never a link. The mini
- * board of today's block (the Board page's card and lane header) is the Board's to draw: `fy-render-card-embed-board.test.tsx` proves the
+ * board of today's block (the Board page's task and lane header) is the Board's to draw: `fy-render-task-embed-board.test.tsx` proves the
  * hand-off to it, and this file the fallback where no Board answers.
  */
 

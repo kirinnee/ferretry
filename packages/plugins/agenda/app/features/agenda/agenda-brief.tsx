@@ -9,7 +9,7 @@
  * headings so they are never read as one block — no tinted boxes, no stripes: a bold sentence-case heading
  * in the ink colour, and room.
  *
- * Two layouts. The CARD's is open: every section is drawn in full under its heading, because a card
+ * Two layouts. The TASK's is open: every section is drawn in full under its heading, because a task
  * stands alone and nothing on it hides behind a click (only a long "The full picture" is previewed). The
  * recommendation is NOT a section there: the answer bar tags the recommended option and says why under the
  * buttons. The BOARD's is collapsible: native `<details>`, closed except the first question.
@@ -82,7 +82,7 @@ function NewMarker({ word }: { readonly word: 'new' | 'changed' }) {
   return <span className="fy-attn-new">{word}</span>;
 }
 
-/** The one plain line under a card's heading, and what is left of the context once it is said. */
+/** The one plain line under a task's heading, and what is left of the context once it is said. */
 export interface CardLede {
   readonly line: string | null;
   /** What the Context section still draws: the context less its lead point, or `null` when nothing is left. */
@@ -132,8 +132,8 @@ function RecommendedBadge() {
 }
 
 /**
- * What the ask is called on this card: a note says what happened, a to-do is something to do, and only a
- * card that asks something calls it a question.
+ * What the ask is called on this task: a note says what happened, a to-do is something to do, and only a
+ * task that asks something calls it a question.
  */
 const askHeading = (item: Pick<AgendaItem, 'kind' | 'ask'>, several: boolean): string => {
   if (several) return 'The questions';
@@ -369,26 +369,26 @@ export interface AgendaBriefProps {
   readonly renderProse: AgendaProse;
   /**
    * Sections fold behind a `<summary>` (the board). `false` draws every section open under a bold heading
-   * (the card). Default: collapsible.
+   * (the task). Default: collapsible.
    */
   readonly collapsible?: boolean;
   /** Collapsible only: every section starts open. */
   readonly expanded?: boolean;
   /**
-   * The card already draws the ask: a LONE question would only say it again in other words, so its section
+   * The task already draws the ask: a LONE question would only say it again in other words, so its section
    * is left out. Several questions still draw.
    */
   readonly askShown?: boolean;
-  /** The ask itself, drawn first — when it is not already the card's heading. */
+  /** The ask itself, drawn first — when it is not already the task's heading. */
   readonly ask?: string;
   /**
    * What the ask is headed with. Absent: the item's own word (a note says what happened, a to-do is something
-   * to do). `null`: no heading — the ask is the first line of the body, as a card that asks reads it.
+   * to do). `null`: no heading — the ask is the first line of the body, as a task that asks reads it.
    */
   readonly askLabel?: string | null;
   /**
    * What to draw as the recommendation. The folded layout defaults to the item's own; the open layout draws it
-   * only when handed one, because the card's answer bar says it under the options.
+   * only when handed one, because the task's answer bar says it under the options.
    */
   readonly recommendation?: AgendaRecommendation | undefined;
   /** The steps checklist, drawn under "Steps". */
@@ -396,7 +396,7 @@ export interface AgendaBriefProps {
   /** The body, drawn under "The full picture" — the one section that may start folded. */
   readonly detail?: ReactNode;
   /**
-   * Which half to draw. `card`: only what the minimal card needs (the ask when it is not the heading, the
+   * Which half to draw. `task`: only what the minimal task needs (the ask when it is not the heading, the
    * recommendation handed in). `detail`: everything else — what the item knows beyond
    * its question. Default `all`: the board's folded brief.
    */
@@ -445,7 +445,7 @@ export function AgendaBriefSections({
   const lettered = asCard || several ? [] : letteredOptions(itemOptions(item), item.optionDetails, pick);
   const options = needsOptionsSection(lettered) ? lettered : [];
   const termsLine = asCard ? null : (item.terms ?? null);
-  // The board folds the item's own recommendation. A card's answer bar says it under the options, so a card
+  // The board folds the item's own recommendation. A task's answer bar says it under the options, so a task
   // draws a section only when it is handed one — the per-question card, whose bar has no options to tag.
   const recommendation = asDetail ? undefined : (given ?? (fold ? item.recommendation : undefined));
   // A recommendation that names a listed option is marked on that option and its reason said right under the list.
@@ -453,7 +453,7 @@ export function AgendaBriefSections({
     recommendation !== undefined &&
     options.some(option => option.label.trim().toLowerCase() === recommendation.decision.trim().toLowerCase());
   const heading = askLabel === undefined ? askHeading(item, several) : askLabel;
-  // Open and not the card: the premise and the context are ONE block on top, and the type orders what follows.
+  // Open and not the task: the premise and the context are ONE block on top, and the type orders what follows.
   const situated = !fold && !asCard && (premise !== null || context !== null);
   const kind = agendaTaskKind(item);
   const typed = !fold && !asCard;

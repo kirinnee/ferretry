@@ -58,7 +58,7 @@ const created = (at = ago(HOUR)): TaskEvent => ({
 /** An event before the card numbers it. Distributed, so each event type keeps its own fields. */
 type EventInput = TaskEvent extends infer Event ? (Event extends unknown ? Omit<Event, 'seq'> : never) : never;
 
-/** The child card of the lead's card F1, worked by `child`, with these events after its creation. */
+/** The child task of the lead's task F1, worked by `child`, with these events after its creation. */
 const childTask = (events: readonly EventInput[], stored: Partial<Task> = {}): Task => ({
   ...boardTask({ id: 'F2', parent: { id: 'F1' }, assignee: 'child', laneId: 'implement', ...stored }),
   history: [created(), ...events.map((event, index) => ({ ...event, seq: index + 2 }) as TaskEvent)],
@@ -68,7 +68,7 @@ const leadTask = view({ id: 'F1', laneId: 'plan' });
 
 const everyone = rosterOf(['lead', 'child', 'other'].map(id => liveSession(id)));
 
-/** A memory that has seen the child card up to its creation, with nothing blocking it. */
+/** A memory that has seen the child task up to its creation, with nothing blocking it. */
 const sawChild = (mark: Partial<SweepMemory['seen'][string]> = {}): SweepMemory => ({
   format: 1,
   sweptAt: EARLIER,

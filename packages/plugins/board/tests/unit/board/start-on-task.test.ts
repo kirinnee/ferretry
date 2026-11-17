@@ -17,8 +17,8 @@ const OWNER = { kind: 'owner' } as const;
 const FOLDERS: Readonly<Record<string, string>> = { [PROJECT]: '/work/board', [OTHER_PROJECT]: '/work/relay' };
 
 /**
- * One card and the ferrets on this machine, with `start` doing what the daemon's start does to them: the new ferret
- * is alive, holds the card as its focus, and is the card's assignee.
+ * One task and the ferrets on this machine, with `start` doing what the daemon's start does to them: the new ferret
+ * is alive, holds the task as its focus, and is the task's assignee.
  */
 const world = (initial: Partial<Task> = {}, overrides: Partial<StartOnTaskPorts> = {}) => {
   let current = boardTask({ id: 'F1', laneId: 'todo', ...initial });
@@ -258,7 +258,7 @@ describe('starting a ferret on a card', () => {
   });
 
   it('should hand a retry with the same key the held answer even after the holder finished', async () => {
-    // Arrange: a live ferret holds the card, the first reply is lost, the holder completes.
+    // Arrange: a live ferret holds the task, the first reply is lost, the holder completes.
     const { ports, started, alive } = world({ assignee: 'holder' });
     alive.set('holder', ID);
     const first = await startOnTask(ports, ID, OWNER, 'click-1');

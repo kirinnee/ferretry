@@ -399,7 +399,7 @@ describe('the ferrets as the board’s one liveness read', () => {
     expect(roster.sessions.get('lead')).not.toHaveProperty('lead');
     expect(roster.sessions.get('helper')).toMatchObject({ status: 'working', focusCard: null, lead: 'lead' });
 
-    // A focus file that cannot be read at all is no card for anyone, and the roster still stands.
+    // A focus file that cannot be read at all is no task for anyone, and the roster still stands.
     const damaged = new FerretsLiveness(
       ferrets,
       { focusOfAll: async () => Promise.reject(new Error('damaged')) },

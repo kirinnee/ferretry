@@ -67,7 +67,7 @@ const openPr = {
 };
 const links = { prs: [openPr], branch: null, commits: [], docs: [] };
 
-/** A card `lead` handed to `child` as a sub-card with a PR open, so it neither closes nor ships. */
+/** A task `lead` handed to `child` as a sub-card with a PR open, so it neither closes nor ships. */
 const helperWithPr = (overrides: Partial<Task> = {}): Task =>
   boardTask({
     id: 'F2',
@@ -353,7 +353,7 @@ describe('returning one card through the service', () => {
   });
 });
 
-/** A tick whose roster changes after the plan is made: the card's write must judge the roster as it is then. */
+/** A tick whose roster changes after the plan is made: the task's write must judge the roster as it is then. */
 const tickWithRosterChange = async (options: {
   readonly stored: readonly Task[];
   readonly planned: readonly TaskView[];

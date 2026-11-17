@@ -1,17 +1,17 @@
 /**
  * "LAST TOUCHED" AND THE ACTIVITY STATE (`board-design.md` §3.3), derived at read time from session
- * liveness and the cards, never stored.
+ * liveness and the tasks, never stored.
  *
  * - **Attribution.** A session's liveness touches exactly one card: its `config.focusCard`. A lead with
- *   forty cards touches only the one it is on.
+ *   forty tasks touches only the one it is on.
  * - **Signals** are read, never detected: a session's strong life-signs (`lastTokenAdvanceAt`,
  *   `lastTranscriptAt`, `lastSubprocessAt`/`subprocessSince`, `lastActivityAt`) after the Warden's
- *   liveness ledger is laid over them; every history event on the card; and a linked PR's merge. A pane
+ *   liveness ledger is laid over them; every history event on the task; and a linked PR's merge. A pane
  *   redraw or a config write alone is never activity, the way the Warden reasons (`warden/detect.ts`).
- * - **Roll-up.** `lastTouchedAt(card)` is the latest of its own signals and every live descendant's
- *   `lastTouchedAt`, so a helper's work makes its lead's card active.
+ * - **Roll-up.** `lastTouchedAt(task)` is the latest of its own signals and every live descendant's
+ *   `lastTouchedAt`, so a helper's work makes its lead's task active.
  * - **States**, first match wins: `active` → `orphaned` → `waiting` → `stale` → `idle`. A closed or
- *   dropped card is `idle`: nobody's clock runs on it.
+ *   dropped task is `idle`: nobody's clock runs on it.
  *
  * One roster read serves a whole board read: everything below is a pure function of it.
  */
@@ -43,11 +43,11 @@ type FerretTurnState = 'working' | 'your-turn' | 'needs-input';
 /** Statuses a ferret never leaves without being resumed. */
 const isTerminalStatus = (status: FerretStatus): boolean => status === 'stopped';
 
-/** A strong signal this recent makes its card `active` even between turns. */
+/** A strong signal this recent makes its task `active` even between turns. */
 export const ACTIVE_WINDOW_MS = 2 * 60_000;
 
 /**
- * How long a lane's cards may sit untouched when the lane names no `staleAfter`. `null` is never: a
+ * How long a lane's tasks may sit untouched when the lane names no `staleAfter`. `null` is never: a
  * `verify` lane is the owner's clock and a `closed` one is finished.
  */
 const DEFAULT_STALE_AFTER: Readonly<Record<LaneCategory, StaleAfter | null>> = {
@@ -64,7 +64,7 @@ export interface FerretLiveness {
   readonly id: string;
   readonly status: FerretStatus;
   readonly turnState?: FerretTurnState;
-  /** The card its activity is attributed to (`config.focusCard`). */
+  /** The task its activity is attributed to (`config.focusCard`). */
   readonly focusCard: TaskRef | null;
   /** It declared a wait (`fy signal waiting`): it is parked on purpose and must not be nudged. */
   readonly declaredWait: boolean;
@@ -156,8 +156,8 @@ export const strongSignalAt = (session: FerretLiveness): string | undefined => {
 };
 
 /**
- * How long a lane's cards may sit untouched, in milliseconds; `null` is never. A lane's own `staleAfter`
- * wins. A shipped lane a release moves cards into waits for this machine to run that release, which no
+ * How long a lane's tasks may sit untouched, in milliseconds; `null` is never. A lane's own `staleAfter`
+ * wins. A shipped lane a release moves tasks into waits for this machine to run that release, which no
  * ferret can hurry, so it is never stale unless it says otherwise.
  */
 export const staleAfterMsOf = (lane: Lane): number | null => {
@@ -167,7 +167,7 @@ export const staleAfterMsOf = (lane: Lane): number | null => {
   return fallback === null ? null : staleAfterMinutes(fallback) * 60_000;
 };
 
-/** The stale threshold of the lane a card sits in; `null` when it is never stale or its lanes are unknown. */
+/** The stale threshold of the lane a task sits in; `null` when it is never stale or its lanes are unknown. */
 export const taskStaleAfterMs = (task: Task, inputs: Pick<ActivityInputs, 'laneSets'>): number | null => {
   const laneSet = inputs.laneSets.get(task.projectId);
   if (laneSet === undefined) return null;
@@ -186,7 +186,7 @@ const latest = (left: Touch | null, right: Touch | null): Touch | null => {
   return instant(right.at) > instant(left.at) ? right : left;
 };
 
-/** The card's own touch: its history, its merged PRs and the sessions focused on it. */
+/** The task's own touch: its history, its merged PRs and the sessions focused on it. */
 const ownTouch = (task: Task, focused: readonly FerretLiveness[]): Touch | null => {
   let touch: Touch | null = null;
   for (const event of task.history)
@@ -202,14 +202,14 @@ const ownTouch = (task: Task, focused: readonly FerretLiveness[]): Touch | null 
 interface Walked {
   readonly touch: Touch | null;
   readonly active: boolean;
-  /** This card's ferret, or a descendant's, is alive (or could not be read, so is not called dead). */
+  /** This task's ferret, or a descendant's, is alive (or could not be read, so is not called dead). */
   readonly live: boolean;
 }
 
 /**
- * Every card's activity from one roster. Linear in cards plus sessions: each card is walked once and its
+ * Every task's activity from one roster. Linear in tasks plus sessions: each task is walked once and its
  * result memoized. A loop in `parent` (a damaged board) is cut where it closes, and what was walked
- * through a cut is not memoized, so every card on the loop still sees the whole loop.
+ * through a cut is not memoized, so every task on the loop still sees the whole loop.
  */
 export const deriveActivities = (
   inputs: ActivityInputs,
@@ -243,9 +243,9 @@ export const deriveActivities = (
     let active = sessions.some(
       session => isWorking(session) || nowMs - instant(strongSignalAt(session)) <= ACTIVE_WINDOW_MS,
     );
-    // An UNASSIGNED card still in the backlog is nobody's work yet: it falls to its owner only as a default,
+    // An UNASSIGNED task still in the backlog is nobody's work yet: it falls to its owner only as a default,
     // so the owner being alive keeps nothing under a parent alive. Counted, a lead's live session hid every
-    // card whose ferret had finished behind one Todo child it had not handed out (&F240, 2026-10-31).
+    // task whose ferret had finished behind one Todo child it had not handed out (&F240, 2026-10-31).
     const unclaimed = task.assignee === null && taskCategory(task, inputs.laneSets) === 'backlog';
     let live = !unclaimed && presenceOf(roster, effectiveAssignee(task)) !== 'dead';
     for (const child of inputs.index.children(task.id)) {
@@ -293,8 +293,8 @@ const stateOf = (
   ) {
     return 'orphaned';
   }
-  // Someone else's clock is never stale: a card blocked, waiting on another card, or whose agenda carries its open ask
-  // (docs/agenda.md § Card asks). It is idle, never `waiting`: a card does not wait on the owner itself.
+  // Someone else's clock is never stale: a task blocked, waiting on another task, or whose agenda carries its open ask
+  // (docs/agenda.md § Task asks). It is idle, never `waiting`: a task does not wait on the owner itself.
   const asks = inputs.asks.get(task.id);
   if (
     task.blocked !== null ||

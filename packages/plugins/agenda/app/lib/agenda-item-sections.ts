@@ -8,8 +8,8 @@
  *                   description (the item's summary); the quiet controls are the head's ⋯ menu
  *   2 premise       premise and context: may be long, and may assume what the owner already knows
  *   3 detail        the context explained from zero (`detail`): FOLDED by default
- *   4 references    one TABLE of every term and every PR, card or link, each with a plain meaning: FOLDED
- *   5 needs         what it needs from the owner: the ask with its buttons, and every card ask with ITS buttons
+ *   4 references    one TABLE of every term and every PR, task or link, each with a plain meaning: FOLDED
+ *   5 needs         what it needs from the owner: the ask with its buttons, and every task ask with ITS buttons
  *   6 tabs          the live document as tabs (&F923): "Where we are now" first and open (the answer to the owner's
  *                   question, what is decided, what is open, then the ferret's own Markdown), "The full picture", then
  *                   the ferret's own tabs — every one Markdown with fy-render
@@ -97,8 +97,8 @@ export const STAGE_WORDS: Readonly<Record<AgendaStage, string>> = {
 };
 
 /**
- * The stage an item is at now. A standalone card gate from before stages is the card's own ask: a plan to approve
- * ("OK to build") or a card to test. Every other item reads its stage the protocol's one way (`agendaStage`).
+ * The stage an item is at now. A standalone task gate from before stages is the task's own ask: a plan to approve
+ * ("OK to build") or a task to test. Every other item reads its stage the protocol's one way (`agendaStage`).
  */
 export const itemStage = (item: AgendaItem): AgendaStage => {
   const closed = (item as { readonly resolvedAt?: string }).resolvedAt !== undefined;
@@ -142,12 +142,12 @@ export const referenceRows = (item: Pick<AgendaItem, 'terms' | 'links'>): readon
 ];
 
 // ---------------------------------------------------------------------------------------------------
-// 6. Card asks
+// 6. Task asks
 // ---------------------------------------------------------------------------------------------------
 
 /**
- * ONE CARD ASK the item carries (test this, approve that): drawn inside "What I need from you" with ITS buttons. Today
- * the daemon mirrors a thread's card ask as `gateAttached`; a list, so a daemon that carries several (`cardAsks`,
+ * ONE TASK ASK the item carries (test this, approve that): drawn inside "What I need from you" with ITS buttons. Today
+ * the daemon mirrors a thread's task ask as `gateAttached`; a list, so a daemon that carries several (`cardAsks`,
  * `agenda.card-asks.1`) reads into the same section unchanged.
  */
 export interface ItemTaskAsk {
@@ -156,12 +156,12 @@ export interface ItemTaskAsk {
   readonly gate: AgendaGate;
   /** The ask drawn as the gate item it would be: the same options, in the same directions, as every gate surface. */
   readonly view: GateItem;
-  /** The card's How to test (Markdown), when the ask carries it. */
+  /** The task's How to test (Markdown), when the ask carries it. */
   readonly howToTest: string | null;
 }
 
 /**
- * The current card ask carries its own How to test in the snapshot. A host may also provide board steps.
+ * The current task ask carries its own How to test in the snapshot. A host may also provide board steps.
  */
 export const itemTaskAsks = (
   item: AgendaItem,

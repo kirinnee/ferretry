@@ -220,7 +220,7 @@ describe('the subtree table', () => {
     const rows = view?.rows ?? [];
     // Only two rows have a last line (the budget) ...
     expect(rows.filter(row => row.last !== undefined)).toHaveLength(2);
-    // ... yet EVERY row keeps its card, its lane and its PR, the ended one and the live ones past the budget included.
+    // ... yet EVERY row keeps its task, its lane and its PR, the ended one and the live ones past the budget included.
     expect(rows).toHaveLength(5);
     for (const row of rows) {
       expect(row.task).toMatchObject({ lane: 'Review' });

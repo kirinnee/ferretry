@@ -9,7 +9,7 @@ import { boardTask, PROJECT } from './support.ts';
 /**
  * The busy-daemon fix, held at the PRODUCTION wiring (`assemble`, the way the daemon builds it): the board's gate list
  * is ONE sweep for the whole board and the sweep stops with the daemon. The seam counted is Asks, the port every
- * ledger read goes through, so a board of N cards reading its ledgers once per card is a number, not a feeling.
+ * ledger read goes through, so a board of N tasks reading its ledgers once per task is a number, not a feeling.
  */
 
 const TASKS = 3000;
@@ -40,7 +40,7 @@ const counting = (
 };
 
 /**
- * Generated cards in Todo over `ferrets` ferrets, written into Board's own state before the daemon first reads it. The
+ * Generated tasks in Todo over `ferrets` ferrets, written into Board's own state before the daemon first reads it. The
  * first `gated` of them sit in the default board's try-it gate lane instead, with what that gate needs to ask the owner.
  */
 const seed = async (
@@ -77,7 +77,7 @@ const seed = async (
 
 describe('the board gate list through the real wiring (G1)', () => {
   it('should read every ledger once for 3000 cards, not once per card', async () => {
-    // Arrange: the daemon's own Board half over a counting Asks, with 3000 cards on disk, 5 of them at a gate
+    // Arrange: the daemon's own Board half over a counting Asks, with 3000 tasks on disk, 5 of them at a gate
     const { asks, calls } = counting();
     const world = await boot({ asks });
     const tasks = await seed(world.host, FERRETS, 5);
@@ -85,15 +85,15 @@ describe('the board gate list through the real wiring (G1)', () => {
     if (job === undefined) throw new Error('Board registers no board-gates job');
     should(tasks).have.length(TASKS);
 
-    // Act: the gate reconcile, whose card list is `gateBoard.cards()`
+    // Act: the gate reconcile, whose task list is `gateBoard.cards()`
     await job.run(new AbortController().signal);
 
-    // Assert: one sweep reads the open card asks once (not once per ferret's ledger), plus the reconcile's own single
-    // read of every open card ask (`openAll`) and one of the answered ones, and each of the 5 asks raised reads its
+    // Assert: one sweep reads the open task asks once (not once per ferret's ledger), plus the reconcile's own single
+    // read of every open task ask (`openAll`) and one of the answered ones, and each of the 5 asks raised reads its
     // own ledger once more. A per-card derivation reads 3000 times that.
     should(calls.get('open')).equal(1 + 1 + 5);
     should(calls.get('answers')).equal(1 + 5);
-    // And the cards at a gate came out of that one list with their content: each asks the owner about its own card
+    // And the tasks at a gate came out of that one list with their content: each asks the owner about its own task
     const raised = await asks.open({});
     should(raised.map(each => each.entry).sort()).eql([1, 2, 3, 4, 5].map(n => `gate:F${String(n)}:to-test:1`).sort());
     should(raised.map(each => each.subject).sort()).eql(
@@ -104,8 +104,8 @@ describe('the board gate list through the real wiring (G1)', () => {
 
 describe('the board sweep reads the board afresh on every pass (G3)', () => {
   it('should raise the ask of a card that reached its gate between two passes, without the write hook having asked', async () => {
-    // Arrange: a card in Todo and a first pass over it. Asks refuses a raise while `refusing`, so the write that moves
-    // the card to its gate (which tells the gates, and is swallowed when they cannot ask) leaves it at the gate unasked.
+    // Arrange: a task in Todo and a first pass over it. Asks refuses a raise while `refusing`, so the write that moves
+    // the task to its gate (which tells the gates, and is swallowed when they cannot ask) leaves it at the gate unasked.
     let refusing = false;
     const target = new FakeAsks();
     const asks = new Proxy(target, {
@@ -130,7 +130,7 @@ describe('the board sweep reads the board afresh on every pass (G3)', () => {
     await job.run(new AbortController().signal);
     should(await target.open({})).have.length(0);
 
-    // Act: the card moves to the gate while Asks refuses, then pass two runs with Asks back
+    // Act: the task moves to the gate while Asks refuses, then pass two runs with Asks back
     refusing = true;
     should((await move('doing')).status).equal(200);
     should((await move('to-test')).status).equal(200);
@@ -139,7 +139,7 @@ describe('the board sweep reads the board afresh on every pass (G3)', () => {
     should(await target.open({})).have.length(0);
     await job.run(new AbortController().signal);
 
-    // Assert: pass two read the card where it is now, so its ask is raised (a card list kept from pass one would
+    // Assert: pass two read the task where it is now, so its ask is raised (a task list kept from pass one would
     // judge it by Todo and raise nothing)
     const open = await target.open({});
     should(open).have.length(1);
@@ -158,7 +158,7 @@ const stoppedAtFirstRead = () => {
 
 describe('the board sweep stops with the daemon (G2)', () => {
   it('should make the one card-ask read and no more once stopped at that read', async () => {
-    // Arrange: 3000 cards over 100 ferrets; the stop comes with the first (and only) Asks read
+    // Arrange: 3000 tasks over 100 ferrets; the stop comes with the first (and only) Asks read
     const { stop, asks, calls } = stoppedAtFirstRead();
     const world = await boot({ asks });
     await seed(world.host, 100);

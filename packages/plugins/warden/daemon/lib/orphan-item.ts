@@ -1,11 +1,11 @@
 import { clipAtWord, MAX_AGENDA_DETAIL_LENGTH, MAX_AGENDA_SUBJECT_LENGTH } from './protocol.ts';
 import { orphanTitle, type OrphanedTask } from './orphans.ts';
 
-/** The entry of the one machine item every card with nobody working on it is listed on (`standing`, keyed by it). */
+/** The entry of the one machine item every task with nobody working on it is listed on (`standing`, keyed by it). */
 export const ORPHANS_ENTRY = 'warden.orphans';
 
 /**
- * How many cards the item names: the oldest waits first, then a "…and N more." line. A list that grows without bound
+ * How many tasks the item names: the oldest waits first, then a "…and N more." line. A list that grows without bound
  * would never fit an item, and the owner acts on the first few anyway. 10,000 orphans still make one short item.
  */
 export const MAX_LISTED_ORPHANS = 12;
@@ -26,11 +26,11 @@ const bodyOf = (rows: readonly string[], hidden: number): string =>
   [...rows, ...(hidden > 0 ? [`…and ${String(hidden)} more.`] : [])].join('\n');
 
 /**
- * The cards with nobody working on them, as ONE item (docs/agenda.md § The machine agenda; v4's orphan list). The
+ * The tasks with nobody working on them, as ONE item (docs/agenda.md § The machine agenda; v4's orphan list). The
  * caller keeps the item current with `standing` (the same item as the list changes, nothing written when the wording
  * is the same) and closes it when the list is empty: `undefined`.
  *
- * The body names the first {@link MAX_LISTED_ORPHANS} cards, oldest wait first, then counts the rest; if even those
+ * The body names the first {@link MAX_LISTED_ORPHANS} tasks, oldest wait first, then counts the rest; if even those
  * would not fit an item's detail, whole rows are dropped (and counted) rather than a row cut in two.
  */
 export function orphanItem(tasks: readonly OrphanedTask[]): OrphanItem | undefined {

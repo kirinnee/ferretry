@@ -57,7 +57,7 @@ export const boot = async (
   const asks = options.asks ?? new FakeAsks();
   const ferrets = new FakeFerrets();
   ferrets.add({ id: ferretId('f1') });
-  // The half is captured as it is built, so a test can call the `apply` the card source hands Asks.
+  // The half is captured as it is built, so a test can call the `apply` the task source hands Asks.
   const taken: { half?: { hooks: Record<string, unknown> } } = {};
   // The jobs the half registers, so a test can run one with a signal of its own.
   const jobs = new Map<string, TakenJob>();
@@ -104,7 +104,7 @@ export const boot = async (
   return { asks, ferrets, host, apply, observe, contribution, jobs };
 };
 
-/** Makes a card as the owner; a refusal fails the test with the daemon's own words. */
+/** Makes a task as the owner; a refusal fails the test with the daemon's own words. */
 export const makeTask = async (host: Awaited<ReturnType<typeof boot>>['host'], extra: Record<string, unknown> = {}) => {
   const made = await host.request('POST', '/v1/board/tasks', { body: { ...NEW_TASK, ...extra }, headers: as('owner') });
   if (made.status !== 200) throw new Error(`creating a card was refused (${String(made.status)}): ${made.body}`);

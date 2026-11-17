@@ -13,15 +13,15 @@ import { boardOf, taskView, orphanView } from './board-fixtures.ts';
 import { enabled, harness, type JevScript, journalTypes, NOW, no, session, triageable } from './sweep-harness.ts';
 
 /**
- * The Warden reading the board, end to end through the real sweep (`board-design.md` §3.4): an orphaned card
+ * The Warden reading the board, end to end through the real sweep (`board-design.md` §3.4): an orphaned task
  * is reported beside the ferrets' flags and its owner is told once, and a ferret the Warden starts again is
- * handed its focus card.
+ * handed its focus task.
  */
 
 const MINUTE = 60_000;
 const iso = (ms: number): string => new Date(ms).toISOString();
 
-/** A board port over a board the test can change between sweeps, and the focus cards it knows. */
+/** A board port over a board the test can change between sweeps, and the focus tasks it knows. */
 const boardPort = (
   initial: WardenBoardRead | undefined,
   tasks: Readonly<Record<string, WardenFocusTask>> = {},
@@ -184,7 +184,7 @@ describe('an orphaned card', () => {
   });
 });
 
-/** `count` cards, each left by a ferret of its own among `ferrets`, none with a live owner: a roster of finished ferrets. */
+/** `count` tasks, each left by a ferret of its own among `ferrets`, none with a live owner: a roster of finished ferrets. */
 const orphans = (count: number, ferrets: number, from = 1): WardenBoardRead =>
   boardOf(
     ...Array.from({ length: count }, (_, index) =>
@@ -197,7 +197,7 @@ const finished = (ferrets: number) =>
 
 describe('orphaned cards on the one machine item', () => {
   it('should be ONE item for 31 cards of several ferrets and sessions, showing the first dozen and "+M more"', async () => {
-    // Arrange — the 31 cards that were all refused as one board's twenty-first item.
+    // Arrange — the 31 tasks that were all refused as one board's twenty-first item.
     const subject = harness({ config: enabled(), fleet: finished(4), board: boardPort(orphans(31, 4)) });
 
     // Act
@@ -279,7 +279,7 @@ describe('orphaned cards on the one machine item', () => {
     const subject = harness({ config: enabled(), fleet: finished(4), board });
     await subject.service.run({ force: false });
 
-    // Act — the owner closes the item; the same three cards stay orphaned for many sweeps.
+    // Act — the owner closes the item; the same three tasks stay orphaned for many sweeps.
     const subjectNow = (): string | undefined => subject.orphanItem.current?.subject;
     subject.orphanItem.current = undefined;
     for (let sweep = 0; sweep < 4; sweep += 1) await subject.service.run({ force: false });
@@ -291,7 +291,7 @@ describe('orphaned cards on the one machine item', () => {
     should(quiet).eql({ opened: 1, current: undefined });
     should(subject.orphanItem.opened).equal(2);
     should(subjectNow()).equal('4 tasks have nobody working on them');
-    // The sweep wrote the item twice: when it first opened, and when a card joined after the owner closed it.
+    // The sweep wrote the item twice: when it first opened, and when a task joined after the owner closed it.
     should(subject.orphanItem.writes).equal(2);
   });
 
@@ -381,7 +381,7 @@ describe('orphaned cards on the one machine item', () => {
 
 describe('the orphaned cards item the Agenda refuses', () => {
   it('should be tried again next sweep — one attempt of one item, never one per card — and said once per reason', async () => {
-    // Arrange — 31 cards, the machine board refuses the one item.
+    // Arrange — 31 tasks, the machine board refuses the one item.
     let reason: string | undefined = 'this session already has 20 unresolved items';
     const subject = harness({
       config: enabled(),
@@ -395,7 +395,7 @@ describe('the orphaned cards item the Agenda refuses', () => {
     reason = 'the Agenda could not be written';
     await subject.service.run({ force: false });
     const refused = subject.journal.filter(entry => entry.type === 'fleet.warden_orphan_failed');
-    // Not remembered as told while the item has not landed: every card is still news when it does.
+    // Not remembered as told while the item has not landed: every task is still news when it does.
     const rememberedWhileRefused = subject.state().orphans;
     reason = undefined;
     await subject.service.run({ force: false });

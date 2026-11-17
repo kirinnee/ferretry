@@ -134,7 +134,7 @@ describe('claiming a card', () => {
   }
 
   it('should refuse a card held by a ferret that is not a lead of the caller, even if it is sibling’s owner', async () => {
-    // Arrange — `lead` owns the card and is the sibling's lead too, but the sibling holds it.
+    // Arrange — `lead` owns the task and is the sibling's lead too, but the sibling holds it.
     const { service } = treeWith({ owner: 'lead', assignee: 'sibling' });
 
     // Act
@@ -309,7 +309,7 @@ describe('what a refused helper is told about a card its lead holds', () => {
     const assignTo = (assignee: string | null) => action({ action: 'assign', assignee });
 
     it('should offer the claim only for a descendant of the caller that the daemon’s lineage proves', async () => {
-      // Arrange: lead > child > grandchild; the lead holds the card.
+      // Arrange: lead > child > grandchild; the lead holds the task.
       const { service } = treeWith({ owner: 'lead' });
 
       // Act

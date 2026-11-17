@@ -29,7 +29,7 @@ export function prCell(pr: SubtreeRow['pr']): string {
 }
 
 const taskCell = (row: SubtreeRow): string => {
-  const task = row.task ?? row.card; // `card` is the former key
+  const task = row.task ?? row.card; // `task` is the former key
   return task === undefined ? '-' : [task.ref, task.lane].filter(part => part !== undefined).join(' ');
 };
 

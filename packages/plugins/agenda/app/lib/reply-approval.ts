@@ -1,13 +1,13 @@
 /**
- * A REPLY THAT ALREADY SAYS YES TO THE CARD ASK (&B155). The owner answered an item holding a card ask in words —
- * "build", "ok to build!" — and the card stayed where it was: only the card ask's own button moves the card, and the
+ * A REPLY THAT ALREADY SAYS YES TO THE TASK ASK (&B155). The owner answered an item holding a task ask in words —
+ * "build", "ok to build!" — and the task stayed where it was: only the task ask's own button moves the task, and the
  * ferret may not press it. So when the owner's latest words on the item are a PLAIN approval, the card ask offers that
  * reply as its answer, one tap away. It is only offered, never applied.
  *
  * Conservative on purpose — anything else offers nothing:
- * - the item holds exactly ONE open card ask (counted in `cardAsks`, never the one-ask `gateAttached` mirror; an item
+ * - the item holds exactly ONE open task ask (counted in `cardAsks`, never the one-ask `gateAttached` mirror; an item
  *   from a daemon that keeps no `cardAsks` offers nothing), and that ask has exactly one forward option (not the one that
- *   sends the card back with words);
+ *   sends the task back with words);
  * - the owner's words came AFTER that ask was raised, and are the LAST thing on the item (no ferret reply, edit or
  *   answer form after them);
  * - the item's own reference the composer puts in front ("!A304 ok to build!") is set aside, and only that one;
@@ -18,7 +18,7 @@
 import { type AgendaGate, type AgendaItem, taskAskReference, openTaskAsks } from '@ferretry/core-asks/contract';
 import { type HistoryEvent, withoutLeadingReference } from './agenda-history.ts';
 
-/** The words that alone mean "yes, go on" to any card ask, in lower case. */
+/** The words that alone mean "yes, go on" to any task ask, in lower case. */
 const APPROVALS: ReadonlySet<string> = new Set([
   'yes',
   'yep',
@@ -39,7 +39,7 @@ const APPROVALS: ReadonlySet<string> = new Set([
   'all good',
 ]);
 
-/** The words that approve only a plan ("OK to build"): a tested card is never "built". */
+/** The words that approve only a plan ("OK to build"): a tested task is never "built". */
 const BUILD_APPROVALS: ReadonlySet<string> = new Set([
   'build',
   'build it',
@@ -49,7 +49,7 @@ const BUILD_APPROVALS: ReadonlySet<string> = new Set([
   'okay to build',
 ]);
 
-/** The words that pass only a card waiting to be tried ("Done"): a plan is never "tested". */
+/** The words that pass only a task waiting to be tried ("Done"): a plan is never "tested". */
 const TEST_APPROVALS: ReadonlySet<string> = new Set(['done', 'works', 'it works', 'tested', 'works for me']);
 
 /** The longest reply that is read at all: an approval is a word or a few. */
@@ -67,13 +67,13 @@ const normal = (text: string): string =>
 export interface ReplyApproval {
   /** The owner's words, as they wrote them. */
   readonly reply: string;
-  /** The card ask's forward option those words approve: the button the offer presses. */
+  /** The task ask's forward option those words approve: the button the offer presses. */
   readonly label: string;
-  /** The card ask it answers (`cardAskReference`): only that ask's block draws the offer. */
+  /** The task ask it answers (`taskAskReference`): only that ask's block draws the offer. */
   readonly ask: string;
 }
 
-/** The forward option of a card ask: the one option that does not send the card back; none when there are several. */
+/** The forward option of a task ask: the one option that does not send the task back; none when there are several. */
 const forwardLabel = (gate: AgendaGate): string | null => {
   const forward = gate.options.filter(option => option.outcome !== 'reopen-with-agenda');
   return forward.length === 1 ? (forward[0]?.label ?? null) : null;
@@ -93,7 +93,7 @@ const lastOwnerReply = (history: readonly HistoryEvent[], since: number): Histor
 };
 
 /**
- * The approval to offer on the item's one open card ask, or `null`: only when the owner's last words, written after
+ * The approval to offer on the item's one open task ask, or `null`: only when the owner's last words, written after
  * the ask was raised, plainly approve it.
  */
 export const replyApproval = (item: AgendaItem, history: readonly HistoryEvent[]): ReplyApproval | null => {

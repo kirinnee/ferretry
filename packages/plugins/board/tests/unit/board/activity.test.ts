@@ -33,7 +33,7 @@ const created = (at: string, ferret = 'lead'): TaskEvent => ({
   laneId: 'todo',
 });
 
-/** A card created (and last touched) `age` ago. */
+/** A task created (and last touched) `age` ago. */
 const aged = (age: number, overrides: Partial<Task> = {}): Task =>
   boardTask({ createdAt: ago(age), history: [created(ago(age))], ...overrides });
 
@@ -368,7 +368,7 @@ describe('the activity state', () => {
   });
 
   it('should orphan a card whose only child is an unassigned Todo card, but not one with an assigned or started child', () => {
-    // Arrange — the lead owns every card and is alive; the reviewer finished.
+    // Arrange — the lead owns every task and is alive; the reviewer finished.
     const roster = rosterOf([liveSession('lead'), liveSession('reviewer', { status: 'stopped' })]);
     const tasks = [
       aged(MINUTE, { id: 'F1', laneId: 'review', assignee: 'reviewer' }),

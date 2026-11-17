@@ -213,7 +213,7 @@ describe('laneFromFacts: an open PR pulls a shipped card back', () => {
       auto: true,
       trigger: 'pr.ready',
     };
-    // The new PR was abandoned: what shipped still ships, so the card goes on to the release.
+    // The new PR was abandoned: what shipped still ships, so the task goes on to the release.
     const subject = { ...base, history: [base.history[0] as TaskEvent, pulled] };
     should(move(subject, '4.110.0')).match({ lane: { id: 'tested' }, trigger: 'release.running', backward: false });
   });

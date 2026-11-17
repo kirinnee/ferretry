@@ -1,16 +1,16 @@
 /**
- * A FINISHED HELPER'S CARD GOES BACK TO ITS LEAD (docs/board.md § A finished helper's card goes back to its lead).
+ * A FINISHED HELPER'S TASK GOES BACK TO ITS LEAD (docs/board.md § A finished helper's task goes back to its lead).
  *
- * When the ferret a card is assigned to has ended (`fy signal done`, stopped, completed) and the card is still open
+ * When the ferret a task is assigned to has ended (`fy signal done`, stopped, completed) and the task is still open
  * work, the daemon assigns it to the nearest LIVE ancestor of that ferret: the lead that started it, else the lead's
- * lead, an ended one skipped. Nobody is asked or messaged; the card's history says
+ * lead, an ended one skipped. Nobody is asked or messaged; the task's history says
  * `returned to <lead>: <ferret> finished`. These are the pure decisions: the board sweep asks WHEN, and
- * {@link returnCard} makes the write.
+ * {@link returnTask} makes the write.
  *
- * It sits BEHIND the sub-card closes ({@link sub-card-close}): a helper's card with no PR still closes as
- * "helper finished" and a sub-card whose PR shipped closes with the parent carrying the test. What is left, a card
- * with a PR open or merged-not-closed, or a top-level card a helper held, is returned. With no live ancestor
- * nothing is returned and the card is an orphan, which the Warden reports.
+ * It sits BEHIND the sub-card closes ({@link sub-card-close}): a helper's task with no PR still closes as
+ * "helper finished" and a sub-card whose PR shipped closes with the parent carrying the test. What is left, a task
+ * with a PR open or merged-not-closed, or a top-level task a helper held, is returned. With no live ancestor
+ * nothing is returned and the task is an orphan, which the Warden reports.
  */
 import { type Task, isSubTask, type LaneCategory } from '../../../contract/index.ts';
 import { type TaskContext, withEvent } from './task-actions.ts';
@@ -21,10 +21,10 @@ import { HELPER_ENDED_GRACE_MS, isHandedHelper, isPrFreeHelper } from './sub-tas
 
 export { nearestLiveLead };
 
-/** The lanes a card sits in while somebody is doing it; anywhere else it is unclaimed, shipped, or finished. */
+/** The lanes a task sits in while somebody is doing it; anywhere else it is unclaimed, shipped, or finished. */
 const WORKING_CATEGORIES: readonly LaneCategory[] = ['active', 'review'];
 
-/** Whether the card's ferret is gone and has been untouched for the grace (a session that blinks is not ended). */
+/** Whether the task's ferret is gone and has been untouched for the grace (a session that blinks is not ended). */
 export const endedForGrace = (
   task: Pick<Task, 'createdAt'> & { readonly lastTouchedAt?: string | null },
   roster: FerretRoster,
@@ -37,12 +37,12 @@ export const endedForGrace = (
 };
 
 /**
- * The live lead an ended ferret's card goes back to, or `null` when it stays: the card is open work in a working
+ * The live lead an ended ferret's task goes back to, or `null` when it stays: the task is open work in a working
  * lane (not backlog, not shipped, not closed or dropped), its assignee has ended, and somebody above that ferret is
  * alive. The grace is not judged here ({@link returnTarget} does), so this is the question the card's write asks again
  * with a fresh roster. A sub-card is returned only while it is a helper's with a PR: a lead's own bookkeeping has no
  * helper to send back from, and a PR-free helper closes instead. The helper rule is judged here, not left to the
- * sweep, because a returned card reads as bookkeeping once its lead owns it.
+ * sweep, because a returned task reads as bookkeeping once its lead owns it.
  */
 export const returnLead = (
   task: Pick<Task, 'assignee' | 'owner' | 'dropped' | 'parent' | 'links'>,
@@ -66,7 +66,7 @@ export const returnTarget = (
 ): string | null =>
   endedForGrace(task, roster, effectiveAssignee(task), nowMs) ? returnLead(task, category, roster) : null;
 
-/** The card handed back: assigned to `lead`, with the ferret that finished recorded in the event. */
+/** The task handed back: assigned to `lead`, with the ferret that finished recorded in the event. */
 export const returnTask = (task: Task, lead: string, finished: string, context: Pick<TaskContext, 'now'>): Task => ({
   ...withEvent(
     task,
@@ -79,7 +79,7 @@ export const returnTask = (task: Task, lead: string, finished: string, context: 
 /**
  * The sessions from `ferret` up to `lead`, both included, walked up the roster's `lead`: exactly the ones a return
  * rests on (the ferret is gone, each one between is gone, `lead` is alive), so those are the ones whose standing is
- * held still while the card is handed over. `null` when `lead` is not above `ferret`.
+ * held still while the task is handed over. `null` when `lead` is not above `ferret`.
  */
 export const lineageThrough = (roster: FerretRoster, ferret: string, lead: string): readonly string[] | null => {
   const line = [ferret];

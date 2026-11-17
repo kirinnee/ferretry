@@ -1,7 +1,7 @@
 /**
- * WHAT KIND OF AGENDA ITEM THIS IS, in one word — the pill in the card's top bar, tinted by a theme token (never a
+ * WHAT KIND OF AGENDA ITEM THIS IS, in one word — the pill in the task's top bar, tinted by a theme token (never a
  * colour alone). The words are the protocol's (`AGENDA_KIND_LABELS`, plain words for what the owner does); only the
- * tone is the app's. A card waiting to be tried is a Test. No line of advice goes with it: the card says what to do by
+ * tone is the app's. A task waiting to be tried is a Test. No line of advice goes with it: the task says what to do by
  * what it asks.
  */
 

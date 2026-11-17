@@ -117,7 +117,7 @@ const created = (): TaskEvent => ({
   laneId: 'todo',
 });
 
-/** A valid card, checked against the wire schema so a fixture can never drift from what the daemon sends. */
+/** A valid task, checked against the wire schema so a fixture can never drift from what the daemon sends. */
 export const boardTask = (overrides: Partial<TaskView> = {}): TaskView =>
   CardViewSchema.parse({
     format: 1,

@@ -1,10 +1,10 @@
 /**
- * WHO A BOARD NOTICE IS FOR when a card needs its people to act: a stale nudge, a red CI, a PR closed unmerged.
+ * WHO A BOARD NOTICE IS FOR when a task needs its people to act: a stale nudge, a red CI, a PR closed unmerged.
  *
- * The card's ASSIGNEE answers for it. When that session has ended, the nearest live ancestor lead of the
- * assignee does; only when nobody in that line is left does it fall to the card's owner (its creator by
+ * The task's ASSIGNEE answers for it. When that session has ended, the nearest live ancestor lead of the
+ * assignee does; only when nobody in that line is left does it fall to the task's owner (its creator by
  * default) and the owner's leads. An interactive session is the owner's own chat, so it is chosen only when
- * no automatic session is alive anywhere in that order. Pure: a function of the card and one roster read.
+ * no automatic session is alive anywhere in that order. Pure: a function of the task and one roster read.
  */
 import type { Task } from '../../../contract/index.ts';
 import { MAX_LINEAGE_DEPTH } from './lineage.ts';
@@ -53,12 +53,12 @@ export const noticeRecipient = (
   return interactive;
 };
 
-/** The alerts a PR raises about a card. */
+/** The alerts a PR raises about a task. */
 export type PrAlertReason = 'ci-failing' | 'closed-unmerged';
 
 /**
  * Who a PR alert goes to when {@link noticeRecipient} found nobody: the same session it went to before routing
- * existed — the card's working ferret for a red CI, its owner for a PR closed unmerged. The sender then lets a
+ * existed — the task's working ferret for a red CI, its owner for a PR closed unmerged. The sender then lets a
  * helper's lead stand in for it (`nudgeTarget`), and the send path revives an ended session.
  */
 export const alertFallback = (task: Pick<Task, 'owner' | 'assignee'>, reason: PrAlertReason): string =>

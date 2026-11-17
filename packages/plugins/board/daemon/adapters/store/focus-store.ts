@@ -9,7 +9,7 @@ const EMPTY: Entry = { card: null, anchor: null, skip: null };
 const SECTION = 'board:focus';
 
 /**
- * Which card each ferret works on, the card its own delegations go under, and why its work has no card
+ * Which task each ferret works on, the task its own delegations go under, and why its work has no task
  * (`state/board/focus.json`). Ferrets keeps none of it, so Board holds it. A ferret that does not exist cannot be
  * focused: `setFocus` and `skip` answer `false`, as today's did for a session that was gone.
  *

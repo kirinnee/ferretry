@@ -35,7 +35,7 @@ const laneOf = (laneSet: LaneSet | null | undefined, id: string): Lane | undefin
 /** A lane's display name, falling back to its id when the lane set no longer has it. */
 export const laneName = (laneSet: LaneSet | null | undefined, id: string): string => laneOf(laneSet, id)?.name ?? id;
 
-// ─── one card's face ───────────────────────────────────────────────────────────────────────────
+// ─── one task's face ───────────────────────────────────────────────────────────────────────────
 
 /** The PR state a row shows: the newest linked PR, in the words the `--pr` filter uses. */
 export function prLabel(prs: readonly PrLink[]): string {
@@ -50,7 +50,7 @@ export function prLabel(prs: readonly PrLink[]): string {
   return pr.checks === 'failing' ? `${base} open, CI red` : `${base} open`;
 }
 
-/** The one word for how the card is doing: a block beats the derived activity. A card never waits on the owner itself. */
+/** The one word for how the task is doing: a block beats the derived activity. A task never waits on the owner itself. */
 export function activityLabel(task: TaskView): string {
   if (task.dropped !== null) return 'dropped';
   if (task.blocked !== null) return 'blocked';
@@ -89,7 +89,7 @@ const byOrder = (left: TaskView, right: TaskView): number =>
   (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER) ||
   Number(left.id.slice(1)) - Number(right.id.slice(1));
 
-/** Cards grouped by project, then by lane in the project's Kanban order; lanes with no card are left out. */
+/** Tasks grouped by project, then by lane in the project's Kanban order; lanes with no task are left out. */
 function groupBoard(response: BoardResponse, projects: readonly BoardProject[]): readonly ProjectGroup[] {
   const known = new Map(projects.map(project => [project.id, project]));
   const groups: ProjectGroup[] = [];
@@ -121,7 +121,7 @@ const headerLine = (response: BoardResponse, projects: readonly BoardProject[], 
 const quarantineNotes = (response: BoardResponse): string[] =>
   response.quarantined.map(task => `! ${task.id} could not be read (${task.reason})`);
 
-/** The board as text: one header with the counts, then each lane with its cards, one row per card. */
+/** The board as text: one header with the counts, then each lane with its tasks, one row per task. */
 export function renderBoard(
   response: BoardResponse,
   projects: readonly BoardProject[],
@@ -156,7 +156,7 @@ export function renderBoard(
   return lines.join('\n');
 }
 
-/** The same board as a markdown status report: a heading per lane and a table of its cards. */
+/** The same board as a markdown status report: a heading per lane and a table of its tasks. */
 export function renderBoardMarkdown(
   response: BoardResponse,
   projects: readonly BoardProject[],
@@ -187,7 +187,7 @@ export function renderBoardMarkdown(
   return lines.join('\n');
 }
 
-// ─── one card in full ──────────────────────────────────────────────────────────────────────────
+// ─── one task in full ──────────────────────────────────────────────────────────────────────────
 
 /** Who a line is by: the reporter of a reported trigger, else the actor (`boardEventActor`). */
 const actorLabel = (event: TaskEvent, names: FerretNames): string => {
@@ -228,8 +228,8 @@ export function renderTermsTable(terms: TaskView['terms']): string {
 }
 
 /**
- * The whole card: its ask first (the owner's words, verbatim), then why it exists, what a newcomer needs,
- * the glossary, the brief, how the owner tests it, how it relates to other cards, and its history. Empty parts
+ * The whole task: its ask first (the owner's words, verbatim), then why it exists, what a newcomer needs,
+ * the glossary, the brief, how the owner tests it, how it relates to other tasks, and its history. Empty parts
  * are left out.
  */
 export function renderTask(
@@ -289,7 +289,7 @@ export function renderTask(
   ];
   if (linkRows.length > 0) lines.push(...section('Links', linkRows.join('\n')));
   if (task.files.length > 0) lines.push(...section('Files', task.files.join('\n')));
-  // The agenda items that carry the card: its asks ride them, the card only names them.
+  // The agenda items that carry the task: its asks ride them, the task only names them.
   if (task.openAsks.length > 0) lines.push(...section('On the agenda', agendaList(task.openAsks)));
 
   const history = task.history.map(
@@ -355,7 +355,7 @@ const PAST: Readonly<Record<BoardVerb, string>> = {
   visibility: 'visibility changed',
 };
 
-/** One line that says what the verb did and where the card stands now. */
+/** One line that says what the verb did and where the task stands now. */
 export function renderActed(verb: BoardVerb, task: TaskView, laneSet: LaneSet | null, names: FerretNames): string {
   return `${formatTaskRef(task)} ${PAST[verb]} — ${laneName(laneSet, task.laneId)}, ${whoLabel(task, names)}, ${activityLabel(task)}`;
 }

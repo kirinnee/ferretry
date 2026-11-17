@@ -201,7 +201,7 @@ describe('G164 work search cannot tell whether a value that became a secret appe
 describe('G164 a related check that never names the secret cannot tell a guessed word of it (review round 3 probe)', () => {
   /**
    * Two worlds whose secret differs ONLY in the guessed word `zqbody`. `tokensOf` splits `sk-zqbody` into words while the
-   * vault masks the whole value, so an ordinary decoy card holding `zqbody` must not rank by how many items held the key.
+   * vault masks the whole value, so an ordinary decoy task holding `zqbody` must not rank by how many items held the key.
    */
   const world = async (key: string, options: { tracks?: boolean } = {}) => {
     const redaction = new FakeRedaction();

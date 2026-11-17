@@ -1,9 +1,9 @@
 /**
- * `fy card patch` and `fy card show --yaml` (docs/board.md § Patch: a card as one document).
+ * `fy task patch` and `fy task show --yaml` (docs/board.md § Patch: a task as one document).
  *
- * A card's words are ONE editable document. `cardPatchDocument` prints it with its revision; `composeCardPatch` reads
- * a patch against the card as it stands, refusing one written against an older revision (read before write), and
- * composes the ONE `edit` action carrying what differs: the same action, validation and governance as `fy card edit`,
+ * A card's words are ONE editable document. `taskPatchDocument` prints it with its revision; `composeTaskPatch` reads
+ * a patch against the task as it stands, refusing one written against an older revision (read before write), and
+ * composes the ONE `edit` action carrying what differs: the same action, validation and governance as `fy task edit`,
  * never a second write path. Pure.
  */
 import {
@@ -26,7 +26,7 @@ type WordKey = Exclude<keyof TaskPatch, 'revision'>;
 
 const WORD_KEYS = TASK_PATCH_KEYS.filter((key): key is WordKey => key !== 'revision');
 
-/** The card as the document `patch` takes back: its revision, then every field it changes ("" when empty). */
+/** The task as the document `patch` takes back: its revision, then every field it changes ("" when empty). */
 export function taskPatchDocument(task: TaskWords): Record<string, unknown> {
   return {
     revision: taskRevision(task),
@@ -65,13 +65,13 @@ export function parseTaskPatch(
   return { ok: true, patch: parsed.data };
 }
 
-/** What a card patch asks: the edit to send, nothing (every value matches), or a refusal (read it again). */
+/** What a task patch asks: the edit to send, nothing (every value matches), or a refusal (read it again). */
 export type TaskPatchPlan =
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'stale' }
   | { readonly kind: 'edit'; readonly request: TaskActionRequestInput };
 
-/** The ONE edit a patch is against `card`; `stale` when the card has changed since the patch's revision was read. */
+/** The ONE edit a patch is against `task`; `stale` when the task has changed since the patch's revision was read. */
 export function composeTaskPatch(task: TaskWords, patch: TaskPatch): TaskPatchPlan {
   if (patch.revision !== taskRevision(task)) return { kind: 'stale' };
   const fields: Record<string, unknown> = Object.fromEntries(
@@ -91,8 +91,8 @@ export function composeTaskPatch(task: TaskWords, patch: TaskPatch): TaskPatchPl
 }
 
 /**
- * The progress parts a patch names that differ from the card's (a card with no progress reads each part as ""): the progress
- * MERGES BY KEY, so only those go, and the daemon merges them into the card's progress inside its write.
+ * The progress parts a patch names that differ from the task's (a task with no progress reads each part as ""): the progress
+ * MERGES BY KEY, so only those go, and the daemon merges them into the task's progress inside its write.
  */
 function changedProgressParts(
   task: TaskWords,

@@ -22,7 +22,7 @@ import type { SerialRun } from '../../lib/lanes/serial.ts';
 
 type Counters = z.infer<typeof CountersFileSchema>;
 
-/** The card files and the id counter, as the manifest declares them. */
+/** The task files and the id counter, as the manifest declares them. */
 export interface TaskStoreFiles {
   readonly cards: StateFileDef<string, Task>;
   readonly counters: StateFileDef<string, Counters>;
@@ -40,18 +40,18 @@ interface Loaded {
 }
 
 /**
- * The board's source of truth: ONE FILE PER CARD (`state/board/cards/<id>.json`, the card and its whole history) and
+ * The board's source of truth: ONE FILE PER TASK (`state/board/cards/<id>.json`, the task and its whole history) and
  * the machine-wide id counter (`counters.json`), both through the kernel's state port (atomic, format-first).
  *
- * - **Writes are serialized per card**, so two writes to one card never interleave and writes to different cards never
+ * - **Writes are serialized per task**, so two writes to one task never interleave and writes to different tasks never
  *   wait on each other.
- * - **A damaged card is quarantined, never fatal.** A file the state port calls damaged is left exactly where it is,
+ * - **A damaged task is quarantined, never fatal.** A file the state port calls damaged is left exactly where it is,
  *   excluded from every read, reported in each read's `quarantined` and to the diagnostics once, and refused by
- *   {@link write}: overwriting it would replace the evidence with a card rebuilt from nothing.
+ *   {@link write}: overwriting it would replace the evidence with a task rebuilt from nothing.
  * - **Ids are never reused.** The counter is the floor, and the highest id already on disk (quarantined files included)
  *   is too, so a lost or damaged counter skips numbers instead of handing one out twice.
  *
- * The cards are read once, on first use, and kept in memory: every write goes through this store, so memory and disk
+ * The tasks are read once, on first use, and kept in memory: every write goes through this store, so memory and disk
  * agree. That copy is the board's query projection and is rebuilt from the files at every start.
  */
 export class KernelTaskStore implements BoardStore {
@@ -85,7 +85,7 @@ export class KernelTaskStore implements BoardStore {
         allocated = next;
         return { format: 1 as const, next: { ...fresh(), ...current?.next, [kind]: next + 1 } };
       });
-      // A damaged counter file is replaced from the highest id on disk: it holds no card, only a floor.
+      // A damaged counter file is replaced from the highest id on disk: it holds no task, only a floor.
       if (!result.ok) {
         const next = Math.max(...onDisk, 0) + 1;
         allocated = next;

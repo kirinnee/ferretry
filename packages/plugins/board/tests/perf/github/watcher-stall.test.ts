@@ -10,9 +10,9 @@ import { boardTask, FakeLanes, ferretActor, lanes, NOW, PROJECT, world } from '.
 import { answer, prNode, prUrl } from '../../unit/github/support.ts';
 
 /**
- * The stall family (a live board of ~3,600 cards answered /healthz over 250 ms while the watcher wrote cards): the
+ * The stall family (a live board of ~3,600 tasks answered /healthz over 250 ms while the watcher wrote tasks): the
  * daemon is one thread, so what matters is the longest stretch the tick runs WITHOUT giving the event loop back.
- * The cards are stored by the real `KernelCardStore` (its schema parse and per-card serial sections included) and every
+ * The tasks are stored by the real `KernelTaskStore` (its schema parse and per-card serial sections included) and every
  * stub below yields to the loop once per call, as the real file, `gh` and Asks calls do, so a gap the sampler sees is
  * one synchronous slice of the tick's own work, measured as the CPU it burned (see the sampler).
  */
@@ -75,7 +75,7 @@ const stored = (index: number) => {
   });
 };
 
-/** GitHub's answer for one repository: every PR open, which every card's `unknown` link learns from, so EVERY card writes. */
+/** GitHub's answer for one repository: every PR open, which every task's `unknown` link learns from, so EVERY task writes. */
 const everyPullRequest = (repo: string): string => {
   const prs: Record<number, unknown> = {};
   for (let number = 1; number <= numberOf(TASKS); number += 1) prs[number] = prNode(number, { repo });

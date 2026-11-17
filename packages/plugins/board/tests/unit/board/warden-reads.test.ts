@@ -7,7 +7,7 @@ import manifest from '../../../manifest.ts';
 import { boot, TEST_IDENTITY } from '../../integration/daemon/harness.ts';
 
 /**
- * The reads other plugins make of Board (the Warden's: lane sets, a ferret's focus card, and a cursor past one page),
+ * The reads other plugins make of Board (the Warden's: lane sets, a ferret's focus task, and a cursor past one page),
  * through the real daemon half's `BoardPort`.
  */
 
@@ -29,7 +29,7 @@ const world = async () => {
     if (!result.ok) throw new Error(`create refused: ${result.error.message}`);
     return result.value;
   };
-  /** Plants the focus file: ferret → the card it works on, as a stored ref. */
+  /** Plants the focus file: ferret → the task it works on, as a stored ref. */
   const plantFocus = (entries: Record<string, { id: string; machineId?: string } | null>): void => {
     host.state('board').plant(
       FOCUS as never,
@@ -144,7 +144,7 @@ describe('BoardApi.focusOf', () => {
   });
 
   test('a private card is answered to its own ferret’s focus, as the resume brief always did', async () => {
-    // Arrange: the owner makes the card private
+    // Arrange: the owner makes the task private
     const { board, made, plantFocus } = await world();
     const task = await made('owner');
     const hidden = await board.act('owner', task.id, { action: 'visibility', visibility: 'private' });
@@ -177,7 +177,7 @@ describe('BoardApi.focusOf', () => {
 
 describe('BoardApi.orphanedCards', () => {
   test('lists an open card whose ferret has ended, with the lanes that name it, and not a card with a live ferret', async () => {
-    // Arrange: two cards on the implement lane; the ferret of one has stopped
+    // Arrange: two tasks on the implement lane; the ferret of one has stopped
     const { board, made, ferrets } = await world();
     ferrets.add({ id: ferretId('f2') as FerretId });
     const ended = await made('owner', { title: 'Ended', assignee: 'f1', laneId: 'doing' });

@@ -9,7 +9,7 @@ import { TidyService } from '../../daemon/lib/service.ts';
 const ME = ferretId('lead');
 const OTHER = ferretId('helper');
 
-/** The fake board with every card read as an agent's, and each project's switch scripted. */
+/** The fake board with every task read as an agent's, and each project's switch scripted. */
 function board(on: readonly string[] = []): BoardApi {
   const inner = fakeBoard();
   return {

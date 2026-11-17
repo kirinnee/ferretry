@@ -218,7 +218,7 @@ describe('GitHubWatcher: polling', () => {
     should((await subject.watcher.tick()).polled).be.empty();
     subject.clock.ms += POLL_OPEN_MS;
     should((await subject.watcher.tick()).polled).deepEqual([REPO]);
-    // Nothing new: no card is written again.
+    // Nothing new: no task is written again.
     should(subject.store.writes).have.length(2);
   });
 
@@ -535,7 +535,7 @@ describe('GitHubWatcher: releases', () => {
     });
     await subject.watcher.tick();
     should(subject.stored().laneId).equal('released');
-    // A card waiting at the Plan gate stays there: only the owner passes a gate (docs/board.md § Cards show progress).
+    // A task waiting at the Plan gate stays there: only the owner passes a gate (docs/board.md § Tasks show progress).
     should(subject.stored('F2').laneId).equal('plan');
     should(subject.gh.calls).be.empty();
     // The release reaches this machine: the next tick finds it, with nothing new from GitHub.
@@ -586,7 +586,7 @@ describe('GitHubWatcher: releases', () => {
     });
     await subject.watcher.tick();
     should(subject.gh.polls()).equal(1);
-    // The repository is now idle for ten minutes. A card imported or linked with an unknown PR is looked at anyway.
+    // The repository is now idle for ten minutes. A task imported or linked with an unknown PR is looked at anyway.
     subject.store.cards.set('F2', withLinks([link(941)], { id: 'F2' }));
     should((await subject.watcher.tick()).polled).deepEqual([REPO]);
     should(subject.stored('F2').laneId).equal('merged');
@@ -860,7 +860,7 @@ describe('GitHubWatcher: the job', () => {
   it('should build the board index once a tick however many cards it watches', async () => {
     const tasks = [940, 941, 942, 943].map(number => withLinks([link(number)], { id: `F${number}` }));
     const prs = Object.fromEntries(tasks.map(watched => [watched.links.prs[0]?.number ?? 0, prNode(0)]));
-    // A BoardIndex walks the cards it is built from twice (by id, then by edges), so each walk of the snapshot's
+    // A BoardIndex walks the tasks it is built from twice (by id, then by edges), so each walk of the snapshot's
     // array is one half of one construction.
     let walks = 0;
     const snapshotTasks = [...tasks];

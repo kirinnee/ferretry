@@ -1,5 +1,5 @@
 /**
- * THE BOARD AND A CARD'S "AGENDA ASKS", in a real browser: the board (`/d/<id>/board`) draws, a card opens over it
+ * THE BOARD AND A TASK'S "AGENDA ASKS", in a real browser: the board (`/d/<id>/board`) draws, a task opens over it
  * (`/d/<id>/board/F3`: a drawer on a desktop, a page on a phone) and its page has the "Agenda asks" section (v4 parity).
  * Phone and desktop, light and dark. Set `FY_BOARD_APP_SHOTS_DIR` to keep `<viewport>-<scheme>-<scene>.png`.
  */
@@ -85,7 +85,7 @@ describe('the board and a card’s Agenda asks', () => {
       it(`draws the board's cards (${name}, ${scheme})`, async () => {
         const { tab, close } = await open(name, scheme, '&open=none');
         try {
-          // A phone shows one lane at a time: wait for any of the cards.
+          // A phone shows one lane at a time: wait for any of the tasks.
           await tab.waitForSelector(
             'text=/Rich CI cache summary|Release notes for 4.111|Retire the old inbox route|Lane editor copy/',
           );

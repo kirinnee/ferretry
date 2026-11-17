@@ -25,7 +25,7 @@ afterEach(async () => {
   await f.clean();
 });
 
-/** A fake v4.291.5 card, as `FileBoardStore.write` stores it. */
+/** A fake v4.291.5 task, as `FileBoardStore.write` stores it. */
 function v4Task(id: string, extra: Record<string, unknown> = {}) {
   const kind = { B: 'bug', F: 'feature', I: 'infra', C: 'chore' }[id.slice(0, 1)];
   return {

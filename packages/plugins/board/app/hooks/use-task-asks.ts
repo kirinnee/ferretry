@@ -1,6 +1,6 @@
 /**
- * A card's Agenda asks, LIVE (v4's `useBoardAsks`): the agendas of the ferrets that can hold them are watched in the
- * board store for as long as the card is open, and re-read when the machine says that ferret's asks changed
+ * A task's Agenda asks, LIVE (v4's `useBoardAsks`): the agendas of the ferrets that can hold them are watched in the
+ * board store for as long as the task is open, and re-read when the machine says that ferret's asks changed
  * (`asks.changed`, noted by the runtime). The rows follow every later snapshot with no board refresh and no remount;
  * the watch is released on unmount.
  */

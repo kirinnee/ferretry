@@ -1,15 +1,15 @@
 /**
- * A `card` OR `board` BLOCK, DRAWN LIVE IN CHAT: the Board's own card and lane, read-only, inline in a message.
+ * A `task` OR `board` BLOCK, DRAWN LIVE IN CHAT: the Board's own task and lane, read-only, inline in a message.
  *
  * Conversation owns the fence and hands the Board what it names (`reference:&board`, an `EmbedSpec`); everything drawn
- * is read from the board, so the block can never say something the board does not. The card is the real `BoardCard` and
+ * is read from the board, so the block can never say something the board does not. The task is the real `BoardTask` and
  * the lane header the real `BoardLane`, the same ones the Board page, the phone and the Tasks tab draw.
  *
- *  - PROOF BEFORE LINK. A card that was read is a link to its page; one that was not (missing, unreadable, or not yet
+ *  - PROOF BEFORE LINK. A task that was read is a link to its page; one that was not (missing, unreadable, or not yet
  *    answered) is a quiet note or a placeholder and never a link.
- *  - LIVE, WITHOUT A TIMER. Each card is watched with `beat: false`, so it is re-read only when `board.changed` names it,
+ *  - LIVE, WITHOUT A TIMER. Each task is watched with `beat: false`, so it is re-read only when `board.changed` names it,
  *    and a block that unmounts lets go of its watch. A `parent:` block joins one shared whole-board read the same way.
- *  - Both list forms draw ONE mini board: the lanes with their cards under them, at most `embedChildren` cards.
+ *  - Both list forms draw ONE mini board: the lanes with their tasks under them, at most `embedChildren` tasks.
  */
 
 import { FY_RENDER_LIMITS } from '@ferretry/plugin-conversation/contract';
@@ -81,7 +81,7 @@ function Task({
   );
 }
 
-/** The one mini board both list forms draw: the lanes with their cards, then the notes and a footer. */
+/** The one mini board both list forms draw: the lanes with their tasks, then the notes and a footer. */
 function MiniBoard({
   anchor,
   lanes,

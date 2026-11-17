@@ -1,6 +1,6 @@
 import { type BoardMergeGateResponse, formatTaskRef, prUrlParts } from '../../contract/index.ts';
 
-/** `fy card merge-gate` exit codes past 0 (free): the merger reads anything but 0 as "do not merge". */
+/** `fy task merge-gate` exit codes past 0 (free): the merger reads anything but 0 as "do not merge". */
 export const MERGE_GATE_WAITING = 1;
 export const MERGE_GATE_UNREADABLE = 2;
 
@@ -9,7 +9,7 @@ export interface MergeGateIo {
   diagnostic(message: string): void;
 }
 
-/** The words for what a PR still waits on, one line per card of its merge unit: `&F20 waits on &F18 (until shipped)`. */
+/** The words for what a PR still waits on, one line per task of its merge unit: `&F20 waits on &F18 (until shipped)`. */
 export function mergeGateLines(answer: Pick<BoardMergeGateResponse, 'waits'>): readonly string[] {
   const byTask = new Map<string, string[]>();
   for (const wait of answer.waits) {
@@ -20,9 +20,9 @@ export function mergeGateLines(answer: Pick<BoardMergeGateResponse, 'waits'>): r
 }
 
 /**
- * `fy card merge-gate <pr-url>`: whether a PR may merge as far as the board's queue goes. Exit 0 and silence when it
- * may, 1 and the waits when a card it ships waits on another, 2 when the board cannot be read (the daemon is down, a
- * card is unreadable, the URL is not a PR). The merger treats 2 like 1, so it never merges what it could not check.
+ * `fy task merge-gate <pr-url>`: whether a PR may merge as far as the board's queue goes. Exit 0 and silence when it
+ * may, 1 and the waits when a task it ships waits on another, 2 when the board cannot be read (the daemon is down, a
+ * task is unreadable, the URL is not a PR). The merger treats 2 like 1, so it never merges what it could not check.
  */
 export async function checkMergeGate(
   read: (pr: string) => Promise<BoardMergeGateResponse>,

@@ -23,10 +23,10 @@ import {
 import type { BoardCaller } from '../lib/board/index.ts';
 import { answer, boardCaller, FY_REQUEST_ID_HEADER, parseBody, pathParameter } from './http.ts';
 
-/** The project boards' HTTP surface: the board query, one card, a new card, every action on a card, a ferret's skip. */
+/** The project boards' HTTP surface: the board query, one task, a new task, every action on a task, a ferret's skip. */
 export interface BoardSubsystem {
   board(query: BoardQuery): Promise<BoardResponse>;
-  /** Every card id on this machine, whatever its project or state. */
+  /** Every task id on this machine, whatever its project or state. */
   ids(): Promise<BoardIdsResponse>;
   /** Whether a PR may merge as far as the board's queue goes (docs/design/clash-queue.md). */
   mergeGate(pr: string): Promise<BoardMergeGateResponse>;
@@ -34,7 +34,7 @@ export interface BoardSubsystem {
   create(request: TaskCreateRequest, caller: BoardCaller): Promise<TaskResponse>;
   act(id: TaskId, request: TaskActionRequest, caller: BoardCaller): Promise<TaskResponse>;
   skip(request: BoardSkipRequest, caller: BoardCaller): Promise<BoardSkipResponse>;
-  /** The owner's start of a NEW ferret on a card, or the live ferret that already holds it. */
+  /** The owner's start of a NEW ferret on a task, or the live ferret that already holds it. */
   start(id: TaskId, caller: BoardCaller, key?: string): Promise<TaskStartResponse>;
 }
 
@@ -101,7 +101,7 @@ type BoardRoutes = TaskRoutes & {
 
 /**
  * `operator` throughout, plus the `fleet` capability (the manifest): a remote caller reaches the board only if the owner
- * lets the fleet be used from there, and a loopback caller is ungoverned. Who may write WHICH card is the board's own
+ * lets the fleet be used from there, and a loopback caller is ungoverned. Who may write WHICH task is the board's own
  * decision — ownership and lineage — made inside the service.
  */
 export function boardRoutes(board: BoardSubsystem): BoardRoutes {

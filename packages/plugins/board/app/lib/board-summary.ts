@@ -1,11 +1,11 @@
 /**
  * THE TABLE AS THE CURRENT SUMMARY: what the owner must act on, what is being worked on, and what has
- * recently merged and released. Newest first, no "who" and no PR numbers (the card detail has them).
+ * recently merged and released. Newest first, no "who" and no PR numbers (the task detail has them).
  *
- * The lane design is about ACTION first and information second: a card in a lane where the owner has to
+ * The lane design is about ACTION first and information second: a task in a lane where the owner has to
  * do something (try it) leads the page, then what is in progress, then two compact
  * information sections. Only the information sections follow the time window; "To test" and "Working now"
- * are true now, however old the card is.
+ * are true now, however old the task is.
  *
  * Pure values in, pure values out: the caller passes `now`.
  */
@@ -54,7 +54,7 @@ export const SUMMARY_SECTIONS: Readonly<Record<SummarySectionId, SectionMeta>> =
   released: { title: 'Released recently', action: false, windowed: true },
 };
 
-/** A row of the summary: the card, where it sits, and when it last mattered. */
+/** A row of the summary: the task, where it sits, and when it last mattered. */
 export interface SummaryRow extends HumanTask {
   readonly card: BoardTaskOf;
   readonly row: BoardListRow;
@@ -63,7 +63,7 @@ export interface SummaryRow extends HumanTask {
   readonly at: string | null;
   /** "merged 2h ago", "released in 4.141.1 · 2h ago", "working now". */
   readonly when: string;
-  /** The key of the human card this agent card is drawn under, or `null`. */
+  /** The key of the human task this agent task is drawn under, or `null`. */
   readonly under: string | null;
 }
 
@@ -80,7 +80,7 @@ export const agoLabel = (instant: string | null, now: number): string | null => 
   return age === null ? null : age === 'now' ? 'just now' : `${age} ago`;
 };
 
-/** Which section a card belongs to; `null` for a card that is not part of the story (backlog, closed, unplaced). */
+/** Which section a task belongs to; `null` for a task that is not part of the story (backlog, closed, unplaced). */
 export const sectionOf = (task: BoardTaskOf, category: LaneCategory | null): SummarySectionId | null => {
   if (category === null) return null;
   if (isActionCategory(category)) return 'to-test';
@@ -138,18 +138,18 @@ const newestFirst = (left: SummaryRow, right: SummaryRow): number =>
   left.card.task.id.localeCompare(right.card.task.id, undefined, { numeric: true });
 
 export interface SummaryInput {
-  /** Every open card of the board, in a row each. */
+  /** Every open task of the board, in a row each. */
   readonly rows: readonly BoardListRow[];
-  /** Closed cards, only to find what was released lately and is done with. */
+  /** Closed tasks, only to find what was released lately and is done with. */
   readonly closedRows?: readonly BoardListRow[];
   readonly window: SummaryWindow;
   readonly now: number;
 }
 
 /**
- * The summary: the four sections in order, each newest first, empty ones left out. A closed card appears
- * only under "Released recently", and only if it shipped inside the window. Agent cards (when the board
- * shows them) sit right under the human card they serve.
+ * The summary: the four sections in order, each newest first, empty ones left out. A closed task appears
+ * only under "Released recently", and only if it shipped inside the window. Agent tasks (when the board
+ * shows them) sit right under the human task they serve.
  */
 export const summarySections = ({ rows, closedRows = [], window, now }: SummaryInput): readonly SummarySection[] => {
   const range = { preset: window, from: null, to: null } as const;

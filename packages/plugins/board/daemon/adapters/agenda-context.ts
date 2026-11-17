@@ -5,19 +5,19 @@ import type { TaskResponse } from '../../contract/wire.ts';
 
 /** What Board's half of the agenda context reads, each from the world Board already built. */
 export interface BoardAgendaContextSources {
-  /** The card a ferret works on (`config.focusTask`); `null` for none. */
+  /** The task a ferret works on (`config.focusTask`); `null` for none. */
   readonly focusOf: (ferret: string) => Promise<TaskRef | null>;
-  /** One card with its lane set; `undefined` when it is not on the board. */
+  /** One task with its lane set; `undefined` when it is not on the board. */
   readonly card: (id: TaskRef['id']) => Promise<TaskResponse | undefined>;
-  /** Where the card's gate asks the owner. A read that fails THROWS: "not asking" would let a second ask through. */
+  /** Where the task's gate asks the owner. A read that fails THROWS: "not asking" would let a second ask through. */
   readonly asking: (id: TaskRef['id']) => Promise<{ readonly ferret: string; readonly id: string } | undefined>;
   readonly machineId: () => string | undefined;
   readonly laneForTrigger?: typeof defaultLaneForTrigger;
 }
 
 /**
- * Board's half of `agenda.context:board` (the agenda's focus card, to-test lane and gate asks, docs/agenda.md): three
- * reads over what Board already holds. A card of another machine means nothing in this store, so it is not answered.
+ * Board's half of `agenda.context:board` (the agenda's focus task, to-test lane and gate asks, docs/agenda.md): three
+ * reads over what Board already holds. A task of another machine means nothing in this store, so it is not answered.
  */
 export function boardAgendaContext(sources: BoardAgendaContextSources): AgendaBoardContext {
   const laneForTrigger = sources.laneForTrigger ?? defaultLaneForTrigger;

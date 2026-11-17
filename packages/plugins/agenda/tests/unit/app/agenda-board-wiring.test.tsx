@@ -86,7 +86,7 @@ const drawn = async (
   provided: Provided,
   ready: (root: HTMLElement) => boolean,
 ): Promise<HTMLElement> => {
-  // A phone: the opened ask is the deck's card, with its answer row.
+  // A phone: the opened ask is the deck's task, with its answer row.
   window.innerWidth = 400;
   const half = app.build?.({ manifest, client: daemon(items) });
   const component =

@@ -1,5 +1,5 @@
 /**
- * The rendered card name.
+ * The rendered task name.
  *
  * Keep the parser in the shell: task names also feed the command palette,
  * while this component owns only the task-facing visual treatment.

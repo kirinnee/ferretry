@@ -10,11 +10,11 @@ import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 // ─── tidy plan (`POST /v1/tidy/plan`) ─────────────────────────────────────────────────────────────────────────────
 
-/** A card's id as Board mints it (`B12`, `F412`, `I3`, `C9`); Tidy reads it, never makes one. */
+/** A task's id as Board mints it (`B12`, `F412`, `I3`, `C9`); Tidy reads it, never makes one. */
 export const TidyCardIdSchema = z.string().regex(/^[BFIC][1-9][0-9]{0,8}$/u);
 export type TidyTaskId = z.infer<typeof TidyCardIdSchema>;
 
-/** Why a card is kept. */
+/** Why a task is kept. */
 export const TidyCardKeepCodeSchema = z.enum(['owner-asked', 'board-on', 'assigned-to-live-ferret', 'waiting-at-gate']);
 export type TidyTaskKeepCode = z.infer<typeof TidyCardKeepCodeSchema>;
 
@@ -65,7 +65,7 @@ export type TidyPlanRequest = z.infer<typeof TidyPlanRequestSchema>;
 /** The plan names the ferret it is for: the caller's own from its credential, or the one the owner asked about. */
 export const TidyPlanSchema = z.strictObject({
   ferret: FerretIdSchema,
-  /** A helper holds no cards to drop (the board refuses its drops), so its plan has none. */
+  /** A helper holds no tasks to drop (the board refuses its drops), so its plan has none. */
   helper: z.boolean(),
   drop: z.array(TidyDropSchema),
   close: z.array(TidyCloseSchema),

@@ -17,7 +17,7 @@ export class AskEvents implements AgendaChangeObserver {
     );
     if (answered) {
       for (const answer of answersOn(ferret, item)) {
-        // A daemon card answer names the precise obligation in its history; older answers are already published.
+        // A daemon task answer names the precise obligation in its history; older answers are already published.
         if (change.actor.kind === 'daemon' && answer.entry !== latest?.note) continue;
         if (change.actor.kind === 'human' && taskAnswers.has(answer.id)) continue;
         this.events.publish(AskAnswered, {

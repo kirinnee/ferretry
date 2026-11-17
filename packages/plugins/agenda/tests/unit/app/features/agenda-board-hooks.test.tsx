@@ -367,7 +367,7 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
     });
 
     test('releases only the registration being disposed, though every card of a machine registers the SAME function', () => {
-      // The shell hands one cached `editorFor` per machine, so each card's scope registers the identical function.
+      // The shell hands one cached `editorFor` per machine, so each task's scope registers the identical function.
       const shared = upon('shared');
       const book = laneEditorBook();
       const first = book.register(desk, shared);
@@ -389,7 +389,7 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
     });
   });
 
-  /** An open card of `daemon`, with the Inbox page binding Board per card exactly as the screens do. */
+  /** An open task of `daemon`, with the Inbox page binding Board per task exactly as the screens do. */
   const Page = ({
     cards,
     open,
@@ -527,7 +527,7 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
         {
           [desk]: {
             [AGENDA_LANE_PROPOSAL_HOOK]: {
-              // ONE function for the machine, as the shell caches it: every card's scope registers this same value.
+              // ONE function for the machine, as the shell caches it: every task's scope registers this same value.
               editorFor: (ask: { sourceRef?: string | null }) => `/desk-lanes/${ask.sourceRef}`,
             },
           },
@@ -539,7 +539,7 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
     await interact(() =>
       must(root().querySelector<HTMLButtonElement>('.fy-attn-deck__top [aria-label="Next item"]'), 'Next').click(),
     );
-    // The leaving card unmounts once its fly-out ends, releasing its scope's registration.
+    // The leaving task unmounts once its fly-out ends, releasing its scope's registration.
     await interact(() => new Promise(resolve => setTimeout(resolve, 400)));
     await interact(() => flush());
     expect(root().querySelector('.fy-attn-deck__leaving')).toBeNull();

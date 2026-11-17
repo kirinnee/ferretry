@@ -26,13 +26,13 @@ const said = (text: string): TranscriptEvent => ({ kind: 'message', role: 'assis
 const call = (name: string, input: unknown): TranscriptEvent =>
   ({ kind: 'tool-call', role: 'assistant', call: { id: name, name, input } }) as TranscriptEvent;
 
-/** A card response on the support project's board. */
+/** A task response on the support project's board. */
 const response = (overrides: Parameters<typeof boardTask>[0] = {}): TaskResponse =>
   ({ card: { ...boardTask(overrides) }, laneSet: lanes() }) as unknown as TaskResponse;
 
 const HOUR = BOARD_CHECK_INTERVAL_MS;
 
-/** Ports over a transcript, a focus, a skip and a card; records what was sent and journalled. */
+/** Ports over a transcript, a focus, a skip and a task; records what was sent and journalled. */
 function harness(
   options: {
     readonly events?: readonly TranscriptEvent[];

@@ -38,7 +38,7 @@ import {
   type FerretRoster,
 } from '../../daemon/lib/board/index.ts';
 
-/** An agenda that names no card. */
+/** An agenda that names no task. */
 const NO_ASKS: TaskAskLinkSource = { asksFor: async () => new Map() };
 
 export const MACHINE = 'machine-1';
@@ -147,7 +147,7 @@ export const lanes = (
 /** The names fake every world uses: a ferret is named by its id, so a recorded actor is predictable. */
 export const NAMES: FerretNames = { nameOf: async ferret => ferret };
 
-/** A ferret as a card records it, named as {@link NAMES} names it. */
+/** A ferret as a task records it, named as {@link NAMES} names it. */
 export const ferretActor = (ferret: string): Extract<TaskActor, { kind: 'ferret' }> => ({
   kind: 'ferret',
   name: ferret,
@@ -156,7 +156,7 @@ export const ferretActor = (ferret: string): Extract<TaskActor, { kind: 'ferret'
 
 const ferret = ferretActor;
 
-/** A stored card: `F1` by ferret `lead`, in Todo, unless told otherwise. */
+/** A stored task: `F1` by ferret `lead`, in Todo, unless told otherwise. */
 export const boardTask = (overrides: Partial<Task> = {}): Task => {
   const id = overrides.id ?? 'F1';
   const laneId = overrides.laneId ?? 'todo';

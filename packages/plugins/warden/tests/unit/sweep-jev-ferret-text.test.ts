@@ -62,7 +62,7 @@ const peerWaiter = (id: string, overrides: Parameters<typeof session>[0]['state'
   });
 const peer = () => session({ id: 'p9', status: PEER_STATE, label: PEER });
 
-/** The focus card a restarted or resumed ferret is handed, so the turn typed into it is delivered and read. */
+/** The focus task a restarted or resumed ferret is handed, so the turn typed into it is delivered and read. */
 const task: WardenFocusTask = { task: taskView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
 const board = { read: async () => boardOf(), focusCard: async () => task };
 
@@ -135,7 +135,7 @@ describe('what reaches a ferret from Jev, whatever the act', () => {
       // Everything typed into a ferret's session is a static message or a fixed sentence.
       should(subject.remedies.length).be.above(0);
       for (const remedy of subject.remedies) should(String(remedy.detail)).not.match(HOSTILE);
-      // A restart or a resume is handed its card, and the reason given with it is a static leaf sentence.
+      // A restart or a resume is handed its task, and the reason given with it is a static leaf sentence.
       if (scenario.act === 'restart' || scenario.act === 'resume')
         should(subject.remedies.map(remedy => String(remedy.detail)).join('\n')).containEql('Your task:');
       // The ferret's views carry classifications and fixed sentences only.

@@ -1,5 +1,5 @@
 /**
- * A BOARD ALERT IS NEVER TYPED INTO THE OWNER'S OWN CHAT. A stale card, a red CI and a PR closed unmerged are
+ * A BOARD ALERT IS NEVER TYPED INTO THE OWNER'S OWN CHAT. A stale task, a red CI and a PR closed unmerged are
  * routed by `noticeRecipient` (`notice-route.ts`), which falls to an interactive session only when no automatic one is alive —
  * and for a lead the owner chats with, whose helpers have ended, that is nearly always: from 2026-10-31 to
  * 2026-11-03 one such lead had 177 of them typed into it as turns, 158 of them "CI is red".
@@ -9,13 +9,13 @@
  * place every alert passes, whoever it was routed to — the alert route, the pre-routing fallback, or a helper's
  * lead standing in for it. The session's mode is read as the send path reads it (`config.mode`).
  *
- * Holding one back loses nothing the board does not show: a red CI is the card's PR fact, a PR closed unmerged is
- * a note in the card's history, a stale card is its activity. The alert is journalled on the session it was for,
+ * Holding one back loses nothing the board does not show: a red CI is the task's PR fact, a PR closed unmerged is
+ * a note in the task's history, a stale task is its activity. The alert is journalled on the session it was for,
  * so what was withheld can be counted. An automatic session gets every alert as before.
  *
- * A PRIVATE card is hidden from the default board, so a red CI or a PR closed unmerged on one is seen by nobody
+ * A PRIVATE task is hidden from the default board, so a red CI or a PR closed unmerged on one is seen by nobody
  * who does not open it. Such an alert is also written as a note on the nearest PUBLIC ancestor that is still open ({@link AlertSurface}),
- * which the owner's default board does show — still not a turn. A stale nudge is journalled only: it is a card's own
+ * which the owner's default board does show — still not a turn. A stale nudge is journalled only: it is a task's own
  * quiet, and a note on its parent would count as the parent's activity.
  */
 import type { Task, TaskId } from '../../../contract/index.ts';
@@ -37,7 +37,7 @@ export interface BoardAlertPorts {
   send(ferret: string, message: string): Promise<void>;
   /** Journals an alert that was held back on the session it was for. */
   withheld(ferret: string, message: string): Promise<void>;
-  /** Puts a held-back alert about a card where the board shows it, without typing it anywhere. */
+  /** Puts a held-back alert about a task where the board shows it, without typing it anywhere. */
   surface(task: TaskId, message: string): Promise<void>;
 }
 
@@ -49,7 +49,7 @@ export class BoardAlerts {
 
   /**
    * Sends one alert unless its session is interactive. A session whose mode cannot be read — or whose read fails —
-   * is sent to: the send path refuses one it cannot read, exactly as before. `about` names the card whose
+   * is sent to: the send path refuses one it cannot read, exactly as before. `about` names the task whose
    * actionable alert this is, so a held-back one can be surfaced on the board.
    */
   async send(ferret: string, message: string, about?: TaskId): Promise<BoardAlertOutcome> {
@@ -65,16 +65,16 @@ export class BoardAlerts {
 }
 
 export interface AlertSurfacePorts {
-  /** Every readable card, archived ones included, with every board's lanes. */
+  /** Every readable task, archived ones included, with every board's lanes. */
   snapshot(): Promise<{ readonly cards: readonly Task[]; readonly laneSets: LaneSets }>;
-  /** Writes a note on a card's history as the daemon. */
+  /** Writes a note on a task's history as the daemon. */
   note(task: TaskId, text: string): Promise<void>;
   machineId(): string | undefined;
 }
 
 /**
- * The nearest ancestor of `card` that is public AND on the default board (open, not dropped, not in a closed lane —
- * the board's own `isOpenOnBoard`), never the card itself; `undefined` when there is none. An archived ancestor is
+ * The nearest ancestor of `task` that is public AND on the default board (open, not dropped, not in a closed lane —
+ * the board's own `isOpenOnBoard`), never the task itself; `undefined` when there is none. An archived ancestor is
  * walked past: a note on it would sit where the default board does not list it.
  */
 const visibleAncestor = (task: Task, index: BoardIndex, laneSets: LaneSets): Task | undefined => {
@@ -90,8 +90,8 @@ const visibleAncestor = (task: Task, index: BoardIndex, laneSets: LaneSets): Tas
 };
 
 /**
- * Where a held-back alert about a PRIVATE card is seen: a note on its nearest public ancestor that the default
- * board lists (open). A public card needs nothing (its own PR facts show), and a private card with no such ancestor
+ * Where a held-back alert about a PRIVATE task is seen: a note on its nearest public ancestor that the default
+ * board lists (open). A public task needs nothing (its own PR facts show), and a private task with no such ancestor
  * has nowhere visible to go — journalled only, a declared gap (docs/board.md).
  */
 export class AlertSurface {

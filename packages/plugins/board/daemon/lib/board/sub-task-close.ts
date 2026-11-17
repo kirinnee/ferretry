@@ -1,6 +1,6 @@
 /**
- * SUB-CARDS CLOSE THEMSELVES (docs/board.md § Sub-cards close themselves): a card with a parent is a lead's
- * bookkeeping for one piece of work, and the owner tests the parent, never the sub-card. So where a top-level card
+ * SUB-CARDS CLOSE THEMSELVES (docs/board.md § Sub-cards close themselves): a task with a parent is a lead's
+ * bookkeeping for one piece of work, and the owner tests the parent, never the sub-card. So where a top-level task
  * would wait in Released · to test, a sub-card closes instead, and a helper that ends with no PR closes with its
  * ferret. These are the pure decisions: each answers the history reason a close is recorded with, or `null` for
  * "stays open". `closeAsDaemon` (card-actions) makes the move; the PR facts, `fy signal done` and the board sweep
@@ -25,10 +25,10 @@ export const closedLaneOf = (laneSet: LaneSet): Lane | undefined =>
 const hasOpenPr = (task: Pick<Task, 'links'>): boolean => task.links.prs.some(pr => pr.state === 'open');
 const hasMergedPr = (task: Pick<Task, 'links'>): boolean => task.links.prs.some(pr => pr.state === 'merged');
 
-/** Whether the card has no PR that is open or merged: a review or research helper, or work that shipped nothing. */
+/** Whether the task has no PR that is open or merged: a review or research helper, or work that shipped nothing. */
 export const isPrFreeHelper = (task: Pick<Task, 'links'>): boolean => !hasOpenPr(task) && !hasMergedPr(task);
 
-/** A sub-card handed to another ferret: a helper's card, never the lead's own bookkeeping. */
+/** A sub-card handed to another ferret: a helper's task, never the lead's own bookkeeping. */
 export const isHandedHelper = (task: Pick<Task, 'parent' | 'assignee' | 'owner'>): boolean =>
   isSubTask(task) && task.assignee !== null && task.assignee !== task.owner;
 
@@ -39,7 +39,7 @@ const closable = (task: Task, laneSet: LaneSet): boolean => {
 };
 
 /**
- * A sub-card whose PRs shipped and that now sits where a top-level card would wait for the owner to try it (a
+ * A sub-card whose PRs shipped and that now sits where a top-level task would wait for the owner to try it (a
  * `verify` lane). `null` for anything else: a PR still open, nothing merged, any other lane.
  */
 export const shippedCloseReason = (task: Task, laneSet: LaneSet): string | null => {
@@ -50,7 +50,7 @@ export const shippedCloseReason = (task: Task, laneSet: LaneSet): string | null 
 
 /**
  * A sub-card whose ferret finished or ended with no PR to ship (a review or research helper). `null` for anything
- * else, and for a card with a PR open or merged, which the PR's own facts close.
+ * else, and for a task with a PR open or merged, which the PR's own facts close.
  */
 export const helperCloseReason = (task: Task, laneSet: LaneSet): string | null =>
   closable(task, laneSet) && isPrFreeHelper(task) ? SUB_TASK_HELPER_REASON : null;

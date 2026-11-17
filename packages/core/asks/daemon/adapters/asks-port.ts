@@ -165,7 +165,7 @@ export function answerOf(ferret: string, item: ResolvedAgendaItem): AskAnswer | 
   };
 }
 
-/** Durable answers on a thread, including the owner's answer while it rests and answered card questions. */
+/** Durable answers on a thread, including the owner's answer while it rests and answered task questions. */
 export function answersOn(ferret: string, item: AgendaItem | ResolvedAgendaItem): AskAnswer[] {
   const out: AskAnswer[] = [];
   if ('resolvedAt' in item) {
@@ -233,14 +233,14 @@ function summaryOf(
   };
 }
 
-/** The `card` source the Board registers: a gate's ask, `gate:<card>:<lane>:<entry>`. */
+/** The `task` source the Board registers: a gate's ask, `gate:<card>:<lane>:<entry>`. */
 const TASK_SOURCE = 'card' as SourceKey;
 
 /**
- * The open asks a card's gates put on an item that is NOT itself the card's obligation: a ferret's own item or a card
+ * The open asks a task's gates put on an item that is NOT itself the task's obligation: a ferret's own item or a task
  * agenda carrying `cardAsks` (what a v4 agenda holds, and what this engine still reads, answers and rests). Each is
- * an open ask of the `card` source named by its gate, on its carrier's own id, so the Board finds the ask a gate
- * already has and raises no second one. Only the Board's own read (the `card` source) lists them; the carrier stays
+ * an open ask of the `task` source named by its gate, on its carrier's own id, so the Board finds the ask a gate
+ * already has and raises no second one. Only the Board's own read (the `task` source) lists them; the carrier stays
  * one ask of its own source everywhere else.
  */
 const carriedTaskAsks = (ferret: string, item: AgendaItem, sources: Parameters<typeof summaryOf>[3]): AskSummary[] =>

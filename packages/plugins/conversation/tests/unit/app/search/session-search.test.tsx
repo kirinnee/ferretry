@@ -1,5 +1,5 @@
 /**
- * Current-ferret file and card search: the ranking model, what one mounted scope costs, the ferret's cards as Board
+ * Current-ferret file and task search: the ranking model, what one mounted scope costs, the ferret's tasks as Board
  * hands them in, honest file-index coverage, the scope/evidence pairing, and the combobox control.
  */
 
@@ -58,7 +58,7 @@ const taskOf = (id: string, patch: Partial<FerretSearchCard> = {}): FerretSearch
   ...patch,
 });
 
-/** This ferret's one card, the way Board hands it in. */
+/** This ferret's one task, the way Board hands it in. */
 const needleCard = (patch: Partial<FerretSearchCard> = {}): FerretSearchCard =>
   taskOf('F6', { title: 'Needle task', summary: 'Search the current ferret quickly.', ...patch });
 
@@ -113,7 +113,7 @@ const providerOf = (
     focusSignal = 0,
     at = SCOPE,
   }: {
-    /** `null`: the host has no board and hands no cards in. */
+    /** `null`: the host has no board and hands no tasks in. */
     readonly cards?: FerretTasksRead | null;
     readonly focusSignal?: number;
     readonly at?: FerretSearchScope | null;
@@ -319,7 +319,7 @@ describe('what one mounted ferret scope costs', () => {
   });
 });
 
-/* ---------- the cards ---------------------------------------------------------- */
+/* ---------- the tasks ---------------------------------------------------------- */
 
 describe("the ferret's cards", () => {
   const observe = async (

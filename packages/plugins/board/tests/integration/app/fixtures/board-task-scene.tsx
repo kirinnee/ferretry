@@ -1,9 +1,9 @@
 /**
- * The browser entry for "the board and a card's Agenda asks": the REAL `BoardPage` over fake data, with the card the
+ * The browser entry for "the board and a task's Agenda asks": the REAL `BoardPage` over fake data, with the task the
  * address names (`/d/<id>/board/F3`) open as a drawer, or as a page on a phone.
  *
  *   ?theme=<family>-<mode>
- *   ?open=F3|none      the card the address names (default F3)
+ *   ?open=F3|none      the task the address names (default F3)
  */
 
 import { createRoot } from 'react-dom/client';

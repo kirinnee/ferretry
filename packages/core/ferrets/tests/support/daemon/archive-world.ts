@@ -25,7 +25,7 @@ import { ARCHIVE_PASS_JOB } from '../../../daemon/modules/archive.ts';
 
 export const HOUR_MS = 3_600_000;
 
-/** What Board says: the cards it holds, and whether it can answer at all. */
+/** What Board says: the tasks it holds, and whether it can answer at all. */
 class FakeBoard {
   cards: ArchiveTaskStanding[] = [];
   broken = false;

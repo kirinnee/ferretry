@@ -10,7 +10,7 @@ import manifest from '../../../manifest.ts';
 import { boardTask, FakeLanes, lanes, NOW, PROJECT, world } from '../../unit/board/support.ts';
 import { answer, prNode, prUrl, REPO } from '../../unit/github/support.ts';
 
-/** A board as large as the owner's real one can grow to (the 3,600 cards of the stall report). */
+/** A board as large as the owner's real one can grow to (the 3,600 tasks of the stall report). */
 const TASKS = 3_600;
 /** The longest the daemon may go without answering anything else: one slice of one tick may not hold the loop longer. */
 const LONGEST_SLICE_MS = 100;
@@ -35,7 +35,7 @@ const afterIo = async (): Promise<void> => await new Promise<void>(resolve => se
 
 describe('GitHubWatcher: one tick on a very large board', () => {
   it(`should never hold the event loop for ${String(LONGEST_SLICE_MS)} ms in one slice with ${String(TASKS)} watched cards whose PRs all changed`, async () => {
-    // The real card store over an in-memory state folder: its schema checks and copies cost what they cost in the daemon.
+    // The real task store over an in-memory state folder: its schema checks and copies cost what they cost in the daemon.
     const store = new KernelTaskStore(
       new MemoryStateFolder().port([stateFile('cards'), stateFile('counters')]),
       { cards: stateFile('cards'), counters: stateFile('counters') },
@@ -61,7 +61,7 @@ describe('GitHubWatcher: one tick on a very large board', () => {
         return await service.recordPullRequests(...parameters);
       },
     };
-    // One repository answers for every PR, each now open (so every card moves), as one `gh` call would.
+    // One repository answers for every PR, each now open (so every task moves), as one `gh` call would.
     const everyPr = Object.fromEntries(Array.from({ length: TASKS }, (_, at) => [at + 1, prNode(at + 1)]));
     const reply = answer({ prs: everyPr });
     const copies = { repositoryOf: async () => null, branchOf: async () => null };

@@ -21,7 +21,7 @@ interface WorkInput {
   readonly fields?: Partial<Record<WorkField, string>>;
 }
 
-/** A card as its source hands it over. */
+/** A task as its source hands it over. */
 export const taskWork = (
   input: WorkInput & { readonly project?: string; readonly ferret?: string | null },
 ): RawWork => ({

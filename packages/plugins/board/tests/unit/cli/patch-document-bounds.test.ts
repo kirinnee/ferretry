@@ -8,7 +8,7 @@ import { readPatchText } from '../../../cli/lib/patch-document.ts';
 // names, with no size cap of the CLI's own. They read through the shared bounded reader (`@ferretry/std/yaml`), so a
 // hostile document is refused in one fixed sentence and the command finishes at once. A real patch is a few fields,
 // each at most 64 KiB, so the 256 KiB cap does not touch one. One hostile text of each shape, through THIS plugin's own
-// entry points (`readPatchText`, `parseCardPatch`, `parseProgressFile`).
+// entry points (`readPatchText`, `parseTaskPatch`, `parseProgressFile`).
 
 /** A nest of anchors, each aliasing the previous ten times: a million nodes from six short lines. */
 const laughs = (): string => {

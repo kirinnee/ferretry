@@ -13,7 +13,7 @@
  *    failed to build, a file refused when first read, a folder in an older format MOVED ASIDE so the plugin starts
  *    empty) and any `state/<id>-before-*` folder left behind. Every down plugin fails the run: it is a converter bug.
  * 3. Proves the data is there through v5's own HTTP routes, with the admin token the home carries (read from the file,
- *    sent only to the daemon this script started, never printed): the ferrets, projects, board cards and agenda items
+ *    sent only to the daemon this script started, never printed): the ferrets, projects, board tasks and agenda items
  *    `made.json` records, by id, with the names, lanes, dependencies and states it records. While v5's Gate is still a
  *    skeleton, every authenticated route answers `503 admission_unavailable`: the inventory and data checks are then
  *    skipped with a warning, and run by themselves once Gate lands.

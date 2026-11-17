@@ -49,7 +49,7 @@ export interface WatchedBoard {
   act(id: TaskId, request: TaskActionRequest, caller: BoardCaller): Promise<TaskResponse>;
 }
 
-/** Queues one message about a card to the ferret that answers for it, through the ordinary send path. */
+/** Queues one message about a task to the ferret that answers for it, through the ordinary send path. */
 export interface PrNudgeSender {
   send(task: Pick<Task, 'id' | 'owner' | 'assignee'>, message: string, reason: PrAlertReason): Promise<void>;
 }

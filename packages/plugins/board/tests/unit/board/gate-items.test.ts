@@ -16,10 +16,10 @@ import {
 import { boardTask, MemoryBoardStore, NOW, world } from './support.ts';
 
 /**
- * CARD ASKS (docs/board.md § Cards show progress; their asks ride Asks, source `card`, #1552): a card entering a gate has
- * ONE obligation raised through Asks, leaving withdraws it, and only the owner's answer moves the card — first, through
+ * TASK ASKS (docs/board.md § Tasks show progress; their asks ride Asks, source `task`, #1552): a task entering a gate has
+ * ONE obligation raised through Asks, leaving withdraws it, and only the owner's answer moves the task — first, through
  * the board, as the owner — and each answer is applied once, by its answer id. The real Board service runs over a
- * fake `CardObligations`.
+ * fake `TaskObligations`.
  */
 
 const OWNER: BoardCaller = { kind: 'owner' };
@@ -43,7 +43,7 @@ class AsksTurns {
   }
 }
 
-/** Asks' `card` source in memory: idempotent by entry, with the ledger id the real one would give. */
+/** Asks' `task` source in memory: idempotent by entry, with the ledger id the real one would give. */
 class Obligations implements TaskObligations {
   readonly raised: AskDraft[] = [];
   private readonly state = new Map<string, 'open' | 'answered' | 'withdrawn'>();
@@ -254,7 +254,7 @@ const fixture = (
   };
 };
 
-/** A card at To test: its obligation raised, and the entry's reference. */
+/** A task at To test: its obligation raised, and the entry's reference. */
 const atTest = async (tasks: readonly Task[] = [external()]) => {
   const world_ = fixture(tasks);
   await world_.service.trigger('F1', 'release.running');
@@ -618,7 +618,7 @@ describe('#1552 (models Asks’ per-ferret turn, its KeyedSerialQueue) an answer
     // Act
     const { outcome, during } = await answerThroughAsks(w, turns, entry, { choice: 'Done' });
 
-    // Assert: the card moved FIRST (the ask still open), then Asks recorded the answer
+    // Assert: the task moved FIRST (the ask still open), then Asks recorded the answer
     should(outcome).eql({ handled: true, applied: true });
     should(during).eql(['open', 'closed']);
     should(w.obligations.stateOf(entry)).equal('answered');
@@ -637,7 +637,7 @@ describe('#1552 (models Asks’ per-ferret turn, its KeyedSerialQueue) an answer
   });
 
   it('should refuse an answer to a gate the card left without waiting on itself, and withdraw that ask after Asks’ turn', async () => {
-    // Arrange: the owner moved the card on the board; the ask is left open (a write that was missed)
+    // Arrange: the owner moved the task on the board; the ask is left open (a write that was missed)
     const { w, turns, entry } = await atTestLocked();
     w.store.cards.set('F1', { ...w.stored(), laneId: 'implement' });
 

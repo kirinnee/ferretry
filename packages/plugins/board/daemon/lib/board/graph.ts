@@ -1,6 +1,6 @@
 /**
- * The board's relationships, read off the cards: parents, dependencies and what each blocker still
- * blocks (`board-design.md` §2.7). Everything here is derived from the stored cards on every read and
+ * The board's relationships, read off the tasks: parents, dependencies and what each blocker still
+ * blocks (`board-design.md` §2.7). Everything here is derived from the stored tasks on every read and
  * never stored, so there is no inverse index to drift.
  */
 import {
@@ -19,7 +19,7 @@ import {
 
 export type LaneSets = ReadonlyMap<BoardProjectId, LaneSet>;
 
-/** Every card, keyed for the walks the board makes. Refs that name another machine resolve to nothing. */
+/** Every task, keyed for the walks the board makes. Refs that name another machine resolve to nothing. */
 export class BoardIndex {
   private readonly byId = new Map<TaskId, Task>();
   private readonly childrenById = new Map<TaskId, Task[]>();
@@ -38,7 +38,7 @@ export class BoardIndex {
     }
   }
 
-  /** Whether a ref names a card on this machine. */
+  /** Whether a ref names a task on this machine. */
   isLocal(ref: TaskRef): boolean {
     return ref.machineId === undefined || ref.machineId === this.machineId;
   }
@@ -47,12 +47,12 @@ export class BoardIndex {
     return this.isLocal(ref) ? this.byId.get(ref.id) : undefined;
   }
 
-  /** The cards whose parent is this one, in store order. */
+  /** The tasks whose parent is this one, in store order. */
   children(id: TaskId): readonly Task[] {
     return this.childrenById.get(id) ?? [];
   }
 
-  /** The cards that depend on this one, in store order. */
+  /** The tasks that depend on this one, in store order. */
   dependents(id: TaskId): readonly Task[] {
     return this.dependentsById.get(id) ?? [];
   }
@@ -64,7 +64,7 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
   else list.push(value);
 }
 
-/** The category of the lane a card sits in, or `undefined` when its board has no lanes this build knows. */
+/** The category of the lane a task sits in, or `undefined` when its board has no lanes this build knows. */
 export const taskCategory = (task: Task, laneSets: LaneSets): LaneCategory | undefined => {
   const laneSet = laneSets.get(task.projectId);
   if (laneSet === undefined) return undefined;
@@ -72,7 +72,7 @@ export const taskCategory = (task: Task, laneSets: LaneSets): LaneCategory | und
   return category.ok ? category.value : undefined;
 };
 
-/** The earliest release any of the card's merged PRs shipped in. */
+/** The earliest release any of the task's merged PRs shipped in. */
 export const shippedIn = (task: Task): ReleasedIn | null => {
   let earliest: ReleasedIn | null = null;
   for (const pr of task.links.prs) {
@@ -81,7 +81,7 @@ export const shippedIn = (task: Task): ReleasedIn | null => {
   return earliest;
 };
 
-/** Whether a card is in a release: a PR shipped in one, or its lane is the one a release moves it into. */
+/** Whether a task is in a release: a PR shipped in one, or its lane is the one a release moves it into. */
 const isReleased = (task: Task, laneSets: LaneSets): boolean => {
   if (shippedIn(task) !== null) return true;
   const laneSet = laneSets.get(task.projectId);
@@ -91,7 +91,7 @@ const isReleased = (task: Task, laneSets: LaneSets): boolean => {
 };
 
 /**
- * The dependencies still holding a card back: not overridden, and the blocker not done per
+ * The dependencies still holding a task back: not overridden, and the blocker not done per
  * `isBlockerDone`. A blocker this machine cannot read — on another machine, quarantined, or on a board
  * with no lanes — still blocks, and so does a dropped one: its work will never ship, and the dependent's
  * ferret has to remove the dependency on purpose.
@@ -107,7 +107,7 @@ export const blockedBy = (task: Task, index: BoardIndex, laneSets: LaneSets): re
     })
     .map(dependency => dependency.task);
 
-/** How many of a card's live sub-cards are still being built: in a backlog, active or review lane. */
+/** How many of a task's live sub-cards are still being built: in a backlog, active or review lane. */
 export const stillBuilding = (task: Task, index: BoardIndex, laneSets: LaneSets): number =>
   index.children(task.id).filter(child => {
     if (child.dropped !== null) return false;
@@ -137,7 +137,7 @@ export const dependencyCycle = (index: BoardIndex, from: TaskId, to: TaskRef): s
 };
 
 /**
- * Whether putting `card` under `parent` would close a loop in the parent chain: `parent` is `card` itself,
+ * Whether putting `task` under `parent` would close a loop in the parent chain: `parent` is `task` itself,
  * or one of its descendants. The walk is bounded by the chain's own length and stops at a repeat.
  */
 export const parentLoop = (index: BoardIndex, task: TaskId, parent: TaskRef): boolean => {

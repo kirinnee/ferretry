@@ -1,11 +1,11 @@
 /**
- * THE BOARD PAGE (`/board`): every card on the machine as lanes.
+ * THE BOARD PAGE (`/board`): every task on the machine as lanes.
  *
  * It owns what the views must not: the reads (the U10 board store, once per kind of read) and the filters in
- * the URL. The page is READ-ONLY for the owner: no drag between lanes, no lane menu, no "Add card", no
+ * the URL. The page is READ-ONLY for the owner: no drag between lanes, no lane menu, no "Add task", no
  * "Lanes ✎" editor link — the board runs itself and the owner answers in the agenda. What stays are the
  * reading aids: the view switch, the filters, "Show private", the scope toggle and the theme switch. Everything
- * drawn is `BoardCard`, `BoardLane`, `BoardCountsBar` and `BoardFilterBar`, which the phone and the side pane reuse.
+ * drawn is `BoardTask`, `BoardLane`, `BoardCountsBar` and `BoardFilterBar`, which the phone and the side pane reuse.
  */
 
 import type { BoardActivityFilter, BoardProjectId } from '../../contract/index.ts';
@@ -51,20 +51,20 @@ export interface BoardPageProps {
   readonly onNavigate: (to: string) => void;
   /** A fixed clock for the age labels; the live page re-reads the time every 30 seconds. */
   readonly now?: number;
-  /** The card the address names (`/d/<id>/board/<taskId>`); it opens as a drawer, or a page on a phone. */
+  /** The task the address names (`/d/<id>/board/<taskId>`); it opens as a drawer, or a page on a phone. */
   readonly openCard?: { readonly daemonId: DaemonId; readonly taskId: string } | null;
   /** A phone: one lane at a time under a chip strip, the filters in a bottom sheet, rows sized for a thumb. */
   readonly phone?: boolean;
   /**
-   * The chat the reader came from. When there is one the page opens on THAT ferret's cards, with a one-tap
-   * "All cards" to widen it; a ferret or "All cards" choice in the URL always wins.
+   * The chat the reader came from. When there is one the page opens on THAT ferret's tasks, with a one-tap
+   * "All tasks" to widen it; a ferret or "All cards" choice in the URL always wins.
    */
   readonly origin?: FerretScope | null;
 }
 
 const NO_MACHINES: readonly BoardMachine[] = [];
 
-/** "This ferret | All cards": the one-tap widening of a board that opened on the chat the reader came from. */
+/** "This ferret | All tasks": the one-tap widening of a board that opened on the chat the reader came from. */
 function ScopeToggle({
   ferret,
   scoped,
@@ -72,7 +72,7 @@ function ScopeToggle({
 }: {
   readonly ferret: string;
   readonly scoped: boolean;
-  /** True to widen to every card, false to narrow back to the ferret. */
+  /** True to widen to every task, false to narrow back to the ferret. */
   readonly onChange: (all: boolean) => void;
 }) {
   return (
@@ -113,7 +113,7 @@ export function BoardPage({
   origin = null,
 }: BoardPageProps) {
   const params = useMemo(() => new URLSearchParams(search), [search]);
-  // The ferret the page opens on: the chat's, unless the URL names a ferret or asked for every card.
+  // The ferret the page opens on: the chat's, unless the URL names a ferret or asked for every task.
   const scopeFerret = origin?.ferret ?? null;
   const defaultScoped = scopeFerret !== null && params.get('cards') !== 'all' && params.get('ferret') === null;
   const filterSearch = useMemo(() => {
@@ -249,8 +249,8 @@ export function BoardPage({
 
   const detailMachine =
     openTask === null ? undefined : machines.find(machine => machine.connection.daemonId === openTask.daemonId);
-  // The open card's sub-cards are in its detail whether or not the board shows them, open or closed: a read of its
-  // machine with every state and every sub-card in, which only an open card pays for.
+  // The open task's sub-cards are in its detail whether or not the board shows them, open or closed: a read of its
+  // machine with every state and every sub-card in, which only an open task pays for.
   const detailMachines = useMemo(() => (detailMachine === undefined ? NO_MACHINES : [detailMachine]), [detailMachine]);
   const detailFilters = useMemo<BoardFilters>(() => ({ ...NO_BOARD_FILTERS, state: 'all', agents: true }), []);
   const detailRead = useBoard(store, detailMachines, detailFilters, { beat: false });
@@ -272,7 +272,7 @@ export function BoardPage({
     if (openTask !== null) onNavigate(boardPath(openTask.daemonId));
   }, [openTask, onNavigate]);
 
-  // A count pressed on a phone opens the matching cards as a list (pressed again, it lifts the filter).
+  // A count pressed on a phone opens the matching tasks as a list (pressed again, it lifts the filter).
   const pressCount = (activity: BoardActivityFilter | null): void => {
     if (!phone || activity === null) {
       setFilters({ ...filters, activity });
@@ -291,10 +291,10 @@ export function BoardPage({
         scoped={scoped}
       />
     );
-  // `?highlight=F11` (Info's "Open board"): the card is marked and scrolled to, and the mark follows it through refreshes.
+  // `?highlight=F11` (Info's "Open board"): the task is marked and scrolled to, and the mark follows it through refreshes.
   const highlight = params.get('highlight');
   const pageRef = useRef<HTMLElement | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `model` is the trigger — a refresh redraws the cards, so the mark is laid again
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `model` is the trigger — a refresh redraws the tasks, so the mark is laid again
   useEffect(() => {
     const page = pageRef.current;
     if (page === null || highlight === null || highlight === '') return;

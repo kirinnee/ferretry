@@ -1,27 +1,27 @@
 /**
- * A SESSION STARTED WITH A BRIEF GETS A CARD (`board-design.md` §3.1 items 1–2), made by the daemon with
+ * A SESSION STARTED WITH A BRIEF GETS A TASK (`board-design.md` §3.1 items 1–2), made by the daemon with
  * the session, so nobody has to remember to.
  *
- * - **`fy start` and the app's New session**: the session owns its own card. Title from `--name`, brief and
+ * - **`fy start` and the app's New session**: the session owns its own task. Title from `--name`, brief and
  *   ask the prompt verbatim — the ask's source is the starting ferret (`session:<parent>`) or the owner —
  *   in the first backlog lane, and the session's focus.
- * - **`fy new`** (Pack): the card is the LEAD's delegation. Owner the lead, assignee the child, on the board
- *   the child inherits. Its parent comes from the lead's INTENT, never from the card it touched last: the
- *   card the brief names (`&F138`), else the lead's explicit focus card (`config.focusAnchor`), else none —
- *   a top-level card, said in the start's output. `--card <id>` names an EXISTING card instead: it is
- *   assigned to the child, and so is the lead's own open card with the same title, so a delegation never
- *   leaves a twin. The card's id is reserved BEFORE the start, because the child's brief names it.
+ * - **`fy new`** (Pack): the task is the LEAD's delegation. Owner the lead, assignee the child, on the board
+ *   the child inherits. Its parent comes from the lead's INTENT, never from the task it touched last: the
+ *   task the brief names (`&F138`), else the lead's explicit focus card (`config.focusAnchor`), else none —
+ *   a top-level task, said in the start's output. `--task <id>` names an EXISTING task instead: it is
+ *   assigned to the child, and so is the lead's own open task with the same title, so a delegation never
+ *   leaves a twin. The task's id is reserved BEFORE the start, because the child's brief names it.
  *
  * **Only where the board is on** (`board-switch.ts`): the board is opt-in. On a board that is off a start makes
- * no card, and a `fy new` makes one only when the lead holds a card to put it under (the brief names one, or
- * the lead's focus) or hands one over (`--card`): a lead may always give its helpers cards.
+ * no task, and a `fy new` makes one only when the lead holds a task to put it under (the brief names one, or
+ * the lead's focus) or hands one over (`--task`): a lead may always give its helpers tasks.
  *
- * The card is written after the session's record and before its agent launches, so the agent's first turn
- * already has its focus card, and a start refused earlier leaves no card behind. **A board failure never
+ * The task is written after the session's record and before its agent launches, so the agent's first turn
+ * already has its focus task, and a start refused earlier leaves no task behind. **A board failure never
  * fails a start**: the session starts, and what could not be done is said (`notes`) instead.
  *
  * A project with no lanes yet gets the inferred template PROPOSED (unconfirmed, one agenda choice for the
- * owner) and the card lands on its real board; only when proposing fails does it go on the Unfiled board,
+ * owner) and the task lands on its real board; only when proposing fails does it go on the Unfiled board,
  * with a note saying how to move it.
  */
 import { taskTitleFor, deriveTaskTitle } from './task-title.ts';
@@ -45,13 +45,13 @@ import type { BoardDiagnostics, LaneProposer, LaneSetSource, ProjectAdopter, Fer
 import type { BoardService, TaskHolders, SignalDoneOutcome } from './service.ts';
 import { clip } from './signal-done.ts';
 
-/** The longest ask a card keeps; a longer brief is cut, and the brief field says so. */
+/** The longest ask a task keeps; a longer brief is cut, and the brief field says so. */
 const MAX_ASK_LENGTH = MAX_TASK_BRIEF_LENGTH;
 
 /** The source an ask carries when the owner said it. */
 const OWNER_ASK_SOURCE = 'owner';
 
-/** The source an ask carries when a `fy new` made the card for a ferret no lead was recorded for: the work of a ferret, never the owner's ask. */
+/** The source an ask carries when a `fy new` made the task for a ferret no lead was recorded for: the work of a ferret, never the owner's ask. */
 const PACK_ASK_SOURCE = 'fy new';
 
 /** The source an ask carries when a ferret's brief said it. */
@@ -80,10 +80,10 @@ export interface FerretTasksPorts {
   readonly starts: {
     projectForStart(start: { readonly cwd: string; readonly parent?: string }): Promise<BoardProjectId>;
   };
-  /** Whether a board is on: a start on a board that is off makes no card of its own. */
+  /** Whether a board is on: a start on a board that is off makes no task of its own. */
   readonly switches: BoardSwitchReader;
   readonly proposer: LaneProposer;
-  /** Registers the repository of a session on the Unfiled board, so its card goes on that project's board. */
+  /** Registers the repository of a session on the Unfiled board, so its task goes on that project's board. */
   readonly adoption?: ProjectAdopter;
   readonly projects: BoardProjectNames;
   readonly focus: Pick<FerretFocus, 'anchorOf'>;
@@ -92,54 +92,54 @@ export interface FerretTasksPorts {
   readonly bin: string;
 }
 
-/** Where a delegated card's parent came from: the brief that names it, or the lead's explicit focus card. */
+/** Where a delegated task's parent came from: the brief that names it, or the lead's explicit focus task. */
 export type ParentFrom = 'brief' | 'focus';
 
-/** A `fy new`'s card, decided before the child exists so its brief can name it. */
+/** A `fy new`'s task, decided before the child exists so its brief can name it. */
 export interface Delegation {
   readonly lead: string;
   /** The helper's brief as the lead wrote it, without the footer the daemon adds. */
   readonly brief: string;
-  /** The child's card id: reserved for a new card, the lead's own for an existing one. */
+  /** The child's task id: reserved for a new task, the lead's own for an existing one. */
   readonly id: TaskId;
-  /** The card already exists (`--card`, or the lead's open card with this title): it is assigned, not made. */
+  /** The task already exists (`--task`, or the lead's open task with this title): it is assigned, not made. */
   readonly existing: boolean;
-  /** The card the child's card sits under; `null` for a top-level card. */
+  /** The task the child's task sits under; `null` for a top-level task. */
   readonly parent: TaskRef | null;
-  /** Why it sits there; absent for a top-level card and for an existing card, which keeps the parent it had. */
+  /** Why it sits there; absent for a top-level task and for an existing task, which keeps the parent it had. */
   readonly parentFrom?: ParentFrom;
   /** The board's name as the owner reads it; `undefined` when the child may run on another board. */
   readonly project?: string;
-  /** The OWNER started the ferret on this existing card (`ownerDelegation`): no lead hands it down, the owner assigns it. */
+  /** The OWNER started the ferret on this existing task (`ownerDelegation`): no lead hands it down, the owner assigns it. */
   readonly byOwner?: true;
-  /** Who held the existing card when the start judged it: the assignment writes only if it still finds them (`CardHolders`). */
+  /** Who held the existing task when the start judged it: the assignment writes only if it still finds them (`TaskHolders`). */
   readonly held?: TaskHolders;
 }
 
-/** Who holds a card now, as a start must still find them when it assigns it. */
+/** Who holds a task now, as a start must still find them when it assigns it. */
 const holdersOf = (task: Pick<Task, 'owner' | 'assignee'>): TaskHolders => ({
   owner: task.owner,
   assignee: task.assignee,
 });
 
-/** What delegating a card came to: the delegation, or why the start must not go on. */
+/** What delegating a task came to: the delegation, or why the start must not go on. */
 export interface DelegationOutcome {
   readonly delegation?: Delegation;
-  /** Set when `--card` named a card the lead may not hand over: the start is refused with this. */
+  /** Set when `--task` named a task the lead may not hand over: the start is refused with this. */
   readonly refusal?: string;
   readonly notes: readonly string[];
 }
 
-/** What a `fy new` hands the board to decide its card from. */
+/** What a `fy new` hands the board to decide its task from. */
 export interface DelegationRequest {
   readonly brief: string;
-  /** The name the child session is given, which titles a new card. */
+  /** The name the child session is given, which titles a new task. */
   readonly name?: string | undefined;
-  /** An existing card the child works on (`--card`). */
+  /** An existing task the child works on (`--task`). */
   readonly card?: TaskId | undefined;
 }
 
-/** A card's title as compared for twins: case, spacing and punctuation do not tell two titles apart. */
+/** A task's title as compared for twins: case, spacing and punctuation do not tell two titles apart. */
 const normalisedTitle = (title: string): string =>
   title
     .normalize('NFKC')
@@ -155,13 +155,13 @@ export interface StartedFerret {
   readonly brief: string;
   /** The starting ferret (`config.parent`); absent when the owner started it. */
   readonly parent?: string | undefined;
-  /** Set for a `fy new`: the card the lead's delegation reserved. */
+  /** Set for a `fy new`: the task the lead's delegation reserved. */
   readonly delegation?: Delegation | undefined;
-  /** The start came through `fy new`: with no lead recorded, its card is still a ferret's errand, never the owner's ask. */
+  /** The start came through `fy new`: with no lead recorded, its task is still a ferret's errand, never the owner's ask. */
   readonly viaPack?: true | undefined;
 }
 
-/** The card a start made, or why it made none. */
+/** The task a start made, or why it made none. */
 export interface OpenedTask {
   readonly card?: Task;
   /** The board's name as the owner reads it. */
@@ -169,16 +169,16 @@ export interface OpenedTask {
   readonly notes: readonly string[];
 }
 
-/** A card's title: the session's name, else the brief's own, never its raw first words. */
+/** A task's title: the session's name, else the brief's own, never its raw first words. */
 export const taskTitle = (name: string | undefined, brief: string): string =>
   (name === undefined ? null : deriveTaskTitle(name)) ?? taskTitleFor(brief, 'Task');
 
-/** A brief as a card's ask: verbatim, cut only at the field's limit. */
+/** A brief as a task's ask: verbatim, cut only at the field's limit. */
 export const askOf = (text: string, source: string): TaskMessage => ({ text: clip(text, MAX_ASK_LENGTH), source });
 
 /**
- * The delegation of a start the owner made on an existing card ("Start a ferret on it"): it is assigned to the new
- * ferret as the owner's act, and the card keeps its owner and its parent.
+ * The delegation of a start the owner made on an existing task ("Start a ferret on it"): it is assigned to the new
+ * ferret as the owner's act, and the task keeps its owner and its parent.
  */
 export const ownerDelegation = (task: Pick<Task, 'id' | 'owner' | 'assignee' | 'parent'>): Delegation => ({
   lead: task.owner,
@@ -190,7 +190,7 @@ export const ownerDelegation = (task: Pick<Task, 'id' | 'owner' | 'assignee' | '
   held: holdersOf(task),
 });
 
-/** The line a helper's brief gains (`subFerretFooter`): its card and where it is. */
+/** The line a helper's brief gains (`subFerretFooter`): its task and where it is. */
 export const taskFooterLine = (
   id: TaskId,
   project: string | undefined,
@@ -199,7 +199,7 @@ export const taskFooterLine = (
 ): string =>
   `Your task is ${formatTaskRef({ id })} on the ${project === undefined ? "project's" : project} board${parent === null ? '' : `, under ${formatTaskRef(parent)}`}; the daemon moves it for you (\`${bin} task note\` adds progress).`;
 
-/** A card request the daemon fills for a start. */
+/** A task request the daemon fills for a start. */
 const startRequest = (fields: {
   readonly title: string;
   readonly brief: string;
@@ -230,12 +230,12 @@ export class FerretTasks {
   constructor(private readonly ports: FerretTasksPorts) {}
 
   /**
-   * A `fy new`'s card, before the child starts, and the child's id reserved (or the existing card named).
-   * Its parent comes from intent: the card the brief names, else the lead's explicit focus card, else none.
+   * A `fy new`'s task, before the child starts, and the child's id reserved (or the existing task named).
+   * Its parent comes from intent: the task the brief names, else the lead's explicit focus task, else none.
    * `inLeadFolder` says the child runs where the lead does, so it inherits the lead's board and the footer can
    * name it; otherwise `cwd` is the folder it runs in. No delegation when the board can do nothing (the child then
-   * starts with no card, and `notes` is what to say) or when `--card` named a card that cannot be handed over
-   * (`refusal`). The board is opt-in, and asked of the board the CHILD will work on: a card is made there only when
+   * starts with no task, and `notes` is what to say) or when `--task` named a task that cannot be handed over
+   * (`refusal`). The board is opt-in, and asked of the board the CHILD will work on: a task is made there only when
    * it is on, or under a parent the lead holds on that same board (docs/board.md § The board is opt-in).
    */
   async delegate(
@@ -307,12 +307,12 @@ export class FerretTasks {
   }
 
   /**
-   * `fy start --card <id>`, before the session exists: the existing card the new session takes over, judged with the
-   * same authority as `fy new --card`. A ferret's start (`lead`) hands over only a card it may hand down; the owner's
-   * (no lead) needs the card to exist. Either way the card must still be open work: a dropped or closed card is refused
+   * `fy start --task <id>`, before the session exists: the existing task the new session takes over, judged with the
+   * same authority as `fy new --task`. A ferret's start (`lead`) hands over only a task it may hand down; the owner's
+   * (no lead) needs the task to exist. Either way the task must still be open work: a dropped or closed task is refused
    * here, before anything is written, and so is a start that is not an ordinary ferret (a miner, a guide builder or a
-   * warden takes no card). `refusal` says why a card cannot be had; the start must not go on. The judgement is early,
-   * not final: {@link takeOver} re-judges inside the write that assigns the card.
+   * warden takes no task). `refusal` says why a task cannot be had; the start must not go on. The judgement is early,
+   * not final: {@link takeOver} re-judges inside the write that assigns the task.
    */
   async startOn(lead: string | undefined, id: TaskId, ordinary = true): Promise<DelegationOutcome> {
     if (!ordinary) {
@@ -332,9 +332,9 @@ export class FerretTasks {
   }
 
   /**
-   * `fy start --card`, once the session's record exists and before its agent launches: the card is assigned to it, or
-   * the start is refused and `stop` takes the record down, so a session never runs on a card it was not given. The
-   * assignment is one write that re-judges the card (dropped, closed, still the lead's to hand down), so a drop or a
+   * `fy start --task`, once the session's record exists and before its agent launches: the task is assigned to it, or
+   * the start is refused and `stop` takes the record down, so a session never runs on a task it was not given. The
+   * assignment is one write that re-judges the task (dropped, closed, still the lead's to hand down), so a drop or a
    * reassignment between {@link startOn} and here loses the race cleanly: nothing is assigned and nothing launches.
    */
   async takeOver(
@@ -360,7 +360,7 @@ export class FerretTasks {
     return { delegation: ownerDelegation(task), notes: [] };
   }
 
-  /** Why a card cannot take a new session: it is dropped or closed. `undefined` when it is open work. */
+  /** Why a task cannot take a new session: it is dropped or closed. `undefined` when it is open work. */
   private async unavailable(id: TaskId): Promise<string | undefined> {
     const { cards: tasks, laneSets } = await this.ports.board.snapshot();
     const task = tasks.find(each => each.id === id);
@@ -371,7 +371,7 @@ export class FerretTasks {
     return undefined;
   }
 
-  /** `--card`: the lead's existing card, handed over; refused (not failed) when it cannot be. */
+  /** `--task`: the lead's existing task, handed over; refused (not failed) when it cannot be. */
   private async existingCard(lead: string, id: TaskId): Promise<DelegationOutcome> {
     let task: Task;
     try {
@@ -388,10 +388,10 @@ export class FerretTasks {
   }
 
   /**
-   * The parent a NEW card goes under, from the lead's intent in priority order: the first card the brief
-   * names, then the lead's explicit focus card. Neither is the card the lead merely touched last. Either counts
+   * The parent a NEW task goes under, from the lead's intent in priority order: the first task the brief
+   * names, then the lead's explicit focus task. Neither is the task the lead merely touched last. Either counts
    * only when the lead may put a child under it and it is still work (`BoardService.mayAdoptUnder`): a brief that
-   * merely mentions somebody else's card, or a closed one, gives no parent, so the board's switch decides.
+   * merely mentions somebody else's task, or a closed one, gives no parent, so the board's switch decides.
    */
   private async parentFor(
     lead: string,
@@ -409,7 +409,7 @@ export class FerretTasks {
   }
 
   /**
-   * The lead's own open card for this very work — same board, same title once case and punctuation are set
+   * The lead's own open task for this very work — same board, same title once case and punctuation are set
    * aside, still the lead's to give (nobody else is on it) — so a delegation reuses it rather than twinning it.
    */
   private async twinOf(lead: string, projectId: BoardProjectId, title: string): Promise<Task | undefined> {
@@ -424,7 +424,7 @@ export class FerretTasks {
   }
 
   /**
-   * The card of a session being started, after its record and before its launch. Never rejects: a board
+   * The task of a session being started, after its record and before its launch. Never rejects: a board
    * failure is a note, and the start goes on.
    */
   async open(start: StartedFerret): Promise<OpenedTask> {
@@ -434,11 +434,11 @@ export class FerretTasks {
       const from = delegation?.lead ?? start.parent;
       const brief = delegation?.brief ?? start.brief;
       if (delegation?.existing === true) return await this.handOver(delegation, start.ferret);
-      // A start with no delegation makes its own card only where the board is on.
+      // A start with no delegation makes its own task only where the board is on.
       if (delegation === undefined && !(await this.ports.switches.isOn(await this.ports.lanes.projectOf(start.ferret))))
         return { notes: [] };
       const placed = await this.place(start.ferret, owner);
-      // The board the child landed on is the one asked: a guess at start time that came out otherwise makes no card.
+      // The board the child landed on is the one asked: a guess at start time that came out otherwise makes no task.
       if (delegation !== undefined && !(await this.licensed(placed.projectId, delegation.parent))) {
         return {
           notes: [
@@ -475,7 +475,7 @@ export class FerretTasks {
     }
   }
 
-  /** Whether a lead's new card may go on `projectId`: its board is on, or the parent (already judged) is on it. */
+  /** Whether a lead's new task may go on `projectId`: its board is on, or the parent (already judged) is on it. */
   private async licensed(projectId: BoardProjectId, parent: TaskRef | null): Promise<boolean> {
     if (await this.ports.switches.isOn(projectId)) return true;
     if (parent === null) return false;
@@ -483,7 +483,7 @@ export class FerretTasks {
     return tasks.find(task => task.id === parent.id)?.projectId === projectId;
   }
 
-  /** The existing card, assigned to the session just started (by the lead, or by the owner); it keeps its owner and its parent. */
+  /** The existing task, assigned to the session just started (by the lead, or by the owner); it keeps its owner and its parent. */
   private async handOver(delegation: Delegation, ferret: string): Promise<OpenedTask> {
     const held = delegation.held;
     if (held === undefined)
@@ -492,7 +492,7 @@ export class FerretTasks {
       delegation.byOwner === true
         ? await this.ports.board.assignForOwner(delegation.id, ferret, held)
         : await this.ports.board.handOver(delegation.id, delegation.lead, ferret, held);
-    // The card is assigned: nothing after this may undo the start, so the board's name is best effort.
+    // The task is assigned: nothing after this may undo the start, so the board's name is best effort.
     const project = await this.ports.projects.nameOf(task.projectId).catch((error: unknown) => {
       this.ports.diagnostics.warn(`could not name the board of ${formatTaskRef(task)}: ${said(error)}`);
       return undefined;
@@ -505,9 +505,9 @@ export class FerretTasks {
   }
 
   /**
-   * A start IS the work starting (`work.started`), so the card enters the lane that trigger names for its
-   * workflow (In progress, or Plan/Design for a plan-first card), whoever may move cards: a helper cannot,
-   * and a card left in the backlog while it is built tells the owner nothing. Best effort, like the card.
+   * A start IS the work starting (`work.started`), so the task enters the lane that trigger names for its
+   * workflow (In progress, or Plan/Design for a plan-first card), whoever may move tasks: a helper cannot,
+   * and a task left in the backlog while it is built tells the owner nothing. Best effort, like the task.
    */
   private async workStarted(task: Task, ferret: string): Promise<Task> {
     try {
@@ -553,7 +553,7 @@ export class FerretTasks {
   }
 
   /**
-   * The board a session's card goes on: its project's, with lanes proposed when the project has none, else
+   * The board a session's task goes on: its project's, with lanes proposed when the project has none, else
    * the Unfiled board with a note that says how to move it.
    */
   private async place(

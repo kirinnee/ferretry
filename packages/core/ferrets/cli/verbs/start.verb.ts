@@ -15,7 +15,7 @@ import { BINARY, defineVerbs, type VerbContext } from './context.ts';
 
 /**
  * The flags of `fy new` that are not Ferrets' start: a start's idempotency key and attachments are `fy start`'s alone.
- * The model routing (`--model`, `--effort`, `--auto`), `--card`, `--name <title>` and `--allow-scratch` are sent with
+ * The model routing (`--model`, `--effort`, `--auto`), `--task`, `--name <title>` and `--allow-scratch` are sent with
  * the start.
  */
 const NEW_FLAGS_ELSEWHERE = ['request-id', 'file', 'f'];
@@ -85,7 +85,7 @@ const start = (role: 'start' | 'new', { api, environment, env, readText, readByt
             : undefined;
     const title = text(invocation, 'name');
     const label = text(invocation, 'label');
-    // `--card` is the flag's former name: still read, no longer declared or listed.
+    // `--task` is the flag's former name: still read, no longer declared or listed.
     const task = text(invocation, 'task', 'card');
     const model = text(invocation, 'model');
     const effort = text(invocation, 'effort');

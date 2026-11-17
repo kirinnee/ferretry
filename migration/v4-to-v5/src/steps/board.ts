@@ -1,11 +1,11 @@
 /**
- * Board: cards, counters, lane sets with the board switch, the sweep's memory and each ferret's focus. Every v4 file is
+ * Board: tasks, counters, lane sets with the board switch, the sweep's memory and each ferret's focus. Every v4 file is
  * read with this tool's own parser (`../v4/board.ts`), mapped, and parsed by the STRICT v5 Board contract schema before
  * anything is written. All files are mapped first and written only after every one succeeded, so a failure writes
  * nothing.
  *
- * Cards (`state/board/tasks/<id>.json` → `state/board/cards/<id>.json`, `CardSchema`):
- *  - The id is kept exactly (`&F1792` still names the same card), as are machineId, projectId, laneId, kind, title,
+ * Tasks (`state/board/tasks/<id>.json` → `state/board/cards/<id>.json`, `CardSchema`):
+ *  - The id is kept exactly (`&F1792` still names the same task), as are machineId, projectId, laneId, kind, title,
  *    summary, the ask (its text AND its source), premise, context, terms, brief, howToTest, owner, assignee, parent,
  *    dependencies (with the owner's override), blocked, dropped, workflow, links with the PR cache, files, order,
  *    snoozed, askedBy, visibility, visibilitySource and every instant. v5 kept v4's field names for all of them.
@@ -15,10 +15,10 @@
  *    decision 2026-11-07): owner `{via?}`, ferret `{name, ferret}`, daemon `{}`. The `…Via` beside an actor folds into
  *    the owner's `via`. A ferret's name is its v4 callsign (`v5FerretName`: `teammate`, else a valid `name`, else id).
  *  - History: every v4 event type maps to the v5 type of the same name, except `migrated` (v5 dropped it), which becomes
- *    a `note` naming the legacy ref, so the record of where the card came from is kept. A type v4 does not have fails
- *    the step naming the card and the type. A field v4.291.5 does not declare on an event is left out (v4 itself
+ *    a `note` naming the legacy ref, so the record of where the task came from is kept. A type v4 does not have fails
+ *    the step naming the task and the type. A field v4.291.5 does not declare on an event is left out (v4 itself
  *    strips it on read) and named in notCarried.
- *  - Dropped cards and cards in a closed lane are ordinary cards and are all kept.
+ *  - Dropped tasks and tasks in a closed lane are ordinary tasks and are all kept.
  *
  * Counters (`state/board/counters.json`): v4 stores the LAST number handed out per letter (partial), and allocates
  * `max(counter, highest id on disk) + 1`. v5 stores the NEXT number per kind; the converter writes exactly what v4
@@ -36,7 +36,7 @@
  * Focus (`state/sessions/<sid>/config.json` `focusTask`/`focusAnchor`/`boardSkip` → `state/board/focus.json`): v5's
  * Board holds the facts v4 kept in each session's config.
  *
- * Errors name a file, a card id or a v4 event type, never a value from the file.
+ * Errors name a file, a task id or a v4 event type, never a value from the file.
  */
 import {
   BoardFileSchema,
@@ -367,7 +367,7 @@ async function convert(ctx: StepContext): Promise<{ kept: KeptItem[]; notCarried
   const names = new FerretNames(ctx);
   const facts: Facts = { namedById: 0, migratedNotes: 0, eventFields: new Set(), clarificationFields: new Set() };
 
-  // ── cards ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  // ── tasks ───────────────────────────────────────────────────────────────────────────────────────────────────────
   const highest: Record<string, number> = { B: 0, F: 0, I: 0, C: 0 };
   const unknownFields = new Set<string>();
   let tasks = 0;

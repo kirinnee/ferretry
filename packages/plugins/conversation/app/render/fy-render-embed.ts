@@ -7,9 +7,9 @@
  * no title, no lane and no status is authored here, so a block can never say something the board does
  * not. What it shows is read from the board when it is drawn (`fy-render-embed.tsx`).
  *
- *   task    exactly one `&F12` (an older message spells the type `card`; the header reader hands it here as `task`)
+ *   task    exactly one `&F12` (an older message spells the type `task`; the header reader hands it here as `task`)
  *   board   a list of `&F12` `&F13` … (spaces or lines, an optional leading `- `), or `parent: &F12`
- *           alone, which shows that card's children grouped by lane
+ *           alone, which shows that task's children grouped by lane
  */
 
 import { FY_RENDER_LIMITS, parseReferenceToken } from '@ferretry/app';

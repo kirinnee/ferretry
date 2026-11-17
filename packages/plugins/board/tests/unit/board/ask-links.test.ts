@@ -82,7 +82,7 @@ describe("Asks' link to cards", () => {
   });
 
   it('should make ONE Asks read per derivation, whatever the number of cards and ferrets on the board', async () => {
-    // Arrange: 600 cards over 600 distinct ferrets; the read used to be one ledger per ferret
+    // Arrange: 600 tasks over 600 distinct ferrets; the read used to be one ledger per ferret
     const tasks = Array.from({ length: 600 }, (_, i) =>
       boardTask({ id: `F${String(i + 1)}`, owner: `owner${String(i)}`, assignee: `helper${String(i)}` }),
     );

@@ -111,7 +111,7 @@ const CHECKED: LaneSet = LaneSetSchema.parse({
   lanes: LABELLING.lanes.map(entry => (entry.id === 'send' ? lane('check', 'review') : entry)),
 });
 
-/** The same flow, where the deploy itself would close the card. */
+/** The same flow, where the deploy itself would close the task. */
 const CLOSES_ON_DEPLOY: LaneSet = LaneSetSchema.parse({
   ...LABELLING,
   lanes: LABELLING.lanes.map(entry => {

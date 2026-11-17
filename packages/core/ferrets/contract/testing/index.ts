@@ -915,7 +915,7 @@ export class FakeFerrets implements FerretsApi {
     this.starts.push(request);
     this.#next += 1;
     const id = ferretId(`f${this.#next}`);
-    // The start options the real summary carries (`summaryOf`): its model, card, label and title.
+    // The start options the real summary carries (`summaryOf`): its model, task, label and title.
     const { model, card: task, label, title } = request.options ?? {};
     this.add({
       id,

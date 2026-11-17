@@ -82,7 +82,7 @@ describe('mergeGateOf', () => {
   });
 
   it('should never hold a PR on a card that ships in the same merge', () => {
-    // Arrange — two cards linking one PR, one waiting on the other (the link arrived after the claim queued it).
+    // Arrange — two tasks linking one PR, one waiting on the other (the link arrived after the claim queued it).
     const tasks = [
       boardTask({ id: 'F1', ...linking(prLink(42)) }),
       boardTask({ id: 'F2', ...linking(prLink(42), prLink(7)), ...waitsOn('F1') }),
@@ -164,7 +164,7 @@ describe('mergeGateOf', () => {
 
   describe('the live clash order', () => {
     const at = (minute: number): string => `2026-10-30T10:${String(minute).padStart(2, '0')}:00.000Z`;
-    /** A card claiming each path at its minute, in that order. */
+    /** A task claiming each path at its minute, in that order. */
     const claiming = (id: string, claims: readonly (readonly [string, number])[], rest: Partial<Task> = {}) =>
       boardTask({
         id: id as Task['id'],

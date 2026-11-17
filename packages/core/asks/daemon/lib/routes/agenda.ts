@@ -404,7 +404,7 @@ async function apply(
     request.response === undefined
   )
     throw new ApiError(400, 'an attached task answer needs a response', 'invalid');
-  // An answer to a card's gate moves the card first; only a move that went through answers the item.
+  // An answer to a task's gate moves the task first; only a move that went through answers the item.
   const gated =
     sourced === undefined && request.action === 'resolve' && request.response !== undefined && gates !== undefined
       ? await answerGate(gates, context, {
@@ -419,7 +419,7 @@ async function apply(
           attachments: request.attachments,
         })
       : undefined;
-  // Files belong to a card's gate answer: an answer that is not one has nothing to carry them to.
+  // Files belong to a task's gate answer: an answer that is not one has nothing to carry them to.
   if (request.action === 'resolve' && request.attachments !== undefined && gated === undefined) {
     throw new ApiError(400, 'files can only come with the answer to a task ask', 'invalid');
   }
@@ -544,7 +544,7 @@ export function agendaRoutes(
   notifications?: DirectNotificationSubsystem,
   /** The held configuration edits an item may confirm; absent, `--confirms` is refused. */
   config?: AgendaConfigPort,
-  /** The card asks an answer may move a card through; absent, a card ask is answered like any other choice. */
+  /** The task asks an answer may move a task through; absent, a task ask is answered like any other choice. */
   gates?: AgendaGatePort,
   sources?: SourceAnswers,
   /** Who is in whose lineage and who the Warden started; absent, a ferret reads no Warden item at all. */

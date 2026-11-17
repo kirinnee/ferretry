@@ -20,8 +20,8 @@ import {
 } from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /**
- * CARD ASKS ACROSS MERGE AND SPLIT (docs/agenda.md § Merge and split): a merge keeps every card ask of both items, once
- * per card and entry; a split with `moveCards` takes a moved card's asks to the new item. The pure half first, then
+ * TASK ASKS ACROSS MERGE AND SPLIT (docs/agenda.md § Merge and split): a merge keeps every task ask of both items, once
+ * per card and entry; a split with `moveCards` takes a moved task's asks to the new item. The pure half first, then
  * through the real state machine.
  */
 
@@ -65,7 +65,7 @@ const thread = (extra: Partial<AgendaItem> = {}): AgendaItem =>
     id: 'A1',
     source: 'agent-raised',
     sourceRef: null,
-    // A line that only repeats the card ask (docs/agenda.md § One ask): the card asks are all the thread asks.
+    // A line that only repeats the task ask (docs/agenda.md § One ask): the task asks are all the thread asks.
     subject: 'Try it: Badge',
     title: 'Badge',
     why: 'w',
@@ -494,7 +494,7 @@ describe('a merge carries card asks', () => {
 
 describe('a split carries a moved card’s asks', () => {
   it('moves the asks of the cards it moves to the new item, and the original keeps the rest', () => {
-    // Arrange — A1 carries F1's and F2's asks, without holding either card otherwise
+    // Arrange — A1 carries F1's and F2's asks, without holding either task otherwise
     const ledger = twoThreads([gate('F1'), gate('F2')], []);
 
     // Act
@@ -520,7 +520,7 @@ describe('a split carries a moved card’s asks', () => {
   });
 
   it('puts the original back where it was when it asked nothing but the asks that moved', () => {
-    // Arrange — A1's line only repeats F1's card ask; A1 rested, then F1's ask woke it
+    // Arrange — A1's line only repeats F1's task ask; A1 rested, then F1's ask woke it
     let ledger = twoThreads([], [], 'Try it: Badge');
     ledger = ok(
       applyAgendaCommand(ledger, { action: 'rest', actor: AGENT, id: 'A1', why: 'checking', at: minute(2) }),
@@ -555,7 +555,7 @@ describe('a split carries a moved card’s asks', () => {
   });
 
   it('refuses to move a card’s ask onto a new item that cannot carry it, and writes nothing', () => {
-    // Arrange — the card's own agenda, raised by the daemon: a split off it is the daemon's item, not a card agenda
+    // Arrange — the task's own agenda, raised by the daemon: a split off it is the daemon's item, not a task agenda
     const ledger = ok(
       applyAgendaCommandToSession(null, SESSION, {
         action: 'raise',

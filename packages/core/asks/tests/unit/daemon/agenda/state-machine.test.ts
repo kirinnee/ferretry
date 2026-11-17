@@ -4052,7 +4052,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     ],
   };
   const NEXT = { ...GATE, entry: 2 };
-  // A reply thread whose line only repeats its card ask (docs/agenda.md § One ask): the card ask is all it asks.
+  // A reply thread whose line only repeats its task ask (docs/agenda.md § One ask): the task ask is all it asks.
   const REPEATS = { subject: 'Try it: Badge', ask: { kind: 'open-question' as const }, kind: 'reply' as const };
   const SYSTEM: AgendaActor = { kind: 'daemon', cause: 'system' };
   const RECEIPT = 'a'.repeat(64);
@@ -4144,7 +4144,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
 
   describe('an item’s own ask beside its card ask', () => {
     const TASK = { kind: 'task' as const };
-    // The card agenda the daemon opens (`cardAgendaRaise`): an open question in the lane's words, under `card-agenda:`.
+    // The task agenda the daemon opens (`cardAgendaRaise`): an open question in the lane's words, under `card-agenda:`.
     const TASK_AGENDA = {
       source: 'task' as const,
       sourceRef: taskAgendaReference('F1'),
@@ -4164,11 +4164,11 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       );
 
     it('keeps an unanswered own ask in Needs you after the card ask is answered, then parks on its answer', () => {
-      // Arrange — a to-do "Restart the service" that carries a try-it card ask
+      // Arrange — a to-do "Restart the service" that carries a try-it task ask
       const carried = attach(raised(AGENT, { subject: 'Restart the service', ask: TASK }).ledger);
       should(agendaState(carried.item!).state).equal('needs-you');
 
-      // Act — the card ask is answered
+      // Act — the task ask is answered
       const gateDone = succeeded(answer(carried.ledger));
 
       // Assert — its own ask remains, so it is still the owner's
@@ -4180,7 +4180,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     });
 
     it('parks on the owner’s answer to its own ask once the card ask is answered too', () => {
-      // Arrange — a permission with a try-it card ask, the card ask answered
+      // Arrange — a permission with a try-it task ask, the task ask answered
       const carried = attach(raised(AGENT, { ask: { kind: 'permission' } }).ledger);
       const gateDone = succeeded(answer(carried.ledger));
       should(agendaState(gateDone.item!).state).equal('needs-you');
@@ -4247,7 +4247,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       const BADGE = 'Should the badge also change keyboard focus?';
 
       it('keeps a new question in Needs you after the card ask is answered, then rests on the owner’s answer', () => {
-        // Arrange — the ferret rewrites the generated ask into a question with options, then the card ask arrives
+        // Arrange — the ferret rewrites the generated ask into a question with options, then the task ask arrives
         const edited = ferretAsks(taskAgenda().ledger, {
           subject: BADGE,
           kind: 'choice',
@@ -4257,7 +4257,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         should(edited.item?.revisions?.some(each => each.by === 'agent')).be.true();
         const carried = attach(edited.ledger);
 
-        // Act — the card ask is answered Good
+        // Act — the task ask is answered Good
         const gateDone = succeeded(answer(carried.ledger));
 
         // Assert — the ferret's question is still the owner's
@@ -4331,7 +4331,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         should(aged.subject).equal(BADGE);
         const carried = attach(ledger);
 
-        // Act — the card ask is answered Good
+        // Act — the task ask is answered Good
         const gateDone = succeeded(answer(carried.ledger));
 
         // Assert — the ferret's question is still in front of the owner
@@ -4368,7 +4368,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         );
 
       it('rests on the card ask’s Good when the owner replied to the question while the card ask waited', () => {
-        // Arrange — the ferret asks its own question, a try-it card ask arrives, the owner replies in words
+        // Arrange — the ferret asks its own question, a try-it task ask arrives, the owner replies in words
         const carried = attachAt(raised(AGENT, FOCUS).ledger, GATE, SECOND);
         const replied = ownerReplies(carried.ledger, THIRD);
         // The reply answered the question and nothing more: the try-it takes over as the item's ask, in Needs you.
@@ -4378,7 +4378,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         should(openTaskAsks(replied.item!)).have.length(1);
         should(replied.item?.ownerAnswer).be.undefined();
 
-        // Act — the card ask is answered Done
+        // Act — the task ask is answered Done
         const done = doneAt(replied.ledger, GATE, FOURTH);
 
         // Assert — the answered question does not come back
@@ -4388,7 +4388,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       });
 
       it('rests on a later card ask’s Good when the owner replied before that ask was put', () => {
-        // Arrange — the owner replies first; then a card ask is put and answered, then a second one
+        // Arrange — the owner replies first; then a task ask is put and answered, then a second one
         const replied = ownerReplies(raised(AGENT, FOCUS).ledger, SECOND);
         const woken = attachAt(replied.ledger, GATE, THIRD);
         should(agendaState(woken.item!).state).equal('needs-you');
@@ -4435,7 +4435,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         ),
       );
 
-      // Assert — only the daemon's card agenda keeps one
+      // Assert — only the daemon's task agenda keeps one
       should(opened.item?.generatedSubject).equal(TASK_AGENDA.subject);
       should(restated.change).equal('refreshed');
       should(restated.item?.generatedSubject).equal('Try it: the badge.');
@@ -4444,11 +4444,11 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     });
 
     it('keeps an agent-raised subject-only question in Needs you after Good, and the owner’s reply parks it', () => {
-      // Arrange — a ferret's open question in its subject alone, carrying a try-it card ask
+      // Arrange — a ferret's open question in its subject alone, carrying a try-it task ask
       const BADGE = 'Should the badge also change keyboard focus?';
       const carried = attach(raised(AGENT, { ...REPEATS, subject: BADGE }).ledger);
 
-      // Act — the card ask is answered Good
+      // Act — the task ask is answered Good
       const gateDone = succeeded(answer(carried.ledger));
 
       // Assert — its question is still the owner's
@@ -4472,7 +4472,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     });
 
     it('reads a card agenda from before the generated subject by its words', () => {
-      // Arrange — the same card agenda stored before `generatedSubject`, and one whose ferret rewrote it then
+      // Arrange — the same task agenda stored before `generatedSubject`, and one whose ferret rewrote it then
       const withoutRecord = (ledger: AgendaLedger, subject?: string): AgendaLedger => ({
         ...ledger,
         entries: ledger.entries.map(entry => {
@@ -4481,7 +4481,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
           return { ...entry, item: { ...item, ...(subject === undefined ? {} : { subject }) } };
         }),
       });
-      // Read conservatively: only a line that provably repeats the ask (the lane's words and the card's title) is the
+      // Read conservatively: only a line that provably repeats the ask (the lane's words and the task's title) is the
       // daemon's; anything more — even after "Try it:" — is a question of the ferret's until a restate stamps it.
       const generated = attach(withoutRecord(raised(DAEMON, TASK_AGENDA).ledger, 'Try it: Badge'));
       const prefixed = attach(
@@ -4504,7 +4504,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     });
 
     it('rests a carried card agenda (its subject stamped as generated) once its card ask is answered', () => {
-      // Arrange — a carried v4 card agenda: v4's own subject, kept as `generatedSubject`
+      // Arrange — a carried v4 task agenda: v4's own subject, kept as `generatedSubject`
       const carried = (ledger: AgendaLedger): AgendaLedger => ({
         ...ledger,
         entries: ledger.entries.map(entry => {
@@ -4516,10 +4516,10 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       });
       const stamped = attach(carried(raised(DAEMON, TASK_AGENDA).ledger));
 
-      // Act — the owner answers the card ask
+      // Act — the owner answers the task ask
       const done = succeeded(answer(stamped.ledger));
 
-      // Assert — nothing is left for the owner: it is off Needs you, as a 5.0-raised card agenda is
+      // Assert — nothing is left for the owner: it is off Needs you, as a 5.0-raised task agenda is
       should(done.item?.generatedSubject).equal('OK to build? Badge counts unread items.');
       should(openTaskAsks(done.item!)).have.length(0);
       should(agendaState(done.item!).state).equal('resting');
@@ -4591,7 +4591,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       });
 
       it('lets the try-it take over in the same item: a question open, answered, then the try-it asked (still Needs you)', () => {
-        // Arrange — an own question stands beside the card ask: it is the one ask
+        // Arrange — an own question stands beside the task ask: it is the one ask
         const carried = attach(
           raised(AGENT, {
             subject: 'Should keyboard focus change too?',

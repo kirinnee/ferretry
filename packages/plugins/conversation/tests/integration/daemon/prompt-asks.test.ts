@@ -18,7 +18,7 @@ const working: PromptRead = { turnState: 'working' };
 
 /**
  * Asks as far as prompt cards go, with Asks' own rules: `(source, entry)` is kept for life (a closed card's entry
- * returns the same ref and is never reopened), and a card raised for a ferret lands on `homeOf(ferret)`'s board.
+ * returns the same ref and is never reopened), and a task raised for a ferret lands on `homeOf(ferret)`'s board.
  */
 function board(
   options: { failRaise?: () => boolean; failClose?: () => boolean; homeOf?: (ferret: string) => string } = {},
@@ -538,7 +538,7 @@ describe('what a tick reads', () => {
 });
 
 describe('a card whose ref was never saved', () => {
-  /** Asks raised, then the ref could not be saved: the record says waiting, with no card. */
+  /** Asks raised, then the ref could not be saved: the record says waiting, with no task. */
   async function unsaved(options: Parameters<typeof board>[0] = {}) {
     const store = records();
     const write = store.write;
@@ -622,7 +622,7 @@ describe('a card whose ref was never saved', () => {
 });
 
 describe('a raise that succeeded but whose ref was never saved, on its own board and redirected to a lead', () => {
-  /** Asks raised and kept the card; the process lost the write that would have saved its ref. */
+  /** Asks raised and kept the task; the process lost the write that would have saved its ref. */
   const losingFirstRefSave = (store: ReturnType<typeof records>): ReturnType<typeof records> => {
     const write = store.write;
     let armed = true;

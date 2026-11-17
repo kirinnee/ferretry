@@ -1,5 +1,5 @@
 /**
- * A card's name, parsed out of a ferret's `name`. The parsing half of
+ * A task's name, parsed out of a ferret's `name`. The parsing half of
  * the rendered name (`views/card-name.tsx`); every surface that merely needs the words takes this.
  *
  * `--name` is documented to the CLI's callers as "a succinct summary of what

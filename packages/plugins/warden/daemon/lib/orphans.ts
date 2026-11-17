@@ -1,26 +1,26 @@
 /**
- * ORPHANED CARDS: the Warden's one anomaly about a CARD rather than a ferret (`board-design.md` §3.3, §3.4).
+ * ORPHANED TASKS: the Warden's one anomaly about a TASK rather than a ferret (`board-design.md` §3.3, §3.4).
  *
  * ═══ WHAT ORPHANED MEANS ═══
  *
- * A card in an active or review lane whose ferret is finished (or gone from this machine), with no live
+ * A task in an active or review lane whose ferret is finished (or gone from this machine), with no live
  * ferret anywhere under it. The board derives that (`board/activity.ts`, `activity: 'orphaned'`) and this
- * module never decides it again: it reads the board's word, so the card drawn red on the board and the
- * card the Warden reports are always the same cards.
+ * module never decides it again: it reads the board's word, so the task drawn red on the board and the
+ * task the Warden reports are always the same tasks.
  *
  * ═══ WHO IS TOLD ═══
  *
- * Nothing is investigated: the fault is categorical, and its remedy is somebody picking the card up. So:
+ * Nothing is investigated: the fault is categorical, and its remedy is somebody picking the task up. So:
  *
- * 1. the card's OWNER ferret, when it is alive and is not the finished ferret itself, gets a queued
- *    message through the ordinary send path: resume the ferret, hand the card on, or drop it;
- * 2. otherwise the owner (the person) is told by the ONE machine item that lists every such card
- *    (`orphan-item.ts`, v4's single list): a card joins it when no live owner ferret can be told, and leaves it
- *    when a ferret is on the card again. Never one ask per card: a board holds 20 unresolved items.
+ * 1. the task's OWNER ferret, when it is alive and is not the finished ferret itself, gets a queued
+ *    message through the ordinary send path: resume the ferret, hand the task on, or drop it;
+ * 2. otherwise the owner (the person) is told by the ONE machine item that lists every such task
+ *    (`orphan-item.ts`, v4's single list): a task joins it when no live owner ferret can be told, and leaves it
+ *    when a ferret is on the task again. Never one ask per task: a board holds 20 unresolved items.
  *
- * Once per EPISODE: one card left by one ferret. The Warden remembers whom it told
- * ({@link OrphanMemory}); a card still orphaned is not told again, except that a message to an owner
- * ferret that has since finished too moves on to the list. A card that is no longer orphaned is
+ * Once per EPISODE: one task left by one ferret. The Warden remembers whom it told
+ * ({@link OrphanMemory}); a task still orphaned is not told again, except that a message to an owner
+ * ferret that has since finished too moves on to the list. A task that is no longer orphaned is
  * forgotten and drops off the list: when it is orphaned again it is news again.
  *
  * Pure: the board, the fleet and the memory arrive through the arguments.
@@ -36,20 +36,20 @@ import { isTerminalStatus, type WardenSessionView } from './types.ts';
 /** Every board's lanes, by project id. */
 type LaneSets = ReadonlyMap<string, LaneSet>;
 
-/** Every card as the board derives it, with every board's lanes: one read per sweep. */
+/** Every task as the board derives it, with every board's lanes: one read per sweep. */
 export interface WardenBoardRead {
   readonly views: readonly TaskView[];
   readonly laneSets: LaneSets;
 }
 
-/** The card's working ferret: the assignee, else the owner (Board's rule: a `null` assignee reads as the owner). */
+/** The task's working ferret: the assignee, else the owner (Board's rule: a `null` assignee reads as the owner). */
 const effectiveAssignee = (task: Pick<TaskView, 'owner' | 'assignee'>): string => task.assignee ?? task.owner;
 
-/** The anomaly identity of an orphaned card: about the card, so two cards one ferret left are two flags. */
+/** The anomaly identity of an orphaned task: about the task, so two tasks one ferret left are two flags. */
 export const orphanFleetKey = (id: TaskId): string => `card:${id}`;
 
 /**
- * The source reference of the per-card ask an earlier Warden raised on a ferret's board (`warden-orphan:<card>`): only
+ * The source reference of the per-card ask an earlier Warden raised on a ferret's board (`warden-orphan:<task>`): only
  * read now, to close what such a board still holds ({@link OrphanPlan.resolve}).
  */
 const orphanTaskAskRef = (id: TaskId): string => `warden-orphan:${id}`;
@@ -63,7 +63,7 @@ const ferretRef = (sessionId: string, fleet: ReadonlyMap<string, WardenSessionVi
   return teammate === undefined ? sessionId : wardenTeammateToken(teammate);
 };
 
-/** What became of a card's ferret, in words: its terminal status, or that it is gone. */
+/** What became of a task's ferret, in words: its terminal status, or that it is gone. */
 const endedAs = (sessionId: string, fleet: ReadonlyMap<string, WardenSessionView>): string => {
   const session = fleet.get(sessionId);
   return session === undefined ? 'no longer on this machine' : session.state.status;
@@ -72,7 +72,7 @@ const endedAs = (sessionId: string, fleet: ReadonlyMap<string, WardenSessionView
 // ── Detection ────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * One `orphaned_card` anomaly per card the board calls orphaned. A card a warden (or anything a warden
+ * One `orphaned_card` anomaly per task the board calls orphaned. A task a warden (or anything a warden
  * spawned) was left holding is not flagged: the Warden never reports its own lineage.
  */
 export function detectOrphanedTasks(
@@ -111,15 +111,15 @@ export function detectOrphanedTasks(
 // ── Escalation ───────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Whom the Warden told about one orphaned card, this episode:
+ * Whom the Warden told about one orphaned task, this episode:
  *
  * - `owner`: a message to the owner ferret `to`;
- * - `list`: the card is a row of the ONE machine item (`to` is that board);
+ * - `list`: the task is a row of the ONE machine item (`to` is that board);
  * - `notice`: a per-card ask on the board of ferret `to`, as an earlier Warden raised. Never made now: the next sweep
  *   closes it ({@link OrphanPlan.resolve}) and forgets it.
  */
 export interface OrphanTold {
-  /** The finished ferret the card was left by: the episode. */
+  /** The finished ferret the task was left by: the episode. */
   readonly assignee: string;
   readonly via: 'owner' | 'list' | 'notice';
   /** The owner ferret messaged, the machine board, or the session whose board holds a per-card ask. */
@@ -127,7 +127,7 @@ export interface OrphanTold {
   readonly at: string;
 }
 
-/** A card remembered as a row of the machine item, from `at`. */
+/** A task remembered as a row of the machine item, from `at`. */
 export const orphanListed = (assignee: string, at: string): OrphanTold => ({
   assignee,
   via: 'list',
@@ -135,19 +135,19 @@ export const orphanListed = (assignee: string, at: string): OrphanTold => ({
   at,
 });
 
-/** Every orphaned card the Warden has told somebody about, keyed by card id. */
+/** Every orphaned task the Warden has told somebody about, keyed by task id. */
 export type OrphanMemory = Readonly<Record<string, OrphanTold>>;
 
-/** One card as a row of the machine item: its id, the ferret that left it, the one line that names it, and since when it has waited. */
+/** One task as a row of the machine item: its id, the ferret that left it, the one line that names it, and since when it has waited. */
 export interface OrphanedTask {
   readonly id: TaskId;
-  /** The finished ferret the card was left by: the episode. */
+  /** The finished ferret the task was left by: the episode. */
   readonly assignee: string;
   readonly line: string;
   readonly waitingSince: string;
 }
 
-/** A message to the owner ferret, and the row the card becomes when the message cannot be typed. */
+/** A message to the owner ferret, and the row the task becomes when the message cannot be typed. */
 interface OrphanMessage {
   readonly taskId: TaskId;
   readonly assignee: string;
@@ -161,7 +161,7 @@ interface OrphanMessage {
   readonly fallback: OrphanedTask;
 }
 
-/** A per-card ask an earlier Warden raised, to close: its card is no longer orphaned, or is listed now. */
+/** A per-card ask an earlier Warden raised, to close: its task is no longer orphaned, or is listed now. */
 export interface OrphanResolution {
   readonly taskId: TaskId;
   readonly sessionId: string;
@@ -172,7 +172,7 @@ export interface OrphanResolution {
 export interface OrphanPlan {
   /** The messages to type to live owner ferrets. */
   readonly tell: readonly OrphanMessage[];
-  /** The cards listed on the machine item without any message: no live owner ferret can be told. */
+  /** The tasks listed on the machine item without any message: no live owner ferret can be told. */
   readonly list: readonly OrphanedTask[];
   /** The per-card asks still on ferret boards from before the list: each is closed, once. */
   readonly resolve: readonly OrphanResolution[];
@@ -187,7 +187,7 @@ export interface OrphanPlanInput {
   /** Every session this daemon holds, live and finished. */
   readonly fleet: readonly WardenSessionView[];
   readonly memory: OrphanMemory;
-  /** Whether the Warden is on: off, nobody is told, but a card that recovered is still cleared. */
+  /** Whether the Warden is on: off, nobody is told, but a task that recovered is still cleared. */
   readonly enabled: boolean;
   /** The CLI a ferret or a person actually types. */
   readonly clientName: string;
@@ -195,7 +195,7 @@ export interface OrphanPlanInput {
 
 const flatten = (value: string): string => value.replaceAll(/\s+/gu, ' ').trim();
 
-/** The ways out of an orphaned card, as commands. */
+/** The ways out of an orphaned task, as commands. */
 const remedies = (view: TaskView, assignee: string, cli: string): string =>
   `Resume its ferret (\`${cli} resume ${assignee}\`), hand the task to another ferret (\`${cli} task assign ${view.id} <ferret>\`), or drop it (\`${cli} task drop ${view.id} --reason "<why>"\`).`;
 
@@ -210,7 +210,7 @@ const TASK_LINE_TAIL = (lane: string): string =>
   ` is waiting in ${lane}, but no ferret is assigned, so nothing will happen to it.`;
 
 /**
- * The one line that names an orphaned card: its reference, title and lane, and what that means. It is a row of the
+ * The one line that names an orphaned task: its reference, title and lane, and what that means. It is a row of the
  * machine item, so it has to fit a push body: a long title gives way, never the ending.
  */
 function orphanTaskLine(view: TaskView, board: WardenBoardRead): string {
@@ -220,7 +220,7 @@ function orphanTaskLine(view: TaskView, board: WardenBoardRead): string {
   return flatten(`${ref} ${clipAtWord(flatten(view.title), room)}${tail}`);
 }
 
-/** The queued message to the card's owner ferret. */
+/** The queued message to the task's owner ferret. */
 function orphanOwnerMessage(
   view: TaskView,
   board: WardenBoardRead,
@@ -235,11 +235,11 @@ function orphanOwnerMessage(
   );
 }
 
-/** The title of the machine item: one card, or how many. */
+/** The title of the machine item: one task, or how many. */
 export const orphanTitle = (count: number): string =>
   count === 1 ? 'A task has nobody working on it' : `${String(count)} tasks have nobody working on them`;
 
-/** A card as a row of the machine item. */
+/** A task as a row of the machine item. */
 const orphanedTask = (view: TaskView, board: WardenBoardRead, assignee: string, since: string): OrphanedTask => ({
   id: view.id,
   assignee,
@@ -248,7 +248,7 @@ const orphanedTask = (view: TaskView, board: WardenBoardRead, assignee: string, 
 });
 
 /**
- * Whom to tell about each orphaned card this sweep, which cards the machine item lists, which per-card asks to
+ * Whom to tell about each orphaned task this sweep, which tasks the machine item lists, which per-card asks to
  * close, and what to remember. Deterministic: the same inputs give the same plan in the same order.
  */
 export function planOrphanEscalations(input: OrphanPlanInput): OrphanPlan {
@@ -265,7 +265,7 @@ export function planOrphanEscalations(input: OrphanPlanInput): OrphanPlan {
   const closeAsk = (taskId: TaskId, told: OrphanTold, note: string): void => {
     if (told.via === 'notice') resolve.push({ taskId, sessionId: told.to, sourceRef: orphanTaskAskRef(taskId), note });
   };
-  // A card that was on the list already stays remembered. A card joining it now is NOT remembered here: it is
+  // A task that was on the list already stays remembered. A task joining it now is NOT remembered here: it is
   // remembered once the item that names it has landed (`WardenSweepService.escalateOrphans`), so a refused item
   // names it again, as news, next sweep.
   const listed = (task: OrphanedTask, kept?: OrphanTold): void => {

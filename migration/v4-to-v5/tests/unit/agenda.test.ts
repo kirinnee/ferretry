@@ -203,7 +203,7 @@ test('a version-4 board: version 1, gate fields dropped, replied close done, cur
   expect(entries(v5).some(entry => 'gate' in entry.item || 'gateAttachedChangedAt' in entry.item)).toBe(false);
   expect(item(v5, 'A22')?.item.disposition).toBe('done');
   expect(item(v5, 'A1')?.item.parked).toEqual({ reason: 'replied', at: at(3) });
-  // v4's read lifted the bare gate into a card ask; v5 keeps the card ask, not the mirror.
+  // v4's read lifted the bare gate into a task ask; v5 keeps the task ask, not the mirror.
   expect((item(v5, 'A1')?.item.cardAsks as { gate: Json }[] | undefined)?.[0]?.gate).toEqual(GATE);
   expect(entries(v5)).toHaveLength(22);
   // History: the replied version record is now done, the owner-history line is byte-identical.
@@ -222,7 +222,7 @@ test('a version-4 board: version 1, gate fields dropped, replied close done, cur
 });
 
 test('a v4 card agenda (daemon-raised, card-agenda:<card>) is carried with generatedSubject, so it rests after its card ask is answered', async () => {
-  // Made by v4's own engine: the daemon opens the card's agenda; a daemon item under another reference is no card agenda.
+  // Made by v4's own engine: the daemon opens the task's agenda; a daemon item under another reference is no task agenda.
   let ledger = v4Board();
   const daemonRaise = (id: string, sourceRef: string, minute: number) => {
     const made = applyAgendaCommand(ledger, {
@@ -256,7 +256,7 @@ test('a v4 card agenda (daemon-raised, card-agenda:<card>) is carried with gener
   expect(item(v5, 'A4')?.item.generatedSubject).toBeUndefined();
   expect(item(v5, 'A1')?.item.generatedSubject).toBeUndefined();
   expect(item(v5, 'A2')?.item.generatedSubject).toBeUndefined();
-  // v5's own rule now reads it as the generated card ask: its whole ask is its card asks.
+  // v5's own rule now reads it as the generated task ask: its whole ask is its task asks.
   const { isGeneratedTaskAgendaAsk } = await import('@ferretry/core-asks/contract');
   const carried = item(v5, 'A3')?.item as Parameters<typeof isGeneratedTaskAgendaAsk>[0];
   expect(isGeneratedTaskAgendaAsk(carried)).toBe(true);
@@ -368,7 +368,7 @@ test('the machine agenda, a never-renamed attention.json, damaged files set asid
   const task = document(v4Board('f3'));
   const a1 = item(task, 'A1');
   if (a1 === undefined) throw new Error('fixture');
-  a1.item.gateAttached = GATE; // v4's read lifts it into a card ask
+  a1.item.gateAttached = GATE; // v4's read lifts it into a task ask
   await putText('state/sessions/f3/agenda.json', `${JSON.stringify(task, null, 2)}\n`);
   const sent = { kind: 'agenda', interactive: false, title: 'FAKE buzz', body: 'FAKE' };
   const notification = (extra: Json) =>

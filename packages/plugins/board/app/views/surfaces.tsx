@@ -1,8 +1,8 @@
 /**
  * EVERY SURFACE THE BOARD DRAWS, built once per daemon from the generated client: the two screens (the board, one
- * card), the two panels (a ferret's cards, a card's progress), the Settings tab and the two renderers (the `card`
- * ask, a `&F12` reference, the `card` and `board` blocks of a chat). The card is READ-ONLY STATUS: nothing here answers, asks or moves a card (#1552). The
- * owner answers in the Agenda; the ask renderer draws that answer row's one plain reference to the card.
+ * task), the two panels (a ferret's tasks, a task's progress), the Settings tab and the two renderers (the `task`
+ * ask, a `&F12` reference, the `task` and `board` blocks of a chat). The task is READ-ONLY STATUS: nothing here answers, asks or moves a task (#1552). The
+ * owner answers in the Agenda; the ask renderer draws that answer row's one plain reference to the task.
  */
 
 import { RouteLink, useLayoutMode, useNow } from '@ferretry/app/ui';
@@ -54,7 +54,7 @@ const useFerrets = (runtime: BoardRuntime): readonly FerretRow[] => {
 const useCallsigns = (rows: readonly FerretRow[]): ReadonlyMap<string, string> =>
   useMemo(() => new Map(rows.map(row => [row.id, row.name] as const)), [rows]);
 
-/** The project names for the card detail's byline. */
+/** The project names for the task detail's byline. */
 const useProjectNames = (runtime: BoardRuntime): ((id: string) => string) => {
   const [names, setNames] = useState<ReadonlyMap<string, string>>(new Map());
   useEffect(() => {
@@ -73,7 +73,7 @@ const useProjectNames = (runtime: BoardRuntime): ((id: string) => string) => {
   return useCallback((id: string) => names.get(id) ?? id.slice(0, 8), [names]);
 };
 
-/** `/board/:project?` — the board; a card id in the address opens that card as a drawer (a page on a phone). */
+/** `/board/:project?` — the board; a task id in the address opens that task as a drawer (a page on a phone). */
 const boardScreen = (runtime: BoardRuntime): AppComponent<ScreenProps> =>
   function BoardScreen({ params }: ScreenProps): ReactNode {
     const [search, setSearch] = useLocationSearch();
@@ -164,7 +164,7 @@ const formerCardScreen = (runtime: BoardRuntime): AppComponent<ScreenProps> =>
     return <TaskPage id={id} runtime={runtime} />;
   };
 
-/** `ferret.side` — the cards of the ferret the panel sits beside. */
+/** `ferret.side` — the tasks of the ferret the panel sits beside. */
 const tasksOfFerret = (runtime: BoardRuntime): AppComponent<PanelProps> =>
   function TasksOfFerret({ subject }: PanelProps): ReactNode {
     const rows = useFerrets(runtime);
@@ -199,7 +199,7 @@ const tasksOfFerret = (runtime: BoardRuntime): AppComponent<PanelProps> =>
     );
   };
 
-/** `card.detail` — one card's progress: now, done so far, next, as its ferret last wrote it. */
+/** `card.detail` — one task's progress: now, done so far, next, as its ferret last wrote it. */
 const taskProgress = (runtime: BoardRuntime): AppComponent<PanelProps> =>
   function TaskProgress({ subject }: PanelProps): ReactNode {
     const id = (subject ?? '').toUpperCase();
@@ -237,7 +237,7 @@ const boardSettings = (): AppComponent<SettingsProps> =>
     );
   };
 
-/** The shape of what an ask renderer is handed: the `card` source's reference, possibly inside its envelope. */
+/** The shape of what an ask renderer is handed: the `task` source's reference, possibly inside its envelope. */
 const taskOfAsk = (value: unknown): string | null => {
   const direct = value as Partial<TaskAskRef> | null;
   const nested = (value as { readonly ref?: Partial<TaskAskRef> } | null)?.ref;
@@ -246,7 +246,7 @@ const taskOfAsk = (value: unknown): string | null => {
 };
 
 /**
- * `ask:card` — the Agenda's one answer row for an ask a card raised. The card is named once, as a plain reference
+ * `ask:card` — the Agenda's one answer row for an ask a task raised. The task is named once, as a plain reference
  * and its title; there is no heading, no button and no lane talk here (owner words, #1552).
  */
 const taskAskRenderer = (runtime: BoardRuntime): AppComponent<RendererProps> =>
@@ -262,7 +262,7 @@ const taskAskRenderer = (runtime: BoardRuntime): AppComponent<RendererProps> =>
     );
   };
 
-/** `reference:&` — a `&F12` written anywhere: a link when the card exists on this machine, plain text when not. */
+/** `reference:&` — a `&F12` written anywhere: a link when the task exists on this machine, plain text when not. */
 const taskReferenceRenderer = (runtime: BoardRuntime): AppComponent<RendererProps> =>
   function TaskReference({ value }: RendererProps): ReactNode {
     const written = String(typeof value === 'string' ? value : ((value as { id?: unknown } | null)?.id ?? ''))
@@ -273,7 +273,7 @@ const taskReferenceRenderer = (runtime: BoardRuntime): AppComponent<RendererProp
     const read = useMemo(() => (state.task === null ? [] : [state.task]), [state.task]);
     const proves = useTaskReferenceProof(runtime.store, THIS_MACHINE, read);
     if (!known) return <>{`&${written}`}</>;
-    // Syntax is not proof: it links only when the card is one of this machine's, and reads as plain text otherwise.
+    // Syntax is not proof: it links only when the task is one of this machine's, and reads as plain text otherwise.
     if (!proves(written)) return <>{formatTaskRef({ id: written })}</>;
     return (
       <RouteLink title={state.task?.title} to={taskPagePath(written)}>
@@ -282,7 +282,7 @@ const taskReferenceRenderer = (runtime: BoardRuntime): AppComponent<RendererProp
     );
   };
 
-/** `reference:&board` — a `card` or `board` block in chat: the mini board and its lanes, drawn from the board. */
+/** `reference:&board` — a `task` or `board` block in chat: the mini board and its lanes, drawn from the board. */
 const taskEmbedRenderer = (runtime: BoardRuntime): AppComponent<RendererProps> =>
   function TaskEmbedRenderer({ value }: RendererProps): ReactNode {
     const callsigns = useCallsigns(useFerrets(runtime));

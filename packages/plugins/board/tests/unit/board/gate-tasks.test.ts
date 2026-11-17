@@ -42,7 +42,7 @@ describe('the gate card list', () => {
       },
     });
 
-    // Assert: one project name, no per-card derivation, and the same cards the per-card path builds
+    // Assert: one project name, no per-card derivation, and the same tasks the per-card path builds
     should(counts.names).equal(1);
     should(counts.blocked).equal(0);
     should(passed).have.length(COUNT);
@@ -56,7 +56,7 @@ describe('the gate card list', () => {
   });
 
   it('should read Asks once, ask for one project name and derive no card on its own for 3000 cards', async () => {
-    // Arrange: 3000 cards over 30 projects, with the Asks link counted (one call is one whole-board read of every ledger)
+    // Arrange: 3000 tasks over 30 projects, with the Asks link counted (one call is one whole-board read of every ledger)
     const tasks = Array.from({ length: 3000 }, (_, i) =>
       boardTask({ id: `F${i + 1}`, projectId: `p${i % 30}` as never }),
     );
@@ -93,7 +93,7 @@ describe('the gate card list', () => {
       },
     });
 
-    // Assert: O(cards) work, one derivation: not one whole-board read per card
+    // Assert: O(tasks) work, one derivation: not one whole-board read per task
     should(passed).have.length(3000);
     should(calls.asks).equal(1);
     should(calls.names).equal(30);

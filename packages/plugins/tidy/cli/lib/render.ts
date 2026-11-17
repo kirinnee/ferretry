@@ -44,7 +44,7 @@ const clip = (text: string, width: number): string => {
 
 const TITLE_WIDTH = 70;
 
-/** One card or ask the tidy touched, or failed to touch. */
+/** One task or ask the tidy touched, or failed to touch. */
 export interface TidyOutcome {
   readonly reference: string;
   readonly title: string;

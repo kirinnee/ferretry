@@ -1,18 +1,18 @@
 /**
- * THE ANSWER ROW OF AN OPEN AGENDA CARD — ONE ROW, at most THREE buttons, in DIRECTION order: the ← answer, the ↑
+ * THE ANSWER ROW OF AN OPEN AGENDA TASK — ONE ROW, at most THREE buttons, in DIRECTION order: the ← answer, the ↑
  * (recommended) one, the → one, each the swipe that sends it. A direction with no answer draws NOTHING: the buttons
  * there share the width, never a hole. Each says its option's own short label (`agendaAnswerText`: "No", "Only
- * blockers"), never its description and never a bare letter, cut at a word only when very long; in an open card a label
+ * blockers"), never its description and never a bare letter, cut at a word only when very long; in an open task a label
  * too long for its third of a phone's row wraps onto a second line between words. The full label is its accessible
  * name and its title. The recommended one is in the
- * accent. A tap answers at once. Options past the three are chosen from the card's options list, never a second row.
- * "Not needed" is the pill in the card's top bar (a button only, never a swipe), not a button here. Answering is replying, so there
- * is no text field: the composer below the card is the one box, and what is typed in it rides an answer as its note.
+ * accent. A tap answers at once. Options past the three are chosen from the task's options list, never a second row.
+ * "Not needed" is the pill in the task's top bar (a button only, never a swipe), not a button here. Answering is replying, so there
+ * is no text field: the composer below the task is the one box, and what is typed in it rides an answer as its note.
  *
  * On touch the row swipes (← ↑ →) exactly as the Inbox deck does (`swipeIntent`), and ↓ is `onSkip` — Skip, never a dismiss.
- * An item linked to a card the owner may close also draws "Done · closes &F12" in the → slot when it is free; with
- * all three taken it is the one button under the row, tap only — a swipe never closes a card.
- * A card answered in words (an open question, several questions, a mix) draws NO buttons here: the composer is the
+ * An item linked to a task the owner may close also draws "Done · closes &F12" in the → slot when it is free; with
+ * all three taken it is the one button under the row, tap only — a swipe never closes a task.
+ * A task answered in words (an open question, several questions, a mix) draws NO buttons here: the composer is the
  * answer. A review's "Request changes" is a button, never a swipe: it takes the composer's words, or puts the owner
  * in the composer when it is empty. A notice's one button is Got it.
  */
@@ -61,7 +61,7 @@ export interface AgendaQuickRepliesProps {
   readonly swipeable: boolean;
   /** A review's Request changes, when the host can take the owner to the composer. */
   readonly requestChanges?: RequestChanges;
-  /** "Done · closes &F12": absent when the item offers no card to close. */
+  /** "Done · closes &F12": absent when the item offers no task to close. */
   readonly doneClose?: DoneCloseView;
   /** One answer; the host adds the composer's text as its note. */
   readonly onAct: (action: InboxAction) => void;
@@ -125,7 +125,7 @@ function Chip({ label, recommended, busy, arrow, swipeable, primary = false, slo
   );
 }
 
-/** One button of the row: an answer the card gives, in the slot of its swipe direction. */
+/** One button of the row: an answer the task gives, in the slot of its swipe direction. */
 interface Reply {
   readonly label: string;
   readonly answer: AgendaTaskAnswer;
@@ -136,7 +136,7 @@ interface Reply {
 /** Where a direction sits in the row, read left to right: ← ↑ →. */
 const ROW_ORDER: Readonly<Record<string, number>> = { left: 0, up: 1, right: 2 };
 
-/** The row's buttons, in ← ↑ → order: the card's answers (three at most). */
+/** The row's buttons, in ← ↑ → order: the task's answers (three at most). */
 const repliesOf = (model: CardModel, requestChanges: RequestChanges | undefined): readonly Reply[] =>
   [
     ...model.answers.map(answer => ({ label: answer.label, answer })),
@@ -220,7 +220,7 @@ export function AgendaQuickReplies({
   const recommended = model.recommended;
   const replies = repliesOf(model, requestChanges);
   const slotted = replies.length > 0 && !model.notice;
-  // "Done · closes &F12" takes the → slot when the card gave fewer than three answers, and counts as a button there.
+  // "Done · closes &F12" takes the → slot when the task gave fewer than three answers, and counts as a button there.
   const { closeInRow, slots } = answerRowLayout(model, {
     requestChanges: requestChanges !== undefined,
     doneClose: doneClose !== undefined,

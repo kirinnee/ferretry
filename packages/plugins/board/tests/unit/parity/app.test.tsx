@@ -27,7 +27,7 @@ const TASKS = [
   boardTask('F3', { laneId: 'review', title: 'Wait on the lanes', blockedBy: [{ id: 'F2' }] }),
 ];
 
-/** A daemon that answers Board's reads from the cards above; a route it does not know fails like an old daemon. */
+/** A daemon that answers Board's reads from the tasks above; a route it does not know fails like an old daemon. */
 const daemon: PluginClient = {
   call: async (route: string, init?: { readonly params?: Readonly<Record<string, string>> }) => {
     switch (route) {

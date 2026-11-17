@@ -11,7 +11,7 @@
  * the same catalogs the ladder reads. A second read would be a second definition: a menu that offers `!A3` beside a
  * transcript that cannot prove it is exactly the disagreement this repository keeps finding.
  *
- * WHAT AN ENTRY MEANS, per prefix (`ReferenceCatalogEntry`): `token` is what follows the sigil — a card id (`F12`),
+ * WHAT AN ENTRY MEANS, per prefix (`ReferenceCatalogEntry`): `token` is what follows the sigil — a task id (`F12`),
  * an ask id (`A3`), a skill name, an agent name, a terminal or page key, or a ferret-root-relative path (a folder's
  * path ends in `/`). `label` and `detail` are the row. `closed` is a known entry not on offer: done work, a finished
  * ferret, or a file that is listed but not served (its `detail` says why).
@@ -94,7 +94,7 @@ export interface ComposerAutocompleteProvidersOptions {
   readonly waitForCatalog?: ComposerProviderWarmup;
   readonly hostedPrefixes?: readonly ReferenceCatalogPrefix[];
   /**
-   * The menu's "Include agent tasks" switch, read live. Off (the default): a card whose ask the owner did not make
+   * The menu's "Include agent tasks" switch, read live. Off (the default): a task whose ask the owner did not make
    * (the catalog entry's `agentAsked`) is not offered, unless its id is typed exactly.
    */
   readonly getIncludeAgentTasks?: () => boolean;
@@ -104,7 +104,7 @@ export interface ComposerAutocompleteProvidersOptions {
    * sigils only open on an id prefix, so they never carry words and never ask.
    */
   readonly getWorkSearch?: () => WorkSearchPort | undefined;
-  /** Project id to name for the cards that search finds. */
+  /** Project id to name for the tasks that search finds. */
   readonly getProjectNames?: () => ReadonlyMap<string, string> | undefined;
 }
 
@@ -602,11 +602,11 @@ export const isTaskMenuLabel = (label: string | undefined): boolean =>
   label !== undefined && TASK_MENU_LABELS.has(label);
 
 /**
- * Closed work (done, dropped) is hidden until the reader types its id exactly: a finished card is rarely the one
+ * Closed work (done, dropped) is hidden until the reader types its id exactly: a finished task is rarely the one
  * being referenced, and ten of them above the live ones would bury the menu's purpose. The board's own order (active
  * first, then most recently touched) is kept.
  *
- * The same holds for a card whose ask the owner did not make (another ferret's, the Warden's, an automatic card):
+ * The same holds for a task whose ask the owner did not make (another ferret's, the Warden's, an automatic task):
  * the menu offers what the owner asked for, unless the reader turns "Include agent tasks" on.
  */
 const taskCandidates = (
@@ -663,7 +663,7 @@ const sleepUnlessAborted = (ms: number, signal: AbortSignal): Promise<void> =>
     signal.addEventListener('abort', onAbort, { once: true });
   });
 
-/** A card the daemon found by its words: the same row a catalog card is, with its standing as the trailing chip. */
+/** A task the daemon found by its words: the same row a catalog task is, with its standing as the trailing chip. */
 const cardHitCandidate = (
   scope: DaemonFerretScope,
   hit: Extract<WorkHit, { kind: 'card' }>,
@@ -711,7 +711,7 @@ const askHitCandidate = (
  *
  * - Only for words: an empty query or the start of an id keeps the instant list, and so does a machine that cannot
  *   search or a search that fails — the menu never gets worse for asking.
- * - A card is open work only: the menu offers what is live, as the catalog list does.
+ * - A task is open work only: the menu offers what is live, as the catalog list does.
  * - An ask is this ferret's only: `!A3` is proved against THIS ferret's asks, so another ferret's `A3` would insert a
  *   reference nothing can prove.
  * - A row the catalog list already has wins.

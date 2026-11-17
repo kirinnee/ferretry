@@ -7,7 +7,7 @@ import type { ReactNode } from 'react';
  * The mini board and the lane view are the Board's: Conversation mounts the whole block through the Board's
  * `reference:&board` renderer, handing it what the block names. `RendererView` is replaced here by a stand-in that
  * records what it was asked for and draws what a Board renderer would, so this file proves the hand-off; the Board's own
- * drawing is proven in the Board's tests, and the no-Board fallback in `fy-render-card-embed.test.tsx`.
+ * drawing is proven in the Board's tests, and the no-Board fallback in `fy-render-task-embed.test.tsx`.
  */
 
 interface Asked {

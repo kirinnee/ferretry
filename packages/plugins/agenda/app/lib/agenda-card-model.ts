@@ -1,6 +1,6 @@
 /**
- * WHAT ONE ITEM ASKS AND OFFERS, decided once for every surface that answers it (the card, the agenda row, the
- * full card): the heading, the answers as buttons, the recommendation and its one reason line, and the hint
+ * WHAT ONE ITEM ASKS AND OFFERS, decided once for every surface that answers it (the task, the agenda row, the
+ * full task): the heading, the answers as buttons, the recommendation and its one reason line, and the hint
  * for an item answered in the message box. Pure; the surfaces only draw it.
  */
 
@@ -21,15 +21,15 @@ import {
 import { cardAnswers, isTextOnlyAsk, needsReplyText } from './agenda-answers.ts';
 import { visibleWhy } from './agenda-inbox.ts';
 
-/** The longest ask that is still drawn as the card's heading. */
+/** The longest ask that is still drawn as the task's heading. */
 const QUESTION_HEADING_MAX = 160;
 
 export interface CardModel {
   /** A plain notification: no answers, no turn; the owner reads it and clears it. */
   readonly notice: boolean;
-  /** What the card needs from the owner, and so how its "What I need from you" segment reads (`agendaShape`). */
+  /** What the task needs from the owner, and so how its "What I need from you" segment reads (`agendaShape`). */
   readonly shape: AgendaShape;
-  /** The card's answers as buttons (left · up · right), without one that needs the owner's words. */
+  /** The task's answers as buttons (left · up · right), without one that needs the owner's words. */
   readonly answers: readonly AgendaTaskAnswer[];
   /** An old choice's options past the third: plain buttons, never a swipe. */
   readonly extras: readonly AgendaAskOption[];
@@ -49,7 +49,7 @@ export interface CardModel {
   readonly recommended: string | undefined;
   /** The one line under the buttons: why the recommendation. */
   readonly recommendationLine: string | undefined;
-  /** "Not needed…" lives in the ⋯ menu: no answer of the card's own already dismisses. */
+  /** "Not needed…" lives in the ⋯ menu: no answer of the task's own already dismisses. */
   readonly dismissInMenu: boolean;
   /** Says the answer is the message box's text. */
   readonly composerHint: string | undefined;
@@ -101,7 +101,7 @@ export const cardModel = (item: AgendaItem): CardModel => {
     recommendation,
     recommended,
     recommendationLine,
-    // A ferret's rule suggestion is never closed on the agenda (the daemon refuses): its card's own Dismiss says no.
+    // A ferret's rule suggestion is never closed on the agenda (the daemon refuses): its task's own Dismiss says no.
     dismissInMenu: !answers.some(answer => answer.does === 'dismiss') && item.signInRuleSuggestion === undefined,
     composerHint: textOnly
       ? AGENDA_SHAPE_LEADS[shape]
@@ -115,7 +115,7 @@ export const cardModel = (item: AgendaItem): CardModel => {
 
 /** The buttons an answer row draws, and whether "Done · closes" is one of them. */
 export interface AnswerRowLayout {
-  /** "Done · closes &F12" takes the → slot when the card gave fewer than three answers; with three it sits under them. */
+  /** "Done · closes &F12" takes the → slot when the task gave fewer than three answers; with three it sits under them. */
   readonly closeInRow: boolean;
   /** The buttons on the row, which sets how many words each says (`agendaAnswerText`). */
   readonly slots: number;

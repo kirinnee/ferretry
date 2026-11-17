@@ -1,11 +1,11 @@
 /**
- * The agenda's half of a card ask (docs/agenda.md § Card asks): the owner's answer to a card ask moves the card
+ * The agenda's half of a task ask (docs/agenda.md § Task asks): the owner's answer to a task ask moves the task
  * FIRST, through the board as the owner, and only a move that went through records the answer; the agenda then rests.
  *
- * Who may answer: the owner — at the machine (the admin token, recorded `admin-token` on the card), or a paired
- * device the `fleet` grant lets use the board, exactly the caller who could have moved the card on the Board. A
- * ferret, a lead over its sub-ferret and the daemon are refused here; the state machine records a card ask's answer
- * only from the daemon itself, once this check passed and the card moved.
+ * Who may answer: the owner — at the machine (the admin token, recorded `admin-token` on the task), or a paired
+ * device the `fleet` grant lets use the board, exactly the caller who could have moved the task on the Board. A
+ * ferret, a lead over its sub-ferret and the daemon are refused here; the state machine records a task ask's answer
+ * only from the daemon itself, once this check passed and the task moved.
  */
 import { type ApiActor, cap, grantRefusalCode, parseActor } from '@ferretry/core-gate/contract';
 import { ApiError, type CallContext } from '@ferretry/kernel/contract';
@@ -16,28 +16,28 @@ import type { BoardReopenAttachments } from '../protocol/board-refs.ts';
 type RouteContext = CallContext;
 
 /**
- * Who the board records a card move as (today's `BoardCaller`). This is Asks' side of the card-ask seam: the Board
- * plugin's `card` source answers through it once the card-ask flow is settled (an `apply(answer)` before an ask is
- * answered is still a lead decision), and until then no build wires it, so a card ask is answered like any choice.
+ * Who the board records a task move as (today's `BoardCaller`). This is Asks' side of the card-ask seam: the Board
+ * plugin's `task` source answers through it once the card-ask flow is settled (an `apply(answer)` before an ask is
+ * answered is still a lead decision), and until then no build wires it, so a task ask is answered like any choice.
  */
 type BoardCaller =
   | { readonly kind: 'owner'; readonly via?: 'admin-token' }
   | { readonly kind: 'ferret'; readonly sessionId: string }
   | { readonly kind: 'daemon'; readonly sessionId?: string };
 
-/** Why the board refused to move the card (today's `GateRefusal`). */
+/** Why the board refused to move the task (today's `GateRefusal`). */
 interface GateRefusal {
   readonly code: 'forbidden' | 'invalid' | 'moved-on' | 'not-moved';
   readonly message: string;
 }
 
-/** What answering a card ask came to (today's `GateAnswerOutcome`). */
+/** What answering a task ask came to (today's `GateAnswerOutcome`). */
 export type GateAnswerOutcome =
   | { readonly handled: false }
   | { readonly handled: true; readonly mutation: AgendaMutation }
   | { readonly handled: true; readonly refused: GateRefusal };
 
-/** One answer to a card ask, as the agenda route received it (today's `GateAnswer`). */
+/** One answer to a task ask, as the agenda route received it (today's `GateAnswer`). */
 export interface GateAnswer {
   readonly sessionId: string;
   readonly id: AgendaId;
@@ -52,7 +52,7 @@ export interface GateAnswer {
   readonly cardAsk?: string | undefined;
   readonly gate?: true | undefined;
   readonly askVersion?: number | undefined;
-  /** Whether this human may move the card at all, asked only once the answer is known to be to a card ask. */
+  /** Whether this human may move the task at all, asked only once the answer is known to be to a task ask. */
   readonly permitted?: () => string | undefined;
 }
 
@@ -116,11 +116,11 @@ const refusedDevice = (context: RouteContext): ApiError | undefined => {
   );
 };
 
-/** Generic card-source obligations require the same board standing as attached card questions. */
+/** Generic card-source obligations require the same board standing as attached task questions. */
 export const taskAnswerPermission = (context: RouteContext): string | undefined => refusedDevice(context)?.message;
 
 /**
- * The owner's Not needed on a gate item leaves the card where it is, quietly — so only a caller who could answer the
+ * The owner's Not needed on a gate item leaves the task where it is, quietly — so only a caller who could answer the
  * item may say it: a device needs the board's `fleet` grant, as an answer does. Throws the refusal.
  */
 export async function refuseGateDismissal(

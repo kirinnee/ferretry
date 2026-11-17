@@ -5,20 +5,20 @@ import { BOARD_CHECK_TAIL, lastTurn } from './turn-check.ts';
 import { ASK_REFERENCE_SIGIL, ASK_REFERENCE_SIGIL_CLASS } from '@ferretry/core-asks/contract';
 
 /**
- * THE BACKSTOP UNDER "ONE ASK PER THING" (docs/board.md § Cards show progress; docs/agenda.md § Card asks).
+ * THE BACKSTOP UNDER "ONE ASK PER THING" (docs/board.md § Tasks show progress; docs/agenda.md § Task asks).
  *
- * A card at a gate stage asks the owner through ONE agenda: the daemon puts its card ask on the agenda that carries
- * the card. A ferret that also raises its own item on the card ("please test this") makes the owner answer twice.
- * When a turn ends, the daemon reads it: if the turn raised an agenda item that is now open on a card sitting in a
- * gate lane, and ANOTHER open item on this agenda carries that card's open ask, the ferret gets ONE queued message
- * naming both: add yours to the one that carries the card, and drop your own.
+ * A task at a gate stage asks the owner through ONE agenda: the daemon puts its task ask on the agenda that carries
+ * the task. A ferret that also raises its own item on the task ("please test this") makes the owner answer twice.
+ * When a turn ends, the daemon reads it: if the turn raised an agenda item that is now open on a task sitting in a
+ * gate lane, and ANOTHER open item on this agenda carries that task's open ask, the ferret gets ONE queued message
+ * naming both: add yours to the one that carries the task, and drop your own.
  *
  * - **Only where the board is on**, and never for a helper (it raises nothing).
  * - **Evidence, not inference.** The turn's own tool calls say it raised something; the ferret's own open
- *   items on a gate card, raised since the turn began, say what.
+ *   items on a gate task, raised since the turn began, say what.
  * - **Once per item.** The send id carries the item, so a turn end observed twice is one send.
  * - **A turn the check started is never checked**, so a reply to it cannot start a loop.
- * - **Silence when unsure.** No carrying agenda to point to, a card or session that cannot be read, a turn whose
+ * - **Silence when unsure.** No carrying agenda to point to, a task or session that cannot be read, a turn whose
  *   start time is unknown: nothing is said.
  *
  * Pure except {@link BoardGateCheck}, which reads and sends through its ports.
@@ -45,11 +45,11 @@ export const raisesAsk = (event: TranscriptEvent): boolean => {
 export interface GateCheckItem {
   readonly id: string;
   readonly raisedBy: 'human' | 'agent' | 'daemon';
-  /** The card a ferret's own ask is about, when it names one. */
+  /** The task a ferret's own ask is about, when it names one. */
   readonly card?: TaskRef | null | undefined;
   readonly waitingSince: string;
   readonly notice?: boolean | undefined;
-  /** The cards for which this ask is the open ask of their gate (the `card` source's obligations). */
+  /** The tasks for which this ask is the open ask of their gate (the `task` source's obligations). */
   readonly gateOf?: readonly TaskId[] | undefined;
 }
 
@@ -63,11 +63,11 @@ export interface BoardGateCheckPorts {
   readonly tail: (ferret: string, limit: number) => Promise<readonly TranscriptEvent[]>;
   /** The ferret's open asks, the daemon's gate asks included. */
   readonly open: (ferret: string) => Promise<readonly GateCheckItem[]>;
-  /** One card with its board's lanes; a card that is gone is refused `not-found`. */
+  /** One task with its board's lanes; a task that is gone is refused `not-found`. */
   readonly card: (ref: TaskRef) => Promise<TaskResponse>;
   /** The ordinary send; the same id twice is one message. */
   readonly send: (ferret: string, sendId: string, message: string) => Promise<void>;
-  /** Journals that a nudge went out, with the ferret's items and the cards it named. */
+  /** Journals that a nudge went out, with the ferret's items and the tasks it named. */
   readonly record: (ferret: string, items: readonly string[], tasks: readonly string[]) => Promise<void>;
 }
 
@@ -80,10 +80,10 @@ const atGate = (response: TaskResponse): boolean => {
   return lane !== undefined && isGateLane(lane);
 };
 
-/** One ferret item to drop, with the card it sits on and the agenda that carries that card's ask. */
+/** One ferret item to drop, with the task it sits on and the agenda that carries that task's ask. */
 export interface DuplicateGateItem {
   readonly card: string;
-  /** The agenda that carries the card's ask. */
+  /** The agenda that carries the task's ask. */
   readonly gateItem: string;
   readonly item: string;
 }

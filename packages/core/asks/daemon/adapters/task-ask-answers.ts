@@ -15,7 +15,7 @@ import type { AgendaResponse } from '../lib/protocol/agenda.ts';
 import type { AgendaGatePort, GateAnswer, GateAnswerOutcome } from '../lib/routes/agenda-gates.ts';
 import { parseObligation } from './asks-port.ts';
 
-/** The source the Board plugin registers its card asks under (`ask.sources:card`). */
+/** The source the Board plugin registers its task asks under (`ask.sources:card`). */
 export const TASK_SOURCE = 'card' as SourceKey;
 
 const refused = (code: 'forbidden' | 'invalid' | 'moved-on' | 'not-moved', message: string): GateAnswerOutcome => ({
@@ -27,12 +27,12 @@ const effectOf = (response: AgendaResponse): AnswerEffect =>
   response.kind === 'multiple-choice' ? 'choose' : response.kind === 'permission' ? response.decision : 'clarify';
 
 /**
- * The owner's answer to a card ask (lead decision #13, the #1552 order): the CARD MOVES FIRST, through the `card`
+ * The owner's answer to a task ask (lead decision #13, the #1552 order): the TASK MOVES FIRST, through the `task`
  * source's `apply`, and only an applied answer is recorded on the agenda — as the daemon, the one actor the state
- * machine takes a card ask's answer from. A refusal, or no Board to apply it, leaves the ask open and says why.
+ * machine takes a task ask's answer from. A refusal, or no Board to apply it, leaves the ask open and says why.
  *
  * Who may answer stays today's rule: only the owner, and a paired device only where it may use the board
- * (`permitted`, asked once the answer is known to be to a card ask and before the board is touched).
+ * (`permitted`, asked once the answer is known to be to a task ask and before the board is touched).
  */
 export function taskAskAnswers(
   agenda: Pick<AgendaService, 'list' | 'cardAsk'>,
@@ -59,7 +59,7 @@ export function taskAskAnswers(
       );
     },
     answer: async (answer: GateAnswer): Promise<GateAnswerOutcome> => {
-      // Only an explicitly addressed card answer acts on its source. Plain words answer the item's own question.
+      // Only an explicitly addressed task answer acts on its source. Plain words answer the item's own question.
       if (answer.cardAsk === undefined && answer.gate !== true) return { handled: false };
       const ask = await askOn(answer.sessionId, answer.id, answer.cardAsk);
       if (ask === undefined) return refused('moved-on', `${answer.id} no longer carries that question; read it again`);

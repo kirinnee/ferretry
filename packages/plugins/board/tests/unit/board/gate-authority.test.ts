@@ -12,7 +12,7 @@ import {
 import { boardTask, MemoryBoardStore, world } from './support.ts';
 
 /**
- * WHO PASSES A GATE (docs/board.md § Cards show progress): the owner always; on an INTERNAL card (a ferret's own
+ * WHO PASSES A GATE (docs/board.md § Tasks show progress): the owner always; on an INTERNAL task (a ferret's own
  * errand) its owner ferret and the leads above it too; nobody else. Every standing × audience × kind of lane.
  */
 
@@ -37,7 +37,7 @@ describe('mayPassGate', () => {
   });
 });
 
-/** The card's owner ferret is `child`, started by `lead`; `grandchild` works it; `stranger` is nobody to it. */
+/** The task's owner ferret is `child`, started by `lead`; `grandchild` works it; `stranger` is nobody to it. */
 const CALLERS: Readonly<Record<Exclude<BoardStanding, 'daemon' | 'assignee-lead'>, BoardCaller>> = {
   'owner-human': { kind: 'owner' },
   owner: { kind: 'ferret', ferret: 'child' },
@@ -46,7 +46,7 @@ const CALLERS: Readonly<Record<Exclude<BoardStanding, 'daemon' | 'assignee-lead'
   reader: { kind: 'ferret', ferret: 'stranger' },
 };
 
-/** An external card is one a person asked for (its ask names the owner); an internal one is `child`'s own errand. */
+/** An external task is one a person asked for (its ask names the owner); an internal one is `child`'s own errand. */
 const taskFor = (audience: TaskAudience, laneId: string): Task =>
   boardTask({
     laneId,
@@ -168,7 +168,7 @@ describe('moving a card through a gate, by standing and audience', () => {
 });
 
 describe('a lead above only the assignee of an internal card', () => {
-  // lead > child > grandchild, but the card is owned by `stranger`, who is nobody's descendant.
+  // lead > child > grandchild, but the task is owned by `stranger`, who is nobody's descendant.
   const strangersTask = (laneId: string): Task => ({ ...taskFor('internal', laneId), owner: 'stranger' });
   const lead: BoardCaller = { kind: 'ferret', ferret: 'lead' };
 

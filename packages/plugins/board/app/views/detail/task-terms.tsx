@@ -1,7 +1,7 @@
 /**
- * THE JARGON OF A CARD, explained where it is read. Each term the item spells out (`terms`) is drawn with a
- * dotted underline the first time a text on the card uses it — in the premise, the context and the options — and a
- * tap (or Enter, it is focusable) shows what it means right under it. The card's folding Terms list holds them all.
+ * THE JARGON OF A TASK, explained where it is read. Each term the item spells out (`terms`) is drawn with a
+ * dotted underline the first time a text on the task uses it — in the premise, the context and the options — and a
+ * tap (or Enter, it is focusable) shows what it means right under it. The task's folding Terms list holds them all.
  *
  * The mark is made in the Markdown itself, as a link to `#fy-term-<n>`, so the text keeps its bold, code and
  * references and is drawn by the chat's one renderer; `TermLayer` takes the click before the link does, so a term
@@ -25,7 +25,7 @@ const termPattern = (term: string): RegExp =>
 
 /**
  * `text` with the first use of each term marked as a `#fy-term-<n>` link (n: the term's place in `terms`). A term
- * already marked by an earlier text on the card (`seen`) is not marked again; `seen` is updated.
+ * already marked by an earlier text on the task (`seen`) is not marked again; `seen` is updated.
  */
 export const markTerms = (text: string, terms: readonly BoardTerm[], seen: Set<number> = new Set()): string => {
   if (terms.length === 0) return text;
@@ -64,7 +64,7 @@ const termIndex = (target: EventTarget | null): { readonly index: number; readon
   return Number.isInteger(index) ? { index, element: link } : null;
 };
 
-/** The card's term layer: takes a term's tap, shows its meaning under it, and closes on Esc or a tap elsewhere. */
+/** The task's term layer: takes a term's tap, shows its meaning under it, and closes on Esc or a tap elsewhere. */
 export function TermLayer({
   terms,
   renderProse,
@@ -97,7 +97,7 @@ export function TermLayer({
     }
     const box = root.current?.getBoundingClientRect();
     const at = hit.element.getBoundingClientRect();
-    // Under the term, kept inside the card: a tip near the right edge moves left rather than run off it.
+    // Under the term, kept inside the task: a tip near the right edge moves left rather than run off it.
     const room = (box?.width ?? TIP_WIDTH) - TIP_WIDTH;
     setOpen({
       index: hit.index,

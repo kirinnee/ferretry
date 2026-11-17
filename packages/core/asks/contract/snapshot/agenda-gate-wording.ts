@@ -1,20 +1,20 @@
 /**
- * WHAT A CARD ASK SAYS, FROM ITS LANE'S WORKFLOW (docs/agenda.md § One ask, docs/board.md § Cards show progress).
+ * WHAT A TASK ASK SAYS, FROM ITS LANE'S WORKFLOW (docs/agenda.md § One ask, docs/board.md § Tasks show progress).
  *
- * The agenda item is the ONLY place a gated card is answered, so it speaks for the lane in its own words: a lane the
+ * The agenda item is the ONLY place a gated task is answered, so it speaks for the lane in its own words: a lane the
  * owner TRIES things in says "try it" and answers Good (one tap) or words (what is wrong); a lane the owner APPROVES
  * says what is approved and answers the lane's option or words (what to change first). Both ends read the wording
  * here, from the gate alone — never from a lane's name — so a workflow's style is the lane's stage, nothing else.
  *
- * Pure and total. Nothing here moves a card: the labels it picks are the ones the daemon already answers.
+ * Pure and total. Nothing here moves a task: the labels it picks are the ones the daemon already answers.
  */
 import type { AgendaGate, AgendaGateOption } from './agenda.ts';
 import { gateNotYetLabel, gateReopenOption } from './agenda-gate.ts';
 
-/** How a gate is answered: tried (it can send the card back with words) or approved (it can only move on or wait). */
+/** How a gate is answered: tried (it can send the task back with words) or approved (it can only move on or wait). */
 export type GateStyle = 'try-it' | 'approval';
 
-/** The style of a gate: a try-it when one of its options reopens the card, else an approval. */
+/** The style of a gate: a try-it when one of its options reopens the task, else an approval. */
 export const gateStyle = (gate: Pick<AgendaGate, 'options'>): GateStyle =>
   gateReopenOption(gate) === undefined ? 'approval' : 'try-it';
 
@@ -32,11 +32,11 @@ export const gateButtonLabel = (gate: Pick<AgendaGate, 'options'>, option: Agend
     ? GATE_GOOD_LABEL
     : option.label;
 
-/** The options one tap answers: every one but the one that sends the card back, which is answered in words. */
+/** The options one tap answers: every one but the one that sends the task back, which is answered in words. */
 export const gateTapOptions = (gate: Pick<AgendaGate, 'options'>): readonly AgendaGateOption[] =>
   gate.options.filter(option => option.outcome !== 'reopen-with-agenda');
 
-/** The answer typed words are: the reopen option ("Not good"), else "Not yet" (the card waits, the ferret reads them). */
+/** The answer typed words are: the reopen option ("Not good"), else "Not yet" (the task waits, the ferret reads them). */
 export const gateTypedLabel = (gate: Pick<AgendaGate, 'options'>): string | undefined =>
   gateReopenOption(gate)?.label ?? gateNotYetLabel(gate);
 
@@ -46,7 +46,7 @@ export const gateTypedLead = (gate: Pick<AgendaGate, 'options'>): string =>
     ? 'Not good? Type what is wrong below and send.'
     : 'Want something changed first? Type it in the box below, then send. The ferret reads your words first, and nothing is built yet.';
 
-/** The words under a card's buttons when the owner is looking at several asks: which answer a typed message is. */
+/** The words under a task's buttons when the owner is looking at several asks: which answer a typed message is. */
 export const gateTypedPlaceholder = (gate: Pick<AgendaGate, 'options'>): string =>
   gateStyle(gate) === 'try-it' ? 'What is wrong, or what needs changing?' : 'What should change first?';
 
@@ -65,16 +65,16 @@ interface GuidePr {
   readonly releasedIn: { readonly version: string } | null;
 }
 
-/** The parts of a card the guide reads. */
+/** The parts of a task the guide reads. */
 export interface TryItTask {
   readonly howToTest: string | null | undefined;
   readonly links: { readonly prs: readonly GuidePr[]; readonly docs?: readonly string[] };
 }
 
 /**
- * The preview environment a card links, when it has one: a link that is a Cloudflare Pages PREVIEW of a project
+ * The preview environment a task links, when it has one: a link that is a Cloudflare Pages PREVIEW of a project
  * (`https://<branch-or-hash>.<project>.pages.dev/…`), never the production host (`<project>.pages.dev`). It is what
- * `fy task link <card> --doc <url>` records; nothing invents one, so a card with no preview says where to try it for real.
+ * `fy task link <task> --doc <url>` records; nothing invents one, so a task with no preview says where to try it for real.
  */
 export const previewUrlOf = (task: Pick<TryItTask, 'links'>): string | undefined => {
   for (const link of task.links.docs ?? []) {
@@ -92,7 +92,7 @@ export const previewUrlOf = (task: Pick<TryItTask, 'links'>): string | undefined
 /**
  * The product the guide is written by: its release repository (`<owner>/<product>`, from the caller's own single
  * source) and the name said in prose. Only a PR of THAT repository is shipped in it, and only then does updating it
- * install the change; a card on another project's board names that project's repository and release instead.
+ * install the change; a task on another project's board names that project's repository and release instead.
  */
 export interface GuideProduct {
   readonly repository: string;
@@ -111,7 +111,7 @@ const releasedLine = (pr: GuidePr, version: string, product: GuideProduct | unde
   return `Released in ${repository ?? 'its project'} v${version} (${pr.url}). Try it with that release.`;
 };
 
-/** The sentence that says where the work stands, for someone who knows nothing of the card. */
+/** The sentence that says where the work stands, for someone who knows nothing of the task. */
 const standing = (prs: readonly GuidePr[], product: GuideProduct | undefined): readonly string[] => {
   const lines: string[] = [];
   for (const pr of prs) {
@@ -131,10 +131,10 @@ const standing = (prs: readonly GuidePr[], product: GuideProduct | undefined): r
 };
 
 /**
- * EVERYTHING SOMEONE COLD NEEDS TO TRY IT, as Markdown, from the card alone: the preview link first when there is
- * one (**Try it on the preview**), else a line saying where to try it for real; the card's own How to test (where / do /
+ * EVERYTHING SOMEONE COLD NEEDS TO TRY IT, as Markdown, from the task alone: the preview link first when there is
+ * one (**Try it on the preview**), else a line saying where to try it for real; the task's own How to test (where / do /
  * see) as written; then where the work stands (the shipped version, the PR). Too long a How to test is a pointer to the
- * card, never a cut-off copy. `limit` is the most characters the text may have.
+ * task, never a cut-off copy. `limit` is the most characters the text may have.
  */
 export const tryItText = (
   task: TryItTask,

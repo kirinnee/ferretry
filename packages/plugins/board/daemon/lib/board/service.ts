@@ -2,13 +2,13 @@
  * THE BOARD SERVICE: every read and write of the project boards (`board-design.md` §2), over injected
  * ports and nothing else.
  *
- * A write is one card's read-decide-write inside that card's serial section ({@link BoardStore.write}).
+ * A write is one task's read-decide-write inside that task's serial section ({@link BoardStore.write}).
  * Dependency writes are also serialized board-wide, because a cycle can be closed by two writes to two
- * different cards at once and only one of them may see the graph without the other's edge.
+ * different tasks at once and only one of them may see the graph without the other's edge.
  *
  * What happens AFTER a write commits — the session's focus, the reopen delivery, the `board.changed`
  * event — can no longer undo it, so a failure there is reported to {@link BoardDiagnostics} and the
- * caller still gets the card it changed.
+ * caller still gets the task it changed.
  */
 import {
   ADMIN_TOKEN_ACTOR_WORDS,
@@ -114,18 +114,18 @@ export interface BoardServiceDependencies {
   readonly store: BoardStore;
   readonly lanes: LaneSetSource;
   readonly parents: FerretParents;
-  /** The name a ferret's act is recorded by (`CardActor`), looked up once per act. */
+  /** The name a ferret's act is recorded by (`TaskActor`), looked up once per act. */
   readonly names: FerretNames;
   readonly focus: FerretFocus;
   readonly reopen: ReopenNotifier;
-  /** Tells a card's ferret the owner marked it done. */
+  /** Tells a task's ferret the owner marked it done. */
   readonly done: DoneNotifier;
   readonly activity: ActivityDeriver;
   /**
-   * Which sessions are alive, so a live lead may ADOPT a card whose owner ferret and assignee have both ended (docs/board.md
-   * § An orphaned card is adopted). The adoption is judged INSIDE a hold on the sessions it rests on (the owner ferret, the
+   * Which sessions are alive, so a live lead may ADOPT a task whose owner ferret and assignee have both ended (docs/board.md
+   * § An orphaned task is adopted). The adoption is judged INSIDE a hold on the sessions it rests on (the owner ferret, the
    * assignee and the adopter), against a roster read after the hold was taken, so none of them can end or resume
-   * between that read and the card landing on disk. Absent, nothing can be shown to be orphaned and every adoption is refused.
+   * between that read and the task landing on disk. Absent, nothing can be shown to be orphaned and every adoption is refused.
    */
   readonly liveness?: FerretLivenessGuard;
   readonly asks: TaskAskLinkSource;
@@ -134,33 +134,33 @@ export interface BoardServiceDependencies {
   readonly diagnostics: BoardDiagnostics;
   /** This daemon's id, once its identity is open; a write before then is refused as unavailable. */
   readonly machineId: () => string | undefined;
-  /** The release this daemon runs when it reads as one; a card whose PR shipped in it is running here. */
+  /** The release this daemon runs when it reads as one; a task whose PR shipped in it is running here. */
   readonly runningVersion?: () => string | null;
   /** The board-wide section dependency writes share. */
   readonly serial: BoardSerial;
-  /** Moves a ferret on the Unfiled board onto the board of the repository it stands in, at its first card. */
+  /** Moves a ferret on the Unfiled board onto the board of the repository it stands in, at its first task. */
   readonly adoption?: ProjectAdopter;
-  /** Who started whom: a helper may only note and link PRs on its own card. Absent, every caller is a lead. */
+  /** Who started whom: a helper may only note and link PRs on its own task. Absent, every caller is a lead. */
   readonly helpers?: HelperDirectory;
   /** The attachment store, for a move back that carries files. Absent, such a move is refused. */
   readonly attachments?: BoardAttachmentSource;
-  /** What the owner said to a session, for deciding whether a card's ask is theirs. Absent, no ask matches. */
+  /** What the owner said to a session, for deciding whether a task's ask is theirs. Absent, no ask matches. */
   readonly ownerWords?: OwnerWords;
   /**
-   * The board is opt-in (`opt-in.ts`): whether a ferret may make a card where its board is off. Absent, every
+   * The board is opt-in (`opt-in.ts`): whether a ferret may make a task where its board is off. Absent, every
    * board reads as on, as it did before the switch.
    */
   readonly optIn?: BoardOptIn;
-  /** The caller's open agenda threads a card may be made for (`--thread`). Absent, a card naming one is refused. */
+  /** The caller's open agenda threads a task may be made for (`--thread`). Absent, a task naming one is refused. */
   readonly threads?: BoardThreads;
   /**
-   * Told after every committed write of a card, by any path (docs/board.md § Cards show progress): the gate items
-   * follow the card's lane from here. Total in spirit: a failure is a diagnostic, never the write's.
+   * Told after every committed write of a task, by any path (docs/board.md § Tasks show progress): the gate items
+   * follow the task's lane from here. Total in spirit: a failure is a diagnostic, never the write's.
    */
   readonly gates?: TaskWriteObserver;
   /**
    * `card.moving` (the decide hook Board offers): asked inside the write of EVERY lane change, whatever made it — an
-   * act, a gate answer, a trigger, the watcher, a refile, the sweep, a close — so a no leaves the card where it is.
+   * act, a gate answer, a trigger, the watcher, a refile, the sweep, a close — so a no leaves the task where it is.
    * Absent, every move is allowed.
    */
   readonly moving?: (
@@ -170,7 +170,7 @@ export interface BoardServiceDependencies {
   readonly moved?: (input: Omit<TaskMoveInput, 'by'>) => void;
 }
 
-/** One lane change, as `card.moving` is asked about it: the card, the lanes and who moves it. */
+/** One lane change, as `card.moving` is asked about it: the task, the lanes and who moves it. */
 export interface TaskMoveInput {
   readonly card: TaskId;
   readonly from: string;
@@ -178,16 +178,16 @@ export interface TaskMoveInput {
   readonly by: TaskActor;
 }
 
-/** What follows a card's lane after each write: the gate items (`GateItems`). */
-/** Who held a card when a start judged it: what the assignment write must still find, or nothing is assigned. */
+/** What follows a task's lane after each write: the gate items (`GateItems`). */
+/** Who held a task when a start judged it: what the assignment write must still find, or nothing is assigned. */
 export interface TaskHolders {
   readonly owner: string;
   readonly assignee: string | null;
 }
 
 /**
- * The standing of the sessions an adoption rests on, held still while its card is written: `fresh` is their roster read
- * after the hold was taken, and `held` names them (the card's owner ferret, its assignee and the adopter).
+ * The standing of the sessions an adoption rests on, held still while its task is written: `fresh` is their roster read
+ * after the hold was taken, and `held` names them (the task's owner ferret, its assignee and the adopter).
  */
 interface AdoptionHold {
   readonly fresh: FerretRoster;
@@ -198,9 +198,9 @@ export interface TaskWriteObserver {
   written(id: TaskId): Promise<void>;
 }
 
-/** What `fy signal done` did to the ferret's focus card. */
+/** What `fy signal done` did to the ferret's focus task. */
 export interface SignalDoneOutcome {
-  /** The card as written: the note, and the move when there was one. */
+  /** The task as written: the note, and the move when there was one. */
   readonly task: Task;
   /** The lane it moved to; `null` when it stayed. */
   readonly moved: Lane | null;
@@ -211,7 +211,7 @@ export interface SignalDoneOutcome {
 /** The serial key every dependency write shares. */
 export const DEPENDENCY_SECTION = 'board:dependencies';
 
-/** The line a reopened card's ferret is told (§2.9): a plain sentence, with no tag around it. */
+/** The line a reopened task's ferret is told (§2.9): a plain sentence, with no tag around it. */
 export const reopenMessage = (task: Pick<Task, 'id'>, by: TaskActor, reason: string): string =>
   `${formatTaskRef(task)} was reopened by ${reopenerWords(by)}: ${reason}`;
 
@@ -221,8 +221,8 @@ const reopenerWords = (by: TaskActor): string => {
 };
 
 /**
- * The line a card's ferret is told the owner closed it: a plain sentence, with no tag around it. A batch
- * (one ferret's cards closed together) lists them.
+ * The line a task's ferret is told the owner closed it: a plain sentence, with no tag around it. A batch
+ * (one ferret's tasks closed together) lists them.
  */
 export const doneMessage = (tasks: readonly Pick<Task, 'id' | 'title'>[], by: DoneNotice['by'] = 'owner'): string => {
   const named = tasks.map(task => `${formatTaskRef(task)} “${task.title}”`);
@@ -255,7 +255,7 @@ export const actorOf = async (caller: BoardCaller, names: FerretNames): Promise<
 
 const ferretOf = (caller: BoardCaller): string | undefined => (caller.kind === 'owner' ? undefined : caller.ferret);
 
-/** Refuses to store a card the protocol would refuse to read back: sizes, counts, coherence. */
+/** Refuses to store a task the protocol would refuse to read back: sizes, counts, coherence. */
 const requireValidTask = (task: Task): Task => {
   const parsed = CardSchema.safeParse(task);
   if (parsed.success) return parsed.data;
@@ -268,9 +268,9 @@ const requireValidTask = (task: Task): Task => {
 };
 
 /**
- * What a helper may still write: a note on its own card, a PR or branch link, so the PR's facts move the
- * card on their own, and an external trigger it saw happen (a deploy) on the card it is doing, so the card
- * moves as a fact would move it. Authority still decides WHICH card; everything else is its lead's to do.
+ * What a helper may still write: a note on its own task, a PR or branch link, so the PR's facts move the
+ * task on their own, and an external trigger it saw happen (a deploy) on the task it is doing, so the task
+ * moves as a fact would move it. Authority still decides WHICH task; everything else is its lead's to do.
  */
 const subFerretMay = (request: TaskActionRequest): boolean =>
   request.action === 'note' ||
@@ -278,12 +278,12 @@ const subFerretMay = (request: TaskActionRequest): boolean =>
   request.action === 'trigger' ||
   (request.action === 'link' && (request.pr !== undefined || request.branch !== undefined));
 
-/** The fields a helper may write on a card it holds: where the work stands and how the owner checks it. */
+/** The fields a helper may write on a task it holds: where the work stands and how the owner checks it. */
 const HOLDER_FIELDS: readonly BoardEditableField[] = ['progress', 'howToTest'];
 
 /**
- * An edit that names only the card's status and/or How to test (and at least one of them): the one edit a helper
- * may make, on a card it holds. Any other field, or a visibility, in the same edit makes it the lead's alone.
+ * An edit that names only the task's status and/or How to test (and at least one of them): the one edit a helper
+ * may make, on a task it holds. Any other field, or a visibility, in the same edit makes it the lead's alone.
  */
 const isHolderFieldEdit = (request: TaskActionRequest): boolean =>
   request.action === 'edit' &&
@@ -292,8 +292,8 @@ const isHolderFieldEdit = (request: TaskActionRequest): boolean =>
   HOLDER_FIELDS.some(field => request[field] !== undefined);
 
 /**
- * What a helper may do on a card it HOLDS (its assignee, else its owner) and no other: move it, change its focus to
- * it, claim or release the files it will touch (docs/design/clash-queue.md), link a commit or doc to it, set its status and How to test (an edit that names ONLY those: any other field is refused whole). Judged in {@link BoardService.decide}, where the card is in hand; claiming a card its
+ * What a helper may do on a task it HOLDS (its assignee, else its owner) and no other: move it, change its focus to
+ * it, claim or release the files it will touch (docs/design/clash-queue.md), link a commit or doc to it, set its status and How to test (an edit that names ONLY those: any other field is refused whole). Judged in {@link BoardService.decide}, where the task is in hand; claiming a task its
  * lead holds is what makes it the holder, so these are also the only refusals that point at `claim`.
  */
 const holderOnly = (request: TaskActionRequest): boolean =>
@@ -334,7 +334,7 @@ export class BoardService {
   constructor(private readonly ports: BoardServiceDependencies) {}
 
   /**
-   * THE one write of a card: the store's read-decide-write, with `card.moving` asked of any lane change inside it (a
+   * THE one write of a task: the store's read-decide-write, with `card.moving` asked of any lane change inside it (a
    * no refuses the write in words, nothing stored) and `board.card-moved` told once it landed.
    */
   private async write<T>(id: TaskId, decide: (current: Task | undefined) => Promise<BoardWrite<T>>): Promise<T> {
@@ -365,7 +365,7 @@ export class BoardService {
   // Reads
   // -------------------------------------------------------------------------------------------------
 
-  /** One page of a board, or of every board. Closed and dropped cards only when the query asks. */
+  /** One page of a board, or of every board. Closed and dropped tasks only when the query asks. */
   async board(query: BoardQuery): Promise<BoardResponse> {
     const snapshot = await this.ports.store.read();
     const laneSets = await this.laneSetsOf([
@@ -392,7 +392,7 @@ export class BoardService {
   }
 
   /**
-   * Every readable card, as stored, with the lanes of each board they are on: what the daemon's own
+   * Every readable task, as stored, with the lanes of each board they are on: what the daemon's own
    * automation reasons over. Nothing is derived, so it costs one store read and one lane read per board.
    */
   async snapshot(): Promise<{ readonly cards: readonly Task[]; readonly laneSets: LaneSets }> {
@@ -400,7 +400,7 @@ export class BoardService {
     return { cards: tasks, laneSets: await this.laneSetsOf(tasks.map(task => task.projectId)) };
   }
 
-  /** Every card's view, closed and dropped included, with every board's lanes: the board sweep's one read. */
+  /** Every task's view, closed and dropped included, with every board's lanes: the board sweep's one read. */
   async sweepBoard(
     signal?: AbortSignal,
   ): Promise<{ readonly views: readonly TaskView[]; readonly laneSets: LaneSets }> {
@@ -412,7 +412,7 @@ export class BoardService {
   }
 
   /**
-   * Every open card that is orphaned, in board order, with every board's lanes: `sweepBoard`'s one read narrowed to
+   * Every open task that is orphaned, in board order, with every board's lanes: `sweepBoard`'s one read narrowed to
    * what the Warden reports, so the whole set is judged against one store read and one derivation of activity.
    */
   async orphanedCards(): Promise<{ readonly views: readonly TaskView[]; readonly laneSets: LaneSets }> {
@@ -427,7 +427,7 @@ export class BoardService {
 
   /**
    * Closes a helper whose ferret ended (the board sweep found it gone): a sub-card with no PR to ship, closed as
-   * the daemon with the reason "helper finished". Judged again inside the card's write, so a card that gained a PR
+   * the daemon with the reason "helper finished". Judged again inside the task's write, so a task that gained a PR
    * or moved since the sweep read it is left alone. `true` when it closed.
    */
   async closeEndedHelper(id: TaskId): Promise<boolean> {
@@ -445,11 +445,11 @@ export class BoardService {
   }
 
   /**
-   * The daemon closes a card that sits at a try-it gate with nothing to try (`closeNothingToTry`): the one move past a
-   * gate that is not the owner's. `expect` is checked inside the card's write, as an answer's is: the card must still sit
-   * in that lane by that entry, or nothing is written. The verdict itself is judged AGAIN there, against the card and its
-   * dependencies as they are now (steps, a block or an unfinished dependency can arrive without moving the card): the
-   * card closes only when that is still `nothing`, for the very reason `reason` states. `true` when it closed.
+   * The daemon closes a task that sits at a try-it gate with nothing to try (`closeNothingToTry`): the one move past a
+   * gate that is not the owner's. `expect` is checked inside the task's write, as an answer's is: the task must still sit
+   * in that lane by that entry, or nothing is written. The verdict itself is judged AGAIN there, against the task and its
+   * dependencies as they are now (steps, a block or an unfinished dependency can arrive without moving the task): the
+   * task closes only when that is still `nothing`, for the very reason `reason` states. `true` when it closed.
    * Never reachable from a route or `fy`.
    */
   async closeWhereNothingToTry(
@@ -482,12 +482,12 @@ export class BoardService {
   }
 
   /**
-   * Hands a card whose ferret (`from`) ended to `lead`, the nearest live lead above that ferret (the board sweep found
+   * Hands a task whose ferret (`from`) ended to `lead`, the nearest live lead above that ferret (the board sweep found
    * it): assigned as the daemon, with `returned to <lead>: <ferret> finished` in its history. The decision is made
-   * again INSIDE the card's write, against the card as it is now AND the sessions as they are now: `settle` holds the
+   * again INSIDE the task's write, against the task as it is now AND the sessions as they are now: `settle` holds the
    * standing of the sessions the return rests on (the ferret, the ended ones above it, the lead) and hands the write a
    * roster of exactly those, read after the hold was taken, so none of them can end or resume between that read and
-   * the card landing on disk. A card that moved, was reassigned, dropped or closed, whose ferret is back, or whose
+   * the task landing on disk. A task that moved, was reassigned, dropped or closed, whose ferret is back, or whose
    * nearest live lead is no longer `lead`, is left alone; the next sweep plans it afresh. The journal and the notices
    * run after the hold is released. `true` when it moved.
    */
@@ -516,7 +516,7 @@ export class BoardService {
     return true;
   }
 
-  /** Every readable card id on this machine, closed and dropped included: one store read, nothing derived. */
+  /** Every readable task id on this machine, closed and dropped included: one store read, nothing derived. */
   async ids(): Promise<BoardIdsResponse> {
     const { cards: tasks } = await this.ports.store.read();
     return { ids: tasks.map(task => task.id) };
@@ -524,7 +524,7 @@ export class BoardService {
 
   /**
    * Whether a PR may merge as far as the queue goes (`mergeGateOf`, docs/design/clash-queue.md), from one read of
-   * the board: the cards it could not read are named, since any of them might link the PR.
+   * the board: the tasks it could not read are named, since any of them might link the PR.
    */
   async mergeGate(pr: string): Promise<BoardMergeGateResponse> {
     const snapshot = await this.ports.store.read();
@@ -536,7 +536,7 @@ export class BoardService {
     return answer;
   }
 
-  /** One card, in full, with its board's lanes. */
+  /** One task, in full, with its board's lanes. */
   async card(id: TaskId): Promise<TaskResponse> {
     return await this.view(await this.ports.store.read(), id);
   }
@@ -546,12 +546,12 @@ export class BoardService {
   // -------------------------------------------------------------------------------------------------
 
   /**
-   * A new card (§3.1): a counter id, the caller as owner (or the assignee the owner named), the board of
+   * A new task (§3.1): a counter id, the caller as owner (or the assignee the owner named), the board of
    * the caller's project unless one is named, and the variant's first backlog lane unless one is named.
    */
   async create(request: TaskCreateRequest, caller: BoardCaller): Promise<TaskResponse> {
     await this.refuseSubFerret(caller, 'create tasks');
-    // One Yes makes one card: two creates on the same approval are decided one after the other.
+    // One Yes makes one task: two creates on the same approval are decided one after the other.
     if (caller.kind === 'ferret' && request.approval !== undefined) {
       const key = `board:approval:${caller.ferret}:${request.approval}`;
       return await this.ports.serial.run(key, async () => await this.createLicensed(request, caller));
@@ -587,7 +587,7 @@ export class BoardService {
       index,
       approval,
     });
-    // After the insert: a failed create never leaves a thread linked to a card that does not exist.
+    // After the insert: a failed create never leaves a thread linked to a task that does not exist.
     const unlinked = await this.linkThread(thread, { id, machineId }).then(
       () => undefined,
       (error: unknown) => error,
@@ -597,16 +597,16 @@ export class BoardService {
     return await this.view(await this.ports.store.read(), id);
   }
 
-  /** The next id of a kind from the machine-wide counter, for a card a caller must name before it exists. */
+  /** The next id of a kind from the machine-wide counter, for a task a caller must name before it exists. */
   async reserve(kind: TaskKind): Promise<TaskId> {
     this.requireMachine();
     return await this.ports.store.allocateId(kind);
   }
 
   /**
-   * A card the daemon makes for a session it is starting (§3.1), under the id {@link reserve} gave the
+   * A task the daemon makes for a session it is starting (§3.1), under the id {@link reserve} gave the
    * start to name in the brief. The daemon decided who owns it, so no caller's standing is asked; the
-   * parent must still be a card on this machine. `by` is the session the card is recorded as made from
+   * parent must still be a task on this machine. `by` is the session the task is recorded as made from
    * (the lead of a `fy new`, else the session itself), and `focus` is the session that will work on it.
    */
   async spawn(
@@ -637,7 +637,7 @@ export class BoardService {
   }
 
   /**
-   * Whether the lead may hand an EXISTING card to a helper (`fy new --card`): the card is here, not dropped,
+   * Whether the lead may hand an EXISTING task to a helper (`fy new --task`): the task is here, not dropped,
    * and the lead may reassign it. Throws the refusal otherwise; changes nothing.
    */
   async requireHandOver(id: TaskId, lead: string): Promise<Task> {
@@ -655,8 +655,8 @@ export class BoardService {
   }
 
   /**
-   * `fy new --card`, once the helper's session exists: the lead's existing card is assigned to it — its owner
-   * and parent stay — and becomes the session's focus and delegation anchor. Never makes a second card. The
+   * `fy new --task`, once the helper's session exists: the lead's existing task is assigned to it — its owner
+   * and parent stay — and becomes the session's focus and delegation anchor. Never makes a second task. The
    * assignment is recorded as the lead's; the lead's own focus is not touched.
    */
   async handOver(id: TaskId, lead: string, session: string, held: TaskHolders): Promise<Task> {
@@ -666,8 +666,8 @@ export class BoardService {
   }
 
   /**
-   * The owner's "start a ferret on it" (`startOnCard`), once the new session exists: the card is assigned to it
-   * as the owner's act and becomes the session's focus and anchor. Refused, with nothing changed, when the card
+   * The owner's "start a ferret on it" (`startOnTask`), once the new session exists: the task is assigned to it
+   * as the owner's act and becomes the session's focus and anchor. Refused, with nothing changed, when the task
    * was dropped in the meantime — the same write that assigns it reads that, so a drop and this cannot both win.
    */
   async assignForOwner(id: TaskId, session: string, held: TaskHolders): Promise<Task> {
@@ -685,8 +685,8 @@ export class BoardService {
   ): Promise<Task> {
     return await this.write(id, async current => {
       const boardTask = this.requireCard(current, id);
-      // The caller's authority survives a change of assignee (a lead keeps the card it owns, the owner has it always), so
-      // authority alone cannot tell a second start from the first: the card must still be held as the start judged it.
+      // The caller's authority survives a change of assignee (a lead keeps the task it owns, the owner has it always), so
+      // authority alone cannot tell a second start from the first: the task must still be held as the start judged it.
       if (boardTask.owner !== held.owner || boardTask.assignee !== held.assignee) {
         throw new BoardError(
           'version-conflict',
@@ -716,10 +716,10 @@ export class BoardService {
   }
 
   /**
-   * `fy signal done` on the ferret's focus card (§3.1 item 5): the message as the ferret's note, and — still
+   * `fy signal done` on the ferret's focus task (§3.1 item 5): the message as the ferret's note, and — still
    * in an `active` lane with no PR — the daemon's automatic `signal.done` move to where the work is checked,
    * with the message as the reason ({@link doneLane}, {@link doneMove}). The note and the move are one
-   * write. An owner gate or an unfinished blocker holds the card, keeps the note, and says why in `held`. `null` when the session has no focus card here.
+   * write. An owner gate or an unfinished blocker holds the task, keeps the note, and says why in `held`. `null` when the session has no focus task here.
    */
   async signalDone(ferret: string, message: string | undefined): Promise<SignalDoneOutcome | null> {
     const machineId = this.requireMachine();
@@ -761,7 +761,7 @@ export class BoardService {
   }
 
   /**
-   * One action on one card. `expect` (an answer to a gate item) is checked inside the card's write: the card must
+   * One action on one task. `expect` (an answer to a gate item) is checked inside the task's write: the task must
    * still sit in that lane by that entry, or nothing is written.
    */
   async act(
@@ -770,9 +770,9 @@ export class BoardService {
     caller: BoardCaller,
     expect?: { readonly laneId: string; readonly entry: number },
   ): Promise<TaskResponse> {
-    // An assign is judged inside the write: a helper that is the card's assignee may hand it down (`decide`).
+    // An assign is judged inside the write: a helper that is the task's assignee may hand it down (`decide`).
     // A drop and an assign are judged inside the write (`decide`): a helper that leads a subtree may plan it.
-    // A holder-only action is judged in the write against the card's current holder (`decide`).
+    // A holder-only action is judged in the write against the task's current holder (`decide`).
     if (!subFerretMay(request) && !holderOnly(request) && request.action !== 'assign' && request.action !== 'drop') {
       await this.refuseSubFerret(caller, subFerretDoing(request));
     }
@@ -812,7 +812,7 @@ export class BoardService {
   }
 
   /**
-   * `fy card skip "<why>"` (§3.4): the calling ferret records why its work needs no card — chit-chat, or the
+   * `fy task skip "<why>"` (§3.4): the calling ferret records why its work needs no task — chit-chat, or the
    * owner said not to track it — so the turn-end check stays quiet until it takes one. It is a decision about
    * the ferret's own session, so only a ferret makes it, and only for itself.
    */
@@ -829,7 +829,7 @@ export class BoardService {
 
   /**
    * A daemon move on a real signal (work started, PR opened, merged, released; §3.1). Lands in the lane
-   * the trigger names for the card's workflow, never backwards. `null` when the card did not move.
+   * the trigger names for the task's workflow, never backwards. `null` when the task did not move.
    */
   async trigger(
     id: TaskId,
@@ -850,7 +850,7 @@ export class BoardService {
   }
 
   /**
-   * What the GitHub watcher learned of a card's PRs (`pr-cache.ts`): the cache, the automatic links, the
+   * What the GitHub watcher learned of a task's PRs (`pr-cache.ts`): the cache, the automatic links, the
    * notes and the moves they trigger, as ONE daemon write. The nudges are handed back for the watcher to
    * send, because who hears them is not the board's to decide.
    */
@@ -867,13 +867,13 @@ export class BoardService {
   }
 
   /**
-   * Moves the cards of the lanes a lane edit removed to the lanes it named (`moves`: removed → kept),
-   * after the edited set is stored (U3's `CardRelocator`). Safe to repeat: a card no longer in a removed
+   * Moves the tasks of the lanes a lane edit removed to the lanes it named (`moves`: removed → kept),
+   * after the edited set is stored (U3's `TaskRelocator`). Safe to repeat: a task no longer in a removed
    * lane of this project is left alone. The direction of such a move is not defined — its lane is gone —
    * so it is recorded as `by`'s move that says why: `reason`, else that the lane was removed. `by` is the
    * owner for their own edit or their Accept of a proposal; anyone else is the daemon, which never closes a
-   * card here: a move into a closed lane is left undone and said in the diagnostics (the lane service already
-   * refused any gate it would pass). Returns the cards it moved.
+   * task here: a move into a closed lane is left undone and said in the diagnostics (the lane service already
+   * refused any gate it would pass). Returns the tasks it moved.
    */
   async relocate(
     projectId: BoardProjectId,
@@ -936,10 +936,10 @@ export class BoardService {
   // Internals
   // -------------------------------------------------------------------------------------------------
 
-  /** Writes a brand-new card under a counter id; the id already holding a card is the counter's fault. */
+  /** Writes a brand-new task under a counter id; the id already holding a task is the counter's fault. */
   /**
-   * A new card never fails for want of the owner's words; the backfill lets it, so the card waits for the next boot.
-   * A caller that needs the answer settled (a ferret's choice to hide a card) asks for it strictly: not knowing is
+   * A new task never fails for want of the owner's words; the backfill lets it, so the task waits for the next boot.
+   * A caller that needs the answer settled (a ferret's choice to hide a task) asks for it strictly: not knowing is
    * an unavailable board, never a guess that a later boot would have to take back.
    */
   private async askedByOf(
@@ -971,7 +971,7 @@ export class BoardService {
       readonly projectId: BoardProjectId;
       readonly laneSet: LaneSet;
       readonly index: BoardIndex;
-      /** The owner's Yes the card rests on, when that is what let a ferret make it. */
+      /** The owner's Yes the task rests on, when that is what let a ferret make it. */
       readonly approval?: AskRef;
     },
   ): Promise<Task> {
@@ -1016,7 +1016,7 @@ export class BoardService {
       return ready;
     };
     if (task.files.length === 0) return await persist(task);
-    // A card born with claims is queued behind the open cards whose claims clash (docs/design/clash-queue.md). The
+    // A task born with claims is queued behind the open tasks whose claims clash (docs/design/clash-queue.md). The
     // board is read again inside the dependency section, so a claim landing meanwhile is seen.
     return await this.ports.serial.run(DEPENDENCY_SECTION, async () => {
       const index = new BoardIndex((await this.ports.store.read()).cards, facts.machineId);
@@ -1031,10 +1031,10 @@ export class BoardService {
   }
 
   /**
-   * Runs an adoption's card write inside a hold on the sessions it rests on: the card's owner ferret, its assignee and the
-   * adopter, named from the card as it is read now. The write re-judges them against the card as it is stored then
-   * (`orphanedOwner`), so a card that changed hands in the gap is refused rather than adopted. The order is the one
-   * `returnToLead` keeps: the sessions settle outside, the card's write is inside. Without a hold (no port, or nothing
+   * Runs an adoption's task write inside a hold on the sessions it rests on: the task's owner ferret, its assignee and the
+   * adopter, named from the task as it is read now. The write re-judges them against the task as it is stored then
+   * (`orphanedOwner`), so a task that changed hands in the gap is refused rather than adopted. The order is the one
+   * `returnToLead` keeps: the sessions settle outside, the task's write is inside. Without a hold (no port, or nothing
    * to hold) the write runs bare and `orphanedOwner` refuses.
    */
   private async holdingAdopters<T>(
@@ -1055,7 +1055,7 @@ export class BoardService {
     caller: BoardCaller,
     hold?: AdoptionHold,
   ): Promise<TaskOutcome> {
-    // A helper reports what it saw on the card it is doing, not on others its standing reaches.
+    // A helper reports what it saw on the task it is doing, not on others its standing reaches.
     if (request.action === 'trigger' && caller.kind === 'ferret' && caller.ferret !== effectiveAssignee(task)) {
       await this.refuseSubFerret(
         caller,
@@ -1063,7 +1063,7 @@ export class BoardService {
         async () => await this.claimCommand(caller, task),
       );
     }
-    // The card's current holder may move it, focus on it and link a commit or doc to it; claiming a card is how a
+    // The task's current holder may move it, focus on it and link a commit or doc to it; claiming a task is how a
     // helper becomes the holder of one its lead holds, so the refusal says that and nothing else is offered.
     if (holderOnly(request) && caller.kind === 'ferret' && caller.ferret !== effectiveAssignee(task)) {
       await this.refuseSubFerret(caller, subFerretDoing(request), async () => await this.claimCommand(caller, task));
@@ -1107,7 +1107,7 @@ export class BoardService {
         parentStanding,
       );
     } catch (error) {
-      // A refusal to a ferret that could take the card first says so: claim it, rather than ask the lead that holds it.
+      // A refusal to a ferret that could take the task first says so: claim it, rather than ask the lead that holds it.
       // An assign is not offered this here: whether a claim would let it through is judged above (`claimThenAssign`).
       if (
         claimedFrom !== undefined &&
@@ -1127,12 +1127,12 @@ export class BoardService {
   }
 
   /**
-   * The ended owner ferret a live lead may ADOPT this card from, or the refusal: the caller is a lead (the roster read under
+   * The ended owner ferret a live lead may ADOPT this task from, or the refusal: the caller is a lead (the roster read under
    * the hold says it was started by nobody: a caller it cannot place is refused, never presumed a lead), alive, working on
-   * the card's own board; the card is open work; and its owner ferret AND its assignee are both ended, as that same
-   * roster says (a session the roster cannot read is never taken for ended). The hold names the holders of the card as it
-   * was read before the write; a card that has other holders now is refused. Nothing else about authority changes: the
-   * adopter is then the card's owner ferret and assignee, and judged as one.
+   * the task's own board; the task is open work; and its owner ferret AND its assignee are both ended, as that same
+   * roster says (a session the roster cannot read is never taken for ended). The hold names the holders of the task as it
+   * was read before the write; a task that has other holders now is refused. Nothing else about authority changes: the
+   * adopter is then the task's owner ferret and assignee, and judged as one.
    */
   private async orphanedOwner(caller: BoardCaller, task: Task, hold: AdoptionHold | undefined): Promise<string> {
     const ref = formatTaskRef(task);
@@ -1185,8 +1185,8 @@ export class BoardService {
   }
 
   /**
-   * The lead the caller may claim the card from (`claimableFrom`), read from the session registry's lineage: asked only
-   * for a claim, and for a ferret with no standing on the card, whose refusal can then name the claim.
+   * The lead the caller may claim the task from (`claimableFrom`), read from the session registry's lineage: asked only
+   * for a claim, and for a ferret with no standing on the task, whose refusal can then name the claim.
    */
   private async claimedFrom(
     caller: BoardCaller,
@@ -1199,8 +1199,8 @@ export class BoardService {
   }
 
   /**
-   * The claim to offer a refused assign: only when claiming the card WOULD let it through, which is a hand-down to a
-   * descendant the daemon's lineage proves. An assign to nobody, upward or sideways stays forbidden to the card's holder
+   * The claim to offer a refused assign: only when claiming the task WOULD let it through, which is a hand-down to a
+   * descendant the daemon's lineage proves. An assign to nobody, upward or sideways stays forbidden to the task's holder
    * too, so it is the lead's to do.
    */
   private async claimThenAssign(caller: BoardCaller, task: Task, assignee: string | null): Promise<string | undefined> {
@@ -1209,7 +1209,7 @@ export class BoardService {
     return await this.claimCommand(caller, task);
   }
 
-  /** `fy card claim &F12` when the caller may claim the card; `undefined` when it may not. */
+  /** `fy task claim &F12` when the caller may claim the task; `undefined` when it may not. */
   private async claimCommand(caller: BoardCaller, task: Task): Promise<string | undefined> {
     if (caller.kind !== 'ferret') return undefined;
     const from = claimableFrom(caller, task, await ancestorsOf(caller.ferret, this.ports.parents));
@@ -1217,8 +1217,8 @@ export class BoardService {
   }
 
   /**
-   * The card as a ferret's choice to make it private must judge it: with who asked for it settled, because an
-   * unsettled agent-asked card may be the owner's. Any other request, and the owner, judge the card as stored.
+   * The task as a ferret's choice to make it private must judge it: with who asked for it settled, because an
+   * unsettled agent-asked task may be the owner's. Any other request, and the owner, judge the task as stored.
    */
   private async settledForHiding(task: Task, request: TaskActionRequest, standing: BoardStanding) {
     const hides = (request.action === 'edit' || request.action === 'visibility') && request.visibility === 'private';
@@ -1226,7 +1226,7 @@ export class BoardService {
     return { ...task, askedBy: await this.settledAskedBy(task, false) };
   }
 
-  /** Who asked for the card, or an unavailable board when that cannot be read: a guess here would hide a card for good. */
+  /** Who asked for the task, or an unavailable board when that cannot be read: a guess here would hide a task for good. */
   private async settledAskedBy(task: Pick<Task, 'createdBy' | 'ask'>, ownerApp: boolean) {
     // Strict (F-0001): the owner's words come from Conversation (the queue, the send ledger and who wrote each turn). A
     // read that cannot be made, Conversation being off included, is an unavailable board, never a guess.
@@ -1241,8 +1241,8 @@ export class BoardService {
 
   /**
    * The files a move back carries, found where the app uploaded them. They are the OWNER's ("Not good" with a
-   * picture), and they must sit in the session of a ferret the reopen is delivered to — the card's assignee or
-   * its owner ferret — so a request cannot pull another session's files onto this card.
+   * picture), and they must sit in the session of a ferret the reopen is delivered to — the task's assignee or
+   * its owner ferret — so a request cannot pull another session's files onto this task.
    */
   private async attachmentsFor(
     task: Task,
@@ -1270,15 +1270,15 @@ export class BoardService {
     return { request, files };
   }
 
-  /** The caller's standing on the card a re-parent would put a card under; `null` when that card is not here. */
+  /** The caller's standing on the task a re-parent would put a task under; `null` when that task is not here. */
   private async parentStanding(parent: TaskRef, caller: BoardCaller, index: BoardIndex) {
     const found = index.isLocal(parent) ? index.get(parent) : undefined;
     return found === undefined ? null : await this.standing(caller, found);
   }
 
   /**
-   * `assignee` is the session an assign would name: when the caller is the card's assignee and that session is one of
-   * its own descendants, the context says the card is handed down.
+   * `assignee` is the session an assign would name: when the caller is the task's assignee and that session is one of
+   * its own descendants, the context says the task is handed down.
    */
   private async context(task: Task, caller: BoardCaller, assignee?: string | null) {
     const snapshot = await this.ports.store.read();
@@ -1308,7 +1308,7 @@ export class BoardService {
   }
 
   /**
-   * Who a card's gates ask (`cardAudience`): the session that wrote it is read for whether a ferret started it, and a
+   * Who a task's gates ask (`taskAudience`): the session that wrote it is read for whether a ferret started it, and a
    * read that fails reads as the owner's.
    */
   async audienceOf(task: Pick<Task, 'createdBy' | 'ask' | 'askedBy'>): Promise<TaskAudience> {
@@ -1318,7 +1318,7 @@ export class BoardService {
   }
 
   /**
-   * The caller's standing on a card; the lineages of its owner and of its assignee are walked only for a ferret that
+   * The caller's standing on a task; the lineages of its owner and of its assignee are walked only for a ferret that
    * is neither.
    */
   private async standing(caller: BoardCaller, task: Task) {
@@ -1328,8 +1328,8 @@ export class BoardService {
   }
 
   /**
-   * Whether the card is in the caller's subtree: the caller owns it, or its owner or its assignee is a descendant of
-   * the caller. A lead that owns a card is the root of its own subtree, so a card returned to it (assignee = owner)
+   * Whether the task is in the caller's subtree: the caller owns it, or its owner or its assignee is a descendant of
+   * the caller. A lead that owns a task is the root of its own subtree, so a task returned to it (assignee = owner)
    * can still be dropped or handed to a replacement.
    */
   private async inSubtree(caller: BoardCaller, task: Task): Promise<boolean> {
@@ -1339,7 +1339,7 @@ export class BoardService {
     return owners.includes(caller.ferret) || assignees.includes(caller.ferret);
   }
 
-  /** The leads above the card's owner and above its assignee; empty for the caller that is that very ferret. */
+  /** The leads above the task's owner and above its assignee; empty for the caller that is that very ferret. */
   private async lineages(caller: BoardCaller, task: Task): Promise<readonly [readonly string[], readonly string[]]> {
     if (caller.kind !== 'ferret') return [[], []];
     const assignee = effectiveAssignee(task);
@@ -1355,9 +1355,9 @@ export class BoardService {
   }
 
   /**
-   * The board is opt-in (`opt-in.ts`): a ferret's card on a board that is off needs a live parent it holds on that
-   * board, or the owner's Yes (`named`, judged here; `carried` when the card already rests on one), else it is
-   * refused with what to do instead. Answers the approval a NEW card rests on, when that is what let it through;
+   * The board is opt-in (`opt-in.ts`): a ferret's task on a board that is off needs a live parent it holds on that
+   * board, or the owner's Yes (`named`, judged here; `carried` when the task already rests on one), else it is
+   * refused with what to do instead. Answers the approval a NEW task rests on, when that is what let it through;
    * nobody but a ferret is asked.
    */
   private async requireLicence(
@@ -1393,8 +1393,8 @@ export class BoardService {
   }
 
   /**
-   * The thread a new card is made to carry out, when it names one: an OPEN item on the CALLER's own agenda that the
-   * caller raised, neither a gate item nor a notice, and not linked to a card already. Throws the refusal.
+   * The thread a new task is made to carry out, when it names one: an OPEN item on the CALLER's own agenda that the
+   * caller raised, neither a gate item nor a notice, and not linked to a task already. Throws the refusal.
    */
   private async requireThread(caller: BoardCaller, named: string | undefined): Promise<AskRef | undefined> {
     if (named === undefined) return undefined;
@@ -1416,7 +1416,7 @@ export class BoardService {
     return { ferret: caller.ferret, id: named };
   }
 
-  /** The thread becomes the new card's own: linked, nothing else (the card stays as external as any other). */
+  /** The thread becomes the new task's own: linked, nothing else (the task stays as external as any other). */
   private async linkThread(thread: AskRef | undefined, task: TaskRef): Promise<void> {
     if (thread === undefined || this.ports.threads === undefined) return;
     const linked = await this.ports.threads.link(thread.ferret, thread.id, task).catch(() => undefined);
@@ -1429,7 +1429,7 @@ export class BoardService {
   }
 
   /**
-   * A refile onto another board is a card arriving there, so it asks what a create asks: a card made where the board
+   * A refile onto another board is a task arriving there, so it asks what a create asks: a task made where the board
    * is on is not moved onto one that is off unless its parent there is one the ferret holds, or it rests on a Yes.
    */
   private async requireRefileLicence(
@@ -1447,7 +1447,7 @@ export class BoardService {
     });
   }
 
-  /** Whether a card is still work: neither dropped nor in its board's closed lanes. */
+  /** Whether a task is still work: neither dropped nor in its board's closed lanes. */
   private async live(task: Task): Promise<boolean> {
     if (task.dropped !== null) return false;
     const laneSet = await this.ports.lanes.laneSet(task.projectId);
@@ -1455,8 +1455,8 @@ export class BoardService {
   }
 
   /**
-   * Whether `ferret` may put a new card under `id`: the card is on this machine, still work, and the session's
-   * standing on it admits a child. `fy new` asks it before it makes a helper's card under the card a brief names.
+   * Whether `ferret` may put a new task under `id`: the task is on this machine, still work, and the session's
+   * standing on it admits a child. `fy new` asks it before it makes a helper's task under the task a brief names.
    */
   async mayAdoptUnder(ferret: string, id: TaskId): Promise<boolean> {
     const task = (await this.ports.store.read()).cards.find(each => each.id === id);
@@ -1474,7 +1474,7 @@ export class BoardService {
     const directory = this.ports.helpers ?? NO_HELPERS;
     const refusal = await helperRefusal(directory, caller.ferret, doing);
     if (refusal === null) return;
-    // A card its lead holds is the helper's to claim: say that instead of sending it back to the lead.
+    // A task its lead holds is the helper's to claim: say that instead of sending it back to the lead.
     const command = await claim?.().catch(() => undefined);
     const claimable =
       command === undefined ? null : await helperRefusal(directory, caller.ferret, doing, undefined, command);
@@ -1499,9 +1499,9 @@ export class BoardService {
   }
 
   /**
-   * The board a caller's new card goes on: its session's, where a ferret on the Unfiled board standing in a
+   * The board a caller's new task goes on: its session's, where a ferret on the Unfiled board standing in a
    * repository first has that repository registered and its board taken (`ProjectAdoption`). An adoption that
-   * fails leaves the card Unfiled, as it would have been.
+   * fails leaves the task Unfiled, as it would have been.
    */
   private async projectOf(caller: BoardCaller): Promise<BoardProjectId> {
     const session = ferretOf(caller);
@@ -1538,14 +1538,14 @@ export class BoardService {
     }
     const laneSets = await this.laneSetsOf(snapshot.cards.map(entry => entry.projectId));
     const index = new BoardIndex(snapshot.cards, this.ports.machineId() ?? '');
-    // One card derives only what its view reads, never the whole board.
+    // One task derives only what its view reads, never the whole board.
     const derivation = await gatherDerivation(neighbourhoodOf(task, index), index, laneSets, this.ports);
     return { card: deriveView(task, derivation), laneSet: laneSets.get(task.projectId) ?? null };
   }
 
   /**
-   * What follows a committed write: a ferret's write focuses its session on the card (§3.3), and the
-   * fleet feed hears `board.changed`, journalled on the writer's session — the card's owner ferret's
+   * What follows a committed write: a ferret's write focuses its session on the task (§3.3), and the
+   * fleet feed hears `board.changed`, journalled on the writer's session — the task's owner ferret's
    * when the owner or the daemon wrote it, because a feed event always belongs to a session.
    */
   private async afterWrite(
@@ -1570,7 +1570,7 @@ export class BoardService {
       .catch((error: unknown) => this.warn(`could not bring the gate item of ${formatTaskRef(task)} in line`, error));
   }
 
-  /** Tells the card's ferret it was sent back — unless the ferret doing it is who sent it. */
+  /** Tells the task's ferret it was sent back — unless the ferret doing it is who sent it. */
   private async deliverReopen(caller: BoardCaller, outcome: TaskOutcome, task: Task): Promise<void> {
     const reopened = outcome.reopened;
     if (reopened === undefined) return;
@@ -1584,7 +1584,7 @@ export class BoardService {
       .catch((error: unknown) => this.warn(`could not deliver the reopen of ${formatTaskRef(task)}`, error));
   }
 
-  /** Tells the card's ferret the owner closed it: only the owner's move into a closed lane from an open one. */
+  /** Tells the task's ferret the owner closed it: only the owner's move into a closed lane from an open one. */
   private async deliverDone(caller: BoardCaller, request: TaskActionRequest, before: Task, after: Task): Promise<void> {
     if (caller.kind !== 'owner' || request.action !== 'move') return;
     const laneSets = await this.laneSetsOf([after.projectId]);

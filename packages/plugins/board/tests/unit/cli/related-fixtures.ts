@@ -1,6 +1,6 @@
 import type { RelatedGateway, RelatedMatch, RelatedResponse } from '../../../cli/lib/related.ts';
 
-/** A card as the search lists it; the fields the related lines read. */
+/** A task as the search lists it; the fields the related lines read. */
 export const taskHit = (overrides: Partial<RelatedMatch['hit']> = {}): RelatedMatch['hit'] => ({
   kind: 'card',
   id: 'F303',

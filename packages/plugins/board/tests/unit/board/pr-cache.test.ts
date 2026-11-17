@@ -189,7 +189,7 @@ describe('applyPrUpdate', () => {
       changes: 'code',
       changesRevision: PUSHED,
     });
-    // Nothing else changed and nothing was read: the card is not written.
+    // Nothing else changed and nothing was read: the task is not written.
     should(apply(kept, { observed: [observed({ checks: 'passing', headSha: HEAD })] }).task).be.null();
     // Learning it alone is a change worth writing.
     const unread = withPr({ state: 'open', checks: 'passing', polledAt: NOW }, { laneId: 'review' });
@@ -262,7 +262,7 @@ describe('applyPrUpdate', () => {
       links: { prs: [link({ url: second, number: 941 }), link()], branch: null, commits: [], docs: [] },
     });
     const { task } = apply(subject, { observed: [merged(), observed({ url: second })] });
-    // #941 is still open beside the merged #940, so the facts end with the card back in review.
+    // #941 is still open beside the merged #940, so the facts end with the task back in review.
     should(moves(task)).deepEqual([
       ['review', 'pr.opened', 'PR #941 opened'],
       ['merged', 'pr.merged', 'PR #940 merged'],
@@ -271,7 +271,7 @@ describe('applyPrUpdate', () => {
   });
 
   it('should keep a card waiting at the To test gate for an open PR, and write down only the facts', () => {
-    // A gate is passed only by the owner (docs/board.md § Cards show progress): the open PR is told on its gate item.
+    // A gate is passed only by the owner (docs/board.md § Tasks show progress): the open PR is told on its gate item.
     const shipped = link({ state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, releasedIn: RELEASE, polledAt: NOW });
     const second = 'https://github.com/kirinnee/ferretry/pull/941';
     const subject = boardTask({
@@ -285,7 +285,7 @@ describe('applyPrUpdate', () => {
     should(task?.laneId).equal('tested');
     should(task?.links.prs[1]).match({ state: 'open', createdAt: '2026-10-30T10:00:00Z' });
     should(moves(task)).be.empty();
-    // The next poll agrees with the card: nothing more to write.
+    // The next poll agrees with the task: nothing more to write.
     should(
       applyPrUpdate(
         task as Task,
@@ -414,7 +414,7 @@ describe('applyPrUpdate', () => {
   });
 
   it('should stop a fact at a gate on the way, and say so', () => {
-    // A merged and released PR on a card still building: Released · to test is past nothing, but a gated lane
+    // A merged and released PR on a task still building: Released · to test is past nothing, but a gated lane
     // between the two stops it.
     const gated = lanes(PROJECT);
     const withReviewGate = {

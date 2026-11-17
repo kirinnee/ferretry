@@ -3,12 +3,12 @@
  * `GET|POST /v1/board/cards/:cardId` and `GET /v1/board/projects`, each answer parsed with the board's own schema
  * (parse, don't validate).
  *
- * A card id is unique on its machine only, so the store above this keys everything `(daemonId, id)`. The client is
+ * A task id is unique on its machine only, so the store above this keys everything `(daemonId, id)`. The client is
  * already bound to one daemon and its credential; the machine argument names the slice the answer belongs to.
  *
  * A REFUSAL IS A VALUE. Reads throw {@link BoardReadError}; a write answers `BoardResult` so the caller can show
  * "needs a reason" or "owner only" without a try/catch, and the daemon's own error `code` rides along as `boardCode`.
- * There is no answer verb: a card never asks (#1552), so there is no route to answer one.
+ * There is no answer verb: a task never asks (#1552), so there is no route to answer one.
  */
 
 import { type AskListSnapshot, AskListSnapshotSchema } from '@ferretry/core-asks/contract';
@@ -43,7 +43,7 @@ import {
   safeReadTaskStart,
 } from '../../contract/index.ts';
 
-/** The most cards one page asks for; a board larger than a few pages is shown as partial, not paged on. */
+/** The most tasks one page asks for; a board larger than a few pages is shown as partial, not paged on. */
 const BOARD_PAGE_SIZE = 500;
 /** How many pages one read follows before it reports the board as partial. */
 export const BOARD_MAX_PAGES = 4;
@@ -63,10 +63,10 @@ export class BoardReadError extends Error {
   }
 }
 
-/** One board read, every page followed: the cards and the numbers of the first page. */
+/** One board read, every page followed: the tasks and the numbers of the first page. */
 export interface BoardRead {
   readonly response: BoardResponse;
-  /** The board has more cards than the pages read; the counts still cover all of it. */
+  /** The board has more tasks than the pages read; the counts still cover all of it. */
   readonly truncated: boolean;
 }
 
@@ -91,11 +91,11 @@ export interface LaneWriteError {
 export interface BoardPort {
   /** One page of a board; `cursor` continues the one before, `limit` shrinks the page. */
   board(daemon: DaemonConnection, query: BoardServerQuery, cursor?: string, limit?: number): Promise<BoardResponse>;
-  /** One card in full, or `null` when the daemon has no such card. */
+  /** One task in full, or `null` when the daemon has no such task. */
   card(daemon: DaemonConnection, id: TaskId): Promise<TaskResponse | null>;
-  /** One ferret's agenda (`GET /v1/ferrets/:ferretId/agenda`), or `null` when the daemon will not say: the card reads its asks from it. */
+  /** One ferret's agenda (`GET /v1/ferrets/:ferretId/agenda`), or `null` when the daemon will not say: the task reads its asks from it. */
   agenda(daemon: DaemonConnection, ferret: string): Promise<AskListSnapshot | null>;
-  /** Every card id on the machine. */
+  /** Every task id on the machine. */
   ids(daemon: DaemonConnection): Promise<readonly TaskId[]>;
   /** The projects with their lane sets. */
   projects(daemon: DaemonConnection): Promise<readonly BoardProject[]>;
@@ -106,9 +106,9 @@ export interface BoardPort {
     id: TaskId,
     request: TaskActionRequestInput,
   ): Promise<BoardResult<TaskResponse, BoardWriteError>>;
-  /** Starts a NEW ferret on the card, as the owner (`POST /v1/board/cards/:cardId/start`). */
+  /** Starts a NEW ferret on the task, as the owner (`POST /v1/board/cards/:cardId/start`). */
   start(daemon: DaemonConnection, id: TaskId, key?: string): Promise<BoardResult<TaskStartResponse, BoardWriteError>>;
-  /** Opens a card the owner writes, on the machine that will hold it. */
+  /** Opens a task the owner writes, on the machine that will hold it. */
   create(
     daemon: DaemonConnection,
     request: TaskCreateRequestInput,

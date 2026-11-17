@@ -1,10 +1,10 @@
 /**
- * THE CARDS AN AGENDA ITEM'S "DONE · CLOSES" WOULD CLOSE, and the way to close them through the board's own Done.
+ * THE TASKS AN AGENDA ITEM'S "DONE · CLOSES" WOULD CLOSE, and the way to close them through the board's own Done.
  *
- * Cards are Board's, and so is the Done: which lane it moves a card into, and the one request that moves it. This half
- * reads and closes a card only through the `agenda.card-answer` hook Board provides for this daemon
+ * Tasks are Board's, and so is the Done: which lane it moves a task into, and the one request that moves it. This half
+ * reads and closes a task only through the `agenda.card-answer` hook Board provides for this daemon
  * (`contract/app-hooks.ts`), handed down by {@link DoneCloseBoardProvider}. Nothing is offered without one, for an item
- * that did not ask, for a card of another machine, or for a card that is already closed or gone.
+ * that did not ask, for a task of another machine, or for a task that is already closed or gone.
  */
 
 import type { AgendaItem, TaskRef } from '@ferretry/core-asks/contract';
@@ -34,7 +34,7 @@ export interface DoneCloseBoard extends Pick<AgendaTaskAnswer, 'subscribe' | 'wa
 
 const DoneCloseBoardContext = createContext<DoneCloseBoard | undefined>(undefined);
 
-/** Hands the ask surfaces below it the board a Done · closes reads and moves cards through. */
+/** Hands the ask surfaces below it the board a Done · closes reads and moves tasks through. */
 export const DoneCloseBoardProvider = (props: {
   readonly board: DoneCloseBoard | undefined;
   readonly children?: ReactNode;
@@ -43,7 +43,7 @@ export const DoneCloseBoardProvider = (props: {
 const IDLE: AgendaCardView = Object.freeze({ status: 'idle', missing: false, closed: false });
 const NO_SUBSCRIPTION = (): (() => void) => () => undefined;
 
-/** A card that is gone or already closed has nothing left to close, so it offers nothing. */
+/** A task that is gone or already closed has nothing left to close, so it offers nothing. */
 const closable = (state: AgendaCardView): boolean => !state.missing && !(state.status === 'ready' && state.closed);
 
 export const useDoneClose = (
@@ -51,7 +51,7 @@ export const useDoneClose = (
   item: AgendaItem | undefined,
 ): DoneCloseSource | undefined => {
   const provided = useContext(DoneCloseBoardContext);
-  // A board is built for one daemon: a card on any other is not its to close.
+  // A board is built for one daemon: a task on any other is not its to close.
   const board = provided !== undefined && provided.daemonId === daemonId ? provided : undefined;
   const refs = useMemo(
     () => (daemonId === undefined || item === undefined ? [] : offeredCards(item, daemonId)),

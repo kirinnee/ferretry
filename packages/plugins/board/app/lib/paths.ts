@@ -1,6 +1,6 @@
 /**
  * WHERE THE BOARD LIVES in the app: the addresses of this plugin's own screens (`board/:project?`, `task/:id`) and the
- * few other screens a card links to. Those screens are per daemon, so an address is `/d/<daemon>/<screen path>`.
+ * few other screens a task links to. Those screens are per daemon, so an address is `/d/<daemon>/<screen path>`.
  *
  * This half is built once per daemon and knows its machine only as THIS_MACHINE, a placeholder; the daemon that
  * matters is the one in the address the reader is on (the router's own source of truth), so a builder reads it from
@@ -22,12 +22,12 @@ const daemonPrefix = (): string => {
 const daemonAddress = (daemon: string | undefined): string =>
   daemon === undefined ? daemonPrefix() : `/d/${encodeURIComponent(daemon)}`;
 
-/** The board; a card id after it opens the card as a drawer on the board (`/d/<daemon>/board/F12`). */
+/** The board; a task id after it opens the task as a drawer on the board (`/d/<daemon>/board/F12`). */
 export const boardPath = (_daemonId?: DaemonId, daemon?: string): string => `${daemonAddress(daemon)}/board`;
 export const boardTaskPath = (_daemonId: DaemonId | undefined, taskId: string): string =>
   `${daemonPrefix()}/board/${encodeURIComponent(taskId)}`;
 /**
- * One card on its own page. `daemon` names the machine the link is for (an app hook is built for one daemon); without
+ * One task on its own page. `daemon` names the machine the link is for (an app hook is built for one daemon); without
  * it the page is under the daemon the address bar is under.
  */
 export const taskPagePath = (taskId: string, daemon?: string): string =>

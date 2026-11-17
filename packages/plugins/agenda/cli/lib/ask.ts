@@ -10,8 +10,8 @@ import {
 } from '@ferretry/core-asks/contract';
 
 /**
- * The kinds a card is raised as, keyed by the names `--kind` accepts — the older spellings included. A to-do is
- * `todo`, because "task" means a board card (`fy task`, `--task <card>`); `task` stays the wire value so a released
+ * The kinds a task is raised as, keyed by the names `--kind` accepts — the older spellings included. A to-do is
+ * `todo`, because "task" means a board task (`fy task`, `--task <task>`); `task` stays the wire value so a released
  * daemon's strict add schema keeps accepting it.
  */
 const KINDS = new Map<string, AgendaKind>([
@@ -32,7 +32,7 @@ const KINDS = new Map<string, AgendaKind>([
 /** The names `--kind` is documented with, for help text and error messages. */
 export const ASK_KIND_NAMES = ['todo', 'yesno', 'permission', 'choice', 'review', 'info', 'reply', 'form'] as const;
 
-/** Why a card cannot offer more than three answers, and what to do instead. */
+/** Why a task cannot offer more than three answers, and what to do instead. */
 export const TOO_MANY_ANSWERS = `an item offers at most ${MAX_AGENDA_TASK_ANSWERS} answers (swipe left, up, right). Split this into several items, or use --kind reply and let the owner answer in words.`;
 
 /** The flags that shape an ask. */
@@ -43,7 +43,7 @@ export interface AskFlags {
   readonly task?: boolean;
 }
 
-/** The kind a card is raised as and the ask that kind carries (`info` carries none). */
+/** The kind a task is raised as and the ask that kind carries (`info` carries none). */
 export interface TaskAsk {
   readonly kind: AgendaKind;
   readonly ask: AgendaAsk | undefined;
@@ -64,7 +64,7 @@ export function parseKind(raw: string | undefined): AgendaKind | undefined {
  * Supplying `--option` without `--kind` implies a choice, because that is the only kind options mean
  * anything for — and any other kind carrying options is a mistake worth naming rather than silently
  * dropping. Exactly Yes and No is a `yesno`; a `yesno` brings its own two options, so it refuses any.
- * A card offers at most three answers, so a choice takes two or three options.
+ * A task offers at most three answers, so a choice takes two or three options.
  */
 export function parseAsk(flags: AskFlags): TaskAsk {
   const options = (flags.option ?? []).map(option => option.trim()).filter(option => option.length > 0);

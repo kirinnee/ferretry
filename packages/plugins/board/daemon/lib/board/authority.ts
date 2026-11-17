@@ -1,25 +1,25 @@
 /**
- * WHO MAY WRITE WHAT on a card: ownership plus lineage (`board-design.md` §2.5).
+ * WHO MAY WRITE WHAT on a task: ownership plus lineage (`board-design.md` §2.5).
  *
  * This replaces the `task-boards` grant ACL for the board. There are no roles to grant: a caller's
- * standing on a card follows from the card itself (its owner and assignee) and from the owner's lineage
+ * standing on a task follows from the task itself (its owner and assignee) and from the owner's lineage
  * (`config.parent`, walked up). Every decision here is a pure function of those facts.
  *
  * | Standing      | Who                                                    | May                                  |
  * |---------------|--------------------------------------------------------|--------------------------------------|
  * | `owner-human` | the owner: loopback, or a device the `fleet` grant let in | everything, incl. gates and overrides |
- * | `owner`       | the card's owner ferret                                | the assignee's writes, plus re-plan   |
- * | `ancestor`    | a ferret above the card's owner                        | the same as the owner                |
+ * | `owner`       | the task's owner ferret                                | the assignee's writes, plus re-plan   |
+ * | `ancestor`    | a ferret above the task's owner                        | the same as the owner                |
  * | `assignee`    | the ferret doing it (`assignee`, else the owner)       | move, note, link, report, files, …   |
- * | `assignee-lead` | a ferret above the card's assignee, not its owner    | drop and reassign, nothing else      |
+ * | `assignee-lead` | a ferret above the task's assignee, not its owner    | drop and reassign, nothing else      |
  * | `daemon`      | the daemon's own automation                            | trigger moves, link cache, refile    |
- * | `reader`      | any other ferret                                       | read; depend from ITS OWN card only   |
+ * | `reader`      | any other ferret                                       | read; depend from ITS OWN task only   |
  *
  * Re-plan means retitle, rewrite the brief, reassign, drop, reorder and re-parent (which also needs `adopt` on
- * the new parent: a card never moves onto a tree its caller cannot write).
+ * the new parent: a task never moves onto a tree its caller cannot write).
  *
  * One exception inside re-plan: the card's ASSIGNEE may hand it down to a descendant of its own ({@link mayHandDown}),
- * so a lead given a card can start a helper on it without making a duplicate. Never sideways or upward.
+ * so a lead given a task can start a helper on it without making a duplicate. Never sideways or upward.
  */
 import { type Task, formatTaskRef } from '../../../contract/index.ts';
 
@@ -36,7 +36,7 @@ export type BoardCaller =
 
 export type BoardStanding = 'owner-human' | 'owner' | 'ancestor' | 'assignee-lead' | 'assignee' | 'daemon' | 'reader';
 
-/** Everything a caller can ask of a card, as authority sees it. */
+/** Everything a caller can ask of a task, as authority sees it. */
 export type BoardOperation =
   | 'move'
   | 'focus'
@@ -65,14 +65,14 @@ export type BoardOperation =
 
 const WORKERS: readonly BoardStanding[] = ['owner-human', 'owner', 'ancestor', 'assignee'];
 const PLANNERS: readonly BoardStanding[] = ['owner-human', 'owner', 'ancestor'];
-/** A lead may also drop or reassign a card its subtree was handed, whoever owns it: nothing else about the card. */
+/** A lead may also drop or reassign a task its subtree was handed, whoever owns it: nothing else about the task. */
 const SUBTREE_PLANNERS: readonly BoardStanding[] = [...PLANNERS, 'assignee-lead'];
 const HUMAN: readonly BoardStanding[] = ['owner-human'];
 
 /**
  * The standings each operation admits. `replan` is a retitle or a brief rewrite inside an `edit`;
- * `adopt` is naming a card as the parent of a new one; `pass-gate` and `override` are the owner's. `trigger`
- * is the daemon's move on what it observes; `report` is a card's own people telling it what it cannot see.
+ * `adopt` is naming a task as the parent of a new one; `pass-gate` and `override` are the owner's. `trigger`
+ * is the daemon's move on what it observes; `report` is a task's own people telling it what it cannot see.
  */
 export const OPERATION_STANDINGS: Readonly<Record<BoardOperation, readonly BoardStanding[]>> = {
   move: WORKERS,
@@ -101,14 +101,14 @@ export const OPERATION_STANDINGS: Readonly<Record<BoardOperation, readonly Board
   report: WORKERS,
 };
 
-/** The ferret doing the card now: its assignee, which reads as the owner when unset. */
+/** The ferret doing the task now: its assignee, which reads as the owner when unset. */
 export const effectiveAssignee = (task: Pick<Task, 'owner' | 'assignee'>): string => task.assignee ?? task.owner;
 
 /**
- * A caller's standing on one card. `ownerAncestors` is the card owner's lineage and `assigneeAncestors` the assignee's,
+ * A caller's standing on one task. `ownerAncestors` is the task owner's lineage and `assigneeAncestors` the assignee's,
  * nearest first; only a ferret that is neither the owner nor the assignee needs them, so a caller may pass `[]`
- * otherwise. A lead above the OWNER is an `ancestor`: the owner lineage alone holds the card's gates and its plan. A
- * lead above only the ASSIGNEE is an `assignee-lead`: the card was handed to its subtree, so it may drop or reassign it,
+ * otherwise. A lead above the OWNER is an `ancestor`: the owner lineage alone holds the task's gates and its plan. A
+ * lead above only the ASSIGNEE is an `assignee-lead`: the task was handed to its subtree, so it may drop or reassign it,
  * and nothing more (never an owner ferret's gate, never a re-plan).
  */
 export const standingOf = (
@@ -127,18 +127,18 @@ export const standingOf = (
 };
 
 /**
- * Who a card's gates ask (docs/board.md § Cards show progress): an EXTERNAL card is one a person asked for, and its
- * gates are the owner's alone, asked as agenda items; an INTERNAL card is a ferret's own bookkeeping, and the owner
+ * Who a task's gates ask (docs/board.md § Tasks show progress): an EXTERNAL task is one a person asked for, and its
+ * gates are the owner's alone, asked as agenda items; an INTERNAL task is a ferret's own bookkeeping, and the owner
  * never sees it, so its owner ferret or a lead above that ferret passes its gates with an ordinary move.
  */
 export type TaskAudience = 'external' | 'internal';
 
-/** The standings that pass an INTERNAL card's gate besides the owner: its owner ferret and that ferret's leads. */
+/** The standings that pass an INTERNAL task's gate besides the owner: its owner ferret and that ferret's leads. */
 const INTERNAL_GATE_KEEPERS: readonly BoardStanding[] = ['owner-human', 'owner', 'ancestor'];
 
 /**
- * Whether a standing passes an owner gate (out of a gated lane, or into a gated closed lane) on a card of this
- * audience. The owner always; the owner ferret or an ancestor only on an internal card; an assignee, a helper,
+ * Whether a standing passes an owner gate (out of a gated lane, or into a gated closed lane) on a task of this
+ * audience. The owner always; the owner ferret or an ancestor only on an internal task; an assignee, a helper,
  * a reader and the daemon never (the daemon's own moves are its triggers, which never enter a gated closed lane).
  */
 export const mayPassGate = (standing: BoardStanding, audience: TaskAudience): boolean =>
@@ -149,7 +149,7 @@ export const mayDo = (operation: BoardOperation, standing: BoardStanding): boole
   OPERATION_STANDINGS[operation].includes(standing);
 
 /**
- * Whether an assignee may assign the card to `assignee`: only its own descendant. `assigneeAncestors` is the
+ * Whether an assignee may assign the task to `assignee`: only its own descendant. `assigneeAncestors` is the
  * target's lineage read from the daemon's session registry, never from the request.
  */
 export const mayHandDown = (
@@ -165,10 +165,10 @@ export const mayHandDown = (
   assigneeAncestors.includes(caller.ferret);
 
 /**
- * The lead a ferret may CLAIM the card from: the reverse of {@link mayHandDown}. The card's current holder (its assignee,
+ * The lead a ferret may CLAIM the task from: the reverse of {@link mayHandDown}. The task's current holder (its assignee,
  * else its owner) when that is one of the caller's own ancestors. `undefined` otherwise, and for the ferret that already
- * holds it: never sideways (a sibling's or cousin's card, even under a shared lead who owns it), never beyond the caller's
- * own lineage, and never a card the owner holds (the owner is not a ferret). `callerAncestors` is the caller's lineage
+ * holds it: never sideways (a sibling's or cousin's task, even under a shared lead who owns it), never beyond the caller's
+ * own lineage, and never a task the owner holds (the owner is not a ferret). `callerAncestors` is the caller's lineage
  * from the daemon's session registry, nearest first.
  */
 export const claimableFrom = (
@@ -228,7 +228,7 @@ const OPERATION_WORDS: Readonly<Record<BoardOperation, string>> = {
 };
 
 /**
- * The sentence a refusal answers with: what was refused and who may do it instead, naming the card's
+ * The sentence a refusal answers with: what was refused and who may do it instead, naming the task's
  * own ferrets so the caller knows whom to ask.
  */
 export const refusalMessage = (operation: BoardOperation, task: Pick<Task, 'id' | 'owner' | 'assignee'>): string => {

@@ -56,7 +56,7 @@ const alertWorld = (
   return { alerts, sent, withheld, notes };
 };
 
-/** The lead the owner chats with, and the helper it started for the card, which has ended. */
+/** The lead the owner chats with, and the helper it started for the task, which has ended. */
 const roster = (leadInteractive: boolean) =>
   rosterOf([
     liveSession('lizzette', { interactive: leadInteractive }),
@@ -85,7 +85,7 @@ const prTask = boardTask({
   links: { prs: [link], branch: null, commits: [], docs: [] },
 });
 
-/** The PR alerts the GitHub watcher raises for one observation of the card's PR. */
+/** The PR alerts the GitHub watcher raises for one observation of the task's PR. */
 const prAlerts = (observed: { readonly state: 'open' | 'closed'; readonly checks: 'pending' | 'failing' }) =>
   applyPrUpdate(
     prTask,
@@ -152,7 +152,7 @@ describe('board alerts to an interactive session', () => {
   });
 
   it('should journal a stale nudge on the interactive lead instead of typing it', async () => {
-    // Arrange: the card went back to the lead the owner chats with when its ferret ended, and sat there.
+    // Arrange: the task went back to the lead the owner chats with when its ferret ended, and sat there.
     const stale: TaskView = {
       ...boardTask({ laneId: 'implement', owner: 'lizzette', assignee: 'lizzette', createdAt: ago(5 * HOUR) }),
       lastTouchedAt: ago(3 * HOUR),
@@ -272,7 +272,7 @@ describe('a withheld alert about a private card', () => {
     ['dropped', { dropped: { reason: 'superseded', at: NOW } }],
     ['in a closed lane', { laneId: 'closed' }],
   ])('should walk past an archived public parent (%s) to the open public grandparent', async (_name, archived) => {
-    // Arrange: F30 (open, public) > F31 (archived, public) > F32 (private), the card the alert is about.
+    // Arrange: F30 (open, public) > F31 (archived, public) > F32 (private), the task the alert is about.
     const root = boardTask({ id: 'F30', askedBy: 'person', owner: 'lizzette', parent: null });
     const parentTask = boardTask({
       id: 'F31',

@@ -1,5 +1,5 @@
 /**
- * THE "SCREENS FERRETRY CLEARS" CARD in a real browser over a FIXED FAKE screen (`fixtures/warden-dialog-rules-scene.tsx`): a
+ * THE "SCREENS FERRETRY CLEARS" TASK in a real browser over a FIXED FAKE screen (`fixtures/warden-dialog-rules-scene.tsx`): a
  * proposed rule (the row it would press marked, the owner's yes offered) and a held one (shown, never saved), on a phone (390)
  * and a desktop (1280), light and dark. No real pane, ferret or secret is drawn.
  * Set `FY_WARDEN_DIALOG_RULES_SHOTS_DIR` to keep the pictures.

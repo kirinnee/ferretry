@@ -1,10 +1,10 @@
 /**
- * WHAT ANSWERING A CARD MEANS, as pure decisions: a card's answers (left · up · right) become the
- * actions the daemon is asked to take, and the optional reply typed on the card travels with whichever
+ * WHAT ANSWERING A TASK MEANS, as pure decisions: a task's answers (left · up · right) become the
+ * actions the daemon is asked to take, and the optional reply typed on the task travels with whichever
  * answer is given — by swipe, tap or arrow key — as that action's `note`.
  *
- * The answers themselves come from the protocol (`agendaCardAnswers`), so an item raised before
- * cards had them reads exactly as it did. This module only decides how each one is SENT:
+ * The answers themselves come from the protocol (`agendaTaskAnswers`), so an item raised before
+ * tasks had them reads exactly as it did. This module only decides how each one is SENT:
  *
  * | does       | sent as                                         |
  * | ---------- | ----------------------------------------------- |
@@ -40,20 +40,20 @@ import {
   unswipedChoices,
 } from '@ferretry/core-asks/contract';
 
-/** What answering a card does, as the daemon is asked to do it. */
+/** What answering a task does, as the daemon is asked to do it. */
 export type InboxAction =
   | {
       readonly kind: 'respond';
       readonly label: string;
       readonly response: AgendaResponse;
       readonly note?: string;
-      /** The answer is to the gate attached to this thread (`gateAttached`), not to the thread: the daemon moves the card. */
+      /** The answer is to the gate attached to this thread (`gateAttached`), not to the thread: the daemon moves the task. */
       readonly gate?: true;
-      /** WHICH card ask the gate answer is to (its reference), so a retry or a second tap is never spent on the next ask. */
+      /** WHICH task ask the gate answer is to (its reference), so a retry or a second tap is never spent on the next ask. */
       readonly cardAsk?: string;
       /** The ask the owner was shown (`AgendaItem.askVersion`, 1 when absent), so the daemon refuses it once the ferret replaced the ask. */
       readonly askVersion?: number;
-      /** Files already uploaded to the item's session, sent with a Not good: the daemon carries them to the card's ferret. */
+      /** Files already uploaded to the item's session, sent with a Not good: the daemon carries them to the task's ferret. */
       readonly attachments?: BoardReopenAttachments;
     }
   | { readonly kind: 'resolve'; readonly label: string; readonly note?: string; readonly askVersion?: number }
@@ -70,10 +70,10 @@ export type AnswerSource = AgendaTaskSource &
     readonly gate?: AgendaGate;
   };
 
-/** The three ways a card can be swiped, which are also the three arrows of its answer bar. */
+/** The three ways a task can be swiped, which are also the three arrows of its answer bar. */
 export type AnswerDirection = AgendaDirection;
 
-/** The ways a card can be swiped: its three answers' directions. */
+/** The ways a task can be swiped: its three answers' directions. */
 export type SwipeDirection = AnswerDirection;
 
 const withNote = (note: string | undefined): { readonly note?: string } => (note === undefined ? {} : { note });
@@ -171,13 +171,13 @@ export const optionAction = (option: AgendaAskOption, reply: string): InboxActio
   answerAction({ direction: 'left', does: 'choose', label: option.label }, reply) as InboxAction;
 
 /**
- * The answers this card offers, left · up · right — a row of options in the options list's order, as the protocol
- * lays it out (`agendaCardAnswers`). A to-do waiting on its ferret cannot be done yet and asking again is the same
+ * The answers this task offers, left · up · right — a row of options in the options list's order, as the protocol
+ * lays it out (`agendaTaskAnswers`). A to-do waiting on its ferret cannot be done yet and asking again is the same
  * request, so it keeps only an answer the ferret added (a Skip).
  */
 export const cardAnswers = (item: AnswerSource): readonly AgendaTaskAnswer[] => {
   const answers = agendaTaskAnswers(item);
-  // A card in discussion stays fully answerable: only a plain "need more info" wait takes Done away.
+  // A task in discussion stays fully answerable: only a plain "need more info" wait takes Done away.
   const waiting = item.ask?.kind === 'task' && item.waitingOn === 'ferret' && !agendaInDiscussion(item);
   return waiting ? answers.filter(answer => answer.does !== 'done' && answer.does !== 'needs-info') : answers;
 };
@@ -192,7 +192,7 @@ export interface SwipeTarget {
 
 export type SwipeTargets = Readonly<Partial<Record<SwipeDirection, SwipeTarget>>>;
 
-/** Each direction the card answers, with what it would send carrying `reply`. */
+/** Each direction the task answers, with what it would send carrying `reply`. */
 export const swipeTargets = (item: AnswerSource, reply = ''): SwipeTargets => ({
   ...Object.fromEntries(
     cardAnswers(item).map(answer => [
@@ -211,7 +211,7 @@ export const swipeTargets = (item: AnswerSource, reply = ''): SwipeTargets => ({
 const BUTTON_ORDER: readonly AnswerDirection[] = ['right', 'up', 'left'];
 
 /**
- * Every answer the card can send as an action, recommended first: the swiped answers, then an old
+ * Every answer the task can send as an action, recommended first: the swiped answers, then an old
  * choice's options past the third. An answer that needs text it has not got is not in the list.
  */
 export const answerActions = (item: AnswerSource, reply = ''): readonly InboxAction[] => {
@@ -223,12 +223,12 @@ export const answerActions = (item: AnswerSource, reply = ''): readonly InboxAct
   return [...swiped, ...unswipedChoices(item).map(option => optionAction(option, reply))];
 };
 
-/** The card's kind in the word its header says. */
+/** The task's kind in the word its header says. */
 export const kindWord = (item: Pick<AnswerSource, 'kind' | 'ask'> & { readonly notice?: true | undefined }): string =>
   item.notice === true ? 'Notification' : agendaKindLabel(item);
 
 /**
- * Whether the card is answered in words alone: an open question, several questions, or a question mixed with steps
+ * Whether the task is answered in words alone: an open question, several questions, or a question mixed with steps
  * (`agendaShape` reply or answers). It has no buttons; the owner answers in the message box below.
  */
 export const isTextOnlyAsk = (item: AnswerSource & { readonly notice?: true | undefined }): boolean => {

@@ -9,8 +9,8 @@ import {
 } from '../../../daemon/lib/agenda/index.ts';
 
 /**
- * What a source that keeps a daemon-raised task card for a ferret (Conversation's `prompt` source) needs of the REAL
- * port: a child's card lands on its lead's board, the ref the raise returned is the one to close by, and a closed
+ * What a source that keeps a daemon-raised task task for a ferret (Conversation's `prompt` source) needs of the REAL
+ * port: a child's task lands on its lead's board, the ref the raise returned is the one to close by, and a closed
  * `(source, entry)` is never reopened, so the same obligation again needs a new entry.
  */
 class PerSessionLedgers implements AgendaLedgerRepository {

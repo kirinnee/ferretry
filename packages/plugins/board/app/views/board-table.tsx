@@ -2,7 +2,7 @@
  * THE BOARD'S TABLE VIEW (the route is still `?view=list`): the CURRENT SUMMARY. What waits on the owner leads
  * ("To test"), then what is being worked on, then two quiet sections of what merged and
  * what released lately. A row is the title, its one-line summary, the status pill and when it last mattered;
- * the people and the PR numbers live on the card. The Archive keeps the flat, columned rows.
+ * the people and the PR numbers live on the task. The Archive keeps the flat, columned rows.
  *
  * A row has no owner buttons (no Done, no Not good, no Reopen): the owner answers in the agenda.
  */
@@ -159,7 +159,7 @@ export interface TableRowsProps {
   readonly env: BoardTaskEnv;
 }
 
-/** The Archive's rows, flat, one per card. */
+/** The Archive's rows, flat, one per task. */
 export function TableRows({ rows, env }: TableRowsProps) {
   return (
     <div className="fy-board-table">
@@ -175,7 +175,7 @@ export function TableRows({ rows, env }: TableRowsProps) {
 
 export interface TableViewProps {
   readonly model: BoardModel;
-  /** Closed cards, read only to list what was released lately; empty until read. */
+  /** Closed tasks, read only to list what was released lately; empty until read. */
   readonly closed?: BoardModel;
   readonly env: BoardTaskEnv;
   readonly window: SummaryWindow;
@@ -304,7 +304,7 @@ export function TableView({ model, closed, env, window, onWindow }: TableViewPro
   );
 }
 
-/** A closed or dropped card as a Table row, for the Archive. */
+/** A closed or dropped task as a Table row, for the Archive. */
 export const archiveRowsOf = (
   tasks: readonly BoardTaskOf[],
   env: Pick<BoardTaskEnv, 'places'>,

@@ -30,7 +30,7 @@ import { MessageFooter } from '../chat/send-receipt.tsx';
 /**
  * The two transcript rows that arrive on the user channel but are NOT the person speaking.
  *
- * A PEER MESSAGE reads as a message FROM that ferret, never as a "You" bubble: a card on the left with
+ * A PEER MESSAGE reads as a message FROM that ferret, never as a "You" bubble: a task on the left with
  * the sender's monogram, the sender as a `:name` reference (docs/reference-standard.md) through the one
  * renderer so it proves and opens like any other, what kind of message it is, and the message itself as
  * Markdown. Nothing the daemon wrote for the RECEIVING agent is shown — not the banner, not the session
@@ -81,7 +81,7 @@ export function PeerName({
  * "Open conversation with tomi" — a real link, so a modifier-click still opens a new tab. The row says
  * only "Open chat ›" — the words the Inbox already uses for the same move, and short enough that the
  * label is never cut to fit the foot's one line (a control's words are never truncated). The sender's
- * name is already the header of the card this foots, and the name is still spoken — the link's
+ * name is already the header of the task this foots, and the name is still spoken — the link's
  * accessible name keeps it, screen-reader-only.
  */
 function OpenConversation({ agent, surface }: { readonly agent: ResolvedAgent; readonly surface: ReferenceSurface }) {
@@ -347,7 +347,7 @@ export function HandoffNoticeRow({
 
 /**
  * The board's own automatic message to a ferret — "&F209 PR #1087 CI is red. Fix it…" — as one compact
- * system line: a board mark, "Board" as the sender, the sentence, and the card and PR it names as links.
+ * system line: a board mark, "Board" as the sender, the sentence, and the task and PR it names as links.
  * It is never an owner bubble: the owner did not type it.
  */
 export function BoardNudgeRow({

@@ -84,7 +84,7 @@ export const laneSetFor = (projectId: string = PROJECT): LaneSet => ({
 
 export const COUNTS = { closedHidden: 0, stale: 0, orphaned: 0, active: 0 };
 
-/** A valid card as a daemon serves it; `extra` overrides any field. */
+/** A valid task as a daemon serves it; `extra` overrides any field. */
 export const boardTask = (id: string, extra: Record<string, unknown> = {}): TaskView =>
   CardViewSchema.parse({
     format: 1,
@@ -134,7 +134,7 @@ export const boardTask = (id: string, extra: Record<string, unknown> = {}): Task
     ...extra,
   });
 
-/** A card as a newer daemon serves it: who it was asked for, and (when given) the human card it serves. */
+/** A task as a newer daemon serves it: who it was asked for, and (when given) the human task it serves. */
 export const originTask = (
   id: string,
   origin: 'human' | 'agent',
@@ -146,7 +146,7 @@ export const originTask = (
     humanParent === undefined ? { origin } : { origin, humanParent },
   );
 
-/** The cards as an older daemon serves them: nothing says who asked for any of them. */
+/** The tasks as an older daemon serves them: nothing says who asked for any of them. */
 export const unasked = (tasks: readonly TaskView[]): TaskView[] => tasks.map(({ askedBy: _askedBy, ...rest }) => rest);
 
 export const boardAnswer = (tasks: readonly TaskView[], extra: Partial<BoardResponse> = {}): BoardResponse => ({
@@ -159,7 +159,7 @@ export const boardAnswer = (tasks: readonly TaskView[], extra: Partial<BoardResp
   ...extra,
 });
 
-/** A port that answers an empty board, no cards and no projects route; override what a test cares about. */
+/** A port that answers an empty board, no tasks and no projects route; override what a test cares about. */
 export const fakePort = (overrides: Partial<BoardPort> = {}): BoardPort & { readonly calls: string[] } => {
   const calls: string[] = [];
   const port: BoardPort = {
@@ -255,7 +255,7 @@ export const flush = async (): Promise<void> => {
   for (let turn = 0; turn < 5; turn += 1) await new Promise(done => setTimeout(done, 0));
 };
 
-/** The merged board of one machine, for tests that draw cards and need real `BoardModel` cards. */
+/** The merged board of one machine, for tests that draw tasks and need real `BoardModel` tasks. */
 export const boardModelOf = async (
   tasks: readonly TaskView[],
   filters?: import('../../../app/lib/board-model.ts').BoardFilters,

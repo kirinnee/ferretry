@@ -12,7 +12,7 @@ export const isBoardNudge = (record: LedgerSendRecord): boolean => {
   return by?.kind === 'ferretry' && by.feature === FEATURE;
 };
 
-/** The pull requests of the cards a nudge can name. */
+/** The pull requests of the tasks a nudge can name. */
 export interface TaskPullRequests {
   readonly id: string;
   readonly prs?: readonly { readonly number: number; readonly url: string }[];
@@ -22,9 +22,9 @@ const TASK = /&([A-Za-z]+\d+)/u;
 const PR = /\bPR #(\d+)\b/gu;
 
 /**
- * The nudge's one line with each `PR #n` it names turned into a link to that pull request, when the card it
- * is about links one. The card reference itself is the reader's to prove and open (docs/reference-standard.md);
- * a PR the card does not link stays plain words.
+ * The nudge's one line with each `PR #n` it names turned into a link to that pull request, when the task it
+ * is about links one. The task reference itself is the reader's to prove and open (docs/reference-standard.md);
+ * a PR the task does not link stays plain words.
  */
 export function linkNudgePullRequests(text: string, tasks: readonly TaskPullRequests[] | undefined): string {
   const written = TASK.exec(text)?.[1]?.toUpperCase();

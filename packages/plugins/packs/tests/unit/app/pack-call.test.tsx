@@ -29,7 +29,7 @@ mockUi({
   useReferenceSurface: () => ({}),
   cn: (...parts: unknown[]) => parts.filter(Boolean).join(' '),
 });
-// The card is loaded after the seam is mocked.
+// The task is loaded after the seam is mocked.
 const task = async () => await import('../../../app/components/pack-call.tsx');
 
 let view: Mounted | null = null;

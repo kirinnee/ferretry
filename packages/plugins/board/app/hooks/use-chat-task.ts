@@ -1,8 +1,8 @@
 /**
- * THE FERRET'S CARDS: what one ferret's side panel reads.
+ * THE FERRET'S TASKS: what one ferret's side panel reads.
  *
  * One read of the board (this machine, this ferret's project) through the store, so the chip, the panel and the
- * drawer draw the same card and a change reaches them together.
+ * drawer draw the same task and a change reaches them together.
  */
 
 import { useMemo } from 'react';
@@ -18,11 +18,11 @@ export interface UseChatCardInput {
   readonly connection: DaemonConnection;
   readonly machineName: string;
   readonly ferret: string;
-  /** The ferret's focus card, when the host knows it. */
+  /** The ferret's focus task, when the host knows it. */
   readonly focus: TaskRef | null;
-  /** The machine's ferrets, for the helpers' cards. */
+  /** The machine's ferrets, for the helpers' tasks. */
   readonly ferrets: readonly FerretLineage[] | undefined;
-  /** "Internal": the panel draws the cards ferrets made for other ferrets. */
+  /** "Internal": the panel draws the tasks ferrets made for other ferrets. */
   readonly agents: boolean;
 }
 
@@ -39,8 +39,8 @@ export const useChatTask = ({
     () => [{ connection, name: machineName }],
     [connection, machineName],
   );
-  // Every card is read, agent cards too: the header chip must find a helper's own focus card. What the panel
-  // draws is `chatCards`' business.
+  // Every task is read, agent tasks too: the header chip must find a helper's own focus task. What the panel
+  // draws is `chatTasks`' business.
   const filters = useMemo(() => ({ ...NO_BOARD_FILTERS, project: null, agents: true }), []);
   const board = useBoard(store, machines, filters);
   const relatives = useMemo(() => descendantSessionIds(ferrets ?? [], ferret), [ferrets, ferret]);

@@ -1,7 +1,7 @@
 /**
- * THE GATE'S CARD LIST, FROM ONE PASS. The gates read every card on the board; each card is built from ONE sweep
- * (`views`, `laneSets`) and ONE snapshot (`cards`), the way v4's `board-gate-cards` did. Nothing here derives the board
- * again per card: a board of N cards costs one derivation, not N.
+ * THE GATE'S TASK LIST, FROM ONE PASS. The gates read every task on the board; each task is built from ONE sweep
+ * (`views`, `laneSets`) and ONE snapshot (`tasks`), the way v4's `board-gate-cards` did. Nothing here derives the board
+ * again per task: a board of N tasks costs one derivation, not N.
  */
 import type { Task, TaskView } from '../../../contract/index.ts';
 import type { TaskAudience } from './authority.ts';
@@ -9,16 +9,16 @@ import type { GateTask } from './gate-policy.ts';
 import { BoardIndex, type LaneSets, stillBuilding } from './graph.ts';
 
 export interface GateTasksPass {
-  /** The one sweep: every card's derived view. */
+  /** The one sweep: every task's derived view. */
   readonly views: readonly TaskView[];
-  /** The one snapshot of the stored cards and their lane sets. */
+  /** The one snapshot of the stored tasks and their lane sets. */
   readonly cards: readonly Task[];
   readonly laneSets: LaneSets;
   readonly machineId: string;
   /** A project's name, asked once per project. */
   readonly projectName: (project: Task['projectId']) => Promise<string | undefined>;
   readonly audienceOf: (task: Task) => Promise<TaskAudience>;
-  /** The rare card the sweep has no view for (written between the sweep and the snapshot): derived on its own. */
+  /** The rare task the sweep has no view for (written between the sweep and the snapshot): derived on its own. */
   readonly blockedByOf: (task: Task) => Promise<NonNullable<GateTask['blockedBy']>>;
 }
 

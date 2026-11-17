@@ -181,7 +181,7 @@ const clock = (at: string): string => `${at.slice(0, 10)} ${at.slice(11, 16)} UT
 /**
  * What a revived session is told.
  *
- * An AUTO session is told why and to carry on, on its focus card when it has one (`focus-card.ts`). An
+ * An AUTO session is told why and to carry on, on its focus task when it has one (`focus-task.ts`). An
  * INTERACTIVE one gets the notice only: somebody is typing into that terminal, and an instruction to "continue"
  * would be Ferretry putting words in the owner's turn.
  */

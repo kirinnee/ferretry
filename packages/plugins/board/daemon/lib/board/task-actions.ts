@@ -1,5 +1,5 @@
 /**
- * THE CARD RULES: what each request does to one card, as pure functions of the card, the request and the
+ * THE CARD RULES: what each request does to one task, as pure functions of the task, the request and the
  * facts the service gathered first (lanes, the board graph, the caller's standing).
  *
  * Every rule that refuses throws a {@link BoardError} whose message says what to do instead. The rules
@@ -8,11 +8,11 @@
  * - **Authority** (§2.5) is checked first, by {@link requireStanding}.
  * - **A move back needs a reason**, and **a move back by the owner is a reopen** (§2.9): one write records
  *   the `reopened` event and appends the owner's words to the clarifications, and the service then
- *   delivers it to the card's ferret.
+ *   delivers it to the task's ferret.
  * - **Gates** (§2.3): only the owner passes an owner-gated lane (`needsOwner`), so only the owner closes.
  * - **Files ride a reopen only**: an owner's move back may carry the files the owner attached ("Not good"),
  *   which the service resolved first; the `reopened` event names them and the delivery carries them on.
- * - **Dependencies** (§2.7): a card with unfinished blockers cannot move to a later CATEGORY; only the
+ * - **Dependencies** (§2.7): a task with unfinished blockers cannot move to a later CATEGORY; only the
  *   owner overrides a dependency, and the override is recorded. Cycles are refused.
  */
 import {
@@ -72,23 +72,23 @@ import { taskVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibil
 /** The facts every rule may consult, gathered by the service before it calls one. */
 export interface TaskContext {
   readonly now: string;
-  /** Who acts, as the card records them: an owner on the admin token says so in its `via`. */
+  /** Who acts, as the task records them: an owner on the admin token says so in its `via`. */
   readonly actor: TaskActor;
   readonly standing: BoardStanding;
-  /** True when the caller is the card's assignee and the new assignee is its own descendant (`mayHandDown`). */
+  /** True when the caller is the task's assignee and the new assignee is its own descendant (`mayHandDown`). */
   readonly handsDown?: boolean;
-  /** The lead of the caller's own that holds the card, when the caller may CLAIM it (`claimableFrom`). */
+  /** The lead of the caller's own that holds the task, when the caller may CLAIM it (`claimableFrom`). */
   readonly claimedFrom?: string;
-  /** The ended owner ferret a live lead may ADOPT the card from (the service judged the orphan: `BoardService.orphanedOwner`). */
+  /** The ended owner ferret a live lead may ADOPT the task from (the service judged the orphan: `BoardService.orphanedOwner`). */
   readonly adoptedFrom?: string;
-  /** The lanes of the card's own board. */
+  /** The lanes of the task's own board. */
   readonly laneSet: LaneSet;
   readonly index: BoardIndex;
   readonly laneSets: LaneSets;
   /** The version this daemon runs, for `release.running`; absent or `null` when it is not known. */
   readonly runningVersion?: string | null;
   /**
-   * Who the card's gates ask (`CardAudience`): an internal card's owner ferret and leads pass its gates themselves.
+   * Who the task's gates ask (`TaskAudience`): an internal task's owner ferret and leads pass its gates themselves.
    * Absent reads as `external`, the strict reading: only the owner passes a gate.
    */
   readonly audience?: TaskAudience;
@@ -102,10 +102,10 @@ export interface TaskContext {
   };
 }
 
-/** What a rule decided. `task: null` changes nothing on the card. */
+/** What a rule decided. `task: null` changes nothing on the task. */
 export interface TaskOutcome {
   readonly task: Task | null;
-  /** Set when the card was sent back with someone's words: the service delivers it to its ferret. */
+  /** Set when the task was sent back with someone's words: the service delivers it to its ferret. */
   readonly reopened?: {
     readonly from: string;
     readonly to: string;
@@ -120,7 +120,7 @@ export const OWNER_MOVE_SOURCE = 'owner (board move)';
 
 type NewEvent = TaskEvent extends infer E ? (E extends TaskEvent ? Omit<E, 'seq' | 'at' | 'actor'> : never) : never;
 
-/** The card with one more history event: next seq, this instant, this actor. */
+/** The task with one more history event: next seq, this instant, this actor. */
 export const withEvent = (task: Task, event: NewEvent, context: Pick<TaskContext, 'now' | 'actor'>): Task => ({
   ...task,
   history: [
@@ -139,7 +139,7 @@ export const requireStanding = (
   }
 };
 
-/** The refusal for a reassign: an assignee is told the one reassign it has, handing the card down. */
+/** The refusal for a reassign: an assignee is told the one reassign it has, handing the task down. */
 const requireAssign = (standing: BoardStanding, task: Pick<Task, 'id' | 'owner' | 'assignee'>): void => {
   if (mayDo('assign', standing)) return;
   const message =
@@ -180,7 +180,7 @@ const requireOpen = (task: Task, doing: string): void => {
 };
 
 /**
- * Only the owner enters an owner-gated closed lane — or, on an internal card moved, its owner ferret or a lead
+ * Only the owner enters an owner-gated closed lane — or, on an internal task moved, its owner ferret or a lead
  * (`mayPassGate`): the refusal for anyone else.
  */
 const requireOwnerForClosed = (
@@ -199,13 +199,13 @@ const requireOwnerForClosed = (
 };
 
 // ---------------------------------------------------------------------------------------------------
-// Gates: the one stopping point (docs/board.md § Cards show progress)
+// Gates: the one stopping point (docs/board.md § Tasks show progress)
 // ---------------------------------------------------------------------------------------------------
 
 const isGate = (lane: Lane): boolean => laneStage(lane).kind === 'gate';
 
 /**
- * The gate lanes the card's variant walks strictly between its lane and `target`, in order. Entering a gate is not
+ * The gate lanes the task's variant walks strictly between its lane and `target`, in order. Entering a gate is not
  * passing it, so `target` never counts; a move back passes none.
  */
 export const gatesBetween = (laneSet: LaneSet, task: Pick<Task, 'laneId' | 'workflow'>, target: Lane): Lane[] => {
@@ -273,7 +273,7 @@ const move = (task: Task, to: string, reason: string | undefined, context: TaskC
   };
 };
 
-/** The reopen itself: the owner's words become a clarification, then the card goes to `to` (§2.9). */
+/** The reopen itself: the owner's words become a clarification, then the task goes to `to` (§2.9). */
 const reopenTo = (
   task: Task,
   to: string,
@@ -330,7 +330,7 @@ const reopen = (
     !isBackward(context.laneSet, task.laneId, action.to) &&
     !mayPassGate(context.standing, context.audience ?? 'external')
   ) {
-    // A dropped card comes back where it was dropped, or earlier: a drop is no way past a gate.
+    // A dropped task comes back where it was dropped, or earlier: a drop is no way past a gate.
     const from = requireLane(context.laneSet, task.laneId);
     throw new BoardError(
       'owner-gate',
@@ -342,12 +342,12 @@ const reopen = (
 };
 
 /**
- * A daemon move on a real signal (§3.1): into the lane the trigger names for the card's workflow. It
- * never goes backwards (unless `backward` says the facts pulled the card back, see {@link laneFromFacts})
- * and never moves a dropped card, and it is NOT stopped by dependencies, because
+ * A daemon move on a real signal (§3.1): into the lane the trigger names for the task's workflow. It
+ * never goes backwards (unless `backward` says the facts pulled the task back, see {@link laneFromFacts})
+ * and never moves a dropped task, and it is NOT stopped by dependencies, because
  * reality wins over the rule; the history says what it was blocked by. `null` when nothing moves.
  *
- * IT NEVER PASSES A GATE (docs/board.md § Cards show progress): a card waiting at one stays there, whatever the
+ * IT NEVER PASSES A GATE (docs/board.md § Tasks show progress): a task waiting at one stays there, whatever the
  * signal, and a move that would pass one on the way stops in it. Only the owner's own report (`passGates`) goes on.
  */
 export const triggerMove = (
@@ -391,10 +391,10 @@ export const triggerMove = (
 };
 
 /**
- * The first gate a move from the card's lane to `target` would pass: the card's own lane, else a lane of its
+ * The first gate a move from the task's lane to `target` would pass: the task's own lane, else a lane of its
  * variant strictly between the two (`laneStage`, so a stored or a derived gate). Entering a gate is not passing
- * it, so `target` itself never counts, nor does a gate the card's variant skips. `undefined` when it passes
- * none, a backward target included. Throws `unknown-lane` for a card in a lane the set lacks.
+ * it, so `target` itself never counts, nor does a gate the task's variant skips. `undefined` when it passes
+ * none, a backward target included. Throws `unknown-lane` for a task in a lane the set lacks.
  */
 export const gateOnTheWay = (
   laneSet: LaneSet,
@@ -407,11 +407,11 @@ export const gateOnTheWay = (
 
 /**
  * An external trigger somebody reported (the task action `trigger`): something Ferretry cannot see happened —
- * a deploy finished, a reviewer approved — so the card moves the way that trigger moves it. The move is the
+ * a deploy finished, a reviewer approved — so the task moves the way that trigger moves it. The move is the
  * daemon's, through {@link triggerMove}, so it is recorded `auto` with the trigger and `reportedBy` names
  * the caller. Never backward and never into an owner-gated closed lane; the report of a non-owner never closes a
- * card at all (a fact may close a set with no verify lane; a caller's word may not), never moves a blocked card on
- * to a later category (as a move does not), and never passes a gate the owner has not answered: neither the card's own lane nor one its variant walks on the way
+ * task at all (a fact may close a set with no verify lane; a caller's word may not), never moves a blocked task on
+ * to a later category (as a move does not), and never passes a gate the owner has not answered: neither the task's own lane nor one its variant walks on the way
  * ({@link gateOnTheWay}). Already there, or past it, is no change.
  */
 const report = (
@@ -454,7 +454,7 @@ const report = (
       ['owner-human'],
     );
   }
-  // A dependency holds a caller's word as it holds a move: only a fact, or the owner, moves a blocked card on.
+  // A dependency holds a caller's word as it holds a move: only a fact, or the owner, moves a blocked task on.
   const blockers =
     context.standing !== 'owner-human' && rank(context.laneSet, target.id) > rank(context.laneSet, task.laneId)
       ? blockedBy(task, context.index, context.laneSets)
@@ -486,11 +486,11 @@ const reportedBy = (moved: Task, context: Pick<TaskContext, 'actor'>): Task => (
 });
 
 /**
- * Catches a card up to its own PR facts ({@link laneFromFacts}): the daemon's automatic move, recorded with the
+ * Catches a task up to its own PR facts ({@link laneFromFacts}): the daemon's automatic move, recorded with the
  * trigger and the fact that moved it. It stops at a gate like every daemon move ({@link triggerMove}): facts move a
- * card into one, never out of or past it — not on, and not back for an open PR. `null` when the facts
- * put the card where it already is, or have no opinion. Whoever asked for the write, the move is the
- * daemon's: a card the facts moved was moved by no one.
+ * task into one, never out of or past it — not on, and not back for an open PR. `null` when the facts
+ * put the task where it already is, or have no opinion. Whoever asked for the write, the move is the
+ * daemon's: a task the facts moved was moved by no one.
  */
 export const reconcileFacts = (task: Task, context: TaskContext): Task | null => {
   const move = laneFromFacts(task, context.laneSet, task.workflow, {
@@ -521,7 +521,7 @@ const closeTrigger = (task: Task, reason: string): LaneTrigger =>
       : 'pr.merged';
 
 /**
- * The daemon's automatic move of a card into the board's closed lane, with the reason beside it. It is for a sub-card
+ * The daemon's automatic move of a task into the board's closed lane, with the reason beside it. It is for a sub-card
  * that shipped or whose helper finished ({@link sub-card-close}); the owner's own Done is a verdict, not this.
  */
 export const closeAsDaemon = (task: Task, reason: string, context: TaskContext): Task | null => {
@@ -546,11 +546,11 @@ export const closeAsDaemon = (task: Task, reason: string, context: TaskContext):
 };
 
 /**
- * THE ONE PLACE THE DAEMON PASSES A GATE (docs/board.md § Cards show progress; their asks ride the agenda). A card at a
+ * THE ONE PLACE THE DAEMON PASSES A GATE (docs/board.md § Tasks show progress; their asks ride the agenda). A task at a
  * TRY-IT lane with nothing to try is moved by the daemon into the board's closed lane, reason beside it, so nobody is
  * asked to tap Done on it. Only the daemon (the `trigger` standing), only out of a lane whose gate has a reopen option
  * (a try-it), only into the closed lane. Everything else about a gate stays the owner's: a ferret's move past one is
- * still refused by `move`, and nothing on the wire reaches this. `null` when the card is not at such a gate, is
+ * still refused by `move`, and nothing on the wire reaches this. `null` when the task is not at such a gate, is
  * dropped, or the board has no closed lane: nothing is written.
  */
 export const closeNothingToTry = (task: Task, reason: string, context: TaskContext): Task | null => {
@@ -651,7 +651,7 @@ const undepend = (
 // Links
 // ---------------------------------------------------------------------------------------------------
 
-/** What another card already caches of the same PR (the freshest look), under this link's own spelling. */
+/** What another task already caches of the same PR (the freshest look), under this link's own spelling. */
 const cachedElsewhere = (url: string, index: BoardIndex): PrLink | null => {
   const parts = prUrlParts(url);
   if (parts === null) return null;
@@ -666,7 +666,7 @@ const cachedElsewhere = (url: string, index: BoardIndex): PrLink | null => {
   return freshest === null ? null : { ...freshest, url, repo: parts.repo };
 };
 
-/** A newly linked PR: what another card already caches of it, else the URL and nothing GitHub has said yet. */
+/** A newly linked PR: what another task already caches of it, else the URL and nothing GitHub has said yet. */
 const unpolledPr = (url: string, index: BoardIndex): PrLink => {
   const parts = prUrlParts(url);
   if (parts === null) throw new BoardError('invalid', `${url} is not a GitHub pull request URL`);
@@ -740,7 +740,7 @@ const link = (
 /** The fields only the owner side may rewrite: they change what the work IS. */
 const PLAN_FIELDS: readonly BoardEditableField[] = ['title', 'brief'];
 
-/** A card's status with the parts an edit names replaced, inside the card's own write (docs/board.md § The card's Status). */
+/** A task's status with the parts an edit names replaced, inside the task's own write (docs/board.md § The task's Status). */
 const mergedProgress = (task: Task, parts: Partial<Progress> | undefined): Progress | undefined =>
   parts === undefined
     ? undefined
@@ -757,7 +757,7 @@ const edit = (
 ): TaskOutcome => {
   requireStanding('edit', context.standing, task);
   const action = { ...request, progress: mergedProgress(task, request.progress) };
-  // READ BEFORE WRITE (`fy card patch`): the writer read the card at `revision`; a change since would be overwritten unseen.
+  // READ BEFORE WRITE (`fy task patch`): the writer read the task at `revision`; a change since would be overwritten unseen.
   if (action.revision !== undefined && taskRevision(task) !== action.revision) {
     throw new BoardError(
       'version-conflict',
@@ -780,14 +780,14 @@ const edit = (
 };
 
 /**
- * Whether `to` is already the card's recorded choice. The same value as the derived default is still a change when
+ * Whether `to` is already the task's recorded choice. The same value as the derived default is still a change when
  * nobody chose it: recording the choice is what keeps a later repair of the default from undoing it.
  */
 const alreadyChosen = (task: Task, to: TaskVisibility): boolean =>
   visibilityChosen(task) && taskVisibility(task) === to;
 
 /**
- * Makes a card public or private ({@link visibilityVerdict} says who may). The change is stored on the card and
+ * Makes a task public or private ({@link visibilityVerdict} says who may). The change is stored on the task and
  * written to its history as a note, which every app already reads.
  */
 const setVisibility = (
@@ -802,7 +802,7 @@ const setVisibility = (
 };
 
 /**
- * `card` (which may already carry other edits) made `to`, if the caller's standing on `original` allows it. The choice
+ * `task` (which may already carry other edits) made `to`, if the caller's standing on `original` allows it. The choice
  * is stored as chosen, so no later repair of the derived default can undo it.
  */
 const visibilityChanged = (
@@ -844,7 +844,7 @@ const file = (
     };
   }
   if (held) throw new BoardError('invalid', `${ref} already claims ${action.path}`);
-  // A claim that clashes with an open card's queues this one behind it (docs/design/clash-queue.md).
+  // A claim that clashes with an open task's queues this one behind it (docs/design/clash-queue.md).
   return {
     task: queueBehindClashes(
       { ...withEvent(task, { type: 'file-claimed', path: action.path }, context), files: [...task.files, action.path] },
@@ -855,9 +855,9 @@ const file = (
 };
 
 /**
- * Where a refiled card lands on the other board when its PR facts say nothing ({@link factsLandingLane}):
+ * Where a refiled task lands on the other board when its PR facts say nothing ({@link factsLandingLane}):
  * the named lane, else the first lane there of the category it is in now, else that board's first backlog
- * lane. A closed card stays closed: it lands in a closed lane of the other board even when its workflow does
+ * lane. A closed task stays closed: it lands in a closed lane of the other board even when its workflow does
  * not walk one, rather than being reopened.
  */
 const refileLane = (task: Task, from: LaneSet, target: LaneSet, laneId: string | undefined): Lane => {
@@ -872,11 +872,11 @@ const refileLane = (task: Task, from: LaneSet, target: LaneSet, laneId: string |
 const isClosedLane = (lane: Lane): boolean => lane.category === 'closed';
 
 /**
- * Where an open card lands on the other board when its PR facts have a say there: the last active lane its
+ * Where an open task lands on the other board when its PR facts have a say there: the last active lane its
  * variant walks (where work resumes), for {@link reconcileFacts} to move on with the fact in its history.
- * Landing by category instead would put a card merged but not released, sitting in the Unfiled board's To
- * test, into a Released · to test lane, and facts never move a card back. `undefined` when the facts say
- * nothing, so the card lands by category.
+ * Landing by category instead would put a task merged but not released, sitting in the Unfiled board's To
+ * test, into a Released · to test lane, and facts never move a task back. `undefined` when the facts say
+ * nothing, so the task lands by category.
  */
 const factsLandingLane = (task: Task, target: LaneSet, context: TaskContext): Lane | undefined => {
   const lanes = variantLanesOf(target, task.workflow);
@@ -893,7 +893,7 @@ const variantLanesOf = (laneSet: LaneSet, workflow: Task['workflow']): readonly 
   return lanes.ok ? lanes.value : laneSet.lanes;
 };
 
-/** The first backlog lane a workflow walks, else its first lane: where a new card goes. */
+/** The first backlog lane a workflow walks, else its first lane: where a new task goes. */
 const entryLane = (laneSet: LaneSet, workflow: Task['workflow']): Lane => {
   const backlog = firstLaneOfCategory(laneSet, workflow, 'backlog');
   return backlog.ok ? backlog.value : (laneSet.lanes[0] as Lane);
@@ -914,8 +914,8 @@ const refile = (
       `that project has no lanes yet; propose them with \`fy board lanes propose\` first`,
     );
   }
-  // A refile keeps the card's state. The owner already closed a card that is closed here, so carrying it
-  // into the other board's closed lane is no closing; the gate is for a card that is not closed yet.
+  // A refile keeps the task's state. The owner already closed a task that is closed here, so carrying it
+  // into the other board's closed lane is no closing; the gate is for a task that is not closed yet.
   const source = categoryOf(context.laneSet, task.laneId);
   const alreadyClosed = source.ok && source.value === 'closed';
   // Its facts land it where work resumes there, and move it on from there only as far as the first gate.
@@ -950,9 +950,9 @@ const refile = (
 };
 
 /**
- * Where a refile lands for anyone who may not pass a gate (docs/board.md § Cards show progress): never past a gate of
+ * Where a refile lands for anyone who may not pass a gate (docs/board.md § Tasks show progress): never past a gate of
  * the other board's variant — a landing with one before it stops in that gate, and a lane NAMED past one is refused —
- * and a card waiting at a gate never lands in a later stage than that gate's, nor leaves it for a lane that is not a
+ * and a task waiting at a gate never lands in a later stage than that gate's, nor leaves it for a lane that is not a
  * gate. Throws `owner-gate` naming the gate.
  */
 const refileGateLanding = (
@@ -993,8 +993,8 @@ const sameParent = (left: TaskRef | null, right: TaskRef | null): boolean =>
   left === null || right === null ? left === right : sameRef(left, right);
 
 /**
- * Moves a card under another card, or to the top level. The card's owner, its leads and the owner (human)
- * may; the new parent must also be a card the caller may add a child under (`parentStanding`), so a card
+ * Moves a task under another task, or to the top level. The task's owner, its leads and the owner (human)
+ * may; the new parent must also be a task the caller may add a child under (`parentStanding`), so a task
  * never lands on a tree its caller cannot write.
  */
 const reparent = (
@@ -1027,8 +1027,8 @@ const reparent = (
   const moved = task.visibility === undefined ? sitting : withDefaultVisibility(sitting);
   const was = taskVisibility(task);
   const now = taskVisibility(moved);
-  // Where a card sits is part of what decides who can see it: a card never becomes a public sub-card, and a
-  // person's card is never hidden, by a caller the visibility rules would stop doing either directly.
+  // Where a task sits is part of what decides who can see it: a task never becomes a public sub-card, and a
+  // person's task is never hidden, by a caller the visibility rules would stop doing either directly.
   const refusal =
     now === 'public' && task.parent === null && to !== null
       ? visibilityVerdict(moved, 'public', context.standing)
@@ -1047,7 +1047,7 @@ const reparent = (
 };
 
 /**
- * Applies one action request to one card. `focus` changes nothing on the card (the service records it
+ * Applies one action request to one task. `focus` changes nothing on the task (the service records it
  * on the session), so it answers `task: null` once its authority is proved. `refile` needs the target
  * board's lanes, which the service reads first. `reparent` needs the caller's standing on the NEW parent.
  */
@@ -1235,7 +1235,7 @@ export interface NewTaskContext {
   readonly index: BoardIndex;
 }
 
-/** A new card, before the store has it: in its variant's first backlog lane unless one is named. */
+/** A new task, before the store has it: in its variant's first backlog lane unless one is named. */
 export const newTask = (request: TaskCreateRequest, context: NewTaskContext): Task => {
   const lane =
     request.laneId === undefined

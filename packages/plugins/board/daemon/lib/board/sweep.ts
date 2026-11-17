@@ -1,6 +1,6 @@
 /**
  * THE BOARD SWEEP: the board's own tick (`board-design.md` §3.3 nudges, §2.7 unblocks). Owned by the
- * board, not the Warden: it is about cards, and a card's ferret may be perfectly healthy while the card
+ * board, not the Warden: it is about tasks, and a task's ferret may be perfectly healthy while the task
  * goes stale.
  *
  * Each tick reads the board once, compares it with what the last tick saw ({@link SweepMemory}, a small
@@ -8,34 +8,34 @@
  * send path, as a plain sentence. Who sent it is the queue item's metadata (`QueuedMessage.by`, which the
  * app shows as "Ferretry · Board"), never text in the message:
  *
- * 1. **A stale card's ferret is nudged**: `&F412 has had no activity for 3h in Implement. Move it, note
+ * 1. **A stale task's ferret is nudged**: `&F412 has had no activity for 3h in Implement. Move it, note
  *    why, block it, or drop it.` The assignee while it is alive; else the nearest live lead above it; the
- *    card's OWNER (its creator) only when nobody in that line is left, and an interactive session last of all
- *    ({@link noticeRecipient}). At most once per card per its lane's `staleAfter` whoever it goes to; never
- *    to a session that declared a wait; never for a waiting card (a waiting card is not stale, by
+ *    task's OWNER (its creator) only when nobody in that line is left, and an interactive session last of all
+ *    ({@link noticeRecipient}). At most once per task per its lane's `staleAfter` whoever it goes to; never
+ *    to a session that declared a wait; never for a waiting task (a waiting task is not stale, by
  *    derivation).
- * 2. **A dependent card's assignee is told it can go ahead** once its last blocker ships:
+ * 2. **A dependent task's assignee is told it can go ahead** once its last blocker ships:
  *    `&F20 can go ahead: &F18 merged.` Nobody else is.
  *
- * NO NEWS. A card's move, block, drop, reopen or done is never typed into anybody's chat — not the
+ * NO NEWS. A task's move, block, drop, reopen or done is never typed into anybody's chat — not the
  * lead's, not alone, and not in any digest: the owner's "no batched digest" rule (2026-10-30: "there should
  * not be any append or prepend on any feature") still holds for everything the board, and every other part
  * of Ferretry, sends. The one digest the owner has allowed (2026-11-03) is for FERRET messages that a
  * ferret labelled `fyi` (`fy send --kind fyi`), which the queue holds and delivers together with the
  * receiver's other pending ferret messages (docs/message-delivery.md § Labels and combined delivery). A
  * board message is the daemon's, never labelled, and never held. The ferret that finished tells its lead in
- * its own words, the board shows the state, and the card's history keeps every event.
+ * its own words, the board shows the state, and the task's history keeps every event.
  *
  * 3. **A helper whose ferret ended is closed**: a sub-card with no PR to ship, assigned to a ferret that is gone for
  *    longer than {@link HELPER_ENDED_GRACE_MS}, closes as "helper finished" (docs/board.md § Sub-cards close
  *    themselves). A sub-card whose ferret is merely idle, unreadable or the lead itself is never closed here.
  *
- * 4. **A card whose ferret ended goes back to its lead**: an open card in a working lane (`active` or `review`),
+ * 4. **A task whose ferret ended goes back to its lead**: an open task in a working lane (`active` or `review`),
  *    whose assignee is gone for longer than the grace, is assigned to the nearest live ancestor of that ferret,
- *    with `returned to <lead>: <ferret> finished` in its history (docs/board.md § A finished helper's card goes
+ *    with `returned to <lead>: <ferret> finished` in its history (docs/board.md § A finished helper's task goes
  *    back to its lead). It sits behind rule 3: a helper that closes is not also returned.
  *
- * The first sight of a card is a baseline: a daemon that boots onto a board with a thousand cards says
+ * The first sight of a task is a baseline: a daemon that boots onto a board with a thousand tasks says
  * nothing about any of them.
  *
  * {@link planSweep} is pure; {@link BoardSweep} does the IO through its ports.
@@ -72,7 +72,7 @@ export type SweepMemory = SweepFile;
 export const EMPTY_SWEEP_MEMORY: SweepMemory = { format: 1, sweptAt: null, nudged: {}, seen: {} };
 
 /**
- * A message to send: one queued message to one ferret about one card. `stale` is throttled by the card's
+ * A message to send: one queued message to one ferret about one task. `stale` is throttled by the task's
  * lane threshold; `unblocked` is said once, when the last blocker ships.
  */
 interface BoardNudge {
@@ -88,11 +88,11 @@ export interface SweepPlan {
   readonly nudges: readonly BoardNudge[];
   /** The open helpers whose ferret ended with no PR to ship: they close. */
   readonly closes: readonly TaskId[];
-  /** The open cards whose ferret ended and that have a live lead above it: they go back to that lead. */
+  /** The open tasks whose ferret ended and that have a live lead above it: they go back to that lead. */
   readonly returns: readonly TaskReturn[];
 }
 
-/** One card going back: to `lead`, because `from` (its ferret) ended. */
+/** One task going back: to `lead`, because `from` (its ferret) ended. */
 interface TaskReturn {
   readonly id: TaskId;
   readonly lead: string;
@@ -116,11 +116,11 @@ export const formatIdle = (ms: number): string => {
   return hours < 48 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
 };
 
-/** The nudge a stale card's ferret is sent. */
+/** The nudge a stale task's ferret is sent. */
 export const nudgeMessage = (task: Pick<TaskView, 'id'>, idleMs: number, lane: string): string =>
   `${formatTaskRef(task)} has had no activity for ${formatIdle(idleMs)} in ${lane}. Move it, note why, block it, or drop it.`;
 
-/** What a dependent card's assignee is told once its last blocker ships: `&F20 can go ahead: &F18 merged.` */
+/** What a dependent task's assignee is told once its last blocker ships: `&F20 can go ahead: &F18 merged.` */
 const unblockedMessage = (task: Pick<TaskView, 'id'>, shipped: readonly string[]): string =>
   `${formatTaskRef(task)} can go ahead: ${shipped.join(', ')}.`;
 
@@ -139,7 +139,7 @@ const refKey = (ref: TaskRef): string => `${ref.machineId ?? ''}/${ref.id}`;
 const isOpen = (view: TaskView, board: SweepBoard): boolean =>
   view.dropped === null && taskCategory(view, board.laneSets) !== 'closed';
 
-/** The card a ref names on this card's own machine; `undefined` for one elsewhere or not here. */
+/** The task a ref names on this task's own machine; `undefined` for one elsewhere or not here. */
 const localView = (
   view: Pick<TaskView, 'machineId'>,
   ref: TaskRef,
@@ -167,7 +167,7 @@ const shippedBlockers = (
 };
 
 /**
- * Who a card's go-ahead is for, or `null`: its assignee, when its last blocker SHIPPED since `mark` (one
+ * Who a task's go-ahead is for, or `null`: its assignee, when its last blocker SHIPPED since `mark` (one
  * that left without shipping — a dependency dropped, an override — is no news) and it is alive to act.
  */
 const unblockNudge = (
@@ -185,7 +185,7 @@ const unblockNudge = (
 };
 
 /**
- * Whether a card is a helper whose ferret has ended: a sub-card handed to another ferret (never the lead's own
+ * Whether a task is a helper whose ferret has ended: a sub-card handed to another ferret (never the lead's own
  * bookkeeping), with no PR to ship, whose session is gone and untouched for the grace.
  */
 const helperEnded = (view: TaskView, roster: FerretRoster, nowMs: number): boolean => {
@@ -193,8 +193,8 @@ const helperEnded = (view: TaskView, roster: FerretRoster, nowMs: number): boole
 };
 
 /**
- * Who a stale card's nudge goes to, or `null` when nobody should be nudged now: the card's assignee while it is
- * alive, else the nearest live lead above it, the card's owner only when nobody in that line is left
+ * Who a stale task's nudge goes to, or `null` when nobody should be nudged now: the task's assignee while it is
+ * alive, else the nearest live lead above it, the task's owner only when nobody in that line is left
  * ({@link noticeRecipient}). A session that declared a wait is never nudged, and nobody is nudged in its place.
  */
 export const nudgeRecipient = (view: TaskView, roster: FerretRoster): string | null => {
@@ -266,8 +266,8 @@ export interface BoardSweepPorts {
     /** Closes a helper whose ferret ended; `true` when it closed. */
     closeEndedHelper(id: TaskId): Promise<boolean>;
     /**
-     * Hands a card whose ferret ended to its live lead; `true` when it moved. `settle` holds the standing of the
-     * sessions the return rests on and hands the card's write a fresh roster of them (see {@link FerretLivenessGuard}).
+     * Hands a task whose ferret ended to its live lead; `true` when it moved. `settle` holds the standing of the
+     * sessions the return rests on and hands the task's write a fresh roster of them (see {@link FerretLivenessGuard}).
      */
     returnToLead(
       id: TaskId,
@@ -283,7 +283,7 @@ export interface BoardSweepPorts {
   readonly diagnostics: BoardDiagnostics;
 }
 
-/** What one tick did: the stale cards nudged, the cards whose assignee was told to go ahead, and helpers closed. */
+/** What one tick did: the stale tasks nudged, the tasks whose assignee was told to go ahead, and helpers closed. */
 export interface SweepReport {
   readonly nudged: readonly TaskId[];
   readonly unblocked: readonly TaskId[];
@@ -295,7 +295,7 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
 
 /**
  * The sweep, one tick at a time. A tick that overlaps a running one does nothing. A nudge is recorded
- * only once it was sent; a go-ahead that could not be sent keeps the card's previous mark, so the next
+ * only once it was sent; a go-ahead that could not be sent keeps the task's previous mark, so the next
  * tick says it again. A failure is reported and the rest of the tick goes on.
  */
 export class BoardSweep {
@@ -303,7 +303,7 @@ export class BoardSweep {
 
   constructor(private readonly ports: BoardSweepPorts) {}
 
-  /** A stopped tick (`signal`) ends at the next read or card instead of finishing the board. */
+  /** A stopped tick (`signal`) ends at the next read or task instead of finishing the board. */
   async tick(signal?: AbortSignal): Promise<SweepReport> {
     if (this.running) return { nudged: [], unblocked: [], closed: [], returned: [] };
     this.running = true;

@@ -11,7 +11,7 @@ import {
 } from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /**
- * Where a ferret's thread ends up when the card asks on it come and go (docs/agenda.md § Card asks, Leaving), driven
+ * Where a ferret's thread ends up when the task asks on it come and go (docs/agenda.md § Task asks, Leaving), driven
  * through the real state machine, history bound included. The rules, one table row each:
  * (i) the seal is of the stored thread and is renewed by a card-ask write only if the thread matched it before;
  * (ii) a fresh seal is taken only when the first ask comes on a thread with none open;
@@ -63,7 +63,7 @@ const play = (steps: readonly Step[], fill = 0): AgendaItem => {
       request: {
         source: 'agent-raised',
         sourceRef: null,
-        // A line that only repeats the card ask (docs/agenda.md § One ask): the card asks are all the thread asks.
+        // A line that only repeats the task ask (docs/agenda.md § One ask): the task asks are all the thread asks.
         subject: 'Try it: Badge',
         why: 'Because.',
         context: 'ctx',
@@ -310,8 +310,8 @@ const rows: readonly Row[] = [
     ends: 'needs-you',
   },
   {
-    // A reply under a card ask the item asks nothing beside is not its answer, so it leaves the item in Needs you
-    // (`replyKeepsCardAskOpen`, &B165); a thread somebody wrote on since the ask is then left as it is.
+    // A reply under a task ask the item asks nothing beside is not its answer, so it leaves the item in Needs you
+    // (`replyKeepsTaskAskOpen`, &B165); a thread somebody wrote on since the ask is then left as it is.
     name: 'the owner replied after the ask woke it: the reply kept it in Needs you, and it stays as it is',
     steps: [['attach', 'F2'], ['owner-replies'], ['withdraw', 'F2']],
     ends: 'needs-you',

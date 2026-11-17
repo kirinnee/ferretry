@@ -32,7 +32,7 @@ export interface BoardGateway extends RelatedGateway {
   card(id: string): Promise<TaskResponse>;
   create(request: TaskCreateRequestInput): Promise<TaskResponse>;
   act(id: string, request: TaskActionRequestInput): Promise<TaskResponse>;
-  /** `fy card skip`: records on the calling ferret why its work has no card. The daemon refuses an owner. */
+  /** `fy task skip`: records on the calling ferret why its work has no task. The daemon refuses an owner. */
   skip(request: BoardSkipRequest): Promise<BoardSkipResponse>;
   projects(): Promise<BoardProjectsResponse>;
   ferrets(): Promise<readonly FerretDirectoryEntry[]>;
@@ -54,7 +54,7 @@ export interface BoardOutput {
   diagnostic(message: string): void;
 }
 
-/** Reading `--brief-file`, `--how-to-test-file` and `fy card patch --file` is IO; `-` is standard input. */
+/** Reading `--brief-file`, `--how-to-test-file` and `fy task patch --file` is IO; `-` is standard input. */
 export interface TextFiles {
   readText(path: string): Promise<string>;
 }

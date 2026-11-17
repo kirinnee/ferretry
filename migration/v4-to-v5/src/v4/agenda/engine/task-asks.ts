@@ -1,24 +1,24 @@
 // VENDORED from v4.291.5 (64fd8cbcc811e2341f1ab18be170d76106a44852) packages/daemon/src/lib/agenda/card-asks.ts, verbatim except the @ferretry/protocol import path.
 // The converter's own frozen v4 reader: never imported by the product. Do not edit; re-vendor instead.
 /**
- * CARD ASKS ON AN AGENDA — the pure half (docs/agenda.md § Card asks). A card never asks the owner itself: the gate
+ * TASK ASKS ON AN AGENDA — the pure half (docs/agenda.md § Task asks). A task never asks the owner itself: the gate
  * engine (`board/gate-items.ts`) puts its ask on the agenda that carries it, and this file decides what that does to
  * the agenda item:
  *
  * - **Attach.** A NEW ask wakes the agenda into Needs you, fresh — even out of a snooze or a discussion, because it
- *   is a blocker of its card — and moves its stage to `test` or `plan`. Restating an open one (a renamed lane, edited
+ *   is a blocker of its task — and moves its stage to `test` or `plan`. Restating an open one (a renamed lane, edited
  *   steps) changes only the ask. An ask the owner already answered is never asked again.
- * - **Withdraw.** The card left that gate unanswered (moved on by the owner on the Board, dropped): the open ask goes.
+ * - **Withdraw.** The task left that gate unanswered (moved on by the owner on the Board, dropped): the open ask goes.
  *   An agenda left with nothing to answer does not sit in Needs you. A ferret's own thread goes back to the turn the
  *   ask woke it out of (`woke`): the owner's, with the question it had, or the park, rest or wait it was in — unless
- *   something moved it since, which stays. The card agenda the daemon opened (`card-agenda:`) goes back to resting
+ *   something moved it since, which stays. The task agenda the daemon opened (`card-agenda:`) goes back to resting
  *   on its ferret when it holds answered asks or talk, and closes when it holds neither; one sealed and written on
  *   since stays where it is.
  * - **Answer.** The owner's answer is kept on the ask, with its receipt; the agenda RESTS, waiting on its ferret,
- *   unless another card ask on it is still open. It is never closed by the answer: the ferret marks it Done.
+ *   unless another task ask on it is still open. It is never closed by the answer: the ferret marks it Done.
  * - **Not yet.** The ask stays open, marked, and the agenda rests the same way.
  *
- * `gateAttached` mirrors the first open ask's gate on every write, for an app that predates card asks. Pure and total.
+ * `gateAttached` mirrors the first open ask's gate on every write, for an app that predates task asks. Pure and total.
  */
 import { createHash } from 'node:crypto';
 import {
@@ -41,13 +41,13 @@ import {
   parseTaskAgendaReference,
 } from '../protocol/index.ts';
 
-/** What the gate engine does to one agenda's card asks. */
+/** What the gate engine does to one agenda's task asks. */
 export type TaskAskOperation =
-  /** The card waits at this gate: the ask is put on the agenda, or restated as the card now stands. */
+  /** The task waits at this gate: the ask is put on the agenda, or restated as the task now stands. */
   | { readonly kind: 'attach'; readonly ask: Pick<AgendaTaskAsk, 'gate' | 'howToTest'> }
-  /** The card left this gate without the owner's answer: the open ask goes. */
+  /** The task left this gate without the owner's answer: the open ask goes. */
   | { readonly kind: 'withdraw'; readonly reference: string }
-  /** The owner answered and the card moved as they said: the answer is kept, and the agenda rests. */
+  /** The owner answered and the task moved as they said: the answer is kept, and the agenda rests. */
   | { readonly kind: 'answered'; readonly reference: string; readonly answer: AgendaTaskAskAnswer }
   /** The owner said Not yet: the ask stays open, and the agenda rests. */
   | { readonly kind: 'not-yet'; readonly reference: string; readonly note?: string };
@@ -57,11 +57,11 @@ export type TaskAskOutcome =
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly code: 'invalid' | 'full'; readonly message: string }
   | { readonly kind: 'changed'; readonly item: AgendaItem; readonly change: 'refreshed' | 'woke' | 'answered' }
-  /** The last open ask was withdrawn from a card agenda with nothing else in it: it closes, as the daemon's. */
+  /** The last open ask was withdrawn from a task agenda with nothing else in it: it closes, as the daemon's. */
   | { readonly kind: 'closed'; readonly item: AgendaItem; readonly note: string };
 
 /**
- * The asks an agenda keeps: every open one, then the newest answered ones up to {@link MAX_AGENDA_CARD_ASKS}, in
+ * The asks an agenda keeps: every open one, then the newest answered ones up to {@link MAX_AGENDA_TASK_ASKS}, in
  * the order they were put on it.
  */
 const bounded = (asks: readonly AgendaTaskAsk[]): AgendaTaskAsk[] => {
@@ -72,7 +72,7 @@ const bounded = (asks: readonly AgendaTaskAsk[]): AgendaTaskAsk[] => {
 };
 
 /**
- * How long after an ask is answered, or the mirror changes, a repeat from an app that predates card asks (it names no
+ * How long after an ask is answered, or the mirror changes, a repeat from an app that predates task asks (it names no
  * ask) is still read as the screen's old view: a lost response retried, or a screen that still draws the ask before.
  */
 export const LEGACY_REPLAY_MS = 2 * 60_000;
@@ -176,7 +176,7 @@ export const sealTaskAsks = (item: AgendaItem): AgendaItem => {
 const untouched = (item: AgendaItem): boolean =>
   item.cardAsksSeal !== undefined && item.cardAsksSeal === fingerprint(item);
 
-/** Whether an owner's answer to a card ask was recorded on the item after `at`. */
+/** Whether an owner's answer to a task ask was recorded on the item after `at`. */
 const answeredSince = (item: AgendaItem, at: string): boolean =>
   (item.history ?? []).some(entry => entry.kind === 'gate-answered' && entry.at > at);
 
@@ -195,12 +195,12 @@ const restedOnAnswer = (item: AgendaItem, at: string): AgendaItem => {
   return { ...open, parked: { reason: 'replied', at }, resting: { sub: 'waiting-on-ferret', at } };
 };
 
-/** Whether the daemon opened this agenda for its card (`card-agenda:`): it holds the card's asks and nothing of the ferret's. */
+/** Whether the daemon opened this agenda for its task (`card-agenda:`): it holds the task's asks and nothing of the ferret's. */
 const isTaskAgenda = (item: Pick<AgendaItem, 'raisedBy' | 'sourceRef'>): boolean =>
   item.raisedBy === 'daemon' && parseTaskAgendaReference(item.sourceRef) !== undefined;
 
 /**
- * Whether the owner or a ferret has said anything on a card's own agenda. A sealed one is read by its seal; one from
+ * Whether the owner or a ferret has said anything on a task's own agenda. A sealed one is read by its seal; one from
  * before the seal by its activity lines, where the daemon's own (`updated`, `gate-answered`) are not talk.
  */
 const talkedOn = (item: AgendaItem): boolean =>
@@ -304,7 +304,7 @@ const operate = (
     }
     // An ask from before `woke` was kept has no turn to go back to; on a ferret's thread it rests the thread only when
     // the thread is still as the daemon left it.
-    // A sealed card agenda somebody wrote on since stays where it is, as a ferret's thread does: the owner's reply
+    // A sealed task agenda somebody wrote on since stays where it is, as a ferret's thread does: the owner's reply
     // already rested it, and a ferret's answer is in front of the owner.
     if (isTaskAgenda(left) && item.cardAsksSeal !== undefined && !asLeft) {
       return { kind: 'changed', item: told, change: 'refreshed' };
@@ -345,7 +345,7 @@ const operate = (
   return { kind: 'changed', item: restedOnAnswer(answered, at), change: 'answered' };
 };
 
-/** Why a ferret may not close this agenda now, or `undefined` when it may: an open card ask is the owner's to answer. */
+/** Why a ferret may not close this agenda now, or `undefined` when it may: an open task ask is the owner's to answer. */
 export const closeRefusal = (item: AgendaItem): string | undefined => {
   const open = openTaskAsks(item);
   if (open.length === 0) return undefined;
@@ -364,15 +364,15 @@ export const restRefusal = (item: AgendaItem): string | undefined => {
 /** How far the owner got with an ask: answered, then set aside with Not yet, then not looked at. */
 const progressOf = (ask: AgendaTaskAsk): number => (ask.answer !== undefined ? 2 : ask.notYet !== undefined ? 1 : 0);
 
-/** One ask per card and entry of that card into its lane: the gate it asks about, wherever it rides. */
+/** One ask per card and entry of that task into its lane: the gate it asks about, wherever it rides. */
 const askKey = (ask: Pick<AgendaTaskAsk, 'gate'>): string => `${ask.gate.cardId}:${String(ask.gate.entry)}`;
 
-/** What moving card asks between two items (a merge, a split) came to. */
+/** What moving task asks between two items (a merge, a split) came to. */
 export type TaskAsksMove =
   | { readonly kind: 'refused'; readonly code: 'invalid' | 'full'; readonly message: string }
   | { readonly kind: 'moved'; readonly into: AgendaItem };
 
-/** The item stripped of every card ask and its mirror: what is left of one whose asks went to another item. */
+/** The item stripped of every task ask and its mirror: what is left of one whose asks went to another item. */
 export const withoutTaskAsks = (item: AgendaItem): AgendaItem => {
   const { cardAsks: _asks, gateAttached: _shown, gateAttachedChangedAt: _stamp, cardAsksSeal: _seal, ...rest } = item;
   return rest;
@@ -382,7 +382,7 @@ export const withoutTaskAsks = (item: AgendaItem): AgendaItem => {
  * The asks `incoming` brings to `item`, which keeps its own (docs/agenda.md § Merge and split): ONE per card and entry
  * — of two for the same, the one the owner got further with (an answer, then Not yet), else `item`'s — in the order
  * they were put. Nothing is trimmed to fit: more asks than one agenda carries (16 in all, answered or not, so no answer
- * or receipt is lost) are refused, and so is an item that cannot carry a card's ask, since the gate engine would not
+ * or receipt is lost) are refused, and so is an item that cannot carry a task's ask, since the gate engine would not
  * find it there and would ask again.
  *
  * An ask still waiting on the owner that comes in does to `item` what putting it there does: an item not on the owner's
@@ -437,7 +437,7 @@ export const joinTaskAsks = (
 };
 
 /**
- * `item` once the asks of the cards `moves` names went to another item (a split): it keeps the rest. An item that asked
+ * `item` once the asks of the tasks `moves` names went to another item (a split): it keeps the rest. An item that asked
  * the owner NOTHING but those asks does not sit in Needs you with nothing to answer: a ferret's thread goes back to the
  * turn the first of them ended, and any other rests on its ferret.
  */
@@ -460,7 +460,7 @@ export const leaveTaskAsks = (
 };
 
 /**
- * One operation on one open item's card asks. `stage` moves the item to the stage an ask puts it in, as the state
+ * One operation on one open item's task asks. `stage` moves the item to the stage an ask puts it in, as the state
  * machine records a stage change; `history` adds one activity line; `tidy` is the form the item is stored in.
  *
  * The thread is sealed with every change the writer makes to it, as long as it matched its seal before the write, or

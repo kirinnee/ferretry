@@ -111,7 +111,7 @@ describe('mergeBoard', () => {
     ).toEqual(['F4']);
     expect(mergeBoard(machines, { ...NO_BOARD_FILTERS, mine: true }).cards.map(entry => entry.task.id)).toEqual(['F1']);
     expect(isMine(boardTask('F2'))).toBe(false);
-    // A card opened on the admin token is an owner card underneath (its `via` only labels it): still mine.
+    // A task opened on the admin token is an owner task underneath (its `via` only labels it): still mine.
     expect(isMine({ ...boardTask('F5'), createdBy: { kind: 'owner', via: 'admin-token' } })).toBe(true);
   });
 

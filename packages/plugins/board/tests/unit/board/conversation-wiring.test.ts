@@ -7,7 +7,7 @@ import { as, boot, makeTask } from '../../integration/daemon/harness.ts';
 /**
  * Board -> Conversation (optional `uses`, lead decision D2 #12): with Conversation on, what Board owes a ferret is typed
  * through Conversation's ordinary send as the owner's; with it off, it is held with a warning and nothing fails.
- * Ferrets' `ferret.started` makes a started ferret's card (today's `SessionCards.open`).
+ * Ferrets' `ferret.started` makes a started ferret's task (today's `SessionCards.open`).
  */
 
 const gateAnswer = (ask: { ferret?: string; id: string; entry: string }, choice: string, text?: string): AskAnswer =>

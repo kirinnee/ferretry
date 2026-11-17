@@ -46,7 +46,7 @@ const refusalOf = (error: unknown): BoardRefusal => {
   throw error;
 };
 
-/** The parts of a progress write, without the id it names (`task` or, from an old instruction, `card`). */
+/** The parts of a progress write, without the id it names (`task` or, from an old instruction, `task`). */
 const progressParts = ({ now, doneSoFar, next }: { now?: string; doneSoFar?: string; next?: string }) => ({
   ...(now === undefined ? {} : { now }),
   ...(doneSoFar === undefined ? {} : { doneSoFar }),
@@ -54,10 +54,10 @@ const progressParts = ({ now, doneSoFar, next }: { now?: string; doneSoFar?: str
 });
 
 /**
- * Board's daemon half (§2.3): cards and lanes for the work you ask for, with each card's progress and its PRs.
+ * Board's daemon half (§2.3): tasks and lanes for the work you ask for, with each task's progress and its PRs.
  *
- * #1552: a card is read-only status. It never asks; its gate entry is an obligation Asks shows (`ask.sources:card`),
- * and an answer to it moves the card first, as the owner, before the ask is closed.
+ * #1552: a task is read-only status. It never asks; its gate entry is an obligation Asks shows (`ask.sources:card`),
+ * and an answer to it moves the task first, as the owner, before the ask is closed.
  */
 export default implementDaemon(manifest, {
   build: ctx => {
@@ -76,8 +76,8 @@ export default implementDaemon(manifest, {
       ferrets: ctx.needs.ferrets,
       projects: () => ctx.uses.projects.current(),
       conversation: () => ctx.uses.conversation.current(),
-      // `card.moving`: takers say yes or no to a card changing lanes, asked by the service at its one write, whatever
-      // moved the card; the first no wins, with its reason.
+      // `card.moving`: takers say yes or no to a task changing lanes, asked by the service at its one write, whatever
+      // moved the task; the first no wins, with its reason.
       moving: async ({ card: task, ...rest }) => await ctx.hooks.decide(CardMoving, { task: task, ...rest }),
       moved: ({ card: task, ...rest }) => kernel.events.publish(CardMoved, { task: task, ...rest }),
       product: 'ferretry',
@@ -190,27 +190,27 @@ export default implementDaemon(manifest, {
           machineId: () => machineIdOf(kernel),
         }),
         'sitrep.lines': () => [{ id: 'board', order: 50, item: { lines: async ferret => await world.lines(ferret) } }],
-        // Board's cards are work Conversation's search finds (`fy search`, `search_work`).
-        // read-scoped: none — Board hands over its cards raw; Conversation scrubs every text through the read-scoped redaction before it indexes or shows it
+        // Board's tasks are work Conversation's search finds (`fy search`, `search_work`).
+        // read-scoped: none — Board hands over its tasks raw; Conversation scrubs every text through the read-scoped redaction before it indexes or shows it
         'search.sources': () => [{ id: 'board', item: world.workSource }],
-        // The `&` menu of a ferret's composer (reference.catalog): the ferret's cards. Read-scoped: none — Conversation masks the answer.
+        // The `&` menu of a ferret's composer (reference.catalog): the ferret's tasks. Read-scoped: none — Conversation masks the answer.
         'reference.catalog:&': new BoardReferenceCatalog(service),
-        // The session archive (Ferrets): every card's owner, assignee, drop and lane category, read afresh each pass.
+        // The session archive (Ferrets): every task's owner, assignee, drop and lane category, read afresh each pass.
         // Off until the owner names an age; a read that fails keeps every ferret live.
         'session.archive-keeps': () => [{ id: 'board', item: boardArchiveKeeps(service) }],
         // A turn ended (Conversation): the turn-end and gate checks of today (fyd.ts:10727-10783).
         'turn.ended': async payload => {
           await world.turnEnded(payload.ferret);
         },
-        // A ferret started (Ferrets): its card, as today's SessionCards made it.
+        // A ferret started (Ferrets): its task, as today's SessionCards made it.
         'ferret.started': async payload => {
           await world.ferretStarted(payload);
         },
       },
       subscribers: {
         'asks.answered': async wake => {
-          // A card answer was applied by the source's own `apply` before Asks recorded it; now that it is recorded (and
-          // Asks' turn is over), the card's asks follow the card.
+          // A task answer was applied by the source's own `apply` before Asks recorded it; now that it is recorded (and
+          // Asks' turn is over), the task's asks follow the task.
           if (wake.source === TASK_SOURCE) return await world.gates.recorded(wake.entry);
           const answers = await ctx.needs.asks.answers({ source: wake.source, entry: wake.entry });
           const answer = answers.find(each => each.id === wake.answerId);

@@ -1,9 +1,9 @@
 /**
- * The cards a machine notice is about (`AgendaItem.cards`), with their buttons. The rows are the daemon's; the three
- * buttons are Board's writes (`agendaCardsActions`): Open goes to the card's page (Board's `card` screen, when Board is
- * installed), Start and Close are made through the {@link AgendaCardsBoard} the screen binds to Board's
- * `agenda.card-answer` hook ({@link AgendaCardsBoardProvider}, `agenda-board-hooks.tsx`). Without that hook (Board not
- * installed, or not allowed on this machine) the board is idle: Open still goes to the card, and Start and Close are
+ * The tasks a machine notice is about (`AgendaItem.cards`), with their buttons. The rows are the daemon's; the three
+ * buttons are Board's writes (`agendaCardsActions`): Open goes to the task's page (Board's `task` screen, when Board is
+ * installed), Start and Close are made through the {@link AgendaTasksBoard} the screen binds to Board's
+ * `agenda.card-answer` hook ({@link AgendaTasksBoardProvider}, `agenda-board-hooks.tsx`). Without that hook (Board not
+ * installed, or not allowed on this machine) the board is idle: Open still goes to the task, and Start and Close are
  * refused with the reason.
  */
 

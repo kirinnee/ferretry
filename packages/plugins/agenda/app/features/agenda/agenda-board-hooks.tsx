@@ -1,13 +1,13 @@
 /**
- * WHERE AGENDA READS THE CARDS' HOOKS: the three app hooks this half offers (`contract/app-hooks.ts`), read from the
- * shell for ONE daemon (a page's own, or an open Inbox card's machine: {@link AgendaCardBoard}) and handed to the ask
+ * WHERE AGENDA READS THE TASKS' HOOKS: the three app hooks this half offers (`contract/app-hooks.ts`), read from the
+ * shell for ONE daemon (a page's own, or an open Inbox card's machine: {@link AgendaTaskBoard}) and handed to the ask
  * surfaces below, each through the seam that already reads it:
  *
- * - `agenda.card-answer` → {@link DoneCloseBoardProvider} (an item's Done · closes) and {@link AgendaCardsBoardProvider}
+ * - `agenda.card-answer` → {@link DoneCloseBoardProvider} (an item's Done · closes) and {@link AgendaTasksBoardProvider}
  *   (a notice's Start and Close);
  * - `agenda.lane-proposal` → the Inbox's lane editor (`AgendaInbox.laneEditor`: Edit on a lane proposal opens it);
  * - `agenda.card-reference` → the reference surface's `&` proof and opener, so `&F12` in an ask's words links to the
- *   card when, and only when, the card is this daemon's.
+ *   task when, and only when, the task is this daemon's.
  *
  * A hook nobody provides, or a value without the shape, is no hook: the surfaces draw as they do without Board.
  */
@@ -74,7 +74,7 @@ export const useAgendaBoardHooks = (daemonId: DaemonId): AgendaBoardHooks => {
 /** The lane editor the Inbox opens on Edit, or `undefined` without a provider. */
 export const laneEditorOf = (hooks: AgendaBoardHooks): AgendaLaneEditor | undefined => hooks.laneProposal?.editorFor;
 
-/** The lane editors of the machines whose cards are on screen, as each card's scope registered them. */
+/** The lane editors of the machines whose tasks are on screen, as each task's scope registered them. */
 export interface LaneEditorBook {
   /** Registers `editor` for `daemonId` until the returned release; no editor registers nothing. */
   readonly register: (daemonId: DaemonId, editor: AgendaLaneEditor | undefined) => () => void;
@@ -83,7 +83,7 @@ export interface LaneEditorBook {
 
 export const laneEditorBook = (): LaneEditorBook => {
   // One entry per REGISTRATION, not per function: every scope of one machine registers the same cached `editorFor`, so a
-  // release that matched by function would erase every card's editor on that machine at once.
+  // release that matched by function would erase every task's editor on that machine at once.
   const held = new Map<DaemonId, { readonly editor: AgendaLaneEditor }[]>();
   return {
     register: (daemonId, editor) => {
@@ -101,9 +101,9 @@ export const laneEditorBook = (): LaneEditorBook => {
 };
 
 /**
- * One card's Board: the three hooks read for THE CARD'S machine (the Inbox is every machine's), handed to what is drawn
+ * One task's Board: the three hooks read for THE TASK'S machine (the Inbox is every machine's), handed to what is drawn
  * inside as {@link AgendaBoardProviders} does for a page's own, and the machine's lane editor entered in `editors` while
- * it is on screen. Each card of another machine gets that machine's Board, never the page's.
+ * it is on screen. Each task of another machine gets that machine's Board, never the page's.
  */
 export function AgendaTaskBoard({
   daemonId,
@@ -147,7 +147,7 @@ export const useTaskBoards = (
 
 const ELSEWHERE = 'That task is on another machine, so it cannot be changed from here.';
 
-/** A notice's Start and Close, over the provided hook; a card of another daemon is refused, never sent. */
+/** A notice's Start and Close, over the provided hook; a task of another daemon is refused, never sent. */
 const agendaTasksBoardOf = (answer: AgendaTaskAnswer, daemonId: DaemonId): AgendaTasksBoard => ({
   start: async (target, key) => {
     if (target.daemonId !== daemonId) return boardErr({ status: 0, message: ELSEWHERE });
@@ -167,7 +167,7 @@ const NO_SUBSCRIPTION = (): (() => void) => () => undefined;
 
 /**
  * The `&` proof and opener over the provided hook, on top of the surface this sits in: a surface that already proves
- * cards (a ferret's chat, which built its own) is left as it is.
+ * tasks (a ferret's chat, which built its own) is left as it is.
  */
 function TaskReferences({
   reference,
@@ -218,11 +218,11 @@ function OwnReferences({
 const ProofDaemonContext = createContext<DaemonId | undefined>(undefined);
 
 /**
- * The proofs a surface cannot give a card of ANOTHER machine: the page's proofs (`:agent`, `&card`, `!ask`, `@file`) read
+ * The proofs a surface cannot give a task of ANOTHER machine: the page's proofs (`:agent`, `&task`, `!ask`, `@file`) read
  * the page's own daemon, and a reference in one daemon's words can never open a same-named thing on another
- * (docs/reference-standard.md). So a card whose daemon is not the one the proofs were built for is drawn over a surface
+ * (docs/reference-standard.md). So a task whose daemon is not the one the proofs were built for is drawn over a surface
  * with those proofs removed, and its references stay prose. It FAILS CLOSED: outside {@link AgendaBoardProviders}
- * nothing says whose proofs the surface carries, so they are removed too. Only a card of the daemon the proofs were
+ * nothing says whose proofs the surface carries, so they are removed too. Only a task of the daemon the proofs were
  * built for keeps the surface as it is.
  */
 export function TaskReferenceScope({
@@ -241,7 +241,7 @@ export function TaskReferenceScope({
 
 /**
  * Where a daemon's providers begin: proofs an OUTER {@link AgendaBoardProviders} built for ANOTHER daemon are removed
- * before this one adds its own, then the context names this daemon. Without it a machine B's card, drawn inside the
+ * before this one adds its own, then the context names this daemon. Without it a machine B's task, drawn inside the
  * page's providers for machine A, would name B as the proofs' daemon while still carrying A's `:agent` and `&F12`.
  */
 function ProofScope({ daemonId, children }: { readonly daemonId: DaemonId; readonly children: ReactNode }) {
@@ -268,7 +268,7 @@ const withoutProofs = (surface: ReferenceSurface): ReferenceSurface => {
   return rest;
 };
 
-/** Hands the ask surfaces below the provided Done · closes board, the notices' card board and the `&` proof. */
+/** Hands the ask surfaces below the provided Done · closes board, the notices' task board and the `&` proof. */
 export function AgendaBoardProviders({
   hooks,
   onNavigate,

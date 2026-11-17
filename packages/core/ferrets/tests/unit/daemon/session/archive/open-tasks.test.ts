@@ -3,7 +3,7 @@ import should from 'should';
 import { sessionsOnOpenTasks } from '../../../../../daemon/lib/session/archive/open-tasks.ts';
 import type { LaneCategory, OpenTaskStanding } from '../../../../../daemon/lib/session/peers/board.ts';
 
-/** The lanes of project `p`, as Board resolves a card's lane to its category. */
+/** The lanes of project `p`, as Board resolves a task's lane to its category. */
 const lanes: Readonly<Record<string, LaneCategory>> = {
   todo: 'backlog',
   doing: 'active',
@@ -11,7 +11,7 @@ const lanes: Readonly<Record<string, LaneCategory>> = {
   done: 'closed',
 };
 
-/** A card as far as the rule reads it: who owns and holds it, whether it was dropped and in which lane. */
+/** A task as far as the rule reads it: who owns and holds it, whether it was dropped and in which lane. */
 function task(
   owner: string,
   assignee: string | null,

@@ -123,7 +123,7 @@ describe('the board writes', () => {
   });
 
   it('hands the gate’s refusal of a card Start back in its own words (a device without fleet.configure, or a declined passkey)', async () => {
-    // c58-sec3 r1: starting a card asks `fleet.configure`, so a `--limited` device is refused in words, never a blank failure.
+    // c58-sec3 r1: starting a task asks `fleet.configure`, so a `--limited` device is refused in words, never a blank failure.
     const NOT_GIVEN =
       'this device has not been given permission to change the settings for the fleet. Grant it at the machine with `fy device grant <device> fleet --configure`, or from a device that holds it and may manage devices.';
     const PASSKEY = 'changing the settings for the fleet needs a passkey confirmation from this device.';

@@ -17,7 +17,7 @@ import {
 } from '../../../daemon/lib/board/index.ts';
 import { boardTask, MemoryBoardStore, NOW, type ServiceWorld, world } from './support.ts';
 
-/** "Not good" with pictures: the files the owner sends with a move back reach the card's history and its ferret. */
+/** "Not good" with pictures: the files the owner sends with a move back reach the task's history and its ferret. */
 
 const owner: BoardCaller = { kind: 'owner' };
 const ferret = (ferret: string): BoardCaller => ({ kind: 'ferret', ferret });

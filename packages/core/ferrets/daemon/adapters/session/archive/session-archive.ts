@@ -18,8 +18,8 @@ export interface SessionArchiveSources {
   /** The ferrets the owner pinned. */
   pinned(): Promise<ReadonlyMap<string, string>>;
   /**
-   * Every card as stored, each with its lane's category as Board resolved it. INJECTED by the Board plugin; until it
-   * is wired the archive cannot prove a ferret is off every open card, so it keeps every one live.
+   * Every task as stored, each with its lane's category as Board resolved it. INJECTED by the Board plugin; until it
+   * is wired the archive cannot prove a ferret is off every open task, so it keeps every one live.
    */
   board?(): Promise<readonly OpenTaskStanding[]>;
   /** Whether a session's agenda board holds an item that is still open. */

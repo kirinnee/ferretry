@@ -26,7 +26,7 @@ import {
 } from './support.ts';
 
 /**
- * A live lead may ADOPT a card whose owner ferret and assignee have both ended (docs/board.md § An orphaned card is
+ * A live lead may ADOPT a task whose owner ferret and assignee have both ended (docs/board.md § An orphaned task is
  * adopted). `gone` and `gone2` are ended ferrets (not in the roster); `lead` and `other` are live leads; `kid` is a
  * live helper of `lead`; `unreadable` is held by the daemon but its record cannot be read.
  */
@@ -40,7 +40,7 @@ const DIRECTORY = {
   addressOf: async (ferret: string) => ferret,
 };
 
-/** An orphaned card: both its ferrets ended. A ferret's own errand, so an adopter may pass its gates. */
+/** An orphaned task: both its ferrets ended. A ferret's own errand, so an adopter may pass its gates. */
 const orphan = (overrides: Partial<Task> = {}): Task =>
   boardTask({
     laneId: 'implement',

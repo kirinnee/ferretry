@@ -9,10 +9,10 @@
  *            motion is reduced), how urgent it is (Blocking now, Needed by 17:00), ‹ n of N ›, ⋯ and ✕. Everything quiet
  *            is behind ⋯ (`agenda-item-menu.tsx`, a bottom sheet on a phone, a popover wider): the version picker,
  *            Changes, Snooze, Merge with…, Not needed and a host's quiet tools (the Inbox's Skip); a gate item or a
- *            notice drawn with its card rows keeps its summary there too
- *   card     the item in the spec's nine parts (`agenda-item-card.tsx`; the order is `agenda-item-sections.ts`'s): its
+ *            notice drawn with its task rows keeps its summary there too
+ *   task     the item in the spec's nine parts (`agenda-item-card.tsx`; the order is `agenda-item-sections.ts`'s): its
  *            description, state and stage chips, premise and context, the folded detailed context, the terms and
- *            references table, where we are now, what it needs from the owner (the ask and every card ask, each with
+ *            references table, where we are now, what it needs from the owner (the ask and every task ask, each with
  *            its own buttons), the body (the full picture), then the log: the conversation and the folded activity
  *
  * OPENED AT ITS ASK (`startAt: 'ask'`): a Needs-you push and a link that names the item open it scrolled to "What I need
@@ -20,9 +20,9 @@
  * brings its own `startTap`, so a second push for the item already open at its ask scrolls there again.
  *
  * THE HEAD STICKS to the top of the scroller, and a one-row answer (choice, approval, to-do, notice, review) is drawn in
- * a DOCK that sticks to its bottom — the view's foot, whatever the card's height — so the title, the pager and the
- * buttons are in reach however long the card runs. A card answered in words (reply, mixed, form) has no dock: the
- * composer is its answer. An item with a card ask has no dock either: both button sets are inline, each under its own
+ * a DOCK that sticks to its bottom — the view's foot, whatever the task's height — so the title, the pager and the
+ * buttons are in reach however long the task runs. A task answered in words (reply, mixed, form) has no dock: the
+ * composer is its answer. An item with a task ask has no dock either: both button sets are inline, each under its own
  * heading. The scroller keeps room for both
  * (`scroll-padding`), so a focused field never lands behind one.
  *
@@ -88,10 +88,10 @@ export interface AgendaItemViewProps {
    * words still on this device ("Saved on this device"). Absent both: the History draws what the machine holds.
    */
   readonly outboxScope?: DaemonSessionScope | null;
-  /** The machine the item is on: with it, an item that offers to close its card draws "Done · closes &F12". */
+  /** The machine the item is on: with it, an item that offers to close its task draws "Done · closes &F12". */
   readonly daemonId?: DaemonId;
   /**
-   * The cards an item that offers to close them would close, and how, when the host hands them itself; otherwise
+   * The tasks an item that offers to close them would close, and how, when the host hands them itself; otherwise
    * they are read from the board a host provides (`useDoneClose`). Absent both: no such button.
    */
   readonly doneClose?: DoneCloseSource | undefined;
@@ -107,15 +107,15 @@ export interface AgendaItemViewProps {
    * live — the reply does not answer the question, so its own options stay answerable.
    */
   readonly parkedNote?: ReactNode;
-  /** The form an `input` item is answered with (`InputCardHost`): drawn in the card, in the answer row's place. */
+  /** The form an `input` item is answered with (`InputCardHost`): drawn in the task, in the answer row's place. */
   readonly inputForm?: ReactNode;
-  /** A ferret's paste plan (`CopyPlanHost`): drawn in the card, in the answer row's place. */
+  /** A ferret's paste plan (`CopyPlanHost`): drawn in the task, in the answer row's place. */
   readonly planForm?: ReactNode;
-  /** The cards a machine notice is about (`AgendaCardsHost`): each with its own Open, Start and Close. Got it stays the answer. */
+  /** The tasks a machine notice is about (`AgendaCardsHost`): each with its own Open, Start and Close. Got it stays the answer. */
   readonly cardsForm?: ReactNode;
   /** Names this item's form picks when a composer sends them (the Inbox, the chat); absent, a form is read, not filled in. */
   readonly formKey?: string;
-  /** Quiet buttons kept behind ⋯ (the Inbox's Skip and Not needed), so the card body keeps the room. */
+  /** Quiet buttons kept behind ⋯ (the Inbox's Skip and Not needed), so the task body keeps the room. */
   readonly tools?: ReactNode;
   /**
    * Open scrolled to the item's ask ("What I need from you"), focused: a Needs-you push or a link naming the item.
@@ -124,7 +124,7 @@ export interface AgendaItemViewProps {
   readonly startAt?: 'ask';
   /** Which tap asked for `startAt`: a new one scrolls to the ask again, though the item is already open. */
   readonly startTap?: number;
-  /** A card's How to test, read from the board the app holds: a card ask on this item shows it. */
+  /** A task's How to test, read from the board the app holds: a task ask on this item shows it. */
   readonly howToTestFor?: (cardId: string) => string | null | undefined;
   /** Names the item on this device (its machine, conversation and id), so its folded parts are remembered per item. */
   readonly itemKey?: string;
@@ -136,7 +136,7 @@ export interface AgendaItemViewProps {
   readonly lineageTitles?: LineageTitles;
 }
 
-/** The urgent tones the head row says; where else the item stands is the card's state chip. */
+/** The urgent tones the head row says; where else the item stands is the task's state chip. */
 const URGENT_TONES: ReadonlySet<string> = new Set(['blocking', 'will-block', 'needed-by']);
 
 /** Keys that are a field's or a button's own. */
@@ -233,8 +233,8 @@ export function AgendaItemView({
   const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
   const urgent = status !== null && URGENT_TONES.has(status.tone) ? status : null;
-  // The card draws the description under the title, whole. A gate item, whose card repeats nothing, and a notice drawn
-  // with its card rows, which say its lines, keep it behind ⓘ instead.
+  // The task draws the description under the title, whole. A gate item, whose task repeats nothing, and a notice drawn
+  // with its task rows, which say its lines, keep it behind ⓘ instead.
   const infoDescription = gateOf(item) === undefined && cardsForm === undefined ? null : head.description;
   // A host may hand the source itself; otherwise it is read from the board a host provides (`useDoneClose`).
   const fromBoard = useDoneClose(daemonId, item);
@@ -437,7 +437,7 @@ interface ItemMenuRowsProps {
   readonly now: number;
   readonly busy: boolean;
   readonly renderProse: (text: string) => ReactNode;
-  /** A gate item's or a card notice's summary, which its card does not repeat. */
+  /** A gate item's or a task notice's summary, which its task does not repeat. */
   readonly description: string | null;
   readonly count: number;
   readonly shown: number;

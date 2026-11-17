@@ -1,6 +1,6 @@
 /**
  * Reads the facts a tidy is decided on and hands them to `planTidy`. It writes nothing: the plan is applied by the
- * caller through the card drop and the ask close the ferret could have used itself. Copied from today's
+ * caller through the task drop and the ask close the ferret could have used itself. Copied from today's
  * `lib/tidy/service.ts`, reading Board (optional), Asks and Ferrets through their ports instead of the daemon's own.
  */
 import { type AskSummary, type AsksApi, SourceKeySchema } from '@ferretry/core-asks/contract';
@@ -21,11 +21,11 @@ export type TidyPlanResult =
   | { readonly ok: true; readonly plan: TidyPlan }
   | { readonly ok: false; readonly message: string };
 
-/** Board pages hold at most this many cards (`MAX_BOARD_PAGE`); one ferret's open cards are far fewer. */
+/** Board pages hold at most this many tasks (`MAX_BOARD_PAGE`); one ferret's open tasks are far fewer. */
 const TASK_LIMIT = 500;
 const TASK_SOURCE = SourceKeySchema.parse('card');
 
-/** Whether a card-gate ask (its entry names the card) is about this card. */
+/** Whether a card-gate ask (its entry names the task) is about this task. */
 const entryNames = (entry: string, taskId: string): boolean =>
   entry.split(/[:._-]/u).some(part => part === taskId) || entry === taskId;
 

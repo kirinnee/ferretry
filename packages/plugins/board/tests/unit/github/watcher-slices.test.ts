@@ -33,7 +33,7 @@ const afterIo = async (): Promise<void> => await new Promise<void>(resolve => se
 
 describe('GitHubWatcher: one tick over many changed cards', () => {
   it(`writes every one of ${String(TASKS)} watched cards whose PRs all changed`, async () => {
-    // The real card store over an in-memory state folder: its schema checks and copies cost what they cost in the daemon.
+    // The real task store over an in-memory state folder: its schema checks and copies cost what they cost in the daemon.
     const store = new KernelTaskStore(
       new MemoryStateFolder().port([stateFile('cards'), stateFile('counters')]),
       { cards: stateFile('cards'), counters: stateFile('counters') },
@@ -59,7 +59,7 @@ describe('GitHubWatcher: one tick over many changed cards', () => {
         return await service.recordPullRequests(...parameters);
       },
     };
-    // One repository answers for every PR, each now open (so every card moves), as one `gh` call would.
+    // One repository answers for every PR, each now open (so every task moves), as one `gh` call would.
     const everyPr = Object.fromEntries(Array.from({ length: TASKS }, (_, at) => [at + 1, prNode(at + 1)]));
     const reply = answer({ prs: everyPr });
     const copies = { repositoryOf: async () => null, branchOf: async () => null };

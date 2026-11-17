@@ -1,4 +1,4 @@
-/** The small card vocabulary every board schema shares: a card's kind, title, workflow and the owner's words. */
+/** The small task vocabulary every board schema shares: a task's kind, title, workflow and the owner's words. */
 import { z } from 'zod';
 
 export const MAX_TASK_TITLE_LENGTH = 200;
@@ -8,10 +8,10 @@ export const MAX_TASK_SOURCE_LENGTH = 2 * 1024;
 export const CardKindSchema = z.enum(['bug', 'feature', 'infra', 'chore']);
 export type TaskKind = z.infer<typeof CardKindSchema>;
 
-/** The id prefix a kind's cards carry: `F` for a feature. Kind is immutable because the prefix must match. */
+/** The id prefix a kind's tasks carry: `F` for a feature. Kind is immutable because the prefix must match. */
 export const TASK_KIND_PREFIX: Readonly<Record<TaskKind, string>> = { bug: 'B', feature: 'F', infra: 'I', chore: 'C' };
 
-/** A card's title: at most five words, so reading it directly says what the work is doing. */
+/** A task's title: at most five words, so reading it directly says what the work is doing. */
 export const CardTitleSchema = z
   .string()
   .trim()

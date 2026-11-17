@@ -385,7 +385,7 @@ export const withdrawQueued = async (
 
 /**
  * Undo of an Inbox reply: finds the machine the reply went to among the paired ones and withdraws the message there.
- * A machine that is no longer paired throws, so the page can say the card could not be put back honestly.
+ * A machine that is no longer paired throws, so the page can say the task could not be put back honestly.
  */
 export const withdrawReplyVia =
   (

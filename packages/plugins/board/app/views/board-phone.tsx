@@ -1,9 +1,9 @@
 /**
  * THE BOARD ON A PHONE: one lane at a time. The lanes are a strip of chips along the top, a swipe (or the
- * arrow keys on the strip) moves to the next lane, and the chosen lane's cards run down the page as a list.
+ * arrow keys on the strip) moves to the next lane, and the chosen lane's tasks run down the page as a list.
  *
- * The lane shown is the page's (`at`, in the URL, so back from a card returns to the same lane). This
- * component keeps no state of its own and decides nothing about moves; it draws `PlacedCard` like every
+ * The lane shown is the page's (`at`, in the URL, so back from a task returns to the same lane). This
+ * component keeps no state of its own and decides nothing about moves; it draws `PlacedTask` like every
  * other view and only turns a finger or a key into "the next lane".
  */
 
@@ -26,7 +26,7 @@ export interface PhoneKanbanProps {
   readonly env: BoardTaskEnv;
   readonly projectName: (group: BoardGroupOf) => string;
   readonly hideClosed: boolean;
-  /** The lane the URL names, or `null` for the first lane with a card. */
+  /** The lane the URL names, or `null` for the first lane with a task. */
   readonly at: string | null;
   readonly onLane: (laneId: string) => void;
 }

@@ -191,7 +191,7 @@ describe('F-0001 Board reads the owner’s words through Conversation, strictly 
     expect(await refusing.said('f1')).toEqual([]);
   });
 
-  /** A card a ferret made on its own account, carrying words the owner may or may not have said to it. */
+  /** A task a ferret made on its own account, carrying words the owner may or may not have said to it. */
   const ferretTask = async (world: Awaited<ReturnType<typeof boot>>, text: string) => {
     await world.host.request('PUT', '/v1/board/projects/unfiled/switch', { body: { on: true }, headers: as('owner') });
     const made = await world.host.request('POST', '/v1/board/tasks', {

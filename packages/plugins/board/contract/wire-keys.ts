@@ -1,13 +1,13 @@
 /**
  * THE `task…` WIRE KEYS (O18, owner !A539: "rename all to task"). A Board answer that names a work item says
  * `task`/`tasks` (the `--json` of `fy board` and `fy task show`, the HTTP bodies, the `board.changed` event), where the
- * daemon's own shapes still say `card` until the identifier rename. Two directions, both here and nowhere else:
+ * daemon's own shapes still say `task` until the identifier rename. Two directions, both here and nowhere else:
  *
  *  - EMIT (`taskWire`): the daemon turns its own shape into the wire one at the route, once, by key.
- *  - READ (`readBoard`, `readCard`, …): a reader of our own JSON (this CLI, this app) takes either spelling for one
+ *  - READ (`readBoard`, `readTask`, …): a reader of our own JSON (this CLI, this app) takes either spelling for one
  *    release, so a daemon one build behind still answers it.
  *
- * Stored names never come through here: `state/board/cards/*.json`, the ask source `card`, `card-agenda:` and the
+ * Stored names never come through here: `state/board/cards/*.json`, the ask source `task`, `card-agenda:` and the
  * agenda and focus keys are read and written as they always were.
  */
 import {

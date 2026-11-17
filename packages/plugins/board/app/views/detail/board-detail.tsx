@@ -1,15 +1,15 @@
 /**
- * THE CARD DETAIL (`/d/<id>/board/<taskId>`): one card in full, over the Board — READ-ONLY.
+ * THE TASK DETAIL (`/d/<id>/board/<taskId>`): one task in full, over the Board — READ-ONLY.
  *
  * One flowing page, in the manner of a task page: a header (id, title, the summary line, the lane as plain text,
- * who and where), then the card read top to bottom as an agenda card reads — the status, then premise and context
+ * who and where), then the task read top to bottom as an agenda task reads — the status, then premise and context
  * as two tinted blocks, the ask, How to test as a numbered list (its boxes are a reading aid), the brief, the terms
  * (each also a tap tip where the text uses it) — then the plain headed sections and a timeline. Nothing folds.
  * The owner has NO hand controls here: no lane menu, no Done, no Not good, no Reopen, no dependency form, no
- * comment box, no reparent or drop. The board runs itself and the owner answers where a card asks, in the agenda;
+ * comment box, no reparent or drop. The board runs itself and the owner answers where a task asks, in the agenda;
  * a ferret is spoken to in its own chat ("Open chat"). The only buttons are reading aids: Open chat, Copy link,
  * and links to the agenda items, sub-cards and sessions. A side drawer on a wide screen and a full-screen page on
- * a phone; either way the address names the card, so Back leaves it and a link opens it. The card is read through
+ * a phone; either way the address names the task, so Back leaves it and a link opens it. The task is read through
  * the board store (one source of truth with the Board behind it) and an ask opens in its ferret's chat as the same
  * item view every `!A5` opens — it is answered there, never here. This file composes; the facts are
  * `board-detail.ts` and the sections draw them.
@@ -52,7 +52,7 @@ import {
   TermsTable,
 } from './board-detail-sections.tsx';
 
-/** The card's own texts, each `null` when empty, with the first use of each term marked as a tap tip, in reading order. */
+/** The task's own texts, each `null` when empty, with the first use of each term marked as a tap tip, in reading order. */
 const markedTexts = (task: TaskView) => {
   const seen = new Set<number>();
   const mark = (text: string): string | null => (written(text) ? markTerms(text, task.terms, seen) : null);
@@ -75,24 +75,24 @@ export interface BoardDetailProps {
   readonly names: FerretNames;
   readonly now: number;
   readonly projectName: (projectId: string) => string;
-  /** The cards the Board already has, for sub-cards and the release each machine is on. */
+  /** The tasks the Board already has, for sub-cards and the release each machine is on. */
   readonly siblings: readonly {
     readonly task: TaskView;
     readonly laneName: string;
     readonly runningOn: readonly RunningOnMachine[];
   }[];
-  /** A phone shows the card as a page of its own; a wide screen as a drawer beside the Board. */
+  /** A phone shows the task as a page of its own; a wide screen as a drawer beside the Board. */
   readonly phone: boolean;
   readonly onClose: () => void;
   readonly onNavigate: (to: string) => void;
 }
 
 /**
- * ONE CARD THAT CANNOT BE DRAWN STAYS IN ITS DRAWER. Without this, a throw anywhere in a card reached the
+ * ONE TASK THAT CANNOT BE DRAWN STAYS IN ITS DRAWER. Without this, a throw anywhere in a task reached the
  * pane's boundary and replaced the whole Board with "reload to recover" — which a reload could not fix, since
- * the same card throws again — and the error itself was only in a console a phone does not show
+ * the same task throws again — and the error itself was only in a console a phone does not show
  * (2026-10-30). Here the drawer keeps its bar (Close still works), the Board stays usable behind it, and the
- * error's own message is on screen, so the reader can say what failed. A different card starts clean.
+ * error's own message is on screen, so the reader can say what failed. A different task starts clean.
  */
 class TaskErrorBoundary extends Component<
   {

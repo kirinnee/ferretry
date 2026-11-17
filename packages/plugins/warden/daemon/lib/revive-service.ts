@@ -88,8 +88,8 @@ export interface WardenRevivePorts {
   /** One notice to the owner. Total. */
   notifyOwner(notice: WardenReviveNotice): Promise<void>;
   /**
-   * The card a session's work is attributed to, so a revived auto ferret is told to carry on with it
-   * (`focus-card.ts`). Total: no card, or one that cannot be read, is `undefined`. Absent: no board.
+   * The task a session's work is attributed to, so a revived auto ferret is told to carry on with it
+   * (`focus-task.ts`). Total: no task, or one that cannot be read, is `undefined`. Absent: no board.
    */
   focusCard?(sessionId: string): Promise<WardenFocusTask | undefined>;
   journal: { record(type: string, data: Readonly<Record<string, unknown>>): void };

@@ -1,24 +1,24 @@
 /**
- * UNFILED CARDS GO WHERE THEY BELONG (`docs/board.md` § Which board a card is on). The Unfiled board is only
- * for work outside any git repository, so an open card there that belongs on a project's board is refiled to
+ * UNFILED TASKS GO WHERE THEY BELONG (`docs/board.md` § Which board a task is on). The Unfiled board is only
+ * for work outside any git repository, so an open task there that belongs on a project's board is refiled to
  * it, through `BoardService` as the daemon, and the refile's own fact check then puts it in the lane its PRs
- * say. Two things say where a card belongs, the first that answers wins:
+ * say. Two things say where a task belongs, the first that answers wins:
  *
  *   1. **a linked PR's repository** is a registered project's ({@link refileTargets});
  *   2. **the folder its owner ferret works in** belongs to a project: the session's own board, the project its
  *      folder resolves to, else the repository it stands in registered as a project by the same rules a
- *      ferret's first card follows (`ProjectAdoption`: never the home folder, a temp or scratch folder, a
+ *      ferret's first task follows (`ProjectAdoption`: never the home folder, a temp or scratch folder, a
  *      folder that is not a git repository, or one outside every project root).
  *
  * A project that has no lanes yet (one registered before projects got lanes, or by hand) is given the lanes its
- * folder suggests first, unconfirmed and raised as the owner's one agenda choice, and the card is refiled in the
+ * folder suggests first, unconfirmed and raised as the owner's one agenda choice, and the task is refiled in the
  * same pass.
  *
- * It runs on every watcher tick and once at boot, and is idempotent: a refiled card is no longer Unfiled, a
- * card someone put on the Unfiled board on purpose stays there, and two runs never overlap — a run asked for
+ * It runs on every watcher tick and once at boot, and is idempotent: a refiled task is no longer Unfiled, a
+ * task someone put on the Unfiled board on purpose stays there, and two runs never overlap — a run asked for
  * while one is going gets that one's answer. A ferret whose folder said nothing is asked again only after
- * {@link SESSION_BOARD_RETRY_MS}, so a board of old cards costs no git call per card per tick. It never
- * throws: a card it cannot refile is reported once, and the rest go on.
+ * {@link SESSION_BOARD_RETRY_MS}, so a board of old tasks costs no git call per task per tick. It never
+ * throws: a task it cannot refile is reported once, and the rest go on.
  */
 import {
   type BoardProjectId,
@@ -92,7 +92,7 @@ export class UnfiledRefiler {
   constructor(private readonly ports: UnfiledRefilerPorts) {}
 
   /**
-   * Refiles every Unfiled card that belongs on a project's board; the cards refiled. `remotes` are the
+   * Refiles every Unfiled task that belongs on a project's board; the tasks refiled. `remotes` are the
    * projects' repositories when the caller already read them. A run asked for while one is going joins it.
    */
   async run(remotes?: readonly ProjectRemote[]): Promise<readonly string[]> {
@@ -134,7 +134,7 @@ export class UnfiledRefiler {
     });
   }
 
-  /** The cards whose owner ferret's folder names a board, each owner asked once per run. */
+  /** The tasks whose owner ferret's folder names a board, each owner asked once per run. */
   private async folderTargets(
     tasks: readonly Task[],
     remotes: readonly ProjectRemote[],
@@ -170,8 +170,8 @@ export class UnfiledRefiler {
   }
 
   /**
-   * Refiles one card as the daemon; `true` when it moved. A project with no lanes yet gets the ones its folder
-   * suggests first, proposed as the card's ferret (the owner's one agenda choice), so the refile can land.
+   * Refiles one task as the daemon; `true` when it moved. A project with no lanes yet gets the ones its folder
+   * suggests first, proposed as the task's ferret (the owner's one agenda choice), so the refile can land.
    */
   private async refile(target: RefileTarget): Promise<boolean> {
     try {

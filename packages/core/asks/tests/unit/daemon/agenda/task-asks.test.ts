@@ -60,7 +60,7 @@ const thread = (extra: Partial<AgendaItem> = {}): AgendaItem =>
     id: 'A1',
     source: 'agent-raised',
     sourceRef: null,
-    // A line that only repeats the card ask (docs/agenda.md § One ask): the card ask is all the thread asks.
+    // A line that only repeats the task ask (docs/agenda.md § One ask): the task ask is all the thread asks.
     subject: 'Try it: Badge',
     title: 'Badge',
     why: 'w',
@@ -333,7 +333,7 @@ describe('a card’s own agenda, when its only ask is withdrawn', () => {
     const answered = { ...awake, questionAnswer: 'Fixed it, try again', waitingSince: at(3) } as AgendaItem;
     should(agendaState(answered).state).equal('needs-you');
 
-    // Act — the card leaves the gate
+    // Act — the task leaves the gate
     const after = changed(apply(answered, withdraw('F2'), 4));
 
     // Assert — the ferret's answer stays in front of the owner
@@ -431,7 +431,7 @@ describe('one plain line of the daemon’s (a card with nothing to try)', () => 
   const line = (text: string): TaskAskOperation => ({ kind: 'line', line: text });
 
   it('adds one activity line and changes nothing else: no ask, and the turn and place stay', () => {
-    // Arrange — a ferret's thread, resting on its ferret, and a card agenda on the owner's turn
+    // Arrange — a ferret's thread, resting on its ferret, and a task agenda on the owner's turn
     const resting = thread({
       parked: { reason: 'replied', at: at(-5) },
       resting: { sub: 'waiting-on-ferret', at: at(-5) },

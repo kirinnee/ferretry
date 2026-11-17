@@ -1,22 +1,22 @@
 /**
- * THE BOARD, HELD: every paired machine's cards for the queries open pages are showing, kept fresh by
+ * THE BOARD, HELD: every paired machine's tasks for the queries open pages are showing, kept fresh by
  * the machine saying what changed.
  *
  * A PAGE WATCHES A QUERY. `watch(query, machines)` reads each machine's board once and holds it until the
- * page lets go; two pages asking the same thing share one view. A machine's slice is its own: cards keyed
+ * page lets go; two pages asking the same thing share one view. A machine's slice is its own: tasks keyed
  * by task id WITHIN that machine, so `(daemonId, taskId)` is the identity everywhere above this file.
  *
  * LIVE, WITHOUT RE-READING THE BOARD. The daemon publishes `board.changed {projectId, taskIds}` on the
- * fleet feed. `noteEvent` re-reads exactly those cards (`GET /v1/board/tasks/:id`) and drops each into
- * every view it belongs to — or out of those it no longer belongs to, which is how a card moving lanes or
- * closing leaves a filtered board. What an event cannot say is time: a card going stale is no change in
+ * fleet feed. `noteEvent` re-reads exactly those tasks (`GET /v1/board/tasks/:id`) and drops each into
+ * every view it belongs to — or out of those it no longer belongs to, which is how a task moving lanes or
+ * closing leaves a filtered board. What an event cannot say is time: a task going stale is no change in
  * any file. So an open page re-reads its whole board every {@link BOARD_DERIVE_MS}, no oftener, and that
  * read also refreshes the header's counts. Nothing here works out liveness; `activity` is the daemon's.
  *
- * READS RACE, AND THE NEWEST ISSUED WINS. A full read, a card read and a write's answer all describe a
- * card at the moment the request was MADE, and they settle in any order. Each is stamped when it is issued;
- * a card keeps the stamp of the last thing that set it, and an older stamp cannot overwrite a newer one —
- * nor can a read that settles after the card was removed bring it back. The test for this is
+ * READS RACE, AND THE NEWEST ISSUED WINS. A full read, a task read and a write's answer all describe a
+ * task at the moment the request was MADE, and they settle in any order. Each is stamped when it is issued;
+ * a task keeps the stamp of the last thing that set it, and an older stamp cannot overwrite a newer one —
+ * nor can a read that settles after the task was removed bring it back. The test for this is
  * `board-store.test.ts`.
  *
  * A RE-PAIR DROPS A MACHINE. `clearDaemon` forgets every slice of that machine in every view and
@@ -66,7 +66,7 @@ export interface BoardMachineSlice {
   readonly laneSets: ReadonlyMap<BoardProjectId, LaneSet | null>;
   readonly counts: BoardCounts | null;
   readonly quarantined: readonly BoardQuarantinedTask[];
-  /** The board has more cards than the pages read. */
+  /** The board has more tasks than the pages read. */
   readonly truncated: boolean;
   readonly version: string | null;
   /** When the whole board was last read (the store's clock); `null` before the first read. */
@@ -84,7 +84,7 @@ export interface BoardTaskState {
   readonly error: string | null;
   readonly task: TaskView | null;
   readonly laneSet: LaneSet | null;
-  /** The machine answered and has no such card. */
+  /** The machine answered and has no such task. */
   readonly missing: boolean;
 }
 
@@ -95,7 +95,7 @@ export interface BoardProjectsState {
   readonly projects: readonly BoardProject[] | null;
 }
 
-/** Every card id one machine holds, for proving a `&F12` reference whatever project the card is on. */
+/** Every task id one machine holds, for proving a `&F12` reference whatever project the task is on. */
 export interface BoardIdsState {
   readonly status: BoardLoadStatus;
   readonly error: string | null;
@@ -158,7 +158,7 @@ interface View {
   timer: unknown;
   /** Watchers that want the whole board re-read every beat. A view with none stays live by events alone. */
   beats: number;
-  /** The stamp of whatever last set (or removed) each card, per machine. */
+  /** The stamp of whatever last set (or removed) each task, per machine. */
   readonly stamps: Map<DaemonId, Map<TaskId, number>>;
   /** The stamp of the newest whole-board read applied, per machine. */
   readonly fullStamp: Map<DaemonId, number>;
@@ -184,7 +184,7 @@ interface TaskWatch {
   state: BoardTaskState;
   stamp: number;
   timer: unknown;
-  /** Holders that want the card re-read on the 30-second beat; an inline block reads only on its events. */
+  /** Holders that want the task re-read on the 30-second beat; an inline block reads only on its events. */
   beats: number;
 }
 
@@ -312,7 +312,7 @@ export class DaemonBoardStore {
   }
 
   // -------------------------------------------------------------------------------------------------
-  // Agendas: where a card's asks are read from, kept live
+  // Agendas: where a task's asks are read from, kept live
   // -------------------------------------------------------------------------------------------------
 
   /**
@@ -389,7 +389,7 @@ export class DaemonBoardStore {
       this.#applyWhole(view, daemonId, stamp, read, laneSets, version);
     } catch (reason) {
       if (!this.#publishes(view, daemonId, generation)) return;
-      // A failed read never blanks a good board: the cards stay and the page is told the refresh failed.
+      // A failed read never blanks a good board: the tasks stay and the page is told the refresh failed.
       const current = this.#slice(view, daemonId);
       this.#setSlice(view, daemonId, { ...current, status: 'error', error: failureMessage(reason) });
     }
@@ -403,7 +403,7 @@ export class DaemonBoardStore {
   /**
    * Each project's lane set on this machine: the project's own answer when `/v1/board/projects` is served,
    * the one-project board's when the read was scoped to it, and otherwise one tiny scoped read per
-   * project the cards name. A project with no confirmed lanes stays `null` and is shown unplaced.
+   * project the tasks name. A project with no confirmed lanes stays `null` and is shown unplaced.
    */
   async #laneSetsFor(
     machine: DaemonConnection,
@@ -451,7 +451,7 @@ export class DaemonBoardStore {
         stamps.set(task.id, stamp);
       }
     }
-    // A board that ran past its last page cannot say a card is gone, only that it was not read.
+    // A board that ran past its last page cannot say a task is gone, only that it was not read.
     if (!read.truncated) {
       for (const id of current.cards.keys()) {
         if (!incoming.has(id) && stamp > (stamps.get(id) ?? 0)) {
@@ -508,7 +508,7 @@ export class DaemonBoardStore {
     void this.reconcile(daemonId, changed.data.taskIds);
   }
 
-  /** Re-reads these cards of one machine, and only these, into every view and task page that holds them. */
+  /** Re-reads these tasks of one machine, and only these, into every view and task page that holds them. */
   async reconcile(daemonId: DaemonId, taskIds: readonly TaskId[]): Promise<void> {
     const machine = this.#connections.get(daemonId);
     if (machine === undefined) return;
@@ -526,13 +526,13 @@ export class DaemonBoardStore {
             if (this.#views.get(view.key) === view) this.#placeCard(view, daemonId, id, stamp, answer);
           for (const watch of holders) this.#setTask(watch, stamp, answer);
         } catch {
-          // A failed card read changes nothing; the next beat re-reads the whole board.
+          // A failed task read changes nothing; the next beat re-reads the whole board.
         }
       }),
     );
   }
 
-  /** Puts one card read into a view, or takes it out. `answer` is `null` for a card the machine lacks. */
+  /** Puts one task read into a view, or takes it out. `answer` is `null` for a task the machine lacks. */
   #placeCard(view: View, daemonId: DaemonId, id: TaskId, stamp: number, answer: TaskResponse | null): void {
     const stamps = view.stamps.get(daemonId) ?? new Map<TaskId, number>();
     view.stamps.set(daemonId, stamps);
@@ -550,7 +550,7 @@ export class DaemonBoardStore {
   }
 
   // -------------------------------------------------------------------------------------------------
-  // One card
+  // One task
   // -------------------------------------------------------------------------------------------------
 
   taskState(daemonId: DaemonId, id: TaskId): BoardTaskState {
@@ -558,9 +558,9 @@ export class DaemonBoardStore {
   }
 
   /**
-   * Joins the page for one card, reads it, and re-reads it on its `board.changed` and, unless a holder
-   * passes `beat: false`, every beat. A card shown inline in a message is live on events alone: nothing
-   * about a message earns a timer, and the page that holds the card in full still gets its beat.
+   * Joins the page for one task, reads it, and re-reads it on its `board.changed` and, unless a holder
+   * passes `beat: false`, every beat. A task shown inline in a message is live on events alone: nothing
+   * about a message earns a timer, and the page that holds the task in full still gets its beat.
    */
   watchTask(machine: DaemonConnection, id: TaskId, options: { readonly beat?: boolean } = {}): () => void {
     const beat = options.beat !== false;
@@ -691,7 +691,7 @@ export class DaemonBoardStore {
   }
 
   // -------------------------------------------------------------------------------------------------
-  // Card ids
+  // Task ids
   // -------------------------------------------------------------------------------------------------
 
   idsState(daemonId: DaemonId): BoardIdsState {
@@ -700,7 +700,7 @@ export class DaemonBoardStore {
 
   /**
    * Joins one machine's card-id list, reading it once. It is the proof behind `&F12` on every project, so it
-   * is never narrowed to a view's query; `board.changed` adds the ids it names, so a card made a moment ago
+   * is never narrowed to a view's query; `board.changed` adds the ids it names, so a task made a moment ago
    * is proved without a re-read.
    */
   watchIds(machine: DaemonConnection): void {
@@ -741,7 +741,7 @@ export class DaemonBoardStore {
   // -------------------------------------------------------------------------------------------------
 
   /**
-   * Sends one action to the machine that owns the card and, when the daemon accepts it, puts the card as
+   * Sends one action to the machine that owns the task and, when the daemon accepts it, puts the task as
    * the daemon now holds it into every view and page showing it — without waiting for the feed to say so.
    * A refusal changes nothing and comes back as a value.
    */
@@ -768,13 +768,13 @@ export class DaemonBoardStore {
     return boardOk(answer.value.card);
   }
 
-  /** Starts a new ferret on the card on the machine that holds it; the card itself moves when the feed says so. */
+  /** Starts a new ferret on the task on the machine that holds it; the task itself moves when the feed says so. */
   start(machine: DaemonConnection, id: TaskId, key?: string): Promise<BoardResult<TaskStartResponse, BoardWriteError>> {
     return this.#port.start(machine, id, key);
   }
 
   /**
-   * Opens a card the owner wrote on `machine` and, when the daemon accepts it, puts it into every view
+   * Opens a task the owner wrote on `machine` and, when the daemon accepts it, puts it into every view
    * and page showing that machine, like an accepted action does.
    */
   async create(

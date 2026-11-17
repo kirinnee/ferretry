@@ -1,9 +1,9 @@
 /**
  * THE BOARD'S VIEWS of one model: Kanban (the default), Table (see `board-table.tsx`), Tree, Dependencies and Archive.
  *
- * Every view draws the same `BoardCard`; they differ only in how the cards are arranged. The page owns
- * the data and hands each view a `BoardCardEnv`, so a view never reads the network. The views are READ-ONLY:
- * nothing is draggable and no lane takes a drop, the board moves its own cards.
+ * Every view draws the same `BoardTask`; they differ only in how the tasks are arranged. The page owns
+ * the data and hands each view a `BoardTaskEnv`, so a view never reads the network. The views are READ-ONLY:
+ * nothing is draggable and no lane takes a drop, the board moves its own tasks.
  */
 
 import { formatTaskRef } from '../../contract/index.ts';
@@ -23,7 +23,7 @@ import { BoardIcon } from './board-icons.tsx';
 import { BoardLane } from './board-lane.tsx';
 import { archiveRowsOf, TableRows } from './board-table.tsx';
 
-/** What every view needs to draw and wire a card. */
+/** What every view needs to draw and wire a task. */
 export interface BoardTaskEnv {
   readonly names: FerretNames;
   readonly now: number;
@@ -31,7 +31,7 @@ export interface BoardTaskEnv {
   readonly hrefFor: (task: BoardTaskOf) => string;
   readonly onNavigate: (to: string) => void;
   readonly places: ReadonlyMap<string, BoardTaskPlace>;
-  /** A phone: thumb-sized cards. */
+  /** A phone: thumb-sized tasks. */
   readonly touch?: boolean;
 }
 
@@ -138,7 +138,7 @@ export interface TreeViewProps {
   readonly env: BoardTaskEnv;
 }
 
-/** A lead's card with its sub-ferrets' cards indented under it. */
+/** A lead's task with its sub-ferrets' tasks indented under it. */
 export function TreeView({ model, env }: TreeViewProps) {
   const rows = useMemo(() => flattenTree(buildTree(model.cards)), [model.cards]);
   if (rows.length === 0) return <Empty>No tasks match.</Empty>;
@@ -167,8 +167,8 @@ export interface DependenciesViewProps {
 }
 
 /**
- * Every card that waits on another or is waited on, each with its blockers and the cards it unblocks.
- * A list rather than a graph: the dependency lines are said in words under each card.
+ * Every task that waits on another or is waited on, each with its blockers and the tasks it unblocks.
+ * A list rather than a graph: the dependency lines are said in words under each task.
  */
 export function DependenciesView({ model, env }: DependenciesViewProps) {
   const linked = model.cards.filter(task => task.task.blockedBy.length > 0 || task.task.blocks.length > 0);
@@ -201,7 +201,7 @@ export function DependenciesView({ model, env }: DependenciesViewProps) {
 // ---------------------------------------------------------------------------------------------------
 
 export interface ArchiveViewProps {
-  /** Closed and dropped cards, newest first, already narrowed by the search. */
+  /** Closed and dropped tasks, newest first, already narrowed by the search. */
   readonly shown: readonly BoardTaskOf[];
   readonly remaining: number;
   readonly total: number;

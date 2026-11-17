@@ -1,7 +1,7 @@
 /**
  * What Board provides to Agenda's asks: the three app hooks of the REAL half (`app.shell.hooks`), each built as the
  * shell builds it (over one client, on one daemon) against a scripted daemon that records every request. The
- * answers are Board's own: `boardDone` picks the lane, `planMove` plans the move, `createCardReferenceResolver` proves
+ * answers are Board's own: `boardDone` picks the lane, `planMove` plans the move, `createTaskReferenceResolver` proves
  * `&F12` and `laneEditDestination` opens the lane editor. Agenda's side (drawing the ask, failing closed without a
  * provider) is tested in Agenda.
  */
@@ -19,7 +19,7 @@ interface Sent {
   readonly key?: string;
 }
 
-/** A daemon with `cards` on one lane set; a write answers what `answer` says (the moved card by default). */
+/** A daemon with `tasks` on one lane set; a write answers what `answer` says (the moved task by default). */
 const scripted = (
   tasks: readonly TaskView[],
   options: {
@@ -165,7 +165,7 @@ describe('agenda.card-answer: Done · closes is the board’s own Done', () => {
     const dropped = boardTask('F2', { laneId: 'tested', dropped: { at: '2026-08-01T10:00:00.000Z', reason: 'no' } });
     const unread = scripted([boardTask('F1', { laneId: 'tested' })]);
     const droppedWorld = scripted([dropped]);
-    // A card in a lane its board does not have: the board has no Done for it.
+    // A task in a lane its board does not have: the board has no Done for it.
     const noDone = scripted([boardTask('F3', { laneId: 'gone-lane' })]);
 
     const neverRead = answerOver(unread.client);
