@@ -9,7 +9,8 @@ import {
   ownerStanding,
   StandInAdmission,
 } from '@ferretry/core-gate/contract/testing';
-import { FakeVault } from '@ferretry/core-vault/contract/testing';
+import type { SecretName } from '@ferretry/core-vault/contract';
+import { FakeRedaction, FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { ApiRequest, CallStanding } from '@ferretry/kernel/contract';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
@@ -62,11 +63,12 @@ const standingFor = (request: ApiRequest): CallStanding => {
 };
 const callAs = (caller: string) => ({ headers: { [callerHeader]: caller } });
 
-const boot = async (): Promise<TestHost> =>
+const boot = async (runner = new FakeRunner(), redaction?: FakeRedaction): Promise<TestHost> =>
   await testHost({
     everyDirectory: true,
-    plugins: [ferrets, harnessPlugin(new FakeHarness()), runnerPlugin(new FakeRunner())],
+    plugins: [ferrets, harnessPlugin(new FakeHarness()), runnerPlugin(runner)],
     gate: new StandInAdmission(standingFor),
+    ...(redaction === undefined ? {} : { redaction }),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
   });
 
@@ -97,5 +99,37 @@ describe('the stored last screen route', () => {
     expect((await h.request('GET', `/v1/ferrets/${id}/last-screen`, callAs('ferret:someone-else'))).status).toBe(403);
     // A device that holds it gets past the gate (and reaches the ferret's own 409: nothing stored yet).
     expect((await h.request('GET', `/v1/ferrets/${id}/last-screen`, callAs('device:full'))).status).toBe(409);
+  });
+
+  test('a stopped ferret answers 200 with the stored last lines, masked again with what the Vault holds NOW', async () => {
+    const runner = new FakeRunner();
+    // The Vault's values as the read sees them: empty when the frame is kept, one more by the time it is read back.
+    const held = new Map<SecretName, string>();
+    const h = await boot(runner, new FakeRedaction(held));
+    const id = await started(h);
+    // The pane shows a value the Vault does not hold yet when the frame is kept on the stop.
+    const later = 'sk-added-after-the-stop-0123456789';
+    const look = {
+      frame: 'f',
+      working: false,
+      atPrompt: true,
+      permission: false,
+      status: `$ build\nout of memory\ntoken=${later}\nKilled\n`,
+    };
+    // Whatever handle the ferret's pane has, any look answers the same frame.
+    runner.look = async () => look;
+    const stopped = await h.request('POST', `/v1/ferrets/${id}/stop`, { query: { how: 'now' }, body: {} });
+    expect(stopped.status).toBeLessThan(300);
+    await h.settle();
+    held.set('LATER_TOKEN' as SecretName, later);
+    const read = await h.request('GET', `/v1/ferrets/${id}/last-screen`);
+    expect(read.status).toBe(200);
+    const { screen } = read.json<{ screen: string }>();
+    expect(screen).toContain('out of memory');
+    expect(screen).toContain('Killed');
+    expect(screen).toContain('[redacted:LATER_TOKEN]');
+    expect(screen).not.toContain(later);
+    // A device that holds terminal use reads it too.
+    expect((await h.request('GET', `/v1/ferrets/${id}/last-screen`, callAs('device:full'))).status).toBe(200);
   });
 });
