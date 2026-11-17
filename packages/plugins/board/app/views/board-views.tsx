@@ -18,7 +18,7 @@ import {
   buildTree,
   flattenTree,
 } from '../lib/board-view.ts';
-import { BoardCard } from './board-card.tsx';
+import { BoardCard } from './board-task.tsx';
 import { BoardIcon } from './board-icons.tsx';
 import { BoardLane } from './board-lane.tsx';
 import { archiveRowsOf, TableRows } from './board-table.tsx';

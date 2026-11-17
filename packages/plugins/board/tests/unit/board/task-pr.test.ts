@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { PrLink } from '../../../contract/index.ts';
-import { prOf } from '../../../daemon/lib/board/card-pr.ts';
+import { prOf } from '../../../daemon/lib/board/task-pr.ts';
 
 const link = (number: number, state: PrLink['state'], extra: Partial<PrLink> = {}): PrLink => ({
   url: `https://github.com/acme/repo/pull/${number}`,

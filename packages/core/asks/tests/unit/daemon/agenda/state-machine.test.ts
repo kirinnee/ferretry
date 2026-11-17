@@ -24,7 +24,7 @@ import {
   awaitsOwnAnswer,
   cardAgendaReference,
   openCardAsks,
-} from '../../../../daemon/lib/protocol/agenda-card-asks.ts';
+} from '../../../../daemon/lib/protocol/agenda-task-asks.ts';
 import { gateReference } from '../../../../daemon/lib/protocol/agenda-gate.ts';
 import should from 'should';
 import {
@@ -47,7 +47,7 @@ import {
   parseAgendaLedger,
   type RaiseAgendaRequest,
 } from '../../../../daemon/lib/agenda/state-machine.ts';
-import type { CardAskOperation } from '../../../../daemon/lib/agenda/card-asks.ts';
+import type { CardAskOperation } from '../../../../daemon/lib/agenda/task-asks.ts';
 
 const SESSION_ID = 'session-1';
 const OTHER_SESSION_ID = 'session-2';

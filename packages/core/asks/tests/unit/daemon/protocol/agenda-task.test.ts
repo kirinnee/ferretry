@@ -30,7 +30,7 @@ import {
   unswipedChoices,
   YES_NO_ORDER,
   yesNoOrder,
-} from '../../../../daemon/lib/protocol/agenda-card.ts';
+} from '../../../../daemon/lib/protocol/agenda-task.ts';
 
 const AT = '2026-10-29T09:00:00.000Z';
 

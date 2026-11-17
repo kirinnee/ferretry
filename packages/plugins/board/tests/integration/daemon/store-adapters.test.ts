@@ -4,7 +4,7 @@ import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import type { BoardProjectId, Card, CardId } from '../../../contract/index.ts';
 import { BoardFiles, BoardSwitchFiles, LaneSetFiles } from '../../../daemon/adapters/lanes/index.ts';
-import { KernelCardStore } from '../../../daemon/adapters/store/card-store.ts';
+import { KernelCardStore } from '../../../daemon/adapters/store/task-store.ts';
 import { KernelFerretFocus } from '../../../daemon/adapters/store/focus-store.ts';
 import { KernelSweepMemory } from '../../../daemon/adapters/store/sweep-memory.ts';
 import { BoardUnavailableError, EMPTY_SWEEP_MEMORY } from '../../../daemon/lib/board/index.ts';

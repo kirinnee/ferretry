@@ -26,7 +26,7 @@ import {
   agendaTabNameProblem,
   agendaTabProblems,
 } from './agenda.ts';
-import { agendaCardKind } from './agenda-card.ts';
+import { agendaCardKind } from './agenda-task.ts';
 
 /** One tab as a reader sees it. The main tab's parts are separate, so each draws in its own block. */
 export type AgendaViewTab =

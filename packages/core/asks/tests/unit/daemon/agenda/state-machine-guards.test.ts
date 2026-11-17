@@ -11,7 +11,7 @@ import {
   parseAgendaLedger,
   type RaiseAgendaRequest,
 } from '../../../../daemon/lib/agenda/state-machine.ts';
-import { cardAgendaReference } from '../../../../daemon/lib/protocol/agenda-card-asks.ts';
+import { cardAgendaReference } from '../../../../daemon/lib/protocol/agenda-task-asks.ts';
 import { gateReference } from '../../../../daemon/lib/protocol/agenda-gate.ts';
 import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
 import type { AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';

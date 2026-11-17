@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { sessionsOnOpenCards } from '../../../../../daemon/lib/session/archive/open-cards.ts';
+import { sessionsOnOpenCards } from '../../../../../daemon/lib/session/archive/open-tasks.ts';
 import type { LaneCategory, OpenCardStanding } from '../../../../../daemon/lib/session/peers/board.ts';
 
 /** The lanes of project `p`, as Board resolves a card's lane to its category. */

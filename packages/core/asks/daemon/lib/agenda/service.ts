@@ -10,11 +10,11 @@ import type {
 } from '../protocol/agenda.ts';
 import type { AgendaConversationPage, AgendaVersion, AgendaVersionSummary } from '../protocol/agenda-versions.ts';
 import type { TaskRef } from '../protocol/board-refs.ts';
-import { agendaCardKind, clipAtWord } from '../protocol/agenda-card.ts';
+import { agendaCardKind, clipAtWord } from '../protocol/agenda-task.ts';
 import { MACHINE_AGENDA_ID, MAX_AGENDA_TITLE_LENGTH } from '../protocol/agenda.ts';
 import { MAX_AGENDA_CONVERSATION_FRAGMENT_LENGTH } from '../protocol/agenda-versions.ts';
 import { formatTaskRef } from '../protocol/board-refs.ts';
-import type { CardAskOperation } from './card-asks.ts';
+import type { CardAskOperation } from './task-asks.ts';
 import { KeyedSerialQueue } from './serial-queue.ts';
 import {
   isAncestorOf,

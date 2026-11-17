@@ -31,7 +31,7 @@ import {
 import { THIS_MACHINE } from '../lib/machine.ts';
 import { navigateTo } from '../lib/navigate.ts';
 import { boardCardPath } from '../lib/paths.ts';
-import { BoardCard } from './board-card.tsx';
+import { BoardCard } from './board-task.tsx';
 import { BoardLane } from './board-lane.tsx';
 
 export interface CardEmbedProps {

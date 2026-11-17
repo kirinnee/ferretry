@@ -1,5 +1,5 @@
 import { expect, it } from 'bun:test';
-import { cardAnswers, reference } from '../../support/daemon/card-answers.ts';
+import { cardAnswers, reference } from '../../support/daemon/task-answers.ts';
 
 it('replays an explicit answered card ask by receipt without answering the item itself', async () => {
   const board = await cardAnswers();

@@ -43,7 +43,7 @@ import {
   type ReviveSubject,
   reviveMessage,
 } from './revive.ts';
-import type { WardenFocusCard } from './focus-card.ts';
+import type { WardenFocusCard } from './focus-task.ts';
 import { fitOwnerNotice } from './owner-notice.ts';
 import { instantMs, isoFromMs } from './time.ts';
 import { WARDEN_LABEL, type WardenSessionView } from './types.ts';

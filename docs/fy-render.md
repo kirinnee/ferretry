@@ -239,7 +239,7 @@ the daemon's answer is the proof the reference standard asks for
   never polls.
 - **One renderer.** It draws wherever `ChatProse` draws — chat messages, agenda bodies, a board task's
   detail — and nowhere else. Spec: `packages/plugins/conversation/app/render/fy-render-embed.ts`; component:
-  `packages/plugins/conversation/app/render/fy-render-card-embed.tsx`.
+  `packages/plugins/conversation/app/render/fy-render-task-embed.tsx`.
 
 ### Maps
 

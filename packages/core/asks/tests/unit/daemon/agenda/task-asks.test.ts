@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { AgendaCardAskAnswer, AgendaGate, AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
 import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
-import { cardAgendaReference } from '../../../../daemon/lib/protocol/agenda-card-asks.ts';
+import { cardAgendaReference } from '../../../../daemon/lib/protocol/agenda-task-asks.ts';
 import should from 'should';
 import {
   applyCardAsk,
@@ -9,7 +9,7 @@ import {
   type CardAskOutcome,
   restRefusal,
   sealCardAsks,
-} from '../../../../daemon/lib/agenda/card-asks.ts';
+} from '../../../../daemon/lib/agenda/task-asks.ts';
 
 const T0 = Date.parse('2026-11-03T08:00:00.000Z');
 const at = (minutes: number): string => new Date(T0 + minutes * 60_000).toISOString();

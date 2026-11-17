@@ -26,7 +26,7 @@ import { createBoardActions } from './lib/board-actions.ts';
 import { boardDone } from './lib/board-done.ts';
 import { planMove } from './lib/board-move.ts';
 import type { BoardCardState } from './lib/board-store.ts';
-import { type CardReferenceResolver, createCardReferenceResolver } from './lib/card-reference-context.ts';
+import { type CardReferenceResolver, createCardReferenceResolver } from './lib/task-reference-context.ts';
 import { laneEditDestination } from './lib/lane-proposal-link.ts';
 import { THIS_MACHINE } from './lib/machine.ts';
 import { boardPath, cardPagePath } from './lib/paths.ts';

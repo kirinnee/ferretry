@@ -1,6 +1,6 @@
 import { render } from '@ferretry/app/testing';
 import { describe, expect, it } from 'bun:test';
-import { FyRenderCardEmbed } from '../../../../app/render/fy-render-card-embed.tsx';
+import { FyRenderCardEmbed } from '../../../../app/render/fy-render-task-embed.tsx';
 import { type FyRenderParsedBlock, isFyRenderEmbedBlock, parseFyRender } from '../../../../app/render/fy-render.ts';
 
 /**

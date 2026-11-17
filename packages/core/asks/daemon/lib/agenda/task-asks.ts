@@ -42,7 +42,7 @@ import {
   openCardAsks,
   parseCardAgendaReference,
   repliedToOwnAsk,
-} from '../protocol/agenda-card-asks.ts';
+} from '../protocol/agenda-task-asks.ts';
 import { canonicalJson } from '@ferretry/std';
 import { formatTaskRef } from '../protocol/board-refs.ts';
 

@@ -51,7 +51,7 @@ import {
   createPrLinks,
   requireCardRef,
 } from './board-request.ts';
-import { cardPatchDocument, composeCardPatch, parseCardPatch } from './card-patch.ts';
+import { cardPatchDocument, composeCardPatch, parseCardPatch } from './task-patch.ts';
 import { queuedLines } from './clash-notes.ts';
 import { refuse } from './errors.ts';
 import { missingFacility } from './context.ts';

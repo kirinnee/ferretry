@@ -2,4 +2,4 @@
    every plugin's list through the generated `packages/app/src/generated/plugin-styles.css`. */
 @import './views/board.css';
 @import './views/detail/board-detail.css';
-@import './views/detail/card-situation.css';
+@import './views/detail/task-situation.css';

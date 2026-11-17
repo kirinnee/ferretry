@@ -6,8 +6,8 @@ import {
   type SourceKey,
   SourceKeySchema,
 } from '@ferretry/core-asks/contract';
-import type { LaneProposalCard } from '../../lib/lanes/lane-proposal-card.ts';
-import { LANE_PROPOSAL_SOURCE } from '../../lib/lanes/lane-proposal-card.ts';
+import type { LaneProposalCard } from '../../lib/lanes/lane-proposal-task.ts';
+import { LANE_PROPOSAL_SOURCE } from '../../lib/lanes/lane-proposal-task.ts';
 import { LANE_ASK_WITHDRAWN } from '../../lib/lanes/lane-set-service.ts';
 import type { LaneProposalAsks } from '../../lib/lanes/ports.ts';
 

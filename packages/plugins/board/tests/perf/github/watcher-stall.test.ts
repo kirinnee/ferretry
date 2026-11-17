@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import { KernelCardStore } from '../../../daemon/adapters/store/card-store.ts';
+import { KernelCardStore } from '../../../daemon/adapters/store/task-store.ts';
 import { BoardService } from '../../../daemon/lib/board/index.ts';
 import { GitHubWatcher, UnfiledRefiler } from '../../../daemon/lib/github/index.ts';
 import { KeyedSerial } from '../../../daemon/lib/lanes/index.ts';

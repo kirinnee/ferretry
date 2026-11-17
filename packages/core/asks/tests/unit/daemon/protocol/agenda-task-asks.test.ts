@@ -20,7 +20,7 @@ import {
   ownCardAsk,
   parseCardAgendaReference,
   repliedToOwnAsk,
-} from '../../../../daemon/lib/protocol/agenda-card-asks.ts';
+} from '../../../../daemon/lib/protocol/agenda-task-asks.ts';
 import { canonicalJson } from '@ferretry/std';
 
 const AT = '2026-11-03T09:00:00.000Z';

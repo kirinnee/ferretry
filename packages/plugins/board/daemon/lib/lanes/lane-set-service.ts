@@ -7,7 +7,7 @@
  */
 import { err, ok, type Result } from '@ferretry/std';
 import { type BoardProjectId, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
-import { laneChangeCard, laneProposalCard } from './lane-proposal-card.ts';
+import { laneChangeCard, laneProposalCard } from './lane-proposal-task.ts';
 import {
   decideLaneChange,
   type LaneActor,

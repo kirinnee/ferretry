@@ -14,7 +14,7 @@ import {
   CardPatchSchema,
   cardRevision,
 } from '../../contract/index.ts';
-import { cardTitleIssue } from './card-title.ts';
+import { cardTitleIssue } from './task-title.ts';
 import { patchProblems, readPatchText, samePatchValue } from './patch-document.ts';
 
 type CardWords = Pick<

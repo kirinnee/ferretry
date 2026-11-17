@@ -1,4 +1,4 @@
-import { agendaCardKind, agendaTitle } from './agenda-card.ts';
+import { agendaCardKind, agendaTitle } from './agenda-task.ts';
 import { type AgendaListSnapshot, type AgendaSnapshot, ResolvedAgendaHeaderSchema } from './agenda.ts';
 
 /** Active and parked items stay complete; every closed item is a header, with no recent-full exception. */

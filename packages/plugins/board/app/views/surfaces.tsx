@@ -17,7 +17,7 @@ import type {
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { CARD_ID_PATTERN, type CardAskRef, formatCardRef, writtenProgressParts } from '../../contract/index.ts';
 import { useBoardCard, useCardReferenceProof } from '../hooks/use-board.ts';
-import { useChatCard } from '../hooks/use-chat-card.ts';
+import { useChatCard } from '../hooks/use-chat-task.ts';
 import { embedSpecOf } from '../lib/embed-lanes.ts';
 import { readChatTasksUrl } from '../lib/board-chat-url.ts';
 import { ferretNamer } from '../lib/board-present.ts';

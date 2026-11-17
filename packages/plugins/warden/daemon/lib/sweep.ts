@@ -164,7 +164,7 @@ import {
   type WardenFailoverState,
 } from './failover.ts';
 import { blessingViews, investigationList, retainRecords, WARDEN_STATUS_LIST_LIMIT } from './feed.ts';
-import { type WardenFocusCard, wardenResumeMessage } from './focus-card.ts';
+import { type WardenFocusCard, wardenResumeMessage } from './focus-task.ts';
 import { wardenFixedNudge, wardenFixedResumeReason, wardenFixedStopReason } from './ferret-sentences.ts';
 import {
   capSkipKey,

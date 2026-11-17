@@ -13,7 +13,7 @@
 
 import type { MarkdownAstFenceNode, MarkdownFences } from '@ferretry/app';
 import { FyRenderBlock } from './fy-render-block.tsx';
-import { FyRenderCardEmbed, type FyRenderCardEmbedHost } from './fy-render-card-embed.tsx';
+import { FyRenderCardEmbed, type FyRenderCardEmbedHost } from './fy-render-task-embed.tsx';
 import {
   FY_RENDER_FENCE_ATTRIBUTE,
   type FyRenderWorkspaceReader,

@@ -7,7 +7,7 @@ import {
   agendaDoneMessage,
   agendaNeedsInfoMessage,
 } from '../protocol/agenda-message.ts';
-import { agendaCardKind, agendaTitle } from '../protocol/agenda-card.ts';
+import { agendaCardKind, agendaTitle } from '../protocol/agenda-task.ts';
 import { formWords } from '../protocol/agenda-form.ts';
 
 /**

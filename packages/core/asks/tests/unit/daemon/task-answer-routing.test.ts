@@ -1,5 +1,5 @@
 import { expect, it } from 'bun:test';
-import { cardAnswers, reference } from '../../support/daemon/card-answers.ts';
+import { cardAnswers, reference } from '../../support/daemon/task-answers.ts';
 
 it('keeps an unnamed plain reply on the item and leaves its attached card ask open', async () => {
   const board = await cardAnswers();

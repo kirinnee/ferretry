@@ -30,10 +30,10 @@ import { activityText, hasLinks, kindLabel, laneCategoryOf, laneNameOf, written 
 import type { RunningOnMachine } from '../../lib/board-model.ts';
 import type { FerretNames } from '../../lib/board-present.ts';
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
-import { useCardAsks } from '../../hooks/use-card-asks.ts';
+import { useCardAsks } from '../../hooks/use-task-asks.ts';
 import { agendaAskPath, boardPath, ferretPath } from '../../lib/paths.ts';
 import { cardProse } from '../prose.tsx';
-import { markTerms, TermLayer } from './card-terms.tsx';
+import { markTerms, TermLayer } from './task-terms.tsx';
 import { Situation } from './situation.tsx';
 import { BoardIcon } from '../board-icons.tsx';
 import {

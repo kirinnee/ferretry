@@ -247,7 +247,7 @@ leaves, so a standing Ferrets would refuse is a rejection there too (keep live).
 | Part                              | File                                                                                  |
 | --------------------------------- | ------------------------------------------------------------------------------------- |
 | The rule (pure)                   | `packages/core/ferrets/daemon/lib/session/archive/policy.ts`                          |
-| Keep signals                      | `.../archive/keeps.ts`, `.../archive/open-cards.ts`                                   |
+| Keep signals                      | `.../archive/keeps.ts`, `.../archive/open-tasks.ts`                                   |
 | The pass                          | `.../archive/service.ts`                                                              |
 | The registry document             | `.../archive/registry.ts`                                                             |
 | Archive, revive, fallback reads   | `packages/core/ferrets/daemon/adapters/storage/session-storage.ts`                    |

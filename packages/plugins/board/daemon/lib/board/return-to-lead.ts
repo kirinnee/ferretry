@@ -13,11 +13,11 @@
  * nothing is returned and the card is an orphan, which the Warden reports.
  */
 import { type Card, isSubCard, type LaneCategory } from '../../../contract/index.ts';
-import { type CardContext, withEvent } from './card-actions.ts';
+import { type CardContext, withEvent } from './task-actions.ts';
 import { nearestLiveLead, presenceOf, type FerretRoster } from './activity.ts';
 import { effectiveAssignee } from './authority.ts';
 import { MAX_LINEAGE_DEPTH } from './lineage.ts';
-import { HELPER_ENDED_GRACE_MS, isHandedHelper, isPrFreeHelper } from './sub-card-close.ts';
+import { HELPER_ENDED_GRACE_MS, isHandedHelper, isPrFreeHelper } from './sub-task-close.ts';
 
 export { nearestLiveLead };
 

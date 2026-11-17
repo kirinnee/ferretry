@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { AgendaCardAnswer } from '../../../../daemon/lib/protocol/agenda.ts';
-import { agendaCardAnswers, agendaShape, isDefaultAnswerLabel } from '../../../../daemon/lib/protocol/agenda-card.ts';
+import { agendaCardAnswers, agendaShape, isDefaultAnswerLabel } from '../../../../daemon/lib/protocol/agenda-task.ts';
 import {
   AGENDA_NEED_HEADING,
   AGENDA_SHAPE_ERRORS,

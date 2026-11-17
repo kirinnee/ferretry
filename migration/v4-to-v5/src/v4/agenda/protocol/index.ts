@@ -1,7 +1,7 @@
 // The vendored v4.291.5 protocol files, re-exported as v4's own barrel (packages/protocol/src/lib/index.ts) did.
 export * from './account-ids.ts';
-export * from './agenda-card-asks.ts';
-export * from './agenda-card.ts';
+export * from './agenda-task-asks.ts';
+export * from './agenda-task.ts';
 export * from './agenda-form.ts';
 export * from './agenda-gate.ts';
 export * from './agenda-patch.ts';

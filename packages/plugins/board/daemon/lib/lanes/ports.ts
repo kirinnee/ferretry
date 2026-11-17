@@ -1,6 +1,6 @@
 import type { BoardProjectId, BoardSwitch } from '../../../contract/index.ts';
 import type { ProjectInfo, RegisterProjectRequest } from '@ferretry/plugin-projects/contract';
-import type { LaneProposalCard } from './lane-proposal-card.ts';
+import type { LaneProposalCard } from './lane-proposal-task.ts';
 import type { BoardActorVia, LaneSet } from './model.ts';
 import type { ProjectGitFacts } from './template-inference.ts';
 

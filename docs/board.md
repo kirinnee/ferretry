@@ -1145,7 +1145,7 @@ A task never asks the owner itself, and no lane means "waiting on you". Lanes sh
 needs the owner — a plan to approve (Plan/Design's **OK to build**) or a release to try (Released's **Done / Not
 good**) — the daemon puts a **task ask** on the agenda that carries the task, with the task's How to test, and the
 owner answers it there ([agenda.md](agenda.md#task-asks) has the wire). The code is `GateItems`
-(`packages/daemon/src/lib/board/gate-items.ts`); the pure half is `gate-policy.ts` and `agenda/card-asks.ts`.
+(`packages/daemon/src/lib/board/gate-items.ts`); the pure half is `gate-policy.ts` and `agenda/task-asks.ts`.
 
 Internally the lane's stage is still a **gate** (`laneStage` in `@ferretry/protocol`): it is what makes the daemon put
 a task ask, and what refuses a ferret's move past it. A lane stored without a stage reads with one.
@@ -1210,7 +1210,7 @@ a daemon trigger (`work.started`, a PR, a release — it stops in the first gate
 either), `fy signal done` (held, or stopped at the gate) and a refile's facts. A refile by anyone else never lands a task
 past a gate of the other board's variant: it stops in the first one on the way, and a lane named past one is refused;
 and a task waiting at a gate lands at a gate of the same stage or earlier, never a later one; a dropped task is reopened by anyone else only where it was dropped, or earlier. Leaving a gate is
-`needsOwner`'s and a gate on the way `gatesBetween`'s (`card-actions.ts`), both from each lane's stage
+`needsOwner`'s and a gate on the way `gatesBetween`'s (`task-actions.ts`), both from each lane's stage
 (`laneStage`), so a `verify` lane with no `ownerGate` is a gate too. A ferret may still move a task back out of a
 gate, with a reason. A task's workflow never changes, so no variant can skip one.
 

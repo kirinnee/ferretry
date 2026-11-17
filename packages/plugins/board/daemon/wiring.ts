@@ -53,7 +53,7 @@ import { ConversationMessages } from './adapters/messages.ts';
 import { ConversationOwnerWords } from './adapters/owner-words.ts';
 import { BoardWorkSource } from './adapters/work-source.ts';
 import { KernelFerretFocus } from './adapters/store/focus-store.ts';
-import { KernelCardStore } from './adapters/store/card-store.ts';
+import { KernelCardStore } from './adapters/store/task-store.ts';
 import { KernelSweepMemory } from './adapters/store/sweep-memory.ts';
 import {
   BoardService,
@@ -86,7 +86,7 @@ import {
   type GateCheckItem,
   type TranscriptEvent,
 } from './lib/board/index.ts';
-import { prOf } from './lib/board/card-pr.ts';
+import { prOf } from './lib/board/task-pr.ts';
 import { githubWatchJob, type GithubWatch } from './lib/github/index.ts';
 import {
   BoardSwitchService,

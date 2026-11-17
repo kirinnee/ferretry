@@ -13,10 +13,10 @@ import { createElement, type FunctionComponent, Suspense } from 'react';
 import manifest from '../../../manifest.ts';
 import app from '../../../app/index.ts';
 import { NO_BOARD_FILTERS, boardFiltersToSearch, parseBoardFilters } from '../../../app/lib/board-model.ts';
-import { parseWorkName } from '../../../app/lib/card-name.ts';
+import { parseWorkName } from '../../../app/lib/task-name.ts';
 import { boardCardPath, boardPath, cardPagePath, projectLanesPath } from '../../../app/lib/paths.ts';
 import { BoardFilterSheet } from '../../../app/views/board-filters.tsx';
-import { CardName } from '../../../app/views/card-name.tsx';
+import { CardName } from '../../../app/views/task-name.tsx';
 import { boardAnswer, card, laneSetFor, PROJECT } from '../app/board-support.ts';
 
 const LEAD = 'mvuc7tsf-0c3d50df';

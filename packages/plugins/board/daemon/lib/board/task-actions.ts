@@ -66,7 +66,7 @@ import { queueBehindClashes } from './clash-queue.ts';
 import { BoardError } from './errors.ts';
 import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
 import { laneFromFacts } from './lane-facts.ts';
-import { closedLaneOf, shippedCloseReason, SUB_CARD_SHIPPED_REASON } from './sub-card-close.ts';
+import { closedLaneOf, shippedCloseReason, SUB_CARD_SHIPPED_REASON } from './sub-task-close.ts';
 import { cardVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
 
 /** The facts every rule may consult, gathered by the service before it calls one. */

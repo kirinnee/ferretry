@@ -113,7 +113,7 @@ import {
   sealCardAsks,
   withCardAsks,
   withoutCardAsks,
-} from './card-asks.ts';
+} from './task-asks.ts';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;

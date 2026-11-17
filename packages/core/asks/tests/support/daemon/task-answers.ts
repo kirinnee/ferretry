@@ -1,7 +1,7 @@
 import type { AskAnswer } from '../../../contract/index.ts';
-import { cardAskAnswers } from '../../../daemon/adapters/card-ask-answers.ts';
+import { cardAskAnswers } from '../../../daemon/adapters/task-ask-answers.ts';
 import { agendaRoutes } from '../../../daemon/lib/routes/agenda.ts';
-import { cardAskReference } from '../../../daemon/lib/protocol/agenda-card-asks.ts';
+import { cardAskReference } from '../../../daemon/lib/protocol/agenda-task-asks.ts';
 import { agendaService, routeDispatcher, NO_HELD_REPLIES } from '../../unit/daemon/routes/support.ts';
 
 const gate = (cardId = 'F12') => ({

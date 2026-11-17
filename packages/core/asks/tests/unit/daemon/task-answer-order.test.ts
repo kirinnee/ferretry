@@ -1,6 +1,6 @@
 import { expect, it } from 'bun:test';
-import { cardAnswers, reference } from '../../support/daemon/card-answers.ts';
-import { askedCardAsks } from '../../../daemon/lib/protocol/agenda-card-asks.ts';
+import { cardAnswers, reference } from '../../support/daemon/task-answers.ts';
+import { askedCardAsks } from '../../../daemon/lib/protocol/agenda-task-asks.ts';
 
 it('sends an unnamed marked answer to askedCardAsks order after Not yet', async () => {
   const board = await cardAnswers();

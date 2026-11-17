@@ -14,7 +14,7 @@ import {
 import { type MouseEvent, type ReactNode, useId, useState } from 'react';
 import { linkNudgePullRequests } from './board-nudge.ts';
 import { displayCallsign } from '@ferretry/core-ferrets/contract';
-import { useCardPullRequests } from './card-pull-requests.tsx';
+import { useCardPullRequests } from './task-pull-requests.tsx';
 import { ferretryLine, ferretryRest } from '../composer/ferretry-sender.ts';
 import type { InstructionsUpdate } from './instructions-update.ts';
 import { clockOfInstant, useScreenHref } from '@ferretry/app';

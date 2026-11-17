@@ -30,7 +30,7 @@ import {
   WorkflowSchema,
   AskIdTextSchema,
 } from '../../contract/index.ts';
-import { cardTitleIssue } from './card-title.ts';
+import { cardTitleIssue } from './task-title.ts';
 import { refuse } from './errors.ts';
 
 const describeIssues = (error: z.ZodError): string =>

@@ -6,7 +6,7 @@
  */
 
 import { cn } from '@ferretry/app/ui';
-import { parseWorkName } from '../lib/card-name.ts';
+import { parseWorkName } from '../lib/task-name.ts';
 
 export interface CardNameProps {
   readonly name?: string | null;

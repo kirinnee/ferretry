@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { cardPatchDocument, composeCardPatch, parseCardPatch } from '../../../cli/lib/card-patch.ts';
+import { cardPatchDocument, composeCardPatch, parseCardPatch } from '../../../cli/lib/task-patch.ts';
 import { patchYaml } from '../../../cli/lib/patch-document.ts';
 import { card } from './fixtures.ts';
 

@@ -7,7 +7,7 @@ import {
   type AgendaCardAnswer,
   type AgendaKind,
 } from '../protocol/agenda.ts';
-import { agendaCardAnswers, agendaCardKind } from '../protocol/agenda-card.ts';
+import { agendaCardAnswers, agendaCardKind } from '../protocol/agenda-task.ts';
 
 /** What an item says, as the lint reads it: its title, its ask, the context, its answers and the brief. */
 export interface AgendaWriting extends AgendaBrief {

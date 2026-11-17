@@ -26,7 +26,7 @@ mock.module('@ferretry/app', () => ({
   },
 }));
 
-const { FyRenderCardEmbed } = await import('../../../../app/render/fy-render-card-embed.tsx');
+const { FyRenderCardEmbed } = await import('../../../../app/render/fy-render-task-embed.tsx');
 const { isFyRenderEmbedBlock, parseFyRender } = await import('../../../../app/render/fy-render.ts');
 
 const blockOf = (type: 'task' | 'board', payload: string) => {

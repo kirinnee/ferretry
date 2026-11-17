@@ -6,10 +6,10 @@ import {
   MAX_AGENDA_CARD_ASKS,
 } from '../../../../daemon/lib/protocol/agenda.ts';
 import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
-import { cardAgendaReference, cardAskReference } from '../../../../daemon/lib/protocol/agenda-card-asks.ts';
+import { cardAgendaReference, cardAskReference } from '../../../../daemon/lib/protocol/agenda-task-asks.ts';
 import { gateReference } from '../../../../daemon/lib/protocol/agenda-gate.ts';
 import should from 'should';
-import { joinCardAsks, leaveCardAsks, sealCardAsks, withoutCardAsks } from '../../../../daemon/lib/agenda/card-asks.ts';
+import { joinCardAsks, leaveCardAsks, sealCardAsks, withoutCardAsks } from '../../../../daemon/lib/agenda/task-asks.ts';
 import {
   type AgendaActor,
   type AgendaLedger,

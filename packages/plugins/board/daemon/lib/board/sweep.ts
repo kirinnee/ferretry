@@ -60,7 +60,7 @@ import { effectiveAssignee } from './authority.ts';
 import { cardCategory, type LaneSets } from './graph.ts';
 import { noticeRecipient } from './notice-route.ts';
 import { endedForGrace, lineageThrough, returnTarget } from './return-to-lead.ts';
-import { isHandedHelper, isPrFreeHelper } from './sub-card-close.ts';
+import { isHandedHelper, isPrFreeHelper } from './sub-task-close.ts';
 import type { BoardClock, BoardDiagnostics } from './ports.ts';
 
 /** How often the daemon sweeps the board. */

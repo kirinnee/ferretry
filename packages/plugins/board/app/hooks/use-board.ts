@@ -27,7 +27,7 @@ import {
   parseBoardFilters,
   toServerQuery,
 } from '../lib/board-model.ts';
-import { type CardReferenceResolver, createCardReferenceResolver } from '../lib/card-reference-context.ts';
+import { type CardReferenceResolver, createCardReferenceResolver } from '../lib/task-reference-context.ts';
 import { boardPrivate } from '../lib/board-private-preference.ts';
 import {
   type BoardLoadStatus,

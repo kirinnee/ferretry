@@ -24,7 +24,7 @@
  */
 
 import type { AgendaAsk, AgendaFormField, AgendaKind, AgendaQuestion } from './agenda.ts';
-import { type AgendaShape, kindOfAsk } from './agenda-card.ts';
+import { type AgendaShape, kindOfAsk } from './agenda-task.ts';
 
 /** The heading of the card's segment that holds exactly the ask. */
 export const AGENDA_NEED_HEADING = 'What I need from you';

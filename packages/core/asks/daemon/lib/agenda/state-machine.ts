@@ -51,7 +51,7 @@ import {
   type ResolvedAgendaItem,
   ResolvedAgendaItemSchema,
 } from '../protocol/agenda.ts';
-import { hasOpenCardAsk, openCardAsks, parseCardAgendaReference } from '../protocol/agenda-card-asks.ts';
+import { hasOpenCardAsk, openCardAsks, parseCardAgendaReference } from '../protocol/agenda-task-asks.ts';
 import { agendaItemRevision } from '../protocol/agenda-patch.ts';
 import {
   type AgendaResting,
@@ -60,7 +60,7 @@ import {
   MAX_AGENDA_REST_WHY_LENGTH,
   MAX_AGENDA_STAGES,
 } from '../protocol/agenda-state.ts';
-import { agendaCardKind, agendaShape } from '../protocol/agenda-card.ts';
+import { agendaCardKind, agendaShape } from '../protocol/agenda-task.ts';
 import { applyAgendaTabEdits } from '../protocol/agenda-tabs.ts';
 import { agendaEditShapeProblems, agendaShapeProblems } from '../protocol/agenda-shape.ts';
 import { agendaStage, agendaStageOfKind } from '../protocol/agenda-stage.ts';
@@ -88,7 +88,7 @@ import {
   sealCardAsks,
   withCardAsks,
   withoutCardAsks,
-} from './card-asks.ts';
+} from './task-asks.ts';
 import { ASK_REFERENCE_SIGIL } from '../../../contract/snapshot/ask-reference.ts';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */

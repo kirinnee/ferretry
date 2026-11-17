@@ -23,8 +23,8 @@ import {
 import type { AgendaActor, AgendaService, RaiseAgendaRequest } from '../lib/agenda/index.ts';
 import { SerialQueue } from '../lib/agenda/serial-queue.ts';
 import { machineNoticeRef } from '../lib/agenda/service.ts';
-import { askedCardAsks, cardAskReference } from '../lib/protocol/agenda-card-asks.ts';
-import { askForKind } from '../lib/protocol/agenda-card.ts';
+import { askedCardAsks, cardAskReference } from '../lib/protocol/agenda-task-asks.ts';
+import { askForKind } from '../lib/protocol/agenda-task.ts';
 import {
   MACHINE_AGENDA_ID,
   type AgendaItem,

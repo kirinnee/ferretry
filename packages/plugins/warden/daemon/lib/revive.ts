@@ -28,7 +28,7 @@
  */
 
 import type { WardenReviveConfig } from './protocol.ts';
-import { focusCardBrief, type WardenFocusCard } from './focus-card.ts';
+import { focusCardBrief, type WardenFocusCard } from './focus-task.ts';
 import { instantMs } from './time.ts';
 
 /** One journal event, as the revive reads it. */

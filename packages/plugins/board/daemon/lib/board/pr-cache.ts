@@ -28,7 +28,7 @@ import {
   prUrlParts,
   type ReleasedIn,
 } from '../../../contract/index.ts';
-import { type CardContext, reconcileFacts, requireStanding, triggerMove, withEvent } from './card-actions.ts';
+import { type CardContext, reconcileFacts, requireStanding, triggerMove, withEvent } from './task-actions.ts';
 import type { PrAlertReason } from './notice-route.ts';
 
 /**

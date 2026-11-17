@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { AskAnswer, AskSourceSpec } from '../../../contract/index.ts';
-import { cardAskAnswers } from '../../../daemon/adapters/card-ask-answers.ts';
-import type { CardAskOperation } from '../../../daemon/lib/agenda/card-asks.ts';
+import { cardAskAnswers } from '../../../daemon/adapters/task-ask-answers.ts';
+import type { CardAskOperation } from '../../../daemon/lib/agenda/task-asks.ts';
 import type { AgendaService } from '../../../daemon/lib/agenda/index.ts';
 import type { GateAnswer } from '../../../daemon/lib/routes/agenda-gates.ts';
 

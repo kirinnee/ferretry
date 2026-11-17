@@ -24,7 +24,7 @@
  * owner) and the card lands on its real board; only when proposing fails does it go on the Unfiled board,
  * with a note saying how to move it.
  */
-import { cardTitleFor, deriveCardTitle } from './card-title.ts';
+import { cardTitleFor, deriveCardTitle } from './task-title.ts';
 import {
   type BoardProjectId,
   type Card,

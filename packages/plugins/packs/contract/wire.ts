@@ -18,7 +18,7 @@
 import { FerretStateSchema, FerretSummarySchema, HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { CardIdSchema } from './card.ts';
+import { CardIdSchema } from './task.ts';
 
 const InteractionModeSchema = z.enum(['auto', 'interactive']);
 export type InteractionMode = z.infer<typeof InteractionModeSchema>;

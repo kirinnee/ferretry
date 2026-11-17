@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { parseWorkName, workIsRedundant } from '../../../app/lib/card-name.ts';
+import { parseWorkName, workIsRedundant } from '../../../app/lib/task-name.ts';
 
 describe('parseWorkName', () => {
   it('splits a bracketed teammate prefix off the task', () => {

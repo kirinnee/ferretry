@@ -8,7 +8,7 @@ import {
   agendaFormProblems,
   type AgendaFormField,
 } from '../../../../daemon/lib/protocol/agenda.ts';
-import { agendaCardAnswers, agendaShape } from '../../../../daemon/lib/protocol/agenda-card.ts';
+import { agendaCardAnswers, agendaShape } from '../../../../daemon/lib/protocol/agenda-task.ts';
 import { formAnswerProblems, formFieldName, formWords } from '../../../../daemon/lib/protocol/agenda-form.ts';
 import { AGENDA_SHAPE_LINE, agendaShapeProblems } from '../../../../daemon/lib/protocol/agenda-shape.ts';
 

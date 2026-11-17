@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { CONFIG_FILE_MAX_BYTES, CONFIG_TOO_LARGE } from '@ferretry/std/yaml';
 import { parseProgressFile } from '../../../cli/lib/board-progress.ts';
-import { parseCardPatch } from '../../../cli/lib/card-patch.ts';
+import { parseCardPatch } from '../../../cli/lib/task-patch.ts';
 import { readPatchText } from '../../../cli/lib/patch-document.ts';
 
 // `fy task patch` and `fy task progress --file` read a file or stdin the person (or the ferret running the command)

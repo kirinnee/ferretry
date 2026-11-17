@@ -1,5 +1,5 @@
 /** @ferretry/plugin-packs/contract — wire schemas, port + token, events, config and state declarations, words (§2.1). */
-export * from './card.ts';
+export * from './task.ts';
 export * from './cleanup.ts';
 export * from './config.ts';
 export * from './mentions.ts';

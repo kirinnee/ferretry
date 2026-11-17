@@ -17,7 +17,7 @@ import {
   type CardRef,
   variantLanes,
 } from '../../../contract/index.ts';
-import { gatesBetween, withEvent } from './card-actions.ts';
+import { gatesBetween, withEvent } from './task-actions.ts';
 
 /** What a `done` with no message says on the card. */
 export const DONE_WITHOUT_MESSAGE = 'signalled done';

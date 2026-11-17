@@ -65,7 +65,7 @@ import {
   requireStanding,
   triggerMove,
   withEvent,
-} from './card-actions.ts';
+} from './task-actions.ts';
 import { queueBehindClashes } from './clash-queue.ts';
 import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
 import { mergeGateOf } from './merge-gate.ts';
@@ -101,7 +101,7 @@ import { applyPrUpdate, type PrUpdate, type PrUpdateOutcome } from './pr-cache.t
 import { compareViews, countsOf, inScope, isOpenOnBoard, pageOf, passesFilters } from './query.ts';
 import { returnCard, returnLead } from './return-to-lead.ts';
 import { doneLane, doneMove, doneNote } from './signal-done.ts';
-import { helperCloseReason } from './sub-card-close.ts';
+import { helperCloseReason } from './sub-task-close.ts';
 import { defaultVisibility, visibilityVerdict } from './visibility.ts';
 import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 

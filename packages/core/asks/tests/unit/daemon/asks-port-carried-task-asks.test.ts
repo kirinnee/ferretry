@@ -2,7 +2,7 @@ import { expect, it } from 'bun:test';
 import type { AskSourceSpec } from '../../../contract/index.ts';
 import { asksPort } from '../../../daemon/adapters/asks-port.ts';
 import type { AgendaService } from '../../../daemon/lib/agenda/index.ts';
-import { cardAskReference } from '../../../daemon/lib/protocol/agenda-card-asks.ts';
+import { cardAskReference } from '../../../daemon/lib/protocol/agenda-task-asks.ts';
 import { agendaService } from './routes/support.ts';
 
 /**

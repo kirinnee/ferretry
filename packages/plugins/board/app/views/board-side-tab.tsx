@@ -29,7 +29,7 @@ import type { BoardCardOf } from '../lib/board-view.ts';
 import { useAddToChat } from '../lib/add-to-chat.ts';
 import type { FerretScope } from '../lib/machine.ts';
 import { boardCardPath } from '../lib/paths.ts';
-import { BoardCard, type BoardDensity } from './board-card.tsx';
+import { BoardCard, type BoardDensity } from './board-task.tsx';
 import { InternalToggle } from './board-filters.tsx';
 import { BoardLane } from './board-lane.tsx';
 
