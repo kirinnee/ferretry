@@ -27,6 +27,8 @@ export interface InputSettledSlotProps {
   readonly place?: string;
   /** The board project the DAEMON resolved for the asking session, when it did. */
   readonly project?: { readonly id: string; readonly name: string };
+  /** The tapped account was already that project's default (the daemon's one-tap choice, for the `project` reason). */
+  readonly projectDefault?: true;
   /**
    * A panel here is still offering something (`true`) or is done (`false`): while any is, the card keeps the view it is
    * drawn in instead of letting its host move on. Optional: a panel that offers nothing to wait for never calls it.

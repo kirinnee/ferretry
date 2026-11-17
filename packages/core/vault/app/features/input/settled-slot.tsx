@@ -9,6 +9,7 @@
  */
 import { PanelSlot, useOptionalRouter } from '@ferretry/app';
 import { INPUT_SETTLED_SLOT, type InputSettledSlotProps } from '../../../contract/index.ts';
+import { useLetGoOnUnmount } from './code-offers.tsx';
 
 export function SettledSlot({
   slot,
@@ -18,6 +19,7 @@ export function SettledSlot({
   /** A panel here is still offering something (`true`) or is done (`false`): the card keeps its view meanwhile. */
   readonly hold?: (holding: boolean) => void;
 }) {
+  useLetGoOnUnmount(hold);
   const router = useOptionalRouter();
   const daemon = router?.route.kind === 'screen' ? router.route.daemon : undefined;
   if (daemon === undefined) return null;

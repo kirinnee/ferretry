@@ -4,8 +4,10 @@
  * because the code is made inside the daemon. Fixtures are fake ids and labels only.
  */
 import { describe, expect, it } from 'bun:test';
+import { useState } from 'react';
 import { type PlacedPanel, RouterProvider, WithSlotPanels } from '@ferretry/app/testing';
 import { InputCard } from '../../../app/features/input/input-card.tsx';
+import { SettledSlot } from '../../../app/features/input/settled-slot.tsx';
 import {
   asksCode,
   codeButtonWords,
@@ -332,6 +334,76 @@ describe('the codes slot', () => {
     } finally {
       await mounted.unmount();
     }
+  });
+
+  it('lets go of the card when the slot stops being offered, so a panel that said hold(true) cannot keep it holding', async () => {
+    const holds: [boolean, string | undefined][] = [];
+    const holder: PlacedPanel = {
+      plugin: 'accounts',
+      id: 'input-codes',
+      view: props => (
+        <button data-hold="" onClick={() => (props.hold as (holding: boolean) => void)(true)} type="button">
+          Set up
+        </button>
+      ),
+    };
+    function Moves() {
+      // The card's request moves on (the daemon typed the code, or the offers went): it no longer asks for a code.
+      const [request, setRequest] = useState(codeCard());
+      return (
+        <>
+          <button
+            data-moved=""
+            onClick={() => setRequest(codeCard([CODE_OFFER], { state: 'delivered' }))}
+            type="button"
+          >
+            Move on
+          </button>
+          <InputCard
+            client={recordingClient(async () => ({})).client}
+            now={NOW}
+            onDone={() => undefined}
+            onHold={(holding, settled) => holds.push([holding, settled])}
+            request={request}
+          />
+        </>
+      );
+    }
+    window.history.replaceState({}, '', '/d/dm1/agenda');
+    const mounted = await mount(
+      <RouterProvider screens={[{ plugin: 'agenda', id: 'agenda', path: 'agenda', label: 'Agenda' }]}>
+        <WithSlotPanels slots={{ [INPUT_CARD_CODES_SLOT]: [holder] }}>
+          <Moves />
+        </WithSlotPanels>
+      </RouterProvider>,
+    );
+    await settle();
+    try {
+      await click(q(mounted.container, '[data-hold]'));
+      expect(holds).toEqual([[true, undefined]]);
+      await click(q(mounted.container, '[data-moved]'));
+      await settle();
+      expect(mounted.container.querySelector('[data-hold]')).toBeNull();
+      expect(holds).toEqual([
+        [true, undefined],
+        [false, undefined],
+      ]);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('says hold(false) for a settled-card panel too when its slot goes away', async () => {
+    const holds: boolean[] = [];
+    const mounted = await mount(
+      <SettledSlot
+        hold={holding => holds.push(holding)}
+        slot={{ ferret: 'hadi', request: REQUEST_ID, entry: 'GITHUB_DEMO' }}
+      />,
+    );
+    expect(holds).toEqual([]);
+    await mounted.unmount();
+    expect(holds).toEqual([false]);
   });
 
   it('draws nothing, and does not fail, where no shell places a panel', async () => {
