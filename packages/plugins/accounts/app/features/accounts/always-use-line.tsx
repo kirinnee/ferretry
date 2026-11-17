@@ -130,7 +130,9 @@ export function AlwaysUseLine({ client, slot }: AlwaysUseLineProps) {
             onClick={() => void write()}
             type="button"
           >
-            Always use for <ProjectName name={always.project} />
+            <span>
+              Always use for <ProjectName name={always.project} />
+            </span>
           </button>
           <p className="m-0 text-meta text-muted">
             <Sentence words={alwaysUseExplainParts(always)} />
