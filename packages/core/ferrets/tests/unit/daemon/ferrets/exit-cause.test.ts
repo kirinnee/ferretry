@@ -32,12 +32,14 @@ test('no recorded end is terminal_gone and says so', () => {
   expect(end.reason).toBe('the agent exited on its own; how it exited was not recorded');
 });
 
-test('the last lines ride on the cause and end the reason; every cause it builds is one the record accepts', () => {
+test('every cause it builds is one the record accepts, and none carries a screen: a stray `lastLines` is dropped and the record refuses one', () => {
   const lastLines = 'error: out of memory\nexit';
-  for (const exit of [{ signal: 9, lastLines }, { status: 3, lastLines }, { lastLines }, { status: 0, lastLines }]) {
-    const end = endOfExit(exit);
+  for (const exit of [{ signal: 9 }, { status: 3 }, {}, { status: 0 }]) {
+    // Whatever else rides on the answer (a runner from before this change), only the signal or status is read.
+    const end = endOfExit({ ...exit, lastLines } as never);
     expect(FerretEndCauseSchema.safeParse(end.cause).success).toBe(true);
-    expect(end.reason.endsWith(`Its last words: ${lastLines}`)).toBe(true);
+    expect(JSON.stringify(end)).not.toContain('out of memory');
   }
-  expect(endOfExit({ signal: 9, lastLines }).cause).toEqual({ kind: 'signal', signal: 9, lastLines });
+  expect(endOfExit({ signal: 9 }).cause).toEqual({ kind: 'signal', signal: 9 });
+  expect(FerretEndCauseSchema.safeParse({ kind: 'signal', signal: 9, lastLines }).success).toBe(false);
 });

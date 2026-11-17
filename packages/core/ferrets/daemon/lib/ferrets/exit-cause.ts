@@ -13,33 +13,31 @@ export interface ExitedEnd {
  * invented exit code), a non-zero status is `agent_crashed`, status 0 is a `clean_exit` (the agent is done, so nothing
  * revives it) and a pane tmux recorded nothing for is `terminal_gone`, which is as far as the proof goes. The warden
  * and the auto-resume read the first, second and last as a death owed a revive; nobody's stop is ever one of them.
- * `lastLines` (already masked by the runner) rides on the cause and ends the reason, so every surface that says why
- * says what the harness said last.
+ * Only the signal or exit status is said: what the pane SHOWED never rides on the cause or the reason (both are served
+ * to every caller, the events stream and the journal), it is kept as the ferret's stored last screen instead.
  */
 export function endOfExit(exit: RunnerExit): ExitedEnd {
-  const lastLines = exit.lastLines === undefined ? {} : { lastLines: exit.lastLines };
-  const said = exit.lastLines === undefined ? '' : `. Its last words: ${exit.lastLines}`;
   if (exit.signal !== undefined)
     return {
-      cause: { kind: 'signal', signal: exit.signal, ...lastLines },
+      cause: { kind: 'signal', signal: exit.signal },
       status: 'failed',
-      reason: `the agent was ended by signal ${exit.signal}${said}`,
+      reason: `the agent was ended by signal ${exit.signal}`,
     };
   if (exit.status === 0)
     return {
       cause: { kind: 'clean_exit' },
       status: 'stopped',
-      reason: `the agent finished and exited (exit status 0)${said}`,
+      reason: 'the agent finished and exited (exit status 0)',
     };
   if (exit.status !== undefined)
     return {
-      cause: { kind: 'agent_crashed', exitCode: exit.status, ...lastLines },
+      cause: { kind: 'agent_crashed', exitCode: exit.status },
       status: 'failed',
-      reason: `the agent exited with status ${exit.status}${said}`,
+      reason: `the agent exited with status ${exit.status}`,
     };
   return {
-    cause: { kind: 'terminal_gone', ...lastLines },
+    cause: { kind: 'terminal_gone' },
     status: 'failed',
-    reason: `the agent exited on its own; how it exited was not recorded${said}`,
+    reason: 'the agent exited on its own; how it exited was not recorded',
   };
 }

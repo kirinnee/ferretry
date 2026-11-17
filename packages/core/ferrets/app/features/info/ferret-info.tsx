@@ -9,6 +9,7 @@
 
 import { Info, X } from 'lucide-react';
 import { type ReactNode, useCallback, useId } from 'react';
+import { endHasLastWords, lastWordsOf } from '../../../contract/index.ts';
 import { displayCallsign } from '../../lib/callsign.ts';
 import type { FerretsClient } from '../../lib/client.ts';
 import { BottomSheet, browserClipboardWriter, type ClipboardWriter, useLayoutMode } from '../../ui.ts';
@@ -19,7 +20,7 @@ import { InfoOverview } from './info-overview.tsx';
 import { InfoPanel } from './info-panel.tsx';
 import type { InfoRelaunchRead } from './info-relaunch.tsx';
 import { InfoRuntime } from './info-runtime.tsx';
-import { readFerret, readFerrets, readRelaunchSettings, readWorktrees } from './info-wire.ts';
+import { readFerret, readFerrets, readLastScreen, readRelaunchSettings, readWorktrees } from './info-wire.ts';
 import { type InfoRead, useInfoRead } from './use-info-read.ts';
 import { useInfoPlacement } from './use-info-placement.ts';
 
@@ -65,6 +66,13 @@ function FerretInfo({
   const ferrets = useInfoRead(() => readFerrets(client), tab === 'overview');
   const relaunch = useInfoRead(() => readRelaunchSettings(client, ferretId), tab === 'runtime');
   const record = ferret.read.kind === 'ready' ? ferret.read.value : null;
+  // What a ferret that ended on its own said last: its stored last screen, read through the gated, re-masked route.
+  const screen = useInfoRead(
+    () => readLastScreen(client, ferretId),
+    tab === 'overview' && record?.state === 'stopped' && endHasLastWords(record.cause),
+  );
+  const lastWords =
+    screen.read.kind === 'ready' && screen.read.value !== null ? lastWordsOf(screen.read.value) : undefined;
   // The same Restart as Actions: a paused one (in-flight work, a smaller window, an unresumable conversation) is held
   // by the panel below with its deliberate "Restart anyway", and is never claimed as done.
   const refusal = useRestartRefusal(() => {
@@ -132,6 +140,7 @@ function FerretInfo({
               now={now()}
               worktrees={worktrees.read.kind === 'ready' ? worktrees.read.value : null}
               write={write}
+              {...(lastWords === undefined ? {} : { lastWords })}
               {...(ferrets.read.kind === 'ready' ? { ferrets: ferrets.read.value } : {})}
               {...(onRename === undefined ? {} : { onRename })}
               {...(onOpenFerret === undefined ? {} : { onOpenFerret })}

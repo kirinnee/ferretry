@@ -74,7 +74,7 @@ function runner(answers: Answers) {
 }
 
 describe('TmuxRunner.exited', () => {
-  test("asks list-panes of the ferret's own session by its exact name, then reads the pane", async () => {
+  test("asks list-panes of the ferret's own session by its exact name, and reads no screen", async () => {
     const { subject, calls } = runner({ panes: '%7|1||9\n', screen: 'bye\n' });
     await subject.exited(FERRET, HANDLE);
     expect(calls).toEqual([
@@ -86,14 +86,14 @@ describe('TmuxRunner.exited', () => {
         '-F',
         '#{pane_id}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}',
       ],
-      ['capture-pane', '-p', '-t', '%7'],
     ]);
   });
 
-  test('a pane killed by a signal answers the signal, and its masked last lines', async () => {
+  test('a pane killed by a signal answers the signal and NOTHING the pane showed', async () => {
     const screen = `token ${SECRET}\n\nKilled\n\n\n`;
     const exit = await runner({ panes: '%7|1||9\n', screen }).subject.exited(FERRET, HANDLE);
-    expect(exit).toEqual({ signal: 9, lastLines: `token ${'*'.repeat(SECRET.length)}\nKilled` });
+    expect(exit).toEqual({ signal: 9 });
+    expect(JSON.stringify(exit)).not.toContain('Killed');
   });
 
   test('a pane whose program exited answers its status, 0 included', async () => {
@@ -131,14 +131,37 @@ describe('TmuxRunner.exited', () => {
     expect(await subject.exited(FERRET, 'not-a-pane' as RunnerHandle)).toBeUndefined();
     expect(calls).toEqual([]);
   });
+});
 
-  test('a held pane gives how it ended and no lines; so does a runner with no look wiring or an unreadable pane', async () => {
-    expect(await runner({ panes: '%7|1||9\n', screen: 'x', held: true }).subject.exited(FERRET, HANDLE)).toEqual({
-      signal: 9,
-    });
-    expect(await runner({ panes: '%7|1||9\n', screen: 'x', watched: false }).subject.exited(FERRET, HANDLE)).toEqual({
-      signal: 9,
-    });
-    expect(await runner({ panes: '%7|1||9\n', captureCode: 1 }).subject.exited(FERRET, HANDLE)).toEqual({ signal: 9 });
+describe('TmuxRunner.deadScreen', () => {
+  test('re-proves the pane is dead, then answers the whole screen MASKED (the keeper cuts it)', async () => {
+    const screen = `token ${SECRET}\n\nKilled\n\n\n`;
+    const { subject, calls } = runner({ panes: '%7|1||9\n', screen });
+    const shown = await subject.deadScreen(FERRET, HANDLE);
+    expect(shown).toContain(`token ${'*'.repeat(SECRET.length)}`);
+    expect(shown).toContain('Killed');
+    expect(shown).not.toContain(SECRET);
+    expect(calls.map(call => call[0])).toEqual(['list-panes', 'capture-pane']);
+  });
+
+  test('a live pane, a pane that is not the handle and a handle that is no pane id show nothing and read nothing', async () => {
+    for (const panes of ['%7|0||\n', '%8|1|1|\n', '']) {
+      const { subject, calls } = runner({ panes, screen: 'x' });
+      expect(await subject.deadScreen(FERRET, HANDLE)).toBeUndefined();
+      expect(calls.map(call => call[0])).not.toContain('capture-pane');
+    }
+    const { subject, calls } = runner({ panes: '%7|1||9\n', screen: 'x' });
+    expect(await subject.deadScreen(FERRET, 'not-a-pane' as RunnerHandle)).toBeUndefined();
+    expect(calls).toEqual([]);
+  });
+
+  test('a held pane, a runner with no look wiring and an unreadable pane show nothing', async () => {
+    expect(
+      await runner({ panes: '%7|1||9\n', screen: 'x', held: true }).subject.deadScreen(FERRET, HANDLE),
+    ).toBeUndefined();
+    expect(
+      await runner({ panes: '%7|1||9\n', screen: 'x', watched: false }).subject.deadScreen(FERRET, HANDLE),
+    ).toBeUndefined();
+    expect(await runner({ panes: '%7|1||9\n', captureCode: 1 }).subject.deadScreen(FERRET, HANDLE)).toBeUndefined();
   });
 });

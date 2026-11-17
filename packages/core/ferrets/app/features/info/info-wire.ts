@@ -113,3 +113,22 @@ export const readRelaunchSettings = async (client: FerretsClient, ferretId: stri
   if (!parsed.success) throw unreadable();
   return parsed.data;
 };
+
+const LastScreenSchema = z.object({ screen: z.string() });
+
+/**
+ * `GET /v1/ferrets/:ferretId/last-screen`: the ferret's STORED last screen, through the read that checks the caller may
+ * touch the ferret and masks the text again with the Vault's values now (the cause on the record never carries a
+ * screen). `null` when there is none or it cannot be read: the closing words are a courtesy to the row, never a
+ * failed panel.
+ */
+export const readLastScreen = async (client: FerretsClient, ferretId: string): Promise<string | null> => {
+  try {
+    const parsed = LastScreenSchema.safeParse(
+      await client.call<unknown>('GET /v1/ferrets/:ferretId/last-screen', { params: { ferretId }, quiet: true }),
+    );
+    return parsed.success ? parsed.data.screen : null;
+  } catch {
+    return null;
+  }
+};

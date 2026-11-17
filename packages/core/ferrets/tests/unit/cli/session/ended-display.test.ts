@@ -5,9 +5,10 @@ import { sessionView } from './session-fixtures.ts';
 const PLAIN = { amber: (text: string) => text } as Parameters<typeof renderSessionTable>[1];
 
 describe('a stopped ferret says why it ended', () => {
-  test('status: a signal, with its last words under it', () => {
+  test('status: a signal, with its last words (read from the stored last screen) under it', () => {
     const lines = renderFerret(
-      sessionView({ state: 'stopped', cause: { kind: 'signal', signal: 9, lastLines: 'out of memory\nKilled' } }),
+      sessionView({ state: 'stopped', cause: { kind: 'signal', signal: 9 } }),
+      'out of memory\nKilled',
     );
     expect(lines.slice(3)).toEqual([
       '  ended: the agent was killed by signal 9',

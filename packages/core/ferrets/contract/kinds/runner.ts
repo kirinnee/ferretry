@@ -310,24 +310,26 @@ export interface Runner {
    * killed. Absent: a pane that died and stayed is never noticed.
    */
   exited?(ferret: FerretId, handle: RunnerHandle): Promise<RunnerExit | undefined>;
+  /**
+   * Additive (dead pane): the screen a pane {@link Runner.exited} proves dead still shows, MASKED by the runner (the
+   * same redaction a look gets), for the ferret's stored last screen only (`LastSnapshotCapture`, which masks it again
+   * before it writes it 0600 to the ferret's own folder). It re-proves the pane is dead and the ferret's own first, so
+   * a live pane, another ferret's pane, a held read and an unreadable screen all answer `undefined`. It is never put on
+   * a record, a journal line or an event: the only way to read it back is `FerretsApi.lastSnapshot`. Absent: a dead
+   * pane's screen is never kept.
+   */
+  deadScreen?(ferret: FerretId, handle: RunnerHandle): Promise<string | undefined>;
 }
 
-/** Longest `lastLines` an {@link RunnerExit} carries: the harness's closing words, not its whole screen. */
-export const RUNNER_EXIT_LAST_LINES = 8;
-/** The most characters `lastLines` carries, counted from its end. */
-export const RUNNER_EXIT_LAST_BYTES = 600;
-
 /**
- * How a pane's program ended, as the runner proved it. `status` is the program's exit status and `signal` the signal that
- * ended it INSTEAD (tmux's `pane_dead_status` / `pane_dead_signal`); neither is present when tmux recorded none.
- * `lastLines` is the last non-empty lines the pane still shows, MASKED by the runner (the same redaction a look gets),
- * at most {@link RUNNER_EXIT_LAST_LINES} lines and {@link RUNNER_EXIT_LAST_BYTES} characters; absent when the pane could
- * not be read (a hold, nothing left on screen).
+ * How a pane's program ended, as the runner proved it, and NOTHING the pane showed: a screen can carry a value a tool
+ * printed, so it never rides on this answer (see {@link Runner.deadScreen}). `status` is the program's exit status and
+ * `signal` the signal that ended it INSTEAD (tmux's `pane_dead_status` / `pane_dead_signal`); neither is present when
+ * tmux recorded none.
  */
 export interface RunnerExit {
   readonly status?: number | undefined;
   readonly signal?: number | undefined;
-  readonly lastLines?: string | undefined;
 }
 
 /**

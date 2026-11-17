@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { lastLinesOf, PANE_EXIT_FACTS, parsePaneExits } from '../../../../daemon/lib/tmux/pane-exit.ts';
+import { PANE_EXIT_FACTS, parsePaneExits } from '../../../../daemon/lib/tmux/pane-exit.ts';
 
 describe('parsePaneExits', () => {
   test('asks for the pane id, dead, and how the program ended', () => {
@@ -25,26 +25,5 @@ describe('parsePaneExits', () => {
     expect(parsePaneExits('%3|1|2|0\nnonsense\n%x|1||\n%5|2||\n|1||\n')).toEqual([
       { paneId: '%3', dead: true, status: 2 },
     ]);
-  });
-});
-
-describe('lastLinesOf', () => {
-  test('keeps the last non-empty lines of a screen, trailing blanks and padding gone', () => {
-    expect(lastLinesOf('a   \n\n\nb\n\n   \nc  \n\n\n')).toBe('a\nb\nc');
-  });
-
-  test('at most the last 8 lines', () => {
-    const screen = Array.from({ length: 12 }, (_, at) => `line ${at + 1}`).join('\n');
-    expect(lastLinesOf(screen)).toBe(Array.from({ length: 8 }, (_, at) => `line ${at + 5}`).join('\n'));
-  });
-
-  test('at most the last 600 characters', () => {
-    const lines = lastLinesOf(`${'x'.repeat(500)}\n${'y'.repeat(500)}`);
-    expect(lines?.length).toBeLessThanOrEqual(600);
-    expect(lines?.endsWith('y'.repeat(500))).toBe(true);
-  });
-
-  test('a screen that shows nothing says nothing', () => {
-    expect(lastLinesOf('\n  \n\n')).toBeUndefined();
   });
 });

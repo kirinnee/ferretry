@@ -10,25 +10,18 @@ async function running() {
   return { f, handle };
 }
 
-test('settleExited: a pane a signal ended settles the ferret stopped, cause signal, with the last lines on both the cause and the journal', async () => {
+test('settleExited: a pane a signal ended settles the ferret stopped, cause signal, the signal on both the cause and the journal', async () => {
   const { f, handle } = await running();
-  const settled = await f.service.settleExited(
-    f.id,
-    handle,
-    { signal: 9, lastLines: 'Killed' },
-    'running',
-    async () => true,
-  );
+  const settled = await f.service.settleExited(f.id, handle, { signal: 9 }, 'running', async () => true);
   expect(settled).toBe(true);
   const ferret = await f.service.get(f.id);
   expect(ferret?.state).toBe('stopped');
-  expect(ferret?.cause).toEqual({ kind: 'signal', signal: 9, lastLines: 'Killed' });
+  expect(ferret?.cause).toEqual({ kind: 'signal', signal: 9 });
   expect(f.history.at(-1)).toMatchObject({
     type: 'session.exited',
     data: { status: 'failed', pane: 'dead', exitCode: null, signal: 9, from: 'running' },
   });
   expect(String(f.history.at(-1)?.data.reason)).toContain('signal 9');
-  expect(String(f.history.at(-1)?.data.reason)).toContain('Killed');
 });
 
 test('settleExited: a non-zero exit is agent_crashed with the number', async () => {

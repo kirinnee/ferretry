@@ -17,6 +17,8 @@ export interface InfoOverviewProps {
   /** Every ferret on the machine, for lineage; absent until read. */
   readonly ferrets?: readonly FerretSummary[];
   readonly write: ClipboardWriter;
+  /** What an ended ferret's pane showed last: its stored last screen, read through the gated, re-masked route. */
+  readonly lastWords?: string;
   readonly now: number;
   /** Opens Actions › Rename. Absent when this connection may not rename. */
   readonly onRename?: () => void;
@@ -34,6 +36,7 @@ export function InfoOverview({
   worktrees,
   ferrets,
   write,
+  lastWords,
   now,
   onRename,
   onOpenFerret,
@@ -91,11 +94,11 @@ export function InfoOverview({
         {ferret.cause === undefined ? null : (
           <InfoRow hint={INFO_HINT.cause} label="Ended">
             <span data-info-cause={ferret.cause.kind}>{endCauseWord(ferret.cause)}</span>
-            {'lastLines' in ferret.cause && ferret.cause.lastLines !== undefined ? (
+            {lastWords === undefined ? null : (
               <pre className="fy-info-muted font-mono" data-info-last-lines="">
-                {ferret.cause.lastLines}
+                {lastWords}
               </pre>
-            ) : null}
+            )}
           </InfoRow>
         )}
         <InfoRow label="Project">

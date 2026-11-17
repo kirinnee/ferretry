@@ -62,13 +62,17 @@ type CaptureOutcome = 'written' | 'nothing' | 'failed' | 'timed-out';
 export class LastSnapshotCapture {
   constructor(private readonly deps: LastSnapshotCaptureDeps) {}
 
-  async capture(ferret: FerretId, runner: Runner, handle: RunnerHandle): Promise<void> {
+  /**
+   * `deadPane`: the pane is one the runner proved dead and kept, which a look never reads, so its screen comes from
+   * `Runner.deadScreen` (the same masking, the same file, the same bound).
+   */
+  async capture(ferret: FerretId, runner: Runner, handle: RunnerHandle, deadPane = false): Promise<void> {
     const id = tryParseSessionId(ferret);
     if (id === undefined) return;
     const abandon = new AbortController();
     try {
       const outcome = await Promise.race<CaptureOutcome>([
-        this.captureOnce(id, runner, handle, abandon.signal).catch(() => 'failed' as const),
+        this.captureOnce(id, ferret, runner, handle, abandon.signal, deadPane).catch(() => 'failed' as const),
         this.deps.sleep(this.deps.bound ?? LAST_SNAPSHOT_CAPTURE_BOUND, abandon.signal).then(
           () => 'timed-out' as const,
           () => 'failed' as const,
@@ -86,12 +90,13 @@ export class LastSnapshotCapture {
 
   private async captureOnce(
     id: SessionId,
+    ferret: FerretId,
     runner: Runner,
     handle: RunnerHandle,
     abandoned: AbortSignal,
+    deadPane: boolean,
   ): Promise<CaptureOutcome> {
-    const look = await runner.look?.(handle);
-    const screen = look?.status;
+    const screen = deadPane ? await runner.deadScreen?.(ferret, handle) : (await runner.look?.(handle))?.status;
     // Today's rule: only a frame actually observed on a live pane is kept; a blank one is not evidence of anything.
     if (screen === undefined || screen.trim() === '') return 'nothing';
     const masked = await this.deps.redaction.read(scope => maskedScreen(scope, screen, this.deps.yieldToLoop));

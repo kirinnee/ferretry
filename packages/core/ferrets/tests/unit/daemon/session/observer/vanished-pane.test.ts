@@ -215,7 +215,7 @@ describe('a ferret whose terminal vanished', () => {
 describe('a ferret whose pane is kept dead (the harness was killed or crashed)', () => {
   it('is settled with how it ended, on the handle it ran on, by the watch', async () => {
     const fleet = await watched('working');
-    fleet.runner.die(fleet.record.handle as RunnerHandle, { signal: 9, lastLines: 'Killed' });
+    fleet.runner.die(fleet.record.handle as RunnerHandle, { signal: 9 });
 
     await fleet.tick();
 
@@ -223,7 +223,7 @@ describe('a ferret whose pane is kept dead (the harness was killed or crashed)',
       {
         ferret: fleet.id,
         handle: fleet.record.handle as string,
-        exit: { signal: 9, lastLines: 'Killed' },
+        exit: { signal: 9 },
         from: 'running',
       },
     ]);

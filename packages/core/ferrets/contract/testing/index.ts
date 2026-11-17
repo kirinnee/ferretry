@@ -299,9 +299,17 @@ export class FakeRunner implements Runner {
     if (this.exitedAnswer === 'throw') throw new Error('the fake runner could not ask');
     return this.#live.get(handle)?.ferret === ferret ? this.deadPanes.get(handle) : undefined;
   }
-  /** TEST ONLY: the program in the pane behind `handle` ended and tmux kept the pane. */
-  die(handle: RunnerHandle, how: RunnerExit = {}): void {
+  /** TEST ONLY: what a dead pane still shows, per handle (what `deadScreen` answers). */
+  readonly deadScreens = new Map<RunnerHandle, string>();
+  async deadScreen(ferret: FerretId, handle: RunnerHandle): Promise<string | undefined> {
+    return this.#live.get(handle)?.ferret === ferret && this.deadPanes.has(handle)
+      ? this.deadScreens.get(handle)
+      : undefined;
+  }
+  /** TEST ONLY: the program in the pane behind `handle` ended and tmux kept the pane (`screen` is what it still shows). */
+  die(handle: RunnerHandle, how: RunnerExit = {}, screen?: string): void {
     this.deadPanes.set(handle, how);
+    if (screen !== undefined) this.deadScreens.set(handle, screen);
   }
   /** TEST ONLY: the host went down and took the runner's server with it: every pane is gone. */
   reboot(): void {

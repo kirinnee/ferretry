@@ -1,5 +1,6 @@
 /** Reading ferrets: the list, one ferret, its subtree and its live turns; `fy ps` and `fy status`. */
-import { verb } from '@ferretry/kernel/manifest';
+import { CAPABILITIES } from '@ferretry/core-gate/contract';
+import { route, verb } from '@ferretry/kernel/manifest';
 import { ferretRead, fragment } from '../kit.ts';
 
 export default fragment({
@@ -25,6 +26,17 @@ export default fragment({
     ferretRead('GET /v1/ferrets/:ferretId/live', {
       audit: { skip: 'a ferret read records nothing' },
       guard: { none: 'a turn count and a context percentage; no text' },
+    }),
+    // A stopped ferret's STORED last screen (`FerretsApi.lastSnapshot`): what `fy status` and Info say a ferret that ended
+    // on its own showed last. A screen is pane text, so it asks `terminal.use` of a remote device like the pane routes do,
+    // is refused to a caller that may not touch the ferret before the file is opened, and is masked AGAIN on this read.
+    route('GET /v1/ferrets/:ferretId/last-screen', {
+      minimum: 'operator',
+      caller: 'any',
+      noStore: true,
+      capability: { capability: CAPABILITIES.terminal, axis: 'use' },
+      audit: { skip: 'a ferret read records nothing' },
+      guard: 'secrets',
     }),
   ],
   cli: [

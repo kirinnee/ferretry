@@ -564,7 +564,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     stopping: ferret => {
       hooks.observe(FerretStopping, { ferret });
     },
-    lastSnapshot: async (ferret, runner, handle) => await lastSnapshots.capture(ferret, runner, handle),
+    lastSnapshot: async (ferret, runner, handle, deadPane) =>
+      await lastSnapshots.capture(ferret, runner, handle, deadPane),
     started: payload => {
       hooks.observe(FerretStarted, payload);
     },

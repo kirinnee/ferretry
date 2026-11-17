@@ -29,18 +29,16 @@ function headline(view: FerretSummary): string {
 
 /**
  * Why a stopped ferret ended, as lines a person reads, when nobody chose it to: the terminal vanished, a signal or a
- * non-zero exit ended the agent, or the harness left on its own; and what the harness said last when the runner read it.
+ * non-zero exit ended the agent, or the harness left on its own; and what the harness said last, when the caller read
+ * it (`lastWords`: the stored last screen, read through its gated, re-masked route; it is never on the record).
  * A stop, a `signal done` and a launch that never ran say nothing here (the state already does). Empty for a live ferret.
  */
-function endedLines(view: FerretSummary): string[] {
+function endedLines(view: FerretSummary, lastWords: string | undefined): string[] {
   const why = endedWhy(view);
-  const cause = view.cause;
-  if (why === undefined || cause === undefined) return [];
-  const lastLines =
-    'lastLines' in cause && cause.lastLines !== undefined
-      ? [`  its last words:`, ...cause.lastLines.split('\n').map(line => `    ${line}`)]
-      : [];
-  return [`  ended: ${why}`, ...lastLines];
+  if (why === undefined) return [];
+  const words =
+    lastWords === undefined ? [] : [`  its last words:`, ...lastWords.split('\n').map(line => `    ${line}`)];
+  return [`  ended: ${why}`, ...words];
 }
 
 /** The short reason a stopped ferret's end was nobody's choice, or `undefined` (a live ferret, a stop, a finish). */
@@ -82,12 +80,12 @@ function stateCell(view: FerretSummary): string {
 }
 
 /** The single-ferret detail block printed by `status`, `start`, `resume` and `rename --json`-less answers. */
-export function renderFerret(view: FerretSummary): string[] {
+export function renderFerret(view: FerretSummary, lastWords?: string): string[] {
   return [
     headline(view),
     `  ${view.folder}`,
     `  ${view.state} since ${view.stateAt}; started ${view.createdAt}`,
-    ...endedLines(view),
+    ...endedLines(view, lastWords),
   ];
 }
 

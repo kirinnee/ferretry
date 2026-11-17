@@ -52,12 +52,10 @@ describe('InfoOverview', () => {
     expect(going.querySelector('[data-info-row="Ended"]')).toBeNull();
   });
 
-  it("shows the harness's last words under why it ended, when the runner read them", async () => {
+  it("shows the harness's last words under why it ended, when the stored last screen was read", async () => {
     const ended = await show({
-      ferret: ferretOf('f1', {
-        state: 'stopped',
-        cause: { kind: 'signal', signal: 9, lastLines: 'out of memory\nKilled' },
-      }),
+      ferret: ferretOf('f1', { state: 'stopped', cause: { kind: 'signal', signal: 9 } }),
+      lastWords: 'out of memory\nKilled',
     });
     expect(row(ended, 'Ended')).toContain('Killed by signal 9');
     expect(ended.querySelector('[data-info-last-lines]')?.textContent).toBe('out of memory\nKilled');

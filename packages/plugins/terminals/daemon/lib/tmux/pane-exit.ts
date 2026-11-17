@@ -1,5 +1,3 @@
-import { RUNNER_EXIT_LAST_BYTES, RUNNER_EXIT_LAST_LINES } from '@ferretry/core-ferrets/contract';
-
 /** What tmux is asked about every pane of a ferret's session: id, dead, and how its program ended. */
 export const PANE_EXIT_FACTS = '#{pane_id}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}';
 
@@ -33,20 +31,4 @@ export function parsePaneExits(stdout: string): readonly PaneExitFacts[] {
     });
   }
   return panes;
-}
-
-/**
- * The closing words of a dead pane: the last non-empty lines of an ALREADY MASKED screen, bounded from the end. `undefined`
- * when the screen shows nothing.
- */
-export function lastLinesOf(masked: string): string | undefined {
-  const lines = masked
-    .replaceAll('\r\n', '\n')
-    .split('\n')
-    .map(line => line.trimEnd())
-    .filter(line => line.trim() !== '')
-    .slice(-RUNNER_EXIT_LAST_LINES)
-    .join('\n');
-  const bounded = lines.length > RUNNER_EXIT_LAST_BYTES ? lines.slice(-RUNNER_EXIT_LAST_BYTES) : lines;
-  return bounded.trim() === '' ? undefined : bounded.trim();
 }
