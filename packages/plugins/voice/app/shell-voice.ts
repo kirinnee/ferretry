@@ -37,9 +37,11 @@ export {
   isKeyboardCaptured,
   isSpeechWorkerScriptUrl,
   isWorkerScriptUrl,
+  SecretInput,
   Textarea,
   trustedWorkerUrl,
   useDocumentVisible,
+  useSecretField,
 } from '@ferretry/app/ui';
 export { findReferences, parseReferenceToken, type Reference } from '@ferretry/app';
 

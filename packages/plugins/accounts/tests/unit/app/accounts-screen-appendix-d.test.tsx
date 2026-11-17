@@ -17,7 +17,7 @@ afterEach(async () => {
 
 const PASSWORD = 'synthetic-screen-password-1';
 
-const screen = async () => {
+const screen = async (options: { readonly openGithub?: boolean } = {}) => {
   const github = list().accounts.find(each => each.id === 'GITHUB');
   const fake = fakeClient((call: Call) => {
     if (call.route === 'GET /v1/accounts') return list();
@@ -30,7 +30,7 @@ const screen = async () => {
   await settle();
   await settle();
   const q = (selector: string) => view.container.querySelector<HTMLElement>(selector);
-  await click(q('[data-accounts-row="GITHUB"] button'));
+  if (options.openGithub !== false) await click(q('[data-accounts-row="GITHUB"] button'));
   return { q, view, calls: fake.calls };
 };
 
@@ -49,12 +49,34 @@ describe('Appendix D: the Accounts screen', () => {
     expect(s.q('[data-accounts-password-state]')?.textContent).toContain('write-only');
     expect(s.q('[data-accounts-cli-name]')?.textContent).toContain('not an environment variable');
     await typeInto(box(), PASSWORD);
+    // Typed: the live value only, never the `value` attribute or anywhere in the markup.
+    expect(box().getAttribute('value')).toBeNull();
+    expect(s.view.container.innerHTML).not.toContain(PASSWORD);
     await click(s.q('[data-accounts-save]'));
     await settle();
     // The password went out in the write and nowhere else: the box is empty again and no screen text holds it.
     expect(JSON.stringify(s.calls.find(call => call.route === 'PUT /v1/accounts/:id')?.body)).toContain(PASSWORD);
     expect((s.q('[data-accounts-password]') as HTMLInputElement).value).toBe('');
     expect(s.view.container.textContent).not.toContain(PASSWORD);
+    expect(s.view.container.innerHTML).not.toContain(PASSWORD);
+  });
+
+  it('S136 should draw the new account password write-only, keep it out of the markup, send it once and empty the box', async () => {
+    const s = await screen({ openGithub: false });
+    await click(s.q('[data-accounts-add-open]'));
+    await typeInto(s.q('[data-accounts-new-label]'), 'Synthetic Service');
+    const box = () => s.q('[data-accounts-new-password]') as HTMLInputElement;
+    expect(box().type).toBe('password');
+    await typeInto(box(), PASSWORD);
+    expect(box().getAttribute('value')).toBeNull();
+    expect(s.view.container.innerHTML).not.toContain(PASSWORD);
+    const save = () => s.q('[data-accounts-new-save]') as HTMLButtonElement;
+    expect(save().disabled).toBe(false);
+    await click(save());
+    await settle();
+    const put = s.calls.filter(call => call.route === 'PUT /v1/accounts/:id');
+    expect(put).toHaveLength(1);
+    expect(JSON.stringify(put[0]?.body)).toContain(PASSWORD);
     expect(s.view.container.innerHTML).not.toContain(PASSWORD);
   });
 

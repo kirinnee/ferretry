@@ -6,13 +6,15 @@
  * it ONCE, padded, to be STAGED in the daemon's memory; clears the field at that instant; asks for a passkey bound to
  * that one stage; only then commits it. A dismissed passkey drops the stage and nothing is saved.
  *
- * The key lives in this component's field and nowhere else: never in state after staging, never in a URL, a log or
- * storage, and the field clears when the page is hidden. Every sentence here is the app's or the daemon's words about
+ * The key lives in this component's field and nowhere else: never in state (the field is the shared uncontrolled
+ * `SecretInput`, so it is not in the input's `value` attribute either; each render reads it through the ref to say what
+ * it reads as), never in a URL, a log or storage, and the field clears when the page is hidden. Every sentence here is the app's or the daemon's words about
  * the owner's own account; nothing a ferret wrote is drawn.
  */
 
 import { LOGIN_TOTP_WARNING, padInputValue, type TwoFactorStageId } from '../../../contract/routes/index.ts';
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useId, useState } from 'react';
+import { SecretInput, useSecretField } from '@ferretry/app/ui';
 import {
   accountWords,
   addKeyActWords,
@@ -61,32 +63,22 @@ export function AutomaticCodesPanel({
   addKey,
   onSaved,
 }: AutomaticCodesPanelProps): ReactNode {
-  const field = useRef<HTMLInputElement | null>(null);
+  const seed = useSecretField();
+  const seedId = useId();
   const [open, setOpen] = useState(defaultOpen);
   const [accountId, setAccountId] = useState(initial?.id);
-  const [text, setText] = useState('');
   const [label, setLabel] = useState('');
   const [warningTick, setWarningTick] = useState(false);
   const [mismatchTick, setMismatchTick] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'form' });
 
   const account = accounts.find(each => each.id === accountId);
-  const draft = readSeedDraft(text, account);
+  const draft = readSeedDraft(seed.read(), account);
   const busy = phase.kind === 'staging' || phase.kind === 'passkey' || phase.kind === 'saving';
   const blocked = saveBlocked({ draft, account, warningTick, mismatchTick, busy });
 
-  const clearKey = useCallback((): void => {
-    setText('');
-    if (field.current !== null) field.current.value = '';
-  }, []);
-
-  useEffect(() => {
-    const hide = (): void => {
-      if (document.visibilityState === 'hidden') clearKey();
-    };
-    document.addEventListener('visibilitychange', hide);
-    return () => document.removeEventListener('visibilitychange', hide);
-  }, [clearKey]);
+  // The field empties itself when the page is hidden (the shared hook); these are the other two: sent, and closed.
+  const clearKey = seed.clear;
 
   const save = async (): Promise<void> => {
     if (account === undefined || blocked !== undefined) return;
@@ -94,7 +86,7 @@ export function AutomaticCodesPanel({
     let staged: TwoFactorStageId | undefined;
     try {
       const answer = await stageSeed(client, account.id, {
-        padded: padInputValue(text),
+        padded: padInputValue(seed.read()),
         ...(label.trim() === '' ? {} : { label: label.trim() }),
         totpAcknowledged: true,
         ...stageTicks({ draft, mismatchTick }),
@@ -190,25 +182,15 @@ export function AutomaticCodesPanel({
               </label>
             ) : null}
 
-            <label className="flex min-w-0 flex-col gap-1 text-meta text-muted">
+            <label className="flex min-w-0 flex-col gap-1 text-meta text-muted" htmlFor={seedId}>
               2FA key or otpauth:// link
-              <input
-                autoCapitalize="off"
-                autoComplete="new-password"
+              <SecretInput
+                id={seedId}
                 className="kt-input mono min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
-                data-1p-ignore=""
-                data-bwignore=""
                 data-codes-seed=""
-                data-lpignore="true"
                 disabled={busy}
-                onChange={event => {
-                  setText(event.target.value);
-                  setMismatchTick(false);
-                }}
-                ref={field}
-                spellCheck={false}
-                type="password"
-                value={text}
+                field={seed}
+                onTyped={() => setMismatchTick(false)}
               />
             </label>
 

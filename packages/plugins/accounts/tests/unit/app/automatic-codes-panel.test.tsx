@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { AutomaticCodesPanel } from '../../../app/features/two-factor/automatic-codes.tsx';
 import type { CodesAccount } from '../../../app/lib/automatic-codes.ts';
 import { padInputValue, type TwoFactorStageId } from '../../../contract/routes/index.ts';
-import { type Mounted, mount } from '../../support/app/dom.ts';
+import { interact, type Mounted, mount } from '../../support/app/dom.ts';
 import { click, settle, typeInto } from '../../support/app/dom-form.ts';
 import { type Call, fakeClient } from '../../support/app/fake-client.ts';
 
@@ -70,6 +70,28 @@ const panel = async (given: { addKey: (stage: TwoFactorStageId, words: string) =
 };
 
 describe('Appendix D: the seed panel', () => {
+  it('I175 should keep a typed key out of the markup and the value attribute while still reading what it is, and empty it when the page is hidden', async () => {
+    const typed = await panel({ addKey: async () => true });
+    const field = () => typed.q('[data-codes-seed]') as HTMLInputElement;
+    await typeInto(field(), SEED);
+    // The live read still says what the paste is...
+    expect(typed.q('[data-codes-reads]')?.textContent).toContain('6-digit codes');
+    // ...and the key is only the field's live value: not its attribute, not anywhere in the markup.
+    expect(field().value).toBe(SEED);
+    expect(field().type).toBe('password');
+    expect(field().getAttribute('value')).toBeNull();
+    expect(typed.html()).not.toContain(SEED);
+    // A page sent to the background empties it.
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    try {
+      await interact(() => document.dispatchEvent(new Event('visibilitychange')));
+      expect(field().value).toBe('');
+      expect(typed.q('[data-codes-reads]')).toBeNull();
+    } finally {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    }
+  });
+
   it('I174 should start with its ticks off and Save disabled, stage the seed once and empty the field, send no body on the commit, and save nothing on a dismissed passkey', async () => {
     const asked: string[] = [];
     // A dismissed passkey: the stage is dropped and nothing is committed.

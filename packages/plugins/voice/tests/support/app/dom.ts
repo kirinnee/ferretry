@@ -175,3 +175,19 @@ export const must = <T>(value: T | null | undefined, what: string): T => {
   if (value === null || value === undefined) throw new Error(`expected ${what} to be present`);
   return value;
 };
+
+/** Types into an input the way a person does: sets the live value, then fires the `input` event React listens for. */
+export const typeInto = async (element: Element | null, value: string): Promise<void> => {
+  const input = must(element, 'an input') as HTMLInputElement;
+  await interact(() => {
+    const setter = must(Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set, 'a value setter');
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+
+/** Submits a form the way a Save press does. */
+export const submit = async (form: Element | null): Promise<void> => {
+  const target = must(form, 'a form');
+  await interact(() => target.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+};

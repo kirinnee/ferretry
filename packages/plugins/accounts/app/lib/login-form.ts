@@ -57,10 +57,11 @@ export const signInProblem = (draft: SignInDraft): string | undefined => {
   return undefined;
 };
 
-export const passwordProblem = (password: string): string | undefined =>
-  password !== '' && password.length < LOGIN_PASSWORD_MIN_LENGTH
-    ? `At least ${LOGIN_PASSWORD_MIN_LENGTH} characters.`
-    : undefined;
+/** The same sentence from how many characters are typed, for a field whose value is never held in state. */
+export const passwordLengthProblem = (length: number): string | undefined =>
+  length > 0 && length < LOGIN_PASSWORD_MIN_LENGTH ? `At least ${LOGIN_PASSWORD_MIN_LENGTH} characters.` : undefined;
+
+export const passwordProblem = (password: string): string | undefined => passwordLengthProblem(password.length);
 
 /** A handle offered while a label is typed: `GitHub (kirinnee)` → `GITHUB_KIRINNEE`. Editable by the owner. */
 export const handleFromLabel = (label: string): string =>

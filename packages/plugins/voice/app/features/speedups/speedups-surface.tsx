@@ -17,7 +17,7 @@
  * renders as a stated refusal, and a damaged vault says so rather than showing every key unset.
  */
 
-import { MIN_SECRET_VALUE_LENGTH } from '../../shell-voice.ts';
+import { MIN_SECRET_VALUE_LENGTH, SecretInput, useSecretField } from '../../shell-voice.ts';
 import type { SpeedupStatus, SpeedupsView, SpeedupTestResult } from '../../../contract/index.ts';
 import { AlertTriangle, Check, ExternalLink, FlaskConical, KeyRound, Zap } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
@@ -49,7 +49,12 @@ export function lastTestLine(status: SpeedupStatus): string | undefined {
 
 /** Why a pasted key cannot be saved yet, or nothing. */
 export function keyDraftProblem(value: string): string | undefined {
-  if (value === '' || value.trim().length >= MIN_SECRET_VALUE_LENGTH) return undefined;
+  return value === '' ? undefined : keyLengthProblem(value.trim().length);
+}
+
+/** The same from how many characters (spaces around it not counted) are typed: the field's value is never held in state. */
+function keyLengthProblem(length: number): string | undefined {
+  if (length === 0 || length >= MIN_SECRET_VALUE_LENGTH) return undefined;
   return `At least ${MIN_SECRET_VALUE_LENGTH} characters. That looks too short to be a whole key.`;
 }
 
@@ -84,19 +89,20 @@ function StatusChip({ status, vaultReadable }: { readonly status: SpeedupStatus;
 export function SpeedupCard({ status, vaultReadable, busy, locked = false, error, onSave, onTest }: SpeedupCardProps) {
   const fieldId = useId();
   const headingId = useId();
-  const [value, setValue] = useState('');
+  // The key lives only in the field's own value (read on Save); state knows how long it is, never what it says.
+  const key = useSecretField(typed => typed.trim().length);
   const [replacing, setReplacing] = useState(false);
-  const problem = keyDraftProblem(value);
+  const problem = keyLengthProblem(key.length);
   const idle = busy === null && !locked;
-  const ready = value.trim().length >= MIN_SECRET_VALUE_LENGTH && idle;
+  const ready = key.length >= MIN_SECRET_VALUE_LENGTH && idle;
   const showField = !status.set || replacing;
   const line = lastTestLine(status);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!ready) return;
-    void Promise.resolve(onSave(value.trim())).then(() => {
-      setValue('');
+    void Promise.resolve(onSave(key.read().trim())).then(() => {
+      key.clear();
       setReplacing(false);
     });
   };
@@ -135,17 +141,11 @@ export function SpeedupCard({ status, vaultReadable, busy, locked = false, error
             {status.label} key <span className="mono text-meta font-normal text-faint">({status.secretName})</span>
           </label>
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-            <input
+            <SecretInput
               id={fieldId}
-              // `password` so it is not read over a shoulder; `new-password` so no password manager
-              // keeps a copy of a credential this browser only relays.
-              type="password"
-              autoComplete="new-password"
-              spellCheck={false}
+              field={key}
               className="kt-input min-h-[44px] w-full min-w-0 flex-1 rounded-control border border-border bg-surface-2 px-2 text-fg"
-              value={value}
               placeholder="paste it here — it is never shown again"
-              onChange={event => setValue(event.target.value)}
             />
             <button
               type="submit"
@@ -160,7 +160,7 @@ export function SpeedupCard({ status, vaultReadable, busy, locked = false, error
                 type="button"
                 className="kt-btn min-h-[44px] justify-center"
                 onClick={() => {
-                  setValue('');
+                  key.clear();
                   setReplacing(false);
                 }}
               >
