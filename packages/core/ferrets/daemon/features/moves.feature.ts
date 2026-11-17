@@ -54,7 +54,10 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     const record = registry.get(id as unknown as FerretId);
     if (record?.handle === undefined) return 'gone' as const;
     const runner = runnerOf(id as unknown as FerretId);
-    return runner?.identify === undefined ? undefined : await runner.identify(record.handle as RunnerHandle);
+    // With the ferret named: a stale handle that now names another ferret's pane must not take stock of ITS processes.
+    return runner?.identify === undefined
+      ? undefined
+      : await runner.identify(record.handle as RunnerHandle, id as unknown as FerretId);
   };
   const pane = (id: SessionId): MovePane => ({
     identify: async () => await identify(id),
@@ -63,7 +66,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       if (record?.handle === undefined) return undefined;
       const runner = runnerOf(id as unknown as FerretId);
       if (runner?.lastScreen === undefined) throw new Error('the runner cannot read the pane');
-      return await runner.lastScreen(record.handle as RunnerHandle);
+      return await runner.lastScreen(record.handle as RunnerHandle, id as unknown as FerretId);
     },
   });
   // What Runtimes answers a move, bounded on the kernel clock as a start's own resolution is: an answer that never settles

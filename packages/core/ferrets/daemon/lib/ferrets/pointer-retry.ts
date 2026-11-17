@@ -1,3 +1,4 @@
+import type { FerretId } from '../../../contract/ids.ts';
 import { type Runner, type RunnerHandle, runnerDeliveryFailure } from '../../../contract/kinds/runner.ts';
 
 /** How many times a relaunch's pointer is typed before the ferret is left for an owner to stop and resume. */
@@ -29,15 +30,16 @@ export async function typePointer(
   text: string,
   still: () => boolean,
   pause: (ms: number) => Promise<void>,
+  ferret?: FerretId,
 ): Promise<void> {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      await runner.deliver(handle, { text });
+      await runner.deliver(handle, { text }, ferret);
       return;
     } catch (error) {
       if (attempt >= POINTER_ATTEMPTS || !mayTypeAgain(error)) throw error;
       await pause(POINTER_RETRY_DELAY_MS);
-      if (!still() || !(await runner.alive(handle).catch(() => false))) throw error;
+      if (!still() || !(await runner.alive(handle, ferret).catch(() => false))) throw error;
     }
   }
 }

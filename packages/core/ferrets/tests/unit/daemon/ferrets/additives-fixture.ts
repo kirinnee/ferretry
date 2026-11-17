@@ -53,13 +53,13 @@ export class ActingRunner extends SignalRunner {
     });
     if (!acted.ok) throw new FakeRunnerFailure({ kind: 'held', code: acted.error.refused });
   }
-  override async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {
+  override async deliver(handle: RunnerHandle, delivery: RunnerDelivery, ferret?: FerretId): Promise<DeliveryOutcome> {
     for (const write of ['load-buffer', 'paste-buffer', 'send-keys']) await this.#write(handle, write);
-    return await super.deliver(handle, delivery);
+    return await super.deliver(handle, delivery, ferret);
   }
-  override async stopTurn(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerStopOutcome> {
+  override async stopTurn(handle: RunnerHandle, stop: RunnerStop, ferret?: FerretId): Promise<RunnerStopOutcome> {
     if (this.working || stop.whenIdle) await this.#write(handle, `send-keys ${stop.key}`);
-    return await super.stopTurn(handle, stop);
+    return await super.stopTurn(handle, stop, ferret);
   }
 }
 
@@ -92,6 +92,10 @@ export interface AdditivesOptions {
   readonly limits?: () => LimitsFile | undefined;
   /** The stored last screen as the daemon's reader answers it, masked again (unbound by default). */
   readonly storedLastSnapshot?: (ferret: FerretId) => Promise<string | undefined>;
+  /** The last-screen keeper a stop or an exit settle calls (unbound by default: nothing is kept). */
+  readonly lastSnapshot?: FerretsPorts['lastSnapshot'];
+  /** Told of every `ferret.changed` the service raises (the events stream's source), with its payload. */
+  readonly changed?: FerretsPorts['changed'];
 }
 
 /** A Ferrets service over fakes; with `queueing`, a runner that acts per write on the kernel's real act rules. */
@@ -115,6 +119,8 @@ export function additivesFixture(options: AdditivesOptions = {}) {
   // The act runner the RUNNER guards its own writes with (Ferrets holds none: the seam never acts itself).
   const act = options.queueing === undefined ? undefined : queueingAct(options.queueing);
   const runner = act === undefined ? new SignalRunner() : new ActingRunner(act);
+  // Every production caller must name the ferret a handle is for: a pane id alone can name another ferret's pane.
+  runner.requireFerret = true;
   const harness = new FakeHarness();
   const history: { readonly type: string; readonly data: Readonly<Record<string, unknown>> }[] = [];
   const ports: FerretsPorts = {
@@ -131,7 +137,7 @@ export function additivesFixture(options: AdditivesOptions = {}) {
     sitrepSources: () => [],
     instructions: () => [],
     folder: path => ok(fenced(path)),
-    changed: () => {},
+    changed: options.changed ?? (() => {}),
     history: async (_ferret, type, data) => {
       history.push({ type, data });
     },
@@ -140,6 +146,7 @@ export function additivesFixture(options: AdditivesOptions = {}) {
     ...(options.session === undefined ? {} : { session: options.session }),
     ...(options.limits === undefined ? {} : { limits: options.limits }),
     ...(options.storedLastSnapshot === undefined ? {} : { storedLastSnapshot: options.storedLastSnapshot }),
+    ...(options.lastSnapshot === undefined ? {} : { lastSnapshot: options.lastSnapshot }),
   };
   const service = new FerretsService(registry, tokens, ports);
   return {

@@ -41,7 +41,7 @@ export function fixture() {
     stateAt: T0,
   };
   const registry = new FerretRegistry([record]);
-  const runner = new FakeRunner();
+  const runner = Object.assign(new FakeRunner(), { requireFerret: true });
   const harness = new FakeHarness();
   const events: string[] = [];
   const stored: string[] = [];

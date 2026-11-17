@@ -30,6 +30,8 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     turnObserved: async (ferret, turn) => await service.turnObserved(ferret, turn),
     settleGone: async (ferret, handle, exited, stillGone) =>
       await service.settleGone(ferret, handle, exited, stillGone),
+    settleExited: async (ferret, handle, exit, from, stillExited) =>
+      await service.settleExited(ferret, handle, exit, from, stillExited),
     clock: { now: () => kernel.clock.now() },
     // The owner of the stored question says whether one is open (Conversation's `question.json`); with none, it is "no".
     questionOpen: async ferret => {

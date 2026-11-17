@@ -107,7 +107,7 @@ const paneOf = async (deps: LiveEventsDeps, id: SessionId): Promise<PaneState | 
   if (record === undefined || record.state === 'stopped' || record.handle === undefined) return undefined;
   const look = await deps
     .runner()
-    ?.look?.(record.handle as RunnerHandle)
+    ?.look?.(record.handle as RunnerHandle, record.id)
     .catch(() => undefined);
   if (look?.status === undefined) return undefined;
   return { dead: false, alive: true, promptReady: look.atPrompt === true, history: '', visible: look.status };

@@ -66,7 +66,11 @@ const callAs = (caller: string) => ({ headers: { [callerHeader]: caller } });
 const boot = async (): Promise<TestHost> =>
   await testHost({
     everyDirectory: true,
-    plugins: [ferrets, harnessPlugin(new FakeHarness()), runnerPlugin(new FakeRunner())],
+    plugins: [
+      ferrets,
+      harnessPlugin(new FakeHarness()),
+      runnerPlugin(Object.assign(new FakeRunner(), { requireFerret: true })),
+    ],
     gate: new StandInAdmission(standingFor),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
   });

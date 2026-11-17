@@ -11,6 +11,7 @@ import { compactAt, setCompactAt } from './compact-at.ts';
 import { agentControl, effectiveLimits, revokeToken, turnUsage } from './insights.ts';
 import { repointRuntime, runtimeRecords } from './runtime-records.ts';
 import { lastSnapshot, prompt, turnObserved, turns } from './turns.ts';
+import { endOfExit } from './exit-cause.ts';
 import { KeyedSerialExecutor } from './serial.ts';
 import { typePointer } from './pointer-retry.ts';
 import type { SerialExecutor } from '../ports.ts';
@@ -48,6 +49,7 @@ import type {
   FerretRecord,
   FerretRuntimeRecord,
   FerretRuntimeRename,
+  RunnerExit,
   FerretAddress,
   FerretsApi,
   FerretState,
@@ -245,9 +247,10 @@ export interface FerretsPorts {
   /**
    * Keeps the ferret's last screen (`last-snapshot.txt`, today's `launcher.snapshot`) just before its pane is stopped
    * or replaced: masked, bounded, best effort. It never rejects and never holds a stop past its own bound. Unbound:
-   * nothing is kept.
+   * nothing is kept. `deadPane`: the pane is one the runner proved dead and kept, read through `Runner.deadScreen`
+   * (a look never reads a dead pane); the screen goes to the same stored file and nowhere else.
    */
-  lastSnapshot?(ferret: FerretId, runner: Runner, handle: RunnerHandle): Promise<void>;
+  lastSnapshot?(ferret: FerretId, runner: Runner, handle: RunnerHandle, deadPane?: boolean): Promise<void>;
   /** `ferret.started` (additive, D2 #12): told once a start's record is written, before its launch. */
   started?(payload: FerretStartedPayload): void;
   /** Writes a ferret's `details.json` (its start options and title). */
@@ -1269,8 +1272,12 @@ export class FerretsService implements FerretsApi {
     if (record.handle !== undefined && (harness === undefined || runner === undefined))
       throw new ApiError(503, 'the harness or runner needed to stop this ferret is unavailable', 'plugin_unavailable');
     if (record.handle !== undefined && harness !== undefined && runner !== undefined) {
-      await this.keepLastScreen(ferret, runner, record.handle as RunnerHandle);
-      await harness.stop(ferret, record.handle as RunnerHandle, runner, how);
+      // Its own terminal already gone: the handle the record kept names nobody (or, after a server restart, another
+      // ferret's pane), so there is nothing to read or stop.
+      if (!(await this.terminalGone(ferret, runner))) {
+        await this.keepLastScreen(ferret, runner, record.handle as RunnerHandle);
+        await harness.stop(ferret, record.handle as RunnerHandle, runner, how);
+      }
     }
     await this.settle(record, 'stopped', 'stopped', cause);
     // Today's `session.stopped` journal event, with the reason the caller gave or the lifecycle default.
@@ -1330,6 +1337,47 @@ export class FerretsService implements FerretsApi {
         pane: 'gone',
         exitCode: null,
         signal: null,
+      });
+      return true;
+    });
+  }
+
+  /**
+   * Settles a ferret whose pane the runner PROVED dead but KEPT (`Runner.exited`: `remain-on-exit`, `pane_dead` 1), the
+   * way {@link FerretsService.settleGone} settles a vanished one: a COMPARE-AND-SET under the ferret's own queue, only
+   * while it is still live on exactly `handle`, and `stillExited` asked AGAIN inside the queue (a relaunch that ran
+   * while this waited may have put a live pane on the same handle). An owner's stop wins by construction: it runs in the
+   * same queue and leaves the record `stopped`, so this answers false. The end is {@link endOfExit}: its cause carries
+   * the exit status or signal only, and the journal says the same: what the pane showed is kept as the ferret's stored
+   * last screen (read back only through `lastSnapshot`), never on either. Nothing is killed or launched; the dead pane is cleared by the next launch. True only when it landed.
+   */
+  async settleExited(
+    ferret: FerretId,
+    handle: string,
+    exit: RunnerExit,
+    from: string,
+    stillExited: () => Promise<boolean>,
+  ) {
+    const end = endOfExit(exit);
+    return await this.serial.run(ferret, async () => {
+      await this.ports.ready?.();
+      const record = this.registry.get(ferret);
+      if (record === undefined || (record.state !== 'working' && record.state !== 'idle') || record.handle !== handle)
+        return false;
+      if (!(await stillExited().catch(() => false))) return false;
+      this.ports.stopping?.(ferret);
+      // What the pane still shows is kept as the stored last screen (0600, its own folder, masked again on every read),
+      // never on the cause or in the journal: both are served to every caller. Best effort and bounded, like a stop's.
+      const runner = this.ports.runner();
+      if (runner !== undefined) await this.keepLastScreen(ferret, runner, handle as RunnerHandle, true);
+      await this.settle(record, 'stopped', 'stopped', end.cause);
+      await this.ports.history?.(ferret, 'session.exited', {
+        reason: end.reason,
+        from,
+        status: end.status,
+        pane: 'dead',
+        exitCode: exit.status ?? null,
+        signal: exit.signal ?? null,
       });
       return true;
     });
@@ -1792,8 +1840,12 @@ export class FerretsService implements FerretsApi {
         'plugin_unavailable',
       );
     if (record.handle !== undefined && harness !== undefined && runner !== undefined) {
-      await this.keepLastScreen(record.id, runner, record.handle as RunnerHandle);
-      await harness.stop(record.id, record.handle as RunnerHandle, runner, 'now');
+      // A record whose own terminal is already gone (a converted v4 ferret's pane id, one from before a server restart)
+      // has nothing to stop: its handle can now name ANOTHER ferret's pane, which a stop through it would end.
+      if (!(await this.terminalGone(record.id, runner))) {
+        await this.keepLastScreen(record.id, runner, record.handle as RunnerHandle);
+        await harness.stop(record.id, record.handle as RunnerHandle, runner, 'now');
+      }
     }
     // The conversation's lease is HANDED to the ferret, never freed: between this pane's death and the relaunch's claim a
     // terminal's `claude --resume` could otherwise take the conversation and leave two writers (a failed relaunch
@@ -1804,13 +1856,23 @@ export class FerretsService implements FerretsApi {
     return this.registry.get(record.id) as FerretRecord;
   }
 
+  /** Whether the runner PROVES this ferret's own terminal is not there. Anything that proves nothing is `false`. */
+  private async terminalGone(ferret: FerretId, runner: Runner): Promise<boolean> {
+    return (await runner.gone?.(ferret).catch(() => false)) === true;
+  }
+
   /**
    * Today's order: the final frame is captured first, then the pane is stopped (every stop, `signal done`'s completion,
    * a Warden or budget stop and a pane a move replaces all come through here). Best effort: whatever the capture does,
    * the stop goes on.
    */
-  private async keepLastScreen(ferret: FerretId, runner: Runner, handle: RunnerHandle): Promise<void> {
-    await this.ports.lastSnapshot?.(ferret, runner, handle).catch(() => undefined);
+  private async keepLastScreen(
+    ferret: FerretId,
+    runner: Runner,
+    handle: RunnerHandle,
+    deadPane = false,
+  ): Promise<void> {
+    await this.ports.lastSnapshot?.(ferret, runner, handle, deadPane).catch(() => undefined);
   }
 
   /** A caller that is a ferret reaches only itself and its helpers (the same rule as stop and resume). */
@@ -2021,7 +2083,7 @@ export class FerretsService implements FerretsApi {
       try {
         // A handle is only ever tracked through a runner, so one is always here; none is a cleanup that cannot run.
         if (runner === undefined) throw new Error('no runner to stop the failed launch with');
-        await runner.stop(handle, 'now');
+        await runner.stop(handle, 'now', record.id);
       } catch {
         // Keep the handle recoverable by stop; a failed cleanup never claims the process stopped.
         await this.write({ ...record, handle }, record.state, 'state');
@@ -2341,6 +2403,7 @@ export class FerretsService implements FerretsApi {
         turn.instruction,
         () => this.registry.get(ferret)?.handle === handle,
         ms => this.pause(ms),
+        ferret,
       );
       tellCarried(carried, { text: turn.instruction, turn: turn.turn, file: turn.file });
     } catch {
@@ -2377,14 +2440,18 @@ export class FerretsService implements FerretsApi {
     if (handle === undefined) return notTyped;
     let admission: SessionEffectAdmission | undefined;
     try {
-      await runner.deliver(handle, {
-        text: turn.instruction,
-        beforeWrite: async () => {
-          admission = await admit(ferret, turn.prompt);
-          // `settled` aborts this delivery at the exact pre-write boundary: a replay, never a second typing.
-          if (admission !== 'perform') throw new FirstTurnNotPerformed();
+      await runner.deliver(
+        handle,
+        {
+          text: turn.instruction,
+          beforeWrite: async () => {
+            admission = await admit(ferret, turn.prompt);
+            // `settled` aborts this delivery at the exact pre-write boundary: a replay, never a second typing.
+            if (admission !== 'perform') throw new FirstTurnNotPerformed();
+          },
         },
-      });
+        ferret,
+      );
       // A runner that typed without asking first has typed a turn no ledger admitted: refused, never counted.
       if (admission !== 'perform') return notTyped;
       await session.settleFirstTurn(ferret, turn.prompt);
@@ -2422,7 +2489,7 @@ export class FerretsService implements FerretsApi {
   ): Promise<Result<FerretId, StartFailure>> {
     if (runner.settled === undefined) return ok(ferret);
     try {
-      await runner.settled(handle);
+      await runner.settled(handle, ferret);
     } catch (error) {
       const ran = diedParked(error) ? FIRST_TURN_NEVER_RAN : FIRST_TURN_MAYBE_RAN;
       const why = (await this.startExplained(ferret, runner, handle, said)) ?? STARTUP_EXITED;
@@ -2447,7 +2514,7 @@ export class FerretsService implements FerretsApi {
     const harness = key === undefined ? undefined : this.ports.harness(key);
     if (harness?.startFailure === undefined || runner.lastScreen === undefined) return undefined;
     try {
-      const sentence = harness.startFailure(await runner.lastScreen(handle));
+      const sentence = harness.startFailure(await runner.lastScreen(handle, ferret));
       if (typeof sentence !== 'string' || sentence === '') return undefined;
       if (sentence.length <= START_EXPLAINED_MAX) said.explained = sentence;
       return sentence;

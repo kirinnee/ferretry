@@ -23,7 +23,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import type { Log } from '@ferretry/kernel/contract';
-import type { FerretId, FerretRecord, Runner, RunnerHandle } from '../../contract/index.ts';
+import type { FerretId, FerretRecord, Runner, RunnerExit, RunnerHandle } from '../../contract/index.ts';
 import { turnPaneEvidenceOfLook } from '../adapters/session/observer/runner-look.ts';
 import { InlineObserverHost } from '../adapters/session/observer/inline-observer-host.ts';
 import { SessionObservationApplier } from '../adapters/session/observer/session-observation-applier.ts';
@@ -67,6 +67,19 @@ export interface TurnWatchDeps {
     handle: string,
     exited: { readonly from: string; readonly reason: string },
     stillGone: () => Promise<boolean>,
+  ) => Promise<boolean>;
+  /**
+   * A live ferret whose pane a look could not read and the runner PROVES is still there with its program ended (the
+   * harness was killed or crashed and the pane was kept) is settled stopped WITH HOW IT ENDED
+   * (`FerretsService.settleExited`: the same compare-and-set, and a second proof inside the ferret's queue). Absent: a
+   * dead pane that stayed is never noticed after boot.
+   */
+  readonly settleExited?: (
+    ferret: FerretId,
+    handle: string,
+    exit: RunnerExit,
+    from: string,
+    stillExited: () => Promise<boolean>,
   ) => Promise<boolean>;
   readonly clock: { now(): string };
   /** Whether the ferret's owner stores a question that is open now (the `turn.question-open` provider); `false` with none. */
@@ -190,14 +203,16 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
     if (record === undefined || record.state === 'stopped' || record.handle === undefined) return undefined;
     const look = await deps
       .runner()
-      ?.look?.(record.handle as RunnerHandle)
+      ?.look?.(record.handle as RunnerHandle, record.id)
       .catch(() => undefined);
     if (look === undefined) noticeGone(record);
     return look === undefined ? undefined : turnPaneEvidenceOfLook(look);
   };
   // A pane no look can read may be a pane that is not there: a tmux session killed by hand, or lost with its server, left
-  // the registry saying `working` for ever (the boot exit pass runs once). Only the runner's PROOF settles it, and never on
-  // the tick's time: the settle waits in the ferret's own queue, which a long stop or restart can hold.
+  // the registry saying `working` for ever (the boot exit pass runs once). Or it may be a pane tmux KEPT with its program
+  // ended (`remain-on-exit`: a harness killed or crashed), which reads alive to `gone` and was never settled. Only the
+  // runner's PROOF settles either, and never on the tick's time: the settle waits in the ferret's own queue, which a long
+  // stop or restart can hold. A stop the owner made has already moved the record out of working/idle there.
   const settling = new Set<FerretId>();
   const noticeGone = (record: FerretRecord): void => {
     const runner = deps.runner();
@@ -211,12 +226,25 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
       .then(async gone => {
         // The proof above was taken outside the ferret's queue: the settle asks again once it holds the queue, because a
         // restart that ran in between may have put a live pane on this very handle.
-        if (gone)
+        if (gone) {
           await deps.settleGone?.(
             record.id,
             handle,
             { from, reason: GONE_REASON },
             async () => (await runner.gone?.(record.id)) === true,
+          );
+          return;
+        }
+        // The terminal is there. A pane the runner PROVES is there with its program ended (the harness was killed or
+        // crashed and the pane was kept) is no live agent either: settled with how it ended, in the ferret's queue.
+        const exit = await runner.exited?.(record.id, handle as RunnerHandle);
+        if (exit !== undefined)
+          await deps.settleExited?.(
+            record.id,
+            handle,
+            exit,
+            from,
+            async () => (await runner.exited?.(record.id, handle as RunnerHandle)) !== undefined,
           );
       })
       .catch((error: unknown) =>

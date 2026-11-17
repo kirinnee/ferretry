@@ -41,7 +41,7 @@ export class FerretSessionLifecycleLauncher implements SessionLifecycleLauncher 
     const handle = this.ports.handleOf(this.ferret(record));
     const runner = this.ports.runner();
     if (handle === undefined || runner === undefined) return false;
-    return await runner.alive(handle);
+    return await runner.alive(handle, this.ferret(record));
   }
 
   async refuseLaunch(record: SessionLifecycleRecord): Promise<string | undefined> {
@@ -71,7 +71,7 @@ export class FerretSessionLifecycleLauncher implements SessionLifecycleLauncher 
     if (runner.observe === undefined) throw new Error('this runner cannot tell whether the harness is ready');
     const started = this.ports.nowMs();
     for (;;) {
-      const look = await runner.observe(handle);
+      const look = await runner.observe(handle, this.ferret(record));
       if (look?.promptReady === true) return;
       if (look === undefined || look.dead || !look.alive)
         throw new Error('the harness pane ended before it was ready for its first turn');
@@ -83,13 +83,17 @@ export class FerretSessionLifecycleLauncher implements SessionLifecycleLauncher 
 
   async deliver(record: SessionLifecycleRecord, instruction: string, beforeWrite?: () => Promise<void>): Promise<void> {
     const { handle, runner } = this.pane(record);
-    await runner.deliver(handle, { text: instruction, ...(beforeWrite === undefined ? {} : { beforeWrite }) });
+    await runner.deliver(
+      handle,
+      { text: instruction, ...(beforeWrite === undefined ? {} : { beforeWrite }) },
+      this.ferret(record),
+    );
   }
 
   async settled(record: SessionLifecycleRecord): Promise<'settled' | 'timed-out'> {
     const { handle, runner } = this.pane(record);
     // A runner that cannot tell never waits: the start then measures delivery alone.
-    return (await runner.settled?.(handle)) ?? 'settled';
+    return (await runner.settled?.(handle, this.ferret(record))) ?? 'settled';
   }
 
   /** The service's stop keeps the ferret's last screen itself, just before it stops the pane. */

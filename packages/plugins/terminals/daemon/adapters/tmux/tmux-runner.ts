@@ -17,6 +17,7 @@ import {
   type Runner,
   type RunnerDelivery,
   type RunnerDeliveryFailure,
+  type RunnerExit,
   type RunnerHandle,
   type RunnerLook,
   type RunnerStop,
@@ -41,6 +42,7 @@ import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { sessionTarget } from '../../lib/tmux/address.ts';
 import { tmuxStartDirectory } from '../../lib/tmux/format-escape.ts';
 import { maskedScreen } from '../../lib/tmux/screen-mask.ts';
+import { PANE_EXIT_FACTS, parsePaneExits } from '../../lib/tmux/pane-exit.ts';
 import { killSessionArguments, paneActivityFormat, remainOnExitArguments } from '../../lib/tmux/commands.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../lib/tmux/contracts.ts';
 import { TmuxController } from '../../lib/tmux/controller.ts';
@@ -337,10 +339,11 @@ export class TmuxRunner implements Runner {
     return ok(running);
   }
 
-  async alive(handle: RunnerHandle): Promise<boolean> {
+  async alive(handle: RunnerHandle, ferret?: FerretId): Promise<boolean> {
     if (!PANE_ID.test(handle)) return false;
     const facts = await this.facts(handle);
-    return facts !== undefined && !facts.dead;
+    // Another ferret's live pane behind a stale handle is not THIS ferret's liveness.
+    return facts !== undefined && !facts.dead && TmuxRunner.owns(facts, ferret);
   }
 
   /**
@@ -364,12 +367,64 @@ export class TmuxRunner implements Runner {
   }
 
   /**
+   * Whether the pane `handle` of `ferret` is PROVEN to be there with its program ended (`Runner.exited`): the session is
+   * the ferret's own (named by the ferret, every target the exact `=name`), and `list-panes -s` lists that exact pane id
+   * with `pane_dead` 1. A live pane, a pane id the session does not hold (a relaunch replaced it), a session that is not
+   * there (that is {@link TmuxRunner.gone}) and every refusal that proves nothing answer `undefined`. It answers the
+   * status and signal only, never what the pane shows ({@link TmuxRunner.deadScreen}). Only asks.
+   */
+  async exited(ferret: FerretId, handle: RunnerHandle): Promise<RunnerExit | undefined> {
+    if (!PANE_ID.test(handle)) return undefined;
+    let session: string;
+    try {
+      session = ferretTmuxSession(ferret);
+    } catch {
+      return undefined;
+    }
+    const listed = await this.options.tmux
+      .execute(['list-panes', '-s', '-t', `=${session}`, '-F', PANE_EXIT_FACTS])
+      .catch(() => undefined);
+    if (listed === undefined || listed.code !== 0) return undefined;
+    const pane = parsePaneExits(listed.stdout).find(candidate => candidate.paneId === handle);
+    if (pane === undefined || !pane.dead) return undefined;
+    return {
+      ...(pane.status === undefined ? {} : { status: pane.status }),
+      ...(pane.signal === undefined ? {} : { signal: pane.signal }),
+    };
+  }
+
+  /**
+   * The masked screen of a pane {@link TmuxRunner.exited} proves dead (`Runner.deadScreen`), for the ferret's stored last
+   * screen and nothing else: the proof is asked again here (a pane that is live, another ferret's or replaced answers
+   * `undefined`), the screen is read through the same act and redaction a look uses, so a hold refuses it, and the whole
+   * masked frame is returned (the keeper bounds it). `undefined` with no look wiring, a hold, or an unreadable screen.
+   */
+  async deadScreen(ferret: FerretId, handle: RunnerHandle): Promise<string | undefined> {
+    if ((await this.exited(ferret, handle)) === undefined) return undefined;
+    const watch = this.options.look;
+    if (watch === undefined) return undefined;
+    const acted = await watch
+      .act(targetRef('terminal', handle), 'read', async () => {
+        const captured = await this.options.tmux.execute(['capture-pane', '-p', '-t', handle]);
+        if (captured.code !== 0) return { kind: 'content' as const };
+        return await watch.redaction.read(async scope => ({
+          kind: 'content' as const,
+          data: (await maskedScreen(scope, captured.stdout, watch.yieldToLoop)) as never,
+        }));
+      })
+      .catch(() => undefined);
+    if (acted === undefined || !acted.ok || typeof acted.value.data !== 'string') return undefined;
+    return acted.value.data;
+  }
+
+  /**
    * The pane behind `handle` now, read only (`list-panes -a`: the one question tmux answers EXACTLY by pane id, where
    * `display-message -t %n` answers the current pane for an id that is gone). `'gone'` only when a server that answered
    * does not list the pane, or tmux says it has no server; every other failure proves nothing and is `undefined`. A pane
-   * outside a ferret's session is not vouched for (`undefined`). A dead pane tmux keeps has no pid.
+   * outside a ferret's session, or (with `ferret` named) in another ferret's, is not vouched for (`undefined`). A dead pane
+   * tmux keeps has no pid.
    */
-  async identify(handle: RunnerHandle): Promise<RunnerPaneIdentity | 'gone' | undefined> {
+  async identify(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerPaneIdentity | 'gone' | undefined> {
     if (!PANE_ID.test(handle)) return undefined;
     const listed = await this.options.tmux.execute(['list-panes', '-a', '-F', PANE_FACTS]).catch(() => undefined);
     if (listed === undefined) return undefined;
@@ -379,7 +434,9 @@ export class TmuxRunner implements Runner {
       .map(parsePaneFacts)
       .find(candidate => candidate?.paneId === handle);
     if (facts === undefined) return 'gone';
-    if (!isFerretSession(facts.session)) return undefined;
+    // Another ferret's pane behind a stale handle: it is not THIS ferret's pane, so nothing about it (its process tree
+    // above all) is told for this ferret. Not `'gone'` either: the ferret's own pane may be elsewhere, so it is unknown.
+    if (!isFerretSession(facts.session) || !TmuxRunner.owns(facts, ferret)) return undefined;
     if (facts.dead || facts.pid <= 0) return { handle };
     const start = await this.options.processes?.startOf(facts.pid).catch(() => undefined);
     return { handle, pid: facts.pid, ...(start === undefined ? {} : { processStart: String(start) }) };
@@ -426,8 +483,8 @@ export class TmuxRunner implements Runner {
     }
   }
 
-  async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {
-    const pane = await this.guardedPane(handle);
+  async deliver(handle: RunnerHandle, delivery: RunnerDelivery, ferret?: FerretId): Promise<DeliveryOutcome> {
+    const pane = await this.guardedPane(handle, ferret);
     // In particular, ComposerUnconfirmedError and PaneStrandedError propagate without a retry: typed is not lost.
     try {
       return await new TmuxPaneDelivery(new TmuxController(pane.port), pane.sleep).deliver(
@@ -446,8 +503,8 @@ export class TmuxRunner implements Runner {
    * binding `deliver` uses: every write is acted on under `kernel.act(terminal %n, 'keys')` by this runner itself (a hold
    * types nothing), re-checked against the exact live pane in the write, and never raw. A caller must not wrap it again.
    */
-  async queue(handle: RunnerHandle, text: string): Promise<QueueOutcome> {
-    const pane = await this.guardedPane(handle);
+  async queue(handle: RunnerHandle, text: string, ferret?: FerretId): Promise<QueueOutcome> {
+    const pane = await this.guardedPane(handle, ferret);
     try {
       return await new TmuxPaneQueue(new TmuxController(pane.port), pane.sleep).queue(pane.session, text);
     } catch (error) {
@@ -467,8 +524,8 @@ export class TmuxRunner implements Runner {
    * failed, a pane not live, or a press the binding refused because the pane changed (a stop at a pane that is no
    * longer the one bound is a stop at a gone ferret pane). A hold that refused the press is its closed code.
    */
-  async stopTurn(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerStopOutcome> {
-    return await this.#stop(handle, stop, false);
+  async stopTurn(handle: RunnerHandle, stop: RunnerStop, ferret?: FerretId): Promise<RunnerStopOutcome> {
+    return await this.#stop(handle, stop, false, ferret);
   }
 
   /**
@@ -477,10 +534,15 @@ export class TmuxRunner implements Runner {
    * blocking prompt and no startup wait, since a permission that came up after the caller's own read can sit beneath a
    * still-drawn active-work line, and Escape would then answer it "no" for the person. Nothing is pressed then.
    */
-  async #stop(handle: RunnerHandle, stop: RunnerStop, overPrompt: boolean): Promise<RunnerStopOutcome> {
+  async #stop(
+    handle: RunnerHandle,
+    stop: RunnerStop,
+    overPrompt: boolean,
+    ferret?: FerretId,
+  ): Promise<RunnerStopOutcome> {
     // Closed by the contract's type; refused here as well, so no caller can make this press another key.
     if (!STOP_KEYS.has(stop.key)) throw new PaneDeliveryError('that is not a harness stop key');
-    const pane = await this.guardedPane(handle);
+    const pane = await this.guardedPane(handle, ferret);
     const tmux = new TmuxController(pane.port);
     try {
       const before = await captureFrame(tmux, pane.session).catch(() => undefined);
@@ -512,8 +574,8 @@ export class TmuxRunner implements Runner {
    * Its reads are not acted on, exactly like `deliver`'s own frame reads. A pane that dies rejects with
    * `PaneStartupExitedError`, whose `parked` says whether a frame showed the first turn parked first.
    */
-  async settled(handle: RunnerHandle): Promise<'settled' | 'timed-out'> {
-    const pane = await this.guardedPane(handle);
+  async settled(handle: RunnerHandle, ferret?: FerretId): Promise<'settled' | 'timed-out'> {
+    const pane = await this.guardedPane(handle, ferret);
     const reading = onlyReads(pane.port, 'a startup wait writes nothing');
     return await new TmuxPaneDelivery(new TmuxController(reading), pane.sleep).waitStartupSettled(pane.session);
   }
@@ -523,10 +585,10 @@ export class TmuxRunner implements Runner {
    * harness to explain a failed start. Only a ferret's own pane is read (a person's shell answers `''`), only by its
    * exact id, and nothing is written. The text goes to the caller and is never logged here.
    */
-  async lastScreen(handle: RunnerHandle): Promise<string> {
+  async lastScreen(handle: RunnerHandle, ferret?: FerretId): Promise<string> {
     if (!PANE_ID.test(handle)) return '';
     const facts = await this.facts(handle);
-    if (facts === undefined || !isFerretSession(facts.session)) return '';
+    if (facts === undefined || !isFerretSession(facts.session) || !TmuxRunner.owns(facts, ferret)) return '';
     const captured = await this.options.tmux.execute(['capture-pane', '-p', '-t', handle]);
     return captured.code === 0 ? captured.stdout : '';
   }
@@ -537,8 +599,9 @@ export class TmuxRunner implements Runner {
    */
   private async readingPane(
     handle: RunnerHandle,
+    ferret?: FerretId,
   ): Promise<{ readonly tmux: TmuxController; readonly session: string }> {
-    const pane = await this.guardedPane(handle);
+    const pane = await this.guardedPane(handle, ferret);
     return { tmux: new TmuxController(onlyReads(pane.port, 'a pane read writes nothing')), session: pane.session };
   }
 
@@ -553,9 +616,9 @@ export class TmuxRunner implements Runner {
   }
 
   /** Today's `TmuxSendTerminal.observe`: one read of the pane for a send. Total: nothing live reads `undefined`. */
-  async observe(handle: RunnerHandle): Promise<RunnerPaneObservation | undefined> {
+  async observe(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerPaneObservation | undefined> {
     try {
-      const { tmux, session } = await this.readingPane(handle);
+      const { tmux, session } = await this.readingPane(handle, ferret);
       return await this.maskedObservation(await new ComposerActs(tmux, session, noSleep).observe());
     } catch {
       return undefined;
@@ -563,14 +626,14 @@ export class TmuxRunner implements Runner {
   }
 
   /** Today's `TmuxSendTerminal.heldAt`: rejects when the pane cannot be read (an unread pane proves nothing). */
-  async heldAt(handle: RunnerHandle, text: string): Promise<RunnerHeldAt | undefined> {
-    const { tmux, session } = await this.readingPane(handle);
+  async heldAt(handle: RunnerHandle, text: string, ferret?: FerretId): Promise<RunnerHeldAt | undefined> {
+    const { tmux, session } = await this.readingPane(handle, ferret);
     return await new ComposerActs(tmux, session, noSleep).heldAt(text);
   }
 
   /** Today's `TmuxSendTerminal.clearComposer`, every `C-u` through the guarded binding (`kernel.act` on the pane). */
-  async clearComposer(handle: RunnerHandle, text: string): Promise<RunnerComposerCleared> {
-    const pane = await this.guardedPane(handle);
+  async clearComposer(handle: RunnerHandle, text: string, ferret?: FerretId): Promise<RunnerComposerCleared> {
+    const pane = await this.guardedPane(handle, ferret);
     try {
       return await new ComposerActs(new TmuxController(pane.port), pane.session, pane.sleep).clearComposer(text);
     } catch (error) {
@@ -579,8 +642,13 @@ export class TmuxRunner implements Runner {
   }
 
   /** Today's `TmuxSendTerminal.submitComposer`: one Enter through the guarded binding. */
-  async submitComposer(handle: RunnerHandle, text: string, strict = false): Promise<RunnerComposerSubmitted> {
-    const pane = await this.guardedPane(handle);
+  async submitComposer(
+    handle: RunnerHandle,
+    text: string,
+    strict = false,
+    ferret?: FerretId,
+  ): Promise<RunnerComposerSubmitted> {
+    const pane = await this.guardedPane(handle, ferret);
     try {
       return await new ComposerActs(new TmuxController(pane.port), pane.session, pane.sleep).submitComposer(
         text,
@@ -595,15 +663,19 @@ export class TmuxRunner implements Runner {
    * Today's `TmuxSendTerminal.stopActiveTurn`: the harness's stop under `stopTurn`'s rule (one keystroke, never `C-c`),
    * then a bounded wait for a prompt that is NOT a failure when it gives up, then one read of the pane.
    */
-  async stopActiveTurn(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerPaneObservation | undefined> {
-    const stopped = await this.#stop(handle, stop, true);
-    if (!stopped.pressed) return await this.observe(handle);
-    const pane = await this.guardedPane(handle).catch(() => undefined);
+  async stopActiveTurn(
+    handle: RunnerHandle,
+    stop: RunnerStop,
+    ferret?: FerretId,
+  ): Promise<RunnerPaneObservation | undefined> {
+    const stopped = await this.#stop(handle, stop, true, ferret);
+    if (!stopped.pressed) return await this.observe(handle, ferret);
+    const pane = await this.guardedPane(handle, ferret).catch(() => undefined);
     if (pane !== undefined)
       await new TmuxPaneDelivery(new TmuxController(pane.port), pane.sleep)
         .waitReady(pane.session)
         .catch(() => undefined);
-    return await this.observe(handle);
+    return await this.observe(handle, ferret);
   }
 
   /**
@@ -612,14 +684,15 @@ export class TmuxRunner implements Runner {
    * takes, at a line boundary) and only then handed on, everything inside ONE `kernel.act(terminal %n, 'read')` so a hold
    * refuses the whole read. Reads only. Total: a pane that is gone, not a ferret's own, unreadable or held reads `undefined`.
    */
-  async formCapture(handle: RunnerHandle): Promise<RunnerFormCapture | undefined> {
+  async formCapture(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerFormCapture | undefined> {
     const watch = this.options.look;
     if (watch === undefined || !PANE_ID.test(handle)) return undefined;
     const tmux = this.options.tmux;
     const acted = await watch
       .act(targetRef('terminal', handle), 'read', async () => {
         const facts = await this.facts(handle);
-        if (facts === undefined || !isFerretSession(facts.session)) return { kind: 'content' as const };
+        if (facts === undefined || !isFerretSession(facts.session) || !TmuxRunner.owns(facts, ferret))
+          return { kind: 'content' as const };
         if (facts.dead)
           return {
             kind: 'content' as const,
@@ -664,10 +737,10 @@ export class TmuxRunner implements Runner {
    * Structured questions: ONE key of the closed {@link FORM_KEYS} typed at the pane through the guarded binding (every
    * write is `kernel.act(terminal %n, 'keys')`, so a Vault hold types nothing and rejects `held`), exactly as `deliver`'s.
    */
-  async formKey(handle: RunnerHandle, key: FormKey): Promise<void> {
+  async formKey(handle: RunnerHandle, key: FormKey, ferret?: FerretId): Promise<void> {
     if (!(FORM_KEYS as readonly string[]).includes(key))
       throw new TypeError('that key is not one a form is driven with');
-    const pane = await this.guardedPane(handle);
+    const pane = await this.guardedPane(handle, ferret);
     try {
       await new TmuxController(pane.port).sendKey(pane.session, key);
     } catch (error) {
@@ -676,10 +749,10 @@ export class TmuxRunner implements Runner {
   }
 
   /** Live model switch: ONE row digit of the closed {@link PICKER_KEYS}, guarded exactly as {@link TmuxRunner.formKey}. */
-  async pickerKey(handle: RunnerHandle, key: PickerKey): Promise<void> {
+  async pickerKey(handle: RunnerHandle, key: PickerKey, ferret?: FerretId): Promise<void> {
     if (!(PICKER_KEYS as readonly string[]).includes(key))
       throw new TypeError('that key is not one a model picker is driven with');
-    const pane = await this.guardedPane(handle);
+    const pane = await this.guardedPane(handle, ferret);
     try {
       await new TmuxController(pane.port).sendKey(pane.session, key);
     } catch (error) {
@@ -688,8 +761,8 @@ export class TmuxRunner implements Runner {
   }
 
   /** Structured questions: `text` pasted as one bracketed paste through the guarded binding, as {@link TmuxRunner.formKey}. */
-  async formPaste(handle: RunnerHandle, text: string): Promise<void> {
-    const pane = await this.guardedPane(handle);
+  async formPaste(handle: RunnerHandle, text: string, ferret?: FerretId): Promise<void> {
+    const pane = await this.guardedPane(handle, ferret);
     try {
       await new TmuxController(pane.port).paste(pane.session, text);
     } catch (error) {
@@ -703,7 +776,7 @@ export class TmuxRunner implements Runner {
    * included) and only then parsed. Everything inside ONE act on the pane: a hold refuses the whole read and nothing is captured. Total: a
    * pane that is gone, dead, not a ferret's, unreadable or held answers `undefined`. Never writes.
    */
-  async look(handle: RunnerHandle): Promise<RunnerLook | undefined> {
+  async look(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerLook | undefined> {
     const watch = this.options.look;
     if (watch === undefined || !PANE_ID.test(handle)) return undefined;
     const tmux = this.options.tmux;
@@ -718,10 +791,19 @@ export class TmuxRunner implements Runner {
           return nothing;
         }
         let frame = this.#frames.get(handle);
+        // A cached frame is keyed by the pane id, which another ferret's pane can take over: a look FOR a ferret proves the
+        // pane is that ferret's own before the cache is used (a fresh capture proves it below).
+        if (ferret !== undefined && frame !== undefined && capturedFrameIsCurrent(frame, activity)) {
+          const facts = await this.facts(handle);
+          if (facts === undefined || !TmuxRunner.owns(facts, ferret)) {
+            this.#frames.delete(handle);
+            return nothing;
+          }
+        }
         if (frame === undefined || !capturedFrameIsCurrent(frame, activity)) {
           // A fresh capture re-proves the pane is a live ferret's own: a person's shell is never read.
           const facts = await this.facts(handle);
-          if (facts === undefined || facts.dead || !isFerretSession(facts.session)) {
+          if (facts === undefined || facts.dead || !isFerretSession(facts.session) || !TmuxRunner.owns(facts, ferret)) {
             this.#frames.delete(handle);
             return nothing;
           }
@@ -752,7 +834,10 @@ export class TmuxRunner implements Runner {
    * The exact live ferret pane behind `handle`, bound for writing: every target is rebound to this handle, every read
    * re-proves the pane is the one first seen, and every write is acted on under `kernel.act` and guarded in the server.
    */
-  private async guardedPane(handle: RunnerHandle): Promise<{
+  private async guardedPane(
+    handle: RunnerHandle,
+    ferret?: FerretId,
+  ): Promise<{
     readonly port: TmuxCommandPort;
     readonly session: string;
     readonly sleep: DeliverySleep;
@@ -766,6 +851,8 @@ export class TmuxRunner implements Runner {
       original === undefined ||
       original.dead ||
       !isFerretSession(original.session) ||
+      // Another ferret's pane behind a stale handle: nothing is typed, pressed or read, as for a pane that is gone.
+      !TmuxRunner.owns(original, ferret) ||
       original.command === undefined ||
       original.cursorRow === undefined
     )
@@ -852,14 +939,28 @@ export class TmuxRunner implements Runner {
     };
   }
 
-  async stop(handle: RunnerHandle, how: 'polite' | 'now'): Promise<void> {
+  /**
+   * Whether the pane `facts` describes is `ferret`'s own. A pane id is not an identity: the private server hands `%0` out
+   * again after it restarts, so a handle a record kept can name ANOTHER ferret's pane, and a stop through it would end
+   * that ferret. With no `ferret` the caller vouches for the handle itself (a launch cleaning up a pane it just made).
+   */
+  private static owns(facts: PaneFacts, ferret: FerretId | undefined): boolean {
+    return ferret === undefined || facts.session === ferretTmuxSession(ferret);
+  }
+
+  async stop(handle: RunnerHandle, how: 'polite' | 'now', ferret?: FerretId): Promise<void> {
     if (!PANE_ID.test(handle)) return;
     // Any stop forgets the pane text kept for the look: a polite one only interrupts, but the pane text is not kept.
     // Forgotten again as it ends, so no look that overlaps the stop keeps any (`#stopEpoch`).
     this.#frames.delete(handle);
     try {
       const facts = await this.facts(handle);
-      if (facts === undefined) return;
+      // Nothing, or ANOTHER ferret's pane (or a person's shell), behind this handle: the pane id says nothing about this
+      // ferret, so nothing is pressed or killed through it. Its own session is stopped by its exact name, as v4 did.
+      if (facts === undefined || !TmuxRunner.owns(facts, ferret)) {
+        if (ferret !== undefined) await this.stopByName(ferret, how);
+        return;
+      }
       if (how === 'polite' && !facts.dead) {
         // The harness's own interrupt first; the session goes once the pane is dead or the caller asks again `now`.
         await this.options.tmux.execute(['send-keys', '-t', handle, 'C-c']);
@@ -873,10 +974,44 @@ export class TmuxRunner implements Runner {
     }
   }
 
-  async signal(handle: RunnerHandle, signal: 'interrupt' | 'terminate'): Promise<void> {
+  /**
+   * Stops `ferret`'s own session by its EXACT name (`=fy-<id>`: a bare name is a prefix match that could name another
+   * ferret's), for a handle that does not lead to it. Polite sends the harness's interrupt to a session that still has a live
+   * pane and otherwise (every pane dead, or `now`) kills the session. A session that is not there stops nothing.
+   */
+  private async stopByName(ferret: FerretId, how: 'polite' | 'now'): Promise<void> {
+    let session: string;
+    try {
+      session = ferretTmuxSession(ferret);
+    } catch {
+      return;
+    }
+    const exact = `=${session}`;
+    const present = await this.options.tmux.execute(['has-session', '-t', exact]).catch(() => undefined);
+    if (present === undefined || present.code !== 0) return;
+    if (how === 'polite') {
+      const panes = await this.options.tmux.execute(['list-panes', '-s', '-t', exact, '-F', '#{pane_dead}']);
+      const live = panes.code === 0 && panes.stdout.split('\n').some(line => line.trim() === '0');
+      if (live) {
+        // `send-keys` wants a PANE target: `=fy-<id>` alone is parsed as a pane name and tmux answers "can't find pane",
+        // while `=fy-<id>:` is the exact session's active pane. A refusal is thrown, so a polite stop that reached
+        // nothing is never taken for one that did (the caller would settle the ferret `stopped` over a running session).
+        const pressed = await this.options.tmux.execute(['send-keys', '-t', `${exact}:`, 'C-c']);
+        if (pressed.code !== 0)
+          throw new Error(`could not interrupt ${session}: ${pressed.stderr.trim() || `tmux exited ${pressed.code}`}`);
+        return;
+      }
+    }
+    const killed = await this.options.tmux.execute(['kill-session', '-t', exact]);
+    // A session that went away between the check and the kill is the stop already made; any other refusal is not.
+    if (killed.code !== 0 && !/can't find session/iu.test(killed.stderr) && !isTmuxServerAbsent(killed.stderr))
+      throw new Error(`could not stop ${session}: ${killed.stderr.trim() || `tmux exited ${killed.code}`}`);
+  }
+
+  async signal(handle: RunnerHandle, signal: 'interrupt' | 'terminate', ferret?: FerretId): Promise<void> {
     if (!PANE_ID.test(handle)) return;
     const facts = await this.facts(handle);
-    if (facts === undefined || facts.dead || !isFerretSession(facts.session)) return;
+    if (facts === undefined || facts.dead || !isFerretSession(facts.session) || !TmuxRunner.owns(facts, ferret)) return;
     if (signal === 'interrupt') await this.options.tmux.execute(['send-keys', '-t', handle, 'C-c']);
     else await this.options.tmux.execute(killSessionArguments(facts.session));
   }

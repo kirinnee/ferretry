@@ -89,7 +89,11 @@ export async function openHarness(
   await ports.ready?.();
   if (registry.get(ferret) === undefined) return undefined;
   requireMayTouch(caller, ferret);
-  /** The ferret's pane and runner NOW, or why there is nothing to write to. */
+  /**
+   * The ferret's pane and runner NOW, or why there is nothing to write to. The handle is only a pane id, which can name
+   * ANOTHER ferret's pane (a converted v4 record, a tmux-server restart), so every runner call made through it passes
+   * `ferret`: the runner acts only on a pane in this ferret's own session and otherwise refuses as for a gone pane.
+   */
   const pane = (): Result<{ readonly handle: RunnerHandle; readonly runner: Runner }, HarnessRefusal> => {
     const handle = registry.get(ferret)?.handle as RunnerHandle | undefined;
     const runner = ports.runner();
@@ -156,14 +160,16 @@ export async function openHarness(
       if (injects(delivery.text)) return err({ refused: 'not_ready', why: 'busy' });
       // Ruling #45: one look first. A ferret visibly at work is answered busy NOW, nothing typed, rather than after
       // the delivery's readiness wait gives up on a prompt that will not come until the turn ends.
-      const look = await found.value.runner.look?.(found.value.handle).catch(() => undefined);
+      const look = await found.value.runner.look?.(found.value.handle, ferret).catch(() => undefined);
       if (midTurn(look)) return err({ refused: 'not_ready', why: 'busy' });
       // A pane parked on a tool permission waits for a person, so the readiness wait would only run out its ~27 s while
       // holding the ferret's one send lane (an interrupt and every later send queue behind it): answered at once.
       // Startup dialogs (`prompt`, `dialog`) are NOT answered here: the delivery's own wait answers them.
       if (look?.permission === true) return err({ refused: 'not_ready', why: 'dialog' });
       // The runner guards each write with kernel.act on this pane itself; a hold it meets types nothing.
-      const delivered = await written(async () => await found.value.runner.deliver(found.value.handle, delivery));
+      const delivered = await written(
+        async () => await found.value.runner.deliver(found.value.handle, delivery, ferret),
+      );
       if (delivered.ok) ports.delivered?.(ferret);
       return delivered;
     },
@@ -186,9 +192,9 @@ export async function openHarness(
         // Not handed, and nothing sent: typed as it always was. `deliver` answered busy without looking, so the pane
         // is looked at now: an idle one is typed at its prompt (where it lands is again the transcript's to say), a
         // working one goes to its own queue below.
-        const look = await runner.look?.(handle).catch(() => undefined);
+        const look = await runner.look?.(handle, ferret).catch(() => undefined);
         if (!midTurn(look)) {
-          const delivered = await written(async () => await runner.deliver(handle, { text }));
+          const delivered = await written(async () => await runner.deliver(handle, { text }, ferret));
           if (!delivered.ok) return delivered;
           ports.delivered?.(ferret);
           return ok('left');
@@ -208,7 +214,7 @@ export async function openHarness(
         typed = queuedMessageInstruction(file);
       }
       // As `deliver`: the runner acts on this pane for each write it makes, so it is NOT wrapped in a second act here.
-      const queued = await written(async () => await queue(handle, typed));
+      const queued = await written(async () => await queue(handle, typed, ferret));
       if (queued.ok) ports.delivered?.(ferret);
       return queued;
     },
@@ -225,7 +231,7 @@ export async function openHarness(
       const whenIdle = record?.mode === 'interactive' && stop.safeWhenIdle;
       try {
         // As `deliver`: the runner acts on this pane for its one keystroke, so it is NOT wrapped in a second act here.
-        return ok(await stopTurn(handle, { key: stop.key, whenIdle }));
+        return ok(await stopTurn(handle, { key: stop.key, whenIdle }, ferret));
       } catch (error) {
         const failure = runnerDeliveryFailure(error);
         if (failure?.kind === 'held') return err({ refused: failure.code });
@@ -241,7 +247,7 @@ export async function openHarness(
       const { handle, runner } = found.value;
       const observe = runner.observe?.bind(runner);
       if (observe === undefined) return err({ refused: 'plugin_unavailable' });
-      const seen = await observe(handle).catch(() => undefined);
+      const seen = await observe(handle, ferret).catch(() => undefined);
       return seen === undefined ? err({ refused: 'no_pane' }) : ok(seen);
     },
     heldAt: async (text: string): Promise<Result<RunnerHeldAt | undefined, HarnessRefusal>> => {
@@ -251,7 +257,7 @@ export async function openHarness(
       const heldAt = runner.heldAt?.bind(runner);
       if (heldAt === undefined) return err({ refused: 'plugin_unavailable' });
       // A pane that cannot be read REJECTS (it is not "not held"): the caller decides what an unread pane allows.
-      return ok(await heldAt(handle, text));
+      return ok(await heldAt(handle, text, ferret));
     },
     clearComposer: async (text: string): Promise<Result<RunnerComposerCleared, HarnessDeliveryFailure>> => {
       const found = pane();
@@ -259,7 +265,7 @@ export async function openHarness(
       const { handle, runner } = found.value;
       const clear = runner.clearComposer?.bind(runner);
       if (clear === undefined) return err({ refused: 'plugin_unavailable' });
-      return await written(async () => await clear(handle, text));
+      return await written(async () => await clear(handle, text, ferret));
     },
     submitComposer: async (
       text: string,
@@ -270,7 +276,7 @@ export async function openHarness(
       const { handle, runner } = found.value;
       const submit = runner.submitComposer?.bind(runner);
       if (submit === undefined) return err({ refused: 'plugin_unavailable' });
-      return await written(async () => await submit(handle, text, strict));
+      return await written(async () => await submit(handle, text, strict, ferret));
     },
     stopActive: async (): Promise<Result<RunnerPaneObservation | undefined, HarnessRefusal>> => {
       const found = pane();
@@ -284,7 +290,7 @@ export async function openHarness(
       // ACTIVE turn only. An idle press would answer a permission prompt or dismiss a question the person has not
       // decided; the runner presses only while the pane it reads shows work (`shouldPressStopKey`).
       try {
-        return ok(await stopActive(handle, { key: stop.key, whenIdle: false }));
+        return ok(await stopActive(handle, { key: stop.key, whenIdle: false }, ferret));
       } catch (error) {
         const failure = runnerDeliveryFailure(error);
         if (failure?.kind === 'held') return err({ refused: failure.code });
@@ -324,7 +330,7 @@ export async function openHarness(
         const { handle, runner } = found.value;
         const capture = runner.formCapture?.bind(runner);
         if (capture === undefined) return err({ refused: 'plugin_unavailable' });
-        const seen = await capture(handle).catch(() => undefined);
+        const seen = await capture(handle, ferret).catch(() => undefined);
         return seen === undefined ? err({ refused: 'no_pane' }) : ok(seen);
       },
       key: async (key: FormKey): Promise<Result<void, HarnessDeliveryFailure>> => {
@@ -333,7 +339,7 @@ export async function openHarness(
         const { handle, runner } = found.value;
         const press = runner.formKey?.bind(runner);
         if (press === undefined) return err({ refused: 'plugin_unavailable' });
-        return await written(async () => await press(handle, key));
+        return await written(async () => await press(handle, key, ferret));
       },
       pickerKey: async (key: PickerKey): Promise<Result<void, HarnessDeliveryFailure>> => {
         const found = pane();
@@ -341,7 +347,7 @@ export async function openHarness(
         const { handle, runner } = found.value;
         const press = runner.pickerKey?.bind(runner);
         if (press === undefined) return err({ refused: 'plugin_unavailable' });
-        return await written(async () => await press(handle, key));
+        return await written(async () => await press(handle, key, ferret));
       },
       paste: async (text: string): Promise<Result<void, HarnessDeliveryFailure>> => {
         const found = pane();
@@ -349,7 +355,7 @@ export async function openHarness(
         const { handle, runner } = found.value;
         const paste = runner.formPaste?.bind(runner);
         if (paste === undefined) return err({ refused: 'plugin_unavailable' });
-        return await written(async () => await paste(handle, text));
+        return await written(async () => await paste(handle, text, ferret));
       },
     } satisfies HarnessForm,
     // Bound to the ferret this seam was opened for: there is no target to name, so it cannot read another ferret's.
