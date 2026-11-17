@@ -38,12 +38,17 @@ import { bulletPoints, describePrevious, FIELD_LABEL, itemAtVersion, POINT_FIELD
  *   ferret took them in. `send` is the delivery the chat's ledger recorded for that row, when it has one.
  * - `item`: they are stored on the item on the machine; whether the ferret has had them is not recorded.
  *
+ * - `device`: they have not left THIS device: the chat's outbox still holds them (`outbox`), waiting for the machine to be
+ *   reachable, or refused by it (`refused`). Drawn as the chat's own "Saved on this device" / "Not sent".
+ *
  * `answered` is the chat's own rule: the ferret said something after them.
  */
-interface OwnerReach {
-  readonly via: 'transcript' | 'item';
+export interface OwnerReach {
+  readonly via: 'transcript' | 'item' | 'device';
   readonly answered: boolean;
   readonly send?: LedgerSendRecord;
+  /** Only with `via: 'device'`: why the words still wait, and whether the machine said no. */
+  readonly outbox?: { readonly reason: string | undefined; readonly refused: boolean };
 }
 
 export type HistoryEvent =
@@ -121,6 +126,41 @@ const ownerPart = (part: AgendaMessagePart): { readonly text: string; readonly n
   };
 };
 
+/**
+ * The owner's words in one message, as events for the item: one per answer form that names it, or one plain reply.
+ * `named` says the message is about the item although its words do not cite it (an outbox entry keeps the references
+ * apart from the words).
+ */
+const ownerWords = (
+  text: string,
+  entryId: string,
+  id: AgendaItem['id'],
+  at: number,
+  reached: OwnerReach,
+  named = false,
+): readonly HistoryEvent[] => {
+  const message = parseAgendaMessage(text);
+  if (message !== undefined) {
+    return message.parts
+      .filter(part => part.items.some(item => item.id === id))
+      .map(
+        part =>
+          ({
+            kind: 'owner',
+            key: `${entryId}:${part.raw}`,
+            at,
+            form: part.kind,
+            ...ownerPart(part),
+            reached,
+          }) as const,
+      )
+      .filter(event => event.text !== '');
+  }
+  return named || citesPattern(id).test(text)
+    ? [{ kind: 'owner', key: entryId, at, text: withoutLeadingReference(text, id), reached }]
+    : [];
+};
+
 /** What the owner said to the item in one user row, or nothing when the row is not about it. */
 const ownerSaid = (
   entry: TranscriptEntry,
@@ -135,26 +175,7 @@ const ownerSaid = (
     answered,
     ...(entry.send === undefined ? {} : { send: entry.send }),
   };
-  const message = parseAgendaMessage(entry.text);
-  if (message !== undefined) {
-    return message.parts
-      .filter(part => part.items.some(named => named.id === id))
-      .map(
-        part =>
-          ({
-            kind: 'owner',
-            key: `${entry.id}:${part.raw}`,
-            at,
-            form: part.kind,
-            ...ownerPart(part),
-            reached,
-          }) as const,
-      )
-      .filter(event => event.text !== '');
-  }
-  return citesPattern(id).test(entry.text)
-    ? [{ kind: 'owner', key: entry.id, at, text: withoutLeadingReference(entry.text, id), reached }]
-    : [];
+  return ownerWords(entry.text, entry.id, id, at, reached);
 };
 
 /** One unit of a reply the way a reader sees it: a heading, a paragraph, a list item or a Q/A recap pair. */
@@ -360,3 +381,66 @@ export const itemHistory = (item: AgendaItem, entries: readonly TranscriptEntry[
     .map((event, order) => ({ event, order }))
     .sort((a, b) => a.event.at - b.event.at || a.order - b.order)
     .map(({ event }) => event);
+
+/**
+ * One of the owner's messages that is still on this device (Conversation's `conversation.device-outbox`, narrowed to
+ * the fields the History reads): its send id, its words, the items it is about and why it waits.
+ */
+export interface DeviceWords {
+  readonly id: string;
+  readonly message: string;
+  readonly references: readonly string[];
+  readonly createdAt: string;
+  readonly reason?: string | undefined;
+  readonly refused?: true | undefined;
+}
+
+const namesItem = (references: readonly string[], id: AgendaItem['id']): boolean =>
+  references.some(reference => new RegExp(`^${ASK_REFERENCE_SIGIL_CLASS}${id}$`, 'u').test(reference.trim()));
+
+/** The owner's words still on this device that are about the item, as History events (`reached.via: 'device'`). */
+export const deviceEvents = (id: AgendaItem['id'], words: readonly DeviceWords[]): readonly HistoryEvent[] =>
+  words.flatMap(entry =>
+    ownerWords(
+      entry.message,
+      entry.id,
+      id,
+      Date.parse(entry.createdAt) || 0,
+      {
+        via: 'device',
+        answered: false,
+        outbox: { reason: entry.reason, refused: entry.refused === true },
+      },
+      namesItem(entry.references, id),
+    ),
+  );
+
+/**
+ * The History with the device's words added, oldest first. A message that already reached the machine shows ONCE, with
+ * the ledger's tick: a device event is dropped when the History already holds its send id (the ledger's own record, or
+ * the transcript row it became).
+ */
+export const withDeviceEvents = (
+  history: readonly HistoryEvent[],
+  device: readonly HistoryEvent[],
+): readonly HistoryEvent[] => {
+  if (device.length === 0) return history;
+  const arrived = new Set<string>();
+  for (const event of history) {
+    if (event.kind !== 'owner') continue;
+    arrived.add(event.key);
+    if (event.reached?.send !== undefined) arrived.add(event.reached.send.sendId);
+  }
+  const fresh = device.filter(
+    event =>
+      event.kind === 'owner' &&
+      ![...arrived].some(
+        held => held === event.key || event.key.startsWith(`${held}:`) || held.startsWith(`${event.key}:`),
+      ),
+  );
+  if (fresh.length === 0) return history;
+  return [...history, ...fresh]
+    .map((event, order) => ({ event, order }))
+    .sort((a, b) => a.event.at - b.event.at || a.order - b.order)
+    .map(({ event }) => event);
+};

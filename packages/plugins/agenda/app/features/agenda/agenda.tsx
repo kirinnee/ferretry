@@ -659,6 +659,7 @@ export const useAgenda = ({
           ferret={ferret}
           history={history}
           item={cardItem}
+          outboxScope={scope}
           itemKey={inboxCardKey(connection.daemonId, scope.sessionId, cardItem.id)}
           key={cardItem.id}
           {...(lifecycle.versions === undefined ? {} : { versions: lifecycle.versions })}
