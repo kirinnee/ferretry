@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+oversize	daemon/adapters/tmux/tmux-runner.ts	1400	2026-12-17	hot (6 of the last 80 merges) and 1.2k lines; split by feature (stop, identify, launch) when next touched
