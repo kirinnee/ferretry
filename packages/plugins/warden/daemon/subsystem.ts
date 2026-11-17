@@ -28,6 +28,7 @@ import {
 import { WardenFleetFacts } from './adapters/fleet-facts.ts';
 import {
   exchangeSends,
+  HARNESS_OF,
   limitedFerrets,
   livenessTargets,
   readFleet,
@@ -44,8 +45,11 @@ import { conversationStuckInbox, conversationStuckInput } from './stuck-ports.ts
 import { agendaDialogNotices, ferretDialogs } from './dialogs.ts';
 import { dialogRulesInEffect, ferretClearPane } from './dialog-clear.ts';
 import { dialogLearnService, dialogRulesView } from './dialog-learn.ts';
+import { builtInDialogRules, type DialogRuleProvision } from './dialog-rules-source.ts';
 import type { DialogLearnAnswer, DialogLearnRequest, DialogRulesView } from '../contract/dialog-rules.ts';
 import {
+  AUTO_MOVE_FAILED_REF,
+  AutoMoveFailures,
   DIALOG_CLEAR_REF,
   DIALOG_PROPOSALS_REF,
   DIALOG_WATCH_REF,
@@ -72,7 +76,7 @@ import {
   type WardenReadScope,
   wardenTriggerEnabled,
 } from './lib/index.ts';
-import { parseWardenConfigPatch } from './lib/config.ts';
+import { parseStoredWardenConfig, parseWardenConfigPatch } from './lib/config.ts';
 import { JevTriageGuard } from './lib/jev.ts';
 import type {
   WardenAgendaView,
@@ -106,6 +110,11 @@ export interface WardenHost {
   readonly terminals?: () => TerminalsApi | undefined;
   /** Browsers, when it is on: it closes the browsers left under a ferret's pane. Off, that check does not run. */
   readonly browsers?: () => BrowsersApi | undefined;
+  /**
+   * The built-in dialog rules each harness plugin provides, read now (`warden.dialog-rules.<harness>`): a harness that
+   * provides none, or whose plugin is off, has none. Absent: no built-in rules at all.
+   */
+  readonly dialogRules?: () => readonly DialogRuleProvision[];
 }
 
 /** What the routes serve (today's `WardenSubsystem`, in the contract's words where they differ). */
@@ -305,7 +314,50 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
       return [];
     }
   };
+  // The ferrets the mover could not move, as ONE machine item (`auto-move-failures.ts`), beside the stuck-input list below.
+  // It lists a ferret where the failure is recorded, and drops it once the ferret is moved, stopped or gone.
+  let autoMoveService: WardenAutoMoveService | undefined;
+  const autoMoveFailures = new AutoMoveFailures(
+    new StateMachineMembers(kernel.state, AUTO_MOVE_FAILED_REF),
+    machineNotices,
+    {
+      // A stopped or gone ferret needs no move: `undefined`.
+      current: async sessionId => {
+        const ferret = await ferrets.get(sessionId as FerretId).catch(() => undefined);
+        if (ferret === undefined || ferret.state === 'stopped') return undefined;
+        return {
+          agent: ferret.runtime ?? ferret.harness,
+          name: ferret.name,
+          midTurn: ferret.state === 'working',
+        };
+      },
+      // The login the mover's own ranking would pick for it now (the first ready one), or none.
+      candidate: async sessionId => {
+        const ferret = await ferrets.get(sessionId as FerretId).catch(() => undefined);
+        const harness = ferret === undefined ? undefined : HARNESS_OF[ferret.harness];
+        if (ferret === undefined || harness === undefined || autoMoveService === undefined) return undefined;
+        const config = parseStoredWardenConfig(await configStore.read()).config;
+        const [candidates] = await autoMoveService.moveCandidates(
+          [
+            {
+              config: {
+                id: ferret.id,
+                mode: ferret.mode ?? 'interactive',
+                agent: ferret.runtime ?? ferret.harness,
+                harness,
+              },
+            },
+          ],
+          config,
+        );
+        return candidates?.candidates[0];
+      },
+    },
+    nowIso,
+  );
   const autoMove = new WardenAutoMoveService({
+    failed: async (sessionId, detail, quiet) => await autoMoveFailures.note(sessionId, detail, quiet),
+    settled: async () => await autoMoveFailures.reconcile(),
     facts: async () => await facts.facts(),
     // ONE yes or no from Accounts (an input card, a sign-in waiting on their phone, a plan card or a copied secret all
     // answer it), then the ferret's own prompt. A check that cannot be made is a reason not to move.
@@ -376,6 +428,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
     emit: async (sessionId, type, data) => kernel.log.info(type, { ferret: sessionId, ...scalars(data) }),
     journal: { record: (type, data) => kernel.log.info(type, scalars(data)) },
   });
+  autoMoveService = autoMove;
 
   const service = new WardenSweepService(
     {
@@ -472,8 +525,10 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
   // ── dialog watch: a ferret parked on a harness screen nothing pre-answered is told to the owner ONCE per episode ───
   // Not a flag and not a sweep step: a rule over the dialog Ferrets already recorded (`dialog-watch.ts`).
   // A screen a rule knows how to leave is left in the same look, before the owner is told of anything (`dialog-clear.ts`).
+  const builtInRules = builtInDialogRules(host.dialogRules ?? (() => []), (type, data) => kernel.log.info(type, data));
   const dialogClear = new WardenDialogClear({
-    rules: dialogRulesInEffect(kernel.config),
+    rules: dialogRulesInEffect(kernel.config, builtInRules),
+    nudgeOf: ruleId => builtInRules.nudgeOf(ruleId),
     ...ferretClearPane(ferrets),
     sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
     memory: new StateMachineMembers(kernel.state, DIALOG_CLEAR_REF),
@@ -545,7 +600,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
     },
     agenda: async scope => await service.agenda(scope),
     dialogs: {
-      rules: async () => await dialogRulesView(kernel.config, dialogProposals),
+      rules: async () => await dialogRulesView(kernel.config, dialogProposals, builtInRules),
       learn: async request => {
         const address = await ferrets.resolve(request.ferret);
         if (address.kind !== 'ferret')

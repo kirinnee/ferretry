@@ -19,6 +19,7 @@ import {
   HarnessConfigSchema,
 } from '../contract/index.ts';
 import { codexHarness } from './adapters/codex-harness.ts';
+import { CODEX_DIALOG_RULES } from './dialog-rules.ts';
 import { HostCodexFacts } from './adapters/facts.ts';
 import { HostPrograms } from './adapters/host-programs.ts';
 import { NpmCodexLatest } from './adapters/npm-latest.ts';
@@ -196,6 +197,8 @@ export default implementDaemon(manifest, {
       // answers `not-taken` for a Codex launch without asking, so this is the contract's answer, not MCP's gate.
       provides: { codex: { view, discovery, approvedProjectServers: codexProjectApprovals } },
       hooks: {
+        // The Warden's read of the screens this plugin draws (it has no nudge to add: a declined Codex screen says nothing).
+        'warden.dialog-rules.codex:dialog-rules': { rules: CODEX_DIALOG_RULES },
         // Runtimes' read of the `settings` components a profile names for Codex: this plugin's own items, live, no cache.
         'runtimes.components.settings.codex:components': codexSettingsSource(
           () => kernel.config.collection(CODEX_SETTINGS as ConfigCollectionDef<SettingsItem>),

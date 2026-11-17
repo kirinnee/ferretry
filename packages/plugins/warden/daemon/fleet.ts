@@ -15,7 +15,7 @@ import {
   withLivenessLedger,
 } from './lib/index.ts';
 
-const HARNESS_OF: Readonly<Record<string, 'claude' | 'codex'>> = { 'claude-code': 'claude', codex: 'codex' };
+export const HARNESS_OF: Readonly<Record<string, 'claude' | 'codex'>> = { 'claude-code': 'claude', codex: 'codex' };
 
 interface TurnMemory {
   /** The conversation's own turn id last seen, and the ordinal the sweep counts it as. */

@@ -29,6 +29,7 @@ describe('codex contract', () => {
       'start.decide',
       'runtimes.components.settings.codex',
       'runtimes.components.hooks.codex',
+      'warden.dialog-rules.codex',
     ]);
     expect(manifest.hooks.takes[0]?.key).toBe('codex');
   });

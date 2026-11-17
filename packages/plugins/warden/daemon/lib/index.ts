@@ -1,6 +1,7 @@
 export * from './action-tally.ts';
 export * from './agenda.ts';
 export * from './auto-move.ts';
+export * from './auto-move-failures.ts';
 export * from './auto-move-service.ts';
 export * from './backoff.ts';
 export * from './bless.ts';
@@ -55,8 +56,6 @@ export * from './types.ts';
 export * from './verdicts.ts';
 export * from './dialog-clear.ts';
 export * from './dialog-rules.ts';
-export * from './dialog-rules-claude.ts';
-export * from './dialog-rules-codex.ts';
 export * from './dialog-learn.ts';
 export * from './dialog-teach.ts';
 export * from './dialog-words.ts';

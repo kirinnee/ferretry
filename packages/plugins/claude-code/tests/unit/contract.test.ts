@@ -35,6 +35,7 @@ describe('claude-code contract', () => {
       'start.decide',
       'runtimes.components.settings.claude',
       'runtimes.components.hooks.claude',
+      'warden.dialog-rules.claude',
     ]);
   });
 

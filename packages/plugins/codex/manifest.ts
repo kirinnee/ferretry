@@ -24,6 +24,7 @@ import {
   ProfileCodexSettingsSource,
   RuntimesPort,
 } from '@ferretry/plugin-runtimes/contract';
+import { HARNESS_DIALOG_RULES_KEY, WardenDialogRulesCodex } from '@ferretry/plugin-warden/contract';
 
 /**
  * Codex (§2.3): a harness, the same way as Claude Code. It takes `harnesses:codex` from Ferrets and needs a `runners`
@@ -155,6 +156,8 @@ export default definePlugin({
       { hook: StartDecide },
       { hook: ProfileCodexSettingsSource, key: PROFILE_COMPONENTS_KEY },
       { hook: ProfileCodexHooksSource, key: PROFILE_COMPONENTS_KEY },
+      // The Warden clears the screens this plugin draws by rules that live here (`daemon/dialog-rules.ts`).
+      { hook: WardenDialogRulesCodex, key: HARNESS_DIALOG_RULES_KEY },
     ],
   },
 

@@ -10,13 +10,8 @@ import {
 } from '../contract/dialog-rules.ts';
 import { WardenConfigMoved, WardenConfigRefused } from './adapters/index.ts';
 import { ferretClearPane } from './dialog-clear.ts';
-import {
-  CLAUDE_DIALOG_RULES,
-  CODEX_DIALOG_RULES,
-  type DialogLearnPorts,
-  type MachineMembersStore,
-  WardenDialogLearn,
-} from './lib/index.ts';
+import type { BuiltInDialogRules } from './dialog-rules-source.ts';
+import { type DialogLearnPorts, type MachineMembersStore, WardenDialogLearn } from './lib/index.ts';
 
 /** The state file name a ferret's frame is kept under: its id, as one plain name. */
 const frameName = (ferret: string): string => ferret.replaceAll(/[^\w-]/gu, '_');
@@ -62,13 +57,14 @@ const viewOf = (rules: readonly DialogRule[]) =>
 export async function dialogRulesView(
   config: Pick<ConfigPort, 'file'>,
   proposals: MachineMembersStore,
+  builtIn: Pick<BuiltInDialogRules, 'rules'>,
 ): Promise<DialogRulesView> {
   const waiting = Object.values(await proposals.read()).flatMap(entry => {
     const parsed = DialogProposalSchema.safeParse(JSON.parse(entry[0] ?? 'null'));
     return parsed.success ? [parsed.data] : [];
   });
   return {
-    builtIn: viewOf([...CLAUDE_DIALOG_RULES, ...CODEX_DIALOG_RULES]),
+    builtIn: viewOf(builtIn.rules()),
     taught: viewOf(config.file(WARDEN_DIALOG_RULES)?.rules ?? []),
     pending: waiting,
   };

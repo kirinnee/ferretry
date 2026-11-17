@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { CLAUDE_DIALOG_RULES, CODEX_DIALOG_RULES } from '../support/dialog-rules.ts';
 import type { FormKey } from '@ferretry/core-ferrets/contract';
 import {
   DialogLearnAnswerSchema,
@@ -10,9 +11,7 @@ import {
   WARDEN_DIALOG_RULES,
 } from '../../contract/dialog-rules.ts';
 import {
-  CLAUDE_DIALOG_RULES,
   type ClearFrame,
-  CODEX_DIALOG_RULES,
   DialogLearnRefused,
   maskShapes,
   proposeRule,

@@ -27,7 +27,6 @@
  */
 import type { FormKey } from '@ferretry/core-ferrets/contract';
 import type { DialogRule } from '../../contract/dialog-rules.ts';
-import { DIALOG_NUDGES } from './dialog-rules-claude.ts';
 import { cursorRow, frameShows, planKeys, ruleFor } from './dialog-rules.ts';
 import type { WatchedDialog } from './dialog-watch.ts';
 import type { ClearableDialogWords } from './dialog-words.ts';
@@ -59,8 +58,10 @@ const blocksAs = (rule: DialogRule, dialog: ClearableDialogWords, frame: ClearFr
   frame.blocking === ('press' in rule.action && dialog.kind === 'permission' ? 'permission' : 'dialog');
 
 export interface DialogClearPorts {
-  /** The rules in effect right now: the built-in tables and the ones the owner taught. */
+  /** The rules in effect right now: the built-in ones the harness plugins provide and the ones the owner taught. */
   rules(): Promise<readonly DialogRule[]>;
+  /** What the ferret is told after `ruleId` declined its prompt (the harness plugin's fixed words), or `undefined`: nothing. */
+  nudgeOf?(ruleId: string): string | undefined;
   /** The words of the ferret's dialog, read for this press only (pane text: never logged, stored or told). */
   words(sessionId: string): Promise<ClearableDialogWords | undefined>;
   /** The ferret's live frame, or `undefined` when it cannot be read (gone, held, no pane). */
@@ -170,7 +171,7 @@ export class WardenDialogClear {
         return 'failed';
     }
     if (!(await this.ports.key(sessionId, plan.confirm))) return 'failed';
-    const nudge = DIALOG_NUDGES[rule.id];
+    const nudge = this.ports.nudgeOf?.(rule.id);
     if (nudge !== undefined) this.ports.nudge(sessionId, nudge);
     this.ports.record('fleet.warden_dialog_autocleared', {
       sessionId,

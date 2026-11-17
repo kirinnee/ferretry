@@ -4,10 +4,13 @@
  * Read off real panes of Codex 0.145.0, 0.156.1, 0.163.0 and 0.164.0 (`packages/plugins/codex/tests/fixtures/dialogs`).
  * No rule picks a row that grants: each `choose` is the row that DECLINES, and the planner refuses a grant anyway.
  *
+ * The Warden reads this table through the `warden.dialog-rules.codex` hook (`daemon/index.ts`), validates every rule, and
+ * drops one it refuses; it owns the engine that presses the keys, this plugin owns the words of the screens it draws.
+ *
  * Not here, on purpose (they stay a notice): the sign-in screen (no row dismisses it), the folder-access screens (their
  * only ways out trust the folder or leave it), and the usage-limit screen (the auto-move's).
  */
-import type { DialogRule } from '../../contract/dialog-rules.ts';
+import type { DialogRule } from '@ferretry/plugin-warden/contract';
 
 export const CODEX_DIALOG_RULES: readonly DialogRule[] = [
   {
