@@ -233,3 +233,20 @@ describe('a single-quoted $word is a value: a shell expands nothing in single qu
     expect(shown(word)).toBe(word);
   });
 });
+
+describe('KNOWN GAP (ports-pending runtimes): a cluster with a value-taking letter is still SHOWN', () => {
+  // These pin what the cutter does TODAY. When the GAP closes, they flip: move each word to the hidden cases above.
+  test.each(['-Np', '-Bp', '-Cp', '-Ep', '-Vp', '-dp', '-lp'])(
+    'should still show the password of %s<value> until the GAP is closed',
+    flags => {
+      // Arrange
+      const word = `${flags}${PASSWORD}`;
+
+      // Act
+      const actual = shownWord(word, undefined);
+
+      // Assert
+      expect(actual).toEqual({ text: word, hidden: false });
+    },
+  );
+});
