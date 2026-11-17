@@ -122,6 +122,23 @@ describe('HistoryPage', () => {
     }
   });
 
+  it('names the harness each unreadable transcript is in, when the daemon says', async () => {
+    const view = await mount(
+      <HistoryPage
+        daemon={DAEMON}
+        readHistory={async () => ({ entries: [entry], skipped: 3, skippedBy: { 'claude-code': 2, codex: 1 } })}
+        readEntry={async () => detail}
+      />,
+    );
+    try {
+      await settle();
+      const where = must(view.container.querySelector('[data-skipped-by]'), 'per-harness skips');
+      expect(where.textContent).toBe('2 Claude Code, 1 Codex');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('reports an unreadable history and an unreadable selected transcript plainly', async () => {
     const failedHistory = await mount(
       <HistoryPage

@@ -58,10 +58,15 @@ export const LinkQuerySchema = z.strictObject({
 });
 export type LinkQuery = z.infer<typeof LinkQuerySchema>;
 
+/** How many transcripts one harness's history could not be read into a conversation (keyed by the harness plugin's key). */
+export const SkippedByHarnessSchema = z.record(HarnessIdSchema, z.number().int().positive());
+
 export const LinkListingSchema = z.strictObject({
   conversations: z.array(LinkableConversationSchema),
   matched: z.number().int().nonnegative(),
   skipped: z.number().int().nonnegative(),
+  /** `skipped`, split by harness; absent when nothing was skipped. The sum is `skipped`. */
+  skippedBy: SkippedByHarnessSchema.optional(),
   computerListed: z.literal(false).optional(),
   /** The index is still being read (first build after a start, or catching up): this answer lists what is indexed so far. */
   indexing: z.literal(true).optional(),
@@ -144,6 +149,8 @@ export const ForeignHistoryListSchema = z.strictObject({
   entries: z.array(ForeignHistoryEntrySchema),
   /** The transcripts the listing could not read: said aloud, never swapped for an empty conversation. */
   skipped: z.number().int().nonnegative(),
+  /** `skipped`, split by harness; absent when nothing was skipped. The sum is `skipped`. */
+  skippedBy: SkippedByHarnessSchema.optional(),
 });
 export const ForeignHistorySchema = z.strictObject({
   entry: ForeignHistoryEntrySchema,
