@@ -7,6 +7,7 @@
 import { InstantSchema, ITEM_NAME_PATTERN, NonEmptyStringSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { BrowserFirewallFailureSchema, BrowserPortsSettingSchema } from './wire/shared.ts';
 
 /**
  * The name of an item in a collection: ASCII letters and digits in words joined by single dashes. It is the one rule
@@ -80,7 +81,11 @@ export const DisabledConfigSchema = z.strictObject({
 });
 export type DisabledConfig = z.infer<typeof DisabledConfigSchema>;
 
-/** `config/runtimes.yaml`: the one runtime a start uses when nobody names one, and the auto-resume switch. */
+/**
+ * `config/runtimes.yaml`: the one runtime a start uses when nobody names one, the auto-resume switch and the machine's
+ * two loopback-port settings (`browserPorts`, `browserFirewallFailure`) that Browsers and Logins read through
+ * `machineBrowserPorts()`.
+ */
 export const RuntimesFileSchema = z.strictObject({
   defaultRuntime: RuntimeNameSchema.optional(),
   /**
@@ -88,6 +93,16 @@ export const RuntimesFileSchema = z.strictObject({
    * ferrets that were running when the host went down. Left out = on, as today. Not a held loosening, as today.
    */
   autoResume: z.boolean().optional(),
+  /**
+   * "Browser ports" (today's machine.yaml `browserPorts`): `random` (left out), `per-user` or three explicit ports. Read when
+   * the browser or the login window STARTS. Not a loosening: it changes which loopback ports are used, not what an agent may do.
+   */
+  browserPorts: BrowserPortsSettingSchema.optional(),
+  /**
+   * "When the loopback firewall check fails" (today's machine.yaml `browserFirewallFailure`): `warn` (left out) or `refuse`.
+   * Not a loosening: it can only make a start stricter.
+   */
+  browserFirewallFailure: BrowserFirewallFailureSchema.optional(),
 });
 export type RuntimesFile = z.infer<typeof RuntimesFileSchema>;
 
