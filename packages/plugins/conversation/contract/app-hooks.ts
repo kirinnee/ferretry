@@ -31,6 +31,42 @@ export interface ConversationAddToChat {
   readonly add: (ferret: string, reference: string) => AddToChatResult;
 }
 
+/**
+ * One message of the owner's that is still on THIS device, not yet on the machine. Only what a surface needs to say
+ * "Saved on this device" (or "Not sent") beside the owner's words: no files, no draft-clearing data.
+ */
+export interface DeviceOutboxEntry {
+  /** The send's id, the same one the daemon's queue and ledger use once it arrives. */
+  readonly id: string;
+  readonly ferretId: string;
+  readonly message: string;
+  /** The Agenda items the message is about (`!A3` and the like), apart from the words. */
+  readonly references: readonly string[];
+  /** When the owner sent it (an ISO instant). */
+  readonly createdAt: string;
+  /** Why it still waits, in plain words; absent before the first attempt. */
+  readonly reason?: string;
+  /** The machine answered "no" (not "I can't be reached"): the owner must edit or cancel it in the chat. */
+  readonly refused?: true;
+}
+
+/**
+ * Add to chat's sibling: `conversation.device-outbox`, this device's unsent owner messages for one ferret, READ ONLY.
+ *
+ * Read it with `useAppHook(daemon, CONVERSATION_DEVICE_OUTBOX_HOOK, 'conversation')`. Nothing can be edited, cancelled
+ * or sent through it, and only the fields of {@link DeviceOutboxEntry} cross: the owner's own words, on the device that
+ * already holds them. It is a named hook and not the above-composer slot because that slot never carries the outbox
+ * (`contract/slots.ts`: no outbox or device-only row).
+ */
+export const CONVERSATION_DEVICE_OUTBOX_HOOK = 'conversation.device-outbox' as const;
+
+export interface ConversationDeviceOutbox {
+  /** Calls `listener` when any entry changes. Returns how to stop. */
+  readonly subscribe: (listener: () => void) => () => void;
+  /** This device's messages to `ferret` that have not reached the machine, oldest first; the same array until it changes. */
+  readonly entries: (ferret: string) => readonly DeviceOutboxEntry[];
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
 /**
@@ -95,4 +131,6 @@ export const CONVERSATION_APP_HOOKS = {
 export const CONVERSATION_PROVIDED_APP_HOOKS = {
   [CONVERSATION_ADD_TO_CHAT_HOOK]: (value: unknown): value is ConversationAddToChat =>
     isRecord(value) && typeof value.add === 'function',
+  [CONVERSATION_DEVICE_OUTBOX_HOOK]: (value: unknown): value is ConversationDeviceOutbox =>
+    isRecord(value) && typeof value.subscribe === 'function' && typeof value.entries === 'function',
 } as const;
