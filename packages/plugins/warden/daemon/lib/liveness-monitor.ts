@@ -85,6 +85,8 @@ export class WardenLivenessMonitor {
   private readonly missedLooks = new Map<string, number>();
   /** When this daemon first looked at each working ferret, this run. */
   private readonly firstLookAt = new Map<string, number>();
+  /** The launches announced since the ferret's last look: its clocks start again from that instant. */
+  private readonly launchedAt = new Map<string, number>();
   private armedAtMs: number | undefined;
   private lastTickMs: number | undefined;
   /** When the last tick that saw anything finished — however late: the monitor is alive while it sees. */
@@ -98,6 +100,19 @@ export class WardenLivenessMonitor {
   /** Start the grace period: until a tick has had the chance to run, every ferret counts as watched. */
   arm(): void {
     this.armedAtMs = this.ports.nowMs();
+  }
+
+  /**
+   * A ferret was launched — started, resumed, revived, restarted or relaunched for a model switch. Every clock of
+   * its starts again at THIS instant: silence from before the launch (a pane that was stopped for minutes, a track
+   * a quick relaunch left behind) is never the new run's. The next look rebuilds its track from here.
+   */
+  launched(sessionId: string): void {
+    const nowMs = this.ports.nowMs();
+    this.tracks.delete(sessionId);
+    this.missedLooks.delete(sessionId);
+    this.firstLookAt.set(sessionId, nowMs);
+    this.launchedAt.set(sessionId, nowMs);
   }
 
   disarm(): void {
@@ -115,18 +130,28 @@ export class WardenLivenessMonitor {
     this.lastTickMs = nowMs;
     const targets = (await this.ports.targets()).filter(target => ACTIVE_MONITORED.includes(target.status));
     const present = new Set(targets.map(target => target.id));
-    for (const id of new Set([...this.tracks.keys(), ...this.missedLooks.keys(), ...this.firstLookAt.keys()])) {
+    for (const id of new Set([
+      ...this.tracks.keys(),
+      ...this.missedLooks.keys(),
+      ...this.firstLookAt.keys(),
+      ...this.launchedAt.keys(),
+    ])) {
       if (present.has(id)) continue;
       this.tracks.delete(id);
       this.missedLooks.delete(id);
       this.firstLookAt.delete(id);
+      this.launchedAt.delete(id);
     }
     const events: ReflexEvent[] = [];
     const blind: string[] = [];
     for (const target of targets) {
       if (!this.firstLookAt.has(target.id)) this.firstLookAt.set(target.id, nowMs);
       const sample = await this.ports.sample(target).catch((): LivenessSample => ({}));
-      const folded = foldLivenessSample(this.tracks.get(target.id), sample, target.turn, nowMs);
+      const launchMs = this.launchedAt.get(target.id);
+      this.launchedAt.delete(target.id);
+      const looked = foldLivenessSample(this.tracks.get(target.id), sample, target.turn, nowMs);
+      // A launch announced since the last look: the clock began then, not at this look.
+      const folded = launchMs === undefined ? looked : { ...looked, anchorAt: new Date(launchMs).toISOString() };
       const anchored = late ? { ...folded, anchorAt: new Date(nowMs).toISOString(), frozenTicks: 0 } : folded;
       const step = reflexStep(anchored, nowMs, reflexSettingsFor(target, this.tickSeconds), {
         nudgeAllowed: options.nudgeAllowed,
