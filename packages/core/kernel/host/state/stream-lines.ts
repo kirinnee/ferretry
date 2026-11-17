@@ -2,9 +2,9 @@ import { err, ok, type Result } from '@ferretry/std';
 import type { StateDamage, StateFileDef } from '../../contract/index.ts';
 import { damageOf, describeFault, openDocument, shapeOf } from './format.ts';
 import type { HostFs } from './host-fs.ts';
-import { JsonlScanner } from './jsonl-scan.ts';
+import { JsonlScanner, MAX_JSONL_RECORD_BYTES } from './jsonl-scan.ts';
 
-/** A journal is read this much at a time; one record can span several pieces. */
+/** A journal is read this much at a time; a piece grows to hold one whole record (up to the record cap). */
 export const JSONL_CHUNK_BYTES = 256 * 1024;
 
 /** Thrown into the file read to end it when the reader stopped asking; never escapes. */
@@ -51,17 +51,22 @@ export async function* streamJsonlLines<Shape>(
   });
 
   const reading = fs
-    .streamBytes(path, JSONL_CHUNK_BYTES, async chunk => {
-      if (stopped) throw STOPPED;
-      scanner.push(chunk);
-      if (pending.length === 0) return;
-      // Hold the file here until the reader has taken this piece's records.
-      wake?.();
-      await new Promise<void>(release => {
-        resume = release;
-      });
-      if (stopped) throw STOPPED;
-    })
+    .streamBytes(
+      path,
+      JSONL_CHUNK_BYTES,
+      async chunk => {
+        if (stopped) throw STOPPED;
+        scanner.push(chunk);
+        if (pending.length === 0) return;
+        // Hold the file here until the reader has taken this piece's records.
+        wake?.();
+        await new Promise<void>(release => {
+          resume = release;
+        });
+        if (stopped) throw STOPPED;
+      },
+      MAX_JSONL_RECORD_BYTES,
+    )
     .then(opened => {
       found = opened;
       if (opened) scanner.end();

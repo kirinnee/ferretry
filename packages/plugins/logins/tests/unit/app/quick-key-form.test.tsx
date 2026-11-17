@@ -399,6 +399,126 @@ describe('one click files one key', () => {
   });
 });
 
+// A preset that drives both CLIs and asks for nothing but one key: the key is read by both, each CLI also has a plain
+// variable of its own that the other never reads.
+const BOTH: ProviderPresetView = {
+  ...ZAI,
+  id: 'both-cli',
+  label: 'Both CLI',
+  variables: [
+    {
+      name: 'ANTHROPIC_BASE_URL',
+      kind: 'plain',
+      value: 'https://both.test/anthropic',
+      required: true,
+      allowEmpty: false,
+      harnesses: ['claude-code'],
+    },
+    {
+      name: 'OPENAI_BASE_URL',
+      kind: 'plain',
+      value: 'https://both.test/v1',
+      required: true,
+      allowEmpty: false,
+      harnesses: ['codex'],
+    },
+    {
+      name: 'BOTH_API_KEY',
+      kind: 'secret',
+      secret: 'BOTH_KEY',
+      required: true,
+      allowEmpty: false,
+      harnesses: ['claude-code', 'codex'],
+    },
+  ],
+  halves: [
+    { harness: 'claude-code', offered: { available: true }, models: [] },
+    { harness: 'codex', offered: { available: true }, models: [] },
+  ],
+};
+
+const mountBoth = async (calls: Call[], added: string[]) => {
+  const client = scripted(
+    {
+      'GET /v1/logins/presets': { presets: [BOTH] },
+      [LIST]: loginList(),
+      [GRANTS]: OPEN,
+      [HELD]: NONE_HELD,
+      [FILE]: { name: 'BOTH_KEY' },
+      [STAGE]: staged,
+      [APPLY]: { outcome: 'applied' },
+    },
+    calls,
+  );
+  return mount(
+    <QuickKeyForm
+      client={client}
+      preset={BOTH}
+      variable={must(quickKeyVariable(BOTH), 'the key variable')}
+      onAdded={id => added.push(id)}
+      onCancel={() => undefined}
+      onMore={() => undefined}
+    />,
+  );
+};
+
+describe('a preset that drives several CLIs', () => {
+  it('asks which CLI, and with the 2nd one makes a Codex login that carries only Codex’s variables', async () => {
+    const calls: Call[] = [];
+    const added: string[] = [];
+    const view = await mountBoth(calls, added);
+    const c = view.container;
+    const choice = must(c.querySelector<HTMLSelectElement>('[data-quick-key-harness]'), 'the CLI choice');
+    expect(Array.from(choice.options).map(option => option.value)).toEqual(['claude-code', 'codex']);
+    expect(choice.value).toBe('claude-code');
+    await interact(() => {
+      choice.value = 'codex';
+      choice.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await type(view, KEY);
+    await press(c.querySelector('[data-change-submit]'), 'Add');
+    await until(() => added.length > 0, 'the login to be added');
+
+    expect(calls.find(call => call.route === STAGE)?.body).toEqual({
+      kind: 'login.add',
+      id: 'codex-both-cli',
+      harness: 'codex',
+      halves: ['codex'],
+      store: 'environment',
+      preset: 'both-cli',
+      env: { OPENAI_BASE_URL: 'https://both.test/v1', BOTH_API_KEY: `\${secret:BOTH_KEY}` },
+    });
+    await view.unmount();
+  });
+
+  it('makes a Claude Code login with only Claude Code’s variables when the first CLI is left chosen', async () => {
+    const calls: Call[] = [];
+    const added: string[] = [];
+    const view = await mountBoth(calls, added);
+    await type(view, KEY);
+    await press(view.container.querySelector('[data-change-submit]'), 'Add');
+    await until(() => added.length > 0, 'the login to be added');
+
+    expect(calls.find(call => call.route === STAGE)?.body).toEqual({
+      kind: 'login.add',
+      id: 'claude-both-cli',
+      harness: 'claude-code',
+      halves: ['claude-code'],
+      store: 'environment',
+      preset: 'both-cli',
+      env: { ANTHROPIC_BASE_URL: 'https://both.test/anthropic', BOTH_API_KEY: `\${secret:BOTH_KEY}` },
+    });
+    await view.unmount();
+  });
+
+  it('offers no choice for a preset that drives one CLI, and sends no halves', async () => {
+    const calls: Call[] = [];
+    const view = await mountForm(routes(NONE_HELD, calls));
+    expect(view.container.querySelector('[data-quick-key-harness]')).toBeNull();
+    await view.unmount();
+  });
+});
+
 describe('the tile', () => {
   it('opens the key-only form, and More fields… opens today’s full form with the key as a reference', async () => {
     const calls: Call[] = [];

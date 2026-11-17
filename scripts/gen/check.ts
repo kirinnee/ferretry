@@ -10,7 +10,7 @@
  *   --strict                                       `guarantees` also checks rows owned by pending packages
  *   --results <junit.xml|folder>                   `guarantees` reads whether a test passed (repeatable); --existence-only skips that
  *   --tier unit|int                                `guarantees` proves only the rows with a test in that tier (CI: one job per tier)
- *   --base <ref>                                   the ref `ports-pending.json` may not grow from
+ *   --base <ref>                                   the ref the `ports-pending/` ledger may not grow from
  *   --list                                         prints the checks and exits
  *
  * The `fy` shell calls this script for `fy check`; it exits 1 on any finding.

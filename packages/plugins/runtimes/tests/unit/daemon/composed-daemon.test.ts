@@ -992,35 +992,20 @@ describe('the homes the composed daemon provides', () => {
     expect((await port.tools()).length).toBeGreaterThan(0);
   });
 
-  it('machineBrowserPorts() says it cannot say while the machine view holds only the schema default (no file of Runtimes carries the setting)', async () => {
+  it('machineBrowserPorts() answers random and warn for a machine whose runtimes.yaml names neither', async () => {
     const { host } = await compose();
 
-    // The machine read still shows the default; the port refuses to pass that default off as a setting somebody made.
-    const machine = (await host.request('GET', '/v1/runtimes/machine')).json<MachineBrowserPorts>();
-    expect(machine.browserPorts).toBe('random');
-
-    await expect(host.provided(RuntimesPort).machineBrowserPorts()).rejects.toThrow(
-      'Runtimes holds no browserPorts setting yet, so it cannot say which ports the agent browser binds',
-    );
+    expect(await host.provided(RuntimesPort).machineBrowserPorts()).toStrictEqual({
+      browserPorts: 'random',
+      browserFirewallFailure: 'warn',
+    });
   });
 
-  it('machineBrowserPorts() carries the two settings the machine view holds and nothing else of it', async () => {
+  it('machineBrowserPorts() answers the two settings runtimes.yaml holds and nothing else of the machine', async () => {
     const { host } = await compose({
-      assemble: ctx => {
-        const base = hostAssembly(ctx);
-        return {
-          ...base,
-          catalog: {
-            ...base.catalog,
-            machine: async () =>
-              ({
-                browserPorts: { cdp: 9300, relay: 9301, vnc: 5901 },
-                browserFirewallFailure: 'refuse',
-                agentPermissions: 'skip',
-                tools: [],
-              }) as never,
-          },
-        };
+      config: {
+        ...CONFIG,
+        'runtimes.yaml': { browserPorts: { cdp: 9300, relay: 9301, vnc: 5901 }, browserFirewallFailure: 'refuse' },
       },
     });
 
@@ -1028,6 +1013,30 @@ describe('the homes the composed daemon provides', () => {
       browserPorts: { cdp: 9300, relay: 9301, vnc: 5901 },
       browserFirewallFailure: 'refuse',
     });
+  });
+
+  it('machineBrowserPorts() answers what a machine.settings change saved, and a change back to the defaults removes the keys', async () => {
+    const { host } = await compose();
+    const port = host.provided(RuntimesPort);
+
+    const applied = await stageAndApply(host, {
+      change: MACHINE_SETTINGS({ browserPorts: 'per-user', browserFirewallFailure: 'refuse' }),
+    });
+
+    expect(applied.status).toBe(200);
+    expect(applied.json<{ outcome: string }>().outcome).toBe('applied');
+    expect(await port.machineBrowserPorts()).toStrictEqual({
+      browserPorts: 'per-user',
+      browserFirewallFailure: 'refuse',
+    });
+    const machine = (await host.request('GET', '/v1/runtimes/machine')).json<MachineBrowserPorts>();
+    expect(machine).toMatchObject({ browserPorts: 'per-user', browserFirewallFailure: 'refuse' });
+
+    const back = await stageAndApply(host, {
+      change: MACHINE_SETTINGS({ browserPorts: 'random', browserFirewallFailure: 'warn' }),
+    });
+    expect(back.json<{ outcome: string }>().outcome).toBe('applied');
+    expect(await port.machineBrowserPorts()).toStrictEqual({ browserPorts: 'random', browserFirewallFailure: 'warn' });
   });
 
   it('S1 the provided port lists and reads the fleet’s installed skills through assetSkills()', async () => {

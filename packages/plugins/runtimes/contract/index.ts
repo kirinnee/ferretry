@@ -113,8 +113,9 @@ export interface RuntimesApi extends RuntimeHomesApi, RuntimeLayersApi {
    * account's firewall check failed (`browserFirewallFailure`). Browsers reads them for the loopback firewall doctor and
    * Logins reads `shared` from them. Only these two settings, never the rest of the machine view.
    *
-   * REJECTS while no file of Runtimes holds `browserPorts` (the value is only the schema default `random`; the setting is
-   * not carried yet): Runtimes cannot say, and a reader must treat that as unknown and fail closed, never as `random`.
+   * Both are keys of `runtimes.yaml`, `random` and `warn` when left out (or the file is absent). REJECTS while that file cannot
+   * be read as it stands (unreadable, a link, too large, broken): Runtimes cannot say, and a reader must treat that as
+   * unknown and fail closed, never as `random`.
    */
   machineBrowserPorts(): Promise<MachineBrowserPorts>;
   /**

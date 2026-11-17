@@ -23,7 +23,7 @@
  * hand in its sorted place passes and generation stays optional.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, sep } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import {
   type FolderEntry,
   type FolderRegistrySpec,
@@ -414,6 +414,25 @@ function glossary(model: Model): string {
     ),
     '',
   ].join('\n');
+}
+
+/**
+ * Every manifest instruction whose `text` file is not on disk, one sentence each naming the plugin, the id and the path.
+ * `instructionTexts` would otherwise write an import of a file that is not there: the generated module then breaks at
+ * its first import (a kernel bundle that never builds), far from the manifest that named the path. A missing file fails
+ * generation and `--check` (`registries-fresh`) at the source instead.
+ */
+export function missingInstructionTexts(model: Model): readonly string[] {
+  return model.loaded.flatMap(s =>
+    (s.manifest.instructions ?? []).flatMap(entry => {
+      const file = join(model.ws.byId(s.id)?.dir ?? '', entry.text);
+      return existsSync(file)
+        ? []
+        : [
+            `plugin "${s.id}" declares instruction "${entry.id}" with text "${entry.text}", but ${relative(model.ws.root, file)} does not exist`,
+          ];
+    }),
+  );
 }
 
 /**
@@ -931,6 +950,10 @@ async function main(args: readonly string[]): Promise<number> {
   }
   const model = await buildModel(root, false);
   for (const failure of model.failures) console.error(`⚠️  ${failure}`);
+  const missing = missingInstructionTexts(model);
+  for (const sentence of missing) console.error(`❌ missing-instruction: ${sentence}`);
+  // Nothing is written from a model whose instruction files are missing: the generated imports would not resolve.
+  if (missing.length > 0) return 1;
   const files = only === undefined ? generateGlobal(model) : generatePackage(model, only);
   if (args.includes('--check')) {
     const stale = staleFiles(model.ws.root, files, false);

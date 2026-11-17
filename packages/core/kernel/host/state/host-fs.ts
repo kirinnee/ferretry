@@ -49,8 +49,19 @@ export interface HostFs {
    * Hands a regular file to `onChunk` in pieces of at most `chunkBytes`, in order, holding only one piece: `false`
    * when the file does not exist. A piece is reused after `onChunk` returns, so it must be copied to be kept. A
    * link is refused, never followed; a fault, or a throw from `onChunk`, ends the read and rejects.
+   *
+   * A piece ends on a newline: a line is never handed over in two parts, so a writer that rewrites the end of the file
+   * between two reads (an append cuts a crash's torn last line off first) can never be glued onto what was already
+   * read. A piece grows past `chunkBytes`, up to `maxLineBytes`, to hold one whole line. Only a line longer than
+   * that, and the file's last line when it has no newline (handed over once the end of the file is confirmed), arrive
+   * unterminated. `maxLineBytes` defaults to `chunkBytes`.
    */
-  streamBytes(path: string, chunkBytes: number, onChunk: (chunk: Uint8Array) => void | Promise<void>): Promise<boolean>;
+  streamBytes(
+    path: string,
+    chunkBytes: number,
+    onChunk: (chunk: Uint8Array) => void | Promise<void>,
+    maxLineBytes?: number,
+  ): Promise<boolean>;
   /** `lstat`: `undefined` when the path does not exist. */
   info(path: string): Promise<HostFileInfo | undefined>;
   /** The entries of a directory; `[]` when it does not exist. */
@@ -134,7 +145,7 @@ export function createNodeHostFs(options: NodeHostFsOptions = {}): HostFs {
         await handle.close();
       }
     },
-    async streamBytes(path, chunkBytes, onChunk) {
+    async streamBytes(path, chunkBytes, onChunk, maxLineBytes = chunkBytes) {
       let handle: FileHandle;
       try {
         handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -144,11 +155,32 @@ export function createNodeHostFs(options: NodeHostFsOptions = {}): HostFs {
       }
       try {
         if (!(await handle.stat()).isFile()) throw new Error('not a regular file');
-        const buffer = new Uint8Array(chunkBytes);
+        // Positional reads: the next read begins at the line in progress, not where the last one stopped, so a line
+        // is always read whole from its first byte and a rewritten tail is read as it now is.
+        let buffer = new Uint8Array(chunkBytes);
+        let position = 0;
         for (;;) {
-          const { bytesRead } = await handle.read(buffer, 0, chunkBytes, null);
+          const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, position);
           if (bytesRead === 0) return true;
-          await onChunk(buffer.subarray(0, bytesRead));
+          const lineEnd = buffer.subarray(0, bytesRead).lastIndexOf(0x0a);
+          if (lineEnd >= 0) {
+            await onChunk(buffer.subarray(0, lineEnd + 1));
+            position += lineEnd + 1;
+          } else if (bytesRead === buffer.byteLength && buffer.byteLength <= maxLineBytes) {
+            // One line fills the buffer and may be longer: read it again with room for more of it.
+            buffer = new Uint8Array(Math.min(buffer.byteLength * 2, maxLineBytes + 1));
+          } else if (bytesRead === buffer.byteLength) {
+            // A line past the limit: the reader counts it as too long, whatever its tail does.
+            await onChunk(buffer.subarray(0, bytesRead));
+            position += bytesRead;
+          } else {
+            // No newline and the file ended in this read: the last line, torn or not. It is handed over only once the
+            // end is confirmed; if the file grew meanwhile the line is read again from its start.
+            const end = await handle.read(new Uint8Array(1), 0, 1, position + bytesRead);
+            if (end.bytesRead > 0) continue;
+            await onChunk(buffer.subarray(0, bytesRead));
+            return true;
+          }
         }
       } finally {
         await handle.close();

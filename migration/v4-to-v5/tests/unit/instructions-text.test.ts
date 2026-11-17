@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parse } from 'yaml';
+import { acceptedConfigStep } from '../../src/steps/accepted-config.ts';
 import { settingsStep } from '../../src/steps/settings.ts';
 import { fixture } from './ferret-fixture.ts';
 
@@ -70,8 +71,11 @@ describe('the written instructions text is the v4 text, exactly', () => {
   for (const [name, document] of cases)
     test(name, async () => {
       await plant(document);
-      const report = await settingsStep.run(f.ctx());
+      const ctx = f.ctx();
+      const report = await settingsStep.run(ctx);
       expect(report.status).toBe('converted');
+      // The accepted step runs last in a real conversion: the file is in effect (v4 never held it), not a held add.
+      expect((await acceptedConfigStep.run(ctx)).status).toBe('converted');
       const path = join(f.to, 'config/instructions/main.yaml');
       expect(InstructionsFileSchema.safeParse(parse(await readFile(path, 'utf8'))).success).toBe(true);
       expect((await stat(path)).mode & 0o777).toBe(0o600);

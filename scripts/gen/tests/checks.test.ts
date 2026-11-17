@@ -3,6 +3,7 @@
  * a clean case that stays quiet). Fixture workspaces live under `scripts/gen/tests/.tmp/`.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { contextFor, parseArgs } from '../lib/check.ts';
 import { strictFindings } from '../../ci/strict-guarantees.ts';
@@ -94,14 +95,14 @@ describe('manifest-match', () => {
     const found = messages(await run(manifestMatch, f));
     expect(found).toContain('implements undeclared routes "GET /v1/extra"');
     expect(found).toContain('misses routes "GET /v1/alpha"');
-    expect(found).toContain('skeleton but beta is not in ports-pending.json');
+    expect(found).toContain('skeleton but beta is not pending');
   });
   test('a skeleton half that pendingHalves names passes though its package is not in pending (gate, vault)', async () => {
     const f = ws([withRoute('alpha', { daemon: implementedDaemon(['GET /v1/alpha']) }), withRoute('beta')], {
       pending: ['alpha'],
       pendingHalves: { beta: ['daemon', 'app', 'cli'] },
     });
-    expect(messages(await run(manifestMatch, f))).not.toContain('beta is not in ports-pending.json');
+    expect(messages(await run(manifestMatch, f))).not.toContain('beta is not pending');
   });
 });
 
@@ -124,11 +125,10 @@ describe('ports-pending', () => {
     );
     f.write('base.json', JSON.stringify({ format: 1, pending: ['alpha', 'ghost'] }));
     const found = messages(await run(portsPending, f, { base: `file:${join(f.root, 'base.json')}` }));
-    expect(found).toContain('beta was added; the list may only shrink');
+    expect(found).toContain('beta gained a gap line; the list may only shrink');
     expect(found).toContain('ghost is not a subsystem');
-    expect(found).toContain('alpha has no skeleton half left');
   });
-  test('a fully ported plugin stays listed only while it states what is still open', async () => {
+  test('a fully ported plugin is pending only while it holds a gap file', async () => {
     const ported = `import { implementApp, implementCli } from '${SDK}';`;
     const alpha = {
       id: 'alpha',
@@ -145,21 +145,10 @@ describe('ports-pending', () => {
     stated.write('base.json', base);
     expect(messages(await run(portsPending, stated, { base: `file:${join(stated.root, 'base.json')}` }))).toBe('');
 
-    const unstated = ws([alpha], { pending: ['alpha'], pendingReasons: { alpha: [] } });
-    unstated.write('base.json', base);
-    expect(messages(await run(portsPending, unstated, { base: `file:${join(unstated.root, 'base.json')}` }))).toContain(
-      'alpha has no skeleton half left',
-    );
-
-    const stray = ws([{ id: 'beta' }], {
-      pending: ['beta'],
-      pendingHalves: { beta: ALL },
-      pendingReasons: { alpha: ['a reason for nobody'] },
-    });
-    stray.write('base.json', JSON.stringify({ format: 1, pending: ['beta'] }));
-    expect(messages(await run(portsPending, stray, { base: `file:${join(stray.root, 'base.json')}` }))).toContain(
-      'alpha has reasons but is not listed in "pending"',
-    );
+    // With no gap file the plugin is simply not pending: there is nothing to list, and nothing to remove.
+    const none = ws([alpha]);
+    none.write('base.json', base);
+    expect(messages(await run(portsPending, none, { base: `file:${join(none.root, 'base.json')}` }))).toBe('');
   });
   test('planted: a skeleton half pendingHalves does not name fails; so does a name for a real half', async () => {
     const real = (fn: string) =>
@@ -177,7 +166,7 @@ describe('ports-pending', () => {
     });
     unnamed.write('base.json', base);
     const missing = messages(await run(portsPending, unnamed, { base: `file:${join(unnamed.root, 'base.json')}` }));
-    expect(missing).toContain('cli half of beta is a skeleton but ports-pending.json pendingHalves does not name it');
+    expect(missing).toContain('cli half of beta is a skeleton but ports-pending/halves/cli.txt does not name it');
     expect(missing).not.toContain('daemon half of beta');
     const overnamed = ws([alpha, { id: 'beta' }], {
       pending: ['alpha', 'beta'],
@@ -201,7 +190,7 @@ describe('ports-pending', () => {
     expect(found).toContain('pendingHalves alpha app was added; pendingHalves may only shrink');
     expect(found).not.toContain('pendingHalves catalogs app was added');
   });
-  test('pending only shrinks: a ruled id may re-enter only with a reason; any other new id fails', async () => {
+  test('pending only shrinks: a ruled id may re-enter by a one-time ruling; any other new id fails', async () => {
     const base = JSON.stringify({ format: 1, pending: ['alpha'], pendingHalves: { alpha: ALL } });
     const stated = ws([{ id: 'alpha' }, { id: 'terminals' }], {
       pending: ['alpha', 'terminals'],
@@ -210,18 +199,9 @@ describe('ports-pending', () => {
     });
     stated.write('base.json', base);
     const passing = messages(await run(portsPending, stated, { base: `file:${join(stated.root, 'base.json')}` }));
-    expect(passing).not.toContain('terminals was added');
-    expect(passing).not.toContain('terminals is back in "pending"');
+    expect(passing).not.toContain('terminals gained a gap line');
 
-    const silent = ws([{ id: 'alpha' }, { id: 'usage' }], {
-      pending: ['alpha', 'usage'],
-      pendingHalves: { alpha: ALL, usage: ALL },
-    });
-    silent.write('base.json', base);
-    expect(messages(await run(portsPending, silent, { base: `file:${join(silent.root, 'base.json')}` }))).toContain(
-      'usage is back in "pending" by a one-time ruling but states no "pendingReasons" line',
-    );
-
+    // A ruled id re-enters by holding a gap file: with no allowance the same gap is the finding.
     const unwired = ws([{ id: 'alpha' }, { id: 'access' }], {
       pending: ['alpha', 'access'],
       pendingReasons: { access: ['GAP(access): app/x.tsx is not reached by any screen (owner: nelly)'] },
@@ -231,8 +211,7 @@ describe('ports-pending', () => {
     const unwiredFound = messages(
       await run(portsPending, unwired, { base: `file:${join(unwired.root, 'base.json')}` }),
     );
-    expect(unwiredFound).not.toContain('access was added');
-    expect(unwiredFound).not.toContain('access is back in "pending"');
+    expect(unwiredFound).not.toContain('access gained a gap line');
 
     const other = ws([{ id: 'alpha' }, { id: 'beta' }], {
       pending: ['alpha', 'beta'],
@@ -241,7 +220,7 @@ describe('ports-pending', () => {
     });
     other.write('base.json', base);
     expect(messages(await run(portsPending, other, { base: `file:${join(other.root, 'base.json')}` }))).toContain(
-      'beta was added; the list may only shrink',
+      'beta gained a gap line; the list may only shrink',
     );
   });
   test('a shrinking list of skeletons passes', async () => {
@@ -1494,10 +1473,9 @@ describe('registry generator', () => {
 
   test('pending app halves are omitted, ported halves register, and registries --check stays exact', async () => {
     const f = ws([KERNEL_PACKAGE, { id: 'alpha' }, { id: 'beta' }]);
-    f.write(
-      'ports-pending.json',
-      JSON.stringify({ format: 1, pending: ['alpha', 'beta'], pendingHalves: { alpha: ['app'] } }),
-    );
+    f.write('packages/plugins/alpha/ports-pending/pending.txt', '[fixture] pending\n');
+    f.write('packages/plugins/beta/ports-pending/pending.txt', '[fixture] pending\n');
+    f.write('packages/plugins/alpha/ports-pending/halves/app.txt', '');
     const files = generateGlobal(await buildModel(f.root));
     const surfaces = files.get('packages/app/src/generated/surfaces.ts') ?? '';
     expect(surfaces).not.toContain('import app_alpha');
@@ -1508,7 +1486,7 @@ describe('registry generator', () => {
     writeFiles(f.root, files);
     const check = () => Bun.spawnSync(['bun', join(import.meta.dir, '../registries.ts'), '--root', f.root, '--check']);
     expect(check().exitCode).toBe(0);
-    f.write('ports-pending.json', JSON.stringify({ format: 1, pending: ['alpha', 'beta'], pendingHalves: {} }));
+    rmSync(join(f.root, 'packages/plugins/alpha/ports-pending/halves/app.txt'));
     expect(check().exitCode).toBe(1);
     const ported = generateGlobal(await buildModel(f.root));
     expect(ported.get('packages/app/src/generated/surfaces.ts')).toContain('app: app_alpha');

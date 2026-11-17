@@ -182,6 +182,29 @@ describe('the durable send ledger', () => {
     expect((await sends.settle(F1, 's3', { fate: 'delivered' }))?.fate).toBe('delivered');
   });
 
+  test('the end of the log answers the newest line of each send in its window and the log size', async () => {
+    const state = world();
+    const sends = ledger(state);
+    for (let n = 0; n < 30; n++)
+      await sends.accept(F1, record(`s${String(n).padStart(2, '0')}`, { message: 'm'.repeat(200) }));
+    await sends.settle(F1, 's29', { fate: 'delivered' });
+    // A line cut by the window's start, and a line that is not a send, are not records.
+    await state.append<unknown>(SENDS_STATE, { note: 'not a send' }, F1);
+
+    const small = await sends.recent(F1, 1_500);
+    const everything = await sends.recent(F1, 1_000_000);
+
+    expect(small.records.length).toBeGreaterThan(0);
+    expect(small.records.length).toBeLessThan(10);
+    expect(small.records.find(each => each.sendId === 's29')?.fate).toBe('delivered');
+    expect(small.records.some(each => each.sendId === 's00')).toBe(false);
+    expect(everything.records).toHaveLength(30);
+    expect(small.size).toBe(everything.size);
+    expect(everything.size).toBeGreaterThan(30 * 200);
+    expect(Object.isFrozen(small.records[0])).toBe(true);
+    expect((await sends.recent('nobody' as SessionId, 100)).size).toBe(0);
+  });
+
   test('lines that are not sends this daemon wrote are skipped, and what is read is frozen', async () => {
     const state = world();
     state.folder.plant(

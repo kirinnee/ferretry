@@ -27,6 +27,19 @@ const SIGN_IN_APPROVAL_RENDERER = 'ask:sign-in-approval';
 /** The input-request owner's renderer for a value typed into a prompt. */
 export const INPUT_RENDERER = 'ask:input';
 
+/** An input request's id: 32 hex digits, the id the input form routes by. */
+const REQUEST_ID = /^[0-9a-f]{32}$/u;
+
+/**
+ * The input request an `input` card was raised for: the item's own `input` when it has one, else the entry its
+ * obligation names (`ask:input:<request id>`, how the Asks port raises it). `undefined` when it names none.
+ */
+const inputRequestOf = (item: AgendaItem): string | undefined => {
+  if (item.input !== undefined) return item.input.requestId;
+  const entry = item.sourceRef?.startsWith('ask:input:') === true ? item.sourceRef.slice('ask:input:'.length) : '';
+  return REQUEST_ID.test(entry) ? entry : undefined;
+};
+
 /** Who an ask is from, for the renderer that draws part of it: the ferret's id and spoken name, and its project. */
 export interface AskFrom {
   readonly ferret: string;
@@ -79,8 +92,14 @@ export const askRendererFor = (
       slot: 'plan',
       value: onScreen(item, { kind: 'two-factor-seed', stage: item.twoFactorSeed.stage }, from),
     };
-  if (item.kind === 'input')
-    return { key: INPUT_RENDERER, slot: 'input', value: onScreen(item, { kind: 'input' }, from) };
+  if (item.kind === 'input') {
+    const request = inputRequestOf(item);
+    return {
+      key: INPUT_RENDERER,
+      slot: 'input',
+      value: onScreen(item, request === undefined ? { kind: 'input' } : { kind: 'input', request }, from),
+    };
+  }
   return undefined;
 };
 

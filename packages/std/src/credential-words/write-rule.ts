@@ -23,6 +23,7 @@
  * Pure: no IO.
  */
 import { createHash } from 'node:crypto';
+import { judgedText } from './shell-reference.ts';
 import { endsInCredentialWord, HIDDEN_VALUE_TEXT, namesCredential, urlPasswordCuts } from './words.ts';
 
 /**
@@ -72,15 +73,6 @@ const KNOWN_SHAPES: readonly RegExp[] = [
 
 /** The same shapes, to list every match in one window from a chosen start (a match a cut may have faked is skipped). */
 const KNOWN_SHAPES_EVERYWHERE: readonly RegExp[] = KNOWN_SHAPES.map(shape => new RegExp(shape.source, 'gu'));
-
-/**
- * A value that names a secret rather than holding one: `${secret:NAME}`, `${secret?:NAME}`, `${NAME}` or `$NAME`
- * (docs/secrets.md: "a pointer is only…"). The braces hold a NAME and nothing else: `${X:-<literal>}` is a shell
- * default, which carries a literal and so can carry a credential, and is no pointer. Linear: anchored at both ends, so
- * it is tried from one start, and each branch is one class run with one way to end it. Tested only on a value of at
- * most {@link SCAN_WINDOW} characters: a longer one is no reference.
- */
-const REFERENCE = /^\$(?:\{(?:secret\??:)?[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
 
 /**
  * A path or a URL: a scheme and `://`, or a leading `/`, `~` or `.`. Linear: anchored at the start, one class run, then
@@ -156,9 +148,12 @@ function holdsWhitespace(text: string): boolean {
 export function looksLikeRawSecret(key: string | number | undefined, value: string): boolean {
   if (holdsKnownShape(value)) return true;
   if (typeof key !== 'string' || !endsInCredentialWord(key)) return false;
-  const trimmed = value.trim();
+  const whole = value.trim();
+  // A shell reference is read for what it holds (shell-reference.ts): a pointer or an error message holds nothing, and a
+  // default (`${X:-lit}`) holds its LITERAL, which is judged ALONE — a long plain NAME must not dilute it, and an empty
+  // or path literal must not be refused for the key it is written under. A known shape was tried on the whole above.
+  const trimmed = judgedText(whole).trim();
   if (trimmed.length < MIN_SECRET_LENGTH || holdsWhitespace(trimmed)) return false;
-  if (trimmed.length <= SCAN_WINDOW && REFERENCE.test(trimmed)) return false;
   // A path or a URL under a "…key" name (a key file, a JWKS endpoint) is where a secret is, not one.
   if (PLACE.test(trimmed.slice(0, SCAN_WINDOW))) return false;
   return shannonEntropy(trimmed) >= ENTROPY_THRESHOLD;

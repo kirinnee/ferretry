@@ -591,7 +591,8 @@ async function filesUnder(folder: string): Promise<string[]> {
   for (const entry of await readdir(folder, { withFileTypes: true })) {
     const path = join(folder, entry.name);
     if (entry.isDirectory()) found.push(...(await filesUnder(path)));
-    else found.push(path);
+    // A link is not a file with content of its own (a converted ferret's `projects` links to the pool, whose files are listed).
+    else if (!entry.isSymbolicLink()) found.push(path);
   }
   return found;
 }

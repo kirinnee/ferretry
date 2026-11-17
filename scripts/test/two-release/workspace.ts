@@ -371,22 +371,16 @@ export function writeWorkspace(root: string, variant: Variant): void {
     JSON.stringify({ name: 'fixture-cli', private: true, bin: { fx: './bin.ts' } }),
   );
   // The core, Access and Connections app halves are left out of the app registry so the shell test draws only the fixture plugins.
-  files.set(
-    'ports-pending.json',
-    JSON.stringify({
-      format: 1,
-      pending: [],
-      pendingHalves: {
-        gate: ['app'],
-        asks: ['app'],
-        vault: ['app'],
-        ferrets: ['app'],
-        mailbox: ['app'],
-        access: ['app'],
-        connections: ['app'],
-      },
-    }),
-  );
+  for (const [id, core] of [
+    ['gate', true],
+    ['asks', true],
+    ['vault', true],
+    ['ferrets', true],
+    ['mailbox', true],
+    ['access', false],
+    ['connections', false],
+  ] as const)
+    files.set(`packages/${core ? 'core' : 'plugins'}/${id}/ports-pending/halves/app.txt`, '');
   shimPackage(files, 'kernel', 'packages/core/kernel', '@ferretry/kernel', true);
   for (const id of CORE_SHIMS) shimPackage(files, id, `packages/core/${id}`, `@ferretry/core-${id}`);
   shimPackage(files, 'access', 'packages/plugins/access', '@ferretry/plugin-access');

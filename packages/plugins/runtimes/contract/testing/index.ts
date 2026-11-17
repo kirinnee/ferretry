@@ -35,7 +35,7 @@ export interface FakeRuntimes extends RuntimesApi {
   setCatalog(runtimes: readonly RuntimeView[], tools?: readonly MachineTool[]): void;
   /**
    * What `machineBrowserPorts()` answers (`random` and `warn` until set: a machine whose setting says `random`). The real
-   * Runtimes REJECTS while it holds no `browserPorts` setting; a test of that case makes the fake's method reject.
+   * Runtimes REJECTS while `runtimes.yaml` cannot be read as it stands; a test of that case makes the fake's method reject.
    */
   setMachineBrowserPorts(next: MachineBrowserPorts): void;
   /** What `autoResume()` answers (on until set; `undefined` is a switch that cannot be read). */

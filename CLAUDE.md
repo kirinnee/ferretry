@@ -138,8 +138,8 @@ The PWA opens New machine setup by itself (after pairing, and on Settings › Ma
 Claude Code and Codex steps import, sign in and name each runtime on one screen —
 `fy daemon setup` asks the same questions at a terminal, and `fy daemon import claude|codex` is the
 no-questions verb for scripts. Each import is of the host's own setup with `store: host`, so the
-login is shared in place and never seeded. A `config.yaml` that is not `version: 2` is **refused,
-never converted** — the sentence tells the person to move it aside and set the machine up again.
+login is shared in place and never seeded. A stray `fleet/config.yaml` is **ignored**:
+never read, converted or refused, so a machine that still has one boots as if it were not there.
 There is no switch, no old reader and no migration: the old account system is deleted.
 
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `^attention` (the old `!A3` is still read, never written: `!` is shell mode in agent composers), `/skill` or
@@ -227,7 +227,7 @@ A machine's configuration is **one human-editable YAML file per building block**
 editors of them. A broken file keeps its **last good version** in effect, an edit that **loosens** spend or
 authority is **held until the owner confirms it** (the tighter version stays in effect), a **raw secret in a
 file is refused**, and every write edits only the changed keys so comments survive. The old
-`fleet/config.yaml` is refused by sentence, never converted. The contract is
+`fleet/config.yaml` is ignored, never read, converted or refused. The contract is
 [docs/config-files.md](docs/config-files.md).
 
 **Lessons** are rules learned from ferrets ([docs/lessons.md](docs/lessons.md)). The passive switch only

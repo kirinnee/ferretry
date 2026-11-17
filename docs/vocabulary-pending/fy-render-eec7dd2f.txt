@@ -1,0 +1,2 @@
+docs/fy-render.md
+- Plain `<button>`, `<input>`, `<select>`, `<table>`, headings and text are already styled in a live page. Classes add the rest, live or static: `fy-btn` (`fy-btn--primary`, `fy-btn--quiet`; `aria-pre

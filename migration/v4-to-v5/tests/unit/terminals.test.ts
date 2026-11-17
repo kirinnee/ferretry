@@ -66,3 +66,12 @@ test('a regular file cannot be used as the tmux socket', async () => {
   expect(report.status).toBe('failed');
   expect(JSON.stringify(report)).not.toContain('FAKE-SECRET');
 });
+
+test('FX2 a stale pane is not counted as a handle available in ferret records', async () => {
+  await f.session();
+  await f.pane();
+  const live = await terminalsStep.run(f.ctx());
+  expect(live.kept).toContainEqual({ what: 'pane handles available in ferret records', count: 1 });
+  const stale = await terminalsStep.run(f.ctx(false, async () => false));
+  expect(stale.kept).toContainEqual({ what: 'pane handles available in ferret records', count: 0 });
+});

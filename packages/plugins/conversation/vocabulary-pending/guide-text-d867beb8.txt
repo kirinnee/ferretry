@@ -1,0 +1,2 @@
+packages/plugins/conversation/cli/reading/guide-text.ts
+export const RENDER_GUIDE_SECTION = `

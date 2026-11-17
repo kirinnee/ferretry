@@ -1,9 +1,0 @@
-{
-  "format": 1,
-  "pending": ["vault"],
-  "pendingReasons": {
-    "vault": [
-      "[own] GAP(vault): the Secrets tab has no \"Copy to another machine\" (an accepted omission). Agenda hands the ask:input renderer no request id (only {kind:\"input\"}), so the card finds its request by listing the ferret's open requests and matching the prompt the ask quotes (app/features/input/input-card-host.tsx)"
-    ]
-  }
-}

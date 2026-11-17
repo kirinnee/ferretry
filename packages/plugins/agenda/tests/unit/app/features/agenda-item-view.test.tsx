@@ -9,7 +9,10 @@ import { DISMISS_ACTION, type InboxAction } from '../../../../app/lib/agenda-inb
 import type { DaemonId } from '../../../../app/shell.ts';
 import { registerComposerFor } from '../../../support/app/composer-quote.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
+import { ensureDom, interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
+
+// Alone, nothing has registered a DOM yet when a `describe` body reads `HTMLElement.prototype`.
+ensureDom();
 
 let view: Mounted | null = null;
 afterEach(async () => {

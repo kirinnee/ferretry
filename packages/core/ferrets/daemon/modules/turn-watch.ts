@@ -52,9 +52,22 @@ export interface TurnWatchDeps {
   readonly tail: SessionTranscriptTail;
   /** The registry's record of a ferret: which runner and handle its pane is, and whether it still runs. */
   readonly record: (ferret: FerretId) => FerretRecord | undefined;
+  /** Every ferret the registry holds, with the runner handle the list view leaves out: what the gone sweep walks. */
+  readonly live?: () => readonly FerretRecord[];
   readonly runner: () => Runner | undefined;
   /** The ferret's registry state follows a recorded turn (`FerretsService.turnObserved`). */
   readonly turnObserved: (ferret: FerretId, turn: SessionTurnState) => Promise<void>;
+  /**
+   * A live ferret whose pane a look could not read and the runner PROVES gone is settled stopped, `terminal_gone`, on
+   * exactly that handle (`FerretsService.settleGone`: a compare-and-set that a stop or a resume in between wins). Absent:
+   * a vanished pane is never noticed after boot.
+   */
+  readonly settleGone?: (
+    ferret: FerretId,
+    handle: string,
+    exited: { readonly from: string; readonly reason: string },
+    stillGone: () => Promise<boolean>,
+  ) => Promise<boolean>;
   readonly clock: { now(): string };
   /** Whether the ferret's owner stores a question that is open now (the `turn.question-open` provider); `false` with none. */
   readonly questionOpen?: (ferret: FerretId) => Promise<boolean>;
@@ -64,6 +77,12 @@ export interface TurnWatchDeps {
   readonly yieldToLoop: () => Promise<void>;
   readonly log: Pick<Log, 'warn'>;
 }
+
+/** What a settled vanished terminal says (the boot exit pass's own sentence for a `gone` pane). */
+const GONE_REASON = 'the agent is no longer running: its terminal is gone, so how it exited was not recorded';
+
+/** How often every live ferret is asked whether its terminal is still there, whatever its document says. */
+const GONE_SWEEP_MS = 30_000;
 
 /** The sentence a part that is not mounted in this build rejects with. */
 const notMounted = (part: string): Error => new Error(`${part} is not mounted in this version of Ferretry.`);
@@ -131,6 +150,8 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
   readonly host: InlineObserverHost;
   /** Ferrets typed into this ferret's pane: its next look is due on the next tick, and its wait starts over at 2 s. */
   readonly wake: (ferret: FerretId) => void;
+  /** Starts the 30 s sweep that asks the runner about every live ferret's terminal; the answer stops it. */
+  readonly startSweep: () => () => void;
 } {
   let watcher: PacedTurnWatcher | undefined;
   const answersNotMounted = {
@@ -171,8 +192,50 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
       .runner()
       ?.look?.(record.handle as RunnerHandle)
       .catch(() => undefined);
+    if (look === undefined) noticeGone(record);
     return look === undefined ? undefined : turnPaneEvidenceOfLook(look);
   };
+  // A pane no look can read may be a pane that is not there: a tmux session killed by hand, or lost with its server, left
+  // the registry saying `working` for ever (the boot exit pass runs once). Only the runner's PROOF settles it, and never on
+  // the tick's time: the settle waits in the ferret's own queue, which a long stop or restart can hold.
+  const settling = new Set<FerretId>();
+  const noticeGone = (record: FerretRecord): void => {
+    const runner = deps.runner();
+    const handle = record.handle;
+    if (deps.settleGone === undefined || runner?.gone === undefined || handle === undefined) return;
+    if (settling.has(record.id)) return;
+    settling.add(record.id);
+    const from = record.state === 'idle' ? 'awaiting_user' : 'running';
+    void runner
+      .gone(record.id)
+      .then(async gone => {
+        // The proof above was taken outside the ferret's queue: the settle asks again once it holds the queue, because a
+        // restart that ran in between may have put a live pane on this very handle.
+        if (gone)
+          await deps.settleGone?.(
+            record.id,
+            handle,
+            { from, reason: GONE_REASON },
+            async () => (await runner.gone?.(record.id)) === true,
+          );
+      })
+      .catch((error: unknown) =>
+        deps.log.warn("a ferret's vanished terminal could not be settled", {
+          ferret: record.id,
+          ...turnWatchFailureFields(error),
+        }),
+      )
+      .finally(() => settling.delete(record.id));
+  };
+  // The watch's roster drops a session whose document is in no turn status (a declared `waiting`, a converted v4 copy), so
+  // no look of it would ever come back empty and ask. The sweep asks about EVERY live registry record, one cheap
+  // `has-session` each per {@link GONE_SWEEP_MS}, whatever its document says.
+  const sweepGone = (): void => {
+    for (const record of deps.live?.() ?? []) {
+      if ((record.state === 'working' || record.state === 'idle') && record.handle !== undefined) noticeGone(record);
+    }
+  };
+  const startSweep = (): (() => void) => deps.every(GONE_SWEEP_MS, sweepGone);
   const refused = (part: string) => async (): Promise<never> => {
     throw notMounted(part);
   };
@@ -231,5 +294,5 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
     },
     new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex'), QUESTIONS_NOT_MOUNTED),
   );
-  return { host, wake: ferret => watcher?.wake(ferret as unknown as SessionId) };
+  return { host, wake: ferret => watcher?.wake(ferret as unknown as SessionId), startSweep };
 }

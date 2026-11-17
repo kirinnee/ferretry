@@ -408,6 +408,7 @@ export function AgendaItemView({
             onMergeClose={() => setMergeFor(null)}
             history={shownHistory}
             {...(itemKey === undefined ? {} : { itemKey })}
+            {...(daemonId === undefined ? {} : { daemonId })}
             {...(versions === undefined ? {} : { versions })}
             {...(merge === undefined ? {} : { merge })}
             {...(lineageTitles === undefined ? {} : { lineageTitles })}

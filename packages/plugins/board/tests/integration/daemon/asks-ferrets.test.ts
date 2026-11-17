@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { entryId, FakeAsks, sourceKey } from '@ferretry/core-asks/contract/testing';
-import type { AskDraft } from '@ferretry/core-asks/contract';
+import type { AgendaSnapshot, AskDraft } from '@ferretry/core-asks/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { gateReference } from '../../../contract/index.ts';
 import {
@@ -15,6 +15,12 @@ import { FerretsHelpers, FerretsLiveness, FerretsNames, FerretsParents } from '.
 import { CardAskLinks } from '../../../daemon/lib/board/index.ts';
 import { KeyedSerial } from '../../../daemon/lib/lanes/serial.ts';
 import { card } from '../../support/board.ts';
+
+/** The boards' agenda items, as Asks hands them: an item is open in `items` and gone to `resolved` once answered. */
+const boardsOf = (...items: readonly Record<string, unknown>[]) => ({
+  snapshots: async () => [{ sessionId: 'lanie', items, resolved: [] } as unknown as AgendaSnapshot],
+});
+const raised = (id: string, extra: Record<string, unknown> = {}) => ({ id, raisedBy: 'agent', ...extra });
 
 const gate = (cardId: string, entry = 1) => gateReference({ cardId, laneId: 'plan', entry });
 
@@ -124,7 +130,7 @@ describe('the open card asks, read for the cards they are about', () => {
     });
     await new AsksCardObligations(asks).raise(gateDraft('F2', 1, 'f2'));
     await asks.raise({ ...gateDraft('F3'), entry: entryId('not-a-gate') });
-    const reader = new AsksCardAskReader(asks);
+    const reader = new AsksCardAskReader({ open: asks.open.bind(asks), ...boardsOf() });
 
     const open = await reader.open();
 
@@ -143,7 +149,9 @@ describe('the asks a card carries, through the real Asks reader', () => {
     await obligations.raise(gateDraft('F1', 2, 'stranger'));
     await obligations.raise(gateDraft('F2', 1, 'helper'));
     await asks.raise({ ...gateDraft('F1'), entry: entryId('not-a-gate') });
-    const links = new CardAskLinks(new AsksCardAskReader(asks), { warn: () => undefined });
+    const links = new CardAskLinks(new AsksCardAskReader({ open: asks.open.bind(asks), ...boardsOf() }), {
+      warn: () => undefined,
+    });
     const cards = [card({ id: 'F1', owner: 'owner' }), card({ id: 'F2', owner: 'owner', assignee: 'helper' })];
 
     const found = await links.asksFor(cards);
@@ -154,6 +162,61 @@ describe('the asks a card carries, through the real Asks reader', () => {
     const [first] = found.get('F1')?.open ?? [];
     asks.answerAs({ ferret: first!.ferret, id: first!.id as never }, 'approve');
     expect((await links.asksFor(cards)).get('F1')?.open.map(ref => ref.ferret)).toEqual(['stranger']);
+  });
+});
+
+describe('the asks a ferret raised about a task', () => {
+  test('task show lists the open ferret-raised asks and the gate ask, and not the answered one', async () => {
+    const asks = new FakeAsks();
+    await new AsksCardObligations(asks).raise(gateDraft('F9', 1, 'lanie'));
+    const links = new CardAskLinks(
+      new AsksCardAskReader({
+        open: asks.open.bind(asks),
+        // A3 is open and names F9; A4 is open and names it only through a merge; A5 was answered, so it is resolved.
+        snapshots: async () => [
+          {
+            sessionId: 'lanie',
+            items: [
+              raised('A3', { task: { id: 'F9' } }),
+              raised('A4', { task: { id: 'F2' }, relatedTasks: [{ id: 'F9' }] }),
+              raised('A6', { task: { id: 'F2' } }),
+              raised('A7', { task: { id: 'F9' }, notice: true }),
+              { id: 'A8', raisedBy: 'daemon', task: { id: 'F9' } },
+            ],
+            resolved: [raised('A5', { task: { id: 'F9' } })],
+          } as unknown as AgendaSnapshot,
+        ],
+      }),
+      { warn: () => undefined },
+    );
+
+    const found = await links.asksFor([card({ id: 'F9', owner: 'lanie' })]);
+
+    const gateAsk = (await asks.open({ source: CARD_SOURCE, state: 'open' }))[0]!;
+    expect(found.get('F9')?.open).toEqual([
+      { ferret: 'lanie', id: gateAsk.id },
+      { ferret: 'lanie', id: 'A3' },
+      { ferret: 'lanie', id: 'A4' },
+    ]);
+    expect(found.get('F9')?.asking).toEqual([{ ferret: 'lanie', id: gateAsk.id }]);
+  });
+
+  test('a board that cannot be read costs the card its ferret-raised asks and keeps its gate ask', async () => {
+    const asks = new FakeAsks();
+    await new AsksCardObligations(asks).raise(gateDraft('F9', 1, 'lanie'));
+    const warnings: string[] = [];
+    const links = new CardAskLinks(
+      new AsksCardAskReader({
+        open: asks.open.bind(asks),
+        snapshots: async () => Promise.reject(new Error('no boards')),
+      }),
+      { warn: message => warnings.push(message) },
+    );
+
+    const found = await links.asksFor([card({ id: 'F9', owner: 'lanie' })]);
+
+    expect(found.get('F9')?.asking).toHaveLength(1);
+    expect(warnings).toHaveLength(1);
   });
 });
 

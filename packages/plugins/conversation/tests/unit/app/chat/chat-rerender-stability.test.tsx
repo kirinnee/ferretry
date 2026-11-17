@@ -22,7 +22,7 @@ import { chatReferenceSurface } from '../../../../app/chat/reference-surface.ts'
 import { fyRenderFences } from '../../../../app/render/fences.tsx';
 import { transcriptEntriesFromLog } from '../../../../app/chat/chat-refresh.ts';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
-import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { ensureDom, interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 const NOW = Date.UTC(2026, 9, 29, 12, 0, 0);
 
@@ -62,6 +62,9 @@ class OnScreen {
     return [];
   }
 }
+// The DOM is this file's own: `HTMLIFrameElement` and `IntersectionObserver` are read below, before any `mount()`
+// registers one, so the file passes alone as well as after another DOM file has run.
+ensureDom();
 const realObserver = globalThis.IntersectionObserver;
 
 /**

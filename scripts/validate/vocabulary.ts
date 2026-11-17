@@ -12,13 +12,17 @@
  *    `README.md` and `instructions/**`, `.claude/skills/**`.
  * Not scanned (step 2 renames them, never a sentence): comments, identifiers, whitespace-free strings, CSS, tests.
  *
- * A ratchet, not a ban: each scope (a workspace package, or `docs`, `scripts`, `migration`, `.claude`, the root) holds
- * `vocabulary-pending.json` = `{ "format": 1, "count": N }`, today's hits. The check fails when
- *  - the hits GROW past the file (new text says the old word; say the new one),
- *  - the hits DROP below the file (lower the file to the new count; at zero, delete it),
- *  - the file holds more than the base ref's file for that scope (a base that holds no file at all is the
- *    introduction of the ratchet, and is not compared).
- * A scope with hits and no file has a pending count of zero. The last O18 unit empties `RATCHETED_WORDS`; the
+ * A ratchet, not a ban, and DELETION-ONLY: each scope (a workspace package, or `docs`, `scripts`, `migration`, `.claude`,
+ * the root) keeps a `vocabulary-pending/` folder with ONE FILE PER REMAINING HIT, so two branches that each fix a hit
+ * delete different files and merge clean (a per-scope count both of them lower would conflict). A hit's file is
+ * `<name>-<hash>.txt`: `<hash>` is eight hex digits of the hit's line with the old and new word masked and spaces
+ * collapsed (the path is NOT in it, so moving a file changes nothing); `__2`, `__3` after it tell identical lines apart.
+ * The body is the file and the line, for people. The check fails when
+ *  - a hit has no file (new text says the old word; say the new one; or the line it sits on was edited and still has it),
+ *  - a file has no hit (it was fixed: `git rm` the file; the message names the file),
+ *  - the folder holds a file the base ref's folder does not (a base that holds no folder or count at all is the
+ *    introduction of the ratchet, and is not compared; a base with the old count file only caps the number of files).
+ * A scope with hits and no folder has a pending count of zero. The last O18 unit empties `RATCHETED_WORDS`; the
  * word is then as strict as every other.
  *
  * Exceptions, each with its reason, and nothing broader:
@@ -39,7 +43,9 @@ import { NOT_SEARCHED, NOT_SEARCHED_PATHS } from '../gen/lib/pending-files.ts';
 import { type Workspace, loadWorkspace, sourceFiles } from '../gen/lib/workspace.ts';
 import { RATCHETED_WORDS, withoutExceptions } from './glossary.ts';
 
-export const PENDING_NAME = 'vocabulary-pending.json';
+export const PENDING_NAME = 'vocabulary-pending';
+/** The retired `{ "format": 1, "count": N }` file; a base ref may still hold it, a working tree may not. */
+const LEGACY_NAME = 'vocabulary-pending.json';
 export const ALLOWLIST_FILE = 'scripts/validate/vocabulary-allowlist.tsv';
 export const ALLOWLIST_UNTIL: readonly string[] = ['step2', 'stored'];
 
@@ -275,7 +281,8 @@ export function scopeOf(rel: string, packageRels: readonly string[]): string {
   return slash === -1 ? '.' : rel.slice(0, slash);
 }
 
-export const pendingPathOf = (scope: string): string => (scope === '.' ? PENDING_NAME : `${scope}/${PENDING_NAME}`);
+export const pendingPathOf = (scope: string): string =>
+  scope === '.' ? `${PENDING_NAME}/` : `${scope}/${PENDING_NAME}/`;
 
 function isHistory(rel: string): boolean {
   for (const prefix of HISTORY_FOLDERS.keys()) {
@@ -298,9 +305,19 @@ function globFiles(root: string, cwd: string, pattern: string): string[] {
   return found.filter(rel => !rel.split('/').includes('node_modules')).sort();
 }
 
+/** One hit as the ledger sees it: the file name it is kept under, where it sits and the line it sits on. */
+export interface Site {
+  readonly name: string;
+  readonly file: string;
+  readonly line: number;
+  readonly text: string;
+}
+
 export interface ScopeCount {
   readonly count: number;
   readonly occurrences: readonly Occurrence[];
+  /** One site per hit, in file and line order. */
+  readonly sites: readonly Site[];
 }
 
 export interface Scan {
@@ -308,6 +325,47 @@ export interface Scan {
   readonly tokenUses: ReadonlyMap<string, number>;
   /** Every scope that could hold a pending file. */
   readonly validScopes: ReadonlySet<string>;
+}
+
+const slugOf = (file: string): string =>
+  (file.split('/').pop() ?? file)
+    .replace(/\.[^.]*$/u, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .slice(0, 40) || 'file';
+
+/** The hash a hit is kept under: its line, lower-cased, the old and new word masked, spaces collapsed. Not its path. */
+export function lineHash(line: string, words: readonly string[]): string {
+  const mask = new RegExp(
+    `(?<![\\p{L}\\p{N}_])(?:${words.map(w => w.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('|')})s?(?![\\p{L}\\p{N}_])`,
+    'giu',
+  );
+  const text = line.toLowerCase().replace(mask, 'W').replace(/\s+/gu, ' ').trim();
+  return new Bun.CryptoHasher('sha1').update(text).digest('hex').slice(0, 8);
+}
+
+/** The ledger names of the hits `occurrences` hold, one per hit; identical lines get `__2`, `__3`. */
+export function sitesOf(root: string, occurrences: readonly Occurrence[], words: readonly string[]): Site[] {
+  const lines = new Map<string, string[]>();
+  const seen = new Map<string, number>();
+  const out: Site[] = [];
+  for (const o of occurrences) {
+    if (!lines.has(o.file)) lines.set(o.file, readFileSync(join(root, o.file), 'utf8').split('\n'));
+    const text = (lines.get(o.file)?.[o.line - 1] ?? '').trim();
+    for (let n = 0; n < o.hits; n++) {
+      const stem = `${slugOf(o.file)}-${lineHash(text, words)}`;
+      const count = (seen.get(stem) ?? 0) + 1;
+      seen.set(stem, count);
+      out.push({
+        name: count === 1 ? stem : `${stem}__${count}`,
+        file: o.file,
+        line: o.line,
+        text: text.slice(0, 200),
+      });
+    }
+  }
+  return out;
 }
 
 /** Reads every scanned file under `root`. `only` restricts the scan to one scope. */
@@ -356,79 +414,101 @@ export function scanTree(root: string, words: Iterable<string>, allow: readonly 
 
   const scopes = new Map<string, ScopeCount>();
   for (const [scope, occurrences] of [...found].sort(([a], [b]) => a.localeCompare(b)))
-    scopes.set(scope, { count: occurrences.reduce((n, o) => n + o.hits, 0), occurrences });
+    scopes.set(scope, {
+      count: occurrences.reduce((n, o) => n + o.hits, 0),
+      occurrences,
+      sites: sitesOf(root, occurrences, [...RATCHETED_WORDS.keys(), ...RATCHETED_WORDS.values()]),
+    });
   const validScopes = new Set<string>([...packageRels, 'docs', 'scripts', 'migration', '.claude', '.']);
   return { scopes, tokenUses: counter.tokenUses, validScopes };
 }
 
+/** One scope's ledger folder: its path and the file names (without `.txt`) it holds. */
 export interface PendingFile {
   readonly where: string;
-  readonly count: number;
+  readonly names: readonly string[];
 }
 
-/** Every `vocabulary-pending.json` of a tree, by scope; unreadable or malformed ones become findings. */
+const LEDGER_NAME = /^[a-z0-9][a-z0-9-]*-[0-9a-f]{8}(?:__\d+)?$/u;
+/** The hash and the stem of a ledger name, `undefined` when it is no ledger name. */
+const stemOf = (name: string): string | undefined =>
+  LEDGER_NAME.test(name) ? name.replace(/__\d+$/u, '').replace(/^.*-/u, '') : undefined;
+
+/** Every `vocabulary-pending/` folder of a tree, by scope; a stray file or the retired count file becomes a finding. */
 export function readPendingFiles(root: string): {
   readonly byScope: Map<string, PendingFile>;
   readonly findings: Finding[];
 } {
   const byScope = new Map<string, PendingFile>();
   const findings: Finding[] = [];
-  const paths: string[] = [];
-  const walkDir = (rel: string): void => {
+  const names = new Map<string, string[]>();
+  const walkDir = (rel: string, inside: boolean): void => {
     for (const entry of readdirSync(join(root, rel), { withFileTypes: true })) {
       if ((NOT_SEARCHED as readonly string[]).includes(entry.name)) continue;
       const next = rel === '' ? entry.name : `${rel}/${entry.name}`;
       if ((NOT_SEARCHED_PATHS as readonly string[]).includes(next)) continue;
-      if (entry.isDirectory()) walkDir(next);
-      else if (entry.name === PENDING_NAME) paths.push(next);
+      if (entry.isDirectory()) {
+        if (inside) findings.push({ check: 'vocabulary', where: next, message: 'a ledger folder holds files only' });
+        else walkDir(next, entry.name === PENDING_NAME);
+      } else if (inside) {
+        const name = entry.name.replace(/\.txt$/u, '');
+        const scope = dirname(rel) === '.' ? '.' : dirname(rel);
+        if (!entry.name.endsWith('.txt') || stemOf(name) === undefined)
+          findings.push({
+            check: 'vocabulary',
+            where: next,
+            message: 'is no ledger file: it is <name>-<8 hex digits>[__n].txt, one per remaining hit',
+          });
+        else names.set(scope, [...(names.get(scope) ?? []), name]);
+      } else if (entry.name === LEGACY_NAME)
+        findings.push({
+          check: 'vocabulary',
+          where: next,
+          message: 'is the retired count file: one file per remaining hit under vocabulary-pending/ now',
+        });
     }
   };
-  walkDir('');
-  for (const where of paths.sort()) {
-    const parsed = parsePendingFile(readFileSync(join(root, where), 'utf8'), where);
-    if (typeof parsed === 'string') findings.push({ check: 'vocabulary', where, message: parsed });
-    else byScope.set(dirname(where) === '.' ? '.' : dirname(where), parsed);
-  }
+  walkDir('', false);
+  for (const [scope, list] of [...names].sort(([a], [b]) => a.localeCompare(b)))
+    byScope.set(scope, { where: pendingPathOf(scope), names: list.sort() });
   return { byScope, findings };
 }
 
-/** The count of a pending file, or the sentence that says what is wrong with it. */
-export function parsePendingFile(text: string, where: string): PendingFile | string {
-  let doc: unknown;
-  try {
-    doc = JSON.parse(text);
-  } catch (error) {
-    return `is not JSON: ${error instanceof Error ? error.message : String(error)}`;
-  }
-  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return 'is not an object';
-  const keys = Object.keys(doc).sort().join(',');
-  if (keys !== 'count,format') return `holds the keys "${keys}"; it is exactly { "format": 1, "count": N }`;
-  const { format, count } = doc as { format: unknown; count: unknown };
-  if (format !== 1) return 'format is not 1';
-  if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) return '"count" is not a whole number >= 0';
-  return { where, count };
+/** One scope of the base: the file names it held, or (a base that predates the folders) only how many hits it allowed. */
+export interface BaseScope {
+  readonly count: number;
+  readonly names?: ReadonlySet<string>;
 }
 
 /**
- * The base ref's pending counts by scope: a git ref, or `file:<dir>` (a tree, for tests). `undefined` when the ref
- * cannot be read or holds no pending file at all (the ratchet was not there yet, so there is nothing to compare).
+ * The base ref's pending files by scope: a git ref, or `file:<dir>` (a tree, for tests). `undefined` when the ref
+ * cannot be read or holds no ledger at all (the ratchet was not there yet, so there is nothing to compare).
  */
-export function readBaseCounts(root: string, ref: string): Map<string, number> | undefined {
+export function readBaseCounts(root: string, ref: string): Map<string, BaseScope> | undefined {
   try {
-    const found = new Map<string, number>();
+    const found = new Map<string, BaseScope>();
     if (ref.startsWith('file:')) {
       const dir = ref.slice(5);
       if (!existsSync(dir)) return undefined;
-      for (const [scope, file] of readPendingFiles(dir).byScope) found.set(scope, file.count);
+      for (const [scope, file] of readPendingFiles(dir).byScope)
+        found.set(scope, { count: file.names.length, names: new Set(file.names) });
     } else {
       const listed = spawnSync('git', ['ls-tree', '-r', '--name-only', ref], { cwd: root, encoding: 'utf8' });
       if (listed.status !== 0) return undefined;
-      for (const where of listed.stdout.split('\n').filter(p => p === PENDING_NAME || p.endsWith(`/${PENDING_NAME}`))) {
-        const shown = spawnSync('git', ['show', `${ref}:${where}`], { cwd: root, encoding: 'utf8' });
-        if (shown.status !== 0) return undefined;
-        const parsed = parsePendingFile(shown.stdout, where);
-        if (typeof parsed !== 'string') found.set(dirname(where) === '.' ? '.' : dirname(where), parsed.count);
+      const names = new Map<string, Set<string>>();
+      for (const where of listed.stdout.split('\n')) {
+        const folder = new RegExp(`^(?:(.*)/)?${PENDING_NAME}/([^/]+)\\.txt$`, 'u').exec(where);
+        if (folder !== null) {
+          const scope = folder[1] ?? '.';
+          names.set(scope, (names.get(scope) ?? new Set<string>()).add(folder[2] ?? ''));
+        } else if (where === LEGACY_NAME || where.endsWith(`/${LEGACY_NAME}`)) {
+          const shown = spawnSync('git', ['show', `${ref}:${where}`], { cwd: root, encoding: 'utf8' });
+          if (shown.status !== 0) return undefined;
+          const count = (JSON.parse(shown.stdout) as { count?: unknown }).count;
+          if (typeof count === 'number') found.set(dirname(where) === '.' ? '.' : dirname(where), { count });
+        }
       }
+      for (const [scope, set] of names) found.set(scope, { count: set.size, names: set });
     }
     return found.size === 0 ? undefined : found;
   } catch {
@@ -443,11 +523,11 @@ const locate = (occurrences: readonly Occurrence[], limit = 4): string => {
   return occurrences.length > limit ? `${shown.join(', ')} and ${occurrences.length - limit} more` : shown.join(', ');
 };
 
-/** The pure rule: counts against the pending files and the base. */
+/** The pure rule: the hits of each scope against its ledger folder and the base. */
 export function ratchetFindings(
   scopes: ReadonlyMap<string, ScopeCount>,
   pending: ReadonlyMap<string, PendingFile>,
-  base: ReadonlyMap<string, number> | undefined,
+  base: ReadonlyMap<string, BaseScope> | undefined,
   validScopes: ReadonlySet<string>,
   only?: string,
 ): Finding[] {
@@ -458,44 +538,63 @@ export function ratchetFindings(
     if (only !== undefined && scope !== only) continue;
     const file = pending.get(scope);
     const here = scopes.get(scope);
-    const count = here?.count ?? 0;
     const target = pendingPathOf(scope);
     if (file !== undefined && !validScopes.has(scope)) {
       findings.push({
         check,
         where: file.where,
         message:
-          'is outside the rule: a pending file sits in a workspace package, docs, scripts, migration, .claude or the root',
+          'is outside the rule: a pending folder sits in a workspace package, docs, scripts, migration, .claude or the root',
       });
       continue;
     }
-    const allowed = file?.count ?? 0;
-    if (count > allowed)
+    // Hits and files meet by hash: a hit without a file is growth, a file without a hit was fixed.
+    const files = new Map<string, string[]>();
+    for (const name of file?.names ?? [])
+      files.set(stemOf(name) ?? name, [...(files.get(stemOf(name) ?? name) ?? []), name]);
+    const hits = new Map<string, Site[]>();
+    for (const site of here?.sites ?? [])
+      hits.set(stemOf(site.name) ?? site.name, [...(hits.get(stemOf(site.name) ?? site.name) ?? []), site]);
+    const grown: Site[] = [];
+    const gone: string[] = [];
+    for (const key of new Set([...files.keys(), ...hits.keys()])) {
+      const have = files.get(key) ?? [];
+      const seen = hits.get(key) ?? [];
+      if (seen.length > have.length) grown.push(...seen.slice(have.length));
+      if (have.length > seen.length) gone.push(...have.slice(seen.length));
+    }
+    if (grown.length > 0)
       findings.push({
         check,
         where: scope,
-        message: `${count} hit${count === 1 ? '' : 's'} of ${sayWord()} against ${allowed} allowed${
-          file === undefined ? ` (no ${target})` : ` by ${target}`
-        }; new text uses the new word: ${locate(here?.occurrences ?? [])}`,
+        message: `${grown.length} hit${grown.length === 1 ? '' : 's'} of ${sayWord()} with no file in ${target}; new text uses the new word: ${locate(
+          grown.map(site => ({ file: site.file, line: site.line, hits: 1 })),
+        )}`,
       });
-    else if (file !== undefined && count < allowed)
+    for (const name of gone)
       findings.push({
         check,
-        where: file.where,
-        message:
-          count === 0
-            ? `holds ${allowed} but the scope is at 0: delete this file`
-            : `holds ${allowed} but the scope is at ${count}: lower "count" to ${count}`,
+        where: `${target}${name}.txt`,
+        message: 'holds a hit that is gone: git rm this file',
       });
-    else if (file !== undefined && count === 0)
-      findings.push({ check, where: file.where, message: 'holds 0: delete this file' });
     if (base !== undefined && file !== undefined) {
-      const before = base.get(scope) ?? 0;
-      if (file.count > before)
+      const before = base.get(scope);
+      // A scope the base has no folder for, in a base that has folders at all, held nothing there.
+      const beforeNames =
+        before?.names ?? ([...base.values()].some(b => b.names !== undefined) ? new Set<string>() : undefined);
+      if (beforeNames !== undefined) {
+        for (const name of file.names)
+          if (!beforeNames.has(name))
+            findings.push({
+              check,
+              where: `${target}${name}.txt`,
+              message: 'is not in the base: the ledger may only lose files',
+            });
+      } else if (file.names.length > (before?.count ?? 0))
         findings.push({
           check,
           where: file.where,
-          message: `holds ${file.count} but the base holds ${before}: the count may only go down`,
+          message: `holds ${file.names.length} files but the base held ${before?.count ?? 0}: the ledger may only shrink`,
         });
     }
   }
@@ -534,7 +633,9 @@ export async function vocabularyReport(root: string, packageId?: string, base?: 
     if (only !== undefined && scope !== only) continue;
     const count = scan.scopes.get(scope)?.count ?? 0;
     total += count;
-    table.push(`${scope.padEnd(34)} ${String(count).padStart(5)}  (pending ${pending.byScope.get(scope)?.count ?? 0})`);
+    table.push(
+      `${scope.padEnd(34)} ${String(count).padStart(5)}  (pending ${pending.byScope.get(scope)?.names.length ?? 0})`,
+    );
   }
   table.push(
     `${'total'.padEnd(34)} ${String(total).padStart(5)}  (${sayWord()}; the base is ${baseCounts === undefined ? 'not compared' : 'compared'})`,

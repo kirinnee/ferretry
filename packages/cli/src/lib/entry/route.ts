@@ -18,6 +18,8 @@ export type EntrySlice = 'mcp-serve' | 'full';
 export interface ServeInvocation {
   /** `--as-owner` before the verb: refused by the slim root, which acts as the pane's ferret only. */
   readonly asOwner: boolean;
+  /** The words after `mcp serve`, for the slim root's option guard (`serve-guard.ts`). */
+  readonly rest: readonly string[];
 }
 
 /** The `mcp serve` invocation `args` (without the runtime and script) spell, or undefined when they spell another. */
@@ -33,11 +35,12 @@ export function mcpServeInvocation(args: readonly string[]): ServeInvocation | u
   }
   if (args[index] !== 'mcp' || args[index + 1] !== 'serve') return undefined;
   // `--help` or `-h` anywhere after the verb (before `--`) is answered by the router before it connects.
-  for (const token of args.slice(index + 2)) {
+  const rest = args.slice(index + 2);
+  for (const token of rest) {
     if (token === '--') break;
     if (token === '--help' || token === '-h') return undefined;
   }
-  return { asOwner };
+  return { asOwner, rest };
 }
 
 export function entrySlice(args: readonly string[]): EntrySlice {

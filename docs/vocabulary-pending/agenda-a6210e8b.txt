@@ -1,0 +1,2 @@
+docs/agenda.md
+| 6   | A task that's ready shows its test steps and Done / Not good inside its agenda, never as a separate item.                                                                                       

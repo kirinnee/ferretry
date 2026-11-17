@@ -91,7 +91,7 @@ export function isSkeleton(impl: AnyImplementation): boolean {
   return (impl as { skeleton?: true }).skeleton === true;
 }
 
-/** Compares one half with its manifest. `pending` = the id is in ports-pending.json. */
+/** Compares one half with its manifest. `pending` = the id holds a gap file under ports-pending/. */
 /**
  * Sections whose declared names may be left unimplemented: a declared doctor check with no run is reported by
  * `fy doctor` itself as a failure naming the check, so the half still builds (an undeclared run is still refused).
@@ -122,7 +122,7 @@ export function halfFindings(
       findings.push({
         check,
         where,
-        message: `${half} half is a skeleton but ${manifest.id} is not in ports-pending.json`,
+        message: `${half} half is a skeleton but ${manifest.id} is not pending (no ports-pending/ gap file)`,
       });
     return findings;
   }

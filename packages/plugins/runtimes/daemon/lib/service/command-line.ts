@@ -22,6 +22,7 @@ import {
   findFlagSecrets,
   findRawSecrets,
   HIDDEN_VALUE_TEXT,
+  isShellPointer,
   looksSecret,
   type ShownWord,
   SHOWN_TESTS,
@@ -172,8 +173,15 @@ export const commandWordsOf = (command: string): readonly string[] => command.sp
 export const writtenWithheld = (name: string, text: string): boolean =>
   valueRefused(name, text) || shownWord(text, undefined).hidden;
 
-/** A pointer to a value, not a value: `$NAME`, `${NAME}`, `${secret:NAME}`, with a pair of quotes around it or not. */
-const POINTER = /^(["']?)\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)\1$/u;
+/** A pair of quotes around a word, or none. */
+const QUOTED = /^(["'])([\s\S]*)\1$/u;
+
+/**
+ * A pointer to a value, not a value: `$NAME`, `${NAME}`, `${secret:NAME}`, with a pair of quotes around it or not. The
+ * std rule's own reading ({@link isShellPointer}): a default (`${X:-v}`) carries a literal and is a value, whatever
+ * its NAME.
+ */
+const isPointer = (word: string): boolean => isShellPointer(QUOTED.exec(word)?.[2] ?? word);
 
 /**
  * A plain word of a command: lowercase letters, dots, slashes and hyphens (`srv`, `npx`, `--stdio`, `bin/run.js`),
@@ -236,7 +244,7 @@ function pointerThenPlainWords(part: string): boolean {
   const [pointer = '', ...rest] = part.trim().split(/\s+/u);
   return (
     pointer === HIDDEN_VALUE_TEXT ||
-    (POINTER.test(pointer) && rest.every(word => PLAIN_WORD.test(word) && !looksSecret('', word)))
+    (isPointer(pointer) && rest.every(word => PLAIN_WORD.test(word) && !looksSecret('', word)))
   );
 }
 

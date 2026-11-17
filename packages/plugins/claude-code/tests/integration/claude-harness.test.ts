@@ -1000,6 +1000,20 @@ describe('ClaudeHarness', () => {
     expect(entries.length).toBe(2);
   });
 
+  test('E4 a read after an entry id the transcript no longer holds returns nothing, never the whole conversation', async () => {
+    const { harness, writeHome } = build();
+    await harness.start(spec(), runner({}), {} as never);
+    const record = (id: string) =>
+      JSON.stringify({ type: 'assistant', uuid: id, timestamp: T, message: { content: [{ type: 'text', text: id }] } });
+    await writeHome('projects/-work/conv-1.jsonl', ['a1', 'a2', 'a3'].map(record).join('\n'));
+
+    // A known id pages on from it (and `limit` still bounds the page); an id compaction dropped is a cursor that is gone.
+    expect((await harness.transcript.read(FERRET, 'a1')).map(entry => entry.id)).toEqual(['a2', 'a3']);
+    expect((await harness.transcript.read(FERRET, 'a1', 1)).map(entry => entry.id)).toEqual(['a2']);
+    expect((await harness.transcript.read(FERRET, 'a3')).map(entry => entry.id)).toEqual([]);
+    expect((await harness.transcript.read(FERRET, 'dropped-by-compaction')).map(entry => entry.id)).toEqual([]);
+  });
+
   test('U5 the transcript stamp and tail name only the assigned conversation, and carry no text', async () => {
     const { harness, writeHome } = build();
     expect(await harness.transcriptStamp(FERRET)).toBeUndefined();

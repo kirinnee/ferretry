@@ -1768,6 +1768,7 @@ describe('reading the board', () => {
     const agenda = new CardAskLinks(
       {
         open: async () => [{ ferret: 'stranger', id: 'A1', cardId: 'F1' }],
+        mentioned: async () => [],
       },
       { warn: () => undefined },
     );

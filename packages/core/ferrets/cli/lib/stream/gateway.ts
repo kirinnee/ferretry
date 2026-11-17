@@ -11,6 +11,12 @@ const decoder = new TextDecoder();
 /** The text of one frame, which arrives as a string or as UTF-8 bytes. */
 const textOf = (frame: string | Uint8Array): string => (typeof frame === 'string' ? frame : decoder.decode(frame));
 
+const FAILED = 'WebSocket stream failed';
+
+/** A failure that came with no close code: the words it carries, framed once (the transport may already have framed them). */
+const failedStreamSentence = (reason: string): string =>
+  reason === '' ? FAILED : reason.startsWith(FAILED) ? reason : `${FAILED}: ${reason}`;
+
 /**
  * The journal socket over the shell's guarded client (no socket opened outside it). Today's transport rules: a
  * caller who leaves closes the socket with 1000 "event stream cancelled" and the follow ends quietly; a socket that
@@ -62,7 +68,7 @@ export class ClientEventStream implements IEventStream {
           },
           onClose: (reason, code) => {
             if (code === undefined) {
-              fail(new Error(reason === '' ? 'WebSocket stream failed' : `WebSocket stream failed: ${reason}`));
+              fail(new Error(failedStreamSentence(reason)));
               return;
             }
             const detail = reason === '' ? `code ${code}` : `${reason} (code ${code})`;

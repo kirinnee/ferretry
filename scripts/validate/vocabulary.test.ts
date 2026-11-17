@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { RATCHETED_WORDS, glossaryFindings } from './glossary.ts';
@@ -6,7 +7,7 @@ import {
   ALLOWLIST_FILE,
   Counter,
   parseAllowlist,
-  parsePendingFile,
+  lineHash,
   pendingPathOf,
   scanSource,
   scopeOf,
@@ -41,7 +42,20 @@ function tree(files: Readonly<Record<string, string>> = {}): string {
   return root;
 }
 
-const pending = (count: number): string => `${JSON.stringify({ format: 1, count })}\n`;
+const WORDS = [...RATCHETED_WORDS.keys(), ...RATCHETED_WORDS.values()];
+/** The ledger files (path to body) of a scope's hits, one per line of text, as the check names them: `<file>-<hash>`, `__2` for a repeat. */
+const ledger = (scope: string, file: string, lines: readonly string[]): Record<string, string> => {
+  const stem = (file.split('/').pop() ?? '').replace(/\.[^.]*$/u, '');
+  const seen = new Map<string, number>();
+  const out: Record<string, string> = {};
+  for (const line of lines) {
+    const name = `${stem}-${lineHash(line, WORDS)}`;
+    const n = (seen.get(name) ?? 0) + 1;
+    seen.set(name, n);
+    out[`${pendingPathOf(scope)}${n === 1 ? name : `${name}__${n}`}.txt`] = `${file}\n${line}\n`;
+  }
+  return out;
+};
 const noBase = 'file:/nonexistent-vocabulary-base';
 const messages = async (root: string, base = noBase): Promise<string[]> =>
   (await vocabularyReport(root, undefined, base)).findings.map(f => `${f.where}: ${f.message}`);
@@ -222,71 +236,122 @@ describe('the allowlist', () => {
 });
 
 describe('the ratchet', () => {
-  const one = (hits: number): string => say(`${Array.from({ length: hits }, () => 'the OLD').join(' ')}\n`);
+  const line = say('the OLD sits here');
+  const names = (scope: string, file: string, count: number): Record<string, string> =>
+    ledger(
+      scope,
+      file,
+      Array.from({ length: count }, () => line),
+    );
+  const text = (hits: number): string => `${Array.from({ length: hits }, () => line).join('\n')}\n`;
 
-  test('a count that equals its file passes', async () => {
-    const root = tree({ 'docs/guide.md': one(2), [pendingPathOf('docs')]: pending(2) });
+  test('a hit with its file passes', async () => {
+    const root = tree({ 'docs/guide.md': text(2), ...names('docs', 'docs/guide.md', 2) });
     expect(await messages(root)).toEqual([]);
   });
 
-  test('hits above the file fail (growth), and so do hits with no file', async () => {
-    const grown = tree({ 'docs/guide.md': one(3), [pendingPathOf('docs')]: pending(2) });
-    expect((await messages(grown)).join('\n')).toContain('3 hits');
-    expect((await messages(grown)).join('\n')).toContain('against 2 allowed');
-    const none = tree({ 'docs/guide.md': one(1) });
-    expect((await messages(none)).join('\n')).toContain('(no docs/vocabulary-pending.json)');
+  test('a hit with no file fails (growth), and a scope with no folder says so', async () => {
+    const grown = tree({ 'docs/guide.md': text(3), ...names('docs', 'docs/guide.md', 2) });
+    expect((await messages(grown)).join('\n')).toContain('1 hit of');
+    expect((await messages(grown)).join('\n')).toContain('with no file in docs/vocabulary-pending/');
+    const none = tree({ 'docs/guide.md': text(1) });
+    expect((await messages(none)).join('\n')).toContain('with no file in docs/vocabulary-pending/');
   });
 
-  test('a count that drops without lowering the file fails; at zero the file is to be deleted', async () => {
-    const dropped = tree({ 'docs/guide.md': one(1), [pendingPathOf('docs')]: pending(2) });
-    expect((await messages(dropped)).join('\n')).toContain('lower "count" to 1');
-    const gone = tree({ 'docs/guide.md': 'Say task.\n', [pendingPathOf('docs')]: pending(2) });
-    expect((await messages(gone)).join('\n')).toContain('delete this file');
-    const zero = tree({ 'docs/guide.md': 'Say task.\n', [pendingPathOf('docs')]: pending(0) });
-    expect((await messages(zero)).join('\n')).toContain('holds 0: delete this file');
+  test('a fixed hit leaves a file with no hit: the check names it and says git rm', async () => {
+    const dropped = tree({ 'docs/guide.md': text(1), ...names('docs', 'docs/guide.md', 2) });
+    const found = await messages(dropped);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatch(
+      /^docs\/vocabulary-pending\/guide-[0-9a-f]{8}__2\.txt: holds a hit that is gone: git rm this file$/u,
+    );
+    const gone = tree({ 'docs/guide.md': 'Say task.\n', ...names('docs', 'docs/guide.md', 2) });
+    expect(await messages(gone)).toHaveLength(2);
   });
 
-  test('a file above the base fails, even when the tree matches the file', async () => {
-    const root = tree({ 'docs/guide.md': one(3), [pendingPathOf('docs')]: pending(3) });
-    const base = tree({ [pendingPathOf('docs')]: pending(2) });
-    expect((await messages(root, `file:${base}`)).join('\n')).toContain('holds 3 but the base holds 2');
-    const equal = tree({ [pendingPathOf('docs')]: pending(3) });
+  test('a line still holding one of two old words keeps its hash: fixing one hit leaves one file to remove', async () => {
+    const two = say('the OLD and the OLD');
+    const half = say('the OLD and the NEW');
+    const before = ledger('docs', 'docs/guide.md', [two, two]);
+    expect(Object.keys(before)).toHaveLength(2);
+    const root = tree({ 'docs/guide.md': `${half.replace('NEW', NEW)}\n`, ...before });
+    // one hit left in the line, two files: exactly one is stale
+    expect((await messages(root)).filter(m => m.includes('is gone'))).toHaveLength(1);
+  });
+
+  test('moving a file keeps its ledger: the path is not in the name', async () => {
+    const root = tree({ 'docs/other-name.md': text(1), ...names('docs', 'docs/guide.md', 1) });
+    const renamed = (await messages(root)).join('\n');
+    // the file stem is only for people: the same line under another file name still matches by hash
+    expect(renamed).not.toContain('with no file');
+  });
+
+  test('a file the base does not hold fails, even when the tree matches its folder', async () => {
+    const root = tree({ 'docs/guide.md': text(2), ...names('docs', 'docs/guide.md', 2) });
+    const base = tree(names('docs', 'docs/guide.md', 1));
+    const found = (await messages(root, `file:${base}`)).join('\n');
+    expect(found).toMatch(/guide-[0-9a-f]{8}__2\.txt: is not in the base: the ledger may only lose files/u);
+    const equal = tree(names('docs', 'docs/guide.md', 2));
     expect(await messages(root, `file:${equal}`)).toEqual([]);
   });
 
-  test('a scope the base has no file for holds 0 there, so a new file fails; a base with no file at all is not compared', async () => {
+  test('a scope the base has no folder for holds nothing there, so a new folder fails; a base with no ledger at all is not compared', async () => {
     const root = tree({
-      'docs/guide.md': one(1),
-      [pendingPathOf('docs')]: pending(1),
-      'scripts/a.ts': say("console.log('the OLD');\n"),
-      [pendingPathOf('scripts')]: pending(1),
+      'docs/guide.md': text(1),
+      ...names('docs', 'docs/guide.md', 1),
+      'scripts/a.ts': say("console.log('the OLD sits here');\n"),
+      ...ledger('scripts', 'scripts/a.ts', [say("console.log('the OLD sits here');")]),
     });
-    const base = tree({ [pendingPathOf('docs')]: pending(1) });
+    const base = tree(names('docs', 'docs/guide.md', 1));
     const found = (await messages(root, `file:${base}`)).join('\n');
-    expect(found).toContain('scripts/vocabulary-pending.json: holds 1 but the base holds 0');
-    expect(found).not.toContain('docs/vocabulary-pending.json');
+    expect(found).toContain('scripts/vocabulary-pending/a-');
+    expect(found).toContain('is not in the base');
+    expect(found).not.toContain('docs/vocabulary-pending/');
     expect(await messages(root)).toEqual([]);
   });
 
-  test('a pending file outside the rule, or malformed, is a finding', async () => {
-    const stray = tree({ 'packages/plugins/x/app/vocabulary-pending.json': pending(1) });
+  test('a base that still holds the old count file only caps the number of files', async () => {
+    const root = tree({ 'docs/guide.md': text(2), ...names('docs', 'docs/guide.md', 2) });
+    const git = (...args: string[]): void => {
+      const run = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], {
+        cwd: root,
+        encoding: 'utf8',
+      });
+      if (run.status !== 0) throw new Error(run.stderr);
+    };
+    git('init', '-q');
+    writeFileSync(join(root, 'docs/vocabulary-pending.json'), '{"format":1,"count":1}\n');
+    git('add', 'docs/vocabulary-pending.json');
+    git('commit', '-q', '-m', 'base');
+    rmSync(join(root, 'docs/vocabulary-pending.json'));
+    expect((await messages(root, 'HEAD')).join('\n')).toContain('holds 2 files but the base held 1');
+    writeFileSync(join(root, 'docs/vocabulary-pending.json'), '{"format":1,"count":2}\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'base2');
+    rmSync(join(root, 'docs/vocabulary-pending.json'));
+    expect((await messages(root, 'HEAD')).join('\n')).not.toContain('base held');
+  });
+
+  test('a folder outside the rule, a file that is no ledger file, and the retired count file are findings', async () => {
+    const stray = tree({ 'packages/plugins/x/app/vocabulary-pending/a-0123abcd.txt': 'x\n' });
     expect((await messages(stray)).join('\n')).toContain('is outside the rule');
-    for (const bad of [
-      '{',
-      '[]',
-      '{"format":1}',
-      '{"format":2,"count":1}',
-      '{"format":1,"count":-1}',
-      '{"format":1,"count":1.5}',
-    ])
-      expect(typeof parsePendingFile(bad, 'f')).toBe('string');
-    expect(parsePendingFile('{"count":4,"format":1}', 'f')).toEqual({ where: 'f', count: 4 });
+    const bad = tree({
+      'docs/vocabulary-pending/notes.md': 'x\n',
+      'docs/vocabulary-pending/Bad Name.txt': 'x\n',
+      'docs/vocabulary-pending/deeper/a-0123abcd.txt': 'x\n',
+      'docs/vocabulary-pending.json': '{"format":1,"count":1}\n',
+    });
+    const found = (await messages(bad)).join('\n');
+    expect(found).toContain('docs/vocabulary-pending/notes.md: is no ledger file');
+    expect(found).toContain('docs/vocabulary-pending/Bad Name.txt: is no ledger file');
+    expect(found).toContain('a ledger folder holds files only');
+    expect(found).toContain('docs/vocabulary-pending.json: is the retired count file');
   });
 
   test('--package reads one scope only', async () => {
     const root = tree({
       'packages/plugins/x/manifest.ts': say("export default { summary: 'a OLD' };\n"),
-      'docs/guide.md': one(5),
+      'docs/guide.md': text(5),
     });
     expect((await vocabularyReport(root, undefined, noBase)).findings).toHaveLength(2);
     const scoped = (await vocabularyReport(root, 'x', noBase)).findings;
@@ -302,8 +367,8 @@ describe('scopes', () => {
     expect(scopeOf('docs/board.md', packages)).toBe('docs');
     expect(scopeOf('.claude/skills/s/SKILL.md', packages)).toBe('.claude');
     expect(scopeOf('README.md', packages)).toBe('.');
-    expect(pendingPathOf('.')).toBe('vocabulary-pending.json');
-    expect(pendingPathOf('docs')).toBe('docs/vocabulary-pending.json');
+    expect(pendingPathOf('.')).toBe('vocabulary-pending/');
+    expect(pendingPathOf('docs')).toBe('docs/vocabulary-pending/');
   });
 });
 

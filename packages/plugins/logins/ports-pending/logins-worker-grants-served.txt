@@ -1,0 +1,1 @@
+[own] GAP(logins): worker grants are served on main, so the sign-in blob and its bearer header transit the daemon's heap per read (kernel: a worker-owned read/fetch is not built)

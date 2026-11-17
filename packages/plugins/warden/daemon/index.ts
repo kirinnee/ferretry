@@ -105,6 +105,8 @@ export default implementDaemon(manifest, {
       hooks: {
         'ferret.changed': payload => {
           if (payload.state === 'stopped') subsystem.nudgeSweep('paneDied');
+          // A launch writes the ferret `starting` (a fresh start says `started`): the quiet clock starts there.
+          if (payload.change === 'started' || payload.state === 'starting') subsystem.launched(payload.ferret);
         },
         'turn.ended': () => subsystem.nudgeSweep('turnEnd'),
       },

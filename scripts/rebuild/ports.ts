@@ -358,7 +358,7 @@ ${pl.also.length} files. Copy only the part this subsystem needs and say so in t
 ${pathBlock(pl.also, true)}
 ## Keep (tests required): ${owned.length} rows owned (${owned.filter(r => r.status === 'kept').length} kept, ${owned.filter(r => r.status === 'split').length} split)
 
-Every row below gets a test whose name contains the row id, e.g. \`test('${owned[0]?.id ?? 'G11'} …', …)\`; \`ports-pending.json\` loses this plugin's line in the same PR (§10.4).
+Every row below gets a test whose name contains the row id, e.g. \`test('${owned[0]?.id ?? 'G11'} …', …)\`; \`ports-pending/\` loses this plugin's line files in the same PR (§10.4).
 
 ${owned.length ? owned.map(rowLine).join('\n') : '_No Appendix D row names this subsystem as owner._'}
 

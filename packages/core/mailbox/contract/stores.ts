@@ -199,6 +199,14 @@ export type SendSettlement = Partial<
   >
 >;
 
+/** The end of a send ledger's log: see {@link SendLedger.recent}. */
+export interface SendLedgerTail {
+  /** The latest line of each send that has a line in the window, in the order those lines were written. */
+  readonly records: readonly SendRecord[];
+  /** The log's size in bytes when it was read: a window of at least this many bytes holds every line. */
+  readonly size: number;
+}
+
 /**
  * The durable send ledger.
  *
@@ -224,6 +232,11 @@ export interface SendLedger {
   withdraw(id: SessionId, sendId: string, reason: string): Promise<SendRecord | undefined>;
   /** Every send this session holds, the latest line for each, oldest acceptance first. */
   list(id: SessionId): Promise<readonly SendRecord[]>;
+  /**
+   * The END of the log only (at most `maxBytes` of it, the line the window cuts dropped), so a page of the newest sends
+   * never reads the whole file. Left out by a ledger that cannot say: its pages are cut from `list`.
+   */
+  recent?(id: SessionId, maxBytes: number): Promise<SendLedgerTail>;
   /**
    * Appends a new snapshot of an existing send with `patch` applied — a proven fate, a re-attempt, an
    * extended deadline. A field set to `undefined` is cleared. A withdrawn send is never settled, and a

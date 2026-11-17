@@ -78,6 +78,7 @@ import {
   MIN_SECRET_VALUE_LENGTH,
   secretReferencePattern,
 } from '../secret-reference.ts';
+import { judgedText } from './shell-reference.ts';
 
 export { HIDDEN_VALUE_TEXT };
 
@@ -748,14 +749,14 @@ function flagValueCuts(flag: string, value: string, offset: number, tests: Cutte
  * only.
  */
 const WHOLE_SCHEME = /^(?:bearer|basic|token)[ \t]+/iu;
-const WHOLE_REFERENCE = /^\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
 const WHOLE_PLACE = /^(?:[a-z][a-z0-9+.-]*:\/\/|[/~.])/iu;
 const WHOLE_PAIR = /^([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*[:=][ \t]*/u;
 const WHOLE_HEADER = /^(?:authorization|cookie)$/iu;
 function refusedWhole(value: string): boolean {
   if (!value.includes('${secret:')) return false;
-  const inner = unquoted(value).trim().replace(WHOLE_SCHEME, '');
-  if (inner.length < 16 || /\s/u.test(inner) || WHOLE_REFERENCE.test(inner) || WHOLE_PLACE.test(inner)) return false;
+  // The write rule's own reading of a shell reference (shell-reference.ts): a default's literal is judged alone.
+  const inner = judgedText(unquoted(value).trim().replace(WHOLE_SCHEME, '')).trim();
+  if (inner.length < 16 || /\s/u.test(inner) || WHOLE_PLACE.test(inner)) return false;
   const counts = new Map<string, number>();
   for (const char of inner) counts.set(char, (counts.get(char) ?? 0) + 1);
   const length = [...inner].length;

@@ -1,0 +1,5 @@
+{
+  "seam": "code:packages/plugins/accounts/daemon/index.ts:notBuiltRoute",
+  "card": "&F1787",
+  "why": "Any declared Accounts route without a handler answers 'not built'."
+}

@@ -714,7 +714,7 @@ by name against the host `PATH`. Three rules now hold, and each has a mechanism 
   of its own, before it starts a session". So an armed SIT
   that starts a ferret must not give it a shell or a `PATH` env part: put the fake `claude`/`codex`
   first on the daemon's `PATH` instead. Judging a shell-backed launch on its real PATH waits for a
-  kernel-side resolve (the `GAP(kernel)` line under `terminals` in `ports-pending.json`).
+  kernel-side resolve (the `GAP(kernel)` line under `terminals` in `ports-pending/`).
 - **A leak fails the run.** `scripts/ci/test.sh` and the `task test*` targets run every unit, int and
   SIT invocation through
   `scripts/test/swept.sh`, which gives the run its own `TMPDIR`, exports `FERRETRY_TEST=1`, and kills

@@ -4,5 +4,6 @@
  * import this, so a word W refuses is a word the mask cuts by construction, and each consumer runs W on what it is about
  * to show as a fail-closed net.
  */
+export * from './shell-reference.ts';
 export * from './words.ts';
 export * from './write-rule.ts';

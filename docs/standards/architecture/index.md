@@ -89,8 +89,9 @@ why.
 Why: parallel work collides on shared files. In one week of merges into `rebuild/5.0-after`, `ports-pending.json` was
 touched by 53 PRs, `knip.production.json` by 15, the core ferrets daemon `index.ts` by 12 and its `service.ts` by 11. Each
 of those is a merge conflict waiting for the next PR. Splitting `ports-pending.json` into one file per owning package took
-it to zero. Prefer that shape: when a shared list keeps growing, give each plugin its own file and let one reader compose
-them.
+it to zero, and a file per open line (`ports-pending/<slug>.txt`, closed by `git rm`) removed the last conflict: two PRs
+deleting adjacent lines of one list still conflict. Prefer that shape: when a shared list keeps growing, give each item
+its own file and let one reader compose them.
 
 Enforced on every pull request into `rebuild/5.0-after` by `scripts/ci/one-folder.ts` (the `One Folder` workflow, `.github/workflows/one-folder.yaml`):
 
@@ -147,7 +148,7 @@ ordinary code, so the easy path was to edit them anywhere.
 2. **One Folder** (CI): a PR names its home package folder; files outside it must be explained under `## Outside files`.
 3. **Composition guard** (CI, U9): every package declares its composition files (registries and the few hand-written
    seams that remain). A PR that edits one fails unless its body has a `## Contract change` section that names each
-   file and says why. Exempt: a pure one-line ADD to a registry, and line DELETIONS from a `ports-pending.json` ledger.
+   file and says why. Exempt: a pure one-line ADD to a registry. The pending ledger needs no exemption: closing a line is deleting its own file.
 4. **Size and churn check** (CI, H6, `scripts/ci/size-churn.ts`, in the One Folder job): a source file (`.ts`/`.tsx`,
    not a test or generated) that the PR changes fails if it has more than 1,500 lines, or if 6 or more of the last 80
    merges edited it (one merge is one PR). The way out is a split, or an `oversize` row (limit, expiry date, reason) in

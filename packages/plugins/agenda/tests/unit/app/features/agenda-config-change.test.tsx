@@ -52,4 +52,21 @@ describe('AgendaConfigChange', () => {
     );
     await view.unmount();
   });
+
+  it('E9 held text: links to the machine’s Configuration files, where the held edit is read in full', async () => {
+    const view = await mount(<AgendaConfigChange daemonId="studio" item={{ confirms }} />);
+    const link = view.container.querySelector<HTMLAnchorElement>('[data-agenda-held-text-link]');
+    expect(link?.getAttribute('href')).toBe('/d/studio/settings/kernel/files');
+    expect(link?.textContent).toBe('Read the held text of warden.yaml');
+    await view.unmount();
+  });
+
+  it('E9 held text: without a machine, says where to read the held text instead of linking', async () => {
+    const view = await mount(<AgendaConfigChange item={{ confirms }} />);
+    expect(view.container.querySelector('[data-agenda-held-text-link]')).toBeNull();
+    expect(view.container.querySelector('[data-agenda-held-text]')?.textContent).toBe(
+      'Read the held text in Settings › Configuration files.',
+    );
+    await view.unmount();
+  });
 });

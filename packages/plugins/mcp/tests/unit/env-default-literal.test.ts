@@ -65,3 +65,17 @@ describe('MCP wire raw-secret test: only a bare NAME is a pointer', () => {
     },
   );
 });
+
+describe('MCP wire raw-secret test: a default is judged by its literal alone (the std reading)', () => {
+  test.each([
+    ['an empty default', '${API_KEY:-}'],
+    ['a required message', '${API_KEY:?required}'],
+    ['a path default', '${TLS_KEY:-/etc/ssl/private/key.pem}'],
+  ])('should not flag %s', (_label, value) => {
+    expect(looksLikeRawSecret('API_KEY', value)).toBe(false);
+  });
+
+  test('should flag a random literal under a name so long and plain that it diluted the whole string', () => {
+    expect(looksLikeRawSecret('API_KEY', `\${${'A'.repeat(60)}:-${RANDOM}}`)).toBe(true);
+  });
+});

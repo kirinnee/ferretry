@@ -33,7 +33,13 @@ import { answerWhenChanged, type ApiResponse, decodeParameter, headerValue } fro
 import { jsonResponse } from '../../api.ts';
 import type { MountRoute, RouteContext } from '../../api.ts';
 import { queuePage } from '../../../../contract/index.ts';
-import { DEFAULT_SEND_PAGE, MAX_SEND_PAGE, type SendPageQuery, sendPage } from '../../../../contract/index.ts';
+import {
+  DEFAULT_SEND_PAGE,
+  MAX_SEND_PAGE,
+  type SendPage,
+  type SendPageQuery,
+  sendPage,
+} from '../../../../contract/index.ts';
 
 /**
  * Talking to a session that is already running: `POST /v1/ferrets/:ferretId/send` and
@@ -69,6 +75,11 @@ export interface SessionSendSubsystem {
   interrupt(sessionId: string): Promise<SessionView>;
   /** Every send this session's ledger holds, newest first, each with the fate proven so far. */
   sends(sessionId: string): Promise<readonly SendRecord[]>;
+  /**
+   * The page of sends `query` asks for, cut without reading the whole ledger (`daemon/lib/delivery/sends-pager.ts`); the
+   * answer is the one `sendPage` gives over `sends`. Left out by a subsystem that cannot: its page is cut from `sends`.
+   */
+  sendsPage?(sessionId: string, query: SendPageQuery): Promise<SendPage | undefined>;
   /** One send by its id — how a sender learns where its message settled. */
   sendStatus(sessionId: string, sendId: string, options?: SendStatusWait): Promise<SendRecord>;
   /**
@@ -345,7 +356,10 @@ async function sendsPage(subsystem: SessionSendSubsystem, context: RouteContext)
   const query = pageQuery(context, 'sends');
   const sessionId = pathSessionId(context);
   const build = async (): Promise<ApiResponse> => {
-    const page = sendPage(await subsystem.sends(sessionId).catch(refuse), query);
+    const page =
+      subsystem.sendsPage === undefined
+        ? sendPage(await subsystem.sends(sessionId).catch(refuse), query)
+        : await subsystem.sendsPage(sessionId, query).catch(refuse);
     if (page === undefined) throw new ApiError(400, `no send ${query.before ?? ''} to page from`, 'invalid_cursor');
     return jsonResponse(page);
   };

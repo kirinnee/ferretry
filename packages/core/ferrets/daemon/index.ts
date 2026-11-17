@@ -17,7 +17,6 @@ import {
   FerretStopping,
   FerretStarted,
   FerretFiles,
-  FerretHistoryFiles,
   type FerretIngestEvidence,
   type FerretRecord,
   type FerretState,
@@ -52,7 +51,6 @@ import { turnWatchFailureFields } from './modules/turn-watch.ts';
 import { outdatedMark } from './lib/fleet-list/outdated-mark.ts';
 import { FerretsService, type FerretsPorts } from './lib/ferrets/service.ts';
 import { helperDecision, noHelperAdmission } from './lib/ferrets/helper-admission.ts';
-import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
 import { stopUnconfirmedIn } from './lib/ferrets/restart-guards.ts';
 import { type SessionId, tryParseSessionId } from './lib/session-id.ts';
 import { DEFAULT_CALLSIGN_POOL, NameAllocator, SystemCallsignIssuer } from './lib/names/index.ts';
@@ -155,38 +153,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     new KeyedSerialExecutor(),
   );
 
-  /**
-   * Today's journal append (`storage/session-storage.ts` `append`) without its index: the next sequence after the
-   * last readable event. One chain per ferret; a journal that cannot be read to its end is not appended to.
-   */
   // The journal stream's source: each ferret's history.jsonl, and the append edge below.
   const eventSource = new HistoryEventSource(kernel.state, () => registry.list().map(ferret => ferret.id));
-  const historyQueue = new KeyedSerialExecutor();
-  const appendHistory = async (ferret: FerretId, type: string, data: Readonly<Record<string, unknown>>) =>
-    await historyQueue
-      .run(ferret, async () => {
-        let last = 0;
-        for await (const line of kernel.state.lines(FerretHistoryFiles, ferret)) {
-          const event = parseSessionEvent(line, ferret as unknown as SessionId);
-          if (event !== undefined) last = Math.max(last, event.sequence);
-        }
-        const event = createSessionEvent(ferret as unknown as SessionId, last, kernel.clock.now(), type, data);
-        await kernel.state.append(FerretHistoryFiles, encodeSessionEvent(event), ferret);
-        eventSource.publish({
-          sequence: event.sequence,
-          sessionId: event.sessionId,
-          time: event.time,
-          type: event.type,
-          data: event.data,
-        });
-      })
-      .catch((error: unknown) =>
-        log.warn('a ferret history event could not be recorded', {
-          ferret,
-          type,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
 
   /** A ferret's `waiting.json`, or an empty one: what it declared, the time credited for it, and when it finished. */
   const parkedFile = async (ferret: FerretId) => {
@@ -204,6 +172,30 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     });
     throw error;
   });
+  /**
+   * A ferret's history event, without the session index. The storage's own `appendHistory` owns the sequence: it runs in
+   * the same session lane as `sessionStore.append`, so a ferret's history and its session journal never share a number.
+   */
+  const appendHistory = async (ferret: FerretId, type: string, data: Readonly<Record<string, unknown>>) =>
+    await sessionStore
+      .appendHistory(ferret as unknown as SessionId, type, data)
+      .then(event => {
+        eventSource.publish({
+          sequence: event.sequence,
+          sessionId: event.sessionId,
+          time: event.time,
+          type: event.type,
+          data: event.data,
+        });
+      })
+      .catch((error: unknown) =>
+        log.warn('a ferret history event could not be recorded', {
+          ferret,
+          type,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+
   // ONE executor for the callsign ledger: what makes a claim atomic across concurrent starts and renames.
   const callsignSerial = new KeyedSerialExecutor();
   // What the fleet holds: its records, and the sessions the archive took out of the live set (they keep their name for the

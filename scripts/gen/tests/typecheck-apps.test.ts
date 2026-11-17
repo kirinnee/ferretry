@@ -71,12 +71,10 @@ test('coverage accepts a documented exact pending-port file and checks neighbour
   }`);
   source(dir, pending, 'export {};\n');
   source(dir, checkedPath, 'export {};\n');
+  mkdirSync(join(dir, 'packages/plugins/example/ports-pending/app-ports'), { recursive: true });
   writeFileSync(
-    join(dir, 'ports-pending.json'),
-    JSON.stringify({
-      format: 1,
-      pendingAppPorts: [{ plugin: 'example', path: pending, reason: 'owner contract member' }],
-    }),
+    join(dir, 'packages/plugins/example/ports-pending/app-ports/owner-contract-member.json'),
+    JSON.stringify({ plugin: 'example', path: pending, reason: 'owner contract member' }),
   );
   const checked = Bun.spawnSync(['bun', coverage], {
     cwd: dir,

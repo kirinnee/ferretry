@@ -497,6 +497,7 @@ describe('POST /v1/warden/run answers a ferret through the projection', () => {
     investigate: unreached,
     leave: unreached,
     nudgeSweep: unreached,
+    launched: unreached,
     arm: unreached,
   };
   const routes = wardenRoutes(subsystem, { mayTouch: (_caller, target) => target === MINE || target === HELPER });

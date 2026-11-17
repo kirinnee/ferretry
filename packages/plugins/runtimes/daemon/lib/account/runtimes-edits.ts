@@ -33,6 +33,11 @@ export function ownedFileBodies(model: AccountModel): ReadonlyMap<string, Body> 
   files.set('runtimes.yaml', {
     ...(model.machine.defaultRuntime === undefined ? {} : { defaultRuntime: model.machine.defaultRuntime }),
     autoResume: model.machine.autoResume,
+    // Written only off its default, so a machine that never set them keeps a file that never names them.
+    ...(model.machine.browserPorts === 'random' ? {} : { browserPorts: model.machine.browserPorts }),
+    ...(model.machine.browserFirewallFailure === 'warn'
+      ? {}
+      : { browserFirewallFailure: model.machine.browserFirewallFailure }),
   });
   for (const [name, runtime] of Object.entries(model.runtimes)) {
     files.set(`runtimes/${name}.yaml`, {
@@ -77,12 +82,17 @@ export function ownedFileBodies(model: AccountModel): ReadonlyMap<string, Body> 
 }
 
 /** The machine settings Runtimes' own `runtimes.yaml` holds (see {@link ownedFileBodies}); every other one has no file here. */
-const OWNED_MACHINE_KEYS: ReadonlySet<string> = new Set(['defaultRuntime', 'autoResume']);
+const OWNED_MACHINE_KEYS: ReadonlySet<string> = new Set([
+  'defaultRuntime',
+  'autoResume',
+  'browserPorts',
+  'browserFirewallFailure',
+]);
 
 /**
- * The parts of the model `next` moves that no file of Runtimes holds: a machine setting other than the default runtime and
- * auto-resume (agent permissions, what agents may control, the browser settings, agenda mode, the usage feed, the time
- * zone) and the `advanced` block. {@link ownedFileEdits} renders none of them, so a change carrying one would be reported
+ * The parts of the model `next` moves that no file of Runtimes holds: a machine setting other than the default runtime,
+ * auto-resume and the two loopback-port settings (agent permissions, what agents may control, browser mode and proxy,
+ * agenda mode, the usage feed, the time zone) and the `advanced` block. {@link ownedFileEdits} renders none of them, so a change carrying one would be reported
  * as applied and save nothing, while the homes it published were built from a model that was never saved (a permission
  * mode loosened with no owner hold). Such a change is refused instead.
  */

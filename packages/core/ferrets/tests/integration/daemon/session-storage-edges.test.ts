@@ -96,6 +96,29 @@ describe('session storage — the journal and what listens to it', () => {
     should(heard.map(event => event.type)).deepEqual(['first']);
   });
 
+  it('should give two concurrent writers of one journal (a session append and a bare history append) distinct, ordered sequences', async () => {
+    const { storage, raw } = await openStorage();
+    const id = parseSessionId('two-writers');
+
+    const events = await Promise.all([
+      storage.append(id, 'session-a', {}),
+      storage.appendHistory(id, 'history-b', {}),
+      storage.append(id, 'session-c', {}),
+      storage.appendHistory(id, 'history-d', {}),
+      storage.appendHistory(id, 'history-e', {}),
+    ]);
+
+    should(events.map(event => event.sequence)).deepEqual([1, 2, 3, 4, 5]);
+    const written = await raw.records(FerretHistoryFiles, id);
+    should(written.records.map(event => [event.sequence, event.type])).deepEqual([
+      [1, 'session-a'],
+      [2, 'history-b'],
+      [3, 'session-c'],
+      [4, 'history-d'],
+      [5, 'history-e'],
+    ]);
+  });
+
   it('should prove a journal is present, and refuse a session whose journal is lost', async () => {
     const { storage, raw } = await openStorage();
     const withJournal = parseSessionId('has-journal');

@@ -25,6 +25,9 @@ import { versionArchiveName } from '../../lib/state.ts';
 const tablesIn = (db: SqliteHandle): number =>
   db.query<{ n: number }>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table'")[0]?.n ?? 0;
 
+/** Words per INSERT: far under SQLite's limit of bound values per statement, and large enough to be a handful of calls. */
+const WORDS_PER_STATEMENT = 200;
+
 const summaryOf = (version: AgendaVersion): AgendaVersionSummary => ({
   version: version.version,
   at: version.at,
@@ -47,11 +50,23 @@ interface CachedVersion {
  * version. The caller serializes writes per session. Connections close after each operation; at most one read version
  * is cached. The kernel opens each one at format 1 (`PRAGMA user_version`) and refuses any other, never upgrading or
  * emptying it; the tables are built only in a file that holds none.
+ *
+ * Each draft is its own archive file (create, WAL, commit, checkpoint on close: tens of milliseconds of synchronous
+ * disk work), so `record` gives the event loop a turn between drafts: a ledger of a few hundred drafts held the whole
+ * daemon for 3.99 s on a real-size home when it did not. A single archive is still one synchronous write, so its words
+ * go in a few multi-row statements.
  */
 export class SqliteAgendaVersionStore implements AgendaVersionStore {
   private cached: CachedVersion | undefined;
 
-  constructor(private readonly state: Pick<StatePort, 'sqlite' | 'list'>) {}
+  /**
+   * `yieldToLoop` gives whatever waits on the event loop (a request, a stream, a timer) a turn; the daemon passes the
+   * kernel clock's, so the default does not yield (a test with a virtual clock must not wait on a real one).
+   */
+  constructor(
+    private readonly state: Pick<StatePort, 'sqlite' | 'list'>,
+    private readonly yieldToLoop: () => Promise<void> = async () => undefined,
+  ) {}
 
   private name(sessionId: string, id: AgendaId): string {
     if (!isAgendaSessionId(sessionId)) throw new Error(`not a valid agenda session id: ${sessionId}`);
@@ -92,16 +107,27 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
       JSON.stringify(summaryOf(snapshot)),
     ]);
     if (inserted.changes === 0) return;
-    for (const [position, entry] of (conversation ?? snapshot.item.conversation ?? []).entries()) {
+    const words = (conversation ?? snapshot.item.conversation ?? []).map(entry => {
       const text = JSON.stringify(AgendaConversationEntrySchema.parse(entry));
-      const hash = createHash('sha256').update(text).digest('hex');
-      db.run('INSERT OR IGNORE INTO words VALUES (?, ?)', [hash, text]);
-      db.run('INSERT INTO version_words VALUES (?, ?, ?)', [snapshot.version, position, hash]);
+      return { text, hash: createHash('sha256').update(text).digest('hex') };
+    });
+    // A few multi-row statements, not two per word: a thread of thousands of words is a few calls into SQLite.
+    for (let from = 0; from < words.length; from += WORDS_PER_STATEMENT) {
+      const chunk = words.slice(from, from + WORDS_PER_STATEMENT);
+      db.run(
+        `INSERT OR IGNORE INTO words VALUES ${chunk.map(() => '(?, ?)').join(', ')}`,
+        chunk.flatMap(word => [word.hash, word.text]),
+      );
+      db.run(
+        `INSERT INTO version_words VALUES ${chunk.map(() => '(?, ?, ?)').join(', ')}`,
+        chunk.flatMap((word, offset) => [snapshot.version, from + offset, word.hash]),
+      );
     }
   }
 
   async record(sessionId: string, drafts: readonly AgendaVersionDraft[]): Promise<void> {
-    for (const draft of drafts) {
+    for (const [index, draft] of drafts.entries()) {
+      if (index > 0) await this.yieldToLoop();
       const db = this.open(sessionId, draft.entry.item.id);
       try {
         db.transaction(() => {

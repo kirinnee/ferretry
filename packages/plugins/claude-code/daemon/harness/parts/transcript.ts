@@ -129,6 +129,9 @@ export const transcriptPart = (
     read: async (ferret, after, limit) => {
       const all = await entries(core, ferret);
       const from = after === undefined ? 0 : all.findIndex(entry => entry.id === after) + 1;
+      // An `after` this transcript no longer holds (compaction rewrote it, or it is older than the window) is a cursor
+      // that is gone: nothing new, never the whole conversation again (the Codex reader answers the same).
+      if (after !== undefined && from === 0) return [];
       return all.slice(from, limit === undefined ? undefined : from + limit);
     },
     readCovering: async (ferret, since) => {

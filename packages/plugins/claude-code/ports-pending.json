@@ -1,9 +1,0 @@
-{
-  "format": 1,
-  "pending": ["claude-code"],
-  "pendingReasons": {
-    "claude-code": [
-      "[own] GAP(claude-code): a fast start that names no model is judged on the model of the runtime it names (login catalog's default, else the model set's, via RuntimesPort); with no runtime named (harness or login start), a harness-default model set and no catalog default, or Runtimes off, the daemon cannot see the account's default, so that start is allowed and a wrong /fast on is answered by the CLI (owner: nelly)"
-    ]
-  }
-}

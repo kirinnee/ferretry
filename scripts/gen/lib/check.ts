@@ -16,7 +16,7 @@ export interface CheckContext {
   model(): Promise<Model>;
   /** `--package <id>`: restrict findings to one package where the check can. */
   readonly packageId?: string;
-  /** The git ref `ports-pending.json` may not grow from (default `origin/rebuild/5.0`). */
+  /** The git ref the `ports-pending/` ledger may not grow from (default `origin/rebuild/5.0`). */
   readonly base?: string;
   /** Check rows owned by pending packages too (`guarantees`). */
   readonly strict?: boolean;

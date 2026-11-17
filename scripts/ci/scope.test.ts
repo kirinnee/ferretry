@@ -632,6 +632,9 @@ test('a ports-pending record or a plugin manifest is never scopable, wherever it
     'packages/plugins/a/ports-pending.json',
     'packages/plugins/a/daemon/ports-pending.json',
     'packages/plugins/a/ports-pending/b.json',
+    'packages/plugins/a/ports-pending/some-gap.txt',
+    'packages/plugins/a/ports-pending/halves/app.txt',
+    'ports-pending/unwired/hook-x.json',
     'packages/plugins/a/ports-pending.yaml',
     'packages/core/kernel/ports-pending.json',
   ])

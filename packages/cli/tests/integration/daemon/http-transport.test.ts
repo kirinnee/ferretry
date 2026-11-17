@@ -195,7 +195,7 @@ class HandSocket implements FeedSocket {
   onopen: (() => void) | null = null;
   onmessage: ((event: { readonly data: unknown }) => void) | null = null;
   onclose: ((event: { readonly reason?: string; readonly code?: number }) => void) | null = null;
-  onerror: (() => void) | null = null;
+  onerror: ((event?: { readonly message?: string }) => void) | null = null;
   readonly sent: (string | Uint8Array)[] = [];
   readonly closed: [number | undefined, string | undefined][] = [];
   send(frame: string | Uint8Array): void {
@@ -375,17 +375,20 @@ describe('a daemon stream', () => {
     http.socket('/a', listeners);
     http.socket('/b', listeners);
     http.socket('/c', listeners);
+    http.socket('/d', listeners);
     await settle();
     sockets[0]?.onclose?.({ code: 4001, reason: 'denied' });
     sockets[1]?.onclose?.({ code: 1006 });
     sockets[2]?.onerror?.();
     sockets[2]?.onerror?.();
     sockets[2]?.onopen?.();
+    sockets[3]?.onerror?.({ message: "WebSocket connection to 'ws://127.0.0.1:1/d' failed: connect ECONNREFUSED" });
 
     should(closes).eql([
       ['WebSocket stream closed unexpectedly: denied (code 4001)', 4001],
       ['WebSocket stream closed unexpectedly: code 1006', 1006],
       ['WebSocket stream failed', undefined],
+      ['WebSocket stream failed: connect ECONNREFUSED', undefined],
     ]);
   });
 
@@ -448,5 +451,47 @@ describe('the default event feed socket', () => {
 
     should(events).eql([{ name: 'hello', payload: 1 }]);
     should(seen).eql(['Bearer test-credential']);
+  });
+
+  it('should say why a real daemon refused the stream upgrade, instead of a bare failure', async () => {
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: () => Response.json({ error: 'no ferret kraig', code: 'not-found' }, { status: 404 }),
+      websocket: { message: () => undefined },
+    });
+    closers.push(() => server.stop(true));
+    const http = transport(`http://127.0.0.1:${String(server.port)}`);
+    const closes: [string, number | undefined][] = [];
+
+    http.socket('/v1/events?sessionId=kraig', {
+      onFrame: () => undefined,
+      onClose: (reason, code) => closes.push([reason, code]),
+    });
+    for (let waited = 0; waited < 100 && closes.length === 0; waited += 1) await Bun.sleep(20);
+
+    should(closes).eql([['WebSocket stream failed: the daemon refused the stream (HTTP 404)', undefined]]);
+  });
+
+  it('should show the reason and code a real daemon closed an accepted stream with', async () => {
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: (request, bun) => (bun.upgrade(request) ? undefined : new Response('no', { status: 400 })),
+      websocket: {
+        open: socket => socket.close(4401, 'this session is no longer admitted'),
+        message: () => undefined,
+      },
+    });
+    closers.push(() => server.stop(true));
+    const http = transport(`http://127.0.0.1:${String(server.port)}`);
+    const closes: [string, number | undefined][] = [];
+
+    http.socket('/v1/events', { onFrame: () => undefined, onClose: (reason, code) => closes.push([reason, code]) });
+    for (let waited = 0; waited < 100 && closes.length === 0; waited += 1) await Bun.sleep(20);
+
+    should(closes).eql([
+      ['WebSocket stream closed unexpectedly: this session is no longer admitted (code 4401)', 4401],
+    ]);
   });
 });
