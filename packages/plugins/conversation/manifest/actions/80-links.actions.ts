@@ -38,6 +38,8 @@ export default fragment({
         },
       ],
       options: [
+        { flag: '--limit <n>', help: 'how many conversations to list', hidden: true },
+        { flag: '--source <source>', help: 'only conversations from this source', hidden: true },
         { flag: '--harness <harness>', help: 'only this harness (choices: "claude", "codex")' },
         {
           flag: '--since <duration>',

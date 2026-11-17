@@ -1,4 +1,4 @@
-import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, panel, route, settingsTab, refusedItemOptions, verb } from '@ferretry/kernel/manifest';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { ACTIONS_ROW_SLOT, FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
@@ -186,7 +186,11 @@ export default definePlugin({
       verb('mcp ls', {
         summary: 'list the MCP servers a ferret sees, by scope, with approval and sign-in',
         args: [],
-        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+        options: [
+          { flag: '--session <id>', help: 'list them as this ferret sees them', hidden: true },
+          { flag: '--machine', help: 'list them for the whole machine instead of one ferret', hidden: true },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
       }),
       verb('mcp check', {
         summary: 'connect to one MCP server and list its tools, by name or id',
@@ -208,6 +212,7 @@ export default definePlugin({
         summary: 'add an MCP server item',
         args: [{ name: 'name', help: 'the MCP server item’s name' }],
         options: [
+          ...refusedItemOptions(['command', 'arg', 'url', 'env']),
           { flag: '--file <path>', help: "the item's text, from a local file (- reads standard input)" },
           { flag: '--command <command>', help: 'MCP: the command to run' },
           { flag: '--arg <arg>', help: 'MCP: one argument; repeat it' },
@@ -227,6 +232,7 @@ export default definePlugin({
         summary: 'change an MCP server item; every profile and runtime that uses it changes too',
         args: [{ name: 'name', help: 'the MCP server item’s name' }],
         options: [
+          ...refusedItemOptions(['command', 'arg', 'url', 'env']),
           { flag: '--file <path>', help: "the item's text, from a local file (- reads standard input)" },
           { flag: '--command <command>', help: 'MCP: the command to run' },
           { flag: '--arg <arg>', help: 'MCP: one argument; repeat it' },

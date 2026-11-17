@@ -147,7 +147,18 @@ const onboardingManifest = definePlugin({
   api: 5,
   core: false,
   kinds: [],
-  actions: { cli: [verb('onboard', { summary: 'first run' })] },
+  actions: {
+    cli: [
+      verb('onboard', {
+        summary: 'first run',
+        options: [
+          { flag: '-y, --yes', help: 'skip the questions' },
+          { flag: '--check', help: 'change nothing' },
+          { flag: '--json', help: 'print JSON' },
+        ],
+      }),
+    ],
+  },
 });
 
 /** The real router, over a fake controller and fake `pair` / `onboard` halves, all writing to one ordered log. */

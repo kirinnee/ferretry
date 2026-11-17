@@ -576,7 +576,7 @@ export default definePlugin({
           },
           { flag: '--unbound <placeholder>', help: 'leave a placeholder unfilled (repeatable) (default: [])' },
           { flag: '--older', help: 'allow installing an older version than the one installed' },
-          { flag: '--yes', help: 'do not ask before installing' },
+          { flag: '-y, --yes', help: 'do not ask before installing' },
           { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
         ],
       }),
@@ -589,7 +589,7 @@ export default definePlugin({
         summary: 'remove one install, and only the files it wrote',
         args: [{ name: 'installId', help: 'an install id from "catalog installs"' }],
         options: [
-          { flag: '--yes', help: 'do not ask before removing' },
+          { flag: '-y, --yes', help: 'do not ask before removing' },
           { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
         ],
       }),

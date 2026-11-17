@@ -124,17 +124,38 @@ export default definePlugin({
           { name: 'path', help: 'the key to change, e.g. nav.side' },
           { name: 'value', help: 'the new value', variadic: true },
         ],
-        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+        options: [
+          {
+            flag: '--device <id>',
+            help: 'refused with a sentence: a layout for one device is chosen in the app on that device',
+            hidden: true,
+          },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
       }),
       verb('layout use', {
         summary: 'switch to another installed layout',
         args: [{ name: 'name', help: 'the layout’s name' }],
-        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+        options: [
+          {
+            flag: '--device <id>',
+            help: 'refused with a sentence: a layout for one device is chosen in the app on that device',
+            hidden: true,
+          },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
       }),
       verb('layout reset', {
         summary: 'drop your changes and use the built-in default',
         args: [],
-        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+        options: [
+          {
+            flag: '--device <id>',
+            help: 'refused with a sentence: a layout for one device is chosen in the app on that device',
+            hidden: true,
+          },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
       }),
       verb('layout save', {
         summary: 'save the layout in use as a new, shareable layout item',
@@ -149,7 +170,14 @@ export default definePlugin({
       verb('theme use', {
         summary: 'switch theme',
         args: [{ name: 'name', help: 'the theme’s name' }],
-        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+        options: [
+          {
+            flag: '--device <id>',
+            help: 'refused with a sentence: a layout for one device is chosen in the app on that device',
+            hidden: true,
+          },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
       }),
     ],
   },

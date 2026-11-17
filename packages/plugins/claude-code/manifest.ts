@@ -1,4 +1,12 @@
-import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import {
+  appAction,
+  definePlugin,
+  panel,
+  route,
+  settingsTab,
+  refusedItemOptions,
+  verb,
+} from '@ferretry/kernel/manifest';
 import {
   CLAUDE_CODE,
   CLAUDE_CODE_AGENT_HOMES,
@@ -128,6 +136,7 @@ export default definePlugin({
         summary: 'add a settings item',
         args: [{ name: 'name', help: 'the settings item’s name' }],
         options: [
+          ...refusedItemOptions([]),
           { flag: '--file <path>', help: "the item's text, from a local file" },
           { flag: '--dry-run', help: 'show what would change, and change nothing' },
           { flag: '-y, --yes', help: 'go ahead without asking' },
@@ -138,6 +147,7 @@ export default definePlugin({
         summary: 'change a settings item; every runtime that uses it changes too',
         args: [{ name: 'name', help: 'the settings item’s name' }],
         options: [
+          ...refusedItemOptions([]),
           { flag: '--file <path>', help: "the item's text, from a local file" },
           { flag: '--dry-run', help: 'show what would change, and change nothing' },
           { flag: '-y, --yes', help: 'go ahead without asking' },
@@ -168,6 +178,7 @@ export default definePlugin({
         summary: 'add a hooks item',
         args: [{ name: 'name', help: 'the hooks item’s name' }],
         options: [
+          ...refusedItemOptions([]),
           { flag: '--file <path>', help: "the item's text, from a local file" },
           { flag: '--dry-run', help: 'show what would change, and change nothing' },
           { flag: '-y, --yes', help: 'go ahead without asking' },
@@ -178,6 +189,7 @@ export default definePlugin({
         summary: 'change a hooks item; every runtime that uses it changes too',
         args: [{ name: 'name', help: 'the hooks item’s name' }],
         options: [
+          ...refusedItemOptions([]),
           { flag: '--file <path>', help: "the item's text, from a local file" },
           { flag: '--dry-run', help: 'show what would change, and change nothing' },
           { flag: '-y, --yes', help: 'go ahead without asking' },

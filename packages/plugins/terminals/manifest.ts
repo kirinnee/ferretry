@@ -356,6 +356,7 @@ export default definePlugin({
         summary: 'list the terminals in the session',
         args: [],
         options: [
+          { flag: '--ferret <id>', help: 'the same as --session', hidden: true },
           {
             flag: '-s, --session <id>',
             help: 'act on this session yourself; without it, act as the agent session this runs inside',
@@ -374,6 +375,7 @@ export default definePlugin({
           },
         ],
         options: [
+          { flag: '--ferret <id>', help: 'the same as --session', hidden: true },
           {
             flag: '-s, --session <id>',
             help: 'act on this session yourself; without it, act as the agent session this runs inside',
@@ -397,6 +399,7 @@ export default definePlugin({
           },
         ],
         options: [
+          { flag: '--ferret <id>', help: 'the same as --session', hidden: true },
           {
             flag: '-s, --session <id>',
             help: 'act on this session yourself; without it, act as the agent session this runs inside',
@@ -408,6 +411,7 @@ export default definePlugin({
         summary: 'print the last lines of a terminal',
         args: [{ name: 'name', help: "the terminal's name or id" }],
         options: [
+          { flag: '--ferret <id>', help: 'the same as --session', hidden: true },
           {
             flag: '-s, --session <id>',
             help: 'act on this session yourself; without it, act as the agent session this runs inside',
@@ -419,6 +423,7 @@ export default definePlugin({
         summary: 'wait until text appears or the running command ends; exits 1 on timeout',
         args: [{ name: 'name', help: "the terminal's name or id" }],
         options: [
+          { flag: '--ferret <id>', help: 'the same as --session', hidden: true },
           {
             flag: '-s, --session <id>',
             help: 'act on this session yourself; without it, act as the agent session this runs inside',
@@ -432,6 +437,7 @@ export default definePlugin({
         summary: 'close a terminal, or with --all-finished every terminal a finished ferret left open',
         args: [{ name: 'name', help: "the terminal's name or id", optional: true }],
         options: [
+          { flag: '--ferret <id>', help: 'the same as --session', hidden: true },
           {
             flag: '-s, --session <id>',
             help: 'act on this session yourself; without it, act as the agent session this runs inside',
@@ -455,6 +461,7 @@ export default definePlugin({
           { name: 'message', help: 'what the owner should do there; never a secret', optional: true, variadic: true },
         ],
         options: [
+          { flag: '--ferret <id>', help: 'the same as --session', hidden: true },
           {
             flag: '-s, --session <id>',
             help: 'act on this session yourself; without it, act as the agent session this runs inside',
@@ -465,6 +472,7 @@ export default definePlugin({
         summary: 'take a terminal over from the ferret until you hand it back',
         args: [{ name: 'name', help: "the terminal's name or id" }],
         options: [
+          { flag: '--ferret <id>', help: 'the same as --session', hidden: true },
           {
             flag: '-s, --session <id>',
             help: 'act on this session yourself; without it, act as the agent session this runs inside',
@@ -475,6 +483,7 @@ export default definePlugin({
         summary: 'hand a terminal you took over back to the ferret',
         args: [{ name: 'name', help: "the terminal's name or id" }],
         options: [
+          { flag: '--ferret <id>', help: 'the same as --session', hidden: true },
           {
             flag: '-s, --session <id>',
             help: 'act on this session yourself; without it, act as the agent session this runs inside',
@@ -485,6 +494,7 @@ export default definePlugin({
         summary: 'let the ferret use a terminal you opened',
         args: [{ name: 'name', help: "the terminal's name or id" }],
         options: [
+          { flag: '--ferret <id>', help: 'the same as --session', hidden: true },
           {
             flag: '-s, --session <id>',
             help: 'act on this session yourself; without it, act as the agent session this runs inside',
@@ -495,6 +505,7 @@ export default definePlugin({
         summary: 'show which terminals a ferret is driving, taken over, or handed to it',
         args: [],
         options: [
+          { flag: '--ferret <id>', help: 'the same as --session', hidden: true },
           {
             flag: '-s, --session <id>',
             help: 'act on this session yourself; without it, act as the agent session this runs inside',

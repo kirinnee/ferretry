@@ -456,6 +456,11 @@ export default definePlugin({
         summary: 'write a task’s progress: now, done so far, next',
         args: [{ name: 'id', help: 'the task, like &F21' }],
         options: [
+          {
+            flag: '--file <path>',
+            help: 'read the progress from a YAML or JSON file (- reads standard input)',
+            hidden: true,
+          },
           { flag: '--now <text>', help: 'what is happening right now' },
           { flag: '--done <text>', help: 'what is done so far; repeat for more' },
           { flag: '--next <text>', help: 'what comes next; repeat for more' },

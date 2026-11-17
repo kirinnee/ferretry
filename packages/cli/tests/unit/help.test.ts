@@ -209,7 +209,9 @@ describe('help names the flags the handlers read', () => {
   };
   const optionsSection = (line: string): string => helpOf(line).split('Options:')[1] ?? '';
   const flagsOf = (line: string): readonly string[] =>
-    (table.entries.find(candidate => candidate.line === line)?.options ?? []).map(option => option.flag);
+    (table.entries.find(candidate => candidate.line === line)?.options ?? [])
+      .filter(option => option.hidden !== true)
+      .map(option => option.flag);
 
   const SHARED = [
     '--mode <mode>',

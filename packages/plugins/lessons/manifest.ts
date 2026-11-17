@@ -208,7 +208,11 @@ export default definePlugin({
       verb('lesson', {
         summary: 'the lessons board: what was learned from your corrections (pending ones first)',
         args: [],
-        options: [{ flag: '--state <state>', help: 'only lessons in this state' }],
+        options: [
+          { flag: '--all', help: 'every state, not just the pending ones', hidden: true },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering', hidden: true },
+          { flag: '--state <state>', help: 'only lessons in this state' },
+        ],
       }),
       verb('lesson ls', {
         summary: 'the lessons board, pending ones first (the same as bare lesson)',
@@ -270,6 +274,7 @@ export default definePlugin({
         summary: 'an estimated read of older ferrets for lessons; never starts by itself',
         args: [],
         options: [
+          { flag: '--ferrets <ids>', help: 'the same as --sessions', hidden: true },
           { flag: '--estimate', help: 'what a scan would cost, without reading anything (the default)' },
           { flag: '--start', help: 'actually run the scan' },
           {

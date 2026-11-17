@@ -13,9 +13,10 @@
  * - A negative number (`-1`, `-0.5`, `-300,0`) is a word, never an option: `--pages -1` has the value `-1`.
  * - A repeated option becomes a list, in the order given.
  * - `--` ends options; everything after it is positional.
- * - For a verb that declares no options (or an option it does not declare), write positionals before options, or end
- *   options with `--`, when a switch is followed by a positional. A verb whose own reader knows an option is a switch
- *   still gets that word back where it was written (`swallowed`).
+ * - This parser reads ANY name; which names a verb accepts is the dispatch's to refuse (`option-guard.ts`), by the verb's
+ *   own declarations. For a verb that declares no switch, write positionals before options, or end options with `--`,
+ *   when a switch is followed by a positional. A verb whose own reader knows an option is a switch still gets that word
+ *   back where it was written (`swallowed`).
  *
  * Pure: no IO, no globals.
  */
@@ -24,7 +25,7 @@ import type { SwallowedWord, VerbInvocation, VerbOptionDecl } from '@ferretry/ke
 type OptionValue = string | boolean | readonly string[];
 
 /** The names one declared flag answers to: `-s, --session <id>` is `s` and `session`. */
-const flagNames = (flag: string): readonly string[] =>
+export const flagNames = (flag: string): readonly string[] =>
   flag
     .split(/[|,]/u)
     .map(part => (part.trim().split(/\s+/u)[0] ?? '').replace(/^-{1,2}/u, ''))

@@ -7,3 +7,4 @@
 #
 card-agenda:	the sourceRef prefix of the agenda the daemon opened for a piece of work; stored in obligations and agenda files, never renamed (O18 plan 1b)	stored
 {card}	the template placeholder over the stored ask-ref field `card` (packages/plugins/board/daemon/index.ts, the ask.sources:card title); a field name on disk, never renamed	stored
+--card	the former name of `--task` on `start` and `new`, still read for agents' old instructions and declared hidden so the shell accepts it (packages/core/ferrets/cli/verbs/start.verb.ts); goes with the step-2 rename	step2

@@ -206,7 +206,10 @@ describe('runFy', () => {
   it('V-0429 hands a plugin verb the words as typed, `--` included, beside the parsed args and options', async () => {
     const manifest = definePlugin({
       ...boardManifest,
-      actions: { ...boardManifest.actions, cli: [verb('task show')] },
+      actions: {
+        ...boardManifest.actions,
+        cli: [verb('task show', { options: [{ flag: '--with <name...>', help: 'the names to run with' }] })],
+      },
     });
     const heard: (readonly string[] | undefined)[] = [];
     const half = implementCli(manifest, {

@@ -28,6 +28,8 @@ export default fragment({
       summary: 'start a ferret on one of your agent runtimes',
       args: [{ name: 'prompt', help: 'the task prompt; required for --mode auto', optional: true, variadic: true }],
       options: [
+        { flag: '--runtime <name>', help: 'the same as --agent', hidden: true },
+        { flag: '--card <id>', help: 'the former name of --task', hidden: true },
         {
           flag: '-a, --agent <agent>',
           help: 'the runtime to run it on, such as claude-default (--runtime also works); leave it out to use this machine’s default runtime for new agents',
@@ -98,6 +100,14 @@ export default fragment({
       summary: 'start a helper ferret (Pack mode); needs --runtime <name> or --auto',
       args: [{ name: 'words', help: 'the complete brief for the helper', optional: true, variadic: true }],
       options: [
+        { flag: '-a, --agent <agent>', help: 'the same as --runtime', hidden: true },
+        { flag: '--card <id>', help: 'the former name of --task', hidden: true },
+        { flag: '-f, --file <file>', help: 'refused with a sentence: attachments belong to `start`', hidden: true },
+        {
+          flag: '--request-id <id>',
+          help: 'refused with a sentence: an idempotency key belongs to `start`',
+          hidden: true,
+        },
         {
           flag: '--runtime <name>',
           help: 'the runtime to run it on (`fy recommend` lists them); name one, or pass --auto',

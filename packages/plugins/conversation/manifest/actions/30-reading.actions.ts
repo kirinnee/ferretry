@@ -24,7 +24,10 @@ export default fragment({
     verb('logs', {
       summary: "read a ferret's conversation log",
       args: [{ name: 'id', help: 'session id' }],
-      options: [{ flag: '--turn <number>', help: 'read one explicitly bounded transcript turn' }],
+      options: [
+        { flag: '--limit <n>', help: 'how many lines or entries to read', hidden: true },
+        { flag: '--turn <number>', help: 'read one explicitly bounded transcript turn' },
+      ],
     }),
   ],
 });

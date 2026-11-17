@@ -152,6 +152,9 @@ const SHELL_VERB_LINES: readonly ShellVerbLine[] = [
       { flag: '--when-idle', help: 'wait until every turn has finished before restarting the daemon' },
       { flag: '--switch-to-profile', help: 'move a nix-shell install onto the nix profile' },
       { flag: '--report <file>', help: 'write the result of the update to this file' },
+      // The daemon's Update button starts `fy update --run --to <version> --report <file>` (update-host.ts): the one
+      // word the launch adds to the verb, read by nothing and never typed by a person.
+      { flag: '--run', help: 'how the daemon launches an update: no other meaning', hidden: true },
       JSON_OPTION,
     ],
   },
@@ -227,6 +230,7 @@ const SHELL_VERB_LINES: readonly ShellVerbLine[] = [
       { flag: '--clarify <text>', help: 'mark an answer review as needing clarification, and say what' },
       { flag: '--other <text>', help: 'answer with something that is not a listed option' },
       { flag: '--answer <text>', help: 'answer an open question in words' },
+      { flag: '--text <text>', help: 'the same as --answer', hidden: true },
       { flag: '--done', help: 'close the ask without a response' },
     ],
   },

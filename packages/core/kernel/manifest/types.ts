@@ -70,6 +70,12 @@ export interface VerbOptionDecl {
   readonly help: string;
   /** The verb refuses to run without it (`error: required option '--scope <scope>' not specified`), before any handler. */
   readonly required?: boolean;
+  /**
+   * Accepted but not listed by `--help`: a synonym, a former name an agent's old instructions still use, or a flag the
+   * verb reads only to refuse it with a sentence of its own. The shell refuses every option a verb does not declare, so an
+   * option the verb's code reads is declared — listed, or hidden.
+   */
+  readonly hidden?: boolean;
 }
 
 /** One positional argument a verb takes, as `fy <verb> --help` lists it under Arguments. */
