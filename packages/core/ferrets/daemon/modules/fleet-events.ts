@@ -32,6 +32,8 @@ const AVERAGE_JOURNAL_LINE_BYTES = 1024;
 export const backlogTailBytes = (limit: number): number =>
   Math.min(BACKLOG_TAIL_MAX_BYTES, Math.max(BACKLOG_TAIL_MIN_BYTES, limit * AVERAGE_JOURNAL_LINE_BYTES));
 const REPLAY_PAGE = 1_000;
+/** The value of `?from=` that starts a ferret's stream at the end of its journal, with no replay and no read of the journal. */
+const FROM_NOW = 'now';
 
 /** The journals as a source: replay and backlog read the ferrets' files, `publish` is the live append edge. */
 export class HistoryEventSource implements FleetEventSource {
@@ -138,13 +140,23 @@ function sole(call: CallContext, name: string): string | undefined {
 export function eventStreamScope(call: CallContext, exists: (id: string) => boolean): FleetEventStreamScope {
   for (const name of call.request.query.keys()) {
     // `ticket` is tolerated as a leftover. A `token` is not: no credential is read from a URL.
-    if (!['after', 'sessionId', 'live', 'transcript', 'tail', 'ticket'].includes(name))
+    if (!['after', 'from', 'sessionId', 'live', 'transcript', 'tail', 'ticket'].includes(name))
       throw new ApiError(400, `unknown event-stream query parameter "${name}"`, 'invalid_query');
   }
-  const rawAfter = sole(call, 'after') ?? '0';
+  const givenAfter = sole(call, 'after');
+  const rawAfter = givenAfter ?? '0';
   const after = Number(rawAfter);
   if (!/^[0-9]+$/u.test(rawAfter) || !Number.isSafeInteger(after))
     throw new ApiError(400, 'after must be a non-negative integer', 'invalid_query');
+  const rawFrom = sole(call, 'from');
+  if (rawFrom !== undefined && rawFrom !== FROM_NOW)
+    throw new ApiError(400, `from must be "${FROM_NOW}" when given`, 'invalid_query');
+  if (rawFrom !== undefined && givenAfter !== undefined)
+    throw new ApiError(
+      400,
+      'from=now starts at the end of the journal; it takes no after cursor',
+      'from_excludes_after',
+    );
   const rawLive = sole(call, 'live');
   if (rawLive !== undefined && rawLive !== SESSION_LIVE_STREAM_FLAG)
     throw new ApiError(400, `live must be "${SESSION_LIVE_STREAM_FLAG}" when given`, 'invalid_query');
@@ -154,6 +166,12 @@ export function eventStreamScope(call: CallContext, exists: (id: string) => bool
   const rawTail = sole(call, 'tail');
   const sessionId = sole(call, 'sessionId');
   if (sessionId === undefined) {
+    if (rawFrom !== undefined)
+      throw new ApiError(
+        400,
+        'from=now follows one session; add sessionId (a fleet stream has ?tail=0)',
+        'from_needs_session',
+      );
     if (after !== 0)
       throw new ApiError(
         400,
@@ -179,6 +197,7 @@ export function eventStreamScope(call: CallContext, exists: (id: string) => bool
     kind: 'session',
     sessionId,
     after,
+    ...(rawFrom === undefined ? {} : { from: FROM_NOW }),
     ...(rawLive === undefined ? {} : { live: true }),
     ...(rawTranscript === undefined ? {} : { transcript: true }),
   };

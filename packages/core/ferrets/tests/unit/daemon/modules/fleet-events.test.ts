@@ -230,6 +230,37 @@ describe('R537 the query rules are today’s', () => {
     ).toEqual({ status: 400, code: 'invalid_query' });
   });
 
+  test('from=now starts one ferret at the end of its journal, and it refuses a cursor, a fleet stream and any other word', () => {
+    expect(
+      scope([
+        ['sessionId', 'wren'],
+        ['from', 'now'],
+        ['live', '1'],
+      ]),
+    ).toEqual({ kind: 'session', sessionId: 'wren', after: 0, from: 'now', live: true });
+    expect(
+      refusal([
+        ['sessionId', 'wren'],
+        ['from', 'now'],
+        ['after', '0'],
+      ]),
+    ).toEqual({ status: 400, code: 'from_excludes_after' });
+    expect(refusal([['from', 'now']])).toEqual({ status: 400, code: 'from_needs_session' });
+    expect(
+      refusal([
+        ['sessionId', 'wren'],
+        ['from', 'start'],
+      ]),
+    ).toEqual({ status: 400, code: 'invalid_query' });
+    expect(
+      refusal([
+        ['sessionId', 'wren'],
+        ['from', 'now'],
+        ['from', 'now'],
+      ]),
+    ).toEqual({ status: 400, code: 'invalid_query' });
+  });
+
   test('an unknown parameter, a repeated one and a token in the URL are refused; a leftover ticket is tolerated', () => {
     expect(refusal([['token', 'abc']])).toEqual({ status: 400, code: 'invalid_query' });
     expect(
@@ -272,6 +303,96 @@ describe('G161 R520 the socket: replay, then the idle proof, then live appends',
     handler.close();
     source.publish({ sequence: 5, sessionId: 'wren', time: NOW, type: 'x', data: {} });
     expect(feed.frames).toHaveLength(4);
+  });
+
+  test('from=now delivers only the frames written after the open', async () => {
+    const { append, source } = world();
+    await append('wren', 40);
+    const accept = fleetEventsAccept(source, { after: () => ({ cancel: () => undefined }) }, id => id === 'wren');
+    const attach = await accept(
+      call([
+        ['sessionId', 'wren'],
+        ['from', 'now'],
+      ]),
+    );
+    const feed = downstream();
+    const handler = await attach(feed.port);
+    await handler.open();
+    const kinds = () => feed.frames.map(frame => FyEventStreamFrameSchema.parse(frame));
+    // The 40 old events are not sent; the stream only proves it is live, from the start of the sequence.
+    expect(kinds()).toEqual([
+      { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 'wren', after: 0 } },
+    ]);
+    source.publish({ sequence: 41, sessionId: 'wren', time: NOW, type: 'session.turn', data: { n: 41 } });
+    source.publish({ sequence: 3, sessionId: 'oak', time: NOW, type: 'session.turn', data: { n: 3 } });
+    const after = kinds();
+    expect(after.map(frame => frame.kind)).toEqual(['idle', 'event']);
+    expect(after.at(-1)).toMatchObject({ kind: 'event', event: { sequence: 41, sessionId: 'wren' } });
+    handler.close();
+  });
+
+  test('from=now reads no journal bytes before the end: opening one asks the journal port for nothing', async () => {
+    const { append, port } = world();
+    await append('wren', 40);
+    const reads: string[] = [];
+    const counted = new HistoryEventSource(
+      {
+        lines: (...args) => (reads.push('lines'), port.lines(...args)),
+        tail: (...args) => (reads.push('tail'), port.tail(...args)),
+      },
+      () => ['wren'],
+    );
+    const open = async (query: [string, string][]) => {
+      const accept = fleetEventsAccept(counted, { after: () => ({ cancel: () => undefined }) }, id => id === 'wren');
+      const handler = await (await accept(call(query)))(downstream().port);
+      await handler.open();
+      handler.close();
+    };
+    await open([
+      ['sessionId', 'wren'],
+      ['from', 'now'],
+      ['live', '1'],
+      ['transcript', '1'],
+    ]);
+    expect(reads).toEqual([]);
+    // The control: any cursor reads the journal to find its place, which is the cost from=now removes.
+    await open([
+      ['sessionId', 'wren'],
+      ['after', String(Number.MAX_SAFE_INTEGER)],
+    ]);
+    expect(reads).toEqual(['lines']);
+  });
+
+  test('a large journal opens in O(1): the open does the same work for 10 events as for 5 000', async () => {
+    const small = world();
+    const large = world();
+    await small.append('wren', 10);
+    await large.append('wren', 5_000);
+    const costOf = async (w: ReturnType<typeof world>) => {
+      let reads = 0;
+      const counted = new HistoryEventSource(
+        {
+          lines: (...args) => (reads++, w.port.lines(...args)),
+          tail: (...args) => (reads++, w.port.tail(...args)),
+        },
+        () => ['wren'],
+      );
+      const accept = fleetEventsAccept(counted, { after: () => ({ cancel: () => undefined }) }, () => true);
+      const feed = downstream();
+      const handler = await (
+        await accept(
+          call([
+            ['sessionId', 'wren'],
+            ['from', 'now'],
+          ]),
+        )
+      )(feed.port);
+      await handler.open();
+      handler.close();
+      return { reads, frames: feed.frames.length };
+    };
+    expect(await costOf(large)).toEqual(await costOf(small));
+    expect(await costOf(large)).toEqual({ reads: 0, frames: 1 });
   });
 
   test('a client frame ends the stream: it is server-only', async () => {

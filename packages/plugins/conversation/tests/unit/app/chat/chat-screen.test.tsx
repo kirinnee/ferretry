@@ -453,7 +453,7 @@ describe('the live event stream, as the screen wires it', () => {
     expect(opened[0]?.key).toBe(EVENTS);
     expect(opened[0]?.query).toEqual({
       sessionId: 'shared',
-      after: String(Number.MAX_SAFE_INTEGER),
+      from: 'now',
       live: '1',
       transcript: '1',
     });
@@ -463,16 +463,16 @@ describe('the live event stream, as the screen wires it', () => {
     expect(opened[0]?.closed).toBe(true);
   });
 
-  test('a chat open asks for only new frames: a cursor past every journal event, never the journal from the start', async () => {
+  test('a chat open asks for only new frames: from now, never the journal from the start and no cursor to scan to', async () => {
     const client = daemon(() => '');
     const opened = withSocket(client);
     await open(client, 'shared');
     await waitFor(() => opened.length > 0, 'the stream to open');
 
     const query = opened[0]?.query ?? {};
-    // Past any sequence a journal can reach, so the daemon's replay is empty; "0" or no `after` would replay it all.
-    expect(Number(query['after'])).toBe(Number.MAX_SAFE_INTEGER);
-    expect(Number.isSafeInteger(Number(query['after']))).toBe(true);
+    // `from=now` starts at the end of the journal without reading it; any `after` makes the daemon scan to find the place.
+    expect(query['from']).toBe('now');
+    expect(query).not.toHaveProperty('after');
     // `tail` is the fleet stream's: with a session id the daemon refuses it.
     expect(query).not.toHaveProperty('tail');
   });

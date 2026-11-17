@@ -2089,6 +2089,13 @@ list only when an event says something moved. `tail` on a session stream is refu
 (`tail_needs_fleet`); that stream resumes from `after`. A daemon that predates `tail` refuses it as
 an unknown parameter, so a reader decides from the daemon's version (`x-fy-version`) whether to send it.
 
+**A session feed may start at its end.** `?from=now` on a per-session stream (`/v1/events?sessionId=…&from=now`)
+starts at the journal's end without reading the journal: nothing is replayed, only events appended after the open
+are sent, and the opening proof's `after` is 0 until one arrives, so the open costs the same for a long
+journal as a short one. A reader that only wants the `live` and `transcript` frames (the chat) sends it. It takes
+no `after` (`from_excludes_after`) and needs a `sessionId` (`from_needs_session`; a fleet feed's equivalent is
+`tail=0`); any value but `now` is `invalid_query`. A daemon that predates it refuses `from` as an unknown parameter.
+
 **A body larger than one record travels in ordered parts**, in both directions. §7 caps plaintext at
 65492 bytes with the envelope inside it, so a sender cuts the body with the shared rule
 (`partitionTunnelBody` in `@ferretry/protocol`: each part's JSON-escaped UTF-8 fits what the envelope
