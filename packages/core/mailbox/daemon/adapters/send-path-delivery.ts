@@ -28,6 +28,8 @@ export interface QueuedSend {
   readonly warden?: true;
   readonly agenda?: true;
   readonly notice?: true;
+  /** The session monitor's wake: a notice that never revives a stopped ferret. */
+  readonly monitor?: true;
   /** Two or more ferret messages delivered as one turn. */
   readonly parts?: SendMessageRequest['parts'];
 }
@@ -137,6 +139,7 @@ export function typedRequestOf(delivery: QueueDelivery): QueuedSend {
             : feature === 'Agenda'
               ? { agenda: true as const }
               : { notice: true as const }),
+          ...(feature === 'Monitor' ? { monitor: true as const } : {}),
         }
       : {}),
   };

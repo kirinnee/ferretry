@@ -1,13 +1,24 @@
 import { type ApiResponse, type CallContext } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
-import { FerretWaitFiles, FerretSummaryFiles, MonitorTickFile } from '../../contract/index.ts';
+import {
+  FERRET_WAKE_KEY,
+  FerretWaitFiles,
+  FerretSummaryFiles,
+  FerretWake,
+  MonitorTickFile,
+} from '../../contract/index.ts';
 import {
   FerretSignalArtifacts,
   type FerretSignalHost,
   FerretSignalRepository,
   FerretSignalTerminal,
 } from '../adapters/session/signal/ferret-signal.ts';
-import { FerretMonitorSend, MonitorFiles, StorageMonitorWaits } from '../adapters/session/monitor/index.ts';
+import {
+  FerretMonitorSend,
+  MailboxMonitorSend,
+  MonitorFiles,
+  StorageMonitorWaits,
+} from '../adapters/session/monitor/index.ts';
 import { KeyedSerialExecutor } from '../adapters/storage/keyed-serial-executor.ts';
 import { FerretSignals } from '../lib/ferrets/signals.ts';
 import { sessionSignalRoutes } from '../lib/runtime/mounts/session-signal.ts';
@@ -69,7 +80,11 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       name: MONITOR_RECORD_NAME,
       write: async text => await kernel.state.write(MonitorTickFile, JSON.parse(text)),
     }),
-    sends: new FerretMonitorSend(async ferret => await service.harness(ferret)),
+    // A wake goes through the Mailbox when one provides `ferrets.wake`, the harness seam only without one.
+    sends: new MailboxMonitorSend(
+      () => f.hooks.provider(FerretWake, FERRET_WAKE_KEY),
+      new FerretMonitorSend(async ferret => await service.harness(ferret)),
+    ),
     clock: { now: () => kernel.clock.now(), nowMs: () => kernel.clock.nowMs() },
   });
   let monitorArmed = false;

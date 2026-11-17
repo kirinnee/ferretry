@@ -269,6 +269,15 @@ describe('typedRequestOf', () => {
     should(request).not.have.property('attachmentIds');
   });
 
+  it('should mark a Monitor wake as a notice that never revives, and no other daemon sender as one', () => {
+    const wake = typedRequestOf(one(message({ sender: 'daemon', by: { kind: 'ferretry', feature: 'Monitor' } })));
+    const board = typedRequestOf(one(message({ sender: 'daemon', by: { kind: 'ferretry', feature: 'Board' } })));
+
+    should(wake).containEql({ notice: true, monitor: true });
+    should(board).containEql({ notice: true });
+    should(board).not.have.property('monitor');
+  });
+
   it('should leave a combined delivery’s sender to its first part, and an unnamed first part to none', () => {
     const unnamed = typedRequestOf({
       sendId: 'q-1',

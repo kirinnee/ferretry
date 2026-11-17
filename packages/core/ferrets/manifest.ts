@@ -11,6 +11,7 @@ import {
   FerretChanged,
   FerretStopping,
   FerretStarted,
+  FerretWake,
   FerretsChanged,
   FerretsPort,
   FERRETS_STATE,
@@ -110,6 +111,7 @@ export default definePlugin({
       { hook: FerretChanged },
       { hook: FerretStopping },
       { hook: FerretStarted },
+      { hook: FerretWake },
     ],
     takes: [
       { hook: Bearers, key: 'ferret' },
