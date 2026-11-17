@@ -27,6 +27,11 @@ export interface InputSettledSlotProps {
   readonly place?: string;
   /** The board project the DAEMON resolved for the asking session, when it did. */
   readonly project?: { readonly id: string; readonly name: string };
+  /**
+   * A panel here is still offering something (`true`) or is done (`false`): while any is, the card keeps the view it is
+   * drawn in instead of letting its host move on. Optional: a panel that offers nothing to wait for never calls it.
+   */
+  readonly hold?: (holding: boolean) => void;
 }
 
 export function isInputSettledSlotProps(props: unknown): props is InputSettledSlotProps {

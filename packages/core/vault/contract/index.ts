@@ -52,6 +52,7 @@ export { envEntryRefused, firstRefusedWord, refusedLine } from './lib/command-li
 export * from './inputs.ts';
 export * from './inputs-wire.ts';
 export * from './input-slots.ts';
+export * from './input-card-slots.ts';
 export * from './masks.ts';
 export * from './profile-secrets.ts';
 export * from './phone.ts';

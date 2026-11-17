@@ -28,13 +28,16 @@ import {
   type InputCardField,
   inputFailure,
   offerBody,
+  offerCodes,
   offerElsewhereWords,
   offerFillsWords,
   offerSentWords,
+  offersCodesSlot,
   offersPressEnter,
   offerWhyWords,
   offerWords,
   HIDE_OTHER_ACCOUNTS_WORDS,
+  oneFactorLine,
   OTHER_ACCOUNT_WORDS,
   savedChoices,
   settledSlotProps,
@@ -57,6 +60,7 @@ import {
 } from '../../lib/input-card.ts';
 import type { InputRequest, InputSavedOffer } from '../../../contract/index.ts';
 import { Eye, EyeOff, ShieldAlert, type VaultClient } from '../../shell.tsx';
+import { CodeButtons, CodesSlot } from './code-offers.tsx';
 import { FieldShot } from './field-shot.tsx';
 import { SettledSlot } from './settled-slot.tsx';
 
@@ -213,6 +217,8 @@ interface FormProps {
   readonly onSettled: (words: string, used?: InputSavedOffer) => void;
   readonly onSending: (sending: boolean) => void;
   readonly onRefresh?: (() => void) | undefined;
+  /** What an installed plugin draws under the saved accounts while the card asks a code (the codes slot), if anything. */
+  readonly codesSlot?: ReactNode;
 }
 
 interface OfferButtonProps {
@@ -253,7 +259,18 @@ function OfferButton({ offer, disabled, onUse }: OfferButtonProps) {
   );
 }
 
-function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onSending, onRefresh }: FormProps) {
+function InputForm({
+  request,
+  fields,
+  client,
+  blocked,
+  busy,
+  cancel,
+  onSettled,
+  onSending,
+  onRefresh,
+  codesSlot,
+}: FormProps) {
   const nodes = useRef<Nodes>(new Map());
   // Whether each field is filled and what is wrong with it: never the value, which stays in the field's own node.
   const [states, setStates] = useState<Readonly<Record<string, FieldState>>>({});
@@ -293,9 +310,15 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
   };
 
   /** A tap on a saved account: the daemon types from it, so nothing is typed here and nothing is sent but its handle. */
-  const tapOffer = async (offer: InputSavedOffer): Promise<void> => {
+  const tapOffer = async (offer: InputSavedOffer, factor?: string): Promise<void> => {
     if (off) return;
-    const built = offerBody(request, offer, submit, deliveryIdFor(`offer:${offer.id}:${offer.signIn ?? ''}`));
+    const built = offerBody(
+      request,
+      offer,
+      submit,
+      deliveryIdFor(`offer:${offer.id}:${offer.signIn ?? ''}:${factor ?? ''}`),
+      factor,
+    );
     if (!built.ok) {
       setFailure(built.problem);
       return;
@@ -307,7 +330,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
     try {
       await deliverInput(client, request, built.body);
       pending.current = null;
-      onSettled(offerSentWords(request, offer), offer);
+      onSettled(offerSentWords(request, offer, factor), offer);
     } catch (cause) {
       const words = inputFailure(cause, request.target.kind);
       if (words.definitive) pending.current = null;
@@ -352,15 +375,29 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
     }
   };
 
+  /** One account: a button per code key when it makes codes here, else the one "use saved" button. */
+  const drawOffer = (offer: InputSavedOffer) => {
+    const keys = offerCodes(request, offer);
+    return keys.length > 0 ? (
+      <CodeButtons
+        disabled={off}
+        key={offer.id + (offer.signIn ?? '')}
+        keys={keys}
+        offer={offer}
+        onUse={factor => void tapOffer(offer, factor)}
+      />
+    ) : (
+      <OfferButton
+        disabled={off}
+        key={offer.id + (offer.signIn ?? '')}
+        offer={offer}
+        onUse={() => void tapOffer(offer)}
+      />
+    );
+  };
+
   return (
-    <form
-      className="flex min-w-0 flex-col gap-3"
-      data-input-form=""
-      onSubmit={event => {
-        event.preventDefault();
-        if (ready) void send();
-      }}
-    >
+    <div className="flex min-w-0 flex-col gap-3">
       {choices === undefined ? null : (
         <div className="flex min-w-0 flex-col gap-2" data-input-saved="">
           <p className="m-0 text-cell font-medium text-fg">Use a saved login</p>
@@ -374,14 +411,12 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
               {differentFromWords(request)}
             </p>
           )}
-          {choices.matched.map(offer => (
-            <OfferButton
-              disabled={off}
-              key={offer.id + (offer.signIn ?? '')}
-              offer={offer}
-              onUse={() => void tapOffer(offer)}
-            />
-          ))}
+          {choices.matched.map(drawOffer)}
+          {oneFactorLine(request, choices.matched) === undefined ? null : (
+            <p className="m-0 text-meta text-warn" data-input-one-factor="" role="note">
+              {oneFactorLine(request, choices.matched)}
+            </p>
+          )}
           {choices.other.length === 0 ? null : (
             <>
               {/* The toggle never moves: the list is drawn BELOW it, so no account is ever drawn under a finger that just tapped it. */}
@@ -397,14 +432,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
               </button>
               {!showOther ? null : (
                 <div className="flex min-w-0 flex-col gap-2" data-input-other="">
-                  {choices.other.map(offer => (
-                    <OfferButton
-                      disabled={off}
-                      key={offer.id + (offer.signIn ?? '')}
-                      offer={offer}
-                      onUse={() => void tapOffer(offer)}
-                    />
-                  ))}
+                  {choices.other.map(drawOffer)}
                 </div>
               )}
             </>
@@ -412,52 +440,63 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
           <p className="m-0 text-meta text-faint">Or type it yourself:</p>
         </div>
       )}
-      {fields.map(field => (
-        <FieldInput
-          disabled={off}
-          field={field}
-          key={field.key}
-          many={many}
-          nodes={nodes.current}
-          onChange={value => setStates(current => ({ ...current, [field.key]: fieldStateOf(field, value) }))}
-          onEnter={() => {
-            // Enter inside a field sends only when every field is typed.
-            if (ready) void send();
-          }}
-          onReveal={() => setRevealed(current => ({ ...current, [field.key]: !current[field.key] }))}
-          problem={many ? states[field.key]?.problem : undefined}
-          revealed={revealed[field.key] === true}
-        />
-      ))}
-      {!offersPressEnter(request) ? null : (
-        <label className="flex min-h-[44px] items-center gap-2 text-cell text-fg">
-          <input
-            checked={submit}
-            data-input-enter=""
-            onChange={event => setSubmit(event.target.checked)}
-            type="checkbox"
+      {/* Outside the form: what a plugin draws here has buttons and fields of its own. */}
+      {codesSlot}
+      <form
+        className="flex min-w-0 flex-col gap-3"
+        data-input-form=""
+        onSubmit={event => {
+          event.preventDefault();
+          if (ready) void send();
+        }}
+      >
+        {fields.map(field => (
+          <FieldInput
+            disabled={off}
+            field={field}
+            key={field.key}
+            many={many}
+            nodes={nodes.current}
+            onChange={value => setStates(current => ({ ...current, [field.key]: fieldStateOf(field, value) }))}
+            onEnter={() => {
+              // Enter inside a field sends only when every field is typed.
+              if (ready) void send();
+            }}
+            onReveal={() => setRevealed(current => ({ ...current, [field.key]: !current[field.key] }))}
+            problem={many ? states[field.key]?.problem : undefined}
+            revealed={revealed[field.key] === true}
           />
-          Press Enter for me
-        </label>
-      )}
-      {failure === null ? null : (
-        <p className="m-0 text-meta text-err" data-input-failure="" role="alert">
-          {failure}
-        </p>
-      )}
-      <div className="flex flex-wrap items-center justify-end gap-2" data-input-actions="">
-        {cancel}
-        <button
-          className="kt-btn min-h-[44px] justify-center"
-          data-input-send=""
-          data-variant="primary"
-          disabled={off || !ready}
-          type="submit"
-        >
-          {sending ? 'Sending…' : 'Send'}
-        </button>
-      </div>
-    </form>
+        ))}
+        {!offersPressEnter(request) ? null : (
+          <label className="flex min-h-[44px] items-center gap-2 text-cell text-fg">
+            <input
+              checked={submit}
+              data-input-enter=""
+              onChange={event => setSubmit(event.target.checked)}
+              type="checkbox"
+            />
+            Press Enter for me
+          </label>
+        )}
+        {failure === null ? null : (
+          <p className="m-0 text-meta text-err" data-input-failure="" role="alert">
+            {failure}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center justify-end gap-2" data-input-actions="">
+          {cancel}
+          <button
+            className="kt-btn min-h-[44px] justify-center"
+            data-input-send=""
+            data-variant="primary"
+            disabled={off || !ready}
+            type="submit"
+          >
+            {sending ? 'Sending…' : 'Send'}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -624,7 +663,13 @@ export function InputCard({
   const [cancelling, setCancelling] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const holding = sending || cancelling;
+  // A panel in a slot of the card is still offering something: the card keeps the view while it does.
+  const [codesHold, setCodesHold] = useState(false);
+  const [settledHold, setSettledHold] = useState(false);
+  const refreshing = useRef(onRefresh);
+  refreshing.current = onRefresh;
+  const refresh = useCallback((): void => refreshing.current?.(), []);
+  const holding = sending || cancelling || (settled === null && codesHold) || (settled !== null && settledHold);
   const told = useRef<string | null>(null);
   const hold = useRef(onHold);
   hold.current = onHold;
@@ -776,7 +821,7 @@ export function InputCard({
           <p className="m-0 text-ui text-fg" data-input-settled="" role="status">
             {settled}
           </p>
-          {used === null ? null : <SettledSlot slot={settledSlotProps(request, used)} />}
+          {used === null ? null : <SettledSlot hold={setSettledHold} slot={settledSlotProps(request, used)} />}
         </>
       ) : request.source !== undefined ? (
         // A paste of a secure copy has nothing to type: the owner allows it, and the daemon pastes what the request names.
@@ -830,6 +875,21 @@ export function InputCard({
               onDone();
             }}
             request={request}
+            {...(offersCodesSlot(request) && request.saved !== undefined
+              ? {
+                  codesSlot: (
+                    <CodesSlot
+                      slot={{
+                        requestId: request.id,
+                        ferretId: request.sessionId,
+                        saved: request.saved,
+                        refresh,
+                        hold: setCodesHold,
+                      }}
+                    />
+                  ),
+                }
+              : {})}
           />
           {problem === null ? null : (
             <p className="m-0 text-meta text-err" data-input-cancel-failure="" role="alert">

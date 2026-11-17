@@ -10,6 +10,7 @@
  */
 import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import {
+  type InputCodeKey,
   type InputDeliverBody,
   type InputRequest,
   type InputRequestField,
@@ -289,6 +290,7 @@ export const offerBody = (
   offer: InputSavedOffer,
   submit: boolean,
   deliveryId: string,
+  factor?: string,
 ): BuiltBody =>
   request.observedDigest === undefined
     ? { ok: false, problem: REOBSERVING }
@@ -299,13 +301,57 @@ export const offerBody = (
           observedDigest: request.observedDigest,
           entry: offer.id,
           ...(offer.signIn === undefined ? {} : { signIn: offer.signIn }),
+          // The id of one of the offer's own 2FA keys: the code is made inside the daemon and typed, never sent here.
+          ...(factor === undefined ? {} : { factor }),
           submit: enterFor(request, submit),
         },
       };
 
 /** What the card says once a saved account was used: the account and the target, never the value. */
-export const offerSentWords = (request: InputRequest, offer: InputSavedOffer): string =>
-  `Used ${offerWords(offer)} for ${targetRef(request)}.`;
+export const offerSentWords = (request: InputRequest, offer: InputSavedOffer, factor?: string): string => {
+  const key = factor === undefined ? undefined : offer.codes?.find(each => each.factor === factor);
+  return key === undefined
+    ? `Used ${offerWords(offer)} for ${targetRef(request)}.`
+    : `Used a code from Ferretry (${key.label}) for ${offerWords(offer)} at ${targetRef(request)}.`;
+};
+
+// ─── codes Ferretry makes (docs/input-requests.md, "Codes Ferretry makes") ─────────────────────────────────────────────
+
+/** Said once under the code buttons: the password and the code now come from one place. */
+export const LOGIN_ONE_FACTOR_WARNING = 'Password and code both come from this machine: together they are one factor.';
+
+/**
+ * Whether this card asks for a one-time code and nothing stronger. The FIELDS decide, not the offer: a field the daemon
+ * upgraded to a secret or a private value is not a place a code Ferretry made may go, so such a card draws no code
+ * button and offers no seed setup.
+ */
+export const asksCode = (request: InputRequest): boolean => {
+  if (request.source !== undefined) return false;
+  const fields = request.fields;
+  return (
+    fields.some(field => field.sensitivity === 'code') &&
+    fields.every(field => field.sensitivity === 'code' || field.sensitivity === 'plain')
+  );
+};
+
+/** The keys an offer makes codes from, as the card may draw them: none on a card that asks for more than a code. */
+export const offerCodes = (request: InputRequest, offer: InputSavedOffer): readonly InputCodeKey[] =>
+  asksCode(request) && offer.matched ? (offer.codes ?? []) : [];
+
+/** "Use code from Ferretry · Authy backup": the owner's own label of the key, never a code. */
+export const codeButtonWords = (key: InputCodeKey): string => `Use code from Ferretry · ${key.label}`;
+
+/** What the last code made from this key came to, or `undefined` when it was never tried. */
+export const codeCheckedWords = (key: InputCodeKey): string | undefined =>
+  key.checked === 'worked' ? 'worked last time' : key.checked === 'failed' ? 'did not work last time' : undefined;
+
+/** The one-factor line, drawn once under the buttons when the card draws any code button at all. */
+export const oneFactorLine = (request: InputRequest, offers: readonly InputSavedOffer[]): string | undefined =>
+  offers.some(offer => offerCodes(request, offer).length > 0) ? LOGIN_ONE_FACTOR_WARNING : undefined;
+
+/** Whether the card offers the codes slot: only while it waits and asks a code, with the daemon's saved facts. */
+export const offersCodesSlot = (request: InputRequest): boolean =>
+  request.state === 'pending' && request.saved !== undefined && asksCode(request);
 
 /** What the settled card hands a panel in the slot after it: ids and names the owner saw on the card. */
 export const settledSlotProps = (request: InputRequest, offer: InputSavedOffer): InputSettledSlotProps => ({
