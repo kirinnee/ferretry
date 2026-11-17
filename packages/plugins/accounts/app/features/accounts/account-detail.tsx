@@ -18,7 +18,7 @@ import {
   type TwoFactorStageId,
 } from '../../../contract/routes/index.ts';
 import { ChevronRight, Plus, Trash2 } from '../../shell.tsx';
-import { type FormEvent, type ReactNode, useState } from 'react';
+import { type FormEvent, type ReactNode, useId, useState } from 'react';
 import {
   accountTitle,
   KEY_KIND_OPTIONS,
@@ -33,7 +33,14 @@ import {
 } from '../../lib/accounts-screen.ts';
 import type { CodesAccount } from '../../lib/automatic-codes.ts';
 import type { AccountsClient as InputClient } from './accounts-api.ts';
-import { methodOfDraft, parseDomains, passwordProblem, type SignInDraft, signInProblem } from '../../lib/login-form.ts';
+import {
+  methodOfDraft,
+  parseDomains,
+  passwordLengthProblem,
+  type SignInDraft,
+  signInProblem,
+} from '../../lib/login-form.ts';
+import { SecretInput, useSecretField } from '@ferretry/app/ui';
 import { AutomaticCodesPanel } from '../two-factor/automatic-codes.tsx';
 import { type AccountOps, INPUT, Refusal, Tabs } from './accounts-parts.tsx';
 import { AccountRulesRevoke } from './account-rules.tsx';
@@ -100,22 +107,25 @@ export function AccountDetail(props: AccountDetailProps): ReactNode {
 function DetailsTab({ account, ops, busy, error, onClosed, rules }: AccountDetailProps): ReactNode {
   const [label, setLabel] = useState(account.label);
   const [username, setUsername] = useState(account.username ?? '');
-  const [password, setPassword] = useState('');
+  // The new password lives only in the field's own value (read on Save); state knows how long it is, never what it says.
+  const password = useSecretField();
+  const passwordId = useId();
   const [confirming, setConfirming] = useState(false);
-  const problem = passwordProblem(password);
-  const changed = label.trim() !== account.label || username.trim() !== (account.username ?? '') || password !== '';
+  const problem = passwordLengthProblem(password.length);
+  const changed = label.trim() !== account.label || username.trim() !== (account.username ?? '') || password.filled;
 
   const save = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     if (!changed || problem !== undefined || label.trim() === '' || busy) return;
+    const sending = password.read();
     const took = await ops.putAccount(account.id, {
       ...(label.trim() === account.label ? {} : { label: label.trim() }),
       ...(username.trim() === (account.username ?? '')
         ? {}
         : { username: username.trim() === '' ? null : username.trim() }),
-      ...(password === '' ? {} : { password }),
+      ...(sending === '' ? {} : { password: sending }),
     });
-    if (took) setPassword('');
+    if (took) password.clear();
   };
 
   return (
@@ -144,19 +154,9 @@ function DetailsTab({ account, ops, busy, error, onClosed, rules }: AccountDetai
             value={username}
           />
         </label>
-        <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+        <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg" htmlFor={passwordId}>
           {account.fields.password ? 'Replace the password' : 'Password'}
-          <input
-            autoComplete="new-password"
-            className={INPUT}
-            data-1p-ignore=""
-            data-accounts-password=""
-            data-lpignore="true"
-            disabled={busy}
-            onChange={event => setPassword(event.target.value)}
-            type="password"
-            value={password}
-          />
+          <SecretInput className={INPUT} data-accounts-password="" disabled={busy} field={password} id={passwordId} />
           <span className="text-meta font-normal text-muted" data-accounts-password-state="">
             {account.fields.password
               ? 'A password is saved. It is write-only: nobody can read it back, ferrets included.'

@@ -15,6 +15,7 @@ import {
   withTestResult,
 } from '../../../../app/features/speedups/speedups-surface.tsx';
 import { daemonConnection } from '../../../../app/shell-voice.ts';
+import { mount, must, submit, typeInto } from '../../../support/app/dom.ts';
 import { render, run, runAsync } from '../../../support/app/react.ts';
 import { configChangeHarness } from '../config-change-support.tsx';
 
@@ -59,9 +60,6 @@ const text = (node: unknown): string => JSON.stringify(node);
 
 const buttonLabelled = (root: ReactTestInstance, label: string): ReactTestInstance =>
   root.find(node => node.type === 'button' && node.props['aria-label'] === label);
-
-const submitButton = (root: ReactTestInstance): ReactTestInstance =>
-  root.find(node => node.type === 'button' && node.props.type === 'submit');
 
 const noop = () => undefined;
 
@@ -147,10 +145,10 @@ describe('SpeedupCard', () => {
     expect(buttonLabelled(renderer.root, 'Test the Groq key').props.disabled).toBe(true);
   });
 
-  it('saves a pasted key once, then clears the field', async () => {
+  it('saves a pasted key once, then clears the field, and never puts it in the markup', async () => {
     // Arrange
     const saved: string[] = [];
-    const renderer = render(
+    const mounted = await mount(
       <SpeedupCard
         status={status()}
         vaultReadable
@@ -160,23 +158,30 @@ describe('SpeedupCard', () => {
         onTest={noop}
       />,
     );
-    const input = renderer.root.findByType('input');
-    expect(input.props.type).toBe('password');
-    expect(input.props.autoComplete).toBe('new-password');
+    try {
+      const input = must(mounted.container.querySelector('input'), 'the key field');
+      const save = must(mounted.container.querySelector<HTMLButtonElement>('button[type=submit]'), 'Save');
+      expect(input.type).toBe('password');
+      expect(input.getAttribute('autocomplete')).toBe('new-password');
 
-    // Act — too short first, then whole.
-    run(() => input.props.onChange({ target: { value: 'abc' } }));
-    expect(text(renderer.toJSON())).toContain('too short');
-    expect(submitButton(renderer.root).props.disabled).toBe(true);
-    run(() => renderer.root.findByType('form').props.onSubmit({ preventDefault: noop }));
-    run(() => input.props.onChange({ target: { value: `  ${KEY}  ` } }));
-    await runAsync(async () => {
-      renderer.root.findByType('form').props.onSubmit({ preventDefault: noop });
-    });
+      // Act — too short first, then whole.
+      await typeInto(input, 'abc');
+      expect(mounted.container.textContent).toContain('too short');
+      expect(save.disabled).toBe(true);
+      await submit(mounted.container.querySelector('form'));
+      await typeInto(input, `  ${KEY}  `);
+      expect(save.disabled).toBe(false);
+      // The key is typed, and neither the attribute nor the markup holds it.
+      expect(input.getAttribute('value')).toBeNull();
+      expect(mounted.container.innerHTML).not.toContain(KEY);
+      await submit(mounted.container.querySelector('form'));
 
-    // Assert
-    expect(saved).toEqual([KEY]);
-    expect(renderer.root.findByType('input').props.value).toBe('');
+      // Assert
+      expect(saved).toEqual([KEY]);
+      expect(input.value).toBe('');
+    } finally {
+      await mounted.unmount();
+    }
   });
 
   it('offers Replace and Test for a set key, and cancels a replacement', () => {

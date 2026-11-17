@@ -15,7 +15,7 @@ import {
   type TwoFactorStageId,
 } from '../../../contract/routes/index.ts';
 import { ArrowLeft, ChevronRight, Plus } from '../../shell.tsx';
-import { type FormEvent, type ReactNode, useState } from 'react';
+import { type FormEvent, type ReactNode, useId, useState } from 'react';
 import {
   accountsBySite,
   accountTitle,
@@ -27,7 +27,8 @@ import {
   signInMethodWords,
 } from '../../lib/accounts-screen.ts';
 import type { AccountsClient as InputClient } from './accounts-api.ts';
-import { handleFromLabel, parseDomains, passwordProblem } from '../../lib/login-form.ts';
+import { handleFromLabel, parseDomains, passwordLengthProblem } from '../../lib/login-form.ts';
+import { SecretInput, useSecretField } from '@ferretry/app/ui';
 import { AccountDetail, type AccountTab } from './account-detail.tsx';
 import { type AccountOps, INPUT, Refusal } from './accounts-parts.tsx';
 import { SiteDetail, type SiteTab } from './site-detail.tsx';
@@ -368,7 +369,9 @@ function AddAccountForm({
   const [handle, setHandle] = useState('');
   const [handleEdited, setHandleEdited] = useState(false);
   const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  // The password lives only in the field's own value (read on Save); state knows how long it is, never what it says.
+  const password = useSecretField();
+  const passwordId = useId();
   const [site, setSite] = useState('');
 
   const id = AccountIdSchema.safeParse(handle.trim());
@@ -376,8 +379,8 @@ function AddAccountForm({
   const domains = parseDomains(site);
   const siteProblem =
     site.trim() !== '' && domains.length === 0 ? 'That is not a web host, like app.vercel.com.' : undefined;
-  const problem = passwordProblem(password) ?? siteProblem;
-  const ready = label.trim() !== '' && id.success && !taken && password !== '' && problem === undefined;
+  const problem = passwordLengthProblem(password.length) ?? siteProblem;
+  const ready = label.trim() !== '' && id.success && !taken && password.filled && problem === undefined;
 
   if (!open)
     return (
@@ -394,9 +397,9 @@ function AddAccountForm({
     const made = await ops.putAccount(id.data, {
       label: label.trim(),
       ...(username.trim() === '' ? {} : { username: username.trim() }),
-      password,
+      password: password.read(),
     });
-    setPassword('');
+    password.clear();
     if (!made) return;
     if (domains.length > 0) await ops.addSignIn(id.data, { place: { kind: 'site', domains: [...domains], match: [] } });
     setOpen(false);
@@ -464,17 +467,9 @@ function AddAccountForm({
           value={username}
         />
       </label>
-      <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+      <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg" htmlFor={passwordId}>
         Password
-        <input
-          autoComplete="new-password"
-          className={INPUT}
-          data-accounts-new-password=""
-          disabled={busy}
-          onChange={event => setPassword(event.target.value)}
-          type="password"
-          value={password}
-        />
+        <SecretInput className={INPUT} data-accounts-new-password="" disabled={busy} field={password} id={passwordId} />
       </label>
       <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
         Signs in at (optional)

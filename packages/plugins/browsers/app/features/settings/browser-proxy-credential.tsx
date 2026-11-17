@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import { Button } from '@ferretry/app/ui';
+import { Button, SecretInput, type SecretField } from '@ferretry/app/ui';
 
 /** What a stored credential shows instead of its value: a constant, so not even the length is given away. */
 const MASK = '••••••••••••';
@@ -9,9 +9,13 @@ export interface BrowserProxyCredentialProps {
   readonly what: 'Username' | 'Password';
   /** Whether a secret is already filed for this credential. */
   readonly stored: boolean;
-  /** What has been typed and not yet saved. Held by the form, in memory only. */
-  readonly value: string;
-  readonly onChange: (value: string) => void;
+  /**
+   * What has been typed and not yet saved. The form owns the field (`useSecretField`) so it can read the value to file it;
+   * the characters live only in the input node, never in any component's state or in the input's `value` attribute.
+   */
+  readonly field: SecretField;
+  /** Told after what is typed changes or is emptied, so the form can drop a stale problem and test result. */
+  readonly onChanged: () => void;
   readonly onRemove: () => void;
   /** One short sentence when saving this value failed. */
   readonly problem: string | null;
@@ -24,8 +28,8 @@ export interface BrowserProxyCredentialProps {
 export function BrowserProxyCredential({
   what,
   stored,
-  value,
-  onChange,
+  field,
+  onChanged,
   onRemove,
   problem,
 }: BrowserProxyCredentialProps) {
@@ -40,19 +44,13 @@ export function BrowserProxyCredential({
       </label>
       {showBox ? (
         <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-          <input
+          <SecretInput
             id={id}
-            // `password` hides it from a shoulder; `new-password` keeps a password manager from filing a copy.
-            type="password"
-            autoComplete="new-password"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
+            field={field}
             className="kt-input min-w-0 flex-1"
-            value={value}
             placeholder={replacing ? `New ${key}` : ''}
             data-browser-proxy-credential-value={key}
-            onChange={event => onChange(event.target.value)}
+            onTyped={onChanged}
           />
           {replacing ? (
             <Button
@@ -60,7 +58,8 @@ export function BrowserProxyCredential({
               data-browser-proxy-credential-cancel={key}
               onClick={() => {
                 setReplacing(false);
-                onChange('');
+                field.clear();
+                onChanged();
               }}
             >
               Cancel

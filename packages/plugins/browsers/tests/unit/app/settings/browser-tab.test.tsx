@@ -61,6 +61,7 @@ const tab = async (script: Script = {}, place?: ViewPlace) => {
     if (route === STATE) return script.state ?? { state: 'stopped' };
     if (route === GRANTS) return script.grants ?? OPEN;
     if (route === 'GET /v1/secrets') return { secrets: [] };
+    if (route === 'POST /v1/secrets') return {};
     if (route === PROXY_TEST) return script.test ?? new Error('no test scripted');
     return new Error(`no route ${route}`);
   });
@@ -197,6 +198,53 @@ describe('the Browser tab', () => {
     expect(body(calls, PROXY_TEST)).toEqual({});
     expect(text(view.container, '[data-browser-proxy-test-egress]')).toContain('203.0.113.7');
     expect(text(view.container, '[data-browser-proxy-test-tested]')).toBe('Tested the saved proxy.');
+    await view.unmount();
+  });
+
+  it('keeps a typed proxy username and password out of the markup, files each once, and empties the boxes', async () => {
+    const USER = 'synthetic-proxy-user-0001';
+    const PASS = 'synthetic-proxy-pass-0002';
+    const { calls, view } = await tab({
+      test: {
+        reachable: true,
+        tested: 'saved',
+        roundTripMs: 42,
+        egressIp: '203.0.113.7',
+        message: 'The proxy answered.',
+      },
+    });
+    const box = (what: 'username' | 'password') =>
+      must(
+        view.container.querySelector<HTMLInputElement>(`[data-browser-proxy-credential-value="${what}"]`),
+        `the ${what} box`,
+      );
+    await typeInto(view.container.querySelector('[data-browser-proxy-url]'), 'http://proxy.example.test:8080');
+    await typeInto(box('username'), USER);
+    await typeInto(box('password'), PASS);
+    // Typed: each box holds its value as the live value only, never as the `value` attribute or anywhere in the markup.
+    expect(box('password').type).toBe('password');
+    expect(box('username').getAttribute('value')).toBeNull();
+    expect(box('password').getAttribute('value')).toBeNull();
+    expect(view.container.innerHTML).not.toContain(USER);
+    expect(view.container.innerHTML).not.toContain(PASS);
+    const userBox = box('username');
+    const passBox = box('password');
+    await click(view.container.querySelector('[data-browser-proxy-save-panel] [data-change-submit]'), 'Save and test');
+    const filed = calls
+      .filter(call => call.route === 'POST /v1/secrets')
+      .map(call => (call.init?.body as { name: string; value: string }) ?? { name: '', value: '' });
+    expect(filed).toEqual([
+      { name: 'PROXY_USER', value: USER },
+      { name: 'PROXY_PASSWORD', value: PASS },
+    ]);
+    // Filed: nothing is left in either box, and the saved file holds only the names.
+    expect(userBox.value).toBe('');
+    expect(passBox.value).toBe('');
+    const sent = body(calls, CONFIG_PUT) as { text: string };
+    expect(sent.text).not.toContain(USER);
+    expect(sent.text).not.toContain(PASS);
+    expect(view.container.innerHTML).not.toContain(USER);
+    expect(view.container.innerHTML).not.toContain(PASS);
     await view.unmount();
   });
 

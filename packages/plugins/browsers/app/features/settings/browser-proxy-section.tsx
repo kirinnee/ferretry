@@ -1,4 +1,11 @@
-import { Button, type ChangeAuthority, ChangeApplyPanel, SetupNote, SetupSection } from '@ferretry/app/ui';
+import {
+  Button,
+  type ChangeAuthority,
+  ChangeApplyPanel,
+  SetupNote,
+  SetupSection,
+  useSecretField,
+} from '@ferretry/app/ui';
 import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { BrowserProxySetting } from '../../../contract/index.ts';
@@ -43,9 +50,9 @@ export function BrowserProxySection({
   const [draft, setDraft] = useState<BrowserProxyDraft>(draftOf(saved));
   const [testing, setTesting] = useState(false);
   const [shown, setShown] = useState<ProxyTestShown | null>(null);
-  // What was typed into the write-only boxes and not yet filed in the secret store. In memory only; emptied the
-  // moment the machine has it.
-  const [pending, setPending] = useState({ username: '', password: '' });
+  // What was typed into the write-only boxes and not yet filed in the secret store lives only in the two inputs
+  // themselves (read to file it, emptied the moment the machine has it); state knows only whether each holds anything.
+  const pendingFields = { username: useSecretField(), password: useSecretField() };
   const [problems, setProblems] = useState<{ username: string | null; password: string | null }>({
     username: null,
     password: null,
@@ -87,13 +94,15 @@ export function BrowserProxySection({
   // the box, else under PROXY_USER / PROXY_PASSWORD.
   const filed: BrowserProxyDraft = {
     ...draft,
-    usernameSecret: pending.username === '' ? draft.usernameSecret : nameFor(draft.usernameSecret, DEFAULT_USER),
-    passwordSecret: pending.password === '' ? draft.passwordSecret : nameFor(draft.passwordSecret, DEFAULT_PASSWORD),
+    usernameSecret: !pendingFields.username.filled ? draft.usernameSecret : nameFor(draft.usernameSecret, DEFAULT_USER),
+    passwordSecret: !pendingFields.password.filled
+      ? draft.passwordSecret
+      : nameFor(draft.passwordSecret, DEFAULT_PASSWORD),
   };
   const typed = draft.url.trim() !== '';
   const wanted = typed ? settingOf(filed) : ({ ok: true, setting: null } as const);
   const before = JSON.stringify(draftOf(saved));
-  const dirty = JSON.stringify(filed) !== before || pending.username !== '' || pending.password !== '';
+  const dirty = JSON.stringify(filed) !== before || pendingFields.username.filled || pendingFields.password.filled;
   // What to test: nothing is sent for the saved proxy (`{}`); the edited setting is sent only when it differs.
   const testBody: { readonly proxy?: BrowserProxySetting } | null = !typed
     ? saved === null
@@ -127,8 +136,8 @@ export function BrowserProxySection({
   // Files what was typed in the secret store. False (with one short sentence on the box) when it cannot be.
   const fileCredentials = async (): Promise<boolean> => {
     const boxes = [
-      ['username', pending.username, filed.usernameSecret],
-      ['password', pending.password, filed.passwordSecret],
+      ['username', pendingFields.username.read(), filed.usernameSecret],
+      ['password', pendingFields.password.read(), filed.passwordSecret],
     ] as const;
     const short = boxes.filter(([, value]) => value !== '' && value.length < MIN_SECRET_VALUE_LENGTH);
     if (short.length > 0) {
@@ -149,7 +158,7 @@ export function BrowserProxySection({
         return false;
       }
       setExisting(current => new Set([...(current ?? []), name]));
-      setPending(current => ({ ...current, [key]: '' }));
+      pendingFields[key].clear();
       setDraft(current => ({ ...current, [`${key}Secret`]: name }));
     }
     return true;
@@ -171,14 +180,13 @@ export function BrowserProxySection({
     return isSecretName(name) && (existing === null ? name === savedName : existing.has(name));
   };
   const savedNames = draftOf(saved);
-  const typedInto = (key: 'username' | 'password', value: string): void => {
-    setPending(current => ({ ...current, [key]: value }));
+  const typedInto = (key: 'username' | 'password'): void => {
     setProblems(current => ({ ...current, [key]: null }));
     setSaveOutcome(null);
     forgetTest();
   };
   const removeCredential = (key: 'username' | 'password'): void => {
-    setPending(current => ({ ...current, [key]: '' }));
+    pendingFields[key].clear();
     edit({ [`${key}Secret`]: '' });
   };
   // Save files what was typed, saves the setting, and then tries the saved proxy: "set it, see it work".
@@ -258,17 +266,17 @@ export function BrowserProxySection({
       <BrowserProxyCredential
         what="Username"
         stored={isStored(draft.usernameSecret, savedNames.usernameSecret)}
-        value={pending.username}
+        field={pendingFields.username}
         problem={problems.username}
-        onChange={value => typedInto('username', value)}
+        onChanged={() => typedInto('username')}
         onRemove={() => removeCredential('username')}
       />
       <BrowserProxyCredential
         what="Password"
         stored={isStored(draft.passwordSecret, savedNames.passwordSecret)}
-        value={pending.password}
+        field={pendingFields.password}
         problem={problems.password}
-        onChange={value => typedInto('password', value)}
+        onChanged={() => typedInto('password')}
         onRemove={() => removeCredential('password')}
       />
       <div className="flex min-w-0 flex-col gap-2">
@@ -357,7 +365,8 @@ export function BrowserProxySection({
               data-browser-proxy-undo=""
               onClick={() => {
                 setDraft(draftOf(saved));
-                setPending({ username: '', password: '' });
+                pendingFields.username.clear();
+                pendingFields.password.clear();
                 setProblems({ username: null, password: null });
                 forgetTest();
               }}
