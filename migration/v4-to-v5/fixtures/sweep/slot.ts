@@ -10,6 +10,10 @@
  *   bun slot.ts pair <1..9> <v4|v5>               opens ONE agent-browser tab already pairing (the link never appears here)
  *   bun slot.ts upgrade-v5 <1..9> <libexec-dir>   move ONLY the 5.0 daemon to a newer build, keeping its home, data and pairing
  *   bun slot.ts stamp-v5 <libexec-dir> <commit>   record which commit a 5.0 build came from (BUILD.json), for upgrade-v5
+ *   bun slot.ts persist <1..9> [dir]   move ONE slot to a persistent folder (default ~/.local/share/fy-sweep/slot<N>) and run
+ *                                      both daemons as enabled user units, so they come back after a reboot with the same
+ *                                      identity, pairing and data (the ferrets' panes do not: they are revived, as after a restart)
+ *   bun slot.ts unpersist <1..9>       the reverse: units removed, folder back under the sweep root, daemons running as before
  *
  * Everything lives under SWEEP_ROOT/slot<N>/ (refused anywhere else, links resolved first). Ports: v4 is 7600+2N, 5.0 is
  * 7601+2N. Nothing here touches ~/.ferretry (v4, 7457), ~/.ferretry-v5 (the owner's preview, 7458) or v4's default 7431:
@@ -22,9 +26,12 @@
  * WHERE they run (the caller's tool, not the daemon's environment): each daemon is a transient USER SERVICE of the caller's
  * systemd manager (fy4-slot<N>.service / fy5-slot<N>.service, Restart=on-failure, KillMode=process), so a crash brings it back
  * and a ferret's cgroup kill or a fleet limit never reaches it; each side's tmux server runs in its own scope
- * (fy<4|5>-slot<N>-terminals.scope) so a daemon restart never kills a pane. See "user services" below.
+ * (fy<4|5>-slot<N>-terminals.scope) so a daemon restart never kills a pane. See "user services" below. `persist` turns the
+ * transient units into enabled unit files (and the scopes into terminals services) and the slot folder into a persistent one.
  */
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import {
   chmod,
   copyFile,
@@ -50,6 +57,17 @@ import {
   PREVIEW_DEPLOY_JOB,
   PREVIEW_DEPLOY_WORKFLOW,
 } from './deploy-gate.ts';
+import { fakeCodexAuthText } from './fake-codex-auth.ts';
+import {
+  LINK_SCRIPT,
+  daemonUnitText,
+  defaultPersistDir,
+  persistTargetProblem,
+  pointerFile,
+  terminalsUnitText,
+  unitMarker,
+  userUnitDir,
+} from './persist.ts';
 import {
   assertScopeOwned,
   assertServiceOwned,
@@ -86,7 +104,11 @@ type Which = 'v4' | 'v5';
 
 interface Slot {
   readonly n: number;
+  /** The LOGICAL slot folder, always <sweep root>/slot<N>: what every home records about itself. */
   readonly dir: string;
+  /** Where the slot's files really are: `dir` itself, or (a PERSISTED slot) the persistent folder `dir` is a link to. */
+  readonly real: string;
+  readonly persisted: boolean;
   readonly v4Port: number;
   readonly v5Port: number;
   readonly v4: { out: string; home: string; lock: string; tmux: string };
@@ -103,13 +125,28 @@ interface Slot {
   readonly bin: string;
 }
 
+/** The persistent folder the kit's own pointer file names for this slot, or undefined when the slot is not persisted. */
+function persistedDirOf(n: number): string | undefined {
+  try {
+    const document: unknown = JSON.parse(readFileSync(pointerFile(n), 'utf8'));
+    return isRecord(document) && document.slot === n && typeof document.dir === 'string' && isAbsolute(document.dir)
+      ? document.dir
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function slotOf(n: number): Slot {
   const dir = join(SWEEP_ROOT, `slot${String(n)}`);
+  const real = persistedDirOf(n) ?? dir;
   const v4out = join(dir, 'v4');
   const v5dir = join(dir, 'v5');
   return {
     n,
     dir,
+    real,
+    persisted: real !== dir,
     v4Port: 7600 + 2 * n,
     v5Port: 7601 + 2 * n,
     v4: {
@@ -160,7 +197,21 @@ async function assertSlotPath(slot: Slot): Promise<void> {
   if (root !== SWEEP_ROOT) die(`refusing: ${SWEEP_ROOT} resolves to ${root}; the sweep root may not be a link`, 99);
   const existing = await lstat(slot.dir).catch(() => undefined);
   if (existing !== undefined) {
-    if (existing.isSymbolicLink()) die(`refusing: ${slot.dir} is a symbolic link`, 99);
+    if (existing.isSymbolicLink()) {
+      // The ONE link allowed is a persisted slot's, and only to exactly the folder the kit's pointer file recorded.
+      const folder = slot.persisted ? await lstat(slot.real).catch(() => undefined) : undefined;
+      if (
+        folder?.isDirectory() !== true ||
+        folder.isSymbolicLink() ||
+        (await readlink(slot.dir)) !== slot.real ||
+        (await realpath(slot.dir)) !== (await realpath(slot.real))
+      )
+        die(
+          `refusing: ${slot.dir} is a symbolic link${slot.persisted ? ` that does not lead to its persistent folder ${slot.real}` : ''}`,
+          99,
+        );
+      return;
+    }
     const real = await realpath(slot.dir);
     const inside = relative(root, real);
     if (inside !== `slot${String(slot.n)}`)
@@ -230,10 +281,13 @@ function baseEnvironment(): Record<string, string> {
   return env;
 }
 
-const richHelpers = (): Record<string, string> => ({
+/** A persisted slot carries its OWN copy of the fake ferret's helper: the checkout the kit ran from may be gone by then. */
+const richHelpers = (slot: Slot): Record<string, string> => ({
   FY_FIXTURE_RICH: '1',
   FY_FIXTURE_BUN: process.execPath,
-  FY_FIXTURE_HELPER: join(FIXTURES, 'support', 'fake-claude-rich.ts'),
+  FY_FIXTURE_HELPER: slot.persisted
+    ? join(slot.dir, 'support', 'fake-claude-rich.ts')
+    : join(FIXTURES, 'support', 'fake-claude-rich.ts'),
 });
 
 function daemonEnvironment(slot: Slot, which: Which): Record<string, string> {
@@ -273,7 +327,7 @@ function daemonEnvironment(slot: Slot, which: Which): Record<string, string> {
     FY_CODEX_BIN: join(world.harness, 'codex'),
     FY_E2E_FAKE_CLAUDE_LOG: join(world.logs, 'fake-claude.log'),
     FY_E2E_FAKE_CODEX_LOG: join(world.logs, 'fake-codex.log'),
-    ...richHelpers(),
+    ...richHelpers(slot),
   };
 }
 
@@ -323,6 +377,12 @@ async function v5Programs(slot: Slot): Promise<string> {
   return dir;
 }
 
+/** The v4 `fy` a wrapper runs for this slot: the slot's own copy when it is persisted, else the shared links. */
+async function v4Fy(slot: Slot): Promise<string> {
+  const own = join(slot.dir, 'v4-bin', 'fy');
+  return (await lstat(own).catch(() => undefined)) === undefined ? join(SWEEP_ROOT, 'v4bin', 'fy') : own;
+}
+
 /**
  * The folder whose `fy` a wrapper runs for this slot: the slot's own folder; for a slot built by an older kit (shared or
  * hand-patched bin folder) the folder its RUNNING daemon was started from, which is what its wrapper was patched to use too;
@@ -369,10 +429,16 @@ async function portFree(port: number): Promise<boolean> {
 
 /** Pids that hold `lockFile` open, read from /proc/<pid>/fd link targets only. */
 async function pidsHolding(lockFile: string): Promise<number[]> {
+  // /proc names an open file by its resolved path: a persisted slot's lock, opened through the slot link, shows as the real one.
+  const resolved = await realpath(dirname(lockFile)).then(
+    folder => join(folder, basename(lockFile)),
+    () => lockFile,
+  );
   const held: number[] = [];
   for (const name of (await readdir('/proc').catch(() => [] as string[])).filter(entry => /^\d+$/u.test(entry))) {
     for (const fd of await readdir(`/proc/${name}/fd`).catch(() => [] as string[])) {
-      if ((await readlink(`/proc/${name}/fd/${fd}`).catch(() => '')) === lockFile) {
+      const target = await readlink(`/proc/${name}/fd/${fd}`).catch(() => '');
+      if (target === lockFile || target === resolved) {
         held.push(Number(name));
         break;
       }
@@ -420,8 +486,9 @@ async function killTmux(socket: string, label: string): Promise<void> {
  * would take the owner's preview down. systemd-run/systemctl are the CALLER's tools: the daemon's own environment is still
  * exactly daemonEnvironment() (private XDG_RUNTIME_DIR, no bus).
  *
- * REBOOT SURVIVAL IS OUT OF SCOPE: a slot lives under /tmp, which systemd-tmpfiles wipes at boot ("D /tmp"), so no unit file
- * is written to ~/.config/systemd/user and no linger is enabled; the units are transient and end with the user manager.
+ * REBOOT SURVIVAL is opt-in, per slot, and is `persist` (below): a slot lives under /tmp, which systemd-tmpfiles wipes at boot
+ * ("D /tmp"), so by default no unit file is written to ~/.config/systemd/user and the units are transient and end with the
+ * user manager. A persisted slot has real unit files (enabled) and a persistent folder instead.
  */
 
 /** The cgroup a daemon or tmux server inside this slice would sit in with a ferret's own processes: the limit that kills. */
@@ -431,6 +498,9 @@ const FLEET_SLICE = 'ferretry_fleet.slice';
 const unitOf = (slot: Slot, which: Which): string => `fy${which === 'v4' ? '4' : '5'}-slot${String(slot.n)}`;
 const serviceOf = (slot: Slot, which: Which): string => `${unitOf(slot, which)}.service`;
 const scopeOf = (slot: Slot, which: Which): string => `${unitOf(slot, which)}-terminals.scope`;
+/** The unit a side's tmux server lives in: a transient scope, or (a persisted slot) an enabled terminals service. */
+const terminalsOf = (slot: Slot, which: Which): string =>
+  slot.persisted ? `${unitOf(slot, which)}-terminals.service` : scopeOf(slot, which);
 const sideOf = (slot: Slot, which: Which): { dir: string; lock: string; tmux: string } =>
   which === 'v4'
     ? { dir: slot.v4.out, lock: slot.v4.lock, tmux: slot.v4.tmux }
@@ -483,7 +553,9 @@ const realPorts: GuardPorts = {
   holders: pidsHolding,
   stopByLock,
   cgroupPids: async cgroup => {
-    const text = await readFile(join('/sys/fs/cgroup', cgroup, 'cgroup.procs'), 'utf8').catch(() => '');
+    // Unreadable is NOT empty: a control group whose members cannot be listed cannot be shown to be this slot's.
+    const text = await readFile(join('/sys/fs/cgroup', cgroup, 'cgroup.procs'), 'utf8').catch(() => undefined);
+    if (text === undefined) return undefined;
     return text
       .split('\n')
       .map(Number)
@@ -516,14 +588,21 @@ const realPorts: GuardPorts = {
   refuse: sentence => die(sentence, 99),
 };
 
-const envFileOf = (slot: Slot, which: Which): string => join(sideOf(slot, which).dir, 'fyd.env');
+/** The path a unit's ExecStart (and its guard identity) names. A persisted slot's units never depend on the /tmp link existing. */
+const physical = (slot: Slot, path: string): string =>
+  path === slot.dir
+    ? slot.real
+    : path.startsWith(`${slot.dir}/`)
+      ? join(slot.real, path.slice(slot.dir.length + 1))
+      : path;
+const envFileOf = (slot: Slot, which: Which): string => physical(slot, join(sideOf(slot, which).dir, 'fyd.env'));
 const guardIds = (slot: Slot, which: Which): { name: string; lock: string; envFile: string } => ({
   name: serviceOf(slot, which),
   lock: sideOf(slot, which).lock,
   envFile: envFileOf(slot, which),
 });
 const scopeIds = (slot: Slot, which: Which): { name: string; socket: string } => ({
-  name: scopeOf(slot, which),
+  name: terminalsOf(slot, which),
   socket: sideOf(slot, which).tmux,
 });
 
@@ -639,6 +718,20 @@ async function ensureTmux(slot: Slot, which: Which): Promise<void> {
   await assertScopeOwned(realPorts, scopeIds(slot, which));
   await mkdir(dirname(side.tmux), { recursive: true, mode: 0o700 });
   await writeEnvFile(slot, which);
+  if (slot.persisted) {
+    // A persisted slot's tmux server is the enabled terminals service (its unit file holds the same recipe as below).
+    const name = terminalsOf(slot, which);
+    const began = await systemctlUser(['start', name]);
+    const serverPid = await tmuxServerPid(side.tmux);
+    if (began.code !== 0 || serverPid === undefined)
+      die(
+        `could not start the ${label} server with ${name} (exit ${String(began.code)}: ${(began.err + began.out).trim().slice(0, 300)})`,
+      );
+    console.log(
+      `  ${label}: server pid ${String(serverPid)} started by ${name} (cgroup ${await cgroupOfPid(serverPid)})`,
+    );
+    return;
+  }
   const started = inScope(slot, which, envFileOf(slot, which), [
     tmux,
     '-u',
@@ -700,7 +793,14 @@ async function startService(
     die(`refusing: ${name} is already ${info.active} (pid ${String(info.mainPid)}); stop it first`, 99);
   if (info.loaded) await systemctlUser(['reset-failed', name]);
   await writeEnvFile(slot, which);
-  await writeFile(logFile, '', { flag: 'a', mode: 0o600 });
+  await writeFile(physical(slot, logFile), '', { flag: 'a', mode: 0o600 });
+  if (slot.persisted) {
+    // The enabled unit file already holds the command, the log and the directory; only the env file is rewritten above.
+    const began = await systemctlUser(['start', name]);
+    if (began.code !== 0)
+      die(`could not start ${name} (exit ${String(began.code)}: ${(began.err + began.out).trim().slice(0, 300)})`);
+    return;
+  }
   const properties = [
     'Restart=on-failure',
     'RestartSec=2s',
@@ -771,6 +871,11 @@ async function up(slot: Slot, reuse: boolean): Promise<void> {
 }
 
 async function upInner(slot: Slot, reuse: boolean): Promise<void> {
+  if (slot.persisted)
+    die(
+      `refusing: slot ${String(slot.n)} is persisted at ${slot.real}; "up" rebuilds a slot from scratch. Run unpersist ${String(slot.n)} first`,
+      99,
+    );
   await assertSlotPath(slot);
   if ((await pidsHolding(slot.v4.lock)).length + (await pidsHolding(slot.v5.lock)).length > 0)
     die(`slot ${String(slot.n)} is already up; run sweep-down.sh ${String(slot.n)} first (or use it as it is)`);
@@ -823,6 +928,7 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
   // 2. The port pin, written into the v4 home BEFORE any daemon verb can run; limits OFF and accepted; the orphaned Chrome stopped.
   await pinV4(slot);
   await limitsOffV4(slot);
+  await signInFakeCodex(slot.v4.home, 'fleet', 'credentials');
   await stopSlotChrome(slot, 'v4 build');
 
   // 3. A COPY of the (stopped) v4 home goes through the converter. The copy leaves sockets and locks behind.
@@ -856,6 +962,8 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
   await freshIdentityForV5(slot);
   await pinV5(slot);
   await verifyLimitsOffV5(slot);
+  // The converter carries the credential folders; this makes sure the Codex login is signed in on the 5.0 side whatever it did.
+  await signInFakeCodex(slot.v5.home, 'state', 'logins', 'credentials');
 
   // 5. Both daemons. v4 first (its panes are still in the builder's tmux server, which it adopts).
   await ensureTmux(slot, 'v4');
@@ -894,6 +1002,22 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
 
   console.log(`\nslot ${String(slot.n)} is up (${String(Math.round((Date.now() - started) / 1000))} s)\n`);
   await status(slot);
+}
+
+/**
+ * The fixture's Codex login (`codex-main`) is added with --no-sign-in, so `codex-main-agent` would refuse to resume ("Login
+ * codex-main needs sign-in"). Gives it the FAKE sign-in file the daemon's own rule reads as signed in (fake-codex-auth.ts: made-up
+ * markers, never a real token; the fake `codex` never reads it). Only a login folder that exists and holds no `auth.json` is
+ * touched; a file that is already there is never replaced.
+ */
+async function signInFakeCodex(home: string, ...credentials: string[]): Promise<void> {
+  const folder = join(home, ...credentials, 'codex-main');
+  if ((await lstat(folder).catch(() => undefined))?.isDirectory() !== true) return;
+  const file = join(folder, 'auth.json');
+  if ((await lstat(file).catch(() => undefined)) !== undefined) return;
+  await writeFile(file, fakeCodexAuthText(), { mode: 0o600 });
+  await chmod(file, 0o600);
+  console.log(`  codex-main: the fake sign-in file is in place (${relative(home, file)})`);
 }
 
 /**
@@ -1073,7 +1197,7 @@ async function cli(
   inherit = false,
 ): Promise<{ code: number; out: string; err: string }> {
   const port = await guard(slot, which);
-  const program = which === 'v4' ? join(SWEEP_ROOT, 'v4bin', 'fy') : await v5Fy(slot);
+  const program = which === 'v4' ? await v4Fy(slot) : await v5Fy(slot);
   const env = { ...baseEnvironment(), ...slotCliEnvironment(slot, which, port) };
   if (which === 'v4') {
     const token = (await readFile(join(slot.v4.home, 'api-token'), 'utf8').catch(() => '')).trim();
@@ -1121,6 +1245,14 @@ async function status(slot: Slot): Promise<void> {
     `  5.0  http://127.0.0.1:${String(slot.v5Port)}    app: https://ferretry-v5.pages.dev/app/    CLI: fy5s${n}   home: ${slot.v5.home}`,
   );
   for (const which of ['v4', 'v5'] as const) await statusServices(slot, which);
+  if (slot.persisted) {
+    const names = [serviceOf(slot, 'v4'), serviceOf(slot, 'v5'), terminalsOf(slot, 'v4'), terminalsOf(slot, 'v5')];
+    const enabled = await Promise.all(
+      names.map(async name => `${name}: ${(await systemctlUser(['is-enabled', name])).out.trim() || 'unknown'}`),
+    );
+    console.log(`  PERSISTED at ${slot.real} (${slot.dir} is a link to it); units: ${enabled.join(', ')}`);
+    console.log(`  ${await lingerNote()}`);
+  }
   console.log(`  put ${slot.bin} first on PATH to use fy4s${n} / fy5s${n}`);
   console.log(`  pair an agent browser (the link never reaches a tool argument or result):`);
   console.log(
@@ -1165,6 +1297,11 @@ async function statusServices(slot: Slot, which: Which): Promise<void> {
 
 async function down(slot: Slot, options: { keepFiles: boolean; quiet?: boolean }): Promise<void> {
   await assertSlotPath(slot);
+  if (slot.persisted && !options.keepFiles)
+    die(
+      `refusing: slot ${String(slot.n)} is persisted at ${slot.real}; "down" without --keep-files would delete a persistent folder. Run unpersist ${String(slot.n)} first, or use down ${String(slot.n)} --keep-files to stop it only`,
+      99,
+    );
   // Ownership first: a unit or scope under this slot's name that is not this slot's refuses the whole down, nothing stopped.
   await assertSlotUnitsOwned(slot);
   if (options.quiet !== true) console.log(`slot ${String(slot.n)}: stopping`);
@@ -1350,9 +1487,10 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
   if (running === undefined)
     die(`refusing: slot ${n}'s 5.0 side is not up (no fyd holds ${slot.v5.lock}); start it with sweep-up.sh first`);
   const bin = dirname(running);
-  if (relative(SWEEP_ROOT, bin).startsWith('..') || isAbsolute(relative(SWEEP_ROOT, bin)))
+  const inside = (root: string): boolean => !relative(root, bin).startsWith('..') && !isAbsolute(relative(root, bin));
+  if (!inside(SWEEP_ROOT) && !(slot.persisted && inside(slot.real)))
     die(
-      `refusing: slot ${n}'s daemon runs from ${bin}, outside ${SWEEP_ROOT}; this command only rewrites programs inside the sweep root`,
+      `refusing: slot ${n}'s daemon runs from ${bin}, outside ${SWEEP_ROOT}${slot.persisted ? ` and ${slot.real}` : ''}; this command only rewrites programs inside the slot's own folder`,
       99,
     );
   const libexec = resolve(libexecArg);
@@ -1497,7 +1635,7 @@ async function pair(slot: Slot, which: Which): Promise<void> {
   );
   const base = await guardedEnv(slot, which);
   const port = await guard(slot, which);
-  const program = which === 'v4' ? join(SWEEP_ROOT, 'v4bin', 'fy') : await v5Fy(slot);
+  const program = which === 'v4' ? await v4Fy(slot) : await v5Fy(slot);
   const env: Record<string, string> = {
     ...base,
     PATH: `${shimDir}:${base.PATH ?? ''}`,
@@ -1568,22 +1706,322 @@ async function guardedEnv(slot: Slot, which: Which): Promise<Record<string, stri
   return { ...baseEnvironment(), ...slotCliEnvironment(slot, which, port) };
 }
 
+// ─── persist / unpersist: one slot that survives a reboot ────────────────────────────────────────────────────────
+
+/*
+ * WHAT MOVES AND WHAT STAYS. The slot folder moves to a persistent one (a rename: same file system, so every file keeps its
+ * mtime; a copy only across file systems, verified before the original is removed). The logical path <sweep root>/slot<N> stays
+ * as a SYMLINK to it, because both homes record absolute paths of themselves (the fleet manifest, transcript homes, accepted
+ * config text hashed with its etag): rewriting those would break the very files that make the slot "the same slot", while a link
+ * keeps every one of them true. After a boot /tmp is empty, so every unit's ExecStartPre (link-slot.sh) recreates the link
+ * before its daemon runs; the units themselves name only persistent paths.
+ *
+ * What the kit owns IS rewritten: fyd.env (the helper path), the wrapper copies, the four unit files, fy4s<N>/fy5s<N>, the pointer
+ * file. Ferrets' panes do not survive the move (both tmux servers are stopped first, as for any restart of the daemons): each side
+ * revives them, as after a restart.
+ */
+
+/** The four unit files a persisted slot owns, with the text each must hold. */
+function persistedUnits(slot: Slot): { name: string; text: string }[] {
+  const tmux = Bun.which('tmux');
+  if (tmux === null) die('tmux is not on PATH', 69);
+  const link = ['/bin/sh', join(slot.real, 'link-slot.sh'), slot.real, slot.dir];
+  const out: { name: string; text: string }[] = [];
+  for (const which of ['v4', 'v5'] as const) {
+    const side = sideOf(slot, which);
+    const envFile = envFileOf(slot, which);
+    const program =
+      which === 'v4' ? physical(slot, join(slot.dir, 'v4-bin', 'fyd')) : physical(slot, join(slot.v5.bin, 'fyd'));
+    const terminals = terminalsOf(slot, which);
+    const daemon = serviceOf(slot, which);
+    out.push({
+      name: daemon,
+      text: daemonUnitText({
+        slot: slot.n,
+        side: which,
+        name: daemon,
+        terminalsName: terminals,
+        execStartPre: link,
+        execStart: wrapped(envFile, [
+          program,
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(which === 'v4' ? slot.v4Port : slot.v5Port),
+        ]),
+        workingDirectory: physical(slot, which === 'v4' ? join(slot.v4.out, 'work') : slot.v5.user),
+        logFile: physical(slot, join(side.dir, 'fyd.log')),
+      }),
+    });
+    out.push({
+      name: terminals,
+      text: terminalsUnitText({
+        slot: slot.n,
+        side: which,
+        name: terminals,
+        execStartPre: link,
+        execStart: wrapped(envFile, [
+          tmux,
+          '-u',
+          '-S',
+          side.tmux,
+          'start-server',
+          ';',
+          'set-option',
+          '-s',
+          'exit-empty',
+          'off',
+        ]),
+        execStop: wrapped(envFile, [tmux, '-u', '-S', side.tmux, 'kill-server']),
+      }),
+    });
+  }
+  return out;
+}
+
+/** The unit file at `path` is this kit's own for this slot (its first line is exactly the marker), or absent. */
+async function unitFileState(path: string, slot: number, name: string): Promise<'absent' | 'ours' | 'foreign'> {
+  const text = await readFile(path, 'utf8').catch(() => undefined);
+  if (text === undefined) return (await lstat(path).catch(() => undefined)) === undefined ? 'absent' : 'foreign';
+  return text.split('\n')[0] === unitMarker(slot, name) ? 'ours' : 'foreign';
+}
+
+/** Same file system: a rename. Otherwise `cp -a`, verified (entry count and total size), and only then the original removed. */
+async function moveTree(from: string, to: string): Promise<void> {
+  try {
+    await rename(from, to);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
+  }
+  const copied = await run('cp', ['-a', '--', from, to], baseEnvironment());
+  const measure = async (root: string): Promise<{ entries: number; bytes: number }> => {
+    let entries = 0;
+    let bytes = 0;
+    const walk = async (folder: string): Promise<void> => {
+      for (const entry of await readdir(folder, { withFileTypes: true })) {
+        entries += 1;
+        const path = join(folder, entry.name);
+        if (entry.isDirectory()) await walk(path);
+        else bytes += (await lstat(path)).size;
+      }
+    };
+    await walk(root);
+    return { entries, bytes };
+  };
+  if (copied.code !== 0) {
+    await rm(to, { recursive: true, force: true });
+    die(
+      `could not copy ${from} to ${to} (exit ${String(copied.code)}: ${copied.err.trim().slice(0, 200)}); the original is untouched`,
+    );
+  }
+  const [a, b] = [await measure(from), await measure(to)];
+  if (a.entries !== b.entries || a.bytes !== b.bytes) {
+    await rm(to, { recursive: true, force: true });
+    die(
+      `the copy at ${to} does not match ${from} (${JSON.stringify(b)} vs ${JSON.stringify(a)}); the original is untouched`,
+    );
+  }
+  await rm(from, { recursive: true, force: true });
+}
+
+/** After a reboot /tmp is empty: put the persisted slot's link (and its wrappers) back, and prove the link is the right one. */
+async function healPersistedLink(slot: Slot): Promise<void> {
+  if (!slot.persisted) return;
+  const folder = await lstat(slot.real).catch(() => undefined);
+  if (folder?.isDirectory() !== true || folder.isSymbolicLink())
+    die(
+      `slot ${String(slot.n)} is recorded as persisted at ${slot.real}, but that folder is missing or not a real folder`,
+      99,
+    );
+  await mkdir(SWEEP_ROOT, { recursive: true, mode: 0o700 });
+  if ((await lstat(slot.dir).catch(() => undefined)) === undefined) await symlink(slot.real, slot.dir);
+  await assertSlotPath(slot);
+  for (const which of ['4', '5']) {
+    if ((await lstat(join(slot.bin, `fy${which}s${String(slot.n)}`)).catch(() => undefined)) === undefined) {
+      await writeWrappers(slot);
+      break;
+    }
+  }
+}
+
+async function lingerNote(): Promise<string> {
+  const uid = process.getuid?.();
+  const ran = await run('loginctl', ['show-user', String(uid ?? ''), '-p', 'Linger'], managerEnvironment()).catch(
+    () => undefined,
+  );
+  const linger = /Linger=(\w+)/u.exec(ran?.out ?? '')?.[1];
+  return linger === 'yes'
+    ? 'linger is on for this user: the units start at boot, without a login'
+    : `WARNING: linger is ${linger ?? 'unknown'} for this user, so the units start only when this user logs in. To start them at boot, run once: loginctl enable-linger ${process.env.USER ?? '$USER'}`;
+}
+
+async function waitHealthy(slot: Slot, which: Which): Promise<void> {
+  const path = which === 'v4' ? '/v1/health' : '/healthz';
+  const port = which === 'v4' ? slot.v4Port : slot.v5Port;
+  await waitUntil(
+    `the ${labelOf(which)} daemon serving`,
+    which === 'v4' ? 90_000 : 180_000,
+    async () => (await fetch(`http://127.0.0.1:${String(port)}${path}`, { signal: AbortSignal.timeout(2000) })).ok,
+  );
+}
+
+/** Starts both sides of a slot under its CURRENT kind of unit (transient or persisted): tmux first, then the daemon, v4 before 5.0. */
+async function startBoth(slot: Slot, v4Dir: string): Promise<void> {
+  await ensureTmux(slot, 'v4');
+  await startService(
+    slot,
+    'v4',
+    join(v4Dir, 'fyd'),
+    slot.v4Port,
+    join(slot.v4.out, 'fyd.log'),
+    join(slot.v4.out, 'work'),
+  );
+  await waitHealthy(slot, 'v4');
+  await ensureTmux(slot, 'v5');
+  await startService(slot, 'v5', join(slot.v5.bin, 'fyd'), slot.v5Port, join(slot.v5.dir, 'fyd.log'), slot.v5.user);
+  await waitHealthy(slot, 'v5');
+}
+
+async function persist(slot: Slot, targetArg: string | undefined): Promise<void> {
+  const n = String(slot.n);
+  if (slot.persisted) die(`slot ${n} is already persisted at ${slot.real}`, 99);
+  await assertSlotPath(slot);
+  if ((await lstat(slot.dir).catch(() => undefined))?.isDirectory() !== true)
+    die(`slot ${n} has no folder at ${slot.dir}; bring it up first (sweep-up.sh ${n})`);
+  await guard(slot, 'v4');
+  await guard(slot, 'v5');
+  const target = targetArg ?? defaultPersistDir(slot.n);
+  const problem = persistTargetProblem({ target, sweepRoot: SWEEP_ROOT, home: homedir() });
+  if (problem !== undefined) die(`refusing: ${problem}`, 99);
+  const occupied = await readdir(target).catch(() => undefined);
+  if (occupied !== undefined && occupied.length > 0) die(`refusing: ${target} already holds files`, 99);
+  if ((await lstat(target).catch(() => undefined)) !== undefined && occupied === undefined)
+    die(`refusing: ${target} exists and is not an empty folder`, 99);
+  await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+  // Every unit under this slot's names must be this slot's (running), and no unit FILE of those names may already be there.
+  await assertSlotUnitsOwned(slot);
+  const files = persistedUnits({ ...slot, real: target, persisted: true }).map(unit => unit.name);
+  for (const name of files)
+    if ((await unitFileState(join(userUnitDir(), name), slot.n, name)) === 'foreign')
+      die(`refusing: ${join(userUnitDir(), name)} already exists and is not this kit's; it is left alone`, 99);
+  const v4 = await v4Programs();
+
+  console.log(`slot ${n}: persisting to ${target}`);
+  console.log(`  ${await lingerNote()}`);
+  await down(slot, { keepFiles: true });
+  if (occupied !== undefined) await rm(target, { recursive: true });
+  await moveTree(slot.dir, target);
+  const revert = async (): Promise<void> => {
+    await rm(pointerFile(slot.n), { force: true });
+    if ((await lstat(slot.dir).catch(() => undefined))?.isSymbolicLink() === true) await rm(slot.dir);
+    await moveTree(target, slot.dir);
+  };
+  let p: Slot;
+  try {
+    await symlink(target, slot.dir);
+    await mkdir(dirname(pointerFile(slot.n)), { recursive: true, mode: 0o700 });
+    await writeFile(
+      pointerFile(slot.n),
+      `${JSON.stringify({ slot: slot.n, dir: target, persistedAt: new Date().toISOString() }, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+    p = slotOf(slot.n);
+    await assertSlotPath(p);
+    // Programs and helpers the units need, in the slot's own folder: nothing a restart depends on lives in a checkout or a link farm.
+    await mkdir(join(p.real, 'v4-bin'), { recursive: true, mode: 0o700 });
+    for (const name of ['fy', 'fyd', 'fyd-browser-worker']) {
+      if ((await lstat(join(v4.dir, name)).catch(() => undefined)) === undefined) continue;
+      await copyFile(join(v4.dir, name), join(p.real, 'v4-bin', name));
+      await chmod(join(p.real, 'v4-bin', name), 0o755);
+    }
+    await mkdir(join(p.real, 'support'), { recursive: true, mode: 0o700 });
+    await copyFile(join(FIXTURES, 'support', 'fake-claude-rich.ts'), join(p.real, 'support', 'fake-claude-rich.ts'));
+    await writeFile(join(p.real, 'link-slot.sh'), LINK_SCRIPT, { mode: 0o700 });
+    await chmod(join(p.real, 'link-slot.sh'), 0o700);
+    await writeEnvFile(p, 'v4');
+    await writeEnvFile(p, 'v5');
+    await mkdir(userUnitDir(), { recursive: true });
+    for (const unit of persistedUnits(p)) await writeFile(join(userUnitDir(), unit.name), unit.text, { mode: 0o644 });
+  } catch (error) {
+    for (const name of files) {
+      if ((await unitFileState(join(userUnitDir(), name), slot.n, name)) === 'ours')
+        await rm(join(userUnitDir(), name), { force: true });
+    }
+    await revert().catch(() => undefined);
+    throw error;
+  }
+  const reloaded = await systemctlUser(['daemon-reload']);
+  const enabled = await systemctlUser(['enable', ...files]);
+  if (reloaded.code !== 0 || enabled.code !== 0)
+    die(
+      `the unit files are written but systemd would not load or enable them (${(reloaded.err + enabled.err + enabled.out).trim().slice(0, 300)}); fix that, or run unpersist ${n}`,
+    );
+  await startBoth(p, v4.dir);
+  await writeWrappers(p);
+  console.log(`\nslot ${n} is persisted at ${target}: both daemons are enabled user units and survive a reboot\n`);
+  await status(p);
+}
+
+async function unpersist(slot: Slot): Promise<void> {
+  const n = String(slot.n);
+  if (!slot.persisted) die(`slot ${n} is not persisted`, 99);
+  await healPersistedLink(slot);
+  const back = slotOf(slot.n).dir;
+  const names = persistedUnits(slot).map(unit => unit.name);
+  for (const name of names)
+    if ((await unitFileState(join(userUnitDir(), name), slot.n, name)) === 'foreign')
+      die(`refusing: ${join(userUnitDir(), name)} is not this kit's unit file; it is left alone`, 99);
+  await assertSlotUnitsOwned(slot);
+  const v4Dir = (await v4Programs()).dir;
+  console.log(`slot ${n}: unpersisting from ${slot.real}`);
+  await down(slot, { keepFiles: true });
+  await systemctlUser(['disable', ...names]);
+  for (const name of names)
+    if ((await unitFileState(join(userUnitDir(), name), slot.n, name)) === 'ours')
+      await rm(join(userUnitDir(), name), { force: true });
+  await systemctlUser(['daemon-reload']);
+  for (const name of names) await systemctlUser(['reset-failed', name]);
+  // The folder goes back where the sweep expects it; the link, the pointer and the persistence-only files go.
+  if ((await lstat(slot.dir).catch(() => undefined))?.isSymbolicLink() !== true)
+    die(`refusing: ${slot.dir} is not the link the persisted slot expects; nothing was moved`, 99);
+  await rm(slot.dir);
+  await moveTree(slot.real, back);
+  await rm(pointerFile(slot.n), { force: true });
+  const plain = slotOf(slot.n);
+  for (const leftover of ['link-slot.sh', 'v4-bin', 'support'])
+    await rm(join(plain.dir, leftover), { recursive: true, force: true });
+  await startBoth(plain, v4Dir);
+  await writeWrappers(plain);
+  console.log(
+    `\nslot ${n} is back under ${plain.dir}, running as transient units (no unit file, gone with the user manager)\n`,
+  );
+  await status(plain);
+}
+
 // ─── main ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The slot named on the command line; a persisted slot's /tmp link (empty after a boot) is put back first. */
+async function healedSlot(text: string | undefined): Promise<Slot> {
+  const slot = parseSlot(text);
+  await healPersistedLink(slot);
+  return slot;
+}
 
 try {
   const [command, slotArg, ...rest] = process.argv.slice(2);
   switch (command) {
     case 'up':
-      await up(parseSlot(slotArg), rest.includes('--reuse'));
+      await up(await healedSlot(slotArg), rest.includes('--reuse'));
       break;
     case 'down':
-      await down(parseSlot(slotArg), { keepFiles: rest.includes('--keep-files') });
+      await down(await healedSlot(slotArg), { keepFiles: rest.includes('--keep-files') });
       break;
     case 'status':
-      await status(parseSlot(slotArg));
+      await status(await healedSlot(slotArg));
       break;
     case 'cli': {
-      const slot = parseSlot(slotArg);
+      const slot = await healedSlot(slotArg);
       const which = rest[0];
       if (which !== 'v4' && which !== 'v5') die('usage: slot.ts cli <1..9> <v4|v5> [args…]', 64);
       process.exit((await cli(slot, which, rest.slice(1), true)).code);
@@ -1592,17 +2030,23 @@ try {
     case 'pair': {
       const which = rest[0];
       if (which !== 'v4' && which !== 'v5') die('usage: slot.ts pair <1..9> <v4|v5>', 64);
-      await pair(parseSlot(slotArg), which);
+      await pair(await healedSlot(slotArg), which);
       break;
     }
     case 'upgrade-v5':
-      await upgradeV5(parseSlot(slotArg), rest[0]);
+      await upgradeV5(await healedSlot(slotArg), rest[0]);
+      break;
+    case 'persist':
+      await persist(await healedSlot(slotArg), rest[0]);
+      break;
+    case 'unpersist':
+      await unpersist(await healedSlot(slotArg));
       break;
     case 'stamp-v5':
       await stampV5(slotArg, rest[0]);
       break;
     default:
-      die('usage: slot.ts <up|down|status|cli|pair|upgrade-v5|stamp-v5> <slot 1..9> …', 64);
+      die('usage: slot.ts <up|down|status|cli|pair|upgrade-v5|persist|unpersist|stamp-v5> <slot 1..9> …', 64);
   }
 } catch (error) {
   if (error instanceof Failure) {

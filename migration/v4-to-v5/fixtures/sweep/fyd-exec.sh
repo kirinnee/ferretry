@@ -9,10 +9,13 @@
 # <env-file> (the slot's private 0600 NAME=value file, written by slot.ts from its allow-list), and nothing else.
 #
 # <env-file> is PARSED, never evaluated: each line is NAME=value, the value everything after the first `=`, taken literally
-# (no quoting, no expansion). Fail closed (exit 78) on anything else: a missing, linked or foreign-owned file, an empty file, a
-# line without `=`, a name that is not [A-Za-z_][A-Za-z0-9_]*, a credential-shaped name, or a program path holding `=`.
+# (no quoting, no expansion). Fail closed, ALWAYS with exit 78, on anything else: a missing, linked, foreign-owned, unreadable
+# or not-exactly-0600 file, an empty file, a line without `=`, a name that is not [A-Za-z_][A-Za-z0-9_]*, a credential-shaped
+# name, or a program that is not an absolute executable path without `=`. Uniform means uniform: the EXIT trap below turns any
+# other way this script could leave before the exec (a failed read, a command that errors under `set -e`) into 78 too.
 # No value is ever printed, put in a unit property or in argv by this script.
 set -eu
+trap 'exit 78' EXIT
 
 fail() {
   printf 'fyd-exec: refusing: %s\n' "$1" >&2
@@ -28,9 +31,14 @@ case "$envbin" in /*) ;; *) fail 'the env program must be an absolute path' ;; e
 [ -x "$envbin" ] || fail 'the env program is not executable'
 case "$1" in /*) ;; *) fail 'the program must be an absolute path' ;; esac
 case "$1" in *=*) fail 'the program path holds "=" (env would read it as an assignment)' ;; esac
+[ -f "$1" ] && [ -x "$1" ] || fail 'the program is not an executable file'
 # shellcheck disable=SC3067 # `test -O` (owned by this user) is in dash, bash and busybox sh, just not in the POSIX text
 [ -f "$file" ] && [ ! -L "$file" ] && [ -O "$file" ] && [ -r "$file" ] ||
-  fail 'the environment file is missing, a link, or not owned by this user'
+  fail 'the environment file is missing, a link, unreadable, or not owned by this user'
+# Exactly 0600: the file holds the daemon's whole environment, so a group- or world-readable (or writable) one is refused.
+[ -n "$(find "$file" -perm 600 -print 2>/dev/null)" ] || fail 'the environment file is not mode 0600'
+# `cat` (not a redirection on a special builtin, which would end the shell with its own status) proves the file reads.
+cat -- "$file" >/dev/null 2>&1 || fail 'the environment file cannot be read'
 
 count=0
 while IFS= read -r line || [ -n "$line" ]; do
@@ -48,4 +56,5 @@ while IFS= read -r line || [ -n "$line" ]; do
 done <"$file"
 
 [ "$count" -gt 0 ] || fail 'the environment file holds no variables'
+trap - EXIT
 exec "$envbin" -i "$@"
