@@ -57,6 +57,8 @@ describe('this build’s catalogs, parsed when built-ins.json is written', () =>
     should(PRESET_ENV_NAMES).eql(names);
     should(names).eql([...new Set(names)].sort());
     should(names).containEql('ZAI_API_KEY').and.containEql('ANTHROPIC_BASE_URL');
+    // A `PREFIX_*` detect family is declared as the family, spelled as the preset wrote it; an exact detect name is not added.
+    should(names).containEql('ZAI_*').and.containEql('LITELLM_*').and.not.containEql('AWS_PROFILE');
     should(builtInsFresh(realBuiltIns, written(`${JSON.stringify(names)}\n`))).be.true();
     should(builtInsFresh(realBuiltIns, written(JSON.stringify([...names, 'SMUGGLED_TOKEN'])))).be.false();
     should(builtInsFresh(realBuiltIns, join(tmpdir(), 'logins-built-ins-none', 'names.json'))).be.false();

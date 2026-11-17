@@ -233,7 +233,17 @@ export function fakeWorld(
         }),
     ...(shell === undefined
       ? {}
-      : { readEnvironment: (names: readonly string[]) => Object.fromEntries(names.map(name => [name, shell[name]])) }),
+      : {
+          // The shell's own rule: a name is exact, a declared `PREFIX_*` family answers every set variable of the prefix.
+          readEnvironment: (names: readonly string[]) =>
+            Object.fromEntries(
+              names.flatMap(name =>
+                name.endsWith('_*')
+                  ? Object.entries(shell).filter(([variable]) => variable.startsWith(name.slice(0, -1)))
+                  : [[name, shell[name]]],
+              ),
+            ),
+        }),
     binaryName: 'fz',
     sleep: async milliseconds => {
       slept.push(milliseconds);
