@@ -35,7 +35,7 @@ const record = (id: string, state: FerretRecord['state'], extra: Partial<FerretR
 });
 
 function ferrets(records: readonly FerretRecord[], over: Partial<BootExitFerrets> = {}) {
-  const settled: { ferret: FerretId; handle: string; from: string }[] = [];
+  const settled: { ferret: FerretId; handle: string | undefined; from: string }[] = [];
   const port: BootExitFerrets = {
     list: () => records,
     status: async () => 'running',
@@ -58,7 +58,7 @@ async function pass(exits: BootExitRecorder) {
 }
 
 describe("W2-a the boot exit pass (today's first self-check, over the registry)", () => {
-  test('W2-a only a live ferret on a handle whose document claims an agent and whose terminal is PROVEN gone is recorded', async () => {
+  test('W2-a only a live ferret (on a handle or on none, FX3) whose document claims an agent and whose terminal is PROVEN gone is recorded', async () => {
     const { port, settled } = ferrets([
       record('a', 'working', { handle: '%1' }),
       record('b', 'idle', { handle: '%2' }),
@@ -67,10 +67,11 @@ describe("W2-a the boot exit pass (today's first self-check, over the registry)"
       record('e', 'stopped', { handle: '%5' }),
     ]);
     const found = await pass(new BootExitRecorder(new FerretBootExits(port), { now: () => T0 }));
-    expect(found.map(candidate => candidate.id)).toEqual([ferretId('a'), ferretId('b')]);
+    expect(found.map(candidate => candidate.id)).toEqual([ferretId('a'), ferretId('b'), ferretId('d')]);
     expect(settled).toEqual([
       { ferret: ferretId('a'), handle: '%1', from: 'running' },
       { ferret: ferretId('b'), handle: '%2', from: 'awaiting_user' },
+      { ferret: ferretId('d'), handle: undefined, from: 'running' },
     ]);
   });
 

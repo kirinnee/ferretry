@@ -13,7 +13,7 @@ afterEach(async () => {
 
 interface Settled {
   readonly ferret: FerretId;
-  readonly handle: string;
+  readonly handle: string | undefined;
   readonly from: string;
   readonly reason: string;
 }
@@ -206,6 +206,84 @@ describe('a ferret whose terminal vanished', () => {
     (fleet.record as { state: string }).state = 'stopped';
 
     await fleet.tick();
+
+    expect(fleet.runner.goneAsked).toEqual([]);
+    expect(fleet.settled).toEqual([]);
+  });
+});
+
+describe('FX3: a live ferret with NO handle (a converted v4 copy)', () => {
+  /** The fleet of `watched`, its record then stripped of the handle the converter dropped. */
+  async function converted(state: 'working' | 'idle' = 'working') {
+    const fleet = await watched(state, 'waiting');
+    delete (fleet.record as { handle?: string }).handle;
+    return fleet;
+  }
+
+  it('is settled gone by the sweep, on NO handle, once the runner proves its terminal is not there', async () => {
+    const fleet = await converted();
+    fleet.runner.reboot();
+
+    await fleet.sweep();
+
+    expect(fleet.settled).toEqual([
+      {
+        ferret: fleet.id,
+        handle: undefined,
+        from: 'running',
+        reason: 'the agent is no longer running: its terminal is gone, so how it exited was not recorded',
+      },
+    ]);
+  });
+
+  it('says it was between turns when it was idle', async () => {
+    const fleet = await converted('idle');
+    fleet.runner.reboot();
+
+    await fleet.sweep();
+
+    expect(fleet.settled.map(one => one.from)).toEqual(['awaiting_user']);
+  });
+
+  it('is asked again inside the settle, by the ferret', async () => {
+    const fleet = await converted();
+    fleet.runner.reboot();
+    await fleet.sweep();
+    const [stillGone] = fleet.stillGones;
+    expect(await stillGone?.()).toBe(true);
+
+    fleet.runner.adoptable(fleet.id);
+
+    expect(await stillGone?.()).toBe(false);
+  });
+
+  it('is left alone when the runner says its terminal is there, and no dead pane is looked for (it names no pane)', async () => {
+    const fleet = await converted();
+
+    await fleet.sweep();
+
+    expect(fleet.runner.goneAsked).toEqual([fleet.id]);
+    expect(fleet.runner.exitedAsked).toEqual([]);
+    expect(fleet.settled).toEqual([]);
+    expect(fleet.settledExits).toEqual([]);
+  });
+
+  it('is left alone when the runner cannot prove the terminal gone', async () => {
+    const fleet = await converted();
+    fleet.runner.reboot();
+    fleet.runner.goneAnswer = false;
+
+    await fleet.sweep();
+
+    expect(fleet.settled).toEqual([]);
+  });
+
+  it('is not asked about once the registry says it is stopped', async () => {
+    const fleet = await converted();
+    fleet.runner.reboot();
+    (fleet.record as { state: string }).state = 'stopped';
+
+    await fleet.sweep();
 
     expect(fleet.runner.goneAsked).toEqual([]);
     expect(fleet.settled).toEqual([]);

@@ -13,6 +13,7 @@ import {
   type AutoResumeDecideInput,
   AutoResumeFile,
   AutoResumeSummaryFile,
+  FerretFiles,
   FerretHistoryFiles,
   type FerretId,
   FerretsPort,
@@ -161,6 +162,35 @@ describe('W2-a auto-resume, mounted', () => {
         .map(input => input.ferret)
         .sort(),
     ).toEqual([a, b].sort());
+    await h.stop();
+  });
+
+  test('FX3: a converted ferret with NO handle (working, and idle) is settled terminal_gone and auto-resumed like any other', async () => {
+    let { h, runner } = await boot([fakeRuntimes(yes).plugin]);
+    const working = await start(h, 'fir');
+    const idle = await start(h, 'gingko');
+    await h.settle();
+    // The converter drops a handle it cannot prove: both records stay live in the registry, with no handle and no pane.
+    for (const [id, state] of [
+      [working, 'working'],
+      [idle, 'idle'],
+    ] as const) {
+      const document = JSON.parse(h.state('ferrets').raw(FerretFiles, id) ?? '{}') as Record<string, unknown>;
+      delete document.handle;
+      h.state('ferrets').plant(FerretFiles, JSON.stringify({ ...document, state }), id);
+    }
+    const launches = runner.starts;
+    h = await hostRestart(h, runner);
+    expect(runner.starts).toBe(launches);
+
+    await runPass(h);
+
+    expect(runner.starts).toBe(launches + 2);
+    for (const id of [working, idle]) {
+      expect((await view(h, id)).state).not.toBe('stopped');
+      expect(types(h, id)).toContain('session.exited');
+      expect(types(h, id)).toContain('session.auto_resumed');
+    }
     await h.stop();
   });
 
