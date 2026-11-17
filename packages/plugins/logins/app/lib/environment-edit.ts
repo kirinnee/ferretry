@@ -5,7 +5,8 @@
  * REFERENCES ONLY. A secret is never typed here: a value that looks like a key, or an address holding one, is refused
  * BEFORE any request, by the same detector the daemon applies to a login file, and the sentence names the VARIABLE and
  * never the value. A variable the page shows as a secret or as hidden has no value on this screen; it is sent as
- * `{ keep: true }` unless the person typed a replacement (a `${secret:NAME}` reference).
+ * `{ keep: true }` unless the person typed a replacement (a `${secret:NAME}` reference). A replacement they typed that
+ * was emptied before Save (`wiped`) is refused instead: a silent keep would drop what they meant to apply.
  */
 
 import {
@@ -25,6 +26,11 @@ export interface EditRow {
   /** A plain value, or what the person typed. Empty for a secret or hidden one that is kept as it is. */
   readonly value: string;
   readonly removed: boolean;
+  /**
+   * The person typed a value into this masked row and it was emptied since (the page was hidden, or a held change
+   * took it). Such a row is refused at Save, never sent as "keep": the person meant to replace it.
+   */
+  readonly wiped?: boolean;
 }
 
 type EnvChange = Extract<LoginChange, { kind: 'login.env' }>;
@@ -68,7 +74,7 @@ export function envChange(loginId: string, rows: readonly EditRow[]): EnvEdit {
   for (const row of rows) {
     if (row.removed) continue;
     const name = row.kind === 'new' ? row.name.trim() : row.name;
-    if (row.kind === 'new' && name === '' && row.value.trim() === '') continue;
+    if (row.kind === 'new' && name === '' && row.value.trim() === '' && row.wiped !== true) continue;
     if (name === '') return refused('A new variable needs a name.');
     // A name that failed the check is never repeated: it is free text, and may be a key.
     if (!POSIX_NAME.test(name))
@@ -82,6 +88,7 @@ export function envChange(loginId: string, rows: readonly EditRow[]): EnvEdit {
     if ((RESERVED_LOGIN_ENV_NAMES as readonly string[]).includes(name))
       return refused(`${name} is reserved: Ferretry sets it for the runtime itself.`);
     if (env.has(name)) return refused(`${name} is listed twice.`);
+    if (row.wiped === true && row.value === '') return refused(`${name} needs a value.`);
     if (row.kind === 'new' && row.value.trim() === '') return refused(`${name} needs a value.`);
     if ((row.kind === 'secret' || row.kind === 'hidden') && row.value === '') {
       env.set(name, { keep: true });

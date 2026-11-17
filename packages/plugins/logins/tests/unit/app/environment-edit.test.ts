@@ -187,6 +187,30 @@ describe('envChange', () => {
     });
   });
 
+  it('refuses a replacement whose typed value was wiped, instead of keeping the old secret', () => {
+    expect(envChange('zai', withRow(1, { wiped: true }))).toEqual({
+      kind: 'refused',
+      sentence: 'AUTH_TOKEN needs a value.',
+    });
+    // The same row with its value typed again is a replacement like any other.
+    expect(envChange('zai', withRow(1, { wiped: true, value: '${secret:WORK_KEY}' }))).toMatchObject({
+      kind: 'change',
+      change: { env: { AUTH_TOKEN: '${secret:WORK_KEY}' } },
+    });
+  });
+
+  it('refuses a wiped new row, with or without a name, and a removed wiped row is simply gone', () => {
+    expect(envChange('zai', [...rows(), { ...newRow('REGION', ''), wiped: true }])).toEqual({
+      kind: 'refused',
+      sentence: 'REGION needs a value.',
+    });
+    expect(envChange('zai', [...rows(), { ...newRow('', ''), wiped: true }])).toEqual({
+      kind: 'refused',
+      sentence: 'A new variable needs a name.',
+    });
+    expect(envChange('zai', withRow(1, { wiped: true, removed: true }))).toMatchObject({ kind: 'change' });
+  });
+
   it('lets a new variable take the name of one that is being removed', () => {
     const edit = envChange('zai', [...withRow(0, { removed: true }), newRow('BASE_URL', 'https://other.test')]);
     expect(edit).toMatchObject({ kind: 'change', change: { env: { BASE_URL: 'https://other.test' } } });

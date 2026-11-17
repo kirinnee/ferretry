@@ -7,6 +7,10 @@ export {
   type ClipboardWriter,
   browserClipboardWriter,
   cn,
+  SecretInput,
+  SecretTextarea,
+  useSecretField,
+  useSecretTextarea,
   changeRefusalExplanation,
   useChangeAuthority,
 } from '@ferretry/app/ui';
