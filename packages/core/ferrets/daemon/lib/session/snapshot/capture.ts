@@ -68,7 +68,7 @@ export class LastSnapshotCapture {
     const abandon = new AbortController();
     try {
       const outcome = await Promise.race<CaptureOutcome>([
-        this.captureOnce(id, runner, handle, abandon.signal).catch(() => 'failed' as const),
+        this.captureOnce(id, ferret, runner, handle, abandon.signal).catch(() => 'failed' as const),
         this.deps.sleep(this.deps.bound ?? LAST_SNAPSHOT_CAPTURE_BOUND, abandon.signal).then(
           () => 'timed-out' as const,
           () => 'failed' as const,
@@ -86,11 +86,12 @@ export class LastSnapshotCapture {
 
   private async captureOnce(
     id: SessionId,
+    ferret: FerretId,
     runner: Runner,
     handle: RunnerHandle,
     abandoned: AbortSignal,
   ): Promise<CaptureOutcome> {
-    const look = await runner.look?.(handle);
+    const look = await runner.look?.(handle, ferret);
     const screen = look?.status;
     // Today's rule: only a frame actually observed on a live pane is kept; a blank one is not evidence of anything.
     if (screen === undefined || screen.trim() === '') return 'nothing';

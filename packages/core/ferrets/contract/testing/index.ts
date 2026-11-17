@@ -150,8 +150,10 @@ export class FakeRunner implements Runner {
     if (live === undefined) return err('gone');
     return ok({ handle: live.handle, ...(live.pid === undefined ? {} : { pid: live.pid }), startedAt: live.startedAt });
   }
-  async alive(handle: RunnerHandle): Promise<boolean> {
-    return this.#live.has(handle);
+  async alive(handle: RunnerHandle, ferret?: FerretId): Promise<boolean> {
+    // A liveness probe a test makes on its own is not a production caller: listed, never refused.
+    if (ferret === undefined) this.unnamed.push('alive');
+    return this.#owns(handle, ferret);
   }
   /** What the next `identify` answers instead of the live pane: a test's own `'gone'`, or `undefined` for a runner that cannot tell. */
   identity: 'gone' | undefined | 'live' = 'live';
@@ -162,22 +164,25 @@ export class FakeRunner implements Runner {
     return { handle, ...(live.pid === undefined ? {} : { pid: live.pid }), processStart: String(live.startedAt) };
   }
   async signal(): Promise<void> {}
-  async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {
+  async deliver(handle: RunnerHandle, delivery: RunnerDelivery, ferret?: FerretId): Promise<DeliveryOutcome> {
+    this.#named('deliver', ferret);
     this.#fail();
-    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    if (!this.#owns(handle, ferret)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
     await delivery.beforeWrite?.();
     this.deliveries.push({ handle, delivery });
     return delivery.text.startsWith('/') ? 'handled-local' : 'turn-started';
   }
-  async queue(handle: RunnerHandle, text: string): Promise<QueueOutcome> {
+  async queue(handle: RunnerHandle, text: string, ferret?: FerretId): Promise<QueueOutcome> {
+    this.#named('queue', ferret);
     this.#fail();
-    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    if (!this.#owns(handle, ferret)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
     this.queued.push({ handle, text });
     return this.queueOutcome;
   }
-  async stopTurn(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerStopOutcome> {
+  async stopTurn(handle: RunnerHandle, stop: RunnerStop, ferret?: FerretId): Promise<RunnerStopOutcome> {
+    this.#named('stopTurn', ferret);
     this.#fail();
-    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    if (!this.#owns(handle, ferret)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
     this.stops.push({ handle, stop });
     if (!shouldPressStopKey(this.working, stop)) return { pressed: false, working: this.working };
     this.pressed.push({ handle, key: stop.key });
@@ -197,29 +202,44 @@ export class FakeRunner implements Runner {
   readonly cleared: { readonly handle: RunnerHandle; readonly text: string }[] = [];
   readonly submitted: { readonly handle: RunnerHandle; readonly text: string; readonly strict: boolean }[] = [];
   readonly stoppedActive: { readonly handle: RunnerHandle; readonly stop: RunnerStop }[] = [];
-  async observe(handle: RunnerHandle): Promise<RunnerPaneObservation | undefined> {
-    return this.#live.has(handle) ? this.pane : undefined;
+  async observe(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerPaneObservation | undefined> {
+    this.#named('observe', ferret);
+    return this.#owns(handle, ferret) ? this.pane : undefined;
   }
-  async heldAt(handle: RunnerHandle, text: string): Promise<RunnerHeldAt | undefined> {
+  async heldAt(handle: RunnerHandle, text: string, ferret?: FerretId): Promise<RunnerHeldAt | undefined> {
+    this.#named('heldAt', ferret);
     void text;
-    if (!this.#live.has(handle) || this.held === 'throw') throw new Error('the fake runner could not read the pane');
+    if (!this.#owns(handle, ferret) || this.held === 'throw')
+      throw new Error('the fake runner could not read the pane');
     return this.held;
   }
-  async clearComposer(handle: RunnerHandle, text: string): Promise<RunnerComposerCleared> {
+  async clearComposer(handle: RunnerHandle, text: string, ferret?: FerretId): Promise<RunnerComposerCleared> {
+    this.#named('clearComposer', ferret);
     this.#fail();
-    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    if (!this.#owns(handle, ferret)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
     this.cleared.push({ handle, text });
     return this.clearOutcome;
   }
-  async submitComposer(handle: RunnerHandle, text: string, strict = false): Promise<RunnerComposerSubmitted> {
+  async submitComposer(
+    handle: RunnerHandle,
+    text: string,
+    strict = false,
+    ferret?: FerretId,
+  ): Promise<RunnerComposerSubmitted> {
+    this.#named('submitComposer', ferret);
     this.#fail();
-    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    if (!this.#owns(handle, ferret)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
     this.submitted.push({ handle, text, strict });
     return this.submitOutcome;
   }
-  async stopActiveTurn(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerPaneObservation | undefined> {
+  async stopActiveTurn(
+    handle: RunnerHandle,
+    stop: RunnerStop,
+    ferret?: FerretId,
+  ): Promise<RunnerPaneObservation | undefined> {
+    this.#named('stopActiveTurn', ferret);
     this.#fail();
-    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    if (!this.#owns(handle, ferret)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
     this.stoppedActive.push({ handle, stop });
     if (shouldPressStopKey(this.working, stop)) this.pressed.push({ handle, key: stop.key });
     return this.pane;
@@ -241,24 +261,28 @@ export class FakeRunner implements Runner {
   readonly formPastes: { readonly handle: RunnerHandle; readonly text: string }[] = [];
   /** Runs after each key or paste lands, so a test can redraw `form` the way a real form would. */
   onFormWrite: (write: { readonly key?: FormKey; readonly text?: string }) => void = () => {};
-  async formCapture(handle: RunnerHandle): Promise<RunnerFormCapture | undefined> {
-    return this.#live.has(handle) ? this.form : undefined;
+  async formCapture(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerFormCapture | undefined> {
+    this.#named('formCapture', ferret);
+    return this.#owns(handle, ferret) ? this.form : undefined;
   }
-  async formKey(handle: RunnerHandle, key: FormKey): Promise<void> {
+  async formKey(handle: RunnerHandle, key: FormKey, ferret?: FerretId): Promise<void> {
+    this.#named('formKey', ferret);
     this.#fail();
-    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    if (!this.#owns(handle, ferret)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
     this.formKeys.push({ handle, key });
     this.onFormWrite({ key });
   }
   readonly pickerKeys: { readonly handle: RunnerHandle; readonly key: PickerKey }[] = [];
-  async pickerKey(handle: RunnerHandle, key: PickerKey): Promise<void> {
+  async pickerKey(handle: RunnerHandle, key: PickerKey, ferret?: FerretId): Promise<void> {
+    this.#named('pickerKey', ferret);
     this.#fail();
-    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    if (!this.#owns(handle, ferret)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
     this.pickerKeys.push({ handle, key });
   }
-  async formPaste(handle: RunnerHandle, text: string): Promise<void> {
+  async formPaste(handle: RunnerHandle, text: string, ferret?: FerretId): Promise<void> {
+    this.#named('formPaste', ferret);
     this.#fail();
-    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    if (!this.#owns(handle, ferret)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
     this.formPastes.push({ handle, text });
     this.onFormWrite({ text });
   }
@@ -269,9 +293,10 @@ export class FakeRunner implements Runner {
   readonly screens = new Map<RunnerHandle, RunnerLook>();
   /** Every handle `look` was asked about, in order. */
   readonly looked: RunnerHandle[] = [];
-  async look(handle: RunnerHandle): Promise<RunnerLook | undefined> {
+  async look(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerLook | undefined> {
+    this.#named('look', ferret);
     this.looked.push(handle);
-    if (!this.#live.has(handle)) return undefined;
+    if (!this.#owns(handle, ferret)) return undefined;
     return this.screens.get(handle) ?? { frame: 'idle', working: false, atPrompt: true, permission: false };
   }
   /**
@@ -286,6 +311,30 @@ export class FakeRunner implements Runner {
     if ([...this.#live.values()].some(live => live.ferret === ferret)) return false;
     if (this.goneAnswer === 'throw') throw new Error('the fake runner could not ask');
     return this.goneAnswer;
+  }
+  /**
+   * When set, a call that names no ferret THROWS, and every such call is listed in {@link FakeRunner.unnamed} either way:
+   * a pane id is not an identity, so a production caller that reaches a handle without the ferret it is for is the bug
+   * (a stale handle then reaches ANOTHER ferret's pane). The ferrets unit fixture sets it.
+   */
+  requireFerret = false;
+  readonly unnamed: string[] = [];
+  #named(method: string, ferret: FerretId | undefined): void {
+    if (ferret !== undefined) return;
+    this.unnamed.push(method);
+    if (this.requireFerret) throw new Error(`FakeRunner.${method} was called with a handle and no ferret`);
+  }
+  /**
+   * TEST ONLY: every live pane of `from` now belongs to `to`, and the handles stay as they were: a tmux server that
+   * restarted hands the same pane ids out again, so a record that kept `from`'s handle now names `to`'s pane.
+   */
+  reassign(from: FerretId, to: FerretId): void {
+    for (const [handle, live] of this.#live) if (live.ferret === from) this.#live.set(handle, { ...live, ferret: to });
+  }
+  /** The pane behind `handle` is live and, when the call is FOR a ferret, that ferret's own (as the tmux runner proves it). */
+  #owns(handle: RunnerHandle, ferret: FerretId | undefined): boolean {
+    const live = this.#live.get(handle);
+    return live !== undefined && (ferret === undefined || live.ferret === ferret);
   }
   /** TEST ONLY: the host went down and took the runner's server with it: every pane is gone. */
   reboot(): void {

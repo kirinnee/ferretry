@@ -64,7 +64,7 @@ const firstTurnPointers = (runner: FakeRunner) =>
 
 describe('M3 F-0344 a started ferret is handed its task once (today’s deliverFirstTurn)', () => {
   test('M3 F-0344 a started ferret’s pane receives the first-turn pointer EXACTLY ONCE, and a restart types nothing again', async () => {
-    const runner = new FakeRunner();
+    const runner = Object.assign(new FakeRunner(), { requireFerret: true });
     const first = await boot(runner);
 
     const started = await start(first, { folder: '/work/a', prompt: 'Build the thing.' });
@@ -91,7 +91,7 @@ describe('M3 F-0344 a started ferret is handed its task once (today’s deliverF
   });
 
   test('a start with no task types nothing into its pane', async () => {
-    const runner = new FakeRunner();
+    const runner = Object.assign(new FakeRunner(), { requireFerret: true });
     const host = await boot(runner);
 
     const started = await start(host, { folder: '/work/a' });

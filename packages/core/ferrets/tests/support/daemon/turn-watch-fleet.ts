@@ -83,7 +83,7 @@ export interface FleetHooks {
 export async function fleetOf(turnState: 'your-turn' | 'working', ferrets = 30, hooks: FleetHooks = {}) {
   const { storage } = await memoryStorage({ clock: { now: () => new Date(RECORD_T0).toISOString() } });
   cleanups.push(async () => await storage.close());
-  const runner = new FakeRunner();
+  const runner = Object.assign(new FakeRunner(), { requireFerret: true });
   const harness = new TailHarness();
   const transcripts = new HarnessTranscript(
     () => harness,

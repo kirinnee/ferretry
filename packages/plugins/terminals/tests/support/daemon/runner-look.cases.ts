@@ -30,6 +30,8 @@ function subject(
   } = {},
 ) {
   const handle = '%7' as RunnerHandle;
+  /** The session the pane is in now (a stale handle's pane can be another ferret's). */
+  let session = options.session ?? 'fy-f-hadi';
   const calls: (readonly string[])[] = [];
   const acts: ActRecord[] = [];
   let screen = options.screen ?? PERMISSION;
@@ -67,7 +69,7 @@ function subject(
           await gate('facts');
           return {
             code: 0,
-            stdout: `%7|4242|${dead ? 1 : 0}|${options.session ?? 'fy-f-hadi'}|1000\n`,
+            stdout: `%7|4242|${dead ? 1 : 0}|${session}|1000\n`,
             stderr: '',
           };
         }
@@ -123,6 +125,10 @@ function subject(
     },
     die: () => {
       dead = true;
+    },
+    /** The pane id now names a pane in another session (the server restarted and handed `%7` out again). */
+    retarget: (next: string) => {
+      session = next;
     },
     hold: () => {
       held = true;
@@ -359,6 +365,33 @@ export function runnerLookCases(): void {
       // Assert
       should(look).be.undefined();
       should(pane.captures()).equal(0);
+    });
+
+    it('#handle-io a look FOR a ferret reads nothing when the pane behind the handle is another ferret’s', async () => {
+      // Arrange: `%7` is in fy-f-hadi; the look is for f-stale, whose record kept the handle.
+      const pane = subject();
+
+      // Act
+      const other = await pane.runner.look(pane.handle, 'f-stale' as never);
+      const own = await pane.runner.look(pane.handle, 'f-hadi' as never);
+
+      // Assert: the other ferret saw nothing and nothing was captured for it; the pane's own ferret still reads it.
+      should(other).be.undefined();
+      should(own?.permission).be.true();
+      should(pane.captures()).equal(1);
+    });
+
+    it('#handle-io a frame kept for one ferret is never answered to another once the pane id names a different pane', async () => {
+      // Arrange: a look for f-hadi keeps its frame; then `%7` names f-other's pane, whose screen is the same text.
+      const pane = subject();
+      await pane.runner.look(pane.handle, 'f-hadi' as never);
+      pane.retarget('fy-f-other');
+
+      // Act
+      const stale = await pane.runner.look(pane.handle, 'f-hadi' as never);
+
+      // Assert
+      should(stale).be.undefined();
     });
 
     it('should answer nothing when the screen cannot be captured, and capture again on the next look rather than reuse a frame', async () => {

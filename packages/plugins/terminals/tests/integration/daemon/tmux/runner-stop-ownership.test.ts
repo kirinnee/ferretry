@@ -12,7 +12,8 @@ const LIVE_OWNER = 'mw7bp99h-61f11260' as FerretId;
 /** The pane `%5` is now the second ferret's, and alive. */
 const PANE = '%5' as RunnerHandle;
 
-function runner() {
+/** `ownSession`: the ferret named on a stop still has its OWN session (`=fy-<id>`) under another pane id. */
+function runner(ownSession = false) {
   const calls: (readonly string[])[] = [];
   const subject = new TmuxRunner({
     tmux: {
@@ -21,6 +22,13 @@ function runner() {
         if (args[0] === 'display-message') {
           return { code: 0, stdout: `%5|4242|0|fy-${LIVE_OWNER}|1700000000\n`, stderr: '' };
         }
+        if (args[0] === 'has-session') {
+          const own = args.at(-1) === `=fy-${STALE_OWNER}`;
+          return own && ownSession
+            ? { code: 0, stdout: '', stderr: '' }
+            : { code: 1, stdout: '', stderr: "can't find session: x" };
+        }
+        if (args[0] === 'list-panes') return { code: 0, stdout: '0\n', stderr: '' };
         return { code: 0, stdout: '', stderr: '' };
       },
     },
@@ -56,6 +64,18 @@ describe('TmuxRunner stop and signal through a stale pane id', () => {
     await subject.stop(PANE, 'polite', STALE_OWNER);
 
     expect(writes()).toEqual([]);
+  });
+
+  test("a stop whose handle names another ferret's pane stops the ferret's OWN session by exact name", async () => {
+    const now = runner(true);
+    await now.subject.stop(PANE, 'now', STALE_OWNER);
+    expect(now.writes()).toEqual([['kill-session', '-t', `=fy-${STALE_OWNER}`]]);
+
+    const polite = runner(true);
+    await polite.subject.stop(PANE, 'polite', STALE_OWNER);
+    expect(polite.writes()).toEqual([['send-keys', '-t', `=fy-${STALE_OWNER}`, 'C-c']]);
+    // Never the pane id that names the other ferret.
+    expect([...now.writes(), ...polite.writes()].some(args => args.includes(PANE))).toBe(false);
   });
 
   test('a signal that names a ferret does nothing to another ferret', async () => {

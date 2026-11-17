@@ -26,7 +26,7 @@ const record = createSessionRecord(
 ).record;
 
 function fixture(options: { readonly runner?: Runner | undefined; readonly handle?: RunnerHandle | undefined } = {}) {
-  const runner = 'runner' in options ? options.runner : new FakeRunner();
+  const runner = 'runner' in options ? options.runner : Object.assign(new FakeRunner(), { requireFerret: true });
   const calls: string[] = [];
   const stops: { ferret: FerretId; how: string; reason: string | undefined; cause: FerretEndCause }[] = [];
   let clock = 0;

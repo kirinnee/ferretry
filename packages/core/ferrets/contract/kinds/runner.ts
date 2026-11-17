@@ -148,6 +148,13 @@ export interface RunnerPaneIdentity {
   readonly processStart?: string;
 }
 
+/**
+ * A pane id is not an identity (see {@link Runner.stop}). Every member below that reads, types, presses a key at, or
+ * answers about the pane behind a handle takes the `ferret` it is for as its LAST argument: given, the runner acts ONLY
+ * when the pane's session is that ferret's own and otherwise does what it does for a pane that is gone (a rejection with
+ * `not_ready`/`exited` for a write, `undefined`/`''`/`false` for a read) with NOTHING typed, pressed or read. Omitted, the
+ * handle alone is trusted (a launch that has just made the pane). Every caller that holds a ferret passes it.
+ */
 export interface Runner {
   readonly key: RunnerKey;
   start(spec: RunSpec): Promise<Result<RunningFerret, StartRefusal>>;
@@ -160,7 +167,7 @@ export interface Runner {
   stop(handle: RunnerHandle, how: 'polite' | 'now', ferret?: FerretId): Promise<void>;
   resume(spec: RunSpec, harnessConversationId: string): Promise<Result<RunningFerret, StartRefusal>>;
   attach(handle: RunnerHandle): Promise<Result<RunningFerret, AttachRefusal>>;
-  alive(handle: RunnerHandle): Promise<boolean>;
+  alive(handle: RunnerHandle, ferret?: FerretId): Promise<boolean>;
   /**
    * A raw process signal: `interrupt` is the runner's own interrupt key (tmux: `C-c`), which can QUIT a harness at an
    * idle prompt. Never a harness's turn stop: that is {@link Runner.stopTurn}.
@@ -172,7 +179,7 @@ export interface Runner {
    * happened carries a {@link RunnerDeliveryFailure} on its `deliveryFailure` field (read it with
    * {@link runnerDeliveryFailure}): every kind but `unconfirmed` typed nothing of the message.
    */
-  deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome>;
+  deliver(handle: RunnerHandle, delivery: RunnerDelivery, ferret?: FerretId): Promise<DeliveryOutcome>;
   /**
    * Additive (U3): puts one message into a BUSY pane's own queue (today's tmux `TmuxPaneQueue`), so the harness takes
    * it when its turn ends. Like `deliver`, the runner guards EVERY write it makes with `kernel.act` on that pane itself,
@@ -180,7 +187,7 @@ export interface Runner {
    * rejects; it never starts anything. Absent: the runner cannot queue, and the harness seam answers `plugin_unavailable`.
    * Its rejections carry a {@link RunnerDeliveryFailure} exactly as `deliver`'s do.
    */
-  queue?(handle: RunnerHandle, text: string): Promise<QueueOutcome>;
+  queue?(handle: RunnerHandle, text: string, ferret?: FerretId): Promise<QueueOutcome>;
   /**
    * Additive (harness-refusals, today's `TmuxSendTerminal.pressStopKey` under `shouldPressStopKey`): reads the ferret's
    * pane ONCE and presses `stop.key` — exactly one keystroke, never `C-c`, never retried — only when
@@ -189,7 +196,7 @@ export interface Runner {
    * that is gone rejects with `not_ready`/`exited`, a hold its act meets with `held` (nothing pressed), both on
    * `deliveryFailure`. Absent: the runner cannot stop a turn safely, and the harness seam refuses `plugin_unavailable`.
    */
-  stopTurn?(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerStopOutcome>;
+  stopTurn?(handle: RunnerHandle, stop: RunnerStop, ferret?: FerretId): Promise<RunnerStopOutcome>;
   /**
    * Additive (U3, today's `SessionLifecycleLauncher.settled`): waits, boundedly, until the harness has finished its OWN
    * startup after the first turn was delivered. Delivery is not startup: Codex takes a submission while it is still
@@ -198,13 +205,13 @@ export interface Runner {
    * `parked: true` (see {@link diedParked}) when a frame showed the first turn parked before the pane died. It only
    * reads: no key is ever written. Absent: the runner cannot tell, and a start does not wait.
    */
-  settled?(handle: RunnerHandle): Promise<'settled' | 'timed-out'>;
+  settled?(handle: RunnerHandle, ferret?: FerretId): Promise<'settled' | 'timed-out'>;
   /**
    * Additive (U3, today's `PaneScreenReader.text`): what the pane behind `handle` last showed, dead or alive, so a
    * harness can explain a start that failed ({@link Harness.startFailure}). It only reads, and the text is handed to the
    * harness only: it is never logged, stored or quoted in any answer. A handle with nothing behind it answers `''`.
    */
-  lastScreen?(handle: RunnerHandle): Promise<string>;
+  lastScreen?(handle: RunnerHandle, ferret?: FerretId): Promise<string>;
   /**
    * Additive (c58-37, Restart CLI and Move): the pane behind `handle` RIGHT NOW, read-only (unlike {@link Runner.attach},
    * which adopts and remembers). It is what a move addresses a pane by: the triple handle, pid and start, because pane ids
@@ -235,7 +242,7 @@ export interface Runner {
    * with nothing live behind it, or a pane that is not a ferret's own, answers `undefined`. Absent: the runner cannot be
    * watched, and the ferret's turn is decided from what else is known.
    */
-  look?(handle: RunnerHandle): Promise<RunnerLook | undefined>;
+  look?(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerLook | undefined>;
   /**
    * Additive (send path, today's `TmuxSendTerminal.observe`): ONE read of what the ferret's pane shows for a send to
    * decide where a message may go (type it, queue it, revive first). Reads only: no key is typed. The runner reads
@@ -244,54 +251,63 @@ export interface Runner {
    * live behind it answers `undefined`. Absent: the runner cannot be read, so a send cannot prove a pane safe to type
    * into and Conversation refuses (`plugin_unavailable`).
    */
-  observe?(handle: RunnerHandle): Promise<RunnerPaneObservation | undefined>;
+  observe?(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerPaneObservation | undefined>;
   /**
    * Additive (send path, today's `TmuxSendTerminal.heldAt`): where the pane still shows `text` held, in the composer or
    * in the harness's visible queue and nowhere else on screen; `undefined` when it shows it in neither. REJECTS when the
    * pane cannot be read, or its queue runs past what the pane shows: an unread pane proves nothing, and "not held" is
    * what licenses typing a message again. Reads only.
    */
-  heldAt?(handle: RunnerHandle, text: string): Promise<RunnerHeldAt | undefined>;
+  heldAt?(handle: RunnerHandle, text: string, ferret?: FerretId): Promise<RunnerHeldAt | undefined>;
   /**
    * Additive (send path, today's `TmuxSendTerminal.clearComposer`): erases `text` from the composer ONLY when the
    * composer holds exactly that and nothing else, one `C-u` at a time, reading the composer before each key; a person's
    * own draft is never erased (`foreign`). Like `deliver`, the runner guards every write with `kernel.act` on that pane
    * itself, so a caller must not wrap it in a second act. Its rejections carry a {@link RunnerDeliveryFailure}.
    */
-  clearComposer?(handle: RunnerHandle, text: string): Promise<RunnerComposerCleared>;
+  clearComposer?(handle: RunnerHandle, text: string, ferret?: FerretId): Promise<RunnerComposerCleared>;
   /**
    * Additive (send path, today's `TmuxSendTerminal.submitComposer`): presses Enter ONCE, only when the composer holds
    * exactly `text` at a pane that is not mid-turn or behind a prompt (`strict` also refuses a clipped drawing of it),
    * then watches it leave or not. Guarded and rejecting as {@link Runner.clearComposer} is.
    */
-  submitComposer?(handle: RunnerHandle, text: string, strict?: boolean): Promise<RunnerComposerSubmitted>;
+  submitComposer?(
+    handle: RunnerHandle,
+    text: string,
+    strict?: boolean,
+    ferret?: FerretId,
+  ): Promise<RunnerComposerSubmitted>;
   /**
    * Additive (send path, today's `TmuxSendTerminal.stopActiveTurn`, the send-now's stop): presses the harness's stop
    * key under {@link shouldPressStopKey} exactly as {@link Runner.stopTurn} does, waits boundedly for the pane to come
    * back to a prompt (a wait that gives up is not a failure: the answer is what a READ afterwards shows) and answers that
    * read, or `undefined` when the pane could not be read. Guarded and rejecting as `stopTurn` is.
    */
-  stopActiveTurn?(handle: RunnerHandle, stop: RunnerStop): Promise<RunnerPaneObservation | undefined>;
+  stopActiveTurn?(
+    handle: RunnerHandle,
+    stop: RunnerStop,
+    ferret?: FerretId,
+  ): Promise<RunnerPaneObservation | undefined>;
   /**
    * Additive (structured questions): ONE capture of the pane behind `handle` for the question-form driver, inside
    * `kernel.act(terminal %n, 'read')` (a hold refuses it: `undefined`), masked before it leaves. Reads only. `undefined`
    * for a handle with nothing live behind it or a pane that is not a ferret's own. Absent: the form cannot be read.
    */
-  formCapture?(handle: RunnerHandle): Promise<RunnerFormCapture | undefined>;
+  formCapture?(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerFormCapture | undefined>;
   /**
    * Additive (structured questions): ONE key of {@link FORM_KEYS} typed at the pane, guarded exactly as `deliver`'s
    * writes are (`kernel.act(terminal %n, 'keys')` by the runner itself, so a Vault hold types NOTHING). Rejects with a
    * {@link RunnerDeliveryFailure} as `deliver` does. Absent: the form cannot be driven.
    */
-  formKey?(handle: RunnerHandle, key: FormKey): Promise<void>;
+  formKey?(handle: RunnerHandle, key: FormKey, ferret?: FerretId): Promise<void>;
   /**
    * Additive (live model switch): ONE row digit of {@link PICKER_KEYS} typed at the pane for a numbered model picker,
    * guarded exactly as {@link Runner.formKey} is. A SEPARATE member, never a widening of {@link FORM_KEYS}. Absent: a
    * numbered picker cannot be driven.
    */
-  pickerKey?(handle: RunnerHandle, key: PickerKey): Promise<void>;
+  pickerKey?(handle: RunnerHandle, key: PickerKey, ferret?: FerretId): Promise<void>;
   /** Additive (structured questions): `text` pasted into the pane as one bracketed paste; guarded as {@link Runner.formKey}. */
-  formPaste?(handle: RunnerHandle, text: string): Promise<void>;
+  formPaste?(handle: RunnerHandle, text: string, ferret?: FerretId): Promise<void>;
   /**
    * Additive (W2-a, today's `TmuxSessionExitObserver.exitOf` `gone` proof): whether the runner PROVES that `ferret`'s own
    * terminal is not there at all (tmux: the ferret's session cannot be found, or the private server is not running,
