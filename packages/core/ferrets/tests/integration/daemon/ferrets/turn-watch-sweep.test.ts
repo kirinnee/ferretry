@@ -5,8 +5,9 @@ import { FakeGate, ownerStanding, StandInAdmission } from '@ferretry/core-gate/c
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
-import { Harnesses, Runners } from '../../../../contract/index.ts';
+import { AutoResumeDecide, AutoResumeSummaryFile, Harnesses, Runners } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
+import { AUTO_RESUME_JOB } from '../../../../daemon/modules/auto-resume.ts';
 import ferrets, { TURN_WATCH_JOB } from '../../../../daemon/index.ts';
 
 /**
@@ -44,10 +45,32 @@ const runnerPlugin = (runner: FakeRunner) =>
     { build: () => ({ hooks: { 'runners:tmux': runner } }) },
   );
 
+/** Runtimes' stand-in: the machine's auto-resume switch is on, and every ferret's own runtime says no (so a pass SKIPS it, in the summary). */
+const runtimesPlugin = () =>
+  implementDaemon(
+    definePlugin({
+      id: 'runtimes',
+      title: 'Runtimes (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: AutoResumeDecide }] },
+    }),
+    {
+      build: () => ({
+        hooks: {
+          'auto-resume.decide': async (input: { ask: string }) =>
+            (input.ask === 'switch' ? { allow: true } : { allow: false, reason: 'no login' }) as never,
+        },
+      }),
+    },
+  );
+
 const boot = async (runner: FakeRunner): Promise<TestHost> =>
   await testHost({
     everyDirectory: true,
-    plugins: [ferrets, harnessPlugin(new FakeHarness()), runnerPlugin(runner)],
+    plugins: [ferrets, harnessPlugin(new FakeHarness()), runnerPlugin(runner), runtimesPlugin()],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
   });
@@ -68,7 +91,7 @@ describe('the 30 s gone sweep', () => {
     expect(armed).toBeGreaterThan(before);
   });
 
-  test('W4 a ferret whose terminal vanished while the daemon was down is settled by the first sweep tick', async () => {
+  test('W4 a ferret whose terminal vanished while the daemon was down is left to the BOOT pass: sweep ticks settle nothing until it has closed its recorder, and the pass owns the ferret', async () => {
     const runner = new FakeRunner();
     const first = await boot(runner);
     const made = await first.request('POST', '/v1/ferrets', {
@@ -83,15 +106,33 @@ describe('the 30 s gone sweep', () => {
     const second = await first.restart();
     await second.settle();
     expect((await stateOf(second, id)).state).not.toBe('stopped');
-    // The job is started and NOT waited for: the tick must not depend on it having finished.
-    const running = second.runJob(TURN_WATCH_JOB);
+    // The turn watch is up and its sweep ticks (more than once), the boot pass has NOT run: nothing is settled by the sweep,
+    // or the ferret would be stopped without being recorded as owed a resume.
+    const watching = second.runJob(TURN_WATCH_JOB);
     await second.clock.advance(SWEEP_MS);
-    await running;
+    await watching;
+    await second.clock.advance(SWEEP_MS);
     await second.settle();
     await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await stateOf(second, id)).state).not.toBe('stopped');
+    expect(second.state('ferrets').raw(AutoResumeSummaryFile)).toBeUndefined();
+
+    // The boot pass runs: IT settles the vanished ferret, and records it (no Runtimes answers here, so it is skipped and
+    // told so in the summary: proof the pass, not the sweep, owned it).
+    let done = false;
+    const pass = second.runJob(AUTO_RESUME_JOB).finally(() => {
+      done = true;
+    });
+    for (let step = 0; step < 60 && !done; step += 1) await second.clock.advance(1_000);
+    await pass;
+    await second.settle();
 
     const settled = await stateOf(second, id);
     expect(settled.state).toBe('stopped');
     expect(settled.cause).toEqual({ kind: 'terminal_gone' });
+    const summary = JSON.parse(second.state('ferrets').raw(AutoResumeSummaryFile) ?? '{}') as {
+      skipped?: { sessionId: string }[];
+    };
+    expect(summary.skipped?.map(entry => entry.sessionId)).toEqual([id]);
   });
 });

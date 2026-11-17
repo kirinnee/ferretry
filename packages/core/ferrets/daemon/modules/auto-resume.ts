@@ -21,6 +21,7 @@ import {
   type AutoResumeSettings,
   defaultAutoResumeSettings,
 } from '../lib/session/auto-resume/index.ts';
+import type { BootPassGate } from '../lib/session/auto-resume/boot-gate.ts';
 
 /** The job that records how each ferret's terminal fared across the restart and works the owed resumes off (W2-a). */
 export const AUTO_RESUME_JOB = 'ferrets.auto-resume';
@@ -59,6 +60,8 @@ export interface AutoResumeDeps extends Omit<BootExitFerrets, 'list'> {
   readonly sleep: (milliseconds: number) => Promise<void>;
   readonly log: Pick<Log, 'warn'>;
   readonly settings?: AutoResumeSettings;
+  /** Released the moment the pass has closed its recorder: the turn watch's observers settle nothing before it. */
+  readonly bootPass?: Pick<BootPassGate, 'release'>;
 }
 
 export interface AutoResume {
@@ -128,7 +131,7 @@ async function runOnce(deps: AutoResumeDeps, service: AutoResumeService): Promis
     if (transition !== undefined) await exits.settle(observation, transition).catch(() => false);
   }
   // Written down BEFORE anything is attempted: the host can go down again mid-pass, and what is owed must survive it.
-  const settledNow = exits.close();
+  const settledNow = closeRecorder(deps, exits);
   await service
     .record([...settledNow, ...(await settledBeforePass(deps, settledNow))])
     .catch((error: unknown) =>
@@ -141,6 +144,9 @@ async function runOnce(deps: AutoResumeDeps, service: AutoResumeService): Promis
  * The ferrets the sweep or the turn watch's first look settled `terminal_gone` between this daemon's start and this pass:
  * the pass lost the race to settle them, not the right to resume them. Only a settle of THIS process counts (a ferret
  * stopped `terminal_gone` on an earlier boot was recorded, or deliberately not, by that boot's pass).
+ *
+ * The boot pass gate keeps the observers quiet until the recorder is closed, so this normally finds nothing: it is the
+ * backstop for any settle that slips through.
  *
  * It is owed only what the boot pass owes, and the document is read the same way (`bootClaim`, after a settle): a
  * ferret it says `completed`, `failed` or `stalled` (the registry still said working when the pane was lost), or still
@@ -171,6 +177,13 @@ async function settledBeforePass(
     found.push({ id: record.id, status: from ?? status, at: record.stateAt });
   }
   return found;
+}
+
+/** Closes the recorder, and only then lets the vanished-pane observers settle: what they settle from here is not this pass's. */
+function closeRecorder(deps: AutoResumeDeps, exits: BootExitRecorder): ReturnType<BootExitRecorder['close']> {
+  const owed = exits.close();
+  deps.bootPass?.release();
+  return owed;
 }
 
 function reasonOf(error: unknown): string {

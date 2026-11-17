@@ -1,5 +1,6 @@
 import { milliseconds } from '@ferretry/std';
 import { AutoResumeDecide, DAEMON_ORIGIN, FerretHistoryFiles, Runners } from '../../contract/index.ts';
+import { sharedBootPass } from '../lib/session/auto-resume/boot-gate.ts';
 import { boundedReason } from '../lib/ferrets/auto-resume.ts';
 import { NoLongerOwed } from '../lib/session/auto-resume/index.ts';
 import type { SessionId } from '../lib/session-id.ts';
@@ -8,7 +9,9 @@ import { AUTO_RESUME_JOB, buildAutoResume } from '../modules/auto-resume.ts';
 import type { FeatureContribution, FerretsContext, FerretsFeature } from './types.ts';
 
 function register(f: FerretsContext): FeatureContribution | undefined {
-  const { kernel, hooks, registry, service, sessionStore, log, ready, storeLoaded, appendHistory } = f;
+  const { kernel, hooks, registry, service, sessionStore, log, ready, storeLoaded, appendHistory, late } = f;
+  // Opened when the pass has closed its recorder (or ended without one); the turn watch's observers wait on it.
+  const bootPass = sharedBootPass(late);
   // Auto-resume after a host restart (W2-a, today's `createAutoResume` + `BootExitRecorder`): once the daemon serves, the
   // ferrets whose terminal the runner PROVES gone are settled `terminal_gone` and written to the ledger, then resumed
   // through the ordinary resume, staggered, two at a time, each only on Runtimes' OWN yes (RULING #27 Q5: no answer, no
@@ -16,6 +19,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
   const autoResume = buildAutoResume({
     // Registered as the daemon starts, before anything serves: a ferret settled gone from here on is the restart's.
     bootedAt: kernel.clock.now(),
+    bootPass,
     state: kernel.state,
     // The held records (with the runner handle the list view leaves out): the handle is what the settle compares.
     records: () =>
@@ -74,13 +78,18 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     id: AUTO_RESUME_JOB,
     schedule: { onceAfterStart: true },
     run: async () => {
-      await ready();
-      await storeLoaded.catch(() => undefined);
-      await autoResume
-        .run()
-        .catch((error: unknown) =>
-          log.warn('the auto-resume pass stopped early', { error: error instanceof Error ? error.name : 'unknown' }),
-        );
+      try {
+        await ready();
+        await storeLoaded.catch(() => undefined);
+        await autoResume
+          .run()
+          .catch((error: unknown) =>
+            log.warn('the auto-resume pass stopped early', { error: error instanceof Error ? error.name : 'unknown' }),
+          );
+      } finally {
+        // A pass that failed, or never got to its recorder, still lets the observers settle (the sweep must not be lost).
+        bootPass.release();
+      }
     },
   });
 

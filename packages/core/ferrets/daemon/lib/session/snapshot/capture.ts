@@ -101,9 +101,11 @@ export class LastSnapshotCapture {
     // READ and showed nothing is newer than any frame kept before it, so that older frame is forgotten rather than left
     // to be read back as this ferret's last screen (a pane that could not be read says nothing of the kind: it stays).
     if (screen === undefined) return 'nothing';
-    if (screen.trim() === '') return await this.forget(id);
+    // An abandoned capture (the bound passed) changes nothing: forgetting is a write too, and it must not land late.
+    if (screen.trim() === '') return abandoned.aborted ? 'nothing' : await this.forget(id);
     const masked = await this.deps.redaction.read(scope => maskedScreen(scope, screen, this.deps.yieldToLoop));
-    if (typeof masked !== 'string' || masked.trim() === '') return await this.forget(id);
+    if (typeof masked !== 'string' || masked.trim() === '')
+      return abandoned.aborted ? 'nothing' : await this.forget(id);
     // The bound is checked here, before the write starts; a write already begun is not called back (see the class).
     if (abandoned.aborted) return 'nothing';
     await this.deps.store(id).write(id, lastSnapshotText(masked));
