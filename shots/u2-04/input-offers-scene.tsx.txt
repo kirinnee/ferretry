@@ -1,0 +1,132 @@
+/**
+ * The input card with saved-login offers, over fixed fake data (nothing real, no network): the one-tap account, the
+ * hand-picked one behind "Use another account…", and the settled card with a stand-in for Accounts' slot panel.
+ *
+ *   ?theme=<family>-<mode>   &state=offers | other | settled
+ */
+import type { PluginClient } from '@ferretry/kernel/manifest';
+import { createRoot } from 'react-dom/client';
+import { RouterProvider } from '../../../../../app/src/testing/router.tsx';
+import { WithSlotPanels } from '../../../../../app/src/testing/slot-panels.tsx';
+import { useEffect } from 'react';
+import { InputCard } from '../../../../vault/app/features/input/input-card.tsx';
+import { INPUT_SETTLED_SLOT } from '../../../../vault/contract/index.ts';
+
+const params = new URLSearchParams(window.location.search);
+document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+const state = params.get('state') ?? 'offers';
+window.history.replaceState({}, '', '/d/studio/agenda');
+
+const request = {
+  id: 'a'.repeat(32),
+  sessionId: 'hadi',
+  agendaItemId: 'A7',
+  target: { kind: 'terminal', key: 'dev' },
+  prompt: '[sudo] password for kirin:',
+  sensitivity: 'secret',
+  fields: [{ id: 'value', label: 'Password', sensitivity: 'secret' }],
+  submit: 'offer-owner',
+  raisedAt: '2026-11-10T00:00:00.000Z',
+  expiresAt: '2026-11-10T00:08:05.000Z',
+  observed: {
+    kind: 'terminal',
+    paneProof: { paneId: '%1', pid: 100 },
+    foreground: { pid: 100, pgid: 100, comm: 'sudo', argv: 'sudo ls' },
+    echo: 'off',
+    cursorRow: 3,
+    promptLine: '[sudo] password for kirin:',
+    promptLineDigest: 'c'.repeat(64),
+    recognisedConsumer: true,
+  },
+  observedDigest: 'b'.repeat(64),
+  risk: { level: 'green', reason: 'Typing is hidden and sudo is known to ask for passwords.' },
+  state: 'pending',
+  saved: {
+    match: 'sudo@kirin-box',
+    project: { id: 'p1', name: 'ferretry' },
+    offers: [
+      {
+        id: 'SUDO_KIRIN_BOX',
+        label: 'sudo on kirin-box',
+        username: 'kirin',
+        fills: 'password',
+        matched: true,
+        signIn: 'si_0123456789abcdef',
+        primary: true,
+        why: 'only',
+      },
+      {
+        id: 'WORK_ADMIN',
+        label: 'Work admin',
+        fills: 'password',
+        matched: false,
+        elsewhere: ['build.example.test'],
+      },
+    ],
+  },
+} as never;
+
+const client = {
+  call: async (route: string) => {
+    if (route.endsWith('/deliver'))
+      return {
+        id: 'a'.repeat(32),
+        deliveryId: '123e4567-e89b-42d3-a456-426614174000',
+        state: 'delivered',
+        submitted: true,
+      };
+    return {};
+  },
+} as unknown as PluginClient;
+
+const slots = {
+  [INPUT_SETTLED_SLOT]: [
+    {
+      plugin: 'accounts',
+      id: 'dont-ask-again',
+      view: () => (
+        <button className="kt-btn min-h-[44px]" type="button">
+          Don’t ask again for this sign-in…
+        </button>
+      ),
+    },
+  ],
+};
+
+function Scene() {
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.querySelector('[data-input-request]') === null) return;
+      if (state === 'other' && document.querySelector('[data-input-other]') === null) {
+        document.querySelector<HTMLElement>('[data-input-other-toggle]')?.click();
+        return;
+      }
+      if (state === 'settled' && document.querySelector('[data-input-settled-slot] button') === null) {
+        document.querySelector<HTMLElement>('[data-input-offer="SUDO_KIRIN_BOX"]')?.click();
+        return;
+      }
+      document.documentElement.dataset.sceneReady = '1';
+      clearInterval(timer);
+    }, 80);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <RouterProvider screens={[{ plugin: 'agenda', id: 'agenda', path: 'agenda', label: 'Agenda' }]}>
+      <WithSlotPanels slots={slots}>
+        <div className="mx-auto max-w-[420px] p-panel">
+          <InputCard
+            agentName="Hadi"
+            client={client}
+            now={Date.parse('2026-11-10T00:00:00.000Z')}
+            onDone={() => undefined}
+            request={request}
+          />
+        </div>
+      </WithSlotPanels>
+    </RouterProvider>
+  );
+}
+
+const root = document.getElementById('root');
+if (root === null) throw new Error('❌ the input offers scene has no #root');
+createRoot(root).render(<Scene />);
