@@ -3,15 +3,15 @@
  * security design; the default stands until then).
  *
  * The net is "run the write rule (W) on what the cutter SHOWS, withhold what W still refuses". Over the 85,848-line
- * acceptance corpus it leaves exactly 57 refused lines shown in the Runtimes views (15 of them also at the kernel door, where
+ * acceptance corpus it leaves exactly 57 refused lines (63 with the `${SECRET:X}` value, which the corpus did not hold) shown in the Runtimes views (15 of them also at the kernel door, 21 with the `${SECRET:X}` lines, where
  * (B) showed them too), and every one carries only the 16-character LOW-entropy part `abababab12121212` (entropy 2.0, under W's
  * 3.5). W refused the RAW line only because the glued pointer text made the whole word look random; the cutter then cuts the
  * pointer and leaves `,abababab12121212`, which W accepts bare (`--key abababab12121212` is a write W allows). So the masked
  * item is no finding and the net, by its definition, does not fire. Widening that means changing W (its entropy gate) or
  * withholding every refused raw item the cutter did not remove entirely: neither is done here.
  *
- * This file lists the 57 (19 lines × 3 marks) and pins, for each: W refuses it raw, W accepts its masked text, W accepts
- * the low-entropy part bare, the views show it as the cutter leaves it, and the kernel door shows exactly the 15. A new
+ * This file lists the 63 (21 lines × 3 marks) and pins, for each: W refuses it raw, W accepts its masked text, W accepts
+ * the low-entropy part bare, the views show it as the cutter leaves it, and the kernel door shows exactly the 21. A new
  * line of this kind (the full-corpus run lists them) is added here on purpose or the net is fixed. Fake only.
  */
 import { describe, it } from 'bun:test';
@@ -26,7 +26,7 @@ const LOW = 'abababab12121212';
 const MARKS = [',', ';', '&'];
 const ZWSP = '\u200b';
 
-/** The 19 lines per mark; `kernel` is true where the kernel door shows it too (the 5 header lines, as at (B)). */
+/** The 21 lines per mark; `kernel` is true where the kernel door shows it too (the 5 header lines, as at (B), and the 2 `API_KEY=${SECRET:X}` lines). */
 const PER_MARK: readonly ((mark: string) => { readonly line: readonly string[]; readonly kernel: boolean })[] = [
   m => ({ line: [`--key \${secret:X}\\${m}${LOW} --model m`], kernel: false }),
   m => ({ line: [`--token=\${secret:X}\\${m}${LOW} x`], kernel: false }),
@@ -47,6 +47,10 @@ const PER_MARK: readonly ((mark: string) => { readonly line: readonly string[]; 
   m => ({ line: [`--token=$\${secret:X}${m}${LOW} x`], kernel: false }),
   m => ({ line: [`--key \${secret:X}}${m}${LOW} --model m`], kernel: false }),
   m => ({ line: [`--token=\${secret:X}}${m}${LOW} x`], kernel: false }),
+  // A `${SECRET:X}` is no pointer (the pointer's name is lower case): it is a value, so the cutter cuts it and leaves the
+  // part after the mark, as it leaves it after any value (the one cut before only showed the whole line raw, and W withheld it).
+  m => ({ line: ['-e', `API_KEY=\${SECRET:X}${m}${LOW}`], kernel: true }),
+  m => ({ line: [`API_KEY=\${SECRET:X}${m}${LOW}`], kernel: true }),
 ];
 const PINNED = MARKS.flatMap(mark => PER_MARK.map(make => make(mark)));
 
@@ -59,11 +63,11 @@ const fileDef = defineConfig({
 const FLOW = (line: readonly string[]): string =>
   `command: srv\nargs: [${line.map(word => JSON.stringify(word)).join(', ')}]\n`;
 
-describe('CFG-LEAK (ii) 0 shown that W refuses on the masked text; 57 listed low-entropy values that W accepts bare', () => {
-  it('is exactly 57 lines, 15 of them shown at the kernel door as well', () => {
-    should(PINNED.length).equal(57);
-    should(PINNED.filter(row => row.kernel).length).equal(15);
-    should(new Set(PINNED.map(row => JSON.stringify(row.line))).size).equal(57);
+describe('CFG-LEAK (ii) 0 shown that W refuses on the masked text; 63 listed low-entropy values that W accepts bare', () => {
+  it('is exactly 63 lines, 21 of them shown at the kernel door as well', () => {
+    should(PINNED.length).equal(63);
+    should(PINNED.filter(row => row.kernel).length).equal(21);
+    should(new Set(PINNED.map(row => JSON.stringify(row.line))).size).equal(63);
   });
 
   it('each: W refuses it raw, W accepts what the cutter shows, W accepts the low-entropy part bare', () => {
@@ -138,7 +142,7 @@ describe('CFG-LEAK (ii) 0 shown that W refuses on the masked text; 57 listed low
     }
   });
 
-  it('the kernel door shows exactly the 15 header lines the same way, and withholds the rest', () => {
+  it('the kernel door shows exactly the 21 header and API_KEY lines the same way, and withholds the rest', () => {
     const shown = PINNED.filter(({ line }) => {
       const result = shownConfigText(fileDef, 'servers.yaml', FLOW(line), 'fy');
       return result.kind === 'shown' && result.text.includes('abababab');

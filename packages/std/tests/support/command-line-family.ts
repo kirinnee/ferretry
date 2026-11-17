@@ -388,7 +388,9 @@ const LATER_POINTERS: readonly ((value: string) => { text: string; kept: string[
 /** Before a later pointer, a part that is no secret: it points at one, or is too short; and a harmless key's value. */
 const PADDED_CONTROLS: readonly ((key: string) => string)[] = [
   key => `${key}$LONG_POINTER_NAME ${POINTER}`,
-  key => `${key}'$LONG_POINTER_NAME' ${POINTER}`,
+  // A double-quoted `$NAME` is expanded by a shell, so it points; a single-quoted one is the text `$NAME`, a value (it is
+  // hidden: `credential-words-shown-password.test.ts`).
+  key => `${key}"$LONG_POINTER_NAME" ${POINTER}`,
   // biome-ignore lint/suspicious/noTemplateCurlyInString: a pointer is the literal text `${NAME}`
   key => `${key}\${LONG_POINTER_NAME} ${POINTER}`,
   key => `${key}short== ${POINTER}`,

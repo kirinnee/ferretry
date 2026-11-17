@@ -1,6 +1,5 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { WITHHELD_WORDS_TEXT } from '../../../contract/index.ts';
 import { shownFlags } from '../../support/resolved-view-support.ts';
 
 // The Resolved view reads a launch flag in one pass, however long it is. What it shows and hides is
@@ -43,7 +42,7 @@ describe('resolvedEntries is linear', () => {
     should(actual.map(word => word.value)).deepEqual([
       `--set=password=${HIDDEN}`,
       spaced,
-      WITHHELD_WORDS_TEXT,
+      `--set=API_KEY=${HIDDEN}`,
       `--set=${`api_key=${HIDDEN} `.repeat(20_000)}`,
     ]);
     should(performance.now() - started).be.below(2_000);
