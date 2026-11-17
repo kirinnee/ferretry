@@ -249,7 +249,8 @@ export const CODEX_SETTINGS = configDef(
  * What an AGENT's write of `config/codex/hooks/<name>.yaml` is held for: EVERY add and EVERY change (owner ruling !A525
  * item 9). A hook is a shell command Codex runs on an event, so a new or edited one is code the owner must see; an
  * unchanged file holds nothing. Compared as written (a re-ordered key counts as a change: it fails closed). The sentence
- * never names a command. The owner's own write is never held.
+ * never names a command. The owner's write through fy, the app or PUT /v1/config/file is never held; a hand edit or a
+ * file copied onto disk is held like any unacknowledged edit until `fy config confirm`.
  */
 export const hooksItemHeld: Loosens<HooksItem> = (before, after) =>
   before === undefined

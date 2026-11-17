@@ -476,7 +476,8 @@ describe('Runtimes’ own instructions are written through a change', () => {
   };
 
   it('puts, edits and removes an instructions component: the item changes and the rendered CLAUDE.md follows', async () => {
-    const { host, world } = await compose({ config: withLayers() });
+    // Every add or change of an instructions item is held for the owner (!A525 item 9): this owner confirms.
+    const { host, world } = await compose({ config: withLayers(), ownerConfirms: true });
 
     const created = await stageAndApply(host, putHouse('Be brief.', true));
     expect([created.status, JSON.stringify(created.json())]).toEqual([200, expect.any(String)]);
@@ -917,7 +918,7 @@ describe('M1 an instructions change is refused before anything of it is written'
   });
 
   it('m6 still takes tabs, line breaks and a text exactly at the bound', async () => {
-    const { host } = await compose({ config: withLayers() });
+    const { host } = await compose({ config: withLayers(), ownerConfirms: true });
 
     const tabs = await stageAndApply(host, putHouse('line one\n\tindented\r\nline three'));
     const edge = await stageAndApply(host, {

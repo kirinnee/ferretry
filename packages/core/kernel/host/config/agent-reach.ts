@@ -20,7 +20,9 @@
  * `instructions/<n>.yaml` (Runtimes; today's `components/instructions/<n>`) and `codex/hooks/<n>.yaml` (Codex; today's
  * Codex `components/hooks/<n>`). Each plugin's `loosens` HOLDS EVERY add and EVERY change by an agent for the owner (it is
  * not `neverLoosens`: instructions are what a ferret is told and a hook is a shell command, so no agent's write of either
- * is ever applied unseen). Whoever adds a folder here must give its def a `loosens` that holds every change.
+ * is ever applied unseen). The owner's write through fy, the app or PUT /v1/config/file is never held; a hand edit or a
+ * file copied onto disk is held like any unacknowledged edit until `fy config confirm`. Whoever adds a folder here must
+ * give its def a `loosens` that holds every change.
  *
  * NOT MAPPED, a declared GAP (docs/config-files.md, the agent's tools):
  * - `presets/<n>.yaml`: no declared successor (Logins to rule whether `endpoints/` is one).

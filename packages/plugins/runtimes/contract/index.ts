@@ -209,7 +209,8 @@ export const PROFILE_ITEMS = configDef(
  * What an AGENT's write of `config/instructions/<name>.yaml` is held for: EVERY add and EVERY change (owner ruling
  * !A525 item 9). Instructions are what a ferret is told to do, so a new or edited one is authority the owner must see;
  * an unchanged text holds nothing. Compared as written (a re-ordered key counts as a change: it fails closed). The
- * sentence names the file's kind, never its text. The owner's own write is never held.
+ * sentence names the file's kind, never its text. The owner's write through fy, the app or PUT /v1/config/file is never
+ * held; a hand edit or a file copied onto disk is held like any unacknowledged edit until `fy config confirm`.
  */
 export const instructionsItemHeld: Loosens<InstructionsFile> = (before, after) =>
   before === undefined
