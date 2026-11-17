@@ -403,7 +403,7 @@ describe('what a failed pairing says', () => {
     const lines = message.split('\n');
     // What was tried, in order, one short sentence each.
     expect(lines[0]).toBe(
-      'First, directly at 127.0.0.1:7617: no answer. 127.0.0.1 only works through an SSH tunnel from this computer.',
+      'First, directly at 127.0.0.1:7617: no answer. 127.0.0.1 only works on that machine itself, or through an SSH tunnel from this computer.',
     );
     expect(lines[1]).toBe(
       "Then Ferretry's relay (relay.example) answered, but the machine is not connected to it, so it could not carry the pairing.",
@@ -411,7 +411,6 @@ describe('what a failed pairing says', () => {
     // The loopback address is not the verdict.
     expect(message).not.toContain('"this computer itself"');
     expect(message).not.toContain('can never reach');
-    expect(message).not.toContain('Check that Ferretry is running');
     expect(lines[2]).toBe('Most likely fix:');
     const fixes = fixList(message);
     expect(fixes).toHaveLength(4);
@@ -420,8 +419,9 @@ describe('what a failed pairing says', () => {
     expect(fixes[1]).toContain('same browser, on the same computer as the tunnel');
     expect(fixes[2]).toContain('Chrome asked about local network access, allow it');
     // The link carries no relay state, so it is "may be", never a fact.
-    expect(fixes[3]).toContain('The relay may be switched off on that machine');
-    expect(fixes[3]).toContain('Pairing from another device needs the relay switched on there (or an SSH tunnel)');
+    expect(fixes[3]).toContain(
+      'Ferretry may not be running on that machine, or its relay may be switched off there. Pairing from another device needs it running with the relay on (or an SSH tunnel).',
+    );
     expect(fixes.map(fix => fix.slice(0, 2))).toEqual(['1.', '2.', '3.', '4.']);
   });
 

@@ -266,7 +266,7 @@ describe('PairingScreen exchange', () => {
       onPair: async () => {
         throw new Error(
           [
-            'First, directly at 127.0.0.1:7617: no answer. 127.0.0.1 only works through an SSH tunnel from this computer.',
+            'First, directly at 127.0.0.1:7617: no answer. 127.0.0.1 only works on that machine itself, or through an SSH tunnel from this computer.',
             "Then Ferretry's relay (relay.example) answered, but the machine is not connected to it, so it could not carry the pairing.",
             'Most likely fix:',
             '1. If you use an SSH tunnel: check it is still running.',
@@ -280,7 +280,7 @@ describe('PairingScreen exchange', () => {
 
     const failure = must(screen.container.querySelector('[data-pairing-failure="transport"]'), 'the failure');
     expect([...failure.querySelectorAll('p')].map(line => line.textContent)).toEqual([
-      'First, directly at 127.0.0.1:7617: no answer. 127.0.0.1 only works through an SSH tunnel from this computer.',
+      'First, directly at 127.0.0.1:7617: no answer. 127.0.0.1 only works on that machine itself, or through an SSH tunnel from this computer.',
       "Then Ferretry's relay (relay.example) answered, but the machine is not connected to it, so it could not carry the pairing.",
       'Most likely fix:',
     ]);

@@ -77,11 +77,11 @@ carrying the redemption response, or one generic `pair-refused`), then the sessi
 - **When every carrier fails, every leg is reported**, in plain words, one sentence each
   (`PairingUnreachableError` in `packages/plugins/connections/app/pairing/unreachable.ts`), in the order tried,
   followed by "Most likely fix" and a numbered list (the pairing screen draws it as a list). A loopback direct
-  address is normal over an SSH tunnel, so it is one clause ("only works through an SSH tunnel from this computer"),
+  address is normal over an SSH tunnel, so it is one clause ("only works on that machine itself, or through an SSH tunnel from this computer"),
   never the verdict; the first fixes are the tunnel still running, the same browser on the same computer, and
   Chrome's local network access prompt. The relay leg says whether the machine is not connected to the relay, the
   relay is switched off or busy, or it could not be reached at all; when the machine is not connected it adds that
-  the relay "may be switched off on that machine" — "may", because the link carries no relay state — and that pairing from another device needs the relay switched on there (or an SSH tunnel). When no relay
+  that "Ferretry may not be running on that machine, or its relay may be switched off there" — "may", because the link carries no machine or relay state — and that pairing from another device needs it running with the relay on (or an SSH tunnel). When no relay
   was discovered, the sentence says so. Sentences name a host and port only, never a path, so the fingerprint
   stays out of them.
 

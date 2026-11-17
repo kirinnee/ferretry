@@ -19,13 +19,13 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const SEED = { daemonUrl: 'http://127.0.0.1:7617', daemonId: 'fake-daemon', code: 'FAKE-0000' };
 
 const MESSAGE = [
-  'First, directly at 127.0.0.1:7617: no answer. 127.0.0.1 only works through an SSH tunnel from this computer.',
+  'First, directly at 127.0.0.1:7617: no answer. 127.0.0.1 only works on that machine itself, or through an SSH tunnel from this computer.',
   "Then Ferretry's relay (relay.example) answered, but the machine is not connected to it, so it could not carry the pairing.",
   'Most likely fix:',
   '1. If you use an SSH tunnel: check it is still running, and that its local port was free (look for "Could not request local forwarding" in the ssh window).',
   '2. Open the link in the same browser, on the same computer as the tunnel.',
   '3. If Chrome asked about local network access, allow it.',
-  '4. The relay may be switched off on that machine. Pairing from another device needs the relay switched on there (or an SSH tunnel).',
+  '4. Ferretry may not be running on that machine, or its relay may be switched off there. Pairing from another device needs it running with the relay on (or an SSH tunnel).',
 ].join('\n');
 
 const root = document.getElementById('root');

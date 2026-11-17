@@ -60,7 +60,7 @@ const directSentence = (leg: PairingLegFailure): string => {
   const host = hostOf(leg.address);
   // A loopback address is NORMAL here: through an SSH tunnel it is the supported way in. So it is one clause, never the verdict.
   const why = isLoopbackDirect(leg)
-    ? `${urlOf(leg.address)?.hostname ?? host} only works through an SSH tunnel from this computer.`
+    ? `${urlOf(leg.address)?.hostname ?? host} only works on that machine itself, or through an SSH tunnel from this computer.`
     : 'The machine may be asleep, or on a network this device cannot reach.';
   return `First, directly at ${host}: no answer. ${why}`;
 };
@@ -120,7 +120,7 @@ const fixesFor = (legs: readonly PairingLegFailure[]): readonly string[] => {
   fixes.push('If Chrome asked about local network access, allow it.');
   if (relay?.code === RELAY_CLOSE_CODES.daemonAbsent) {
     fixes.push(
-      'The relay may be switched off on that machine. Pairing from another device needs the relay switched on there (or an SSH tunnel).',
+      'Ferretry may not be running on that machine, or its relay may be switched off there. Pairing from another device needs it running with the relay on (or an SSH tunnel).',
     );
   }
   return fixes;
