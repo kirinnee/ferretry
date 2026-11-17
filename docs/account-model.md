@@ -74,7 +74,8 @@ change, like every other. There are three ways to choose, and they ask the same 
   `--name <runtime>` or the suggested name (`claude-default`).
 
 `fy daemon start` at a terminal on a machine that is not set up ends with one line naming the app and
-`fy daemon setup`. There is no top-level `fy setup`.
+`fy daemon setup`. The top-level `fy setup` is a different verb: it finishes an install (the daemon as a
+user service, a wait until it answers, the pairing QR, then `fy onboard`), and it does not set a machine up.
 
 ## Reaching it
 
