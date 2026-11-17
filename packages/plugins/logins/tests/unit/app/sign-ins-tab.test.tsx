@@ -230,6 +230,8 @@ describe('the page the address names', () => {
     await click(view.container.querySelector('[data-add-login]'), 'Add a login');
     await until(() => view.container.querySelector('[data-provider-grid]') !== null, 'the provider');
     await click(view.container.querySelector('[data-provider-tile="zai-glm"]'), 'Use this provider');
+    // A key-only provider opens the quick form first; More fields… is today's full form.
+    await click(view.container.querySelector('[data-quick-key-more]'), 'More fields…');
     await click(view.container.querySelector('[data-add-login-form="zai-glm"] [data-change-submit]'), 'Add');
     await until(() => view.container.querySelector('[data-login-page="claude-zai-glm"]') !== null, 'the new page');
     expect(view.container.querySelector('[data-logins-adding]')).toBeNull();
@@ -340,6 +342,7 @@ describe('the add-login panel', () => {
     await until(() => c.querySelector('[data-provider-grid]') !== null, 'the grid');
     await click(c.querySelector('[data-provider-tile="zai-glm"]'), 'GLM');
     expect(c.querySelector('[data-provider-grid]')).toBeNull();
+    await click(c.querySelector('[data-quick-key-more]'), 'More fields…');
     expect(c.querySelector('[data-add-login-preset="zai-glm"] [data-add-login-form="zai-glm"]')).not.toBeNull();
     await click(c.querySelector('[data-add-login-form] button:not([data-change-submit])'), 'Cancel');
     expect(c.querySelector('[data-provider-grid]')).not.toBeNull();
@@ -419,6 +422,8 @@ describe('the add-login panel', () => {
     const view = await mount(<AddLoginPanel client={client} onAdded={id => added.push(id)} />);
     await until(() => view.container.querySelector('[data-provider-tile]') !== null, 'the provider');
     await click(view.container.querySelector('[data-provider-tile="zai-glm"]'), 'Use this provider');
+    // A key-only provider opens the quick form first; More fields… is today's full form.
+    await click(view.container.querySelector('[data-quick-key-more]'), 'More fields…');
     const field = must(
       view.container.querySelector<HTMLInputElement>('[data-add-login-form="zai-glm"] input'),
       'the secret variable',
@@ -756,6 +761,8 @@ describe('the add-login panel', () => {
     // Change of mind: leave the form, then open the OTHER provider by hand.
     await click(view.container.querySelector('[data-add-login-form] button:not([data-change-submit])'), 'Cancel');
     await click(view.container.querySelector('[data-provider-tile="openrouter"]'), 'Use this provider');
+    // A key-only provider opens the quick form first; More fields… is today's full form.
+    await click(view.container.querySelector('[data-quick-key-more]'), 'More fields…');
     const form = must(view.container.querySelector('[data-add-login-form="openrouter"]'), 'the form');
     expect(form.querySelector('[data-paste-secrets]')).toBeNull();
     expect(form.querySelector('[data-paste-withheld]')).toBeNull();
