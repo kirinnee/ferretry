@@ -1,7 +1,12 @@
 /** "Always use for <project>" as a decision (`app/lib/always-use.ts`): when it is offered, and what a tap would write. */
 
 import { describe, expect, it } from 'bun:test';
-import { alwaysUseFailureWords, alwaysUseFor, alwaysUseSavedWords } from '../../../app/lib/always-use.ts';
+import {
+  alwaysUseExplainParts,
+  alwaysUseFailureWords,
+  alwaysUseFor,
+  alwaysUseSavedParts,
+} from '../../../app/lib/always-use.ts';
 import { PutAccountDefaultRequestSchema } from '../../../contract/routes/index.ts';
 import { list } from '../../support/app/accounts-fixtures.ts';
 import { settledSlot } from '../../support/app/input-card-fixtures.ts';
@@ -20,7 +25,16 @@ describe('when "Always use for <project>" is offered', () => {
     });
     // The body is one the route's own schema accepts.
     expect(PutAccountDefaultRequestSchema.safeParse(always?.body).success).toBe(true);
-    expect(alwaysUseSavedWords(always as never)).toBe('GitHub is now the default for demo-project at github.com.');
+    // The sentences are three parts so the screen can keep the project's name whole; joined, they are the sentence.
+    const saved = alwaysUseSavedParts(always as never);
+    expect(`${saved.before}${saved.project}${saved.after}`).toBe(
+      'GitHub is now the default for demo-project at github.com.',
+    );
+    const explain = alwaysUseExplainParts(always as never);
+    expect(explain.project).toBe('demo-project');
+    expect(`${explain.before}${explain.project}${explain.after}`).toBe(
+      'Makes GitHub the default for github.com in demo-project.',
+    );
   });
 
   it('is not offered when the daemon resolved no project (Unfiled)', () => {

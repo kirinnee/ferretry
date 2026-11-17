@@ -46,6 +46,10 @@ describe('the "Always use for <project>" line', () => {
     const shown = await draw();
     expect(q(shown.view.container, '[data-input-always-button]').textContent).toBe('Always use for demo-project');
     expect(shown.view.container.textContent).toContain('Makes GitHub the default for github.com in demo-project.');
+    // The name is one box, with the full stop that follows it, so a phone never breaks it after its hyphen.
+    expect(
+      [...shown.view.container.querySelectorAll('[data-input-always-project]')].map(each => each.textContent),
+    ).toEqual(['demo-project', 'demo-project.']);
     expect(shown.writes()).toEqual([]);
     // The card keeps its view while the line is on offer.
     expect(shown.holds).toEqual([true]);
