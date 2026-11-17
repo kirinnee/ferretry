@@ -141,13 +141,18 @@ export class WardenReviveService {
       // Switched off (not merely unreadable): remember it, so a death that happens while it is off is not brought back
       // by switching it on. Written once; the next sweeps find it already there.
       const before = input.revive ?? EMPTY_REVIVE_STATE;
-      if (switched === false && before.offSince === undefined) await persist({ ...before, offSince: at }, []);
+      if (switched === false && before.offSince === undefined) {
+        await persist({ ...before, offSince: at }, []);
+        // Auto-revive going quiet must leave a trace: otherwise the first sign is a ferret that was never brought back.
+        this.ports.journal.record('fleet.warden_revive_switched_off', { since: at });
+      }
       return none;
     }
 
     let state = this.housekeeping(input.revive ?? EMPTY_REVIVE_STATE, input.fleet, nowMs);
     // Switched on again after being off: only deaths from now on are the Warden's to revive.
     if (state.offSince !== undefined) {
+      this.ports.journal.record('fleet.warden_revive_switched_on', { offSince: state.offSince, armedAt: at });
       const { offSince: _off, ...rest } = state;
       state = { ...rest, armedAt: at };
     }
