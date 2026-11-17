@@ -27,7 +27,7 @@ import {
   createPrLinks,
   DEFAULT_REOPEN_SOURCE,
   parseTerms,
-  requireCardRef,
+  requireTaskRef,
   visibilityOf,
 } from '../../../cli/lib/board-request.ts';
 import { FERRETRY_ID } from './fixtures.ts';
@@ -40,16 +40,16 @@ describe('requireCardRef', () => {
   it('should accept the & and the bare spelling of one task', () => {
     // Act + Assert
     for (const raw of ['&F412', 'F412', ' &f412 ']) {
-      should(requireCardRef(raw)).eql({ id: 'F412' });
+      should(requireTaskRef(raw)).eql({ id: 'F412' });
     }
   });
 
   it('should refuse junk and say which flag it was reading', () => {
     // Act + Assert
     for (const raw of ['', 'F', '412', 'X1', '&&F1', 'F1 F2']) {
-      should(() => requireCardRef(raw)).throw(/expected a task id like &F21/u);
+      should(() => requireTaskRef(raw)).throw(/expected a task id like &F21/u);
     }
-    should(() => requireCardRef('nope', '--parent id')).throw(/expected a --parent id like &F21, got "nope"/u);
+    should(() => requireTaskRef('nope', '--parent id')).throw(/expected a --parent id like &F21, got "nope"/u);
   });
 });
 

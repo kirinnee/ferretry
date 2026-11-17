@@ -485,7 +485,7 @@ describe('Agenda service: parking', () => {
 
 describe('an agenda item offers to close the card that waits to be tried', () => {
   const taskRequest = { ...request, kind: 'task' as const, ask: { kind: 'task' as const } };
-  const withCards = (waiting: readonly string[]) => {
+  const withTasks = (waiting: readonly string[]) => {
     const asked: string[] = [];
     const repository = new MemoryRepository();
     const service = new AgendaService(
@@ -510,7 +510,7 @@ describe('an agenda item offers to close the card that waits to be tried', () =>
 
   it('should offer by default for a to-do or a review on a card in the to-test lane', async () => {
     // Arrange
-    const { service } = withCards(['F12']);
+    const { service } = withTasks(['F12']);
 
     // Act
     const todo = await service.raise(SESSION, { ...taskRequest, task: { id: 'F12' } }, AGENT);
@@ -522,7 +522,7 @@ describe('an agenda item offers to close the card that waits to be tried', () =>
 
   it('should not offer for another lane, another kind, a notice, a card-less item or an unreadable board', async () => {
     // Arrange
-    const { asked, service } = withCards(['F12']);
+    const { asked, service } = withTasks(['F12']);
 
     // Act
     const elsewhere = await service.raise(SESSION, { ...taskRequest, task: { id: 'F99' } }, AGENT);
@@ -548,7 +548,7 @@ describe('an agenda item offers to close the card that waits to be tried', () =>
 
   it('should keep an offer the add asked for without asking the board', async () => {
     // Arrange
-    const { asked, service } = withCards([]);
+    const { asked, service } = withTasks([]);
 
     // Act
     const raised = await service.raise(SESSION, { ...request, task: { id: 'F12' }, offerClose: true }, AGENT);

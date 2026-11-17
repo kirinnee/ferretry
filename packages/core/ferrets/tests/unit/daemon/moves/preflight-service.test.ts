@@ -242,12 +242,12 @@ describe('a Claude tool shell the move finds mid-turn', () => {
     const report = await preflight.inspect(
       view({ status: 'tool_running', turnState: 'working', openTools: undefined }),
     );
-    const card = preflight.describe(report);
+    const task = preflight.describe(report);
 
     // Assert
     should(report.processes[0]?.agentCommand).be.true();
     should(report.processes[0]?.unkeptJob).be.undefined();
-    const title = card.items.find(item => item.pid === 40)?.title ?? '';
+    const title = task.items.find(item => item.pid === 40)?.title ?? '';
     should(title).containEql('a command the agent is running');
     should(title).not.containEql('background job');
   });

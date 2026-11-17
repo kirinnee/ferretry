@@ -732,11 +732,11 @@ const removal = (
 ): LaneGateProblem => {
   const said = (
     laneId: string,
-    cards?: { readonly verb: 'moves' | 'sends'; readonly where: string },
+    tasks?: { readonly verb: 'moves' | 'sends'; readonly where: string },
   ): LaneGateProblem => ({
     laneId,
-    why: `removes ${lane.name}${gate ? ', which waits for the owner' : ''}${cards === undefined ? '' : `, and ${cards.verb} its tasks ${cards.where}`}`,
-    removed: { name: lane.name, gate, ...(cards === undefined ? {} : { cards }) },
+    why: `removes ${lane.name}${gate ? ', which waits for the owner' : ''}${tasks === undefined ? '' : `, and ${tasks.verb} its tasks ${tasks.where}`}`,
+    removed: { name: lane.name, gate, ...(tasks === undefined ? {} : { cards: tasks }) },
   });
   const target = to === undefined ? undefined : next.lanes.find(candidate => candidate.id === to);
   if (to === undefined || target === undefined) return said(lane.id);
@@ -785,10 +785,10 @@ export const laneChangeLines = (
       continue;
     }
     if (group[0] !== problem) continue;
-    const { gate, cards } = problem.removed ?? { gate: false };
+    const { gate, cards: tasks } = problem.removed ?? { gate: false };
     const names = nameRun(group.map(each => each.removed?.name ?? each.laneId));
     const lanes = `removes ${String(group.length)} lanes${gate ? ' that wait for the owner' : ''} (${names})`;
-    lines.push(cards === undefined ? lanes : `${lanes}, and ${cards.verb} their tasks ${cards.where}`);
+    lines.push(tasks === undefined ? lanes : `${lanes}, and ${tasks.verb} their tasks ${tasks.where}`);
   }
   return lines;
 };

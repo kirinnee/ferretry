@@ -24,13 +24,13 @@
 import type { AskDraft } from '@ferretry/core-asks/contract';
 import {
   type BoardReopenAttachments,
-  type Card,
-  type CardActionRequest,
-  type CardGate,
-  type CardGateOption,
-  type CardId,
+  type Task,
+  type TaskActionRequest,
+  type TaskGate,
+  type TaskGateOption,
+  type TaskId,
   clipAtWord,
-  formatCardRef,
+  formatTaskRef,
   gateChoice,
   gateReference,
   gateReopenOption,
@@ -40,26 +40,26 @@ import {
 } from '../../../contract/index.ts';
 import { type BoardCaller, effectiveAssignee } from './authority.ts';
 import {
-  cardAskDraft,
-  type GateCard,
+  taskAskDraft,
+  type GateTask,
   type GateLanes,
   gateMoveReason,
   gateOf,
   nothingToTryReason,
   tryItVerdict,
 } from './gate-policy.ts';
-import type { CardWriteObserver } from './service.ts';
+import type { TaskWriteObserver } from './service.ts';
 import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /** An open `card` ask, as the obligations port reports it. */
-export interface OpenCardAskEntry {
+export interface OpenTaskAskEntry {
   /** The Asks entry id: `gate:<card>:<lane>:<entry>`. */
   readonly entry: string;
   /** The ask's id on its ferret's ledger (`A12`). */
   readonly ask: string;
   /** The ferret whose ledger holds it. */
   readonly ferret: string;
-  readonly cardId: CardId;
+  readonly cardId: TaskId;
 }
 
 /**
@@ -68,46 +68,46 @@ export interface OpenCardAskEntry {
  *
  * `raise` is idempotent by `(source, entry)`: a second raise of an entry that is open or answered changes nothing.
  */
-export interface CardObligations {
+export interface TaskObligations {
   /** Raises the ask; `true` when it is new, `false` when that entry was already raised. */
   raise(draft: AskDraft): Promise<boolean>;
   /** Withdraws the open ask of `entry`; nothing when it is not open. */
   withdraw(entry: string, reason: 'withdrawn' | 'superseded'): Promise<void>;
   /** Every open `card` ask, or the open ones of one card. A read that fails THROWS: "not asking" would let a second ask through. */
-  open(card?: CardId): Promise<readonly OpenCardAskEntry[]>;
+  open(task?: TaskId): Promise<readonly OpenTaskAskEntry[]>;
   /** The entries of this card's asks the owner has already answered: each has been asked, for good. */
-  answered(card: CardId): Promise<ReadonlySet<string>>;
+  answered(task: TaskId): Promise<ReadonlySet<string>>;
   /** {@link open} for every card in ONE scan, grouped by card: what a whole-board pass reads instead of one scan per card. */
-  openAll(): Promise<ReadonlyMap<CardId, readonly OpenCardAskEntry[]>>;
+  openAll(): Promise<ReadonlyMap<TaskId, readonly OpenTaskAskEntry[]>>;
   /** {@link answered} for every card in ONE scan, grouped by card. */
-  answeredAll(): Promise<ReadonlyMap<CardId, ReadonlySet<string>>>;
+  answeredAll(): Promise<ReadonlyMap<TaskId, ReadonlySet<string>>>;
 }
 
 /** What one whole-board pass reads of Asks once: the open and the answered `card` asks of every card. */
 interface AsksPass {
-  readonly open: ReadonlyMap<CardId, readonly OpenCardAskEntry[]>;
-  readonly answered: ReadonlyMap<CardId, ReadonlySet<string>>;
+  readonly open: ReadonlyMap<TaskId, readonly OpenTaskAskEntry[]>;
+  readonly answered: ReadonlyMap<TaskId, ReadonlySet<string>>;
 }
 
 /** The board as the card asks read and write it: one card or every card, and the owner's act on one. */
 export interface GateBoard {
-  card(id: CardId): Promise<GateCard | undefined>;
-  cards(): Promise<readonly GateCard[]>;
+  card(id: TaskId): Promise<GateTask | undefined>;
+  cards(): Promise<readonly GateTask[]>;
   /**
    * Applies one action as `caller`; throws the board's refusal. `expect` is checked in the same write: the card must
    * still sit in that lane by that entry, or nothing is written.
    */
-  act(id: CardId, request: CardActionRequest, caller: BoardCaller, expect?: GateExpectation): Promise<void>;
+  act(id: TaskId, request: TaskActionRequest, caller: BoardCaller, expect?: GateExpectation): Promise<void>;
   /**
    * The daemon's own move of a card out of a try-it lane into the closed lane, reason beside it: the one pass of a gate
    * that is not the owner's. Written only while the card still sits at `expect`; `false` when it did not close.
    */
-  closeNothingToTry(id: CardId, expect: GateExpectation, reason: string): Promise<boolean>;
+  closeNothingToTry(id: TaskId, expect: GateExpectation, reason: string): Promise<boolean>;
 }
 
 /** Tells a card's ferret the owner's answer, through the reopen ladder. */
 interface GateWords {
-  told(task: Card, message: string, key: string): Promise<void>;
+  told(task: Task, message: string, key: string): Promise<void>;
 }
 
 /** Where the files an answer carries are moved to the card's ferret, answering their ids as they are THERE; rejects when one cannot be carried. */
@@ -124,7 +124,7 @@ interface GateHomes {
 }
 
 export interface GateItemsDependencies {
-  readonly obligations: CardObligations;
+  readonly obligations: TaskObligations;
   readonly board: GateBoard;
   readonly lanes: GateLanes;
   readonly words: GateWords;
@@ -182,7 +182,7 @@ export interface GateExpectation {
 }
 
 /** Runs `work` once every earlier one queued under `key` has settled: one at a time per key. */
-const serially = async <T>(queues: Map<CardId, Promise<unknown>>, key: CardId, work: () => Promise<T>): Promise<T> => {
+const serially = async <T>(queues: Map<TaskId, Promise<unknown>>, key: TaskId, work: () => Promise<T>): Promise<T> => {
   const turn = (queues.get(key) ?? Promise.resolve()).then(work);
   const tail = turn.catch(() => undefined);
   queues.set(key, tail);
@@ -195,25 +195,25 @@ const serially = async <T>(queues: Map<CardId, Promise<unknown>>, key: CardId, w
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-export class GateItems implements CardWriteObserver {
+export class GateItems implements TaskWriteObserver {
   /** Cards whose ask is being answered right now: their own writes are the answer's, not a card moving on. */
-  private readonly answering = new Set<CardId>();
+  private readonly answering = new Set<TaskId>();
   /** One answer per card at a time: the tail of each card's queue of answers. */
-  private readonly answers = new Map<CardId, Promise<unknown>>();
+  private readonly answers = new Map<TaskId, Promise<unknown>>();
   /** One pass over a card's asks at a time, so two writes of one card never raise its ask twice. */
-  private readonly passes = new Map<CardId, Promise<unknown>>();
+  private readonly passes = new Map<TaskId, Promise<unknown>>();
   /** The answers already applied in this run: a replay of one is a no-op even before the card is read. */
   private readonly applied = new Set<string>();
 
   constructor(private readonly ports: GateItemsDependencies) {}
 
   /** A card was written: its ask follows its lane. Never rejects. */
-  async written(id: CardId): Promise<void> {
+  async written(id: TaskId): Promise<void> {
     if (this.answering.has(id)) return;
-    const card = await this.ports.board.card(id).catch(() => undefined);
-    if (card === undefined) return;
-    await this.reconcile(card).catch((error: unknown) =>
-      this.ports.diagnostics.warn(`the ask of ${formatCardRef({ id })} could not follow it: ${errorText(error)}`),
+    const task = await this.ports.board.card(id).catch(() => undefined);
+    if (task === undefined) return;
+    await this.reconcile(task).catch((error: unknown) =>
+      this.ports.diagnostics.warn(`the ask of ${formatTaskRef({ id })} could not follow it: ${errorText(error)}`),
     );
   }
 
@@ -222,13 +222,13 @@ export class GateItems implements CardWriteObserver {
    * while the daemon was down loses it. Each card on its own; returns how many asks it raised.
    */
   async backfill(signal?: AbortSignal): Promise<number> {
-    return await this.reconcileAll(card => card, signal);
+    return await this.reconcileAll(task => task, signal);
   }
 
   /** Every card at a gate is looked at again, and asks nothing is waiting for are closed; returns how many asks it raised. */
   async sweep(signal?: AbortSignal): Promise<number> {
     const raised = await this.reconcileAll(
-      card => (gateOf(card, this.ports.lanes) === undefined ? undefined : card),
+      task => (gateOf(task, this.ports.lanes) === undefined ? undefined : task),
       signal,
     );
     signal?.throwIfAborted();
@@ -244,9 +244,9 @@ export class GateItems implements CardWriteObserver {
    * card) and each card takes its own slice, so a board of N cards costs two scans, not 2N (v4 read only the card's
    * own holders). A stopped pass (`signal`) ends before the next card.
    */
-  private async reconcileAll(choose: (card: GateCard) => GateCard | undefined, signal?: AbortSignal): Promise<number> {
+  private async reconcileAll(choose: (task: GateTask) => GateTask | undefined, signal?: AbortSignal): Promise<number> {
     let raised = 0;
-    const cards = (await this.ports.board.cards()).map(choose);
+    const tasks = (await this.ports.board.cards()).map(choose);
     signal?.throwIfAborted();
     let pass: AsksPass;
     try {
@@ -259,13 +259,13 @@ export class GateItems implements CardWriteObserver {
       this.ports.diagnostics.warn(`the asks of the tasks could not be read, so none was put: ${errorText(error)}`);
       return 0;
     }
-    for (const card of cards) {
+    for (const task of tasks) {
       signal?.throwIfAborted();
-      if (card === undefined) continue;
+      if (task === undefined) continue;
       try {
-        if (await this.reconcile(card, pass)) raised += 1;
+        if (await this.reconcile(task, pass)) raised += 1;
       } catch (error) {
-        this.ports.diagnostics.warn(`the ask of ${formatCardRef(card.task)} could not be put: ${errorText(error)}`);
+        this.ports.diagnostics.warn(`the ask of ${formatTaskRef(task.task)} could not be put: ${errorText(error)}`);
       }
     }
     return raised;
@@ -283,46 +283,46 @@ export class GateItems implements CardWriteObserver {
     return await serially(this.answers, reference.cardId, async () => await this.answerAlone(answer, reference.cardId));
   }
 
-  private async answerAlone(answer: GateAnswer, cardId: CardId): Promise<GateAnswerOutcome> {
+  private async answerAlone(answer: GateAnswer, taskId: TaskId): Promise<GateAnswerOutcome> {
     if (this.applied.has(answer.answerId)) return { handled: true, applied: true };
     if (!answer.human) {
       return refused(
         'forbidden',
-        `only the owner answers ${ASK_REFERENCE_SIGIL}${answer.ask.id}'s question: it decides where ${formatCardRef({ id: cardId })} goes next`,
+        `only the owner answers ${ASK_REFERENCE_SIGIL}${answer.ask.id}'s question: it decides where ${formatTaskRef({ id: taskId })} goes next`,
       );
     }
-    const card = await this.ports.board.card(cardId);
-    const here = card === undefined ? undefined : gateOf(card, this.ports.lanes);
-    if (card === undefined || here === undefined || gateReference(here) !== answer.entry) {
+    const task = await this.ports.board.card(taskId);
+    const here = task === undefined ? undefined : gateOf(task, this.ports.lanes);
+    if (task === undefined || here === undefined || gateReference(here) !== answer.entry) {
       // The ask is still open (the refusal leaves it so) and Asks is inside its turn: it is taken back once that ends.
       this.afterward(`the ask ${answer.entry}`, async () => {
         await this.ports.obligations.withdraw(answer.entry, 'withdrawn');
       });
       return refused(
         'moved-on',
-        `${formatCardRef({ id: cardId })} is no longer at that question, so nothing was moved`,
+        `${formatTaskRef({ id: taskId })} is no longer at that question, so nothing was moved`,
       );
     }
     const decision = decide(here, answer);
     if ('code' in decision) return { handled: true, refused: decision };
     const unfit = this.filesRefusal(answer, decision);
     if (unfit !== undefined) return { handled: true, refused: unfit };
-    this.answering.add(card.task.id);
+    this.answering.add(task.task.id);
     let applied = false;
     try {
-      const failed = await this.apply(card, here, decision, answer);
+      const failed = await this.apply(task, here, decision, answer);
       if (failed !== undefined) return { handled: true, refused: failed };
       this.applied.add(answer.answerId);
       applied = true;
-      if (decision.kind === 'option') await this.tellAnswered(card.task, here, decision, answer);
+      if (decision.kind === 'option') await this.tellAnswered(task.task, here, decision, answer);
       return { handled: true, applied: true };
     } finally {
-      this.answering.delete(card.task.id);
+      this.answering.delete(task.task.id);
       // Never reconciled here: the ask being answered is still open in Asks, and withdrawing it would wait on the very
       // turn this answer runs in. An applied answer is reconciled from `asks.answered` (`recorded`); a refused one,
       // whose writes from other paths were set aside meanwhile, once Asks has finished with it.
       if (!applied)
-        this.afterward(`the ask of ${formatCardRef(card.task)}`, async () => await this.written(card.task.id));
+        this.afterward(`the ask of ${formatTaskRef(task.task)}`, async () => await this.written(task.task.id));
     }
   }
 
@@ -348,13 +348,13 @@ export class GateItems implements CardWriteObserver {
   }
 
   /** Brings one card's ask in line with its lane, one pass per card at a time; `true` when it raised a new ask. */
-  private async reconcile(card: GateCard, pass?: AsksPass): Promise<boolean> {
-    return await serially(this.passes, card.task.id, async () => await this.reconcileAlone(card, pass));
+  private async reconcile(task: GateTask, pass?: AsksPass): Promise<boolean> {
+    return await serially(this.passes, task.task.id, async () => await this.reconcileAlone(task, pass));
   }
 
-  private async reconcileAlone(card: GateCard, pass?: AsksPass): Promise<boolean> {
-    const { task } = card;
-    const seen = gateOf(card, this.ports.lanes);
+  private async reconcileAlone(boardTask: GateTask, pass?: AsksPass): Promise<boolean> {
+    const { task } = boardTask;
+    const seen = gateOf(boardTask, this.ports.lanes);
     const asked =
       pass === undefined
         ? await this.ports.obligations.answered(task.id)
@@ -365,10 +365,10 @@ export class GateItems implements CardWriteObserver {
     const verdict =
       seen === undefined || asked.has(gateReference(seen))
         ? undefined
-        : tryItVerdict({ ...task, blockedBy: card.blockedBy, building: card.building }, seen);
+        : tryItVerdict({ ...task, blockedBy: boardTask.blockedBy, building: boardTask.building }, seen);
     // Nothing to try: the card closes, so what follows is the card as it stands NOW, past that gate.
     const closed =
-      seen !== undefined && verdict?.kind === 'nothing' && (await this.closeNothing(card, seen, verdict.why));
+      seen !== undefined && verdict?.kind === 'nothing' && (await this.closeNothing(boardTask, seen, verdict.why));
     if (verdict?.kind === 'nothing' && !closed) return false;
     const gate = closed ? undefined : seen;
     // Blocked: the card is not ready to try, so nothing is asked, and an ask still waiting for the owner is taken back
@@ -383,7 +383,7 @@ export class GateItems implements CardWriteObserver {
     // Already open from the pass's own read: raising would find it and change nothing, after two more scans.
     if (pass !== undefined && openNow.some(open => open.entry === wanted)) return false;
     const ferret = (await this.askersOf(task))[0] ?? task.owner;
-    return await this.ports.obligations.raise(cardAskDraft(gate, task, ferret, this.ports.product));
+    return await this.ports.obligations.raise(taskAskDraft(gate, task, ferret, this.ports.product));
   }
 
   /**
@@ -391,21 +391,21 @@ export class GateItems implements CardWriteObserver {
    * card is closed; `false` when it moved on first (the next look reads it as it is). The card's own write is not a
    * reason to look again, so it is not read as a card moving on while it is written.
    */
-  private async closeNothing(card: GateCard, gate: CardGate, why: string): Promise<boolean> {
-    this.answering.add(card.task.id);
+  private async closeNothing(task: GateTask, gate: TaskGate, why: string): Promise<boolean> {
+    this.answering.add(task.task.id);
     try {
       return await this.ports.board.closeNothingToTry(
-        card.task.id,
+        task.task.id,
         { laneId: gate.laneId, entry: gate.entry },
         nothingToTryReason(why),
       );
     } finally {
-      this.answering.delete(card.task.id);
+      this.answering.delete(task.task.id);
     }
   }
 
   /** The ferrets a card's ask belongs to: the home of its assignee first, then the home of its owner ferret. */
-  private async askersOf(task: Pick<Card, 'assignee' | 'owner'>): Promise<readonly string[]> {
+  private async askersOf(task: Pick<Task, 'assignee' | 'owner'>): Promise<readonly string[]> {
     const homes = await Promise.all(
       [effectiveAssignee(task), task.owner].map(async each => await this.ports.homes.of(each).catch(() => each)),
     );
@@ -416,12 +416,12 @@ export class GateItems implements CardWriteObserver {
    * Where this card's ask is open now, or `undefined` when it is not. A board or Asks that cannot be read THROWS:
    * "not asking" would let a second ask through.
    */
-  async asking(cardId: CardId): Promise<GateAsking | undefined> {
-    const card = await this.ports.board.card(cardId);
-    const gate = card === undefined ? undefined : gateOf(card, this.ports.lanes);
-    if (card === undefined || gate === undefined) return undefined;
+  async asking(taskId: TaskId): Promise<GateAsking | undefined> {
+    const task = await this.ports.board.card(taskId);
+    const gate = task === undefined ? undefined : gateOf(task, this.ports.lanes);
+    if (task === undefined || gate === undefined) return undefined;
     const wanted = gateReference(gate);
-    const found = (await this.ports.obligations.open(cardId)).find(each => each.entry === wanted);
+    const found = (await this.ports.obligations.open(taskId)).find(each => each.entry === wanted);
     return found === undefined ? undefined : { ferret: found.ferret, id: found.ask };
   }
 
@@ -432,20 +432,20 @@ export class GateItems implements CardWriteObserver {
    * entry cannot exist; this catches the asks of different entries a missed write left behind.
    */
   private async closeStrays(signal?: AbortSignal): Promise<void> {
-    const byCard = new Map<CardId, OpenCardAskEntry[]>();
+    const byTask = new Map<TaskId, OpenTaskAskEntry[]>();
     for (const open of await this.ports.obligations.open())
-      byCard.set(open.cardId, [...(byCard.get(open.cardId) ?? []), open]);
-    if (byCard.size === 0) return;
+      byTask.set(open.cardId, [...(byTask.get(open.cardId) ?? []), open]);
+    if (byTask.size === 0) return;
     // The cards come from ONE read of the board here, taken AFTER the reconcile above has raised and withdrawn asks (a
     // second whole-board read per sweep, on purpose: the reconcile's list is older, and judging a card that moved since by
     // its old lane would withdraw the live ask of its new gate). It is skipped when no card ask is open. A derivation per
     // card with an open ask would read the whole board each time. A card this read did not have (written since) is looked
     // for on its own.
     const known = new Map((await this.ports.board.cards()).map(each => [each.task.id, each] as const));
-    for (const [cardId, opens] of byCard) {
+    for (const [taskId, opens] of byTask) {
       signal?.throwIfAborted();
-      const card = known.get(cardId) ?? (await this.ports.board.card(cardId).catch(() => undefined));
-      const gate = card === undefined ? undefined : gateOf(card, this.ports.lanes);
+      const task = known.get(taskId) ?? (await this.ports.board.card(taskId).catch(() => undefined));
+      const gate = task === undefined ? undefined : gateOf(task, this.ports.lanes);
       const wanted = gate === undefined ? undefined : gateReference(gate);
       const newest = (entry: string): number => parseGateReference(entry)?.entry ?? 0;
       const keeper =
@@ -453,32 +453,32 @@ export class GateItems implements CardWriteObserver {
           ? wanted
           : [...opens].sort((left, right) => newest(right.entry) - newest(left.entry))[0]?.entry;
       for (const open of opens) {
-        const stale = card === undefined || gate === undefined || open.entry !== keeper;
-        if (stale && !(await this.isBeingAnswered(cardId)))
+        const stale = task === undefined || gate === undefined || open.entry !== keeper;
+        if (stale && !(await this.isBeingAnswered(taskId)))
           await this.ports.obligations.withdraw(open.entry, 'superseded');
       }
     }
   }
 
-  private async isBeingAnswered(cardId: CardId): Promise<boolean> {
-    return this.answering.has(cardId);
+  private async isBeingAnswered(taskId: TaskId): Promise<boolean> {
+    return this.answering.has(taskId);
   }
 
   /** Moves the card as the answer says; a refusal when the board would not. */
   private async apply(
-    card: GateCard,
-    gate: CardGate,
+    boardTask: GateTask,
+    gate: TaskGate,
     decision: Decision,
     answer: GateAnswer,
   ): Promise<GateRefusal | undefined> {
-    const { task, laneSet } = card;
+    const { task, laneSet } = boardTask;
     if (decision.kind === 'not-yet') {
       if (decision.words !== undefined) await this.notYet(task, decision.words, answer);
       return undefined;
     }
-    if (laneSet === null) return { code: 'not-moved', message: `${formatCardRef(task)} has no lanes any more` };
+    if (laneSet === null) return { code: 'not-moved', message: `${formatTaskRef(task)} has no lanes any more` };
     const target = this.ports.lanes.outcomeLane(laneSet, task.workflow, gate.laneId, decision.option.id);
-    if (!target.ok) return { code: 'not-moved', message: `${formatCardRef(task)} was not moved: ${target.message}` };
+    if (!target.ok) return { code: 'not-moved', message: `${formatTaskRef(task)} was not moved: ${target.message}` };
     const expect: GateExpectation = { laneId: gate.laneId, entry: gate.entry };
     if (decision.option.outcome !== 'reopen-with-ask') {
       return await this.act(
@@ -508,8 +508,8 @@ export class GateItems implements CardWriteObserver {
 
   /** The card moved on the owner's answer: its ferret is told. A Not good is told by the reopen itself, with the owner's words. */
   private async tellAnswered(
-    task: Card,
-    gate: CardGate,
+    task: Task,
+    gate: TaskGate,
     decision: Extract<Decision, { kind: 'option' }>,
     answer: GateAnswer,
   ): Promise<void> {
@@ -518,11 +518,11 @@ export class GateItems implements CardWriteObserver {
     await this.ports.words
       .told(
         task,
-        `${formatCardRef(task)}: the owner said ${decision.option.label} on ${ASK_REFERENCE_SIGIL}${answer.ask.id}${said}. Mark ${ASK_REFERENCE_SIGIL}${answer.ask.id} done once nothing more is expected.`,
+        `${formatTaskRef(task)}: the owner said ${decision.option.label} on ${ASK_REFERENCE_SIGIL}${answer.ask.id}${said}. Mark ${ASK_REFERENCE_SIGIL}${answer.ask.id} done once nothing more is expected.`,
         `card-ask-${task.id}-${String(gate.entry)}-${answer.answerId}`,
       )
       .catch((error: unknown) =>
-        this.ports.diagnostics.warn(`could not tell ${formatCardRef(task)}'s ferret: ${errorText(error)}`),
+        this.ports.diagnostics.warn(`could not tell ${formatTaskRef(task)}'s ferret: ${errorText(error)}`),
       );
   }
 
@@ -555,7 +555,7 @@ export class GateItems implements CardWriteObserver {
    * The answer's files, moved to the card's ferret BEFORE the board is touched, so a file that cannot be carried
    * leaves the card where it is. The reopen then names them where the ferret holds them.
    */
-  private async carried(task: Card, answer: GateAnswer): Promise<BoardReopenAttachments | GateRefusal | undefined> {
+  private async carried(task: Task, answer: GateAnswer): Promise<BoardReopenAttachments | GateRefusal | undefined> {
     const files = answer.attachments;
     if (files === undefined || this.ports.files === undefined) return undefined;
     const to = effectiveAssignee(task);
@@ -564,35 +564,35 @@ export class GateItems implements CardWriteObserver {
     } catch (error) {
       return {
         code: 'not-moved',
-        message: `${formatCardRef(task)} was not moved: a file could not be carried to its ferret: ${errorText(error)}`,
+        message: `${formatTaskRef(task)} was not moved: a file could not be carried to its ferret: ${errorText(error)}`,
       };
     }
   }
 
   /** "Not yet" with words: kept on the card as the owner's, and told to its ferret. The card stays where it is. */
-  private async notYet(task: Card, words: string, answer: GateAnswer): Promise<void> {
+  private async notYet(task: Task, words: string, answer: GateAnswer): Promise<void> {
     const refusal = await this.act(
       task.id,
       { action: 'clarify', text: words, source: `owner (ask ${ASK_REFERENCE_SIGIL}${answer.ask.id})` },
       answer,
     );
     if (refusal !== undefined)
-      this.ports.diagnostics.warn(`the owner's words on ${formatCardRef(task)} were not kept: ${refusal.message}`);
+      this.ports.diagnostics.warn(`the owner's words on ${formatTaskRef(task)} were not kept: ${refusal.message}`);
     await this.ports.words
       .told(
         task,
-        `${formatCardRef(task)}: the owner is not ready to move it on yet: ${words}`,
+        `${formatTaskRef(task)}: the owner is not ready to move it on yet: ${words}`,
         `gate-not-yet-${task.id}-${answer.answerId}`,
       )
       .catch((error: unknown) =>
-        this.ports.diagnostics.warn(`could not tell ${formatCardRef(task)}'s ferret: ${errorText(error)}`),
+        this.ports.diagnostics.warn(`could not tell ${formatTaskRef(task)}'s ferret: ${errorText(error)}`),
       );
   }
 
   /** One board act as the owner; the board's refusal as a gate refusal. */
   private async act(
-    id: CardId,
-    request: CardActionRequest,
+    id: TaskId,
+    request: TaskActionRequest,
     answer: GateAnswer,
     expect?: GateExpectation,
   ): Promise<GateRefusal | undefined> {
@@ -600,7 +600,7 @@ export class GateItems implements CardWriteObserver {
       await this.ports.board.act(id, request, answer.caller, expect);
       return undefined;
     } catch (error) {
-      return { code: 'not-moved', message: `${formatCardRef({ id })} was not moved: ${errorText(error)}` };
+      return { code: 'not-moved', message: `${formatTaskRef({ id })} was not moved: ${errorText(error)}` };
     }
   }
 }
@@ -609,7 +609,7 @@ export class GateItems implements CardWriteObserver {
 type Decision =
   | {
       readonly kind: 'option';
-      readonly option: CardGateOption;
+      readonly option: TaskGateOption;
       readonly note: string | null;
       readonly words?: string;
     }
@@ -624,7 +624,7 @@ const refused = (code: GateRefusal['code'], message: string): GateAnswerOutcome 
  * Reads the answer against the gate: a chosen label is its option (or "Not yet"); the owner's own words alone (no
  * choice) are the gate's Not good. Reopen-with-ask needs words, from the note or the answer.
  */
-const decide = (gate: CardGate, answer: GateAnswer): Decision | GateRefusal => {
+const decide = (gate: TaskGate, answer: GateAnswer): Decision | GateRefusal => {
   const note = answer.text?.trim() ?? '';
   const words = (text: string): { readonly words?: string } => (text === '' ? {} : { words: text });
   if (answer.choice === undefined) {

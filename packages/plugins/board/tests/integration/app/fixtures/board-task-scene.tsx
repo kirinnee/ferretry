@@ -10,7 +10,14 @@ import { createRoot } from 'react-dom/client';
 import { DaemonBoardStore } from '../../../../app/lib/board-store.ts';
 import { BoardPage } from '../../../../app/views/board-page.tsx';
 import { THIS_MACHINE } from '../../../../app/lib/machine.ts';
-import { boardAnswer, card, fakeEnvironment, fakePort, laneSetFor, PROJECT } from '../../../unit/app/board-support.ts';
+import {
+  boardAnswer,
+  boardTask,
+  fakeEnvironment,
+  fakePort,
+  laneSetFor,
+  PROJECT,
+} from '../../../unit/app/board-support.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
@@ -18,8 +25,8 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const LEAD = 'mvuc7tsf-0c3d50df';
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 
-const cards = [
-  card('F3', {
+const tasks = [
+  boardTask('F3', {
     title: 'Rich CI cache summary',
     laneId: 'plan',
     owner: LEAD,
@@ -28,9 +35,9 @@ const cards = [
     context: '- The cache key hashes the lockfile.',
     ask: { text: 'Show cache hits and misses in the CI summary', source: `session:${LEAD}` },
   }),
-  card('F4', { title: 'Release notes for 4.111', laneId: 'implement', owner: LEAD }),
-  card('F5', { title: 'Retire the old inbox route', laneId: 'review', owner: LEAD }),
-  card('F6', { title: 'Lane editor copy', laneId: 'todo', owner: LEAD }),
+  boardTask('F4', { title: 'Release notes for 4.111', laneId: 'implement', owner: LEAD }),
+  boardTask('F5', { title: 'Retire the old inbox route', laneId: 'review', owner: LEAD }),
+  boardTask('F6', { title: 'Lane editor copy', laneId: 'todo', owner: LEAD }),
 ];
 
 const agenda = {
@@ -57,9 +64,9 @@ const agenda = {
 
 const store = new DaemonBoardStore(
   fakePort({
-    board: async () => boardAnswer(cards, { laneSet: laneSetFor(), projectId: PROJECT }),
+    board: async () => boardAnswer(tasks, { laneSet: laneSetFor(), projectId: PROJECT }),
     card: async (_daemon, id) => {
-      const found = cards.find(entry => entry.id === id);
+      const found = tasks.find(entry => entry.id === id);
       return found === undefined ? null : { card: found, laneSet: laneSetFor() };
     },
     agenda: async () => agenda,

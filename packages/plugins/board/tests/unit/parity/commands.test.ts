@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import manifest from '../../../manifest.ts';
 import {
   AT,
-  card,
-  cardResponse,
+  boardTask,
+  taskResponse,
   DENISHA,
   FERRETRY_ID,
   laneSet,
@@ -17,12 +17,12 @@ import { run } from '../../integration/cli/harness.ts';
 const declared = new Set<string>(manifest.actions?.cli?.map(entry => entry.verb) ?? []);
 
 const PROJECTS = listing({ projects: [project(), otherProject()], current: FERRETRY_ID as never });
-const CARD = cardResponse(card({ id: 'F7' }), laneSet());
+const TASK = taskResponse(boardTask({ id: 'F7' }), laneSet());
 const BASE = {
   'GET /v1/board/projects': PROJECTS,
   'GET /v1/ferrets': [{ id: DENISHA, name: 'denisha' }],
-  'GET /v1/board/tasks/:taskId': CARD,
-  'POST /v1/board/tasks/:taskId': CARD,
+  'GET /v1/board/tasks/:taskId': TASK,
+  'POST /v1/board/tasks/:taskId': TASK,
 };
 const LANES = { ...BASE, 'GET /v1/board/projects/:projectId/lanes': project() };
 const CHANGE = { 'POST /v1/board/projects/:projectId/lanes': { laneSet: laneSet({ version: 4 }), ask: 'raised' } };
@@ -133,7 +133,7 @@ const ROWS: readonly Row[] = [
     verb: 'task new',
     args: ['Rename', 'widget'],
     options: { kind: 'feature', ask: 'rename it', 'ask-source': 'chat://1', new: true },
-    answers: { ...BASE, 'POST /v1/board/tasks': CARD },
+    answers: { ...BASE, 'POST /v1/board/tasks': TASK },
     route: 'POST /v1/board/tasks',
     body: { title: 'Rename widget' },
   },

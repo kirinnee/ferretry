@@ -10,7 +10,7 @@ import {
   summarySections,
 } from '../../../app/lib/board-summary.ts';
 import { listRows } from '../../../app/lib/board-view.ts';
-import { COUNTS, card, laneSetFor, laptop, originCard, PROJECT } from './board-support.ts';
+import { COUNTS, boardTask, laneSetFor, laptop, originTask, PROJECT } from './board-support.ts';
 import { mergeBoardAt as mergeBoard } from './board-support.ts';
 
 const NOW = Date.parse('2026-08-01T10:00:00.000Z');
@@ -19,7 +19,7 @@ const TWO_DAYS = '2026-07-30T10:00:00.000Z';
 const OLD = '2026-07-01T10:00:00.000Z';
 const release = (at: string) => ({ version: '4.110.0', tag: 'v4.110.0', at });
 
-const rowsOf = (cards: ReturnType<typeof card>[]) =>
+const rowsOf = (tasks: ReturnType<typeof boardTask>[]) =>
   listRows(
     mergeBoard(
       [
@@ -27,7 +27,7 @@ const rowsOf = (cards: ReturnType<typeof card>[]) =>
           daemonId: laptop.daemonId,
           machine: 'laptop',
           version: '4.110.0',
-          cards,
+          cards: tasks,
           laneSets: new Map([[PROJECT, laneSetFor()]]),
           counts: COUNTS,
           quarantined: [],
@@ -37,8 +37,8 @@ const rowsOf = (cards: ReturnType<typeof card>[]) =>
     ),
   );
 
-const idsOf = (cards: ReturnType<typeof card>[], window: 'today' | '7d' = '7d') =>
-  summarySections({ rows: rowsOf(cards), window, now: NOW }).map(section => [
+const idsOf = (tasks: ReturnType<typeof boardTask>[], window: 'today' | '7d' = '7d') =>
+  summarySections({ rows: rowsOf(tasks), window, now: NOW }).map(section => [
     section.id,
     section.rows.map(row => row.card.task.id),
   ]);
@@ -57,7 +57,7 @@ describe('which section a card belongs to', () => {
     expect(isActionCategory('verify')).toBe(true);
     expect(isActionCategory('shipped')).toBe(false);
     expect(SUMMARY_SECTIONS['to-test'].action).toBe(true);
-    const some = rowsOf([card('F1')])[0]?.card;
+    const some = rowsOf([boardTask('F1')])[0]?.card;
     if (some === undefined) throw new Error('no card');
     expect(sectionOf(some, 'verify')).toBe('to-test');
     expect(sectionOf(some, 'active')).toBe('working');
@@ -70,18 +70,18 @@ describe('which section a card belongs to', () => {
 });
 
 describe('the four sections', () => {
-  const cards = [
-    card('F1', { laneId: 'tested', shippedIn: release(HOUR) }),
-    card('F2', { laneId: 'implement' }),
-    card('F3', { laneId: 'review' }),
-    card('F4', { laneId: 'merged', lastTouchedAt: HOUR }),
-    card('F5', { laneId: 'released', shippedIn: release(TWO_DAYS) }),
-    card('F6', { laneId: 'todo' }),
-    card('F7', { laneId: 'closed' }),
+  const tasks = [
+    boardTask('F1', { laneId: 'tested', shippedIn: release(HOUR) }),
+    boardTask('F2', { laneId: 'implement' }),
+    boardTask('F3', { laneId: 'review' }),
+    boardTask('F4', { laneId: 'merged', lastTouchedAt: HOUR }),
+    boardTask('F5', { laneId: 'released', shippedIn: release(TWO_DAYS) }),
+    boardTask('F6', { laneId: 'todo' }),
+    boardTask('F7', { laneId: 'closed' }),
   ];
 
   it('orders them to-test, working, merged, released and drops backlog and closed', () => {
-    expect(idsOf(cards)).toEqual([
+    expect(idsOf(tasks)).toEqual([
       ['to-test', ['F1']],
       ['working', ['F2', 'F3']],
       ['merged', ['F4']],
@@ -91,10 +91,10 @@ describe('the four sections', () => {
 
   it('narrows only merged and released by the window', () => {
     const stale = [
-      ...cards,
-      card('F8', { laneId: 'merged', lastTouchedAt: OLD }),
-      card('F9', { laneId: 'tested', shippedIn: release(OLD) }),
-      card('F10', { laneId: 'implement', lastTouchedAt: OLD }),
+      ...tasks,
+      boardTask('F8', { laneId: 'merged', lastTouchedAt: OLD }),
+      boardTask('F9', { laneId: 'tested', shippedIn: release(OLD) }),
+      boardTask('F10', { laneId: 'implement', lastTouchedAt: OLD }),
     ];
     expect(idsOf(stale, 'today')).toEqual([
       ['to-test', ['F1', 'F9']],
@@ -117,7 +117,7 @@ describe('the four sections', () => {
       releasedIn: null,
       polledAt: HOUR,
     });
-    const merged = card('F4', {
+    const merged = boardTask('F4', {
       laneId: 'merged',
       lastTouchedAt: OLD,
       links: { prs: [pr(1, HOUR), pr(2, null)], branch: null, commits: [], docs: [] },
@@ -127,7 +127,7 @@ describe('the four sections', () => {
   });
 
   it('says when each row last mattered', () => {
-    const whens = summarySections({ rows: rowsOf(cards), window: '7d', now: NOW }).flatMap(section =>
+    const whens = summarySections({ rows: rowsOf(tasks), window: '7d', now: NOW }).flatMap(section =>
       section.rows.map(row => [row.card.task.id, row.when]),
     );
     expect(whens).toEqual([
@@ -140,11 +140,11 @@ describe('the four sections', () => {
   });
 
   it('describes a quiet working card by its activity and when it was touched', () => {
-    const quiet = card('F2', { laneId: 'implement', activity: 'stale', lastTouchedAt: TWO_DAYS });
+    const quiet = boardTask('F2', { laneId: 'implement', activity: 'stale', lastTouchedAt: TWO_DAYS });
     const rows = summarySections({ rows: rowsOf([quiet]), window: '7d', now: NOW })[0]?.rows;
     expect(rows?.[0]?.when).toBe('stale · touched 2d ago');
     const unknown = summarySections({
-      rows: rowsOf([card('F3', { laneId: 'implement', activity: 'idle', lastTouchedAt: HOUR })]),
+      rows: rowsOf([boardTask('F3', { laneId: 'implement', activity: 'idle', lastTouchedAt: HOUR })]),
       window: '7d',
       now: NOW,
     })[0]?.rows[0];
@@ -152,7 +152,7 @@ describe('the four sections', () => {
   });
 
   it('says "ready to test" for a to-test card nothing has released, and "merged" with no time', () => {
-    const waiting = summarySections({ rows: rowsOf([card('F1', { laneId: 'tested' })]), window: '7d', now: NOW });
+    const waiting = summarySections({ rows: rowsOf([boardTask('F1', { laneId: 'tested' })]), window: '7d', now: NOW });
     expect(waiting[0]?.rows[0]?.when).toBe('ready to test');
     expect(agoLabel(null, NOW)).toBeNull();
     expect(agoLabel(new Date(NOW).toISOString(), NOW)).toBe('just now');
@@ -160,16 +160,16 @@ describe('the four sections', () => {
 
   it('lists a closed card that shipped in the window, once, and never a dropped or unreleased one', () => {
     const closed = rowsOf([
-      card('F20', { laneId: 'closed', shippedIn: release(HOUR) }),
-      card('F21', { laneId: 'closed', shippedIn: release(OLD) }),
-      card('F22', { laneId: 'closed' }),
-      card('F23', {
+      boardTask('F20', { laneId: 'closed', shippedIn: release(HOUR) }),
+      boardTask('F21', { laneId: 'closed', shippedIn: release(OLD) }),
+      boardTask('F22', { laneId: 'closed' }),
+      boardTask('F23', {
         laneId: 'closed',
         shippedIn: release(HOUR),
         dropped: { at: HOUR, reason: 'no' },
       }),
     ]);
-    const sections = summarySections({ rows: rowsOf(cards), closedRows: closed, window: '7d', now: NOW });
+    const sections = summarySections({ rows: rowsOf(tasks), closedRows: closed, window: '7d', now: NOW });
     expect(sections.find(section => section.id === 'released')?.rows.map(row => row.card.task.id)).toEqual([
       'F20',
       'F5',
@@ -179,12 +179,12 @@ describe('the four sections', () => {
 
 describe('agent cards in the summary', () => {
   it('sits an agent card right under the human card it serves', () => {
-    const cards = [
-      originCard('F2', 'human', null, { laneId: 'implement', lastTouchedAt: '2026-08-01T09:30:00.000Z' }),
-      originCard('F3', 'human', null, { laneId: 'implement', lastTouchedAt: '2026-08-01T09:20:00.000Z' }),
-      originCard('F4', 'agent', { id: 'F2' }, { laneId: 'implement', lastTouchedAt: '2026-08-01T09:00:00.000Z' }),
+    const tasks = [
+      originTask('F2', 'human', null, { laneId: 'implement', lastTouchedAt: '2026-08-01T09:30:00.000Z' }),
+      originTask('F3', 'human', null, { laneId: 'implement', lastTouchedAt: '2026-08-01T09:20:00.000Z' }),
+      originTask('F4', 'agent', { id: 'F2' }, { laneId: 'implement', lastTouchedAt: '2026-08-01T09:00:00.000Z' }),
     ];
-    const section = summarySections({ rows: rowsOf(cards), window: '7d', now: NOW })[0];
+    const section = summarySections({ rows: rowsOf(tasks), window: '7d', now: NOW })[0];
     expect(section?.rows.map(row => [row.card.task.id, row.under === null])).toEqual([
       ['F2', true],
       ['F4', false],

@@ -30,8 +30,8 @@ const ok = <T extends { ok: boolean }>(result: T): Extract<T, { ok: true }> => {
   return result as Extract<T, { ok: true }>;
 };
 
-const gateFor = (cardId: string) => ({
-  cardId,
+const gateFor = (taskId: string) => ({
+  cardId: taskId,
   laneId: 'tested',
   laneName: 'Try it',
   entry: 1,
@@ -97,19 +97,19 @@ const play = (steps: readonly Step[], fill = 0): AgendaItem => {
       }),
     ).ledger;
   }
-  steps.forEach(([kind, card], index) => {
+  steps.forEach(([kind, task], index) => {
     const at = minute(11 + index);
-    const reference = gateReference(gateFor(card ?? 'F2'));
+    const reference = gateReference(gateFor(task ?? 'F2'));
     const ask = (operation: object) =>
       applyAgendaCommand(ledger, { action: 'card-ask', actor: SYSTEM, id: 'A1', operation, at } as never);
     const next = (() => {
       switch (kind) {
         case 'attach':
-          return ask({ kind: 'attach', ask: { gate: gateFor(card) } });
+          return ask({ kind: 'attach', ask: { gate: gateFor(task) } });
         case 'restate':
           return ask({
             kind: 'attach',
-            ask: { gate: gateFor(card), howToTest: `Open the app, round ${String(index)}` },
+            ask: { gate: gateFor(task), howToTest: `Open the app, round ${String(index)}` },
           });
         case 'withdraw':
           return ask({ kind: 'withdraw', reference });

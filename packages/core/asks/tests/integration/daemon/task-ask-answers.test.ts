@@ -131,16 +131,16 @@ const stateOf = async (half: Half) => {
 describe('a card ask answered by the owner', () => {
   it('should move the card first through the card source, then record the answer the owner gave', async () => {
     // Arrange
-    const card = board();
-    const half = await world(card.providers);
+    const task = board();
+    const half = await world(task.providers);
 
     // Act
     const response = await choose(half, 'Done', { note: 'looks right' }, deviceStanding('phone'), allowEverything);
 
     // Assert
     expect(response.status).toBe(200);
-    expect(card.applied).toHaveLength(1);
-    expect(card.applied[0]).toMatchObject({
+    expect(task.applied).toHaveLength(1);
+    expect(task.applied[0]).toMatchObject({
       ferret: 'f1',
       ask: 'A1',
       source: 'card',
@@ -150,7 +150,7 @@ describe('a card ask answered by the owner', () => {
       text: 'looks right',
       by: { kind: 'device', holder: 'phone' },
     });
-    expect(card.applied[0]?.id).toMatch(/^an_[0-9a-f]{24}$/u);
+    expect(task.applied[0]?.id).toMatch(/^an_[0-9a-f]{24}$/u);
     expect((await stateOf(half))?.items[0]?.cardAsks?.[0]?.answer).toMatchObject({
       response: { kind: 'multiple-choice', choice: 'Done' },
       note: 'looks right',
@@ -159,22 +159,22 @@ describe('a card ask answered by the owner', () => {
 
   it('should be recorded as Not yet when the owner set it aside, and the card told it was only a choice', async () => {
     // Arrange
-    const card = board();
-    const half = await world(card.providers, SOLO);
+    const task = board();
+    const half = await world(task.providers, SOLO);
 
     // Act
     const response = await choose(half, 'Not yet');
 
     // Assert
     expect(response.status).toBe(200);
-    expect(card.applied[0]).toMatchObject({ effect: 'choose', choice: 'Not yet' });
+    expect(task.applied[0]).toMatchObject({ effect: 'choose', choice: 'Not yet' });
     expect((await stateOf(half))?.items[0]?.cardAsks?.[0]).toMatchObject({ notYet: expect.anything() });
   });
 
   it('should reopen the card with the owner’s words when they say what is not good', async () => {
     // Arrange
-    const card = board();
-    const half = await world(card.providers);
+    const task = board();
+    const half = await world(task.providers);
 
     // Act
     const typed = await half.call(
@@ -186,25 +186,25 @@ describe('a card ask answered by the owner', () => {
 
     // Assert
     expect(typed.status).toBe(200);
-    expect(card.applied[0]).toMatchObject({ effect: 'clarify', text: 'the badge is clipped' });
+    expect(task.applied[0]).toMatchObject({ effect: 'clarify', text: 'the badge is clipped' });
   });
 
   it('should join a note to the words of a Not good', async () => {
     // Arrange
-    const card = board();
-    const half = await world(card.providers);
+    const task = board();
+    const half = await world(task.providers);
 
     // Act
     await choose(half, 'Not good', { note: 'on the phone' });
 
     // Assert
-    expect(card.applied[0]?.text).toBe('on the phone');
+    expect(task.applied[0]?.text).toBe('on the phone');
   });
 
   it('should answer a replay of the same answer with the recorded one, and refuse a different one', async () => {
     // Arrange
-    const card = board();
-    const half = await world(card.providers);
+    const task = board();
+    const half = await world(task.providers);
     await choose(half, 'Done');
 
     // Act
@@ -213,7 +213,7 @@ describe('a card ask answered by the owner', () => {
 
     // Assert
     expect(replay.status).toBe(200);
-    expect(card.applied).toHaveLength(1);
+    expect(task.applied).toHaveLength(1);
     expect(other.status).toBe(409);
     expect(other.json()).toMatchObject({ code: 'gate_moved_on' });
   });
@@ -221,12 +221,12 @@ describe('a card ask answered by the owner', () => {
 
 describe('a card ask answer the owner may not give, or the card cannot take', () => {
   const refusal = async (
-    card: ReturnType<typeof board> | undefined,
+    task: ReturnType<typeof board> | undefined,
     send: (half: Half) => ReturnType<typeof choose>,
   ) => {
-    const half = await world(card?.providers);
+    const half = await world(task?.providers);
     const response = await send(half);
-    return { response, half, card };
+    return { response, half, card: task };
   };
 
   it('should leave the ask open when the board cannot move the card', async () => {
@@ -253,21 +253,21 @@ describe('a card ask answer the owner may not give, or the card cannot take', ()
 
   it('should refuse a ferret, before the card is touched', async () => {
     // Arrange
-    const card = board();
-    const half = await world(card.providers);
+    const task = board();
+    const half = await world(task.providers);
 
     // Act
     const response = await choose(half, 'Done', {}, ferretStanding('f1' as FerretId));
 
     // Assert
     expect(response.status).toBe(403);
-    expect(card.applied).toEqual([]);
+    expect(task.applied).toEqual([]);
   });
 
   it('should refuse a name the ask does not offer, an answer that is not a choice, and a Not good without words', async () => {
     // Arrange
-    const card = board();
-    const half = await world(card.providers);
+    const task = board();
+    const half = await world(task.providers);
 
     // Act
     const unknown = await choose(half, 'Maybe');
@@ -288,13 +288,13 @@ describe('a card ask answer the owner may not give, or the card cannot take', ()
     expect(noWords.status).toBe(400);
     expect(noWords.json()).toMatchObject({ error: 'say what is not good so the ferret can fix it' });
     expect(tooLong.status).toBe(400);
-    expect(card.applied).toEqual([]);
+    expect(task.applied).toEqual([]);
   });
 
   it('should take own words only where the ask offers a Not good', async () => {
     // Arrange
-    const card = board();
-    const fresh = await world(card.providers, SOLO);
+    const task = board();
+    const fresh = await world(task.providers, SOLO);
 
     // Act
     const response = await fresh.call(
@@ -311,8 +311,8 @@ describe('a card ask answer the owner may not give, or the card cannot take', ()
 
   it('should refuse an answer to an ask the item no longer carries', async () => {
     // Arrange
-    const card = board();
-    const half = await world(card.providers);
+    const task = board();
+    const half = await world(task.providers);
 
     // Act
     const missing = await half.call(
@@ -331,8 +331,8 @@ describe('a card ask answer the owner may not give, or the card cannot take', ()
 
   it('should refuse files for an answer that is not a Not good, from another ferret, and from this one', async () => {
     // Arrange
-    const card = board();
-    const half = await world(card.providers);
+    const task = board();
+    const half = await world(task.providers);
     const files = (from: string) => ({ from, ids: [`att_${'a'.repeat(64)}`] });
 
     // Act
@@ -347,13 +347,13 @@ describe('a card ask answer the owner may not give, or the card cannot take', ()
       error: 'this daemon cannot carry files with an answer (update it: fy daemon update)',
     });
     expect([forDone.status, foreign.status, own.status]).toEqual([400, 400, 400]);
-    expect(card.applied).toEqual([]);
+    expect(task.applied).toEqual([]);
   });
 
   it('should ask a device for its fleet grant before the card is touched', async () => {
     // Arrange
-    const card = board();
-    const half = await world(card.providers);
+    const task = board();
+    const half = await world(task.providers);
 
     // Act
     const response = await choose(half, 'Done', {}, deviceStanding('phone'), {
@@ -363,15 +363,15 @@ describe('a card ask answer the owner may not give, or the card cannot take', ()
 
     // Assert
     expect(response.status).toBe(403);
-    expect(card.applied).toEqual([]);
+    expect(task.applied).toEqual([]);
   });
 });
 
 describe('what the card source is told is a card ask', () => {
   it('should be answered by plain words as the item’s own question, not as the card ask', async () => {
     // Arrange
-    const card = board();
-    const half = await world(card.providers);
+    const task = board();
+    const half = await world(task.providers);
 
     // Act
     const response = await half.call(
@@ -383,7 +383,7 @@ describe('what the card source is told is a card ask', () => {
 
     // Assert
     expect(response.status).toBe(200);
-    expect(card.applied).toEqual([]);
+    expect(task.applied).toEqual([]);
   });
 });
 
@@ -395,11 +395,11 @@ describe('a card ask an item carries, read through the Asks port', () => {
     const half = await world(board().providers);
 
     // Act
-    const forCard = await half.asks.open({ ferret: 'f1' as FerretId, source: 'card' as never });
+    const forTask = await half.asks.open({ ferret: 'f1' as FerretId, source: 'card' as never });
     const everything = await half.asks.open({ ferret: 'f1' as FerretId });
 
     // Assert
-    expect(forCard.map(ask => [ask.id, ask.source, ask.entry, ask.state] as string[])).toEqual([
+    expect(forTask.map(ask => [ask.id, ask.source, ask.entry, ask.state] as string[])).toEqual([
       ['A1', 'card', reference, 'open'],
     ]);
     expect(everything.map(ask => `${ask.id}:${ask.source}`)).toEqual(['A1:ferret']);
@@ -446,10 +446,10 @@ describe('an ask the card source raised itself, read through the Asks port', () 
     });
 
     // Act
-    const forCard = await half.asks.open({ ferret: 'f1' as FerretId, source: 'card' as never });
+    const forTask = await half.asks.open({ ferret: 'f1' as FerretId, source: 'card' as never });
 
     // Assert
-    expect(forCard.filter(ask => ask.id === raised.id).map(ask => [ask.source, ask.entry])).toEqual([
+    expect(forTask.filter(ask => ask.id === raised.id).map(ask => [ask.source, ask.entry])).toEqual([
       ['card' as never, 'gate:F13:to-test:1' as never],
     ]);
   });

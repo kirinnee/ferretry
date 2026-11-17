@@ -3,37 +3,37 @@
  * (`views`, `laneSets`) and ONE snapshot (`cards`), the way v4's `board-gate-cards` did. Nothing here derives the board
  * again per card: a board of N cards costs one derivation, not N.
  */
-import type { Card, CardView } from '../../../contract/index.ts';
-import type { CardAudience } from './authority.ts';
-import type { GateCard } from './gate-policy.ts';
+import type { Task, TaskView } from '../../../contract/index.ts';
+import type { TaskAudience } from './authority.ts';
+import type { GateTask } from './gate-policy.ts';
 import { BoardIndex, type LaneSets, stillBuilding } from './graph.ts';
 
-export interface GateCardsPass {
+export interface GateTasksPass {
   /** The one sweep: every card's derived view. */
-  readonly views: readonly CardView[];
+  readonly views: readonly TaskView[];
   /** The one snapshot of the stored cards and their lane sets. */
-  readonly cards: readonly Card[];
+  readonly cards: readonly Task[];
   readonly laneSets: LaneSets;
   readonly machineId: string;
   /** A project's name, asked once per project. */
-  readonly projectName: (project: Card['projectId']) => Promise<string | undefined>;
-  readonly audienceOf: (card: Card) => Promise<CardAudience>;
+  readonly projectName: (project: Task['projectId']) => Promise<string | undefined>;
+  readonly audienceOf: (task: Task) => Promise<TaskAudience>;
   /** The rare card the sweep has no view for (written between the sweep and the snapshot): derived on its own. */
-  readonly blockedByOf: (card: Card) => Promise<NonNullable<GateCard['blockedBy']>>;
+  readonly blockedByOf: (task: Task) => Promise<NonNullable<GateTask['blockedBy']>>;
 }
 
-export async function gateCardsOf(pass: GateCardsPass): Promise<GateCard[]> {
+export async function gateTasksOf(pass: GateTasksPass): Promise<GateTask[]> {
   const byId = new Map(pass.views.map(view => [view.id, view] as const));
   const index = new BoardIndex(pass.cards, pass.machineId);
   const names = new Map<string, Promise<string | undefined>>();
-  const nameOf = (project: Card['projectId']): Promise<string | undefined> => {
+  const nameOf = (project: Task['projectId']): Promise<string | undefined> => {
     const known = names.get(project);
     if (known !== undefined) return known;
     const asked = pass.projectName(project);
     names.set(project, asked);
     return asked;
   };
-  const out: GateCard[] = [];
+  const out: GateTask[] = [];
   for (const stored of pass.cards) {
     const name = await nameOf(stored.projectId);
     const view = byId.get(stored.id);

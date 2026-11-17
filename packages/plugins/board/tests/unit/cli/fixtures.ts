@@ -3,9 +3,9 @@ import {
   type BoardProjectsResponse,
   type BoardResponse,
   BoardResponseSchema,
-  type CardEvent,
-  type CardResponse,
-  type CardView,
+  type TaskEvent,
+  type TaskResponse,
+  type TaskView,
   CardViewSchema,
   LANE_TEMPLATES,
   type LaneSet,
@@ -109,7 +109,7 @@ export const pr = (overrides: Partial<PrLink> = {}): PrLink =>
 export const mergedPr = (overrides: Partial<PrLink> = {}): PrLink =>
   pr({ state: 'merged', mergedAt: AT, mergeSha: 'a'.repeat(40), ...overrides });
 
-const created = (): CardEvent => ({
+const created = (): TaskEvent => ({
   seq: 1,
   at: AT,
   actor: { kind: 'ferret', name: DENISHA, ferret: DENISHA },
@@ -118,7 +118,7 @@ const created = (): CardEvent => ({
 });
 
 /** A valid card, checked against the wire schema so a fixture can never drift from what the daemon sends. */
-export const card = (overrides: Partial<CardView> = {}): CardView =>
+export const boardTask = (overrides: Partial<TaskView> = {}): TaskView =>
   CardViewSchema.parse({
     format: 1,
     id: 'F1',
@@ -183,7 +183,7 @@ export const response = (overrides: Partial<BoardResponse> = {}): BoardResponse 
     ...overrides,
   });
 
-export const cardResponse = (task: CardView = card(), set: LaneSet | null = laneSet()): CardResponse => ({
+export const taskResponse = (task: TaskView = boardTask(), set: LaneSet | null = laneSet()): TaskResponse => ({
   card: task,
   laneSet: set,
 });

@@ -237,24 +237,24 @@ describe('a draft slot (B142)', () => {
     const machine = new Daemon();
     const drafts = store();
     const chat = await box(machine, drafts);
-    const card = await box(machine, drafts, { slot: A5 });
+    const task = await box(machine, drafts, { slot: A5 });
     // The chat's stream names no item; the card's names its own.
     expect(machine.asked).toEqual([null, 'A5']);
 
     // Act
     await chat.it.type('chat words');
-    await card.it.type('card words');
+    await task.it.type('card words');
     await saved();
 
     // Assert — each box holds its own words, on the screen, on the machine and in the saved drafts.
     expect(chat.it.shown()).toBe('chat words');
-    expect(card.it.shown()).toBe('card words');
+    expect(task.it.shown()).toBe('card words');
     expect(machine.held('chat').text).toBe('chat words');
     expect(drafts.load(chatScope)).toBe('chat words');
     expect(drafts.load(cardScope(A5))).toBe('card words');
     expect(machine.held('A5').text).toBe('card words');
     await chat.unmount();
-    await card.unmount();
+    await task.unmount();
   });
 
   test('two cards of one ferret are separate drafts', async () => {
@@ -280,20 +280,20 @@ describe('a draft slot (B142)', () => {
     const machine = new Daemon();
     const drafts = store();
     const chat = await box(machine, drafts);
-    const card = await box(machine, drafts, { slot: A5 });
+    const task = await box(machine, drafts, { slot: A5 });
     await chat.it.type('still typing in the chat');
-    await card.it.type('done here');
+    await task.it.type('done here');
 
-    await card.it.send();
+    await task.it.send();
 
-    expect(card.sent.map(body => body.message)).toEqual(['done here']);
+    expect(task.sent.map(body => body.message)).toEqual(['done here']);
     // The card streams its own draft, so its send names that slot for the daemon to clear.
-    expect(card.sent[0]?.sharedDraft?.slot).toBe('A5');
-    expect(card.it.shown()).toBe('');
+    expect(task.sent[0]?.sharedDraft?.slot).toBe('A5');
+    expect(task.it.shown()).toBe('');
     expect(machine.held('chat').text).toBe('still typing in the chat');
     expect(chat.it.shown()).toBe('still typing in the chat');
     await chat.unmount();
-    await card.unmount();
+    await task.unmount();
   });
 
   test('a chat send names no slot, as it always did', async () => {

@@ -105,13 +105,13 @@ export const boot = async (
 };
 
 /** Makes a card as the owner; a refusal fails the test with the daemon's own words. */
-export const makeCard = async (host: Awaited<ReturnType<typeof boot>>['host'], extra: Record<string, unknown> = {}) => {
-  const made = await host.request('POST', '/v1/board/tasks', { body: { ...NEW_CARD, ...extra }, headers: as('owner') });
+export const makeTask = async (host: Awaited<ReturnType<typeof boot>>['host'], extra: Record<string, unknown> = {}) => {
+  const made = await host.request('POST', '/v1/board/tasks', { body: { ...NEW_TASK, ...extra }, headers: as('owner') });
   if (made.status !== 200) throw new Error(`creating a card was refused (${String(made.status)}): ${made.body}`);
   return made.json<{ task: { id: string; title: string; laneId: string } }>().task;
 };
 
-export const NEW_CARD = {
+export const NEW_TASK = {
   kind: 'feature',
   title: 'Badge colour',
   assignee: 'f1',

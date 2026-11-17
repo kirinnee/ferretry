@@ -1,11 +1,11 @@
 import type { AskAnswer } from '../../../contract/index.ts';
-import { cardAskAnswers } from '../../../daemon/adapters/task-ask-answers.ts';
+import { taskAskAnswers } from '../../../daemon/adapters/task-ask-answers.ts';
 import { agendaRoutes } from '../../../daemon/lib/routes/agenda.ts';
-import { cardAskReference } from '../../../daemon/lib/protocol/agenda-task-asks.ts';
+import { taskAskReference } from '../../../daemon/lib/protocol/agenda-task-asks.ts';
 import { agendaService, routeDispatcher, NO_HELD_REPLIES } from '../../unit/daemon/routes/support.ts';
 
-const gate = (cardId = 'F12') => ({
-  cardId,
+const gate = (taskId = 'F12') => ({
+  cardId: taskId,
   laneId: 'to-test',
   laneName: 'To test',
   entry: 3,
@@ -15,9 +15,9 @@ const gate = (cardId = 'F12') => ({
     { id: 'reopen', label: 'Not good', outcome: 'reopen-with-agenda' as const },
   ],
 });
-export const reference = (cardId = 'F12') => cardAskReference({ gate: gate(cardId) });
+export const reference = (taskId = 'F12') => taskAskReference({ gate: gate(taskId) });
 
-export async function cardAnswers() {
+export async function taskAnswers() {
   const agenda = agendaService();
   await agenda.raise(
     's1',
@@ -51,7 +51,7 @@ export async function cardAnswers() {
       NO_HELD_REPLIES,
       undefined,
       undefined,
-      cardAskAnswers(
+      taskAskAnswers(
         agenda,
         () => source,
         () => '2026-11-07T10:00:00.000Z',

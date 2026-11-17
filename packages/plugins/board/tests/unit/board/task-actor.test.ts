@@ -1,15 +1,15 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  type Card,
+  type Task,
   CardActionRequestSchema,
-  type CardActionRequestInput,
+  type TaskActionRequestInput,
   CardCreateRequestSchema,
   CardSchema,
 } from '../../../contract/index.ts';
 import { FerretsNames } from '../../../daemon/adapters/ferrets.ts';
 import { type BoardCaller, BoardService } from '../../../daemon/lib/board/index.ts';
-import { card, ferretActor, MemoryBoardStore, NOW, PROJECT, type ServiceWorld, world } from './support.ts';
+import { boardTask, ferretActor, MemoryBoardStore, NOW, PROJECT, type ServiceWorld, world } from './support.ts';
 
 const ADMIN: BoardCaller = { kind: 'owner', via: 'admin-token' };
 const LEAD: BoardCaller = { kind: 'ferret', ferret: 'lead' };
@@ -22,17 +22,17 @@ const create = (assignee: string | null = null) =>
     projectId: PROJECT,
     ...(assignee === null ? {} : { assignee }),
   });
-const action = (input: CardActionRequestInput) => CardActionRequestSchema.parse(input);
+const action = (input: TaskActionRequestInput) => CardActionRequestSchema.parse(input);
 
-const serviceWith = (cards: readonly Card[], overrides: Partial<ServiceWorld> = {}) => {
-  const ports = world({ store: new MemoryBoardStore(cards), ...overrides });
+const serviceWith = (tasks: readonly Task[], overrides: Partial<ServiceWorld> = {}) => {
+  const ports = world({ store: new MemoryBoardStore(tasks), ...overrides });
   return { ports, service: new BoardService(ports) };
 };
-const stored = (ports: ServiceWorld, id = 'F1'): Card => ports.store.cards.get(id) as Card;
+const stored = (ports: ServiceWorld, id = 'F1'): Task => ports.store.cards.get(id) as Task;
 
 /** A stored card whose actor sites (createdBy, the created event, one clarification) all hold `actor`, as JSON. */
 const withActor = (actor: unknown, extra: Record<string, unknown> = {}): unknown => {
-  const base = card();
+  const base = boardTask();
   return {
     ...base,
     createdBy: actor,
@@ -63,7 +63,7 @@ describe('the card actor is exactly one of three strict shapes', () => {
   ])('should refuse %s as a stored actor', (_label, actor) => {
     should(CardSchema.safeParse(withActor(actor)).success).be.false();
     // Each site alone is refused too, not only the three together.
-    const base = card();
+    const base = boardTask();
     should(CardSchema.safeParse({ ...base, createdBy: actor }).success).be.false();
     should(CardSchema.safeParse({ ...base, history: [{ ...base.history[0], actor }] }).success).be.false();
     should(
@@ -76,13 +76,13 @@ describe('the card actor is exactly one of three strict shapes', () => {
   });
 
   it('should refuse a clarification that carries byVia beside its author', () => {
-    const base = card();
+    const base = boardTask();
     const clarification = { text: 't', source: 'owner', at: NOW, by: { kind: 'owner' }, byVia: 'admin-token' };
     should(CardSchema.safeParse({ ...base, clarifications: [clarification] }).success).be.false();
   });
 
   it('should refuse a reported move that carries reportedVia beside its reporter', () => {
-    const base = card({ laneId: 'implement' });
+    const base = boardTask({ laneId: 'implement' });
     const moved = {
       seq: 2,
       at: NOW,
@@ -126,7 +126,7 @@ describe('an act on the admin token', () => {
 
   it("should record { kind: 'owner', via: 'admin-token' } and nothing beside it on a note and a clarification", async () => {
     // Arrange
-    const { ports, service } = serviceWith([card()]);
+    const { ports, service } = serviceWith([boardTask()]);
 
     // Act
     await service.act('F1', action({ action: 'note', text: 'checked' }), ADMIN);
@@ -165,7 +165,7 @@ describe("a ferret's act", () => {
 
   it('should record its name from the names port on a note and a clarification', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card()], { names: DENISHA });
+    const { ports, service } = serviceWith([boardTask()], { names: DENISHA });
 
     // Act
     await service.act('F1', action({ action: 'note', text: 'started' }), LEAD);

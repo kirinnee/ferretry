@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { Card, CardId, CardView, PrLink } from '../../../contract/index.ts';
+import type { Task, TaskId, TaskView, PrLink } from '../../../contract/index.ts';
 import should from 'should';
 import {
   AlertSurface,
@@ -12,7 +12,7 @@ import {
   planSweep,
   EMPTY_SWEEP_MEMORY,
 } from '../../../daemon/lib/board/index.ts';
-import { card, lanes, liveSession, MACHINE, NOW, PROJECT, rosterOf } from './support.ts';
+import { boardTask, lanes, liveSession, MACHINE, NOW, PROJECT, rosterOf } from './support.ts';
 
 /**
  * A board alert never reaches the owner's own interactive chat: each producer's real alert, sent to the session the
@@ -25,7 +25,7 @@ const ago = (ms: number): string => new Date(Date.parse(NOW) - ms).toISOString()
 /** The ports, recording what each was asked; `modes` is how each session takes messages. */
 const alertWorld = (
   modes: Readonly<Record<string, InteractionMode>>,
-  options: { readonly cards?: readonly Card[]; readonly modeFails?: boolean } = {},
+  options: { readonly cards?: readonly Task[]; readonly modeFails?: boolean } = {},
 ) => {
   const sent: string[] = [];
   const withheld: string[] = [];
@@ -77,7 +77,7 @@ const link: PrLink = {
   releasedIn: null,
   polledAt: NOW,
 };
-const prCard = card({
+const prTask = boardTask({
   laneId: 'review',
   workflow: 'quick',
   owner: 'lizzette',
@@ -88,7 +88,7 @@ const prCard = card({
 /** The PR alerts the GitHub watcher raises for one observation of the card's PR. */
 const prAlerts = (observed: { readonly state: 'open' | 'closed'; readonly checks: 'pending' | 'failing' }) =>
   applyPrUpdate(
-    prCard,
+    prTask,
     {
       link: [],
       observed: [{ url: link.url, draft: false, mergedAt: null, mergeSha: null, ...observed }],
@@ -100,7 +100,7 @@ const prAlerts = (observed: { readonly state: 'open' | 'closed'; readonly checks
       actor: { kind: 'daemon' },
       standing: 'daemon',
       laneSet: lanes(),
-      index: new BoardIndex([prCard], 'machine-1'),
+      index: new BoardIndex([prTask], 'machine-1'),
       laneSets: new Map([[PROJECT, lanes()]]),
     },
   ).nudges;
@@ -108,7 +108,7 @@ const prAlerts = (observed: { readonly state: 'open' | 'closed'; readonly checks
 /** Sends each PR alert where the watcher's nudge path routes it. */
 const sendPrAlerts = async (leadInteractive: boolean, nudges: ReturnType<typeof prAlerts>) => {
   const world = alertWorld(MODES(leadInteractive));
-  const recipient = noticeRecipient(roster(leadInteractive), prCard);
+  const recipient = noticeRecipient(roster(leadInteractive), prTask);
   const outcomes = await Promise.all(
     nudges.map(async nudge => await world.alerts.send(recipient?.ferret ?? 'nobody', nudge.message)),
   );
@@ -153,8 +153,8 @@ describe('board alerts to an interactive session', () => {
 
   it('should journal a stale nudge on the interactive lead instead of typing it', async () => {
     // Arrange: the card went back to the lead the owner chats with when its ferret ended, and sat there.
-    const stale: CardView = {
-      ...card({ laneId: 'implement', owner: 'lizzette', assignee: 'lizzette', createdAt: ago(5 * HOUR) }),
+    const stale: TaskView = {
+      ...boardTask({ laneId: 'implement', owner: 'lizzette', assignee: 'lizzette', createdAt: ago(5 * HOUR) }),
       lastTouchedAt: ago(3 * HOUR),
       touchedBy: null,
       activity: 'stale',
@@ -214,7 +214,7 @@ describe('board alerts to an interactive session', () => {
     const world = alertWorld({ lizzette: 'interactive' }, { modeFails: true });
 
     // Act
-    const outcome = await world.alerts.send('lizzette', '&F1 PR #940 CI is red.', 'F1' as CardId);
+    const outcome = await world.alerts.send('lizzette', '&F1 PR #940 CI is red.', 'F1' as TaskId);
 
     // Assert
     should(outcome).equal('sent');
@@ -225,9 +225,9 @@ describe('board alerts to an interactive session', () => {
 });
 
 describe('a withheld alert about a private card', () => {
-  const parent = card({ id: 'F10', askedBy: 'person', owner: 'lizzette', parent: null });
-  const child = card({ id: 'F11', owner: 'lizzette', assignee: 'child', parent: { id: 'F10' } });
-  const grandchild = card({ id: 'F12', owner: 'lizzette', assignee: 'child', parent: { id: 'F11' } });
+  const parent = boardTask({ id: 'F10', askedBy: 'person', owner: 'lizzette', parent: null });
+  const child = boardTask({ id: 'F11', owner: 'lizzette', assignee: 'child', parent: { id: 'F10' } });
+  const grandchild = boardTask({ id: 'F12', owner: 'lizzette', assignee: 'child', parent: { id: 'F11' } });
   const redCi = '&F12 PR #940 CI is red. Fix it, or note on the task why it can stay red.';
   const closed = '&F12 PR #940 was closed without merging. Reopen it, link its replacement, or drop the task.';
 
@@ -241,7 +241,7 @@ describe('a withheld alert about a private card', () => {
       const world = alertWorld({ lizzette: 'interactive' }, { cards: [parent, child, grandchild] });
 
       // Act
-      const outcome = await world.alerts.send('lizzette', message, 'F12' as CardId);
+      const outcome = await world.alerts.send('lizzette', message, 'F12' as TaskId);
 
       // Assert
       should(outcome).equal('withheld');
@@ -253,13 +253,13 @@ describe('a withheld alert about a private card', () => {
 
   it('should note nothing when the interactive lead gets an alert about a public card or one with no public ancestor', async () => {
     // Arrange
-    const hiddenRoot = card({ id: 'F20', owner: 'lizzette', visibility: 'private', parent: null });
-    const orphan = card({ id: 'F21', owner: 'lizzette', parent: { id: 'F20' } });
+    const hiddenRoot = boardTask({ id: 'F20', owner: 'lizzette', visibility: 'private', parent: null });
+    const orphan = boardTask({ id: 'F21', owner: 'lizzette', parent: { id: 'F20' } });
     const world = alertWorld({ lizzette: 'interactive' }, { cards: [parent, hiddenRoot, orphan] });
 
     // Act
-    await world.alerts.send('lizzette', '&F10 PR #1 CI is red.', 'F10' as CardId);
-    await world.alerts.send('lizzette', '&F21 PR #2 CI is red.', 'F21' as CardId);
+    await world.alerts.send('lizzette', '&F10 PR #1 CI is red.', 'F10' as TaskId);
+    await world.alerts.send('lizzette', '&F21 PR #2 CI is red.', 'F21' as TaskId);
     await world.alerts.send('lizzette', '&F10 has had no activity for 3h.');
 
     // Assert
@@ -273,14 +273,20 @@ describe('a withheld alert about a private card', () => {
     ['in a closed lane', { laneId: 'closed' }],
   ])('should walk past an archived public parent (%s) to the open public grandparent', async (_name, archived) => {
     // Arrange: F30 (open, public) > F31 (archived, public) > F32 (private), the card the alert is about.
-    const root = card({ id: 'F30', askedBy: 'person', owner: 'lizzette', parent: null });
-    const parentCard = card({ id: 'F31', owner: 'lizzette', visibility: 'public', parent: { id: 'F30' }, ...archived });
-    const leaf = card({ id: 'F32', owner: 'lizzette', assignee: 'child', parent: { id: 'F31' } });
+    const root = boardTask({ id: 'F30', askedBy: 'person', owner: 'lizzette', parent: null });
+    const parentTask = boardTask({
+      id: 'F31',
+      owner: 'lizzette',
+      visibility: 'public',
+      parent: { id: 'F30' },
+      ...archived,
+    });
+    const leaf = boardTask({ id: 'F32', owner: 'lizzette', assignee: 'child', parent: { id: 'F31' } });
     const message = '&F32 PR #940 CI is red. Fix it, or note on the task why it can stay red.';
-    const world = alertWorld({ lizzette: 'interactive' }, { cards: [root, parentCard, leaf] });
+    const world = alertWorld({ lizzette: 'interactive' }, { cards: [root, parentTask, leaf] });
 
     // Act
-    const outcome = await world.alerts.send('lizzette', message, 'F32' as CardId);
+    const outcome = await world.alerts.send('lizzette', message, 'F32' as TaskId);
 
     // Assert
     should(outcome).equal('withheld');
@@ -290,19 +296,19 @@ describe('a withheld alert about a private card', () => {
 
   it('should note nothing when the only public ancestor is archived, and still type nothing', async () => {
     // Arrange: an archived public root > an open private child.
-    const root = card({
+    const root = boardTask({
       id: 'F40',
       askedBy: 'person',
       owner: 'lizzette',
       parent: null,
       dropped: { reason: 'x', at: NOW },
     });
-    const leaf = card({ id: 'F41', owner: 'lizzette', assignee: 'child', parent: { id: 'F40' } });
+    const leaf = boardTask({ id: 'F41', owner: 'lizzette', assignee: 'child', parent: { id: 'F40' } });
     const message = '&F41 PR #940 was closed without merging. Reopen it, link its replacement, or drop the task.';
     const world = alertWorld({ lizzette: 'interactive' }, { cards: [root, leaf] });
 
     // Act
-    const outcome = await world.alerts.send('lizzette', message, 'F41' as CardId);
+    const outcome = await world.alerts.send('lizzette', message, 'F41' as TaskId);
 
     // Assert
     should(outcome).equal('withheld');
@@ -316,7 +322,7 @@ describe('a withheld alert about a private card', () => {
     const world = alertWorld({ lizzette: 'auto' }, { cards: [parent, child, grandchild] });
 
     // Act
-    const outcome = await world.alerts.send('lizzette', redCi, 'F12' as CardId);
+    const outcome = await world.alerts.send('lizzette', redCi, 'F12' as TaskId);
 
     // Assert
     should(outcome).equal('sent');

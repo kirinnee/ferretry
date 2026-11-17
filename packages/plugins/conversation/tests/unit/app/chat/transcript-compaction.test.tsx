@@ -45,9 +45,9 @@ describe('Transcript compaction', () => {
         ...(percent === undefined ? {} : { percent }),
       });
     mounted = await mount(<Transcript busy daemonId="d" entries={entries} live={running(34)} sessionId="s" />);
-    const card = mounted.container.querySelector('[data-compaction="running"]');
-    expect(card).not.toBeNull();
-    expect(card?.textContent).toMatch(/2m \d+s/);
+    const task = mounted.container.querySelector('[data-compaction="running"]');
+    expect(task).not.toBeNull();
+    expect(task?.textContent).toMatch(/2m \d+s/);
 
     // A sample with no bar, a quiet gap (no sample at all), then the stream's next sample.
     await mounted.render(<Transcript busy daemonId="d" entries={entries} live={running()} sessionId="s" />);
@@ -55,7 +55,7 @@ describe('Transcript compaction', () => {
     await mounted.render(<Transcript busy daemonId="d" entries={entries} live={running(40)} sessionId="s" />);
 
     const after = mounted.container.querySelector('[data-compaction="running"]');
-    expect(after).toBe(card);
+    expect(after).toBe(task);
     expect(after?.isConnected).toBe(true);
     expect(after?.textContent).toMatch(/2m \d+s/);
     expect(after?.textContent).toContain('40%');

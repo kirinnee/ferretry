@@ -20,7 +20,7 @@ import {
   type AgendaStage,
   agendaStage,
   agendaState,
-  hasOpenCardAsk,
+  hasOpenTaskAsk,
 } from '@ferretry/core-asks/contract';
 import { needsYouQueue, restingQueue } from './agenda-queue.ts';
 import { shortAgo } from './agenda-revisions.ts';
@@ -91,7 +91,7 @@ const lastUsefulStage = (item: AgendaItem | AgendaListRecord): AgendaStage => {
   return earlier?.stage ?? agendaStage({ kind: item.kind, ask: item.ask });
 };
 
-const isBlocker = (item: AgendaItem): boolean => item.blockingNow === true || hasOpenCardAsk(item);
+const isBlocker = (item: AgendaItem): boolean => item.blockingNow === true || hasOpenTaskAsk(item);
 
 const sinceWords = (instant: string | undefined, now: number): string | null => {
   if (instant === undefined) return null;

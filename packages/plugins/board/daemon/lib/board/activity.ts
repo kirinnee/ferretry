@@ -16,10 +16,10 @@
  * One roster read serves a whole board read: everything below is a pure function of it.
  */
 import {
-  type Card,
-  type CardId,
-  type CardActivity,
-  type CardRef,
+  type Task,
+  type TaskId,
+  type TaskActivity,
+  type TaskRef,
   type Lane,
   type LaneCategory,
   laneOf,
@@ -27,9 +27,9 @@ import {
   staleAfterMinutes,
 } from '../../../contract/index.ts';
 import { effectiveAssignee } from './authority.ts';
-import { blockedBy, cardCategory } from './graph.ts';
+import { blockedBy, taskCategory } from './graph.ts';
 import { MAX_LINEAGE_DEPTH } from './lineage.ts';
-import type { ActivityDeriver, ActivityInputs, BoardClock, CardActivityFacts } from './ports.ts';
+import type { ActivityDeriver, ActivityInputs, BoardClock, TaskActivityFacts } from './ports.ts';
 
 /**
  * A ferret's state as the board reads it: Ferrets' four states (`FerretState`). `stopped` is the one a ferret never
@@ -65,7 +65,7 @@ export interface FerretLiveness {
   readonly status: FerretStatus;
   readonly turnState?: FerretTurnState;
   /** The card its activity is attributed to (`config.focusCard`). */
-  readonly focusCard: CardRef | null;
+  readonly focusCard: TaskRef | null;
   /** It declared a wait (`fy signal waiting`): it is parked on purpose and must not be nudged. */
   readonly declaredWait: boolean;
   /** The session that started it (`config.parent`); absent for a root. */
@@ -168,10 +168,10 @@ export const staleAfterMsOf = (lane: Lane): number | null => {
 };
 
 /** The stale threshold of the lane a card sits in; `null` when it is never stale or its lanes are unknown. */
-export const cardStaleAfterMs = (card: Card, inputs: Pick<ActivityInputs, 'laneSets'>): number | null => {
-  const laneSet = inputs.laneSets.get(card.projectId);
+export const taskStaleAfterMs = (task: Task, inputs: Pick<ActivityInputs, 'laneSets'>): number | null => {
+  const laneSet = inputs.laneSets.get(task.projectId);
   if (laneSet === undefined) return null;
-  const lane = laneOf(laneSet, card.laneId);
+  const lane = laneOf(laneSet, task.laneId);
   return lane.ok ? staleAfterMsOf(lane.value) : null;
 };
 
@@ -187,11 +187,11 @@ const latest = (left: Touch | null, right: Touch | null): Touch | null => {
 };
 
 /** The card's own touch: its history, its merged PRs and the sessions focused on it. */
-const ownTouch = (card: Card, focused: readonly FerretLiveness[]): Touch | null => {
+const ownTouch = (task: Task, focused: readonly FerretLiveness[]): Touch | null => {
   let touch: Touch | null = null;
-  for (const event of card.history)
+  for (const event of task.history)
     touch = latest(touch, { at: event.at, by: event.actor.kind === 'ferret' ? event.actor.ferret : null });
-  for (const pr of card.links.prs) if (pr.mergedAt !== null) touch = latest(touch, { at: pr.mergedAt, by: null });
+  for (const pr of task.links.prs) if (pr.mergedAt !== null) touch = latest(touch, { at: pr.mergedAt, by: null });
   for (const session of focused) {
     const at = strongSignalAt(session);
     if (at !== undefined) touch = latest(touch, { at, by: session.id });
@@ -215,8 +215,8 @@ export const deriveActivities = (
   inputs: ActivityInputs,
   roster: FerretRoster,
   nowMs: number,
-): ReadonlyMap<CardId, CardActivityFacts> => {
-  const focused = new Map<CardId, FerretLiveness[]>();
+): ReadonlyMap<TaskId, TaskActivityFacts> => {
+  const focused = new Map<TaskId, FerretLiveness[]>();
   for (const session of roster.sessions.values()) {
     const ref = session.focusCard;
     if (ref === null || !inputs.index.isLocal(ref)) continue;
@@ -225,30 +225,30 @@ export const deriveActivities = (
     else list.push(session);
   }
 
-  const walked = new Map<CardId, Walked>();
-  const walking = new Set<CardId>();
+  const walked = new Map<TaskId, Walked>();
+  const walking = new Set<TaskId>();
   let cut = false;
-  const walk = (card: Card): Walked => {
-    const done = walked.get(card.id);
+  const walk = (task: Task): Walked => {
+    const done = walked.get(task.id);
     if (done !== undefined) return done;
-    if (walking.has(card.id)) {
+    if (walking.has(task.id)) {
       cut = true;
       return { touch: null, active: false, live: false };
     }
     const outer = cut;
     cut = false;
-    walking.add(card.id);
-    const sessions = focused.get(card.id) ?? [];
-    let touch = ownTouch(card, sessions);
+    walking.add(task.id);
+    const sessions = focused.get(task.id) ?? [];
+    let touch = ownTouch(task, sessions);
     let active = sessions.some(
       session => isWorking(session) || nowMs - instant(strongSignalAt(session)) <= ACTIVE_WINDOW_MS,
     );
     // An UNASSIGNED card still in the backlog is nobody's work yet: it falls to its owner only as a default,
     // so the owner being alive keeps nothing under a parent alive. Counted, a lead's live session hid every
     // card whose ferret had finished behind one Todo child it had not handed out (&F240, 2026-10-31).
-    const unclaimed = card.assignee === null && cardCategory(card, inputs.laneSets) === 'backlog';
-    let live = !unclaimed && presenceOf(roster, effectiveAssignee(card)) !== 'dead';
-    for (const child of inputs.index.children(card.id)) {
+    const unclaimed = task.assignee === null && taskCategory(task, inputs.laneSets) === 'backlog';
+    let live = !unclaimed && presenceOf(roster, effectiveAssignee(task)) !== 'dead';
+    for (const child of inputs.index.children(task.id)) {
       if (child.dropped !== null) continue;
       const below = walk(child);
       touch = latest(touch, below.touch);
@@ -256,55 +256,55 @@ export const deriveActivities = (
       live ||= below.live;
     }
     const result = { touch, active, live };
-    walking.delete(card.id);
-    if (!cut) walked.set(card.id, result);
+    walking.delete(task.id);
+    if (!cut) walked.set(task.id, result);
     cut ||= outer;
     return result;
   };
 
-  const activities = new Map<CardId, CardActivityFacts>();
-  for (const card of inputs.cards) {
-    const { touch, active } = walk(card);
-    activities.set(card.id, {
+  const activities = new Map<TaskId, TaskActivityFacts>();
+  for (const task of inputs.cards) {
+    const { touch, active } = walk(task);
+    activities.set(task.id, {
       lastTouchedAt: touch?.at ?? null,
       touchedBy: touch?.by ?? null,
-      activity: stateOf(card, { touch, active }, inputs, roster, nowMs, walk),
+      activity: stateOf(task, { touch, active }, inputs, roster, nowMs, walk),
     });
   }
   return activities;
 };
 
 const stateOf = (
-  card: Card,
+  task: Task,
   own: Pick<Walked, 'touch' | 'active'>,
   inputs: ActivityInputs,
   roster: FerretRoster,
   nowMs: number,
-  walk: (card: Card) => Walked,
-): CardActivity => {
-  const category = cardCategory(card, inputs.laneSets);
-  if (card.dropped !== null || category === 'closed') return 'idle';
+  walk: (task: Task) => Walked,
+): TaskActivity => {
+  const category = taskCategory(task, inputs.laneSets);
+  if (task.dropped !== null || category === 'closed') return 'idle';
   if (own.active) return 'active';
   if (
     (category === 'active' || category === 'review') &&
-    presenceOf(roster, effectiveAssignee(card)) === 'dead' &&
-    nearestLiveLead(roster, effectiveAssignee(card)) === null &&
-    !inputs.index.children(card.id).some(child => child.dropped === null && walk(child).live)
+    presenceOf(roster, effectiveAssignee(task)) === 'dead' &&
+    nearestLiveLead(roster, effectiveAssignee(task)) === null &&
+    !inputs.index.children(task.id).some(child => child.dropped === null && walk(child).live)
   ) {
     return 'orphaned';
   }
   // Someone else's clock is never stale: a card blocked, waiting on another card, or whose agenda carries its open ask
   // (docs/agenda.md § Card asks). It is idle, never `waiting`: a card does not wait on the owner itself.
-  const asks = inputs.asks.get(card.id);
+  const asks = inputs.asks.get(task.id);
   if (
-    card.blocked !== null ||
+    task.blocked !== null ||
     (asks !== undefined && asks.asking.length > 0) ||
-    blockedBy(card, inputs.index, inputs.laneSets).length > 0
+    blockedBy(task, inputs.index, inputs.laneSets).length > 0
   ) {
     return 'idle';
   }
-  const staleAfter = cardStaleAfterMs(card, inputs);
-  const since = instant(own.touch?.at ?? card.createdAt);
+  const staleAfter = taskStaleAfterMs(task, inputs);
+  const since = instant(own.touch?.at ?? task.createdAt);
   if (staleAfter !== null && nowMs - since > staleAfter) return 'stale';
   return 'idle';
 };
@@ -313,7 +313,7 @@ const stateOf = (
 export class LivenessActivityDeriver implements ActivityDeriver {
   constructor(private readonly ports: { readonly sessions: FerretLivenessSource; readonly clock: BoardClock }) {}
 
-  async derive(inputs: ActivityInputs): Promise<ReadonlyMap<CardId, CardActivityFacts>> {
+  async derive(inputs: ActivityInputs): Promise<ReadonlyMap<TaskId, TaskActivityFacts>> {
     return deriveActivities(inputs, await this.ports.sessions.roster(), Date.parse(this.ports.clock.now()));
   }
 }

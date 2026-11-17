@@ -42,10 +42,10 @@ describe('the Pack card as a conversation.row panel', () => {
         subject="lead"
       />,
     );
-    const card = view.container.querySelector('.fy-message-pack');
-    expect(card?.getAttribute('data-pack-kind')).toBe('start');
-    expect(card?.getAttribute('data-transcript-density')).toBe('message');
-    expect(card?.textContent).toContain('Started helper');
+    const task = view.container.querySelector('.fy-message-pack');
+    expect(task?.getAttribute('data-pack-kind')).toBe('start');
+    expect(task?.getAttribute('data-transcript-density')).toBe('message');
+    expect(task?.textContent).toContain('Started helper');
     expect(api.calls).toEqual(['GET /v1/ferrets/:ferretId/pack']);
   });
 

@@ -117,7 +117,7 @@ const refusedDevice = (context: RouteContext): ApiError | undefined => {
 };
 
 /** Generic card-source obligations require the same board standing as attached card questions. */
-export const cardAnswerPermission = (context: RouteContext): string | undefined => refusedDevice(context)?.message;
+export const taskAnswerPermission = (context: RouteContext): string | undefined => refusedDevice(context)?.message;
 
 /**
  * The owner's Not needed on a gate item leaves the card where it is, quietly — so only a caller who could answer the

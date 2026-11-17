@@ -14,7 +14,7 @@ import {
 import { type MouseEvent, type ReactNode, useId, useState } from 'react';
 import { linkNudgePullRequests } from './board-nudge.ts';
 import { displayCallsign } from '@ferretry/core-ferrets/contract';
-import { useCardPullRequests } from './task-pull-requests.tsx';
+import { useTaskPullRequests } from './task-pull-requests.tsx';
 import { ferretryLine, ferretryRest } from '../composer/ferretry-sender.ts';
 import type { InstructionsUpdate } from './instructions-update.ts';
 import { clockOfInstant, useScreenHref } from '@ferretry/app';
@@ -359,7 +359,7 @@ export function BoardNudgeRow({
   readonly rhythm: Rhythm;
   readonly text: string;
 }) {
-  const cards = useCardPullRequests();
+  const tasks = useTaskPullRequests();
   const surface = useReferenceSurface();
   return (
     <div
@@ -373,7 +373,7 @@ export function BoardNudgeRow({
       <span className="fy-system-label" data-sender-chip>
         Board
       </span>
-      <Markdown className="fy-system-text" text={linkNudgePullRequests(stripFraming(text).body, cards)} {...surface} />
+      <Markdown className="fy-system-text" text={linkNudgePullRequests(stripFraming(text).body, tasks)} {...surface} />
       <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
     </div>
   );

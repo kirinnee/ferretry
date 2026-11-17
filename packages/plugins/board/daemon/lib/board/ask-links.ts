@@ -16,39 +16,39 @@
  * so it is not read. A notice is context, never an ask, so it is not counted.
  */
 import type { AskRef } from '../../../contract/index.ts';
-import type { Card, CardId } from '../../../contract/index.ts';
-import type { CardAskLinkSource, CardAsks } from './ports.ts';
+import type { Task, TaskId } from '../../../contract/index.ts';
+import type { TaskAskLinkSource, TaskAsks } from './ports.ts';
 
 /** The part of an open card ask the link reads. */
-export interface OpenCardAsk {
+export interface OpenTaskAsk {
   /** The ferret whose ledger the ask lives on. */
   readonly ferret: string;
   /** The ask's id on that ledger (`A12`). */
   readonly id: string;
   /** The card whose gate obligation it is. */
-  readonly cardId: CardId;
+  readonly cardId: TaskId;
   /** A notice is context, never an ask. */
   readonly notice?: boolean | undefined;
 }
 
 /** What the link reads from Asks: the gate asks, and the asks ferrets raised about a card. Each read stands alone. */
-export interface CardAskReader {
+export interface TaskAskReader {
   /** Every open ask of the `card` source, read through Asks (`AsksApi.open`) in one call. */
-  open(): Promise<readonly OpenCardAsk[]>;
+  open(): Promise<readonly OpenTaskAsk[]>;
   /** Every open ask a ferret raised about a card, one entry per card it names (`AsksApi.snapshots`). */
-  mentioned(): Promise<readonly OpenCardAsk[]>;
+  mentioned(): Promise<readonly OpenTaskAsk[]>;
 }
 
-export class CardAskLinks implements CardAskLinkSource {
+export class TaskAskLinks implements TaskAskLinkSource {
   constructor(
-    private readonly asks: CardAskReader,
+    private readonly asks: TaskAskReader,
     private readonly diagnostics: { warn(message: string): void },
   ) {}
 
-  async asksFor(cards: readonly Card[], signal?: AbortSignal): Promise<ReadonlyMap<CardId, CardAsks>> {
+  async asksFor(tasks: readonly Task[], signal?: AbortSignal): Promise<ReadonlyMap<TaskId, TaskAsks>> {
     signal?.throwIfAborted();
-    const wanted = new Set<CardId>(cards.map(card => card.id));
-    const found = new Map<CardId, { open: AskRef[]; asking: AskRef[] }>();
+    const wanted = new Set<TaskId>(tasks.map(task => task.id));
+    const found = new Map<TaskId, { open: AskRef[]; asking: AskRef[] }>();
     const gates = await this.read(() => this.asks.open());
     signal?.throwIfAborted();
     const mentions = await this.read(() => this.asks.mentioned());
@@ -72,7 +72,7 @@ export class CardAskLinks implements CardAskLinkSource {
   }
 
   /** Asks that cannot be read costs the cards their asks, never the board read (nor the other kind of ask). */
-  private async read(read: () => Promise<readonly OpenCardAsk[]>): Promise<readonly OpenCardAsk[]> {
+  private async read(read: () => Promise<readonly OpenTaskAsk[]>): Promise<readonly OpenTaskAsk[]> {
     try {
       return await read();
     } catch (error) {

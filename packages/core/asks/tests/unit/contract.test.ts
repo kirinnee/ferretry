@@ -34,11 +34,11 @@ asksConformance('FakeAsks', () => {
   };
 });
 
-const CardRefSchema = z.strictObject({ card: z.string().regex(/^F[1-9][0-9]*$/u), lane: z.string().min(1) });
+const TaskRefSchema = z.strictObject({ card: z.string().regex(/^F[1-9][0-9]*$/u), lane: z.string().min(1) });
 
 askSourceConformance(
   'a card-shaped source',
-  { schema: CardRefSchema, title: 'Card {card}', form: false },
+  { schema: TaskRefSchema, title: 'Card {card}', form: false },
   {
     valid: [{ card: 'F12', lane: 'try' }],
     invalid: [{ card: 'nope', lane: 'try' }, 'string'],

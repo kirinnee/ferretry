@@ -6,7 +6,7 @@
  * default) and the owner's leads. An interactive session is the owner's own chat, so it is chosen only when
  * no automatic session is alive anywhere in that order. Pure: a function of the card and one roster read.
  */
-import type { Card } from '../../../contract/index.ts';
+import type { Task } from '../../../contract/index.ts';
 import { MAX_LINEAGE_DEPTH } from './lineage.ts';
 import { presenceOf, type FerretLiveness, type FerretRoster } from './activity.ts';
 
@@ -37,11 +37,11 @@ const lineOf = (roster: FerretRoster, ferret: string): readonly string[] => {
  */
 export const noticeRecipient = (
   roster: FerretRoster,
-  card: Pick<Card, 'owner' | 'assignee'>,
+  task: Pick<Task, 'owner' | 'assignee'>,
 ): NoticeRecipient | null => {
-  const assignee = card.assignee ?? card.owner;
+  const assignee = task.assignee ?? task.owner;
   if (presenceOf(roster, assignee) === 'unknown') return null;
-  const order = [...new Set([...lineOf(roster, assignee), ...lineOf(roster, card.owner)])];
+  const order = [...new Set([...lineOf(roster, assignee), ...lineOf(roster, task.owner)])];
   let interactive: NoticeRecipient | null = null;
   for (const ferret of order) {
     const session = roster.sessions.get(ferret);
@@ -61,5 +61,5 @@ export type PrAlertReason = 'ci-failing' | 'closed-unmerged';
  * existed — the card's working ferret for a red CI, its owner for a PR closed unmerged. The sender then lets a
  * helper's lead stand in for it (`nudgeTarget`), and the send path revives an ended session.
  */
-export const alertFallback = (card: Pick<Card, 'owner' | 'assignee'>, reason: PrAlertReason): string =>
-  reason === 'ci-failing' ? (card.assignee ?? card.owner) : card.owner;
+export const alertFallback = (task: Pick<Task, 'owner' | 'assignee'>, reason: PrAlertReason): string =>
+  reason === 'ci-failing' ? (task.assignee ?? task.owner) : task.owner;

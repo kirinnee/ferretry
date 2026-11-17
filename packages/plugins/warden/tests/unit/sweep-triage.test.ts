@@ -1101,7 +1101,7 @@ describe('who needs you', () => {
       howToResolve: 'Answer it.',
       raisedBy: 'agent' as const,
     };
-    const card = {
+    const task = {
       ...row,
       id: 'A2',
       source: 'agent-raised' as const,
@@ -1115,8 +1115,8 @@ describe('who needs you', () => {
         session({ id: 'w', label: 'fleet-warden' }),
       ],
       feedBoards: {
-        s1: { sessionId: 's1', parseErrors: 0, items: [row, card] },
-        done: { sessionId: 'done', parseErrors: 0, items: [{ ...card, id: 'A9' }] },
+        s1: { sessionId: 's1', parseErrors: 0, items: [row, task] },
+        done: { sessionId: 'done', parseErrors: 0, items: [{ ...task, id: 'A9' }] },
       },
     });
     await subject.service.run({ force: false });

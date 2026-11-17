@@ -1,5 +1,5 @@
 import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
-import type { BoardSkip, CardRef, FocusFile } from '../../../contract/index.ts';
+import type { BoardSkip, TaskRef, FocusFile } from '../../../contract/index.ts';
 import { BoardUnavailableError, type FerretFocus } from '../../lib/board/index.ts';
 import type { SerialRun } from '../../lib/lanes/serial.ts';
 import { FerretIdSchema, type FerretsApi } from '@ferretry/core-ferrets/contract';
@@ -28,31 +28,31 @@ export class KernelFerretFocus implements FerretFocus {
 
   async setFocus(
     ferret: string,
-    card: CardRef,
+    task: TaskRef,
     title?: string,
     options?: { readonly anchor?: boolean },
   ): Promise<boolean> {
     if (!(await this.exists(ferret))) return false;
     await this.change(ferret, entry => ({
-      card,
-      anchor: options?.anchor === true ? card : entry.anchor,
+      card: task,
+      anchor: options?.anchor === true ? task : entry.anchor,
       skip: null,
     }));
     if (title !== undefined) await this.titled(ferret, title).catch(() => undefined);
     return true;
   }
 
-  async focusOf(ferret: string): Promise<CardRef | null> {
+  async focusOf(ferret: string): Promise<TaskRef | null> {
     return (await this.entry(ferret)).card;
   }
 
-  async focusOfAll(): Promise<ReadonlyMap<string, CardRef | null>> {
+  async focusOfAll(): Promise<ReadonlyMap<string, TaskRef | null>> {
     const read = await this.state.read(this.file);
     if (!read.ok) throw this.damaged('read', 'every ferret', read.error.sentence);
     return new Map(Object.entries(read.value?.ferrets ?? {}).map(([ferret, entry]) => [ferret, entry.card] as const));
   }
 
-  async anchorOf(ferret: string): Promise<CardRef | null> {
+  async anchorOf(ferret: string): Promise<TaskRef | null> {
     return (await this.entry(ferret)).anchor;
   }
 

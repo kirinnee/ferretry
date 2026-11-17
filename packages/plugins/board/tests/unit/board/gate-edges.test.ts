@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { Card } from '../../../contract/index.ts';
+import type { Task } from '../../../contract/index.ts';
 import {
   BoardIndex,
-  cardAskDraft,
+  taskAskDraft,
   gateEntry,
   gateOf,
   lineageThrough,
@@ -11,7 +11,7 @@ import {
   stageGateLanes,
   stillBuilding,
 } from '../../../daemon/lib/board/index.ts';
-import { card, lanes, liveSession, NOW, PROJECT, rosterOf } from './support.ts';
+import { boardTask, lanes, liveSession, NOW, PROJECT, rosterOf } from './support.ts';
 
 const set = lanes(PROJECT);
 const laneSets = new Map([[PROJECT, set]]);
@@ -71,7 +71,7 @@ describe('the history entry that put a card in its lane', () => {
 describe('an ask whose steps are too long to show', () => {
   const long = `1. step one\n${'x'.repeat(70_000)}`;
   const gateFor = (laneId: string) => {
-    const task = card({
+    const task = boardTask({
       laneId,
       ask: { text: 'ask', source: 'owner' },
       createdBy: ferret,
@@ -87,21 +87,21 @@ describe('an ask whose steps are too long to show', () => {
 
   it('should point an approval at the card instead of cutting its plan', () => {
     const { task, gate } = gateFor('plan');
-    should(String(cardAskDraft(gate, task, 'grandchild').context)).match(/characters, too long to show here/u);
+    should(String(taskAskDraft(gate, task, 'grandchild').context)).match(/characters, too long to show here/u);
   });
 
   it('should point a try-it at the card instead of cutting its steps', () => {
     const { task, gate } = gateFor('tested');
-    should(String(cardAskDraft(gate, task, 'grandchild').context)).match(/characters, too long to show here/u);
+    should(String(taskAskDraft(gate, task, 'grandchild').context)).match(/characters, too long to show here/u);
   });
 });
 
 describe('sub-cards still being built', () => {
   it('should count the live sub-cards in a backlog, active or review lane, and skip dropped and shipped ones', () => {
-    const parent = card({ id: 'F1', laneId: 'implement' });
-    const child = (id: string, laneId: string, extra: Partial<Card> = {}) =>
-      card({ id, laneId, parent: { id: 'F1' } as never, ...extra });
-    const cards = [
+    const parent = boardTask({ id: 'F1', laneId: 'implement' });
+    const child = (id: string, laneId: string, extra: Partial<Task> = {}) =>
+      boardTask({ id, laneId, parent: { id: 'F1' } as never, ...extra });
+    const tasks = [
       parent,
       child('F2', 'todo'),
       child('F3', 'implement'),
@@ -109,7 +109,7 @@ describe('sub-cards still being built', () => {
       child('F5', 'closed'),
       child('F6', 'implement', { dropped: { at: NOW, by: ferret, reason: 'no' } as never }),
     ];
-    should(stillBuilding(parent, new BoardIndex(cards, ''), laneSets)).equal(3);
+    should(stillBuilding(parent, new BoardIndex(tasks, ''), laneSets)).equal(3);
   });
 });
 

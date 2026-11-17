@@ -29,7 +29,7 @@ export async function sessionKeeps(
   signal?: AbortSignal,
 ): Promise<ReadonlyMap<string, string>> {
   const kept = new Map<string, string>();
-  const [pinned, onCards] = await Promise.all([
+  const [pinned, onTasks] = await Promise.all([
     sources.pinned().then(
       set => ({ set }),
       () => undefined,
@@ -43,8 +43,8 @@ export async function sessionKeeps(
   for (const id of ids) {
     if (pinned === undefined) kept.set(id, 'pins unreadable');
     else if (pinned.set.has(id)) kept.set(id, 'pinned');
-    else if (onCards === undefined) kept.set(id, 'board unreadable');
-    else if (onCards.set.has(id)) kept.set(id, 'on a task still in flight');
+    else if (onTasks === undefined) kept.set(id, 'board unreadable');
+    else if (onTasks.set.has(id)) kept.set(id, 'on a task still in flight');
     else pending.push(id);
   }
   for (let at = 0; at < pending.length; at += AGENDA_READS_AT_ONCE) {

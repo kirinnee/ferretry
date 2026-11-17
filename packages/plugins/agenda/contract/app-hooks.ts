@@ -15,11 +15,11 @@
  */
 
 /** "Done · closes", and a notice's Start and Close: the card writes an ask makes. */
-export const AGENDA_CARD_ANSWER_HOOK = 'agenda.card-answer' as const;
+export const AGENDA_TASK_ANSWER_HOOK = 'agenda.card-answer' as const;
 /** Where Edit on a lane-proposal ask goes. */
 export const AGENDA_LANE_PROPOSAL_HOOK = 'agenda.lane-proposal' as const;
 /** Whether `&F12` in an ask's words is a card, and where it opens. */
-export const AGENDA_CARD_REFERENCE_HOOK = 'agenda.card-reference' as const;
+export const AGENDA_TASK_REFERENCE_HOOK = 'agenda.card-reference' as const;
 
 /**
  * The owner opened an ask here: its alerts come down on this device and, through the daemon, on the others. The alert
@@ -39,7 +39,7 @@ export type AgendaSeenMark = () => Promise<{ readonly cleared: boolean; readonly
 export type AgendaItemOpened = (ferret: string, ask: string, seen: AgendaSeenMark) => Promise<unknown>;
 
 /** A card write's answer: done, or the refusal in words (`status` 0 when the request got no answer). */
-export type AgendaCardWrite<Value = undefined> =
+export type AgendaTaskWrite<Value = undefined> =
   | ({ readonly ok: true } & (Value extends undefined ? unknown : { readonly value: Value }))
   | { readonly ok: false; readonly status: number; readonly message: string };
 
@@ -54,7 +54,7 @@ export interface AgendaCardView {
 }
 
 /** `agenda.card-answer`: the cards of the daemon the provider was built for, by id (`F12`). */
-export interface AgendaCardAnswer {
+export interface AgendaTaskAnswer {
   readonly subscribe: (listener: () => void) => () => void;
   /** Keeps `card` read and live until the returned release is called. */
   readonly watch: (card: string) => () => void;
@@ -63,14 +63,14 @@ export interface AgendaCardAnswer {
    * The board's own Done: moves the card into its board's Done lane with one request, recorded in its history and told
    * to its ferret. Nothing is sent for a card that is already closed (answered done) or that the board has no Done for.
    */
-  readonly done: (card: string) => Promise<AgendaCardWrite>;
+  readonly done: (card: string) => Promise<AgendaTaskWrite>;
   /** Starts a ferret on the card (or names the one that holds it); `key` makes a retry of one click the same request. */
   readonly start: (
     card: string,
     key: string,
-  ) => Promise<AgendaCardWrite<{ readonly started: boolean; readonly ferret: string }>>;
+  ) => Promise<AgendaTaskWrite<{ readonly started: boolean; readonly ferret: string }>>;
   /** Drops the card with the reason the board records. */
-  readonly drop: (card: string, reason: string) => Promise<AgendaCardWrite>;
+  readonly drop: (card: string, reason: string) => Promise<AgendaTaskWrite>;
 }
 
 /** An answer, as far as the lane editor reads it: a multiple choice and the label pressed. */
@@ -91,7 +91,7 @@ export interface AgendaLaneProposal {
 export type AgendaLaneEditor = AgendaLaneProposal['editorFor'];
 
 /** `agenda.card-reference`: the proof behind a `&F12` and where it opens. */
-export interface AgendaCardReference {
+export interface AgendaTaskReference {
   readonly subscribe: (listener: () => void) => () => void;
   /** Keeps the proof read and live until the returned release is called. */
   readonly watch: () => () => void;
@@ -106,10 +106,10 @@ const functions = (value: unknown, names: readonly string[]): boolean =>
   isRecord(value) && names.every(name => typeof value[name] === 'function');
 
 /** A provided value is read only when it has the shape: anything else is no provider. */
-export const isAgendaCardAnswer = (value: unknown): value is AgendaCardAnswer =>
+export const isAgendaTaskAnswer = (value: unknown): value is AgendaTaskAnswer =>
   functions(value, ['subscribe', 'watch', 'card', 'done', 'start', 'drop']);
 export const isAgendaLaneProposal = (value: unknown): value is AgendaLaneProposal => functions(value, ['editorFor']);
-export const isAgendaCardReference = (value: unknown): value is AgendaCardReference =>
+export const isAgendaTaskReference = (value: unknown): value is AgendaTaskReference =>
   functions(value, ['subscribe', 'watch', 'proves', 'href']);
 
 export const isAgendaItemOpened = (value: unknown): value is AgendaItemOpened => typeof value === 'function';
@@ -122,9 +122,9 @@ export const isAgendaItemOpened = (value: unknown): value is AgendaItemOpened =>
  * draws without it, so without the check a rename or a second provider would switch a card-moving answer off unseen.
  */
 export const AGENDA_APP_HOOKS = {
-  [AGENDA_CARD_ANSWER_HOOK]: isAgendaCardAnswer,
+  [AGENDA_TASK_ANSWER_HOOK]: isAgendaTaskAnswer,
   [AGENDA_LANE_PROPOSAL_HOOK]: isAgendaLaneProposal,
-  [AGENDA_CARD_REFERENCE_HOOK]: isAgendaCardReference,
+  [AGENDA_TASK_REFERENCE_HOOK]: isAgendaTaskReference,
   [AGENDA_ITEM_OPENED_HOOK]: isAgendaItemOpened,
 } as const;
 export type AgendaAppHook = keyof typeof AGENDA_APP_HOOKS;

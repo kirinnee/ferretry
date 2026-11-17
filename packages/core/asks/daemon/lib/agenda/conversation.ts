@@ -7,7 +7,7 @@ import {
   agendaDoneMessage,
   agendaNeedsInfoMessage,
 } from '../protocol/agenda-message.ts';
-import { agendaCardKind, agendaTitle } from '../protocol/agenda-task.ts';
+import { agendaTaskKind, agendaTitle } from '../protocol/agenda-task.ts';
 import { formWords } from '../protocol/agenda-form.ts';
 
 /**
@@ -63,7 +63,7 @@ function responseWords(response: AgendaResponse, fields: readonly AgendaFormFiel
  */
 export function isQuietAcknowledgement(item: ResolvedAgendaItem): boolean {
   return (
-    agendaCardKind(item) === 'info' &&
+    agendaTaskKind(item) === 'info' &&
     item.disposition === 'done' &&
     item.response === undefined &&
     (item.resolutionNote?.trim() ?? '') === ''

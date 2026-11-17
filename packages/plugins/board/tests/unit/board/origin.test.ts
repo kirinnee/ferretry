@@ -1,15 +1,15 @@
 import { describe, it } from 'bun:test';
-import type { CardActor, Card } from '../../../contract/index.ts';
+import type { TaskActor, Task } from '../../../contract/index.ts';
 import should from 'should';
 import {
   askFerretOf,
   BoardIndex,
-  cardAskedBy,
-  cardOrigin,
+  taskAskedBy,
+  taskOrigin,
   humanParentOf,
   type OriginFacts,
 } from '../../../daemon/lib/board/index.ts';
-import { card, MACHINE } from './support.ts';
+import { boardTask, MACHINE } from './support.ts';
 
 const LEAD = 'mvuc7tsf-0c3d50df';
 const CHILD = 'mvvilibo-3df19c85';
@@ -17,10 +17,10 @@ const CHILD = 'mvvilibo-3df19c85';
 /** The child was started by the lead; every other session by the owner. */
 const facts: OriginFacts = { startedByFerret: session => session === CHILD };
 
-const by = (createdBy: CardActor, source: string, extra: Partial<Card> = {}): Card =>
-  card({ createdBy, ask: { text: 'do the thing', source }, ...extra });
+const by = (createdBy: TaskActor, source: string, extra: Partial<Task> = {}): Task =>
+  boardTask({ createdBy, ask: { text: 'do the thing', source }, ...extra });
 
-const ferret = (ferret: string): CardActor => ({ kind: 'ferret', name: ferret, ferret });
+const ferret = (ferret: string): TaskActor => ({ kind: 'ferret', name: ferret, ferret });
 
 describe('cardOrigin: the owner asked', () => {
   it.each([
@@ -34,7 +34,7 @@ describe('cardOrigin: the owner asked', () => {
     ['a top-level ferret wrote a brief path as the source', by(ferret(LEAD), '/tmp/briefs/kt-board-v3.md')],
     ['a ferret this daemon does not know recorded it', by(ferret('mvzzzzzz-00000000'), 'lead message turn-003')],
   ])('should read as human when %s', (_case, subject) => {
-    should(cardOrigin(subject, facts)).equal('human');
+    should(taskOrigin(subject, facts)).equal('human');
   });
 });
 
@@ -46,12 +46,12 @@ describe('cardOrigin: an agent made it', () => {
     ['a helper wrote a lead message as the source', by(ferret(CHILD), 'lead message queued-47a7847b')],
     ['a ferret recorded words from a helper session', by(ferret(LEAD), `session:${CHILD}`)],
   ])('should read as agent when %s', (_case, subject) => {
-    should(cardOrigin(subject, facts)).equal('agent');
+    should(taskOrigin(subject, facts)).equal('agent');
   });
 
   it('should match the owner as a word, in any case, and never inside another word', () => {
-    should(cardOrigin(by(ferret(CHILD), 'OWNER relayed it'), facts)).equal('human');
-    should(cardOrigin(by(ferret(CHILD), 'co-owners thread'), facts)).equal('agent');
+    should(taskOrigin(by(ferret(CHILD), 'OWNER relayed it'), facts)).equal('human');
+    should(taskOrigin(by(ferret(CHILD), 'co-owners thread'), facts)).equal('agent');
   });
 });
 
@@ -73,7 +73,7 @@ describe('humanParentOf', () => {
   const human = by({ kind: 'owner' }, 'board', { id: 'F1' });
   const delegated = by({ kind: 'daemon' }, `session:${LEAD}`, { id: 'F2', parent: { id: 'F1' } });
   const grandchild = by(ferret(CHILD), `session:${CHILD}`, { id: 'F3', parent: { id: 'F2' } });
-  const originOf = (subject: Card) => cardOrigin(subject, facts);
+  const originOf = (subject: Task) => taskOrigin(subject, facts);
 
   it('should name the nearest human ancestor, however deep, and never the card itself', () => {
     // Arrange
@@ -111,7 +111,7 @@ describe('cardAskedBy: a person asked', () => {
       by({ kind: 'owner' }, 'lead mvkm41oz turn-001 brief (owner 2026-10-23)'),
     ],
   ])('should read as person when %s', (_case, subject) => {
-    should(cardAskedBy(subject)).equal('person');
+    should(taskAskedBy(subject)).equal('person');
   });
 });
 
@@ -125,12 +125,12 @@ describe('cardAskedBy: an agent made it', () => {
     ['a ferret this daemon does not know recorded it', by(ferret('mvzzzzzz-00000000'), 'lead message turn-003')],
     ['the word owner sits inside another word', by(ferret(CHILD), 'co-owners thread')],
   ])('should read as agent when %s', (_case, subject) => {
-    should(cardAskedBy(subject)).equal('agent');
+    should(taskAskedBy(subject)).equal('agent');
   });
 
   it('should be stricter than origin: a card origin shows can still be an agent card for the inbox', () => {
     const own = by(ferret(LEAD), `session:${LEAD}`);
-    should(cardOrigin(own, facts)).equal('human');
-    should(cardAskedBy(own)).equal('agent');
+    should(taskOrigin(own, facts)).equal('human');
+    should(taskAskedBy(own)).equal('agent');
   });
 });

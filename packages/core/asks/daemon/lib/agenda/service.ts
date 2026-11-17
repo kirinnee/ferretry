@@ -10,11 +10,11 @@ import type {
 } from '../protocol/agenda.ts';
 import type { AgendaConversationPage, AgendaVersion, AgendaVersionSummary } from '../protocol/agenda-versions.ts';
 import type { TaskRef } from '../protocol/board-refs.ts';
-import { agendaCardKind, clipAtWord } from '../protocol/agenda-task.ts';
+import { agendaTaskKind, clipAtWord } from '../protocol/agenda-task.ts';
 import { MACHINE_AGENDA_ID, MAX_AGENDA_TITLE_LENGTH } from '../protocol/agenda.ts';
 import { MAX_AGENDA_CONVERSATION_FRAGMENT_LENGTH } from '../protocol/agenda-versions.ts';
 import { formatTaskRef } from '../protocol/board-refs.ts';
-import type { CardAskOperation } from './task-asks.ts';
+import type { TaskAskOperation } from './task-asks.ts';
 import { KeyedSerialQueue } from './serial-queue.ts';
 import {
   isAncestorOf,
@@ -182,12 +182,12 @@ export function isAgendaSessionId(value: string): boolean {
 }
 
 /** Whether a card waits in the lane where released work is tried (Released · to test). */
-export interface AgendaCardLanes {
+export interface AgendaTaskLanes {
   inToTest(task: TaskRef): Promise<boolean>;
 }
 
 /** No card is known to be in the to-test lane: nothing is offered to close by default. */
-const NO_AGENDA_CARD_LANES: AgendaCardLanes = { inToTest: async () => false };
+const NO_AGENDA_TASK_LANES: AgendaTaskLanes = { inToTest: async () => false };
 
 /**
  * Whether a card's gate is asking the owner already (docs/agenda.md § One ask per thing): where, as the item and the
@@ -242,7 +242,7 @@ export class AgendaService {
     /** Who started whom: a sub-ferret raises and changes nothing here. Absent, every agent is a lead. */
     private readonly subFerrets: SubFerretDirectory = NO_SUB_FERRETS,
     /** Which cards wait in the to-test lane: a to-do or review on one offers to close it by default. */
-    private readonly cards: AgendaCardLanes = NO_AGENDA_CARD_LANES,
+    private readonly cards: AgendaTaskLanes = NO_AGENDA_TASK_LANES,
     /** Where the daemon asks the owner for a sub-ferret: its lineage's home (docs/agenda.md § Sub-ferret agenda). */
     private readonly homes: AgendaHomeResolver = SELF_AGENDA_HOME,
     /** Which cards are asking the owner through their gate: a second ask about one is not raised (see {@link raise}). */
@@ -389,7 +389,7 @@ export class AgendaService {
   /** A to-do or review on a card in the to-test lane offers to close it, unless the add already said so. */
   private async withOfferClose(request: RaiseAgendaRequest): Promise<RaiseAgendaRequest> {
     if (request.offerClose !== undefined || request.task === undefined || request.notice === true) return request;
-    if (!CLOSE_OFFERED_KINDS.has(agendaCardKind(request))) return request;
+    if (!CLOSE_OFFERED_KINDS.has(agendaTaskKind(request))) return request;
     const waiting = await this.cards.inToTest(request.task).catch(() => false);
     return waiting ? { ...request, offerClose: true } : request;
   }
@@ -568,14 +568,14 @@ export class AgendaService {
     id: AgendaId,
     request: RaiseAgendaRequest,
     actor: AgendaActor,
-    moveCards?: readonly TaskRef[],
+    moveTasks?: readonly TaskRef[],
   ): Promise<AgendaMutation> {
     return this.apply(sessionId, {
       action: 'split',
       actor,
       id,
       request,
-      ...(moveCards === undefined ? {} : { moveCards }),
+      ...(moveTasks === undefined ? {} : { moveCards: moveTasks }),
       at: this.clock.now(),
     });
   }
@@ -841,7 +841,7 @@ export class AgendaService {
    * A card ask on this agenda (docs/agenda.md § Card asks): put on it, restated, withdrawn, or the owner's answer
    * recorded (`CardAskOperation`). Daemon-only: the card's lane is the witness.
    */
-  async cardAsk(sessionId: string, id: AgendaId, operation: CardAskOperation): Promise<AgendaMutation> {
+  async cardAsk(sessionId: string, id: AgendaId, operation: TaskAskOperation): Promise<AgendaMutation> {
     return this.apply(sessionId, {
       action: 'card-ask',
       actor: { kind: 'daemon', cause: 'system' },

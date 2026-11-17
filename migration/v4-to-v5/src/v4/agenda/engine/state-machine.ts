@@ -3,11 +3,11 @@
 import {
   AGENDA_SCHEMA_VERSION,
   AGENDA_URGENT_WAKE_MS,
-  canCarryCardAsk,
+  canCarryTaskAsk,
   type AgendaAsk,
   type AgendaBrief,
-  type AgendaCardAnswer,
-  type AgendaCardRow,
+  type AgendaTaskAnswer,
+  type AgendaTaskRow,
   type AgendaClearableField,
   agendaItemRevision,
   type AgendaConfirms,
@@ -16,7 +16,7 @@ import {
   type AgendaCopyPlanRef,
   type AgendaDisposition,
   type AgendaErrorCode,
-  type AgendaCardAsk,
+  type AgendaTaskAsk,
   type AgendaGate,
   type AgendaHistoryEntry,
   AgendaHistoryEntrySchema,
@@ -40,7 +40,7 @@ import {
   type AgendaUndelivered,
   agendaBriefOf,
   agendaBriefRequiredProblems,
-  agendaCardKind,
+  agendaTaskKind,
   applyAgendaTabEdits,
   type AgendaTabEdit,
   agendaEditShapeProblems,
@@ -59,15 +59,15 @@ import {
   fitAgendaItem,
   formAnswerProblems,
   formatTaskRef,
-  cardAgendaReference,
-  cardAskReference,
-  cardAskStage,
-  hasOpenCardAsk,
-  openCardAsks,
-  parseCardAgendaReference,
+  taskAgendaReference,
+  taskAskReference,
+  taskAskStage,
+  hasOpenTaskAsk,
+  openTaskAsks,
+  parseTaskAgendaReference,
   gateReference,
   MAX_AGENDA_PER_SESSION,
-  MAX_AGENDA_CARDS,
+  MAX_AGENDA_TASKS,
   MAX_AGENDA_LINKS,
   MAX_AGENDA_REST_WHY_LENGTH,
   MAX_AGENDA_REPLY_ENVELOPE_LENGTH,
@@ -104,15 +104,15 @@ import {
   wordsOf,
 } from './item-words.ts';
 import {
-  applyCardAsk,
-  type CardAskOperation,
+  applyTaskAsk,
+  type TaskAskOperation,
   closeRefusal,
-  joinCardAsks,
-  leaveCardAsks,
+  joinTaskAsks,
+  leaveTaskAsks,
   restRefusal,
-  sealCardAsks,
-  withCardAsks,
-  withoutCardAsks,
+  sealTaskAsks,
+  withTaskAsks,
+  withoutTaskAsks,
 } from './task-asks.ts';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
@@ -198,14 +198,14 @@ export interface AgendaLedger {
 export const AGENDA_LEDGER_VERSION = 4;
 
 /** The card an item is: what it is about, its kind and its answers by direction (all derived when absent). */
-export interface AgendaCardFields {
+export interface AgendaTaskFields {
   readonly title?: string;
   readonly kind?: AgendaKind;
-  readonly answers?: AgendaCardAnswer[];
+  readonly answers?: AgendaTaskAnswer[];
 }
 
 /** A raise carries the item's card and structured brief (the ask line is the `subject`) alongside its ask. */
-export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
+export interface RaiseAgendaRequest extends AgendaBrief, AgendaTaskFields {
   readonly source: AgendaSource;
   readonly sourceRef: string | null;
   readonly sourceSeq?: number;
@@ -239,7 +239,7 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   /** The approve-on-phone card an `info` item presents (`AgendaPhoneApprovalRef`); only the daemon raises one. */
   readonly phoneApproval?: AgendaPhoneApprovalRef;
   /** The board cards a machine notice lists, each with Open, Start and Close (`AgendaCardRow`); only the daemon raises them. */
-  readonly cards?: readonly AgendaCardRow[];
+  readonly cards?: readonly AgendaTaskRow[];
   /** The owner's one tap may close `task` too (`DAEMON_FEATURES.agendaOfferClose`); needs a card. */
   readonly offerClose?: true;
   /** DEPRECATED: a standalone gate item (`AgendaGate`). No daemon raises one any more; kept for an item carried over. */
@@ -248,7 +248,7 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
    * The card asks the new agenda carries (docs/agenda.md § Card asks): only the daemon raises one with any, when it
    * opens the agenda of a card that nobody's agenda carries yet. `gateAttached` mirrors the first open one.
    */
-  readonly cardAsks?: readonly AgendaCardAsk[];
+  readonly cardAsks?: readonly AgendaTaskAsk[];
   /**
    * The item starts on the FERRET's turn, in discussion (`waitingFor: 'discussion'`), instead of the owner's: a
    * gate's follow-up conversation, which the owner opened by saying Not good. Only the daemon raises one so.
@@ -331,7 +331,7 @@ export interface EditAgendaPatch extends AgendaBrief {
   readonly stage?: AgendaStage;
   readonly ask?: AgendaAsk;
   readonly kind?: AgendaKind;
-  readonly answers?: AgendaCardAnswer[];
+  readonly answers?: AgendaTaskAnswer[];
   /** The why line and the how-to-resolve line (`agenda.patch.1`): rewritten, never removed. */
   readonly why?: string;
   readonly howToResolve?: string;
@@ -565,7 +565,7 @@ export type AgendaCommand =
       readonly action: 'card-ask';
       readonly actor: AgendaActor;
       readonly id: AgendaId;
-      readonly operation: CardAskOperation;
+      readonly operation: TaskAskOperation;
       readonly at: string;
     }
   | {
@@ -669,13 +669,13 @@ export function isGateFollowupItem(item: Pick<AgendaItem, 'raisedBy' | 'source' 
  * The agenda the daemon opened for a card nobody's agenda carried (`card-agenda:`, docs/agenda.md § Card asks): like a
  * follow-up, raised ON BEHALF of the card's ferret, which works and closes it as its own.
  */
-export function isCardAgendaItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
-  return item.raisedBy === 'daemon' && item.source === 'task' && parseCardAgendaReference(item.sourceRef) !== undefined;
+export function isTaskAgendaItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
+  return item.raisedBy === 'daemon' && item.source === 'task' && parseTaskAgendaReference(item.sourceRef) !== undefined;
 }
 
 /** An item the daemon raised on behalf of the ferret whose board holds it: a gate's follow-up, or a card's agenda. */
 export function isOnBehalfItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
-  return isGateFollowupItem(item) || isCardAgendaItem(item);
+  return isGateFollowupItem(item) || isTaskAgendaItem(item);
 }
 
 /** {@link isOnBehalfItem}, of an entry the daemon raised. */
@@ -974,13 +974,13 @@ function channelItem<Item extends AgendaItem | ResolvedAgendaItem>(item: Item, l
 }
 
 /** What a card's agenda asks of its own, beside its card asks: a reply, if the owner wants to talk it over. */
-export const CARD_AGENDA_HOW_TO_RESOLVE =
+export const TASK_AGENDA_HOW_TO_RESOLVE =
   "Answer the card's ask here (its buttons move the card); reply to talk it over. The ferret marks this done.";
 
 const MIGRATION_ACTOR: AgendaActor = { kind: 'daemon', cause: 'system' };
 
 /** A gate item's gate as the card ask it becomes: open, put on the agenda when the gate item was raised. */
-const liftedAsk = (item: AgendaItem, gate: AgendaGate): AgendaCardAsk => {
+const liftedAsk = (item: AgendaItem, gate: AgendaGate): AgendaTaskAsk => {
   const notYet = (item.history ?? []).findLast(
     entry => entry.kind === 'gate-answered' && entry.note === gateReference(gate),
   );
@@ -1002,29 +1002,29 @@ const readable = (item: AgendaItem): AgendaItem | undefined => {
  * An open gate item as its card's agenda (docs/agenda.md § Card asks): the same id, history, snooze and turn, raised
  * on its ferret's behalf (`card-agenda:<card>`), its gate now its card ask, asking nothing of its own but a reply.
  */
-const cardAgendaOf = (item: AgendaItem & { readonly gate: AgendaGate }, at: string): AgendaItem => {
+const taskAgendaOf = (item: AgendaItem & { readonly gate: AgendaGate }, at: string): AgendaItem => {
   const { gate, ask: _ask, answers: _answers, kind: _kind, ...rest } = item;
-  const stage = cardAskStage(gate);
+  const stage = taskAskStage(gate);
   const base: AgendaItem = {
     ...rest,
-    sourceRef: cardAgendaReference(gate.cardId),
+    sourceRef: taskAgendaReference(gate.cardId),
     kind: 'reply',
     ask: { kind: 'open-question' },
-    howToResolve: CARD_AGENDA_HOW_TO_RESOLVE,
+    howToResolve: TASK_AGENDA_HOW_TO_RESOLVE,
     ...staged({ ...rest, kind: 'reply', ask: { kind: 'open-question' } }, stage, at),
   };
-  return withCardAsks(base, [liftedAsk(item, gate)]);
+  return withTaskAsks(base, [liftedAsk(item, gate)]);
 };
 
 /** Whether an open item is a thread about this card: an agent's own item on it, never a notice or a gate item. */
-const isCardThread = (item: AgendaItem, cardId: string): boolean =>
-  item.raisedBy === 'agent' && canCarryCardAsk(item) && item.task?.id === cardId;
+const isTaskThread = (item: AgendaItem, taskId: string): boolean =>
+  item.raisedBy === 'agent' && canCarryTaskAsk(item) && item.task?.id === taskId;
 
 /** The thread that takes a card's ask: one already carrying it, else one on the owner's turn, else the newest. */
-const threadFor = (entries: readonly AgendaEntry[], cardId: string): AgendaItem | undefined => {
+const threadFor = (entries: readonly AgendaEntry[], taskId: string): AgendaItem | undefined => {
   const threads = entries
     .filter(isActiveAgenda)
-    .flatMap(entry => (isCardThread(entry.item, cardId) ? [entry.item] : []));
+    .flatMap(entry => (isTaskThread(entry.item, taskId) ? [entry.item] : []));
   const newest = (pool: readonly AgendaItem[]): AgendaItem | undefined =>
     pool.reduce<AgendaItem | undefined>(
       (kept, each) =>
@@ -1032,7 +1032,7 @@ const threadFor = (entries: readonly AgendaEntry[], cardId: string): AgendaItem 
       undefined,
     );
   return (
-    newest(threads.filter(each => (each.cardAsks ?? []).some(ask => ask.gate.cardId === cardId))) ??
+    newest(threads.filter(each => (each.cardAsks ?? []).some(ask => ask.gate.cardId === taskId))) ??
     newest(threads.filter(each => each.waitingOn === undefined && each.parked === undefined)) ??
     newest(threads)
   );
@@ -1045,9 +1045,9 @@ const threadFor = (entries: readonly AgendaEntry[], cardId: string): AgendaItem 
 const threadWithAsk = (thread: AgendaItem, gateItem: AgendaItem & { readonly gate: AgendaGate }): AgendaItem => {
   const ask = liftedAsk(gateItem, gateItem.gate);
   const asks = thread.cardAsks ?? [];
-  const carried = asks.some(each => cardAskReference(each) === cardAskReference(ask)) ? asks : [...asks, ask];
+  const carried = asks.some(each => taskAskReference(each) === taskAskReference(ask)) ? asks : [...asks, ask];
   const shown = agendaState(gateItem).state === 'needs-you' && agendaState(thread).state !== 'needs-you';
-  if (!shown) return withCardAsks(thread, carried);
+  if (!shown) return withTaskAsks(thread, carried);
   const {
     parked: _parked,
     resting: _resting,
@@ -1056,7 +1056,7 @@ const threadWithAsk = (thread: AgendaItem, gateItem: AgendaItem & { readonly gat
     waitingFor: _waitingFor,
     ...awake
   } = thread;
-  return withCardAsks({ ...awake, waitingSince: gateItem.waitingSince }, carried);
+  return withTaskAsks({ ...awake, waitingSince: gateItem.waitingSince }, carried);
 };
 
 const withItem = (ledger: AgendaLedger, item: AgendaItem): AgendaLedger => ({
@@ -1090,7 +1090,7 @@ export function liftGateItems(ledger: AgendaLedger): AgendaLedger {
     const gate = entry.item.gateAttached;
     if (gate === undefined || entry.item.cardAsks !== undefined || isGateItem(entry.item)) continue;
     const lifted = readable(
-      withCardAsks(entry.item, [{ ...liftedAsk(entry.item, gate), at: entry.item.waitingSince }]),
+      withTaskAsks(entry.item, [{ ...liftedAsk(entry.item, gate), at: entry.item.waitingSince }]),
     );
     if (lifted !== undefined) current = withItem(current, lifted);
   }
@@ -1102,13 +1102,13 @@ export function liftGateItems(ledger: AgendaLedger): AgendaLedger {
         : [],
     )
     .sort((left, right) => Date.parse(right.waitingSince) - Date.parse(left.waitingSince));
-  for (const cardId of new Set(gateItems.map(item => item.gate.cardId))) {
-    const ofCard = gateItems.filter(item => item.gate.cardId === cardId);
-    let carrier = threadFor(current.entries, cardId);
-    let closing = ofCard;
+  for (const taskId of new Set(gateItems.map(item => item.gate.cardId))) {
+    const ofTask = gateItems.filter(item => item.gate.cardId === taskId);
+    let carrier = threadFor(current.entries, taskId);
+    let closing = ofTask;
     if (carrier === undefined) {
-      const [newest, ...older] = ofCard;
-      const converted = newest === undefined ? undefined : readable(cardAgendaOf(newest, at));
+      const [newest, ...older] = ofTask;
+      const converted = newest === undefined ? undefined : readable(taskAgendaOf(newest, at));
       if (converted === undefined) continue;
       current = withItem(current, converted);
       carrier = converted;
@@ -1474,7 +1474,7 @@ function transition(ledger: AgendaLedger, command: AgendaCommand): AgendaMutatio
     case 'restate-confirms':
       return restateConfirms(ledger, command);
     case 'card-ask':
-      return cardAsk(ledger, command);
+      return taskAsk(ledger, command);
     case 'link-task':
       return linkTask(ledger, command);
     case 'resolve-source':
@@ -1519,7 +1519,7 @@ type WakeCommand = Extract<AgendaCommand, { action: 'wake' }>;
 type ResolveSourceCommand = Extract<AgendaCommand, { action: 'resolve-source' }>;
 type UndeliveredCommand = Extract<AgendaCommand, { action: 'undelivered' }>;
 type RestateConfirmsCommand = Extract<AgendaCommand, { action: 'restate-confirms' }>;
-type CardAskCommand = Extract<AgendaCommand, { action: 'card-ask' }>;
+type TaskAskCommand = Extract<AgendaCommand, { action: 'card-ask' }>;
 type LinkTaskCommand = Extract<AgendaCommand, { action: 'link-task' }>;
 
 function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
@@ -1629,7 +1629,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       waitingSince: actor.kind === 'daemon' && request.waitingSince !== undefined ? request.waitingSince : command.at,
       howToResolve: request.howToResolve,
       ...(request.ask === undefined ? {} : { ask: request.ask }),
-      ...cardFieldsOf(request),
+      ...taskFieldsOf(request),
       ...agendaBriefOf(request),
       // A new ask is the OWNER's turn: no `waitingOn`. The ferret's turn begins only when the owner replies.
       ...(request.notice === true ? { notice: true as const } : {}),
@@ -1648,7 +1648,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.discussion === true
         ? { waitingOn: 'ferret' as const, askedAt: command.at, waitingFor: 'discussion' as const }
         : {}),
-      ...firstStage(request.stage ?? agendaStageOfKind(agendaCardKind(request)), command.at),
+      ...firstStage(request.stage ?? agendaStageOfKind(agendaTaskKind(request)), command.at),
       // A gate item moved to its card's new ferret goes on as the one it replaces stood.
       ...(request.carried === undefined ? {} : agendaCarriedOf(request.carried)),
     },
@@ -1656,8 +1656,8 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   );
   // A card agenda opens with its card asks, the first open one mirrored for an app that predates them.
   // One that carries its talk over from another ferret's is not sealed: it reads its activity lines, as one from before the seal does.
-  const asked = request.cardAsks === undefined ? raised : withCardAsks(raised, request.cardAsks);
-  const item = request.cardAsks === undefined || request.carried !== undefined ? asked : sealCardAsks(asked);
+  const asked = request.cardAsks === undefined ? raised : withTaskAsks(raised, request.cardAsks);
+  const item = request.cardAsks === undefined || request.carried !== undefined ? asked : sealTaskAsks(asked);
   const next: AgendaLedger = {
     ...ledger,
     nextId: ledger.nextId + 1,
@@ -1770,8 +1770,8 @@ function addressById(
     const refusal = closeRefusal(target.item);
     if (refusal !== undefined) return failure('invalid', refusal);
   }
-  if (command.action === 'resolve' && command.actor.kind === 'human' && hasOpenCardAsk(target.item)) {
-    const labels = openCardAsks(target.item).flatMap(ask => ask.gate.options.map(option => option.label));
+  if (command.action === 'resolve' && command.actor.kind === 'human' && hasOpenTaskAsk(target.item)) {
+    const labels = openTaskAsks(target.item).flatMap(ask => ask.gate.options.map(option => option.label));
     return failure(
       'invalid',
       `answer ${command.id}'s card ask instead (${[...new Set(labels)].join(' / ')}), or Not needed`,
@@ -2130,13 +2130,13 @@ function sameRequest(item: AgendaItem, request: RaiseAgendaRequest): boolean {
     item.ping === request.ping &&
     JSON.stringify(item.cards ?? null) === JSON.stringify(request.cards ?? null) &&
     JSON.stringify(item.gate ?? null) === JSON.stringify(request.gate ?? null) &&
-    JSON.stringify(cardFieldsOf(item)) === JSON.stringify(cardFieldsOf(request)) &&
+    JSON.stringify(taskFieldsOf(item)) === JSON.stringify(taskFieldsOf(request)) &&
     JSON.stringify(agendaBriefOf(item)) === JSON.stringify(agendaBriefOf(request))
   );
 }
 
 /** Just the card fields a request or item carries, in one fixed key order, the absent ones left out. */
-function cardFieldsOf(value: AgendaCardFields): AgendaCardFields {
+function taskFieldsOf(value: AgendaTaskFields): AgendaTaskFields {
   return {
     ...(value.title === undefined ? {} : { title: value.title }),
     ...(value.kind === undefined ? {} : { kind: value.kind }),
@@ -2373,7 +2373,7 @@ function replaceProblem(item: AgendaItem, patch: EditAgendaPatch, actor: AgendaA
   }
   // A new kind takes none of the old shape: an old choice's options never answer an explainer.
   const next = composeReplacement(item, patch);
-  const kind = agendaCardKind(next);
+  const kind = agendaTaskKind(next);
   if (next.ask === undefined && kind !== 'info') {
     return `a new ${kind} needs its ask: give it with the kind (\`--kind ${kind}\` with --option or --question)`;
   }
@@ -2386,7 +2386,7 @@ function replaceProblem(item: AgendaItem, patch: EditAgendaPatch, actor: AgendaA
 
 /** Whether an edit moves the item to another kind. */
 function kindMoved(item: AgendaItem, patch: EditAgendaPatch): boolean {
-  return patch.kind !== undefined && patch.kind !== agendaCardKind(item);
+  return patch.kind !== undefined && patch.kind !== agendaTaskKind(item);
 }
 
 /**
@@ -2510,7 +2510,7 @@ function editInPlace(ledger: AgendaLedger, item: AgendaItem, command: EditComman
   })[0];
   if (optionDetailProblem !== undefined) return failure('invalid', optionDetailProblem);
   const fieldsProblem = agendaFormProblems({
-    kind: patch.kind ?? agendaCardKind(item),
+    kind: patch.kind ?? agendaTaskKind(item),
     fields: patch.fields ?? composed.fields,
   })[0];
   if (patch.fields !== undefined && fieldsProblem !== undefined) return failure('invalid', fieldsProblem);
@@ -2856,7 +2856,7 @@ function log(ledger: AgendaLedger, command: LogCommand): AgendaMutation {
 }
 
 /** Without `machineId` a ref means "on this machine", which this layer cannot name, so a bare ref matches any machine's id. */
-const sameCard = (left: TaskRef, right: TaskRef): boolean =>
+const sameTask = (left: TaskRef, right: TaskRef): boolean =>
   left.id === right.id &&
   (left.machineId === undefined || right.machineId === undefined || left.machineId === right.machineId);
 
@@ -2925,22 +2925,22 @@ function merge(ledger: AgendaLedger, command: MergeCommand): AgendaMutation {
   }
   const survivor = into.item;
   const absorbed = from.item;
-  const cards = distinctBy([...(survivor.cards ?? []), ...(absorbed.cards ?? [])], row => formatTaskRef(row.task));
+  const tasks = distinctBy([...(survivor.cards ?? []), ...(absorbed.cards ?? [])], row => formatTaskRef(row.task));
   const links = distinctBy([...(survivor.links ?? []), ...(absorbed.links ?? [])], link => sortedJson(link));
   const adopts = survivor.task === undefined || survivor.task === null ? absorbed.task : undefined;
   const task = adopts ?? survivor.task;
   const related = distinctBy(
     [...(survivor.relatedTasks ?? []), ...(absorbed.task ? [absorbed.task] : []), ...(absorbed.relatedTasks ?? [])],
     formatTaskRef,
-  ).filter(ref => task === undefined || task === null || !sameCard(ref, task));
-  if (cards.length > MAX_AGENDA_CARDS || related.length > MAX_AGENDA_CARDS || links.length > MAX_AGENDA_LINKS) {
+  ).filter(ref => task === undefined || task === null || !sameTask(ref, task));
+  if (tasks.length > MAX_AGENDA_TASKS || related.length > MAX_AGENDA_TASKS || links.length > MAX_AGENDA_LINKS) {
     return failure(
       'full',
-      `${command.id} and ${command.from} hold more cards or links together than one item keeps (${MAX_AGENDA_CARDS} cards, ${MAX_AGENDA_LINKS} links): close what is done first`,
+      `${command.id} and ${command.from} hold more cards or links together than one item keeps (${MAX_AGENDA_TASKS} cards, ${MAX_AGENDA_LINKS} links): close what is done first`,
     );
   }
   // Every card ask of both rides the one item, once per card and entry; the absorbed item keeps none.
-  const asked = joinCardAsks(survivor, absorbed.cardAsks ?? [], command.at, (item, stage) => ({
+  const asked = joinTaskAsks(survivor, absorbed.cardAsks ?? [], command.at, (item, stage) => ({
     ...item,
     ...staged(item, stage, command.at),
   }));
@@ -2950,17 +2950,17 @@ function merge(ledger: AgendaLedger, command: MergeCommand): AgendaMutation {
     [...(survivor.mergedFrom ?? []), absorbed.id, ...(absorbed.mergedFrom ?? [])],
     id => id,
   );
-  const { cards: _cards, links: _links, task: _task, relatedTasks: _related, ...base } = asked.into;
+  const { cards: _tasks, links: _links, task: _task, relatedTasks: _related, ...base } = asked.into;
   const merged: AgendaItem = {
     ...base,
-    ...(cards.length === 0 ? {} : { cards }),
+    ...(tasks.length === 0 ? {} : { cards: tasks }),
     ...(links.length === 0 ? {} : { links }),
     ...(task === undefined ? {} : { task }),
     ...(related.length === 0 ? {} : { relatedTasks: related }),
     ...(conversation.length === 0 ? {} : { conversation }),
     mergedFrom,
   };
-  const bare = { ...from, item: withoutCardAsks(absorbed) };
+  const bare = { ...from, item: withoutTaskAsks(absorbed) };
   const kept: AgendaLedger = {
     ...ledger,
     entries: ledger.entries.map(entry =>
@@ -3010,9 +3010,9 @@ function split(ledger: AgendaLedger, command: SplitCommand): AgendaMutation {
   const original = target.item;
   const moving = command.moveCards ?? [];
   const holds = (ref: TaskRef): boolean =>
-    (original.task !== undefined && original.task !== null && sameCard(original.task, ref)) ||
-    (original.cards ?? []).some(row => sameCard(row.task, ref)) ||
-    (original.relatedTasks ?? []).some(card => sameCard(card, ref)) ||
+    (original.task !== undefined && original.task !== null && sameTask(original.task, ref)) ||
+    (original.cards ?? []).some(row => sameTask(row.task, ref)) ||
+    (original.relatedTasks ?? []).some(task => sameTask(task, ref)) ||
     (original.cardAsks ?? []).some(ask => ask.gate.cardId === ref.id);
   const missing = moving.find(ref => !holds(ref));
   if (missing !== undefined) return failure('invalid', `${formatTaskRef(missing)} is not a card of ${command.id}`);
@@ -3021,10 +3021,10 @@ function split(ledger: AgendaLedger, command: SplitCommand): AgendaMutation {
   if (made.change !== 'created' || made.item === undefined) {
     return failure('invalid', 'an open item of this ferret already says the same: nothing was split off');
   }
-  const moves = (ref: TaskRef): boolean => moving.some(card => sameCard(card, ref));
+  const moves = (ref: TaskRef): boolean => moving.some(task => sameTask(task, ref));
   // A moved card's asks go with it (docs/agenda.md § Merge and split): the new item carries them, the original keeps the rest.
-  const { left, moved } = leaveCardAsks(original, ask => moves({ id: ask.gate.cardId }), command.at);
-  const carried = joinCardAsks(made.item, moved, command.at, (item, stage) => ({
+  const { left, moved } = leaveTaskAsks(original, ask => moves({ id: ask.gate.cardId }), command.at);
+  const carried = joinTaskAsks(made.item, moved, command.at, (item, stage) => ({
     ...item,
     ...staged(item, stage, command.at),
   }));
@@ -3034,7 +3034,7 @@ function split(ledger: AgendaLedger, command: SplitCommand): AgendaMutation {
   const movedRelated = (original.relatedTasks ?? []).filter(moves);
   const keptRelated = (original.relatedTasks ?? []).filter(ref => !moves(ref));
   const movesTask = original.task !== undefined && original.task !== null && moves(original.task);
-  const { cards: _cards, task: _task, relatedTasks: _related, ...base } = left;
+  const { cards: _tasks, task: _task, relatedTasks: _related, ...base } = left;
   const parent: AgendaItem = {
     ...base,
     ...(keptRows.length === 0 ? {} : { cards: keptRows }),
@@ -3502,14 +3502,14 @@ function restateConfirms(ledger: AgendaLedger, command: RestateConfirmsCommand):
  * (`applyCardAsk`). Only the daemon writes one, and only on an open agenda that can carry it: not a notice (it asks
  * nothing) and not a standalone gate item from before card asks (it IS the ask).
  */
-function cardAsk(ledger: AgendaLedger, command: CardAskCommand): AgendaMutation {
+function taskAsk(ledger: AgendaLedger, command: TaskAskCommand): AgendaMutation {
   if (command.actor.kind !== 'daemon') return failure('forbidden', 'only the daemon puts a card ask on an agenda');
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
   if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   if (isGateItem(target.item) || target.item.notice === true) {
     return failure('invalid', `${command.id} is a gate item or a notice, so it carries no card ask`);
   }
-  const outcome = applyCardAsk(target.item, command.operation, command.at, {
+  const outcome = applyTaskAsk(target.item, command.operation, command.at, {
     stage: (item, stage) => ({ ...item, ...staged(item, stage, command.at) }),
     history: (item, kind, note) => ({ ...item, history: withHistory(item.history, { at: command.at, kind, note }) }),
     tidy: item => fitAgendaItem(tidied(item)),

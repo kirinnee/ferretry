@@ -6,13 +6,13 @@
  */
 
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
-import type { CardView } from '../../contract/index.ts';
-import { askSessions, type CardAsks, collectAsks } from '../lib/board-asks.ts';
+import type { TaskView } from '../../contract/index.ts';
+import { askSessions, type TaskAsks, collectAsks } from '../lib/board-asks.ts';
 import type { DaemonBoardStore } from '../lib/board-store.ts';
 import type { DaemonConnection } from '../lib/machine.ts';
 
-export const useCardAsks = (store: DaemonBoardStore, machine: DaemonConnection, card: CardView): CardAsks => {
-  const sessions = askSessions(card);
+export const useTaskAsks = (store: DaemonBoardStore, machine: DaemonConnection, task: TaskView): TaskAsks => {
+  const sessions = askSessions(task);
   const key = sessions.join('|');
   // biome-ignore lint/correctness/useExhaustiveDependencies: `key` is the list of sessions
   const held = useMemo(() => sessions, [key]);
@@ -31,9 +31,9 @@ export const useCardAsks = (store: DaemonBoardStore, machine: DaemonConnection, 
   return useMemo(
     () =>
       collectAsks(
-        card,
+        task,
         held.map(sessionId => ({ sessionId, snapshot: store.agendaSnapshot(machine.daemonId, sessionId) })),
       ),
-    [card, held, stamp, store, machine.daemonId],
+    [task, held, stamp, store, machine.daemonId],
   );
 };

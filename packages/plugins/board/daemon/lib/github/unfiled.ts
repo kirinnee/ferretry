@@ -22,8 +22,8 @@
  */
 import {
   type BoardProjectId,
-  type Card,
-  formatCardRef,
+  type Task,
+  formatTaskRef,
   type LaneSet,
   UNFILED_PROJECT_ID,
 } from '../../../contract/index.ts';
@@ -105,14 +105,14 @@ export class UnfiledRefiler {
 
   private async refileAll(given: readonly ProjectRemote[] | undefined): Promise<readonly string[]> {
     try {
-      const { cards, laneSets } = await this.ports.board.snapshot();
-      const open = cards.filter(card => isRefilable(card, laneSets));
+      const { cards: tasks, laneSets } = await this.ports.board.snapshot();
+      const open = tasks.filter(task => isRefilable(task, laneSets));
       if (open.length === 0) return [];
       const remotes = given ?? (await this.remotes());
       const byPr = refileTargets(open, laneSets, owners(remotes));
       const claimed = new Set(byPr.map(target => target.card.id));
       const byFolder = await this.folderTargets(
-        open.filter(card => !claimed.has(card.id)),
+        open.filter(task => !claimed.has(task.id)),
         remotes,
       );
       const refiled: string[] = [];
@@ -136,20 +136,20 @@ export class UnfiledRefiler {
 
   /** The cards whose owner ferret's folder names a board, each owner asked once per run. */
   private async folderTargets(
-    cards: readonly Card[],
+    tasks: readonly Task[],
     remotes: readonly ProjectRemote[],
   ): Promise<readonly RefileTarget[]> {
     const boards = new Map<string, BoardProjectId | null>();
     const targets: RefileTarget[] = [];
-    for (const card of cards) {
-      if (!boards.has(card.owner)) boards.set(card.owner, await this.boardOf(card.owner));
-      const projectId = boards.get(card.owner) ?? null;
+    for (const task of tasks) {
+      if (!boards.has(task.owner)) boards.set(task.owner, await this.boardOf(task.owner));
+      const projectId = boards.get(task.owner) ?? null;
       if (projectId === null || projectId === UNFILED_PROJECT_ID) continue;
       const name = remotes.find(project => project.id === projectId)?.name ?? 'that project';
       targets.push({
-        card,
+        card: task,
         projectId,
-        reason: `${formatCardRef(card)}'s ferret ${card.owner} works in ${name}, so the task belongs on its board`,
+        reason: `${formatTaskRef(task)}'s ferret ${task.owner} works in ${name}, so the task belongs on its board`,
       });
     }
     return targets;
@@ -186,7 +186,7 @@ export class UnfiledRefiler {
     } catch (error) {
       this.warnOnce(
         `refile:${target.card.id}`,
-        `Unfiled board: could not refile ${formatCardRef(target.card)}: ${detail(error)}`,
+        `Unfiled board: could not refile ${formatTaskRef(target.card)}: ${detail(error)}`,
       );
       return false;
     }

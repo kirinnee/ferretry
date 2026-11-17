@@ -8,7 +8,7 @@ import {
   type ReopenDelivery,
   type ReopenMessenger,
 } from '../../../daemon/lib/board/index.ts';
-import { card, NOW } from './support.ts';
+import { boardTask, NOW } from './support.ts';
 
 class FakeMessenger implements ReopenMessenger {
   readonly sent: Array<readonly [string, string, string]> = [];
@@ -23,7 +23,7 @@ class FakeMessenger implements ReopenMessenger {
 
 const closed = (id: string, title: string, assignee: string | null, owner = 'lead'): DoneNotice => ({
   by: 'owner',
-  task: card({
+  task: boardTask({
     id,
     title,
     owner,
@@ -171,6 +171,6 @@ describe('delivering a done', () => {
 
     // Assert
     should(messenger.sent).deepEqual([]);
-    should(doneKey([{ task: card({ id: 'F9', history: [] }), by: 'owner' }])).equal('board-done-F9-0');
+    should(doneKey([{ task: boardTask({ id: 'F9', history: [] }), by: 'owner' }])).equal('board-done-F9-0');
   });
 });

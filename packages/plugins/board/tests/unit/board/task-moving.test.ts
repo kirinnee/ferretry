@@ -1,17 +1,17 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { BoardError, BoardService, type CardMoveInput } from '../../../daemon/lib/board/index.ts';
-import { card, MemoryBoardStore, world } from './support.ts';
+import { BoardError, BoardService, type TaskMoveInput } from '../../../daemon/lib/board/index.ts';
+import { boardTask, MemoryBoardStore, world } from './support.ts';
 
 /**
  * `card.moving` is asked at the board service's ONE write, so every path that changes a card's lane — an owner's
  * act, a daemon trigger (the watcher, a release), a gate answer, a refile, the sweep — is asked, not only the route's
  * move; and `board.task-moved` is told once the move landed.
  */
-const setup = (verdict: (input: CardMoveInput) => { allow: true } | { allow: false; reason: string }) => {
-  const store = new MemoryBoardStore([card({ laneId: 'implement' })]);
-  const asked: CardMoveInput[] = [];
-  const moved: Omit<CardMoveInput, 'by'>[] = [];
+const setup = (verdict: (input: TaskMoveInput) => { allow: true } | { allow: false; reason: string }) => {
+  const store = new MemoryBoardStore([boardTask({ laneId: 'implement' })]);
+  const asked: TaskMoveInput[] = [];
+  const moved: Omit<TaskMoveInput, 'by'>[] = [];
   const service = new BoardService(
     world({
       store,
@@ -93,7 +93,7 @@ describe('an answer to a `card` entry that is not a gate’s', () => {
 
 describe('a move that cannot be announced or no longer matches what an answer expected', () => {
   it('should keep the move and warn when board.task-moved throws', async () => {
-    const store = new MemoryBoardStore([card({ laneId: 'implement' })]);
+    const store = new MemoryBoardStore([boardTask({ laneId: 'implement' })]);
     const ports = world({
       store,
       moved: () => {
@@ -109,7 +109,7 @@ describe('a move that cannot be announced or no longer matches what an answer ex
   });
 
   it('should refuse a move whose card is no longer at the gate the answer was about', async () => {
-    const store = new MemoryBoardStore([card({ laneId: 'implement' })]);
+    const store = new MemoryBoardStore([boardTask({ laneId: 'implement' })]);
     const service = new BoardService(world({ store }));
 
     await service

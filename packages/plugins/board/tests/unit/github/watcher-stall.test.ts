@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import { KernelCardStore } from '../../../daemon/adapters/store/task-store.ts';
+import { KernelTaskStore } from '../../../daemon/adapters/store/task-store.ts';
 import { BoardService } from '../../../daemon/lib/board/index.ts';
 import { GitHubWatcher, UnfiledRefiler } from '../../../daemon/lib/github/index.ts';
 import { KeyedSerial } from '../../../daemon/lib/lanes/index.ts';
 import manifest from '../../../manifest.ts';
-import { card, FakeLanes, ferretActor, lanes, NOW, PROJECT, world } from '../board/support.ts';
+import { boardTask, FakeLanes, ferretActor, lanes, NOW, PROJECT, world } from '../board/support.ts';
 import { answer, prNode, prUrl } from './support.ts';
 
 /**
@@ -17,7 +17,7 @@ import { answer, prNode, prUrl } from './support.ts';
  * one synchronous slice of the tick's own work.
  */
 
-const CARDS = 30;
+const TASKS = 30;
 const REPOSITORIES = 8;
 const HISTORY = 30;
 
@@ -33,7 +33,7 @@ const stored = (index: number) => {
   const id = `F${String(index + 1)}`;
   const repo = repositoryOf(index);
   const number = numberOf(index);
-  return card({
+  return boardTask({
     id,
     laneId: 'implement',
     workflow: 'quick',
@@ -73,17 +73,17 @@ const stored = (index: number) => {
 /** GitHub's answer for one repository: every PR open, which every card's `unknown` link learns from, so EVERY card writes. */
 const everyPullRequest = (repo: string): string => {
   const prs: Record<number, unknown> = {};
-  for (let number = 1; number <= numberOf(CARDS); number += 1) prs[number] = prNode(number, { repo });
+  for (let number = 1; number <= numberOf(TASKS); number += 1) prs[number] = prNode(number, { repo });
   return answer({ prs });
 };
 
 describe('the watcher tick over many changed cards', () => {
   it('writes every card', async () => {
     const state = new MemoryStateFolder().port([file('cards'), file('counters')]);
-    const store = new KernelCardStore(state, { cards: file('cards'), counters: file('counters') }, new KeyedSerial(), {
+    const store = new KernelTaskStore(state, { cards: file('cards'), counters: file('counters') }, new KeyedSerial(), {
       warn: () => undefined,
     });
-    for (let index = 0; index < CARDS; index += 1) {
+    for (let index = 0; index < TASKS; index += 1) {
       const task = stored(index);
       await store.write(task.id, async () => ({ task, result: null }));
     }
@@ -136,6 +136,6 @@ describe('the watcher tick over many changed cards', () => {
 
     const report = await watcher.tick();
 
-    should(report.written.length).equal(CARDS);
+    should(report.written.length).equal(TASKS);
   });
 });

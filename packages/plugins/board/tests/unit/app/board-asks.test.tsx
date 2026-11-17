@@ -8,7 +8,16 @@ import { THIS_MACHINE } from '../../../app/lib/machine.ts';
 import { BoardDetail } from '../../../app/views/detail/board-detail.tsx';
 import { boardRuntimeOf } from '../../../app/views/runtime.ts';
 import { AsksList } from '../../../app/views/detail/board-detail-sections.tsx';
-import { card, CHILD, fakeEnvironment, fakePort, flush, laneSetFor, laptop, workstation } from './board-support.ts';
+import {
+  boardTask,
+  CHILD,
+  fakeEnvironment,
+  fakePort,
+  flush,
+  laneSetFor,
+  laptop,
+  workstation,
+} from './board-support.ts';
 
 const LEAD = 'mvuc7tsf-0c3d50df';
 const names = (ferret: string): string => (ferret === LEAD ? 'Denisha' : ferret.slice(0, 6));
@@ -46,7 +55,7 @@ describe('board-app: the card’s Agenda asks (v4 parity)', () => {
   });
 
   it('collectAsks keeps the card’s own open asks, blocking first, and only this card’s answered ones, newest first', () => {
-    const task = card('F3', {
+    const task = boardTask('F3', {
       openAsks: [
         { ferret: LEAD, id: 'A1' },
         { ferret: LEAD, id: 'A2' },
@@ -75,14 +84,14 @@ describe('board-app: the card’s Agenda asks (v4 parity)', () => {
   });
 
   it('collectAsks says it is still reading while an agenda has not answered, and names the ask without its item', () => {
-    const task = card('F3', { openAsks: [{ ferret: LEAD, id: 'A1' }] });
+    const task = boardTask('F3', { openAsks: [{ ferret: LEAD, id: 'A1' }] });
     const asks = collectAsks(task, [{ sessionId: LEAD, snapshot: null }]);
     expect(asks.reading).toBe(true);
     expect(asks.open).toEqual([{ ferret: LEAD, id: 'A1', item: null, blocking: false }]);
   });
 
   it('AsksList draws blocking, open and answered rows, and a row opens its ask in the Agenda', async () => {
-    const task = card('F3', {
+    const task = boardTask('F3', {
       openAsks: [
         { ferret: LEAD, id: 'A1' },
         { ferret: LEAD, id: 'A2' },
@@ -125,8 +134,8 @@ describe('board-app: the card’s Agenda asks (v4 parity)', () => {
   });
 
   it('the card page draws an "Agenda asks" section read from the ferret’s agenda, and none for a card with no asks', async () => {
-    const asked = card('F3', { openAsks: [{ ferret: LEAD, id: 'A1' }], owner: LEAD, assignee: null });
-    const quiet = card('F4', { owner: LEAD, assignee: null });
+    const asked = boardTask('F3', { openAsks: [{ ferret: LEAD, id: 'A1' }], owner: LEAD, assignee: null });
+    const quiet = boardTask('F4', { owner: LEAD, assignee: null });
     const reads: string[] = [];
     let current = snapshot({ items: [open('A1', { blockingNow: true })], resolved: [resolved('A7', 'F3')] });
     const port = fakePort({

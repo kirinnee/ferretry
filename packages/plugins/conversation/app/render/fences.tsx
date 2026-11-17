@@ -13,7 +13,7 @@
 
 import type { MarkdownAstFenceNode, MarkdownFences } from '@ferretry/app';
 import { FyRenderBlock } from './fy-render-block.tsx';
-import { FyRenderCardEmbed, type FyRenderCardEmbedHost } from './fy-render-task-embed.tsx';
+import { FyRenderTaskEmbed, type FyRenderTaskEmbedHost } from './fy-render-task-embed.tsx';
 import {
   FY_RENDER_FENCE_ATTRIBUTE,
   type FyRenderWorkspaceReader,
@@ -85,7 +85,7 @@ export interface FyRenderFenceHost {
    */
   readonly readWorkspaceMedia?: FyRenderWorkspaceReader | undefined;
   /** The daemon whose board a `task` or `board` block asks. Without it those blocks stay ordinary code fences. */
-  readonly cardEmbed?: FyRenderCardEmbedHost | undefined;
+  readonly cardEmbed?: FyRenderTaskEmbedHost | undefined;
 }
 
 /** The fences Conversation's surfaces hand to `<Markdown enableFyRender fences={…}>`. Build once per host; keep it stable. */
@@ -99,7 +99,7 @@ export function fyRenderFences(host: FyRenderFenceHost = {}): MarkdownFences {
       if (!isFyRenderEmbedBlock(parsed.block))
         return <FyRenderBlock block={parsed.block} readWorkspaceMedia={host.readWorkspaceMedia} />;
       if (host.cardEmbed === undefined) return null;
-      return <FyRenderCardEmbed block={parsed.block} host={host.cardEmbed} onTaskOpen={onTaskOpen} />;
+      return <FyRenderTaskEmbed block={parsed.block} host={host.cardEmbed} onTaskOpen={onTaskOpen} />;
     },
   };
 }

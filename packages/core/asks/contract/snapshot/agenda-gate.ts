@@ -4,13 +4,13 @@
  * pure facts both ends read off it — the item's stable reference, the ask it presents, which swipe gives which
  * option, and what a chosen label means.
  */
-import type { AgendaAskOption, AgendaCardAnswer, AgendaDirection, AgendaGate, AgendaGateOption } from './agenda.ts';
+import type { AgendaAskOption, AgendaTaskAnswer, AgendaDirection, AgendaGate, AgendaGateOption } from './agenda.ts';
 
 const GATE_REFERENCE_PREFIX = 'gate:';
 const GATE_FOLLOWUP_REFERENCE_PREFIX = 'gate-followup:';
 
 /** A card id, a lane id and an entry as a reference spells them: no separator inside any of them. */
-const CARD_ID = /^[BFIC][1-9][0-9]{0,8}$/u;
+const TASK_ID = /^[BFIC][1-9][0-9]{0,8}$/u;
 const LANE_ID = /^[^\s:]{1,64}$/u;
 const ENTRY = /^[1-9][0-9]{0,8}$/u;
 
@@ -33,9 +33,9 @@ export const parseGateReference = (sourceRef: string | null | undefined): GateRe
   if (typeof sourceRef !== 'string' || !sourceRef.startsWith(GATE_REFERENCE_PREFIX)) return undefined;
   const parts = sourceRef.slice(GATE_REFERENCE_PREFIX.length).split(':');
   if (parts.length !== 3) return undefined;
-  const [cardId = '', laneId = '', entry = ''] = parts;
-  if (!CARD_ID.test(cardId) || !LANE_ID.test(laneId) || !ENTRY.test(entry)) return undefined;
-  return { cardId, laneId, entry: Number(entry) };
+  const [taskId = '', laneId = '', entry = ''] = parts;
+  if (!TASK_ID.test(taskId) || !LANE_ID.test(laneId) || !ENTRY.test(entry)) return undefined;
+  return { cardId: taskId, laneId, entry: Number(entry) };
 };
 
 /** What a follow-up conversation's `sourceRef` names: the card, and the gate entry the owner said Not good to. */
@@ -53,9 +53,9 @@ export const parseGateFollowupReference = (sourceRef: string | null | undefined)
   if (typeof sourceRef !== 'string' || !sourceRef.startsWith(GATE_FOLLOWUP_REFERENCE_PREFIX)) return undefined;
   const parts = sourceRef.slice(GATE_FOLLOWUP_REFERENCE_PREFIX.length).split(':');
   if (parts.length !== 2) return undefined;
-  const [cardId = '', entry = ''] = parts;
-  if (!CARD_ID.test(cardId) || !ENTRY.test(entry)) return undefined;
-  return { cardId, entry: Number(entry) };
+  const [taskId = '', entry = ''] = parts;
+  if (!TASK_ID.test(taskId) || !ENTRY.test(entry)) return undefined;
+  return { cardId: taskId, entry: Number(entry) };
 };
 
 /**
@@ -108,7 +108,7 @@ export const gateAskOptions = (gate: Pick<AgendaGate, 'options'>): AgendaAskOpti
   [...gateLayout(gate).values()].map(label => ({ label }));
 
 /** The answers, ← · ↑ · →, each `choose`ing its label, so an app that knows nothing of gates answers correctly. */
-export const gateAnswers = (gate: Pick<AgendaGate, 'options'>): AgendaCardAnswer[] =>
+export const gateAnswers = (gate: Pick<AgendaGate, 'options'>): AgendaTaskAnswer[] =>
   [...gateLayout(gate)].map(([direction, label]) => ({ direction, label, does: 'choose' as const }));
 
 /** What a chosen label means on this gate: one of its options, "Not yet", or nothing it offers. */

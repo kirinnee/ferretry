@@ -2,7 +2,7 @@ import {
   agendaState,
   agendaTitle,
   type AskBoardSnapshot,
-  parseCardAgendaReference,
+  parseTaskAgendaReference,
   parseGateFollowupReference,
 } from '@ferretry/core-asks/contract';
 import { AGENDA_NUDGE_MARK, nothingTyped } from './turn-nudge.ts';
@@ -146,7 +146,7 @@ const spokenFor = (item: RestItem): boolean =>
     (item.raisedBy === 'daemon' &&
       item.source === 'task' &&
       (parseGateFollowupReference(item.sourceRef) !== undefined ||
-        parseCardAgendaReference(item.sourceRef) !== undefined)));
+        parseTaskAgendaReference(item.sourceRef) !== undefined)));
 
 /** The items on a ferret's board whose nudge is due at `now`, oldest due first. */
 export function restNudgesDue(

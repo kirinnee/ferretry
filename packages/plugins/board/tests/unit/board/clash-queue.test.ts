@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import {
   type BoardProjectId,
-  type Card,
-  type CardActionRequestInput,
+  type Task,
+  type TaskActionRequestInput,
   CardActionRequestSchema,
   CardCreateRequestSchema,
   type LaneSet,
@@ -26,7 +26,7 @@ import {
   queueBehindClashes,
 } from '../../../daemon/lib/board/clash-queue.ts';
 import {
-  card,
+  boardTask,
   lanes,
   MACHINE,
   MemoryBoardStore,
@@ -40,16 +40,16 @@ import {
 const ferret = (ferret: string): BoardCaller => ({ kind: 'ferret', ferret });
 const lead = ferret('lead');
 const child = ferret('child');
-const action = (input: CardActionRequestInput) => CardActionRequestSchema.parse(input);
+const action = (input: TaskActionRequestInput) => CardActionRequestSchema.parse(input);
 const laneSets: ReadonlyMap<BoardProjectId, LaneSet> = new Map([[PROJECT as BoardProjectId, lanes()]]);
 
-const serviceWith = (cards: readonly Card[], overrides: Partial<ServiceWorld> = {}) => {
-  const ports = world({ store: new MemoryBoardStore(cards), ...overrides });
+const serviceWith = (tasks: readonly Task[], overrides: Partial<ServiceWorld> = {}) => {
+  const ports = world({ store: new MemoryBoardStore(tasks), ...overrides });
   return { ports, service: new BoardService(ports) };
 };
-const stored = (ports: ServiceWorld, id = 'F1'): Card => ports.store.cards.get(id) as Card;
-const plan = (subject: Card, claimed: readonly string[], cards: readonly Card[]) =>
-  planClashes(subject, claimed, new BoardIndex([subject, ...cards], MACHINE), laneSets);
+const stored = (ports: ServiceWorld, id = 'F1'): Task => ports.store.cards.get(id) as Task;
+const plan = (subject: Task, claimed: readonly string[], tasks: readonly Task[]) =>
+  planClashes(subject, claimed, new BoardIndex([subject, ...tasks], MACHINE), laneSets);
 
 describe('claimsClash', () => {
   it('should clash on the same path, however it is spelled', () => {
@@ -84,10 +84,10 @@ describe('claimsClash', () => {
 describe('planClashes', () => {
   it('should queue a claim behind an open card on the same board that claims an overlapping path', () => {
     // Arrange
-    const first = card({ id: 'F2', laneId: 'implement', files: ['packages/daemon/'] });
+    const first = boardTask({ id: 'F2', laneId: 'implement', files: ['packages/daemon/'] });
 
     // Act
-    const result = plan(card(), ['packages/daemon/bin/fyd.ts'], [first]);
+    const result = plan(boardTask(), ['packages/daemon/bin/fyd.ts'], [first]);
 
     // Assert
     should(result.waits).eql([{ card: { id: 'F2' }, ours: 'packages/daemon/bin/fyd.ts', theirs: 'packages/daemon/' }]);
@@ -95,21 +95,21 @@ describe('planClashes', () => {
   });
 
   it('should count a backlog card, which claimed the area first', () => {
-    const result = plan(card(), ['knip.json'], [card({ id: 'F2', laneId: 'todo', files: ['knip.json'] })]);
+    const result = plan(boardTask(), ['knip.json'], [boardTask({ id: 'F2', laneId: 'todo', files: ['knip.json'] })]);
     should(result.waits.map(wait => wait.card.id)).eql(['F2']);
   });
 
   it('should skip cards whose work has shipped, dropped cards, and cards on another board', () => {
     // Arrange
     const others = [
-      card({ id: 'F2', laneId: 'merged', files: ['knip.json'] }),
-      card({ id: 'F3', laneId: 'closed', files: ['knip.json'] }),
-      card({ id: 'F4', files: ['knip.json'], dropped: { reason: 'not needed', at: NOW } }),
-      card({ id: 'F5', projectId: OTHER_PROJECT as Card['projectId'], files: ['knip.json'] }),
+      boardTask({ id: 'F2', laneId: 'merged', files: ['knip.json'] }),
+      boardTask({ id: 'F3', laneId: 'closed', files: ['knip.json'] }),
+      boardTask({ id: 'F4', files: ['knip.json'], dropped: { reason: 'not needed', at: NOW } }),
+      boardTask({ id: 'F5', projectId: OTHER_PROJECT as Task['projectId'], files: ['knip.json'] }),
     ];
 
     // Act
-    const result = plan(card(), ['knip.json'], others);
+    const result = plan(boardTask(), ['knip.json'], others);
 
     // Assert
     should(result).eql({ waits: [], unqueued: [] });
@@ -117,13 +117,13 @@ describe('planClashes', () => {
 
   it("should skip the card's ancestors and descendants, which overlap it by design", () => {
     // Arrange
-    const parent = card({ id: 'F2', files: ['packages/daemon/'] });
-    const subject = card({ parent: { id: 'F2' } });
-    const grandchild = card({ id: 'F4', parent: { id: 'F3' }, files: ['packages/daemon/x.ts'] });
-    const childCard = card({ id: 'F3', parent: { id: 'F1' }, files: ['packages/daemon/y.ts'] });
+    const parent = boardTask({ id: 'F2', files: ['packages/daemon/'] });
+    const subject = boardTask({ parent: { id: 'F2' } });
+    const grandchild = boardTask({ id: 'F4', parent: { id: 'F3' }, files: ['packages/daemon/x.ts'] });
+    const childTask = boardTask({ id: 'F3', parent: { id: 'F1' }, files: ['packages/daemon/y.ts'] });
 
     // Act
-    const result = plan(subject, ['packages/daemon/z.ts'], [parent, childCard, grandchild]);
+    const result = plan(subject, ['packages/daemon/z.ts'], [parent, childTask, grandchild]);
 
     // Assert
     should(result).eql({ waits: [], unqueued: [] });
@@ -131,7 +131,7 @@ describe('planClashes', () => {
 
   it('should skip a card it already depends on, or took out of its queue on purpose', () => {
     // Arrange
-    const subject = card({
+    const subject = boardTask({
       dependsOn: [{ task: { id: 'F2' }, until: 'released' }],
       history: [
         { seq: 1, at: NOW, actor: { kind: 'ferret', name: 'lead', ferret: 'lead' }, type: 'created', laneId: 'todo' },
@@ -145,7 +145,7 @@ describe('planClashes', () => {
         },
       ],
     });
-    const others = [card({ id: 'F2', files: ['knip.json'] }), card({ id: 'F3', files: ['knip.json'] })];
+    const others = [boardTask({ id: 'F2', files: ['knip.json'] }), boardTask({ id: 'F3', files: ['knip.json'] })];
 
     // Act
     const result = plan(subject, ['knip.json'], others);
@@ -156,7 +156,7 @@ describe('planClashes', () => {
 
   it("should not read removing another machine's card as removing the local card with the same id", () => {
     // Arrange
-    const subject = card({
+    const subject = boardTask({
       id: 'F3',
       history: [
         { seq: 1, at: NOW, actor: { kind: 'ferret', name: 'lead', ferret: 'lead' }, type: 'created', laneId: 'todo' },
@@ -172,7 +172,7 @@ describe('planClashes', () => {
     });
 
     // Act
-    const result = plan(subject, ['x.ts'], [card({ id: 'F2', laneId: 'implement', files: ['x.ts'] })]);
+    const result = plan(subject, ['x.ts'], [boardTask({ id: 'F2', laneId: 'implement', files: ['x.ts'] })]);
 
     // Assert
     should(result.waits.map(wait => wait.card.id)).eql(['F2']);
@@ -180,10 +180,10 @@ describe('planClashes', () => {
 
   it('should report, not add, a clash whose dependency would close a cycle', () => {
     // Arrange
-    const other = card({ id: 'F2', files: ['knip.json'], dependsOn: [{ task: { id: 'F1' }, until: 'shipped' }] });
+    const other = boardTask({ id: 'F2', files: ['knip.json'], dependsOn: [{ task: { id: 'F1' }, until: 'shipped' }] });
 
     // Act
-    const result = plan(card(), ['knip.json'], [other]);
+    const result = plan(boardTask(), ['knip.json'], [other]);
 
     // Assert
     should(result.waits).eql([]);
@@ -194,13 +194,13 @@ describe('planClashes', () => {
   it('should stop adding at the most dependencies a card may hold', () => {
     // Arrange
     const full = Array.from({ length: MAX_BOARD_DEPENDENCIES }, (_, n) => ({
-      task: { id: `F${String(100 + n)}` as Card['id'] },
+      task: { id: `F${String(100 + n)}` as Task['id'] },
       until: 'shipped' as const,
     }));
-    const subject = card({ dependsOn: full });
+    const subject = boardTask({ dependsOn: full });
 
     // Act
-    const result = plan(subject, ['knip.json'], [card({ id: 'F2', files: ['knip.json'] })]);
+    const result = plan(subject, ['knip.json'], [boardTask({ id: 'F2', files: ['knip.json'] })]);
 
     // Assert
     should(result.waits).eql([]);
@@ -222,14 +222,14 @@ describe('planClashes and merge units', () => {
       releasedIn: null,
       polledAt: NOW,
     });
-  const linking = (...prs: PrLink[]): Pick<Card, 'links'> => ({
+  const linking = (...prs: PrLink[]): Pick<Task, 'links'> => ({
     links: { prs, branch: null, commits: [], docs: [] },
   });
 
   it('should never queue a card behind one that ships in the same PR', () => {
     // Arrange
-    const subject = card({ id: 'F2', ...linking(prLink(42)) });
-    const first = card({ id: 'F1', files: ['knip.json'], ...linking(prLink(42)) });
+    const subject = boardTask({ id: 'F2', ...linking(prLink(42)) });
+    const first = boardTask({ id: 'F1', files: ['knip.json'], ...linking(prLink(42)) });
 
     // Act
     const result = plan(subject, ['knip.json'], [first]);
@@ -240,11 +240,11 @@ describe('planClashes and merge units', () => {
 
   it("should queue behind the card whose PR ships a helper's claim, not the helper that closes early", () => {
     // Arrange
-    const lead = card({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) });
-    const helper = card({ id: 'F2', parent: { id: 'F1' }, files: ['knip.json'] });
+    const lead = boardTask({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) });
+    const helper = boardTask({ id: 'F2', parent: { id: 'F1' }, files: ['knip.json'] });
 
     // Act
-    const result = plan(card({ id: 'F3' }), ['knip.json'], [lead, helper]);
+    const result = plan(boardTask({ id: 'F3' }), ['knip.json'], [lead, helper]);
 
     // Assert
     should(result.waits).eql([{ card: { id: 'F1' }, via: { id: 'F2' }, ours: 'knip.json', theirs: 'knip.json' }]);
@@ -252,14 +252,14 @@ describe('planClashes and merge units', () => {
 
   it("should queue once per shipping card, and not behind the claimer's own lead", () => {
     // Arrange — two helpers of F1 clash with the claimer; the claimer's sibling ships with it.
-    const lead = card({ id: 'F1', ...linking(prLink(42)) });
+    const lead = boardTask({ id: 'F1', ...linking(prLink(42)) });
     const helpers = [
-      card({ id: 'F2', parent: { id: 'F1' }, files: ['knip.json'] }),
-      card({ id: 'F4', parent: { id: 'F1' }, files: ['knip.json'] }),
+      boardTask({ id: 'F2', parent: { id: 'F1' }, files: ['knip.json'] }),
+      boardTask({ id: 'F4', parent: { id: 'F1' }, files: ['knip.json'] }),
     ];
-    const sibling = card({ id: 'F6', parent: { id: 'F5' }, files: ['knip.json'] });
-    const claimerLead = card({ id: 'F5' });
-    const subject = card({ id: 'F7', parent: { id: 'F5' } });
+    const sibling = boardTask({ id: 'F6', parent: { id: 'F5' }, files: ['knip.json'] });
+    const claimerLead = boardTask({ id: 'F5' });
+    const subject = boardTask({ id: 'F7', parent: { id: 'F5' } });
 
     // Act
     const result = plan(subject, ['knip.json'], [lead, ...helpers, claimerLead, sibling]);
@@ -283,17 +283,17 @@ describe('planClashes across shipping units (review round 2)', () => {
       releasedIn: null,
       polledAt: NOW,
     });
-  const linking = (...prs: PrLink[]): Pick<Card, 'links'> => ({
+  const linking = (...prs: PrLink[]): Pick<Task, 'links'> => ({
     links: { prs, branch: null, commits: [], docs: [] },
   });
 
   it("should count a finished helper's claims while its lead's PR is open", () => {
     // Arrange
-    const lead = card({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) });
-    const helper = card({ id: 'F2', parent: { id: 'F1' }, laneId: 'closed', files: ['knip.json'] });
+    const lead = boardTask({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) });
+    const helper = boardTask({ id: 'F2', parent: { id: 'F1' }, laneId: 'closed', files: ['knip.json'] });
 
     // Act
-    const result = plan(card({ id: 'F3' }), ['knip.json'], [lead, helper]);
+    const result = plan(boardTask({ id: 'F3' }), ['knip.json'], [lead, helper]);
 
     // Assert
     should(result.waits.map(wait => wait.card.id)).eql(['F1']);
@@ -301,15 +301,20 @@ describe('planClashes across shipping units (review round 2)', () => {
 
   it('should refuse a wait that would close a cycle between two PRs through their helpers', () => {
     // Arrange — F2 (a helper of F1, PR 42) already waits on F3 (PR 43); F4, a helper of F3, now claims what F2 claims.
-    const cards = [
-      card({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) }),
-      card({ id: 'F2', parent: { id: 'F1' }, files: ['x.ts'], dependsOn: [{ task: { id: 'F3' }, until: 'shipped' }] }),
-      card({ id: 'F3', laneId: 'implement', ...linking(prLink(43)) }),
+    const tasks = [
+      boardTask({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) }),
+      boardTask({
+        id: 'F2',
+        parent: { id: 'F1' },
+        files: ['x.ts'],
+        dependsOn: [{ task: { id: 'F3' }, until: 'shipped' }],
+      }),
+      boardTask({ id: 'F3', laneId: 'implement', ...linking(prLink(43)) }),
     ];
-    const subject = card({ id: 'F4', parent: { id: 'F3' } });
+    const subject = boardTask({ id: 'F4', parent: { id: 'F3' } });
 
     // Act
-    const result = plan(subject, ['x.ts'], cards);
+    const result = plan(subject, ['x.ts'], tasks);
 
     // Assert
     should(result.waits).eql([]);
@@ -318,9 +323,9 @@ describe('planClashes across shipping units (review round 2)', () => {
 
   it('should queue a child with its own PR behind the PR that ships its sibling helper', () => {
     // Arrange
-    const lead = card({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) });
-    const helper = card({ id: 'F2', parent: { id: 'F1' }, files: ['x.ts'] });
-    const subject = card({ id: 'F3', parent: { id: 'F1' }, ...linking(prLink(43)) });
+    const lead = boardTask({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) });
+    const helper = boardTask({ id: 'F2', parent: { id: 'F1' }, files: ['x.ts'] });
+    const subject = boardTask({ id: 'F3', parent: { id: 'F1' }, ...linking(prLink(43)) });
 
     // Act
     const result = plan(subject, ['x.ts'], [lead, helper]);
@@ -331,13 +336,13 @@ describe('planClashes across shipping units (review round 2)', () => {
 
   it('should still queue two cards that only share an old, merged PR', () => {
     // Arrange
-    const first = card({
+    const first = boardTask({
       id: 'F1',
       laneId: 'implement',
       files: ['x.ts'],
       ...linking(prLink(40, 'merged'), prLink(42)),
     });
-    const subject = card({ id: 'F2', ...linking(prLink(40, 'merged'), prLink(43)) });
+    const subject = boardTask({ id: 'F2', ...linking(prLink(40, 'merged'), prLink(43)) });
 
     // Act
     const result = plan(subject, ['x.ts'], [first]);
@@ -361,16 +366,16 @@ describe('planClashes and the board service (review round 3)', () => {
       releasedIn: null,
       polledAt: NOW,
     });
-  const linking = (...prs: PrLink[]): Pick<Card, 'links'> => ({
+  const linking = (...prs: PrLink[]): Pick<Task, 'links'> => ({
     links: { prs, branch: null, commits: [], docs: [] },
   });
 
   it('should see a cycle through two cards that share one PR', async () => {
     // Arrange — F1 and F2 ship PR 42 together; F3 ships PR 43.
     const { ports, service } = serviceWith([
-      card({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) }),
-      card({ id: 'F2', laneId: 'implement', files: ['x.ts'], ...linking(prLink(42)) }),
-      card({ id: 'F3', laneId: 'implement', files: ['y.ts'], ...linking(prLink(43)) }),
+      boardTask({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) }),
+      boardTask({ id: 'F2', laneId: 'implement', files: ['x.ts'], ...linking(prLink(42)) }),
+      boardTask({ id: 'F3', laneId: 'implement', files: ['y.ts'], ...linking(prLink(43)) }),
     ]);
 
     // Act — F1 queues behind F3 (y.ts); then F3 claims x.ts, which F2 holds in PR 42.
@@ -389,10 +394,10 @@ describe('planClashes and the board service (review round 3)', () => {
   for (const order of ['F2 first', 'F3 first'] as const) {
     it(`should queue behind the lead's PR whatever the store order (${order})`, () => {
       // Arrange — F2 and F3 are helpers of F1 (PR 42) claiming x.ts; F4, under F2, ships its own PR 43.
-      const lead = card({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) });
-      const f2 = card({ id: 'F2', parent: { id: 'F1' }, files: ['x.ts'] });
-      const f3 = card({ id: 'F3', parent: { id: 'F1' }, files: ['x.ts'] });
-      const subject = card({ id: 'F4', parent: { id: 'F2' }, ...linking(prLink(43)) });
+      const lead = boardTask({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) });
+      const f2 = boardTask({ id: 'F2', parent: { id: 'F1' }, files: ['x.ts'] });
+      const f3 = boardTask({ id: 'F3', parent: { id: 'F1' }, files: ['x.ts'] });
+      const subject = boardTask({ id: 'F4', parent: { id: 'F2' }, ...linking(prLink(43)) });
 
       // Act
       const result = plan(subject, ['x.ts'], order === 'F2 first' ? [lead, f2, f3] : [lead, f3, f2]);
@@ -404,16 +409,16 @@ describe('planClashes and the board service (review round 3)', () => {
 
   it('should queue behind a lead on another board whose lanes this read does not hold', () => {
     // Arrange
-    const lead = card({
+    const lead = boardTask({
       id: 'F1',
-      projectId: OTHER_PROJECT as Card['projectId'],
+      projectId: OTHER_PROJECT as Task['projectId'],
       laneId: 'implement',
       ...linking(prLink(42)),
     });
-    const helper = card({ id: 'F2', parent: { id: 'F1' }, files: ['x.ts'] });
+    const helper = boardTask({ id: 'F2', parent: { id: 'F1' }, files: ['x.ts'] });
 
     // Act
-    const result = plan(card({ id: 'F3' }), ['x.ts'], [lead, helper]);
+    const result = plan(boardTask({ id: 'F3' }), ['x.ts'], [lead, helper]);
 
     // Assert
     should(result.waits.map(wait => wait.card.id)).eql(['F1']);
@@ -423,8 +428,8 @@ describe('planClashes and the board service (review round 3)', () => {
 describe('queueBehindClashes', () => {
   it("should add the dependency and a note, both the daemon's, for the claiming session", () => {
     // Arrange
-    const first = card({ id: 'F2', files: ['knip.json'] });
-    const subject = card();
+    const first = boardTask({ id: 'F2', files: ['knip.json'] });
+    const subject = boardTask();
 
     // Act
     const queued = queueBehindClashes(subject, ['knip.json'], {
@@ -455,7 +460,7 @@ describe('queueBehindClashes', () => {
   });
 
   it('should leave a card that clashes with nothing unchanged', () => {
-    const subject = card();
+    const subject = boardTask();
     const queued = queueBehindClashes(subject, ['knip.json'], {
       index: new BoardIndex([subject], MACHINE),
       laneSets,
@@ -469,8 +474,8 @@ describe('the board service queues clashing claims', () => {
   it('should queue a card behind an open card when its file claim clashes, inside the dependency section', async () => {
     // Arrange
     const { ports, service } = serviceWith([
-      card({ laneId: 'implement' }),
-      card({ id: 'F2', laneId: 'implement', files: ['packages/protocol/src/lib/daemon-features.ts'] }),
+      boardTask({ laneId: 'implement' }),
+      boardTask({ id: 'F2', laneId: 'implement', files: ['packages/protocol/src/lib/daemon-features.ts'] }),
     ]);
 
     // Act
@@ -489,7 +494,10 @@ describe('the board service queues clashing claims', () => {
 
   it('should not queue on a release, nor take the dependency section for it', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ files: ['knip.json'] }), card({ id: 'F2', files: ['knip.json'] })]);
+    const { ports, service } = serviceWith([
+      boardTask({ files: ['knip.json'] }),
+      boardTask({ id: 'F2', files: ['knip.json'] }),
+    ]);
 
     // Act
     await service.act('F1', action({ action: 'file', path: 'knip.json', release: true }), lead);
@@ -501,7 +509,7 @@ describe('the board service queues clashing claims', () => {
 
   it('should queue a card created with claims behind the open card that claimed first', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ id: 'F1', files: ['packages/daemon/bin/fyd.ts'] })]);
+    const { ports, service } = serviceWith([boardTask({ id: 'F1', files: ['packages/daemon/bin/fyd.ts'] })]);
 
     // Act
     const response = await service.create(
@@ -523,7 +531,7 @@ describe('the board service queues clashing claims', () => {
   });
 
   it('should create a card without claims outside the dependency section', async () => {
-    const { ports, service } = serviceWith([card({ files: ['knip.json'] })]);
+    const { ports, service } = serviceWith([boardTask({ files: ['knip.json'] })]);
     await service.create(
       CardCreateRequestSchema.parse({ kind: 'feature', title: 'Other', ask: { text: 'x', source: 'owner' } }),
       lead,
@@ -533,7 +541,7 @@ describe('the board service queues clashing claims', () => {
 
   it('should name the cards it could not read when it answers the merge gate', async () => {
     // Arrange
-    const ports = world({ store: new MemoryBoardStore([card()], [{ id: 'F9', reason: 'torn file' }]) });
+    const ports = world({ store: new MemoryBoardStore([boardTask()], [{ id: 'F9', reason: 'torn file' }]) });
 
     // Act
     const answer = await new BoardService(ports).mergeGate('https://github.com/kirinnee/ferretry/pull/42');
@@ -557,7 +565,7 @@ describe('the board service queues clashing claims', () => {
       leadOf: async (id: string) => (id === 'child' ? 'lead' : undefined),
       addressOf: async (id: string) => id,
     };
-    const { ports, service } = serviceWith([card({ assignee: 'child' }), card({ id: 'F2' })], { helpers });
+    const { ports, service } = serviceWith([boardTask({ assignee: 'child' }), boardTask({ id: 'F2' })], { helpers });
 
     // Act
     await service.act('F1', action({ action: 'file', path: 'knip.json' }), child);

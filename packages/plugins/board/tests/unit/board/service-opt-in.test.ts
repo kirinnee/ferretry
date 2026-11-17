@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
 import {
   type BoardProjectId,
-  type Card,
+  type Task,
   CardActionRequestSchema,
-  type CardCreateRequestInput,
+  type TaskCreateRequestInput,
   CardCreateRequestSchema,
 } from '../../../contract/index.ts';
 import should from 'should';
@@ -15,10 +15,10 @@ import {
   BoardService,
   type OwnerWords,
 } from '../../../daemon/lib/board/index.ts';
-import { card, MemoryBoardStore, NOW, OTHER_PROJECT, PROJECT, type ServiceWorld, world } from './support.ts';
+import { boardTask, MemoryBoardStore, NOW, OTHER_PROJECT, PROJECT, type ServiceWorld, world } from './support.ts';
 
 const lead: BoardCaller = { kind: 'ferret', ferret: 'lead' };
-const OWNER_WANTS_A_CARD = 'put the login redesign on the board as a task so I can follow it';
+const OWNER_WANTS_A_TASK = 'put the login redesign on the board as a task so I can follow it';
 
 /** Each board's switch and the ferrets' answered items, as the opt-in rule reads them; counts what it read. */
 class FakeOptIn implements BoardOptIn {
@@ -69,7 +69,7 @@ const yes = (id = 'A12', ferret = 'lead', choice = 'Yes'): AnsweredAsk & { reado
 
 const refile = (projectId: BoardProjectId) => CardActionRequestSchema.parse({ action: 'refile', projectId });
 
-const create = (input: Partial<CardCreateRequestInput> = {}) =>
+const create = (input: Partial<TaskCreateRequestInput> = {}) =>
   CardCreateRequestSchema.parse({
     kind: 'feature',
     title: 'Login redesign',
@@ -77,8 +77,8 @@ const create = (input: Partial<CardCreateRequestInput> = {}) =>
     ...input,
   });
 
-const serviceWith = (cards: readonly Card[], overrides: Partial<ServiceWorld> = {}) => {
-  const ports = world({ store: new MemoryBoardStore(cards), ...overrides });
+const serviceWith = (tasks: readonly Task[], overrides: Partial<ServiceWorld> = {}) => {
+  const ports = world({ store: new MemoryBoardStore(tasks), ...overrides });
   return { ports, service: new BoardService(ports) };
 };
 
@@ -162,7 +162,7 @@ describe('the board is opt-in', () => {
 
   it('should make a card under a parent the ferret holds', async () => {
     // Arrange
-    const { service } = serviceWith([card({ id: 'F3', owner: 'lead' })], { optIn: new FakeOptIn() });
+    const { service } = serviceWith([boardTask({ id: 'F3', owner: 'lead' })], { optIn: new FakeOptIn() });
 
     // Act
     const response = await service.create(create({ parent: { id: 'F3' } }), lead);
@@ -174,7 +174,7 @@ describe('the board is opt-in', () => {
   it('should still refuse a parent the ferret does not hold, before the rule is read', async () => {
     // Arrange
     const optIn = new FakeOptIn();
-    const { service } = serviceWith([card({ id: 'F3', owner: 'stranger' })], { optIn });
+    const { service } = serviceWith([boardTask({ id: 'F3', owner: 'stranger' })], { optIn });
 
     // Act
     const error = await refusal(service.create(create({ parent: { id: 'F3' } }), lead));
@@ -236,7 +236,7 @@ describe('the board is opt-in', () => {
 
   it('should refuse a second card on a Yes that already made one, saying which', async () => {
     // Arrange
-    const used = card({ id: 'F4', owner: 'lead', approval: { ferret: 'lead', id: 'A12' } });
+    const used = boardTask({ id: 'F4', owner: 'lead', approval: { ferret: 'lead', id: 'A12' } });
     const { service } = serviceWith([used], { optIn: new FakeOptIn(new Set(), { lead: [yes()] }) });
 
     // Act
@@ -284,11 +284,11 @@ describe('the board is opt-in', () => {
 
   it("should refuse a card whose ask is the owner's own words, however they ask for a card", async () => {
     // Arrange
-    const ownerWords = new FakeOwnerWords({ lead: [OWNER_WANTS_A_CARD] });
+    const ownerWords = new FakeOwnerWords({ lead: [OWNER_WANTS_A_TASK] });
     const { service } = serviceWith([], { optIn: new FakeOptIn(), ownerWords });
 
     // Act
-    const error = await refusal(service.create(create({ ask: { text: OWNER_WANTS_A_CARD, source: 'owner' } }), lead));
+    const error = await refusal(service.create(create({ ask: { text: OWNER_WANTS_A_TASK, source: 'owner' } }), lead));
 
     // Assert
     should(error.code).equal('forbidden');
@@ -298,9 +298,9 @@ describe('the board is opt-in', () => {
   it('should refuse a card under a parent that is dropped, closed, or on another board', async () => {
     // Arrange
     const parents = [
-      card({ id: 'F3', owner: 'lead', dropped: { reason: 'superseded', at: NOW } }),
-      card({ id: 'F4', owner: 'lead', laneId: 'closed' }),
-      card({ id: 'F5', owner: 'lead', projectId: OTHER_PROJECT, laneId: 'todo' }),
+      boardTask({ id: 'F3', owner: 'lead', dropped: { reason: 'superseded', at: NOW } }),
+      boardTask({ id: 'F4', owner: 'lead', laneId: 'closed' }),
+      boardTask({ id: 'F5', owner: 'lead', projectId: OTHER_PROJECT, laneId: 'todo' }),
     ];
     const { service } = serviceWith(parents, { optIn: new FakeOptIn(new Set([OTHER_PROJECT])) });
 
@@ -314,7 +314,7 @@ describe('the board is opt-in', () => {
   it("should refuse a refile of a ferret's card onto a board that is off", async () => {
     // Arrange: made where the board is on, then moved to one that is off.
     const { ports, service } = serviceWith(
-      [card({ id: 'F1', owner: 'lead', projectId: OTHER_PROJECT, laneId: 'todo' })],
+      [boardTask({ id: 'F1', owner: 'lead', projectId: OTHER_PROJECT, laneId: 'todo' })],
       {
         optIn: new FakeOptIn(new Set([OTHER_PROJECT])),
       },
@@ -330,10 +330,10 @@ describe('the board is opt-in', () => {
 
   it('should refile onto a board that is off a card under a live parent there the ferret holds, or one made on a Yes', async () => {
     // Arrange
-    const cards = [
-      card({ id: 'F2', owner: 'lead' }),
-      card({ id: 'F1', owner: 'lead', projectId: OTHER_PROJECT, laneId: 'todo', parent: { id: 'F2' } }),
-      card({
+    const tasks = [
+      boardTask({ id: 'F2', owner: 'lead' }),
+      boardTask({ id: 'F1', owner: 'lead', projectId: OTHER_PROJECT, laneId: 'todo', parent: { id: 'F2' } }),
+      boardTask({
         id: 'F3',
         owner: 'lead',
         projectId: OTHER_PROJECT,
@@ -341,7 +341,7 @@ describe('the board is opt-in', () => {
         approval: { ferret: 'lead', id: 'A12' },
       }),
     ];
-    const { ports, service } = serviceWith(cards, { optIn: new FakeOptIn() });
+    const { ports, service } = serviceWith(tasks, { optIn: new FakeOptIn() });
 
     // Act
     await service.act('F1', refile(PROJECT), lead);
@@ -354,11 +354,11 @@ describe('the board is opt-in', () => {
 
   it('should refuse a refile under a parent the ferret does not hold, and let the owner refile anything', async () => {
     // Arrange
-    const cards = [
-      card({ id: 'F2', owner: 'stranger' }),
-      card({ id: 'F1', owner: 'lead', projectId: OTHER_PROJECT, laneId: 'todo', parent: { id: 'F2' } }),
+    const tasks = [
+      boardTask({ id: 'F2', owner: 'stranger' }),
+      boardTask({ id: 'F1', owner: 'lead', projectId: OTHER_PROJECT, laneId: 'todo', parent: { id: 'F2' } }),
     ];
-    const { ports, service } = serviceWith(cards, { optIn: new FakeOptIn() });
+    const { ports, service } = serviceWith(tasks, { optIn: new FakeOptIn() });
 
     // Act
     const error = await refusal(service.act('F1', refile(PROJECT), lead));
@@ -372,7 +372,7 @@ describe('the board is opt-in', () => {
   it('should leave a refile within one board, or onto a board that is on, alone', async () => {
     // Arrange
     const { ports, service } = serviceWith(
-      [card({ id: 'F1', owner: 'lead', projectId: OTHER_PROJECT, laneId: 'todo' })],
+      [boardTask({ id: 'F1', owner: 'lead', projectId: OTHER_PROJECT, laneId: 'todo' })],
       {
         optIn: new FakeOptIn(new Set([PROJECT])),
       },
@@ -389,14 +389,14 @@ describe('the board is opt-in', () => {
 describe('whether a lead may put a new card under a card', () => {
   it('should be a live card on this machine that it may add a child under', async () => {
     // Arrange
-    const cards = [
-      card({ id: 'F1', owner: 'lead' }),
-      card({ id: 'F2', owner: 'stranger' }),
-      card({ id: 'F3', owner: 'lead', laneId: 'closed' }),
-      card({ id: 'F4', owner: 'lead', dropped: { reason: 'superseded', at: NOW } }),
-      card({ id: 'F5', owner: 'child' }),
+    const tasks = [
+      boardTask({ id: 'F1', owner: 'lead' }),
+      boardTask({ id: 'F2', owner: 'stranger' }),
+      boardTask({ id: 'F3', owner: 'lead', laneId: 'closed' }),
+      boardTask({ id: 'F4', owner: 'lead', dropped: { reason: 'superseded', at: NOW } }),
+      boardTask({ id: 'F5', owner: 'child' }),
     ];
-    const { service } = serviceWith(cards);
+    const { service } = serviceWith(tasks);
 
     // Act
     const answers = await Promise.all(
@@ -410,7 +410,7 @@ describe('whether a lead may put a new card under a card', () => {
   it('should read a card on a board with no lanes as no longer work', async () => {
     // Arrange
     const { service } = serviceWith([
-      card({ id: 'F1', owner: 'lead', projectId: '33333333-3333-4333-8333-333333333333' }),
+      boardTask({ id: 'F1', owner: 'lead', projectId: '33333333-3333-4333-8333-333333333333' }),
     ]);
 
     // Act

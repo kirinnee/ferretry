@@ -1,4 +1,4 @@
-import { type CardId, type CardRef, type CardResponse, type Lane, laneStage } from '../../../contract/index.ts';
+import { type TaskId, type TaskRef, type TaskResponse, type Lane, laneStage } from '../../../contract/index.ts';
 import type { TranscriptEvent } from './transcript-events.ts';
 import { BoardError } from './errors.ts';
 import { BOARD_CHECK_TAIL, lastTurn } from './turn-check.ts';
@@ -46,11 +46,11 @@ export interface GateCheckItem {
   readonly id: string;
   readonly raisedBy: 'human' | 'agent' | 'daemon';
   /** The card a ferret's own ask is about, when it names one. */
-  readonly card?: CardRef | null | undefined;
+  readonly card?: TaskRef | null | undefined;
   readonly waitingSince: string;
   readonly notice?: boolean | undefined;
   /** The cards for which this ask is the open ask of their gate (the `card` source's obligations). */
-  readonly gateOf?: readonly CardId[] | undefined;
+  readonly gateOf?: readonly TaskId[] | undefined;
 }
 
 /** What the check reads and how it sends. */
@@ -64,17 +64,17 @@ export interface BoardGateCheckPorts {
   /** The ferret's open asks, the daemon's gate asks included. */
   readonly open: (ferret: string) => Promise<readonly GateCheckItem[]>;
   /** One card with its board's lanes; a card that is gone is refused `not-found`. */
-  readonly card: (ref: CardRef) => Promise<CardResponse>;
+  readonly card: (ref: TaskRef) => Promise<TaskResponse>;
   /** The ordinary send; the same id twice is one message. */
   readonly send: (ferret: string, sendId: string, message: string) => Promise<void>;
   /** Journals that a nudge went out, with the ferret's items and the cards it named. */
-  readonly record: (ferret: string, items: readonly string[], cards: readonly string[]) => Promise<void>;
+  readonly record: (ferret: string, items: readonly string[], tasks: readonly string[]) => Promise<void>;
 }
 
 /** Whether a lane is a gate stage: its stored stage, else the one its category and owner gate derive. */
 export const isGateLane = (lane: Lane): boolean => laneStage(lane).kind === 'gate';
 
-const atGate = (response: CardResponse): boolean => {
+const atGate = (response: TaskResponse): boolean => {
   if (response.card.dropped !== null) return false;
   const lane = response.laneSet?.lanes.find(candidate => candidate.id === response.card.laneId);
   return lane !== undefined && isGateLane(lane);
@@ -92,8 +92,8 @@ export interface DuplicateGateItem {
 export const gateCheckMessage = (duplicates: readonly DuplicateGateItem[], binary: string): string =>
   duplicates
     .map(
-      ({ card, gateItem, item }) =>
-        `&${card} already asks the owner on ${ASK_REFERENCE_SIGIL}${gateItem}, which carries the task: put yours on it (${binary} ask edit ${gateItem} --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop ${ASK_REFERENCE_SIGIL}${item}: ${binary} ask dismiss ${item}`,
+      ({ card: task, gateItem, item }) =>
+        `&${task} already asks the owner on ${ASK_REFERENCE_SIGIL}${gateItem}, which carries the task: put yours on it (${binary} ask edit ${gateItem} --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop ${ASK_REFERENCE_SIGIL}${item}: ${binary} ask dismiss ${item}`,
     )
     .join('\n');
 
@@ -130,7 +130,7 @@ export class BoardGateCheck {
     );
     const duplicates: DuplicateGateItem[] = [];
     for (const item of raised) {
-      const ref = item.card as CardRef;
+      const ref = item.card as TaskRef;
       const gateItem = open.find(candidate => candidate.id !== item.id && (candidate.gateOf ?? []).includes(ref.id));
       if (gateItem === undefined) continue;
       if (!(await this.atGate(ref))) continue;
@@ -144,7 +144,7 @@ export class BoardGateCheck {
     return true;
   }
 
-  private async atGate(ref: CardRef): Promise<boolean> {
+  private async atGate(ref: TaskRef): Promise<boolean> {
     try {
       return atGate(await this.ports.card(ref));
     } catch (error) {

@@ -613,14 +613,14 @@ const taskCandidates = (
   scope: DaemonFerretScope,
   entries: readonly ReferenceCatalogEntry[],
   query: string,
-  includeAgentCards: boolean,
+  includeAgentTasks: boolean,
 ): ComposerAutocompleteCandidate[] => {
   const typed = query.toUpperCase();
   return entries
     .filter(
       entry =>
         entry.token.toUpperCase() === typed ||
-        (entry.closed !== true && (includeAgentCards || entry.agentAsked !== true)),
+        (entry.closed !== true && (includeAgentTasks || entry.agentAsked !== true)),
     )
     .flatMap(entry => {
       const reference = tokenOf({ kind: 'task', id: entry.token });
@@ -776,14 +776,14 @@ const familyResult = (
   entries: readonly ReferenceCatalogEntry[],
   query: string,
   contextLabel: string,
-  includeAgentCards: boolean,
+  includeAgentTasks: boolean,
 ): ComposerProviderResult => {
   if (family === ':')
     return { candidates: agentCandidates(scope, entries), filterQuery: query, limit: MAX_AGENT_RESULTS, contextLabel };
   if (family === ASK_REFERENCE_SIGIL)
     return { candidates: agendaCandidates(scope, entries), filterQuery: query, contextLabel };
   return {
-    candidates: taskCandidates(scope, entries, query, includeAgentCards),
+    candidates: taskCandidates(scope, entries, query, includeAgentTasks),
     filterQuery: query,
     limit: MAX_TASK_RESULTS,
     contextLabel,
@@ -807,13 +807,13 @@ const unreadFamilyResult = (contextLabel: string, query: string, error: unknown)
 const familyAnswers = (
   scope: DaemonFerretScope,
   source: CatalogSource,
-  includeAgentCards: () => boolean = () => false,
+  includeAgentTasks: () => boolean = () => false,
 ) => ({
   initial: (family: ReferenceFamily, query: string, contextLabel: string): ComposerProviderResult | undefined => {
     const known = source.known(family);
     return known === undefined
       ? undefined
-      : familyResult(family, scope, known, query, contextLabel, includeAgentCards());
+      : familyResult(family, scope, known, query, contextLabel, includeAgentTasks());
   },
   read: async (
     family: ReferenceFamily,
@@ -822,7 +822,7 @@ const familyAnswers = (
     signal: AbortSignal,
   ): Promise<ComposerProviderResult> => {
     try {
-      return familyResult(family, scope, await source.read(family, signal), query, contextLabel, includeAgentCards());
+      return familyResult(family, scope, await source.read(family, signal), query, contextLabel, includeAgentTasks());
     } catch (error) {
       if (signal.aborted || isAbortError(error)) throw error;
       return unreadFamilyResult(contextLabel, query, error);

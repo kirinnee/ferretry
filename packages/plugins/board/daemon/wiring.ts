@@ -14,25 +14,25 @@ import {
   type BoardConfig,
   type BoardFileSchema,
   BoardChanged,
-  type Card,
-  type CardId,
-  type CardRef,
-  type CardView,
+  type Task,
+  type TaskId,
+  type TaskRef,
+  type TaskView,
   type CountersFileSchema,
-  type FocusCard,
+  type FocusTask,
   type FocusFile,
   type LaneSet,
-  type OrphanedCards,
+  type OrphanedTasks,
   BoardQuerySchema,
   parseGateReference,
   type SweepFile,
 } from '../contract/index.ts';
 import type { z } from 'zod';
 import {
-  AsksCardObligations,
-  CARD_SOURCE,
+  AsksTaskObligations,
+  TASK_SOURCE,
   gateAnswerOf,
-  AsksCardAskReader,
+  AsksTaskAskReader,
   AsksOptIn,
   AsksThreads,
 } from './adapters/asks.ts';
@@ -53,36 +53,36 @@ import { ConversationMessages } from './adapters/messages.ts';
 import { ConversationOwnerWords } from './adapters/owner-words.ts';
 import { BoardWorkSource } from './adapters/work-source.ts';
 import { KernelFerretFocus } from './adapters/store/focus-store.ts';
-import { KernelCardStore } from './adapters/store/task-store.ts';
+import { KernelTaskStore } from './adapters/store/task-store.ts';
 import { KernelSweepMemory } from './adapters/store/sweep-memory.ts';
 import {
   BoardService,
   BoardSweep,
-  CardAskLinks,
-  type CardObligations,
-  CardStartRefused,
+  TaskAskLinks,
+  type TaskObligations,
+  TaskStartRefused,
   type DoneNotifier,
   DoneDeliveryLadder,
   type FerretRoster,
   GateItems,
-  gateCardsOf,
+  gateTasksOf,
   LivenessActivityDeriver,
   ReopenDeliveryLadder,
   type ReopenNotifier,
   stageGateLanes,
-  startOnCard,
+  startOnTask,
   walkLadder,
   rungsOf,
-  type StartOnCardPorts,
+  type StartOnTaskPorts,
   type GateBoard,
-  type GateCard,
+  type GateTask,
   BoardError,
   BoardIndex,
   stillBuilding,
   ownerDelegation,
   BoardGateCheck,
   BoardTurnCheck,
-  FerretCards,
+  FerretTasks,
   type GateCheckItem,
   type TranscriptEvent,
 } from './lib/board/index.ts';
@@ -104,7 +104,7 @@ type Counters = z.infer<typeof CountersFileSchema>;
 
 /** The state files and config this half reads, from the manifest's own declarations. */
 export interface BoardDefs {
-  readonly cards: StateFileDef<string, Card>;
+  readonly cards: StateFileDef<string, Task>;
   readonly counters: StateFileDef<string, Counters>;
   readonly boards: StateFileDef<string, z.infer<typeof BoardFileSchema>>;
   readonly sweep: StateFileDef<string, SweepFile>;
@@ -136,15 +136,15 @@ export interface BoardWorld {
   readonly lanes: LaneSetService;
   readonly switches: BoardSwitchService;
   readonly gates: GateItems;
-  readonly obligations: CardObligations;
+  readonly obligations: TaskObligations;
   readonly focus: KernelFerretFocus;
   readonly watch: GithubWatch;
   readonly sweep: BoardSweep;
   readonly start: (
-    id: CardId,
+    id: TaskId,
     caller: import('./lib/board/index.ts').BoardCaller,
     key?: string,
-  ) => ReturnType<typeof startOnCard>;
+  ) => ReturnType<typeof startOnTask>;
   readonly proposalAcceptance: import('./lib/lanes/index.ts').LaneProposalAcceptance;
   readonly helpers: FerretsHelpers;
   readonly liveness: FerretsLiveness;
@@ -154,13 +154,13 @@ export interface BoardWorld {
   readonly applyAnswer: (answer: AskAnswer) => Promise<'applied' | { readonly refused: string }>;
   readonly sweepTick: (signal?: AbortSignal) => Promise<void>;
   readonly lines: (ferret: string) => Promise<readonly SitrepLine[]>;
-  readonly heldBy: (ferret: string) => Promise<readonly CardView[]>;
+  readonly heldBy: (ferret: string) => Promise<readonly TaskView[]>;
   /** The lane set of every project that has a card (`BoardApi.laneSets`). */
   readonly laneSets: () => Promise<readonly LaneSet[]>;
   /** Every open orphaned card with every board's lanes, from one snapshot (`BoardApi.orphanedCards`). */
-  readonly orphanedCards: () => Promise<OrphanedCards>;
+  readonly orphanedCards: () => Promise<OrphanedTasks>;
   /** The card a ferret works on with its lane set, when it is on this machine (`BoardApi.focusOf`). Not-found is `undefined`. */
-  readonly focusCard: (ferret: string) => Promise<FocusCard | undefined>;
+  readonly focusCard: (ferret: string) => Promise<FocusTask | undefined>;
   /** `turn.ended` (Conversation): the turn-end check and the gate check, each failure said, never thrown. */
   readonly turnEnded: (ferret: string) => Promise<void>;
   /** `ferret.started` (Ferrets): the started ferret's card (today's `SessionCards`). Never rejects. */
@@ -192,7 +192,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   const serial = new KeyedSerial();
 
   // ── state ─────────────────────────────────────────────────────────────────────────────────────────────────────
-  const store = new KernelCardStore(kernel.state, { cards: defs.cards, counters: defs.counters }, serial, diagnostics);
+  const store = new KernelTaskStore(kernel.state, { cards: defs.cards, counters: defs.counters }, serial, diagnostics);
   const focus = new KernelFerretFocus(kernel.state, defs.focus, ferrets, serial, diagnostics);
   const sweepMemory = new KernelSweepMemory(kernel.state, defs.sweep, diagnostics);
 
@@ -256,7 +256,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   const done: DoneNotifier = new DoneDeliveryLadder(messages, diagnostics);
 
   // ── the service ───────────────────────────────────────────────────────────────────────────────────────────────
-  const obligations = new AsksCardObligations(asks);
+  const obligations = new AsksTaskObligations(asks);
   const optIn = new AsksOptIn(asks).with({
     isOn: async project => await switches.isOn(project),
     nameOf: async project => (await lanes.project(project))?.name ?? project,
@@ -282,7 +282,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     done,
     activity: new LivenessActivityDeriver({ sessions: liveness, clock }),
     liveness,
-    asks: new CardAskLinks(new AsksCardAskReader(asks), diagnostics),
+    asks: new TaskAskLinks(new AsksTaskAskReader(asks), diagnostics),
     changes: {
       changed: async (_ferret: string, event: BoardChangedEvent) => {
         kernel.events.publish(BoardChanged, event);
@@ -305,7 +305,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   board = service;
 
   // ── gates: the card's entry into a gate lane is an obligation Asks shows; answering it moves the card ─────────
-  const gateCard = async (stored: Card, view?: CardView): Promise<GateCard> => {
+  const gateTask = async (stored: Task, view?: TaskView): Promise<GateTask> => {
     const response = await service.card(stored.id);
     const name = (await lanes.project(stored.projectId))?.name;
     const snapshot = await service.snapshot();
@@ -321,22 +321,22 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   };
   const gateBoard: GateBoard = {
     card: async id => {
-      const stored = (await service.snapshot()).cards.find(card => card.id === id);
-      return stored === undefined ? undefined : await gateCard(stored);
+      const stored = (await service.snapshot()).cards.find(task => task.id === id);
+      return stored === undefined ? undefined : await gateTask(stored);
     },
     // One sweep and one snapshot for the whole board; every card is built from them (v4's one-sweep shape), with no
     // per-card derivation.
     cards: async () => {
       const { views, laneSets } = await service.sweepBoard();
       const snapshot = await service.snapshot();
-      return await gateCardsOf({
+      return await gateTasksOf({
         views,
         cards: snapshot.cards,
         laneSets: snapshot.laneSets.size >= laneSets.size ? snapshot.laneSets : laneSets,
         machineId: machineId() ?? '',
         projectName: async project => (await lanes.project(project))?.name,
-        audienceOf: async card => await service.audienceOf(card),
-        blockedByOf: async card => (await service.card(card.id)).card.blockedBy,
+        audienceOf: async task => await service.audienceOf(task),
+        blockedByOf: async task => (await service.card(task.id)).card.blockedBy,
       });
     },
     act: async (id, request, caller, expect) => {
@@ -349,8 +349,8 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     board: gateBoard,
     lanes: stageGateLanes,
     words: {
-      told: async (card, message, key) => {
-        await walkLadder(messages, diagnostics, rungsOf(card), message, key);
+      told: async (task, message, key) => {
+        await walkLadder(messages, diagnostics, rungsOf(task), message, key);
       },
     },
     homes: { of: homeOf },
@@ -359,16 +359,16 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   gateItems = gates;
 
   // ── starting a ferret on a card ───────────────────────────────────────────────────────────────────────────────
-  const startResults = new Map<string, import('../contract/index.ts').CardStartResponse>();
-  const startPorts: StartOnCardPorts = {
+  const startResults = new Map<string, import('../contract/index.ts').TaskStartResponse>();
+  const startPorts: StartOnTaskPorts = {
     card: async id => await service.card(id),
-    folderOf: async card => {
-      const project = ProjectIdSchema.safeParse(card.projectId);
+    folderOf: async task => {
+      const project = ProjectIdSchema.safeParse(task.projectId);
       return project.success ? (await needs.projects()?.find(project.data))?.path : undefined;
     },
     live: async () => {
       const all = await ferrets.list();
-      const out = new Map<string, CardId | null>();
+      const out = new Map<string, TaskId | null>();
       for (const each of all)
         if (each.state !== 'stopped') out.set(each.id, (await focus.focusOf(each.id))?.id ?? null);
       return out;
@@ -376,18 +376,18 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     // Ferrets has no `kill_failed` state: a pane that would not stop reads as stopped (GAP).
     stuck: async () => new Map(),
     exclusive: async (id, work) => await serial.run(`board:start:${id}`, work),
-    start: async ({ card, folder, name, prompt }) => {
+    start: async ({ card: task, folder, name, prompt }) => {
       // Only the owner reaches this (`startOnCard` refuses any other caller before the port is asked), so it is a person's start.
       const started = await ferrets.start({ folder, name, prompt, by: 'board' }, PERSON_ORIGIN);
-      if (!started.ok) throw new CardStartRefused(started.error.reason);
+      if (!started.ok) throw new TaskStartRefused(started.error.reason);
       const ferret = started.value;
       // The new ferret holds the card from the first turn: assigned as the owner's act, and its focus.
       await service.assignForOwner(
-        card.id,
+        task.id,
         ferret,
-        ownerDelegation(card).held ?? { owner: card.owner, assignee: card.assignee },
+        ownerDelegation(task).held ?? { owner: task.owner, assignee: task.assignee },
       );
-      await focus.setFocus(ferret, { id: card.id } as CardRef, card.title, { anchor: true });
+      await focus.setFocus(ferret, { id: task.id } as TaskRef, task.title, { anchor: true });
       return { ferret, status: 'started' as const };
     },
     recall: key => startResults.get(key),
@@ -421,8 +421,8 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     },
     surface: {
       snapshot: async () => await service.snapshot(),
-      note: async (card, text) => {
-        await service.act(card, { action: 'note', text }, { kind: 'daemon' });
+      note: async (task, text) => {
+        await service.act(task, { action: 'note', text }, { kind: 'daemon' });
       },
       machineId,
     },
@@ -535,7 +535,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
             waitingSince: ask.raisedAt,
             notice: ask.kind === 'notice',
             gateOf:
-              ask.source === CARD_SOURCE
+              ask.source === TASK_SOURCE
                 ? [parseGateReference(ask.entry)?.cardId].flatMap(id => (id === undefined ? [] : [id]))
                 : [],
           }),
@@ -557,7 +557,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   };
 
   // ── a started ferret's card (Ferrets' `ferret.started`; today's SessionCards) ───────────────────────────────
-  const ferretCards = new FerretCards({
+  const ferretTasks = new FerretTasks({
     board: service,
     lanes,
     starts: {
@@ -587,14 +587,14 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
           diagnostics.warn(`stopping ${started.ferret}: ${reason}`);
           await ferrets.stop(started.ferret, 'now', reason);
         };
-        const handed = await ferretCards.startOn(started.parent, started.card as CardId);
+        const handed = await ferretTasks.startOn(started.parent, started.card as TaskId);
         if (handed.delegation === undefined)
           return await stop(handed.refusal ?? `task ${started.card} cannot be handed over`);
-        await ferretCards.takeOver(handed.delegation, started.ferret, stop);
+        await ferretTasks.takeOver(handed.delegation, started.ferret, stop);
         return;
       }
       if (started.brief === undefined) return;
-      const opened = await ferretCards.open({
+      const opened = await ferretTasks.open({
         ferret: started.ferret,
         name: started.name,
         brief: started.brief,
@@ -621,7 +621,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     return { refused: outcome.refused.message };
   };
 
-  const heldBy = async (ferret: string): Promise<readonly CardView[]> =>
+  const heldBy = async (ferret: string): Promise<readonly TaskView[]> =>
     (await service.board(BoardQuerySchema.parse({ ferret, state: 'open', limit: 100 }))).cards;
 
   return {
@@ -634,7 +634,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     focus,
     watch,
     sweep,
-    start: async (id, caller, key) => await startOnCard(startPorts, id, caller, key),
+    start: async (id, caller, key) => await startOnTask(startPorts, id, caller, key),
     proposalAcceptance: new LaneProposalAcceptance(lanes),
     helpers,
     liveness,
@@ -652,13 +652,13 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
       const held = await heldBy(ferret);
       if (held.length === 0) return [];
       const { laneSets } = await service.snapshot();
-      return held.map(card => {
-        const lane = laneSets.get(card.projectId)?.lanes.find(candidate => candidate.id === card.laneId)?.name;
-        const pr = prOf(card.links.prs);
+      return held.map(task => {
+        const lane = laneSets.get(task.projectId)?.lanes.find(candidate => candidate.id === task.laneId)?.name;
+        const pr = prOf(task.links.prs);
         return {
           kind: 'card' as const,
-          text: `${card.title}${card.progress?.now ? `: ${card.progress.now}` : ''}`,
-          ref: `&${card.id}`,
+          text: `${task.title}${task.progress?.now ? `: ${task.progress.now}` : ''}`,
+          ref: `&${task.id}`,
           ...(lane === undefined ? {} : { lane }),
           ...(pr === undefined ? {} : { pr }),
         };

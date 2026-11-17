@@ -3,8 +3,8 @@ import {
   type BoardPrStateFilter,
   type BoardQueryInput,
   BoardQuerySchema,
-  type Card,
-  type CardView,
+  type Task,
+  type TaskView,
   type LaneCategory,
   type PrLink,
 } from '../../../contract/index.ts';
@@ -21,12 +21,12 @@ import {
   passesFilters,
   type ScopedView,
 } from '../../../daemon/lib/board/index.ts';
-import { card, NOW } from './support.ts';
+import { boardTask, NOW } from './support.ts';
 
 const query = (input: BoardQueryInput = {}) => BoardQuerySchema.parse(input);
 
-const view = (overrides: Partial<CardView> = {}, stored: Partial<Card> = {}): CardView => ({
-  ...card(stored),
+const view = (overrides: Partial<TaskView> = {}, stored: Partial<Task> = {}): TaskView => ({
+  ...boardTask(stored),
   lastTouchedAt: null,
   touchedBy: null,
   activity: 'idle',
@@ -45,7 +45,7 @@ const view = (overrides: Partial<CardView> = {}, stored: Partial<Card> = {}): Ca
   ...overrides,
 });
 
-const scoped = (entry: CardView, category: LaneCategory | undefined = 'backlog'): ScopedView => ({
+const scoped = (entry: TaskView, category: LaneCategory | undefined = 'backlog'): ScopedView => ({
   view: entry,
   category,
 });
@@ -215,7 +215,7 @@ describe('board order and pages', () => {
 
   it('should order by manual order, then most recent, then id', () => {
     // Arrange
-    const cards = [
+    const tasks = [
       touched('F3', 1),
       touched('B9', 1),
       touched('F2', 1),
@@ -225,7 +225,7 @@ describe('board order and pages', () => {
     ];
 
     // Act
-    const ordered = [...cards].sort(compareViews).map(entry => entry.id);
+    const ordered = [...tasks].sort(compareViews).map(entry => entry.id);
 
     // Assert
     should(ordered).eql(['F8', 'C7', 'F1', 'B9', 'F2', 'F3']);
@@ -238,11 +238,11 @@ describe('board order and pages', () => {
 
   it('should page with a cursor until the last page', () => {
     // Arrange
-    const cards = ['F1', 'F2', 'F3'].map(id => touched(id, 1));
+    const tasks = ['F1', 'F2', 'F3'].map(id => touched(id, 1));
 
     // Act
-    const first = pageOf(query({ limit: 2 }), cards);
-    const second = pageOf(query({ limit: 2, cursor: first.nextCursor ?? undefined }), cards);
+    const first = pageOf(query({ limit: 2 }), tasks);
+    const second = pageOf(query({ limit: 2, cursor: first.nextCursor ?? undefined }), tasks);
 
     // Assert
     should(first.cards.map(entry => entry.id)).eql(['F1', 'F2']);

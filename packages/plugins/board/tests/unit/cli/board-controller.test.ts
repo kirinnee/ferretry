@@ -5,10 +5,10 @@ import type {
   BoardResponse,
   BoardSkipRequest,
   BoardSkipResponse,
-  CardActionRequestInput,
-  CardCreateRequestInput,
-  CardResponse,
-  CardView,
+  TaskActionRequestInput,
+  TaskCreateRequestInput,
+  TaskResponse,
+  TaskView,
   LaneSet,
 } from '../../../contract/index.ts';
 import { taskWire } from '../../../contract/index.ts';
@@ -24,9 +24,9 @@ import {
 import type { BoardGateway, BoardOutput, FerretDirectoryEntry, TextFiles } from '../../../cli/lib/ports.ts';
 import { RelatedCheck } from '../../../cli/lib/related.ts';
 import { filesOf } from '../../../cli/lib/context.ts';
-import { askHit, CapturingOutput, cardHit, FakeRelatedGateway } from './related-fixtures.ts';
+import { askHit, CapturingOutput, taskHit, FakeRelatedGateway } from './related-fixtures.ts';
 import {
-  card,
+  boardTask,
   DENISHA,
   directory,
   FERRETRY_ID,
@@ -38,7 +38,7 @@ import {
   pr,
   project,
   response,
-  cardResponse,
+  taskResponse,
 } from './fixtures.ts';
 
 const PR_ONE = 'https://github.com/kirinnee/ferretry/pull/1';
@@ -59,8 +59,8 @@ class FakeGateway implements BoardGateway {
   readonly boardCalls: BoardQueryInput[] = [];
   readonly cardCalls: string[] = [];
   projectCalls = 0;
-  readonly createCalls: { request: CardCreateRequestInput }[] = [];
-  readonly actCalls: { id: string; request: CardActionRequestInput }[] = [];
+  readonly createCalls: { request: TaskCreateRequestInput }[] = [];
+  readonly actCalls: { id: string; request: TaskActionRequestInput }[] = [];
   readonly skipCalls: { request: BoardSkipRequest }[] = [];
 
   boardResponse: BoardResponse = response();
@@ -72,7 +72,7 @@ class FakeGateway implements BoardGateway {
     ],
     current: FERRETRY_ID as never,
   });
-  cardView: CardView | undefined;
+  cardView: TaskView | undefined;
   cardLaneSet: LaneSet | null = laneSet();
   ferretList: readonly FerretDirectoryEntry[] = directory;
   createError: unknown;
@@ -84,25 +84,25 @@ class FakeGateway implements BoardGateway {
     return Promise.resolve(this.boardResponse);
   }
 
-  card(id: string): Promise<CardResponse> {
+  card(id: string): Promise<TaskResponse> {
     this.cardCalls.push(id);
-    return Promise.resolve(cardResponse(this.cardView ?? card({ id }), this.cardLaneSet));
+    return Promise.resolve(taskResponse(this.cardView ?? boardTask({ id }), this.cardLaneSet));
   }
 
-  create(request: CardCreateRequestInput): Promise<CardResponse> {
+  create(request: TaskCreateRequestInput): Promise<TaskResponse> {
     this.createCalls.push({ request });
     if (this.createError !== undefined) return Promise.reject(this.createError);
-    return Promise.resolve(cardResponse(card({ id: 'F2' }), laneSet()));
+    return Promise.resolve(taskResponse(boardTask({ id: 'F2' }), laneSet()));
   }
 
-  act(id: string, request: CardActionRequestInput): Promise<CardResponse> {
+  act(id: string, request: TaskActionRequestInput): Promise<TaskResponse> {
     this.actCalls.push({ id, request });
     if (this.actError !== undefined) return Promise.reject(this.actError);
     const url = 'pr' in request ? request.pr : undefined;
     if (url !== undefined && this.actFailures.has(url)) return Promise.reject(this.actFailures.get(url));
     return Promise.resolve(
-      cardResponse(
-        card({
+      taskResponse(
+        boardTask({
           id,
           links: {
             prs: url ? [pr({ url, number: Number(url.split('/').at(-1)) })] : [],
@@ -369,7 +369,7 @@ describe('fy board', () => {
   it('should print the daemon’s answer as JSON on request', async () => {
     // Arrange
     const { controller, gateway, log } = harness();
-    gateway.boardResponse = response({ cards: [card()] });
+    gateway.boardResponse = response({ cards: [boardTask()] });
 
     // Act
     await controller.board({ json: true });
@@ -381,7 +381,7 @@ describe('fy board', () => {
   it('should print a markdown report on request', async () => {
     // Arrange
     const { controller, gateway, log } = harness();
-    gateway.boardResponse = response({ cards: [card()] });
+    gateway.boardResponse = response({ cards: [boardTask()] });
 
     // Act
     await controller.board({ md: true });
@@ -395,7 +395,7 @@ describe('fy board', () => {
   it('should show callsigns, not session ids, in the rows', async () => {
     // Arrange
     const { controller, gateway, log } = harness();
-    gateway.boardResponse = response({ cards: [card({ owner: DENISHA, assignee: KIRIN })] });
+    gateway.boardResponse = response({ cards: [boardTask({ owner: DENISHA, assignee: KIRIN })] });
 
     // Act
     await controller.board({});
@@ -422,7 +422,7 @@ describe('fy task show', () => {
   it('should fetch the children only when the roll-up counts some, and keep only the task’s own', async () => {
     // Arrange
     const { controller, gateway, log } = harness();
-    gateway.cardView = card({
+    gateway.cardView = boardTask({
       id: 'F5',
       rollup: {
         children: 1,
@@ -433,8 +433,8 @@ describe('fy task show', () => {
     });
     gateway.boardResponse = response({
       cards: [
-        card({ id: 'F6', title: 'Child one', parent: { id: 'F5' } }),
-        card({ id: 'F7', title: 'Stranger', parent: { id: 'F9' } }),
+        boardTask({ id: 'F6', title: 'Child one', parent: { id: 'F5' } }),
+        boardTask({ id: 'F7', title: 'Stranger', parent: { id: 'F9' } }),
       ],
     });
 
@@ -1134,7 +1134,7 @@ describe('the action verbs', () => {
   it('should send only the parts --now/--done/--next name, without reading the task', async () => {
     // Arrange — the daemon merges them into the card's progress in its own write, so concurrent edits never undo each other.
     const gateway = new FakeGateway();
-    gateway.cardView = card({ id: 'F1', progress: { now: 'old', doneSoFar: '- done', next: '1. next' } });
+    gateway.cardView = boardTask({ id: 'F1', progress: { now: 'old', doneSoFar: '- done', next: '1. next' } });
     const { controller } = harness(gateway);
 
     // Act
@@ -1296,7 +1296,7 @@ describe('fy task new — related work', () => {
     return { controller, gateway, log, searchGateway, searchOutput };
   };
 
-  const strong = [{ strength: 'strong' as const, hit: cardHit() }];
+  const strong = [{ strength: 'strong' as const, hit: taskHit() }];
 
   it('should refuse a strong duplicate, create nothing, and list the matches and the ways out', async () => {
     // Arrange
@@ -1369,7 +1369,7 @@ describe('fy task new — related work', () => {
   it('should list the weak related tasks and offer --related, then create', async () => {
     // Arrange
     const { controller, gateway, log } = related([
-      { strength: 'weak', hit: cardHit() },
+      { strength: 'weak', hit: taskHit() },
       { strength: 'weak', hit: askHit() },
     ]);
 
@@ -1426,7 +1426,7 @@ describe('fy task new — related work', () => {
 
   it('should create on weak matches alone', async () => {
     // Arrange
-    const { controller, gateway } = related([{ strength: 'weak', hit: cardHit() }]);
+    const { controller, gateway } = related([{ strength: 'weak', hit: taskHit() }]);
 
     // Act
     await controller.create([], base);

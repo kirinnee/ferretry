@@ -6,7 +6,7 @@ import type { WorkSource } from '@ferretry/plugin-conversation/contract';
 import { fakeProjects } from '@ferretry/plugin-projects/contract/testing';
 import manifest from '../../../manifest.ts';
 import { ferretId } from '@ferretry/core-ferrets/contract/testing';
-import { as, boot, makeCard } from '../../integration/daemon/harness.ts';
+import { as, boot, makeTask } from '../../integration/daemon/harness.ts';
 
 /**
  * A machine with nothing installed, as the kernel's spawn surfaces it: Bun refuses to start a program it cannot find,
@@ -36,8 +36,8 @@ describe('jobs parity', () => {
     const asked: string[] = [];
     const { host } = await boot({ spawn: nothingInstalled(asked) });
     expect(host.jobIds()).toContain('board-github-watch');
-    const card = await makeCard(host);
-    const linked = await host.request('POST', `/v1/board/tasks/${card.id}`, {
+    const task = await makeTask(host);
+    const linked = await host.request('POST', `/v1/board/tasks/${task.id}`, {
       body: { action: 'link', pr: 'https://github.com/kirinnee/ferretry/pull/940' },
       headers: as('owner'),
     });
@@ -69,7 +69,7 @@ describe('jobs parity', () => {
   test('J-0080 the Unfiled refile is its own job beside the GitHub watch, run once at start', async () => {
     const { host } = await boot({ spawn: nothingInstalled([]) });
     expect(host.jobIds()).toEqual(expect.arrayContaining(['board-github-watch', 'board-unfiled-refile']));
-    await makeCard(host);
+    await makeTask(host);
     await host.runJob('board-unfiled-refile');
     expect(host.logs.filter(entry => entry.level === 'error')).toEqual([]);
   });
@@ -136,22 +136,22 @@ describe('jobs parity', () => {
     });
     ferrets.add({ id: ferretId('g0') });
     ferrets.setState(ferretId('g0'), 'stopped');
-    const card = await makeCard(host, { projectId: project.id, assignee: 'g0' });
+    const task = await makeTask(host, { projectId: project.id, assignee: 'g0' });
 
-    const started = await host.request('POST', `/v1/board/tasks/${card.id}/start`, { headers: as('owner') });
+    const started = await host.request('POST', `/v1/board/tasks/${task.id}/start`, { headers: as('owner') });
     expect(started.status).toBe(200);
     const result = started.json<{ task: string; ferret: string; started: boolean }>();
 
     expect(result.started).toBe(true);
     expect((await ferrets.get(result.ferret as never))?.folder).toBe(folder);
 
-    const read = await host.request('GET', `/v1/board/tasks/${card.id}`, { headers: as('owner') });
+    const read = await host.request('GET', `/v1/board/tasks/${task.id}`, { headers: as('owner') });
     expect(read.json<{ task: { assignee: string | null } }>().task.assignee).toBe(result.ferret);
   });
 
   test('J-0091 the work search no longer watches the board’s directory: Board hands Conversation its cards through search.sources, which re-indexes by identity', async () => {
     const world = await boot({ uses: { conversation: fakeConversation() } });
-    const made = await makeCard(world.host);
+    const made = await makeTask(world.host);
     const [contribution] = world.contribution('search.sources') as { id: string; item: WorkSource }[];
     expect(contribution?.id).toBe('board');
     const before = (await contribution?.item.list()) ?? [];
@@ -166,14 +166,14 @@ describe('jobs parity', () => {
 
   test('J-0091 the cards are a cheap source, so the next search reads them again: a card made or edited after the first search is listed as new work', async () => {
     const world = await boot({ uses: { conversation: fakeConversation() } });
-    const first = await makeCard(world.host);
+    const first = await makeTask(world.host);
     const [contribution] = world.contribution('search.sources') as { id: string; item: WorkSource }[];
     // The work search re-reads, on every search, exactly the sources that say `cheap` (nothing calls `changed('board')`).
     expect(contribution?.item.cheap).toBe(true);
     const afterFirstSearch = (await contribution?.item.list()) ?? [];
     expect(afterFirstSearch.map(work => work.key)).toEqual([`card:${first.id}`]);
 
-    const second = await makeCard(world.host);
+    const second = await makeTask(world.host);
     await world.host.request('POST', `/v1/board/tasks/${first.id}`, {
       body: { action: 'note', text: 'zebra crossing' },
       headers: as('owner'),

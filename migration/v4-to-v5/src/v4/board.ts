@@ -17,8 +17,8 @@ import { info } from './ferrets.ts';
 
 const Instant = z.iso.datetime({ offset: true });
 const SessionId = z.string().min(1);
-export const CARD_ID = /^[BFIC][1-9][0-9]{0,8}$/u;
-const CardId = z.string().regex(CARD_ID);
+export const TASK_ID = /^[BFIC][1-9][0-9]{0,8}$/u;
+const TaskId = z.string().regex(TASK_ID);
 const MachineId = z.string().trim().min(1).max(128);
 const ProjectId = z.union([z.uuid(), z.literal('unfiled')]);
 const LaneId = z
@@ -36,12 +36,12 @@ export const V4Actor = z.discriminatedUnion('kind', [
 export type V4ActorValue = z.infer<typeof V4Actor>;
 
 /** v4 `TaskRefSchema`. */
-export const V4TaskRef = z.strictObject({ machineId: MachineId.optional(), id: CardId });
+export const V4TaskRef = z.strictObject({ machineId: MachineId.optional(), id: TaskId });
 export type V4TaskRefValue = z.infer<typeof V4TaskRef>;
 
-const V4CardShape = {
+const V4TaskShape = {
   v: z.literal(1),
-  id: CardId,
+  id: TaskId,
   machineId: MachineId,
   projectId: ProjectId,
   laneId: LaneId,
@@ -88,22 +88,22 @@ const V4CardShape = {
   /** v4 `AgendaRefSchema`: the creating ferret's agenda item that approved the card. */
   approval: z.strictObject({ sessionId: SessionId, id: z.string().regex(/^A[1-9][0-9]*$/u) }).optional(),
 };
-export const KNOWN_CARD_FIELDS: ReadonlySet<string> = new Set(Object.keys(V4CardShape));
+export const KNOWN_TASK_FIELDS: ReadonlySet<string> = new Set(Object.keys(V4TaskShape));
 const FIELD_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 
-export const V4Card = z.looseObject(V4CardShape).superRefine((card, context) => {
-  const prefix = { bug: 'B', feature: 'F', infra: 'I', chore: 'C' }[card.kind];
-  if (!card.id.startsWith(prefix)) context.addIssue({ code: 'custom', message: 'id prefix', path: ['id'] });
-  if (card.history.some((event, index) => event.seq !== index + 1))
+export const V4Task = z.looseObject(V4TaskShape).superRefine((task, context) => {
+  const prefix = { bug: 'B', feature: 'F', infra: 'I', chore: 'C' }[task.kind];
+  if (!task.id.startsWith(prefix)) context.addIssue({ code: 'custom', message: 'id prefix', path: ['id'] });
+  if (task.history.some((event, index) => event.seq !== index + 1))
     context.addIssue({ code: 'custom', message: 'history seq', path: ['history'] });
-  if (card.history[0]?.type !== 'created')
+  if (task.history[0]?.type !== 'created')
     context.addIssue({ code: 'custom', message: 'history opens with created', path: ['history'] });
 });
-export type V4CardValue = z.infer<typeof V4Card>;
+export type V4TaskValue = z.infer<typeof V4Task>;
 
 /** The top-level fields of a card this reader does not declare: names only, refused if a name is not field-like. */
-export function unknownCardFields(card: Record<string, unknown>): string[] | undefined {
-  const unknown = Object.keys(card).filter(key => !KNOWN_CARD_FIELDS.has(key));
+export function unknownTaskFields(task: Record<string, unknown>): string[] | undefined {
+  const unknown = Object.keys(task).filter(key => !KNOWN_TASK_FIELDS.has(key));
   return unknown.every(key => FIELD_NAME.test(key)) ? unknown.sort() : undefined;
 }
 

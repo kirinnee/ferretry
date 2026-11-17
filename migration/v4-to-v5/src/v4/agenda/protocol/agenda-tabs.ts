@@ -28,7 +28,7 @@ import {
   agendaTabNameProblem,
   agendaTabProblems,
 } from './agenda.ts';
-import { agendaCardKind } from './agenda-task.ts';
+import { agendaTaskKind } from './agenda-task.ts';
 
 /** One tab as a reader sees it. The main tab's parts are separate, so each draws in its own block. */
 export type AgendaViewTab =
@@ -59,7 +59,7 @@ export const agendaTabs = (item: TabSource): readonly AgendaViewTab[] => {
     ...(filled(item.stillOpen) ? { stillOpen: item.stillOpen } : {}),
     ...(filled(item.whereWeAre) ? { whereWeAre: item.whereWeAre } : {}),
   };
-  const bodyName = agendaCardKind(item) === 'review' ? AGENDA_REVIEW_BODY_TAB_NAME : AGENDA_BODY_TAB_NAME;
+  const bodyName = agendaTaskKind(item) === 'review' ? AGENDA_REVIEW_BODY_TAB_NAME : AGENDA_BODY_TAB_NAME;
   return [
     ...(Object.keys(main).length === 0
       ? []

@@ -670,7 +670,7 @@ describe('withdrawQueued', () => {
 });
 
 describe('withdrawReplyVia', () => {
-  const card = { daemon: 'studio', ferret: 's1' };
+  const task = { daemon: 'studio', ferret: 's1' };
 
   test('takes the reply back from the machine it went to, through that machine’s client', async () => {
     const asked: string[] = [];
@@ -680,7 +680,7 @@ describe('withdrawReplyVia', () => {
       asked.push(daemon);
       return daemon === 'studio' ? studio : undefined;
     }, outbox as never);
-    expect(await take(card, 'm1')).toBe('withdrawn');
+    expect(await take(task, 'm1')).toBe('withdrawn');
     expect(asked).toEqual(['studio']);
     expect(studio.calls).toMatchObject([{ route: DELETE, params: { ferretId: 's1', messageId: 'm1' } }]);
   });

@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
-import type { Card, CardView, LaneSet, PrLink, ReleasedIn } from '../../../contract/index.ts';
+import type { Task, TaskView, LaneSet, PrLink, ReleasedIn } from '../../../contract/index.ts';
 import should from 'should';
 import {
   applyPrUpdate,
   BoardIndex,
   BoardService,
   BoardSweep,
-  type CardContext,
+  type TaskContext,
   closedLaneOf,
   EMPTY_SWEEP_MEMORY,
   gateOf,
@@ -17,12 +17,12 @@ import {
   reconcileFacts,
   shippedCloseReason,
   stageGateLanes,
-  SUB_CARD_HELPER_REASON,
-  SUB_CARD_SHIPPED_REASON,
+  SUB_TASK_HELPER_REASON,
+  SUB_TASK_SHIPPED_REASON,
   type SweepBoard,
 } from '../../../daemon/lib/board/index.ts';
 import {
-  card,
+  boardTask,
   FakeFocus,
   FakeSessions,
   lanes,
@@ -56,8 +56,8 @@ const mergedPr = (releasedIn: ReleasedIn | null = null): PrLink =>
   pr({ state: 'merged', mergedAt: '2026-10-30T09:00:00Z', mergeSha: SHA, releasedIn });
 
 const PARENT = { id: 'F1' };
-const sub = (laneId: string, prs: readonly PrLink[] = [], overrides: Partial<Card> = {}): Card =>
-  card({
+const sub = (laneId: string, prs: readonly PrLink[] = [], overrides: Partial<Task> = {}): Task =>
+  boardTask({
     id: 'F2',
     parent: PARENT,
     owner: 'lead',
@@ -68,7 +68,7 @@ const sub = (laneId: string, prs: readonly PrLink[] = [], overrides: Partial<Car
     ...overrides,
   });
 
-const context = (subject: Card, laneSet: LaneSet = templateLanes(), overrides: Partial<CardContext> = {}) => ({
+const context = (subject: Task, laneSet: LaneSet = templateLanes(), overrides: Partial<TaskContext> = {}) => ({
   now: NOW,
   actor: { kind: 'daemon' as const },
   standing: 'daemon' as const,
@@ -78,7 +78,7 @@ const context = (subject: Card, laneSet: LaneSet = templateLanes(), overrides: P
   ...overrides,
 });
 
-const lastMove = (subject: Card | null) => subject?.history.at(-1);
+const lastMove = (subject: Task | null) => subject?.history.at(-1);
 
 describe('a sub-card whose PRs shipped', () => {
   it('should close instead of waiting in Released · to test, with the reason in its history', () => {
@@ -95,7 +95,7 @@ describe('a sub-card whose PRs shipped', () => {
       type: 'moved',
       from: 'released',
       to: 'closed',
-      reason: SUB_CARD_SHIPPED_REASON,
+      reason: SUB_TASK_SHIPPED_REASON,
       auto: true,
       actor: { kind: 'daemon' },
     });
@@ -122,7 +122,7 @@ describe('a sub-card whose PRs shipped', () => {
 
     // Assert
     should(caught?.laneId).equal('closed');
-    should(lastMove(caught)).match({ reason: SUB_CARD_SHIPPED_REASON });
+    should(lastMove(caught)).match({ reason: SUB_TASK_SHIPPED_REASON });
   });
 
   it('should stay open while one of its PRs is still open', () => {
@@ -139,11 +139,11 @@ describe('a sub-card whose PRs shipped', () => {
     const set = templateLanes();
     const shipped = [mergedPr(RELEASE)];
     const dropped = sub('released', shipped, {
-      dropped: { at: NOW, by: { kind: 'owner' }, reason: 'no' } as Card['dropped'],
+      dropped: { at: NOW, by: { kind: 'owner' }, reason: 'no' } as Task['dropped'],
     });
 
     // Act / Assert
-    should(shippedCloseReason(sub('released', shipped), set)).equal(SUB_CARD_SHIPPED_REASON);
+    should(shippedCloseReason(sub('released', shipped), set)).equal(SUB_TASK_SHIPPED_REASON);
     should(shippedCloseReason(sub('implement', shipped), set)).be.null();
     should(shippedCloseReason(sub('released', shipped, { parent: null }), set)).be.null();
     should(shippedCloseReason(dropped, set)).be.null();
@@ -164,10 +164,10 @@ describe('a sub-card whose ferret finishes with no PR', () => {
     const done = await service.signalDone('child', 'reviewed: no findings');
 
     // Assert
-    const stored = ports.store.cards.get('F2') as Card;
+    const stored = ports.store.cards.get('F2') as Task;
     should(done?.moved?.id).equal('closed');
     should(stored.laneId).equal('closed');
-    should(stored.history.at(-1)).match({ type: 'moved', to: 'closed', reason: SUB_CARD_HELPER_REASON, auto: true });
+    should(stored.history.at(-1)).match({ type: 'moved', to: 'closed', reason: SUB_TASK_HELPER_REASON, auto: true });
     should(stored.history.at(-2)).match({ type: 'note', text: 'done: reviewed: no findings' });
     should(ports.store.writes).have.length(1);
   });
@@ -184,7 +184,7 @@ describe('a sub-card whose ferret finishes with no PR', () => {
 
     // Assert
     should(done?.moved?.id).equal('review');
-    should((ports.store.cards.get('F2') as Card).laneId).equal('review');
+    should((ports.store.cards.get('F2') as Task).laneId).equal('review');
   });
 
   it('should leave a sub-card whose PR merged where it is on done', async () => {
@@ -199,7 +199,7 @@ describe('a sub-card whose ferret finishes with no PR', () => {
 
     // Assert
     should(done?.moved).be.null();
-    should((ports.store.cards.get('F2') as Card).laneId).equal('implement');
+    should((ports.store.cards.get('F2') as Task).laneId).equal('implement');
   });
 
   it('should still send a top-level card with no PR to be tried', async () => {
@@ -222,8 +222,8 @@ describe('a sub-card whose ferret finishes with no PR', () => {
     const abandoned = pr({ state: 'closed' });
 
     // Act / Assert
-    should(helperCloseReason(sub('implement'), set)).equal(SUB_CARD_HELPER_REASON);
-    should(helperCloseReason(sub('implement', [abandoned]), set)).equal(SUB_CARD_HELPER_REASON);
+    should(helperCloseReason(sub('implement'), set)).equal(SUB_TASK_HELPER_REASON);
+    should(helperCloseReason(sub('implement', [abandoned]), set)).equal(SUB_TASK_HELPER_REASON);
     should(helperCloseReason(sub('implement', [pr()]), set)).be.null();
     should(helperCloseReason(sub('implement', [mergedPr()]), set)).be.null();
     should(helperCloseReason(sub('implement', [], { parent: null }), set)).be.null();
@@ -232,7 +232,7 @@ describe('a sub-card whose ferret finishes with no PR', () => {
 });
 
 describe('closing a helper whose ferret ended', () => {
-  const idle = (view: Card, derived: Partial<CardView> = {}): CardView => ({
+  const idle = (view: Task, derived: Partial<TaskView> = {}): TaskView => ({
     ...view,
     lastTouchedAt: null,
     touchedBy: null,
@@ -251,7 +251,7 @@ describe('closing a helper whose ferret ended', () => {
     shippedIn: null,
     ...derived,
   });
-  const board = (...views: CardView[]): SweepBoard => ({ views, laneSets: new Map([[PROJECT, lanes(PROJECT)]]) });
+  const board = (...views: TaskView[]): SweepBoard => ({ views, laneSets: new Map([[PROJECT, lanes(PROJECT)]]) });
   const gone = rosterOf([liveSession('lead')]);
   const alive = rosterOf([liveSession('lead'), liveSession('child')]);
   const old = new Date(Date.parse(NOW) - HELPER_ENDED_GRACE_MS - 1000).toISOString();
@@ -315,7 +315,7 @@ describe('closing a helper whose ferret ended', () => {
 
     // Assert
     should(report.closed).deepEqual(['F2']);
-    should((ported.store.cards.get('F2') as Card).history.at(-1)).match({ reason: SUB_CARD_HELPER_REASON });
+    should((ported.store.cards.get('F2') as Task).history.at(-1)).match({ reason: SUB_TASK_HELPER_REASON });
     should(warnings).be.empty();
   });
 
@@ -364,7 +364,7 @@ describe('no gate item for a sub-card the owner would test', () => {
   it('should raise none at a verify lane for a sub-card, and still raise one for a top-level card', () => {
     // Arrange
     const set = templateLanes();
-    const gate = (task: Card) => gateOf({ task, laneSet: set, audience: 'external' }, stageGateLanes);
+    const gate = (task: Task) => gateOf({ task, laneSet: set, audience: 'external' }, stageGateLanes);
 
     // Act / Assert
     should(gate(sub('released', [mergedPr(RELEASE)]))).be.undefined();

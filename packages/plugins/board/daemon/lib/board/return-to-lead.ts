@@ -12,8 +12,8 @@
  * with a PR open or merged-not-closed, or a top-level card a helper held, is returned. With no live ancestor
  * nothing is returned and the card is an orphan, which the Warden reports.
  */
-import { type Card, isSubCard, type LaneCategory } from '../../../contract/index.ts';
-import { type CardContext, withEvent } from './task-actions.ts';
+import { type Task, isSubTask, type LaneCategory } from '../../../contract/index.ts';
+import { type TaskContext, withEvent } from './task-actions.ts';
 import { nearestLiveLead, presenceOf, type FerretRoster } from './activity.ts';
 import { effectiveAssignee } from './authority.ts';
 import { MAX_LINEAGE_DEPTH } from './lineage.ts';
@@ -26,13 +26,13 @@ const WORKING_CATEGORIES: readonly LaneCategory[] = ['active', 'review'];
 
 /** Whether the card's ferret is gone and has been untouched for the grace (a session that blinks is not ended). */
 export const endedForGrace = (
-  card: Pick<Card, 'createdAt'> & { readonly lastTouchedAt?: string | null },
+  task: Pick<Task, 'createdAt'> & { readonly lastTouchedAt?: string | null },
   roster: FerretRoster,
   ferret: string,
   nowMs: number,
 ): boolean => {
   if (presenceOf(roster, ferret) !== 'dead') return false;
-  const touched = Date.parse(card.lastTouchedAt ?? card.createdAt);
+  const touched = Date.parse(task.lastTouchedAt ?? task.createdAt);
   return Number.isNaN(touched) || nowMs - touched >= HELPER_ENDED_GRACE_MS;
 };
 
@@ -45,32 +45,32 @@ export const endedForGrace = (
  * sweep, because a returned card reads as bookkeeping once its lead owns it.
  */
 export const returnLead = (
-  card: Pick<Card, 'assignee' | 'owner' | 'dropped' | 'parent' | 'links'>,
+  task: Pick<Task, 'assignee' | 'owner' | 'dropped' | 'parent' | 'links'>,
   category: LaneCategory | undefined,
   roster: FerretRoster,
 ): string | null => {
-  if (card.dropped !== null || category === undefined || !WORKING_CATEGORIES.includes(category)) return null;
-  if (isSubCard(card) && (!isHandedHelper(card) || isPrFreeHelper(card))) return null;
-  const ferret = effectiveAssignee(card);
+  if (task.dropped !== null || category === undefined || !WORKING_CATEGORIES.includes(category)) return null;
+  if (isSubTask(task) && (!isHandedHelper(task) || isPrFreeHelper(task))) return null;
+  const ferret = effectiveAssignee(task);
   return presenceOf(roster, ferret) === 'dead' ? nearestLiveLead(roster, ferret) : null;
 };
 
 /** {@link returnLead} for a ferret that has been gone for the grace (a session that blinks is not ended). */
 export const returnTarget = (
-  card: Pick<Card, 'assignee' | 'owner' | 'dropped' | 'createdAt' | 'parent' | 'links'> & {
+  task: Pick<Task, 'assignee' | 'owner' | 'dropped' | 'createdAt' | 'parent' | 'links'> & {
     readonly lastTouchedAt?: string | null;
   },
   category: LaneCategory | undefined,
   roster: FerretRoster,
   nowMs: number,
 ): string | null =>
-  endedForGrace(card, roster, effectiveAssignee(card), nowMs) ? returnLead(card, category, roster) : null;
+  endedForGrace(task, roster, effectiveAssignee(task), nowMs) ? returnLead(task, category, roster) : null;
 
 /** The card handed back: assigned to `lead`, with the ferret that finished recorded in the event. */
-export const returnCard = (card: Card, lead: string, finished: string, context: Pick<CardContext, 'now'>): Card => ({
+export const returnTask = (task: Task, lead: string, finished: string, context: Pick<TaskContext, 'now'>): Task => ({
   ...withEvent(
-    card,
-    { type: 'assigned', from: card.assignee, to: lead, returnedFrom: finished },
+    task,
+    { type: 'assigned', from: task.assignee, to: lead, returnedFrom: finished },
     { now: context.now, actor: { kind: 'daemon' } },
   ),
   assignee: lead,

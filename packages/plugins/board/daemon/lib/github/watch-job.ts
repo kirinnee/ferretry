@@ -88,9 +88,9 @@ export const githubWatchJob = (needs: GithubWatchNeeds): GithubWatch => {
   const surface = new AlertSurface(needs.surface);
   const alerts = new BoardAlerts({
     ...needs.alerts,
-    surface: async (card, message) => {
-      await surface.surface(card, message).catch((error: unknown) => {
-        needs.diagnostics.warn(`could not surface a withheld alert on ${card}'s board: ${String(error)}`);
+    surface: async (task, message) => {
+      await surface.surface(task, message).catch((error: unknown) => {
+        needs.diagnostics.warn(`could not surface a withheld alert on ${task}'s board: ${String(error)}`);
       });
     },
   });
@@ -104,10 +104,10 @@ export const githubWatchJob = (needs: GithubWatchNeeds): GithubWatch => {
     // else the nearest live lead above it, else the owner (notice-route.ts). With nobody alive it falls back to who the
     // alert went to before routing, via nudgeTarget (a helper's lead).
     nudges: {
-      send: async (card, message, reason) => {
-        const recipient = noticeRecipient(await needs.roster(), card);
-        const ferret = recipient?.ferret ?? (await nudgeTarget(needs.helpers, alertFallback(card, reason)));
-        await alerts.send(ferret, message, card.id);
+      send: async (task, message, reason) => {
+        const recipient = noticeRecipient(await needs.roster(), task);
+        const ferret = recipient?.ferret ?? (await nudgeTarget(needs.helpers, alertFallback(task, reason)));
+        await alerts.send(ferret, message, task.id);
       },
     },
   });

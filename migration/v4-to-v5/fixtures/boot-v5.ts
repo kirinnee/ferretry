@@ -28,7 +28,7 @@
  */
 import { FerretSummarySchema } from '@ferretry/core-ferrets/contract';
 import { DAEMON_RUN_FILE, DaemonRunSchema } from '@ferretry/kernel/contract';
-import { readCard } from '@ferretry/plugin-board/contract';
+import { readTask } from '@ferretry/plugin-board/contract';
 import { ProjectListSchema } from '@ferretry/plugin-projects/contract';
 import { spawn, type Subprocess } from 'bun';
 import { appendFileSync, existsSync } from 'node:fs';
@@ -330,7 +330,7 @@ async function bootHome(at: string, dir: string, data: boolean): Promise<readonl
     if (admitted) {
       await checkFerrets(base, token);
       await checkProjects(base, token);
-      await checkCards(base, token);
+      await checkTasks(base, token);
       await checkAgenda(base, token);
       await checkRuntimes(base, token);
     }
@@ -459,15 +459,15 @@ async function checkProjects(url: string, bearer: string): Promise<void> {
   });
 }
 
-async function checkCards(url: string, bearer: string): Promise<void> {
-  for (const card of made.cards ?? [])
-    await checked('board', `card ${card.id}`, async () => {
-      const { card: view } = readCard(await get(url, bearer, `/v1/board/tasks/${card.id}`));
-      if (view.id !== card.id) fail(`card ${card.id}: v5 answered card ${view.id}`);
-      if (view.laneId !== card.lane) fail(`card ${card.id}: it was in lane ${card.lane}; v5 has it in ${view.laneId}`);
-      if (card.dependsOn !== undefined && !JSON.stringify(view.dependsOn).includes(`"${card.dependsOn}"`))
-        fail(`card ${card.id}: it depended on ${card.dependsOn}; v5 lists no such dependency`);
-      say(`card ${card.id}: in lane ${view.laneId}, ${String(view.dependsOn.length)} dependency(ies)`);
+async function checkTasks(url: string, bearer: string): Promise<void> {
+  for (const task of made.cards ?? [])
+    await checked('board', `card ${task.id}`, async () => {
+      const { card: view } = readTask(await get(url, bearer, `/v1/board/tasks/${task.id}`));
+      if (view.id !== task.id) fail(`card ${task.id}: v5 answered card ${view.id}`);
+      if (view.laneId !== task.lane) fail(`card ${task.id}: it was in lane ${task.lane}; v5 has it in ${view.laneId}`);
+      if (task.dependsOn !== undefined && !JSON.stringify(view.dependsOn).includes(`"${task.dependsOn}"`))
+        fail(`card ${task.id}: it depended on ${task.dependsOn}; v5 lists no such dependency`);
+      say(`card ${task.id}: in lane ${view.laneId}, ${String(view.dependsOn.length)} dependency(ies)`);
     });
 }
 

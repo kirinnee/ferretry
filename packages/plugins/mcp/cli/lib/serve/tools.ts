@@ -905,7 +905,7 @@ const progress = (name: string, key: 'task' | 'card', description: string): McpT
     [key],
   ),
 });
-const CARD_TOOLS: readonly McpToolDefinition[] = [
+const TASK_TOOLS: readonly McpToolDefinition[] = [
   progress('task_progress', 'task', 'Rewrite one task’s progress (now, doneSoFar, next).'),
   progress('card_progress', 'card', 'Old name of task_progress: rewrite one task’s progress (now, doneSoFar, next).'),
 ];
@@ -916,6 +916,6 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
   ...CONFIG_TOOLS,
   ...LESSON_TOOLS,
   ...SEARCH_TOOLS,
-  ...CARD_TOOLS,
+  ...TASK_TOOLS,
   INSTRUCTIONS_TOOL,
 ];

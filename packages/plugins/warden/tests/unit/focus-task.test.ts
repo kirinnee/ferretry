@@ -1,15 +1,15 @@
 import { describe, it } from 'bun:test';
-import type { CardEvent, PrLink } from '@ferretry/plugin-board/contract';
+import type { TaskEvent, PrLink } from '@ferretry/plugin-board/contract';
 import type { Instant } from '@ferretry/std';
 import should from 'should';
 import {
   FOCUS_HISTORY_LINES,
-  focusCardBrief,
-  type WardenFocusCard,
+  focusTaskBrief,
+  type WardenFocusTask,
   wardenResumeMessage,
 } from '../../daemon/lib/index.ts';
 import { lanes, PROJECT } from '../support/board.ts';
-import { cardView } from './board-fixtures.ts';
+import { taskView } from './board-fixtures.ts';
 
 const pr = (overrides: Partial<PrLink> = {}): PrLink => ({
   url: 'https://github.com/kirinnee/ferretry/pull/42',
@@ -25,7 +25,7 @@ const pr = (overrides: Partial<PrLink> = {}): PrLink => ({
   ...overrides,
 });
 
-const note = (seq: number, text: string): CardEvent => ({
+const note = (seq: number, text: string): TaskEvent => ({
   seq,
   at: `2026-10-30T10:0${seq}:00.000Z` as Instant,
   actor: { kind: 'ferret', name: 'worker', ferret: 'worker' },
@@ -33,12 +33,12 @@ const note = (seq: number, text: string): CardEvent => ({
   text,
 });
 
-const focus = (task = cardView({ title: 'Ship the thing' })): WardenFocusCard => ({ task, laneSet: lanes(PROJECT) });
+const focus = (task = taskView({ title: 'Ship the thing' })): WardenFocusTask => ({ task, laneSet: lanes(PROJECT) });
 
 describe('focusCardBrief', () => {
   it('should name the card and its lane, and quote the ask verbatim with where it came from', () => {
     // Act
-    const text = focusCardBrief(focus());
+    const text = focusTaskBrief(focus());
 
     // Assert
     should(text.split('\n').slice(0, 5)).eql([
@@ -55,7 +55,7 @@ describe('focusCardBrief', () => {
 
   it('should not tell a sub-ferret to move its task: the task moves itself', () => {
     // Act
-    const text = focusCardBrief({ ...focus(), subFerret: true });
+    const text = focusTaskBrief({ ...focus(), subFerret: true });
 
     // Assert
     should(text).endWith(
@@ -66,7 +66,7 @@ describe('focusCardBrief', () => {
 
   it('should quote every clarification verbatim', () => {
     // Arrange
-    const task = cardView({
+    const task = taskView({
       clarifications: [
         { text: 'and in dark mode', source: 'chat://2', at: '2026-10-30T10:00:00.000Z', by: { kind: 'owner' } },
         { text: 'not on Sundays', source: 'chat://3', at: '2026-10-30T10:00:00.000Z', by: { kind: 'owner' } },
@@ -74,7 +74,7 @@ describe('focusCardBrief', () => {
     });
 
     // Act
-    const text = focusCardBrief(focus(task));
+    const text = focusTaskBrief(focus(task));
 
     // Assert
     should(text).containEql('Clarified, verbatim (chat://2):\nand in dark mode');
@@ -83,7 +83,7 @@ describe('focusCardBrief', () => {
 
   it('should list every link, a draft PR as a draft', () => {
     // Arrange
-    const task = cardView({
+    const task = taskView({
       links: {
         prs: [pr(), pr({ url: 'https://github.com/kirinnee/ferretry/pull/43', number: 43, draft: true })],
         branch: 'feat/board',
@@ -93,7 +93,7 @@ describe('focusCardBrief', () => {
     });
 
     // Act
-    const text = focusCardBrief(focus(task));
+    const text = focusTaskBrief(focus(task));
 
     // Assert
     should(text).containEql(
@@ -110,16 +110,16 @@ describe('focusCardBrief', () => {
 
   it('should leave the links out when there are none', () => {
     // Act + Assert
-    should(focusCardBrief(focus())).not.containEql('Links:');
+    should(focusTaskBrief(focus())).not.containEql('Links:');
   });
 
   it(`should show the newest ${FOCUS_HISTORY_LINES} history lines, in the words fy task show uses`, () => {
     // Arrange
-    const base = cardView();
+    const base = taskView();
     const history = [...base.history, ...[2, 3, 4, 5, 6, 7].map(seq => note(seq, `step ${seq}`))];
 
     // Act
-    const text = focusCardBrief(focus({ ...base, history }));
+    const text = focusTaskBrief(focus({ ...base, history }));
 
     // Assert
     const shown = text.split('\n').filter(line => line.startsWith('- 2026'));
@@ -134,7 +134,7 @@ describe('focusCardBrief', () => {
 
   it('should name lanes by id when the board’s lanes are unknown', () => {
     // Act
-    const text = focusCardBrief({ task: cardView(), laneSet: null });
+    const text = focusTaskBrief({ task: taskView(), laneSet: null });
 
     // Assert
     should(text).containEql('Lane: implement');
@@ -143,8 +143,8 @@ describe('focusCardBrief', () => {
 
   it('should name a ferret in its history by its session id', () => {
     // Arrange
-    const base = cardView();
-    const assigned: CardEvent = {
+    const base = taskView();
+    const assigned: TaskEvent = {
       seq: 2,
       at: '2026-10-30T10:02:00.000Z' as Instant,
       actor: { kind: 'ferret', name: 'lead', ferret: 'lead' },
@@ -154,7 +154,7 @@ describe('focusCardBrief', () => {
     };
 
     // Act
-    const text = focusCardBrief(focus({ ...base, history: [...base.history, assigned] }));
+    const text = focusTaskBrief(focus({ ...base, history: [...base.history, assigned] }));
 
     // Assert
     should(text).containEql('- 2026-10-30T10:02:00.000Z  assigned lead → worker');

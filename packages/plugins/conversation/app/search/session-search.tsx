@@ -61,14 +61,14 @@ export interface FerretSearchCard {
 }
 
 /** This ferret's cards as Board read them: still reading, read, or not readable (and why). */
-export interface FerretCardsRead {
+export interface FerretTasksRead {
   readonly state: SessionSearchResourceState;
   readonly error: string | null;
   readonly cards: readonly FerretSearchCard[];
 }
 
 /** No board on this host: an empty, ready slice, never an error (the search simply holds files only). */
-const NO_BOARD: FerretCardsRead = { state: 'ready', error: null, cards: [] };
+const NO_BOARD: FerretTasksRead = { state: 'ready', error: null, cards: [] };
 
 /** Which daemon and ferret a search is about. Ferret ids are per daemon, so both are its identity. */
 export interface FerretSearchScope {
@@ -284,13 +284,13 @@ export function useSessionSearch(): SessionSearchContextValue {
 
 export function SessionSearchProvider({
   scope,
-  cards = NO_BOARD,
+  cards: tasks = NO_BOARD,
   focusSignal = 0,
   children,
 }: {
   readonly scope: FerretSearchScope | null;
   /** This ferret's cards as Board read them; absent, the host has no board and no cards. */
-  readonly cards?: FerretCardsRead;
+  readonly cards?: FerretTasksRead;
   readonly focusSignal?: number;
   readonly children: ReactNode;
 }) {
@@ -307,7 +307,7 @@ export function SessionSearchProvider({
   const key = snapshotKey(scope);
   const currentKey = useRef(key);
   currentKey.current = key;
-  const ferret = cards;
+  const ferret = tasks;
   // The board read in flight for THIS session. Menus await it rather than offer an invented empty list.
   const taskPending = useRef<{
     readonly key: string;

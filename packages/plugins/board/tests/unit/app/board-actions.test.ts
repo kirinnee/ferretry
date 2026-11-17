@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  type CardActionRequestInput,
-  type CardCreateRequestInput,
+  type TaskActionRequestInput,
+  type TaskCreateRequestInput,
   boardErr,
   boardOk,
   type LaneSetActionRequestInput,
@@ -9,14 +9,14 @@ import {
 } from '../../../contract/index.ts';
 
 import { type BoardMoveTarget, createBoardActions } from '../../../app/lib/board-actions.ts';
-import { CHILD, card, laneSetFor, laptop, workstation } from './board-support.ts';
+import { CHILD, boardTask, laneSetFor, laptop, workstation } from './board-support.ts';
 
 const lanes = laneSetFor();
 
 const harness = (paired = [laptop]) => {
-  const sent: { daemonId: string; id: string; request: CardActionRequestInput }[] = [];
+  const sent: { daemonId: string; id: string; request: TaskActionRequestInput }[] = [];
   const lanesSent: { daemonId: string; projectId: string; request: LaneSetActionRequestInput }[] = [];
-  const created: { daemonId: string; request: CardCreateRequestInput }[] = [];
+  const created: { daemonId: string; request: TaskCreateRequestInput }[] = [];
   const started: { daemonId: string; id: string; key: string | undefined }[] = [];
   let refuse = false;
   const actions = createBoardActions({
@@ -32,7 +32,9 @@ const harness = (paired = [laptop]) => {
       },
       act: async (machine, id, request) => {
         sent.push({ daemonId: machine.daemonId, id, request });
-        return refuse ? boardErr({ status: 409, message: 'no', boardCode: 'owner-gate' as const }) : boardOk(card(id));
+        return refuse
+          ? boardErr({ status: 409, message: 'no', boardCode: 'owner-gate' as const })
+          : boardOk(boardTask(id));
       },
       start: async (machine, id, key) => {
         started.push({ daemonId: machine.daemonId, id, key });
@@ -44,7 +46,7 @@ const harness = (paired = [laptop]) => {
         created.push({ daemonId: machine.daemonId, request });
         return refuse
           ? boardErr({ status: 409, message: 'no', boardCode: 'owner-gate' as const })
-          : boardOk(card('F9'));
+          : boardOk(boardTask('F9'));
       },
     },
     connection: daemonId => paired.find(machine => machine.daemonId === daemonId),
@@ -134,26 +136,26 @@ describe('files on a move back', () => {
 });
 
 describe('the other verbs', () => {
-  const card1 = { daemonId: laptop.daemonId, id: 'F1' };
+  const task1 = { daemonId: laptop.daemonId, id: 'F1' };
 
   it('send the request each one names, to the card’s machine', async () => {
     const { actions, sent } = harness();
-    await actions.reopen(card1, 'implement', 'it came back', { text: 'again', source: `session:${CHILD}` });
-    await actions.depend(card1, { task: { daemonId: laptop.daemonId, id: 'F2' } as never, until: 'merged' as never });
-    await actions.depend(card1, {
+    await actions.reopen(task1, 'implement', 'it came back', { text: 'again', source: `session:${CHILD}` });
+    await actions.depend(task1, { task: { daemonId: laptop.daemonId, id: 'F2' } as never, until: 'merged' as never });
+    await actions.depend(task1, {
       task: { daemonId: laptop.daemonId, id: 'F3' } as never,
       until: 'merged' as never,
       overrideReason: 'urgent',
     });
-    await actions.undepend(card1, { daemonId: laptop.daemonId, id: 'F2' } as never, 'no longer needed');
-    await actions.note(card1, 'a note');
-    await actions.link(card1, { pr: 12 } as never);
-    await actions.drop(card1, 'obsolete');
-    await actions.editField(card1, { title: 'New title' });
-    await actions.reparent(card1, { id: 'F9' } as never, 'wrong parent');
-    await actions.reparent(card1, null);
-    await actions.snoozeTask(card1, '2026-08-02T15:00:00.000Z');
-    await actions.snoozeTask(card1, null);
+    await actions.undepend(task1, { daemonId: laptop.daemonId, id: 'F2' } as never, 'no longer needed');
+    await actions.note(task1, 'a note');
+    await actions.link(task1, { pr: 12 } as never);
+    await actions.drop(task1, 'obsolete');
+    await actions.editField(task1, { title: 'New title' });
+    await actions.reparent(task1, { id: 'F9' } as never, 'wrong parent');
+    await actions.reparent(task1, null);
+    await actions.snoozeTask(task1, '2026-08-02T15:00:00.000Z');
+    await actions.snoozeTask(task1, null);
     expect(sent.map(entry => entry.request.action)).toEqual([
       'reopen',
       'depend',
@@ -182,17 +184,17 @@ describe('the other verbs', () => {
   it('hand the daemon’s refusal back as a value', async () => {
     const { actions, refuse } = harness();
     refuse(true);
-    const answer = await actions.drop(card1, 'x');
+    const answer = await actions.drop(task1, 'x');
     expect(!answer.ok && answer.error.boardCode).toBe('owner-gate');
   });
 });
 
 describe('start', () => {
-  const card1 = { daemonId: laptop.daemonId, id: 'F1' };
+  const task1 = { daemonId: laptop.daemonId, id: 'F1' };
 
   it('starts a new ferret on the card, on the machine it names', async () => {
     const { actions, started } = harness();
-    const answer = await actions.start(card1, 'click-1');
+    const answer = await actions.start(task1, 'click-1');
     expect(answer.ok && answer.value).toEqual({ card: 'F1', ferret: 'worker', started: true });
     expect(started).toEqual([{ daemonId: laptop.daemonId, id: 'F1', key: 'click-1' }]);
   });
@@ -200,7 +202,7 @@ describe('start', () => {
   it('hands the daemon’s refusal back as a value, and an unpaired machine as such', async () => {
     const { actions, refuse } = harness();
     refuse(true);
-    const answer = await actions.start(card1);
+    const answer = await actions.start(task1);
     expect(!answer.ok && answer.error).toEqual({ status: 404, message: 'the card was closed', boardCode: 'not-found' });
     const gone = await actions.start({ daemonId: workstation.daemonId, id: 'F1' });
     expect(!gone.ok && gone.error.boardCode).toBe('no-machine');

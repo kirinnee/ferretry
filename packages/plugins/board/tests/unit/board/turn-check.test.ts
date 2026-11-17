@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { BoardSkip, CardResponse, CardRef } from '../../../contract/index.ts';
+import type { BoardSkip, TaskResponse, TaskRef } from '../../../contract/index.ts';
 import should from 'should';
 import { BoardError } from '../../../daemon/lib/board/errors.ts';
 import {
@@ -9,11 +9,11 @@ import {
   type BoardTurnCheckPorts,
   boardCheckMessage,
   boardCheckSendId,
-  isOpenCard,
+  isOpenTask,
   mutatingWork,
 } from '../../../daemon/lib/board/turn-check.ts';
 import type { TranscriptEvent } from '../../../daemon/lib/board/transcript-events.ts';
-import { card, lanes } from './support.ts';
+import { boardTask, lanes } from './support.ts';
 
 const owner = (text: string, inputSource?: 'harness'): TranscriptEvent => ({
   kind: 'message',
@@ -27,8 +27,8 @@ const call = (name: string, input: unknown): TranscriptEvent =>
   ({ kind: 'tool-call', role: 'assistant', call: { id: name, name, input } }) as TranscriptEvent;
 
 /** A card response on the support project's board. */
-const response = (overrides: Parameters<typeof card>[0] = {}): CardResponse =>
-  ({ card: { ...card(overrides) }, laneSet: lanes() }) as unknown as CardResponse;
+const response = (overrides: Parameters<typeof boardTask>[0] = {}): TaskResponse =>
+  ({ card: { ...boardTask(overrides) }, laneSet: lanes() }) as unknown as TaskResponse;
 
 const HOUR = BOARD_CHECK_INTERVAL_MS;
 
@@ -36,9 +36,9 @@ const HOUR = BOARD_CHECK_INTERVAL_MS;
 function harness(
   options: {
     readonly events?: readonly TranscriptEvent[];
-    readonly focus?: CardRef | null;
+    readonly focus?: TaskRef | null;
     readonly skip?: BoardSkip | null;
-    readonly card?: () => Promise<CardResponse>;
+    readonly card?: () => Promise<TaskResponse>;
     readonly readable?: boolean;
     readonly boardOn?: boolean;
   } = {},
@@ -164,17 +164,17 @@ describe('the board check words', () => {
 describe('isOpenCard', () => {
   it('should count a card in any lane that is not closed, and not dropped', () => {
     // Act + Assert
-    should(isOpenCard(response())).be.true();
-    should(isOpenCard(response({ laneId: 'closed' }))).be.false();
+    should(isOpenTask(response())).be.true();
+    should(isOpenTask(response({ laneId: 'closed' }))).be.false();
     should(
-      isOpenCard(response({ dropped: { reason: 'superseded', at: '2026-10-30T10:00:00.000Z' } } as never)),
+      isOpenTask(response({ dropped: { reason: 'superseded', at: '2026-10-30T10:00:00.000Z' } } as never)),
     ).be.false();
   });
 
   it('should not count a card whose lane its board does not hold, or a board with no lanes', () => {
     // Act + Assert
-    should(isOpenCard(response({ laneId: 'gone' } as never))).be.false();
-    should(isOpenCard({ ...response(), laneSet: null })).be.false();
+    should(isOpenTask(response({ laneId: 'gone' } as never))).be.false();
+    should(isOpenTask({ ...response(), laneSet: null })).be.false();
   });
 });
 

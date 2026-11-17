@@ -42,7 +42,7 @@ import {
   sessionsToReadForResolved,
   type UnreadSession,
   UNSNOOZE_ACTION,
-  withFerretCards,
+  withFerretTasks,
   withFerretSessions,
 } from '../lib/agenda-inbox.ts';
 import {
@@ -347,17 +347,17 @@ export function useAgendaInboxModel(
   // A ferret's rule suggestion the owner already answered stays open on the ferret's agenda until it expires (C2): it
   // leaves the owner's Inbox through the owner's own "answered" set, never by closing the card. A reply just sent leaves
   // the deck at once, and an Undo's card is back at once, before any board says so.
-  const boardCards = derived.boardCards;
+  const boardTasks = derived.boardCards;
   const cards = useStable(derived.cards, cardsKey(derived.cards));
   // The overlay goes the moment the boards agree with it: parked or gone (or asked again), or listed open once Undo landed.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `repliedState` is the trigger -- a new entry (or Undo settling) must be checked against the boards at once
   useEffect(() => {
-    const listed = new Set(boardCards.map(card => card.key));
+    const listed = new Set(boardTasks.map(card => card.key));
     replied.reconcile((card): BoardItemRead => {
       const board = boards.snapshots.get(daemonSessionKey({ daemonId: card.daemonId, sessionId: card.view.config.id }));
       return board === undefined ? undefined : (board.items.find(item => item.id === card.item.id) ?? null);
     }, listed);
-  }, [replied, repliedState, boards, boardCards]);
+  }, [replied, repliedState, boards, boardTasks]);
   // The conversations whose items the agenda lists, with the machine each belongs to.
   const sources = useMemo(
     () =>
@@ -385,14 +385,14 @@ export function useAgendaInboxModel(
       boards.snapshots.get(daemonSessionKey({ daemonId, sessionId }))?.resolved ?? NO_RECORDS,
     [boards],
   );
-  const freshWithFerretCards = useMemo(
+  const freshWithFerretTasks = useMemo(
     () =>
-      withFerretCards(withFerretEntries, (daemonId, sessionId) =>
+      withFerretTasks(withFerretEntries, (daemonId, sessionId) =>
         boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
       ),
     [withFerretEntries, boards],
   );
-  const withFerret = useStable(freshWithFerretCards, cardsKey(freshWithFerretCards));
+  const withFerret = useStable(freshWithFerretTasks, cardsKey(freshWithFerretTasks));
   const boardKey = (entry: UnreadSession): string =>
     daemonSessionKey({ daemonId: entry.daemonId, sessionId: entry.view.config.id });
   const held = (entry: UnreadSession): boolean => boards.snapshots.has(boardKey(entry));

@@ -4,12 +4,12 @@ import type {
   ReferenceCatalogProvider,
 } from '@ferretry/plugin-conversation/contract';
 import { referenceCatalogLimit } from '@ferretry/plugin-conversation/contract';
-import { type CardView, cap, type LaneCategory } from '../../contract/index.ts';
+import { type TaskView, cap, type LaneCategory } from '../../contract/index.ts';
 import type { LaneSets } from '../lib/board/index.ts';
 
 /** What Board reads of itself to answer the `&` menu: every card's view with the lanes of each board (`sweepBoard`). */
-export interface BoardCardViews {
-  sweepBoard(): Promise<{ readonly views: readonly CardView[]; readonly laneSets: LaneSets }>;
+export interface BoardTaskViews {
+  sweepBoard(): Promise<{ readonly views: readonly TaskView[]; readonly laneSets: LaneSets }>;
 }
 
 /** The detail a card with no assignee prints (today's `&` menu row). */
@@ -20,11 +20,11 @@ const MAX_ALIAS = 64;
 
 const clip = (text: string, max: number): string => (text.length <= max ? text : text.slice(0, max));
 
-const laneOf = (view: CardView, laneSets: LaneSets) =>
+const laneOf = (view: TaskView, laneSets: LaneSets) =>
   laneSets.get(view.projectId)?.lanes.find(lane => lane.id === view.laneId);
 
 /** Closed work: dropped, or sitting in a closed-category lane. Known to a proof, not offered by the menu. */
-const isClosed = (view: CardView, category: LaneCategory | undefined): boolean =>
+const isClosed = (view: TaskView, category: LaneCategory | undefined): boolean =>
   view.dropped !== null || category === 'closed';
 
 /** Work in progress: an active or review lane. The menu lists it first. */
@@ -36,19 +36,19 @@ const isActive = (category: LaneCategory | undefined): boolean => category === '
  * `origin: human` is the owner's; `origin: agent` or `askedBy: agent` is an agent's; a view that carries neither
  * falls back to "the owner raised it" (`createdBy`), as the app's `isMine` reads it.
  */
-const isAgentAsked = (view: CardView): boolean => {
+const isAgentAsked = (view: TaskView): boolean => {
   if (view.askedBy === 'person' || view.origin === 'human') return false;
   if (view.origin === 'agent' || view.askedBy === 'agent') return true;
   return view.createdBy.kind !== 'owner';
 };
 
-const touchedMs = (view: CardView): number => {
+const touchedMs = (view: TaskView): number => {
   const parsed = Date.parse(view.lastTouchedAt ?? view.createdAt);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
 interface Row {
-  readonly view: CardView;
+  readonly view: TaskView;
   readonly entry: ReferenceCatalogEntry;
   readonly closed: boolean;
   readonly active: boolean;
@@ -81,7 +81,7 @@ const compareRows = (left: Row, right: Row): number =>
 export class BoardReferenceCatalog implements ReferenceCatalogProvider {
   readonly demand = cap('fleet', 'use');
 
-  constructor(private readonly board: BoardCardViews) {}
+  constructor(private readonly board: BoardTaskViews) {}
 
   async entries(input: ReferenceCatalogInput): Promise<readonly ReferenceCatalogEntry[]> {
     const { views, laneSets } = await this.board.sweepBoard();

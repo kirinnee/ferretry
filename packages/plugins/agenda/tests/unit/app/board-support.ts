@@ -4,7 +4,7 @@
  * card into is Board's rule (tested in Board); this stand-in closes into `closed` and counts a card there as closed.
  */
 
-import type { AgendaCardView, AgendaCardWrite } from '../../../contract/app-hooks.ts';
+import type { AgendaCardView, AgendaTaskWrite } from '../../../contract/app-hooks.ts';
 import type { DoneCloseResult } from '../../../app/lib/agenda-done-close.ts';
 import type { DoneCloseBoard } from '../../../app/hooks/use-done-close.ts';
 import { daemonConnection } from '../../../app/shell.ts';
@@ -12,14 +12,14 @@ import { daemonConnection } from '../../../app/shell.ts';
 export const laptop = daemonConnection({ daemonId: 'daemon/laptop' });
 
 /** A card as the board serves it, as far as a Done reads it; `extra` overrides any field. */
-export interface BoardCard {
+export interface BoardTask {
   readonly id: string;
   readonly title: string;
   readonly laneId: string;
   readonly dropped: { readonly at: string; readonly reason: string } | null;
 }
 
-export const card = (id: string, extra: Partial<BoardCard> = {}): BoardCard => ({
+export const card = (id: string, extra: Partial<BoardTask> = {}): BoardTask => ({
   id,
   title: `Card ${id}`,
   laneId: 'implement',
@@ -47,7 +47,7 @@ export const flush = async (): Promise<void> => {
 };
 
 /** What the fake board's read answers: the card, or `null` for a card the board does not have. */
-export type BoardRead = { readonly task: BoardCard } | null;
+export type BoardRead = { readonly task: BoardTask } | null;
 
 /** A move's answer: the card where it landed, or the board's refusal. */
 export type BoardMove =
@@ -70,7 +70,7 @@ export const fakeDoneCloseBoard = (
   const moves: string[] = [];
   const listeners = new Set<() => void>();
   const states = new Map<string, AgendaCardView>();
-  const reads = new Map<string, BoardCard | null>();
+  const reads = new Map<string, BoardTask | null>();
   const read = options.task ?? (async () => ({ task: card('F1', { laneId: 'tested' }) }));
   const IDLE: AgendaCardView = { status: 'idle', missing: false, closed: false };
   const publish = (id: string, state: AgendaCardView): void => {
@@ -93,7 +93,7 @@ export const fakeDoneCloseBoard = (
     land(id, answer.read);
     return { ok: true };
   };
-  const refused = (message: string): AgendaCardWrite => ({ ok: false, status: 0, message });
+  const refused = (message: string): AgendaTaskWrite => ({ ok: false, status: 0, message });
   return {
     daemonId: laptop.daemonId,
     moves,

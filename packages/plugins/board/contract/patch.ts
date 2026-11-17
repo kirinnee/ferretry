@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { toBullets } from './workflow.ts';
-import { type Card, CardEditFields, CardVisibilitySchema } from './wire.ts';
+import { type Task, TaskEditFields, CardVisibilitySchema } from './wire.ts';
 import { PositiveIntegerSchema } from '@ferretry/std';
 
 /**
@@ -38,29 +38,29 @@ export const CardPatchSchema = z.strictObject({
   /** READ BEFORE WRITE: the revision `fy card show <id> --yaml` printed (required); a stale one is refused. */
   revision: PositiveIntegerSchema,
   /** Rewritten, never removed. */
-  title: CardEditFields.title,
+  title: TaskEditFields.title,
   /** The one line the card face shows: rewritten, never removed. */
-  summary: CardEditFields.summary,
-  premise: points(CardEditFields.premise),
-  context: points(CardEditFields.context),
+  summary: TaskEditFields.summary,
+  premise: points(TaskEditFields.premise),
+  context: points(TaskEditFields.context),
   /** The glossary, replaced whole; `null` empties it. */
-  terms: z.preprocess(value => (value === null ? [] : value), CardEditFields.terms.unwrap()).optional(),
-  brief: emptied(CardEditFields.brief),
-  howToTest: emptied(CardEditFields.howToTest),
+  terms: z.preprocess(value => (value === null ? [] : value), TaskEditFields.terms.unwrap()).optional(),
+  brief: emptied(TaskEditFields.brief),
+  howToTest: emptied(TaskEditFields.howToTest),
   /**
    * The card's Status (&C48): the one object that MERGES BY KEY — each part named (`now`, `doneSoFar`, `next`) replaces
    * that part, the rest stay; `""` empties a part. The daemon merges it inside the card's write. Never `null`.
    */
-  progress: CardEditFields.progress,
+  progress: TaskEditFields.progress,
   visibility: CardVisibilitySchema.optional(),
 });
-export type CardPatch = z.infer<typeof CardPatchSchema>;
+export type TaskPatch = z.infer<typeof CardPatchSchema>;
 
 /** Every key a card patch takes, in the order `fy card show --yaml` prints them. */
-export const CARD_PATCH_KEYS = Object.keys(CardPatchSchema.shape) as readonly (keyof CardPatch)[];
+export const TASK_PATCH_KEYS = Object.keys(CardPatchSchema.shape) as readonly (keyof TaskPatch)[];
 
 /**
  * A CARD'S REVISION (`board.patch.1`): the seq of its newest history event. Every change to a card appends one, so it
  * moves on whenever anybody writes the card; the CLI prints it and the daemon checks it with this one function.
  */
-export const cardRevision = (card: Pick<Card, 'history'>): number => card.history.at(-1)?.seq ?? 1;
+export const taskRevision = (task: Pick<Task, 'history'>): number => task.history.at(-1)?.seq ?? 1;

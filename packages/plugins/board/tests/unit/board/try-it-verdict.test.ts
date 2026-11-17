@@ -1,16 +1,16 @@
 import { describe, it } from 'bun:test';
-import type { Card, CardGate, PrLink } from '../../../contract/index.ts';
+import type { Task, TaskGate, PrLink } from '../../../contract/index.ts';
 import should from 'should';
 import { nothingToTryReason, saysNothingToTry, tryItVerdict } from '../../../daemon/lib/board/index.ts';
-import { card } from './support.ts';
+import { boardTask } from './support.ts';
 
-const TRY_IT: Pick<CardGate, 'options'> = {
+const TRY_IT: Pick<TaskGate, 'options'> = {
   options: [
     { id: 'done', label: 'Done', outcome: 'close' },
     { id: 'not-good', label: 'Not good', outcome: 'reopen-with-ask' },
   ],
 };
-const PLAN: Pick<CardGate, 'options'> = { options: [{ id: 'ok', label: 'OK to build', outcome: 'next' }] };
+const PLAN: Pick<TaskGate, 'options'> = { options: [{ id: 'ok', label: 'OK to build', outcome: 'next' }] };
 
 const pr = (number: number, changes?: PrLink['changes'], state: PrLink['state'] = 'merged'): PrLink => ({
   url: `https://github.com/ferretry/ferretry/pull/${String(number)}`,
@@ -27,15 +27,15 @@ const pr = (number: number, changes?: PrLink['changes'], state: PrLink['state'] 
 });
 
 /** A card a person asked for, with steps to try and no PR: the case that is asked. */
-const tryable = (overrides: Partial<Card> = {}): Card =>
-  card({
+const tryable = (overrides: Partial<Task> = {}): Task =>
+  boardTask({
     ask: { text: 'make it', source: 'owner' },
     createdBy: { kind: 'ferret', name: 'lead', ferret: 'lead' },
     howToTest: '1. Open the Inbox\n2. Tap Done',
     ...overrides,
   });
 
-const withPrs = (...prs: PrLink[]): Partial<Card> => ({
+const withPrs = (...prs: PrLink[]): Partial<Task> => ({
   links: { prs, branch: null, commits: [], docs: [] },
 });
 

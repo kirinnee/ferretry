@@ -60,10 +60,10 @@ function facts(over: Partial<Facts> = {}): Facts {
   };
 }
 
-const card = '&F1787';
+const task = '&F1787';
 const entry = (seam: string, over: Partial<UnwiredEntry> = {}): UnwiredEntry => ({
   seam,
-  card,
+  card: task,
   why: 'the owner loses something',
   ...over,
 });
@@ -118,8 +118,8 @@ describe('unwired-seams: R3 a port nothing reaches', () => {
   });
 
   test('a port entry for a port that does not exist is a finding', () => {
-    const all = unwiredSeams(facts()).map(s => ({ seam: s.seam, card, why: 'x' }));
-    const found = unwiredFindings(facts(), [...all, { seam: 'port:ghost', card, why: 'x' }], undefined);
+    const all = unwiredSeams(facts()).map(s => ({ seam: s.seam, card: task, why: 'x' }));
+    const found = unwiredFindings(facts(), [...all, { seam: 'port:ghost', card: task, why: 'x' }], undefined);
     expect(found.map(f => f.message)).toEqual([expect.stringContaining('no port named "ghost"')]);
   });
 
@@ -262,10 +262,10 @@ describe('unwired-seams: the whole-file code entry', () => {
     });
     const rest = unwiredSeams(f)
       .filter(s => !s.seam.startsWith('code:'))
-      .map(s => ({ seam: s.seam, card, why: 'x' }));
+      .map(s => ({ seam: s.seam, card: task, why: 'x' }));
     const found = unwiredFindings(
       f,
-      [...rest, { seam: 'code:packages/core/ferrets/daemon/moves-deps.ts:*', card, why: 'x' }],
+      [...rest, { seam: 'code:packages/core/ferrets/daemon/moves-deps.ts:*', card: task, why: 'x' }],
       undefined,
     );
     expect(found).toHaveLength(1);
@@ -323,9 +323,9 @@ describe('unwired-seams: the base the list may not grow from', () => {
   });
 
   test('a readable base with a list reads it as before', () => {
-    const dir = repoWith([{ seam: 'hook:a', card, why: 'x' }]);
+    const dir = repoWith([{ seam: 'hook:a', card: task, why: 'x' }]);
     dirs.push(dir);
-    expect(readBaseUnwired(dir, 'HEAD')).toEqual([{ seam: 'hook:a', card, why: 'x' }]);
+    expect(readBaseUnwired(dir, 'HEAD')).toEqual([{ seam: 'hook:a', card: task, why: 'x' }]);
   });
 
   test('the check exits with the sentence when the named base is missing', async () => {

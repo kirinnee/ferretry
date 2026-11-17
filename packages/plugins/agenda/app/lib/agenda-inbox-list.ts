@@ -147,12 +147,12 @@ export interface InboxSections {
  * `ownerCards` (on the owner's turn) and `ferretCards` (on the ferret's turn) sorted into the three sections.
  * A ferret that is stopped heads the first; one with anything else on the owner's turn is in the second.
  */
-export const inboxSections = (ownerCards: readonly InboxCard[], ferretCards: readonly InboxCard[]): InboxSections => {
+export const inboxSections = (ownerCards: readonly InboxCard[], ferretTasks: readonly InboxCard[]): InboxSections => {
   const owners = buildGroups(ownerCards);
   return {
     stopped: owners.filter(group => group.stopped),
     needsYou: owners.filter(group => !group.stopped),
-    withFerrets: buildGroups(ferretCards).map(group => ({ ...group, stopped: false })),
+    withFerrets: buildGroups(ferretTasks).map(group => ({ ...group, stopped: false })),
   };
 };
 

@@ -4,17 +4,17 @@ import type { AgendaSnapshot, AskDraft } from '@ferretry/core-asks/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { gateReference } from '../../../contract/index.ts';
 import {
-  AsksCardObligations,
-  AsksCardAskReader,
+  AsksTaskObligations,
+  AsksTaskAskReader,
   AsksOptIn,
   AsksThreads,
-  CARD_SOURCE,
+  TASK_SOURCE,
   gateAnswerOf,
 } from '../../../daemon/adapters/asks.ts';
 import { FerretsHelpers, FerretsLiveness, FerretsNames, FerretsParents } from '../../../daemon/adapters/ferrets.ts';
-import { CardAskLinks } from '../../../daemon/lib/board/index.ts';
+import { TaskAskLinks } from '../../../daemon/lib/board/index.ts';
 import { KeyedSerial } from '../../../daemon/lib/lanes/serial.ts';
-import { card } from '../../support/board.ts';
+import { boardTask } from '../../support/board.ts';
 
 /** The boards' agenda items, as Asks hands them: an item is open in `items` and gone to `resolved` once answered. */
 const boardsOf = (...items: readonly Record<string, unknown>[]) => ({
@@ -22,14 +22,14 @@ const boardsOf = (...items: readonly Record<string, unknown>[]) => ({
 });
 const raised = (id: string, extra: Record<string, unknown> = {}) => ({ id, raisedBy: 'agent', ...extra });
 
-const gate = (cardId: string, entry = 1) => gateReference({ cardId, laneId: 'plan', entry });
+const gate = (taskId: string, entry = 1) => gateReference({ cardId: taskId, laneId: 'plan', entry });
 
-const gateDraft = (cardId: string, entry = 1, ferret = 'f1'): AskDraft => ({
-  source: CARD_SOURCE,
+const gateDraft = (taskId: string, entry = 1, ferret = 'f1'): AskDraft => ({
+  source: TASK_SOURCE,
   ref: {},
-  entry: entryId(gate(cardId, entry)),
+  entry: entryId(gate(taskId, entry)),
   kind: 'yesno',
-  subject: `Approve the plan for ${cardId}`,
+  subject: `Approve the plan for ${taskId}`,
   why: 'the plan waits for you',
   raisedBy: { kind: 'daemon' },
   ferret,
@@ -38,7 +38,7 @@ const gateDraft = (cardId: string, entry = 1, ferret = 'f1'): AskDraft => ({
 describe('a card gate as an obligation in Asks', () => {
   test('withdrawing a gate names its entry to Asks, so a carrier holding other gates keeps them', async () => {
     const asks = new FakeAsks();
-    const obligations = new AsksCardObligations(asks);
+    const obligations = new AsksTaskObligations(asks);
     await obligations.raise(gateDraft('F1'));
     const closes: { entry: unknown; reason: unknown }[] = [];
     const recording = {
@@ -55,18 +55,18 @@ describe('a card gate as an obligation in Asks', () => {
       },
     };
 
-    await new AsksCardObligations(recording as never).withdraw(gate('F1'), 'withdrawn');
+    await new AsksTaskObligations(recording as never).withdraw(gate('F1'), 'withdrawn');
 
     expect(closes).toEqual([{ entry: gate('F1'), reason: 'withdrawn' }]);
   });
 
   test('raising the same gate entry twice is one ask, and an entry already answered is never asked again', async () => {
     const asks = new FakeAsks();
-    const obligations = new AsksCardObligations(asks);
+    const obligations = new AsksTaskObligations(asks);
 
     expect(await obligations.raise(gateDraft('F1'))).toBe(true);
     expect(await obligations.raise(gateDraft('F1'))).toBe(false);
-    const [raised] = await asks.open({ source: CARD_SOURCE });
+    const [raised] = await asks.open({ source: TASK_SOURCE });
     asks.answerAs({ ferret: 'f1', id: raised!.id }, 'approve');
 
     expect(await obligations.raise(gateDraft('F1'))).toBe(false);
@@ -75,7 +75,7 @@ describe('a card gate as an obligation in Asks', () => {
 
   test('the open gates are listed with the card each names, optionally for one card, and other asks are left out', async () => {
     const asks = new FakeAsks();
-    const obligations = new AsksCardObligations(asks);
+    const obligations = new AsksTaskObligations(asks);
     await obligations.raise(gateDraft('F1'));
     await obligations.raise(gateDraft('F2', 1, 'f2'));
     await asks.raise({ ...gateDraft('F3'), entry: entryId('not-a-gate') });
@@ -89,22 +89,22 @@ describe('a card gate as an obligation in Asks', () => {
 
   test('every open gate is grouped under the card it names, and a card with two gates holds both', async () => {
     const asks = new FakeAsks();
-    const obligations = new AsksCardObligations(asks);
+    const obligations = new AsksTaskObligations(asks);
     await obligations.raise(gateDraft('F1', 1));
     await obligations.raise(gateDraft('F1', 2));
     await obligations.raise(gateDraft('F2', 1, 'f2'));
     await asks.raise({ ...gateDraft('F3'), entry: entryId('not-a-gate') });
 
-    const byCard = await obligations.openAll();
+    const byTask = await obligations.openAll();
 
-    expect([...byCard.keys()].sort()).toEqual(['F1', 'F2']);
-    expect(byCard.get('F1' as never)?.map(entry => entry.entry)).toEqual([gate('F1', 1), gate('F1', 2)]);
-    expect(byCard.get('F2' as never)?.map(entry => entry.ferret)).toEqual(['f2']);
+    expect([...byTask.keys()].sort()).toEqual(['F1', 'F2']);
+    expect(byTask.get('F1' as never)?.map(entry => entry.entry)).toEqual([gate('F1', 1), gate('F1', 2)]);
+    expect(byTask.get('F2' as never)?.map(entry => entry.ferret)).toEqual(['f2']);
   });
 
   test('withdrawing a gate closes its open ask, for the reason given, and leaves other gates open', async () => {
     const asks = new FakeAsks();
-    const obligations = new AsksCardObligations(asks);
+    const obligations = new AsksTaskObligations(asks);
     await obligations.raise(gateDraft('F1'));
     await obligations.raise(gateDraft('F2', 1, 'f2'));
 
@@ -117,7 +117,7 @@ describe('a card gate as an obligation in Asks', () => {
 describe('the open card asks, read for the cards they are about', () => {
   test('every ledger’s gate asks name their card in one read; a plain ask and a notice from another source are left out', async () => {
     const asks = new FakeAsks();
-    await new AsksCardObligations(asks).raise(gateDraft('F1'));
+    await new AsksTaskObligations(asks).raise(gateDraft('F1'));
     await asks.raise({
       source: sourceKey('ferret'),
       ref: {},
@@ -128,9 +128,9 @@ describe('the open card asks, read for the cards they are about', () => {
       raisedBy: { kind: 'ferret', ferret: 'f1' },
       ferret: 'f1',
     });
-    await new AsksCardObligations(asks).raise(gateDraft('F2', 1, 'f2'));
+    await new AsksTaskObligations(asks).raise(gateDraft('F2', 1, 'f2'));
     await asks.raise({ ...gateDraft('F3'), entry: entryId('not-a-gate') });
-    const reader = new AsksCardAskReader({ open: asks.open.bind(asks), ...boardsOf() });
+    const reader = new AsksTaskAskReader({ open: asks.open.bind(asks), ...boardsOf() });
 
     const open = await reader.open();
 
@@ -144,33 +144,36 @@ describe('the open card asks, read for the cards they are about', () => {
 describe('the asks a card carries, through the real Asks reader', () => {
   test('a card shows the gate ask on its ferret’s ledger and on a ledger outside its board, and an answered one is gone', async () => {
     const asks = new FakeAsks();
-    const obligations = new AsksCardObligations(asks);
+    const obligations = new AsksTaskObligations(asks);
     await obligations.raise(gateDraft('F1', 1, 'owner'));
     await obligations.raise(gateDraft('F1', 2, 'stranger'));
     await obligations.raise(gateDraft('F2', 1, 'helper'));
     await asks.raise({ ...gateDraft('F1'), entry: entryId('not-a-gate') });
-    const links = new CardAskLinks(new AsksCardAskReader({ open: asks.open.bind(asks), ...boardsOf() }), {
+    const links = new TaskAskLinks(new AsksTaskAskReader({ open: asks.open.bind(asks), ...boardsOf() }), {
       warn: () => undefined,
     });
-    const cards = [card({ id: 'F1', owner: 'owner' }), card({ id: 'F2', owner: 'owner', assignee: 'helper' })];
+    const tasks = [
+      boardTask({ id: 'F1', owner: 'owner' }),
+      boardTask({ id: 'F2', owner: 'owner', assignee: 'helper' }),
+    ];
 
-    const found = await links.asksFor(cards);
+    const found = await links.asksFor(tasks);
 
     expect(found.get('F1')?.open.map(ref => ref.ferret)).toEqual(['owner', 'stranger']);
     expect(found.get('F1')?.asking).toEqual(found.get('F1')?.open ?? []);
     expect(found.get('F2')?.open.map(ref => ref.ferret)).toEqual(['helper']);
     const [first] = found.get('F1')?.open ?? [];
     asks.answerAs({ ferret: first!.ferret, id: first!.id as never }, 'approve');
-    expect((await links.asksFor(cards)).get('F1')?.open.map(ref => ref.ferret)).toEqual(['stranger']);
+    expect((await links.asksFor(tasks)).get('F1')?.open.map(ref => ref.ferret)).toEqual(['stranger']);
   });
 });
 
 describe('the asks a ferret raised about a task', () => {
   test('task show lists the open ferret-raised asks and the gate ask, and not the answered one', async () => {
     const asks = new FakeAsks();
-    await new AsksCardObligations(asks).raise(gateDraft('F9', 1, 'lanie'));
-    const links = new CardAskLinks(
-      new AsksCardAskReader({
+    await new AsksTaskObligations(asks).raise(gateDraft('F9', 1, 'lanie'));
+    const links = new TaskAskLinks(
+      new AsksTaskAskReader({
         open: asks.open.bind(asks),
         // A3 is open and names F9; A4 is open and names it only through a merge; A5 was answered, so it is resolved.
         snapshots: async () => [
@@ -190,9 +193,9 @@ describe('the asks a ferret raised about a task', () => {
       { warn: () => undefined },
     );
 
-    const found = await links.asksFor([card({ id: 'F9', owner: 'lanie' })]);
+    const found = await links.asksFor([boardTask({ id: 'F9', owner: 'lanie' })]);
 
-    const gateAsk = (await asks.open({ source: CARD_SOURCE, state: 'open' }))[0]!;
+    const gateAsk = (await asks.open({ source: TASK_SOURCE, state: 'open' }))[0]!;
     expect(found.get('F9')?.open).toEqual([
       { ferret: 'lanie', id: gateAsk.id },
       { ferret: 'lanie', id: 'A3' },
@@ -203,17 +206,17 @@ describe('the asks a ferret raised about a task', () => {
 
   test('a board that cannot be read costs the card its ferret-raised asks and keeps its gate ask', async () => {
     const asks = new FakeAsks();
-    await new AsksCardObligations(asks).raise(gateDraft('F9', 1, 'lanie'));
+    await new AsksTaskObligations(asks).raise(gateDraft('F9', 1, 'lanie'));
     const warnings: string[] = [];
-    const links = new CardAskLinks(
-      new AsksCardAskReader({
+    const links = new TaskAskLinks(
+      new AsksTaskAskReader({
         open: asks.open.bind(asks),
         snapshots: async () => Promise.reject(new Error('no boards')),
       }),
       { warn: message => warnings.push(message) },
     );
 
-    const found = await links.asksFor([card({ id: 'F9', owner: 'lanie' })]);
+    const found = await links.asksFor([boardTask({ id: 'F9', owner: 'lanie' })]);
 
     expect(found.get('F9')?.asking).toHaveLength(1);
     expect(warnings).toHaveLength(1);
@@ -326,12 +329,12 @@ describe('the asks a card may be made to carry out', () => {
 describe('the answer Asks recorded for a gate', () => {
   test('is shaped with the choice and words, as the owner’s, and is nothing once its ask is gone', async () => {
     const asks = new FakeAsks();
-    await new AsksCardObligations(asks).raise(gateDraft('F1'));
-    const [open] = await asks.open({ source: CARD_SOURCE });
+    await new AsksTaskObligations(asks).raise(gateDraft('F1'));
+    const [open] = await asks.open({ source: TASK_SOURCE });
     const ref = { ferret: 'f1', id: open!.id };
     asks.answerAs(ref, 'choose', { kind: 'host' }, { choice: 'Yes', text: 'ship it' });
     asks.answerAs(ref, 'done', { kind: 'device', holder: 'dev_a' });
-    const [byHost, byDevice] = await asks.answers({ source: CARD_SOURCE });
+    const [byHost, byDevice] = await asks.answers({ source: TASK_SOURCE });
 
     expect(await gateAnswerOf(asks, byHost!)).toMatchObject({
       ask: ref,

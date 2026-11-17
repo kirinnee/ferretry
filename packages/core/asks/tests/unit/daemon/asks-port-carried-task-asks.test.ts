@@ -2,7 +2,7 @@ import { expect, it } from 'bun:test';
 import type { AskSourceSpec } from '../../../contract/index.ts';
 import { asksPort } from '../../../daemon/adapters/asks-port.ts';
 import type { AgendaService } from '../../../daemon/lib/agenda/index.ts';
-import { cardAskReference } from '../../../daemon/lib/protocol/agenda-task-asks.ts';
+import { taskAskReference } from '../../../daemon/lib/protocol/agenda-task-asks.ts';
 import { agendaService } from './routes/support.ts';
 
 /**
@@ -22,9 +22,9 @@ const GATE = {
     { id: 'reopen', label: 'Not good', outcome: 'reopen-with-agenda' as const },
   ],
 };
-const REFERENCE = cardAskReference({ gate: GATE });
+const REFERENCE = taskAskReference({ gate: GATE });
 const boards = { ferrets: async () => ['s1'] };
-const CARD_SOURCE: AskSourceSpec = { schema: undefined as never, title: 'Card', form: false };
+const TASK_SOURCE: AskSourceSpec = { schema: undefined as never, title: 'Card', form: false };
 
 /** One ferret's own `A1` carrying one card ask, on the real engine. */
 async function carried() {
@@ -45,7 +45,7 @@ async function carried() {
     { kind: 'agent', sessionId: 's1', name: null },
   );
   await agenda.cardAsk('s1', 'A1', { kind: 'attach', ask: { gate: GATE } });
-  const api = asksPort(agenda, boards, key => (key === 'card' ? CARD_SOURCE : 'unavailable'));
+  const api = asksPort(agenda, boards, key => (key === 'card' ? TASK_SOURCE : 'unavailable'));
   return { agenda, api };
 }
 
@@ -105,7 +105,7 @@ it('withdrawing one carried gate entry keeps the carrier and every other carried
   const board = await itemsOf(agenda);
   expect(board.items.map(item => item.id)).toEqual(['A1']);
   expect((await api.open({ source: 'card' as never, state: 'open' })).map(ask => ask.entry)).toEqual([
-    cardAskReference({ gate: second }) as never,
+    taskAskReference({ gate: second }) as never,
   ]);
   // Without an entry the carrier's whole set goes, as before.
   await api.close(ref, 'withdrawn');

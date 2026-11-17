@@ -8,7 +8,7 @@
 import { cn } from '@ferretry/app/ui';
 import { parseWorkName } from '../lib/task-name.ts';
 
-export interface CardNameProps {
+export interface TaskNameProps {
   readonly name?: string | null;
   readonly teammate?: string;
   readonly className?: string;
@@ -23,7 +23,7 @@ export interface CardNameProps {
  * context instead of the headline. The stable prefix yields before the task,
  * and the full value remains available as the accessible hover title.
  */
-export function CardName({ name, teammate, className = '', showPrefix = true, size = 'md' }: CardNameProps) {
+export function TaskName({ name, teammate, className = '', showPrefix = true, size = 'md' }: TaskNameProps) {
   const { prefix, task } = parseWorkName(name);
   const title = [prefix ? `[${prefix}]` : null, task].filter(Boolean).join(' ');
 

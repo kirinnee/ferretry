@@ -32,7 +32,7 @@ import { askDelivery } from './adapters/ask-delivery.ts';
 import { asksPort } from './adapters/asks-port.ts';
 import { AskEvents } from './adapters/ask-events.ts';
 import { sourceAnswers } from './adapters/source-answers.ts';
-import { CARD_SOURCE, cardAskAnswers } from './adapters/task-ask-answers.ts';
+import { TASK_SOURCE, taskAskAnswers } from './adapters/task-ask-answers.ts';
 import { FileAgendaLedgerRepository } from './adapters/agenda/file-agenda-ledger-repository.ts';
 import { FileAgendaOutboxRepository } from './adapters/agenda/file-agenda-outbox-repository.ts';
 import { FileAgendaSeenStore, SqliteAgendaVersionStore } from './adapters/agenda/file-agenda-versions.ts';
@@ -181,7 +181,7 @@ export default implementDaemon(manifest, {
           replies,
           undefined,
           undefined,
-          cardAskAnswers(agenda, () => sources(CARD_SOURCE), now),
+          taskAskAnswers(agenda, () => sources(TASK_SOURCE), now),
           sourceAnswers(agenda, sources, now),
           context.reach,
         ),

@@ -3,7 +3,7 @@ import { ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
 import manifest from '../../../manifest.ts';
 import { ConversationOwnerWords } from '../../../daemon/adapters/owner-words.ts';
-import { as, boot, makeCard } from '../../integration/daemon/harness.ts';
+import { as, boot, makeTask } from '../../integration/daemon/harness.ts';
 
 const stateFile = (host: Awaited<ReturnType<typeof boot>>['host'], path: string): Record<string, unknown> => {
   const text = host.state('board').files.get(path);
@@ -14,17 +14,17 @@ const stateFile = (host: Awaited<ReturnType<typeof boot>>['host'], path: string)
 describe('storage parity', () => {
   test('F-0225 F-0228 F-0229 the cards are state/board/cards/<id>.json, one file per card, format 1 first', async () => {
     const { host } = await boot();
-    const card = await makeCard(host);
-    const stored = stateFile(host, `cards/${card.id}.json`);
+    const task = await makeTask(host);
+    const stored = stateFile(host, `cards/${task.id}.json`);
     expect(stored.format).toBe(1);
-    expect(stored.id).toBe(card.id);
+    expect(stored.id).toBe(task.id);
     expect(manifest.data.state.map(file => file.path)).toContain('cards/*.json');
   });
 
   test('F-0090 F-0226 the id counter is state/board/counters.json and is never reused', async () => {
     const { host } = await boot();
-    const first = await makeCard(host);
-    const second = await makeCard(host);
+    const first = await makeTask(host);
+    const second = await makeTask(host);
     expect(Number(second.id.slice(1))).toBeGreaterThan(Number(first.id.slice(1)));
     const counters = stateFile(host, 'counters.json') as { format: number; next: Record<string, number> };
     expect(counters.format).toBe(1);
@@ -33,7 +33,7 @@ describe('storage parity', () => {
 
   test('F-0227 F-0414 the sweep remembers what it saw in state/board/sweep.json', async () => {
     const { host } = await boot();
-    await makeCard(host);
+    await makeTask(host);
     await host.runJob('board-sweep');
     const sweep = stateFile(host, 'sweep.json');
     expect(sweep.format).toBe(1);

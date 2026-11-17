@@ -9,14 +9,14 @@ import type {
   SourceKey,
 } from '../../contract/index.ts';
 import type { AgendaService } from '../lib/agenda/index.ts';
-import { askedCardAsks, cardAskOf, cardAskReference } from '../lib/protocol/agenda-task-asks.ts';
+import { askedTaskAsks, taskAskOf, taskAskReference } from '../lib/protocol/agenda-task-asks.ts';
 import { gateChoice, gateReopenOption } from '../lib/protocol/agenda-gate.ts';
 import type { AgendaResponse } from '../lib/protocol/agenda.ts';
 import type { AgendaGatePort, GateAnswer, GateAnswerOutcome } from '../lib/routes/agenda-gates.ts';
 import { parseObligation } from './asks-port.ts';
 
 /** The source the Board plugin registers its card asks under (`ask.sources:card`). */
-export const CARD_SOURCE = 'card' as SourceKey;
+export const TASK_SOURCE = 'card' as SourceKey;
 
 const refused = (code: 'forbidden' | 'invalid' | 'moved-on' | 'not-moved', message: string): GateAnswerOutcome => ({
   handled: true,
@@ -34,7 +34,7 @@ const effectOf = (response: AgendaResponse): AnswerEffect =>
  * Who may answer stays today's rule: only the owner, and a paired device only where it may use the board
  * (`permitted`, asked once the answer is known to be to a card ask and before the board is touched).
  */
-export function cardAskAnswers(
+export function taskAskAnswers(
   agenda: Pick<AgendaService, 'list' | 'cardAsk'>,
   source: () => AskSourceSpec | 'unavailable',
   now: () => string,
@@ -47,15 +47,15 @@ export function cardAskAnswers(
   const askOn = async (sessionId: string, id: string, reference?: string) => {
     const item = await itemOn(sessionId, id);
     if (item === undefined) return undefined;
-    const open = askedCardAsks(item);
-    return reference === undefined ? open[0] : cardAskOf(item, reference);
+    const open = askedTaskAsks(item);
+    return reference === undefined ? open[0] : taskAskOf(item, reference);
   };
   return {
     isGate: async (sessionId, id) => {
       const item = await itemOn(sessionId, id);
       return (
         item !== undefined &&
-        (parseObligation(item.sourceRef)?.source === CARD_SOURCE || askedCardAsks(item).length > 0)
+        (parseObligation(item.sourceRef)?.source === TASK_SOURCE || askedTaskAsks(item).length > 0)
       );
     },
     answer: async (answer: GateAnswer): Promise<GateAnswerOutcome> => {
@@ -102,7 +102,7 @@ export function cardAskAnswers(
         // The frozen card-source answer has no file-carry seam yet. Refuse before applying or recording anything.
         return refused('invalid', 'this daemon cannot carry files with an answer (update it: fy daemon update)');
       }
-      const reference = cardAskReference(ask);
+      const reference = taskAskReference(ask);
       const at = now();
       const receipt = createHash('sha256')
         .update(
@@ -134,7 +134,7 @@ export function cardAskAnswers(
         id: `an_${receipt.slice(0, 24)}` as AnswerId,
         ferret: answer.sessionId,
         ask: answer.id as AskId,
-        source: CARD_SOURCE,
+        source: TASK_SOURCE,
         entry: reference as EntryId,
         effect: effectOf(response),
         ...(response.kind === 'multiple-choice' ? { choice: response.choice } : {}),

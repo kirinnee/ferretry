@@ -7,7 +7,7 @@ import {
   REQUEST_ID_HEADER,
 } from '../../../app/lib/board-client.ts';
 import { NO_BOARD_FILTERS, toServerQuery } from '../../../app/lib/board-model.ts';
-import { boardAnswer, card, fakePort, laneSetFor, laptop, PROJECT } from './board-support.ts';
+import { boardAnswer, boardTask, fakePort, laneSetFor, laptop, PROJECT } from './board-support.ts';
 
 type Call = {
   route: string;
@@ -39,7 +39,7 @@ const clientOf = (answers: Record<string, unknown | ((call: Call) => unknown)>) 
 
 describe('the board read', () => {
   it('asks for the query and parses the answer', async () => {
-    const client = clientOf({ 'GET /v1/board': boardAnswer([card('F1')]) });
+    const client = clientOf({ 'GET /v1/board': boardAnswer([boardTask('F1')]) });
     const answer = await clientBoardPort(client).board(laptop, { ...query, project: PROJECT }, 'c1', 10);
     expect(answer.cards.map(entry => entry.id)).toEqual(['F1']);
     expect(client.calls[0]?.init.query).toMatchObject({ project: PROJECT, cursor: 'c1', limit: '10' });
@@ -170,7 +170,7 @@ describe('readWholeBoard', () => {
     const port = fakePort({
       board: async () => {
         page += 1;
-        return boardAnswer([card(`F${page}`)], { nextCursor: `c${page}` });
+        return boardAnswer([boardTask(`F${page}`)], { nextCursor: `c${page}` });
       },
     });
     const read = await readWholeBoard(port, laptop, query);

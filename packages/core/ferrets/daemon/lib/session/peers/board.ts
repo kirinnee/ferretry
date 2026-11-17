@@ -14,7 +14,7 @@ export type LaneCategory = 'backlog' | 'active' | 'review' | 'shipped' | 'verify
  * the lane it sits in as Board resolved it (today's `cardCategory(card, laneSets)`) — `undefined` when the lane
  * could not be read.
  */
-export interface OpenCardStanding {
+export interface OpenTaskStanding {
   readonly owner: string;
   readonly assignee: string | null;
   readonly dropped: unknown;

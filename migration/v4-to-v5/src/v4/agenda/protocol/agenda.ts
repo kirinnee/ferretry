@@ -101,7 +101,7 @@ export const AGENDA_ASK_TARGET_LENGTH = 80;
 /** A segment (premise, context, answer, body…) is short points; one paragraph past this many characters is a wall of text the lint warns about. */
 export const AGENDA_SEGMENT_PARAGRAPH_LENGTH = 280;
 /** The most answers a card offers: one per swipe direction, left, up and right. */
-export const MAX_AGENDA_CARD_ANSWERS = 3;
+export const MAX_AGENDA_TASK_ANSWERS = 3;
 
 const singleLine = (maximum: number) =>
   z
@@ -203,13 +203,13 @@ export type AgendaAnswerEffect = z.infer<typeof AgendaAnswerEffectSchema>;
  * One answer on a card, bound to the swipe that gives it. Its label is what the button and the swipe
  * stamp say; for `choose` it IS the option's label, so the button and the recorded answer cannot drift.
  */
-export const AgendaCardAnswerSchema = z.strictObject({
+export const AgendaTaskAnswerSchema = z.strictObject({
   direction: AgendaDirectionSchema,
   label: singleLine(MAX_AGENDA_ASK_OPTION_LENGTH),
   does: AgendaAnswerEffectSchema,
   description: singleLine(MAX_AGENDA_ASK_OPTION_DETAIL_LENGTH).optional(),
 });
-export type AgendaCardAnswer = z.infer<typeof AgendaCardAnswerSchema>;
+export type AgendaTaskAnswer = z.infer<typeof AgendaTaskAnswerSchema>;
 
 /** The effects each ask may be answered with, beyond the `done`, `needs-info` and `dismiss` every card takes. */
 const ASK_EFFECTS: Readonly<Record<AgendaAsk['kind'] | 'none', readonly AgendaAnswerEffect[]>> = {
@@ -220,7 +220,7 @@ const ASK_EFFECTS: Readonly<Record<AgendaAsk['kind'] | 'none', readonly AgendaAn
   task: [],
   none: [],
 };
-const ANY_CARD_EFFECTS: readonly AgendaAnswerEffect[] = ['done', 'needs-info', 'dismiss'];
+const ANY_TASK_EFFECTS: readonly AgendaAnswerEffect[] = ['done', 'needs-info', 'dismiss'];
 
 /**
  * Everything wrong with a card's answers against its ask, as `[path, message]` pairs — empty when they
@@ -228,14 +228,14 @@ const ANY_CARD_EFFECTS: readonly AgendaAnswerEffect[] = ['done', 'needs-info', '
  * of the ask's options. The schemas and the CLI both read it, so one rule refuses in both places.
  */
 export function agendaAnswerProblems(
-  answers: readonly AgendaCardAnswer[],
+  answers: readonly AgendaTaskAnswer[],
   ask: AgendaAsk | undefined,
 ): readonly (readonly [string, string])[] {
   const problems: (readonly [string, string])[] = [];
-  if (answers.length > MAX_AGENDA_CARD_ANSWERS) {
+  if (answers.length > MAX_AGENDA_TASK_ANSWERS) {
     problems.push([
       'answers',
-      `a card offers at most ${MAX_AGENDA_CARD_ANSWERS} answers (left, up, right); split it into several items, or let the reply carry the rest`,
+      `a card offers at most ${MAX_AGENDA_TASK_ANSWERS} answers (left, up, right); split it into several items, or let the reply carry the rest`,
     ]);
   }
   const directions = answers.map(answer => answer.direction);
@@ -244,7 +244,7 @@ export function agendaAnswerProblems(
   }
   const labels = answers.map(answer => answer.label.trim().toLowerCase());
   if (new Set(labels).size !== labels.length) problems.push(['answers', 'answer labels must be unique']);
-  const allowed = new Set([...ASK_EFFECTS[ask?.kind ?? 'none'], ...ANY_CARD_EFFECTS]);
+  const allowed = new Set([...ASK_EFFECTS[ask?.kind ?? 'none'], ...ANY_TASK_EFFECTS]);
   const options = ask?.kind === 'multiple-choice' ? ask.options.map(option => option.label.trim()) : [];
   answers.forEach((answer, index) => {
     if (!allowed.has(answer.does)) {
@@ -260,13 +260,13 @@ export function agendaAnswerProblems(
 }
 
 /** The card's own fields: what it is about, what kind it is, and its answers by direction. */
-export const AgendaCardShape = {
+export const AgendaTaskShape = {
   /** What the item is about, in a few plain words: the card's heading and the push's title. */
   title: singleLine(MAX_AGENDA_TITLE_LENGTH).optional(),
   /** What kind of card it is; derived from the ask when absent (`agendaCardKind`). */
   kind: AgendaKindSchema.optional(),
   /** Up to three answers, one per direction; the kind's defaults when absent (`agendaCardAnswers`). */
-  answers: z.array(AgendaCardAnswerSchema).min(1).max(MAX_AGENDA_CARD_ANSWERS).optional(),
+  answers: z.array(AgendaTaskAnswerSchema).min(1).max(MAX_AGENDA_TASK_ANSWERS).optional(),
 };
 
 const AnswerReviewResponseSchema = z.discriminatedUnion('verdict', [
@@ -717,7 +717,7 @@ export const agendaBriefOf = (value: AgendaBrief): AgendaBrief => ({
 export const agendaOptionLabels = (item: {
   readonly ask?: AgendaAsk | undefined;
   readonly questions?: readonly AgendaQuestion[] | undefined;
-  readonly answers?: readonly AgendaCardAnswer[] | undefined;
+  readonly answers?: readonly AgendaTaskAnswer[] | undefined;
 }): readonly string[] => [
   ...(item.ask?.kind === 'multiple-choice' ? item.ask.options.map(option => option.label.trim()) : []),
   ...(item.questions ?? []).flatMap(question => (question.options ?? []).map(option => option.label.trim())),
@@ -728,7 +728,7 @@ export const agendaOptionLabels = (item: {
 export const agendaOptionDetailProblems = (item: {
   readonly ask?: AgendaAsk | undefined;
   readonly questions?: readonly AgendaQuestion[] | undefined;
-  readonly answers?: readonly AgendaCardAnswer[] | undefined;
+  readonly answers?: readonly AgendaTaskAnswer[] | undefined;
   readonly optionDetails?: readonly AgendaOptionDetail[] | undefined;
 }): string[] => {
   const details = item.optionDetails;
@@ -989,7 +989,7 @@ export const AgendaRevisionSchema = z.strictObject({
     context: z.string().max(MAX_AGENDA_CONTEXT_LENGTH).nullable().optional(),
     howToResolve: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH).optional(),
     ask: AgendaAskSchema.optional(),
-    ...AgendaCardShape,
+    ...AgendaTaskShape,
     ...AgendaBriefShape,
   }),
 });
@@ -1118,7 +1118,7 @@ export const AgendaPhoneApprovalRefSchema = z.strictObject({
 export type AgendaPhoneApprovalRef = z.infer<typeof AgendaPhoneApprovalRefSchema>;
 
 /** The most cards one machine notice lists, each with its own buttons. */
-export const MAX_AGENDA_CARDS = 12;
+export const MAX_AGENDA_TASKS = 12;
 
 /**
  * One board card a machine notice lists (the Warden's cards with nobody working on them): the card, and the one line that names
@@ -1126,11 +1126,11 @@ export const MAX_AGENDA_CARDS = 12;
  * three as the owner's own act on that card. An app from before these rows drops the field and shows the notice's
  * own words with Got it.
  */
-export const AgendaCardRowSchema = z.strictObject({
+export const AgendaTaskRowSchema = z.strictObject({
   task: TaskRefSchema,
   line: z.string().trim().min(1).max(MAX_AGENDA_SUBJECT_LENGTH),
 });
-export type AgendaCardRow = z.infer<typeof AgendaCardRowSchema>;
+export type AgendaTaskRow = z.infer<typeof AgendaTaskRowSchema>;
 
 /**
  * A 2FA seed staged at the machine and waiting for the owner's passkey (docs/secrets.md, "2FA keys"): the card's
@@ -1227,7 +1227,7 @@ export const AgendaGateSchema = z.strictObject({
   projectName: z.string().min(1).max(120).optional(),
   /** The card's title, so a thread carrying this gate can name the card: "Badge colour is ready to test". */
   cardTitle: z.string().min(1).max(MAX_AGENDA_TITLE_LENGTH).optional(),
-  options: z.array(AgendaGateOptionSchema).min(1).max(MAX_AGENDA_CARD_ANSWERS),
+  options: z.array(AgendaGateOptionSchema).min(1).max(MAX_AGENDA_TASK_ANSWERS),
 });
 export type AgendaGate = z.infer<typeof AgendaGateSchema>;
 
@@ -1238,28 +1238,28 @@ export type AgendaGate = z.infer<typeof AgendaGateSchema>;
 // ---------------------------------------------------------------------------------------------------
 
 /** The most card asks one agenda keeps: every open one, then the newest answered ones, so a replay still finds its own. */
-export const MAX_AGENDA_CARD_ASKS = 16;
+export const MAX_AGENDA_TASK_ASKS = 16;
 
 /**
  * The owner's answer to a card ask, kept on the ask: the choice, their words, and a SHA-256 of everything the answer
  * said (`receipt`) with the `askVersion` it was given against, so an exact repeat (a lost response, a second tap) is
  * answered as the first one was and moves nothing again.
  */
-export const AgendaCardAskAnswerSchema = z.object({
+export const AgendaTaskAskAnswerSchema = z.object({
   at: InstantSchema,
   response: AgendaResponseSchema,
   note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
   receipt: z.string().regex(/^[0-9a-f]{64}$/u),
   askVersion: PositiveIntegerSchema.optional(),
 });
-export type AgendaCardAskAnswer = z.infer<typeof AgendaCardAskAnswerSchema>;
+export type AgendaTaskAskAnswer = z.infer<typeof AgendaTaskAskAnswerSchema>;
 
 /**
  * WHAT A CARD ASK WOKE: the turn a ferret's thread was in when the ask was put on it (since when it waited on the owner,
  * or the park, rest or wait on its ferret the ask ended), so the thread goes back to exactly that if the ask is
  * withdrawn unanswered. Only on a ferret's own thread; the card's agenda the daemon opened has nothing to go back to.
  */
-export const AgendaCardAskWokeSchema = z.object({
+export const AgendaTaskAskWokeSchema = z.object({
   waitingSince: InstantSchema,
   parked: AgendaParkedSchema.optional(),
   resting: AgendaRestingSchema.optional(),
@@ -1267,28 +1267,28 @@ export const AgendaCardAskWokeSchema = z.object({
   askedAt: InstantSchema.optional(),
   waitingFor: z.enum(['info', 'discussion']).optional(),
 });
-export type AgendaCardAskWoke = z.infer<typeof AgendaCardAskWokeSchema>;
+export type AgendaTaskAskWoke = z.infer<typeof AgendaTaskAskWokeSchema>;
 
 /**
  * ONE CARD ASK: the card's gate as it stands (the card, its lane, the entry that put it there and the lane's
  * options), when it was put on this agenda, the card's How to test, and — once the owner answered — their answer.
  * Open while it has no answer. Only the daemon writes one; only the owner answers one.
  */
-export const AgendaCardAskSchema = z.object({
+export const AgendaTaskAskSchema = z.object({
   gate: AgendaGateSchema,
   at: InstantSchema,
   /** The turn this ask woke the thread out of (`AgendaCardAskWoke`); absent on the card's own agenda and on an ask from before it was kept. */
-  woke: AgendaCardAskWokeSchema.optional(),
+  woke: AgendaTaskAskWokeSchema.optional(),
   /** The card's How to test, as written (Markdown): what the owner tries before they answer. */
   howToTest: z.string().max(MAX_AGENDA_BODY_LENGTH).optional(),
-  answer: AgendaCardAskAnswerSchema.optional(),
+  answer: AgendaTaskAskAnswerSchema.optional(),
   /**
    * The owner said "Not yet" (a one-option gate's other answer): the card stays, their words reached its ferret, and
    * the ask stays OPEN for them to answer later. The ferret may rest the agenda now; it still may not close it.
    */
   notYet: z.object({ at: InstantSchema, note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional() }).optional(),
 });
-export type AgendaCardAsk = z.infer<typeof AgendaCardAskSchema>;
+export type AgendaTaskAsk = z.infer<typeof AgendaTaskAskSchema>;
 
 /**
  * THE OWNER'S LATEST ANSWER TO AN OPEN ITEM'S ASK (docs/agenda.md § States): an answer rests the item, it never
@@ -1318,7 +1318,7 @@ const AgendaItemBaseShape = {
   waitingSince: InstantSchema,
   howToResolve: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
   ask: AgendaAskSchema.optional(),
-  ...AgendaCardShape,
+  ...AgendaTaskShape,
   ...AgendaBriefShape,
   /** The indices of the steps the owner has ticked: sorted, unique, each below `steps.length`; absent when none. */
   stepsDone: z.array(NonNegativeIntegerSchema).min(1).max(MAX_AGENDA_STEPS).optional(),
@@ -1358,7 +1358,7 @@ const AgendaItemBaseShape = {
   /** The items split off this one, oldest first; on the original. */
   splitInto: z.array(AgendaIdSchema).min(1).optional(),
   /** The cards of the items merged into this one, besides its own `task`: nothing a merge absorbed loses its card. */
-  relatedTasks: z.array(TaskRefSchema).min(1).max(MAX_AGENDA_CARDS).readonly().optional(),
+  relatedTasks: z.array(TaskRefSchema).min(1).max(MAX_AGENDA_TASKS).readonly().optional(),
   /** Off the owner's queue for now, and why (`AgendaParked`); absent on an item in play. */
   parked: AgendaParkedSchema.optional(),
   /** When the ferret last woke a snoozed item as urgent (`now`): it may again only `AGENDA_URGENT_WAKE_MS` later. */
@@ -1395,7 +1395,7 @@ const AgendaItemBaseShape = {
   /** The approve-on-phone card an `info` item presents; only an `info` item carries one. */
   phoneApproval: AgendaPhoneApprovalRefSchema.optional(),
   /** The board cards a machine notice lists, each with Open, Start and Close (`AgendaCardRow`); only the daemon raises them. */
-  cards: z.array(AgendaCardRowSchema).min(1).max(MAX_AGENDA_CARDS).readonly().optional(),
+  cards: z.array(AgendaTaskRowSchema).min(1).max(MAX_AGENDA_TASKS).readonly().optional(),
   /** The staged 2FA seed a card asks the owner to save with a passkey; answered by that ceremony, never the generic answer. */
   twoFactorSeed: AgendaTwoFactorSeedRefSchema.optional(),
   /** A ferret's suggested standing rule: its card opens the create sheet with nothing ticked, never the generic answer. */
@@ -1421,7 +1421,7 @@ const AgendaItemBaseShape = {
    */
   gateAttachedChangedAt: InstantSchema.optional(),
   /** The card asks this agenda carries, oldest first (`AgendaCardAsk`); only the daemon writes them. */
-  cardAsks: z.array(AgendaCardAskSchema).min(1).max(MAX_AGENDA_CARD_ASKS).optional(),
+  cardAsks: z.array(AgendaTaskAskSchema).min(1).max(MAX_AGENDA_TASK_ASKS).optional(),
   /**
    * A digest of the thread as the daemon last left it, apart from its card asks: when the thread no longer matches it,
    * the owner or a ferret has touched it since, and a withdrawn ask leaves it where it is. Only the daemon writes it;
@@ -1787,7 +1787,7 @@ const ResolvedAgendaHeaderObjectSchema = z
     projection: z.literal('header'),
     lifecycle: z.literal('addressed'),
     id: AgendaIdSchema,
-    title: AgendaCardShape.title.unwrap(),
+    title: AgendaTaskShape.title.unwrap(),
     kind: AgendaKindSchema,
     subject: AgendaItemBaseShape.subject,
     /** The Inbox's Find searches this one-line reason as well as the title and subject. */
@@ -1826,7 +1826,7 @@ export const isAgendaHeader = (item: AgendaItem | AgendaListRecord): item is Res
 
 const AddAgendaRequestSchema = z.strictObject({
   action: z.literal('add'),
-  ...AgendaCardShape,
+  ...AgendaTaskShape,
   source: z.literal('agent-raised').default('agent-raised'),
   sourceRef: z.string().max(MAX_AGENDA_SOURCE_REF_LENGTH).nullable().default(null),
   subject: singleLine(MAX_AGENDA_SUBJECT_LENGTH),
@@ -1932,7 +1932,7 @@ export const AgendaEditRequestSchema = z.strictObject({
     .string()
     .regex(/^[0-9a-z]{1,32}$/u)
     .optional(),
-  title: AgendaCardShape.title,
+  title: AgendaTaskShape.title,
   /**
    * What the item needs from the owner now (`--stage`); a change is kept in its `stages`. Only a daemon that
    * reports `agenda.channel.1` takes it.
@@ -1944,8 +1944,8 @@ export const AgendaEditRequestSchema = z.strictObject({
    * is refused, and the ferret's answer to an earlier question is cleared unless this edit sets a new one.
    */
   ask: AgendaAskSchema.optional(),
-  kind: AgendaCardShape.kind,
-  answers: AgendaCardShape.answers,
+  kind: AgendaTaskShape.kind,
+  answers: AgendaTaskShape.answers,
   context: z.preprocess(asBullets, z.string().max(MAX_AGENDA_CONTEXT_LENGTH)).nullable().optional(),
   ...AgendaBriefShape,
   /**
@@ -2076,7 +2076,7 @@ export const AgendaActionRequestSchema = z
       /** The new item, written as an add is (its ask, title, premise and context), raised by the same ferret. */
       item: SplitAgendaItemSchema,
       /** Cards of `id` that go to the new item: its `task` and `relatedTasks`. */
-      moveCards: z.array(TaskRefSchema).min(1).max(MAX_AGENDA_CARDS).optional(),
+      moveCards: z.array(TaskRefSchema).min(1).max(MAX_AGENDA_TASKS).optional(),
     }),
     /** The owner puts an open item away `until` a time still ahead; it comes back then as a fresh item. */
     z.strictObject({

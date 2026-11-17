@@ -134,7 +134,7 @@ import { askFormFor } from './ask-renderers.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
-import { CardReferenceScope } from './agenda-board-hooks.tsx';
+import { TaskReferenceScope } from './agenda-board-hooks.tsx';
 import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
 import { ResolvedItemView } from './resolved-item-view.tsx';
@@ -206,7 +206,7 @@ const renderInboxCard = (
   act: (action: InboxAction) => void,
 ) => (
   <Fragment key={card.key}>
-    <CardReferenceScope daemonId={card.daemonId}>
+    <TaskReferenceScope daemonId={card.daemonId}>
       <AgendaCard
         error={failureFor(inbox.deferredState.failed, card.key)}
         item={card.item}
@@ -220,7 +220,7 @@ const renderInboxCard = (
         {...askFormFor(inbox, card, onNavigate)}
         {...(now === undefined ? {} : { now })}
       />
-    </CardReferenceScope>
+    </TaskReferenceScope>
   </Fragment>
 );
 
@@ -351,7 +351,7 @@ function OpenItem({
   const machineFerrets = isMachineAgendaId(card.view.config.id) ? ferretsOf(card.item.context) : [];
   return (
     <Fragment key={card.key}>
-      <CardReferenceScope daemonId={card.daemonId}>
+      <TaskReferenceScope daemonId={card.daemonId}>
         <div
           className="fy-inbox-open"
           data-inbox-gate={isGateItem(card.item) ? '' : undefined}
@@ -396,7 +396,7 @@ function OpenItem({
             {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
           />
         </div>
-      </CardReferenceScope>
+      </TaskReferenceScope>
     </Fragment>
   );
 }
@@ -1494,7 +1494,7 @@ export function AgendaInboxPage({
   onClearFrom,
   withFerretsOpen = false,
   renderComposer,
-  cardBoard,
+  cardBoard: taskBoard,
   clearPort,
   answerPorts,
   onItemOpened,
@@ -1620,7 +1620,7 @@ export function AgendaInboxPage({
       ? inbox.reading && !empty
       : inbox.resolvedReading && (filter === 'resolved' ? inbox.resolved.length : inbox.parked.length) > 0;
   const host: CardHostProps = { inbox, onNavigate, now, readConversation };
-  const boarded = (card: InboxCard, node: ReactNode): ReactNode => cardBoard?.(card.daemonId, node) ?? node;
+  const boarded = (card: InboxCard, node: ReactNode): ReactNode => taskBoard?.(card.daemonId, node) ?? node;
   const atEnd = deckPlace === QUEUE_END;
   const openAt = (key: string): void => {
     setDeckAt(key);
@@ -1912,13 +1912,13 @@ export function AgendaInboxPage({
   if (resolvedMachine !== null && resolvedConnection !== undefined) {
     return (
       <main aria-label="Inbox" className="fy-attn-inbox" data-agenda-inbox="card">
-        <CardReferenceScope daemonId={resolvedMachine.daemonId}>
+        <TaskReferenceScope daemonId={resolvedMachine.daemonId}>
           <ResolvedItemView
             row={resolvedMachine}
             connection={resolvedConnection}
             onClose={() => setResolvedMachine(null)}
           />
-        </CardReferenceScope>
+        </TaskReferenceScope>
         <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
       </main>
     );

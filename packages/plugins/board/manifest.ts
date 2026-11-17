@@ -21,9 +21,9 @@ import {
   BoardConfigSchema,
   BoardFileSchema,
   BoardPort,
-  CARD_ACTED_AUDIT,
-  CARD_CREATED_AUDIT,
-  CARD_STARTED_AUDIT,
+  TASK_ACTED_AUDIT,
+  TASK_CREATED_AUDIT,
+  TASK_STARTED_AUDIT,
   CardAskRefSchema,
   CardProgressToolInputSchema,
   TaskProgressToolInputSchema,
@@ -40,7 +40,7 @@ import {
 } from './contract/index.ts';
 
 // state/board/ (§9.2). A card is one file; a collection path holds one `*`.
-const CARDS = defineState({ name: 'cards', path: 'cards/*.json', store: 'json', format: 1, schema: CardSchema });
+const TASKS = defineState({ name: 'cards', path: 'cards/*.json', store: 'json', format: 1, schema: CardSchema });
 const COUNTERS = defineState({
   name: 'counters',
   path: 'counters.json',
@@ -75,7 +75,7 @@ const taskRoute = <const Key extends string>(key: Key, descriptor: Parameters<ty
 const fleetUse = cap('fleet', 'use');
 const fleetConfigure = cap('fleet', 'configure');
 const read = { skip: 'a read of tasks and lanes' } as const;
-const cardText = { none: 'tasks are authored text; no pane, page or vault text' } as const;
+const taskText = { none: 'tasks are authored text; no pane, page or vault text' } as const;
 
 /**
  * Board (§2.3): cards and lanes for the work you ask for, with each card's progress and its PRs.
@@ -122,7 +122,7 @@ export default definePlugin({
         noStore: true,
         compress: true,
         audit: read,
-        guard: cardText,
+        guard: taskText,
       }),
       route('GET /v1/board/ids', {
         minimum: 'operator',
@@ -131,7 +131,7 @@ export default definePlugin({
         noStore: true,
         compress: true,
         audit: read,
-        guard: cardText,
+        guard: taskText,
       }),
       route('GET /v1/board/merge-gate', {
         minimum: 'operator',
@@ -139,7 +139,7 @@ export default definePlugin({
         capability: fleetUse,
         noStore: true,
         audit: read,
-        guard: cardText,
+        guard: taskText,
       }),
       ...taskRoute('GET /v1/board/tasks', {
         minimum: 'operator',
@@ -147,15 +147,15 @@ export default definePlugin({
         capability: fleetUse,
         noStore: true,
         audit: read,
-        guard: cardText,
+        guard: taskText,
       }),
       ...taskRoute('POST /v1/board/tasks', {
         minimum: 'operator',
         caller: 'any',
         capability: fleetUse,
         noStore: true,
-        audit: { record: CARD_CREATED_AUDIT },
-        guard: cardText,
+        audit: { record: TASK_CREATED_AUDIT },
+        guard: taskText,
       }),
       ...taskRoute('GET /v1/board/tasks/:taskId', {
         minimum: 'operator',
@@ -163,15 +163,15 @@ export default definePlugin({
         capability: fleetUse,
         noStore: true,
         audit: read,
-        guard: cardText,
+        guard: taskText,
       }),
       ...taskRoute('POST /v1/board/tasks/:taskId', {
         minimum: 'operator',
         caller: 'any',
         capability: fleetUse,
         noStore: true,
-        audit: { record: CARD_ACTED_AUDIT },
-        guard: cardText,
+        audit: { record: TASK_ACTED_AUDIT },
+        guard: taskText,
       }),
       ...taskRoute('POST /v1/board/tasks/:taskId/start', {
         minimum: 'operator',
@@ -179,8 +179,8 @@ export default definePlugin({
         // c58-sec3 r1: starting a card starts a ferret (the card text is its prompt), so it asks what `POST /v1/ferrets` asks.
         capability: fleetConfigure,
         noStore: true,
-        audit: { record: CARD_STARTED_AUDIT },
-        guard: cardText,
+        audit: { record: TASK_STARTED_AUDIT },
+        guard: taskText,
       }),
       route('POST /v1/board/skip', {
         minimum: 'operator',
@@ -188,7 +188,7 @@ export default definePlugin({
         capability: fleetUse,
         noStore: true,
         audit: { record: BOARD_SKIPPED_AUDIT },
-        guard: cardText,
+        guard: taskText,
       }),
 
       route('GET /v1/board/projects', {
@@ -235,8 +235,8 @@ export default definePlugin({
         minimum: 'authenticated',
         caller: 'any',
         capability: fleetUse,
-        audit: { record: CARD_ACTED_AUDIT },
-        guard: cardText,
+        audit: { record: TASK_ACTED_AUDIT },
+        guard: taskText,
         summary: 'Rewrite one task’s progress (now, doneSoFar, next).',
         input: TaskProgressToolInputSchema,
       }),
@@ -245,8 +245,8 @@ export default definePlugin({
         minimum: 'authenticated',
         caller: 'any',
         capability: fleetUse,
-        audit: { record: CARD_ACTED_AUDIT },
-        guard: cardText,
+        audit: { record: TASK_ACTED_AUDIT },
+        guard: taskText,
         summary: 'old name of task_progress',
         input: CardProgressToolInputSchema,
       }),
@@ -762,7 +762,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [CARDS, COUNTERS, BOARDS, SWEEP, FOCUS, GITHUB],
+    state: [TASKS, COUNTERS, BOARDS, SWEEP, FOCUS, GITHUB],
     config: [BOARD_CONFIG],
     readModels: ['cards', 'progress', 'lanes'],
     publishes: [CardMoved, BoardChanged],

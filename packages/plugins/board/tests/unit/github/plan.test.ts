@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
-import { type CardActor, type PrLink, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
+import { type TaskActor, type PrLink, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
 import should from 'should';
 import {
-  cardCategory,
+  taskCategory,
   isLinkable,
   isRefilable,
   isWatched,
@@ -16,7 +16,7 @@ import {
   repoKey,
   unfiledOnPurpose,
 } from '../../../daemon/lib/github/index.ts';
-import { card, lanes, NOW, PROJECT } from '../board/support.ts';
+import { boardTask, lanes, NOW, PROJECT } from '../board/support.ts';
 
 const pr = (overrides: Partial<PrLink> = {}): PrLink => ({
   url: 'https://github.com/kirinnee/ferretry/pull/1',
@@ -56,17 +56,17 @@ describe('what is watched', () => {
   });
 
   it('should watch open cards, and link only cards that have not shipped', () => {
-    should(isWatched(card({ laneId: 'merged' }), laneSets)).be.true();
-    should(isWatched(card({ laneId: 'closed' }), laneSets)).be.false();
-    should(isWatched(card({ dropped: { reason: 'gone', at: NOW } }), laneSets)).be.false();
-    should(isLinkable(card({ laneId: 'review' }), laneSets)).be.true();
-    should(isLinkable(card({ laneId: 'merged' }), laneSets)).be.false();
-    should(isLinkable(card({ laneId: 'todo', dropped: { reason: 'gone', at: NOW } }), laneSets)).be.false();
+    should(isWatched(boardTask({ laneId: 'merged' }), laneSets)).be.true();
+    should(isWatched(boardTask({ laneId: 'closed' }), laneSets)).be.false();
+    should(isWatched(boardTask({ dropped: { reason: 'gone', at: NOW } }), laneSets)).be.false();
+    should(isLinkable(boardTask({ laneId: 'review' }), laneSets)).be.true();
+    should(isLinkable(boardTask({ laneId: 'merged' }), laneSets)).be.false();
+    should(isLinkable(boardTask({ laneId: 'todo', dropped: { reason: 'gone', at: NOW } }), laneSets)).be.false();
   });
 
   it('should know no category for a board without lanes or a lane it does not have', () => {
-    should(cardCategory(card({ laneId: 'gone' }), laneSets)).be.null();
-    should(cardCategory(card({ projectId: '33333333-3333-4333-8333-333333333333' }), laneSets)).be.null();
+    should(taskCategory(boardTask({ laneId: 'gone' }), laneSets)).be.null();
+    should(taskCategory(boardTask({ projectId: '33333333-3333-4333-8333-333333333333' }), laneSets)).be.null();
   });
 
   it('should key repositories and PRs without case', () => {
@@ -78,14 +78,14 @@ describe('what is watched', () => {
 describe('refileTargets', () => {
   const owners = new Map([['kirinnee/ferretry', { id: PROJECT, name: 'Ferretry' }]]);
   const unfiled = (overrides = {}) =>
-    card({
+    boardTask({
       projectId: UNFILED_PROJECT_ID,
       laneId: 'doing',
       createdAt: NOW,
       links: { prs: [pr({ repo: 'KirinNee/Ferretry' })], branch: null, commits: [], docs: [] },
       ...overrides,
     });
-  const refiledToUnfiled = (actor: CardActor) => {
+  const refiledToUnfiled = (actor: TaskActor) => {
     const back = unfiled();
     return {
       ...back,
@@ -113,7 +113,7 @@ describe('refileTargets', () => {
 
   it('should leave a card that is filed, closed, dropped, without a PR, or whose repository no project owns', () => {
     const cases = [
-      card({ links: { prs: [pr()], branch: null, commits: [], docs: [] } }),
+      boardTask({ links: { prs: [pr()], branch: null, commits: [], docs: [] } }),
       unfiled({ laneId: 'closed' }),
       unfiled({ dropped: { reason: 'not needed', at: NOW } }),
       unfiled({ links: { prs: [], branch: null, commits: [], docs: [] } }),

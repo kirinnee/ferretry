@@ -24,29 +24,29 @@
  * owner) and the card lands on its real board; only when proposing fails does it go on the Unfiled board,
  * with a note saying how to move it.
  */
-import { cardTitleFor, deriveCardTitle } from './task-title.ts';
+import { taskTitleFor, deriveTaskTitle } from './task-title.ts';
 import {
   type BoardProjectId,
-  type Card,
-  type CardCreateRequest,
-  type CardId,
-  firstCardRefIn,
-  formatCardRef,
-  MAX_CARD_BRIEF_LENGTH,
-  type CardMessage,
-  type CardRef,
+  type Task,
+  type TaskCreateRequest,
+  type TaskId,
+  firstTaskRefIn,
+  formatTaskRef,
+  MAX_TASK_BRIEF_LENGTH,
+  type TaskMessage,
+  type TaskRef,
   UNFILED_PROJECT_ID,
 } from '../../../contract/index.ts';
 import type { BoardSwitchReader } from '../lanes/board-switch.ts';
 import { effectiveAssignee } from './authority.ts';
 import { BoardError } from './errors.ts';
-import { cardCategory } from './graph.ts';
+import { taskCategory } from './graph.ts';
 import type { BoardDiagnostics, LaneProposer, LaneSetSource, ProjectAdopter, FerretFocus } from './ports.ts';
-import type { BoardService, CardHolders, SignalDoneOutcome } from './service.ts';
+import type { BoardService, TaskHolders, SignalDoneOutcome } from './service.ts';
 import { clip } from './signal-done.ts';
 
 /** The longest ask a card keeps; a longer brief is cut, and the brief field says so. */
-const MAX_ASK_LENGTH = MAX_CARD_BRIEF_LENGTH;
+const MAX_ASK_LENGTH = MAX_TASK_BRIEF_LENGTH;
 
 /** The source an ask carries when the owner said it. */
 const OWNER_ASK_SOURCE = 'owner';
@@ -62,7 +62,7 @@ interface BoardProjectNames {
   nameOf(projectId: BoardProjectId): Promise<string>;
 }
 
-export interface FerretCardsPorts {
+export interface FerretTasksPorts {
   readonly board: Pick<
     BoardService,
     | 'reserve'
@@ -101,11 +101,11 @@ export interface Delegation {
   /** The helper's brief as the lead wrote it, without the footer the daemon adds. */
   readonly brief: string;
   /** The child's card id: reserved for a new card, the lead's own for an existing one. */
-  readonly id: CardId;
+  readonly id: TaskId;
   /** The card already exists (`--card`, or the lead's open card with this title): it is assigned, not made. */
   readonly existing: boolean;
   /** The card the child's card sits under; `null` for a top-level card. */
-  readonly parent: CardRef | null;
+  readonly parent: TaskRef | null;
   /** Why it sits there; absent for a top-level card and for an existing card, which keeps the parent it had. */
   readonly parentFrom?: ParentFrom;
   /** The board's name as the owner reads it; `undefined` when the child may run on another board. */
@@ -113,13 +113,13 @@ export interface Delegation {
   /** The OWNER started the ferret on this existing card (`ownerDelegation`): no lead hands it down, the owner assigns it. */
   readonly byOwner?: true;
   /** Who held the existing card when the start judged it: the assignment writes only if it still finds them (`CardHolders`). */
-  readonly held?: CardHolders;
+  readonly held?: TaskHolders;
 }
 
 /** Who holds a card now, as a start must still find them when it assigns it. */
-const holdersOf = (card: Pick<Card, 'owner' | 'assignee'>): CardHolders => ({
-  owner: card.owner,
-  assignee: card.assignee,
+const holdersOf = (task: Pick<Task, 'owner' | 'assignee'>): TaskHolders => ({
+  owner: task.owner,
+  assignee: task.assignee,
 });
 
 /** What delegating a card came to: the delegation, or why the start must not go on. */
@@ -136,7 +136,7 @@ export interface DelegationRequest {
   /** The name the child session is given, which titles a new card. */
   readonly name?: string | undefined;
   /** An existing card the child works on (`--card`). */
-  readonly card?: CardId | undefined;
+  readonly card?: TaskId | undefined;
 }
 
 /** A card's title as compared for twins: case, spacing and punctuation do not tell two titles apart. */
@@ -162,51 +162,51 @@ export interface StartedFerret {
 }
 
 /** The card a start made, or why it made none. */
-export interface OpenedCard {
-  readonly card?: Card;
+export interface OpenedTask {
+  readonly card?: Task;
   /** The board's name as the owner reads it. */
   readonly project?: string;
   readonly notes: readonly string[];
 }
 
 /** A card's title: the session's name, else the brief's own, never its raw first words. */
-export const cardTitle = (name: string | undefined, brief: string): string =>
-  (name === undefined ? null : deriveCardTitle(name)) ?? cardTitleFor(brief, 'Task');
+export const taskTitle = (name: string | undefined, brief: string): string =>
+  (name === undefined ? null : deriveTaskTitle(name)) ?? taskTitleFor(brief, 'Task');
 
 /** A brief as a card's ask: verbatim, cut only at the field's limit. */
-export const askOf = (text: string, source: string): CardMessage => ({ text: clip(text, MAX_ASK_LENGTH), source });
+export const askOf = (text: string, source: string): TaskMessage => ({ text: clip(text, MAX_ASK_LENGTH), source });
 
 /**
  * The delegation of a start the owner made on an existing card ("Start a ferret on it"): it is assigned to the new
  * ferret as the owner's act, and the card keeps its owner and its parent.
  */
-export const ownerDelegation = (card: Pick<Card, 'id' | 'owner' | 'assignee' | 'parent'>): Delegation => ({
-  lead: card.owner,
+export const ownerDelegation = (task: Pick<Task, 'id' | 'owner' | 'assignee' | 'parent'>): Delegation => ({
+  lead: task.owner,
   brief: '',
-  id: card.id,
+  id: task.id,
   existing: true,
-  parent: card.parent,
+  parent: task.parent,
   byOwner: true,
-  held: holdersOf(card),
+  held: holdersOf(task),
 });
 
 /** The line a helper's brief gains (`subFerretFooter`): its card and where it is. */
-export const cardFooterLine = (
-  id: CardId,
+export const taskFooterLine = (
+  id: TaskId,
   project: string | undefined,
   bin: string,
-  parent: CardRef | null = null,
+  parent: TaskRef | null = null,
 ): string =>
-  `Your task is ${formatCardRef({ id })} on the ${project === undefined ? "project's" : project} board${parent === null ? '' : `, under ${formatCardRef(parent)}`}; the daemon moves it for you (\`${bin} task note\` adds progress).`;
+  `Your task is ${formatTaskRef({ id })} on the ${project === undefined ? "project's" : project} board${parent === null ? '' : `, under ${formatTaskRef(parent)}`}; the daemon moves it for you (\`${bin} task note\` adds progress).`;
 
 /** A card request the daemon fills for a start. */
 const startRequest = (fields: {
   readonly title: string;
   readonly brief: string;
-  readonly ask: CardMessage;
-  readonly parent: CardRef | null;
+  readonly ask: TaskMessage;
+  readonly parent: TaskRef | null;
   readonly assignee: string | null;
-}): CardCreateRequest => ({
+}): TaskCreateRequest => ({
   kind: 'feature',
   title: fields.title,
   summary: '',
@@ -214,7 +214,7 @@ const startRequest = (fields: {
   premise: '',
   context: '',
   terms: [],
-  brief: clip(fields.brief, MAX_CARD_BRIEF_LENGTH),
+  brief: clip(fields.brief, MAX_TASK_BRIEF_LENGTH),
   howToTest: '',
   workflow: 'quick',
   parent: fields.parent,
@@ -226,8 +226,8 @@ const startRequest = (fields: {
 
 const said = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-export class FerretCards {
-  constructor(private readonly ports: FerretCardsPorts) {}
+export class FerretTasks {
+  constructor(private readonly ports: FerretTasksPorts) {}
 
   /**
    * A `fy new`'s card, before the child starts, and the child's id reserved (or the existing card named).
@@ -246,7 +246,7 @@ export class FerretCards {
   ): Promise<DelegationOutcome> {
     try {
       if (request.card !== undefined) return await this.existingCard(lead, request.card);
-      const title = cardTitle(request.name, request.brief);
+      const title = taskTitle(request.name, request.brief);
       const projectId = inLeadFolder ? await this.ports.lanes.projectOf(lead) : undefined;
       const project = projectId === undefined ? undefined : await this.ports.projects.nameOf(projectId);
       const twin = projectId === undefined ? undefined : await this.twinOf(lead, projectId, title);
@@ -262,7 +262,7 @@ export class FerretCards {
             ...(project === undefined ? {} : { project }),
           },
           notes: [
-            `You already had ${formatCardRef(twin)} ("${twin.title}") for this work, so it was assigned to the helper instead of making a second task.`,
+            `You already had ${formatTaskRef(twin)} ("${twin.title}") for this work, so it was assigned to the helper instead of making a second task.`,
           ],
         };
       }
@@ -284,7 +284,7 @@ export class FerretCards {
       const notes =
         parent === null
           ? [
-              `The helper's task has no parent, so it is at the top level of the board: \`${this.ports.bin} task reparent ${formatCardRef({ id })} --parent <id>\` moves it, and \`${this.ports.bin} task focus <id>\` (or \`--task <id>\`) says where your helpers' tasks go next time.`,
+              `The helper's task has no parent, so it is at the top level of the board: \`${this.ports.bin} task reparent ${formatTaskRef({ id })} --parent <id>\` moves it, and \`${this.ports.bin} task focus <id>\` (or \`--task <id>\`) says where your helpers' tasks go next time.`,
             ]
           : [];
       return {
@@ -314,7 +314,7 @@ export class FerretCards {
    * warden takes no card). `refusal` says why a card cannot be had; the start must not go on. The judgement is early,
    * not final: {@link takeOver} re-judges inside the write that assigns the card.
    */
-  async startOn(lead: string | undefined, id: CardId, ordinary = true): Promise<DelegationOutcome> {
+  async startOn(lead: string | undefined, id: TaskId, ordinary = true): Promise<DelegationOutcome> {
     if (!ordinary) {
       return {
         refusal: `--task is for an ordinary ferret: a worker the daemon starts for itself takes no task`,
@@ -341,11 +341,11 @@ export class FerretCards {
     delegation: Delegation,
     ferret: string,
     stop: (reason: string) => Promise<void>,
-  ): Promise<{ readonly opened?: OpenedCard; readonly refusal?: string }> {
+  ): Promise<{ readonly opened?: OpenedTask; readonly refusal?: string }> {
     try {
       return { opened: await this.handOver(delegation, ferret) };
     } catch (error) {
-      const refusal = `${formatCardRef({ id: delegation.id })} could not be handed to the new session: ${said(error)}`;
+      const refusal = `${formatTaskRef({ id: delegation.id })} could not be handed to the new session: ${said(error)}`;
       await stop(refusal).catch((stopped: unknown) => {
         this.ports.diagnostics.warn(`could not stop ${ferret} after a refused task: ${said(stopped)}`);
       });
@@ -353,36 +353,36 @@ export class FerretCards {
     }
   }
 
-  private async ownerStart(id: CardId): Promise<DelegationOutcome> {
-    const { cards } = await this.ports.board.snapshot();
-    const card = cards.find(each => each.id === id);
-    if (card === undefined) return { refusal: `there is no task ${formatCardRef({ id })} on this machine`, notes: [] };
-    return { delegation: ownerDelegation(card), notes: [] };
+  private async ownerStart(id: TaskId): Promise<DelegationOutcome> {
+    const { cards: tasks } = await this.ports.board.snapshot();
+    const task = tasks.find(each => each.id === id);
+    if (task === undefined) return { refusal: `there is no task ${formatTaskRef({ id })} on this machine`, notes: [] };
+    return { delegation: ownerDelegation(task), notes: [] };
   }
 
   /** Why a card cannot take a new session: it is dropped or closed. `undefined` when it is open work. */
-  private async unavailable(id: CardId): Promise<string | undefined> {
-    const { cards, laneSets } = await this.ports.board.snapshot();
-    const card = cards.find(each => each.id === id);
-    if (card === undefined) return `there is no task ${formatCardRef({ id })} on this machine`;
-    if (card.dropped !== null) return `${formatCardRef(card)} is dropped; reopen it before you start a ferret on it`;
-    if (cardCategory(card, laneSets) === 'closed')
-      return `${formatCardRef(card)} is closed; reopen it before you start a ferret on it`;
+  private async unavailable(id: TaskId): Promise<string | undefined> {
+    const { cards: tasks, laneSets } = await this.ports.board.snapshot();
+    const task = tasks.find(each => each.id === id);
+    if (task === undefined) return `there is no task ${formatTaskRef({ id })} on this machine`;
+    if (task.dropped !== null) return `${formatTaskRef(task)} is dropped; reopen it before you start a ferret on it`;
+    if (taskCategory(task, laneSets) === 'closed')
+      return `${formatTaskRef(task)} is closed; reopen it before you start a ferret on it`;
     return undefined;
   }
 
   /** `--card`: the lead's existing card, handed over; refused (not failed) when it cannot be. */
-  private async existingCard(lead: string, id: CardId): Promise<DelegationOutcome> {
-    let card: Card;
+  private async existingCard(lead: string, id: TaskId): Promise<DelegationOutcome> {
+    let task: Task;
     try {
-      card = await this.ports.board.requireHandOver(id, lead);
+      task = await this.ports.board.requireHandOver(id, lead);
     } catch (error) {
       if (error instanceof BoardError) return { refusal: error.message, notes: [] };
       throw error;
     }
-    const project = await this.ports.projects.nameOf(card.projectId);
+    const project = await this.ports.projects.nameOf(task.projectId);
     return {
-      delegation: { lead, brief: '', id, existing: true, parent: card.parent, project, held: holdersOf(card) },
+      delegation: { lead, brief: '', id, existing: true, parent: task.parent, project, held: holdersOf(task) },
       notes: [],
     };
   }
@@ -396,9 +396,9 @@ export class FerretCards {
   private async parentFor(
     lead: string,
     brief: string,
-  ): Promise<{ readonly parent: CardRef | null; readonly from?: ParentFrom }> {
-    const named = firstCardRefIn(brief);
-    const usable = async (ref: CardRef | null | undefined): Promise<CardRef | null> => {
+  ): Promise<{ readonly parent: TaskRef | null; readonly from?: ParentFrom }> {
+    const named = firstTaskRefIn(brief);
+    const usable = async (ref: TaskRef | null | undefined): Promise<TaskRef | null> => {
       if (ref === null || ref === undefined) return null;
       return (await this.ports.board.mayAdoptUnder(lead, ref.id)) ? { id: ref.id } : null;
     };
@@ -412,13 +412,13 @@ export class FerretCards {
    * The lead's own open card for this very work — same board, same title once case and punctuation are set
    * aside, still the lead's to give (nobody else is on it) — so a delegation reuses it rather than twinning it.
    */
-  private async twinOf(lead: string, projectId: BoardProjectId, title: string): Promise<Card | undefined> {
-    const { cards, laneSets } = await this.ports.board.snapshot();
+  private async twinOf(lead: string, projectId: BoardProjectId, title: string): Promise<Task | undefined> {
+    const { cards: tasks, laneSets } = await this.ports.board.snapshot();
     const wanted = normalisedTitle(title);
-    return cards.find(card => {
-      if (card.owner !== lead || card.projectId !== projectId || card.dropped !== null) return false;
-      if (effectiveAssignee(card) !== lead || normalisedTitle(card.title) !== wanted) return false;
-      const category = cardCategory(card, laneSets);
+    return tasks.find(task => {
+      if (task.owner !== lead || task.projectId !== projectId || task.dropped !== null) return false;
+      if (effectiveAssignee(task) !== lead || normalisedTitle(task.title) !== wanted) return false;
+      const category = taskCategory(task, laneSets);
       return category === 'backlog' || category === 'active' || category === 'review';
     });
   }
@@ -427,7 +427,7 @@ export class FerretCards {
    * The card of a session being started, after its record and before its launch. Never rejects: a board
    * failure is a note, and the start goes on.
    */
-  async open(start: StartedFerret): Promise<OpenedCard> {
+  async open(start: StartedFerret): Promise<OpenedTask> {
     try {
       const delegation = start.delegation;
       const owner = delegation?.lead ?? start.ferret;
@@ -447,10 +447,10 @@ export class FerretCards {
         };
       }
       const id = delegation?.id ?? (await this.ports.board.reserve('feature'));
-      const card = await this.ports.board.spawn(
+      const task = await this.ports.board.spawn(
         id,
         startRequest({
-          title: cardTitle(start.name, brief),
+          title: taskTitle(start.name, brief),
           brief,
           ask: askOf(
             brief,
@@ -463,11 +463,11 @@ export class FerretCards {
       );
       if (delegation?.project !== undefined && delegation.project !== placed.project) {
         placed.notes.push(
-          `The brief said ${formatCardRef(card)} is on the ${delegation.project} board; it is on the ${placed.project} board, where the helper runs.`,
+          `The brief said ${formatTaskRef(task)} is on the ${delegation.project} board; it is on the ${placed.project} board, where the helper runs.`,
         );
       }
-      for (const note of placed.notes) this.ports.diagnostics.warn(`${formatCardRef(card)}: ${note}`);
-      return { card: await this.workStarted(card, start.ferret), project: placed.project, notes: placed.notes };
+      for (const note of placed.notes) this.ports.diagnostics.warn(`${formatTaskRef(task)}: ${note}`);
+      return { card: await this.workStarted(task, start.ferret), project: placed.project, notes: placed.notes };
     } catch (error) {
       const note = `No task was made for ${start.ferret}: ${said(error)}`;
       this.ports.diagnostics.warn(note);
@@ -476,29 +476,29 @@ export class FerretCards {
   }
 
   /** Whether a lead's new card may go on `projectId`: its board is on, or the parent (already judged) is on it. */
-  private async licensed(projectId: BoardProjectId, parent: CardRef | null): Promise<boolean> {
+  private async licensed(projectId: BoardProjectId, parent: TaskRef | null): Promise<boolean> {
     if (await this.ports.switches.isOn(projectId)) return true;
     if (parent === null) return false;
-    const { cards } = await this.ports.board.snapshot();
-    return cards.find(card => card.id === parent.id)?.projectId === projectId;
+    const { cards: tasks } = await this.ports.board.snapshot();
+    return tasks.find(task => task.id === parent.id)?.projectId === projectId;
   }
 
   /** The existing card, assigned to the session just started (by the lead, or by the owner); it keeps its owner and its parent. */
-  private async handOver(delegation: Delegation, ferret: string): Promise<OpenedCard> {
+  private async handOver(delegation: Delegation, ferret: string): Promise<OpenedTask> {
     const held = delegation.held;
     if (held === undefined)
-      throw new Error(`${formatCardRef({ id: delegation.id })} was not judged before it was handed over`);
-    const card =
+      throw new Error(`${formatTaskRef({ id: delegation.id })} was not judged before it was handed over`);
+    const task =
       delegation.byOwner === true
         ? await this.ports.board.assignForOwner(delegation.id, ferret, held)
         : await this.ports.board.handOver(delegation.id, delegation.lead, ferret, held);
     // The card is assigned: nothing after this may undo the start, so the board's name is best effort.
-    const project = await this.ports.projects.nameOf(card.projectId).catch((error: unknown) => {
-      this.ports.diagnostics.warn(`could not name the board of ${formatCardRef(card)}: ${said(error)}`);
+    const project = await this.ports.projects.nameOf(task.projectId).catch((error: unknown) => {
+      this.ports.diagnostics.warn(`could not name the board of ${formatTaskRef(task)}: ${said(error)}`);
       return undefined;
     });
     return {
-      card: await this.workStarted(card, ferret),
+      card: await this.workStarted(task, ferret),
       ...(project === undefined ? {} : { project }),
       notes: [],
     };
@@ -509,16 +509,16 @@ export class FerretCards {
    * workflow (In progress, or Plan/Design for a plan-first card), whoever may move cards: a helper cannot,
    * and a card left in the backlog while it is built tells the owner nothing. Best effort, like the card.
    */
-  private async workStarted(card: Card, ferret: string): Promise<Card> {
+  private async workStarted(task: Task, ferret: string): Promise<Task> {
     try {
-      const moved = await this.ports.board.trigger(card.id, 'work.started', {
+      const moved = await this.ports.board.trigger(task.id, 'work.started', {
         ferret,
         reason: 'the session started on it',
       });
-      return moved === null ? card : moved.card;
+      return moved === null ? task : moved.card;
     } catch (error) {
-      this.ports.diagnostics.warn(`could not move ${formatCardRef(card)} to its working lane: ${said(error)}`);
-      return card;
+      this.ports.diagnostics.warn(`could not move ${formatTaskRef(task)} to its working lane: ${said(error)}`);
+      return task;
     }
   }
 

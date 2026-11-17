@@ -22,7 +22,7 @@ const session = (
 });
 
 /** A Warden card, as the board holds it. */
-const card = (overrides: Partial<AgendaItem> = {}): AgendaItem => ({
+const task = (overrides: Partial<AgendaItem> = {}): AgendaItem => ({
   id: 'A1',
   source: 'agent-raised',
   subject: 'What should the Warden do about :atlas? Session may be stuck thinking.',
@@ -53,7 +53,7 @@ const view = (overrides: Partial<WardenAgendaInput> = {}) =>
 describe('the Warden page reads the Warden’s own cards', () => {
   it('should list a Warden card with its ferret, as raised by the Warden', () => {
     // Act
-    const actual = view({ boards: [board('s1', [card()])] });
+    const actual = view({ boards: [board('s1', [task()])] });
 
     // Assert
     should(actual.outcome).equal('items');
@@ -80,7 +80,7 @@ describe('the Warden page reads the Warden’s own cards', () => {
   it('should name the class of a fleet card too', () => {
     // Act
     const actual = view({
-      boards: [board('s1', [card({ sourceRef: 'warden:ask:fleet:dead_monitor:daemon:no-monitor-subsystem' })])],
+      boards: [board('s1', [task({ sourceRef: 'warden:ask:fleet:dead_monitor:daemon:no-monitor-subsystem' })])],
     });
 
     // Assert
@@ -88,12 +88,12 @@ describe('the Warden page reads the Warden’s own cards', () => {
   });
 
   it.each([
-    ['a ferret’s own ask', card({ raisedBy: 'agent', sourceRef: undefined })],
-    ['a person’s note', card({ raisedBy: 'human', sourceRef: undefined })],
-    ['another daemon item', card({ sourceRef: 'harness-prompt:1' })],
-    ['a daemon question row', card({ source: 'question' })],
-    ['an item naming one report block', card({ sourceRef: 'warden:/r.md#sus_thinking' })],
-    ['an old escalation item', card({ sourceRef: 'warden:sus_thinking' })],
+    ['a ferret’s own ask', task({ raisedBy: 'agent', sourceRef: undefined })],
+    ['a person’s note', task({ raisedBy: 'human', sourceRef: undefined })],
+    ['another daemon item', task({ sourceRef: 'harness-prompt:1' })],
+    ['a daemon question row', task({ source: 'question' })],
+    ['an item naming one report block', task({ sourceRef: 'warden:/r.md#sus_thinking' })],
+    ['an old escalation item', task({ sourceRef: 'warden:sus_thinking' })],
   ])('should never list %s', (_label, item) => {
     // Act / Assert
     should(view({ boards: [board('s1', [item])] }).items).deepEqual([]);
@@ -101,7 +101,7 @@ describe('the Warden page reads the Warden’s own cards', () => {
 
   it('should leave out a card on a ferret that has finished', () => {
     // Act
-    const actual = view({ sessions: [session('s1', {}, 'completed')], boards: [board('s1', [card()])] });
+    const actual = view({ sessions: [session('s1', {}, 'completed')], boards: [board('s1', [task()])] });
 
     // Assert
     should(actual.items).deepEqual([]);
@@ -109,7 +109,7 @@ describe('the Warden page reads the Warden’s own cards', () => {
 
   it('should list a card whose session it does not know, with what the board says', () => {
     // Act
-    const actual = view({ sessions: [], boards: [board('s9', [card()])] });
+    const actual = view({ sessions: [], boards: [board('s9', [task()])] });
 
     // Assert
     should(actual.items).match([{ sessionId: 's9', id: 'A1' }]);
@@ -120,7 +120,7 @@ describe('the Warden page reads the Warden’s own cards', () => {
     // Act
     const actual = view({
       sessions: [session('lead'), session('s1', { teammate: 'atlas', label: 'batch-7' })],
-      boards: [board('lead', [card({ sourceRef: 'warden:ask:sus_thinking:s1' })])],
+      boards: [board('lead', [task({ sourceRef: 'warden:ask:sus_thinking:s1' })])],
     });
 
     // Assert
@@ -137,7 +137,7 @@ describe('the Warden page reads the Warden’s own cards', () => {
     // Act
     const actual = view({
       sessions: [session('lead'), session('s1', {}, 'stopped')],
-      boards: [board('lead', [card({ sourceRef: 'warden:ask:sus_thinking:s1' }), card({ id: 'A2' })])],
+      boards: [board('lead', [task({ sourceRef: 'warden:ask:sus_thinking:s1' }), task({ id: 'A2' })])],
     });
 
     // Assert
@@ -147,7 +147,7 @@ describe('the Warden page reads the Warden’s own cards', () => {
 
   it('should leave out an empty context rather than invent one', () => {
     // Arrange
-    const { context: _context, ...bare } = card();
+    const { context: _context, ...bare } = task();
 
     // Act / Assert
     should(view({ boards: [board('s1', [bare])] }).items[0]).not.have.property('context');
@@ -158,8 +158,8 @@ describe('the Warden page reads the Warden’s own cards', () => {
     const actual = view({
       sessions: [session('s1'), session('s2')],
       boards: [
-        board('s2', [card({ id: 'A2', waitingSince: at(-10) }), card({ id: 'A1', waitingSince: at(-10) })]),
-        board('s1', [card({ id: 'A5', waitingSince: at(-10) }), card({ id: 'A3', waitingSince: at(-50) })]),
+        board('s2', [task({ id: 'A2', waitingSince: at(-10) }), task({ id: 'A1', waitingSince: at(-10) })]),
+        board('s1', [task({ id: 'A5', waitingSince: at(-10) }), task({ id: 'A3', waitingSince: at(-50) })]),
       ],
     });
 
@@ -236,6 +236,6 @@ describe('what “nothing waits” means', () => {
 
   it('should list the cards it has while degraded, as items', () => {
     // Act / Assert
-    should(view({ boards: [board('s1', [card()])], unreadBoards: 3 }).outcome).equal('items');
+    should(view({ boards: [board('s1', [task()])], unreadBoards: 3 }).outcome).equal('items');
   });
 });

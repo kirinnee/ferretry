@@ -86,10 +86,10 @@ export const deriveInbox = (
       sessions: machine.sessions,
     })),
   );
-  const boardCards = boardDeck(unread, boardFor, local);
-  const cards = withRepliedCards(boardCards, repliedWithin(machines, local.replied));
+  const boardTasks = boardDeck(unread, boardFor, local);
+  const cards = withRepliedCards(boardTasks, repliedWithin(machines, local.replied));
   const held = (entry: UnreadSession): boolean => boardFor(entry.daemonId, entry.view.config.id) !== undefined;
-  return { unread, boardCards, cards, total: inboxCount(unread, held, cards) };
+  return { unread, boardCards: boardTasks, cards, total: inboxCount(unread, held, cards) };
 };
 
 /**

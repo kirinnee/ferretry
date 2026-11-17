@@ -1,5 +1,5 @@
 import { clipAtWord, MAX_AGENDA_DETAIL_LENGTH, MAX_AGENDA_SUBJECT_LENGTH } from './protocol.ts';
-import { orphanTitle, type OrphanedCard } from './orphans.ts';
+import { orphanTitle, type OrphanedTask } from './orphans.ts';
 
 /** The entry of the one machine item every card with nobody working on it is listed on (`standing`, keyed by it). */
 export const ORPHANS_ENTRY = 'warden.orphans';
@@ -33,12 +33,12 @@ const bodyOf = (rows: readonly string[], hidden: number): string =>
  * The body names the first {@link MAX_LISTED_ORPHANS} cards, oldest wait first, then counts the rest; if even those
  * would not fit an item's detail, whole rows are dropped (and counted) rather than a row cut in two.
  */
-export function orphanItem(cards: readonly OrphanedCard[]): OrphanItem | undefined {
-  if (cards.length === 0) return undefined;
-  const ordered = [...cards].sort(
+export function orphanItem(tasks: readonly OrphanedTask[]): OrphanItem | undefined {
+  if (tasks.length === 0) return undefined;
+  const ordered = [...tasks].sort(
     (left, right) => left.waitingSince.localeCompare(right.waitingSince) || left.id.localeCompare(right.id),
   );
-  const rows = ordered.slice(0, MAX_LISTED_ORPHANS).map(card => `- ${clipAtWord(card.line, MAX_ROW_LENGTH)}`);
+  const rows = ordered.slice(0, MAX_LISTED_ORPHANS).map(task => `- ${clipAtWord(task.line, MAX_ROW_LENGTH)}`);
   while (rows.length > 1 && bodyOf(rows, ordered.length - rows.length).length > MAX_AGENDA_DETAIL_LENGTH) rows.pop();
   const one = ordered.length === 1;
   return {

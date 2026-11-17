@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
-  type Card,
+  type Task,
   CardActionRequestSchema,
   CardCreateRequestSchema,
   type LaneSet,
@@ -12,11 +12,21 @@ import {
   BoardError,
   BoardService,
   type BoardStanding,
-  type CardAudience,
+  type TaskAudience,
   gatesBetween,
   mayPassGate,
 } from '../../../daemon/lib/board/index.ts';
-import { card, FakeFocus, FakeLanes, lanes, MemoryBoardStore, NOW, OTHER_PROJECT, PROJECT, world } from './support.ts';
+import {
+  boardTask,
+  FakeFocus,
+  FakeLanes,
+  lanes,
+  MemoryBoardStore,
+  NOW,
+  OTHER_PROJECT,
+  PROJECT,
+  world,
+} from './support.ts';
 
 /**
  * A GATE IS PASSED ONLY BY THE OWNER (docs/board.md § Cards show progress): their answer to its item, or their own
@@ -51,8 +61,8 @@ const CALLERS: Readonly<Record<Exclude<BoardStanding, 'daemon' | 'assignee-lead'
   reader: { kind: 'ferret', ferret: 'stranger' },
 };
 
-const cardFor = (audience: CardAudience, laneId: string, overrides: Partial<Card> = {}): Card =>
-  card({
+const taskFor = (audience: TaskAudience, laneId: string, overrides: Partial<Task> = {}): Task =>
+  boardTask({
     laneId,
     owner: 'child',
     assignee: 'grandchild',
@@ -64,11 +74,11 @@ const cardFor = (audience: CardAudience, laneId: string, overrides: Partial<Card
   });
 
 const serviceOver = (
-  cards: readonly Card[],
+  tasks: readonly Task[],
   laneSet: LaneSet = lanes(PROJECT),
   overrides: Parameters<typeof world>[0] = {},
 ) => {
-  const store = new MemoryBoardStore(cards);
+  const store = new MemoryBoardStore(tasks);
   const focus = new FakeFocus();
   const service = new BoardService(
     world({
@@ -84,7 +94,7 @@ const serviceOver = (
       runningVersion: () => '4.110.0',
     }),
   );
-  return { store, focus, service, stored: (id = 'F1') => store.cards.get(id) as Card };
+  return { store, focus, service, stored: (id = 'F1') => store.cards.get(id) as Task };
 };
 
 const move = (to: string, reason?: string) =>
@@ -136,7 +146,7 @@ describe('a ferret’s move never jumps a gate', () => {
         const expected = standing !== 'reader' && mayPassGate(standing, audience);
         it(`${expected ? 'lets' : 'refuses'} ${standing} on an ${audience} card ${jump.name}`, async () => {
           // Arrange
-          const world = serviceOver([cardFor(audience, jump.from)], jump.laneSet);
+          const world = serviceOver([taskFor(audience, jump.from)], jump.laneSet);
 
           // Act
           const error = await attempt(world.service.act('F1', move(jump.to), caller));
@@ -156,7 +166,7 @@ describe('a ferret’s move never jumps a gate', () => {
 
   it('names the gate it would pass', async () => {
     // Arrange
-    const world = serviceOver([cardFor('external', 'implement')], withMiddleGate());
+    const world = serviceOver([taskFor('external', 'implement')], withMiddleGate());
 
     // Act
     const error = await attempt(world.service.act('F1', move('merged'), CALLERS.assignee));
@@ -168,7 +178,7 @@ describe('a ferret’s move never jumps a gate', () => {
 
   it('lets a ferret move a card INTO a gate, and back out of one with a reason', async () => {
     // Arrange
-    const world = serviceOver([cardFor('external', 'implement')], withMiddleGate());
+    const world = serviceOver([taskFor('external', 'implement')], withMiddleGate());
 
     // Act
     await world.service.act('F1', move('review'), CALLERS.assignee);
@@ -197,7 +207,7 @@ describe('the daemon’s moves stop at a gate', () => {
 
   it('keeps a card waiting at Plan when a PR opens: a trigger does not take it out', async () => {
     // Arrange
-    const world = serviceOver([cardFor('external', 'plan')]);
+    const world = serviceOver([taskFor('external', 'plan')]);
 
     // Act
     const moved = await world.service.trigger('F1', 'pr.opened');
@@ -209,7 +219,7 @@ describe('the daemon’s moves stop at a gate', () => {
 
   it('stops a trigger at the first gate on the way, and says so', async () => {
     // Arrange
-    const world = serviceOver([cardFor('external', 'implement')], withMiddleGate());
+    const world = serviceOver([taskFor('external', 'implement')], withMiddleGate());
 
     // Act
     await world.service.trigger('F1', 'pr.merged');
@@ -226,7 +236,7 @@ describe('the daemon’s moves stop at a gate', () => {
 
   it('stops a trigger at an internal card’s gate too: its lead passes it, never the daemon', async () => {
     // Arrange
-    const world = serviceOver([cardFor('internal', 'implement')], withMiddleGate());
+    const world = serviceOver([taskFor('internal', 'implement')], withMiddleGate());
 
     // Act
     await world.service.trigger('F1', 'pr.merged');
@@ -239,7 +249,7 @@ describe('the daemon’s moves stop at a gate', () => {
     // Arrange — an open PR beside the shipped one used to pull a card back out of To test
     const world = serviceOver(
       [
-        cardFor('external', 'tested', {
+        taskFor('external', 'tested', {
           workflow: 'quick',
           ...links([
             merged({ releasedIn: { version: '4.110.0', tag: 'v4.110.0', at: NOW } }),
@@ -268,7 +278,7 @@ describe('the daemon’s moves stop at a gate', () => {
     // Arrange — merged and released, refiled onto a board whose Review/CI is a gate
     const world = serviceOver(
       [
-        cardFor('external', 'todo', {
+        taskFor('external', 'todo', {
           workflow: 'quick',
           ...links([merged({ releasedIn: { version: '4.110.0', tag: 'v4.110.0', at: NOW } })]),
         }),
@@ -289,8 +299,8 @@ describe('the daemon’s moves stop at a gate', () => {
 
   it('holds a fy signal done out of a gate, and stops one at a gate on the way', async () => {
     // Arrange — the card in Plan, and one building with a gated Review/CI ahead
-    const atPlan = serviceOver([cardFor('external', 'plan', { owner: 'lead', assignee: null })]);
-    const building = serviceOver([cardFor('external', 'implement', { owner: 'lead', assignee: null })], {
+    const atPlan = serviceOver([taskFor('external', 'plan', { owner: 'lead', assignee: null })]);
+    const building = serviceOver([taskFor('external', 'implement', { owner: 'lead', assignee: null })], {
       ...withMiddleGate(),
       lanes: withMiddleGate().lanes.map(lane =>
         lane.id === 'merged' ? { ...lane, enterOn: [...(lane.enterOn ?? []), 'signal.done'] } : lane,
@@ -320,8 +330,8 @@ describe('the daemon’s moves stop at a gate', () => {
         lane.id === 'merged' ? { ...lane, enterOn: ['pr.merged', 'deploy.done'] } : lane,
       ),
     };
-    const owner = serviceOver([cardFor('external', 'implement')], deploying);
-    const ferret = serviceOver([cardFor('external', 'implement')], deploying);
+    const owner = serviceOver([taskFor('external', 'implement')], deploying);
+    const ferret = serviceOver([taskFor('external', 'implement')], deploying);
     const report = CardActionRequestSchema.parse({ action: 'trigger', event: 'deploy.done' });
 
     // Act
@@ -341,7 +351,7 @@ describe('the security review’s ways past a gate (&F364 PR B)', () => {
 
   it('refuses the assignee’s refile of a card waiting at Plan to a lane past it, and the two-hop that would follow', async () => {
     // Arrange — the review's exploit: refile to Merged on another board, then back to Released
-    const world = serviceOver([cardFor('external', 'plan')]);
+    const world = serviceOver([taskFor('external', 'plan')]);
 
     // Act
     const first = await attempt(world.service.act('F1', refile(OTHER_PROJECT, 'merged'), CALLERS.assignee));
@@ -355,7 +365,7 @@ describe('the security review’s ways past a gate (&F364 PR B)', () => {
 
   it('refuses a named lane past a gate of the other board, even for a card past no gate here', async () => {
     // Arrange — the second hop alone: a card in Merged, refiled by name into Released past Plan
-    const world = serviceOver([cardFor('external', 'merged')]);
+    const world = serviceOver([taskFor('external', 'merged')]);
 
     // Act
     const error = await attempt(world.service.act('F1', refile(OTHER_PROJECT, 'released'), CALLERS.assignee));
@@ -368,8 +378,8 @@ describe('the security review’s ways past a gate (&F364 PR B)', () => {
 
   it('lets a refile land a card waiting at a gate at that board’s gate, or by its category, and the owner anywhere', async () => {
     // Arrange
-    const gated = serviceOver([cardFor('external', 'plan')]);
-    const owner = serviceOver([cardFor('external', 'plan')]);
+    const gated = serviceOver([taskFor('external', 'plan')]);
+    const owner = serviceOver([taskFor('external', 'plan')]);
 
     // Act
     await gated.service.act('F1', refile(OTHER_PROJECT), CALLERS.assignee);
@@ -382,7 +392,7 @@ describe('the security review’s ways past a gate (&F364 PR B)', () => {
 
   it('refuses a helper any refile at all', async () => {
     // Arrange — grandchild was started by child, so it is a helper
-    const store = new MemoryBoardStore([cardFor('external', 'plan')]);
+    const store = new MemoryBoardStore([taskFor('external', 'plan')]);
     const service = new BoardService(
       world({
         store,
@@ -399,7 +409,7 @@ describe('the security review’s ways past a gate (&F364 PR B)', () => {
 
   it('refuses a drop and a reopen past the lane it was dropped from, and reopens it there', async () => {
     // Arrange — the review's exploit: the owner ferret drops a card at Plan, then reopens it in Released
-    const world = serviceOver([cardFor('external', 'plan')]);
+    const world = serviceOver([taskFor('external', 'plan')]);
     await world.service.act('F1', CardActionRequestSchema.parse({ action: 'drop', reason: 'parked' }), CALLERS.owner);
     const reopen = (to: string) =>
       CardActionRequestSchema.parse({
@@ -421,7 +431,7 @@ describe('the security review’s ways past a gate (&F364 PR B)', () => {
 
   it('lets the owner reopen a dropped card anywhere open', async () => {
     // Arrange
-    const world = serviceOver([cardFor('external', 'plan', { dropped: { reason: 'parked', at: NOW } })]);
+    const world = serviceOver([taskFor('external', 'plan', { dropped: { reason: 'parked', at: NOW } })]);
 
     // Act
     await world.service.act(
@@ -442,7 +452,7 @@ describe('the security review’s ways past a gate (&F364 PR B)', () => {
   it('reads a top-level ferret’s own card as the owner’s: it cannot pass its own Plan gate by paraphrasing', async () => {
     // Arrange — lead has no parent; its card says a session of its own asked, and askedBy says agent
     const world = serviceOver([
-      cardFor('external', 'plan', {
+      taskFor('external', 'plan', {
         owner: 'lead',
         assignee: null,
         createdBy: { kind: 'ferret', name: 'lead', ferret: 'lead' },
@@ -461,7 +471,7 @@ describe('the security review’s ways past a gate (&F364 PR B)', () => {
 
   it('reads a card as the owner’s when the lineage cannot be read', async () => {
     // Arrange — the session's parent cannot be read: it is never taken for a ferret's own errand
-    const world = serviceOver([cardFor('internal', 'plan', { askedBy: 'agent' })], lanes(PROJECT), {
+    const world = serviceOver([taskFor('internal', 'plan', { askedBy: 'agent' })], lanes(PROJECT), {
       parents: {
         parentOf: async () => {
           throw new Error('the session document is unreadable');
@@ -488,7 +498,7 @@ describe('who a card’s gates ask comes only from what the daemon recorded (kya
   it('keeps a top-level ferret’s card external whatever session its ask names', async () => {
     // Arrange — the review's proof: lead (top level) writes that its own helper asked
     const world = serviceOver([
-      cardFor('external', 'plan', {
+      taskFor('external', 'plan', {
         owner: 'lead',
         assignee: null,
         createdBy: { kind: 'ferret', name: 'lead', ferret: 'lead' },
@@ -509,7 +519,7 @@ describe('who a card’s gates ask comes only from what the daemon recorded (kya
   it('reads a sub-lead’s own card as internal: a ferret-started session wrote it', async () => {
     // Arrange — child was started by lead
     const world = serviceOver([
-      cardFor('external', 'plan', { createdBy: { kind: 'ferret', name: 'child', ferret: 'child' }, askedBy: 'agent' }),
+      taskFor('external', 'plan', { createdBy: { kind: 'ferret', name: 'child', ferret: 'child' }, askedBy: 'agent' }),
     ]);
 
     // Act
@@ -529,7 +539,7 @@ describe('who a card’s gates ask comes only from what the daemon recorded (kya
     });
     await world.service.spawn('F1', request, { owner: 'lead', by: 'lead', focus: 'child', projectId: PROJECT });
     await world.store.write('F1', async current => ({
-      task: { ...(current as Card), laneId: 'plan' },
+      task: { ...(current as Task), laneId: 'plan' },
       result: undefined,
     }));
     return world;
@@ -563,7 +573,7 @@ describe('who a card’s gates ask comes only from what the daemon recorded (kya
   it('never makes an owner’s card internal by handing it to a helper, refiling or reopening it', async () => {
     // Arrange — the owner made it; lead hands it to child (fy new --card)
     const world = serviceOver([
-      cardFor('external', 'plan', {
+      taskFor('external', 'plan', {
         owner: 'lead',
         assignee: null,
         createdBy: { kind: 'owner' },
@@ -603,7 +613,7 @@ describe('a refile never skips a gate of the other board (kyan R2)', () => {
   const refile = (projectId: string, laneId?: string) =>
     CardActionRequestSchema.parse({ action: 'refile', projectId, ...(laneId === undefined ? {} : { laneId }) });
   const quick = { ...lanes(PROJECT, 'quick'), projectId: OTHER_PROJECT };
-  const twoBoards = (task: Card) => {
+  const twoBoards = (task: Task) => {
     const store = new MemoryBoardStore([task]);
     const service = new BoardService(
       world({
@@ -616,12 +626,12 @@ describe('a refile never skips a gate of the other board (kyan R2)', () => {
         ),
       }),
     );
-    return { service, stored: () => store.cards.get('F1') as Card };
+    return { service, stored: () => store.cards.get('F1') as Task };
   };
 
   it('refuses a card waiting at Plan a named landing in the other board’s To test gate', async () => {
     // Arrange — the review's (a): Plan here, To test on the quick board, then back unnamed to To test here
-    const world = twoBoards(cardFor('external', 'plan'));
+    const world = twoBoards(taskFor('external', 'plan'));
 
     // Act
     const error = await attempt(world.service.act('F1', refile(OTHER_PROJECT, 'to-test'), CALLERS.assignee));
@@ -633,7 +643,7 @@ describe('a refile never skips a gate of the other board (kyan R2)', () => {
 
   it('stops an unnamed refile back at the first gate it would skip', async () => {
     // Arrange — the review's (b): a card that reached the quick board's To test comes home unnamed
-    const world = twoBoards(cardFor('external', 'to-test', { projectId: OTHER_PROJECT }));
+    const world = twoBoards(taskFor('external', 'to-test', { projectId: OTHER_PROJECT }));
 
     // Act
     await world.service.act('F1', refile(PROJECT), CALLERS.assignee);

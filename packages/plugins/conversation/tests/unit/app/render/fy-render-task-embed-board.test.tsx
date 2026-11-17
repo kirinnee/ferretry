@@ -26,7 +26,7 @@ mock.module('@ferretry/app', () => ({
   },
 }));
 
-const { FyRenderCardEmbed } = await import('../../../../app/render/fy-render-task-embed.tsx');
+const { FyRenderTaskEmbed } = await import('../../../../app/render/fy-render-task-embed.tsx');
 const { isFyRenderEmbedBlock, parseFyRender } = await import('../../../../app/render/fy-render.ts');
 
 const blockOf = (type: 'task' | 'board', payload: string) => {
@@ -42,7 +42,7 @@ describe('FyRenderCardEmbed: the Board draws the mini board', () => {
   it('hands a task block to the Board renderer as the task it names, inside the labelled group', () => {
     asked.length = 0;
     owned = true;
-    const tree = render(<FyRenderCardEmbed block={blockOf('task', '&F12')} host={host} />);
+    const tree = render(<FyRenderTaskEmbed block={blockOf('task', '&F12')} host={host} />);
     expect(asked).toEqual([
       { daemon: 'daemon-a', rendererKey: 'reference:&board', value: { kind: 'card', id: 'F12' } },
     ]);
@@ -54,14 +54,14 @@ describe('FyRenderCardEmbed: the Board draws the mini board', () => {
   it('hands a board that lists cards to the Board renderer as one list, not one row per card', () => {
     asked.length = 0;
     owned = true;
-    render(<FyRenderCardEmbed block={blockOf('board', '&F1 &F2')} host={host} />);
+    render(<FyRenderTaskEmbed block={blockOf('board', '&F1 &F2')} host={host} />);
     expect(asked.map(entry => entry.value)).toEqual([{ kind: 'cards', ids: ['F1', 'F2'] }]);
   });
 
   it('hands a `parent:` board to the Board renderer so the lane view is its own', () => {
     asked.length = 0;
     owned = true;
-    const tree = render(<FyRenderCardEmbed block={blockOf('board', 'parent: &F7')} host={host} />);
+    const tree = render(<FyRenderTaskEmbed block={blockOf('board', 'parent: &F7')} host={host} />);
     expect(asked.map(entry => entry.value)).toEqual([{ kind: 'children', parent: 'F7' }]);
     expect(tree.root.findAllByProps({ 'data-fy-card-embed-note': 'F7' })).toHaveLength(0);
   });
@@ -69,7 +69,7 @@ describe('FyRenderCardEmbed: the Board draws the mini board', () => {
   it('draws the reference rows only where no Board answers for the renderer', () => {
     asked.length = 0;
     owned = false;
-    const tree = render(<FyRenderCardEmbed block={blockOf('board', 'parent: &F7')} host={host} />);
+    const tree = render(<FyRenderTaskEmbed block={blockOf('board', 'parent: &F7')} host={host} />);
     expect(tree.root.findAllByProps({ 'data-board-drew': 'reference:&board' })).toHaveLength(0);
     expect(tree.root.findAllByProps({ 'data-fy-card-embed-note': 'F7' })).toHaveLength(1);
   });

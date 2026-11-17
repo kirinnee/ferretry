@@ -1,16 +1,16 @@
 import type { AgendaBoardContext } from '@ferretry/core-asks/contract';
 import { laneForTrigger as defaultLaneForTrigger } from '../../contract/lanes.ts';
-import type { CardRef } from '../../contract/refs.ts';
-import type { CardResponse } from '../../contract/wire.ts';
+import type { TaskRef } from '../../contract/refs.ts';
+import type { TaskResponse } from '../../contract/wire.ts';
 
 /** What Board's half of the agenda context reads, each from the world Board already built. */
 export interface BoardAgendaContextSources {
   /** The card a ferret works on (`config.focusTask`); `null` for none. */
-  readonly focusOf: (ferret: string) => Promise<CardRef | null>;
+  readonly focusOf: (ferret: string) => Promise<TaskRef | null>;
   /** One card with its lane set; `undefined` when it is not on the board. */
-  readonly card: (id: CardRef['id']) => Promise<CardResponse | undefined>;
+  readonly card: (id: TaskRef['id']) => Promise<TaskResponse | undefined>;
   /** Where the card's gate asks the owner. A read that fails THROWS: "not asking" would let a second ask through. */
-  readonly asking: (id: CardRef['id']) => Promise<{ readonly ferret: string; readonly id: string } | undefined>;
+  readonly asking: (id: TaskRef['id']) => Promise<{ readonly ferret: string; readonly id: string } | undefined>;
   readonly machineId: () => string | undefined;
   readonly laneForTrigger?: typeof defaultLaneForTrigger;
 }
@@ -28,14 +28,14 @@ export function boardAgendaContext(sources: BoardAgendaContextSources): AgendaBo
     // "To test" is the lane `release.published` enters (Released · to test), as the board's own lane facts say.
     inToTest: async ref => {
       if (!here(ref)) return false;
-      const found = await sources.card(ref.id as CardRef['id']).catch(() => undefined);
+      const found = await sources.card(ref.id as TaskRef['id']).catch(() => undefined);
       if (found === undefined || found.laneSet === null) return false;
       const lane = laneForTrigger(found.laneSet, found.card.workflow, 'release.published');
       return lane.ok && lane.value !== null && lane.value.id === found.card.laneId;
     },
     asking: async ref => {
       if (!here(ref)) return undefined;
-      const found = await sources.asking(ref.id as CardRef['id']);
+      const found = await sources.asking(ref.id as TaskRef['id']);
       return found === undefined ? undefined : { sessionId: found.ferret, id: found.id as never };
     },
   };

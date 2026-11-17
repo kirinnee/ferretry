@@ -12,8 +12,8 @@ import {
   AGENDA_KIND_LABELS,
   agendaAnswerText,
   agendaCanDiscuss,
-  agendaCardAnswers,
-  agendaCardKind,
+  agendaTaskAnswers,
+  agendaTaskKind,
   agendaInDiscussion,
   agendaKindLabel,
   agendaTitle,
@@ -69,7 +69,7 @@ describe('attention card', () => {
     });
 
     it('prefers the kind an item was raised with', () => {
-      should(agendaCardKind({ kind: 'info', ask: { kind: 'task' } })).equal('info');
+      should(agendaTaskKind({ kind: 'info', ask: { kind: 'task' } })).equal('info');
     });
 
     it('tells a yes-or-no choice from any other two options', () => {
@@ -138,8 +138,8 @@ describe('attention card', () => {
   describe('one meaning for every swipe', () => {
     it('points a row of options in the options list’s order, wherever the recommendation sits', () => {
       const three = { ...item, ask: choice('Pause', 'Switch', 'Warn'), recommendation: { decision: 'Warn' } };
-      should(layout(agendaCardAnswers(three))).eql(['left:Pause', 'up:Switch', 'right:Warn']);
-      should(layout(agendaCardAnswers({ ...item, ask: choice('Ship') }))).eql(['up:Ship']);
+      should(layout(agendaTaskAnswers(three))).eql(['left:Pause', 'up:Switch', 'right:Warn']);
+      should(layout(agendaTaskAnswers({ ...item, ask: choice('Ship') }))).eql(['up:Ship']);
       const asked = {
         ...item,
         ask: choice('Monday', 'Friday'),
@@ -148,23 +148,23 @@ describe('attention card', () => {
           { direction: 'left' as const, does: 'choose' as const, label: 'Monday' },
         ],
       };
-      should(layout(agendaCardAnswers(asked))).eql(['left:Monday', 'right:Friday']);
+      should(layout(agendaTaskAnswers(asked))).eql(['left:Monday', 'right:Friday']);
     });
 
     it('puts No ← and Yes → whichever order the ferret listed them in, on a yes-or-no or a two-way choice', () => {
       for (const kind of ['yesno', 'choice'] as const) {
-        should(layout(agendaCardAnswers({ ...item, kind, ask: choice('Yes', 'No') }))).eql(['left:No', 'right:Yes']);
-        should(layout(agendaCardAnswers({ ...item, kind, ask: choice('No', 'Yes') }))).eql(['left:No', 'right:Yes']);
+        should(layout(agendaTaskAnswers({ ...item, kind, ask: choice('Yes', 'No') }))).eql(['left:No', 'right:Yes']);
+        should(layout(agendaTaskAnswers({ ...item, kind, ask: choice('No', 'Yes') }))).eql(['left:No', 'right:Yes']);
       }
       // An old item with no kind, its options in either case, and one recommending Yes (kept on ↑ before the rule).
-      should(layout(agendaCardAnswers({ ...item, ask: choice('yes', 'NO') }))).eql(['left:NO', 'right:yes']);
+      should(layout(agendaTaskAnswers({ ...item, ask: choice('yes', 'NO') }))).eql(['left:NO', 'right:yes']);
       const recommended = {
         ...item,
         kind: 'choice' as const,
         ask: choice('No', 'Yes'),
         recommendation: { decision: 'Yes' },
       };
-      should(layout(agendaCardAnswers(recommended))).eql(['left:No', 'right:Yes']);
+      should(layout(agendaTaskAnswers(recommended))).eql(['left:No', 'right:Yes']);
       // Answers the ferret pointed itself are re-pointed too: the order never depends on how they were written.
       const pointed = {
         ...item,
@@ -174,16 +174,16 @@ describe('attention card', () => {
           { direction: 'right' as const, does: 'choose' as const, label: 'No' },
         ],
       };
-      should(layout(agendaCardAnswers(pointed))).eql(['left:No', 'right:Yes']);
+      should(layout(agendaTaskAnswers(pointed))).eql(['left:No', 'right:Yes']);
     });
 
     it('leaves a row that is not exactly Yes and No to the options list’s order', () => {
-      should(layout(agendaCardAnswers({ ...item, ask: choice('Yes', 'No', 'Later') }))).eql([
+      should(layout(agendaTaskAnswers({ ...item, ask: choice('Yes', 'No', 'Later') }))).eql([
         'left:Yes',
         'up:No',
         'right:Later',
       ]);
-      should(layout(agendaCardAnswers({ ...item, ask: choice('Yes', 'Later') }))).eql(['left:Yes', 'right:Later']);
+      should(layout(agendaTaskAnswers({ ...item, ask: choice('Yes', 'Later') }))).eql(['left:Yes', 'right:Later']);
     });
 
     it('orders any list of Yes and No as No, Yes (yesNoOrder), and leaves any other list alone', () => {
@@ -198,7 +198,7 @@ describe('attention card', () => {
 
     it('leaves answers that are not options where the card put them', () => {
       const permission = { ...item, ask: { kind: 'permission' as const } };
-      should(layout(agendaCardAnswers(permission))).eql(layout(defaultAgendaAnswers('permission', permission.ask)));
+      should(layout(agendaTaskAnswers(permission))).eql(layout(defaultAgendaAnswers('permission', permission.ask)));
     });
   });
 
@@ -206,9 +206,9 @@ describe('attention card', () => {
     it('reads an item from before cards with no parse failure and derived answers', () => {
       const old = AgendaItemSchema.parse({ ...item, ask: choice('Renew', 'Leave it', 'Ask me each time') });
       should(old.title).be.undefined();
-      should(agendaCardKind(old)).equal('choice');
+      should(agendaTaskKind(old)).equal('choice');
       // A row of options reads in the options list's order: the first ←, the second ↑, the third →.
-      should(layout(agendaCardAnswers(old))).eql(['left:Renew', 'up:Leave it', 'right:Ask me each time']);
+      should(layout(agendaTaskAnswers(old))).eql(['left:Renew', 'up:Leave it', 'right:Ask me each time']);
     });
 
     it('keeps the old brief recommendation on the row, in its place in the list', () => {
@@ -217,12 +217,12 @@ describe('attention card', () => {
         ask: choice('Renew', 'Leave it'),
         recommendation: { decision: 'Leave it' },
       });
-      should(answerInDirection(agendaCardAnswers(old), 'right')?.label).equal('Leave it');
+      should(answerInDirection(agendaTaskAnswers(old), 'right')?.label).equal('Leave it');
     });
 
     it('offers an old choice past three options as buttons, not swipes', () => {
       const old = { ...item, ask: choice('A', 'B', 'C', 'D', 'E') };
-      should(agendaCardAnswers(old)).have.length(3);
+      should(agendaTaskAnswers(old)).have.length(3);
       should(unswipedChoices(old).map(option => option.label)).eql(['D', 'E']);
     });
 
@@ -246,7 +246,7 @@ describe('attention card', () => {
           { direction: 'left', does: 'choose', label: 'No' },
         ],
       });
-      should(layout(agendaCardAnswers(raised))).eql(['left:No', 'right:Yes']);
+      should(layout(agendaTaskAnswers(raised))).eql(['left:No', 'right:Yes']);
     });
 
     it('refuses a stored item whose answers do not fit its ask, naming the answer', () => {
@@ -350,7 +350,7 @@ describe('attention card', () => {
     };
 
     it('is each described option’s short label; the answer it sends is the label, its description kept beside it', () => {
-      const answers = agendaCardAnswers(described);
+      const answers = agendaTaskAnswers(described);
       should(layout(answers)).eql(['left:No', 'right:Only blockers']);
       should(answers.map(each => agendaAnswerText(each.label))).eql(['No', 'Only blockers']);
       should(answers.map(each => each.description)).eql([

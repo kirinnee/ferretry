@@ -186,20 +186,20 @@ describe('a move with a kept job, on a real tmux', () => {
         openTools,
       });
     const report = await look(undefined);
-    const card = preflight.describe(report);
+    const task = preflight.describe(report);
 
     // Assert — the card names both
-    const kept = card.items.find(item => item.title.startsWith('attachment to job build'));
+    const kept = task.items.find(item => item.title.startsWith('attachment to job build'));
     should(kept).be.ok();
     should(kept?.title).equal('attachment to job build (kept; re-attach after the move)');
     should(kept?.blocks).be.false();
-    should(card.items.some(item => item.title.includes('a background job Ferretry is not keeping'))).be.false();
-    const neutral = card.items.find(item => item.title.startsWith('sleep 300 — '));
+    should(task.items.some(item => item.title.includes('a background job Ferretry is not keeping'))).be.false();
+    const neutral = task.items.find(item => item.title.startsWith('sleep 300 — '));
     should(neutral?.title).equal('sleep 300 — a command the agent is running; it stops when the ferret moves.');
     // The state DOES record its open tools and none is open: now the same shell is positively a background job.
     const recorded = await look([]);
-    const recordedCard = preflight.describe(recorded);
-    const unkept = recordedCard.items.find(item => item.title.includes('a background job Ferretry is not keeping'));
+    const recordedTask = preflight.describe(recorded);
+    const unkept = recordedTask.items.find(item => item.title.includes('a background job Ferretry is not keeping'));
     should(unkept?.title).startWith('sleep 300 — a background job Ferretry is not keeping');
     should(unkept?.title).endWith('Start long jobs with `fy job run` so they survive.');
     should(

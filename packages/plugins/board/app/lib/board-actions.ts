@@ -20,17 +20,17 @@ import {
   type BoardProjectId,
   type BoardReopenAttachments,
   type BoardResult,
-  type CardActionRequestInput,
-  type CardCreateRequestInput,
-  type CardId,
-  type CardStartResponse,
-  type CardView,
+  type TaskActionRequestInput,
+  type TaskCreateRequestInput,
+  type TaskId,
+  type TaskStartResponse,
+  type TaskView,
   boardErr,
   boardOk,
   type LaneLayoutValue,
   type LaneSet,
   type LaneTemplateName,
-  type CardMessage,
+  type TaskMessage,
 } from '../../contract/index.ts';
 import type { LaneWriteError } from './board-client.ts';
 import { checkMove } from './board-model.ts';
@@ -48,22 +48,22 @@ interface BoardMutationError {
 
 type LaneMutation = BoardResult<LaneSet, LaneWriteError>;
 
-type BoardMutation = BoardResult<CardView, BoardMutationError>;
+type BoardMutation = BoardResult<TaskView, BoardMutationError>;
 
-type BoardStart = BoardResult<CardStartResponse, BoardMutationError>;
+type BoardStart = BoardResult<TaskStartResponse, BoardMutationError>;
 
 /** A card, named by its machine and id, with what a move needs to be checked: its lane and its lane set. */
-interface BoardCardTarget {
+interface BoardTaskTarget {
   readonly daemonId: DaemonId;
-  readonly id: CardId;
+  readonly id: TaskId;
 }
 
-export interface BoardMoveTarget extends BoardCardTarget {
+export interface BoardMoveTarget extends BoardTaskTarget {
   readonly laneId: string;
   readonly laneSet: Pick<LaneSet, 'lanes' | 'variants'> | null;
 }
 
-type Action<Name extends CardActionRequestInput['action']> = Extract<CardActionRequestInput, { readonly action: Name }>;
+type Action<Name extends TaskActionRequestInput['action']> = Extract<TaskActionRequestInput, { readonly action: Name }>;
 
 type BoardDependency = Pick<Action<'depend'>, 'task' | 'until'> & { readonly overrideReason?: string };
 type BoardLinkTarget = Omit<Action<'link'>, 'action'>;
@@ -82,27 +82,27 @@ export interface BoardActions {
   ): Promise<BoardMutation>;
   /** Reopens a closed card into a lane, with the owner's reason and the ask as said. */
   reopen(
-    target: BoardCardTarget,
+    target: BoardTaskTarget,
     to: string,
     reason: string,
-    ask: CardMessage,
+    ask: TaskMessage,
     attachments?: BoardReopenAttachments,
   ): Promise<BoardMutation>;
-  depend(target: BoardCardTarget, dependency: BoardDependency): Promise<BoardMutation>;
+  depend(target: BoardTaskTarget, dependency: BoardDependency): Promise<BoardMutation>;
   /** Takes a dependency off; the daemon records why. */
-  undepend(target: BoardCardTarget, task: Action<'undepend'>['task'], reason: string): Promise<BoardMutation>;
-  note(target: BoardCardTarget, text: string): Promise<BoardMutation>;
-  link(target: BoardCardTarget, link: BoardLinkTarget): Promise<BoardMutation>;
-  drop(target: BoardCardTarget, reason: string): Promise<BoardMutation>;
+  undepend(target: BoardTaskTarget, task: Action<'undepend'>['task'], reason: string): Promise<BoardMutation>;
+  note(target: BoardTaskTarget, text: string): Promise<BoardMutation>;
+  link(target: BoardTaskTarget, link: BoardLinkTarget): Promise<BoardMutation>;
+  drop(target: BoardTaskTarget, reason: string): Promise<BoardMutation>;
   /** Starts a new ferret on the card (or names the live one that holds it); `key` makes a retry of one click safe. */
-  start(target: BoardCardTarget, key?: string): Promise<BoardStart>;
-  editField(target: BoardCardTarget, edit: BoardEdit): Promise<BoardMutation>;
+  start(target: BoardTaskTarget, key?: string): Promise<BoardStart>;
+  editField(target: BoardTaskTarget, edit: BoardEdit): Promise<BoardMutation>;
   /** Puts a card aside until `until` (an instant), or wakes it now with `null`. The owner's own, kept on the card. */
-  snoozeTask(target: BoardCardTarget, until: string | null): Promise<BoardMutation>;
+  snoozeTask(target: BoardTaskTarget, until: string | null): Promise<BoardMutation>;
   /** Puts the card under another card, or at the top level with `parent: null`. */
-  reparent(target: BoardCardTarget, parent: Action<'reparent'>['parent'], reason?: string): Promise<BoardMutation>;
+  reparent(target: BoardTaskTarget, parent: Action<'reparent'>['parent'], reason?: string): Promise<BoardMutation>;
   /** Opens a card the owner writes, on one machine. */
-  create(daemonId: DaemonId, request: CardCreateRequestInput): Promise<BoardMutation>;
+  create(daemonId: DaemonId, request: TaskCreateRequestInput): Promise<BoardMutation>;
   /** The owner picks a template for a project with no lanes: proposed, then confirmed in the same breath. */
   adoptTemplate(daemonId: DaemonId, projectId: BoardProjectId, template: LaneTemplateName): Promise<LaneMutation>;
   /** Saves an edited layout against the version the editor saw; the owner's edit confirms the set. */
@@ -138,7 +138,7 @@ const unpairedLanes = (daemonId: DaemonId): LaneWriteError => ({
 });
 
 export const createBoardActions = (deps: BoardActionsDeps): BoardActions => {
-  const send = async (target: BoardCardTarget, request: CardActionRequestInput): Promise<BoardMutation> => {
+  const send = async (target: BoardTaskTarget, request: TaskActionRequestInput): Promise<BoardMutation> => {
     const machine = deps.connection(target.daemonId);
     if (machine === undefined) return boardErr(unpaired(target.daemonId));
     return await deps.store.act(machine, target.id, request);

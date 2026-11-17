@@ -1,4 +1,4 @@
-import type { OpenCardStanding } from '../peers/board.ts';
+import type { OpenTaskStanding } from '../peers/board.ts';
 
 /**
  * The sessions that own, or are assigned, a card still in flight: not dropped, and not in a closed or shipped lane.
@@ -12,14 +12,14 @@ import type { OpenCardStanding } from '../peers/board.ts';
  * `undefined` when the lane could not be read), because Ferrets cannot import Board's lane graph. UNWIRED: nothing
  * hands the archive these cards yet, and an archive without them keeps every session (`keeps.ts`: board unreadable).
  */
-export function sessionsOnOpenCards(cards: readonly OpenCardStanding[]): ReadonlySet<string> {
+export function sessionsOnOpenTasks(tasks: readonly OpenTaskStanding[]): ReadonlySet<string> {
   const sessions = new Set<string>();
-  for (const card of cards) {
-    if (card.dropped !== null) continue;
-    const category = card.category;
+  for (const task of tasks) {
+    if (task.dropped !== null) continue;
+    const category = task.category;
     if (category === 'closed' || category === 'shipped') continue;
-    sessions.add(card.owner);
-    if (card.assignee !== null) sessions.add(card.assignee);
+    sessions.add(task.owner);
+    if (task.assignee !== null) sessions.add(task.assignee);
   }
   return sessions;
 }

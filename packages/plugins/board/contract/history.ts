@@ -5,8 +5,8 @@
  * Pure. The caller says how a lane id and a session id read, because only it holds the lane set and the
  * session directory.
  */
-import type { CardActor, BoardAttachment, CardEvent } from './wire.ts';
-import { formatCardRef } from './refs.ts';
+import type { TaskActor, BoardAttachment, TaskEvent } from './wire.ts';
+import { formatTaskRef } from './refs.ts';
 
 /** How a lane id or a session id reads to whoever is shown the line. */
 export type BoardNamer = (id: string) => string;
@@ -27,11 +27,11 @@ export function attachmentsPhrase(files: readonly Pick<BoardAttachment, 'mime'>[
  * reported it (`reportedBy`) — the daemon only carried out their word, and a ferret's report must never read as a
  * fact Ferretry saw for itself.
  */
-export const boardEventActor = (event: Pick<CardEvent, 'actor'> & { readonly reportedBy?: CardActor }): CardActor =>
+export const boardEventActor = (event: Pick<TaskEvent, 'actor'> & { readonly reportedBy?: TaskActor }): TaskActor =>
   event.reportedBy ?? event.actor;
 
 /** One history event's wording; the closed union means every event this build can read is spelled here. */
-export function describeCardEvent(event: CardEvent, lane: BoardNamer, names: BoardNamer): string {
+export function describeTaskEvent(event: TaskEvent, lane: BoardNamer, names: BoardNamer): string {
   switch (event.type) {
     case 'created':
       return `created in ${lane(event.laneId)}`;
@@ -68,9 +68,9 @@ export function describeCardEvent(event: CardEvent, lane: BoardNamer, names: Boa
           : ''
       }`;
     case 'depended':
-      return `depends on ${formatCardRef(event.task)} until ${event.until}${event.override === undefined ? '' : ` (owner override: ${event.override.reason})`}`;
+      return `depends on ${formatTaskRef(event.task)} until ${event.until}${event.override === undefined ? '' : ` (owner override: ${event.override.reason})`}`;
     case 'undepended':
-      return `no longer depends on ${formatCardRef(event.task)}: ${event.reason}`;
+      return `no longer depends on ${formatTaskRef(event.task)}: ${event.reason}`;
     case 'blocked':
       return `blocked: ${event.reason}`;
     case 'unblocked':
@@ -89,8 +89,8 @@ export function describeCardEvent(event: CardEvent, lane: BoardNamer, names: Boa
       return `refiled to ${event.toProject} (${lane(event.toLane)})${event.reason === null ? '' : `: ${event.reason}`}`;
     case 'reparented': {
       const why = event.reason === null ? '' : `: ${event.reason}`;
-      const to = event.to === null ? 'now top level' : `under ${formatCardRef(event.to)}`;
-      const from = event.from === null ? 'top level' : formatCardRef(event.from);
+      const to = event.to === null ? 'now top level' : `under ${formatTaskRef(event.to)}`;
+      const from = event.from === null ? 'top level' : formatTaskRef(event.from);
       return `re-parented ${to} (was ${from})${why}`;
     }
     case 'dropped':

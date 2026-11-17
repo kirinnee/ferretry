@@ -13,12 +13,12 @@ export const isBoardNudge = (record: LedgerSendRecord): boolean => {
 };
 
 /** The pull requests of the cards a nudge can name. */
-export interface CardPullRequests {
+export interface TaskPullRequests {
   readonly id: string;
   readonly prs?: readonly { readonly number: number; readonly url: string }[];
 }
 
-const CARD = /&([A-Za-z]+\d+)/u;
+const TASK = /&([A-Za-z]+\d+)/u;
 const PR = /\bPR #(\d+)\b/gu;
 
 /**
@@ -26,9 +26,9 @@ const PR = /\bPR #(\d+)\b/gu;
  * is about links one. The card reference itself is the reader's to prove and open (docs/reference-standard.md);
  * a PR the card does not link stays plain words.
  */
-export function linkNudgePullRequests(text: string, cards: readonly CardPullRequests[] | undefined): string {
-  const written = CARD.exec(text)?.[1]?.toUpperCase();
-  const prs = written === undefined ? undefined : cards?.find(card => card.id.toUpperCase() === written)?.prs;
+export function linkNudgePullRequests(text: string, tasks: readonly TaskPullRequests[] | undefined): string {
+  const written = TASK.exec(text)?.[1]?.toUpperCase();
+  const prs = written === undefined ? undefined : tasks?.find(task => task.id.toUpperCase() === written)?.prs;
   if (prs === undefined) return text;
   return text.replace(PR, (named, number: string) => {
     const pr = prs.find(candidate => candidate.number === Number(number));

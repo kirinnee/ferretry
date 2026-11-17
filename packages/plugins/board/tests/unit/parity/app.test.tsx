@@ -14,17 +14,17 @@ import manifest from '../../../manifest.ts';
 import app from '../../../app/index.ts';
 import { NO_BOARD_FILTERS, boardFiltersToSearch, parseBoardFilters } from '../../../app/lib/board-model.ts';
 import { parseWorkName } from '../../../app/lib/task-name.ts';
-import { boardCardPath, boardPath, cardPagePath, projectLanesPath } from '../../../app/lib/paths.ts';
+import { boardTaskPath, boardPath, taskPagePath, projectLanesPath } from '../../../app/lib/paths.ts';
 import { BoardFilterSheet } from '../../../app/views/board-filters.tsx';
-import { CardName } from '../../../app/views/task-name.tsx';
-import { boardAnswer, card, laneSetFor, PROJECT } from '../app/board-support.ts';
+import { TaskName } from '../../../app/views/task-name.tsx';
+import { boardAnswer, boardTask, laneSetFor, PROJECT } from '../app/board-support.ts';
 
 const LEAD = 'mvuc7tsf-0c3d50df';
 
-const CARDS = [
-  card('F1', { laneId: 'todo', title: 'Fix the scroller' }),
-  card('F2', { laneId: 'implement', title: 'Draw the lanes', parent: { id: 'F1' }, dependsOn: [] }),
-  card('F3', { laneId: 'review', title: 'Wait on the lanes', blockedBy: [{ id: 'F2' }] }),
+const TASKS = [
+  boardTask('F1', { laneId: 'todo', title: 'Fix the scroller' }),
+  boardTask('F2', { laneId: 'implement', title: 'Draw the lanes', parent: { id: 'F1' }, dependsOn: [] }),
+  boardTask('F3', { laneId: 'review', title: 'Wait on the lanes', blockedBy: [{ id: 'F2' }] }),
 ];
 
 /** A daemon that answers Board's reads from the cards above; a route it does not know fails like an old daemon. */
@@ -32,16 +32,16 @@ const daemon: PluginClient = {
   call: async (route: string, init?: { readonly params?: Readonly<Record<string, string>> }) => {
     switch (route) {
       case 'GET /v1/board':
-        return boardAnswer(CARDS, { projectId: PROJECT, laneSet: laneSetFor() });
+        return boardAnswer(TASKS, { projectId: PROJECT, laneSet: laneSetFor() });
       case 'GET /v1/board/projects':
         return {
           projects: [{ id: PROJECT, name: 'ferretry', path: '/work/ferretry', laneSet: laneSetFor() }],
           current: null,
         };
       case 'GET /v1/board/ids':
-        return { ids: CARDS.map(entry => entry.id) };
+        return { ids: TASKS.map(entry => entry.id) };
       case 'GET /v1/board/tasks/:taskId': {
-        const found = CARDS.find(entry => entry.id === init?.params?.taskId);
+        const found = TASKS.find(entry => entry.id === init?.params?.taskId);
         if (found === undefined) throw Object.assign(new Error('no such card'), { status: 404 });
         return { card: found, laneSet: laneSetFor() };
       }
@@ -152,7 +152,7 @@ describe('the app half the shell builds', () => {
       node => node.querySelector('a') !== null,
       'the reference link',
     );
-    expect(reference.querySelector('a')?.getAttribute('href')).toBe(cardPagePath('F1'));
+    expect(reference.querySelector('a')?.getAttribute('href')).toBe(taskPagePath('F1'));
     expect(reference.querySelector('a')?.getAttribute('title')).toBe('Fix the scroller');
     await view?.unmount();
 
@@ -202,7 +202,7 @@ describe('the app half the shell builds', () => {
       call: async (route: string, init?: { readonly params?: Readonly<Record<string, string>> }) => {
         if (route === 'GET /v1/board/ids') return { ids: ['F1', 'F7'] };
         if (route === 'GET /v1/board/tasks/:taskId') {
-          const found = CARDS.find(entry => entry.id === init?.params?.taskId);
+          const found = TASKS.find(entry => entry.id === init?.params?.taskId);
           if (found === undefined) throw Object.assign(new Error('refused'), { status: 403 });
           return { card: found, laneSet: laneSetFor() };
         }
@@ -218,7 +218,7 @@ describe('the app half the shell builds', () => {
       node => node.querySelector('a') !== null,
       'the listed card links although its read was refused',
     );
-    expect(proved.querySelector('a')?.getAttribute('href')).toBe(cardPagePath('F7'));
+    expect(proved.querySelector('a')?.getAttribute('href')).toBe(taskPagePath('F7'));
     await view?.unmount();
 
     const unproved = await draw<RendererProps>(
@@ -414,7 +414,7 @@ describe('words and routes', () => {
     expect(parseWorkName('[Hayden] Fix the scroller')).toEqual({ prefix: 'Hayden', task: 'Fix the scroller' });
     expect(parseWorkName('Fix the scroller')).toEqual({ prefix: null, task: 'Fix the scroller' });
     expect(parseWorkName('fix [Hayden] later').prefix).toBeNull();
-    view = await mount(<CardName name="[Hayden] Fix the scroller" />);
+    view = await mount(<TaskName name="[Hayden] Fix the scroller" />);
     expect(view.container.textContent).toBe('HaydenFix the scroller');
     expect(view.container.querySelector('[title]')?.getAttribute('title')).toBe('[Hayden] Fix the scroller');
   });
@@ -426,14 +426,14 @@ describe('words and routes', () => {
   });
 
   it('S-0367 daemonBoardCardPath: a card id after /board opens that card; /card/<id> is its own page', () => {
-    expect(boardCardPath(undefined, 'F12')).toBe('/board/F12');
-    expect(cardPagePath('F12')).toBe('/task/F12');
+    expect(boardTaskPath(undefined, 'F12')).toBe('/board/F12');
+    expect(taskPagePath('F12')).toBe('/task/F12');
   });
 
   it('S-0367 daemonBoardCardPath: both are per daemon, so under /d/<daemon>/ on a daemon address', async () => {
     await at('/d/studio/board/F1');
-    expect(boardCardPath(undefined, 'F12')).toBe('/d/studio/board/F12');
-    expect(cardPagePath('F12')).toBe('/d/studio/task/F12');
+    expect(boardTaskPath(undefined, 'F12')).toBe('/d/studio/board/F12');
+    expect(taskPagePath('F12')).toBe('/d/studio/task/F12');
   });
 
   it('S-0368 daemonBoardForFerretPath: a ferret’s board is the board narrowed by ?ferret=', () => {

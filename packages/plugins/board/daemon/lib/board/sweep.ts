@@ -41,23 +41,23 @@
  * {@link planSweep} is pure; {@link BoardSweep} does the IO through its ports.
  */
 import {
-  type CardId,
-  type CardRef,
-  type CardView,
-  formatCardRef,
+  type TaskId,
+  type TaskRef,
+  type TaskView,
+  formatTaskRef,
   isBlockerDone,
   laneOf,
   type SweepFile,
 } from '../../../contract/index.ts';
 import {
-  cardStaleAfterMs,
+  taskStaleAfterMs,
   presenceOf,
   type FerretLivenessGuard,
   type FerretLivenessSource,
   type FerretRoster,
 } from './activity.ts';
 import { effectiveAssignee } from './authority.ts';
-import { cardCategory, type LaneSets } from './graph.ts';
+import { taskCategory, type LaneSets } from './graph.ts';
 import { noticeRecipient } from './notice-route.ts';
 import { endedForGrace, lineageThrough, returnTarget } from './return-to-lead.ts';
 import { isHandedHelper, isPrFreeHelper } from './sub-task-close.ts';
@@ -66,7 +66,7 @@ import type { BoardClock, BoardDiagnostics } from './ports.ts';
 /** How often the daemon sweeps the board. */
 export const BOARD_SWEEP_INTERVAL_MS = 60_000;
 
-type CardMark = SweepFile['seen'][string];
+type TaskMark = SweepFile['seen'][string];
 export type SweepMemory = SweepFile;
 
 export const EMPTY_SWEEP_MEMORY: SweepMemory = { format: 1, sweptAt: null, nudged: {}, seen: {} };
@@ -77,7 +77,7 @@ export const EMPTY_SWEEP_MEMORY: SweepMemory = { format: 1, sweptAt: null, nudge
  */
 interface BoardNudge {
   readonly kind: 'stale' | 'unblocked';
-  readonly cardId: CardId;
+  readonly cardId: TaskId;
   readonly ferret: string;
   readonly message: string;
 }
@@ -87,20 +87,20 @@ export interface SweepPlan {
   readonly memory: SweepMemory;
   readonly nudges: readonly BoardNudge[];
   /** The open helpers whose ferret ended with no PR to ship: they close. */
-  readonly closes: readonly CardId[];
+  readonly closes: readonly TaskId[];
   /** The open cards whose ferret ended and that have a live lead above it: they go back to that lead. */
-  readonly returns: readonly CardReturn[];
+  readonly returns: readonly TaskReturn[];
 }
 
 /** One card going back: to `lead`, because `from` (its ferret) ended. */
-interface CardReturn {
-  readonly id: CardId;
+interface TaskReturn {
+  readonly id: TaskId;
   readonly lead: string;
   readonly from: string;
 }
 
 export interface SweepBoard {
-  readonly views: readonly CardView[];
+  readonly views: readonly TaskView[];
   readonly laneSets: LaneSets;
 }
 
@@ -117,51 +117,51 @@ export const formatIdle = (ms: number): string => {
 };
 
 /** The nudge a stale card's ferret is sent. */
-export const nudgeMessage = (card: Pick<CardView, 'id'>, idleMs: number, lane: string): string =>
-  `${formatCardRef(card)} has had no activity for ${formatIdle(idleMs)} in ${lane}. Move it, note why, block it, or drop it.`;
+export const nudgeMessage = (task: Pick<TaskView, 'id'>, idleMs: number, lane: string): string =>
+  `${formatTaskRef(task)} has had no activity for ${formatIdle(idleMs)} in ${lane}. Move it, note why, block it, or drop it.`;
 
 /** What a dependent card's assignee is told once its last blocker ships: `&F20 can go ahead: &F18 merged.` */
-const unblockedMessage = (card: Pick<CardView, 'id'>, shipped: readonly string[]): string =>
-  `${formatCardRef(card)} can go ahead: ${shipped.join(', ')}.`;
+const unblockedMessage = (task: Pick<TaskView, 'id'>, shipped: readonly string[]): string =>
+  `${formatTaskRef(task)} can go ahead: ${shipped.join(', ')}.`;
 
-const laneName = (board: SweepBoard, card: Pick<CardView, 'projectId'>, laneId: string): string => {
-  const laneSet = board.laneSets.get(card.projectId);
+const laneName = (board: SweepBoard, task: Pick<TaskView, 'projectId'>, laneId: string): string => {
+  const laneSet = board.laneSets.get(task.projectId);
   const lane = laneSet === undefined ? undefined : laneOf(laneSet, laneId);
   return lane?.ok === true ? lane.value.name : laneId;
 };
 
-const refKey = (ref: CardRef): string => `${ref.machineId ?? ''}/${ref.id}`;
+const refKey = (ref: TaskRef): string => `${ref.machineId ?? ''}/${ref.id}`;
 
 // ---------------------------------------------------------------------------------------------------
 // The plan
 // ---------------------------------------------------------------------------------------------------
 
-const isOpen = (view: CardView, board: SweepBoard): boolean =>
-  view.dropped === null && cardCategory(view, board.laneSets) !== 'closed';
+const isOpen = (view: TaskView, board: SweepBoard): boolean =>
+  view.dropped === null && taskCategory(view, board.laneSets) !== 'closed';
 
 /** The card a ref names on this card's own machine; `undefined` for one elsewhere or not here. */
 const localView = (
-  view: Pick<CardView, 'machineId'>,
-  ref: CardRef,
-  byId: ReadonlyMap<CardId, CardView>,
-): CardView | undefined =>
+  view: Pick<TaskView, 'machineId'>,
+  ref: TaskRef,
+  byId: ReadonlyMap<TaskId, TaskView>,
+): TaskView | undefined =>
   ref.machineId === undefined || ref.machineId === view.machineId ? byId.get(ref.id) : undefined;
 
 /** The blockers that left `previous` because they shipped, as `&F18 merged`. */
 const shippedBlockers = (
-  view: CardView,
+  view: TaskView,
   previous: readonly string[],
   board: SweepBoard,
-  byId: ReadonlyMap<CardId, CardView>,
+  byId: ReadonlyMap<TaskId, TaskView>,
 ): readonly string[] => {
   const words: string[] = [];
   for (const dependency of view.dependsOn) {
     if (dependency.override !== undefined || !previous.includes(refKey(dependency.task))) continue;
     const blocker = localView(view, dependency.task, byId);
     if (blocker === undefined) continue;
-    const category = cardCategory(blocker, board.laneSets);
+    const category = taskCategory(blocker, board.laneSets);
     if (category === undefined || !isBlockerDone(category, dependency.until, blocker.shippedIn !== null)) continue;
-    words.push(`${formatCardRef(blocker)} ${laneName(board, blocker, blocker.laneId).toLowerCase()}`);
+    words.push(`${formatTaskRef(blocker)} ${laneName(board, blocker, blocker.laneId).toLowerCase()}`);
   }
   return words;
 };
@@ -171,10 +171,10 @@ const shippedBlockers = (
  * that left without shipping — a dependency dropped, an override — is no news) and it is alive to act.
  */
 const unblockNudge = (
-  view: CardView,
-  mark: CardMark | undefined,
+  view: TaskView,
+  mark: TaskMark | undefined,
   board: SweepBoard,
-  byId: ReadonlyMap<CardId, CardView>,
+  byId: ReadonlyMap<TaskId, TaskView>,
   roster: FerretRoster,
 ): BoardNudge | null => {
   if (mark === undefined || mark.blockedBy.length === 0 || view.blockedBy.length > 0) return null;
@@ -188,7 +188,7 @@ const unblockNudge = (
  * Whether a card is a helper whose ferret has ended: a sub-card handed to another ferret (never the lead's own
  * bookkeeping), with no PR to ship, whose session is gone and untouched for the grace.
  */
-const helperEnded = (view: CardView, roster: FerretRoster, nowMs: number): boolean => {
+const helperEnded = (view: TaskView, roster: FerretRoster, nowMs: number): boolean => {
   return isHandedHelper(view) && isPrFreeHelper(view) && endedForGrace(view, roster, effectiveAssignee(view), nowMs);
 };
 
@@ -197,7 +197,7 @@ const helperEnded = (view: CardView, roster: FerretRoster, nowMs: number): boole
  * alive, else the nearest live lead above it, the card's owner only when nobody in that line is left
  * ({@link noticeRecipient}). A session that declared a wait is never nudged, and nobody is nudged in its place.
  */
-export const nudgeRecipient = (view: CardView, roster: FerretRoster): string | null => {
+export const nudgeRecipient = (view: TaskView, roster: FerretRoster): string | null => {
   const recipient = noticeRecipient(roster, view);
   return recipient === null || recipient.session.declaredWait ? null : recipient.ferret;
 };
@@ -206,18 +206,18 @@ export const nudgeRecipient = (view: CardView, roster: FerretRoster): string | n
 export const planSweep = (memory: SweepMemory, board: SweepBoard, roster: FerretRoster, now: string): SweepPlan => {
   const nowMs = Date.parse(now);
   const byId = new Map(board.views.map(view => [view.id, view]));
-  const seen: Record<string, CardMark> = {};
+  const seen: Record<string, TaskMark> = {};
   const nudged: Record<string, string> = {};
   const nudges: BoardNudge[] = [];
-  const closes: CardId[] = [];
-  const returns: CardReturn[] = [];
+  const closes: TaskId[] = [];
+  const returns: TaskReturn[] = [];
   for (const view of board.views) {
     if (!isOpen(view, board)) continue;
     if (helperEnded(view, roster, nowMs)) {
       closes.push(view.id);
       continue;
     }
-    const lead = returnTarget(view, cardCategory(view, board.laneSets), roster, nowMs);
+    const lead = returnTarget(view, taskCategory(view, board.laneSets), roster, nowMs);
     if (lead !== null) {
       returns.push({ id: view.id, lead, from: effectiveAssignee(view) });
       continue;
@@ -228,7 +228,7 @@ export const planSweep = (memory: SweepMemory, board: SweepBoard, roster: Ferret
     const last = memory.nudged[view.id];
     if (last !== undefined) nudged[view.id] = last;
     if (view.activity !== 'stale') continue;
-    const staleAfter = cardStaleAfterMs(view, board);
+    const staleAfter = taskStaleAfterMs(view, board);
     if (staleAfter === null || (last !== undefined && nowMs - Date.parse(last) < staleAfter)) continue;
     const ferret = nudgeRecipient(view, roster);
     if (ferret === null) continue;
@@ -264,13 +264,13 @@ export interface BoardSweepPorts {
   readonly board: {
     sweepBoard(signal?: AbortSignal): Promise<SweepBoard>;
     /** Closes a helper whose ferret ended; `true` when it closed. */
-    closeEndedHelper(id: CardId): Promise<boolean>;
+    closeEndedHelper(id: TaskId): Promise<boolean>;
     /**
      * Hands a card whose ferret ended to its live lead; `true` when it moved. `settle` holds the standing of the
      * sessions the return rests on and hands the card's write a fresh roster of them (see {@link FerretLivenessGuard}).
      */
     returnToLead(
-      id: CardId,
+      id: TaskId,
       plan: { readonly lead: string; readonly from: string },
       settle: <T>(work: (fresh: FerretRoster) => Promise<T>) => Promise<T>,
     ): Promise<boolean>;
@@ -285,10 +285,10 @@ export interface BoardSweepPorts {
 
 /** What one tick did: the stale cards nudged, the cards whose assignee was told to go ahead, and helpers closed. */
 export interface SweepReport {
-  readonly nudged: readonly CardId[];
-  readonly unblocked: readonly CardId[];
-  readonly closed: readonly CardId[];
-  readonly returned: readonly CardId[];
+  readonly nudged: readonly TaskId[];
+  readonly unblocked: readonly TaskId[];
+  readonly closed: readonly TaskId[];
+  readonly returned: readonly TaskId[];
 }
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -323,8 +323,8 @@ export class BoardSweep {
     signal?.throwIfAborted();
     const now = this.ports.clock.now();
     const plan = planSweep(memory, board, roster, now);
-    const nudged: CardId[] = [];
-    const unblocked: CardId[] = [];
+    const nudged: TaskId[] = [];
+    const unblocked: TaskId[] = [];
     const seen = { ...plan.memory.seen };
     for (const nudge of plan.nudges) {
       signal?.throwIfAborted();
@@ -337,7 +337,7 @@ export class BoardSweep {
         },
       );
     }
-    const closed: CardId[] = [];
+    const closed: TaskId[] = [];
     for (const id of plan.closes) {
       await this.ports.board.closeEndedHelper(id).then(
         done => {
@@ -346,7 +346,7 @@ export class BoardSweep {
         (error: unknown) => this.ports.diagnostics.warn(`could not close helper &${id}: ${messageOf(error)}`),
       );
     }
-    const returned: CardId[] = [];
+    const returned: TaskId[] = [];
     for (const { id, lead, from } of plan.returns) {
       const line = lineageThrough(roster, from, lead);
       if (line === null) continue;

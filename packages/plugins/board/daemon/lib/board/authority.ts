@@ -21,7 +21,7 @@
  * One exception inside re-plan: the card's ASSIGNEE may hand it down to a descendant of its own ({@link mayHandDown}),
  * so a lead given a card can start a helper on it without making a duplicate. Never sideways or upward.
  */
-import { type Card, formatCardRef } from '../../../contract/index.ts';
+import { type Task, formatTaskRef } from '../../../contract/index.ts';
 
 /** Who is asking. The route derives it from the server-side actor, never from the body. */
 export type BoardCaller =
@@ -102,7 +102,7 @@ export const OPERATION_STANDINGS: Readonly<Record<BoardOperation, readonly Board
 };
 
 /** The ferret doing the card now: its assignee, which reads as the owner when unset. */
-export const effectiveAssignee = (card: Pick<Card, 'owner' | 'assignee'>): string => card.assignee ?? card.owner;
+export const effectiveAssignee = (task: Pick<Task, 'owner' | 'assignee'>): string => task.assignee ?? task.owner;
 
 /**
  * A caller's standing on one card. `ownerAncestors` is the card owner's lineage and `assigneeAncestors` the assignee's,
@@ -113,15 +113,15 @@ export const effectiveAssignee = (card: Pick<Card, 'owner' | 'assignee'>): strin
  */
 export const standingOf = (
   caller: BoardCaller,
-  card: Pick<Card, 'owner' | 'assignee'>,
+  task: Pick<Task, 'owner' | 'assignee'>,
   ownerAncestors: readonly string[],
   assigneeAncestors: readonly string[] = [],
 ): BoardStanding => {
   if (caller.kind === 'owner') return 'owner-human';
   if (caller.kind === 'daemon') return 'daemon';
-  if (caller.ferret === card.owner) return 'owner';
+  if (caller.ferret === task.owner) return 'owner';
   if (ownerAncestors.includes(caller.ferret)) return 'ancestor';
-  if (caller.ferret === effectiveAssignee(card)) return 'assignee';
+  if (caller.ferret === effectiveAssignee(task)) return 'assignee';
   if (assigneeAncestors.includes(caller.ferret)) return 'assignee-lead';
   return 'reader';
 };
@@ -131,7 +131,7 @@ export const standingOf = (
  * gates are the owner's alone, asked as agenda items; an INTERNAL card is a ferret's own bookkeeping, and the owner
  * never sees it, so its owner ferret or a lead above that ferret passes its gates with an ordinary move.
  */
-export type CardAudience = 'external' | 'internal';
+export type TaskAudience = 'external' | 'internal';
 
 /** The standings that pass an INTERNAL card's gate besides the owner: its owner ferret and that ferret's leads. */
 const INTERNAL_GATE_KEEPERS: readonly BoardStanding[] = ['owner-human', 'owner', 'ancestor'];
@@ -141,7 +141,7 @@ const INTERNAL_GATE_KEEPERS: readonly BoardStanding[] = ['owner-human', 'owner',
  * audience. The owner always; the owner ferret or an ancestor only on an internal card; an assignee, a helper,
  * a reader and the daemon never (the daemon's own moves are its triggers, which never enter a gated closed lane).
  */
-export const mayPassGate = (standing: BoardStanding, audience: CardAudience): boolean =>
+export const mayPassGate = (standing: BoardStanding, audience: TaskAudience): boolean =>
   audience === 'internal' ? INTERNAL_GATE_KEEPERS.includes(standing) : standing === 'owner-human';
 
 /** Whether a standing admits an operation. */
@@ -173,21 +173,21 @@ export const mayHandDown = (
  */
 export const claimableFrom = (
   caller: BoardCaller,
-  card: Pick<Card, 'owner' | 'assignee'>,
+  task: Pick<Task, 'owner' | 'assignee'>,
   callerAncestors: readonly string[],
 ): string | undefined => {
   if (caller.kind !== 'ferret') return undefined;
-  const holder = effectiveAssignee(card);
+  const holder = effectiveAssignee(task);
   return caller.ferret !== holder && callerAncestors.includes(holder) ? holder : undefined;
 };
 
 /** The sentence a refused claim answers with: who may claim, and what to do instead. */
-export const claimRefusalMessage = (card: Pick<Card, 'id' | 'owner' | 'assignee'>, caller: BoardCaller): string => {
-  const ref = formatCardRef(card);
+export const claimRefusalMessage = (task: Pick<Task, 'id' | 'owner' | 'assignee'>, caller: BoardCaller): string => {
+  const ref = formatTaskRef(task);
   if (caller.kind !== 'ferret') return `claim is a ferret's: ${ref} is taken with \`fy task assign ${ref} <ferret>\``;
-  if (caller.ferret === effectiveAssignee(card)) return `${ref} is already yours`;
-  if (caller.ferret === card.owner) return `you own ${ref}: take it with \`fy task assign ${ref} ${caller.ferret}\``;
-  return `only a ferret below the ferret holding ${ref} may claim it (held by ${effectiveAssignee(card)}); a task held by a ferret outside your lineage is theirs: ask your lead`;
+  if (caller.ferret === effectiveAssignee(task)) return `${ref} is already yours`;
+  if (caller.ferret === task.owner) return `you own ${ref}: take it with \`fy task assign ${ref} ${caller.ferret}\``;
+  return `only a ferret below the ferret holding ${ref} may claim it (held by ${effectiveAssignee(task)}); a task held by a ferret outside your lineage is theirs: ask your lead`;
 };
 
 const STANDING_WORDS: Readonly<Record<BoardStanding, string>> = {
@@ -231,11 +231,11 @@ const OPERATION_WORDS: Readonly<Record<BoardOperation, string>> = {
  * The sentence a refusal answers with: what was refused and who may do it instead, naming the card's
  * own ferrets so the caller knows whom to ask.
  */
-export const refusalMessage = (operation: BoardOperation, card: Pick<Card, 'id' | 'owner' | 'assignee'>): string => {
+export const refusalMessage = (operation: BoardOperation, task: Pick<Task, 'id' | 'owner' | 'assignee'>): string => {
   const who = OPERATION_STANDINGS[operation].map(standing => STANDING_WORDS[standing]);
   const ferrets =
-    card.assignee === null || card.assignee === card.owner
-      ? `owner ferret ${card.owner}`
-      : `owner ferret ${card.owner}, assignee ${card.assignee}`;
-  return `only ${who.join(', ')} may ${OPERATION_WORDS[operation]} ${formatCardRef(card)} (${ferrets})`;
+    task.assignee === null || task.assignee === task.owner
+      ? `owner ferret ${task.owner}`
+      : `owner ferret ${task.owner}, assignee ${task.assignee}`;
+  return `only ${who.join(', ')} may ${OPERATION_WORDS[operation]} ${formatTaskRef(task)} (${ferrets})`;
 };

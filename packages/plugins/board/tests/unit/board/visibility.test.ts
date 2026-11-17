@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
 import {
-  type CardActor,
+  type TaskActor,
   BoardQuerySchema,
-  type Card,
-  type CardCreateRequestInput,
+  type Task,
+  type TaskCreateRequestInput,
   CardCreateRequestSchema,
-  type CardVisibility,
+  type TaskVisibility,
   type PrLink,
 } from '../../../contract/index.ts';
 import should from 'should';
@@ -16,12 +16,12 @@ import {
   BoardError,
   BoardService,
   BoardUnavailableError,
-  cardVisibility,
+  taskVisibility,
   defaultVisibility,
   visibilityVerdict,
   withDefaultVisibility,
 } from '../../../daemon/lib/board/index.ts';
-import { card, MemoryBoardStore, PROJECT, type ServiceWorld, world } from './support.ts';
+import { boardTask, MemoryBoardStore, PROJECT, type ServiceWorld, world } from './support.ts';
 
 const PERSON_ASK = { text: 'build the board', source: 'owner (board)' } as const;
 const AGENT_ASK = { text: 'a ferret idea', source: 'session:lead' } as const;
@@ -30,36 +30,36 @@ const owner: BoardCaller = { kind: 'owner' };
 const lead: BoardCaller = { kind: 'ferret', ferret: 'lead' };
 const stranger: BoardCaller = { kind: 'ferret', ferret: 'stranger' };
 
-const serviceWith = (cards: readonly Card[], overrides: Partial<ServiceWorld> = {}) => {
-  const ports = world({ store: new MemoryBoardStore(cards), ownerWords: { said: async () => [] }, ...overrides });
+const serviceWith = (tasks: readonly Task[], overrides: Partial<ServiceWorld> = {}) => {
+  const ports = world({ store: new MemoryBoardStore(tasks), ownerWords: { said: async () => [] }, ...overrides });
   return { ports, service: new BoardService(ports) };
 };
-const stored = (ports: ServiceWorld, id: string): Card => ports.store.cards.get(id) as Card;
-const create = (input: Partial<CardCreateRequestInput> = {}) =>
+const stored = (ports: ServiceWorld, id: string): Task => ports.store.cards.get(id) as Task;
+const create = (input: Partial<TaskCreateRequestInput> = {}) =>
   CardCreateRequestSchema.parse({ kind: 'feature', title: 'Board store', ask: AGENT_ASK, ...input });
 
 describe('cardVisibility', () => {
   it('should read public for a top-level card a person asked for, and private for everything else', () => {
-    should(cardVisibility(card({ ask: PERSON_ASK }))).equal('public');
-    should(cardVisibility(card({ ask: AGENT_ASK }))).equal('private');
-    should(cardVisibility(card({ ask: PERSON_ASK, parent: { id: 'F9' } }))).equal('private');
-    should(cardVisibility(card({ ask: AGENT_ASK, askedBy: 'person' }))).equal('public');
-    should(cardVisibility(card({ ask: PERSON_ASK, askedBy: 'agent' }))).equal('private');
+    should(taskVisibility(boardTask({ ask: PERSON_ASK }))).equal('public');
+    should(taskVisibility(boardTask({ ask: AGENT_ASK }))).equal('private');
+    should(taskVisibility(boardTask({ ask: PERSON_ASK, parent: { id: 'F9' } }))).equal('private');
+    should(taskVisibility(boardTask({ ask: AGENT_ASK, askedBy: 'person' }))).equal('public');
+    should(taskVisibility(boardTask({ ask: PERSON_ASK, askedBy: 'agent' }))).equal('private');
   });
 
   it('should prefer a stored value, and leave defaultVisibility to ignore it', () => {
-    const hidden = card({ ask: PERSON_ASK, visibility: 'private' });
-    should(cardVisibility(hidden)).equal('private');
+    const hidden = boardTask({ ask: PERSON_ASK, visibility: 'private' });
+    should(taskVisibility(hidden)).equal('private');
     should(defaultVisibility(hidden)).equal('public');
-    should(cardVisibility(card({ ask: AGENT_ASK, visibility: 'public' }))).equal('public');
+    should(taskVisibility(boardTask({ ask: AGENT_ASK, visibility: 'public' }))).equal('public');
   });
 });
 
 describe('visibilityVerdict', () => {
-  const person = card({ ask: PERSON_ASK });
-  const agent = card({ ask: AGENT_ASK });
-  const sub = card({ ask: AGENT_ASK, parent: { id: 'F9' } });
-  const allowed = (target: Card, to: CardVisibility, standing: BoardStanding) =>
+  const person = boardTask({ ask: PERSON_ASK });
+  const agent = boardTask({ ask: AGENT_ASK });
+  const sub = boardTask({ ask: AGENT_ASK, parent: { id: 'F9' } });
+  const allowed = (target: Task, to: TaskVisibility, standing: BoardStanding) =>
     visibilityVerdict(target, to, standing) === null;
 
   it('should let the owner set any card either way', () => {
@@ -114,7 +114,7 @@ describe('creating a card stores its visibility', () => {
   });
 
   it('should store a sub-card as private even when the owner asked for the work', async () => {
-    const { ports, service } = serviceWith([card({ id: 'F1', ask: PERSON_ASK })]);
+    const { ports, service } = serviceWith([boardTask({ id: 'F1', ask: PERSON_ASK })]);
     const { card: task } = await service.create(create({ ask: PERSON_ASK, parent: { id: 'F1' } }), lead);
     should(stored(ports, task.id).visibility).equal('private');
   });
@@ -128,7 +128,7 @@ describe('creating a card stores its visibility', () => {
   });
 
   it('should refuse a ferret that hides the owner’s ask, or publishes a sub-card', async () => {
-    const { service } = serviceWith([card({ id: 'F1', ask: PERSON_ASK })]);
+    const { service } = serviceWith([boardTask({ id: 'F1', ask: PERSON_ASK })]);
     await service
       .create(create({ ask: { text: 'x', source: 'owner via lead jaeda' }, visibility: 'private' }), lead)
       .then(
@@ -142,7 +142,7 @@ describe('creating a card stores its visibility', () => {
   });
 
   it('should let the owner publish a sub-card and hide their own ask', async () => {
-    const { ports, service } = serviceWith([card({ id: 'F1', ask: PERSON_ASK })]);
+    const { ports, service } = serviceWith([boardTask({ id: 'F1', ask: PERSON_ASK })]);
     const sub = await service.create(
       create({ ask: PERSON_ASK, parent: { id: 'F1' }, visibility: 'public', assignee: 'lead', projectId: PROJECT }),
       owner,
@@ -157,11 +157,11 @@ describe('creating a card stores its visibility', () => {
 });
 
 describe('the visibility action', () => {
-  const act = (service: BoardService, id: string, visibility: CardVisibility, caller: BoardCaller) =>
+  const act = (service: BoardService, id: string, visibility: TaskVisibility, caller: BoardCaller) =>
     service.act(id, { action: 'visibility', visibility }, caller);
 
   it('should let the card’s ferret flip an agent-asked card and record it as a note', async () => {
-    const { ports, service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK, visibility: 'private' })]);
+    const { ports, service } = serviceWith([boardTask({ id: 'F1', ask: AGENT_ASK, visibility: 'private' })]);
     const { card: task } = await act(service, 'F1', 'public', lead);
     should(task.visibility).equal('public');
     should(stored(ports, 'F1').visibility).equal('public');
@@ -170,7 +170,7 @@ describe('the visibility action', () => {
   });
 
   it('should refuse a ferret that hides the owner’s ask, and let the owner do it', async () => {
-    const { ports, service } = serviceWith([card({ id: 'F1', ask: PERSON_ASK, askedBy: 'person' })]);
+    const { ports, service } = serviceWith([boardTask({ id: 'F1', ask: PERSON_ASK, askedBy: 'person' })]);
     await act(service, 'F1', 'private', lead).then(
       () => should.fail(undefined, undefined, 'a ferret hid the owner’s ask'),
       (error: unknown) => should(error).be.instanceOf(BoardError).and.match({ code: 'forbidden' }),
@@ -181,7 +181,7 @@ describe('the visibility action', () => {
   });
 
   it('should refuse a ferret that does not own the card', async () => {
-    const { ports, service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK })]);
+    const { ports, service } = serviceWith([boardTask({ id: 'F1', ask: AGENT_ASK })]);
     await act(service, 'F1', 'public', stranger).then(
       () => should.fail(undefined, undefined, 'a stranger published a card'),
       (error: unknown) => should(error).be.instanceOf(BoardError).and.match({ code: 'forbidden' }),
@@ -190,7 +190,7 @@ describe('the visibility action', () => {
   });
 
   it('should record a choice equal to the default, and refuse it only once it is recorded', async () => {
-    const { ports, service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK })]);
+    const { ports, service } = serviceWith([boardTask({ id: 'F1', ask: AGENT_ASK })]);
     await act(service, 'F1', 'private', lead);
     should(stored(ports, 'F1')).match({ visibility: 'private', visibilitySource: 'chosen' });
     should(stored(ports, 'F1').history.at(-1)).match({ type: 'note', text: 'visibility: private (chosen)' });
@@ -223,8 +223,8 @@ describe('the visibility action', () => {
   });
 
   it('should refuse a helper, which may only note and link', async () => {
-    const sub: CardActor = { kind: 'ferret', name: 'child', ferret: 'child' };
-    const { service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK, owner: 'child', createdBy: sub })], {
+    const sub: TaskActor = { kind: 'ferret', name: 'child', ferret: 'child' };
+    const { service } = serviceWith([boardTask({ id: 'F1', ask: AGENT_ASK, owner: 'child', createdBy: sub })], {
       helpers: { leadOf: async id => (id === 'child' ? 'lead' : undefined), addressOf: async id => id },
     });
     await act(service, 'F1', 'public', { kind: 'ferret', ferret: 'child' }).then(
@@ -244,8 +244,8 @@ class FakeOwnerWords implements OwnerWords {
 }
 
 const OWNER_SAID = 'Make the inbox show only cards a person asked for, with the project name next to the machine';
-const lead_made = (id: string, overrides: Partial<Card> = {}) =>
-  card({
+const lead_made = (id: string, overrides: Partial<Task> = {}) =>
+  boardTask({
     id,
     ask: { text: OWNER_SAID, source: 'session:lead' },
     createdBy: { kind: 'ferret', name: 'lead', ferret: 'lead' },
@@ -254,18 +254,18 @@ const lead_made = (id: string, overrides: Partial<Card> = {}) =>
 
 describe('withDefaultVisibility', () => {
   it('should never touch a chosen visibility, with or without a source', () => {
-    const chosen = card({ ask: PERSON_ASK, askedBy: 'person', visibility: 'private', visibilitySource: 'chosen' });
-    const legacy = card({ ask: PERSON_ASK, askedBy: 'person', visibility: 'private' });
+    const chosen = boardTask({ ask: PERSON_ASK, askedBy: 'person', visibility: 'private', visibilitySource: 'chosen' });
+    const legacy = boardTask({ ask: PERSON_ASK, askedBy: 'person', visibility: 'private' });
     should(withDefaultVisibility(chosen)).equal(chosen);
     should(withDefaultVisibility(legacy)).equal(legacy);
   });
 
   it('should answer the same card when its default already holds, and re-derive one that does not', () => {
-    const holds = card({ ask: PERSON_ASK, askedBy: 'person', visibility: 'public', visibilitySource: 'default' });
+    const holds = boardTask({ ask: PERSON_ASK, askedBy: 'person', visibility: 'public', visibilitySource: 'default' });
     should(withDefaultVisibility(holds)).equal(holds);
-    const stale = card({ ask: PERSON_ASK, askedBy: 'person', visibility: 'private', visibilitySource: 'default' });
+    const stale = boardTask({ ask: PERSON_ASK, askedBy: 'person', visibility: 'private', visibilitySource: 'default' });
     should(withDefaultVisibility(stale)).match({ visibility: 'public', visibilitySource: 'default' });
-    should(withDefaultVisibility(card({ ask: PERSON_ASK, askedBy: 'person' }))).match({
+    should(withDefaultVisibility(boardTask({ ask: PERSON_ASK, askedBy: 'person' }))).match({
       visibility: 'public',
       visibilitySource: 'default',
     });
@@ -310,12 +310,12 @@ describe('moving a card under another keeps the visibility rules', () => {
       () => should.fail(undefined, undefined, 'the move was accepted'),
       (error: unknown) => should(error).be.instanceOf(BoardError).and.match({ code: 'forbidden' }),
     );
-  const base = () => [card({ id: 'F2', ask: AGENT_ASK }), card({ id: 'F3', ask: AGENT_ASK })];
+  const base = () => [boardTask({ id: 'F2', ask: AGENT_ASK }), boardTask({ id: 'F3', ask: AGENT_ASK })];
 
   it('should refuse a ferret that would make its published card a public sub-card, and let the owner', async () => {
     const { ports, service } = serviceWith([
       ...base(),
-      card({ id: 'F1', ask: AGENT_ASK, askedBy: 'agent', visibility: 'public', visibilitySource: 'chosen' }),
+      boardTask({ id: 'F1', ask: AGENT_ASK, askedBy: 'agent', visibility: 'public', visibilitySource: 'chosen' }),
     ]);
     await forbidden(reparent(service, 'F1', 'F2', lead));
     should(stored(ports, 'F1').parent).be.null();
@@ -327,7 +327,7 @@ describe('moving a card under another keeps the visibility rules', () => {
   it('should let a ferret make its card private first and then move it', async () => {
     const { ports, service } = serviceWith([
       ...base(),
-      card({ id: 'F1', ask: AGENT_ASK, askedBy: 'agent', visibility: 'public', visibilitySource: 'chosen' }),
+      boardTask({ id: 'F1', ask: AGENT_ASK, askedBy: 'agent', visibility: 'public', visibilitySource: 'chosen' }),
     ]);
     await service.act('F1', { action: 'visibility', visibility: 'private' }, lead);
     await reparent(service, 'F1', 'F2', lead);
@@ -337,7 +337,7 @@ describe('moving a card under another keeps the visibility rules', () => {
   it('should refuse a ferret that would hide the owner’s card by moving it, and let the owner', async () => {
     const { ports, service } = serviceWith([
       ...base(),
-      card({ id: 'F1', ask: PERSON_ASK, askedBy: 'person', visibility: 'public', visibilitySource: 'default' }),
+      boardTask({ id: 'F1', ask: PERSON_ASK, askedBy: 'person', visibility: 'public', visibilitySource: 'default' }),
     ]);
     await forbidden(reparent(service, 'F1', 'F2', lead));
     should(stored(ports, 'F1')).match({ parent: null, visibility: 'public' });
@@ -349,7 +349,7 @@ describe('moving a card under another keeps the visibility rules', () => {
   it('should publish a person’s sub-card again when it is lifted to the top level, and keep a chosen one', async () => {
     const { ports, service } = serviceWith([
       ...base(),
-      card({
+      boardTask({
         id: 'F1',
         ask: PERSON_ASK,
         askedBy: 'person',
@@ -357,7 +357,7 @@ describe('moving a card under another keeps the visibility rules', () => {
         visibility: 'private',
         visibilitySource: 'default',
       }),
-      card({
+      boardTask({
         id: 'F4',
         ask: PERSON_ASK,
         askedBy: 'person',
@@ -375,7 +375,7 @@ describe('moving a card under another keeps the visibility rules', () => {
   it('should let a ferret move the owner’s public sub-card between parents, which publishes nothing new', async () => {
     const { ports, service } = serviceWith([
       ...base(),
-      card({
+      boardTask({
         id: 'F1',
         ask: AGENT_ASK,
         parent: { id: 'F2' },
@@ -388,10 +388,10 @@ describe('moving a card under another keeps the visibility rules', () => {
   });
 
   it('should leave a card with no stored visibility without one, reading it by where it sits', async () => {
-    const { ports, service } = serviceWith([...base(), card({ id: 'F1', ask: AGENT_ASK })]);
+    const { ports, service } = serviceWith([...base(), boardTask({ id: 'F1', ask: AGENT_ASK })]);
     await reparent(service, 'F1', 'F2', lead);
     should(stored(ports, 'F1').visibility).be.undefined();
-    should(cardVisibility(stored(ports, 'F1'))).equal('private');
+    should(taskVisibility(stored(ports, 'F1'))).equal('private');
   });
 });
 
@@ -400,7 +400,7 @@ describe('editing a card with its visibility is one mutation', () => {
     service.act(id, { action: 'edit', ...fields } as never, caller);
 
   it('should apply text and visibility together, with one stored result', async () => {
-    const { ports, service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK })]);
+    const { ports, service } = serviceWith([boardTask({ id: 'F1', ask: AGENT_ASK })]);
     const store = ports.store as MemoryBoardStore;
     await edit(service, 'F1', { title: 'Changed', visibility: 'public' }, lead);
     should(store.writes).have.length(1);
@@ -409,13 +409,13 @@ describe('editing a card with its visibility is one mutation', () => {
   });
 
   it('should change visibility alone through an edit', async () => {
-    const { ports, service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK })]);
+    const { ports, service } = serviceWith([boardTask({ id: 'F1', ask: AGENT_ASK })]);
     await edit(service, 'F1', { visibility: 'public' }, lead);
     should(stored(ports, 'F1')).match({ visibility: 'public' });
   });
 
   it('should refuse a forbidden visibility without applying the text', async () => {
-    const { ports, service } = serviceWith([card({ id: 'F1', ask: PERSON_ASK, askedBy: 'person' })]);
+    const { ports, service } = serviceWith([boardTask({ id: 'F1', ask: PERSON_ASK, askedBy: 'person' })]);
     await edit(service, 'F1', { title: 'Changed', visibility: 'private' }, lead).then(
       () => should.fail(undefined, undefined, 'a ferret hid the owner’s ask'),
       (error: unknown) => should(error).be.instanceOf(BoardError).and.match({ code: 'forbidden' }),
@@ -427,7 +427,7 @@ describe('editing a card with its visibility is one mutation', () => {
   });
 
   it('should record a visibility equal to the default beside a text change, and refuse it once recorded', async () => {
-    const { ports, service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK })]);
+    const { ports, service } = serviceWith([boardTask({ id: 'F1', ask: AGENT_ASK })]);
     await edit(service, 'F1', { title: 'Changed', visibility: 'private' }, lead);
     should(stored(ports, 'F1')).match({ title: 'Changed', visibility: 'private', visibilitySource: 'chosen' });
     await edit(service, 'F1', { title: 'Changed again', visibility: 'private' }, lead);
@@ -454,16 +454,16 @@ describe('the board query filters by visibility', () => {
   };
   const approval = { ferret: 'mvzypoiz-0ef5e827', id: 'A7' };
   const board = () => [
-    card({
+    boardTask({
       id: 'F1',
       ask: PERSON_ASK,
       visibility: 'public',
       approval,
       links: { prs: [pr], branch: 'feat/x', commits: [], docs: [] },
     }),
-    card({ id: 'F2', ask: AGENT_ASK, visibility: 'private' }),
-    card({ id: 'F3', ask: PERSON_ASK }),
-    card({ id: 'F4', ask: AGENT_ASK, parent: { id: 'F1' } }),
+    boardTask({ id: 'F2', ask: AGENT_ASK, visibility: 'private' }),
+    boardTask({ id: 'F3', ask: PERSON_ASK }),
+    boardTask({ id: 'F4', ask: AGENT_ASK, parent: { id: 'F1' } }),
   ];
   const ids = async (query: Parameters<typeof BoardQuerySchema.parse>[0]) =>
     (await serviceWith(board()).service.board(BoardQuerySchema.parse(query))).cards.map(entry => entry.id).sort();

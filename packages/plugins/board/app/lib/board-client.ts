@@ -26,21 +26,21 @@ import {
   type BoardResult,
   boardErr,
   boardOk,
-  type CardActionRequestInput,
+  type TaskActionRequestInput,
   CardActionRequestSchema,
-  type CardCreateRequestInput,
+  type TaskCreateRequestInput,
   CardCreateRequestSchema,
-  type CardId,
-  type CardResponse,
-  type CardStartResponse,
+  type TaskId,
+  type TaskResponse,
+  type TaskStartResponse,
   type LaneSetActionRequestInput,
   LaneSetActionRequestSchema,
   type LaneSetChangeResponse,
   LaneSetChangeResponseSchema,
   readBoard,
-  readCard,
-  safeReadCard,
-  safeReadCardStart,
+  readTask,
+  safeReadTask,
+  safeReadTaskStart,
 } from '../../contract/index.ts';
 
 /** The most cards one page asks for; a board larger than a few pages is shown as partial, not paged on. */
@@ -92,27 +92,27 @@ export interface BoardPort {
   /** One page of a board; `cursor` continues the one before, `limit` shrinks the page. */
   board(daemon: DaemonConnection, query: BoardServerQuery, cursor?: string, limit?: number): Promise<BoardResponse>;
   /** One card in full, or `null` when the daemon has no such card. */
-  card(daemon: DaemonConnection, id: CardId): Promise<CardResponse | null>;
+  card(daemon: DaemonConnection, id: TaskId): Promise<TaskResponse | null>;
   /** One ferret's agenda (`GET /v1/ferrets/:ferretId/agenda`), or `null` when the daemon will not say: the card reads its asks from it. */
   agenda(daemon: DaemonConnection, ferret: string): Promise<AskListSnapshot | null>;
   /** Every card id on the machine. */
-  ids(daemon: DaemonConnection): Promise<readonly CardId[]>;
+  ids(daemon: DaemonConnection): Promise<readonly TaskId[]>;
   /** The projects with their lane sets. */
   projects(daemon: DaemonConnection): Promise<readonly BoardProject[]>;
   /** The daemon's own version, or `null` when it cannot be read. */
   version(daemon: DaemonConnection): Promise<string | null>;
   act(
     daemon: DaemonConnection,
-    id: CardId,
-    request: CardActionRequestInput,
-  ): Promise<BoardResult<CardResponse, BoardWriteError>>;
+    id: TaskId,
+    request: TaskActionRequestInput,
+  ): Promise<BoardResult<TaskResponse, BoardWriteError>>;
   /** Starts a NEW ferret on the card, as the owner (`POST /v1/board/cards/:cardId/start`). */
-  start(daemon: DaemonConnection, id: CardId, key?: string): Promise<BoardResult<CardStartResponse, BoardWriteError>>;
+  start(daemon: DaemonConnection, id: TaskId, key?: string): Promise<BoardResult<TaskStartResponse, BoardWriteError>>;
   /** Opens a card the owner writes, on the machine that will hold it. */
   create(
     daemon: DaemonConnection,
-    request: CardCreateRequestInput,
-  ): Promise<BoardResult<CardResponse, BoardWriteError>>;
+    request: TaskCreateRequestInput,
+  ): Promise<BoardResult<TaskResponse, BoardWriteError>>;
   /** Proposes, edits or confirms one project's lanes. */
   lanes(
     daemon: DaemonConnection,
@@ -187,7 +187,7 @@ export const clientBoardPort = (client: Pick<PluginClient, 'call'>): BoardPort =
   },
   card: async (_daemon, id) => {
     const answer = await read<unknown>(client, 'GET /v1/board/tasks/:taskId', { params: { taskId: id } }, true);
-    return answer === null ? null : readCard(answer);
+    return answer === null ? null : readTask(answer);
   },
   ids: async () => BoardIdsResponseSchema.parse(await read<unknown>(client, 'GET /v1/board/ids', {}, false)).ids,
   projects: async () =>
@@ -217,7 +217,7 @@ export const clientBoardPort = (client: Pick<PluginClient, 'call'>): BoardPort =
       'POST /v1/board/tasks/:taskId',
       { params: { taskId: id }, body: checked.data, headers: { [REQUEST_ID_HEADER]: crypto.randomUUID() } },
       answer => {
-        const parsed = safeReadCard(answer);
+        const parsed = safeReadTask(answer);
         return parsed.success ? parsed.data : undefined;
       },
       writeError,
@@ -230,7 +230,7 @@ export const clientBoardPort = (client: Pick<PluginClient, 'call'>): BoardPort =
       'POST /v1/board/tasks/:taskId/start',
       { params: { taskId: id }, headers: { [REQUEST_ID_HEADER]: key } },
       answer => {
-        const parsed = safeReadCardStart(answer);
+        const parsed = safeReadTaskStart(answer);
         return parsed.success ? parsed.data : undefined;
       },
       writeError,
@@ -244,7 +244,7 @@ export const clientBoardPort = (client: Pick<PluginClient, 'call'>): BoardPort =
       'POST /v1/board/tasks',
       { body: checked.data, headers: { [REQUEST_ID_HEADER]: crypto.randomUUID() } },
       answer => {
-        const parsed = safeReadCard(answer);
+        const parsed = safeReadTask(answer);
         return parsed.success ? parsed.data : undefined;
       },
       writeError,
@@ -279,14 +279,14 @@ export const readWholeBoard = async (
   query: BoardServerQuery,
 ): Promise<BoardRead> => {
   const first = await port.board(daemon, query);
-  let cards = first.cards;
+  let tasks = first.cards;
   let cursor = first.nextCursor;
   let pages = 1;
   while (cursor !== null && pages < BOARD_MAX_PAGES) {
     const next = await port.board(daemon, query, cursor);
-    cards = [...cards, ...next.cards];
+    tasks = [...tasks, ...next.cards];
     cursor = next.nextCursor;
     pages += 1;
   }
-  return { response: { ...first, cards, nextCursor: cursor }, truncated: cursor !== null };
+  return { response: { ...first, cards: tasks, nextCursor: cursor }, truncated: cursor !== null };
 };

@@ -45,7 +45,7 @@ const world = () => {
   }));
 };
 
-const card = (entry: string) => ({
+const task = (entry: string) => ({
   source: 'prompt' as never,
   ref: { kind: 'permission', prompt: 'p1' },
   entry: entry as never,
@@ -61,7 +61,7 @@ describe('a task card raised about a sub-ferret on the real Asks port', () => {
   test('lands on the lead’s board, which the returned ref names, and closes by that ref and entry', async () => {
     const asks = world();
 
-    const ref = await asks.raise(card('p:one'));
+    const ref = await asks.raise(task('p:one'));
     expect(ref.ferret).toBe('lead');
     expect(await asks.open({ source: 'prompt' as never })).toHaveLength(1);
 
@@ -71,13 +71,13 @@ describe('a task card raised about a sub-ferret on the real Asks port', () => {
 
   test('the same entry raised again after it closed is the closed obligation, not a new card', async () => {
     const asks = world();
-    const ref = await asks.raise(card('p:one'));
+    const ref = await asks.raise(task('p:one'));
     await asks.close(ref, 'withdrawn', 'p:one' as never);
 
-    expect(await asks.raise(card('p:one'))).toEqual(ref);
+    expect(await asks.raise(task('p:one'))).toEqual(ref);
     expect(await asks.open({ source: 'prompt' as never })).toHaveLength(0);
 
-    await asks.raise(card('p:two'));
+    await asks.raise(task('p:two'));
     expect(await asks.open({ source: 'prompt' as never })).toHaveLength(1);
   });
 });

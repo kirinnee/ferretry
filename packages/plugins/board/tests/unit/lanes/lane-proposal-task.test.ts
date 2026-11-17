@@ -12,9 +12,9 @@ import {
   type LaneProposalAnswer,
   LaneProposalAcceptance,
   type LaneSet,
-  laneChangeCard,
+  laneChangeTask,
   laneGateProblems,
-  laneProposalCard,
+  laneProposalTask,
   laneProposalReference,
   type PendingLaneSet,
 } from '../../../daemon/lib/lanes/index.ts';
@@ -46,17 +46,17 @@ describe('laneProposalReference and laneProposalCard', () => {
   });
 
   it('should offer Accept and Edit with the lane path as its subject', () => {
-    const card = laneProposalCard('Ferretry', LANES);
+    const task = laneProposalTask('Ferretry', LANES);
 
-    should(card.subject).equal('Lanes for Ferretry: Todo → Doing → Ready to try → Closed');
-    should(card.title).equal('Lanes for Ferretry');
-    should(card.kind).equal('choice');
+    should(task.subject).equal('Lanes for Ferretry: Todo → Doing → Ready to try → Closed');
+    should(task.title).equal('Lanes for Ferretry');
+    should(task.kind).equal('choice');
     // → is yes: Accept on the right, Edit on the left.
-    should(card.options.map(option => option.label)).deepEqual([
+    should(task.options.map(option => option.label)).deepEqual([
       LANE_PROPOSAL_ANSWERS.edit,
       LANE_PROPOSAL_ANSWERS.accept,
     ]);
-    should(card.why).containEql('koen proposed');
+    should(task.why).containEql('koen proposed');
   });
 });
 
@@ -85,11 +85,11 @@ describe('laneChangeCard', () => {
   };
 
   it('should say the board keeps its lanes until the owner accepts, and what the change would do', () => {
-    const card = laneChangeCard('Ferretry', live, risky);
+    const task = laneChangeTask('Ferretry', live, risky);
 
-    should(card.subject).equal('Lanes for Ferretry: Todo → Plan/Design → In progress → Merged → Closed');
+    should(task.subject).equal('Lanes for Ferretry: Todo → Plan/Design → In progress → Merged → Closed');
     // One line of intro, then one bullet per thing to decide.
-    should(card.why).equal(
+    should(task.why).equal(
       [
         'koen proposes new lanes for Ferretry. The board keeps its lanes until you accept. Accepting it:',
         '',
@@ -98,11 +98,11 @@ describe('laneChangeCard', () => {
       ].join('\n'),
     );
     // Accept → stays plain; Edit ← is recommended, so it is the highlighted one.
-    should(card.options.map(option => option.label)).deepEqual([
+    should(task.options.map(option => option.label)).deepEqual([
       LANE_PROPOSAL_ANSWERS.edit,
       LANE_PROPOSAL_ANSWERS.accept,
     ]);
-    should(card.recommendation).deepEqual({ decision: LANE_PROPOSAL_ANSWERS.edit, why: LANE_CHANGE_READ_FIRST });
+    should(task.recommendation).deepEqual({ decision: LANE_PROPOSAL_ANSWERS.edit, why: LANE_CHANGE_READ_FIRST });
   });
 
   it('should tell lanes removed the same way as one bullet', () => {
@@ -124,7 +124,7 @@ describe('laneChangeCard', () => {
     };
 
     // Act + Assert
-    should(laneChangeCard('Ferretry', crowded, emptied).why).endWith(
+    should(laneChangeTask('Ferretry', crowded, emptied).why).endWith(
       '\n\n- removes 14 lanes that wait for the owner (Owner review 00 … Owner review 13), and sends their tasks into the closed lane, which closes them',
     );
   });
@@ -152,36 +152,36 @@ describe('laneChangeCard', () => {
     };
 
     // Act
-    const card = laneChangeCard('Ferretry', crowded, disarmed);
+    const task = laneChangeTask('Ferretry', crowded, disarmed);
 
     // Assert
-    should(card.why.length).be.belowOrEqual(MAX_ASK_DETAIL_LENGTH);
-    should(card.why).match(/\n- and \d+ more, all in the Board lane editor$/u);
-    should(card.why).containEql(`- makes ${name(0)} automatic: it would stop waiting for the owner\n`);
+    should(task.why.length).be.belowOrEqual(MAX_ASK_DETAIL_LENGTH);
+    should(task.why).match(/\n- and \d+ more, all in the Board lane editor$/u);
+    should(task.why).containEql(`- makes ${name(0)} automatic: it would stop waiting for the owner\n`);
     should(
-      card.why
+      task.why
         .split('\n\n')[1]
         ?.split('\n')
         .every(line => line.startsWith('- ')),
     ).be.true();
-    should(card.recommendation).be.undefined();
+    should(task.recommendation).be.undefined();
     // A change the card cannot show in full is accepted only in the lane editor.
-    should(card.options).deepEqual([
+    should(task.options).deepEqual([
       { label: LANE_CHANGE_LATER, description: 'Leave it waiting; the board keeps its lanes' },
       {
         label: LANE_PROPOSAL_ANSWERS.edit,
         description: 'Change them in the Board lane editor (Board, then this project, then Lanes)',
       },
     ]);
-    should(card.options.map(option => option.label)).not.containEql(LANE_PROPOSAL_ANSWERS.accept);
-    should(card.howToResolve).containEql('accepted in the Board lane editor');
+    should(task.options.map(option => option.label)).not.containEql(LANE_PROPOSAL_ANSWERS.accept);
+    should(task.howToResolve).containEql('accepted in the Board lane editor');
   });
 
   it('should cap a long proposer name so it never crowds out the warnings', () => {
-    const card = laneChangeCard('Ferretry', live, { ...risky, proposedBy: 'x'.repeat(500) });
+    const task = laneChangeTask('Ferretry', live, { ...risky, proposedBy: 'x'.repeat(500) });
 
-    should(card.why).containEql('\n- makes Plan/Design automatic');
-    should(card.why.startsWith('x'.repeat(61))).be.false();
+    should(task.why).containEql('\n- makes Plan/Design automatic');
+    should(task.why.startsWith('x'.repeat(61))).be.false();
   });
 
   it('should warn of nothing for a change that only renames', () => {
@@ -193,10 +193,10 @@ describe('laneChangeCard', () => {
     };
 
     should(laneGateProblems(live, renamed, renamed.relocate)).deepEqual([]);
-    const card = laneChangeCard('Ferretry', live, renamed);
-    should(card.why).not.containEql('Accepting it');
-    should(card).not.have.property('recommendation');
-    should(card.options.map(option => option.label)).deepEqual([
+    const task = laneChangeTask('Ferretry', live, renamed);
+    should(task.why).not.containEql('Accepting it');
+    should(task).not.have.property('recommendation');
+    should(task.options.map(option => option.label)).deepEqual([
       LANE_PROPOSAL_ANSWERS.edit,
       LANE_PROPOSAL_ANSWERS.accept,
     ]);

@@ -5,7 +5,7 @@ import {
   activityLog,
   activityStamp,
   ITEM_VIEW_PARTS,
-  itemCardAsks,
+  itemTaskAsks,
   itemStage,
   PART_TITLES,
   referenceRows,
@@ -133,21 +133,21 @@ describe('card asks', () => {
   test('carry the card’s How to test from the board, and none when the board has none', () => {
     const attached = item({ cardAsks: [{ gate: gate, at: '2026-08-01T10:00:00.000Z' }] } as Partial<AgendaItem>);
     const asked: string[] = [];
-    const steps = itemCardAsks(attached, cardId => {
+    const steps = itemTaskAsks(attached, cardId => {
       asked.push(cardId);
       return '  1. Open the badge.\n2. See it is blue.  ';
     });
     expect(asked).toEqual(['F12']);
     expect(steps[0]?.howToTest).toBe('1. Open the badge.\n2. See it is blue.');
-    expect(itemCardAsks(attached, () => null)[0]?.howToTest).toBeNull();
-    expect(itemCardAsks(attached, () => '   ')[0]?.howToTest).toBeNull();
-    expect(itemCardAsks(attached, () => undefined)[0]?.howToTest).toBeNull();
-    expect(itemCardAsks(attached)[0]?.howToTest).toBeNull();
-    expect(itemCardAsks(item(), () => 'steps')).toEqual([]);
+    expect(itemTaskAsks(attached, () => null)[0]?.howToTest).toBeNull();
+    expect(itemTaskAsks(attached, () => '   ')[0]?.howToTest).toBeNull();
+    expect(itemTaskAsks(attached, () => undefined)[0]?.howToTest).toBeNull();
+    expect(itemTaskAsks(attached)[0]?.howToTest).toBeNull();
+    expect(itemTaskAsks(item(), () => 'steps')).toEqual([]);
   });
 
   test('are a list: today the one gate the thread carries, keyed by its reference', () => {
-    const asks = itemCardAsks(
+    const asks = itemTaskAsks(
       item({ cardAsks: [{ gate: gate, at: '2026-08-01T10:00:00.000Z' }] } as Partial<AgendaItem>),
     );
     expect(asks).toHaveLength(1);
@@ -156,7 +156,7 @@ describe('card asks', () => {
       kind: 'multiple-choice',
       options: expect.arrayContaining([expect.objectContaining({ label: 'Done' })]),
     });
-    expect(itemCardAsks(item())).toEqual([]);
+    expect(itemTaskAsks(item())).toEqual([]);
   });
 });
 

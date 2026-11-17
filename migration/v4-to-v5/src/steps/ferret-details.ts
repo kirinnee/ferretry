@@ -182,7 +182,7 @@ export function sessionStateDocument(
 }
 
 /** The card a v4 session was anchored to (or last touched), when it is a card on this machine. */
-function card(raw: Json): unknown {
+function task(raw: Json): unknown {
   for (const key of ['focusAnchor', 'focusTask']) {
     const ref = raw[key];
     if (ref !== null && typeof ref === 'object' && !Array.isArray(ref)) {
@@ -200,7 +200,7 @@ function card(raw: Json): unknown {
 export function detailsDocument(raw: Json): Json | undefined {
   const candidates: Record<string, unknown> = {
     label: raw.label,
-    card: card(raw),
+    card: task(raw),
     model: raw.model,
     effort: raw.launchReasoningEffort,
     fast: raw.launchFast,

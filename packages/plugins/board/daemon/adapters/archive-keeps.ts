@@ -1,16 +1,16 @@
 import {
-  type ArchiveCardStanding,
+  type ArchiveTaskStanding,
   ArchiveCardStandingsSchema,
   type ArchiveKeepSource,
   type FerretId,
   FerretIdSchema,
 } from '@ferretry/core-ferrets/contract';
-import type { Card } from '../../contract/index.ts';
-import { cardCategory, type LaneSets } from '../lib/board/index.ts';
+import type { Task } from '../../contract/index.ts';
+import { taskCategory, type LaneSets } from '../lib/board/index.ts';
 
 /** What Board reads of itself to answer the archive: every card as stored, with every board's lanes (`snapshot`). */
-export interface BoardCardSnapshot {
-  snapshot(): Promise<{ readonly cards: readonly Card[]; readonly laneSets: LaneSets }>;
+export interface BoardTaskSnapshot {
+  snapshot(): Promise<{ readonly cards: readonly Task[]; readonly laneSets: LaneSets }>;
 }
 
 /**
@@ -35,16 +35,16 @@ const ferretOf = (party: string | null): FerretId | undefined => {
  * owner (the rule keeps owner and assignee alike, so nothing is lost); a card with neither names no ferret and is left
  * out (`undefined`).
  */
-const cardStanding = (card: Card, laneSets: LaneSets): ArchiveCardStanding | undefined => {
-  const owner = ferretOf(card.owner);
-  const assignee = ferretOf(card.assignee);
+const taskStanding = (task: Task, laneSets: LaneSets): ArchiveTaskStanding | undefined => {
+  const owner = ferretOf(task.owner);
+  const assignee = ferretOf(task.assignee);
   const named = owner ?? assignee;
   if (named === undefined) return undefined;
   return {
     owner: named,
     assignee: owner === undefined ? null : (assignee ?? null),
-    dropped: card.dropped !== null,
-    category: cardCategory(card, laneSets),
+    dropped: task.dropped !== null,
+    category: taskCategory(task, laneSets),
   };
 };
 
@@ -55,12 +55,12 @@ const cardStanding = (card: Card, laneSets: LaneSets): ArchiveCardStanding | und
  * The answer is checked against Ferrets' own `ArchiveCardStandingsSchema` before it leaves Board, so a standing Ferrets
  * would refuse is a rejection here (the same keep-live outcome), and the two halves cannot drift apart unseen.
  */
-export const boardArchiveKeeps = (board: BoardCardSnapshot): ArchiveKeepSource => ({
+export const boardArchiveKeeps = (board: BoardTaskSnapshot): ArchiveKeepSource => ({
   kind: 'board',
   cards: async () => {
-    const { cards, laneSets } = await board.snapshot();
-    const standings = cards.flatMap(card => {
-      const standing = cardStanding(card, laneSets);
+    const { cards: tasks, laneSets } = await board.snapshot();
+    const standings = tasks.flatMap(task => {
+      const standing = taskStanding(task, laneSets);
       return standing === undefined ? [] : [standing];
     });
     ArchiveCardStandingsSchema.parse(standings);

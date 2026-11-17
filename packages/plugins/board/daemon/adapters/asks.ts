@@ -1,71 +1,71 @@
 import type { AskAnswer, AskDraft, AskId, AsksApi, AskSummary } from '@ferretry/core-asks/contract';
 import type { EntryId, SourceKey } from '@ferretry/core-asks/contract';
-import { type CardId, parseGateReference } from '../../contract/index.ts';
+import { type TaskId, parseGateReference } from '../../contract/index.ts';
 import type {
   AnsweredAsk,
   AskThread,
   BoardOptIn,
   BoardThreads,
-  CardObligations,
-  CardAskReader,
+  TaskObligations,
+  TaskAskReader,
   GateAnswer,
-  OpenCardAsk,
-  OpenCardAskEntry,
+  OpenTaskAsk,
+  OpenTaskAskEntry,
 } from '../lib/board/index.ts';
 
 /** The Asks source this plugin registers: a card's gate entry is an obligation `{ source: 'card', ref, entry }`. */
-export const CARD_SOURCE = 'card' as SourceKey;
+export const TASK_SOURCE = 'card' as SourceKey;
 
-const cardOf = (entry: string): CardId | undefined => parseGateReference(entry)?.cardId as CardId | undefined;
+const taskOf = (entry: string): TaskId | undefined => parseGateReference(entry)?.cardId as TaskId | undefined;
 
 /**
  * The `card` source's obligations in Asks (#1552: the agenda asks, the card shows). `raise` is idempotent by
  * `(source, entry)`; `open` THROWS when Asks cannot be read, because "not asking" would let a second ask through.
  */
-export class AsksCardObligations implements CardObligations {
+export class AsksTaskObligations implements TaskObligations {
   constructor(private readonly asks: Pick<AsksApi, 'raise' | 'open' | 'close' | 'answers'>) {}
 
   async raise(draft: AskDraft): Promise<boolean> {
     const entry = draft.entry as EntryId;
-    const known = await this.asks.open({ source: CARD_SOURCE, entry });
+    const known = await this.asks.open({ source: TASK_SOURCE, entry });
     if (known.some(ask => ask.state !== 'closed')) return false;
-    if ((await this.asks.answers({ source: CARD_SOURCE, entry })).length > 0) return false;
+    if ((await this.asks.answers({ source: TASK_SOURCE, entry })).length > 0) return false;
     await this.asks.raise(draft);
     return true;
   }
 
   async withdraw(entry: string, reason: 'withdrawn' | 'superseded'): Promise<void> {
-    for (const ask of await this.asks.open({ source: CARD_SOURCE, entry: entry as EntryId, state: 'open' }))
+    for (const ask of await this.asks.open({ source: TASK_SOURCE, entry: entry as EntryId, state: 'open' }))
       await this.asks.close({ ferret: ask.ferret ?? '', id: ask.id }, reason, entry as EntryId);
   }
 
-  async open(card?: CardId): Promise<readonly OpenCardAskEntry[]> {
-    const open = await this.asks.open({ source: CARD_SOURCE, state: 'open' });
+  async open(task?: TaskId): Promise<readonly OpenTaskAskEntry[]> {
+    const open = await this.asks.open({ source: TASK_SOURCE, state: 'open' });
     return open.flatMap(ask => {
-      const cardId = cardOf(ask.entry);
-      if (cardId === undefined || (card !== undefined && cardId !== card)) return [];
-      return [{ entry: ask.entry, ask: ask.id, ferret: ask.ferret ?? '', cardId }];
+      const taskId = taskOf(ask.entry);
+      if (taskId === undefined || (task !== undefined && taskId !== task)) return [];
+      return [{ entry: ask.entry, ask: ask.id, ferret: ask.ferret ?? '', cardId: taskId }];
     });
   }
 
-  async answered(card: CardId): Promise<ReadonlySet<string>> {
-    return (await this.answeredAll()).get(card) ?? new Set();
+  async answered(task: TaskId): Promise<ReadonlySet<string>> {
+    return (await this.answeredAll()).get(task) ?? new Set();
   }
 
-  async openAll(): Promise<ReadonlyMap<CardId, readonly OpenCardAskEntry[]>> {
-    const byCard = new Map<CardId, OpenCardAskEntry[]>();
-    for (const entry of await this.open()) byCard.set(entry.cardId, [...(byCard.get(entry.cardId) ?? []), entry]);
-    return byCard;
+  async openAll(): Promise<ReadonlyMap<TaskId, readonly OpenTaskAskEntry[]>> {
+    const byTask = new Map<TaskId, OpenTaskAskEntry[]>();
+    for (const entry of await this.open()) byTask.set(entry.cardId, [...(byTask.get(entry.cardId) ?? []), entry]);
+    return byTask;
   }
 
-  async answeredAll(): Promise<ReadonlyMap<CardId, ReadonlySet<string>>> {
-    const byCard = new Map<CardId, Set<string>>();
-    for (const answer of await this.asks.answers({ source: CARD_SOURCE })) {
-      const cardId = cardOf(answer.entry);
-      if (cardId === undefined) continue;
-      byCard.set(cardId, (byCard.get(cardId) ?? new Set<string>()).add(answer.entry));
+  async answeredAll(): Promise<ReadonlyMap<TaskId, ReadonlySet<string>>> {
+    const byTask = new Map<TaskId, Set<string>>();
+    for (const answer of await this.asks.answers({ source: TASK_SOURCE })) {
+      const taskId = taskOf(answer.entry);
+      if (taskId === undefined) continue;
+      byTask.set(taskId, (byTask.get(taskId) ?? new Set<string>()).add(answer.entry));
     }
-    return byCard;
+    return byTask;
   }
 }
 
@@ -74,10 +74,10 @@ export class AsksCardObligations implements CardObligations {
  * (`AsksApi.open`); and every open ask a ferret raised about a card, read from the boards' agenda items that name it
  * (`AsksApi.snapshots`, the link `fy agenda ls` shows as `&F9`).
  */
-export class AsksCardAskReader implements CardAskReader {
+export class AsksTaskAskReader implements TaskAskReader {
   constructor(private readonly asks: Pick<AsksApi, 'open' | 'snapshots'>) {}
 
-  async mentioned(): Promise<readonly OpenCardAsk[]> {
+  async mentioned(): Promise<readonly OpenTaskAsk[]> {
     const boards = await this.asks.snapshots();
     return boards.flatMap(board =>
       board.items.flatMap(item => {
@@ -86,21 +86,21 @@ export class AsksCardAskReader implements CardAskReader {
           ...(item.task === undefined || item.task === null ? [] : [item.task]),
           ...(item.relatedTasks ?? []),
         ];
-        return [...new Set(named.map(task => task.id))].map(cardId => ({
+        return [...new Set(named.map(task => task.id))].map(taskId => ({
           ferret: board.sessionId,
           id: item.id,
-          cardId: cardId as CardId,
+          cardId: taskId as TaskId,
         }));
       }),
     );
   }
 
-  async open(): Promise<readonly OpenCardAsk[]> {
-    const open = await this.asks.open({ source: CARD_SOURCE, state: 'open' });
+  async open(): Promise<readonly OpenTaskAsk[]> {
+    const open = await this.asks.open({ source: TASK_SOURCE, state: 'open' });
     return open.flatMap(ask => {
-      const cardId = cardOf(ask.entry);
-      if (cardId === undefined || ask.ferret === undefined) return [];
-      return [{ ferret: ask.ferret, id: ask.id, cardId, notice: ask.kind === 'notice' }];
+      const taskId = taskOf(ask.entry);
+      if (taskId === undefined || ask.ferret === undefined) return [];
+      return [{ ferret: ask.ferret, id: ask.id, cardId: taskId, notice: ask.kind === 'notice' }];
     });
   }
 }
@@ -158,7 +158,7 @@ export class AsksThreads implements BoardThreads {
     return {
       raisedBy: ask.raisedBy.kind,
       ...(ask.raisedBy.kind === 'ferret' ? { raisedByFerret: ask.raisedBy.ferret } : {}),
-      gate: ask.source === CARD_SOURCE,
+      gate: ask.source === TASK_SOURCE,
       notice: ask.kind === 'notice',
       card: null,
     };

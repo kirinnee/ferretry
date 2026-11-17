@@ -419,7 +419,7 @@ export const PackChildCardSchema = z.strictObject({
   existing: z.literal(true).optional(),
   note: NonEmpty.optional(),
 });
-export type PackChildCard = z.infer<typeof PackChildCardSchema>;
+export type PackChildTask = z.infer<typeof PackChildCardSchema>;
 
 /**
  * What a `fy new` answered (its `--json` body), as a transcript holds it. A refusal is an ANSWER, not an HTTP error, so a ferret reads the

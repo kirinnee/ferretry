@@ -5,7 +5,7 @@
  * from the fields an item carries, so an item from before stages reads too. Pure and total.
  */
 import type { AgendaAsk, AgendaKind } from './agenda.ts';
-import { agendaCardKind } from './agenda-task.ts';
+import { agendaTaskKind } from './agenda-task.ts';
 import type { AgendaStage } from './agenda-state.ts';
 
 /**
@@ -39,7 +39,7 @@ export const agendaStage = (item: {
   readonly ask?: AgendaAsk | undefined;
 }): AgendaStage => {
   if (item.resolvedAt !== undefined) return 'done';
-  return item.stage ?? agendaStageOfKind(agendaCardKind(item));
+  return item.stage ?? agendaStageOfKind(agendaTaskKind(item));
 };
 
 /**

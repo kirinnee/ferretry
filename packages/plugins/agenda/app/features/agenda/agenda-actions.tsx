@@ -13,7 +13,7 @@
  * here sends anything: every answer leaves through the callbacks.
  */
 
-import { type AgendaAskOption, type AgendaCardAnswer, GOT_IT_LABEL, plainLabel } from '@ferretry/core-asks/contract';
+import { type AgendaAskOption, type AgendaTaskAnswer, GOT_IT_LABEL, plainLabel } from '@ferretry/core-asks/contract';
 import { ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, Ellipsis, LoaderCircle, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import type { AnswerDirection } from '../../lib/agenda-answers.ts';
@@ -163,14 +163,14 @@ function AnswerButton({
   primary,
   onAnswer,
 }: {
-  readonly answer: AgendaCardAnswer;
+  readonly answer: AgendaTaskAnswer;
   readonly busy: boolean;
   readonly swipeHints: boolean;
   readonly arrows: boolean;
   readonly recommended: boolean;
   /** The highlighted answer: the recommended one when the card recommends one of its answers, else → (yes). */
   readonly primary: boolean;
-  readonly onAnswer: (answer: AgendaCardAnswer) => void;
+  readonly onAnswer: (answer: AgendaTaskAnswer) => void;
 }) {
   const hintId = useId();
   const arrow = arrows ? ARROWS[answer.direction] : null;
@@ -203,7 +203,7 @@ function AnswerButton({
 
 export interface AgendaActionsProps {
   /** The card's answers, left · up · right. */
-  readonly answers: readonly AgendaCardAnswer[];
+  readonly answers: readonly AgendaTaskAnswer[];
   /** An old choice's options past the third: buttons with no direction. */
   readonly extraOptions: readonly AgendaAskOption[];
   /** The card can be swiped: each answer also says which way, aloud. */
@@ -223,7 +223,7 @@ export interface AgendaActionsProps {
   readonly onOpenDetail?: () => void;
   /** Says the answer is the message box's text: a text-only ask, or a review that wants changes written. */
   readonly composerHint?: string;
-  readonly onAnswer: (answer: AgendaCardAnswer) => void;
+  readonly onAnswer: (answer: AgendaTaskAnswer) => void;
   readonly onOption: (option: AgendaAskOption) => void;
   /** Whether "Not needed…" is in the ⋯ menu — it is not when an answer already dismisses (a Skip). */
   readonly dismissInMenu: boolean;

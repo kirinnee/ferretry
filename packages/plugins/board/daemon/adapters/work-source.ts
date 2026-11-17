@@ -1,11 +1,11 @@
 import { instantFromEpochMs } from '@ferretry/std';
 import type { RawWork, WorkSource } from '@ferretry/plugin-conversation/contract';
-import type { Card, LaneSet } from '../../contract/index.ts';
+import type { Task, LaneSet } from '../../contract/index.ts';
 import type { LaneSets } from '../lib/board/index.ts';
 
 /** What Board reads of itself to hand its cards over: every card as stored, with the lanes of each board. */
-export interface BoardCards {
-  snapshot(): Promise<{ readonly cards: readonly Card[]; readonly laneSets: LaneSets }>;
+export interface BoardTasks {
+  snapshot(): Promise<{ readonly cards: readonly Task[]; readonly laneSets: LaneSets }>;
 }
 
 const joined = (texts: readonly (string | null | undefined)[]): string =>
@@ -25,37 +25,37 @@ const instantMs = (at: string): number => {
  * the card, so a field added to it later is not searchable until it is named here on purpose. Conversation scrubs every
  * text before it indexes or shows it.
  */
-export const cardWork = (card: Card, laneSet: LaneSet | undefined): RawWork => {
-  const lane = laneSet?.lanes.find(candidate => candidate.id === card.laneId);
-  const state = card.dropped !== null ? 'dropped' : lane?.category === 'closed' ? 'closed' : 'open';
-  const updatedAtMs = instantMs(card.dropped?.at ?? card.history.at(-1)?.at ?? card.createdAt);
-  const notes = card.history.flatMap(event => (event.type === 'note' ? [event.text] : []));
+export const taskWork = (task: Task, laneSet: LaneSet | undefined): RawWork => {
+  const lane = laneSet?.lanes.find(candidate => candidate.id === task.laneId);
+  const state = task.dropped !== null ? 'dropped' : lane?.category === 'closed' ? 'closed' : 'open';
+  const updatedAtMs = instantMs(task.dropped?.at ?? task.history.at(-1)?.at ?? task.createdAt);
+  const notes = task.history.flatMap(event => (event.type === 'note' ? [event.text] : []));
   return {
-    key: `card:${card.id}`,
+    key: `card:${task.id}`,
     kind: 'card',
     updatedAtMs,
     identity: {
       kind: 'card',
-      id: card.id,
-      project: card.projectId,
-      ferret: card.owner,
-      title: card.title,
+      id: task.id,
+      project: task.projectId,
+      ferret: task.owner,
+      title: task.title,
       state,
-      standing: state === 'dropped' ? 'Dropped' : (lane?.name ?? card.laneId),
+      standing: state === 'dropped' ? 'Dropped' : (lane?.name ?? task.laneId),
       updatedAt: instantFromEpochMs(updatedAtMs),
     },
     fields: [
-      ['id', card.id],
-      ['title', card.title],
-      ['summary', card.summary],
-      ['ask', joined([card.ask.text, ...card.clarifications.map(clarification => clarification.text)])],
-      ['premise', card.premise],
-      ['context', card.context],
-      ['brief', card.brief],
-      ['howToTest', card.howToTest],
+      ['id', task.id],
+      ['title', task.title],
+      ['summary', task.summary],
+      ['ask', joined([task.ask.text, ...task.clarifications.map(clarification => clarification.text)])],
+      ['premise', task.premise],
+      ['context', task.context],
+      ['brief', task.brief],
+      ['howToTest', task.howToTest],
       [
         'progress',
-        joined(card.progress === undefined ? [] : [card.progress.now, card.progress.doneSoFar, card.progress.next]),
+        joined(task.progress === undefined ? [] : [task.progress.now, task.progress.doneSoFar, task.progress.next]),
       ],
       ['note', joined(notes)],
     ],
@@ -73,13 +73,13 @@ export class BoardWorkSource implements WorkSource {
   readonly cheap = true;
   private readonly kept = new Map<string, { readonly signature: string; readonly work: RawWork }>();
 
-  constructor(private readonly board: BoardCards) {}
+  constructor(private readonly board: BoardTasks) {}
 
   async list(): Promise<readonly RawWork[]> {
-    const { cards, laneSets } = await this.board.snapshot();
+    const { cards: tasks, laneSets } = await this.board.snapshot();
     const present = new Set<string>();
-    const works = cards.map(card => {
-      const work = cardWork(card, laneSets.get(card.projectId));
+    const works = tasks.map(task => {
+      const work = taskWork(task, laneSets.get(task.projectId));
       const signature = JSON.stringify([work.identity, work.updatedAtMs, work.fields]);
       present.add(work.key);
       const before = this.kept.get(work.key);

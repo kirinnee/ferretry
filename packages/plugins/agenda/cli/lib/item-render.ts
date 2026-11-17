@@ -4,7 +4,7 @@ import {
   type AgendaItem,
   type AgendaListSnapshot,
   agendaAnswerText,
-  agendaCardAnswers,
+  agendaTaskAnswers,
   agendaInDiscussion,
   agendaShape,
   agendaStage,
@@ -48,7 +48,7 @@ const ARROWS: Readonly<Record<AgendaDirection, string>> = { left: '‚Üê', up: '‚Ü
  * nothing the owner could pick is hidden.
  */
 function answersLine(item: AgendaItem): string {
-  const answers = agendaCardAnswers(item);
+  const answers = agendaTaskAnswers(item);
   // Only a card asked in words has no answers to swipe: one question, or several answered as a numbered list.
   if (answers.length === 0) {
     return agendaShape(item) === 'answers' ? 'answer: one reply, each answer numbered' : 'answer: write a full answer';

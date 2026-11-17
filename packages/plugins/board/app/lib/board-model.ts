@@ -22,26 +22,26 @@ import {
   BoardProjectIdSchema,
   type BoardPrStateFilter,
   BoardPrStateFilterSchema,
-  type BoardQuarantinedCard,
+  type BoardQuarantinedTask,
   type BoardResult,
   type BoardStateFilter,
   BoardStateFilterSchema,
-  type CardId,
-  type CardView,
+  type TaskId,
+  type TaskView,
   boardErr,
   boardOk,
   isInBoardState,
-  isSubCard,
+  isSubTask,
   type LaneCategory,
   type LaneSet,
   type MoveReasonProblem,
   moveReasonProblem,
   type ReleasedIn,
-  type CardKind,
+  type TaskKind,
   CardKindSchema,
 } from '../../contract/index.ts';
 import { compareReleaseVersions } from './release-order.ts';
-import { isPrivateCard, splitAvailable } from './board-human.ts';
+import { isPrivateTask, splitAvailable } from './board-human.ts';
 import type { DaemonId } from './machine.ts';
 
 // ---------------------------------------------------------------------------------------------------
@@ -59,17 +59,17 @@ export interface RunningOnMachine {
 }
 
 /** A card on the merged board: the daemon's view of it, and the machine it lives on. */
-interface BoardCard {
+interface BoardTask {
   /** `(daemonId, taskId)`, collision-safe: see {@link boardCardKey}. */
   readonly key: string;
   readonly daemonId: DaemonId;
   readonly machine: string;
-  readonly task: CardView;
+  readonly task: TaskView;
   /** Empty until the card has shipped in a release. */
   readonly runningOn: readonly RunningOnMachine[];
 }
 
-export const boardCardKey = (daemonId: DaemonId, taskId: CardId): string => JSON.stringify([daemonId, taskId]);
+export const boardTaskKey = (daemonId: DaemonId, taskId: TaskId): string => JSON.stringify([daemonId, taskId]);
 
 /**
  * Each paired machine's version against the release a card shipped in. A card that has not shipped has
@@ -119,7 +119,7 @@ export interface BoardFilters {
   readonly machine: DaemonId | null;
   /** A session id: the cards it owns or is assigned. */
   readonly ferret: string | null;
-  readonly kind: CardKind | null;
+  readonly kind: TaskKind | null;
   readonly pr: BoardPrStateFilter | null;
   readonly state: BoardStateFilter;
   readonly activity: BoardActivityFilter | null;
@@ -256,7 +256,7 @@ export const boardFiltersToSearch = (
 export interface BoardServerQuery {
   readonly project: BoardProjectId | null;
   readonly ferret: string | null;
-  readonly kind: CardKind | null;
+  readonly kind: TaskKind | null;
   readonly pr: BoardPrStateFilter | null;
   readonly state: BoardStateFilter;
   readonly activity: BoardActivityFilter | null;
@@ -298,12 +298,12 @@ export const showsAgents = (filters: Pick<BoardFilters, 'agents' | 'ferret' | 'a
   filters.agents || filters.ferret !== null || filters.activity !== null;
 
 /** Whether the owner has a stake in the card: they raised it. */
-export const isMine = (task: Pick<CardView, 'createdBy'>): boolean => task.createdBy.kind === 'owner';
+export const isMine = (task: Pick<TaskView, 'createdBy'>): boolean => task.createdBy.kind === 'owner';
 
-const categoryIn = (laneSet: LaneSet | null, task: CardView): LaneCategory | null =>
+const categoryIn = (laneSet: LaneSet | null, task: TaskView): LaneCategory | null =>
   laneSet?.lanes.find(lane => lane.id === task.laneId)?.category ?? null;
 
-const matchesActivity = (filter: BoardActivityFilter, task: CardView): boolean => {
+const matchesActivity = (filter: BoardActivityFilter, task: TaskView): boolean => {
   switch (filter) {
     case 'blocked':
       return task.blockedBy.length > 0;
@@ -312,7 +312,7 @@ const matchesActivity = (filter: BoardActivityFilter, task: CardView): boolean =
   }
 };
 
-const matchesPr = (filter: BoardPrStateFilter, task: CardView): boolean => {
+const matchesPr = (filter: BoardPrStateFilter, task: TaskView): boolean => {
   const prs = task.links.prs;
   switch (filter) {
     case 'none':
@@ -336,7 +336,7 @@ const matchesPr = (filter: BoardPrStateFilter, task: CardView): boolean => {
  * is the same decision the daemon makes, over the same fields, and the periodic re-read corrects any
  * disagreement. It reads the card's derived `activity`; it never works one out.
  */
-export const cardMatchesQuery = (task: CardView, laneSet: LaneSet | null, query: BoardServerQuery): boolean => {
+export const taskMatchesQuery = (task: TaskView, laneSet: LaneSet | null, query: BoardServerQuery): boolean => {
   const category = categoryIn(laneSet, task);
   if (query.project !== null && task.projectId !== query.project) return false;
   if (query.ferret !== null && task.owner !== query.ferret && task.assignee !== query.ferret) return false;
@@ -378,7 +378,7 @@ export const inDateRange = (range: BoardDateRange, instant: string | null, now: 
  * Whether a card sits in the lane a filter names: by lane id, or by the lane's name in the card's own
  * project on its own machine (so `Review` means that project's Review lane, whatever its id).
  */
-export const inLane = (lane: string, task: Pick<CardView, 'laneId'>, laneSet: LaneSet | null): boolean => {
+export const inLane = (lane: string, task: Pick<TaskView, 'laneId'>, laneSet: LaneSet | null): boolean => {
   if (task.laneId === lane) return true;
   const wanted = lane.toLowerCase();
   return laneSet?.lanes.some(l => l.id === task.laneId && l.name.toLowerCase() === wanted) ?? false;
@@ -393,11 +393,11 @@ export interface BoardMachineData {
   readonly daemonId: DaemonId;
   readonly machine: string;
   readonly version: string | null;
-  readonly cards: readonly CardView[];
+  readonly cards: readonly TaskView[];
   /** This machine's lane set for each project it holds cards for; `null` when it has none confirmed. */
   readonly laneSets: ReadonlyMap<BoardProjectId, LaneSet | null>;
   readonly counts: BoardCounts | null;
-  readonly quarantined: readonly BoardQuarantinedCard[];
+  readonly quarantined: readonly BoardQuarantinedTask[];
 }
 
 /** One lane of one project's board on one machine. */
@@ -405,7 +405,7 @@ interface BoardLane {
   readonly id: string;
   readonly name: string;
   readonly category: LaneCategory;
-  readonly cards: readonly BoardCard[];
+  readonly cards: readonly BoardTask[];
 }
 
 /**
@@ -420,18 +420,18 @@ interface BoardGroup {
   readonly laneSet: LaneSet | null;
   readonly lanes: readonly BoardLane[];
   /** Cards whose lane is not in the lane set (an edit raced the read); never dropped from view. */
-  readonly unplaced: readonly BoardCard[];
+  readonly unplaced: readonly BoardTask[];
 }
 
 interface BoardQuarantine {
   readonly daemonId: DaemonId;
   readonly machine: string;
-  readonly cards: readonly BoardQuarantinedCard[];
+  readonly cards: readonly BoardQuarantinedTask[];
 }
 
 export interface BoardModel {
   readonly groups: readonly BoardGroup[];
-  readonly cards: readonly BoardCard[];
+  readonly cards: readonly BoardTask[];
   /** The header's numbers, summed over every machine read. */
   readonly counts: BoardCounts;
   /** Cards a daemon set aside as unreadable, per machine. */
@@ -464,9 +464,9 @@ const COUNTED: readonly (readonly [BoardActivityFilter, 'stale' | 'orphaned' | '
 ];
 
 /** A machine's header counts without the ferret cards the board is not showing, so a pill and its cards agree. */
-const withoutCards = (
+const withoutTasks = (
   counts: BoardCounts,
-  hidden: readonly { readonly task: CardView; readonly category: LaneCategory | null }[],
+  hidden: readonly { readonly task: TaskView; readonly category: LaneCategory | null }[],
 ): BoardCounts =>
   COUNTED.reduce(
     (left, [filter, key]) => ({
@@ -477,7 +477,7 @@ const withoutCards = (
   );
 
 /** The card's place in its lane: ordered cards first (by `order`), then the longest-untouched first. */
-const compareCards = (left: BoardCard, right: BoardCard): number => {
+const compareTasks = (left: BoardTask, right: BoardTask): number => {
   const a = left.task.order;
   const b = right.task.order;
   if (a !== null && b !== null && a !== b) return a - b;
@@ -498,18 +498,18 @@ export const mergeBoard = (machines: readonly BoardMachineData[], filters: Board
   const showAgents = showsAgents(filters);
   const kept = machines.filter(data => filters.machine === null || data.daemonId === filters.machine);
   const groups: BoardGroup[] = [];
-  const cards: BoardCard[] = [];
+  const tasks: BoardTask[] = [];
   let counts = ZERO_COUNTS;
   const quarantined: BoardQuarantine[] = [];
 
   for (const data of kept) {
-    const hidden: { readonly task: CardView; readonly category: LaneCategory | null }[] = [];
+    const hidden: { readonly task: TaskView; readonly category: LaneCategory | null }[] = [];
     if (data.quarantined.length > 0) {
       quarantined.push({ daemonId: data.daemonId, machine: data.machine, cards: data.quarantined });
     }
-    const byProject = new Map<BoardProjectId, BoardCard[]>();
+    const byProject = new Map<BoardProjectId, BoardTask[]>();
     for (const task of data.cards) {
-      if (!showAgents && isPrivateCard(task)) {
+      if (!showAgents && isPrivateTask(task)) {
         hidden.push({ task, category: categoryIn(data.laneSets.get(task.projectId) ?? null, task) });
         continue;
       }
@@ -517,19 +517,19 @@ export const mergeBoard = (machines: readonly BoardMachineData[], filters: Board
       if (filters.lane !== null && !inLane(filters.lane, task, data.laneSets.get(task.projectId) ?? null)) continue;
       if (!inDateRange(filters.created, task.createdAt, now)) continue;
       if (!inDateRange(filters.touched, task.lastTouchedAt, now)) continue;
-      const card: BoardCard = {
-        key: boardCardKey(data.daemonId, task.id),
+      const boardTask: BoardTask = {
+        key: boardTaskKey(data.daemonId, task.id),
         daemonId: data.daemonId,
         machine: data.machine,
         task,
         runningOn: runningOn(task.shippedIn, versions),
       };
-      cards.push(card);
+      tasks.push(boardTask);
       const members = byProject.get(task.projectId);
-      if (members === undefined) byProject.set(task.projectId, [card]);
-      else members.push(card);
+      if (members === undefined) byProject.set(task.projectId, [boardTask]);
+      else members.push(boardTask);
     }
-    if (data.counts !== null) counts = addCounts(counts, withoutCards(data.counts, hidden));
+    if (data.counts !== null) counts = addCounts(counts, withoutTasks(data.counts, hidden));
     for (const [projectId, members] of byProject) {
       const laneSet = data.laneSets.get(projectId) ?? null;
       const known = new Set(laneSet?.lanes.map(lane => lane.id));
@@ -543,20 +543,20 @@ export const mergeBoard = (machines: readonly BoardMachineData[], filters: Board
           id: lane.id,
           name: lane.name,
           category: lane.category,
-          cards: members.filter(card => card.task.laneId === lane.id).sort(compareCards),
+          cards: members.filter(task => task.task.laneId === lane.id).sort(compareTasks),
         })),
-        unplaced: members.filter(card => !known.has(card.task.laneId)).sort(compareCards),
+        unplaced: members.filter(task => !known.has(task.task.laneId)).sort(compareTasks),
       });
     }
   }
 
   return {
     groups,
-    cards,
+    cards: tasks,
     counts,
     quarantined,
     multiMachine: kept.length > 1,
-    splitsAgents: kept.some(data => splitAvailable(data.cards) || data.cards.some(isSubCard)),
+    splitsAgents: kept.some(data => splitAvailable(data.cards) || data.cards.some(isSubTask)),
   };
 };
 

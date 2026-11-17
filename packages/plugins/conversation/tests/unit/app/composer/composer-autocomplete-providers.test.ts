@@ -79,7 +79,7 @@ const optionsOf = (
   return { daemon: daemonA, scope: scopeA, client, calls: client.calls, ...extra };
 };
 
-const NO_CARDS: readonly ReferenceCatalogEntry[] = [];
+const NO_TASKS: readonly ReferenceCatalogEntry[] = [];
 
 const replacements = (result: { readonly candidates: readonly { readonly replacement: string }[] }): string[] =>
   result.candidates.map(candidate => candidate.replacement);
@@ -422,8 +422,8 @@ describe('composer reference families', () => {
       expect(replacements(await createReferencesProvider(options).candidates(referenceContext(4, '')))).toEqual([
         '&F12',
       ]);
-      const [, , cards] = createDirectReferenceProviders(options);
-      expect(replacements((await cards?.candidates(context('&', ''))) ?? { candidates: [] })).toEqual(['&F12']);
+      const [, , tasks] = createDirectReferenceProviders(options);
+      expect(replacements((await tasks?.candidates(context('&', ''))) ?? { candidates: [] })).toEqual(['&F12']);
     });
 
     it('is offered once "Include agent tasks" is on, still never when closed', async () => {
@@ -434,8 +434,8 @@ describe('composer reference families', () => {
       included = true;
       expect(ladder.snapshotKey).not.toBe(before);
       expect(replacements(await ladder.candidates(referenceContext(4, '')))).toEqual(['&F12', '&F30']);
-      const [, , cards] = createDirectReferenceProviders(options);
-      expect(replacements((await cards?.candidates(context('&', ''))) ?? { candidates: [] })).toEqual(['&F12', '&F30']);
+      const [, , tasks] = createDirectReferenceProviders(options);
+      expect(replacements((await tasks?.candidates(context('&', ''))) ?? { candidates: [] })).toEqual(['&F12', '&F30']);
     });
 
     it('is offered when its id is typed exactly, with the switch off', async () => {
@@ -524,7 +524,7 @@ describe('composer reference families', () => {
     let agenda: readonly ReferenceCatalogEntry[] = AGENDA;
     const options = optionsOf(
       {},
-      { hostedPrefixes: ['^', '&'], getCatalog: prefix => (prefix === '^' ? agenda : NO_CARDS) },
+      { hostedPrefixes: ['^', '&'], getCatalog: prefix => (prefix === '^' ? agenda : NO_TASKS) },
     );
     const ladder = createReferencesProvider(options);
     const [, attention] = createDirectReferenceProviders(options);

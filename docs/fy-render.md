@@ -188,7 +188,7 @@ Two properties this feature must never change, and does not:
 
 | Type               | Renders as                                                                              | Why                                                                                                          |
 | ------------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `task`, `board`    | the board's own `BoardCard`, read from the daemon; a `board` is framed, grouped by lane | A pointer, not bytes: nothing an author wrote is drawn — [Tasks and boards](#tasks-and-boards)               |
+| `task`, `board`    | the board's own `BoardTask`, read from the daemon; a `board` is framed, grouped by lane | A pointer, not bytes: nothing an author wrote is drawn — [Tasks and boards](#tasks-and-boards)               |
 | `svg`              | `<img src="data:image/svg+xml,…">`                                                      | The measured boundary — see below                                                                            |
 | `image` (inline)   | `<img src="data:{mime};base64,…">`                                                      | No script surface exists in a raster decode                                                                  |
 | `html` (no script) | a static fragment in a closed shadow root, sanitized by DOMPurify                       | Nothing runs; [The `html` fragment](#the-html-fragment) says what is stripped and what contains the rest     |
@@ -218,7 +218,7 @@ saved message is never rewritten. Everything written now says `task`.
   in a lane its lane set does not know goes under "Elsewhere", last. At most 24 tasks are shown, then
   "N more on the board."; tasks that could not be shown (missing, unreadable) follow as notes, last.
 
-Each task is the real `BoardCard` the Board page draws, read-only: its title, lane, progress and the
+Each task is the real `BoardTask` the Board page draws, read-only: its title, lane, progress and the
 PRs it links. It reads as it does on the Board (the task's padding and the gap between tasks are the Board's own tokens, in chat and in the agenda alike), and the whole task opens it. The ferret is
 named by its callsign (from the app's fleet, or the surface's own list), and every age ticks on a local
 clock every 30 seconds — a clock, not a daemon read. Clicking it opens the task exactly as a written `&F12` does (`onTaskOpen`), because

@@ -5,12 +5,12 @@ import {
   type BoardCounts,
   type BoardProject,
   type BoardResponse,
-  type CardEvent,
-  type CardRef,
-  type CardView,
-  describeCardEvent,
+  type TaskEvent,
+  type TaskRef,
+  type TaskView,
+  describeTaskEvent,
   formatAskRef,
-  formatCardRef,
+  formatTaskRef,
   type Lane,
   type LaneSet,
   type PrLink,
@@ -27,7 +27,7 @@ const clip = (text: string, width: number): string =>
 
 const cell = (value: string): string => value.replace(/\|/gu, '\\|').replace(/\s*\n\s*/gu, ' ');
 
-const refOf = (ref: CardRef): string => formatCardRef(ref);
+const refOf = (ref: TaskRef): string => formatTaskRef(ref);
 
 const laneOf = (laneSet: LaneSet | null | undefined, id: string): Lane | undefined =>
   laneSet?.lanes.find(lane => lane.id === id);
@@ -51,17 +51,17 @@ export function prLabel(prs: readonly PrLink[]): string {
 }
 
 /** The one word for how the card is doing: a block beats the derived activity. A card never waits on the owner itself. */
-export function activityLabel(card: CardView): string {
-  if (card.dropped !== null) return 'dropped';
-  if (card.blocked !== null) return 'blocked';
-  if (card.blockedBy.length > 0) return 'blocked by deps';
-  return card.activity;
+export function activityLabel(task: TaskView): string {
+  if (task.dropped !== null) return 'dropped';
+  if (task.blocked !== null) return 'blocked';
+  if (task.blockedBy.length > 0) return 'blocked by deps';
+  return task.activity;
 }
 
 /** `owner→assignee`, or just the owner while nobody else has it. */
-export function whoLabel(card: CardView, names: FerretNames): string {
-  const owner = names(card.owner);
-  return card.assignee === null || card.assignee === card.owner ? owner : `${owner}→${names(card.assignee)}`;
+export function whoLabel(task: TaskView, names: FerretNames): string {
+  const owner = names(task.owner);
+  return task.assignee === null || task.assignee === task.owner ? owner : `${owner}→${names(task.assignee)}`;
 }
 
 // ─── the board ─────────────────────────────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ const countsLine = (counts: BoardCounts): string =>
 interface LaneGroup {
   readonly id: string;
   readonly name: string;
-  readonly cards: readonly CardView[];
+  readonly cards: readonly TaskView[];
 }
 
 interface ProjectGroup {
@@ -85,7 +85,7 @@ interface ProjectGroup {
   readonly lanes: readonly LaneGroup[];
 }
 
-const byOrder = (left: CardView, right: CardView): number =>
+const byOrder = (left: TaskView, right: TaskView): number =>
   (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER) ||
   Number(left.id.slice(1)) - Number(right.id.slice(1));
 
@@ -95,17 +95,17 @@ function groupBoard(response: BoardResponse, projects: readonly BoardProject[]):
   const groups: ProjectGroup[] = [];
   const projectIds = [...new Set([...projects.map(project => project.id), ...response.cards.map(c => c.projectId)])];
   for (const projectId of projectIds) {
-    const cards = response.cards.filter(card => card.projectId === projectId);
-    if (cards.length === 0) continue;
+    const tasks = response.cards.filter(task => task.projectId === projectId);
+    if (tasks.length === 0) continue;
     const laneSet =
       response.laneSet?.projectId === projectId ? response.laneSet : (known.get(projectId)?.laneSet ?? null);
     const ordered = (laneSet?.lanes ?? []).map(lane => lane.id);
-    const stray = [...new Set(cards.map(card => card.laneId))].filter(id => !ordered.includes(id));
+    const stray = [...new Set(tasks.map(task => task.laneId))].filter(id => !ordered.includes(id));
     const lanes = [...ordered, ...stray]
       .map(id => ({
         id,
         name: laneName(laneSet, id),
-        cards: cards.filter(card => card.laneId === id).sort(byOrder),
+        cards: tasks.filter(task => task.laneId === id).sort(byOrder),
       }))
       .filter(lane => lane.cards.length > 0);
     groups.push({ name: known.get(projectId)?.name ?? projectId, lanes });
@@ -119,7 +119,7 @@ const headerLine = (response: BoardResponse, projects: readonly BoardProject[], 
 };
 
 const quarantineNotes = (response: BoardResponse): string[] =>
-  response.quarantined.map(card => `! ${card.id} could not be read (${card.reason})`);
+  response.quarantined.map(task => `! ${task.id} could not be read (${task.reason})`);
 
 /** The board as text: one header with the counts, then each lane with its cards, one row per card. */
 export function renderBoard(
@@ -130,21 +130,21 @@ export function renderBoard(
 ): string {
   const lines = [headerLine(response, projects, label)];
   const groups = groupBoard(response, projects);
-  const titleWidth = Math.min(48, Math.max(0, ...response.cards.map(card => card.title.length)));
-  const idWidth = Math.max(0, ...response.cards.map(card => formatCardRef(card).length));
+  const titleWidth = Math.min(48, Math.max(0, ...response.cards.map(task => task.title.length)));
+  const idWidth = Math.max(0, ...response.cards.map(task => formatTaskRef(task).length));
   const showProject = groups.length > 1;
   for (const group of groups) {
     if (showProject) lines.push('', `# ${group.name}`);
     for (const lane of group.lanes) {
       lines.push('', `${lane.name} (${String(lane.cards.length)})`);
-      for (const card of lane.cards) {
+      for (const task of lane.cards) {
         lines.push(
           [
-            `  ${formatCardRef(card).padEnd(idWidth)}`,
-            clip(card.title, titleWidth).padEnd(titleWidth),
-            whoLabel(card, names),
-            activityLabel(card),
-            prLabel(card.links.prs),
+            `  ${formatTaskRef(task).padEnd(idWidth)}`,
+            clip(task.title, titleWidth).padEnd(titleWidth),
+            whoLabel(task, names),
+            activityLabel(task),
+            prLabel(task.links.prs),
           ].join('  '),
         );
       }
@@ -176,9 +176,9 @@ export function renderBoardMarkdown(
         '| Task | Title | Who | Activity | PR |',
         '| --- | --- | --- | --- | --- |',
       );
-      for (const card of lane.cards) {
+      for (const task of lane.cards) {
         lines.push(
-          `| ${formatCardRef(card)} | ${cell(card.title)} | ${cell(whoLabel(card, names))} | ${activityLabel(card)} | ${prLabel(card.links.prs)} |`,
+          `| ${formatTaskRef(task)} | ${cell(task.title)} | ${cell(whoLabel(task, names))} | ${activityLabel(task)} | ${prLabel(task.links.prs)} |`,
         );
       }
     }
@@ -190,7 +190,7 @@ export function renderBoardMarkdown(
 // ─── one card in full ──────────────────────────────────────────────────────────────────────────
 
 /** Who a line is by: the reporter of a reported trigger, else the actor (`boardEventActor`). */
-const actorLabel = (event: CardEvent, names: FerretNames): string => {
+const actorLabel = (event: TaskEvent, names: FerretNames): string => {
   const actor = boardEventActor(event);
   if (actor.kind === 'ferret') return names(actor.ferret);
   // The daemon's own act, with the ferret whose session caused it: "daemon via lanie" (the id when unnamed).
@@ -200,8 +200,8 @@ const actorLabel = (event: CardEvent, names: FerretNames): string => {
 };
 
 /** One history line's wording, as the protocol spells it for every surface. */
-export const describeEvent = (event: CardEvent, laneSet: LaneSet | null, names: FerretNames): string =>
-  describeCardEvent(event, id => laneName(laneSet, id), names);
+export const describeEvent = (event: TaskEvent, laneSet: LaneSet | null, names: FerretNames): string =>
+  describeTaskEvent(event, id => laneName(laneSet, id), names);
 
 const section = (title: string, body: string): string[] => ['', title, ...body.split('\n').map(line => `  ${line}`)];
 
@@ -222,7 +222,7 @@ const renderProgressParts = (parts: ReturnType<typeof writtenProgressParts>): st
 const agendaList = (refs: readonly AskRef[]): string => refs.map(formatAskRef).join(', ');
 
 /** The terms table: the term column is as wide as the longest term, the meaning follows. */
-export function renderTermsTable(terms: CardView['terms']): string {
+export function renderTermsTable(terms: TaskView['terms']): string {
   const width = Math.max(...terms.map(entry => entry.term.length));
   return terms.map(entry => `${entry.term.padEnd(width)}  ${entry.meaning}`).join('\n');
 }
@@ -232,67 +232,67 @@ export function renderTermsTable(terms: CardView['terms']): string {
  * the glossary, the brief, how the owner tests it, how it relates to other cards, and its history. Empty parts
  * are left out.
  */
-export function renderCard(
-  card: CardView,
+export function renderTask(
+  task: TaskView,
   laneSet: LaneSet | null,
-  children: readonly CardView[],
+  children: readonly TaskView[],
   names: FerretNames,
 ): string {
   const lines: string[] = [
-    `${formatCardRef(card)}  ${card.title}  [${card.kind}]`,
-    `lane      ${laneName(laneSet, card.laneId)}  ·  ${activityLabel(card)}  ·  workflow ${card.workflow}`,
-    `who       ${whoLabel(card, names)}`,
-    `project   ${card.projectId}`,
+    `${formatTaskRef(task)}  ${task.title}  [${task.kind}]`,
+    `lane      ${laneName(laneSet, task.laneId)}  ·  ${activityLabel(task)}  ·  workflow ${task.workflow}`,
+    `who       ${whoLabel(task, names)}`,
+    `project   ${task.projectId}`,
   ];
-  if (card.summary !== '') lines.push(`summary   ${card.summary}`);
-  if (card.parent !== null) lines.push(`parent    ${refOf(card.parent)}`);
-  if (card.shippedIn !== null) lines.push(`shipped   ${card.shippedIn.version}`);
-  if (card.suggestedLane !== null) lines.push(`suggests  ${laneName(laneSet, card.suggestedLane)}`);
-  if (card.blocked !== null) lines.push(`blocked   ${card.blocked.reason}`);
-  if (card.dropped !== null) lines.push(`dropped   ${card.dropped.reason}`);
+  if (task.summary !== '') lines.push(`summary   ${task.summary}`);
+  if (task.parent !== null) lines.push(`parent    ${refOf(task.parent)}`);
+  if (task.shippedIn !== null) lines.push(`shipped   ${task.shippedIn.version}`);
+  if (task.suggestedLane !== null) lines.push(`suggests  ${laneName(laneSet, task.suggestedLane)}`);
+  if (task.blocked !== null) lines.push(`blocked   ${task.blocked.reason}`);
+  if (task.dropped !== null) lines.push(`dropped   ${task.dropped.reason}`);
 
-  const progress = writtenProgressParts(card.progress);
+  const progress = writtenProgressParts(task.progress);
   if (progress.length > 0) lines.push(...section('Progress', renderProgressParts(progress)));
-  lines.push(...section('Ask', `${card.ask.text}\n— ${card.ask.source}`));
-  for (const clarification of card.clarifications) {
+  lines.push(...section('Ask', `${task.ask.text}\n— ${task.ask.source}`));
+  for (const clarification of task.clarifications) {
     lines.push(...section('Clarified', `${clarification.text}\n— ${clarification.source}`));
   }
-  if (card.premise !== '') lines.push(...section('Premise', card.premise));
-  if (card.context !== '') lines.push(...section('Context', card.context));
-  if (card.terms.length > 0) lines.push(...section('Terms', renderTermsTable(card.terms)));
-  if (card.brief !== '') lines.push(...section('Brief', card.brief));
-  if (card.howToTest !== '') lines.push(...section('How to test', card.howToTest));
+  if (task.premise !== '') lines.push(...section('Premise', task.premise));
+  if (task.context !== '') lines.push(...section('Context', task.context));
+  if (task.terms.length > 0) lines.push(...section('Terms', renderTermsTable(task.terms)));
+  if (task.brief !== '') lines.push(...section('Brief', task.brief));
+  if (task.howToTest !== '') lines.push(...section('How to test', task.howToTest));
 
-  if (children.length > 0 || card.rollup.children > 0) {
-    const roll = `${String(card.rollup.children)} children, ${String(card.rollup.active)} active`;
+  if (children.length > 0 || task.rollup.children > 0) {
+    const roll = `${String(task.rollup.children)} children, ${String(task.rollup.active)} active`;
     const rows = children.map(
-      child => `${formatCardRef(child)}  ${child.title}  (${laneName(laneSet, child.laneId)}, ${activityLabel(child)})`,
+      child => `${formatTaskRef(child)}  ${child.title}  (${laneName(laneSet, child.laneId)}, ${activityLabel(child)})`,
     );
     lines.push(...section(`Children — ${roll}`, rows.length > 0 ? rows.join('\n') : 'not on this board'));
   }
-  if (card.dependsOn.length > 0) {
-    const waiting = new Set(card.blockedBy.map(refOf));
-    const rows = card.dependsOn.map(dependency => {
+  if (task.dependsOn.length > 0) {
+    const waiting = new Set(task.blockedBy.map(refOf));
+    const rows = task.dependsOn.map(dependency => {
       const flag =
         dependency.override === undefined ? (waiting.has(refOf(dependency.task)) ? 'waiting' : 'done') : 'overridden';
       return `${refOf(dependency.task)}  until ${dependency.until}  (${flag})`;
     });
     lines.push(...section('Depends on', rows.join('\n')));
   }
-  if (card.blocks.length > 0) lines.push(...section('Blocks', card.blocks.map(refOf).join(', ')));
+  if (task.blocks.length > 0) lines.push(...section('Blocks', task.blocks.map(refOf).join(', ')));
 
   const linkRows = [
-    ...card.links.prs.map(pr => `pr      ${pr.url}  (${prLabel([pr])})`),
-    ...(card.links.branch === null ? [] : [`branch  ${card.links.branch}`]),
-    ...card.links.commits.map(commit => `commit  ${commit}`),
-    ...card.links.docs.map(doc => `doc     ${doc}`),
+    ...task.links.prs.map(pr => `pr      ${pr.url}  (${prLabel([pr])})`),
+    ...(task.links.branch === null ? [] : [`branch  ${task.links.branch}`]),
+    ...task.links.commits.map(commit => `commit  ${commit}`),
+    ...task.links.docs.map(doc => `doc     ${doc}`),
   ];
   if (linkRows.length > 0) lines.push(...section('Links', linkRows.join('\n')));
-  if (card.files.length > 0) lines.push(...section('Files', card.files.join('\n')));
+  if (task.files.length > 0) lines.push(...section('Files', task.files.join('\n')));
   // The agenda items that carry the card: its asks ride them, the card only names them.
-  if (card.openAsks.length > 0) lines.push(...section('On the agenda', agendaList(card.openAsks)));
+  if (task.openAsks.length > 0) lines.push(...section('On the agenda', agendaList(task.openAsks)));
 
-  const history = card.history.map(
+  const history = task.history.map(
     event =>
       `${String(event.seq).padStart(3)}  ${event.at}  ${actorLabel(event, names)}  ${describeEvent(event, laneSet, names)}`,
   );
@@ -356,6 +356,6 @@ const PAST: Readonly<Record<BoardVerb, string>> = {
 };
 
 /** One line that says what the verb did and where the card stands now. */
-export function renderActed(verb: BoardVerb, card: CardView, laneSet: LaneSet | null, names: FerretNames): string {
-  return `${formatCardRef(card)} ${PAST[verb]} — ${laneName(laneSet, card.laneId)}, ${whoLabel(card, names)}, ${activityLabel(card)}`;
+export function renderActed(verb: BoardVerb, task: TaskView, laneSet: LaneSet | null, names: FerretNames): string {
+  return `${formatTaskRef(task)} ${PAST[verb]} — ${laneName(laneSet, task.laneId)}, ${whoLabel(task, names)}, ${activityLabel(task)}`;
 }

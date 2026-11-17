@@ -16,23 +16,23 @@
  */
 
 import {
-  type CardId,
-  type CardView,
-  formatCardRef,
+  type TaskId,
+  type TaskView,
+  formatTaskRef,
   type LaneSet,
-  parseCardRef,
+  parseTaskRef,
   writtenProgressParts,
 } from '../../../contract/index.ts';
 import { ArrowLeft, Link, MessageSquare, X } from 'lucide-react';
 import { Component, type ErrorInfo, type ReactNode, useMemo, useState } from 'react';
-import { type BoardMachine, useBoardCard } from '../../hooks/use-board.ts';
+import { type BoardMachine, useBoardTask } from '../../hooks/use-board.ts';
 import { activityText, hasLinks, kindLabel, laneCategoryOf, laneNameOf, written } from '../../lib/board-detail.ts';
 import type { RunningOnMachine } from '../../lib/board-model.ts';
 import type { FerretNames } from '../../lib/board-present.ts';
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
-import { useCardAsks } from '../../hooks/use-task-asks.ts';
+import { useTaskAsks } from '../../hooks/use-task-asks.ts';
 import { agendaAskPath, boardPath, ferretPath } from '../../lib/paths.ts';
-import { cardProse } from '../prose.tsx';
+import { taskProse } from '../prose.tsx';
 import { markTerms, TermLayer } from './task-terms.tsx';
 import { Situation } from './situation.tsx';
 import { BoardIcon } from '../board-icons.tsx';
@@ -53,7 +53,7 @@ import {
 } from './board-detail-sections.tsx';
 
 /** The card's own texts, each `null` when empty, with the first use of each term marked as a tap tip, in reading order. */
-const markedTexts = (task: CardView) => {
+const markedTexts = (task: TaskView) => {
   const seen = new Set<number>();
   const mark = (text: string): string | null => (written(text) ? markTerms(text, task.terms, seen) : null);
   return {
@@ -77,7 +77,7 @@ export interface BoardDetailProps {
   readonly projectName: (projectId: string) => string;
   /** The cards the Board already has, for sub-cards and the release each machine is on. */
   readonly siblings: readonly {
-    readonly task: CardView;
+    readonly task: TaskView;
     readonly laneName: string;
     readonly runningOn: readonly RunningOnMachine[];
   }[];
@@ -94,7 +94,7 @@ export interface BoardDetailProps {
  * (2026-10-30). Here the drawer keeps its bar (Close still works), the Board stays usable behind it, and the
  * error's own message is on screen, so the reader can say what failed. A different card starts clean.
  */
-class CardErrorBoundary extends Component<
+class TaskErrorBoundary extends Component<
   {
     readonly label: string;
     readonly onReport?: (message: string, error: unknown, componentStack: string | null | undefined) => void;
@@ -127,8 +127,8 @@ class CardErrorBoundary extends Component<
 
 export function BoardDetail(props: BoardDetailProps) {
   const { phone, onClose, taskId, machine } = props;
-  const ref = parseCardRef(taskId);
-  const label = ref.ok ? formatCardRef(ref.value) : taskId;
+  const ref = parseTaskRef(taskId);
+  const label = ref.ok ? formatTaskRef(ref.value) : taskId;
   return (
     <div className="fy-board-detail__scrim" data-mode={phone ? 'page' : 'drawer'}>
       <div aria-hidden="true" className="fy-board-detail__backdrop" onClick={onClose} />
@@ -147,9 +147,9 @@ export function BoardDetail(props: BoardDetailProps) {
           </button>
         </div>
         {ref.ok ? (
-          <CardErrorBoundary key={`${String(machine.connection.daemonId)}/${label}`} label={label}>
-            <LoadedCard {...props} id={ref.value.id} />
-          </CardErrorBoundary>
+          <TaskErrorBoundary key={`${String(machine.connection.daemonId)}/${label}`} label={label}>
+            <LoadedTask {...props} id={ref.value.id} />
+          </TaskErrorBoundary>
         ) : (
           <p className="fy-board-detail__empty" role="status">
             {machine.name} has no task {label}.
@@ -160,10 +160,10 @@ export function BoardDetail(props: BoardDetailProps) {
   );
 }
 
-function LoadedCard(props: BoardDetailProps & { readonly id: CardId }) {
+function LoadedTask(props: BoardDetailProps & { readonly id: TaskId }) {
   const { store, machine, id } = props;
-  const state = useBoardCard(store, machine.connection, id);
-  const label = formatCardRef({ id });
+  const state = useBoardTask(store, machine.connection, id);
+  const label = formatTaskRef({ id });
   if (state.missing) {
     return (
       <p className="fy-board-detail__empty" role="status">
@@ -196,17 +196,17 @@ function DetailBody({
   projectName,
   siblings,
   onNavigate,
-}: BoardDetailProps & { readonly task: CardView; readonly laneSet: LaneSet | null }) {
+}: BoardDetailProps & { readonly task: TaskView; readonly laneSet: LaneSet | null }) {
   const [notice, setNotice] = useState<string | null>(null);
 
   const category = laneCategoryOf(laneSet, task.laneId);
   const recipient = task.assignee ?? task.owner;
-  const here = siblings.find(card => card.task.id === task.id);
+  const here = siblings.find(boardTask => boardTask.task.id === task.id);
   const children: readonly ChildLine[] = useMemo(
     () =>
       siblings
-        .filter(card => card.task.parent !== null && card.task.parent.id === task.id)
-        .map(card => ({ task: card.task, laneName: card.laneName })),
+        .filter(boardTask => boardTask.task.parent !== null && boardTask.task.parent.id === task.id)
+        .map(boardTask => ({ task: boardTask.task, laneName: boardTask.laneName })),
     [siblings, task.id],
   );
   const historyContext = useMemo(
@@ -215,7 +215,7 @@ function DetailBody({
   );
   const open = (id: string): void => onNavigate(`${boardPath(machine.connection.daemonId)}/${encodeURIComponent(id)}`);
   const marked = useMemo(() => markedTexts(task), [task]);
-  const asks = useCardAsks(store, machine.connection, task);
+  const asks = useTaskAsks(store, machine.connection, task);
   const firstPr = task.links.prs[0] ?? null;
 
   const copyLink = (): void => {
@@ -235,7 +235,7 @@ function DetailBody({
       <header className="fy-board-detail__head" data-section="header">
         <div className="fy-board-detail__headline">
           <h2 className="fy-board-detail__title">
-            <span className="fy-board-detail__id">{formatCardRef({ id: task.id })}</span> {task.title}
+            <span className="fy-board-detail__id">{formatTaskRef({ id: task.id })}</span> {task.title}
           </h2>
           <div className="fy-board-detail__tools">
             <button
@@ -253,7 +253,7 @@ function DetailBody({
         </div>
         {written(task.summary) ? (
           <div className="fy-board-detail__summary" data-section="summary">
-            {cardProse(task.summary)}
+            {taskProse(task.summary)}
           </div>
         ) : null}
         <div className="fy-board-detail__meta">
@@ -291,7 +291,7 @@ function DetailBody({
         </div>
         {task.dropped === null ? null : (
           <div className="fy-board-detail__quiet" data-state="dropped">
-            Dropped: {cardProse(task.dropped.reason)}
+            Dropped: {taskProse(task.dropped.reason)}
           </div>
         )}
         {notice === null ? null : (
@@ -301,11 +301,11 @@ function DetailBody({
         )}
       </header>
 
-      <TermLayer renderProse={cardProse} terms={task.terms}>
+      <TermLayer renderProse={taskProse} terms={task.terms}>
         <Situation
           context={marked.context}
           premise={marked.premise}
-          renderProse={cardProse}
+          renderProse={taskProse}
           progress={marked.progress}
         />
 
@@ -320,7 +320,7 @@ function DetailBody({
 
         {marked.howToTest === null ? null : (
           <DetailSection id="how-to-test" title="How to test">
-            <HowToTest key={marked.howToTest} renderProse={cardProse} text={marked.howToTest} />
+            <HowToTest key={marked.howToTest} renderProse={taskProse} text={marked.howToTest} />
           </DetailSection>
         )}
 

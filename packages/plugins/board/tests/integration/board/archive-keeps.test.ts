@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import {
   ArchiveKeeps,
-  type ArchiveCardStanding,
+  type ArchiveTaskStanding,
   ArchiveCardStandingsSchema,
   type ArchiveKeepSource,
 } from '@ferretry/core-ferrets/contract';
@@ -11,12 +11,12 @@ import type { Log } from '@ferretry/kernel/contract';
 import { HookEngine } from '@ferretry/kernel/host';
 import { definePlugin } from '@ferretry/kernel/manifest';
 import { testHost } from '@ferretry/kernel/testing';
-import { type BoardCardSnapshot, boardArchiveKeeps } from '../../../daemon/adapters/archive-keeps.ts';
-import { BoardPort, type Card, CardCreateRequestSchema } from '../../../contract/index.ts';
+import { type BoardTaskSnapshot, boardArchiveKeeps } from '../../../daemon/adapters/archive-keeps.ts';
+import { BoardPort, type Task, CardCreateRequestSchema } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
 import manifest from '../../../manifest.ts';
 import type { LaneSets } from '../../../daemon/lib/board/index.ts';
-import { card, lanes, OTHER_PROJECT, PROJECT } from '../../support/board.ts';
+import { boardTask, lanes, OTHER_PROJECT, PROJECT } from '../../support/board.ts';
 
 /**
  * Board's half of `session.archive-keeps` (ruling #46). The archive is OFF by default today and in 5.0 (no `afterHours`
@@ -39,11 +39,11 @@ const ferretsOffering = definePlugin({
   hooks: { offers: [{ hook: ArchiveKeeps }] },
 });
 
-const snapshotOf = (cards: readonly Card[], laneSets: LaneSets = new Map([[PROJECT, lanes()]])): BoardCardSnapshot => ({
-  snapshot: async () => ({ cards, laneSets }),
+const snapshotOf = (tasks: readonly Task[], laneSets: LaneSets = new Map([[PROJECT, lanes()]])): BoardTaskSnapshot => ({
+  snapshot: async () => ({ cards: tasks, laneSets }),
 });
 
-const answer = async (board: BoardCardSnapshot): Promise<readonly ArchiveCardStanding[]> => {
+const answer = async (board: BoardTaskSnapshot): Promise<readonly ArchiveTaskStanding[]> => {
   const source = boardArchiveKeeps(board);
   if (source.kind !== 'board') throw new Error('Board contributed something other than a board source');
   return await source.cards();
@@ -53,22 +53,22 @@ const answer = async (board: BoardCardSnapshot): Promise<readonly ArchiveCardSta
  * Whether Ferrets' boundary reads the whole answer: its own `ArchiveCardStandingsSchema` (ferret-id parties, a boolean
  * `dropped`, no extra keys), which it parses strictly, so one standing it refuses keeps every ferret on every pass.
  */
-const meetsFerretsBoundary = (standings: readonly ArchiveCardStanding[]): boolean =>
+const meetsFerretsBoundary = (standings: readonly ArchiveTaskStanding[]): boolean =>
   ArchiveCardStandingsSchema.safeParse(standings).success;
 
 /** The answer as plain data, for comparing with literal ids (the parties are branded `FerretId`s). */
-const plain = (standings: readonly ArchiveCardStanding[]): readonly unknown[] => standings;
+const plain = (standings: readonly ArchiveTaskStanding[]): readonly unknown[] => standings;
 
 /** Today's keep rule over one standing: the expectation each category row below is checked against. */
-const keptToday = (standing: ArchiveCardStanding): boolean =>
+const keptToday = (standing: ArchiveTaskStanding): boolean =>
   !standing.dropped && standing.category !== 'closed' && standing.category !== 'shipped';
 
 describe('AK-B Board answers the archive: every card, as today read it', () => {
   test('AK-B1 each card answers its own owner and assignee, and no card speaks for another ferret', async () => {
     const standings = await answer(
       snapshotOf([
-        card({ id: 'F1', owner: 'lead', assignee: 'helper', laneId: 'implement' }),
-        card({ id: 'F2', owner: 'other', assignee: null, laneId: 'todo' }),
+        boardTask({ id: 'F1', owner: 'lead', assignee: 'helper', laneId: 'implement' }),
+        boardTask({ id: 'F2', owner: 'other', assignee: null, laneId: 'todo' }),
       ]),
     );
     expect(plain(standings)).toEqual([
@@ -83,8 +83,8 @@ describe('AK-B Board answers the archive: every card, as today read it', () => {
     const dropped = { reason: 'no longer wanted', at: '2026-10-30T11:00:00.000Z' };
     const standings = await answer(
       snapshotOf([
-        card({ id: 'F1', owner: 'lead', assignee: 'helper', laneId: 'implement', dropped }),
-        card({ id: 'F2', owner: 'lead', laneId: 'todo', dropped }),
+        boardTask({ id: 'F1', owner: 'lead', assignee: 'helper', laneId: 'implement', dropped }),
+        boardTask({ id: 'F2', owner: 'lead', laneId: 'todo', dropped }),
       ]),
     );
     expect(standings.map(each => each.dropped)).toEqual([true, true]);
@@ -104,7 +104,7 @@ describe('AK-B Board answers the archive: every card, as today read it', () => {
       { lane: 'closed', category: 'closed', kept: false },
     ];
     const standings = await answer(
-      snapshotOf(cases.map((each, at) => card({ id: `F${at + 1}`, owner: `f${at + 1}`, laneId: each.lane }))),
+      snapshotOf(cases.map((each, at) => boardTask({ id: `F${at + 1}`, owner: `f${at + 1}`, laneId: each.lane }))),
     );
     expect(standings.map(each => each.category)).toEqual(cases.map(each => each.category));
     expect(standings.map(keptToday)).toEqual(cases.map(each => each.kept));
@@ -113,8 +113,8 @@ describe('AK-B Board answers the archive: every card, as today read it', () => {
   test('AK-B4 a card whose lane or board Board cannot name is answered with no category, which keeps (when unsure, keep)', async () => {
     const standings = await answer(
       snapshotOf([
-        card({ id: 'F1', owner: 'a', laneId: 'a-lane-that-is-gone' }),
-        card({ id: 'F2', owner: 'b', projectId: OTHER_PROJECT, laneId: 'todo' }),
+        boardTask({ id: 'F1', owner: 'a', laneId: 'a-lane-that-is-gone' }),
+        boardTask({ id: 'F2', owner: 'b', projectId: OTHER_PROJECT, laneId: 'todo' }),
       ]),
     );
     expect(standings.map(each => each.category)).toEqual([undefined, undefined]);
@@ -122,7 +122,7 @@ describe('AK-B Board answers the archive: every card, as today read it', () => {
   });
 
   test('AK-B5 a board that cannot be read rejects, never answers "no cards": the archive keeps every ferret live', async () => {
-    const broken: BoardCardSnapshot = {
+    const broken: BoardTaskSnapshot = {
       snapshot: async () => {
         throw new Error('the cards file is damaged');
       },
@@ -131,11 +131,13 @@ describe('AK-B Board answers the archive: every card, as today read it', () => {
   });
 
   test('AK-B6 each ask reads the board afresh: a card that closes after one pass stops keeping its ferret at the next', async () => {
-    let cards: readonly Card[] = [card({ id: 'F1', owner: 'lead', laneId: 'implement' })];
-    const board: BoardCardSnapshot = { snapshot: async () => ({ cards, laneSets: new Map([[PROJECT, lanes()]]) }) };
+    let tasks: readonly Task[] = [boardTask({ id: 'F1', owner: 'lead', laneId: 'implement' })];
+    const board: BoardTaskSnapshot = {
+      snapshot: async () => ({ cards: tasks, laneSets: new Map([[PROJECT, lanes()]]) }),
+    };
     const source = boardArchiveKeeps(board) as Extract<ArchiveKeepSource, { kind: 'board' }>;
     expect((await source.cards()).map(keptToday)).toEqual([true]);
-    cards = [card({ id: 'F1', owner: 'lead', laneId: 'closed' })];
+    tasks = [boardTask({ id: 'F1', owner: 'lead', laneId: 'closed' })];
     expect((await source.cards()).map(keptToday)).toEqual([false]);
   });
 });
@@ -147,8 +149,8 @@ describe('AK-B Board answers only ferret ids, so one odd stored card never stops
   test('AK-B9 all parties are ferret ids: every card is answered as stored, and every standing meets Ferrets’ boundary', async () => {
     const standings = await answer(
       snapshotOf([
-        card({ id: 'F1', owner: 'lead', assignee: 'helper_2', laneId: 'implement' }),
-        card({ id: 'F2', owner: 'mw5qhtt4-5a81fb85', assignee: null, laneId: 'closed' }),
+        boardTask({ id: 'F1', owner: 'lead', assignee: 'helper_2', laneId: 'implement' }),
+        boardTask({ id: 'F2', owner: 'mw5qhtt4-5a81fb85', assignee: null, laneId: 'closed' }),
       ]),
     );
     expect(plain(standings)).toEqual([
@@ -161,8 +163,8 @@ describe('AK-B Board answers only ferret ids, so one odd stored card never stops
   test('AK-B10 an owner that is not a ferret id is left out, and the card answers its assignee as its owner', async () => {
     const standings = await answer(
       snapshotOf([
-        card({ id: 'F1', owner: ODD, assignee: 'helper', laneId: 'implement' }),
-        card({ id: 'F2', owner: 'lead', laneId: 'todo' }),
+        boardTask({ id: 'F1', owner: ODD, assignee: 'helper', laneId: 'implement' }),
+        boardTask({ id: 'F2', owner: 'lead', laneId: 'todo' }),
       ]),
     );
     expect(plain(standings)).toEqual([
@@ -175,7 +177,9 @@ describe('AK-B Board answers only ferret ids, so one odd stored card never stops
   });
 
   test('AK-B11 an assignee that is not a ferret id is left out; the owner still answers', async () => {
-    const standings = await answer(snapshotOf([card({ id: 'F1', owner: 'lead', assignee: ODD, laneId: 'review' })]));
+    const standings = await answer(
+      snapshotOf([boardTask({ id: 'F1', owner: 'lead', assignee: ODD, laneId: 'review' })]),
+    );
     expect(plain(standings)).toEqual([{ owner: 'lead', assignee: null, dropped: false, category: 'review' }]);
     expect(meetsFerretsBoundary(standings)).toBe(true);
   });
@@ -183,9 +187,9 @@ describe('AK-B Board answers only ferret ids, so one odd stored card never stops
   test('AK-B12 a card with neither party a ferret id names no ferret and is left out; the other cards still answer', async () => {
     const standings = await answer(
       snapshotOf([
-        card({ id: 'F1', owner: ODD, assignee: ':callsign', laneId: 'implement' }),
-        card({ id: 'F2', owner: ODD, assignee: null, laneId: 'implement' }),
-        card({ id: 'F3', owner: 'lead', assignee: 'helper', laneId: 'implement' }),
+        boardTask({ id: 'F1', owner: ODD, assignee: ':callsign', laneId: 'implement' }),
+        boardTask({ id: 'F2', owner: ODD, assignee: null, laneId: 'implement' }),
+        boardTask({ id: 'F3', owner: 'lead', assignee: 'helper', laneId: 'implement' }),
       ]),
     );
     expect(plain(standings)).toEqual([{ owner: 'lead', assignee: 'helper', dropped: false, category: 'active' }]);
@@ -193,17 +197,17 @@ describe('AK-B Board answers only ferret ids, so one odd stored card never stops
   });
 
   test('AK-B13 one odd card beside a good one: Ferrets still reads the answer, so the good card’s finished ferret can archive', async () => {
-    const cards = [
+    const tasks = [
       // An odd card still in flight: its owner is a callsign, not a ferret id, and it names nobody else.
-      card({ id: 'F1', owner: ':lead', assignee: null, laneId: 'implement' }),
+      boardTask({ id: 'F1', owner: ':lead', assignee: null, laneId: 'implement' }),
       // A good card that is done: it no longer holds its owner, so that ferret may archive.
-      card({ id: 'F2', owner: 'finished', assignee: null, laneId: 'closed' }),
+      boardTask({ id: 'F2', owner: 'finished', assignee: null, laneId: 'closed' }),
       // A good card in flight: it holds its owner and assignee.
-      card({ id: 'F3', owner: 'busy', assignee: 'helper', laneId: 'implement' }),
+      boardTask({ id: 'F3', owner: 'busy', assignee: 'helper', laneId: 'implement' }),
     ];
     // Stored as-is, the odd party fails Ferrets' boundary, which would make the WHOLE answer unreadable and keep every
     // ferret (the archive dead): this is what leaving the party out prevents.
-    const asStored = cards.map(each => ({
+    const asStored = tasks.map(each => ({
       owner: each.owner,
       assignee: each.assignee,
       dropped: each.dropped !== null,
@@ -211,7 +215,7 @@ describe('AK-B Board answers only ferret ids, so one odd stored card never stops
     }));
     expect(ArchiveCardStandingsSchema.safeParse(asStored).success).toBe(false);
 
-    const standings = await answer(snapshotOf(cards));
+    const standings = await answer(snapshotOf(tasks));
     // Ferrets parses Board's answer with this schema: it is readable, so the pass decides on it.
     const read = ArchiveCardStandingsSchema.safeParse(standings);
     if (!read.success) throw new Error('Ferrets would read this answer as unreadable and keep every ferret');

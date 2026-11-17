@@ -1,6 +1,6 @@
 import type { BoardProjectId, BoardSwitch } from '../../../contract/index.ts';
 import type { ProjectInfo, RegisterProjectRequest } from '@ferretry/plugin-projects/contract';
-import type { LaneProposalCard } from './lane-proposal-task.ts';
+import type { LaneProposalTask } from './lane-proposal-task.ts';
 import type { BoardActorVia, LaneSet } from './model.ts';
 import type { ProjectGitFacts } from './template-inference.ts';
 
@@ -41,7 +41,7 @@ export interface BoardSwitchStore {
  * the ask; the answer comes back through Asks (`LaneProposalAcceptance`).
  */
 export interface LaneProposalAsks {
-  raise(ferretId: string, reference: string, card: LaneProposalCard): Promise<void>;
+  raise(ferretId: string, reference: string, task: LaneProposalTask): Promise<void>;
   withdraw(ferretId: string, reference: string, note: string): Promise<void>;
 }
 
@@ -58,7 +58,7 @@ export type RelocationAuthority =
  * stored, with the new set already readable; it must be safe to repeat, because a failure here leaves the set edited
  * and the cards where they were. `by` is whose move it is, and what each card's history records.
  */
-export interface CardRelocator {
+export interface TaskRelocator {
   relocate(projectId: BoardProjectId, moves: Readonly<Record<string, string>>, by: RelocationAuthority): Promise<void>;
 }
 

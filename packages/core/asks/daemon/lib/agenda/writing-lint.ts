@@ -4,10 +4,10 @@ import {
   AGENDA_SEGMENT_PARAGRAPH_LENGTH,
   type AgendaAsk,
   type AgendaBrief,
-  type AgendaCardAnswer,
+  type AgendaTaskAnswer,
   type AgendaKind,
 } from '../protocol/agenda.ts';
-import { agendaCardAnswers, agendaCardKind } from '../protocol/agenda-task.ts';
+import { agendaTaskAnswers, agendaTaskKind } from '../protocol/agenda-task.ts';
 
 /** What an item says, as the lint reads it: its title, its ask, the context, its answers and the brief. */
 export interface AgendaWriting extends AgendaBrief {
@@ -16,7 +16,7 @@ export interface AgendaWriting extends AgendaBrief {
   readonly title?: string | undefined;
   readonly kind?: AgendaKind | undefined;
   readonly ask?: AgendaAsk | undefined;
-  readonly answers?: readonly AgendaCardAnswer[] | undefined;
+  readonly answers?: readonly AgendaTaskAnswer[] | undefined;
   readonly context?: string | null | undefined;
 }
 
@@ -80,7 +80,7 @@ function fieldsOf(item: AgendaWriting): Field[] {
   push('recommendation', [item.recommendation?.decision ?? '', item.recommendation?.why ?? ''].join(' '));
   push('impact', item.impact);
   push('urgency', item.urgency);
-  agendaCardAnswers(item).forEach(answer => {
+  agendaTaskAnswers(item).forEach(answer => {
     push(`answer "${answer.label}"`, [answer.label, answer.description ?? ''].join(' '));
   });
   return fields;
@@ -93,7 +93,7 @@ function definedTerms(item: AgendaWriting): ReadonlySet<string> {
 
 /** Whether the item asks the owner to decide something: a permission, a choice, a question or an open question. */
 function isDecision(item: AgendaWriting): boolean {
-  return (item.questions?.length ?? 0) > 0 || DECISION_KINDS.has(agendaCardKind(item));
+  return (item.questions?.length ?? 0) > 0 || DECISION_KINDS.has(agendaTaskKind(item));
 }
 
 function isBlank(text: string | null | undefined): boolean {
@@ -131,7 +131,7 @@ function collect(
  * carry no description. Yes and No are plain words and a yes-or-no card's own.
  */
 function vagueOptions(item: AgendaWriting): string[] {
-  if (agendaCardKind(item) !== 'choice' || item.ask?.kind !== 'multiple-choice') return [];
+  if (agendaTaskKind(item) !== 'choice' || item.ask?.kind !== 'multiple-choice') return [];
   return item.ask.options
     .filter(option => option.description === undefined)
     .map(option => option.label.trim())

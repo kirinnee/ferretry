@@ -17,7 +17,7 @@
  * in the composer when it is empty. A notice's one button is Got it.
  */
 
-import { agendaAnswerText, type AgendaCardAnswer, GOT_IT_LABEL, plainLabel } from '@ferretry/core-asks/contract';
+import { agendaAnswerText, type AgendaTaskAnswer, GOT_IT_LABEL, plainLabel } from '@ferretry/core-asks/contract';
 import { Check } from 'lucide-react';
 import { type PointerEvent, useRef } from 'react';
 import { type AnswerDirection, answerAction, CLEAR_ACTION } from '../../lib/agenda-answers.ts';
@@ -43,7 +43,7 @@ const sameLabel = (a: string, b: string | undefined): boolean =>
 
 /** A review's Request changes: drawn in its own direction's slot, tapped only. */
 export interface RequestChanges {
-  readonly answer: AgendaCardAnswer;
+  readonly answer: AgendaTaskAnswer;
   readonly onTap: () => void;
 }
 
@@ -128,7 +128,7 @@ function Chip({ label, recommended, busy, arrow, swipeable, primary = false, slo
 /** One button of the row: an answer the card gives, in the slot of its swipe direction. */
 interface Reply {
   readonly label: string;
-  readonly answer: AgendaCardAnswer;
+  readonly answer: AgendaTaskAnswer;
   /** Tapped only, with its own handling (Request changes); absent: the answer is sent as it is. */
   readonly onTap?: () => void;
 }
@@ -308,7 +308,7 @@ function AnswerChip({
   tapOnly,
   onTap,
 }: {
-  readonly answer: AgendaCardAnswer;
+  readonly answer: AgendaTaskAnswer;
   readonly busy: boolean;
   readonly give: (action: InboxAction) => void;
   readonly recommended: string | undefined;

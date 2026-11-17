@@ -6,10 +6,10 @@ import {
   type OrphanMemory,
   type WardenBoardPort,
   type WardenBoardRead,
-  type WardenFocusCard,
+  type WardenFocusTask,
 } from '../../daemon/lib/index.ts';
 import { lanes, PROJECT } from '../support/board.ts';
-import { boardOf, cardView, orphanView } from './board-fixtures.ts';
+import { boardOf, taskView, orphanView } from './board-fixtures.ts';
 import { enabled, harness, type JevScript, journalTypes, NOW, no, session, triageable } from './sweep-harness.ts';
 
 /**
@@ -24,12 +24,12 @@ const iso = (ms: number): string => new Date(ms).toISOString();
 /** A board port over a board the test can change between sweeps, and the focus cards it knows. */
 const boardPort = (
   initial: WardenBoardRead | undefined,
-  cards: Readonly<Record<string, WardenFocusCard>> = {},
+  tasks: Readonly<Record<string, WardenFocusTask>> = {},
 ): WardenBoardPort & { set(next: WardenBoardRead | undefined): void } => {
   let current = initial;
   return {
     read: async () => current,
-    focusCard: async sessionId => cards[sessionId],
+    focusCard: async sessionId => tasks[sessionId],
     set: next => {
       current = next;
     },
@@ -87,7 +87,7 @@ describe('an orphaned card', () => {
     // Act
     await subject.service.run({ force: false });
     const listed = subject.orphanItem.current;
-    board.set(boardOf(cardView({ assignee: 'worker' }, { activity: 'active' })));
+    board.set(boardOf(taskView({ assignee: 'worker' }, { activity: 'active' })));
     await subject.service.run({ force: false });
 
     // Assert
@@ -237,7 +237,7 @@ describe('orphaned cards on the one machine item', () => {
     // Act — F1 recovers, F4 is orphaned.
     board.set(
       boardOf(
-        cardView({ id: 'F1', assignee: 'w0' }, { activity: 'active' }),
+        taskView({ id: 'F1', assignee: 'w0' }, { activity: 'active' }),
         ...orphans(3, 3).views.slice(1),
         orphanView({ id: 'F4', owner: 'gone', assignee: 'w3' }),
       ),
@@ -260,7 +260,7 @@ describe('orphaned cards on the one machine item', () => {
     await subject.service.run({ force: false });
 
     // Act
-    board.set(boardOf(cardView({ id: 'F1', assignee: 'w0' }, { activity: 'active' })));
+    board.set(boardOf(taskView({ id: 'F1', assignee: 'w0' }, { activity: 'active' })));
     await subject.service.run({ force: false });
     const cleared = subject.orphanItem.current;
     board.set(orphans(1, 2, 7));
@@ -366,7 +366,7 @@ describe('orphaned cards on the one machine item', () => {
       config: enabled(),
       fleet: finished(1),
       state: { orphans: earlier },
-      board: boardPort(boardOf(cardView({ id: 'F1', assignee: 'w0' }, { activity: 'active' }))),
+      board: boardPort(boardOf(taskView({ id: 'F1', assignee: 'w0' }, { activity: 'active' }))),
     });
 
     // Act
@@ -417,7 +417,7 @@ describe('the orphaned cards item the Agenda refuses', () => {
 });
 
 describe('a ferret the Warden starts again', () => {
-  const card: WardenFocusCard = { task: cardView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
+  const task: WardenFocusTask = { task: taskView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
   /**
    * Jev's answers that walk the tree to the act: a ferret parked on its quota did not finish on purpose
    * (resume); a running one, silent, waits on nothing real (restart).
@@ -437,7 +437,7 @@ describe('a ferret the Warden starts again', () => {
       config,
       fleet: [triageable('q1')],
       guard: [jev('resume', 0.95)],
-      board: boardPort(boardOf(), { q1: card }),
+      board: boardPort(boardOf(), { q1: task }),
     });
 
     // Act
@@ -467,7 +467,7 @@ describe('a ferret the Warden starts again', () => {
       config,
       fleet: [stuck],
       guard: [jev('restart', 0.99)],
-      board: boardPort(boardOf(), { s1: card }),
+      board: boardPort(boardOf(), { s1: task }),
     });
 
     // Act
@@ -498,7 +498,7 @@ describe('a ferret the Warden starts again', () => {
       config,
       fleet: [{ ...human, config: { ...human.config, mode: 'interactive' } }],
       guard: [jev('resume', 0.95)],
-      board: boardPort(boardOf(), { q1: card }),
+      board: boardPort(boardOf(), { q1: task }),
     });
 
     // Act

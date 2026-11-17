@@ -3,14 +3,14 @@
  * the badge, push and every count read the same list in the same order. Pure and total.
  */
 import {
-  type AgendaCardAsk,
+  type AgendaTaskAsk,
   agendaNeedsYouSince,
   type AgendaParked,
   type AgendaRestSubState,
   agendaState,
   type AgendaStateSource,
   agendaWakeAt,
-  hasOpenCardAsk,
+  hasOpenTaskAsk,
 } from '@ferretry/core-asks/contract';
 
 /** What the queue reads of an item. */
@@ -20,11 +20,11 @@ export interface AgendaQueueSource extends AgendaStateSource {
   readonly blockingNow?: true | undefined;
   readonly neededBy?: string | undefined;
   readonly parked?: AgendaParked | undefined;
-  readonly cardAsks?: readonly Pick<AgendaCardAsk, 'answer'>[] | undefined;
+  readonly cardAsks?: readonly Pick<AgendaTaskAsk, 'answer'>[] | undefined;
 }
 
 /** A blocker goes first: the ferret said it is stuck now, or the agenda carries a card ask the owner has yet to answer. */
-const isBlocker = (item: AgendaQueueSource): boolean => item.blockingNow === true || hasOpenCardAsk(item);
+const isBlocker = (item: AgendaQueueSource): boolean => item.blockingNow === true || hasOpenTaskAsk(item);
 
 const byClock = (left: string, right: string): number => Date.parse(left) - Date.parse(right);
 

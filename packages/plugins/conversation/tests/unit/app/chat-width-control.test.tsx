@@ -7,7 +7,7 @@ import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../../app/chat-width-co
 const radiosOf = (root: ReactTestInstance): ReactTestInstance[] =>
   root.findAllByType('input').filter(input => input.props.type === 'radio');
 
-const cardsOf = (root: ReactTestInstance): ReactTestInstance[] => root.findAllByType('label');
+const tasksOf = (root: ReactTestInstance): ReactTestInstance[] => root.findAllByType('label');
 
 const previewOf = (root: ReactTestInstance): ReactTestInstance =>
   root.findAll(node => node.props['data-chat-width-preview'] !== undefined)[0] as ReactTestInstance;
@@ -31,7 +31,7 @@ describe('ChatWidthControl', () => {
       const expected = CHAT_WIDTH_OPTIONS.map(option => option.id === value);
 
       expect(radiosOf(root).map(radio => radio.props.checked)).toEqual(expected);
-      expect(cardsOf(root).map(card => card.props.className.includes('border-accent bg-accent-soft'))).toEqual(
+      expect(tasksOf(root).map(task => task.props.className.includes('border-accent bg-accent-soft'))).toEqual(
         expected,
       );
     }
@@ -57,15 +57,15 @@ describe('ChatWidthControl', () => {
    * instead of the rule, which is why it also pinned the desktop to a touch dimension.
    */
   it('keeps the touch floor on every option, so a phone can hit them', () => {
-    for (const card of cardsOf(render(<ChatWidthControl value="full" onChange={() => {}} />).root)) {
-      expect(card.props.className).toContain('min-h-control');
+    for (const task of tasksOf(render(<ChatWidthControl value="full" onChange={() => {}} />).root)) {
+      expect(task.props.className).toContain('min-h-control');
     }
   });
 
   it('draws a focus ring on the card, because the radio itself is visually hidden', () => {
-    const [card] = cardsOf(render(<ChatWidthControl value="full" onChange={() => {}} />).root);
+    const [task] = tasksOf(render(<ChatWidthControl value="full" onChange={() => {}} />).root);
 
-    expect(card?.props.className).toContain('has-[:focus-visible]:ring-2');
+    expect(task?.props.className).toContain('has-[:focus-visible]:ring-2');
     expect(radiosOf(render(<ChatWidthControl value="full" onChange={() => {}} />).root)[0]?.props.className).toBe(
       'sr-only',
     );

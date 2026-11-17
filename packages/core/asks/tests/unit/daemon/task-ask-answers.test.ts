@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { AskAnswer, AskSourceSpec } from '../../../contract/index.ts';
-import { cardAskAnswers } from '../../../daemon/adapters/task-ask-answers.ts';
-import type { CardAskOperation } from '../../../daemon/lib/agenda/task-asks.ts';
+import { taskAskAnswers } from '../../../daemon/adapters/task-ask-answers.ts';
+import type { TaskAskOperation } from '../../../daemon/lib/agenda/task-asks.ts';
 import type { AgendaService } from '../../../daemon/lib/agenda/index.ts';
 import type { GateAnswer } from '../../../daemon/lib/routes/agenda-gates.ts';
 
@@ -17,13 +17,13 @@ const GATE = {
 
 /** One open item carrying one open card ask, and the operations the agenda was asked to record. */
 function board() {
-  const recorded: CardAskOperation[] = [];
+  const recorded: TaskAskOperation[] = [];
   const agenda = {
     list: async () => ({
       ok: true,
       value: { items: [{ id: 'A1', cardAsks: [{ gate: GATE, at: AT }] }], resolved: [] },
     }),
-    cardAsk: async (_session: string, _id: string, operation: CardAskOperation) => {
+    cardAsk: async (_session: string, _id: string, operation: TaskAskOperation) => {
       recorded.push(operation);
       return { ok: true, changed: true };
     },
@@ -31,7 +31,7 @@ function board() {
   return { agenda, recorded };
 }
 
-function cardSource(outcome: 'applied' | { readonly refused: string }) {
+function taskSource(outcome: 'applied' | { readonly refused: string }) {
   const applied: AskAnswer[] = [];
   const spec: AskSourceSpec = {
     schema: undefined as never,
@@ -60,8 +60,8 @@ describe('a card ask answered through the card source', () => {
   it('should move the card first, then record the answer as the one the owner gave', async () => {
     // Arrange
     const { agenda, recorded } = board();
-    const source = cardSource('applied');
-    const gates = cardAskAnswers(
+    const source = taskSource('applied');
+    const gates = taskAskAnswers(
       agenda,
       () => source.spec,
       () => AT,
@@ -81,8 +81,8 @@ describe('a card ask answered through the card source', () => {
   it("should leave the ask open with the source's sentence when the card could not move", async () => {
     // Arrange
     const { agenda, recorded } = board();
-    const source = cardSource({ refused: 'F12 is no longer in To test, so nothing was moved' });
-    const gates = cardAskAnswers(
+    const source = taskSource({ refused: 'F12 is no longer in To test, so nothing was moved' });
+    const gates = taskAskAnswers(
       agenda,
       () => source.spec,
       () => AT,
@@ -102,7 +102,7 @@ describe('a card ask answered through the card source', () => {
   it('should refuse when no Board is running, and record nothing', async () => {
     // Arrange
     const { agenda, recorded } = board();
-    const gates = cardAskAnswers(
+    const gates = taskAskAnswers(
       agenda,
       () => 'unavailable',
       () => AT,
@@ -119,8 +119,8 @@ describe('a card ask answered through the card source', () => {
   it('should record Not yet as Not yet once the source applied it', async () => {
     // Arrange
     const { agenda, recorded } = board();
-    const source = cardSource('applied');
-    const gates = cardAskAnswers(
+    const source = taskSource('applied');
+    const gates = taskAskAnswers(
       agenda,
       () => source.spec,
       () => AT,
@@ -136,8 +136,8 @@ describe('a card ask answered through the card source', () => {
   it('should refuse a ferret, and an option the gate does not offer, before the card is touched', async () => {
     // Arrange
     const { agenda } = board();
-    const source = cardSource('applied');
-    const gates = cardAskAnswers(
+    const source = taskSource('applied');
+    const gates = taskAskAnswers(
       agenda,
       () => source.spec,
       () => AT,

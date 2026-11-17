@@ -15,9 +15,9 @@ export const boardOk = <T>(value: T): BoardResult<T, never> => ({ ok: true, valu
 export const boardErr = <E>(error: E): BoardResult<never, E> => ({ ok: false, error });
 
 /** `B12`, `F412`, `I3`, `C9`: the kind's letter and a number. Shown as `&F412`. */
-export const CARD_ID_PATTERN = /^[BFIC][1-9][0-9]{0,8}$/u;
-export const CardIdSchema = z.string().regex(CARD_ID_PATTERN);
-export type CardId = z.infer<typeof CardIdSchema>;
+export const TASK_ID_PATTERN = /^[BFIC][1-9][0-9]{0,8}$/u;
+export const CardIdSchema = z.string().regex(TASK_ID_PATTERN);
+export type TaskId = z.infer<typeof CardIdSchema>;
 
 export const MAX_MACHINE_ID_LENGTH = 128;
 /** The daemon a card lives on. Opaque to the board; the app's merged view keys on it. */
@@ -36,30 +36,30 @@ export const CardRefSchema = z.strictObject({
   machineId: MachineIdSchema.optional(),
   id: CardIdSchema,
 });
-export type CardRef = z.infer<typeof CardRefSchema>;
+export type TaskRef = z.infer<typeof CardRefSchema>;
 
 /** The sigil of the `&card` reference kind (`docs/reference-standard.md`). */
-export const CARD_REF_SIGIL = '&';
+export const TASK_REF_SIGIL = '&';
 
 /** How a card is written everywhere: `&F412`. The machine is not part of it. */
-export const formatCardRef = (ref: CardRef): string => `${CARD_REF_SIGIL}${ref.id}`;
+export const formatTaskRef = (ref: TaskRef): string => `${TASK_REF_SIGIL}${ref.id}`;
 
-export type CardRefParseError = { readonly code: 'empty' } | { readonly code: 'malformed'; readonly input: string };
+export type TaskRefParseError = { readonly code: 'empty' } | { readonly code: 'malformed'; readonly input: string };
 
 /** Reads a card reference a person or ferret typed: `&F412` or a bare `F412`, in any case. Anything else is `malformed`. */
-export const parseCardRef = (input: string): BoardResult<CardRef, CardRefParseError> => {
+export const parseTaskRef = (input: string): BoardResult<TaskRef, TaskRefParseError> => {
   const trimmed = input.trim();
   if (trimmed === '') return boardErr({ code: 'empty' });
-  const bare = trimmed.startsWith(CARD_REF_SIGIL) ? trimmed.slice(1) : trimmed;
+  const bare = trimmed.startsWith(TASK_REF_SIGIL) ? trimmed.slice(1) : trimmed;
   const id = bare.toUpperCase();
-  return CARD_ID_PATTERN.test(id) ? boardOk({ id }) : boardErr({ code: 'malformed', input });
+  return TASK_ID_PATTERN.test(id) ? boardOk({ id }) : boardErr({ code: 'malformed', input });
 };
 
-const CARD_REF_IN_TEXT = /(?<![\w&])&([BFIC][1-9][0-9]{0,8})(?!\w)/u;
+const TASK_REF_IN_TEXT = /(?<![\w&])&([BFIC][1-9][0-9]{0,8})(?!\w)/u;
 
 /** The first `&F412`-style card reference in free text (a brief), or `undefined` when it names none. */
-export const firstCardRefIn = (text: string): CardRef | undefined => {
-  const found = CARD_REF_IN_TEXT.exec(text)?.[1];
+export const firstTaskRefIn = (text: string): TaskRef | undefined => {
+  const found = TASK_REF_IN_TEXT.exec(text)?.[1];
   return found === undefined ? undefined : { id: found };
 };
 
@@ -84,7 +84,7 @@ export type BoardSkip = z.infer<typeof BoardSkipSchema>;
  * A card's actor carries it as the owner actor's own `via`; a lane set records it as `confirmedVia`.
  */
 export const CardActorViaSchema = z.literal('admin-token');
-export type CardActorVia = z.infer<typeof CardActorViaSchema>;
+export type TaskActorVia = z.infer<typeof CardActorViaSchema>;
 
 /** What an `admin-token` actor may be: the truth, which is that it could be either. */
 export const ADMIN_TOKEN_ACTOR_NOTE = 'the owner at this machine, or a ferret without its own credential';

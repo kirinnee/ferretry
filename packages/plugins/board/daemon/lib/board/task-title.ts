@@ -62,7 +62,7 @@ function titleOf(sentence: string): string | null {
 }
 
 /** The title of a brief: its first heading, else its first line that names work; null when there is none. */
-export function deriveCardTitle(brief: string): string | null {
+export function deriveTaskTitle(brief: string): string | null {
   const lines = brief
     .replaceAll('\r\n', '\n')
     .split('\n')
@@ -98,12 +98,12 @@ function briefHash(brief: string): string {
 }
 
 /** The label-and-hash title used when a brief has nothing readable in it: `Review 7k2x`. */
-function fallbackCardTitle(label: string, brief: string): string {
+function fallbackTaskTitle(label: string, brief: string): string {
   const named = titleOf(unmark(label.replaceAll(/[-_]+/gu, ' '))) ?? 'Task';
   return `${named} ${briefHash(brief)}`;
 }
 
 /** The title for a brief nobody named: what it says, else a labelled hash. Never its raw first words. */
-export function cardTitleFor(brief: string, label: string): string {
-  return deriveCardTitle(brief) ?? fallbackCardTitle(label, brief);
+export function taskTitleFor(brief: string, label: string): string {
+  return deriveTaskTitle(brief) ?? fallbackTaskTitle(label, brief);
 }

@@ -164,7 +164,7 @@ import {
   type WardenFailoverState,
 } from './failover.ts';
 import { blessingViews, investigationList, retainRecords, WARDEN_STATUS_LIST_LIMIT } from './feed.ts';
-import { type WardenFocusCard, wardenResumeMessage } from './focus-task.ts';
+import { type WardenFocusTask, wardenResumeMessage } from './focus-task.ts';
 import { wardenFixedNudge, wardenFixedResumeReason, wardenFixedStopReason } from './ferret-sentences.ts';
 import {
   capSkipKey,
@@ -184,8 +184,8 @@ import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
 import type { ReflexEvent } from './liveness-monitor.ts';
 import { type OrphanItem, orphanItem } from './orphan-item.ts';
 import {
-  detectOrphanedCards,
-  type OrphanedCard,
+  detectOrphanedTasks,
+  type OrphanedTask,
   orphanListed,
   type OrphanResolution,
   type OrphanTold,
@@ -552,7 +552,7 @@ export interface WardenBoardPort {
   /** Every card as the board derives it; `undefined` when the board could not be read. */
   read(): Promise<WardenBoardRead | undefined>;
   /** A session's focus card, in full; `undefined` when it has none or it could not be read. */
-  focusCard(sessionId: string): Promise<WardenFocusCard | undefined>;
+  focusCard(sessionId: string): Promise<WardenFocusTask | undefined>;
 }
 
 /** One session's agenda board, in the view's shape, for reading the Warden's own notifications back. */
@@ -1266,7 +1266,7 @@ export class WardenSweepService {
     // not a ferret: they never reach Jev, an investigation or the spawn fingerprint, which stay the ferrets'
     // own. A card left for a week must not hold the recovery edge of every unrelated anomaly closed.
     const board = await this.readBoard();
-    const orphans = board === undefined ? [] : detectOrphanedCards(board, fleet, nowMs);
+    const orphans = board === undefined ? [] : detectOrphanedTasks(board, fleet, nowMs);
     // OVERDUE REPORTS, likewise beside them and never to Jev or an investigation: the rule is facts and its
     // remedy a message (`report-overdue.ts`).
     const overdue = await this.detectOverdue(fleet, nowMs);
@@ -2631,8 +2631,8 @@ export class WardenSweepService {
       else if (act.action === 'resume' || act.action === 'restart') {
         // The ferret started again carries on with its card (`focus-card.ts`). Only an auto one is handed
         // a turn: an interactive one is somebody's terminal, and keeps the resume domain's own behaviour.
-        const card = target.config.mode === 'auto' ? await this.focusCard(targetId) : undefined;
-        const message = card === undefined ? undefined : wardenResumeMessage(act.action, words.resumeReason, card);
+        const task = target.config.mode === 'auto' ? await this.focusCard(targetId) : undefined;
+        const message = task === undefined ? undefined : wardenResumeMessage(act.action, words.resumeReason, task);
         // No person is behind a sweep's act: it runs as the Warden's own, an agent's origin.
         if (act.action === 'resume') await this.ports.remedies.resume(targetId, message, WARDEN_SWEEP_ORIGIN);
         else await this.ports.remedies.restart(targetId, message, WARDEN_SWEEP_ORIGIN);
@@ -2725,7 +2725,7 @@ export class WardenSweepService {
   }
 
   /** A ferret's focus card, or `undefined` when there is no board, no card, or it cannot be read. */
-  private async focusCard(sessionId: string): Promise<WardenFocusCard | undefined> {
+  private async focusCard(sessionId: string): Promise<WardenFocusTask | undefined> {
     const port = this.ports.board?.();
     return await port?.focusCard(sessionId).catch(() => undefined);
   }
@@ -2777,7 +2777,7 @@ export class WardenSweepService {
         });
     }
     const memory: Record<string, OrphanTold> = { ...plan.memory };
-    const listed: OrphanedCard[] = [...plan.list];
+    const listed: OrphanedTask[] = [...plan.list];
     for (const tell of plan.tell) {
       const typed = await this.ports.remedies.nudge(tell.sessionId, tell.message).then(
         () => true,
@@ -2797,12 +2797,12 @@ export class WardenSweepService {
     }
     // The cards that JOIN the list now: news for the owner, so a closed item is raised again for them. A card the
     // list already held is not, so an item the owner dismissed ("Got it") stays dismissed until one joins.
-    const joined = listed.filter(card => memory[card.id] === undefined);
+    const joined = listed.filter(task => memory[task.id] === undefined);
     const landed = await this.syncOrphanItem(listed, joined.length > 0);
     if (landed)
-      for (const card of joined) {
-        memory[card.id] = orphanListed(card.assignee, input.at);
-        this.ports.journal.record('fleet.warden_orphan_told', { taskId: card.id, via: 'list' });
+      for (const task of joined) {
+        memory[task.id] = orphanListed(task.assignee, input.at);
+        this.ports.journal.record('fleet.warden_orphan_told', { taskId: task.id, via: 'list' });
       }
     const { orphans: _previous, ...rest } = input.state;
     return Object.keys(memory).length === 0 ? rest : { ...rest, orphans: memory };
@@ -2814,15 +2814,15 @@ export class WardenSweepService {
    * attempt of one item, never one per card, and the cards stay news until it lands; it is journalled when the reason
    * changes, not on every repeat of the same one. Says whether it landed.
    */
-  private async syncOrphanItem(cards: readonly OrphanedCard[], announce: boolean): Promise<boolean> {
-    const reason = await this.ports.orphans.sync(orphanItem(cards), announce).then(
+  private async syncOrphanItem(tasks: readonly OrphanedTask[], announce: boolean): Promise<boolean> {
+    const reason = await this.ports.orphans.sync(orphanItem(tasks), announce).then(
       () => undefined,
       (error: unknown) => (error instanceof Error && error.message !== '' ? error.message : 'the Agenda refused it'),
     );
     if (reason !== this.orphanItemRefusal) {
       this.orphanItemRefusal = reason;
       if (reason !== undefined)
-        this.ports.journal.record('fleet.warden_orphan_failed', { cards: cards.length, reason });
+        this.ports.journal.record('fleet.warden_orphan_failed', { cards: tasks.length, reason });
     }
     return reason === undefined;
   }

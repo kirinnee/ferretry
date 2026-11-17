@@ -1,16 +1,16 @@
 import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
 import {
-  type BoardQuarantinedCard,
-  type Card,
-  CARD_ID_PATTERN,
+  type BoardQuarantinedTask,
+  type Task,
+  TASK_ID_PATTERN,
   CardSchema,
-  type CardId,
-  type CardKind,
+  type TaskId,
+  type TaskKind,
   type CountersFileSchema,
   MAX_BOARD_REASON_LENGTH,
 } from '../../../contract/index.ts';
 import type { z } from 'zod';
-import { CARD_KIND_PREFIX } from '../../../contract/index.ts';
+import { TASK_KIND_PREFIX } from '../../../contract/index.ts';
 import {
   type BoardDiagnostics,
   type BoardSnapshot,
@@ -23,8 +23,8 @@ import type { SerialRun } from '../../lib/lanes/serial.ts';
 type Counters = z.infer<typeof CountersFileSchema>;
 
 /** The card files and the id counter, as the manifest declares them. */
-export interface CardStoreFiles {
-  readonly cards: StateFileDef<string, Card>;
+export interface TaskStoreFiles {
+  readonly cards: StateFileDef<string, Task>;
   readonly counters: StateFileDef<string, Counters>;
 }
 
@@ -35,8 +35,8 @@ const clip = (text: string): string =>
   text.length <= MAX_BOARD_REASON_LENGTH ? text : `${text.slice(0, MAX_BOARD_REASON_LENGTH - 1)}…`;
 
 interface Loaded {
-  readonly cards: Map<CardId, Card>;
-  readonly quarantined: Map<CardId, string>;
+  readonly cards: Map<TaskId, Task>;
+  readonly quarantined: Map<TaskId, string>;
 }
 
 /**
@@ -54,12 +54,12 @@ interface Loaded {
  * The cards are read once, on first use, and kept in memory: every write goes through this store, so memory and disk
  * agree. That copy is the board's query projection and is rebuilt from the files at every start.
  */
-export class KernelCardStore implements BoardStore {
+export class KernelTaskStore implements BoardStore {
   private loading: Promise<Loaded> | undefined;
 
   constructor(
     private readonly state: StatePort,
-    private readonly files: CardStoreFiles,
+    private readonly files: TaskStoreFiles,
     private readonly serial: SerialRun,
     private readonly diagnostics: BoardDiagnostics,
   ) {}
@@ -68,12 +68,12 @@ export class KernelCardStore implements BoardStore {
     const loaded = await this.load();
     return {
       cards: [...loaded.cards.values()],
-      quarantined: [...loaded.quarantined].map(([id, reason]): BoardQuarantinedCard => ({ id, reason })),
+      quarantined: [...loaded.quarantined].map(([id, reason]): BoardQuarantinedTask => ({ id, reason })),
     };
   }
 
-  async allocateId(kind: CardKind): Promise<CardId> {
-    const prefix = CARD_KIND_PREFIX[kind];
+  async allocateId(kind: TaskKind): Promise<TaskId> {
+    const prefix = TASK_KIND_PREFIX[kind];
     return await this.serial.run(COUNTER_SECTION, async () => {
       const loaded = await this.load();
       const onDisk = [...loaded.cards.keys(), ...loaded.quarantined.keys()]
@@ -93,11 +93,11 @@ export class KernelCardStore implements BoardStore {
         this.diagnostics.warn('the board id counter was damaged; it was started again above the highest task on disk');
       }
       if (allocated > MAX_COUNTER) throw new BoardUnavailableError(`the ${prefix} id counter is exhausted`);
-      return `${prefix}${allocated}` as CardId;
+      return `${prefix}${allocated}` as TaskId;
     });
   }
 
-  async write<T>(id: CardId, decide: (current: Card | undefined) => Promise<BoardWrite<T>>): Promise<T> {
+  async write<T>(id: TaskId, decide: (current: Task | undefined) => Promise<BoardWrite<T>>): Promise<T> {
     return await this.serial.run(`board:card:${id}`, async () => {
       const loaded = await this.load();
       if (loaded.quarantined.has(id))
@@ -106,9 +106,9 @@ export class KernelCardStore implements BoardStore {
       if (decision.task === null) return decision.result;
       if (decision.task.id !== id)
         throw new BoardUnavailableError(`a write to ${id} tried to store ${decision.task.id}`);
-      const card = CardSchema.parse(decision.task);
-      await this.state.write(this.files.cards, card, id);
-      loaded.cards.set(id, card);
+      const task = CardSchema.parse(decision.task);
+      await this.state.write(this.files.cards, task, id);
+      loaded.cards.set(id, task);
       return decision.result;
     });
   }
@@ -124,8 +124,8 @@ export class KernelCardStore implements BoardStore {
   private async readAll(): Promise<Loaded> {
     const loaded: Loaded = { cards: new Map(), quarantined: new Map() };
     for (const name of await this.state.list(this.files.cards)) {
-      if (!CARD_ID_PATTERN.test(name)) continue;
-      const id = name as CardId;
+      if (!TASK_ID_PATTERN.test(name)) continue;
+      const id = name as TaskId;
       const read = await this.state.read(this.files.cards, name);
       if (read.ok && read.value !== undefined && read.value.id === id) loaded.cards.set(id, read.value);
       else if (read.ok && read.value === undefined) continue;

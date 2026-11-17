@@ -1,5 +1,5 @@
 import { isAbsolute, resolve } from 'node:path';
-import { FERRET_CARD_ID_PATTERN, type InitialAttachment, parseCompactAt } from '../../../contract/index.ts';
+import { FERRET_TASK_ID_PATTERN, type InitialAttachment, parseCompactAt } from '../../../contract/index.ts';
 import { SessionCommandError } from './errors.ts';
 import type { SessionEnvironment, StartBody } from './ports.ts';
 
@@ -99,10 +99,10 @@ function assertNumericFlags(flags: StartNumericFlags): void {
  * A card reference a person or ferret typed: `&F412` or a bare `F412`, in any case (today's `parseTaskRef`). Anything
  * that is not exactly one card id is refused in today's words.
  */
-function cardId(value: string): string {
+function taskId(value: string): string {
   const trimmed = value.trim();
   const id = (trimmed.startsWith('&') ? trimmed.slice(1) : trimmed).toUpperCase();
-  if (!FERRET_CARD_ID_PATTERN.test(id)) throw new SessionCommandError(`expected a task id like &F21, got "${value}"`);
+  if (!FERRET_TASK_ID_PATTERN.test(id)) throw new SessionCommandError(`expected a task id like &F21, got "${value}"`);
   return id;
 }
 
@@ -162,7 +162,7 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     ...(flags.teammateFallback === true ? { teammateFallback: true } : {}),
     ...(flags.title === undefined ? {} : { title: flags.title }),
     ...(flags.label === undefined ? {} : { label: flags.label }),
-    ...(flags.card === undefined ? {} : { task: cardId(flags.card) }),
+    ...(flags.card === undefined ? {} : { task: taskId(flags.card) }),
     ...(flags.model === undefined ? {} : { model: flags.model }),
     ...(flags.effort === undefined ? {} : { effort: flags.effort }),
     ...(flags.fast === undefined ? {} : { fast: flags.fast }),

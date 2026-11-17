@@ -12,9 +12,9 @@
  */
 import {
   type BoardProjectId,
-  type Card,
+  type Task,
   categoryOf,
-  formatCardRef,
+  formatTaskRef,
   type LaneCategory,
   type PrLink,
   UNFILED_PROJECT_ID,
@@ -48,10 +48,10 @@ export const pollDelay = (open: boolean, random: number): number =>
   jittered(open ? POLL_OPEN_MS : POLL_IDLE_MS, random);
 
 /** A card's lane category, or `null` when its board has no lanes or no such lane. */
-export const cardCategory = (card: Card, laneSets: LaneSets): LaneCategory | null => {
-  const laneSet = laneSets.get(card.projectId);
+export const taskCategory = (task: Task, laneSets: LaneSets): LaneCategory | null => {
+  const laneSet = laneSets.get(task.projectId);
   if (laneSet === undefined) return null;
-  const category = categoryOf(laneSet, card.laneId);
+  const category = categoryOf(laneSet, task.laneId);
   return category.ok ? category.value : null;
 };
 
@@ -60,14 +60,14 @@ export const needsPoll = (pr: PrLink): boolean =>
   pr.state === 'unknown' || pr.state === 'open' || (pr.state === 'merged' && pr.releasedIn === null);
 
 /** The cards the watcher may still write: not dropped, and not in a closed lane. */
-export const isWatched = (card: Card, laneSets: LaneSets): boolean =>
-  card.dropped === null && cardCategory(card, laneSets) !== 'closed';
+export const isWatched = (task: Task, laneSets: LaneSets): boolean =>
+  task.dropped === null && taskCategory(task, laneSets) !== 'closed';
 
 const LINKABLE: ReadonlySet<LaneCategory | null> = new Set<LaneCategory | null>(['backlog', 'active', 'review']);
 
 /** Whether a PR may still be linked to a card automatically: it has not shipped yet. */
-export const isLinkable = (card: Card, laneSets: LaneSets): boolean =>
-  card.dropped === null && LINKABLE.has(cardCategory(card, laneSets));
+export const isLinkable = (task: Task, laneSets: LaneSets): boolean =>
+  task.dropped === null && LINKABLE.has(taskCategory(task, laneSets));
 
 /** A repository name as a key: GitHub ignores case in owner and repository names. */
 export const repoKey = (repo: string): string => repo.toLowerCase();
@@ -79,17 +79,17 @@ export const prKey = (repo: string, number: number): string => `${repoKey(repo)}
  * Whether someone, not the daemon, put the card on the Unfiled board on purpose: its last refile there was
  * theirs. Such a card stays where it was put, so the daemon never refiles it back and forth.
  */
-export const unfiledOnPurpose = (card: Card): boolean => {
-  const refiled = card.history.findLast(event => event.type === 'refiled' && event.toProject === UNFILED_PROJECT_ID);
+export const unfiledOnPurpose = (task: Task): boolean => {
+  const refiled = task.history.findLast(event => event.type === 'refiled' && event.toProject === UNFILED_PROJECT_ID);
   return refiled !== undefined && refiled.actor.kind !== 'daemon';
 };
 
 /** Whether a card is an Unfiled card the daemon may refile: still open, and not put there on purpose. */
-export const isRefilable = (card: Card, laneSets: LaneSets): boolean =>
-  card.projectId === UNFILED_PROJECT_ID && isWatched(card, laneSets) && !unfiledOnPurpose(card);
+export const isRefilable = (task: Task, laneSets: LaneSets): boolean =>
+  task.projectId === UNFILED_PROJECT_ID && isWatched(task, laneSets) && !unfiledOnPurpose(task);
 
 export interface RefileTarget {
-  readonly card: Card;
+  readonly card: Task;
   readonly projectId: BoardProjectId;
   readonly reason: string;
 }
@@ -100,20 +100,20 @@ export interface RefileTarget {
  * it first. Applies at once: a card that belongs on a board never waits on the Unfiled one.
  */
 export const refileTargets = (
-  cards: readonly Card[],
+  tasks: readonly Task[],
   laneSets: LaneSets,
   owners: ReadonlyMap<string, { readonly id: BoardProjectId; readonly name: string }>,
 ): readonly RefileTarget[] =>
-  cards.flatMap(card => {
-    if (!isRefilable(card, laneSets)) return [];
-    const pr = card.links.prs.find(link => owners.has(repoKey(link.repo)));
+  tasks.flatMap(task => {
+    if (!isRefilable(task, laneSets)) return [];
+    const pr = task.links.prs.find(link => owners.has(repoKey(link.repo)));
     const owner = pr === undefined ? undefined : owners.get(repoKey(pr.repo));
     if (pr === undefined || owner === undefined) return [];
     return [
       {
-        card,
+        card: task,
         projectId: owner.id,
-        reason: `${formatCardRef(card)}'s PR #${String(pr.number)} is in ${pr.repo}, which ${owner.name} owns`,
+        reason: `${formatTaskRef(task)}'s PR #${String(pr.number)} is in ${pr.repo}, which ${owner.name} owns`,
       },
     ];
   });

@@ -10,16 +10,16 @@
  * Pure: the card arrives already read (`WardenBoardPort.focusCard`).
  */
 import {
-  type CardView,
-  describeCardEvent,
-  formatCardRef,
+  type TaskView,
+  describeTaskEvent,
+  formatTaskRef,
   type LaneSet,
   type PrLink,
 } from '@ferretry/plugin-board/contract';
 
 /** A ferret's focus card, with the lanes of its board so the lane reads by name. */
-export interface WardenFocusCard {
-  readonly task: CardView;
+export interface WardenFocusTask {
+  readonly task: TaskView;
   readonly laneSet: LaneSet | null;
   /** The ferret was started by another ferret: it may not move cards, so the brief does not tell it to. */
   readonly subFerret?: boolean;
@@ -34,9 +34,9 @@ const laneName = (laneSet: LaneSet | null, id: string): string =>
 const prLine = (pr: PrLink): string => `PR #${String(pr.number)} ${pr.url} (${pr.draft ? 'draft' : pr.state})`;
 
 /** The card, as the block a resumed ferret reads. Session ids stay ids: the Warden holds no directory. */
-export function focusCardBrief(card: WardenFocusCard): string {
-  const { task, laneSet } = card;
-  const ref = formatCardRef(task);
+export function focusTaskBrief(boardTask: WardenFocusTask): string {
+  const { task, laneSet } = boardTask;
+  const ref = formatTaskRef(task);
   const lines = [
     `Your task: ${ref} — ${task.title}`,
     `Lane: ${laneName(laneSet, task.laneId)}`,
@@ -59,14 +59,14 @@ export function focusCardBrief(card: WardenFocusCard): string {
     'Last on the task:',
     ...recent.map(
       event =>
-        `- ${event.at}  ${describeCardEvent(
+        `- ${event.at}  ${describeTaskEvent(
           event,
           id => laneName(laneSet, id),
           id => id,
         )}`,
     ),
     '',
-    card.subFerret === true
+    boardTask.subFerret === true
       ? `Carry on with ${ref}: your task moves itself (start, PR, merge, \`fy signal done\`); note why if you stop.`
       : `Carry on with ${ref}: move it as you work (\`fy task move ${task.id} <lane>\`), and note why if you stop.`,
   );
@@ -80,11 +80,11 @@ export type WardenResumeAct = 'resume' | 'restart';
  * The turn a verdict's resume or restart hands a ferret that has a focus card. A ferret with none is
  * resumed with the resume domain's own default turn, as before.
  */
-export function wardenResumeMessage(act: WardenResumeAct, reason: string, card: WardenFocusCard): string {
+export function wardenResumeMessage(act: WardenResumeAct, reason: string, task: WardenFocusTask): string {
   const did = act === 'restart' ? 'restarted you with your conversation intact' : 'resumed you';
   const why = reason.trim().replace(/\.$/u, '');
   return (
     `Ferretry's Warden ${did}: ${why}. Re-read your last turn, then continue from where you stopped, on the task below.\n\n` +
-    focusCardBrief(card)
+    focusTaskBrief(task)
   );
 }

@@ -16,15 +16,15 @@ import type {
   BoardAttachment,
   BoardChangedEvent,
   BoardProjectId,
-  BoardQuarantinedCard,
+  BoardQuarantinedTask,
   BoardReopenAttachments,
   BoardSkip,
-  Card,
-  CardActivity,
-  CardActor,
-  CardId,
-  CardKind,
-  CardRef,
+  Task,
+  TaskActivity,
+  TaskActor,
+  TaskId,
+  TaskKind,
+  TaskRef,
   LaneSet,
 } from '../../../contract/index.ts';
 import type { BoardIndex, LaneSets } from './graph.ts';
@@ -35,14 +35,14 @@ import type { BoardIndex, LaneSets } from './graph.ts';
 
 /** Every card the store could read, and the ones it could not. */
 export interface BoardSnapshot {
-  readonly cards: readonly Card[];
+  readonly cards: readonly Task[];
   /** Card files that did not parse: excluded from every read, never overwritten, always reported. */
-  readonly quarantined: readonly BoardQuarantinedCard[];
+  readonly quarantined: readonly BoardQuarantinedTask[];
 }
 
 /** What one card write decided: the card to store (`null` stores nothing) and what to hand back. */
 export interface BoardWrite<T> {
-  readonly task: Card | null;
+  readonly task: Task | null;
   readonly result: T;
 }
 
@@ -55,9 +55,9 @@ export interface BoardWrite<T> {
 export interface BoardStore {
   read(): Promise<BoardSnapshot>;
   /** The next id for a kind from the machine-wide counter. Never reused, even after a damaged counter. */
-  allocateId(kind: CardKind): Promise<CardId>;
+  allocateId(kind: TaskKind): Promise<TaskId>;
   /** One card's read-decide-write, inside that card's serial section. `current` is undefined for a new id. */
-  write<T>(id: CardId, decide: (current: Card | undefined) => Promise<BoardWrite<T>>): Promise<T>;
+  write<T>(id: TaskId, decide: (current: Task | undefined) => Promise<BoardWrite<T>>): Promise<T>;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -99,15 +99,15 @@ export interface FerretFocus {
    * `title` also becomes the name of a session the daemon titled itself, so an unnamed one is called by its work.
    * `anchor` also makes the card the session's delegation anchor ({@link anchorOf}).
    */
-  setFocus(ferret: string, task: CardRef, title?: string, options?: { readonly anchor?: boolean }): Promise<boolean>;
-  focusOf(ferret: string): Promise<CardRef | null>;
+  setFocus(ferret: string, task: TaskRef, title?: string, options?: { readonly anchor?: boolean }): Promise<boolean>;
+  focusOf(ferret: string): Promise<TaskRef | null>;
   /** Every ferret's focused card from ONE read of the store (a roster of N ferrets reads it once, not N times). */
-  focusOfAll(): Promise<ReadonlyMap<string, CardRef | null>>;
+  focusOfAll(): Promise<ReadonlyMap<string, TaskRef | null>>;
   /**
    * The card the session's own delegations go under (`config.focusAnchor`): set only on purpose (`fy task
    * focus`, creating a card, the card a start gave it), never by a plain touch like `focusCard` is.
    */
-  anchorOf(ferret: string): Promise<CardRef | null>;
+  anchorOf(ferret: string): Promise<TaskRef | null>;
   /**
    * Records why the session's work has no card (`fy card skip`, `config.boardSkip`), replacing any earlier one.
    * `false` when there is no such session.
@@ -122,10 +122,10 @@ export interface FerretFocus {
 // ---------------------------------------------------------------------------------------------------
 
 /** How a card is doing, as the activity deriver judges it. */
-export interface CardActivityFacts {
+export interface TaskActivityFacts {
   readonly lastTouchedAt: string | null;
   readonly touchedBy: string | null;
-  readonly activity: CardActivity;
+  readonly activity: TaskActivity;
 }
 
 /**
@@ -133,19 +133,19 @@ export interface CardActivityFacts {
  * lanes (staleness is per lane) and the agenda's answer (a card whose agenda carries its open ask is never stale).
  */
 export interface ActivityInputs {
-  readonly cards: readonly Card[];
+  readonly cards: readonly Task[];
   readonly index: BoardIndex;
   readonly laneSets: LaneSets;
-  readonly asks: ReadonlyMap<CardId, CardAsks>;
+  readonly asks: ReadonlyMap<TaskId, TaskAsks>;
 }
 
 /** Liveness, from session state (`LivenessActivityDeriver`). */
 export interface ActivityDeriver {
-  derive(inputs: ActivityInputs): Promise<ReadonlyMap<CardId, CardActivityFacts>>;
+  derive(inputs: ActivityInputs): Promise<ReadonlyMap<TaskId, TaskActivityFacts>>;
 }
 
 /** The open asks that carry a card. */
-export interface CardAsks {
+export interface TaskAsks {
   /** Every open ask that names the card: its gate entry's ask, or an ask that mentions it. */
   readonly open: readonly AskRef[];
   /** The ones asking the card's gate that the owner has yet to answer; always a subset of `open`. */
@@ -153,9 +153,9 @@ export interface CardAsks {
 }
 
 /** Asks' link to cards: which open asks name each card. A card only DERIVES from it; the card holds no copy. */
-export interface CardAskLinkSource {
+export interface TaskAskLinkSource {
   /** The open asks on `cards`: one Asks read, whatever the size of the board. */
-  asksFor(cards: readonly Card[], signal?: AbortSignal): Promise<ReadonlyMap<CardId, CardAsks>>;
+  asksFor(tasks: readonly Task[], signal?: AbortSignal): Promise<ReadonlyMap<TaskId, TaskAsks>>;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -165,12 +165,12 @@ export interface CardAskLinkSource {
 /** A card the owner (or a ferret on someone else's card) sent back, with the words that sent it. */
 export interface ReopenNotice {
   /** The card as it is after the reopen. */
-  readonly task: Card;
+  readonly task: Task;
   readonly from: string;
   readonly to: string;
   readonly reason: string;
   /** Who sent it back; an owner on the host's admin token says so in its `via`. */
-  readonly by: CardActor;
+  readonly by: TaskActor;
   /** The files the owner sent with it, still in `from`'s session; the delivery carries them to whoever is told. */
   readonly attachments?: BoardReopenAttachments;
 }
@@ -193,7 +193,7 @@ export interface ReopenNotifier {
 
 /** A card the owner marked done: the card as it is after the move. */
 export interface DoneNotice {
-  readonly task: Card;
+  readonly task: Task;
   /** Who closed it: the owner's app (a paired device), or the host's admin token, which may be a ferret. */
   readonly by: 'owner' | 'admin-token';
 }
@@ -286,7 +286,7 @@ export interface AskThread {
   readonly gate: boolean;
   readonly notice: boolean;
   /** The card it is already linked to, when it is. */
-  readonly card: CardRef | null;
+  readonly card: TaskRef | null;
 }
 
 /** The asks a card may be made to carry out (`fy card new --thread`): linked to the card, nothing more. */
@@ -297,6 +297,6 @@ export interface BoardThreads {
   link(
     ferret: string,
     id: string,
-    card: CardRef,
+    task: TaskRef,
   ): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
 }

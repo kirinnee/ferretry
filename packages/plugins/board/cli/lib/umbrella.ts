@@ -73,4 +73,4 @@ export function umbrellaRefusal(signals: readonly string[], binary: string): str
 }
 
 /** One line printed when a card with the owner's words is filed under a parent: a sub-card is private. */
-export const SUB_CARD_ASK_WARNING = 'this task will be private (a sub-task); drop --parent so the owner sees it';
+export const SUB_TASK_ASK_WARNING = 'this task will be private (a sub-task); drop --parent so the owner sees it';

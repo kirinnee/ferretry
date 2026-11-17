@@ -19,11 +19,11 @@ import {
   UNPLACED_LANE,
 } from '../lib/board-phone.ts';
 import type { BoardGroupOf } from '../lib/board-view.ts';
-import { type BoardCardEnv, PlacedCard } from './board-views.tsx';
+import { type BoardTaskEnv, PlacedTask } from './board-views.tsx';
 
 export interface PhoneKanbanProps {
   readonly model: BoardModel;
-  readonly env: BoardCardEnv;
+  readonly env: BoardTaskEnv;
   readonly projectName: (group: BoardGroupOf) => string;
   readonly hideClosed: boolean;
   /** The lane the URL names, or `null` for the first lane with a card. */
@@ -46,7 +46,7 @@ function PhoneBoard({
   onLane,
 }: {
   readonly group: BoardGroupOf;
-  readonly env: BoardCardEnv;
+  readonly env: BoardTaskEnv;
   readonly title: string;
   readonly hideClosed: boolean;
   readonly at: string | null;
@@ -105,7 +105,7 @@ function PhoneBoard({
     go(step);
   };
 
-  const cards =
+  const tasks =
     shown.id === UNPLACED_LANE ? group.unplaced : (group.lanes.find(lane => lane.id === shown.id)?.cards ?? []);
   const panelId = `${group.key}~panel`;
 
@@ -159,10 +159,10 @@ function PhoneBoard({
         role="tabpanel"
       >
         <ul className="fy-board-lane__cards">
-          {cards.length === 0 ? (
+          {tasks.length === 0 ? (
             <li className="fy-board-lane__empty">Nothing here</li>
           ) : (
-            cards.map(card => <PlacedCard card={card} env={env} key={card.key} />)
+            tasks.map(task => <PlacedTask card={task} env={env} key={task.key} />)
           )}
         </ul>
       </div>

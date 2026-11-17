@@ -23,30 +23,30 @@ import {
 } from 'react';
 import type { InboxLaneEditor } from '../../hooks/use-agenda-inbox.ts';
 import {
-  AGENDA_CARD_ANSWER_HOOK,
-  AGENDA_CARD_REFERENCE_HOOK,
+  AGENDA_TASK_ANSWER_HOOK,
+  AGENDA_TASK_REFERENCE_HOOK,
   AGENDA_LANE_PROPOSAL_HOOK,
-  type AgendaCardAnswer,
-  type AgendaCardReference,
+  type AgendaTaskAnswer,
+  type AgendaTaskReference,
   type AgendaLaneEditor,
   type AgendaLaneProposal,
-  isAgendaCardAnswer,
-  isAgendaCardReference,
+  isAgendaTaskAnswer,
+  isAgendaTaskReference,
   isAgendaLaneProposal,
 } from '../../../contract/app-hooks.ts';
 import { type DoneCloseBoard, DoneCloseBoardProvider } from '../../hooks/use-done-close.ts';
-import { type AgendaCardsBoard, boardErr, boardOk } from '../../lib/agenda-cards-actions.ts';
+import { type AgendaTasksBoard, boardErr, boardOk } from '../../lib/agenda-cards-actions.ts';
 import { type AgendaReferenceFacts, agendaReferenceSurface } from '../../lib/agenda-references.ts';
 import type { DaemonId } from '../../lib/machine.ts';
 import { type ReferenceSurface, ReferenceSurfaceProvider, useAppHook, useReferenceSurface } from '../../shell.ts';
-import { AgendaCardsBoardProvider } from './agenda-cards-host.tsx';
+import { AgendaTasksBoardProvider } from './agenda-cards-host.tsx';
 
 /** The provided hooks of one daemon, narrowed: each `undefined` when nobody provides it. */
 export interface AgendaBoardHooks {
   readonly daemonId: DaemonId;
-  readonly cardAnswer: AgendaCardAnswer | undefined;
+  readonly cardAnswer: AgendaTaskAnswer | undefined;
   readonly laneProposal: AgendaLaneProposal | undefined;
-  readonly cardReference: AgendaCardReference | undefined;
+  readonly cardReference: AgendaTaskReference | undefined;
 }
 
 /** The values the shell handed, kept only where they have the shape Agenda reads. */
@@ -55,19 +55,19 @@ export const agendaBoardHooks = (
   provided: { readonly cardAnswer: unknown; readonly laneProposal: unknown; readonly cardReference: unknown },
 ): AgendaBoardHooks => ({
   daemonId,
-  cardAnswer: isAgendaCardAnswer(provided.cardAnswer) ? provided.cardAnswer : undefined,
+  cardAnswer: isAgendaTaskAnswer(provided.cardAnswer) ? provided.cardAnswer : undefined,
   laneProposal: isAgendaLaneProposal(provided.laneProposal) ? provided.laneProposal : undefined,
-  cardReference: isAgendaCardReference(provided.cardReference) ? provided.cardReference : undefined,
+  cardReference: isAgendaTaskReference(provided.cardReference) ? provided.cardReference : undefined,
 });
 
 /** The three hooks as the shell provides them for `daemonId`. */
 export const useAgendaBoardHooks = (daemonId: DaemonId): AgendaBoardHooks => {
-  const cardAnswer = useAppHook(daemonId, AGENDA_CARD_ANSWER_HOOK);
+  const cardAnswer = useAppHook(daemonId, AGENDA_TASK_ANSWER_HOOK);
   const laneProposal = useAppHook(daemonId, AGENDA_LANE_PROPOSAL_HOOK);
-  const cardReference = useAppHook(daemonId, AGENDA_CARD_REFERENCE_HOOK);
+  const taskReference = useAppHook(daemonId, AGENDA_TASK_REFERENCE_HOOK);
   return useMemo(
-    () => agendaBoardHooks(daemonId, { cardAnswer, laneProposal, cardReference }),
-    [daemonId, cardAnswer, laneProposal, cardReference],
+    () => agendaBoardHooks(daemonId, { cardAnswer, laneProposal, cardReference: taskReference }),
+    [daemonId, cardAnswer, laneProposal, taskReference],
   );
 };
 
@@ -105,7 +105,7 @@ export const laneEditorBook = (): LaneEditorBook => {
  * inside as {@link AgendaBoardProviders} does for a page's own, and the machine's lane editor entered in `editors` while
  * it is on screen. Each card of another machine gets that machine's Board, never the page's.
  */
-export function AgendaCardBoard({
+export function AgendaTaskBoard({
   daemonId,
   editors,
   onNavigate,
@@ -127,28 +127,28 @@ export function AgendaCardBoard({
 }
 
 /** What the Inbox screens hand the page: the per-machine lane editor and the per-card scope that feeds it. */
-export const useCardBoards = (
+export const useTaskBoards = (
   onNavigate: (to: string) => void,
 ): {
   readonly laneEditor: InboxLaneEditor;
   readonly cardBoard: (daemonId: DaemonId, children: ReactNode) => ReactNode;
 } => {
   const editors = useMemo(laneEditorBook, []);
-  const cardBoard = useCallback(
+  const taskBoard = useCallback(
     (daemonId: DaemonId, children: ReactNode): ReactNode => (
-      <AgendaCardBoard daemonId={daemonId} editors={editors} onNavigate={onNavigate}>
+      <AgendaTaskBoard daemonId={daemonId} editors={editors} onNavigate={onNavigate}>
         {children}
-      </AgendaCardBoard>
+      </AgendaTaskBoard>
     ),
     [editors, onNavigate],
   );
-  return { laneEditor: editors.editorFor, cardBoard };
+  return { laneEditor: editors.editorFor, cardBoard: taskBoard };
 };
 
 const ELSEWHERE = 'That task is on another machine, so it cannot be changed from here.';
 
 /** A notice's Start and Close, over the provided hook; a card of another daemon is refused, never sent. */
-const agendaCardsBoardOf = (answer: AgendaCardAnswer, daemonId: DaemonId): AgendaCardsBoard => ({
+const agendaTasksBoardOf = (answer: AgendaTaskAnswer, daemonId: DaemonId): AgendaTasksBoard => ({
   start: async (target, key) => {
     if (target.daemonId !== daemonId) return boardErr({ status: 0, message: ELSEWHERE });
     const started = await answer.start(target.id, key ?? crypto.randomUUID());
@@ -169,12 +169,12 @@ const NO_SUBSCRIPTION = (): (() => void) => () => undefined;
  * The `&` proof and opener over the provided hook, on top of the surface this sits in: a surface that already proves
  * cards (a ferret's chat, which built its own) is left as it is.
  */
-function CardReferences({
+function TaskReferences({
   reference,
   onNavigate,
   children,
 }: {
-  readonly reference: AgendaCardReference | undefined;
+  readonly reference: AgendaTaskReference | undefined;
   readonly onNavigate: (to: string) => void;
   readonly children: ReactNode;
 }) {
@@ -225,7 +225,7 @@ const ProofDaemonContext = createContext<DaemonId | undefined>(undefined);
  * nothing says whose proofs the surface carries, so they are removed too. Only a card of the daemon the proofs were
  * built for keeps the surface as it is.
  */
-export function CardReferenceScope({
+export function TaskReferenceScope({
   daemonId,
   children,
 }: {
@@ -287,22 +287,22 @@ export function AgendaBoardProviders({
     [cardAnswer, daemonId],
   );
   const cards = useMemo(
-    () => (cardAnswer === undefined ? undefined : agendaCardsBoardOf(cardAnswer, daemonId)),
+    () => (cardAnswer === undefined ? undefined : agendaTasksBoardOf(cardAnswer, daemonId)),
     [cardAnswer, daemonId],
   );
   const drawn = (
     <DoneCloseBoardProvider board={doneClose}>
       <ProofScope daemonId={daemonId}>
-        <CardReferences onNavigate={onNavigate} reference={hooks.cardReference}>
+        <TaskReferences onNavigate={onNavigate} reference={hooks.cardReference}>
           <OwnReferences facts={references}>{children}</OwnReferences>
-        </CardReferences>
+        </TaskReferences>
       </ProofScope>
     </DoneCloseBoardProvider>
   );
-  return cards === undefined ? drawn : <AgendaCardsBoardProvider board={cards}>{drawn}</AgendaCardsBoardProvider>;
+  return cards === undefined ? drawn : <AgendaTasksBoardProvider board={cards}>{drawn}</AgendaTasksBoardProvider>;
 }
 
-const pickDone = ({ subscribe, watch, card, done }: AgendaCardAnswer): Omit<DoneCloseBoard, 'daemonId'> => ({
+const pickDone = ({ subscribe, watch, card, done }: AgendaTaskAnswer): Omit<DoneCloseBoard, 'daemonId'> => ({
   subscribe,
   watch,
   card,

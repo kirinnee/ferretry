@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { CardResponse, CardRef } from '../../../contract/index.ts';
+import type { TaskResponse, TaskRef } from '../../../contract/index.ts';
 import should from 'should';
 import { BoardError } from '../../../daemon/lib/board/errors.ts';
 import {
@@ -11,7 +11,7 @@ import {
   isGateLane,
 } from '../../../daemon/lib/board/gate-check.ts';
 import type { TranscriptEvent } from '../../../daemon/lib/board/transcript-events.ts';
-import { card, lanes } from './support.ts';
+import { boardTask, lanes } from './support.ts';
 
 const TURN_START = '2026-10-30T10:00:00.000Z';
 const AFTER = '2026-10-30T10:00:05.000Z';
@@ -45,17 +45,17 @@ const gate = (overrides: Partial<GateCheckItem> = {}): GateCheckItem => ({
 });
 
 /** A card in To test (a gate) on the support board, unless told otherwise. */
-const response = (overrides: Parameters<typeof card>[0] = {}): CardResponse =>
+const response = (overrides: Parameters<typeof boardTask>[0] = {}): TaskResponse =>
   ({
-    card: { ...card({ id: 'F412', laneId: 'tested', ...overrides }) },
+    card: { ...boardTask({ id: 'F412', laneId: 'tested', ...overrides }) },
     laneSet: lanes(),
-  }) as unknown as CardResponse;
+  }) as unknown as TaskResponse;
 
 function harness(
   options: {
     readonly events?: readonly TranscriptEvent[];
     readonly items?: readonly GateCheckItem[];
-    readonly card?: (ref: CardRef) => Promise<CardResponse>;
+    readonly card?: (ref: TaskRef) => Promise<TaskResponse>;
     readonly readable?: boolean;
     readonly boardOn?: boolean;
   } = {},
@@ -69,7 +69,7 @@ function harness(
     open: async () => options.items ?? [mine(), gate()],
     card: options.card ?? (async () => response()),
     send: async (ferret, sendId, message) => void sent.push({ ferret, sendId, message }),
-    record: async (ferret, items, cards) => void records.push({ ferret, items, cards }),
+    record: async (ferret, items, tasks) => void records.push({ ferret, items, cards: tasks }),
   };
   return { ports, sent, records };
 }
@@ -195,12 +195,12 @@ describe('BoardGateCheck', () => {
   it("should say nothing when no other agenda carries the card's open ask", async () => {
     // Arrange
     const none = harness({ items: [mine()] });
-    const otherCard = harness({ items: [mine(), gate({ gateOf: ['F9'] })] });
+    const otherTask = harness({ items: [mine(), gate({ gateOf: ['F9'] })] });
     const prefix = harness({ items: [mine(), gate({ gateOf: ['F4123'] })] });
     const answered = harness({ items: [mine(), gate({ gateOf: [] })] });
 
     // Act + Assert
-    for (const h of [none, otherCard, prefix, answered]) {
+    for (const h of [none, otherTask, prefix, answered]) {
       should(await new BoardGateCheck(h.ports, 'zz').check('s-1')).be.false();
       should(h.sent).eql([]);
     }
@@ -209,12 +209,12 @@ describe('BoardGateCheck', () => {
   it("should leave alone an item that is not the ferret's own, new this turn and on a card", async () => {
     // Arrange
     const older = harness({ items: [mine({ waitingSince: BEFORE }), gate()] });
-    const noCard = harness({ items: [mine({ card: null }), gate()] });
+    const noTask = harness({ items: [mine({ card: null }), gate()] });
     const notice = harness({ items: [mine({ notice: true }), gate()] });
     const human = harness({ items: [mine({ raisedBy: 'human' }), gate()] });
 
     // Act + Assert
-    for (const h of [older, noCard, notice, human]) {
+    for (const h of [older, noTask, notice, human]) {
       should(await new BoardGateCheck(h.ports, 'zz').check('s-1')).be.false();
       should(h.sent).eql([]);
     }

@@ -1,4 +1,4 @@
-import { type BoardMergeGateResponse, formatCardRef, prUrlParts } from '../../contract/index.ts';
+import { type BoardMergeGateResponse, formatTaskRef, prUrlParts } from '../../contract/index.ts';
 
 /** `fy card merge-gate` exit codes past 0 (free): the merger reads anything but 0 as "do not merge". */
 export const MERGE_GATE_WAITING = 1;
@@ -11,12 +11,12 @@ export interface MergeGateIo {
 
 /** The words for what a PR still waits on, one line per card of its merge unit: `&F20 waits on &F18 (until shipped)`. */
 export function mergeGateLines(answer: Pick<BoardMergeGateResponse, 'waits'>): readonly string[] {
-  const byCard = new Map<string, string[]>();
+  const byTask = new Map<string, string[]>();
   for (const wait of answer.waits) {
-    const card = formatCardRef(wait.card);
-    byCard.set(card, [...(byCard.get(card) ?? []), `${formatCardRef(wait.on)} (until ${wait.until})`]);
+    const task = formatTaskRef(wait.card);
+    byTask.set(task, [...(byTask.get(task) ?? []), `${formatTaskRef(wait.on)} (until ${wait.until})`]);
   }
-  return [...byCard].map(([card, blockers]) => `${card} waits on ${blockers.join(', ')}`);
+  return [...byTask].map(([task, blockers]) => `${task} waits on ${blockers.join(', ')}`);
 }
 
 /**
@@ -43,7 +43,7 @@ export async function checkMergeGate(
   }
   if (answer.unreadable.length > 0) {
     return unreadable(
-      `the board has tasks it cannot read (${answer.unreadable.map(id => formatCardRef({ id })).join(', ')}), and any of them might link this PR`,
+      `the board has tasks it cannot read (${answer.unreadable.map(id => formatTaskRef({ id })).join(', ')}), and any of them might link this PR`,
     );
   }
   const lines = mergeGateLines(answer);

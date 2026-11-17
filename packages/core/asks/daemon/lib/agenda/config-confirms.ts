@@ -16,7 +16,7 @@
 import {
   AGENDA_CONFIRMS_ANSWERS,
   type AgendaAsk,
-  type AgendaCardAnswer,
+  type AgendaTaskAnswer,
   type AgendaItem,
   type AgendaResponse,
   MAX_AGENDA_DETAIL_LENGTH,
@@ -32,7 +32,7 @@ export type ConfirmationDecision = 'allow' | 'deny' | 'discard';
 export interface ConfirmationCard {
   readonly kind: 'choice';
   readonly ask: AgendaAsk;
-  readonly answers: AgendaCardAnswer[];
+  readonly answers: AgendaTaskAnswer[];
 }
 
 /** The ask and the answers of a confirmation of a held change to `path`. */

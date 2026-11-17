@@ -3,7 +3,7 @@
  * open, which one an older app is shown, which card an agenda carries, the stage an ask puts it in, and the
  * reference of the agenda the daemon opens for a card nobody's agenda carries yet. Total.
  */
-import type { AgendaCardAsk, AgendaGate, AgendaItem } from './agenda.ts';
+import type { AgendaTaskAsk, AgendaGate, AgendaItem } from './agenda.ts';
 import { gateReference, parseGateFollowupReference } from './agenda-gate.ts';
 import { gateAskLine } from './agenda-gate-wording.ts';
 import type { AgendaStage } from './agenda-state.ts';
@@ -12,21 +12,21 @@ import { canonicalJson } from '@ferretry/std';
 import { sha256Hex } from './sha256.ts';
 
 /** The prefix of the `sourceRef` of the agenda the daemon opens for a card: `card-agenda:<card>`. */
-const CARD_AGENDA_REFERENCE_PREFIX = 'card-agenda:';
-const CARD_ID = /^[BFIC][1-9][0-9]{0,8}$/u;
+const TASK_AGENDA_REFERENCE_PREFIX = 'card-agenda:';
+const TASK_ID = /^[BFIC][1-9][0-9]{0,8}$/u;
 
 /** The `sourceRef` of the one agenda the daemon opens, on the card's ferret's behalf, for a card nobody's agenda carries. */
-export const cardAgendaReference = (cardId: string): string => `${CARD_AGENDA_REFERENCE_PREFIX}${cardId}`;
+export const taskAgendaReference = (taskId: string): string => `${TASK_AGENDA_REFERENCE_PREFIX}${taskId}`;
 
 /** The card a `card-agenda:` reference names, or `undefined` for any other reference. */
-export const parseCardAgendaReference = (sourceRef: string | null | undefined): string | undefined => {
-  if (typeof sourceRef !== 'string' || !sourceRef.startsWith(CARD_AGENDA_REFERENCE_PREFIX)) return undefined;
-  const cardId = sourceRef.slice(CARD_AGENDA_REFERENCE_PREFIX.length);
-  return CARD_ID.test(cardId) ? cardId : undefined;
+export const parseTaskAgendaReference = (sourceRef: string | null | undefined): string | undefined => {
+  if (typeof sourceRef !== 'string' || !sourceRef.startsWith(TASK_AGENDA_REFERENCE_PREFIX)) return undefined;
+  const taskId = sourceRef.slice(TASK_AGENDA_REFERENCE_PREFIX.length);
+  return TASK_ID.test(taskId) ? taskId : undefined;
 };
 
 /** A card ask as the "does the item ask its own question" rule reads it: its gate and the How to test it carries. */
-export interface CardAskWords {
+export interface TaskAskWords {
   readonly gate: Pick<AgendaGate, 'options' | 'laneName' | 'cardTitle'>;
   readonly howToTest?: string | null | undefined;
 }
@@ -41,15 +41,15 @@ const askLinePrefix = (gate: Pick<AgendaGate, 'options' | 'laneName'>): string =
  * its card asks; once a ferret or the owner rewrites the subject, the item asks the owner something of its own. Never read
  * from the revision tail, which keeps only the newest few. The ONE test the daemon's state machine and the app share.
  */
-export const isGeneratedCardAgendaAsk = (
+export const isGeneratedTaskAgendaAsk = (
   item: Pick<
     AgendaItem,
     'raisedBy' | 'sourceRef' | 'questions' | 'fields' | 'steps' | 'ask' | 'subject' | 'generatedSubject'
   > & {
-    readonly cardAsks?: readonly Pick<AgendaCardAsk, 'gate' | 'howToTest'>[] | undefined;
+    readonly cardAsks?: readonly Pick<AgendaTaskAsk, 'gate' | 'howToTest'>[] | undefined;
   },
 ): boolean => {
-  if (item.raisedBy !== 'daemon' || parseCardAgendaReference(item.sourceRef) === undefined) return false;
+  if (item.raisedBy !== 'daemon' || parseTaskAgendaReference(item.sourceRef) === undefined) return false;
   if ((item.questions?.length ?? 0) > 0 || (item.fields?.length ?? 0) > 0 || (item.steps?.length ?? 0) > 0) {
     return false;
   }
@@ -79,7 +79,7 @@ const stepLines = (text: string): readonly string[] =>
  * How to test (or that step's first sentence: the daemon clips the line there). Anything else — a ferret's question,
  * even one quoting a step — says something the card ask does not. Pure and total.
  */
-export const askLineRepeatsCardAsk = (line: string, asks: readonly CardAskWords[]): boolean =>
+export const askLineRepeatsTaskAsk = (line: string, asks: readonly TaskAskWords[]): boolean =>
   asks.some(ask => {
     const prefix = askLinePrefix(ask.gate);
     if (!line.startsWith(prefix)) return false;
@@ -99,15 +99,15 @@ export const askLineRepeatsCardAsk = (line: string, asks: readonly CardAskWords[
  * daemon keeps the item in Needs you after the card ask's answer until the owner answers it. The ONE rule both ends read.
  */
 export const itemAsksOwnQuestion = (
-  item: Parameters<typeof isGeneratedCardAgendaAsk>[0],
-  asks: readonly CardAskWords[],
+  item: Parameters<typeof isGeneratedTaskAgendaAsk>[0],
+  asks: readonly TaskAskWords[],
 ): boolean => {
   if ((item.questions?.length ?? 0) > 0 || (item.fields?.length ?? 0) > 0 || (item.steps?.length ?? 0) > 0) {
     return true;
   }
   // With no questions there is no single question to read: the ask line is the subject.
   const line = item.subject.trim();
-  return line !== '' && !isGeneratedCardAgendaAsk(item) && !askLineRepeatsCardAsk(line, asks);
+  return line !== '' && !isGeneratedTaskAgendaAsk(item) && !askLineRepeatsTaskAsk(line, asks);
 };
 
 /**
@@ -147,7 +147,7 @@ export const repliedToOwnAsk = (
 export const awaitsOwnAnswer = (
   item: Parameters<typeof itemAsksOwnQuestion>[0] &
     Pick<AgendaItem, 'notice' | 'ownerAnswer' | 'ownAskRepliedTo' | 'askVersion'>,
-  asks: readonly CardAskWords[],
+  asks: readonly TaskAskWords[],
 ): boolean => {
   if (item.notice === true || item.ownerAnswer !== undefined) return false;
   if (item.ask !== undefined && item.ask.kind !== 'open-question') return true;
@@ -156,29 +156,29 @@ export const awaitsOwnAnswer = (
 };
 
 /** A card ask's stable name: its gate's reference, one per entry of the card into the lane. */
-export const cardAskReference = (ask: Pick<AgendaCardAsk, 'gate'>): string => gateReference(ask.gate);
+export const taskAskReference = (ask: Pick<AgendaTaskAsk, 'gate'>): string => gateReference(ask.gate);
 
 /** Whether the owner has yet to answer this ask. */
-export const isOpenCardAsk = (ask: Pick<AgendaCardAsk, 'answer'>): boolean => ask.answer === undefined;
+export const isOpenTaskAsk = (ask: Pick<AgendaTaskAsk, 'answer'>): boolean => ask.answer === undefined;
 
 /** An agenda's open card asks, oldest first. */
-export const openCardAsks = (item: { readonly cardAsks?: readonly AgendaCardAsk[] | undefined }): AgendaCardAsk[] =>
-  (item.cardAsks ?? []).filter(isOpenCardAsk);
+export const openTaskAsks = (item: { readonly cardAsks?: readonly AgendaTaskAsk[] | undefined }): AgendaTaskAsk[] =>
+  (item.cardAsks ?? []).filter(isOpenTaskAsk);
 
 /** Whether an agenda carries a card ask the owner has yet to answer: that makes it a blocker of its card. */
-export const hasOpenCardAsk = (item: { readonly cardAsks?: readonly Pick<AgendaCardAsk, 'answer'>[] | undefined }) =>
-  (item.cardAsks ?? []).some(isOpenCardAsk);
+export const hasOpenTaskAsk = (item: { readonly cardAsks?: readonly Pick<AgendaTaskAsk, 'answer'>[] | undefined }) =>
+  (item.cardAsks ?? []).some(isOpenTaskAsk);
 
 /**
  * The ONE ask of a card's own agenda — the agenda the daemon opened for the card, which asks the owner nothing else —
  * so its answer is the item's own: Good in one tap, anything else typed. `undefined` for any other item, and for a card
  * agenda that holds more or fewer than one open ask.
  */
-export const ownCardAsk = (
-  item: Pick<AgendaItem, 'raisedBy' | 'sourceRef'> & { readonly cardAsks?: readonly AgendaCardAsk[] | undefined },
-): AgendaCardAsk | undefined => {
-  if (item.raisedBy !== 'daemon' || parseCardAgendaReference(item.sourceRef) === undefined) return undefined;
-  const open = openCardAsks(item);
+export const ownTaskAsk = (
+  item: Pick<AgendaItem, 'raisedBy' | 'sourceRef'> & { readonly cardAsks?: readonly AgendaTaskAsk[] | undefined },
+): AgendaTaskAsk | undefined => {
+  if (item.raisedBy !== 'daemon' || parseTaskAgendaReference(item.sourceRef) === undefined) return undefined;
+  const open = openTaskAsks(item);
   return open.length === 1 ? open[0] : undefined;
 };
 
@@ -188,10 +188,10 @@ export const ownCardAsk = (
  * so the next ask is always reachable and saying Not yet again to the first of them brings the next one forward. Ties
  * keep the order the asks were put on. The ONE order the app draws, the mirror shows and an unnamed answer reaches.
  */
-export const askedCardAsks = <Ask extends Pick<AgendaCardAsk, 'answer' | 'notYet'>>(item: {
+export const askedTaskAsks = <Ask extends Pick<AgendaTaskAsk, 'answer' | 'notYet'>>(item: {
   readonly cardAsks?: readonly Ask[] | undefined;
 }): Ask[] => {
-  const open = (item.cardAsks ?? []).filter(isOpenCardAsk);
+  const open = (item.cardAsks ?? []).filter(isOpenTaskAsk);
   const deferredAt = (ask: Ask): number => {
     const at = Date.parse(ask.notYet?.at ?? '');
     return Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY;
@@ -203,13 +203,13 @@ export const askedCardAsks = <Ask extends Pick<AgendaCardAsk, 'answer' | 'notYet
 };
 
 /** The card ask on this agenda with this reference, open or answered. */
-export const cardAskOf = (
-  item: { readonly cardAsks?: readonly AgendaCardAsk[] | undefined },
+export const taskAskOf = (
+  item: { readonly cardAsks?: readonly AgendaTaskAsk[] | undefined },
   reference: string,
-): AgendaCardAsk | undefined => (item.cardAsks ?? []).find(ask => cardAskReference(ask) === reference);
+): AgendaTaskAsk | undefined => (item.cardAsks ?? []).find(ask => taskAskReference(ask) === reference);
 
 /** What a card ask needs of the owner: a test to try (its gate can send the card back with words), else a plan to approve. */
-export const cardAskStage = (gate: Pick<AgendaGate, 'options'>): Extract<AgendaStage, 'test' | 'plan'> =>
+export const taskAskStage = (gate: Pick<AgendaGate, 'options'>): Extract<AgendaStage, 'test' | 'plan'> =>
   gate.options.some(option => option.outcome === 'reopen-with-agenda') ? 'test' : 'plan';
 
 /**
@@ -218,7 +218,7 @@ export const cardAskStage = (gate: Pick<AgendaGate, 'options'>): Extract<AgendaS
  * something else for the owner to do (an input, a confirmation, a copied plan, a task plan, a 2FA seed, a phone
  * approval, a sign-in rule). The ONE test the engine and the app share.
  */
-export const canCarryCardAsk = (
+export const canCarryTaskAsk = (
   item: Pick<
     AgendaItem,
     | 'notice'
@@ -247,24 +247,24 @@ export const canCarryCardAsk = (
   (item.raisedBy === 'agent' ||
     (item.raisedBy === 'daemon' &&
       item.source === 'task' &&
-      (parseCardAgendaReference(item.sourceRef) !== undefined ||
+      (parseTaskAgendaReference(item.sourceRef) !== undefined ||
         parseGateFollowupReference(item.sourceRef) !== undefined)));
 
-const sameCard = (ref: TaskRef, cardId: string, machineId: string | undefined): boolean =>
-  ref.id === cardId && (ref.machineId === undefined || machineId === undefined || ref.machineId === machineId);
+const sameTask = (ref: TaskRef, taskId: string, machineId: string | undefined): boolean =>
+  ref.id === taskId && (ref.machineId === undefined || machineId === undefined || ref.machineId === machineId);
 
 /**
  * Whether an agenda CARRIES a card: it is about the card (`task`), or it carries one of the card's asks. A notice
  * carries nothing: it is read, never answered.
  */
-export const carriesCard = (
+export const carriesTask = (
   item: Pick<AgendaItem, 'task' | 'cardAsks' | 'notice'> & { readonly relatedTasks?: readonly TaskRef[] | undefined },
-  cardId: string,
+  taskId: string,
   machineId?: string,
 ): boolean => {
   if (item.notice === true) return false;
-  if (item.task !== undefined && item.task !== null && sameCard(item.task, cardId, machineId)) return true;
+  if (item.task !== undefined && item.task !== null && sameTask(item.task, taskId, machineId)) return true;
   // The cards a merge brought in (`relatedTasks`, docs/agenda.md § Merge and split) ride the agenda too.
-  if ((item.relatedTasks ?? []).some(ref => sameCard(ref, cardId, machineId))) return true;
-  return (item.cardAsks ?? []).some(ask => ask.gate.cardId === cardId);
+  if ((item.relatedTasks ?? []).some(ref => sameTask(ref, taskId, machineId))) return true;
+  return (item.cardAsks ?? []).some(ask => ask.gate.cardId === taskId);
 };

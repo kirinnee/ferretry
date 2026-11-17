@@ -119,9 +119,9 @@ export class WorkIndex {
   private stale = 0;
 
   get size(): { readonly cards: number; readonly asks: number } {
-    let cards = 0;
-    for (const { document } of this.documents.values()) if (document.kind === 'card') cards += 1;
-    return { cards, asks: this.documents.size - cards };
+    let tasks = 0;
+    for (const { document } of this.documents.values()) if (document.kind === 'card') tasks += 1;
+    return { cards: tasks, asks: this.documents.size - tasks };
   }
 
   keys(): IterableIterator<string> {

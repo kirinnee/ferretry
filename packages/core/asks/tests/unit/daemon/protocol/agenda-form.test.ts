@@ -8,7 +8,7 @@ import {
   agendaFormProblems,
   type AgendaFormField,
 } from '../../../../daemon/lib/protocol/agenda.ts';
-import { agendaCardAnswers, agendaShape } from '../../../../daemon/lib/protocol/agenda-task.ts';
+import { agendaTaskAnswers, agendaShape } from '../../../../daemon/lib/protocol/agenda-task.ts';
 import { formAnswerProblems, formFieldName, formWords } from '../../../../daemon/lib/protocol/agenda-form.ts';
 import { AGENDA_SHAPE_LINE, agendaShapeProblems } from '../../../../daemon/lib/protocol/agenda-shape.ts';
 
@@ -66,7 +66,7 @@ describe('a form card on the agenda', () => {
   });
 
   it('should offer no swipe answers', () => {
-    should(agendaCardAnswers(ITEM)).deepEqual([]);
+    should(agendaTaskAnswers(ITEM)).deepEqual([]);
   });
 
   it('should refuse options on a yes/no or text field, and a pick without them', () => {

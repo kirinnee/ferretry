@@ -6,13 +6,13 @@
  * "stays open". `closeAsDaemon` (card-actions) makes the move; the PR facts, `fy signal done` and the board sweep
  * decide WHEN to ask. A close raises no gate item and no agenda item: nothing here waits on the owner.
  */
-import { type Card, categoryOf, isSubCard, type Lane, type LaneSet } from '../../../contract/index.ts';
+import { type Task, categoryOf, isSubTask, type Lane, type LaneSet } from '../../../contract/index.ts';
 
 /** The history reason of a sub-card whose PRs shipped. */
-export const SUB_CARD_SHIPPED_REASON = 'sub-task shipped; the parent carries the test';
+export const SUB_TASK_SHIPPED_REASON = 'sub-task shipped; the parent carries the test';
 
 /** The history reason of a sub-card whose ferret finished or ended with no PR to ship. */
-export const SUB_CARD_HELPER_REASON = 'helper finished';
+export const SUB_TASK_HELPER_REASON = 'helper finished';
 
 /** How long a sub-card's ferret must have been gone before the board calls its work ended. */
 export const HELPER_ENDED_GRACE_MS = 2 * 60_000;
@@ -22,35 +22,35 @@ export const closedLaneOf = (laneSet: LaneSet): Lane | undefined =>
   laneSet.lanes.find(lane => lane.id === laneSet.doneLane && lane.category === 'closed') ??
   laneSet.lanes.find(lane => lane.category === 'closed');
 
-const hasOpenPr = (card: Pick<Card, 'links'>): boolean => card.links.prs.some(pr => pr.state === 'open');
-const hasMergedPr = (card: Pick<Card, 'links'>): boolean => card.links.prs.some(pr => pr.state === 'merged');
+const hasOpenPr = (task: Pick<Task, 'links'>): boolean => task.links.prs.some(pr => pr.state === 'open');
+const hasMergedPr = (task: Pick<Task, 'links'>): boolean => task.links.prs.some(pr => pr.state === 'merged');
 
 /** Whether the card has no PR that is open or merged: a review or research helper, or work that shipped nothing. */
-export const isPrFreeHelper = (card: Pick<Card, 'links'>): boolean => !hasOpenPr(card) && !hasMergedPr(card);
+export const isPrFreeHelper = (task: Pick<Task, 'links'>): boolean => !hasOpenPr(task) && !hasMergedPr(task);
 
 /** A sub-card handed to another ferret: a helper's card, never the lead's own bookkeeping. */
-export const isHandedHelper = (card: Pick<Card, 'parent' | 'assignee' | 'owner'>): boolean =>
-  isSubCard(card) && card.assignee !== null && card.assignee !== card.owner;
+export const isHandedHelper = (task: Pick<Task, 'parent' | 'assignee' | 'owner'>): boolean =>
+  isSubTask(task) && task.assignee !== null && task.assignee !== task.owner;
 
 /** A sub-card that is still live and has somewhere to close to. */
-const closable = (card: Card, laneSet: LaneSet): boolean => {
-  const category = categoryOf(laneSet, card.laneId);
-  return isSubCard(card) && card.dropped === null && category.ok && category.value !== 'closed';
+const closable = (task: Task, laneSet: LaneSet): boolean => {
+  const category = categoryOf(laneSet, task.laneId);
+  return isSubTask(task) && task.dropped === null && category.ok && category.value !== 'closed';
 };
 
 /**
  * A sub-card whose PRs shipped and that now sits where a top-level card would wait for the owner to try it (a
  * `verify` lane). `null` for anything else: a PR still open, nothing merged, any other lane.
  */
-export const shippedCloseReason = (card: Card, laneSet: LaneSet): string | null => {
-  if (!closable(card, laneSet) || hasOpenPr(card) || !hasMergedPr(card)) return null;
-  const category = categoryOf(laneSet, card.laneId);
-  return category.ok && category.value === 'verify' ? SUB_CARD_SHIPPED_REASON : null;
+export const shippedCloseReason = (task: Task, laneSet: LaneSet): string | null => {
+  if (!closable(task, laneSet) || hasOpenPr(task) || !hasMergedPr(task)) return null;
+  const category = categoryOf(laneSet, task.laneId);
+  return category.ok && category.value === 'verify' ? SUB_TASK_SHIPPED_REASON : null;
 };
 
 /**
  * A sub-card whose ferret finished or ended with no PR to ship (a review or research helper). `null` for anything
  * else, and for a card with a PR open or merged, which the PR's own facts close.
  */
-export const helperCloseReason = (card: Card, laneSet: LaneSet): string | null =>
-  closable(card, laneSet) && isPrFreeHelper(card) ? SUB_CARD_HELPER_REASON : null;
+export const helperCloseReason = (task: Task, laneSet: LaneSet): string | null =>
+  closable(task, laneSet) && isPrFreeHelper(task) ? SUB_TASK_HELPER_REASON : null;

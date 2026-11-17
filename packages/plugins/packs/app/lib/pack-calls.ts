@@ -588,10 +588,10 @@ export const projectPackCalls = (
       }
       flush();
       if (pack.kind === 'wait') {
-        const card = out.findLastIndex(row => row.pack?.kind === 'new' && waitsFor(row.pack, pack.id));
-        const row = out[card];
+        const task = out.findLastIndex(row => row.pack?.kind === 'new' && waitsFor(row.pack, pack.id));
+        const row = out[task];
         if (row?.pack?.kind === 'new') {
-          out[card] = { ...row, tools: [...(row.tools ?? []), call], pack: { ...row.pack, collected: pack.progress } };
+          out[task] = { ...row, tools: [...(row.tools ?? []), call], pack: { ...row.pack, collected: pack.progress } };
           continue;
         }
       }

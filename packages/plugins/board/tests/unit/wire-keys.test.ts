@@ -2,15 +2,15 @@ import { describe, expect, test } from 'bun:test';
 import {
   formerPath,
   readBoard,
-  readCard,
+  readTask,
   readMergeGate,
-  safeReadCard,
-  safeReadCardStart,
+  safeReadTask,
+  safeReadTaskStart,
   safeReadChanged,
   taskWire,
   withFormerPaths,
 } from '../../contract/index.ts';
-import { card, cardResponse, laneSet, response } from './cli/fixtures.ts';
+import { boardTask, taskResponse, laneSet, response } from './cli/fixtures.ts';
 
 const PROJECT = '0b1f6d1e-6c1b-4f0c-8f4e-2f6f2a3c9a10';
 
@@ -21,7 +21,7 @@ describe('the task wire keys (O18, RULING 2)', () => {
     expect(Object.keys(sent)).not.toContain('cards');
     expect(sent.counts).toEqual(response().counts);
 
-    const one = taskWire.card(cardResponse(card({ id: 'F7' }), laneSet())) as Record<string, unknown>;
+    const one = taskWire.card(taskResponse(boardTask({ id: 'F7' }), laneSet())) as Record<string, unknown>;
     expect(Object.keys(one).sort()).toEqual(['laneSet', 'task']);
     expect((one.task as { id: string }).id).toBe('F7');
 
@@ -43,19 +43,19 @@ describe('the task wire keys (O18, RULING 2)', () => {
   });
 
   test('a reader of our own JSON takes either spelling, so a daemon one build behind still answers it', () => {
-    const now = taskWire.board(response({ cards: [card({ id: 'F1' })], counts: response().counts })) as unknown;
-    const before = response({ cards: [card({ id: 'F1' })] });
+    const now = taskWire.board(response({ cards: [boardTask({ id: 'F1' })], counts: response().counts })) as unknown;
+    const before = response({ cards: [boardTask({ id: 'F1' })] });
     expect(readBoard(now).cards.map(each => each.id)).toEqual(['F1']);
     expect(readBoard(before).cards.map(each => each.id)).toEqual(['F1']);
 
-    const one = cardResponse(card({ id: 'F2' }), laneSet());
-    expect(readCard(taskWire.card(one)).card.id).toBe('F2');
-    expect(readCard(one).card.id).toBe('F2');
-    expect(safeReadCard(taskWire.card(one)).success).toBe(true);
-    expect(safeReadCard({ nothing: true }).success).toBe(false);
+    const one = taskResponse(boardTask({ id: 'F2' }), laneSet());
+    expect(readTask(taskWire.card(one)).card.id).toBe('F2');
+    expect(readTask(one).card.id).toBe('F2');
+    expect(safeReadTask(taskWire.card(one)).success).toBe(true);
+    expect(safeReadTask({ nothing: true }).success).toBe(false);
 
-    expect(safeReadCardStart({ task: 'F7', ferret: 'f1', started: true }).success).toBe(true);
-    expect(safeReadCardStart({ card: 'F7', ferret: 'f1', started: true }).success).toBe(true);
+    expect(safeReadTaskStart({ task: 'F7', ferret: 'f1', started: true }).success).toBe(true);
+    expect(safeReadTaskStart({ card: 'F7', ferret: 'f1', started: true }).success).toBe(true);
 
     const wait = { until: 'shipped', on: { id: 'F2' } };
     const gate = (key: 'task' | 'card') => ({
@@ -77,7 +77,7 @@ describe('the task wire keys (O18, RULING 2)', () => {
 
   test('an answer that names both spellings is not guessed at: the schema refuses it', () => {
     const both = { task: 'F7', card: 'F8', ferret: 'f1', started: true };
-    expect(safeReadCardStart(both).success).toBe(false);
+    expect(safeReadTaskStart(both).success).toBe(false);
   });
 });
 

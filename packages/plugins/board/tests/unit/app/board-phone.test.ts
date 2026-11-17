@@ -8,7 +8,7 @@ import {
   swipeStep,
   UNPLACED_LANE,
 } from '../../../app/lib/board-phone.ts';
-import { boardModelOf, card } from './board-support.ts';
+import { boardModelOf, boardTask } from './board-support.ts';
 
 describe('swipeStep', () => {
   it('goes to the next lane on a swipe left and the previous on a swipe right', () => {
@@ -66,9 +66,9 @@ describe('stepLane', () => {
 describe('phoneLanes and shownLane', () => {
   it('lists the lanes in order with their counts, and leaves the closed one out while it is hidden', async () => {
     const model = await boardModelOf([
-      card('F1', { laneId: 'plan' }),
-      card('F2', { laneId: 'plan' }),
-      card('F3', { laneId: 'closed' }),
+      boardTask('F1', { laneId: 'plan' }),
+      boardTask('F2', { laneId: 'plan' }),
+      boardTask('F3', { laneId: 'closed' }),
     ]);
     const group = model.groups[0];
     if (group === undefined) throw new Error('no group');
@@ -79,7 +79,7 @@ describe('phoneLanes and shownLane', () => {
   });
 
   it('adds an Unplaced chip for cards whose lane the board does not know', async () => {
-    const model = await boardModelOf([card('F1', { laneId: 'no-such-lane' })]);
+    const model = await boardModelOf([boardTask('F1', { laneId: 'no-such-lane' })]);
     const group = model.groups[0];
     if (group === undefined) throw new Error('no group');
     const lanes = phoneLanes(group, true);

@@ -235,7 +235,7 @@ export function harness(
   const boards = new Map<string, readonly WardenEscalationBoardItem[]>();
   const raises: { readonly sessionId: string; readonly request: WardenEscalationRaise }[] = [];
   /** The newest card text raised per `[sessionId, sourceRef]`. */
-  const cards = new Map<string, WardenEscalationRaise>();
+  const tasks = new Map<string, WardenEscalationRaise>();
   const resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[] = [];
   const orphanItem: { current: OrphanItem | undefined; syncs: number; writes: number; opened: number } = {
     current: undefined,
@@ -300,17 +300,17 @@ export function harness(
               sessionId,
               parseErrors: 0,
               items: (boards.get(sessionId) ?? []).map((item, index) => {
-                const card =
-                  item.sourceRef === null ? undefined : cards.get(JSON.stringify([sessionId, item.sourceRef]));
+                const task =
+                  item.sourceRef === null ? undefined : tasks.get(JSON.stringify([sessionId, item.sourceRef]));
                 return {
                   id: `A${index + 1}`,
                   source: item.source,
                   raisedBy: item.raisedBy,
                   ...(item.sourceRef === null ? {} : { sourceRef: item.sourceRef }),
-                  subject: card?.subject ?? 'A seeded card',
-                  why: card?.why ?? 'seeded',
-                  waitingSince: card?.waitingSince ?? at(0),
-                  howToResolve: card?.howToResolve ?? 'seeded',
+                  subject: task?.subject ?? 'A seeded card',
+                  why: task?.why ?? 'seeded',
+                  waitingSince: task?.waitingSince ?? at(0),
+                  howToResolve: task?.howToResolve ?? 'seeded',
                 };
               }),
             }
@@ -392,7 +392,7 @@ export function harness(
       raise: async (sessionId, request) => {
         raises.push({ sessionId, request });
         if (options.raiseWrite !== undefined) return options.raiseWrite;
-        cards.set(JSON.stringify([sessionId, request.sourceRef]), request);
+        tasks.set(JSON.stringify([sessionId, request.sourceRef]), request);
         const existing = boards.get(sessionId) ?? [];
         if (existing.some(item => item.sourceRef === request.sourceRef)) return 'unchanged';
         boards.set(sessionId, [

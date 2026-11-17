@@ -66,7 +66,7 @@ interface GuidePr {
 }
 
 /** The parts of a card the guide reads. */
-export interface TryItCard {
+export interface TryItTask {
   readonly howToTest: string | null | undefined;
   readonly links: { readonly prs: readonly GuidePr[]; readonly docs?: readonly string[] };
 }
@@ -76,8 +76,8 @@ export interface TryItCard {
  * (`https://<branch-or-hash>.<project>.pages.dev/…`), never the production host (`<project>.pages.dev`). It is what
  * `fy task link <card> --doc <url>` records; nothing invents one, so a card with no preview says where to try it for real.
  */
-export const previewUrlOf = (card: Pick<TryItCard, 'links'>): string | undefined => {
-  for (const link of card.links.docs ?? []) {
+export const previewUrlOf = (task: Pick<TryItTask, 'links'>): string | undefined => {
+  for (const link of task.links.docs ?? []) {
     try {
       const url = new URL(link.trim());
       const labels = url.hostname.split('.');
@@ -137,18 +137,18 @@ const standing = (prs: readonly GuidePr[], product: GuideProduct | undefined): r
  * card, never a cut-off copy. `limit` is the most characters the text may have.
  */
 export const tryItText = (
-  card: TryItCard,
+  task: TryItTask,
   pointer: (length: number) => string,
   limit: number,
   product?: GuideProduct,
 ): string => {
-  const preview = previewUrlOf(card);
-  const steps = card.howToTest?.trim() ?? '';
+  const preview = previewUrlOf(task);
+  const steps = task.howToTest?.trim() ?? '';
   const head =
     preview === undefined
       ? 'There is no preview for this one. Try it for real: the steps below say where.'
       : `**Try it on the preview:** ${preview}`;
-  const tail = standing(card.links.prs, product).join('\n');
+  const tail = standing(task.links.prs, product).join('\n');
   const frame = [head, tail].filter(text => text !== '');
   const used = frame.join('\n\n').length + 2;
   const middle =

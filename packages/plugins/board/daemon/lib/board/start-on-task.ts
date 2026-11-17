@@ -22,13 +22,13 @@
  * Pure: the card, the lock, the roster and the start arrive through the ports; authority is the caller's.
  */
 import {
-  type CardId,
-  type CardResponse,
-  type CardStartResponse,
-  type CardView,
+  type TaskId,
+  type TaskResponse,
+  type TaskStartResponse,
+  type TaskView,
   categoryOf,
-  describeCardEvent,
-  formatCardRef,
+  describeTaskEvent,
+  formatTaskRef,
   type LaneSet,
   type PrLink,
   writtenProgressParts,
@@ -37,8 +37,8 @@ import type { BoardCaller } from './authority.ts';
 import { BoardError } from './errors.ts';
 
 /** What a new ferret on a card is started with: all of it the daemon's decision, none of it the client's. */
-export interface NewFerretOnCard {
-  readonly card: CardView;
+export interface NewFerretOnTask {
+  readonly card: TaskView;
   /** The card's project's folder. */
   readonly folder: string;
   /** What the session is called. */
@@ -47,22 +47,22 @@ export interface NewFerretOnCard {
   readonly prompt: string;
 }
 
-export interface StartOnCardPorts {
-  card(id: CardId): Promise<CardResponse>;
+export interface StartOnTaskPorts {
+  card(id: TaskId): Promise<TaskResponse>;
   /** The folder the card's project is registered at; `undefined` for a project with none (Unfiled). */
-  folderOf(card: CardView): Promise<string | undefined>;
+  folderOf(task: TaskView): Promise<string | undefined>;
   /** Every ferret that is alive on this machine, with the card it is working on (`null`: none). */
-  live(): Promise<ReadonlyMap<string, CardId | null>>;
+  live(): Promise<ReadonlyMap<string, TaskId | null>>;
   /** Every ferret whose pane could not be stopped (`kill_failed`): terminal, yet possibly still running, with its card. */
-  stuck(): Promise<ReadonlyMap<string, CardId | null>>;
+  stuck(): Promise<ReadonlyMap<string, TaskId | null>>;
   /** Runs `work` alone for this card: a second start of the same card waits for the first to finish. */
-  exclusive<T>(id: CardId, work: () => Promise<T>): Promise<T>;
+  exclusive<T>(id: TaskId, work: () => Promise<T>): Promise<T>;
   /** Starts the new ferret, with the card assigned to it. Throws {@link CardStartRefused}. */
-  start(start: NewFerretOnCard): Promise<StartedFerret>;
+  start(start: NewFerretOnTask): Promise<StartedFerret>;
   /** What an earlier start with this key came to, kept apart from liveness; `undefined` for a key never seen. */
-  recall(key: string): CardStartResponse | undefined;
+  recall(key: string): TaskStartResponse | undefined;
   /** Keeps what a start came to, under the key its click carried. */
-  remember(key: string, result: CardStartResponse): void;
+  remember(key: string, result: TaskStartResponse): void;
   /** Stops a ferret whose card was taken from it by a close that raced the start. */
   stop(ferret: string, reason: string): Promise<void>;
   /** The shipped command name, so every command the brief prints exists after a rename. */
@@ -77,7 +77,7 @@ interface StartedFerret {
 }
 
 /** Why the new ferret would not start: the words are the start's own, for the person to read. */
-export class CardStartRefused extends Error {
+export class TaskStartRefused extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'CardStartRefused';
@@ -85,15 +85,15 @@ export class CardStartRefused extends Error {
 }
 
 /** What the owner's start came to; `started: false` means a live ferret already holds the card and nothing was started. */
-export type CardStarted = CardStartResponse;
+export type TaskStarted = TaskStartResponse;
 
 const GONE = 'This task was closed; reopen it first.';
 
 /** Whether the card was closed or dropped: nothing is started on it. */
-function closed(card: CardView, laneSet: LaneSet | null): boolean {
-  if (card.dropped !== null) return true;
+function closed(task: TaskView, laneSet: LaneSet | null): boolean {
+  if (task.dropped !== null) return true;
   if (laneSet === null) return false;
-  const category = categoryOf(laneSet, card.laneId);
+  const category = categoryOf(laneSet, task.laneId);
   return category.ok && category.value === 'closed';
 }
 
@@ -105,14 +105,14 @@ const section = (heading: string, text: string): readonly string[] =>
  * (nobody's work yet, so a lead being alive does not hold every card it has not handed out); else any live ferret
  * whose focus it is.
  */
-function heldBy(card: CardView, laneSet: LaneSet | null, live: ReadonlyMap<string, CardId | null>): string | undefined {
-  if (card.assignee !== null) {
-    if (live.has(card.assignee)) return card.assignee;
-  } else if (live.has(card.owner)) {
-    const category = laneSet === null ? undefined : categoryOf(laneSet, card.laneId);
-    if (category?.ok !== true || category.value !== 'backlog') return card.owner;
+function heldBy(task: TaskView, laneSet: LaneSet | null, live: ReadonlyMap<string, TaskId | null>): string | undefined {
+  if (task.assignee !== null) {
+    if (live.has(task.assignee)) return task.assignee;
+  } else if (live.has(task.owner)) {
+    const category = laneSet === null ? undefined : categoryOf(laneSet, task.laneId);
+    if (category?.ok !== true || category.value !== 'backlog') return task.owner;
   }
-  return [...live].find(([, focus]) => focus === card.id)?.[0];
+  return [...live].find(([, focus]) => focus === task.id)?.[0];
 }
 
 /** The card as the block a continuing ferret reads: what it is, the owner's words, its links and its newest history. */
@@ -123,29 +123,29 @@ const laneNameIn = (laneSet: LaneSet | null, id: string): string =>
 
 const prLine = (pr: PrLink): string => `PR #${String(pr.number)} ${pr.url} (${pr.draft ? 'draft' : pr.state})`;
 
-const focusCardBrief = (card: CardView, laneSet: LaneSet | null): string => {
+const focusTaskBrief = (task: TaskView, laneSet: LaneSet | null): string => {
   const lines = [
-    `Your task: ${formatCardRef(card)} — ${card.title}`,
-    `Lane: ${laneNameIn(laneSet, card.laneId)}`,
+    `Your task: ${formatTaskRef(task)} — ${task.title}`,
+    `Lane: ${laneNameIn(laneSet, task.laneId)}`,
     '',
-    `The ask, verbatim (${card.ask.source}):`,
-    card.ask.text,
+    `The ask, verbatim (${task.ask.source}):`,
+    task.ask.text,
   ];
-  for (const clarification of card.clarifications)
+  for (const clarification of task.clarifications)
     lines.push('', `Clarified, verbatim (${clarification.source}):`, clarification.text);
   const links = [
-    ...card.links.prs.map(prLine),
-    ...(card.links.branch === null ? [] : [`branch ${card.links.branch}`]),
-    ...card.links.commits.map(commit => `commit ${commit}`),
-    ...card.links.docs.map(doc => `doc ${doc}`),
+    ...task.links.prs.map(prLine),
+    ...(task.links.branch === null ? [] : [`branch ${task.links.branch}`]),
+    ...task.links.commits.map(commit => `commit ${commit}`),
+    ...task.links.docs.map(doc => `doc ${doc}`),
   ];
   if (links.length > 0) lines.push('', 'Links:', ...links.map(link => `- ${link}`));
   lines.push(
     '',
     'Last on the task:',
-    ...card.history.slice(-FOCUS_HISTORY_LINES).map(
+    ...task.history.slice(-FOCUS_HISTORY_LINES).map(
       event =>
-        `- ${event.at}  ${describeCardEvent(
+        `- ${event.at}  ${describeTaskEvent(
           event,
           id => laneNameIn(laneSet, id),
           id => id,
@@ -156,33 +156,33 @@ const focusCardBrief = (card: CardView, laneSet: LaneSet | null): string => {
 };
 
 /** The first turn of the new ferret: who asked, the card's own words, then the card as a continuing ferret reads it. */
-export function startOnCardBrief(card: CardView, laneSet: LaneSet | null, bin: string): string {
-  const ref = formatCardRef(card);
+export function startOnTaskBrief(task: TaskView, laneSet: LaneSet | null, bin: string): string {
+  const ref = formatTaskRef(task);
   return [
     `The owner asked you to take over task ${ref}. Its last ferret has finished, so nobody else is working on it. Read what is already done, then carry on from there.`,
-    ...section('Summary', card.summary),
+    ...section('Summary', task.summary),
     ...section(
       'Progress',
-      writtenProgressParts(card.progress)
+      writtenProgressParts(task.progress)
         .map(part => `${part.label}:\n${part.text.trim()}`)
         .join('\n\n'),
     ),
-    ...section('Why it exists', card.premise),
-    ...section('Context', card.context),
-    ...section('How to test', card.howToTest),
+    ...section('Why it exists', task.premise),
+    ...section('Context', task.context),
+    ...section('How to test', task.howToTest),
     '',
-    focusCardBrief(card, laneSet),
+    focusTaskBrief(task, laneSet),
     '',
     `The daemon assigned ${ref} to you and moved it into its working lane; \`${bin} task note\` adds progress.`,
   ].join('\n');
 }
 
-export async function startOnCard(
-  ports: StartOnCardPorts,
-  id: CardId,
+export async function startOnTask(
+  ports: StartOnTaskPorts,
+  id: TaskId,
   caller: BoardCaller,
   key?: string,
-): Promise<CardStarted> {
+): Promise<TaskStarted> {
   if (caller.kind !== 'owner') {
     throw new BoardError('forbidden', 'only the owner may start a ferret on a task from here', ['owner-human']);
   }
@@ -191,7 +191,7 @@ export async function startOnCard(
     const remembered = kept === undefined ? undefined : ports.recall(kept);
     if (remembered !== undefined) return remembered;
     const { card: task, laneSet } = await ports.card(id);
-    const ref = formatCardRef(task);
+    const ref = formatTaskRef(task);
     if (closed(task, laneSet)) throw new BoardError('invalid', GONE);
     const holder = heldBy(task, laneSet, await ports.live());
     if (holder !== undefined) {
@@ -216,10 +216,10 @@ export async function startOnCard(
         card: task,
         folder,
         name: task.title,
-        prompt: startOnCardBrief(task, laneSet, ports.bin),
+        prompt: startOnTaskBrief(task, laneSet, ports.bin),
       });
     } catch (error) {
-      if (error instanceof CardStartRefused)
+      if (error instanceof TaskStartRefused)
         throw new BoardError('invalid', `No ferret was started on ${ref}: ${error.message}`);
       throw error;
     }

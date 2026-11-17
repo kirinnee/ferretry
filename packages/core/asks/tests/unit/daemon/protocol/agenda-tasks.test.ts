@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AgendaItemSchema, MAX_AGENDA_CARDS } from '../../../../daemon/lib/protocol/agenda.ts';
+import { AgendaItemSchema, MAX_AGENDA_TASKS } from '../../../../daemon/lib/protocol/agenda.ts';
 
 const NOTICE = {
   id: 'A7',
@@ -25,7 +25,7 @@ describe('the cards a notice is about', () => {
   });
 
   it('should refuse an empty list, more than the limit, and a row with no line', () => {
-    const many = Array.from({ length: MAX_AGENDA_CARDS + 1 }, (_, index) => ({
+    const many = Array.from({ length: MAX_AGENDA_TASKS + 1 }, (_, index) => ({
       ...ROW,
       task: { id: `B${index + 1}` },
     }));

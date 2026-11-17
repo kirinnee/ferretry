@@ -28,14 +28,14 @@ import {
   type BoardCounts,
   type BoardProject,
   type BoardProjectId,
-  type BoardQuarantinedCard,
+  type BoardQuarantinedTask,
   type BoardResult,
-  type CardActionRequestInput,
-  type CardCreateRequestInput,
-  type CardId,
-  type CardResponse,
-  type CardStartResponse,
-  type CardView,
+  type TaskActionRequestInput,
+  type TaskCreateRequestInput,
+  type TaskId,
+  type TaskResponse,
+  type TaskStartResponse,
+  type TaskView,
   boardErr,
   boardOk,
   type LaneSet,
@@ -50,7 +50,7 @@ import {
   type LaneWriteError,
   readWholeBoard,
 } from './board-client.ts';
-import { type BoardServerQuery, cardMatchesQuery, serverQueryKey } from './board-model.ts';
+import { type BoardServerQuery, taskMatchesQuery, serverQueryKey } from './board-model.ts';
 import type { DaemonConnection, DaemonId } from './machine.ts';
 
 /** The longest an open page goes without re-reading its whole board. */
@@ -62,10 +62,10 @@ export type BoardLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 export interface BoardMachineSlice {
   readonly status: BoardLoadStatus;
   readonly error: string | null;
-  readonly cards: ReadonlyMap<CardId, CardView>;
+  readonly cards: ReadonlyMap<TaskId, TaskView>;
   readonly laneSets: ReadonlyMap<BoardProjectId, LaneSet | null>;
   readonly counts: BoardCounts | null;
-  readonly quarantined: readonly BoardQuarantinedCard[];
+  readonly quarantined: readonly BoardQuarantinedTask[];
   /** The board has more cards than the pages read. */
   readonly truncated: boolean;
   readonly version: string | null;
@@ -79,10 +79,10 @@ export interface BoardViewState {
   readonly slices: ReadonlyMap<DaemonId, BoardMachineSlice>;
 }
 
-export interface BoardCardState {
+export interface BoardTaskState {
   readonly status: BoardLoadStatus;
   readonly error: string | null;
-  readonly task: CardView | null;
+  readonly task: TaskView | null;
   readonly laneSet: LaneSet | null;
   /** The machine answered and has no such card. */
   readonly missing: boolean;
@@ -100,7 +100,7 @@ export interface BoardIdsState {
   readonly status: BoardLoadStatus;
   readonly error: string | null;
   /** `null` until read, and when the machine does not serve the list (an older daemon). */
-  readonly ids: ReadonlySet<CardId> | null;
+  readonly ids: ReadonlySet<TaskId> | null;
 }
 
 /** Timers and the clock, injectable so a suite drives the cadence by hand. */
@@ -131,7 +131,7 @@ const IDLE_SLICE: BoardMachineSlice = Object.freeze({
   readAt: null,
 });
 
-export const IDLE_BOARD_TASK: BoardCardState = Object.freeze({
+export const IDLE_BOARD_TASK: BoardTaskState = Object.freeze({
   status: 'idle' as const,
   error: null,
   task: null,
@@ -159,7 +159,7 @@ interface View {
   /** Watchers that want the whole board re-read every beat. A view with none stays live by events alone. */
   beats: number;
   /** The stamp of whatever last set (or removed) each card, per machine. */
-  readonly stamps: Map<DaemonId, Map<CardId, number>>;
+  readonly stamps: Map<DaemonId, Map<TaskId, number>>;
   /** The stamp of the newest whole-board read applied, per machine. */
   readonly fullStamp: Map<DaemonId, number>;
 }
@@ -179,9 +179,9 @@ const agendaKey = (daemonId: DaemonId, ferret: string): string => `${daemonId}\u
 
 interface TaskWatch {
   readonly daemonId: DaemonId;
-  readonly id: CardId;
+  readonly id: TaskId;
   refs: number;
-  state: BoardCardState;
+  state: BoardTaskState;
   stamp: number;
   timer: unknown;
   /** Holders that want the card re-read on the 30-second beat; an inline block reads only on its events. */
@@ -194,7 +194,7 @@ export const boardViewKey = (query: BoardServerQuery, machines: readonly DaemonC
 
 const connectionKey = (machine: DaemonConnection): string => machine.daemonId;
 
-const taskKey = (daemonId: DaemonId, id: CardId): string => JSON.stringify([daemonId, id]);
+const taskKey = (daemonId: DaemonId, id: TaskId): string => JSON.stringify([daemonId, id]);
 
 export class DaemonBoardStore {
   readonly #port: BoardPort;
@@ -416,7 +416,7 @@ export class DaemonBoardStore {
     const scoped = read.response;
     if (scoped.projectId !== null && scoped.laneSet !== null) laneSets.set(scoped.projectId, scoped.laneSet);
     const missing = [
-      ...new Set(scoped.cards.map(card => card.projectId).filter(projectId => !laneSets.has(projectId))),
+      ...new Set(scoped.cards.map(task => task.projectId).filter(projectId => !laneSets.has(projectId))),
     ];
     await Promise.all(
       missing.map(async projectId => {
@@ -439,23 +439,23 @@ export class DaemonBoardStore {
     laneSets: ReadonlyMap<BoardProjectId, LaneSet | null>,
     version: string | null,
   ): void {
-    const stamps = view.stamps.get(daemonId) ?? new Map<CardId, number>();
+    const stamps = view.stamps.get(daemonId) ?? new Map<TaskId, number>();
     view.stamps.set(daemonId, stamps);
     const current = this.#slice(view, daemonId);
-    const cards = new Map(current.cards);
-    const incoming = new Set<CardId>();
-    for (const card of read.response.cards) {
-      incoming.add(card.id);
-      if (stamp > (stamps.get(card.id) ?? 0)) {
-        cards.set(card.id, card);
-        stamps.set(card.id, stamp);
+    const tasks = new Map(current.cards);
+    const incoming = new Set<TaskId>();
+    for (const task of read.response.cards) {
+      incoming.add(task.id);
+      if (stamp > (stamps.get(task.id) ?? 0)) {
+        tasks.set(task.id, task);
+        stamps.set(task.id, stamp);
       }
     }
     // A board that ran past its last page cannot say a card is gone, only that it was not read.
     if (!read.truncated) {
       for (const id of current.cards.keys()) {
         if (!incoming.has(id) && stamp > (stamps.get(id) ?? 0)) {
-          cards.delete(id);
+          tasks.delete(id);
           stamps.set(id, stamp);
         }
       }
@@ -464,7 +464,7 @@ export class DaemonBoardStore {
     this.#setSlice(view, daemonId, {
       status: 'ready',
       error: null,
-      cards,
+      cards: tasks,
       laneSets: new Map([...current.laneSets, ...laneSets]),
       counts: read.response.counts,
       quarantined: read.response.quarantined,
@@ -509,7 +509,7 @@ export class DaemonBoardStore {
   }
 
   /** Re-reads these cards of one machine, and only these, into every view and task page that holds them. */
-  async reconcile(daemonId: DaemonId, taskIds: readonly CardId[]): Promise<void> {
+  async reconcile(daemonId: DaemonId, taskIds: readonly TaskId[]): Promise<void> {
     const machine = this.#connections.get(daemonId);
     if (machine === undefined) return;
     const generation = this.#generation(daemonId);
@@ -533,27 +533,27 @@ export class DaemonBoardStore {
   }
 
   /** Puts one card read into a view, or takes it out. `answer` is `null` for a card the machine lacks. */
-  #placeCard(view: View, daemonId: DaemonId, id: CardId, stamp: number, answer: CardResponse | null): void {
-    const stamps = view.stamps.get(daemonId) ?? new Map<CardId, number>();
+  #placeCard(view: View, daemonId: DaemonId, id: TaskId, stamp: number, answer: TaskResponse | null): void {
+    const stamps = view.stamps.get(daemonId) ?? new Map<TaskId, number>();
     view.stamps.set(daemonId, stamps);
     if (stamp <= Math.max(stamps.get(id) ?? 0, view.fullStamp.get(daemonId) ?? 0)) return;
     const current = this.#slice(view, daemonId);
     const laneSets =
       answer?.laneSet == null ? current.laneSets : new Map(current.laneSets).set(answer.card.projectId, answer.laneSet);
     const laneSet = answer === null ? null : (laneSets.get(answer.card.projectId) ?? null);
-    const belongs = answer !== null && cardMatchesQuery(answer.card, laneSet, view.query);
+    const belongs = answer !== null && taskMatchesQuery(answer.card, laneSet, view.query);
     stamps.set(id, stamp);
-    const cards = new Map(current.cards);
-    if (belongs) cards.set(id, answer.card);
-    else cards.delete(id);
-    this.#setSlice(view, daemonId, { ...current, cards, laneSets });
+    const tasks = new Map(current.cards);
+    if (belongs) tasks.set(id, answer.card);
+    else tasks.delete(id);
+    this.#setSlice(view, daemonId, { ...current, cards: tasks, laneSets });
   }
 
   // -------------------------------------------------------------------------------------------------
   // One card
   // -------------------------------------------------------------------------------------------------
 
-  taskState(daemonId: DaemonId, id: CardId): BoardCardState {
+  taskState(daemonId: DaemonId, id: TaskId): BoardTaskState {
     return this.#tasks.get(taskKey(daemonId, id))?.state ?? IDLE_BOARD_TASK;
   }
 
@@ -562,7 +562,7 @@ export class DaemonBoardStore {
    * passes `beat: false`, every beat. A card shown inline in a message is live on events alone: nothing
    * about a message earns a timer, and the page that holds the card in full still gets its beat.
    */
-  watchTask(machine: DaemonConnection, id: CardId, options: { readonly beat?: boolean } = {}): () => void {
+  watchTask(machine: DaemonConnection, id: TaskId, options: { readonly beat?: boolean } = {}): () => void {
     const beat = options.beat !== false;
     this.#connections.set(machine.daemonId, machine);
     const key = taskKey(machine.daemonId, id);
@@ -622,7 +622,7 @@ export class DaemonBoardStore {
     this.#armTask(watch);
   }
 
-  #setTask(watch: TaskWatch, stamp: number, answer: CardResponse | null): void {
+  #setTask(watch: TaskWatch, stamp: number, answer: TaskResponse | null): void {
     if (stamp <= watch.stamp) return;
     watch.stamp = stamp;
     this.#setTaskState(
@@ -633,7 +633,7 @@ export class DaemonBoardStore {
     );
   }
 
-  #setTaskState(watch: TaskWatch, state: BoardCardState): void {
+  #setTaskState(watch: TaskWatch, state: BoardTaskState): void {
     watch.state = state;
     this.#publish();
   }
@@ -725,7 +725,7 @@ export class DaemonBoardStore {
     }
   }
 
-  #noteIds(daemonId: DaemonId, taskIds: readonly CardId[]): void {
+  #noteIds(daemonId: DaemonId, taskIds: readonly TaskId[]): void {
     const current = this.idsState(daemonId);
     if (current.ids === null || taskIds.every(id => current.ids?.has(id) === true)) return;
     this.#setIds(daemonId, { ...current, ids: new Set([...current.ids, ...taskIds]) });
@@ -747,9 +747,9 @@ export class DaemonBoardStore {
    */
   async act(
     machine: DaemonConnection,
-    id: CardId,
-    request: CardActionRequestInput,
-  ): Promise<BoardResult<CardView, BoardWriteError>> {
+    id: TaskId,
+    request: TaskActionRequestInput,
+  ): Promise<BoardResult<TaskView, BoardWriteError>> {
     const generation = this.#generation(machine.daemonId);
     const stamp = ++this.#clock;
     const answer = await this.#port.act(machine, id, request);
@@ -769,7 +769,7 @@ export class DaemonBoardStore {
   }
 
   /** Starts a new ferret on the card on the machine that holds it; the card itself moves when the feed says so. */
-  start(machine: DaemonConnection, id: CardId, key?: string): Promise<BoardResult<CardStartResponse, BoardWriteError>> {
+  start(machine: DaemonConnection, id: TaskId, key?: string): Promise<BoardResult<TaskStartResponse, BoardWriteError>> {
     return this.#port.start(machine, id, key);
   }
 
@@ -779,8 +779,8 @@ export class DaemonBoardStore {
    */
   async create(
     machine: DaemonConnection,
-    request: CardCreateRequestInput,
-  ): Promise<BoardResult<CardView, BoardWriteError>> {
+    request: TaskCreateRequestInput,
+  ): Promise<BoardResult<TaskView, BoardWriteError>> {
     const generation = this.#generation(machine.daemonId);
     const answer = await this.#port.create(machine, request);
     if (!answer.ok) return boardErr(answer.error);

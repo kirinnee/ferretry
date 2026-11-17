@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
-import type { Card, CardEvent, LaneSet, PrLink, ReleasedIn, Workflow } from '../../../contract/index.ts';
+import type { Task, TaskEvent, LaneSet, PrLink, ReleasedIn, Workflow } from '../../../contract/index.ts';
 import should from 'should';
 import { FACT_TRIGGERS, laneFromFacts } from '../../../daemon/lib/board/index.ts';
-import { card, lanes, oldQuickLanes, PROJECT, templateLanes } from './support.ts';
+import { boardTask, lanes, oldQuickLanes, PROJECT, templateLanes } from './support.ts';
 
 const MERGED_AT = '2026-10-30T09:00:00Z';
 const SHA = 'a'.repeat(40);
@@ -26,11 +26,11 @@ const open = (number: number, draft = false): PrLink => pr(number, { state: 'ope
 const merged = (number: number, releasedIn: ReleasedIn | null = null): PrLink =>
   pr(number, { state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, releasedIn });
 
-const at = (laneId: string, prs: readonly PrLink[], overrides: Partial<Card> = {}): Card =>
-  card({ laneId, links: { prs: [...prs], branch: null, commits: [], docs: [] }, ...overrides });
+const at = (laneId: string, prs: readonly PrLink[], overrides: Partial<Task> = {}): Task =>
+  boardTask({ laneId, links: { prs: [...prs], branch: null, commits: [], docs: [] }, ...overrides });
 
 const verdict = (
-  subject: Card,
+  subject: Task,
   runningVersion: string | null = null,
   laneSet: LaneSet = lanes(),
   workflow: Workflow = subject.workflow,
@@ -140,7 +140,7 @@ describe('laneFromFacts: never backward, never sideways', () => {
 describe('laneFromFacts: an open PR pulls a shipped card back', () => {
   const shipped = merged(1008, release('4.110.0'));
   const open = (number: number, overrides: Partial<PrLink> = {}) => pr(number, { state: 'open', ...overrides });
-  const move = (subject: Card, runningVersion: string | null = null) =>
+  const move = (subject: Task, runningVersion: string | null = null) =>
     laneFromFacts(subject, lanes(), subject.workflow, { prs: subject.links.prs, runningVersion });
 
   it.each(['merged', 'released', 'tested'])('should move a card in %s back to review for an open PR', lane => {
@@ -201,7 +201,7 @@ describe('laneFromFacts: an open PR pulls a shipped card back', () => {
 
   it('should not count its own move back as the owner sending the card back', () => {
     const base = at('review', [shipped, pr(1013, { state: 'closed' })]);
-    const pulled: CardEvent = {
+    const pulled: TaskEvent = {
       seq: 2,
       at: '2026-10-30T10:05:00Z',
       actor: { kind: 'daemon' },
@@ -214,13 +214,13 @@ describe('laneFromFacts: an open PR pulls a shipped card back', () => {
       trigger: 'pr.ready',
     };
     // The new PR was abandoned: what shipped still ships, so the card goes on to the release.
-    const subject = { ...base, history: [base.history[0] as CardEvent, pulled] };
+    const subject = { ...base, history: [base.history[0] as TaskEvent, pulled] };
     should(move(subject, '4.110.0')).match({ lane: { id: 'tested' }, trigger: 'release.running', backward: false });
   });
 
   it('should still keep a card the owner sent back where it is sent', () => {
     const base = at('implement', [shipped, open(1013)]);
-    const sent: CardEvent = {
+    const sent: TaskEvent = {
       seq: 2,
       at: '2026-10-30T10:05:00Z',
       actor: { kind: 'owner' },
@@ -230,14 +230,14 @@ describe('laneFromFacts: an open PR pulls a shipped card back', () => {
       reason: 'not good',
       ask: { text: 'again', source: 'owner' },
     };
-    const subject = { ...base, history: [base.history[0] as CardEvent, sent] };
+    const subject = { ...base, history: [base.history[0] as TaskEvent, sent] };
     should(move(subject)).match({ lane: { id: 'review' }, backward: false });
     should(move({ ...subject, links: { ...subject.links, prs: [shipped] } })).be.null();
   });
 });
 
 describe('laneFromFacts: a card the owner sent back', () => {
-  const sentBack = (kind: 'reopened' | 'moved', when: string): CardEvent =>
+  const sentBack = (kind: 'reopened' | 'moved', when: string): TaskEvent =>
     kind === 'reopened'
       ? {
           seq: 2,
@@ -259,7 +259,7 @@ describe('laneFromFacts: a card the owner sent back', () => {
           backward: true,
           reason: 'needs more work',
         };
-  const created = (subject: Card): CardEvent => subject.history[0] as CardEvent;
+  const created = (subject: Task): TaskEvent => subject.history[0] as TaskEvent;
 
   it.each(['reopened', 'moved'] as const)(
     'should not move it on a PR that merged before it was %s back, but on one that merges after',
@@ -355,7 +355,7 @@ describe('FACT_TRIGGERS', () => {
 
 describe('laneFromFacts: the action-first Ferretry lanes', () => {
   const live = templateLanes(PROJECT);
-  const on = (subject: Card, runningVersion: string | null = null) => verdict(subject, runningVersion, live);
+  const on = (subject: Task, runningVersion: string | null = null) => verdict(subject, runningVersion, live);
 
   it('should put open work in progress, review folded in, and merged work in Merged', () => {
     should(on(at('todo', [open(1, true)]))).deepEqual(['implement', 'pr.opened']);

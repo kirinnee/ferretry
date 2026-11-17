@@ -24,7 +24,7 @@ const context = (trigger: ComposerTrigger, query: string, tier?: number): Compos
   },
 });
 
-const card = (id: string, patch: Partial<Extract<WorkHit, { kind: 'card' }>> = {}): WorkHit =>
+const task = (id: string, patch: Partial<Extract<WorkHit, { kind: 'card' }>> = {}): WorkHit =>
   ({
     kind: 'card',
     id,
@@ -86,7 +86,7 @@ const replacements = (result: { readonly candidates: readonly { readonly replace
 
 describe("the composer pickers over the daemon's work search", () => {
   it('adds a card found by words under the @@@@ rows, as the same row with its lane as the chip', async () => {
-    const { port, asked } = fakePort([card('F77')]);
+    const { port, asked } = fakePort([task('F77')]);
     const result = await ladder(port).candidates(context('@', 'relay', 4));
     expect(result.candidates).toMatchObject([
       { replacement: '&F77', badge: 'Doing', detail: 'Relay handshake · Relay' },
@@ -97,9 +97,9 @@ describe("the composer pickers over the daemon's work search", () => {
   it("names a card's project and never shows its id: Unfiled for the unfiled board, nothing for an unknown one", async () => {
     const stranger = '11111111-2222-4333-8444-555555555555';
     const { port } = fakePort([
-      card('F1', { project: 'unfiled' }),
-      card('F2', { project: stranger }),
-      card('F3', { project: RELAY_PROJECT }),
+      task('F1', { project: 'unfiled' }),
+      task('F2', { project: stranger }),
+      task('F3', { project: RELAY_PROJECT }),
     ]);
     const result = await ladder(port).candidates(context('@', 'relay', 4));
     const details = Object.fromEntries(result.candidates.map(c => [c.replacement, c.detail]));
@@ -146,7 +146,7 @@ describe("the composer pickers over the daemon's work search", () => {
   });
 
   it('leaves the files and agents tiers alone', async () => {
-    const { port, asked } = fakePort([card('F77')]);
+    const { port, asked } = fakePort([task('F77')]);
     await ladder(port).candidates(context('@', 'relay', 2));
     expect(asked).toEqual([]);
   });
@@ -164,7 +164,7 @@ describe("the composer pickers over the daemon's work search", () => {
 
 describe('abandoning a picker search', () => {
   it('rejects at once when the menu was already closed before the wait began', async () => {
-    const { port, asked } = fakePort([card('F77')]);
+    const { port, asked } = fakePort([task('F77')]);
     const controller = new AbortController();
     controller.abort(new Error('closed'));
     const stale = { ...context('@', 'relay', 4), signal: controller.signal };
@@ -173,7 +173,7 @@ describe('abandoning a picker search', () => {
   });
 
   it('rejects at once when the menu closes just before the pause would begin', async () => {
-    const { port, asked } = fakePort([card('F77')]);
+    const { port, asked } = fakePort([task('F77')]);
     const controller = new AbortController();
     const pending = ladder(port).candidates({ ...context('@', 'relay', 4), signal: controller.signal });
     controller.abort(new Error('closed'));
@@ -182,7 +182,7 @@ describe('abandoning a picker search', () => {
   });
 
   it('stops waiting, and never asks, when the menu closes during the pause', async () => {
-    const { port, asked } = fakePort([card('F77')]);
+    const { port, asked } = fakePort([task('F77')]);
     const controller = new AbortController();
     const pending = ladder(port).candidates({ ...context('@', 'relay', 4), signal: controller.signal });
     await new Promise(resolve => setTimeout(resolve, 10));

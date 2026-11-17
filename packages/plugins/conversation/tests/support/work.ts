@@ -22,7 +22,7 @@ interface WorkInput {
 }
 
 /** A card as its source hands it over. */
-export const cardWork = (
+export const taskWork = (
   input: WorkInput & { readonly project?: string; readonly ferret?: string | null },
 ): RawWork => ({
   key: cardKey(input.id),

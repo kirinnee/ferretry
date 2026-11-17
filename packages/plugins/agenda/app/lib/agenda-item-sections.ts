@@ -150,7 +150,7 @@ export const referenceRows = (item: Pick<AgendaItem, 'terms' | 'links'>): readon
  * the daemon mirrors a thread's card ask as `gateAttached`; a list, so a daemon that carries several (`cardAsks`,
  * `agenda.card-asks.1`) reads into the same section unchanged.
  */
-export interface ItemCardAsk {
+export interface ItemTaskAsk {
   /** The ask's own reference (`gate:F12:tested:3`): what keys it, and what an answer names. */
   readonly key: string;
   readonly gate: AgendaGate;
@@ -163,10 +163,10 @@ export interface ItemCardAsk {
 /**
  * The current card ask carries its own How to test in the snapshot. A host may also provide board steps.
  */
-export const itemCardAsks = (
+export const itemTaskAsks = (
   item: AgendaItem,
   howToTestFor?: (cardId: string) => string | null | undefined,
-): readonly ItemCardAsk[] => {
+): readonly ItemTaskAsk[] => {
   const view = attachedGateView(item);
   if (view === undefined) return [];
   const attached = item.cardAsks?.find(ask => gateReference(ask.gate) === gateReference(view.gate));

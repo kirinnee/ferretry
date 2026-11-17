@@ -19,7 +19,7 @@
  */
 
 import {
-  agendaCardKind,
+  agendaTaskKind,
   ASK_REFERENCE_SIGIL_CLASS,
   type AgendaItem,
   type AgendaLink,
@@ -137,7 +137,7 @@ function RecommendedBadge() {
  */
 const askHeading = (item: Pick<AgendaItem, 'kind' | 'ask'>, several: boolean): string => {
   if (several) return 'The questions';
-  const kind = agendaCardKind(item);
+  const kind = agendaTaskKind(item);
   return kind === 'info' ? 'What happened' : kind === 'task' ? 'To do' : 'The question';
 };
 
@@ -455,7 +455,7 @@ export function AgendaBriefSections({
   const heading = askLabel === undefined ? askHeading(item, several) : askLabel;
   // Open and not the card: the premise and the context are ONE block on top, and the type orders what follows.
   const situated = !fold && !asCard && (premise !== null || context !== null);
-  const kind = agendaCardKind(item);
+  const kind = agendaTaskKind(item);
   const typed = !fold && !asCard;
   const stepsBlock =
     asCard || steps === undefined ? null : (

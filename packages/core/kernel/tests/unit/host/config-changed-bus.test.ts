@@ -118,7 +118,7 @@ async function boot(rules: Rules) {
   };
   const records: LogRecord[] = [];
   let config: ConfigPort | undefined;
-  let publish: ((card: string) => void) | undefined;
+  let publish: ((task: string) => void) | undefined;
   const heard: unknown[] = [];
   const outcome = await bootHost({
     home,
@@ -133,7 +133,7 @@ async function boot(rules: Rules) {
       implementDaemon(board, {
         build: ({ kernel }) => {
           config = kernel.config;
-          publish = card => kernel.events.publish(Moved, { card });
+          publish = task => kernel.events.publish(Moved, { card: task });
           return {};
         },
       }),

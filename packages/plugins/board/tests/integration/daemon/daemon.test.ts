@@ -1,27 +1,27 @@
 import { describe, expect, test } from 'bun:test';
 import { sourceKey } from '@ferretry/core-asks/contract/testing';
 import type { AskAnswer } from '@ferretry/core-asks/contract';
-import { as, boot, makeCard, NEW_CARD } from './harness.ts';
+import { as, boot, makeTask, NEW_TASK } from './harness.ts';
 
 describe('board daemon half', () => {
   test('the owner makes a card and the board lists it', async () => {
     const { host } = await boot();
-    const made = await makeCard(host);
-    const card = made;
-    expect(card.id).toMatch(/^F[1-9][0-9]*$/);
+    const made = await makeTask(host);
+    const task = made;
+    expect(task.id).toMatch(/^F[1-9][0-9]*$/);
 
     const board = await host.request('GET', '/v1/board', { headers: as('owner') });
     expect(board.status).toBe(200);
-    expect(board.json<{ tasks: { id: string }[] }>().tasks.map(each => each.id)).toContain(card.id);
+    expect(board.json<{ tasks: { id: string }[] }>().tasks.map(each => each.id)).toContain(task.id);
 
-    const one = await host.request('GET', `/v1/board/tasks/${card.id}`, { headers: as('owner') });
+    const one = await host.request('GET', `/v1/board/tasks/${task.id}`, { headers: as('owner') });
     expect(one.json<{ task: { title: string } }>().task.title).toBe('Badge colour');
   });
 
   test('O18 the former /v1/board/cards paths answer exactly as the /v1/board/tasks paths do: one handler', async () => {
     const { host } = await boot();
     const owner = { headers: as('owner') };
-    const made = await host.request('POST', '/v1/board/cards', { body: NEW_CARD, ...owner });
+    const made = await host.request('POST', '/v1/board/cards', { body: NEW_TASK, ...owner });
     expect(made.status).toBe(200);
     const id = made.json<{ task: { id: string } }>().task.id;
 
@@ -57,14 +57,14 @@ describe('board daemon half', () => {
 
   test('ids are never reused: the second card is a new number', async () => {
     const { host } = await boot();
-    const first = await makeCard(host);
-    const second = await makeCard(host);
+    const first = await makeTask(host);
+    const second = await makeTask(host);
     expect(first.id).not.toBe(second.id);
   });
 
   test('a card is stored one file per card, format first', async () => {
     const { host } = await boot();
-    const made = await makeCard(host);
+    const made = await makeTask(host);
     const id = made.id;
     const text = host.state('board').files.get(`cards/${id}.json`);
     expect(text).toBeDefined();
@@ -92,7 +92,7 @@ describe('board daemon half', () => {
 
   test('the task_progress tool writes the parts it names and keeps the rest; card_progress is its old name, on the same handler', async () => {
     const { host } = await boot();
-    const made = await makeCard(host, { assignee: 'f1' });
+    const made = await makeTask(host, { assignee: 'f1' });
     const id = made.id;
     const first = await host.tool('task_progress', { task: id, now: 'writing it', next: 'test it' });
     const second = await host.tool('card_progress', { card: id, doneSoFar: 'wrote it' });
@@ -109,7 +109,7 @@ describe('board daemon half', () => {
 
   test('the card_progress tool writes the parts it names and keeps the rest', async () => {
     const { host } = await boot();
-    const made = await makeCard(host, { assignee: 'f1' });
+    const made = await makeTask(host, { assignee: 'f1' });
     const id = made.id;
     const first = await host.tool('card_progress', { card: id, now: 'writing it', next: 'test it' });
     const second = await host.tool('card_progress', { card: id, doneSoFar: 'wrote it' });
@@ -156,7 +156,7 @@ describe('board daemon half', () => {
 
   test('#1552 a card that reaches a gate lane raises ONE obligation through Asks, source card; a second write raises no more; leaving withdraws it', async () => {
     const { asks, host } = await boot();
-    const made = await makeCard(host, { howToTest: 'Open the badge and look at its colour.' });
+    const made = await makeTask(host, { howToTest: 'Open the badge and look at its colour.' });
     const move = async (to: string) =>
       await host.request('POST', `/v1/board/tasks/${made.id}`, {
         body: { action: 'move', to, reason: 'for the test' },
@@ -187,7 +187,7 @@ describe('board daemon half', () => {
 
   test('#1552 the owner Done moves the card FIRST (the source apply), and the same answer applied twice moves nothing more', async () => {
     const { asks, host, apply } = await boot();
-    const made = await makeCard(host, { howToTest: 'Open the badge and look at its colour.' });
+    const made = await makeTask(host, { howToTest: 'Open the badge and look at its colour.' });
     const move = async (to: string) =>
       await host.request('POST', `/v1/board/tasks/${made.id}`, {
         body: { action: 'move', to, reason: 'for the test' },
@@ -225,7 +225,7 @@ describe('board daemon half', () => {
 
   test('#1552 an answer to a gate the card has left is refused in words, and the card is not moved', async () => {
     const { asks, host, apply } = await boot();
-    const made = await makeCard(host, { howToTest: 'Open the badge and look at its colour.' });
+    const made = await makeTask(host, { howToTest: 'Open the badge and look at its colour.' });
     const move = async (to: string) =>
       await host.request('POST', `/v1/board/tasks/${made.id}`, {
         body: { action: 'move', to, reason: 'for the test' },
@@ -255,7 +255,7 @@ describe('board daemon half', () => {
 
   test('a card survives a restart, and a damaged card file is quarantined: listed, never served, never overwritten', async () => {
     const { host } = await boot();
-    const kept = await makeCard(host);
+    const kept = await makeTask(host);
     host.state('board').files.set('cards/F77.json', '{ this is not a card');
     const again = await host.restart();
     const board = await again.request('GET', '/v1/board', { headers: as('owner') });
@@ -264,7 +264,7 @@ describe('board daemon half', () => {
     expect(body.quarantined.map(each => each.id)).toEqual(['F77']);
     expect(again.state('board').files.get('cards/F77.json')).toBe('{ this is not a card');
     // The damaged card's number is skipped, never handed out again.
-    const next = await again.request('POST', '/v1/board/tasks', { body: NEW_CARD, headers: as('owner') });
+    const next = await again.request('POST', '/v1/board/tasks', { body: NEW_TASK, headers: as('owner') });
     expect(next.status).toBe(200);
     expect(next.json<{ task: { id: string } }>().task.id).not.toBe('F77');
   });
@@ -276,19 +276,19 @@ describe('board daemon half', () => {
 });
 
 describe('the sitrep a lead reads a card from', () => {
-  type CardLine = { kind: string; ref?: string; lane?: string; pr?: Record<string, unknown> };
-  const linesOf = async (world: Awaited<ReturnType<typeof boot>>, ferret: string): Promise<CardLine[]> => {
-    const [board] = world.contribution('sitrep.lines') as { item: { lines(ferret: string): Promise<CardLine[]> } }[];
+  type TaskLine = { kind: string; ref?: string; lane?: string; pr?: Record<string, unknown> };
+  const linesOf = async (world: Awaited<ReturnType<typeof boot>>, ferret: string): Promise<TaskLine[]> => {
+    const [board] = world.contribution('sitrep.lines') as { item: { lines(ferret: string): Promise<TaskLine[]> } }[];
     return await (board as NonNullable<typeof board>).item.lines(ferret);
   };
 
   test('a card line names the lane the card sits in, and says nothing of a PR it does not have', async () => {
     const world = await boot();
-    const card = await makeCard(world.host, { assignee: 'f1' });
+    const task = await makeTask(world.host, { assignee: 'f1' });
 
     const [line] = await linesOf(world, 'f1');
 
-    expect(line).toMatchObject({ kind: 'card', ref: `&${card.id}` });
+    expect(line).toMatchObject({ kind: 'card', ref: `&${task.id}` });
     expect(typeof line?.lane).toBe('string');
     expect(line?.lane).not.toBe('');
     expect(line?.pr).toBeUndefined();
@@ -296,9 +296,9 @@ describe('the sitrep a lead reads a card from', () => {
 
   test('a card line carries the card’s PR as its board last read it, the newest live one', async () => {
     const world = await boot();
-    const card = await makeCard(world.host, { assignee: 'f1' });
+    const task = await makeTask(world.host, { assignee: 'f1' });
     for (const number of [940, 941]) {
-      const linked = await world.host.request('POST', `/v1/board/tasks/${card.id}`, {
+      const linked = await world.host.request('POST', `/v1/board/tasks/${task.id}`, {
         body: { action: 'link', pr: `https://github.com/kirinnee/ferretry/pull/${String(number)}` },
         headers: as('owner'),
       });

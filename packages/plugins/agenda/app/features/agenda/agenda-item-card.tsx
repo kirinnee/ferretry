@@ -29,7 +29,7 @@
 
 import {
   AGENDA_SHAPE_LEADS,
-  type AgendaCardAnswer,
+  type AgendaTaskAnswer,
   type AgendaItem,
   plainLabel,
   singleAgendaQuestion,
@@ -46,8 +46,8 @@ import { useFormPicks } from '../../lib/agenda-form-state.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import {
-  type ItemCardAsk,
-  itemCardAsks,
+  type ItemTaskAsk,
+  itemTaskAsks,
   itemStage,
   PART_TITLES,
   type ReferenceRow,
@@ -111,7 +111,7 @@ export interface AgendaItemCardProps {
    * A review's Request changes: the host sends the composer's words as the change asked for, or puts the owner in
    * the composer when it is empty. Absent: the card says to type the changes there instead.
    */
-  readonly onRequestChanges?: ((answer: AgendaCardAnswer) => void) | undefined;
+  readonly onRequestChanges?: ((answer: AgendaTaskAnswer) => void) | undefined;
   /**
    * Where a one-row answer (choice, approval, to-do, notice, review) is drawn instead of at the card's foot: the open
    * item's sticky dock, so the buttons stay in reach while a long card scrolls. Absent: the row ends the card.
@@ -327,14 +327,14 @@ function ReferencesTable({
  * the card and what it waits on, its How to test when the ask carries one, and ITS buttons (Done / Not good, or OK to
  * build) — tap only, so the arrows and swipes stay the item's own.
  */
-function CardAskBlock({
+function TaskAskBlock({
   ask,
   busy,
   onAct,
   renderProse,
   offer = null,
 }: {
-  readonly ask: ItemCardAsk;
+  readonly ask: ItemTaskAsk;
   readonly busy: boolean;
   readonly onAct: (action: InboxAction) => void;
   readonly renderProse: Prose;
@@ -508,13 +508,13 @@ export function AgendaItemCard({
   const stepsInNeed = shape === 'todo';
   const requestChanges =
     answerable && onRequestChanges !== undefined && model.requestChanges !== undefined
-      ? { answer: model.requestChanges, onTap: () => onRequestChanges(model.requestChanges as AgendaCardAnswer) }
+      ? { answer: model.requestChanges, onTap: () => onRequestChanges(model.requestChanges as AgendaTaskAnswer) }
       : undefined;
   // Every card ask the item carries is answered HERE, inside the item, with its own buttons: never docked, never a
   // separate item. Only the latest version is answerable, so an earlier one draws none.
-  const cardAsks = latest && settled === undefined ? itemCardAsks(item, howToTestFor) : [];
+  const taskAsks = latest && settled === undefined ? itemTaskAsks(item, howToTestFor) : [];
   // The owner already said yes in words ("build", "ok to build!"): offer it as the card ask's answer (&B155).
-  const replyOffer = cardAsks.length === 0 ? null : replyApproval(item, history);
+  const replyOffer = taskAsks.length === 0 ? null : replyApproval(item, history);
   const replies = (
     <AgendaQuickReplies
       busy={busy}
@@ -534,14 +534,14 @@ export function AgendaItemCard({
   // share the foot of the view and the card ask's buttons are never covered. An item answered in words (a reply, its
   // questions) has no row to label: it gets no "Your answer for this item" heading over nothing (&B156).
   const ownRow = model.notice || model.answers.length > 0 || requestChanges !== undefined;
-  const rowInline = cardAsks.length > 0 && !isInput && planForm === undefined && ownRow;
+  const rowInline = taskAsks.length > 0 && !isInput && planForm === undefined && ownRow;
   const docked =
     answerDock != null &&
     latest &&
     settled === undefined &&
     !isInput &&
     planForm === undefined &&
-    cardAsks.length === 0 &&
+    taskAsks.length === 0 &&
     (model.notice || model.answers.length > 0 || requestChanges !== undefined);
   const state = stateChip(current, ferret, now);
   const stage = itemStage(current);
@@ -765,10 +765,10 @@ export function AgendaItemCard({
               )}
             </Section>
           )}
-          {cardAsks.length === 0 ? null : (
-            <div className="fy-card__card-asks" data-agenda-card-asks={cardAsks.length}>
-              {cardAsks.map(ask => (
-                <CardAskBlock
+          {taskAsks.length === 0 ? null : (
+            <div className="fy-card__card-asks" data-agenda-card-asks={taskAsks.length}>
+              {taskAsks.map(ask => (
+                <TaskAskBlock
                   ask={ask}
                   busy={busy}
                   key={ask.key}

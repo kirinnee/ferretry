@@ -15,7 +15,7 @@
  *   approvals, or the forward option's own label. Nothing longer is read: "build it after lunch" offers nothing.
  */
 
-import { type AgendaGate, type AgendaItem, cardAskReference, openCardAsks } from '@ferretry/core-asks/contract';
+import { type AgendaGate, type AgendaItem, taskAskReference, openTaskAsks } from '@ferretry/core-asks/contract';
 import { type HistoryEvent, withoutLeadingReference } from './agenda-history.ts';
 
 /** The words that alone mean "yes, go on" to any card ask, in lower case. */
@@ -97,7 +97,7 @@ const lastOwnerReply = (history: readonly HistoryEvent[], since: number): Histor
  * the ask was raised, plainly approve it.
  */
 export const replyApproval = (item: AgendaItem, history: readonly HistoryEvent[]): ReplyApproval | null => {
-  const open = openCardAsks(item);
+  const open = openTaskAsks(item);
   const [ask] = open;
   if (open.length !== 1 || ask === undefined) return null;
   const label = forwardLabel(ask.gate);
@@ -113,5 +113,5 @@ export const replyApproval = (item: AgendaItem, history: readonly HistoryEvent[]
     said === named ||
     (named.includes('build') && BUILD_APPROVALS.has(said)) ||
     (named === 'done' && TEST_APPROVALS.has(said));
-  return fits ? { reply, label, ask: cardAskReference(ask) } : null;
+  return fits ? { reply, label, ask: taskAskReference(ask) } : null;
 };

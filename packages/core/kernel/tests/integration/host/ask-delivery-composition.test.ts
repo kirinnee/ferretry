@@ -123,7 +123,7 @@ describe('R-0333 M3: lineage, focus and home through the real Ferrets and Board'
   test('a lead’s add is accepted and carries the card Board says it focuses on', async () => {
     const w = await open();
     const lead = await w.start({ folder: '/work/lead', prompt: 'Lead the work.' });
-    const card = await w.h.request('POST', '/v1/board/cards', {
+    const task = await w.h.request('POST', '/v1/board/cards', {
       body: {
         kind: 'feature',
         title: 'Ship release',
@@ -132,21 +132,21 @@ describe('R-0333 M3: lineage, focus and home through the real Ferrets and Board'
         ask: { text: 'Ship the release.', source: 'owner' },
       },
     });
-    expect(card.status).toBe(200);
-    const cardId = card.json<{ task: { id: string } }>().task.id;
+    expect(task.status).toBe(200);
+    const taskId = task.json<{ task: { id: string } }>().task.id;
     w.as(lead.id);
-    expect((await w.h.request('POST', `/v1/board/cards/${cardId}`, { body: { action: 'focus' } })).status).toBe(200);
+    expect((await w.h.request('POST', `/v1/board/cards/${taskId}`, { body: { action: 'focus' } })).status).toBe(200);
 
     const added = await w.h.request('POST', `/v1/ferrets/${lead.id}/agenda`, { body: ASK });
 
     expect(added.status).toBe(200);
-    expect(added.json<{ items: { task?: { id: string } }[] }>().items[0]?.task?.id).toBe(cardId);
+    expect(added.json<{ items: { task?: { id: string } }[] }>().items[0]?.task?.id).toBe(taskId);
   });
 
   test('a card in its gate refuses another explicitly card-linked ask and points at the existing one', async () => {
     const w = await open();
     const lead = await w.start({ folder: '/work/lead', prompt: 'Lead the work.' });
-    const card = await w.h.request('POST', '/v1/board/cards', {
+    const task = await w.h.request('POST', '/v1/board/cards', {
       body: {
         kind: 'feature',
         title: 'Ship release',
@@ -155,17 +155,17 @@ describe('R-0333 M3: lineage, focus and home through the real Ferrets and Board'
         ask: { text: 'Ship the release.', source: 'owner' },
       },
     });
-    const cardId = card.json<{ task: { id: string } }>().task.id;
+    const taskId = task.json<{ task: { id: string } }>().task.id;
     for (const to of ['doing', 'to-test'])
       expect(
-        (await w.h.request('POST', `/v1/board/cards/${cardId}`, { body: { action: 'move', to, reason: 'Gate check' } }))
+        (await w.h.request('POST', `/v1/board/cards/${taskId}`, { body: { action: 'move', to, reason: 'Gate check' } }))
           .status,
       ).toBe(200);
     await w.h.settle();
     w.as(lead.id);
 
     const second = await w.h.request('POST', `/v1/ferrets/${lead.id}/agenda`, {
-      body: { ...ASK, title: 'Another release decision', subject: 'Another release decision?', task: { id: cardId } },
+      body: { ...ASK, title: 'Another release decision', subject: 'Another release decision?', task: { id: taskId } },
     });
 
     expect(second.status).toBe(400);

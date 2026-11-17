@@ -393,10 +393,10 @@ export const withdrawReplyVia =
     clientOf: (daemon: string) => QueueClient | undefined,
     outbox: Pick<SendOutbox, 'edit' | 'cancel'>,
   ) =>
-  async (card: { readonly daemon: string; readonly ferret: string }, sendId: string): Promise<QueueWithdrawal> => {
-    const client = clientOf(card.daemon);
+  async (task: { readonly daemon: string; readonly ferret: string }, sendId: string): Promise<QueueWithdrawal> => {
+    const client = clientOf(task.daemon);
     if (client === undefined) throw new Error('That machine is no longer paired with this browser.');
-    return await withdrawQueued(client, card.ferret, sendId, outbox);
+    return await withdrawQueued(client, task.ferret, sendId, outbox);
   };
 
 /**

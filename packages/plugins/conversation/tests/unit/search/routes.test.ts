@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ApiRequest } from '@ferretry/kernel/contract';
 import { buildSearch } from '../../../daemon/search/index.ts';
-import { cardWork, FakeSource, NOW_MS, query } from '../../support/work.ts';
+import { taskWork, FakeSource, NOW_MS, query } from '../../support/work.ts';
 
 const asks = {
   open: async ({ state }: { state?: string }) =>
@@ -141,14 +141,14 @@ describe('buildSearch', () => {
       warn: () => undefined,
     });
     expect((await search.service.search(query('relay'))).total).toBe(0);
-    contributed.push(new FakeSource('cards', [cardWork({ id: 'F7', title: 'Relay carrier' })], true));
+    contributed.push(new FakeSource('cards', [taskWork({ id: 'F7', title: 'Relay carrier' })], true));
     expect((await search.service.search(query('relay'))).hits.map(hit => hit.id)).toEqual(['F7']);
   });
 
   test('a redaction generation that moves rebuilds the index; one that cannot be read fails closed', async () => {
     let generation: string | Error = 'g1';
     let lists = 0;
-    const source = new FakeSource('cards', [cardWork({ id: 'F7', title: 'Relay carrier' })]);
+    const source = new FakeSource('cards', [taskWork({ id: 'F7', title: 'Relay carrier' })]);
     const counting = {
       id: 'cards',
       list: async () => {

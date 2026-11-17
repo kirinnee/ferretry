@@ -10,17 +10,17 @@ import {
   type BoardCounts,
   type BoardPrStateFilter,
   type BoardQuery,
-  type CardView,
+  type TaskView,
   isInBoardState,
   type LaneCategory,
   type PrLink,
 } from '../../../contract/index.ts';
 import { BoardError } from './errors.ts';
-import { cardVisibility } from './visibility.ts';
+import { taskVisibility } from './visibility.ts';
 
 /** A view with the category of its lane; `undefined` when its board has no lanes this build knows. */
 export interface ScopedView {
-  readonly view: CardView;
+  readonly view: TaskView;
   readonly category: LaneCategory | undefined;
 }
 
@@ -64,7 +64,7 @@ export const inScope = (query: BoardQuery, scoped: ScopedView): boolean => {
   if (query.ferret !== undefined && view.owner !== query.ferret && view.assignee !== query.ferret) return false;
   if (query.kind !== undefined && view.kind !== query.kind) return false;
   if (query.visibility === 'public' || query.visibility === 'private') {
-    if (cardVisibility(view) !== query.visibility) return false;
+    if (taskVisibility(view) !== query.visibility) return false;
   }
   if (query.query !== undefined) {
     const needle = query.query.toLowerCase();
@@ -101,7 +101,7 @@ export const countsOf = (query: BoardQuery, scoped: readonly ScopedView[]): Boar
 };
 
 /** The card's most recent history instant: when it last changed. */
-const updatedAt = (view: CardView): string => view.history.at(-1)?.at ?? view.createdAt;
+const updatedAt = (view: TaskView): string => view.history.at(-1)?.at ?? view.createdAt;
 
 const idNumber = (id: string): number => Number(id.slice(1));
 
@@ -109,7 +109,7 @@ const idNumber = (id: string): number => Number(id.slice(1));
  * Board order: a card's manual `order` first (unordered cards after), then the most recently changed,
  * then the id. Total, so a page boundary never moves between two reads of an unchanged board.
  */
-export const compareViews = (left: CardView, right: CardView): number => {
+export const compareViews = (left: TaskView, right: TaskView): number => {
   const leftOrder = left.order ?? Number.POSITIVE_INFINITY;
   const rightOrder = right.order ?? Number.POSITIVE_INFINITY;
   if (leftOrder !== rightOrder) return leftOrder < rightOrder ? -1 : 1;
@@ -137,11 +137,11 @@ export const offsetOf = (cursor: string | undefined): number => {
 /** One page of the filtered, ordered cards, and the cursor of the next page (`null` on the last). */
 export const pageOf = (
   query: BoardQuery,
-  views: readonly CardView[],
-): { readonly cards: readonly CardView[]; readonly nextCursor: string | null } => {
+  views: readonly TaskView[],
+): { readonly cards: readonly TaskView[]; readonly nextCursor: string | null } => {
   const offset = offsetOf(query.cursor);
   const ordered = [...views].sort(compareViews);
-  const cards = ordered.slice(offset, offset + query.limit);
-  const end = offset + cards.length;
-  return { cards, nextCursor: end < ordered.length ? cursorFor(end) : null };
+  const tasks = ordered.slice(offset, offset + query.limit);
+  const end = offset + tasks.length;
+  return { cards: tasks, nextCursor: end < ordered.length ? cursorFor(end) : null };
 };

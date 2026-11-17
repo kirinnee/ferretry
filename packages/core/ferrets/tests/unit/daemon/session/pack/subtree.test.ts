@@ -205,15 +205,15 @@ describe('the subtree table', () => {
       draft: false,
       checks: 'passing',
     } as const;
-    const card = (id: string): SitrepLine => ({ kind: 'card', text: id, ref: `&F${id.length}`, lane: 'Review', pr });
+    const task = (id: string): SitrepLine => ({ kind: 'card', text: id, ref: `&F${id.length}`, lane: 'Review', pr });
     const view = await new SubtreeService(
       registry,
       ports({
-        h0: [card('h0'), line('hi', 1)],
-        h1: [card('h1'), line('hi', 1)],
-        h2: [card('h2'), line('hi', 1)],
-        h3: [card('h3'), line('hi', 1)],
-        done: [card('done'), line('bye', 4)],
+        h0: [task('h0'), line('hi', 1)],
+        h1: [task('h1'), line('hi', 1)],
+        h2: [task('h2'), line('hi', 1)],
+        h3: [task('h3'), line('hi', 1)],
+        done: [task('done'), line('bye', 4)],
       }),
       { concurrency: 2, excerptRows: 2, endedRows: 0 },
     ).view('root' as FerretId);

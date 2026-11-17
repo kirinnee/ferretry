@@ -1,5 +1,5 @@
 /** The board fixtures the warden's tests build cards from: the classic lanes and a stored card, in Board's own types. */
-import type { Card, LaneSet } from '@ferretry/plugin-board/contract';
+import type { Task, LaneSet } from '@ferretry/plugin-board/contract';
 import type { Instant } from '@ferretry/std';
 
 export const PROJECT = '11111111-1111-4111-8111-111111111111';
@@ -28,7 +28,7 @@ export const lanes = (projectId: string = PROJECT): LaneSet => ({
 const ferret = (id: string) => ({ kind: 'ferret' as const, name: id, ferret: id });
 
 /** A stored card: `F1` by ferret `lead`, in Todo, unless told otherwise. */
-export const card = (overrides: Partial<Card> = {}): Card => {
+export const task = (overrides: Partial<Task> = {}): Task => {
   const id = overrides.id ?? 'F1';
   const laneId = overrides.laneId ?? 'todo';
   return {

@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
-import type { Card, PrLink } from '../../../contract/index.ts';
+import type { Task, PrLink } from '../../../contract/index.ts';
 import should from 'should';
 import {
   type ActivityDeriver,
   type ActivityInputs,
   BoardIndex,
   blockedBy,
-  cardCategory,
+  taskCategory,
   type DerivationInputs,
   dependencyCycle,
   deriveView,
@@ -16,7 +16,7 @@ import {
   suggestedLaneOf,
   UNOBSERVED,
 } from '../../../daemon/lib/board/index.ts';
-import { card, lanes, MACHINE, NOW, OTHER_PROJECT, PROJECT } from './support.ts';
+import { boardTask, lanes, MACHINE, NOW, OTHER_PROJECT, PROJECT } from './support.ts';
 
 const laneSets = new Map([
   [PROJECT, lanes(PROJECT)],
@@ -37,8 +37,8 @@ const pr = (overrides: Partial<PrLink> = {}): PrLink => ({
   ...overrides,
 });
 
-const inputs = (cards: readonly Card[], overrides: Partial<DerivationInputs> = {}): DerivationInputs => ({
-  index: new BoardIndex(cards, MACHINE),
+const inputs = (tasks: readonly Task[], overrides: Partial<DerivationInputs> = {}): DerivationInputs => ({
+  index: new BoardIndex(tasks, MACHINE),
   laneSets,
   activity: new Map(),
   asks: new Map(),
@@ -48,7 +48,7 @@ const inputs = (cards: readonly Card[], overrides: Partial<DerivationInputs> = {
 describe('the board index', () => {
   it('should resolve local refs and refuse another machine', () => {
     // Arrange
-    const index = new BoardIndex([card({ id: 'F1' })], MACHINE);
+    const index = new BoardIndex([boardTask({ id: 'F1' })], MACHINE);
 
     // Assert
     should(index.get({ id: 'F1' })?.id).equal('F1');
@@ -60,14 +60,14 @@ describe('the board index', () => {
 
   it('should index children and dependents on this machine only', () => {
     // Arrange
-    const parent = card({ id: 'F1' });
-    const child = card({ id: 'F2', parent: { id: 'F1' }, dependsOn: [{ task: { id: 'F1' }, until: 'shipped' }] });
-    const remote = card({
+    const parent = boardTask({ id: 'F1' });
+    const child = boardTask({ id: 'F2', parent: { id: 'F1' }, dependsOn: [{ task: { id: 'F1' }, until: 'shipped' }] });
+    const remote = boardTask({
       id: 'F3',
       parent: { id: 'F1', machineId: 'mac' },
       dependsOn: [{ task: { id: 'F1', machineId: 'mac' }, until: 'shipped' }],
     });
-    const sibling = card({ id: 'F4', parent: { id: 'F1' } });
+    const sibling = boardTask({ id: 'F4', parent: { id: 'F1' } });
 
     // Act
     const index = new BoardIndex([parent, child, remote, sibling], MACHINE);
@@ -81,9 +81,9 @@ describe('the board index', () => {
 describe('a card category', () => {
   it('should read the lane category, or nothing without known lanes', () => {
     // Assert
-    should(cardCategory(card({ laneId: 'review' }), laneSets)).equal('review');
-    should(cardCategory(card({ projectId: 'unfiled' }), laneSets)).be.undefined();
-    should(cardCategory(card({ laneId: 'gone' }), laneSets)).be.undefined();
+    should(taskCategory(boardTask({ laneId: 'review' }), laneSets)).equal('review');
+    should(taskCategory(boardTask({ projectId: 'unfiled' }), laneSets)).be.undefined();
+    should(taskCategory(boardTask({ laneId: 'gone' }), laneSets)).be.undefined();
   });
 });
 
@@ -100,19 +100,19 @@ describe('shipped in', () => {
 
     // Act
     const found = shippedIn(
-      card({ links: { prs: [later, unreleased, earlier], branch: null, commits: [], docs: [] } }),
+      boardTask({ links: { prs: [later, unreleased, earlier], branch: null, commits: [], docs: [] } }),
     );
 
     // Assert
     should(found?.version).equal('4.110.0');
-    should(shippedIn(card())).be.null();
+    should(shippedIn(boardTask())).be.null();
   });
 });
 
 describe('blocked by', () => {
-  const blocker = (overrides: Partial<Card>) => card({ id: 'F2', ...overrides });
-  const dependent = (until: 'shipped' | 'released' = 'shipped', extra: Partial<Card> = {}) =>
-    card({ id: 'F1', dependsOn: [{ task: { id: 'F2' }, until }], ...extra });
+  const blocker = (overrides: Partial<Task>) => boardTask({ id: 'F2', ...overrides });
+  const dependent = (until: 'shipped' | 'released' = 'shipped', extra: Partial<Task> = {}) =>
+    boardTask({ id: 'F1', dependsOn: [{ task: { id: 'F2' }, until }], ...extra });
 
   it.each([
     {
@@ -186,7 +186,7 @@ describe('blocked by', () => {
 
   it('should still count a blocker this machine cannot read', () => {
     // Arrange
-    const waiting = card({
+    const waiting = boardTask({
       id: 'F1',
       dependsOn: [
         { task: { id: 'F9' }, until: 'shipped' },
@@ -203,7 +203,7 @@ describe('blocked by', () => {
 
   it('should not count an overridden dependency', () => {
     // Arrange
-    const waiting = card({
+    const waiting = boardTask({
       id: 'F1',
       dependsOn: [{ task: { id: 'F9' }, until: 'shipped', override: { by: 'owner', reason: 'ship it', at: NOW } }],
     });
@@ -219,14 +219,14 @@ describe('blocked by', () => {
 describe('the dependency cycle check', () => {
   it('should name the cycle an edge two hops away would close', () => {
     // Arrange
-    const cards = [
-      card({ id: 'F1' }),
-      card({ id: 'F2', dependsOn: [{ task: { id: 'F3' }, until: 'shipped' }] }),
-      card({ id: 'F3', dependsOn: [{ task: { id: 'F1' }, until: 'shipped' }] }),
+    const tasks = [
+      boardTask({ id: 'F1' }),
+      boardTask({ id: 'F2', dependsOn: [{ task: { id: 'F3' }, until: 'shipped' }] }),
+      boardTask({ id: 'F3', dependsOn: [{ task: { id: 'F1' }, until: 'shipped' }] }),
     ];
 
     // Act
-    const cycle = dependencyCycle(new BoardIndex(cards, MACHINE), 'F1', { id: 'F2' });
+    const cycle = dependencyCycle(new BoardIndex(tasks, MACHINE), 'F1', { id: 'F2' });
 
     // Assert
     should(cycle).equal('&F1 → &F2 → &F3 → &F1');
@@ -234,45 +234,45 @@ describe('the dependency cycle check', () => {
 
   it('should pass an acyclic graph with shared ancestors and remote edges', () => {
     // Arrange
-    const cards = [
-      card({ id: 'F1' }),
-      card({
+    const tasks = [
+      boardTask({ id: 'F1' }),
+      boardTask({
         id: 'F2',
         dependsOn: [
           { task: { id: 'F4' }, until: 'shipped' },
           { task: { id: 'F3' }, until: 'shipped' },
         ],
       }),
-      card({
+      boardTask({
         id: 'F3',
         dependsOn: [
           { task: { id: 'F4' }, until: 'shipped' },
           { task: { id: 'F1', machineId: 'mac' }, until: 'shipped' },
         ],
       }),
-      card({ id: 'F4' }),
+      boardTask({ id: 'F4' }),
     ];
 
     // Act
-    const cycle = dependencyCycle(new BoardIndex(cards, MACHINE), 'F1', { id: 'F2' });
+    const cycle = dependencyCycle(new BoardIndex(tasks, MACHINE), 'F1', { id: 'F2' });
 
     // Assert
     should(cycle).be.null();
-    should(dependencyCycle(new BoardIndex(cards, MACHINE), 'F1', { id: 'F2', machineId: 'mac' })).be.null();
+    should(dependencyCycle(new BoardIndex(tasks, MACHINE), 'F1', { id: 'F2', machineId: 'mac' })).be.null();
   });
 });
 
 describe('the derived view', () => {
   it('should sum the live children by category and count the active ones', () => {
     // Arrange
-    const parent = card({ id: 'F1', laneId: 'implement' });
-    const cards = [
+    const parent = boardTask({ id: 'F1', laneId: 'implement' });
+    const tasks = [
       parent,
-      card({ id: 'F2', parent: { id: 'F1' }, laneId: 'review' }),
-      card({ id: 'F3', parent: { id: 'F1' }, laneId: 'merged' }),
-      card({ id: 'F4', parent: { id: 'F1' }, laneId: 'merged', dropped: { reason: 'no', at: NOW } }),
-      card({ id: 'F5', parent: { id: 'F1' }, projectId: 'unfiled' }),
-      card({ id: 'F6', parent: { id: 'F3' }, laneId: 'todo' }),
+      boardTask({ id: 'F2', parent: { id: 'F1' }, laneId: 'review' }),
+      boardTask({ id: 'F3', parent: { id: 'F1' }, laneId: 'merged' }),
+      boardTask({ id: 'F4', parent: { id: 'F1' }, laneId: 'merged', dropped: { reason: 'no', at: NOW } }),
+      boardTask({ id: 'F5', parent: { id: 'F1' }, projectId: 'unfiled' }),
+      boardTask({ id: 'F6', parent: { id: 'F3' }, laneId: 'todo' }),
     ];
     const activity = new Map([
       ['F2', { lastTouchedAt: '2026-10-30T11:00:00.000Z', touchedBy: 'child', activity: 'active' as const }],
@@ -280,7 +280,7 @@ describe('the derived view', () => {
     ]);
 
     // Act
-    const rollup = rollupOf(parent, inputs(cards, { activity }));
+    const rollup = rollupOf(parent, inputs(tasks, { activity }));
 
     // Assert
     should(rollup).eql({
@@ -293,8 +293,8 @@ describe('the derived view', () => {
 
   it('should walk a parent loop once', () => {
     // Arrange
-    const first = card({ id: 'F1', parent: { id: 'F2' } });
-    const second = card({ id: 'F2', parent: { id: 'F1' } });
+    const first = boardTask({ id: 'F1', parent: { id: 'F2' } });
+    const second = boardTask({ id: 'F2', parent: { id: 'F1' } });
 
     // Act
     const rollup = rollupOf(first, inputs([first, second]));
@@ -311,14 +311,14 @@ describe('the derived view', () => {
     { name: 'children level with the parent', children: ['implement'], parentLane: 'plan', expected: null },
   ])('should suggest a lane for $name', ({ children, parentLane, expected }) => {
     // Arrange
-    const parent = card({ id: 'F1', laneId: parentLane });
-    const cards = [
+    const parent = boardTask({ id: 'F1', laneId: parentLane });
+    const tasks = [
       parent,
-      ...children.map((laneId, index) => card({ id: `F${index + 2}`, laneId, parent: { id: 'F1' } })),
+      ...children.map((laneId, index) => boardTask({ id: `F${index + 2}`, laneId, parent: { id: 'F1' } })),
     ];
 
     // Act
-    const suggested = suggestedLaneOf(parent, inputs(cards));
+    const suggested = suggestedLaneOf(parent, inputs(tasks));
 
     // Assert
     should(suggested).equal(expected);
@@ -326,8 +326,8 @@ describe('the derived view', () => {
 
   it('should skip a category the parent variant does not walk', () => {
     // Arrange: a pr board has no verify lane, and its last lane is closed.
-    const parent = card({ id: 'F1', projectId: OTHER_PROJECT, laneId: 'implement' });
-    const child = card({ id: 'F2', projectId: OTHER_PROJECT, laneId: 'merged', parent: { id: 'F1' } });
+    const parent = boardTask({ id: 'F1', projectId: OTHER_PROJECT, laneId: 'implement' });
+    const child = boardTask({ id: 'F2', projectId: OTHER_PROJECT, laneId: 'merged', parent: { id: 'F1' } });
 
     // Act
     const suggested = suggestedLaneOf(parent, inputs([parent, child]));
@@ -337,35 +337,38 @@ describe('the derived view', () => {
   });
 
   it.each([
-    { name: 'no children', cards: () => [card({ id: 'F1', laneId: 'implement' })] },
+    { name: 'no children', cards: () => [boardTask({ id: 'F1', laneId: 'implement' })] },
     {
       name: 'a parent without lanes',
       cards: () => [
-        card({ id: 'F1', projectId: 'unfiled' }),
-        card({ id: 'F2', parent: { id: 'F1' }, laneId: 'merged' }),
+        boardTask({ id: 'F1', projectId: 'unfiled' }),
+        boardTask({ id: 'F2', parent: { id: 'F1' }, laneId: 'merged' }),
       ],
     },
     {
       name: 'a parent in a lane its board lost',
-      cards: () => [card({ id: 'F1', laneId: 'gone' }), card({ id: 'F2', parent: { id: 'F1' }, laneId: 'merged' })],
+      cards: () => [
+        boardTask({ id: 'F1', laneId: 'gone' }),
+        boardTask({ id: 'F2', parent: { id: 'F1' }, laneId: 'merged' }),
+      ],
     },
     {
       name: 'a dropped parent',
       cards: () => [
-        card({ id: 'F1', dropped: { reason: 'no', at: NOW } }),
-        card({ id: 'F2', parent: { id: 'F1' }, laneId: 'merged' }),
+        boardTask({ id: 'F1', dropped: { reason: 'no', at: NOW } }),
+        boardTask({ id: 'F2', parent: { id: 'F1' }, laneId: 'merged' }),
       ],
     },
     {
       name: 'a child without lanes',
-      cards: () => [card({ id: 'F1' }), card({ id: 'F2', parent: { id: 'F1' }, projectId: 'unfiled' })],
+      cards: () => [boardTask({ id: 'F1' }), boardTask({ id: 'F2', parent: { id: 'F1' }, projectId: 'unfiled' })],
     },
-  ])('should suggest nothing for $name', ({ cards }) => {
+  ])('should suggest nothing for $name', ({ cards: tasks }) => {
     // Arrange
-    const all = cards();
+    const all = tasks();
 
     // Act
-    const suggested = suggestedLaneOf(all[0] as Card, inputs(all));
+    const suggested = suggestedLaneOf(all[0] as Task, inputs(all));
 
     // Assert
     should(suggested).be.null();
@@ -373,9 +376,9 @@ describe('the derived view', () => {
 
   it('should put the derived fields beside the stored card', () => {
     // Arrange
-    const blocker = card({ id: 'F2', laneId: 'implement' });
-    const waiting = card({ id: 'F1', dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] });
-    const droppedDependent = card({
+    const blocker = boardTask({ id: 'F2', laneId: 'implement' });
+    const waiting = boardTask({ id: 'F1', dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] });
+    const droppedDependent = boardTask({
       id: 'F3',
       dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }],
       dropped: { reason: 'no', at: NOW },
@@ -399,7 +402,7 @@ describe('the derived view', () => {
 
   it('should ask both derivation ports once for the whole board, handing the agenda answer to activity', async () => {
     // Arrange
-    const cards = [card({ id: 'F1' }), card({ id: 'F2' })];
+    const tasks = [boardTask({ id: 'F1' }), boardTask({ id: 'F2' })];
     const ask = { ferret: 'lead', id: 'A9' };
     const asks = new Map([['F1', { open: [ask], asking: [ask] }]]);
     const seen: ActivityInputs[] = [];
@@ -411,14 +414,14 @@ describe('the derived view', () => {
     };
 
     // Act
-    const gathered = await gatherDerivation(cards, new BoardIndex(cards, MACHINE), laneSets, {
+    const gathered = await gatherDerivation(tasks, new BoardIndex(tasks, MACHINE), laneSets, {
       activity,
       asks: { asksFor: async () => asks },
     });
 
     // Assert
     should(seen).have.length(1);
-    should(seen[0]?.cards).equal(cards);
+    should(seen[0]?.cards).equal(tasks);
     should(seen[0]?.laneSets).equal(laneSets);
     should(seen[0]?.asks).equal(asks);
     should(gathered.activity.get('F1')?.activity).equal('active');
@@ -429,20 +432,20 @@ describe('the derived view', () => {
 describe('who a card is for, in its view', () => {
   const NO_ACTIVITY: ActivityDeriver = { derive: async () => new Map() };
   const NO_AGENDA = { asksFor: async () => new Map() };
-  const owners = card({ id: 'F1', createdBy: { kind: 'owner' } });
-  const spawned = card({
+  const owners = boardTask({ id: 'F1', createdBy: { kind: 'owner' } });
+  const spawned = boardTask({
     id: 'F2',
     parent: { id: 'F1' },
     createdBy: { kind: 'daemon' },
     ask: { text: 'a brief', source: 'session:lead' },
   });
-  const childOwn = card({
+  const childOwn = boardTask({
     id: 'F3',
     parent: { id: 'F2' },
     createdBy: { kind: 'ferret', name: 'child', ferret: 'child' },
     ask: { text: 'a follow-up', source: 'session:child' },
   });
-  const cards = [owners, spawned, childOwn];
+  const tasks = [owners, spawned, childOwn];
 
   it('should derive the origin and the nearest human ancestor, asking each session’s lineage once', async () => {
     // Arrange
@@ -453,15 +456,15 @@ describe('who a card is for, in its view', () => {
         return session === 'child' ? 'lead' : undefined;
       },
     };
-    const index = new BoardIndex(cards, MACHINE);
+    const index = new BoardIndex(tasks, MACHINE);
 
     // Act
-    const gathered = await gatherDerivation(cards, index, laneSets, {
+    const gathered = await gatherDerivation(tasks, index, laneSets, {
       activity: NO_ACTIVITY,
       asks: NO_AGENDA,
       parents,
     });
-    const views = cards.map(subject => deriveView(subject, gathered));
+    const views = tasks.map(subject => deriveView(subject, gathered));
 
     // Assert
     should(asked).deepEqual(['child']);
@@ -474,12 +477,12 @@ describe('who a card is for, in its view', () => {
 
   it('should read every session as the owner’s with no lineage port, or when a lineage read fails', async () => {
     // Arrange
-    const index = new BoardIndex(cards, MACHINE);
+    const index = new BoardIndex(tasks, MACHINE);
     const failing = { parentOf: async () => Promise.reject(new Error('config unreadable')) };
 
     // Act
-    const without = await gatherDerivation(cards, index, laneSets, { activity: NO_ACTIVITY, asks: NO_AGENDA });
-    const broken = await gatherDerivation(cards, index, laneSets, {
+    const without = await gatherDerivation(tasks, index, laneSets, { activity: NO_ACTIVITY, asks: NO_AGENDA });
+    const broken = await gatherDerivation(tasks, index, laneSets, {
       activity: NO_ACTIVITY,
       asks: NO_AGENDA,
       parents: failing,
@@ -489,6 +492,6 @@ describe('who a card is for, in its view', () => {
     should(without.origins).be.undefined();
     should(deriveView(childOwn, without).origin).equal('human');
     should(deriveView(childOwn, broken).origin).equal('human');
-    should(deriveView(spawned, inputs(cards)).origin).equal('agent');
+    should(deriveView(spawned, inputs(tasks)).origin).equal('agent');
   });
 });

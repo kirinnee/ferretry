@@ -18,7 +18,7 @@
  * keeps the older rule ({@link isFerretCard}), so the toggle works the same on an older machine.
  */
 
-import { isSubCard, type CardRef } from '../../contract/index.ts';
+import { isSubTask, type TaskRef } from '../../contract/index.ts';
 
 type TaskAsker = 'person' | 'agent';
 
@@ -47,8 +47,8 @@ export const isAgentTask = (task: object): boolean => taskAsker(task) === 'agent
 const askedByPerson = (task: object): boolean => declared(task, 'askedBy') === 'person';
 
 /** A FERRET card by the older rule: one a ferret asked for, or a sub-card no person asked for. Only an older daemon needs it. */
-const isFerretCard = (task: { readonly parent: CardRef | null }): boolean =>
-  isAgentTask(task) || (isSubCard(task) && !askedByPerson(task));
+const isFerretTask = (task: { readonly parent: TaskRef | null }): boolean =>
+  isAgentTask(task) || (isSubTask(task) && !askedByPerson(task));
 
 /** What a daemon said about a card's visibility, `null` when it said nothing (an older daemon). */
 const declaredVisibility = (task: object): 'public' | 'private' | null => {
@@ -60,9 +60,9 @@ const declaredVisibility = (task: object): 'public' | 'private' | null => {
  * A PRIVATE card: the ferrets' own bookkeeping, hidden unless "Show private" is on. The daemon's `visibility` is
  * believed; a card without one reads by the older {@link isFerretCard} rule.
  */
-export const isPrivateCard = (task: { readonly parent: CardRef | null }): boolean => {
+export const isPrivateTask = (task: { readonly parent: TaskRef | null }): boolean => {
   const visibility = declaredVisibility(task);
-  return visibility === null ? isFerretCard(task) : visibility === 'private';
+  return visibility === null ? isFerretTask(task) : visibility === 'private';
 };
 
 /** Whether the daemons behind these cards say who asked for a card, or its visibility: without either there is nothing to split. */
@@ -70,22 +70,22 @@ export const splitAvailable = (tasks: readonly object[]): boolean =>
   tasks.some(task => taskAsker(task) !== null || declaredVisibility(task) !== null);
 
 /** The card an agent card serves, as the daemon declared it: `undefined` when the daemon said nothing, `null` for none. */
-const declaredHumanParent = (task: object): CardRef | null | undefined => {
+const declaredHumanParent = (task: object): TaskRef | null | undefined => {
   const value = declared(task, 'humanParent');
   if (value === null) return null;
   if (typeof value === 'object' && value !== null && typeof Reflect.get(value, 'id') === 'string') {
-    return value as CardRef;
+    return value as TaskRef;
   }
   return undefined;
 };
 
 interface ParentFacts {
   readonly id: string;
-  readonly parent: CardRef | null;
+  readonly parent: TaskRef | null;
 }
 
 /** A card on the board: the machine it lives on and its task (a task id is unique on its machine only). */
-export interface HumanCard {
+export interface HumanTask {
   readonly daemonId: string;
   readonly task: ParentFacts;
 }
@@ -93,16 +93,16 @@ export interface HumanCard {
 const keyOf = (daemonId: string, taskId: string): string => `${daemonId}\u0000${taskId}`;
 
 /** The cards of the board by machine and task id: what {@link humanParentKey} looks a lead up in. */
-export const humanScope = (cards: readonly HumanCard[]): ReadonlyMap<string, HumanCard> =>
-  new Map(cards.map(card => [keyOf(card.daemonId, card.task.id), card] as const));
+export const humanScope = (tasks: readonly HumanTask[]): ReadonlyMap<string, HumanTask> =>
+  new Map(tasks.map(task => [keyOf(task.daemonId, task.task.id), task] as const));
 
 /**
  * The key of the human card an agent card serves, or `null` (a human card has none). The daemon's
  * `humanParent` is believed; without it the nearest human ancestor along `parent` is used, and an ancestor
  * that is not in `scope` means there is nothing to group under.
  */
-export const humanParentKey = (card: HumanCard, scope: ReadonlyMap<string, HumanCard>): string | null => {
-  const { daemonId, task } = card;
+export const humanParentKey = (boardTask: HumanTask, scope: ReadonlyMap<string, HumanTask>): string | null => {
+  const { daemonId, task } = boardTask;
   if (!isAgentTask(task)) return null;
   const told = declaredHumanParent(task);
   if (told === null) return null;
@@ -119,18 +119,18 @@ export const humanParentKey = (card: HumanCard, scope: ReadonlyMap<string, Human
   return null;
 };
 
-export const humanCardKey = (card: HumanCard): string => keyOf(card.daemonId, card.task.id);
+export const humanTaskKey = (task: HumanTask): string => keyOf(task.daemonId, task.task.id);
 
 /**
  * `items` with every agent item moved to sit right after the human item it serves (their order kept), and
  * the key of that human item. An agent item whose human parent is not among `items` keeps its own place, so
  * a section or a window never loses a card.
  */
-export const groupUnderHuman = <T extends HumanCard>(
+export const groupUnderHuman = <T extends HumanTask>(
   items: readonly T[],
-  scope: ReadonlyMap<string, HumanCard>,
+  scope: ReadonlyMap<string, HumanTask>,
 ): readonly { readonly item: T; readonly under: string | null }[] => {
-  const present = new Set(items.map(humanCardKey));
+  const present = new Set(items.map(humanTaskKey));
   const parentOf = (item: T): string | null => {
     const found = humanParentKey(item, scope);
     return found !== null && present.has(found) ? found : null;
@@ -144,6 +144,6 @@ export const groupUnderHuman = <T extends HumanCard>(
   }
   return roots.flatMap(root => [
     { item: root, under: null },
-    ...(children.get(humanCardKey(root)) ?? []).map(child => ({ item: child, under: humanCardKey(root) })),
+    ...(children.get(humanTaskKey(root)) ?? []).map(child => ({ item: child, under: humanTaskKey(root) })),
   ]);
 };

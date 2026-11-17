@@ -2,7 +2,7 @@ import type { AgendaBoardContext, AgendaFerretsContext } from '../../contract/in
 import { AgendaHomes, type HomeSession } from '../lib/agenda/index.ts';
 import { MACHINE_AGENDA_ID } from '../lib/protocol/agenda.ts';
 import type {
-  AgendaCardLanes,
+  AgendaTaskLanes,
   AgendaFocusSource,
   AgendaGateAsking,
   AgendaSessionDirectory,
@@ -24,7 +24,7 @@ export interface BoundAgendaContext {
   readonly sessions: AgendaSessionDirectory;
   readonly subFerrets: SubFerretDirectory;
   readonly focus: AgendaFocusSource;
-  readonly cards: AgendaCardLanes;
+  readonly cards: AgendaTaskLanes;
   readonly homes: AgendaHomeResolver;
   readonly gates: AgendaGateAsking;
   /** Lineage and the Warden's own sessions, for what a ferret may read of a Warden notice. */

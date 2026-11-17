@@ -1048,10 +1048,10 @@ const added = (now: readonly string[], approved: readonly string[]): string[] =>
  * What changed between the approved surface (the committed snapshot) and the current one, one sentence per change, each
  * saying that a reviewer must approve it. Empty when nothing changed.
  */
-export function describeSurfaceChange(approved: AuthoritySurface, now: AuthoritySurface, card: string): string[] {
+export function describeSurfaceChange(approved: AuthoritySurface, now: AuthoritySurface, task: string): string[] {
   const out: string[] = [];
-  const review = `A reviewer must approve this change to the fleet link authority surface (${card}, the dedicated credential link operation): re-run the test with FLEET_LINK_SNAPSHOT_UPDATE=1 and commit the snapshot only once approved.`;
-  const guard = `A reviewer must approve this change to the RootHandle API and decide its guard (${card}): does the new or changed operation need the same guard as linkTo / copyTree? Then re-run the test with FLEET_LINK_SNAPSHOT_UPDATE=1 and commit the snapshot only once approved.`;
+  const review = `A reviewer must approve this change to the fleet link authority surface (${task}, the dedicated credential link operation): re-run the test with FLEET_LINK_SNAPSHOT_UPDATE=1 and commit the snapshot only once approved.`;
+  const guard = `A reviewer must approve this change to the RootHandle API and decide its guard (${task}): does the new or changed operation need the same guard as linkTo / copyTree? Then re-run the test with FLEET_LINK_SNAPSHOT_UPDATE=1 and commit the snapshot only once approved.`;
   for (const module of new Set([...Object.keys(approved.exports), ...Object.keys(now.exports)])) {
     const was = approved.exports[module] ?? [];
     const is = now.exports[module] ?? [];

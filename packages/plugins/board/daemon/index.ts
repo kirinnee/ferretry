@@ -7,19 +7,19 @@ import {
   type BoardApi,
   type BoardRefusal,
   CardAskRefSchema,
-  type Card,
-  type CardActionRequest,
+  type Task,
+  type TaskActionRequest,
   BoardProjectIdSchema,
   CardMoved,
   CardMoving,
   CardProgressToolInputSchema,
   TaskProgressToolInputSchema,
-  type CardView,
+  type TaskView,
 } from '../contract/index.ts';
 import type { BoardConfig } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { boardArchiveKeeps } from './adapters/archive-keeps.ts';
-import { CARD_SOURCE } from './adapters/asks.ts';
+import { TASK_SOURCE } from './adapters/asks.ts';
 import { BoardReferenceCatalog } from './adapters/reference-catalog.ts';
 import { boardAgendaContext } from './adapters/agenda-context.ts';
 import { assemble, type BoardDefs, machineIdOf } from './wiring.ts';
@@ -78,8 +78,8 @@ export default implementDaemon(manifest, {
       conversation: () => ctx.uses.conversation.current(),
       // `card.moving`: takers say yes or no to a card changing lanes, asked by the service at its one write, whatever
       // moved the card; the first no wins, with its reason.
-      moving: async ({ card, ...rest }) => await ctx.hooks.decide(CardMoving, { task: card, ...rest }),
-      moved: ({ card, ...rest }) => kernel.events.publish(CardMoved, { task: card, ...rest }),
+      moving: async ({ card: task, ...rest }) => await ctx.hooks.decide(CardMoving, { task: task, ...rest }),
+      moved: ({ card: task, ...rest }) => kernel.events.publish(CardMoved, { task: task, ...rest }),
       product: 'ferretry',
       version: manifest.version,
       defs,
@@ -90,9 +90,9 @@ export default implementDaemon(manifest, {
       board: (query: Parameters<typeof service.board>[0]) => service.board(query),
       ids: () => service.ids(),
       mergeGate: (pr: string) => service.mergeGate(pr),
-      card: (id: Card['id']) => service.card(id),
+      card: (id: Task['id']) => service.card(id),
       create: (request: Parameters<typeof service.create>[0], caller: BoardCaller) => service.create(request, caller),
-      act: async (id: Card['id'], request: CardActionRequest, caller: BoardCaller) =>
+      act: async (id: Task['id'], request: TaskActionRequest, caller: BoardCaller) =>
         await service.act(id, request, caller),
       skip: (request: Parameters<typeof service.skip>[0], caller: BoardCaller) => service.skip(request, caller),
       start: world.start,
@@ -211,7 +211,7 @@ export default implementDaemon(manifest, {
         'asks.answered': async wake => {
           // A card answer was applied by the source's own `apply` before Asks recorded it; now that it is recorded (and
           // Asks' turn is over), the card's asks follow the card.
-          if (wake.source === CARD_SOURCE) return await world.gates.recorded(wake.entry);
+          if (wake.source === TASK_SOURCE) return await world.gates.recorded(wake.entry);
           const answers = await ctx.needs.asks.answers({ source: wake.source, entry: wake.entry });
           const answer = answers.find(each => each.id === wake.answerId);
           if (answer === undefined) return;
@@ -239,4 +239,4 @@ const settle = async <T>(work: () => Promise<T>): Promise<Result<T, BoardRefusal
 };
 
 void reraiseBoardError;
-export type { CardView };
+export type { TaskView };

@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
-  type Card,
-  type CardActionRequestInput,
+  type Task,
+  type TaskActionRequestInput,
   CardActionRequestSchema,
   type Lane,
   type LaneSet,
@@ -11,7 +11,7 @@ import should from 'should';
 import { type BoardCaller, BoardError, BoardService, gateOnTheWay } from '../../../daemon/lib/board/index.ts';
 
 import {
-  card,
+  boardTask,
   DIRECTORY,
   FakeLanes,
   MemoryBoardStore,
@@ -120,20 +120,20 @@ const CLOSES_ON_DEPLOY: LaneSet = LaneSetSchema.parse({
   }),
 });
 
-const action = (input: CardActionRequestInput) => CardActionRequestSchema.parse(input);
+const action = (input: TaskActionRequestInput) => CardActionRequestSchema.parse(input);
 const report = (event: 'deploy.done' | 'pr.review_approved', reason?: string) =>
   action({ action: 'trigger', event, ...(reason === undefined ? {} : { reason }) });
 
-const serviceWith = (cards: readonly Card[], laneSet = LABELLING, overrides: Partial<ServiceWorld> = {}) => {
+const serviceWith = (tasks: readonly Task[], laneSet = LABELLING, overrides: Partial<ServiceWorld> = {}) => {
   const ports = world({
-    store: new MemoryBoardStore(cards),
+    store: new MemoryBoardStore(tasks),
     lanes: new FakeLanes(new Map([[PROJECT, laneSet]])),
     ...overrides,
   });
   return { ports, service: new BoardService(ports) };
 };
 
-const stored = (ports: ServiceWorld, id = 'F1'): Card => ports.store.cards.get(id) as Card;
+const stored = (ports: ServiceWorld, id = 'F1'): Task => ports.store.cards.get(id) as Task;
 const lastEvent = (ports: ServiceWorld, id = 'F1') => stored(ports, id).history.at(-1);
 
 async function refusal(work: Promise<unknown>): Promise<BoardError> {
@@ -148,7 +148,7 @@ async function refusal(work: Promise<unknown>): Promise<BoardError> {
 describe('a reported trigger', () => {
   it('should move the card as the daemon would, and record who reported it', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'waiting', owner: 'lead', assignee: 'child' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'waiting', owner: 'lead', assignee: 'child' })]);
 
     // Act
     const response = await service.act('F1', report('deploy.done', 'deployed to production'), child);
@@ -172,7 +172,7 @@ describe('a reported trigger', () => {
   it('should take the report of the owner, the owner ferret and its leads', async () => {
     for (const caller of [owner, lead, ferret('grandparent')]) {
       // Arrange
-      const { ports, service } = serviceWith([card({ laneId: 'prepare', owner: 'lead' })], SKIPS_SEND, {});
+      const { ports, service } = serviceWith([boardTask({ laneId: 'prepare', owner: 'lead' })], SKIPS_SEND, {});
       const lineage = caller === lead ? undefined : { lead: 'grandparent' };
       const withLineage =
         lineage === undefined
@@ -190,7 +190,7 @@ describe('a reported trigger', () => {
 
   it('should record how the owner reported it when it came on the admin token', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'waiting' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'waiting' })]);
 
     // Act
     await service.act('F1', report('deploy.done'), { kind: 'owner', via: 'admin-token' });
@@ -202,7 +202,7 @@ describe('a reported trigger', () => {
 
   it('should refuse a ferret with no standing on the card', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'waiting', owner: 'lead' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'waiting', owner: 'lead' })]);
 
     // Act
     const error = await refusal(service.act('F1', report('deploy.done'), stranger));
@@ -217,9 +217,9 @@ describe('a reported trigger', () => {
 
   it('should move a card forward past lanes its variant walks, and never back', async () => {
     // Arrange
-    const ahead = serviceWith([card({ laneId: 'prepare' })], SKIPS_SEND);
-    const past = serviceWith([card({ laneId: 'confirm' })]);
-    const there = serviceWith([card({ laneId: 'deployed' })]);
+    const ahead = serviceWith([boardTask({ laneId: 'prepare' })], SKIPS_SEND);
+    const past = serviceWith([boardTask({ laneId: 'confirm' })]);
+    const there = serviceWith([boardTask({ laneId: 'deployed' })]);
 
     // Act
     await ahead.service.act('F1', report('deploy.done'), lead);
@@ -239,13 +239,13 @@ describe('a reported trigger', () => {
       // Arrange
       const { ports, service } = serviceWith(
         [
-          card({
+          boardTask({
             laneId: 'waiting',
             owner: 'lead',
             assignee: 'child',
             dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }],
           }),
-          card({ id: 'F2' }),
+          boardTask({ id: 'F2' }),
         ],
         LABELLING,
         { helpers: DIRECTORY },
@@ -266,8 +266,8 @@ describe('a reported trigger', () => {
   it('should move a blocked card within its category, and on for the owner, saying what blocked it', async () => {
     // Arrange: Check and Waiting are both review lanes, so a move between them is sideways.
     const blocked = { owner: 'lead', dependsOn: [{ task: { id: 'F2' }, until: 'shipped' as const }] };
-    const sideways = serviceWith([card({ ...blocked, laneId: 'check' }), card({ id: 'F2' })], CHECKED);
-    const owned = serviceWith([card({ ...blocked, laneId: 'waiting' }), card({ id: 'F2' })]);
+    const sideways = serviceWith([boardTask({ ...blocked, laneId: 'check' }), boardTask({ id: 'F2' })], CHECKED);
+    const owned = serviceWith([boardTask({ ...blocked, laneId: 'waiting' }), boardTask({ id: 'F2' })]);
 
     // Act
     await sideways.service.act('F1', report('pr.review_approved'), lead);
@@ -280,7 +280,7 @@ describe('a reported trigger', () => {
 
   it('should leave a gate the owner has not answered to the owner', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'send', owner: 'lead' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'send', owner: 'lead' })]);
 
     // Act
     const error = await refusal(service.act('F1', report('pr.review_approved'), lead));
@@ -295,7 +295,7 @@ describe('a reported trigger', () => {
 
   it('should leave to the owner a gate the card’s variant walks between its lane and the target', async () => {
     // Arrange: Prepare → [Send for review?] → Waiting, on the reviewer's approval.
-    const { ports, service } = serviceWith([card({ laneId: 'prepare', owner: 'lead' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'prepare', owner: 'lead' })]);
 
     // Act
     const error = await refusal(service.act('F1', report('pr.review_approved'), lead));
@@ -310,8 +310,8 @@ describe('a reported trigger', () => {
 
   it('should leave Plan/Design to the owner for work that plans first, and not for work that skips it', async () => {
     // Arrange
-    const planned = serviceWith([card({ laneId: 'todo', workflow: 'design-first' })], PLANNED);
-    const quick = serviceWith([card({ laneId: 'todo', workflow: 'quick' })], PLANNED);
+    const planned = serviceWith([boardTask({ laneId: 'todo', workflow: 'design-first' })], PLANNED);
+    const quick = serviceWith([boardTask({ laneId: 'todo', workflow: 'quick' })], PLANNED);
 
     // Act
     const error = await refusal(planned.service.act('F1', report('deploy.done'), lead));
@@ -324,7 +324,7 @@ describe('a reported trigger', () => {
 
   it('should let a report take a card INTO a gate: entering one is not passing it', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'waiting' })], CONFIRMS_DEPLOY);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'waiting' })], CONFIRMS_DEPLOY);
 
     // Act
     await service.act('F1', report('deploy.done'), lead);
@@ -335,7 +335,7 @@ describe('a reported trigger', () => {
 
   it('should let the owner’s own report pass a gate on the way', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'prepare' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'prepare' })]);
 
     // Act
     await service.act('F1', report('deploy.done'), owner);
@@ -347,7 +347,7 @@ describe('a reported trigger', () => {
 
   it('should let the owner’s own report pass the gate', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'send' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'send' })]);
 
     // Act
     await service.act('F1', report('pr.review_approved'), owner);
@@ -359,7 +359,7 @@ describe('a reported trigger', () => {
   it('should never close a card in an owner-gated closed lane, whoever reports', async () => {
     for (const caller of [owner, lead]) {
       // Arrange
-      const { ports, service } = serviceWith([card({ laneId: 'deployed' })], CLOSES_ON_DEPLOY);
+      const { ports, service } = serviceWith([boardTask({ laneId: 'deployed' })], CLOSES_ON_DEPLOY);
 
       // Act
       const error = await refusal(service.act('F1', report('deploy.done'), caller));
@@ -375,7 +375,7 @@ describe('a reported trigger', () => {
     // Arrange: a set with no verify lane, whose ungated closed lane a deploy enters (a fact may close it).
     for (const caller of [lead, child]) {
       const { ports, service } = serviceWith(
-        [card({ laneId: 'live', owner: 'lead', assignee: 'child' })],
+        [boardTask({ laneId: 'live', owner: 'lead', assignee: 'child' })],
         DEPLOY_CLOSES,
         {
           helpers: DIRECTORY,
@@ -394,7 +394,7 @@ describe('a reported trigger', () => {
 
   it('should let the owner close on a report where the closed lane has no gate', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'live' })], DEPLOY_CLOSES);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'live' })], DEPLOY_CLOSES);
 
     // Act
     await service.act('F1', report('deploy.done'), owner);
@@ -406,7 +406,7 @@ describe('a reported trigger', () => {
 
   it('should say so when the board has no lane for the event', async () => {
     // Arrange: the default Ferretry board enters no lane on a deploy.
-    const { service } = serviceWith([card({ laneId: 'implement' })], LABELLING, { lanes: new FakeLanes() });
+    const { service } = serviceWith([boardTask({ laneId: 'implement' })], LABELLING, { lanes: new FakeLanes() });
 
     // Act
     const error = await refusal(service.act('F1', report('deploy.done'), lead));
@@ -421,7 +421,7 @@ describe('a reported trigger', () => {
   it('should refuse a dropped card', async () => {
     // Arrange
     const { service } = serviceWith([
-      card({ laneId: 'waiting', dropped: { reason: 'no', at: '2026-10-01T00:00:00.000Z' } }),
+      boardTask({ laneId: 'waiting', dropped: { reason: 'no', at: '2026-10-01T00:00:00.000Z' } }),
     ]);
 
     // Act
@@ -467,9 +467,13 @@ describe('the gate on the way', () => {
 describe('a helper reporting a trigger', () => {
   it('should report on the card it is doing, as it links its PR', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'waiting', owner: 'lead', assignee: 'child' })], LABELLING, {
-      helpers: DIRECTORY,
-    });
+    const { ports, service } = serviceWith(
+      [boardTask({ laneId: 'waiting', owner: 'lead', assignee: 'child' })],
+      LABELLING,
+      {
+        helpers: DIRECTORY,
+      },
+    );
 
     // Act
     await service.act('F1', report('deploy.done'), child);
@@ -482,7 +486,7 @@ describe('a helper reporting a trigger', () => {
   it('should be refused on a card it owns but is not doing, and told whom to tell', async () => {
     // Arrange: child owns F1, which another ferret is doing.
     const { ports, service } = serviceWith(
-      [card({ laneId: 'waiting', owner: 'child', assignee: 'stranger' })],
+      [boardTask({ laneId: 'waiting', owner: 'child', assignee: 'stranger' })],
       LABELLING,
       {
         helpers: DIRECTORY,
@@ -502,9 +506,13 @@ describe('a helper reporting a trigger', () => {
 
   it('should leave a lead free to report on any card its standing reaches', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'waiting', owner: 'lead', assignee: 'child' })], LABELLING, {
-      helpers: DIRECTORY,
-    });
+    const { ports, service } = serviceWith(
+      [boardTask({ laneId: 'waiting', owner: 'lead', assignee: 'child' })],
+      LABELLING,
+      {
+        helpers: DIRECTORY,
+      },
+    );
 
     // Act
     await service.act('F1', report('deploy.done'), lead);
@@ -515,7 +523,7 @@ describe('a helper reporting a trigger', () => {
 
   it('should be refused on a card it has no standing on', async () => {
     // Arrange
-    const { service } = serviceWith([card({ laneId: 'waiting', owner: 'lead', assignee: 'child' })], LABELLING, {
+    const { service } = serviceWith([boardTask({ laneId: 'waiting', owner: 'lead', assignee: 'child' })], LABELLING, {
       helpers: DIRECTORY,
     });
 
@@ -546,9 +554,9 @@ describe('a move and a report agree on the owner’s gates', () => {
 
   it('should keep a ferret’s move and its report out of a verify lane alike, and let the owner move it', async () => {
     // Arrange
-    const moving = serviceWith([card({ laneId: 'check', owner: 'lead' })], UNGATED_VERIFY);
-    const reporting = serviceWith([card({ laneId: 'check', owner: 'lead' })], UNGATED_VERIFY);
-    const owning = serviceWith([card({ laneId: 'check', owner: 'lead' })], UNGATED_VERIFY);
+    const moving = serviceWith([boardTask({ laneId: 'check', owner: 'lead' })], UNGATED_VERIFY);
+    const reporting = serviceWith([boardTask({ laneId: 'check', owner: 'lead' })], UNGATED_VERIFY);
+    const owning = serviceWith([boardTask({ laneId: 'check', owner: 'lead' })], UNGATED_VERIFY);
 
     // Act
     const moved = await refusal(moving.service.act('F1', action({ action: 'move', to: 'live' }), lead));

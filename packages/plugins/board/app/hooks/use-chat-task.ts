@@ -6,11 +6,11 @@
  */
 
 import { useMemo } from 'react';
-import { type BoardChat, chatCards, chatChip, descendantSessionIds, type FerretLineage } from '../lib/board-chat.ts';
+import { type BoardChat, chatTasks, chatChip, descendantSessionIds, type FerretLineage } from '../lib/board-chat.ts';
 import { NO_BOARD_FILTERS } from '../lib/board-model.ts';
 import type { DaemonBoardStore } from '../lib/board-store.ts';
 import type { DaemonConnection } from '../lib/machine.ts';
-import type { CardRef } from '../../contract/index.ts';
+import type { TaskRef } from '../../contract/index.ts';
 import { type BoardMachine, useBoard } from './use-board.ts';
 
 export interface UseChatCardInput {
@@ -19,14 +19,14 @@ export interface UseChatCardInput {
   readonly machineName: string;
   readonly ferret: string;
   /** The ferret's focus card, when the host knows it. */
-  readonly focus: CardRef | null;
+  readonly focus: TaskRef | null;
   /** The machine's ferrets, for the helpers' cards. */
   readonly ferrets: readonly FerretLineage[] | undefined;
   /** "Internal": the panel draws the cards ferrets made for other ferrets. */
   readonly agents: boolean;
 }
 
-export const useChatCard = ({
+export const useChatTask = ({
   store,
   connection,
   machineName,
@@ -46,22 +46,22 @@ export const useChatCard = ({
   const relatives = useMemo(() => descendantSessionIds(ferrets ?? [], ferret), [ferrets, ferret]);
   const { model, status } = board;
   const daemonId = connection.daemonId;
-  const cards = useMemo(
-    () => chatCards(model, { daemonId, sessionId: ferret, focus, relatives, agents }),
+  const tasks = useMemo(
+    () => chatTasks(model, { daemonId, sessionId: ferret, focus, relatives, agents }),
     [model, daemonId, ferret, focus, relatives, agents],
   );
   const chip = useMemo(
     () =>
       chatChip(
         focus ?? undefined,
-        cards.focus,
-        cards.focus === null ? undefined : cards.places.get(cards.focus.key),
+        tasks.focus,
+        tasks.focus === null ? undefined : tasks.places.get(tasks.focus.key),
         status,
       ),
-    [focus, cards, status],
+    [focus, tasks, status],
   );
   return useMemo(
-    () => ({ chip, cards, status, refresh: board.refresh, agents, splitsAgents: model.splitsAgents }),
-    [chip, cards, status, board.refresh, agents, model.splitsAgents],
+    () => ({ chip, cards: tasks, status, refresh: board.refresh, agents, splitsAgents: model.splitsAgents }),
+    [chip, tasks, status, board.refresh, agents, model.splitsAgents],
   );
 };

@@ -36,7 +36,7 @@ import {
   unreadSessions,
   unreadTotal,
   updatedSinceAsked,
-  withFerretCards,
+  withFerretTasks,
   withFerretSessions,
 } from '../../../app/lib/agenda-inbox.ts';
 import { answerAction, type InboxAction, withAskVersion } from '../../../app/lib/agenda-answers.ts';
@@ -642,7 +642,7 @@ describe('items in discussion', () => {
       ['s', 'A1'],
     ]);
     expect(
-      withFerretCards(withFerretSessions(sources), boardFor).map(card => [card.view.config.id, card.item.id]),
+      withFerretTasks(withFerretSessions(sources), boardFor).map(card => [card.view.config.id, card.item.id]),
     ).toEqual([
       ['s', 'A2'],
       ['only', 'A1'],

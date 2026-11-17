@@ -527,17 +527,17 @@ describe('SharedDraftStreamHandler on an item slot (&B142)', () => {
   it('opens on the item draft and hears only that draft, never the chat draft', async () => {
     // Arrange
     const { open, service } = world();
-    const card = await open({ peer: 'card', slot: 'A1' });
+    const task = await open({ peer: 'card', slot: 'A1' });
     const chat = await open({ peer: 'chat' });
 
     // Act
     await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['to chat'] });
     await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['to card'] }, undefined, { slot: 'A1' });
-    card.handler.fromClient(edit('c1', [7, '!'], 1));
+    task.handler.fromClient(edit('c1', [7, '!'], 1));
     await settle();
 
     // Assert
-    should(card.downstream.frames).match([
+    should(task.downstream.frames).match([
       { kind: 'snapshot', snapshot: { slot: 'A1', text: '' } },
       { kind: 'edit', applied: { text: ['to card'] }, rev: 1 },
       { kind: 'ack', id: 'c1', rev: 2 },
@@ -551,18 +551,18 @@ describe('SharedDraftStreamHandler on an item slot (&B142)', () => {
   it('keeps carets to the draft they are in', async () => {
     // Arrange
     const { open } = world();
-    const card = await open({ peer: 'card', slot: 'A1' });
-    const otherCard = await open({ peer: 'other', slot: 'A2' });
+    const task = await open({ peer: 'card', slot: 'A1' });
+    const otherTask = await open({ peer: 'other', slot: 'A2' });
     const chat = await open({ peer: 'chat' });
-    const sameCard = await open({ peer: 'twin', slot: 'A1' });
+    const sameTask = await open({ peer: 'twin', slot: 'A1' });
 
     // Act
-    card.handler.fromClient(JSON.stringify({ kind: 'presence', typing: true }));
+    task.handler.fromClient(JSON.stringify({ kind: 'presence', typing: true }));
     await settle();
 
     // Assert
-    should(sameCard.downstream.kinds()).containEql('presence');
-    should(otherCard.downstream.kinds()).not.containEql('presence');
+    should(sameTask.downstream.kinds()).containEql('presence');
+    should(otherTask.downstream.kinds()).not.containEql('presence');
     should(chat.downstream.kinds()).not.containEql('presence');
   });
 

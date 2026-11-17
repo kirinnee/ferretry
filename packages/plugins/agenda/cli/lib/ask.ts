@@ -6,7 +6,7 @@ import {
   askForKind,
   kindOfAsk,
   MAX_ASK_OPTION_LENGTH,
-  MAX_AGENDA_CARD_ANSWERS,
+  MAX_AGENDA_TASK_ANSWERS,
 } from '@ferretry/core-asks/contract';
 
 /**
@@ -33,7 +33,7 @@ const KINDS = new Map<string, AgendaKind>([
 export const ASK_KIND_NAMES = ['todo', 'yesno', 'permission', 'choice', 'review', 'info', 'reply', 'form'] as const;
 
 /** Why a card cannot offer more than three answers, and what to do instead. */
-export const TOO_MANY_ANSWERS = `an item offers at most ${MAX_AGENDA_CARD_ANSWERS} answers (swipe left, up, right). Split this into several items, or use --kind reply and let the owner answer in words.`;
+export const TOO_MANY_ANSWERS = `an item offers at most ${MAX_AGENDA_TASK_ANSWERS} answers (swipe left, up, right). Split this into several items, or use --kind reply and let the owner answer in words.`;
 
 /** The flags that shape an ask. */
 export interface AskFlags {
@@ -44,7 +44,7 @@ export interface AskFlags {
 }
 
 /** The kind a card is raised as and the ask that kind carries (`info` carries none). */
-export interface CardAsk {
+export interface TaskAsk {
   readonly kind: AgendaKind;
   readonly ask: AgendaAsk | undefined;
 }
@@ -66,7 +66,7 @@ export function parseKind(raw: string | undefined): AgendaKind | undefined {
  * dropping. Exactly Yes and No is a `yesno`; a `yesno` brings its own two options, so it refuses any.
  * A card offers at most three answers, so a choice takes two or three options.
  */
-export function parseAsk(flags: AskFlags): CardAsk {
+export function parseAsk(flags: AskFlags): TaskAsk {
   const options = (flags.option ?? []).map(option => option.trim()).filter(option => option.length > 0);
   const named = parseKind(flags.kind);
   const kind = named ?? (options.length > 0 ? 'choice' : 'reply');
@@ -79,7 +79,7 @@ export function parseAsk(flags: AskFlags): CardAsk {
     return { kind, ask: askForKind(kind) };
   }
 
-  if (options.length > MAX_AGENDA_CARD_ANSWERS) throw new Error(TOO_MANY_ANSWERS);
+  if (options.length > MAX_AGENDA_TASK_ANSWERS) throw new Error(TOO_MANY_ANSWERS);
   const parsed = AgendaAskSchema.safeParse(
     askForKind(
       'choice',
@@ -88,7 +88,7 @@ export function parseAsk(flags: AskFlags): CardAsk {
   );
   if (!parsed.success) {
     throw new Error(
-      `a choice needs 2 to ${MAX_AGENDA_CARD_ANSWERS} distinct --option labels, ` +
+      `a choice needs 2 to ${MAX_AGENDA_TASK_ANSWERS} distinct --option labels, ` +
         `each one line of at most ${MAX_ASK_OPTION_LENGTH} characters`,
     );
   }

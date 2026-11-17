@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { BoardService, gateCardsOf, stillBuilding, BoardIndex } from '../../../daemon/lib/board/index.ts';
-import { card, MACHINE, MemoryBoardStore, world } from './support.ts';
+import { BoardService, gateTasksOf, stillBuilding, BoardIndex } from '../../../daemon/lib/board/index.ts';
+import { boardTask, MACHINE, MemoryBoardStore, world } from './support.ts';
 
 const COUNT = 50;
 const fixture = () =>
   Array.from({ length: COUNT }, (_, i) =>
-    card({
+    boardTask({
       id: `F${i + 1}`,
       dependsOn: i > 0 && i % 5 === 0 ? [{ task: { id: `F${i}` }, until: 'shipped' as const }] : [],
       parent: i % 7 === 0 && i > 0 ? { id: 'F1' } : null,
@@ -23,7 +23,7 @@ describe('the gate card list', () => {
     // Act: the single pass, with every per-card port counted
     const { views, laneSets } = await service.sweepBoard();
     const snapshot = await service.snapshot();
-    const passed = await gateCardsOf({
+    const passed = await gateTasksOf({
       views,
       cards: snapshot.cards,
       laneSets,
@@ -57,9 +57,11 @@ describe('the gate card list', () => {
 
   it('should read Asks once, ask for one project name and derive no card on its own for 3000 cards', async () => {
     // Arrange: 3000 cards over 30 projects, with the Asks link counted (one call is one whole-board read of every ledger)
-    const cards = Array.from({ length: 3000 }, (_, i) => card({ id: `F${i + 1}`, projectId: `p${i % 30}` as never }));
+    const tasks = Array.from({ length: 3000 }, (_, i) =>
+      boardTask({ id: `F${i + 1}`, projectId: `p${i % 30}` as never }),
+    );
     const calls = { asks: 0, names: 0, blocked: 0 };
-    const store = new MemoryBoardStore(cards);
+    const store = new MemoryBoardStore(tasks);
     const service = new BoardService(
       world({
         store,
@@ -75,7 +77,7 @@ describe('the gate card list', () => {
     // Act
     const { views, laneSets } = await service.sweepBoard();
     const snapshot = await service.snapshot();
-    const passed = await gateCardsOf({
+    const passed = await gateTasksOf({
       views,
       cards: snapshot.cards,
       laneSets,
@@ -106,7 +108,7 @@ describe('the gate card list', () => {
     let blocked = 0;
 
     // Act
-    const passed = await gateCardsOf({
+    const passed = await gateTasksOf({
       views: [],
       cards: snapshot.cards,
       laneSets: snapshot.laneSets,

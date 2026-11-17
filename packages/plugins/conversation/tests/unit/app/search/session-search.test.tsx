@@ -13,7 +13,7 @@ import {
 } from '@ferretry/core-ferrets/contract';
 import { type ReactNode, useEffect } from 'react';
 import {
-  type FerretCardsRead,
+  type FerretTasksRead,
   type FerretSearchCard,
   type FerretSearchScope,
   filterSessionSearchResults,
@@ -50,7 +50,7 @@ const pastAnnounceDebounce = async (): Promise<void> => {
 
 /* ---------- fixtures ------------------------------------------------------- */
 
-const cardOf = (id: string, patch: Partial<FerretSearchCard> = {}): FerretSearchCard => ({
+const taskOf = (id: string, patch: Partial<FerretSearchCard> = {}): FerretSearchCard => ({
   id,
   title: 'Untitled',
   summary: '',
@@ -60,13 +60,13 @@ const cardOf = (id: string, patch: Partial<FerretSearchCard> = {}): FerretSearch
 
 /** This ferret's one card, the way Board hands it in. */
 const needleCard = (patch: Partial<FerretSearchCard> = {}): FerretSearchCard =>
-  cardOf('F6', { title: 'Needle task', summary: 'Search the current ferret quickly.', ...patch });
+  taskOf('F6', { title: 'Needle task', summary: 'Search the current ferret quickly.', ...patch });
 
-const cardsRead = (
-  cards: readonly FerretSearchCard[] = [needleCard()],
+const tasksRead = (
+  tasks: readonly FerretSearchCard[] = [needleCard()],
   state: SessionSearchResourceState = 'ready',
   error: string | null = null,
-): FerretCardsRead => ({ state, error, cards });
+): FerretTasksRead => ({ state, error, cards: tasks });
 
 const NEEDLE_FILES: readonly SessionFileIndexEntry[] = [
   { name: 'needle.ts', path: 'src/needle.ts' },
@@ -109,19 +109,19 @@ const providerOf = (
   children: ReactNode,
   client: FakeClient,
   {
-    cards = cardsRead(),
+    cards: tasks = tasksRead(),
     focusSignal = 0,
     at = SCOPE,
   }: {
     /** `null`: the host has no board and hands no cards in. */
-    readonly cards?: FerretCardsRead | null;
+    readonly cards?: FerretTasksRead | null;
     readonly focusSignal?: number;
     readonly at?: FerretSearchScope | null;
   } = {},
 ) =>
   withClient(
     client,
-    <SessionSearchProvider focusSignal={focusSignal} scope={at} {...(cards === null ? {} : { cards })}>
+    <SessionSearchProvider focusSignal={focusSignal} scope={at} {...(tasks === null ? {} : { cards: tasks })}>
       {children}
     </SessionSearchProvider>,
   );
@@ -146,12 +146,12 @@ function SearchProbe({ onSearch }: { readonly onSearch: (search: Search) => void
 
 describe('current-ferret search model', () => {
   test('matches a card locally on its id, its title, its summary and its lane', () => {
-    const cards = [
-      cardOf('F96', { title: 'Port the importer', summary: 'Moves every old task.', lane: 'Verify' }),
-      cardOf('F7', { title: 'Unrelated work' }),
+    const tasks = [
+      taskOf('F96', { title: 'Port the importer', summary: 'Moves every old task.', lane: 'Verify' }),
+      taskOf('F7', { title: 'Unrelated work' }),
     ];
     const ids = (query: string) =>
-      filterSessionSearchResults(cards, [], query).map(result =>
+      filterSessionSearchResults(tasks, [], query).map(result =>
         result.kind === 'task' ? result.task.id : result.path,
       );
 
@@ -173,10 +173,10 @@ describe('current-ferret search model', () => {
   });
 
   test('does not invent results for a blank query or one the protocol refuses', () => {
-    expect(filterSessionSearchResults([cardOf('F6', { title: 'Needle task' })], NEEDLE_FILES, '   ')).toEqual([]);
+    expect(filterSessionSearchResults([taskOf('F6', { title: 'Needle task' })], NEEDLE_FILES, '   ')).toEqual([]);
     expect(
       filterSessionSearchResults(
-        [cardOf('F6', { title: 'Needle task' })],
+        [taskOf('F6', { title: 'Needle task' })],
         NEEDLE_FILES,
         'n'.repeat(MAX_SESSION_SEARCH_QUERY_LENGTH + 1),
       ),
@@ -185,7 +185,7 @@ describe('current-ferret search model', () => {
 
   test('ranks a file matching name and path above a card matching only its title', () => {
     const ranked = filterSessionSearchResults(
-      [cardOf('F6', { title: 'Needle task' })],
+      [taskOf('F6', { title: 'Needle task' })],
       [{ name: 'needle.ts', path: 'src/needle.ts' }],
       'needle',
     );
@@ -194,7 +194,7 @@ describe('current-ferret search model', () => {
   });
 
   test('floors a card that matched only in its summary above a path-only file and below a named one', () => {
-    const proseOnly = cardOf('F12', { title: 'Unrelated work', summary: 'Finish porting the PWA feature' });
+    const proseOnly = taskOf('F12', { title: 'Unrelated work', summary: 'Finish porting the PWA feature' });
     const ranked = filterSessionSearchResults(
       [proseOnly],
       [
@@ -213,7 +213,7 @@ describe('current-ferret search model', () => {
 
   test('ranks stably, leaving equal scores in their original order', () => {
     const ranked = filterSessionSearchResults(
-      [cardOf('F7', { title: 'Needle task' }), cardOf('F8', { title: 'Needle task' })],
+      [taskOf('F7', { title: 'Needle task' }), taskOf('F8', { title: 'Needle task' })],
       [],
       'needle',
     );
@@ -225,8 +225,8 @@ describe('current-ferret search model', () => {
 /* ---------- what a mounted scope costs --------------------------------------- */
 
 describe('what one mounted ferret scope costs', () => {
-  const mountProvider = async (client: FakeClient, cards: FerretCardsRead = cardsRead()) => {
-    const view = render(providerOf(<SessionSearchControl />, client, { cards }));
+  const mountProvider = async (client: FakeClient, tasks: FerretTasksRead = tasksRead()) => {
+    const view = render(providerOf(<SessionSearchControl />, client, { cards: tasks }));
     await settle();
     return view;
   };
@@ -246,7 +246,7 @@ describe('what one mounted ferret scope costs', () => {
   test('is independent of board size and tree depth', async () => {
     const many = Array.from({ length: 40 }, (_, index) => needleCard({ id: `F${index + 100}` }));
     const client = clientWith(answersIndex({ files: indexEntries(25) }));
-    const view = await mountProvider(client, cardsRead(many));
+    const view = await mountProvider(client, tasksRead(many));
     try {
       expect(client.calls).toHaveLength(1);
     } finally {
@@ -323,15 +323,15 @@ describe('what one mounted ferret scope costs', () => {
 
 describe("the ferret's cards", () => {
   const observe = async (
-    cards: FerretCardsRead | null,
+    tasks: FerretTasksRead | null,
     client: FakeClient = clientWith(),
   ): Promise<{
     readonly latest: () => Search;
-    readonly update: (next: FerretCardsRead) => Promise<void>;
+    readonly update: (next: FerretTasksRead) => Promise<void>;
     readonly unmount: () => void;
   }> => {
     let latest: Search | undefined;
-    const tree = (read: FerretCardsRead | null) =>
+    const tree = (read: FerretTasksRead | null) =>
       providerOf(
         <SearchProbe
           onSearch={search => {
@@ -341,7 +341,7 @@ describe("the ferret's cards", () => {
         client,
         { cards: read },
       );
-    const view = render(tree(cards));
+    const view = render(tree(tasks));
     await settle();
     return {
       latest: () => {
@@ -359,7 +359,7 @@ describe("the ferret's cards", () => {
   };
 
   test('lists the cards Board handed in, with their lane names', async () => {
-    const probe = await observe(cardsRead([needleCard(), cardOf('F8', { title: 'Assigned to me', lane: 'Plan' })]));
+    const probe = await observe(tasksRead([needleCard(), taskOf('F8', { title: 'Assigned to me', lane: 'Plan' })]));
     try {
       const search = probe.latest();
       expect(search.taskState).toBe('ready');
@@ -372,7 +372,7 @@ describe("the ferret's cards", () => {
   });
 
   test('says loading until the board answers, then ready, and lets a menu await the one read', async () => {
-    const probe = await observe(cardsRead([], 'loading'));
+    const probe = await observe(tasksRead([], 'loading'));
     try {
       expect(probe.latest().taskState).toBe('loading');
       const waiting = probe.latest().waitForTasks();
@@ -384,7 +384,7 @@ describe("the ferret's cards", () => {
       await settle();
       expect(finished).toBe(false);
 
-      await probe.update(cardsRead());
+      await probe.update(tasksRead());
       expect(probe.latest().taskState).toBe('ready');
       expect(probe.latest().tasks.map(task => task.id)).toEqual(['F6']);
       expect(finished).toBe(true);
@@ -397,7 +397,7 @@ describe("the ferret's cards", () => {
   test('says unavailable with the daemon reason when the board cannot be read, and the files stay searchable', async () => {
     const client = clientWith();
     const view = render(
-      providerOf(<SessionSearchControl />, client, { cards: cardsRead([], 'unavailable', 'board refused') }),
+      providerOf(<SessionSearchControl />, client, { cards: tasksRead([], 'unavailable', 'board refused') }),
     );
     try {
       await settle();
@@ -427,7 +427,7 @@ describe("the ferret's cards", () => {
   });
 
   test('keeps a card from any lane findable', async () => {
-    const probe = await observe(cardsRead([needleCard({ lane: 'Done' })]));
+    const probe = await observe(tasksRead([needleCard({ lane: 'Done' })]));
     try {
       run(() => probe.latest().setQuery('needle'));
       expect(probe.latest().results.map(sessionSearchResultKey)).toContain('task:F6');
@@ -440,8 +440,8 @@ describe("the ferret's cards", () => {
 /* ---------- coverage and the file half ---------------------------------------- */
 
 describe('honest coverage of the file index', () => {
-  const mountControl = async (index: CallHandler = answersIndex(), cards: FerretCardsRead = cardsRead()) => {
-    const view = render(providerOf(<SessionSearchControl />, clientWith(index), { cards }));
+  const mountControl = async (index: CallHandler = answersIndex(), tasks: FerretTasksRead = tasksRead()) => {
+    const view = render(providerOf(<SessionSearchControl />, clientWith(index), { cards: tasks }));
     await settle();
     return view;
   };
@@ -457,7 +457,7 @@ describe('honest coverage of the file index', () => {
   test('lists a card matched on its summary alone beside the files', async () => {
     const view = await mountControl(
       answersIndex({ files: [] }),
-      cardsRead([needleCard({ title: 'Unrelated work', summary: 'The transport layer needs work.' })]),
+      tasksRead([needleCard({ title: 'Unrelated work', summary: 'The transport layer needs work.' })]),
     );
     try {
       await type(view, 'transport');
@@ -522,7 +522,7 @@ describe('honest coverage of the file index', () => {
         coverage: 'partial',
         skipped: [{ reason: 'unreadable', count: 3 }],
       }),
-      cardsRead([]),
+      tasksRead([]),
     );
     try {
       await type(view, 'needle');
@@ -540,7 +540,7 @@ describe('honest coverage of the file index', () => {
   });
 
   test('still makes an unqualified no-match claim when the index really is complete', async () => {
-    const view = await mountControl(answersIndex(), cardsRead([]));
+    const view = await mountControl(answersIndex(), tasksRead([]));
     try {
       await type(view, 'absent');
 
@@ -639,9 +639,9 @@ describe('the published scope and the published evidence never disagree', () => 
     const captureControl = (current: SearchController): void => {
       control = current;
     };
-    const under = (client: FakeClient, at: FerretSearchScope, cards: FerretCardsRead) =>
-      providerOf(<ScopeProbe onControl={captureControl} onObserve={observe} />, client, { at, cards });
-    const tree = render(under(alpha, alphaScope, cardsRead()));
+    const under = (client: FakeClient, at: FerretSearchScope, tasks: FerretTasksRead) =>
+      providerOf(<ScopeProbe onControl={captureControl} onObserve={observe} />, client, { at, cards: tasks });
+    const tree = render(under(alpha, alphaScope, tasksRead()));
     try {
       await settle();
       expect(
@@ -669,11 +669,11 @@ describe('the published scope and the published evidence never disagree', () => 
 
       const before = seen.length;
       await runAsync(async () => {
-        tree.update(under(beta, betaScope, cardsRead([], 'loading')));
+        tree.update(under(beta, betaScope, tasksRead([], 'loading')));
         await settle();
       });
       await runAsync(async () => {
-        tree.update(under(beta, betaScope, cardsRead([])));
+        tree.update(under(beta, betaScope, tasksRead([])));
         await settle();
       });
 
@@ -723,8 +723,8 @@ describe('current-ferret search control', () => {
     openers?: { readonly onFile: (path: string) => void; readonly onTasks: () => void },
     {
       index = answersIndex(),
-      cards = cardsRead(),
-    }: { readonly index?: CallHandler; readonly cards?: FerretCardsRead } = {},
+      cards: tasks = tasksRead(),
+    }: { readonly index?: CallHandler; readonly cards?: FerretTasksRead } = {},
   ) => {
     const client = clientWith(index);
     const view = render(
@@ -734,7 +734,7 @@ describe('current-ferret search control', () => {
           <SessionSearchControl {...props} />
         </>,
         client,
-        { cards },
+        { cards: tasks },
       ),
     );
     await settle();
@@ -784,7 +784,7 @@ describe('current-ferret search control', () => {
           path: `needle-${index}.ts`,
         })),
       }),
-      cards: cardsRead([]),
+      cards: tasksRead([]),
     });
     try {
       await search(view, 'needle');
@@ -1073,7 +1073,7 @@ describe('current-ferret search control', () => {
   });
 
   test('says it is INDEXING while it builds, and never calls a failed index an empty result', async () => {
-    const indexing = await mountControl({}, undefined, { index: neverAnswers, cards: cardsRead([], 'loading') });
+    const indexing = await mountControl({}, undefined, { index: neverAnswers, cards: tasksRead([], 'loading') });
     try {
       run(() => indexing.root.findByType('input').props.onChange({ target: { value: 'needle' } }));
       const drawn = JSON.stringify(indexing.toJSON());
@@ -1090,7 +1090,7 @@ describe('current-ferret search control', () => {
 
     const broken = await mountControl({}, undefined, {
       index: () => ({ entries: [] }),
-      cards: cardsRead([], 'unavailable', 'board refused'),
+      cards: tasksRead([], 'unavailable', 'board refused'),
     });
     try {
       run(() => broken.root.findByType('input').props.onChange({ target: { value: 'needle' } }));
@@ -1106,7 +1106,7 @@ describe('current-ferret search control', () => {
 
     const refused = await mountControl({}, undefined, {
       index: () => Promise.reject(new Error('Failed to fetch')),
-      cards: cardsRead([], 'unavailable', 'Failed to fetch'),
+      cards: tasksRead([], 'unavailable', 'Failed to fetch'),
     });
     try {
       run(() => refused.root.findByType('input').props.onChange({ target: { value: 'needle' } }));
@@ -1119,32 +1119,32 @@ describe('current-ferret search control', () => {
   });
 
   test('names only the independently moving half and does not repeat it inside a refusal alert', async () => {
-    const cardsMoving = await mountControl({}, undefined, {
+    const tasksMoving = await mountControl({}, undefined, {
       index: answersIndex({ files: [] }),
-      cards: cardsRead([], 'loading'),
+      cards: tasksRead([], 'loading'),
     });
     try {
-      run(() => cardsMoving.root.findByType('input').props.onChange({ target: { value: 'needle' } }));
-      const drawn = JSON.stringify(cardsMoving.toJSON());
+      run(() => tasksMoving.root.findByType('input').props.onChange({ target: { value: 'needle' } }));
+      const drawn = JSON.stringify(tasksMoving.toJSON());
       expect(drawn).toContain("Indexing this ferret's tasks…");
       expect(drawn).not.toContain("Indexing this ferret's files…");
     } finally {
-      run(() => cardsMoving.unmount());
+      run(() => tasksMoving.unmount());
     }
 
-    const failedCards = await mountControl({}, undefined, {
+    const failedTasks = await mountControl({}, undefined, {
       index: neverAnswers,
-      cards: cardsRead([], 'unavailable', 'task read refused'),
+      cards: tasksRead([], 'unavailable', 'task read refused'),
     });
     try {
-      run(() => failedCards.root.findByType('input').props.onChange({ target: { value: 'needle' } }));
-      const drawn = JSON.stringify(failedCards.toJSON());
+      run(() => failedTasks.root.findByType('input').props.onChange({ target: { value: 'needle' } }));
+      const drawn = JSON.stringify(failedTasks.toJSON());
       expect(drawn).toContain('Tasks unavailable: task read refused.');
       expect(drawn).toContain("Indexing this ferret's files…");
       expect(drawn.match(/Indexing/g)).toHaveLength(1);
       expect(drawn).not.toContain('No files or tasks of this ferret match');
     } finally {
-      run(() => failedCards.unmount());
+      run(() => failedTasks.unmount());
     }
   });
 

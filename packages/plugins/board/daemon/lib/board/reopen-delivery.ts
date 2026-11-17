@@ -14,7 +14,7 @@
  * FILES THE OWNER ATTACHED ("Not good" with a picture) ride the same line to whichever rung takes it: the
  * messenger carries them out of the session they were uploaded to, so the ferret that is told gets them.
  */
-import type { BoardReopenAttachments, Card } from '../../../contract/index.ts';
+import type { BoardReopenAttachments, Task } from '../../../contract/index.ts';
 import { effectiveAssignee } from './authority.ts';
 import type { ReopenNotice, ReopenNotifier } from './ports.ts';
 import { reopenMessage } from './service.ts';
@@ -79,7 +79,7 @@ export class ReopenDeliveryLadder implements ReopenNotifier {
 }
 
 /** The ferrets a card's news goes to, in order: its assignee, then its owner ferret. */
-export const rungsOf = (task: Pick<Card, 'assignee' | 'owner'>): readonly string[] => [
+export const rungsOf = (task: Pick<Task, 'assignee' | 'owner'>): readonly string[] => [
   ...new Set([effectiveAssignee(task), task.owner]),
 ];
 

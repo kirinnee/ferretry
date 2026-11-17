@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import type {
   AgendaAsk,
-  AgendaCardAnswer,
+  AgendaTaskAnswer,
   AgendaId,
   AgendaItem,
   AgendaResponse,
@@ -22,8 +22,8 @@ import {
 import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
 import {
   awaitsOwnAnswer,
-  cardAgendaReference,
-  openCardAsks,
+  taskAgendaReference,
+  openTaskAsks,
 } from '../../../../daemon/lib/protocol/agenda-task-asks.ts';
 import { gateReference } from '../../../../daemon/lib/protocol/agenda-gate.ts';
 import should from 'should';
@@ -47,7 +47,7 @@ import {
   parseAgendaLedger,
   type RaiseAgendaRequest,
 } from '../../../../daemon/lib/agenda/state-machine.ts';
-import type { CardAskOperation } from '../../../../daemon/lib/agenda/task-asks.ts';
+import type { TaskAskOperation } from '../../../../daemon/lib/agenda/task-asks.ts';
 
 const SESSION_ID = 'session-1';
 const OTHER_SESSION_ID = 'session-2';
@@ -1430,16 +1430,16 @@ describe('Agenda state machine discuss', () => {
 });
 
 describe('Agenda state machine card fields', () => {
-  const answers: AgendaCardAnswer[] = [
+  const answers: AgendaTaskAnswer[] = [
     { direction: 'left', does: 'reject', label: 'Deny' },
     { direction: 'up', does: 'approve', label: 'Always allow', description: 'for this repo' },
     { direction: 'right', does: 'approve', label: 'Allow' },
   ];
-  const card: Partial<RaiseAgendaRequest> = { title: 'Deploy approval', kind: 'permission', answers };
+  const task: Partial<RaiseAgendaRequest> = { title: 'Deploy approval', kind: 'permission', answers };
 
   it('should carry the title, kind and answers onto the raised item, and into its snapshot', () => {
     // Arrange / Act
-    const created = raised(AGENT, card);
+    const created = raised(AGENT, task);
 
     // Assert
     should(created.item).containDeep({ title: 'Deploy approval', kind: 'permission', answers });
@@ -1448,15 +1448,15 @@ describe('Agenda state machine card fields', () => {
 
   it('should treat an identical re-raise as unchanged and a different card as a new item', () => {
     // Arrange
-    const first = raised(AGENT, card);
+    const first = raised(AGENT, task);
 
     // Act
-    const same = succeeded(applyAgendaCommand(first.ledger, raiseCommand(AGENT, card, SECOND)));
+    const same = succeeded(applyAgendaCommand(first.ledger, raiseCommand(AGENT, task, SECOND)));
     const retitled = succeeded(
-      applyAgendaCommand(first.ledger, raiseCommand(AGENT, { ...card, title: 'Another title' }, SECOND)),
+      applyAgendaCommand(first.ledger, raiseCommand(AGENT, { ...task, title: 'Another title' }, SECOND)),
     );
     const reanswered = succeeded(
-      applyAgendaCommand(first.ledger, raiseCommand(AGENT, { ...card, answers: answers.slice(0, 2) }, SECOND)),
+      applyAgendaCommand(first.ledger, raiseCommand(AGENT, { ...task, answers: answers.slice(0, 2) }, SECOND)),
     );
 
     // Assert
@@ -1469,7 +1469,7 @@ describe('Agenda state machine card fields', () => {
 
   it('should let an edit reword the title only, never the kind or the answers', () => {
     // Arrange
-    const created = raised(AGENT, card);
+    const created = raised(AGENT, task);
 
     // Act
     const edited = succeeded(
@@ -2466,7 +2466,7 @@ describe('Agenda state machine notices', () => {
     // Arrange
     const run = (overrides: Partial<RaiseAgendaRequest>) =>
       failed(applyAgendaCommandToSession(null, SESSION_ID, raiseCommand(AGENT, notice(overrides))));
-    const answers: AgendaCardAnswer[] = [
+    const answers: AgendaTaskAnswer[] = [
       { direction: 'left', does: 'reject', label: 'No' },
       { direction: 'right', does: 'approve', label: 'Yes' },
     ];
@@ -4056,7 +4056,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
   const REPEATS = { subject: 'Try it: Badge', ask: { kind: 'open-question' as const }, kind: 'reply' as const };
   const SYSTEM: AgendaActor = { kind: 'daemon', cause: 'system' };
   const RECEIPT = 'a'.repeat(64);
-  const ask = (ledger: AgendaLedger, operation: CardAskOperation, actor: AgendaActor = SYSTEM, id: AgendaId = 'A1') =>
+  const ask = (ledger: AgendaLedger, operation: TaskAskOperation, actor: AgendaActor = SYSTEM, id: AgendaId = 'A1') =>
     applyAgendaCommand(ledger, { action: 'card-ask', actor, id, operation, at: SECOND });
   const attach = (ledger: AgendaLedger, gate: typeof GATE = GATE, howToTest?: string) =>
     succeeded(ask(ledger, { kind: 'attach', ask: { gate, ...(howToTest === undefined ? {} : { howToTest }) } }));
@@ -4079,7 +4079,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
 
     // Assert
     should(woke.change).equal('woke');
-    should(openCardAsks(woke.item!)).have.length(1);
+    should(openTaskAsks(woke.item!)).have.length(1);
     should(woke.item?.cardAsks?.[0]).containDeep({ gate: GATE, at: SECOND, howToTest: 'Open the app.' });
     should(woke.item?.waitingSince).equal(SECOND);
     should(agendaState(woke.item!).state).equal('needs-you');
@@ -4113,7 +4113,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     const different = failed(answer(answered.ledger, GATE, 'b'.repeat(64)));
 
     should(answered.change).equal('answered');
-    should(openCardAsks(answered.item!)).have.length(0);
+    should(openTaskAsks(answered.item!)).have.length(0);
     should(answered.item?.cardAsks?.[0]?.answer?.receipt).equal(RECEIPT);
     should(agendaState(answered.item!).state).equal('resting');
     should(isActiveAgenda(activeEntry(answered.ledger))).be.true();
@@ -4126,7 +4126,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
 
     const one = succeeded(answer(both.ledger));
 
-    should(openCardAsks(one.item!).map(each => each.gate.entry)).deepEqual([2]);
+    should(openTaskAsks(one.item!).map(each => each.gate.entry)).deepEqual([2]);
     should(agendaState(one.item!).state).equal('needs-you');
   });
 
@@ -4139,15 +4139,15 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
 
     // Assert — the mirror moves on to the ask still waiting; the change is stamped, so a screen that still draws the
     // first one is not read as answering the second for two minutes
-    should(openCardAsks(deferred.item!).map(each => each.gate.entry)).deepEqual([1, 2]);
+    should(openTaskAsks(deferred.item!).map(each => each.gate.entry)).deepEqual([1, 2]);
   });
 
   describe('an item’s own ask beside its card ask', () => {
     const TASK = { kind: 'task' as const };
     // The card agenda the daemon opens (`cardAgendaRaise`): an open question in the lane's words, under `card-agenda:`.
-    const CARD_AGENDA = {
+    const TASK_AGENDA = {
       source: 'task' as const,
-      sourceRef: cardAgendaReference('F1'),
+      sourceRef: taskAgendaReference('F1'),
       subject: 'Try it: the badge counts unread items.',
       ask: { kind: 'open-question' as const },
       kind: 'reply' as const,
@@ -4172,7 +4172,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       const gateDone = succeeded(answer(carried.ledger));
 
       // Assert — its own ask remains, so it is still the owner's
-      should(openCardAsks(gateDone.item!)).have.length(0);
+      should(openTaskAsks(gateDone.item!)).have.length(0);
       should(gateDone.item?.ownerAnswer).be.undefined();
       should(agendaState(gateDone.item!).state).equal('needs-you');
       should(gateDone.item?.parked).be.undefined();
@@ -4205,7 +4205,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         const second = succeeded(answer(first.ledger, NEXT));
 
         should(agendaState(first.item!).state).equal('needs-you');
-        should(openCardAsks(first.item!)).have.length(1);
+        should(openTaskAsks(first.item!)).have.length(1);
         should(agendaState(second.item!).state).equal('needs-you');
         should(second.item?.ownerAnswer).be.undefined();
       }
@@ -4232,8 +4232,8 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     });
 
     it('rests a card-owned agenda on the answer while its ask is still the one the daemon generated', () => {
-      const card = raised(DAEMON, CARD_AGENDA);
-      const carried = attach(card.ledger);
+      const task = raised(DAEMON, TASK_AGENDA);
+      const carried = attach(task.ledger);
 
       const done = succeeded(answer(carried.ledger));
 
@@ -4241,14 +4241,14 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     });
 
     describe('a card-owned agenda whose ferret asks something of its own', () => {
-      const cardAgenda = () => raised(DAEMON, CARD_AGENDA);
+      const taskAgenda = () => raised(DAEMON, TASK_AGENDA);
       const ferretAsks = (ledger: AgendaLedger, patch: Record<string, unknown>) =>
         succeeded(applyAgendaCommand(ledger, { action: 'edit', actor: AGENT, id: 'A1', patch, at: SECOND } as never));
       const BADGE = 'Should the badge also change keyboard focus?';
 
       it('keeps a new question in Needs you after the card ask is answered, then rests on the owner’s answer', () => {
         // Arrange — the ferret rewrites the generated ask into a question with options, then the card ask arrives
-        const edited = ferretAsks(cardAgenda().ledger, {
+        const edited = ferretAsks(taskAgenda().ledger, {
           subject: BADGE,
           kind: 'choice',
           ask: { kind: 'multiple-choice', options: [{ label: 'Yes' }, { label: 'No' }] },
@@ -4261,7 +4261,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         const gateDone = succeeded(answer(carried.ledger));
 
         // Assert — the ferret's question is still the owner's
-        should(openCardAsks(gateDone.item!)).have.length(0);
+        should(openTaskAsks(gateDone.item!)).have.length(0);
         should(gateDone.item?.ownerAnswer).be.undefined();
         should(agendaState(gateDone.item!).state).equal('needs-you');
         should(gateDone.item?.parked).be.undefined();
@@ -4285,7 +4285,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
 
       it('keeps a reworded open question in Needs you, and the owner’s reply rests it', () => {
         // Arrange — the ferret rewrites the subject into an open question
-        const edited = ferretAsks(cardAgenda().ledger, { subject: BADGE, ask: { kind: 'open-question' } });
+        const edited = ferretAsks(taskAgenda().ledger, { subject: BADGE, ask: { kind: 'open-question' } });
         const carried = attach(edited.ledger);
 
         // Act
@@ -4311,7 +4311,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       });
 
       it('rests again when the ferret only rewords the brief and leaves the generated ask alone', () => {
-        const edited = ferretAsks(cardAgenda().ledger, { why: 'The owner has to try the card.' });
+        const edited = ferretAsks(taskAgenda().ledger, { why: 'The owner has to try the card.' });
         const carried = attach(edited.ledger);
 
         const gateDone = succeeded(answer(carried.ledger));
@@ -4321,13 +4321,13 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
 
       it('keeps a rewritten subject the owner’s after the rewrite aged out of the revisions (no revision tail is read)', () => {
         // Arrange — the ferret rewrites the subject, then edits only the context more times than revisions are kept
-        let ledger = ferretAsks(cardAgenda().ledger, { subject: BADGE }).ledger;
+        let ledger = ferretAsks(taskAgenda().ledger, { subject: BADGE }).ledger;
         for (let index = 0; index < MAX_AGENDA_REVISIONS + 2; index++) {
           ledger = ferretAsks(ledger, { context: `Still checking, round ${String(index)}.` }).ledger;
         }
         const aged = activeEntry(ledger).item;
         should(aged.revisions?.some(each => each.changed.includes('subject'))).be.false();
-        should(aged.generatedSubject).equal(CARD_AGENDA.subject);
+        should(aged.generatedSubject).equal(TASK_AGENDA.subject);
         should(aged.subject).equal(BADGE);
         const carried = attach(ledger);
 
@@ -4348,12 +4348,12 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       };
       const FOURTH = '2026-07-30T13:00:00Z';
       const FIFTH = '2026-07-30T14:00:00Z';
-      const cardAsk = (ledger: AgendaLedger, operation: CardAskOperation, at: string) =>
+      const taskAsk = (ledger: AgendaLedger, operation: TaskAskOperation, at: string) =>
         succeeded(applyAgendaCommand(ledger, { action: 'card-ask', actor: SYSTEM, id: 'A1', operation, at }));
       const attachAt = (ledger: AgendaLedger, gate: typeof GATE, at: string) =>
-        cardAsk(ledger, { kind: 'attach', ask: { gate } }, at);
+        taskAsk(ledger, { kind: 'attach', ask: { gate } }, at);
       const doneAt = (ledger: AgendaLedger, gate: typeof GATE, at: string) =>
-        cardAsk(
+        taskAsk(
           ledger,
           {
             kind: 'answered',
@@ -4375,14 +4375,14 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         should(agendaState(replied.item!).state).equal('needs-you');
         should(replied.item?.parked).be.undefined();
         should(replied.item?.ownAskRepliedTo).be.a.String();
-        should(openCardAsks(replied.item!)).have.length(1);
+        should(openTaskAsks(replied.item!)).have.length(1);
         should(replied.item?.ownerAnswer).be.undefined();
 
         // Act — the card ask is answered Done
         const done = doneAt(replied.ledger, GATE, FOURTH);
 
         // Assert — the answered question does not come back
-        should(openCardAsks(done.item!)).have.length(0);
+        should(openTaskAsks(done.item!)).have.length(0);
         should(agendaState(done.item!).state).equal('resting');
         should(done.item?.parked?.reason).equal('replied');
       });
@@ -4427,16 +4427,16 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
 
     it('records the subject it wrote on the card agenda it opens, and again on each restatement', () => {
       // Arrange / Act
-      const opened = raised(DAEMON, CARD_AGENDA);
+      const opened = raised(DAEMON, TASK_AGENDA);
       const restated = succeeded(
         applyAgendaCommand(
           opened.ledger,
-          raiseCommand(DAEMON, { ...CARD_AGENDA, subject: 'Try it: the badge.' }, SECOND),
+          raiseCommand(DAEMON, { ...TASK_AGENDA, subject: 'Try it: the badge.' }, SECOND),
         ),
       );
 
       // Assert — only the daemon's card agenda keeps one
-      should(opened.item?.generatedSubject).equal(CARD_AGENDA.subject);
+      should(opened.item?.generatedSubject).equal(TASK_AGENDA.subject);
       should(restated.change).equal('refreshed');
       should(restated.item?.generatedSubject).equal('Try it: the badge.');
       should(raised(AGENT, REPEATS).item?.generatedSubject).be.undefined();
@@ -4452,7 +4452,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       const gateDone = succeeded(answer(carried.ledger));
 
       // Assert — its question is still the owner's
-      should(openCardAsks(gateDone.item!)).have.length(0);
+      should(openTaskAsks(gateDone.item!)).have.length(0);
       should(agendaState(gateDone.item!).state).equal('needs-you');
       should(gateDone.item?.parked).be.undefined();
 
@@ -4483,12 +4483,12 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
       });
       // Read conservatively: only a line that provably repeats the ask (the lane's words and the card's title) is the
       // daemon's; anything more — even after "Try it:" — is a question of the ferret's until a restate stamps it.
-      const generated = attach(withoutRecord(raised(DAEMON, CARD_AGENDA).ledger, 'Try it: Badge'));
+      const generated = attach(withoutRecord(raised(DAEMON, TASK_AGENDA).ledger, 'Try it: Badge'));
       const prefixed = attach(
-        withoutRecord(raised(DAEMON, CARD_AGENDA).ledger, 'Try it: Badge. Should keyboard focus change too?'),
+        withoutRecord(raised(DAEMON, TASK_AGENDA).ledger, 'Try it: Badge. Should keyboard focus change too?'),
       );
       const rewritten = attach(
-        withoutRecord(raised(DAEMON, CARD_AGENDA).ledger, 'Should the badge also change keyboard focus?'),
+        withoutRecord(raised(DAEMON, TASK_AGENDA).ledger, 'Should the badge also change keyboard focus?'),
       );
 
       // Act
@@ -4514,14 +4514,14 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
           return { ...entry, item: { ...item, subject, generatedSubject: subject } };
         }),
       });
-      const stamped = attach(carried(raised(DAEMON, CARD_AGENDA).ledger));
+      const stamped = attach(carried(raised(DAEMON, TASK_AGENDA).ledger));
 
       // Act — the owner answers the card ask
       const done = succeeded(answer(stamped.ledger));
 
       // Assert — nothing is left for the owner: it is off Needs you, as a 5.0-raised card agenda is
       should(done.item?.generatedSubject).equal('OK to build? Badge counts unread items.');
-      should(openCardAsks(done.item!)).have.length(0);
+      should(openTaskAsks(done.item!)).have.length(0);
       should(agendaState(done.item!).state).equal('resting');
     });
 
@@ -4538,7 +4538,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         succeeded(applyAgendaCommand(ledger, { action: 'reply', actor: HUMAN, id: 'A1', note, at: THIRD }));
 
       it('logs “works now” under a card’s own try-it without resting it: the Good still waits in Needs you', () => {
-        const carried = attach(raised(DAEMON, CARD_AGENDA).ledger);
+        const carried = attach(raised(DAEMON, TASK_AGENDA).ledger);
         should(agendaState(carried.item!).state).equal('needs-you');
 
         const replied = reply(carried.ledger, 'works now');
@@ -4547,13 +4547,13 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         should(replied.item?.history?.at(-1)).containDeep({ kind: 'replied', note: 'works now' });
         should(replied.item?.conversation?.at(-1)).containDeep({ by: 'owner', via: 'reply', text: 'works now' });
         // ...but the ask is unanswered and the item is still the owner's turn.
-        should(openCardAsks(replied.item!)).have.length(1);
+        should(openTaskAsks(replied.item!)).have.length(1);
         should(replied.item?.parked).be.undefined();
         should(replied.item?.waitingOn).be.undefined();
         should(agendaState(replied.item!).state).equal('needs-you');
         // Good then closes as it always does.
         const good = succeeded(answer(replied.ledger));
-        should(openCardAsks(good.item!)).have.length(0);
+        should(openTaskAsks(good.item!)).have.length(0);
         should(agendaState(good.item!).state).equal('resting');
       });
 
@@ -4562,7 +4562,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
 
         const replied = reply(carried.ledger, 'works now');
 
-        should(openCardAsks(replied.item!)).have.length(1);
+        should(openTaskAsks(replied.item!)).have.length(1);
         should(agendaState(replied.item!).state).equal('needs-you');
       });
 
@@ -4580,13 +4580,13 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         // The reply answers THAT question; the try-it is the item's ask now, so nothing parks it.
         should(replied.item?.parked).be.undefined();
         should(replied.item?.ownAskRepliedTo).be.a.String();
-        should(openCardAsks(replied.item!)).have.length(1);
+        should(openTaskAsks(replied.item!)).have.length(1);
         should(agendaState(replied.item!).state).equal('needs-you');
         should(replied.item?.history?.at(-1)).containDeep({ kind: 'replied', note: 'yes, focus too' });
 
         // Good then answers the item: nothing is left, and it rests on the answer it already had.
         const good = succeeded(answer(replied.ledger));
-        should(openCardAsks(good.item!)).have.length(0);
+        should(openTaskAsks(good.item!)).have.length(0);
         should(agendaState(good.item!).state).equal('resting');
       });
 
@@ -4608,7 +4608,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         // Assert — the question is answered, the SAME item is still theirs, and its ask is the try-it
         should(awaitsOwnAnswer(replied.item!, replied.item!.cardAsks ?? [])).be.false();
         should(agendaState(replied.item!).state).equal('needs-you');
-        should(openCardAsks(replied.item!).map(each => each.gate.cardId)).deepEqual([GATE.cardId]);
+        should(openTaskAsks(replied.item!).map(each => each.gate.cardId)).deepEqual([GATE.cardId]);
         should(replied.item?.id).equal(carried.item?.id);
       });
 
@@ -4666,7 +4666,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
     const again = attach(answered.ledger);
 
     should(again.changed).be.false();
-    should(openCardAsks(activeEntry(again.ledger).item)).have.length(0);
+    should(openTaskAsks(activeEntry(again.ledger).item)).have.length(0);
   });
 
   it('records Not yet as an open, marked ask and rests the agenda', () => {
@@ -4674,7 +4674,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
 
     const notYet = succeeded(ask(first.ledger, { kind: 'not-yet', reference: gateReference(GATE), note: 'tomorrow' }));
 
-    should(openCardAsks(notYet.item!)).have.length(1);
+    should(openTaskAsks(notYet.item!)).have.length(1);
     should(notYet.item?.cardAsks?.[0]?.notYet).deepEqual({ at: SECOND, note: 'tomorrow' });
     should(agendaState(notYet.item!).state).equal('resting');
   });
@@ -4841,8 +4841,8 @@ describe('agenda ledger link meanings', () => {
 describe('a card ask withdrawn from a thread somebody wrote on since (docs/agenda.md § Card asks)', () => {
   const START = Date.parse('2026-07-30T10:00:00Z');
   const minute = (offset: number): string => new Date(START + offset * 60_000).toISOString();
-  const gateFor = (cardId: string) => ({
-    cardId,
+  const gateFor = (taskId: string) => ({
+    cardId: taskId,
     laneId: 'tested',
     laneName: 'Try it',
     entry: 1,
@@ -4854,27 +4854,27 @@ describe('a card ask withdrawn from a thread somebody wrote on since (docs/agend
     ],
   });
   const SYSTEM: AgendaActor = { kind: 'daemon', cause: 'system' };
-  const attach = (ledger: AgendaLedger, cardId: string, at: string) =>
+  const attach = (ledger: AgendaLedger, taskId: string, at: string) =>
     succeeded(
       applyAgendaCommand(ledger, {
         action: 'card-ask',
         actor: SYSTEM,
         id: 'A1',
-        operation: { kind: 'attach', ask: { gate: gateFor(cardId) } },
+        operation: { kind: 'attach', ask: { gate: gateFor(taskId) } },
         at,
       }),
     );
-  const withdraw = (ledger: AgendaLedger, cardId: string, at: string) =>
+  const withdraw = (ledger: AgendaLedger, taskId: string, at: string) =>
     succeeded(
       applyAgendaCommand(ledger, {
         action: 'card-ask',
         actor: SYSTEM,
         id: 'A1',
-        operation: { kind: 'withdraw', reference: gateReference(gateFor(cardId)) },
+        operation: { kind: 'withdraw', reference: gateReference(gateFor(taskId)) },
         at,
       }),
     );
-  const answerDone = (ledger: AgendaLedger, cardId: string, at: string) =>
+  const answerDone = (ledger: AgendaLedger, taskId: string, at: string) =>
     succeeded(
       applyAgendaCommand(ledger, {
         action: 'card-ask',
@@ -4882,7 +4882,7 @@ describe('a card ask withdrawn from a thread somebody wrote on since (docs/agend
         id: 'A1',
         operation: {
           kind: 'answered',
-          reference: gateReference(gateFor(cardId)),
+          reference: gateReference(gateFor(taskId)),
           answer: { at, response: { kind: 'multiple-choice', choice: 'Done' }, receipt: 'a'.repeat(64) },
         },
         at,
@@ -5034,14 +5034,14 @@ describe('a card ask withdrawn from a thread somebody wrote on since (docs/agend
           { action: 'rest', actor: AGENT, id: 'A1', why: 'checking', at: minute(10) },
         ),
       );
-    const splitAway = (ledger: AgendaLedger, cardId: string, at: string) =>
+    const splitAway = (ledger: AgendaLedger, taskId: string, at: string) =>
       succeeded(
         applyAgendaCommand(ledger, {
           action: 'split',
           actor: AGENT,
           id: 'A1',
           request: request({ subject: 'Which cloud account?', premise: 'Two asks grew.', context: 'Split off.' }),
-          moveCards: [{ id: cardId }],
+          moveCards: [{ id: taskId }],
           at,
         }),
       );
@@ -5060,7 +5060,7 @@ describe('a card ask withdrawn from a thread somebody wrote on since (docs/agend
       // Assert
       should(agendaState(parentOf(split)).state).equal('resting');
       should(parentOf(split).resting?.sub).equal('working');
-      should(openCardAsks(activeEntry(split.ledger, 'A2').item)).have.length(1);
+      should(openTaskAsks(activeEntry(split.ledger, 'A2').item)).have.length(1);
     });
 
     it('stays in Needs you when its ferret asked a question of its own after the ask was attached', () => {
@@ -5075,7 +5075,7 @@ describe('a card ask withdrawn from a thread somebody wrote on since (docs/agend
       should(agendaState(parentOf(split)).state).equal('needs-you');
       should(parentOf(split).resting).be.undefined();
       should(parentOf(split).subject).equal('Should keyboard focus change too?');
-      should(openCardAsks(parentOf(split))).have.length(0);
+      should(openTaskAsks(parentOf(split))).have.length(0);
     });
 
     it('stays in Needs you when somebody wrote on the thread since the ask, whatever it says', () => {

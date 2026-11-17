@@ -1,14 +1,23 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount } from '@ferretry/app/testing';
 import { FY_RENDER_LIMITS } from '@ferretry/plugin-conversation/contract';
-import type { CardView } from '../../../contract/index.ts';
+import type { TaskView } from '../../../contract/index.ts';
 import { ferretNamer } from '../../../app/lib/board-present.ts';
 import { DaemonBoardStore } from '../../../app/lib/board-store.ts';
 import type { EmbedSpec } from '../../../app/lib/embed-lanes.ts';
 import { THIS_MACHINE } from '../../../app/lib/machine.ts';
-import { boardCardPath } from '../../../app/lib/paths.ts';
-import { CardEmbed } from '../../../app/views/embed.tsx';
-import { boardAnswer, card, deferred, fakeEnvironment, fakePort, flush, laneSetFor, PROJECT } from './board-support.ts';
+import { boardTaskPath } from '../../../app/lib/paths.ts';
+import { TaskEmbed } from '../../../app/views/embed.tsx';
+import {
+  boardAnswer,
+  boardTask,
+  deferred,
+  fakeEnvironment,
+  fakePort,
+  flush,
+  laneSetFor,
+  PROJECT,
+} from './board-support.ts';
 
 /**
  * A `card` / `board` block in chat, drawn by the Board: the real card and lane header, read from the board, live on
@@ -27,7 +36,7 @@ const names = ferretNamer(new Map([['mvuc7tsf-0c3d50df', 'nimbus']]));
 
 /** A store whose machine serves `cards` by id; the map is mutable so a test can move one, and `fail` ids refuse. */
 const serving = (
-  cards: Map<string, CardView>,
+  tasks: Map<string, TaskView>,
   fail: Set<string> = new Set(),
   extra: Parameters<typeof boardAnswer>[1] = {},
 ) => {
@@ -35,16 +44,16 @@ const serving = (
   const port = fakePort({
     card: async (_daemon, id) => {
       if (fail.has(id)) throw new Error('unreadable');
-      const found = cards.get(id);
+      const found = tasks.get(id);
       return found === undefined ? null : { card: found, laneSet: lanes };
     },
-    board: async () => boardAnswer([...cards.values()], { projectId: PROJECT, laneSet: lanes, ...extra }),
+    board: async () => boardAnswer([...tasks.values()], { projectId: PROJECT, laneSet: lanes, ...extra }),
   });
   return { store: new DaemonBoardStore(port, environment), port, environment };
 };
 
 const show = async (store: DaemonBoardStore, spec: EmbedSpec): Promise<HTMLElement> => {
-  view = await mount(<CardEmbed names={names} spec={spec} store={store} />);
+  view = await mount(<TaskEmbed names={names} spec={spec} store={store} />);
   await interact(() => flush());
   return view.container;
 };
@@ -59,16 +68,16 @@ const poke = async (store: DaemonBoardStore, ...ids: string[]) =>
 
 /** A parent with two children and a stranger. */
 const family = () =>
-  new Map<string, CardView>([
-    ['F10', card('F10', { title: 'Parent' })],
-    ['F11', card('F11', { title: 'Child one', parent: { id: 'F10' } })],
-    ['F12', card('F12', { title: 'Child two', parent: { id: 'F10' }, laneId: 'review' })],
-    ['F13', card('F13', { title: 'Stranger' })],
+  new Map<string, TaskView>([
+    ['F10', boardTask('F10', { title: 'Parent' })],
+    ['F11', boardTask('F11', { title: 'Child one', parent: { id: 'F10' } })],
+    ['F12', boardTask('F12', { title: 'Child two', parent: { id: 'F10' }, laneId: 'review' })],
+    ['F13', boardTask('F13', { title: 'Stranger' })],
   ]);
 
 describe('CardEmbed: a card', () => {
   it('draws the real board card with its title, its lane and a link to its page', async () => {
-    const { store } = serving(new Map([['F1', card('F1', { title: 'Ship the thing' })]]));
+    const { store } = serving(new Map([['F1', boardTask('F1', { title: 'Ship the thing' })]]));
     const root = await show(store, { kind: 'card', id: 'F1' });
     expect(root.querySelector('[data-embed-card="F1"]')).not.toBeNull();
     expect(text(root)).toContain('Ship the thing');
@@ -77,12 +86,12 @@ describe('CardEmbed: a card', () => {
   });
 
   it('follows a lane move on board.changed, with no timer', async () => {
-    const cards = new Map([['F1', card('F1', { title: 'Ship the thing' })]]);
-    const { store, environment } = serving(cards);
+    const tasks = new Map([['F1', boardTask('F1', { title: 'Ship the thing' })]]);
+    const { store, environment } = serving(tasks);
     const root = await show(store, { kind: 'card', id: 'F1' });
     expect(text(root)).toContain('Implement');
     expect(environment.pending()).toBe(0);
-    cards.set('F1', card('F1', { title: 'Ship the thing', laneId: 'review' }));
+    tasks.set('F1', boardTask('F1', { title: 'Ship the thing', laneId: 'review' }));
     await poke(store, 'F1');
     expect(text(root)).toContain('Review/CI');
     expect(text(root)).not.toContain('Implement');
@@ -90,7 +99,7 @@ describe('CardEmbed: a card', () => {
   });
 
   it('says so, in a quiet note and never as a link, when the card does not exist or cannot be read', async () => {
-    const { store } = serving(new Map([['F2', card('F2')]]), new Set(['F2']));
+    const { store } = serving(new Map([['F2', boardTask('F2')]]), new Set(['F2']));
     const missing = await show(store, { kind: 'card', id: 'F404' });
     expect(missing.querySelector('[data-embed-note="F404"]')?.textContent).toContain('No task with this id.');
     expect(missing.querySelector('a')).toBeNull();
@@ -101,26 +110,26 @@ describe('CardEmbed: a card', () => {
   });
 
   it('holds a placeholder, not a link, until the machine has answered', async () => {
-    const held = deferred<{ card: CardView; laneSet: typeof lanes } | null>();
+    const held = deferred<{ card: TaskView; laneSet: typeof lanes } | null>();
     const store = new DaemonBoardStore(fakePort({ card: async () => await held.promise }), fakeEnvironment());
-    view = await mount(<CardEmbed names={names} spec={{ kind: 'card', id: 'F1' }} store={store} />);
+    view = await mount(<TaskEmbed names={names} spec={{ kind: 'card', id: 'F1' }} store={store} />);
     expect(view.container.querySelector('[data-embed-loading="F1"]')).not.toBeNull();
     expect(view.container.querySelector('a')).toBeNull();
-    held.resolve({ card: card('F1'), laneSet: lanes });
+    held.resolve({ card: boardTask('F1'), laneSet: lanes });
     await interact(() => flush());
     expect(view.container.querySelector('[data-embed-loading]')).toBeNull();
     expect(view.container.querySelector('a')).not.toBeNull();
   });
 
   it('names the ferret by its callsign, never by the start of its session id', async () => {
-    const { store } = serving(new Map([['F1', card('F1', { owner: 'mvuc7tsf-0c3d50df' })]]));
+    const { store } = serving(new Map([['F1', boardTask('F1', { owner: 'mvuc7tsf-0c3d50df' })]]));
     const root = await show(store, { kind: 'card', id: 'F1' });
     expect(text(root)).toContain('Nimbus');
     expect(text(root)).not.toContain('mvuc7tsf');
   });
 
   it('lets go of its watch on unmount, so a later event reads nothing', async () => {
-    const { store, port } = serving(new Map([['F1', card('F1')]]));
+    const { store, port } = serving(new Map([['F1', boardTask('F1')]]));
     await show(store, { kind: 'card', id: 'F1' });
     const reads = port.calls.filter(call => call.startsWith('card:')).length;
     await view?.unmount();
@@ -135,9 +144,9 @@ describe('CardEmbed: a list of cards', () => {
   it("draws lanes in the board's lane order with the missing card's note last, and counts each lane", async () => {
     const { store } = serving(
       new Map([
-        ['F1', card('F1', { title: 'First', laneId: 'review' })],
-        ['F2', card('F2', { title: 'Second', laneId: 'todo' })],
-        ['F3', card('F3', { title: 'Third', laneId: 'review' })],
+        ['F1', boardTask('F1', { title: 'First', laneId: 'review' })],
+        ['F2', boardTask('F2', { title: 'Second', laneId: 'todo' })],
+        ['F3', boardTask('F3', { title: 'Third', laneId: 'review' })],
       ]),
       new Set(['F8']),
     );
@@ -152,39 +161,39 @@ describe('CardEmbed: a list of cards', () => {
   });
 
   it('moves a card between lanes on board.changed', async () => {
-    const cards = new Map([
-      ['F1', card('F1', { title: 'First' })],
-      ['F2', card('F2', { title: 'Second' })],
+    const tasks = new Map([
+      ['F1', boardTask('F1', { title: 'First' })],
+      ['F2', boardTask('F2', { title: 'Second' })],
     ]);
-    const { store } = serving(cards);
+    const { store } = serving(tasks);
     const root = await show(store, { kind: 'cards', ids: ['F1', 'F2'] });
     expect(heads(root)).toEqual(['Implement']);
-    cards.set('F2', card('F2', { title: 'Second', laneId: 'review' }));
+    tasks.set('F2', boardTask('F2', { title: 'Second', laneId: 'review' }));
     await poke(store, 'F2');
     expect(heads(root)).toEqual(['Implement', 'Review/CI']);
   });
 
   it('shows a placeholder while a card is still being read, then the mini board', async () => {
-    const held = deferred<{ card: CardView; laneSet: typeof lanes } | null>();
+    const held = deferred<{ card: TaskView; laneSet: typeof lanes } | null>();
     const store = new DaemonBoardStore(
       fakePort({
-        card: async (_daemon, id) => (id === 'F2' ? await held.promise : { card: card(id), laneSet: lanes }),
+        card: async (_daemon, id) => (id === 'F2' ? await held.promise : { card: boardTask(id), laneSet: lanes }),
       }),
       fakeEnvironment(),
     );
-    view = await mount(<CardEmbed names={names} spec={{ kind: 'cards', ids: ['F1', 'F2'] }} store={store} />);
+    view = await mount(<TaskEmbed names={names} spec={{ kind: 'cards', ids: ['F1', 'F2'] }} store={store} />);
     await interact(() => flush());
     expect(view.container.querySelector('[data-embed-loading="F1 F2"]')).not.toBeNull();
     expect(view.container.querySelector('[data-embed-card], .fy-board-card')).not.toBeNull();
-    held.resolve({ card: card('F2'), laneSet: lanes });
+    held.resolve({ card: boardTask('F2'), laneSet: lanes });
     await interact(() => flush());
     expect(view.container.querySelector('[data-embed-loading]')).toBeNull();
   });
 
   it('holds a placeholder before any card has answered', async () => {
-    const held = deferred<{ card: CardView; laneSet: typeof lanes } | null>();
+    const held = deferred<{ card: TaskView; laneSet: typeof lanes } | null>();
     const store = new DaemonBoardStore(fakePort({ card: async () => await held.promise }), fakeEnvironment());
-    view = await mount(<CardEmbed names={names} spec={{ kind: 'cards', ids: ['F1'] }} store={store} />);
+    view = await mount(<TaskEmbed names={names} spec={{ kind: 'cards', ids: ['F1'] }} store={store} />);
     expect(view.container.querySelector('[data-embed-loading="F1"]')).not.toBeNull();
     held.resolve(null);
     await interact(() => flush());
@@ -193,7 +202,7 @@ describe('CardEmbed: a list of cards', () => {
   it('draws at most the cards a block may hold and says how many more are on the board', async () => {
     const many = FY_RENDER_LIMITS.embedChildren + 3;
     const ids = Array.from({ length: many }, (_, index) => `F${index + 1}`);
-    const { store } = serving(new Map(ids.map(id => [id, card(id)] as const)));
+    const { store } = serving(new Map(ids.map(id => [id, boardTask(id)] as const)));
     const root = await show(store, { kind: 'cards', ids });
     expect(root.querySelectorAll('.fy-board-card')).toHaveLength(FY_RENDER_LIMITS.embedChildren);
     expect(text(root)).toContain('3 more on the board.');
@@ -202,26 +211,26 @@ describe('CardEmbed: a list of cards', () => {
 
 describe('CardEmbed: the children of a card', () => {
   it('groups the children by lane and follows a lane move on board.changed', async () => {
-    const cards = family();
-    const { store, environment } = serving(cards);
+    const tasks = family();
+    const { store, environment } = serving(tasks);
     const root = await show(store, { kind: 'children', parent: 'F10' });
     expect(text(root)).toContain('Child one');
     expect(text(root)).toContain('Child two');
     expect(text(root)).not.toContain('Stranger');
     expect(heads(root)).toEqual(['Implement', 'Review/CI']);
     expect(environment.pending()).toBe(0);
-    cards.set('F11', card('F11', { title: 'Child one', parent: { id: 'F10' }, laneId: 'review' }));
+    tasks.set('F11', boardTask('F11', { title: 'Child one', parent: { id: 'F10' }, laneId: 'review' }));
     await poke(store, 'F11');
     expect(heads(root)).toEqual(['Review/CI']);
     expect(root.querySelector('.fy-board-lane__count')?.textContent).toBe('2');
   });
 
   it('says when a parent has no cards under it, and when its cards cannot be read', async () => {
-    const empty = await show(serving(new Map([['F10', card('F10')]])).store, { kind: 'children', parent: 'F10' });
+    const empty = await show(serving(new Map([['F10', boardTask('F10')]])).store, { kind: 'children', parent: 'F10' });
     expect(empty.querySelector('[data-embed-note="F10"]')?.textContent).toContain('No tasks under this one.');
     await view?.unmount();
     const port = fakePort({
-      card: async () => ({ card: card('F10'), laneSet: lanes }),
+      card: async () => ({ card: boardTask('F10'), laneSet: lanes }),
       board: async () => {
         throw new Error('down');
       },
@@ -237,7 +246,7 @@ describe('CardEmbed: the children of a card', () => {
   });
 
   it('says the parent could not be read when its read fails', async () => {
-    const root = await show(serving(new Map([['F10', card('F10')]]), new Set(['F10'])).store, {
+    const root = await show(serving(new Map([['F10', boardTask('F10')]]), new Set(['F10'])).store, {
       kind: 'children',
       parent: 'F10',
     });
@@ -245,9 +254,9 @@ describe('CardEmbed: the children of a card', () => {
   });
 
   it('holds a placeholder until the parent is read', async () => {
-    const held = deferred<{ card: CardView; laneSet: typeof lanes } | null>();
+    const held = deferred<{ card: TaskView; laneSet: typeof lanes } | null>();
     const store = new DaemonBoardStore(fakePort({ card: async () => await held.promise }), fakeEnvironment());
-    view = await mount(<CardEmbed names={names} spec={{ kind: 'children', parent: 'F10' }} store={store} />);
+    view = await mount(<TaskEmbed names={names} spec={{ kind: 'children', parent: 'F10' }} store={store} />);
     expect(view.container.querySelector('[data-embed-loading="F10"]')).not.toBeNull();
     held.resolve(null);
     await interact(() => flush());
@@ -256,11 +265,11 @@ describe('CardEmbed: the children of a card', () => {
   it('holds a placeholder until the board has been read, with the parent already known', async () => {
     const heldBoard = deferred<ReturnType<typeof boardAnswer>>();
     const port = fakePort({
-      card: async () => ({ card: card('F10'), laneSet: lanes }),
+      card: async () => ({ card: boardTask('F10'), laneSet: lanes }),
       board: async () => await heldBoard.promise,
     });
     view = await mount(
-      <CardEmbed
+      <TaskEmbed
         names={names}
         spec={{ kind: 'children', parent: 'F10' }}
         store={new DaemonBoardStore(port, fakeEnvironment())}
@@ -302,30 +311,30 @@ describe('CardEmbed: opening a card', () => {
 
   it('opens the card on a plain click, the way the Board page opens one', async () => {
     const seen = pushes();
-    const { store } = serving(new Map([['F1', card('F1', { title: 'Ship the thing' })]]));
+    const { store } = serving(new Map([['F1', boardTask('F1', { title: 'Ship the thing' })]]));
     const root = await show(store, { kind: 'card', id: 'F1' });
     const link = root.querySelector('[data-embed-card="F1"] a') as HTMLAnchorElement;
     const event = click(link);
     expect(event.defaultPrevented).toBe(true);
-    expect(seen).toEqual([boardCardPath(undefined, 'F1')]);
+    expect(seen).toEqual([boardTaskPath(undefined, 'F1')]);
   });
 
   it('opens a card of a mini board too', async () => {
     const seen = pushes();
     const { store } = serving(
       new Map([
-        ['F1', card('F1')],
-        ['F2', card('F2', { laneId: 'review' })],
+        ['F1', boardTask('F1')],
+        ['F2', boardTask('F2', { laneId: 'review' })],
       ]),
     );
     const root = await show(store, { kind: 'cards', ids: ['F1', 'F2'] });
     click(root.querySelector('[data-task="F2"] a') as Element);
-    expect(seen).toEqual([boardCardPath(undefined, 'F2')]);
+    expect(seen).toEqual([boardTaskPath(undefined, 'F2')]);
   });
 
   it('leaves a modified click to the browser as a link', async () => {
     const seen = pushes();
-    const { store } = serving(new Map([['F1', card('F1')]]));
+    const { store } = serving(new Map([['F1', boardTask('F1')]]));
     const root = await show(store, { kind: 'card', id: 'F1' });
     const link = root.querySelector('[data-embed-card="F1"] a') as HTMLAnchorElement;
     for (const init of [{ ctrlKey: true }, { metaKey: true }]) {
@@ -340,8 +349,8 @@ describe('CardEmbed: opening a card', () => {
     const root = await show(store, { kind: 'children', parent: 'F10' });
     const link = root.querySelector('[data-embed-truncated="F10"] a') as HTMLAnchorElement;
     expect(link.textContent).toBe('Open &F10');
-    expect(link.getAttribute('href')).toBe(boardCardPath(undefined, 'F10'));
+    expect(link.getAttribute('href')).toBe(boardTaskPath(undefined, 'F10'));
     click(link);
-    expect(seen).toEqual([boardCardPath(undefined, 'F10')]);
+    expect(seen).toEqual([boardTaskPath(undefined, 'F10')]);
   });
 });

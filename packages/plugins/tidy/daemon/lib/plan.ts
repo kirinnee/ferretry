@@ -18,7 +18,7 @@ import type { AskKind, AskRaiser } from '@ferretry/core-asks/contract';
 import type { TidyClose, TidyDrop, TidyKeep, TidyPlan } from '../../contract/index.ts';
 
 /** What the decision needs to know about one card. */
-export interface TidyCardFact {
+export interface TidyTaskFact {
   readonly id: string;
   readonly title: string;
   readonly project: string;
@@ -42,7 +42,7 @@ export interface TidyAskFact {
 export interface TidyFacts {
   readonly ferret: string;
   readonly helper: boolean;
-  readonly cards: readonly TidyCardFact[];
+  readonly cards: readonly TidyTaskFact[];
   /** The projects whose board switch is on. An unreadable switch is off, so it is not in this set. */
   readonly boardsOn: ReadonlySet<string>;
   /** Ferrets still running, waiting or starting, not stopped. */
@@ -53,26 +53,26 @@ export interface TidyFacts {
   readonly asks: readonly TidyAskFact[];
 }
 
-type CardKeep = Extract<TidyKeep, { kind: 'card' }>;
+type TaskKeep = Extract<TidyKeep, { kind: 'card' }>;
 type AskKeep = Extract<TidyKeep, { kind: 'ask' }>;
 
-const effectiveAssignee = (card: TidyCardFact): string => card.assignee ?? card.owner;
+const effectiveAssignee = (task: TidyTaskFact): string => task.assignee ?? task.owner;
 
 /** The first reason a card must stay, or `undefined` when it is the ferret's own unwanted card. */
-const cardKeep = (card: TidyCardFact, facts: TidyFacts): CardKeep | undefined => {
-  const keep = (code: CardKeep['code'], why: string): CardKeep => ({
+const taskKeep = (task: TidyTaskFact, facts: TidyFacts): TaskKeep | undefined => {
+  const keep = (code: TaskKeep['code'], why: string): TaskKeep => ({
     kind: 'card',
-    id: card.id,
-    title: card.title,
+    id: task.id,
+    title: task.title,
     code,
     why,
   });
-  if (card.askedBy === 'person') return keep('owner-asked', 'the owner asked for it');
-  if (facts.boardsOn.has(card.project)) return keep('board-on', 'the board is on, so the task is wanted');
-  const doing = effectiveAssignee(card);
+  if (task.askedBy === 'person') return keep('owner-asked', 'the owner asked for it');
+  if (facts.boardsOn.has(task.project)) return keep('board-on', 'the board is on, so the task is wanted');
+  const doing = effectiveAssignee(task);
   if (doing !== facts.ferret && facts.liveFerrets.has(doing))
     return keep('assigned-to-live-ferret', `${doing} is still working it`);
-  if (facts.gateCards.has(card.id)) return keep('waiting-at-gate', 'it waits at a gate on the owner');
+  if (facts.gateCards.has(task.id)) return keep('waiting-at-gate', 'it waits at a gate on the owner');
   return undefined;
 };
 
@@ -116,13 +116,13 @@ export const planTidy = (facts: TidyFacts): TidyPlan => {
   const drop: TidyDrop[] = [];
   const candidates = facts.helper
     ? []
-    : facts.cards.filter(card => card.owner === facts.ferret || card.assignee === facts.ferret);
-  for (const card of candidates) {
-    const reason = cardKeep(card, facts);
+    : facts.cards.filter(task => task.owner === facts.ferret || task.assignee === facts.ferret);
+  for (const task of candidates) {
+    const reason = taskKeep(task, facts);
     if (reason === undefined)
       drop.push({
-        id: card.id,
-        title: card.title,
+        id: task.id,
+        title: task.title,
         why: 'the board is off and nobody but you asked for it',
       });
     else keep.push(reason);

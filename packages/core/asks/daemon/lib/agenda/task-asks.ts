@@ -23,37 +23,37 @@
  */
 import { createHash } from 'node:crypto';
 import {
-  type AgendaCardAsk,
-  type AgendaCardAskAnswer,
-  type AgendaCardAskWoke,
+  type AgendaTaskAsk,
+  type AgendaTaskAskAnswer,
+  type AgendaTaskAskWoke,
   type AgendaItem,
-  MAX_AGENDA_CARD_ASKS,
+  MAX_AGENDA_TASK_ASKS,
   MAX_AGENDA_REPLY_LENGTH,
 } from '../protocol/agenda.ts';
 import { agendaState } from '../protocol/agenda-state.ts';
 import {
-  canCarryCardAsk,
-  cardAskReference,
-  cardAskStage,
+  canCarryTaskAsk,
+  taskAskReference,
+  taskAskStage,
   awaitsOwnAnswer as protocolAwaitsOwnAnswer,
   itemAsksOwnQuestion,
-  isOpenCardAsk,
+  isOpenTaskAsk,
   ownAskDigest,
-  openCardAsks,
-  parseCardAgendaReference,
+  openTaskAsks,
+  parseTaskAgendaReference,
   repliedToOwnAsk,
 } from '../protocol/agenda-task-asks.ts';
 import { canonicalJson } from '@ferretry/std';
 import { formatTaskRef } from '../protocol/board-refs.ts';
 
 /** What the gate engine does to one agenda's card asks. */
-export type CardAskOperation =
+export type TaskAskOperation =
   /** The card waits at this gate: the ask is put on the agenda, or restated as the card now stands. */
-  | { readonly kind: 'attach'; readonly ask: Pick<AgendaCardAsk, 'gate' | 'howToTest'> }
+  | { readonly kind: 'attach'; readonly ask: Pick<AgendaTaskAsk, 'gate' | 'howToTest'> }
   /** The card left this gate without the owner's answer: the open ask goes. */
   | { readonly kind: 'withdraw'; readonly reference: string }
   /** The owner answered and the card moved as they said: the answer is kept, and the agenda rests. */
-  | { readonly kind: 'answered'; readonly reference: string; readonly answer: AgendaCardAskAnswer }
+  | { readonly kind: 'answered'; readonly reference: string; readonly answer: AgendaTaskAskAnswer }
   /** The owner said Not yet: the ask stays open, and the agenda rests. */
   | { readonly kind: 'not-yet'; readonly reference: string; readonly note?: string }
   /**
@@ -63,7 +63,7 @@ export type CardAskOperation =
   | { readonly kind: 'line'; readonly line: string };
 
 /** What an operation came to: the item to write and how it changed, or why nothing was written. */
-export type CardAskOutcome =
+export type TaskAskOutcome =
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly code: 'invalid' | 'full'; readonly message: string }
   | { readonly kind: 'changed'; readonly item: AgendaItem; readonly change: 'refreshed' | 'woke' | 'answered' }
@@ -74,22 +74,22 @@ export type CardAskOutcome =
  * The asks an agenda keeps: every open one, then the newest answered ones up to {@link MAX_AGENDA_CARD_ASKS}, in
  * the order they were put on it.
  */
-const bounded = (asks: readonly AgendaCardAsk[]): AgendaCardAsk[] => {
-  const room = MAX_AGENDA_CARD_ASKS - asks.filter(isOpenCardAsk).length;
-  const answered = asks.filter(ask => !isOpenCardAsk(ask));
+const bounded = (asks: readonly AgendaTaskAsk[]): AgendaTaskAsk[] => {
+  const room = MAX_AGENDA_TASK_ASKS - asks.filter(isOpenTaskAsk).length;
+  const answered = asks.filter(ask => !isOpenTaskAsk(ask));
   const kept = new Set(answered.slice(Math.max(0, answered.length - Math.max(0, room))));
-  return asks.filter(ask => isOpenCardAsk(ask) || kept.has(ask));
+  return asks.filter(ask => isOpenTaskAsk(ask) || kept.has(ask));
 };
 
 /** The item carrying exactly these asks (at most {@link MAX_AGENDA_CARD_ASKS}); absent when none is left. */
-export const withCardAsks = (item: AgendaItem, asks: readonly AgendaCardAsk[]): AgendaItem => {
+export const withTaskAsks = (item: AgendaItem, asks: readonly AgendaTaskAsk[]): AgendaItem => {
   const { cardAsks: _asks, ...rest } = item;
   const kept = bounded(asks);
   return { ...rest, ...(kept.length === 0 ? {} : { cardAsks: kept }) };
 };
 
 /** What an attached ask says it is about, as the activity line records it: "&F12 is at Released: Done or Not good". */
-const askedLine = (ask: Pick<AgendaCardAsk, 'gate'>): string =>
+const askedLine = (ask: Pick<AgendaTaskAsk, 'gate'>): string =>
   `${formatTaskRef({ id: ask.gate.cardId })} is at ${ask.gate.laneName}: ${ask.gate.options.map(option => option.label).join(' or ')}`;
 
 /** The item woken into Needs you, fresh: every park, rest and wait on the ferret ends. */
@@ -106,7 +106,7 @@ const awake = (item: AgendaItem, at: string): AgendaItem => {
 };
 
 /** The turn an item is in now, as a new ask would end it (`AgendaCardAsk.woke`). */
-const turnOf = (item: AgendaItem): AgendaCardAskWoke => ({
+const turnOf = (item: AgendaItem): AgendaTaskAskWoke => ({
   waitingSince: item.waitingSince,
   ...(item.parked === undefined ? {} : { parked: item.parked }),
   ...(item.resting === undefined ? {} : { resting: item.resting }),
@@ -116,7 +116,7 @@ const turnOf = (item: AgendaItem): AgendaCardAskWoke => ({
 });
 
 /** The item back in the turn an ask woke it out of: the owner's with the question it had, or the park, rest or wait it was in. */
-const backTo = (item: AgendaItem, turn: AgendaCardAskWoke): AgendaItem => ({
+const backTo = (item: AgendaItem, turn: AgendaTaskAskWoke): AgendaItem => ({
   ...awake(item, turn.waitingSince),
   ...turn,
 });
@@ -148,7 +148,7 @@ const fingerprint = (item: AgendaItem): string | undefined => {
 const PLACEHOLDER_SEAL = '0'.repeat(32);
 
 /** The item with the seal of the thread as it now stands. */
-export const sealCardAsks = (item: AgendaItem): AgendaItem => {
+export const sealTaskAsks = (item: AgendaItem): AgendaItem => {
   const digest = fingerprint(item);
   const { cardAsksSeal: _seal, ...rest } = item;
   return digest === undefined ? rest : { ...rest, cardAsksSeal: digest };
@@ -177,7 +177,7 @@ const answeredSince = (item: AgendaItem, at: string): boolean =>
  * `held` is every card ask the item held when the operation began: one just withdrawn or moved away still wrote (or was
  * repeated by) the line, so the line is read against it too.
  */
-const awaitsOwnAnswer = (item: AgendaItem, held: readonly AgendaCardAsk[]): boolean =>
+const awaitsOwnAnswer = (item: AgendaItem, held: readonly AgendaTaskAsk[]): boolean =>
   protocolAwaitsOwnAnswer(
     { ...item, cardAsks: held },
     held.map(ask => ({ gate: ask.gate, howToTest: ask.howToTest ?? null })),
@@ -191,9 +191,9 @@ const awaitsOwnAnswer = (item: AgendaItem, held: readonly AgendaCardAsk[]): bool
 const restedOnAnswer = (
   item: AgendaItem,
   at: string,
-  held: readonly AgendaCardAsk[] = item.cardAsks ?? [],
+  held: readonly AgendaTaskAsk[] = item.cardAsks ?? [],
 ): AgendaItem => {
-  if (openCardAsks(item).some(ask => ask.notYet === undefined)) return item;
+  if (openTaskAsks(item).some(ask => ask.notYet === undefined)) return item;
   if (awaitsOwnAnswer(item, held)) {
     const {
       waitingOn: _waitingOn,
@@ -218,8 +218,8 @@ const restedOnAnswer = (
 };
 
 /** Whether the daemon opened this agenda for its card (`card-agenda:`): it holds the card's asks and nothing of the ferret's. */
-const isCardAgenda = (item: Pick<AgendaItem, 'raisedBy' | 'sourceRef'>): boolean =>
-  item.raisedBy === 'daemon' && parseCardAgendaReference(item.sourceRef) !== undefined;
+const isTaskAgenda = (item: Pick<AgendaItem, 'raisedBy' | 'sourceRef'>): boolean =>
+  item.raisedBy === 'daemon' && parseTaskAgendaReference(item.sourceRef) !== undefined;
 
 /**
  * Whether the owner has answered the item's OWN question (a choice, or words in reply) while it stood unchanged. Their
@@ -247,7 +247,7 @@ const spelled = (value: unknown): string => {
 const sameJson = (left: unknown, right: unknown): boolean => spelled(left) === spelled(right);
 
 /** What the state machine lends the pure half: the stage move an ask makes, the activity line, and the form an item is stored in. */
-export interface CardAskEffects {
+export interface TaskAskEffects {
   readonly stage: (item: AgendaItem, stage: 'test' | 'plan') => AgendaItem;
   readonly history: (item: AgendaItem, kind: 'updated' | 'gate-answered', note: string) => AgendaItem;
   readonly tidy: (item: AgendaItem) => AgendaItem;
@@ -255,51 +255,51 @@ export interface CardAskEffects {
 
 const operate = (
   item: AgendaItem,
-  operation: CardAskOperation,
+  operation: TaskAskOperation,
   at: string,
-  effects: CardAskEffects,
-): CardAskOutcome => {
+  effects: TaskAskEffects,
+): TaskAskOutcome => {
   const asks = item.cardAsks ?? [];
   if (operation.kind === 'attach') {
-    const reference = cardAskReference(operation.ask);
-    const existing = asks.find(ask => cardAskReference(ask) === reference);
+    const reference = taskAskReference(operation.ask);
+    const existing = asks.find(ask => taskAskReference(ask) === reference);
     if (existing !== undefined) {
-      if (!isOpenCardAsk(existing)) return { kind: 'unchanged' };
+      if (!isOpenTaskAsk(existing)) return { kind: 'unchanged' };
       const { howToTest: _steps, ...kept } = existing;
-      const restated: AgendaCardAsk = {
+      const restated: AgendaTaskAsk = {
         ...kept,
         gate: operation.ask.gate,
         ...(operation.ask.howToTest === undefined ? {} : { howToTest: operation.ask.howToTest }),
       };
-      const next = withCardAsks(
+      const next = withTaskAsks(
         item,
         asks.map(ask => (ask === existing ? restated : ask)),
       );
       return sameJson(next, item) ? { kind: 'unchanged' } : { kind: 'changed', item: next, change: 'refreshed' };
     }
-    if (asks.filter(isOpenCardAsk).length >= MAX_AGENDA_CARD_ASKS) {
+    if (asks.filter(isOpenTaskAsk).length >= MAX_AGENDA_TASK_ASKS) {
       return {
         kind: 'refused',
         code: 'full',
-        message: `${item.id} already carries ${String(MAX_AGENDA_CARD_ASKS)} open asks about tasks`,
+        message: `${item.id} already carries ${String(MAX_AGENDA_TASK_ASKS)} open asks about tasks`,
       };
     }
     // A ferret's thread remembers the turn this ask ends; a second ask joining a first the owner has yet to look at
     // keeps the first's, so the thread goes back to the turn it was in before either.
-    const first = openCardAsks(item).find(ask => ask.notYet === undefined);
-    const woke = isCardAgenda(item) ? undefined : first === undefined ? turnOf(item) : first.woke;
-    const added: AgendaCardAsk = {
+    const first = openTaskAsks(item).find(ask => ask.notYet === undefined);
+    const woke = isTaskAgenda(item) ? undefined : first === undefined ? turnOf(item) : first.woke;
+    const added: AgendaTaskAsk = {
       gate: operation.ask.gate,
       at,
       ...(woke === undefined ? {} : { woke }),
       ...(operation.ask.howToTest === undefined ? {} : { howToTest: operation.ask.howToTest }),
     };
     const woken = effects.history(
-      effects.stage(awake(item, at), cardAskStage(added.gate)),
+      effects.stage(awake(item, at), taskAskStage(added.gate)),
       'updated',
       askedLine(added),
     );
-    return { kind: 'changed', item: withCardAsks(woken, [...asks, added]), change: 'woke' };
+    return { kind: 'changed', item: withTaskAsks(woken, [...asks, added]), change: 'woke' };
   }
   if (operation.kind === 'line') {
     const last = item.history?.at(-1);
@@ -307,16 +307,16 @@ const operate = (
       ? { kind: 'unchanged' }
       : { kind: 'changed', item: effects.history(item, 'updated', operation.line), change: 'refreshed' };
   }
-  const target = asks.find(ask => cardAskReference(ask) === operation.reference);
+  const target = asks.find(ask => taskAskReference(ask) === operation.reference);
   if (operation.kind === 'withdraw') {
-    if (target === undefined || !isOpenCardAsk(target)) return { kind: 'unchanged' };
-    const left = withCardAsks(
+    if (target === undefined || !isOpenTaskAsk(target)) return { kind: 'unchanged' };
+    const left = withTaskAsks(
       item,
       asks.filter(ask => ask !== target),
     );
     // Only a thread nobody has written on since the daemon left it is moved.
     const asLeft = untouched(item);
-    const waiting = openCardAsks(left).filter(ask => ask.notYet === undefined);
+    const waiting = openTaskAsks(left).filter(ask => ask.notYet === undefined);
     if (waiting.length > 0) {
       // The newest ask goes: the thread has waited on the owner since the one before, not since the one that went.
       const newest = Math.max(...waiting.map(ask => Date.parse(ask.at)));
@@ -325,7 +325,7 @@ const operate = (
     }
     const note = `${formatTaskRef({ id: target.gate.cardId })} moved on, so nothing is left to answer`;
     const told = effects.history(left, 'updated', note);
-    if (target.woke !== undefined && !isCardAgenda(left)) {
+    if (target.woke !== undefined && !isTaskAgenda(left)) {
       // A ferret's thread goes back to the turn the ask woke it out of, or rests when the owner's answer to another ask
       // is the last thing on it; one anybody has written on since stays as it is, in Needs you.
       const settled = !asLeft
@@ -341,7 +341,7 @@ const operate = (
     // the thread is still as the daemon left it.
     // A sealed card agenda somebody wrote on since stays where it is, as a ferret's thread does: the owner's reply
     // already rested it, and a ferret's answer is in front of the owner.
-    if (isCardAgenda(left) && item.cardAsksSeal !== undefined && !asLeft) {
+    if (isTaskAgenda(left) && item.cardAsksSeal !== undefined && !asLeft) {
       return {
         kind: 'changed',
         item:
@@ -351,23 +351,23 @@ const operate = (
         change: 'refreshed',
       };
     }
-    const holdsAnswers = (left.cardAsks ?? []).length > 0 && (isCardAgenda(left) || asLeft);
-    if (holdsAnswers || (isCardAgenda(left) && talkedOn(item))) {
+    const holdsAnswers = (left.cardAsks ?? []).length > 0 && (isTaskAgenda(left) || asLeft);
+    if (holdsAnswers || (isTaskAgenda(left) && talkedOn(item))) {
       return { kind: 'changed', item: restedOnAnswer(told, at, item.cardAsks), change: 'refreshed' };
     }
-    return isCardAgenda(left)
+    return isTaskAgenda(left)
       ? { kind: 'closed', item: told, note }
       : { kind: 'changed', item: left, change: 'refreshed' };
   }
   if (target === undefined) {
     return { kind: 'refused', code: 'invalid', message: `${item.id} has no open ask ${operation.reference}` };
   }
-  if (!isOpenCardAsk(target)) {
+  if (!isOpenTaskAsk(target)) {
     return operation.kind === 'answered' && target.answer?.receipt === operation.answer.receipt
       ? { kind: 'unchanged' }
       : { kind: 'refused', code: 'invalid', message: `${item.id}'s ask ${operation.reference} is already answered` };
   }
-  const changed: AgendaCardAsk =
+  const changed: AgendaTaskAsk =
     operation.kind === 'answered'
       ? { ...target, answer: operation.answer }
       : {
@@ -379,7 +379,7 @@ const operate = (
               : { note: operation.note.trim().slice(0, MAX_AGENDA_REPLY_LENGTH) }),
           },
         };
-  const answered = withCardAsks(
+  const answered = withTaskAsks(
     effects.history(item, 'gate-answered', operation.reference),
     asks.map(ask => (ask === target ? changed : ask)),
   );
@@ -388,33 +388,33 @@ const operate = (
 
 /** Why a ferret may not close this agenda now, or `undefined` when it may: an open card ask is the owner's to answer. */
 export const closeRefusal = (item: AgendaItem): string | undefined => {
-  const open = openCardAsks(item);
+  const open = openTaskAsks(item);
   if (open.length === 0) return undefined;
-  const cards = [...new Set(open.map(ask => formatTaskRef({ id: ask.gate.cardId })))].join(', ');
-  return `${item.id} carries the ask of ${cards}, which only the owner answers: it stays open until they do (add what you have with \`agenda edit ${item.id}\`)`;
+  const tasks = [...new Set(open.map(ask => formatTaskRef({ id: ask.gate.cardId })))].join(', ');
+  return `${item.id} carries the ask of ${tasks}, which only the owner answers: it stays open until they do (add what you have with \`agenda edit ${item.id}\`)`;
 };
 
 /** Why a ferret may not rest this agenda now, or `undefined`: an ask the owner has not answered at all keeps it theirs. */
 export const restRefusal = (item: AgendaItem): string | undefined => {
-  const waiting = openCardAsks(item).filter(ask => ask.notYet === undefined);
+  const waiting = openTaskAsks(item).filter(ask => ask.notYet === undefined);
   if (waiting.length === 0) return undefined;
-  const cards = [...new Set(waiting.map(ask => formatTaskRef({ id: ask.gate.cardId })))].join(', ');
-  return `${item.id} carries the ask of ${cards}, which waits on the owner: it stays in Needs you until they answer`;
+  const tasks = [...new Set(waiting.map(ask => formatTaskRef({ id: ask.gate.cardId })))].join(', ');
+  return `${item.id} carries the ask of ${tasks}, which waits on the owner: it stays in Needs you until they answer`;
 };
 
 /** How far the owner got with an ask: answered, then set aside with Not yet, then not looked at. */
-const progressOf = (ask: AgendaCardAsk): number => (ask.answer !== undefined ? 2 : ask.notYet !== undefined ? 1 : 0);
+const progressOf = (ask: AgendaTaskAsk): number => (ask.answer !== undefined ? 2 : ask.notYet !== undefined ? 1 : 0);
 
 /** One ask per card and entry of that card into its lane: the gate it asks about, wherever it rides. */
-const askKey = (ask: Pick<AgendaCardAsk, 'gate'>): string => `${ask.gate.cardId}:${String(ask.gate.entry)}`;
+const askKey = (ask: Pick<AgendaTaskAsk, 'gate'>): string => `${ask.gate.cardId}:${String(ask.gate.entry)}`;
 
 /** What moving card asks between two items (a merge, a split) came to. */
-export type CardAsksMove =
+export type TaskAsksMove =
   | { readonly kind: 'refused'; readonly code: 'invalid' | 'full'; readonly message: string }
   | { readonly kind: 'moved'; readonly into: AgendaItem };
 
 /** The item stripped of every card ask: what is left of one whose asks went to another item. */
-export const withoutCardAsks = (item: AgendaItem): AgendaItem => {
+export const withoutTaskAsks = (item: AgendaItem): AgendaItem => {
   const { cardAsks: _asks, cardAsksSeal: _seal, ...rest } = item;
   return rest;
 };
@@ -431,13 +431,13 @@ export const withoutCardAsks = (item: AgendaItem): AgendaItem => {
  * one the asks already waiting on it ended. The seal is left as it was: whoever moved the asks wrote on the thread, so
  * it never again reads as the way the card-ask writer left it.
  */
-export const joinCardAsks = (
+export const joinTaskAsks = (
   item: AgendaItem,
-  incoming: readonly AgendaCardAsk[],
-  stage: CardAskEffects['stage'],
-): CardAsksMove => {
+  incoming: readonly AgendaTaskAsk[],
+  stage: TaskAskEffects['stage'],
+): TaskAsksMove => {
   if (incoming.length === 0) return { kind: 'moved', into: item };
-  if (!canCarryCardAsk(item)) {
+  if (!canCarryTaskAsk(item)) {
     return {
       kind: 'refused',
       code: 'invalid',
@@ -445,35 +445,35 @@ export const joinCardAsks = (
     };
   }
   const own = item.cardAsks ?? [];
-  const chosen = new Map<string, AgendaCardAsk>();
+  const chosen = new Map<string, AgendaTaskAsk>();
   for (const ask of [...own, ...incoming]) {
     const held = chosen.get(askKey(ask));
     if (held === undefined || progressOf(ask) > progressOf(held)) chosen.set(askKey(ask), ask);
   }
   const kept = [...chosen.values()].sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
-  if (kept.length > MAX_AGENDA_CARD_ASKS) {
+  if (kept.length > MAX_AGENDA_TASK_ASKS) {
     return {
       kind: 'refused',
       code: 'full',
-      message: `${item.id} would carry more than ${String(MAX_AGENDA_CARD_ASKS)} asks about tasks, answered or not: nothing is dropped to fit`,
+      message: `${item.id} would carry more than ${String(MAX_AGENDA_TASK_ASKS)} asks about tasks, answered or not: nothing is dropped to fit`,
     };
   }
-  const waitingOn = (asks: readonly AgendaCardAsk[]): AgendaCardAsk[] =>
-    asks.filter(ask => isOpenCardAsk(ask) && ask.notYet === undefined);
+  const waitingOn = (asks: readonly AgendaTaskAsk[]): AgendaTaskAsk[] =>
+    asks.filter(ask => isOpenTaskAsk(ask) && ask.notYet === undefined);
   const arriving = new Set(waitingOn(kept).filter(ask => !own.includes(ask)));
-  if (arriving.size === 0) return { kind: 'moved', into: withCardAsks(item, kept) };
+  if (arriving.size === 0) return { kind: 'moved', into: withTaskAsks(item, kept) };
   const first = waitingOn(own)[0];
-  const woke = isCardAgenda(item) ? undefined : first === undefined ? turnOf(item) : first.woke;
+  const woke = isTaskAgenda(item) ? undefined : first === undefined ? turnOf(item) : first.woke;
   const retold = kept.map(ask => {
     if (!arriving.has(ask)) return ask;
     const { woke: _theirs, ...rest } = ask;
     return woke === undefined ? rest : { ...rest, woke };
   });
-  if (first !== undefined) return { kind: 'moved', into: withCardAsks(item, retold) };
+  if (first !== undefined) return { kind: 'moved', into: withTaskAsks(item, retold) };
   const newest = new Date(Math.max(...[...arriving].map(ask => Date.parse(ask.at)))).toISOString();
   const woken = agendaState(item).state === 'needs-you' ? item : awake(item, newest);
-  const staged = stage(woken, cardAskStage(([...arriving][0] as AgendaCardAsk).gate));
-  return { kind: 'moved', into: withCardAsks(staged, retold) };
+  const staged = stage(woken, taskAskStage(([...arriving][0] as AgendaTaskAsk).gate));
+  return { kind: 'moved', into: withTaskAsks(staged, retold) };
 };
 
 /**
@@ -483,31 +483,31 @@ export const joinCardAsks = (
  * them ended, and any other rests on its ferret. An item with an outstanding question of its own, or a thread written
  * on since, stays on the owner's turn.
  */
-export const leaveCardAsks = (
+export const leaveTaskAsks = (
   item: AgendaItem,
-  moves: (ask: AgendaCardAsk) => boolean,
+  moves: (ask: AgendaTaskAsk) => boolean,
   at: string,
-): { readonly left: AgendaItem; readonly moved: readonly AgendaCardAsk[] } => {
+): { readonly left: AgendaItem; readonly moved: readonly AgendaTaskAsk[] } => {
   const moved = (item.cardAsks ?? []).filter(moves);
   if (moved.length === 0) return { left: item, moved };
-  const left = withCardAsks(
+  const left = withTaskAsks(
     item,
     (item.cardAsks ?? []).filter(ask => !moves(ask)),
   );
-  const stillWaiting = openCardAsks(left).some(ask => ask.notYet === undefined);
+  const stillWaiting = openTaskAsks(left).some(ask => ask.notYet === undefined);
   // An item that asks something of its own (a question a ferret added or reworded beside the ask) stays on the owner's
   // turn: only their answer to it rests it. Nor is a thread somebody has written on since the ask was attached moved.
   if (
     stillWaiting ||
     agendaState(item).state !== 'needs-you' ||
     awaitsOwnAnswer(item, item.cardAsks ?? []) ||
-    (!isCardAgenda(item) && !untouched(item))
+    (!isTaskAgenda(item) && !untouched(item))
   ) {
     return { left, moved };
   }
-  const turn = moved.find(ask => isOpenCardAsk(ask) && ask.notYet === undefined)?.woke;
+  const turn = moved.find(ask => isOpenTaskAsk(ask) && ask.notYet === undefined)?.woke;
   return {
-    left: turn === undefined || isCardAgenda(item) ? restedOnAnswer(left, at, item.cardAsks) : backTo(left, turn),
+    left: turn === undefined || isTaskAgenda(item) ? restedOnAnswer(left, at, item.cardAsks) : backTo(left, turn),
     moved,
   };
 };
@@ -521,23 +521,23 @@ export const leaveCardAsks = (
  * the seal it had, which no longer matches it, so it never again reads as the way the daemon left it — no restate,
  * second ask or answer renews it. `tidy` is the stored form: the seal is of the thread as it will be read back.
  */
-export const applyCardAsk = (
+export const applyTaskAsk = (
   item: AgendaItem,
-  operation: CardAskOperation,
+  operation: TaskAskOperation,
   at: string,
-  effects: CardAskEffects,
-): CardAskOutcome => {
+  effects: TaskAskEffects,
+): TaskAskOutcome => {
   const outcome = operate(item, operation, at, effects);
   if (outcome.kind !== 'changed') return outcome;
-  const begins = outcome.change === 'woke' && !isCardAgenda(item) && openCardAsks(item).length === 0;
+  const begins = outcome.change === 'woke' && !isTaskAgenda(item) && openTaskAsks(item).length === 0;
   // The seal is part of the stored thread, so `tidy` fits it with a seal of the same length in place.
   return untouched(item) || begins
-    ? { ...outcome, item: sealCardAsks(effects.tidy({ ...outcome.item, cardAsksSeal: PLACEHOLDER_SEAL })) }
+    ? { ...outcome, item: sealTaskAsks(effects.tidy({ ...outcome.item, cardAsksSeal: PLACEHOLDER_SEAL })) }
     : outcome;
 };
 
 /** Whether a card ask is waiting for the owner now: open, and not set aside with Not yet. */
-export const cardAskWaits = (item: AgendaItem): boolean => openCardAsks(item).some(ask => ask.notYet === undefined);
+export const taskAskWaits = (item: AgendaItem): boolean => openTaskAsks(item).some(ask => ask.notYet === undefined);
 
 /**
  * Whether an owner's reply on this item leaves it the owner's turn: it carries a card ask still waiting for the owner and
@@ -545,8 +545,8 @@ export const cardAskWaits = (item: AgendaItem): boolean => openCardAsks(item).so
  * now" under a try-it — are logged and delivered to the ferret, but they are not the card ask's answer, so the item must
  * not rest: the promised Good stays in Needs you. A thread that asks its own question is answered by the reply and rests.
  */
-export const replyKeepsCardAskOpen = (item: AgendaItem): boolean => {
-  const open = openCardAsks(item);
+export const replyKeepsTaskAskOpen = (item: AgendaItem): boolean => {
+  const open = openTaskAsks(item);
   if (open.length === 0) return false;
   if (item.ask !== undefined && item.ask.kind !== 'open-question') return false;
   return !itemAsksOwnQuestion(

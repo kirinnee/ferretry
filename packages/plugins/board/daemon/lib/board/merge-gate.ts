@@ -22,15 +22,15 @@
 import {
   type BoardMergeGateResponse,
   type BoardMergeWait,
-  type Card,
-  type CardEvent,
+  type Task,
+  type TaskEvent,
   isBlockerDone,
   type PrLink,
   prUrlParts,
-  type CardRef,
+  type TaskRef,
 } from '../../../contract/index.ts';
 import { claimsClash } from './clash-queue.ts';
-import { type BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
+import { type BoardIndex, blockedBy, taskCategory, type LaneSets } from './graph.ts';
 import { ShippingUnits } from './shipping-unit.ts';
 
 /** Whether a PR link names this PR: the same repository (any case) and number. */
@@ -40,25 +40,25 @@ const samePr =
     link.repo.toLowerCase() === pr.repo.toLowerCase() && link.number === pr.number;
 
 /** Whether two refs name the same card: the same id, both on this machine or both on the same other one. */
-const sameRef = (index: BoardIndex, left: CardRef, right: CardRef): boolean =>
+const sameRef = (index: BoardIndex, left: TaskRef, right: TaskRef): boolean =>
   left.id === right.id &&
   (index.isLocal(left) ? index.isLocal(right) : !index.isLocal(right) && left.machineId === right.machineId);
 
 /** One claim with the moment it was made: its last `file-claimed`, else the card's creation (a card born with it). */
 interface Claim {
-  readonly card: Card;
+  readonly card: Task;
   readonly path: string;
   readonly atMs: number;
 }
 
 /** Each held spelling keeps its own moment: claiming `./x.ts` beside `x.ts` later never makes `x.ts` younger. */
-const claimsOf = (card: Card): readonly Claim[] =>
-  card.files.map(path => {
-    const event = card.history.findLast(
-      (entry): entry is Extract<CardEvent, { type: 'file-claimed' }> =>
+const claimsOf = (task: Task): readonly Claim[] =>
+  task.files.map(path => {
+    const event = task.history.findLast(
+      (entry): entry is Extract<TaskEvent, { type: 'file-claimed' }> =>
         entry.type === 'file-claimed' && entry.path === path,
     );
-    return { card, path, atMs: Date.parse(event?.at ?? card.createdAt) };
+    return { card: task, path, atMs: Date.parse(event?.at ?? task.createdAt) };
   });
 
 const earliest = (claims: readonly Claim[]): number => Math.min(...claims.map(claim => claim.atMs));
@@ -73,18 +73,18 @@ const compareRanks = (left: Rank, right: Rank): number =>
  * Whether the dependency was written by the daemon when a claim landed (its latest `depended` event is the daemon's):
  * the live clash order stands in for it, so the gate never weighs a stale one.
  */
-const isClaimTimeWait = (card: Card, on: CardRef, index: BoardIndex): boolean => {
-  const event = card.history.findLast(
-    (entry): entry is Extract<CardEvent, { type: 'depended' }> =>
+const isClaimTimeWait = (task: Task, on: TaskRef, index: BoardIndex): boolean => {
+  const event = task.history.findLast(
+    (entry): entry is Extract<TaskEvent, { type: 'depended' }> =>
       entry.type === 'depended' && sameRef(index, entry.task, on),
   );
   return event?.actor.kind === 'daemon' && event.override === undefined;
 };
 
 /** Whether a card of the unit waived a wait on this card: it removed that dependency on purpose. */
-const waived = (unit: readonly Card[], target: string, index: BoardIndex): boolean =>
-  unit.some(card =>
-    card.history.some(event => event.type === 'undepended' && event.task.id === target && index.isLocal(event.task)),
+const waived = (unit: readonly Task[], target: string, index: BoardIndex): boolean =>
+  unit.some(task =>
+    task.history.some(event => event.type === 'undepended' && event.task.id === target && index.isLocal(event.task)),
   );
 
 /**
@@ -92,27 +92,27 @@ const waived = (unit: readonly Card[], target: string, index: BoardIndex): boole
  * named on the unit card whose claim clashes and on the other unit's shipping card.
  */
 const clashWaits = (
-  unit: readonly Card[],
+  unit: readonly Task[],
   keys: ReadonlySet<string>,
-  live: readonly Card[],
+  live: readonly Task[],
   units: ShippingUnits,
   board: { readonly index: BoardIndex; readonly laneSets: LaneSets },
 ): readonly BoardMergeWait[] => {
-  const inUnit = new Set(unit.map(card => card.id));
-  const others = new Map<string, Card[]>();
-  for (const card of live) {
-    if (inUnit.has(card.id) || card.files.length === 0) continue;
-    for (const key of units.rides(card)) {
-      if (!keys.has(key)) others.set(key, [...(others.get(key) ?? []), card]);
+  const inUnit = new Set(unit.map(task => task.id));
+  const others = new Map<string, Task[]>();
+  for (const task of live) {
+    if (inUnit.has(task.id) || task.files.length === 0) continue;
+    for (const key of units.rides(task)) {
+      if (!keys.has(key)) others.set(key, [...(others.get(key) ?? []), task]);
     }
   }
   // One rank per unit, never per pair, so the order is total (see the module doc).
   const anyRider = new Map<string, number>();
   const ownRider = new Map<string, number>();
-  for (const card of live) {
-    if (card.files.length === 0) continue;
-    const first = earliest(claimsOf(card));
-    const rides = units.rides(card);
+  for (const task of live) {
+    if (task.files.length === 0) continue;
+    const first = earliest(claimsOf(task));
+    const rides = units.rides(task);
     for (const key of rides) {
       anyRider.set(key, Math.min(anyRider.get(key) ?? Infinity, first));
       if (rides.size === 1) ownRider.set(key, Math.min(ownRider.get(key) ?? Infinity, first));
@@ -122,20 +122,20 @@ const clashWaits = (
   const myRank = [...keys].map(rankOf).sort(compareRanks)[0] ?? rankOf('');
   const waits: BoardMergeWait[] = [];
   /** The unit's shipping card when that unit can still hold a merge: there, not dropped, and not shipped. */
-  const holding = (key: string): Card | undefined => {
-    const target = board.index.get({ id: key as Card['id'] });
+  const holding = (key: string): Task | undefined => {
+    const target = board.index.get({ id: key as Task['id'] });
     if (target === undefined || target.dropped !== null) return undefined;
-    const category = cardCategory(target, board.laneSets);
+    const category = taskCategory(target, board.laneSets);
     return category !== undefined && isBlockerDone(category, 'shipped') ? undefined : target;
   };
-  for (const [key, cards] of others) {
+  for (const [key, tasks] of others) {
     const target = holding(key);
     if (target === undefined) continue;
     // An umbrella lead never ships by itself while a child unit can: its claims count through that unit instead.
     if ([...units.rides(target)].some(other => other !== key && holding(other) !== undefined)) continue;
     // A card riding both units (an umbrella lead) belongs to neither side of this pair.
-    const mine = unit.filter(card => !units.rides(card).has(key)).flatMap(claimsOf);
-    const theirs = cards.flatMap(claimsOf);
+    const mine = unit.filter(task => !units.rides(task).has(key)).flatMap(claimsOf);
+    const theirs = tasks.flatMap(claimsOf);
     const clash = mine.find(claim =>
       theirs.some(other => other.card.projectId === claim.card.projectId && claimsClash(claim.path, other.path)),
     );
@@ -157,32 +157,32 @@ export const mergeGateOf = (
 ): BoardMergeGateResponse | null => {
   const pr = prUrlParts(url);
   if (pr === null) return null;
-  const linksPr = (card: Card): boolean => card.links.prs.some(samePr(pr));
-  const live = board.index.cards.filter(card => card.dropped === null);
+  const linksPr = (task: Task): boolean => task.links.prs.some(samePr(pr));
+  const live = board.index.cards.filter(task => task.dropped === null);
   const linking = live.filter(linksPr);
   const units = new ShippingUnits(board.index);
   // Unit KEYS, not card ids: a linking card may share its unit (and so its key) with a card that links another PR too.
-  const ids = new Set(linking.map(card => card.id));
-  const keys = new Set(linking.map(card => units.key(card)));
+  const ids = new Set(linking.map(task => task.id));
+  const keys = new Set(linking.map(task => units.key(task)));
   const unit =
     linking.length === 0
       ? []
-      : live.filter(card => ids.has(card.id) || [...units.rides(card)].some(key => keys.has(key)));
-  const inUnit = new Set(unit.map(card => card.id));
-  const added = unit.flatMap(card =>
-    blockedBy(card, board.index, board.laneSets).flatMap((on): BoardMergeWait[] => {
+      : live.filter(task => ids.has(task.id) || [...units.rides(task)].some(key => keys.has(key)));
+  const inUnit = new Set(unit.map(task => task.id));
+  const added = unit.flatMap(task =>
+    blockedBy(task, board.index, board.laneSets).flatMap((on): BoardMergeWait[] => {
       // `get` answers only for a card on this machine, so a remote card that shares an id is never "inside".
       const blocker = board.index.get(on);
       if (blocker !== undefined && (inUnit.has(blocker.id) || linksPr(blocker))) return [];
-      if (isClaimTimeWait(card, on, board.index)) return [];
-      const until = card.dependsOn.find(dependency => sameRef(board.index, dependency.task, on))?.until ?? 'shipped';
-      return [{ card: { id: card.id }, on, until }];
+      if (isClaimTimeWait(task, on, board.index)) return [];
+      const until = task.dependsOn.find(dependency => sameRef(board.index, dependency.task, on))?.until ?? 'shipped';
+      return [{ card: { id: task.id }, on, until }];
     }),
   );
   const clashes = unit.length === 0 ? [] : clashWaits(unit, keys, live, units, board);
   return {
     pr: url,
-    unit: unit.map(card => ({ id: card.id })),
+    unit: unit.map(task => ({ id: task.id })),
     waits: [...added, ...clashes],
     unreadable: [...board.unreadable] as BoardMergeGateResponse['unreadable'],
   };

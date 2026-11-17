@@ -22,18 +22,18 @@ function Cards({
   readonly entry: NonNullable<RowPanelProps['entry']>;
   readonly ferretId: string;
 }) {
-  const cards = useMemo(() => packCardsOf(entry), [entry]);
+  const tasks = useMemo(() => packCardsOf(entry), [entry]);
   const rows = useSyncExternalStore(
     onChange => feed.watch(ferretId, onChange),
     () => feed.rows(ferretId),
     () => undefined,
   );
-  if (cards.length === 0) return null;
+  if (tasks.length === 0) return null;
   return (
     <PackRowsProvider rows={rows}>
-      {cards.map(card =>
-        card.pack === undefined ? null : (
-          <PackCallRow entry={card} key={card.id} pack={card.pack} rhythm={MESSAGE_RHYTHM} />
+      {tasks.map(task =>
+        task.pack === undefined ? null : (
+          <PackCallRow entry={task} key={task.id} pack={task.pack} rhythm={MESSAGE_RHYTHM} />
         ),
       )}
     </PackRowsProvider>

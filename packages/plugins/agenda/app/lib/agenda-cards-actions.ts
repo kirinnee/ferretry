@@ -26,29 +26,29 @@ interface BoardRefusal {
 }
 
 /** A card on one machine. */
-interface BoardCardTarget {
+interface BoardTaskTarget {
   readonly daemonId: DaemonId;
   readonly id: BoardTaskId;
 }
 
 /** The two board writes a notice's buttons make. */
-export interface AgendaCardsBoard {
+export interface AgendaTasksBoard {
   /** Starts a ferret on the card; `key` makes a retry of one click the same request. */
   readonly start: (
-    target: BoardCardTarget,
+    target: BoardTaskTarget,
     key?: string,
   ) => Promise<BoardResult<{ readonly started: boolean; readonly sessionId: string }, BoardRefusal>>;
   /** Drops the card with the reason the board records. */
-  readonly drop: (target: BoardCardTarget, reason: string) => Promise<BoardResult<unknown, BoardRefusal>>;
+  readonly drop: (target: BoardTaskTarget, reason: string) => Promise<BoardResult<unknown, BoardRefusal>>;
 }
 
 export const agendaCardsActions = (
-  board: AgendaCardsBoard,
+  board: AgendaTasksBoard,
   daemonId: DaemonId,
   onNavigate: (to: string) => void,
   links: Pick<AgendaLinks, 'card' | 'chat'>,
 ): AgendaCardsActions => {
-  const target = (id: BoardTaskId): BoardCardTarget => ({ daemonId, id });
+  const target = (id: BoardTaskId): BoardTaskTarget => ({ daemonId, id });
   const refused = (message: string): AgendaCardOutcome => ({ ok: false, message });
   // One key per Start click: kept while the request got no answer (the next click is a retry of it, and the daemon
   // answers a repeat with the first result), dropped once the daemon has answered, so a later click is new work.

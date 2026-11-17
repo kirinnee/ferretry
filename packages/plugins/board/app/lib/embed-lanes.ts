@@ -7,10 +7,10 @@
  * in a lane its board no longer has, or one whose lane set was not served, sits under "Elsewhere" and is never lost.
  */
 
-import type { CardView, LaneCategory, LaneSet } from '../../contract/index.ts';
+import type { TaskView, LaneCategory, LaneSet } from '../../contract/index.ts';
 import { THIS_MACHINE } from './machine.ts';
-import { boardCardKey, type BoardModel } from './board-model.ts';
-import type { BoardCardOf } from './board-view.ts';
+import { boardTaskKey, type BoardModel } from './board-model.ts';
+import type { BoardTaskOf } from './board-view.ts';
 
 /** What a block names: one card, a list of cards, or the children of a card. */
 export type EmbedSpec =
@@ -40,16 +40,16 @@ export interface EmbedLane {
   readonly key: string;
   readonly name: string;
   readonly category: LaneCategory | null;
-  readonly cards: readonly BoardCardOf[];
+  readonly cards: readonly BoardTaskOf[];
 }
 
 export interface EmbedEntry {
-  readonly task: CardView;
+  readonly task: TaskView;
   readonly laneSet: LaneSet | null;
 }
 
-export const embedCardOf = (task: CardView): BoardCardOf => ({
-  key: boardCardKey(THIS_MACHINE.daemonId, task.id),
+export const embedTaskOf = (task: TaskView): BoardTaskOf => ({
+  key: boardTaskKey(THIS_MACHINE.daemonId, task.id),
   daemonId: THIS_MACHINE.daemonId,
   machine: THIS_MACHINE.daemonId,
   task,
@@ -60,7 +60,7 @@ interface Slot {
   readonly project: number;
   readonly lane: number;
   readonly head: Omit<EmbedLane, 'cards'>;
-  readonly cards: BoardCardOf[];
+  readonly cards: BoardTaskOf[];
 }
 
 /** Cards grouped by project, then by lane in the lane set's own order; unplaced cards last in their project. */
@@ -82,7 +82,7 @@ export const groupEmbedLanes = (entries: readonly EmbedEntry[]): readonly EmbedL
       };
       slots.set(key, slot);
     }
-    slot.cards.push(embedCardOf(task));
+    slot.cards.push(embedTaskOf(task));
   }
   return [...slots.values()]
     .sort((a, b) => a.project - b.project || a.lane - b.lane)
@@ -91,7 +91,7 @@ export const groupEmbedLanes = (entries: readonly EmbedEntry[]): readonly EmbedL
 
 /** The lanes of a whole-board read that hold a child of `parent`, the cards no lane holds under "Elsewhere". */
 export const childLanes = (model: BoardModel, parent: string): readonly EmbedLane[] => {
-  const wanted = (card: BoardCardOf): boolean => card.task.parent?.id === parent;
+  const wanted = (task: BoardTaskOf): boolean => task.task.parent?.id === parent;
   return model.groups
     .flatMap((group): EmbedLane[] => [
       ...group.lanes.map(lane => ({

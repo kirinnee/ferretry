@@ -146,13 +146,13 @@ export const findDuplicates = (agendas: readonly DuplicateAgenda[]): DuplicateFi
   };
 
   // 1. One card, several owner items: its agents' threads (a hands-on card is no thread of the card).
-  const cardOf = (entry: Entry): string | undefined => {
+  const taskOf = (entry: Entry): string | undefined => {
     const { item } = entry;
     if (item.task === undefined || item.task === null || handsOnItem(item)) return undefined;
     if (item.raisedBy !== 'agent') return undefined;
     return `${entry.agenda.home}\n${item.task.machineId ?? ''}/${item.task.id}`;
   };
-  for (const group of grouped(open(), cardOf)) if (group.length > 1) settle('card', group);
+  for (const group of grouped(open(), taskOf)) if (group.length > 1) settle('card', group);
 
   // 2. One source reference open on two agendas.
   const sourceOf = (entry: Entry): string | undefined =>

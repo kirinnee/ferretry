@@ -15,26 +15,26 @@
 import { FY_RENDER_LIMITS } from '@ferretry/plugin-conversation/contract';
 import { RouteLink, useNow } from '@ferretry/app/ui';
 import { type ReactElement, type ReactNode, useMemo } from 'react';
-import { useBoard, useBoardCard, useBoardCards } from '../hooks/use-board.ts';
+import { useBoard, useBoardTask, useBoardTasks } from '../hooks/use-board.ts';
 import { NO_BOARD_FILTERS } from '../lib/board-model.ts';
 import type { FerretNames } from '../lib/board-present.ts';
 import type { DaemonBoardStore } from '../lib/board-store.ts';
-import type { BoardCardOf } from '../lib/board-view.ts';
+import type { BoardTaskOf } from '../lib/board-view.ts';
 import {
   childLanes,
   type EmbedEntry,
   type EmbedLane,
   type EmbedSpec,
-  embedCardOf,
+  embedTaskOf,
   groupEmbedLanes,
 } from '../lib/embed-lanes.ts';
 import { THIS_MACHINE } from '../lib/machine.ts';
 import { navigateTo } from '../lib/navigate.ts';
-import { boardCardPath } from '../lib/paths.ts';
-import { BoardCard } from './board-task.tsx';
+import { boardTaskPath } from '../lib/paths.ts';
+import { BoardTask } from './board-task.tsx';
 import { BoardLane } from './board-lane.tsx';
 
-export interface CardEmbedProps {
+export interface TaskEmbedProps {
   readonly store: DaemonBoardStore;
   readonly spec: EmbedSpec;
   readonly names: FerretNames;
@@ -54,24 +54,24 @@ const loading = (id: string): ReactElement => (
   <div aria-hidden="true" className="fy-card-embed-loading" data-embed-loading={id} />
 );
 
-function Card({
-  card,
+function Task({
+  card: task,
   category,
   lane,
   names,
 }: {
-  readonly card: BoardCardOf;
+  readonly card: BoardTaskOf;
   readonly category: EmbedLane['category'];
   readonly lane?: string | undefined;
   readonly names: FerretNames;
 }): ReactElement {
   const now = useNow();
   return (
-    <BoardCard
-      card={card}
+    <BoardTask
+      card={task}
       category={category}
       density="page"
-      href={boardCardPath(undefined, card.task.id)}
+      href={boardTaskPath(undefined, task.task.id)}
       names={names}
       now={now}
       onNavigate={navigateTo}
@@ -100,13 +100,13 @@ function MiniBoard({
   return (
     <div className="fy-card-embed-board" data-embed-board={anchor}>
       {lanes.map(lane => {
-        const cards = lane.cards.slice(0, Math.max(0, budget));
-        budget -= cards.length;
-        if (cards.length === 0) return null;
+        const tasks = lane.cards.slice(0, Math.max(0, budget));
+        budget -= tasks.length;
+        if (tasks.length === 0) return null;
         return (
           <BoardLane category={lane.category} count={lane.cards.length} density="page" key={lane.key} name={lane.name}>
-            {cards.map(card => (
-              <Card card={card} category={lane.category} key={card.key} names={names} />
+            {tasks.map(task => (
+              <Task card={task} category={lane.category} key={task.key} names={names} />
             ))}
           </BoardLane>
         );
@@ -120,7 +120,7 @@ function MiniBoard({
   );
 }
 
-function OneCard({
+function OneTask({
   store,
   id,
   names,
@@ -129,7 +129,7 @@ function OneCard({
   readonly id: string;
   readonly names: FerretNames;
 }) {
-  const state = useBoardCard(store, THIS_MACHINE, id, { beat: false });
+  const state = useBoardTask(store, THIS_MACHINE, id, { beat: false });
   if (state.task === null) {
     if (state.missing) return note(id, 'No task with this id.');
     if (state.status === 'error') return note(id, 'This task could not be read.');
@@ -139,12 +139,12 @@ function OneCard({
   const lane = state.laneSet?.lanes.find(candidate => candidate.id === task.laneId);
   return (
     <ul className="fy-card-embed-list" data-embed-card={task.id}>
-      <Card card={embedCardOf(task)} category={lane?.category ?? null} lane={lane?.name} names={names} />
+      <Task card={embedTaskOf(task)} category={lane?.category ?? null} lane={lane?.name} names={names} />
     </ul>
   );
 }
 
-function ListedCards({
+function ListedTasks({
   store,
   ids,
   names,
@@ -153,7 +153,7 @@ function ListedCards({
   readonly ids: readonly string[];
   readonly names: FerretNames;
 }) {
-  const states = useBoardCards(store, THIS_MACHINE, ids, { beat: false });
+  const states = useBoardTasks(store, THIS_MACHINE, ids, { beat: false });
   const { lanes, notes, waiting } = useMemo(() => {
     const entries: EmbedEntry[] = [];
     const missing: ReactElement[] = [];
@@ -180,7 +180,7 @@ function ListedCards({
   );
 }
 
-function ChildCards({
+function ChildTasks({
   store,
   parent,
   names,
@@ -189,7 +189,7 @@ function ChildCards({
   readonly parent: string;
   readonly names: FerretNames;
 }) {
-  const proof = useBoardCard(store, THIS_MACHINE, parent, { beat: false });
+  const proof = useBoardTask(store, THIS_MACHINE, parent, { beat: false });
   const { model, status, machines } = useBoard(store, MACHINES, CHILD_FILTERS, { beat: false });
   const lanes = useMemo(() => childLanes(model, parent), [model, parent]);
   if (proof.task === null) {
@@ -205,7 +205,7 @@ function ChildCards({
   const incomplete = machines.some(read => read.truncated) ? (
     <p className="fy-card-embed-more" data-embed-truncated={parent}>
       The board is too big to read in full, so this list may be incomplete.{' '}
-      <RouteLink data-embed-parent-link={parent} onNavigate={navigateTo} to={boardCardPath(undefined, parent)}>
+      <RouteLink data-embed-parent-link={parent} onNavigate={navigateTo} to={boardTaskPath(undefined, parent)}>
         Open &{parent}
       </RouteLink>
     </p>
@@ -213,8 +213,8 @@ function ChildCards({
   return <MiniBoard anchor={parent} footer={incomplete} lanes={lanes} names={names} notes={notes} />;
 }
 
-export function CardEmbed({ store, spec, names }: CardEmbedProps): ReactElement {
-  if (spec.kind === 'card') return <OneCard id={spec.id} names={names} store={store} />;
-  if (spec.kind === 'cards') return <ListedCards ids={spec.ids} names={names} store={store} />;
-  return <ChildCards names={names} parent={spec.parent} store={store} />;
+export function TaskEmbed({ store, spec, names }: TaskEmbedProps): ReactElement {
+  if (spec.kind === 'card') return <OneTask id={spec.id} names={names} store={store} />;
+  if (spec.kind === 'cards') return <ListedTasks ids={spec.ids} names={names} store={store} />;
+  return <ChildTasks names={names} parent={spec.parent} store={store} />;
 }

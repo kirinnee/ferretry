@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { Card, CardView } from '../../../contract/index.ts';
+import type { Task, TaskView } from '../../../contract/index.ts';
 import should from 'should';
 import {
   BoardService,
@@ -10,13 +10,13 @@ import {
   HELPER_ENDED_GRACE_MS,
   nearestLiveLead,
   planSweep,
-  returnCard,
+  returnTask,
   type FerretRoster,
   type SweepBoard,
-  SUB_CARD_HELPER_REASON,
+  SUB_TASK_HELPER_REASON,
 } from '../../../daemon/lib/board/index.ts';
 import {
-  card,
+  boardTask,
   FakeSessions,
   lanes,
   liveSession,
@@ -32,7 +32,7 @@ import type { FerretLiveness } from '../../../daemon/lib/board/index.ts';
 const old = new Date(Date.parse(NOW) - HELPER_ENDED_GRACE_MS - 1000).toISOString();
 const laneSets = new Map([[PROJECT, lanes(PROJECT)]]);
 
-const idle = (stored: Card, derived: Partial<CardView> = {}): CardView => ({
+const idle = (stored: Task, derived: Partial<TaskView> = {}): TaskView => ({
   ...stored,
   lastTouchedAt: old,
   touchedBy: null,
@@ -51,7 +51,7 @@ const idle = (stored: Card, derived: Partial<CardView> = {}): CardView => ({
   shippedIn: null,
   ...derived,
 });
-const board = (...views: CardView[]): SweepBoard => ({ views, laneSets });
+const board = (...views: TaskView[]): SweepBoard => ({ views, laneSets });
 
 const openPr = {
   url: 'https://github.com/kirinnee/ferretry/pull/950',
@@ -68,8 +68,8 @@ const openPr = {
 const links = { prs: [openPr], branch: null, commits: [], docs: [] };
 
 /** A card `lead` handed to `child` as a sub-card with a PR open, so it neither closes nor ships. */
-const helperWithPr = (overrides: Partial<Card> = {}): Card =>
-  card({
+const helperWithPr = (overrides: Partial<Task> = {}): Task =>
+  boardTask({
     id: 'F2',
     parent: { id: 'F1' },
     owner: 'lead',
@@ -261,7 +261,7 @@ describe('the sweep returning an ended ferret’s card', () => {
     const report = await sweep.tick();
 
     // Assert
-    const after = ported.store.cards.get('F2') as Card;
+    const after = ported.store.cards.get('F2') as Task;
     should(report.returned).eql(['F2']);
     should(after.assignee).equal('child');
     should(after.laneId).equal('review');
@@ -303,7 +303,7 @@ describe('the sweep returning an ended ferret’s card', () => {
 });
 
 describe('returning one card through the service', () => {
-  const serviceFor = (stored: Card) => {
+  const serviceFor = (stored: Task) => {
     const ported = world({ store: new MemoryBoardStore([stored]) });
     return { ported, service: new BoardService(ported) };
   };
@@ -336,7 +336,7 @@ describe('returning one card through the service', () => {
     const stored = helperWithPr({ assignee: 'grandchild' });
 
     // Act
-    const returned = returnCard(stored, 'child', 'grandchild', { now: NOW });
+    const returned = returnTask(stored, 'child', 'grandchild', { now: NOW });
 
     // Assert
     should(returned.assignee).equal('child');
@@ -355,8 +355,8 @@ describe('returning one card through the service', () => {
 
 /** A tick whose roster changes after the plan is made: the card's write must judge the roster as it is then. */
 const tickWithRosterChange = async (options: {
-  readonly stored: readonly Card[];
-  readonly planned: readonly CardView[];
+  readonly stored: readonly Task[];
+  readonly planned: readonly TaskView[];
   readonly before: FerretRoster;
   readonly after: FerretRoster;
 }) => {
@@ -466,7 +466,7 @@ describe('a return judged again when it is written', () => {
     });
 
     // Assert
-    const after = ported.store.cards.get('F2') as Card;
+    const after = ported.store.cards.get('F2') as Task;
     should(report.returned).be.empty();
     should(after.assignee).equal('grandchild');
     should(planSweep(EMPTY_SWEEP_MEMORY, board(idle(after)), roster, NOW).closes).eql(['F2']);
@@ -502,7 +502,7 @@ describe('a lead’s own bookkeeping sub-card whose ferret ended', () => {
 });
 
 describe('an orphaned card', () => {
-  const derive = (stored: Card, roster: FerretRoster) =>
+  const derive = (stored: Task, roster: FerretRoster) =>
     deriveActivities(
       { cards: [stored], index: new BoardIndex([stored], MACHINE), laneSets, asks: new Map() },
       roster,
@@ -526,6 +526,6 @@ describe('an orphaned card', () => {
 describe('the history reason of a closing helper', () => {
   it('should be untouched by the return rule', () => {
     // Act / Assert
-    should(SUB_CARD_HELPER_REASON).equal('helper finished');
+    should(SUB_TASK_HELPER_REASON).equal('helper finished');
   });
 });

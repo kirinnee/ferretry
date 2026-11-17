@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
-import type { Card, CardEvent, Lane, PrLink } from '../../../contract/index.ts';
+import type { Task, TaskEvent, Lane, PrLink } from '../../../contract/index.ts';
 import should from 'should';
 import {
   ACTIVE_WINDOW_MS,
   type ActivityInputs,
   BoardIndex,
-  type CardAsks,
-  cardStaleAfterMs,
+  type TaskAsks,
+  taskStaleAfterMs,
   deriveActivities,
   isWorking,
   LivenessActivityDeriver,
@@ -15,7 +15,7 @@ import {
   staleAfterMsOf,
   strongSignalAt,
 } from '../../../daemon/lib/board/index.ts';
-import { card, FakeSessions, lanes, liveSession, MACHINE, NOW, PROJECT, rosterOf } from './support.ts';
+import { boardTask, FakeSessions, lanes, liveSession, MACHINE, NOW, PROJECT, rosterOf } from './support.ts';
 
 const NOW_MS = Date.parse(NOW);
 const MINUTE = 60_000;
@@ -25,7 +25,7 @@ const ago = (ms: number): string => new Date(NOW_MS - ms).toISOString();
 
 const laneSets = new Map([[PROJECT, lanes(PROJECT)]]);
 
-const created = (at: string, ferret = 'lead'): CardEvent => ({
+const created = (at: string, ferret = 'lead'): TaskEvent => ({
   seq: 1,
   at,
   actor: { kind: 'ferret', name: ferret, ferret },
@@ -34,19 +34,19 @@ const created = (at: string, ferret = 'lead'): CardEvent => ({
 });
 
 /** A card created (and last touched) `age` ago. */
-const aged = (age: number, overrides: Partial<Card> = {}): Card =>
-  card({ createdAt: ago(age), history: [created(ago(age))], ...overrides });
+const aged = (age: number, overrides: Partial<Task> = {}): Task =>
+  boardTask({ createdAt: ago(age), history: [created(ago(age))], ...overrides });
 
 const inputsFor = (
-  cards: readonly Card[],
-  asks: ReadonlyMap<string, CardAsks> = new Map(),
+  tasks: readonly Task[],
+  asks: ReadonlyMap<string, TaskAsks> = new Map(),
   sets: ActivityInputs['laneSets'] = laneSets,
-): ActivityInputs => ({ cards, index: new BoardIndex(cards, MACHINE), laneSets: sets, asks });
+): ActivityInputs => ({ cards: tasks, index: new BoardIndex(tasks, MACHINE), laneSets: sets, asks });
 
 const everyoneIdle = rosterOf(['lead', 'child', 'grandchild'].map(id => liveSession(id)));
 
-const derive = (cards: readonly Card[], roster: FerretRoster = everyoneIdle, asks?: ReadonlyMap<string, CardAsks>) =>
-  deriveActivities(inputsFor(cards, asks), roster, NOW_MS);
+const derive = (tasks: readonly Task[], roster: FerretRoster = everyoneIdle, asks?: ReadonlyMap<string, TaskAsks>) =>
+  deriveActivities(inputsFor(tasks, asks), roster, NOW_MS);
 
 const merged = (mergedAt: string): PrLink => ({
   url: 'https://github.com/kirinnee/ferretry/pull/930',
@@ -116,20 +116,20 @@ describe('stale thresholds', () => {
 
   it("should read a card's threshold from its lane, and none for lanes this build does not know", () => {
     // Assert
-    should(cardStaleAfterMs(card({ laneId: 'implement' }), { laneSets })).equal(2 * HOUR);
-    should(cardStaleAfterMs(card({ laneId: 'gone' }), { laneSets })).be.null();
-    should(cardStaleAfterMs(card(), { laneSets: new Map() })).be.null();
+    should(taskStaleAfterMs(boardTask({ laneId: 'implement' }), { laneSets })).equal(2 * HOUR);
+    should(taskStaleAfterMs(boardTask({ laneId: 'gone' }), { laneSets })).be.null();
+    should(taskStaleAfterMs(boardTask(), { laneSets: new Map() })).be.null();
   });
 });
 
 describe('last touched', () => {
   it('should attribute a session only to its focus card, never to every card it owns', () => {
     // Arrange
-    const cards = [aged(DAY, { id: 'F1' }), aged(DAY, { id: 'F2' })];
+    const tasks = [aged(DAY, { id: 'F1' }), aged(DAY, { id: 'F2' })];
     const roster = rosterOf([liveSession('lead', { focusCard: { id: 'F2' }, lastTranscriptAt: ago(MINUTE) })]);
 
     // Act
-    const activity = derive(cards, roster);
+    const activity = derive(tasks, roster);
 
     // Assert
     should(activity.get('F1')).eql({ lastTouchedAt: ago(DAY), touchedBy: 'lead', activity: 'idle' });
@@ -138,14 +138,14 @@ describe('last touched', () => {
 
   it('should ignore a focus on another machine and a session with no signals', () => {
     // Arrange
-    const cards = [aged(HOUR, { id: 'F1' })];
+    const tasks = [aged(HOUR, { id: 'F1' })];
     const roster = rosterOf([
       liveSession('child', { focusCard: { id: 'F1', machineId: 'mac' }, lastTranscriptAt: ago(MINUTE) }),
       liveSession('lead', { focusCard: { id: 'F1' } }),
     ]);
 
     // Act
-    const activity = derive(cards, roster);
+    const activity = derive(tasks, roster);
 
     // Assert
     should(activity.get('F1')).eql({ lastTouchedAt: ago(HOUR), touchedBy: 'lead', activity: 'idle' });
@@ -254,14 +254,14 @@ describe('two sessions on one card', () => {
 describe('the activity state', () => {
   it('should be active within two minutes of a strong signal, and idle after', () => {
     // Arrange
-    const cards = [aged(HOUR, { id: 'F1', laneId: 'implement' }), aged(HOUR, { id: 'F2', laneId: 'implement' })];
+    const tasks = [aged(HOUR, { id: 'F1', laneId: 'implement' }), aged(HOUR, { id: 'F2', laneId: 'implement' })];
     const roster = rosterOf([
       liveSession('lead', { focusCard: { id: 'F1' }, lastTranscriptAt: ago(ACTIVE_WINDOW_MS) }),
       liveSession('child', { focusCard: { id: 'F2' }, lastTranscriptAt: ago(ACTIVE_WINDOW_MS + 1) }),
     ]);
 
     // Act
-    const activity = derive(cards, roster);
+    const activity = derive(tasks, roster);
 
     // Assert
     should(activity.get('F1')?.activity).equal('active');
@@ -271,7 +271,7 @@ describe('the activity state', () => {
   it('should never wait (docs/board.md § Cards show progress): a block, an unfinished blocker or an open card ask leave it idle, never stale', () => {
     // Arrange
     const ask = { ferret: 'lead', id: 'A9' };
-    const cards = [
+    const tasks = [
       aged(5 * DAY, { id: 'F1', blocked: { on: 'external', reason: 'vendor', since: ago(DAY) } }),
       aged(5 * DAY, { id: 'F2', dependsOn: [{ task: { id: 'F5' }, until: 'shipped' }] }),
       aged(5 * DAY, { id: 'F3' }),
@@ -284,7 +284,7 @@ describe('the activity state', () => {
     ]);
 
     // Act
-    const activity = derive(cards, everyoneIdle, asks);
+    const activity = derive(tasks, everyoneIdle, asks);
 
     // Assert
     should(['F1', 'F2', 'F3', 'F4'].map(id => activity.get(id)?.activity)).eql(['idle', 'idle', 'idle', 'stale']);
@@ -292,7 +292,7 @@ describe('the activity state', () => {
 
   it("should go stale past its lane's threshold, never in verify, a release wait, closed or dropped", () => {
     // Arrange
-    const cards = [
+    const tasks = [
       aged(4 * DAY, { id: 'F1', laneId: 'todo' }),
       aged(DAY, { id: 'F2', laneId: 'todo' }),
       aged(3 * HOUR, { id: 'F3', laneId: 'implement' }),
@@ -304,10 +304,10 @@ describe('the activity state', () => {
     ];
 
     // Act
-    const activity = derive(cards);
+    const activity = derive(tasks);
 
     // Assert
-    should(cards.map(each => activity.get(each.id)?.activity)).eql([
+    should(tasks.map(each => activity.get(each.id)?.activity)).eql([
       'stale',
       'idle',
       'stale',
@@ -330,7 +330,7 @@ describe('the activity state', () => {
   it('should orphan an active or review card whose ferret is gone and that has no live descendant', () => {
     // Arrange
     const roster = rosterOf([liveSession('lead'), liveSession('done', { status: 'stopped' })], ['damaged']);
-    const cards = [
+    const tasks = [
       aged(MINUTE, { id: 'F1', laneId: 'implement', assignee: 'done' }),
       aged(MINUTE, { id: 'F2', laneId: 'review', assignee: 'pruned' }),
       aged(MINUTE, { id: 'F3', laneId: 'implement', assignee: 'done' }),
@@ -353,7 +353,7 @@ describe('the activity state', () => {
     ];
 
     // Act
-    const activity = derive(cards, roster);
+    const activity = derive(tasks, roster);
 
     // Assert
     should(['F1', 'F2', 'F3', 'F5', 'F6', 'F7', 'F8'].map(id => activity.get(id)?.activity)).eql([
@@ -370,7 +370,7 @@ describe('the activity state', () => {
   it('should orphan a card whose only child is an unassigned Todo card, but not one with an assigned or started child', () => {
     // Arrange — the lead owns every card and is alive; the reviewer finished.
     const roster = rosterOf([liveSession('lead'), liveSession('reviewer', { status: 'stopped' })]);
-    const cards = [
+    const tasks = [
       aged(MINUTE, { id: 'F1', laneId: 'review', assignee: 'reviewer' }),
       aged(MINUTE, { id: 'F2', parent: { id: 'F1' } }),
       aged(MINUTE, { id: 'F3', laneId: 'review', assignee: 'reviewer' }),
@@ -380,7 +380,7 @@ describe('the activity state', () => {
     ];
 
     // Act
-    const activity = derive(cards, roster);
+    const activity = derive(tasks, roster);
 
     // Assert
     should(['F1', 'F3', 'F5'].map(id => activity.get(id)?.activity)).eql(['orphaned', 'idle', 'idle']);
@@ -388,11 +388,11 @@ describe('the activity state', () => {
 
   it('should read active before waiting', () => {
     // Arrange
-    const cards = [aged(HOUR, { blocked: { on: 'external', reason: 'vendor', since: NOW } })];
+    const tasks = [aged(HOUR, { blocked: { on: 'external', reason: 'vendor', since: NOW } })];
     const roster = rosterOf([liveSession('lead', { focusCard: { id: 'F1' }, status: 'working' })]);
 
     // Act
-    const activity = derive(cards, roster);
+    const activity = derive(tasks, roster);
 
     // Assert
     should(activity.get('F1')?.activity).equal('active');
@@ -404,10 +404,10 @@ describe('the liveness activity deriver', () => {
     // Arrange
     const sessions = new FakeSessions(rosterOf([liveSession('lead')]));
     const deriver = new LivenessActivityDeriver({ sessions, clock: { now: () => NOW } });
-    const cards = [aged(4 * DAY, { id: 'F1' }), aged(HOUR, { id: 'F2' }), aged(HOUR, { id: 'F3' })];
+    const tasks = [aged(4 * DAY, { id: 'F1' }), aged(HOUR, { id: 'F2' }), aged(HOUR, { id: 'F3' })];
 
     // Act
-    const activity = await deriver.derive(inputsFor(cards));
+    const activity = await deriver.derive(inputsFor(tasks));
 
     // Assert
     should(sessions.reads).equal(1);

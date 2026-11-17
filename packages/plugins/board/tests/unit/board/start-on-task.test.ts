@@ -1,18 +1,18 @@
 import { describe, it } from 'bun:test';
-import type { Card, CardId, CardResponse, CardStartResponse, CardView } from '../../../contract/index.ts';
+import type { Task, TaskId, TaskResponse, TaskStartResponse, TaskView } from '../../../contract/index.ts';
 import should from 'should';
 import { KeyedSerial } from '../../../daemon/lib/lanes/serial.ts';
 import {
   BoardError,
-  CardStartRefused,
-  startOnCard,
-  startOnCardBrief,
-  type NewFerretOnCard,
-  type StartOnCardPorts,
+  TaskStartRefused,
+  startOnTask,
+  startOnTaskBrief,
+  type NewFerretOnTask,
+  type StartOnTaskPorts,
 } from '../../../daemon/lib/board/index.ts';
-import { card, lanes, OTHER_PROJECT, PROJECT } from './support.ts';
+import { boardTask, lanes, OTHER_PROJECT, PROJECT } from './support.ts';
 
-const ID = 'F1' as CardId;
+const ID = 'F1' as TaskId;
 const OWNER = { kind: 'owner' } as const;
 const FOLDERS: Readonly<Record<string, string>> = { [PROJECT]: '/work/board', [OTHER_PROJECT]: '/work/relay' };
 
@@ -20,16 +20,16 @@ const FOLDERS: Readonly<Record<string, string>> = { [PROJECT]: '/work/board', [O
  * One card and the ferrets on this machine, with `start` doing what the daemon's start does to them: the new ferret
  * is alive, holds the card as its focus, and is the card's assignee.
  */
-const world = (initial: Partial<Card> = {}, overrides: Partial<StartOnCardPorts> = {}) => {
-  let current = card({ id: 'F1', laneId: 'todo', ...initial });
-  const alive = new Map<string, CardId | null>();
-  const wedged = new Map<string, CardId | null>();
-  const started: NewFerretOnCard[] = [];
+const world = (initial: Partial<Task> = {}, overrides: Partial<StartOnTaskPorts> = {}) => {
+  let current = boardTask({ id: 'F1', laneId: 'todo', ...initial });
+  const alive = new Map<string, TaskId | null>();
+  const wedged = new Map<string, TaskId | null>();
+  const started: NewFerretOnTask[] = [];
   const keyed = new KeyedSerial();
   const stopped: { ferret: string; reason: string }[] = [];
-  const kept = new Map<string, CardStartResponse>();
-  const ports: StartOnCardPorts = {
-    card: async () => ({ card: current, laneSet: lanes(current.projectId) }) as unknown as CardResponse,
+  const kept = new Map<string, TaskStartResponse>();
+  const ports: StartOnTaskPorts = {
+    card: async () => ({ card: current, laneSet: lanes(current.projectId) }) as unknown as TaskResponse,
     folderOf: async row => FOLDERS[row.projectId],
     live: async () => new Map(alive),
     stuck: async () => new Map(wedged),
@@ -59,7 +59,7 @@ const world = (initial: Partial<Card> = {}, overrides: Partial<StartOnCardPorts>
     stopped,
     alive,
     wedged,
-    edit: (change: Partial<Card>) => {
+    edit: (change: Partial<Task>) => {
       current = { ...current, ...change };
     },
   };
@@ -71,7 +71,7 @@ describe('starting a ferret on a card', () => {
     const { ports, started } = world({ assignee: 'gone', laneId: 'implement' });
 
     // Act
-    const result = await startOnCard(ports, ID, OWNER);
+    const result = await startOnTask(ports, ID, OWNER);
 
     // Assert
     should(result).eql({ card: 'F1', ferret: 'new-1', started: true });
@@ -88,7 +88,7 @@ describe('starting a ferret on a card', () => {
     const { ports, started } = world();
 
     // Act
-    await startOnCard(ports, ID, OWNER);
+    await startOnTask(ports, ID, OWNER);
 
     // Assert
     should(started[0]?.folder).equal('/work/board');
@@ -99,7 +99,7 @@ describe('starting a ferret on a card', () => {
     const { ports, started } = world({ projectId: OTHER_PROJECT, laneId: 'todo' });
 
     // Act
-    await startOnCard(ports, ID, OWNER);
+    await startOnTask(ports, ID, OWNER);
 
     // Assert
     should(started[0]?.folder).equal('/work/relay');
@@ -110,7 +110,7 @@ describe('starting a ferret on a card', () => {
     const { ports, started, alive } = world({ assignee: 'gone' });
 
     // Act
-    const result = await startOnCard(ports, ID, OWNER);
+    const result = await startOnTask(ports, ID, OWNER);
 
     // Assert
     should(alive.get(result.ferret)).equal(started[0]?.card.id);
@@ -122,7 +122,7 @@ describe('starting a ferret on a card', () => {
     const { ports, started } = world();
 
     // Act
-    const failure = await startOnCard(ports, ID, { kind: 'ferret', ferret: 'lead' }).catch((error: unknown) => error);
+    const failure = await startOnTask(ports, ID, { kind: 'ferret', ferret: 'lead' }).catch((error: unknown) => error);
 
     // Assert
     should(failure).be.instanceOf(BoardError);
@@ -132,29 +132,29 @@ describe('starting a ferret on a card', () => {
 
   it('should refuse a closed card, and a dropped one, and start nothing', async () => {
     // Arrange
-    const closedCard = world({ laneId: 'closed' });
-    const droppedCard = world({ dropped: { at: '2026-10-30T10:00:00.000Z', reason: 'no' } });
+    const closedTask = world({ laneId: 'closed' });
+    const droppedTask = world({ dropped: { at: '2026-10-30T10:00:00.000Z', reason: 'no' } });
 
     // Act
-    const closed = await startOnCard(closedCard.ports, ID, OWNER).catch((error: unknown) => error);
-    const dropped = await startOnCard(droppedCard.ports, ID, OWNER).catch((error: unknown) => error);
+    const closed = await startOnTask(closedTask.ports, ID, OWNER).catch((error: unknown) => error);
+    const dropped = await startOnTask(droppedTask.ports, ID, OWNER).catch((error: unknown) => error);
 
     // Assert
     should((closed as BoardError).code).equal('invalid');
     should((closed as BoardError).message).equal('This task was closed; reopen it first.');
     should((dropped as BoardError).message).equal('This task was closed; reopen it first.');
-    should(closedCard.started).eql([]);
-    should(droppedCard.started).eql([]);
+    should(closedTask.started).eql([]);
+    should(droppedTask.started).eql([]);
   });
 
   it('should refuse a stale Start from a second client once the card was closed under it', async () => {
     // Arrange
     const { ports, started, edit } = world();
-    const first = await startOnCard(ports, ID, OWNER);
+    const first = await startOnTask(ports, ID, OWNER);
     edit({ assignee: null, laneId: 'closed', dropped: { at: '2026-10-30T10:00:00.000Z', reason: 'no' } });
 
     // Act
-    const stale = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
+    const stale = await startOnTask(ports, ID, OWNER).catch((error: unknown) => error);
 
     // Assert
     should(first.started).be.true();
@@ -168,7 +168,7 @@ describe('starting a ferret on a card', () => {
     alive.set('worker', ID);
 
     // Act
-    const result = await startOnCard(ports, ID, OWNER);
+    const result = await startOnTask(ports, ID, OWNER);
 
     // Assert
     should(result).eql({ card: 'F1', ferret: 'worker', started: false });
@@ -183,8 +183,8 @@ describe('starting a ferret on a card', () => {
     backlog.alive.set('lead', null);
 
     // Act
-    const held = await startOnCard(working.ports, ID, OWNER);
-    const free = await startOnCard(backlog.ports, ID, OWNER);
+    const held = await startOnTask(working.ports, ID, OWNER);
+    const free = await startOnTask(backlog.ports, ID, OWNER);
 
     // Assert
     should(held).eql({ card: 'F1', ferret: 'lead', started: false });
@@ -197,7 +197,7 @@ describe('starting a ferret on a card', () => {
     alive.set('helper', ID);
 
     // Act
-    const result = await startOnCard(ports, ID, OWNER);
+    const result = await startOnTask(ports, ID, OWNER);
 
     // Assert
     should(result).eql({ card: 'F1', ferret: 'helper', started: false });
@@ -207,10 +207,10 @@ describe('starting a ferret on a card', () => {
   it('should start a new ferret when the assignee is gone and no live ferret has the card', async () => {
     // Arrange
     const { ports, alive } = world({ assignee: 'gone', laneId: 'implement' });
-    alive.set('other', 'F9' as CardId);
+    alive.set('other', 'F9' as TaskId);
 
     // Act
-    const result = await startOnCard(ports, ID, OWNER);
+    const result = await startOnTask(ports, ID, OWNER);
 
     // Assert
     should(result.started).be.true();
@@ -221,7 +221,7 @@ describe('starting a ferret on a card', () => {
     const { ports, started } = world();
 
     // Act
-    const results = await Promise.all([startOnCard(ports, ID, OWNER), startOnCard(ports, ID, OWNER)]);
+    const results = await Promise.all([startOnTask(ports, ID, OWNER), startOnTask(ports, ID, OWNER)]);
 
     // Assert
     should(started).have.length(1);
@@ -232,10 +232,10 @@ describe('starting a ferret on a card', () => {
   it('should hand a retry after a lost response the same ferret, and start no second one', async () => {
     // Arrange
     const { ports, started } = world();
-    const first = await startOnCard(ports, ID, OWNER);
+    const first = await startOnTask(ports, ID, OWNER);
 
     // Act
-    const retry = await startOnCard(ports, ID, OWNER);
+    const retry = await startOnTask(ports, ID, OWNER);
 
     // Assert
     should(retry.ferret).equal(first.ferret);
@@ -246,11 +246,11 @@ describe('starting a ferret on a card', () => {
   it("should hand a retry with the same key the first start's result even after that ferret finished", async () => {
     // Arrange
     const { ports, started, alive } = world();
-    const first = await startOnCard(ports, ID, OWNER, 'click-1');
+    const first = await startOnTask(ports, ID, OWNER, 'click-1');
     alive.delete(first.ferret);
 
     // Act
-    const retry = await startOnCard(ports, ID, OWNER, 'click-1');
+    const retry = await startOnTask(ports, ID, OWNER, 'click-1');
 
     // Assert
     should(retry).eql(first);
@@ -261,11 +261,11 @@ describe('starting a ferret on a card', () => {
     // Arrange: a live ferret holds the card, the first reply is lost, the holder completes.
     const { ports, started, alive } = world({ assignee: 'holder' });
     alive.set('holder', ID);
-    const first = await startOnCard(ports, ID, OWNER, 'click-1');
+    const first = await startOnTask(ports, ID, OWNER, 'click-1');
     alive.delete('holder');
 
     // Act
-    const retry = await startOnCard(ports, ID, OWNER, 'click-1');
+    const retry = await startOnTask(ports, ID, OWNER, 'click-1');
 
     // Assert
     should(first).eql({ card: 'F1', ferret: 'holder', started: false });
@@ -276,11 +276,11 @@ describe('starting a ferret on a card', () => {
   it('should start new work for a new click once the first ferret has finished', async () => {
     // Arrange
     const { ports, started, alive } = world();
-    const first = await startOnCard(ports, ID, OWNER, 'click-1');
+    const first = await startOnTask(ports, ID, OWNER, 'click-1');
     alive.delete(first.ferret);
 
     // Act
-    const second = await startOnCard(ports, ID, OWNER, 'click-2');
+    const second = await startOnTask(ports, ID, OWNER, 'click-2');
 
     // Assert
     should(second).eql({ card: 'F1', ferret: 'new-2', started: true });
@@ -290,11 +290,11 @@ describe('starting a ferret on a card', () => {
   it('should keep a key to its own card, and remember nothing for a start without a key', async () => {
     // Arrange
     const { ports, started, alive } = world();
-    const first = await startOnCard(ports, ID, OWNER);
+    const first = await startOnTask(ports, ID, OWNER);
     alive.delete(first.ferret);
 
     // Act
-    const again = await startOnCard(ports, ID, OWNER);
+    const again = await startOnTask(ports, ID, OWNER);
 
     // Assert
     should(again.ferret).equal('new-2');
@@ -314,7 +314,7 @@ describe('starting a ferret on a card', () => {
     );
 
     // Act
-    const failure = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
+    const failure = await startOnTask(ports, ID, OWNER).catch((error: unknown) => error);
 
     // Assert
     should((failure as BoardError).message).equal('This task was closed; reopen it first.');
@@ -336,7 +336,7 @@ describe('starting a ferret on a card', () => {
     );
 
     // Act
-    const failure = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
+    const failure = await startOnTask(ports, ID, OWNER).catch((error: unknown) => error);
 
     // Assert
     should((failure as BoardError).message).equal('This task was closed; reopen it first.');
@@ -356,7 +356,7 @@ describe('starting a ferret on a card', () => {
     );
 
     // Act
-    const failure = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
+    const failure = await startOnTask(ports, ID, OWNER).catch((error: unknown) => error);
 
     // Assert
     should((failure as BoardError).message).equal('This task was closed; reopen it first.');
@@ -371,8 +371,8 @@ describe('starting a ferret on a card', () => {
     );
 
     // Act
-    const failure = await startOnCard(ports, ID, OWNER, 'click-1').catch((error: unknown) => error);
-    const unreasoned = await startOnCard(
+    const failure = await startOnTask(ports, ID, OWNER, 'click-1').catch((error: unknown) => error);
+    const unreasoned = await startOnTask(
       world({}, { start: async () => ({ ferret: 'dead', status: 'failed' }) }).ports,
       ID,
       OWNER,
@@ -408,8 +408,8 @@ describe('starting a ferret on a card', () => {
     );
 
     // Act
-    const first = await startOnCard(ports, ID, OWNER, 'click-1').catch((error: unknown) => error);
-    const retry = await startOnCard(ports, ID, OWNER, 'click-1');
+    const first = await startOnTask(ports, ID, OWNER, 'click-1').catch((error: unknown) => error);
+    const retry = await startOnTask(ports, ID, OWNER, 'click-1');
 
     // Assert
     should(first).be.instanceOf(BoardError);
@@ -438,8 +438,8 @@ describe('starting a ferret on a card', () => {
     );
 
     // Act
-    const failure = await startOnCard(ports, ID, OWNER, 'click-1').catch((error: unknown) => error);
-    const retry = await startOnCard(ports, ID, OWNER, 'click-2').catch((error: unknown) => error);
+    const failure = await startOnTask(ports, ID, OWNER, 'click-1').catch((error: unknown) => error);
+    const retry = await startOnTask(ports, ID, OWNER, 'click-2').catch((error: unknown) => error);
 
     // Assert
     should((failure as BoardError).code).equal('invalid');
@@ -462,7 +462,7 @@ describe('starting a ferret on a card', () => {
     );
 
     // Act
-    const failure = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
+    const failure = await startOnTask(ports, ID, OWNER).catch((error: unknown) => error);
 
     // Assert
     should((failure as BoardError).message).containEql('It could not be stopped (gone)');
@@ -474,7 +474,7 @@ describe('starting a ferret on a card', () => {
     wedged.set('stuck', ID);
 
     // Act
-    const refused = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
+    const refused = await startOnTask(ports, ID, OWNER).catch((error: unknown) => error);
 
     // Assert
     should((refused as BoardError).message).equal('A ferret on &F1 could not be stopped; stop it first.');
@@ -484,11 +484,11 @@ describe('starting a ferret on a card', () => {
   it('should not be held by a stuck pane that belongs to another card', async () => {
     // Arrange
     const { ports, started, wedged } = world({ assignee: 'gone' });
-    wedged.set('elsewhere', 'F9' as CardId);
+    wedged.set('elsewhere', 'F9' as TaskId);
     wedged.set('unfocused', null);
 
     // Act
-    const result = await startOnCard(ports, ID, OWNER);
+    const result = await startOnTask(ports, ID, OWNER);
 
     // Assert
     should(result.started).equal(true);
@@ -509,10 +509,10 @@ describe('starting a ferret on a card', () => {
         },
       },
     );
-    const first = await startOnCard(ports, ID, OWNER, 'click-1').catch((error: unknown) => error);
+    const first = await startOnTask(ports, ID, OWNER, 'click-1').catch((error: unknown) => error);
 
     // Act
-    const retry = await startOnCard(ports, ID, OWNER, 'click-1');
+    const retry = await startOnTask(ports, ID, OWNER, 'click-1');
 
     // Assert
     should(first).be.instanceOf(BoardError);
@@ -524,7 +524,7 @@ describe('starting a ferret on a card', () => {
     const { ports, started } = world({}, { folderOf: async () => undefined });
 
     // Act
-    const failure = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
+    const failure = await startOnTask(ports, ID, OWNER).catch((error: unknown) => error);
 
     // Assert
     should((failure as BoardError).code).equal('invalid');
@@ -538,13 +538,13 @@ describe('starting a ferret on a card', () => {
       {},
       {
         start: async () => {
-          throw new CardStartRefused('the machine is full');
+          throw new TaskStartRefused('the machine is full');
         },
       },
     );
 
     // Act
-    const failure = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
+    const failure = await startOnTask(ports, ID, OWNER).catch((error: unknown) => error);
 
     // Assert
     should((failure as BoardError).code).equal('invalid');
@@ -564,7 +564,7 @@ describe('starting a ferret on a card', () => {
     );
 
     // Act
-    const failure = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
+    const failure = await startOnTask(ports, ID, OWNER).catch((error: unknown) => error);
 
     // Assert
     should(failure).equal(defect);
@@ -574,7 +574,7 @@ describe('starting a ferret on a card', () => {
 describe('the brief of a ferret started on a card', () => {
   it("should carry the card's summary, why it exists, context and how to test it, and the shipped command name", () => {
     // Arrange
-    const row = card({
+    const row = boardTask({
       summary: 'Store the board',
       premise: 'tasks get lost',
       context: 'see the relay',
@@ -583,7 +583,7 @@ describe('the brief of a ferret started on a card', () => {
     });
 
     // Act
-    const brief = startOnCardBrief(row as unknown as CardView, lanes(), 'fy');
+    const brief = startOnTaskBrief(row as unknown as TaskView, lanes(), 'fy');
 
     // Assert
     should(brief).containEql('Summary:\nStore the board');
@@ -597,7 +597,7 @@ describe('the brief of a ferret started on a card', () => {
 
   it('should carry the owner’s clarifications and name the ferrets in the history it shows', () => {
     // Arrange
-    const row = card({
+    const row = boardTask({
       clarifications: [{ text: 'only the phone layout', source: 'owner', at: '2026-10-30T10:00:00.000Z' }] as never,
       history: [
         {
@@ -613,7 +613,7 @@ describe('the brief of a ferret started on a card', () => {
     });
 
     // Act
-    const brief = startOnCardBrief(row as unknown as CardView, lanes(), 'fy');
+    const brief = startOnTaskBrief(row as unknown as TaskView, lanes(), 'fy');
 
     // Assert
     should(brief).containEql('Clarified, verbatim (owner):\nonly the phone layout');
@@ -622,7 +622,7 @@ describe('the brief of a ferret started on a card', () => {
 
   it('should leave out a section the card does not have', () => {
     // Arrange / Act
-    const brief = startOnCardBrief(card() as unknown as CardView, lanes(), 'fy');
+    const brief = startOnTaskBrief(boardTask() as unknown as TaskView, lanes(), 'fy');
 
     // Assert
     should(brief).not.containEql('Why it exists:');

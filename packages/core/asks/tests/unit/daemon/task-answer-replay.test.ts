@@ -1,8 +1,8 @@
 import { expect, it } from 'bun:test';
-import { cardAnswers, reference } from '../../support/daemon/task-answers.ts';
+import { taskAnswers, reference } from '../../support/daemon/task-answers.ts';
 
 it('replays an explicit answered card ask by receipt without answering the item itself', async () => {
-  const board = await cardAnswers();
+  const board = await taskAnswers();
   const answer = { cardAsk: reference(), response: { kind: 'multiple-choice', choice: 'Done' } };
   expect((await board.post(answer)).status).toBe(200);
   expect((await board.post(answer)).status).toBe(200);
@@ -12,7 +12,7 @@ it('replays an explicit answered card ask by receipt without answering the item 
 });
 
 it('refuses named missing and already answered asks without falling through to the item', async () => {
-  const board = await cardAnswers();
+  const board = await taskAnswers();
   expect(
     (await board.post({ cardAsk: reference('F99'), response: { kind: 'open-question', answer: 'main' } })).status,
   ).toBe(409);
@@ -25,7 +25,7 @@ it('refuses named missing and already answered asks without falling through to t
 });
 
 it('recognizes the same card-answer receipt after the carrying item is closed', async () => {
-  const board = await cardAnswers();
+  const board = await taskAnswers();
   const answer = { cardAsk: reference(), response: { kind: 'multiple-choice', choice: 'Done' } };
   await board.post(answer);
   const closed = await board.agenda.resolve(

@@ -1,21 +1,21 @@
 import { describe, it } from 'bun:test';
-import type { AgendaCardAskAnswer, AgendaGate, AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
+import type { AgendaTaskAskAnswer, AgendaGate, AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
 import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
-import { cardAgendaReference } from '../../../../daemon/lib/protocol/agenda-task-asks.ts';
+import { taskAgendaReference } from '../../../../daemon/lib/protocol/agenda-task-asks.ts';
 import should from 'should';
 import {
-  applyCardAsk,
-  type CardAskOperation,
-  type CardAskOutcome,
+  applyTaskAsk,
+  type TaskAskOperation,
+  type TaskAskOutcome,
   restRefusal,
-  sealCardAsks,
+  sealTaskAsks,
 } from '../../../../daemon/lib/agenda/task-asks.ts';
 
 const T0 = Date.parse('2026-11-03T08:00:00.000Z');
 const at = (minutes: number): string => new Date(T0 + minutes * 60_000).toISOString();
 
-const gate = (cardId: string): AgendaGate => ({
-  cardId,
+const gate = (taskId: string): AgendaGate => ({
+  cardId: taskId,
   laneId: 'tested',
   laneName: 'To test',
   entry: 2,
@@ -26,9 +26,9 @@ const gate = (cardId: string): AgendaGate => ({
     { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
   ],
 });
-const reference = (cardId: string): string => `gate:${cardId}:tested:2`;
+const reference = (taskId: string): string => `gate:${taskId}:tested:2`;
 
-const answer: AgendaCardAskAnswer = {
+const answer: AgendaTaskAskAnswer = {
   at: at(0),
   response: { kind: 'multiple-choice', choice: 'Done' },
   receipt: 'a'.repeat(64),
@@ -48,9 +48,9 @@ const world = () => {
   };
   return {
     effects,
-    apply: (item: AgendaItem, operation: CardAskOperation, minutes: number): CardAskOutcome => {
+    apply: (item: AgendaItem, operation: TaskAskOperation, minutes: number): TaskAskOutcome => {
       now = at(minutes);
-      return applyCardAsk(item, operation, now, effects);
+      return applyTaskAsk(item, operation, now, effects);
     },
   };
 };
@@ -72,13 +72,13 @@ const thread = (extra: Partial<AgendaItem> = {}): AgendaItem =>
     ...extra,
   }) as AgendaItem;
 
-const cardAgenda = (extra: Partial<AgendaItem> = {}): AgendaItem =>
-  ({ ...thread(), raisedBy: 'daemon', sourceRef: cardAgendaReference('F1'), ...extra }) as AgendaItem;
+const taskAgenda = (extra: Partial<AgendaItem> = {}): AgendaItem =>
+  ({ ...thread(), raisedBy: 'daemon', sourceRef: taskAgendaReference('F1'), ...extra }) as AgendaItem;
 
-const attach = (cardId: string): CardAskOperation => ({ kind: 'attach', ask: { gate: gate(cardId) } });
-const withdraw = (cardId: string): CardAskOperation => ({ kind: 'withdraw', reference: reference(cardId) });
+const attach = (taskId: string): TaskAskOperation => ({ kind: 'attach', ask: { gate: gate(taskId) } });
+const withdraw = (taskId: string): TaskAskOperation => ({ kind: 'withdraw', reference: reference(taskId) });
 
-const changed = (outcome: CardAskOutcome): AgendaItem => {
+const changed = (outcome: TaskAskOutcome): AgendaItem => {
   if (outcome.kind !== 'changed') throw new Error(`expected a change, got ${outcome.kind}`);
   return outcome.item;
 };
@@ -232,7 +232,7 @@ describe('a withdrawn ask, and the turn it woke the thread out of', () => {
   it('rests the card’s own agenda when the only asks left are ones the owner said Not yet to', () => {
     // Arrange
     const { apply } = world();
-    const first = changed(apply(cardAgenda(), attach('F2'), 1));
+    const first = changed(apply(taskAgenda(), attach('F2'), 1));
     const notYet = changed(apply(first, { kind: 'not-yet', reference: reference('F2') }, 2));
     const both = changed(apply(notYet, attach('F3'), 3));
     should(agendaState(both).state).equal('needs-you');
@@ -273,7 +273,7 @@ describe('a thread whose asks name no turn to go back to (from before they were 
     const { apply } = world();
 
     // Act
-    const after = changed(apply(sealCardAsks(old()), withdraw('F3'), 5));
+    const after = changed(apply(sealTaskAsks(old()), withdraw('F3'), 5));
 
     // Assert
     should(agendaState(after).state).equal('resting');
@@ -287,8 +287,8 @@ describe('a card’s own agenda, when its only ask is withdrawn', () => {
   it('closes when nobody wrote on it, sealed or from before the seal', () => {
     // Arrange
     const { apply } = world();
-    const sealed = changed(apply(sealCardAsks(cardAgenda()), attach('F1'), 1));
-    const old = changed(apply(cardAgenda(), attach('F1'), 1));
+    const sealed = changed(apply(sealTaskAsks(taskAgenda()), attach('F1'), 1));
+    const old = changed(apply(taskAgenda(), attach('F1'), 1));
 
     // Act
     const closedSealed = apply(sealed, withdraw('F1'), 3);
@@ -304,8 +304,8 @@ describe('a card’s own agenda, when its only ask is withdrawn', () => {
   it('rests on its ferret when somebody wrote on it from before the seal, and stays rested when the owner replied', () => {
     // Arrange — a real reply rests the item as the state machine does
     const { apply } = world();
-    const sealed = changed(apply(sealCardAsks(cardAgenda()), attach('F1'), 1));
-    const old = changed(apply(cardAgenda(), attach('F1'), 1));
+    const sealed = changed(apply(sealTaskAsks(taskAgenda()), attach('F1'), 1));
+    const old = changed(apply(taskAgenda(), attach('F1'), 1));
     const reply = {
       parked: { reason: 'replied' as const, at: at(2) },
       resting: { sub: 'waiting-on-ferret' as const, at: at(2) },
@@ -327,7 +327,7 @@ describe('a card’s own agenda, when its only ask is withdrawn', () => {
   it('leaves a sealed card agenda in Needs you when its ferret answered after the owner’s Not yet', () => {
     // Arrange — F2's ask is put on, the owner says Not yet (it rests), the ferret answers (back in Needs you)
     const { apply } = world();
-    const asked = changed(apply(sealCardAsks(cardAgenda()), attach('F2'), 1));
+    const asked = changed(apply(sealTaskAsks(taskAgenda()), attach('F2'), 1));
     const notYet = changed(apply(asked, { kind: 'not-yet', reference: reference('F2') }, 2));
     const { parked: _parked, resting: _resting, ...awake } = notYet;
     const answered = { ...awake, questionAnswer: 'Fixed it, try again', waitingSince: at(3) } as AgendaItem;
@@ -344,7 +344,7 @@ describe('a card’s own agenda, when its only ask is withdrawn', () => {
   it('rests a touched sealed card agenda on the owner’s own answer that the withdrawn ask had kept in Needs you', () => {
     // Arrange — the owner answered the agenda’s own question and talked on it, so it is no longer as the daemon left it
     const { apply } = world();
-    const asked = changed(apply(sealCardAsks(cardAgenda()), attach('F1'), 1));
+    const asked = changed(apply(sealTaskAsks(taskAgenda()), attach('F1'), 1));
     const answeredAndTalked = {
       ...asked,
       ownerAnswer: { at: at(2), response: { kind: 'multiple-choice', choice: 'hm' }, request: 1 },
@@ -363,7 +363,7 @@ describe('a card’s own agenda, when its only ask is withdrawn', () => {
   it('rests when the owner answered, as an answer is what the agenda holds', () => {
     // Arrange
     const { apply } = world();
-    const both = changed(apply(changed(apply(sealCardAsks(cardAgenda()), attach('F1'), 1)), attach('F2'), 2));
+    const both = changed(apply(changed(apply(sealTaskAsks(taskAgenda()), attach('F1'), 1)), attach('F2'), 2));
     const answered = changed(apply(both, { kind: 'answered', reference: reference('F1'), answer }, 3));
 
     // Act
@@ -404,7 +404,7 @@ describe('the seal across the Warden’s nudge and the stored form', () => {
       note: `line ${String(index)}`.padEnd(40, '.'),
     }));
     const base = thread({ history: lines });
-    const plain = changed(applyCardAsk(base, { kind: 'attach', ask: { gate: gate('F2') } }, at(1), world().effects));
+    const plain = changed(applyTaskAsk(base, { kind: 'attach', ask: { gate: gate('F2') } }, at(1), world().effects));
     const { cardAsksSeal: _seal, ...unsealed } = plain;
     const bound = weigh(unsealed) + 10;
     const store = (item: AgendaItem): AgendaItem => {
@@ -416,19 +416,19 @@ describe('the seal across the Warden’s nudge and the stored form', () => {
     const effects = { ...world().effects, tidy: store };
 
     // Act
-    const outcome = applyCardAsk(base, { kind: 'attach', ask: { gate: gate('F2') } }, at(1), effects);
+    const outcome = applyTaskAsk(base, { kind: 'attach', ask: { gate: gate('F2') } }, at(1), effects);
     const item = changed(outcome);
 
     // Assert — storing it again changes nothing, and the seal still matches
     should(item.cardAsksSeal).be.a.String();
     should(store(item)).eql(item);
-    should(sealCardAsks(item)).eql(item);
+    should(sealTaskAsks(item)).eql(item);
     should((item.history ?? []).length).be.below(lines.length + 1);
   });
 });
 
 describe('one plain line of the daemon’s (a card with nothing to try)', () => {
-  const line = (text: string): CardAskOperation => ({ kind: 'line', line: text });
+  const line = (text: string): TaskAskOperation => ({ kind: 'line', line: text });
 
   it('adds one activity line and changes nothing else: no ask, and the turn and place stay', () => {
     // Arrange — a ferret's thread, resting on its ferret, and a card agenda on the owner's turn
@@ -438,7 +438,7 @@ describe('one plain line of the daemon’s (a card with nothing to try)', () => 
     });
     const { apply } = world();
 
-    for (const item of [resting, thread(), cardAgenda()]) {
+    for (const item of [resting, thread(), taskAgenda()]) {
       // Act
       const next = changed(apply(item, line('&F1: Nothing to try: it is a private card'), 1));
 
@@ -486,7 +486,7 @@ describe('why a ferret may not rest an agenda that carries a card ask', () => {
   it('names the cards whose ask still waits on the owner', () => {
     // Arrange
     const { apply } = world();
-    const both = changed(apply(changed(apply(cardAgenda(), attach('F1'), 1)), attach('F2'), 2));
+    const both = changed(apply(changed(apply(taskAgenda(), attach('F1'), 1)), attach('F2'), 2));
 
     // Act
     const refusal = restRefusal(both);
@@ -500,11 +500,11 @@ describe('why a ferret may not rest an agenda that carries a card ask', () => {
   it('has no refusal when no ask is open, or when the owner set every open ask aside with Not yet', () => {
     // Arrange
     const { apply } = world();
-    const asked = changed(apply(cardAgenda(), attach('F1'), 1));
+    const asked = changed(apply(taskAgenda(), attach('F1'), 1));
     const setAside = changed(apply(asked, { kind: 'not-yet', reference: reference('F1') }, 2));
 
     // Assert
-    should(restRefusal(cardAgenda())).be.undefined();
+    should(restRefusal(taskAgenda())).be.undefined();
     should(restRefusal(setAside)).be.undefined();
   });
 });

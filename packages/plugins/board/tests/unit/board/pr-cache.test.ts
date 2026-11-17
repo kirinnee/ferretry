@@ -1,21 +1,21 @@
 import { describe, it } from 'bun:test';
-import type { Card, CardGate, LaneSet, PrLink, ReleasedIn } from '../../../contract/index.ts';
+import type { Task, TaskGate, LaneSet, PrLink, ReleasedIn } from '../../../contract/index.ts';
 import should from 'should';
 import {
   applyPrUpdate,
   BoardError,
   BoardIndex,
   BoardService,
-  type CardContext,
+  type TaskContext,
   PR_POLL_LABEL_REFRESH_MS,
   type PrObservation,
   type PrUpdate,
   samePr,
   tryItVerdict,
 } from '../../../daemon/lib/board/index.ts';
-import { card, lanes, MemoryBoardStore, NOW, PROJECT, world } from './support.ts';
+import { boardTask, lanes, MemoryBoardStore, NOW, PROJECT, world } from './support.ts';
 
-const TRY_IT: Pick<CardGate, 'options'> = {
+const TRY_IT: Pick<TaskGate, 'options'> = {
   options: [
     { id: 'done', label: 'Done', outcome: 'close' },
     { id: 'not-good', label: 'Not good', outcome: 'reopen-with-ask' },
@@ -64,15 +64,15 @@ const update = (overrides: Partial<PrUpdate> = {}): PrUpdate => ({
   ...overrides,
 });
 
-const withPr = (pr: Partial<PrLink>, overrides: Partial<Card> = {}): Card =>
-  card({
+const withPr = (pr: Partial<PrLink>, overrides: Partial<Task> = {}): Task =>
+  boardTask({
     laneId: 'implement',
     workflow: 'quick',
     links: { prs: [link(pr)], branch: null, commits: [], docs: [] },
     ...overrides,
   });
 
-const context = (subject: Card, overrides: Partial<CardContext> = {}, laneSet: LaneSet = lanes()): CardContext => ({
+const context = (subject: Task, overrides: Partial<TaskContext> = {}, laneSet: LaneSet = lanes()): TaskContext => ({
   now: NOW,
   actor: { kind: 'daemon' },
   standing: 'daemon',
@@ -82,12 +82,12 @@ const context = (subject: Card, overrides: Partial<CardContext> = {}, laneSet: L
   ...overrides,
 });
 
-const apply = (subject: Card, change: Partial<PrUpdate>, overrides: Partial<CardContext> = {}) =>
+const apply = (subject: Task, change: Partial<PrUpdate>, overrides: Partial<TaskContext> = {}) =>
   applyPrUpdate(subject, update(change), context(subject, overrides));
 
-const moves = (subject: Card | null) =>
+const moves = (subject: Task | null) =>
   (subject?.history ?? []).flatMap(event => (event.type === 'moved' ? [[event.to, event.trigger, event.reason]] : []));
-const notes = (subject: Card | null) =>
+const notes = (subject: Task | null) =>
   (subject?.history ?? []).flatMap(event => (event.type === 'note' ? [event.text] : []));
 
 describe('samePr', () => {
@@ -122,7 +122,7 @@ describe('applyPrUpdate', () => {
   });
 
   it('should fire pr.opened for a draft and pr.ready once it leaves draft', () => {
-    const draft = apply(withPr({}), { observed: [observed({ draft: true })] }).task as Card;
+    const draft = apply(withPr({}), { observed: [observed({ draft: true })] }).task as Task;
     should(moves(draft)).deepEqual([['review', 'pr.opened', 'PR #940 opened']]);
     // Already in Review/CI, so ready moves nothing — but the cache records it.
     const ready = apply(draft, { observed: [observed()] }).task;
@@ -231,7 +231,7 @@ describe('applyPrUpdate', () => {
     should(link?.state).equal('merged');
     should(link?.changes).be.undefined();
     // Unknown is treated as code: the verdict asks.
-    should(tryItVerdict({ ...(last.task as Card), howToTest: '1. Tap it' }, TRY_IT)).eql({ kind: 'ask' });
+    should(tryItVerdict({ ...(last.task as Task), howToTest: '1. Tap it' }, TRY_IT)).eql({ kind: 'ask' });
   });
 
   it('should keep a merged PR’s kind for its merge commit and drop it for another', () => {
@@ -256,7 +256,7 @@ describe('applyPrUpdate', () => {
 
   it('should take every trigger of one poll in the order a PR lives them, whatever order the links are in', () => {
     const second = 'https://github.com/kirinnee/ferretry/pull/941';
-    const subject = card({
+    const subject = boardTask({
       laneId: 'implement',
       workflow: 'quick',
       links: { prs: [link({ url: second, number: 941 }), link()], branch: null, commits: [], docs: [] },
@@ -274,7 +274,7 @@ describe('applyPrUpdate', () => {
     // A gate is passed only by the owner (docs/board.md § Cards show progress): the open PR is told on its gate item.
     const shipped = link({ state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, releasedIn: RELEASE, polledAt: NOW });
     const second = 'https://github.com/kirinnee/ferretry/pull/941';
-    const subject = card({
+    const subject = boardTask({
       laneId: 'tested',
       workflow: 'quick',
       links: { prs: [shipped, link({ url: second, number: 941 })], branch: null, commits: [], docs: [] },
@@ -288,9 +288,9 @@ describe('applyPrUpdate', () => {
     // The next poll agrees with the card: nothing more to write.
     should(
       applyPrUpdate(
-        task as Card,
+        task as Task,
         update({ observed: [observed({ url: second, createdAt: '2026-10-30T10:00:00Z', checks: 'failing' })] }),
-        context(task as Card),
+        context(task as Task),
       ).task,
     ).be.null();
   });
@@ -298,7 +298,7 @@ describe('applyPrUpdate', () => {
   it('should still pull a merged card back to review for an open PR where no gate holds it', () => {
     const shipped = link({ state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, polledAt: NOW });
     const second = 'https://github.com/kirinnee/ferretry/pull/939';
-    const subject = card({
+    const subject = boardTask({
       laneId: 'merged',
       workflow: 'quick',
       links: { prs: [shipped, link({ url: second, number: 939 })], branch: null, commits: [], docs: [] },
@@ -314,7 +314,7 @@ describe('applyPrUpdate', () => {
     const learned = apply(subject, { observed: [observed({ createdAt: '2026-10-30T08:00:00Z' })] }).task;
     should(learned?.links.prs[0]?.createdAt).equal('2026-10-30T08:00:00Z');
     should(moves(learned)).be.empty();
-    const kept = apply(learned as Card, { observed: [observed()] }).task;
+    const kept = apply(learned as Task, { observed: [observed()] }).task;
     should(kept).be.null();
   });
 
@@ -328,7 +328,7 @@ describe('applyPrUpdate', () => {
     should(task?.links.prs[0]?.polledAt).equal(NOW);
     should(moves(task).at(-1)).deepEqual(['released', 'release.published', 'PR #940 released in 4.110.0']);
     const later: ReleasedIn = { version: '4.111.0', tag: 'v4.111.0', at: NOW };
-    const again = apply(task as Card, { observed: [merged()], releases: [{ url: URL, releasedIn: later }] });
+    const again = apply(task as Task, { observed: [merged()], releases: [{ url: URL, releasedIn: later }] });
     should(again.task).be.null();
   });
 
@@ -456,7 +456,7 @@ describe('applyPrUpdate', () => {
   });
 
   it('should move a merged card even while it is blocked, and say what blocked it', () => {
-    const blocker = card({ id: 'F18', laneId: 'implement' });
+    const blocker = boardTask({ id: 'F18', laneId: 'implement' });
     const blocked = withPr(
       { state: 'open', checks: 'passing', polledAt: NOW },
       { id: 'F2', laneId: 'review', dependsOn: [{ task: { id: 'F18' }, until: 'shipped' }] },
@@ -487,7 +487,7 @@ describe('applyPrUpdate', () => {
         message: '&F1 PR #940 was closed without merging. Reopen it, link its replacement, or drop the task.',
       },
     ]);
-    should(apply(task as Card, { observed: [observed({ state: 'closed' })] }).nudges).be.empty();
+    should(apply(task as Task, { observed: [observed({ state: 'closed' })] }).nudges).be.empty();
   });
 
   it('should nudge once when CI turns red, and keep the card in its lane', () => {
@@ -501,7 +501,7 @@ describe('applyPrUpdate', () => {
         message: '&F1 PR #940 CI is red. Fix it, or note on the task why it can stay red.',
       },
     ]);
-    should(apply(task as Card, { observed: [observed({ checks: 'failing' })] }).nudges).be.empty();
+    should(apply(task as Task, { observed: [observed({ checks: 'failing' })] }).nudges).be.empty();
   });
 
   it('should refresh an unchanged PR label only once it is old, and leave an unobserved one alone', () => {
@@ -514,7 +514,7 @@ describe('applyPrUpdate', () => {
   });
 
   it('should link a PR a rule found, say why, and skip one already linked in any spelling', () => {
-    const bare = card({ laneId: 'implement', workflow: 'quick' });
+    const bare = boardTask({ laneId: 'implement', workflow: 'quick' });
     const { task } = apply(bare, {
       link: [
         { url: URL, because: "its head branch feat/x is the task's branch" },
@@ -563,7 +563,7 @@ describe('BoardService.recordPullRequests', () => {
   });
 
   it('should read every card with its board lanes in one snapshot', async () => {
-    const ports = world({ store: new MemoryBoardStore([card()]) });
+    const ports = world({ store: new MemoryBoardStore([boardTask()]) });
     const snapshot = await new BoardService(ports).snapshot();
     should(snapshot.cards.map(entry => entry.id)).deepEqual(['F1']);
     should([...snapshot.laneSets.keys()]).deepEqual([PROJECT]);

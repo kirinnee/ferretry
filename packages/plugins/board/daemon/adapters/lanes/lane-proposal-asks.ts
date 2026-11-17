@@ -6,7 +6,7 @@ import {
   type SourceKey,
   SourceKeySchema,
 } from '@ferretry/core-asks/contract';
-import type { LaneProposalCard } from '../../lib/lanes/lane-proposal-task.ts';
+import type { LaneProposalTask } from '../../lib/lanes/lane-proposal-task.ts';
 import { LANE_PROPOSAL_SOURCE } from '../../lib/lanes/lane-proposal-task.ts';
 import { LANE_ASK_WITHDRAWN } from '../../lib/lanes/lane-set-service.ts';
 import type { LaneProposalAsks } from '../../lib/lanes/ports.ts';
@@ -22,19 +22,19 @@ const entryOf = (reference: string): EntryId => EntryIdSchema.parse(reference);
 export class AsksLaneProposals implements LaneProposalAsks {
   constructor(private readonly asks: Pick<AsksApi, 'raise' | 'open' | 'close'>) {}
 
-  async raise(ferretId: string, reference: string, card: LaneProposalCard): Promise<void> {
+  async raise(ferretId: string, reference: string, task: LaneProposalTask): Promise<void> {
     const draft: AskDraft = {
       source: SOURCE,
       ref: { lanes: reference },
       entry: entryOf(reference),
       kind: 'choice',
-      subject: card.subject,
-      why: card.why,
-      howToResolve: card.howToResolve,
-      ...(card.recommendation === undefined
+      subject: task.subject,
+      why: task.why,
+      howToResolve: task.howToResolve,
+      ...(task.recommendation === undefined
         ? {}
-        : { context: `Recommended: ${card.recommendation.decision}. ${card.recommendation.why}` }),
-      options: card.options.map(option => ({ label: option.label, description: option.description })),
+        : { context: `Recommended: ${task.recommendation.decision}. ${task.recommendation.why}` }),
+      options: task.options.map(option => ({ label: option.label, description: option.description })),
       raisedBy: { kind: 'daemon' },
       ferret: ferretId,
     };

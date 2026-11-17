@@ -511,7 +511,7 @@ export class AgendaController {
       surface: _surface,
       ...item
     } = composed;
-    const moveCards = (options.moveCards ?? '')
+    const moveTasks = (options.moveCards ?? '')
       .split(',')
       .map(each => each.trim())
       .filter(each => each !== '')
@@ -526,7 +526,7 @@ export class AgendaController {
       action: 'split',
       id,
       item,
-      ...(moveCards.length === 0 ? {} : { moveCards }),
+      ...(moveTasks.length === 0 ? {} : { moveCards: moveTasks }),
     });
     const raised = onlyNewId(before, after);
     this.#report(after, options, () =>

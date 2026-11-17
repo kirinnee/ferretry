@@ -7,7 +7,7 @@
  */
 
 import type { AskListSnapshot } from '@ferretry/core-asks/contract';
-import type { CardView } from '../../contract/index.ts';
+import type { TaskView } from '../../contract/index.ts';
 
 type OpenItem = AskListSnapshot['items'][number];
 type ResolvedItem = AskListSnapshot['resolved'][number];
@@ -33,7 +33,7 @@ interface ResolvedAskRow {
   readonly item: ResolvedItem;
 }
 
-export interface CardAsks {
+export interface TaskAsks {
   readonly open: readonly OpenAskRow[];
   /** Asks about this card that are answered or dismissed, newest first. */
   readonly resolved: readonly ResolvedAskRow[];
@@ -49,14 +49,14 @@ export const askHeading = (item: { readonly subject: string; readonly title?: st
  * The card's open asks (from its own `openAsks`, so none is missed) and its resolved ones (the agenda's ledger, the
  * only place an answered ask is kept), blocking first.
  */
-export const collectAsks = (card: CardView, agendas: readonly SessionAgenda[]): CardAsks => {
+export const collectAsks = (task: TaskView, agendas: readonly SessionAgenda[]): TaskAsks => {
   const itemOf = (ferret: string, id: string): OpenItem | null =>
     agendas.find(entry => entry.sessionId === ferret)?.snapshot?.items.find(item => item.id === id) ?? null;
   const resolved = agendas
     .flatMap(entry => (entry.snapshot?.resolved ?? []).map(item => ({ sessionId: entry.sessionId, item })))
-    .filter(({ item }) => item.task?.id === card.id)
+    .filter(({ item }) => item.task?.id === task.id)
     .sort((a, b) => b.item.resolvedAt.localeCompare(a.item.resolvedAt));
-  const open = card.openAsks.map(ref => {
+  const open = task.openAsks.map(ref => {
     const item = itemOf(ref.ferret, ref.id);
     return { ferret: ref.ferret, id: ref.id, item, blocking: item?.blockingNow === true };
   });
@@ -68,6 +68,6 @@ export const collectAsks = (card: CardView, agendas: readonly SessionAgenda[]): 
 };
 
 /** The ferrets whose agendas can hold this card's asks: the ones that raised an open ask, the owner, the assignee. */
-export const askSessions = (card: Pick<CardView, 'openAsks' | 'owner' | 'assignee'>): readonly string[] => [
-  ...new Set([...card.openAsks.map(ask => ask.ferret), card.owner, ...(card.assignee === null ? [] : [card.assignee])]),
+export const askSessions = (task: Pick<TaskView, 'openAsks' | 'owner' | 'assignee'>): readonly string[] => [
+  ...new Set([...task.openAsks.map(ask => ask.ferret), task.owner, ...(task.assignee === null ? [] : [task.assignee])]),
 ];

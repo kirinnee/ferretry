@@ -20,7 +20,7 @@ export const MAX_GATE_TITLE_LENGTH = 60;
  * named lane, back to rework with the owner's words, or to the board's closed lane.
  */
 export const CardGateOutcomeSchema = z.enum(['next', 'lane', 'reopen-with-ask', 'close']);
-export type CardGateOutcome = z.infer<typeof CardGateOutcomeSchema>;
+export type TaskGateOutcome = z.infer<typeof CardGateOutcomeSchema>;
 
 /** One of the gate's options: its label is the ask option the owner chooses. */
 export const CardGateOptionSchema = z.strictObject({
@@ -33,7 +33,7 @@ export const CardGateOptionSchema = z.strictObject({
     .regex(/^[^\r\n]*$/u, 'one line'),
   outcome: CardGateOutcomeSchema,
 });
-export type CardGateOption = z.infer<typeof CardGateOptionSchema>;
+export type TaskGateOption = z.infer<typeof CardGateOptionSchema>;
 
 /** THE GATE AN ASK IS ABOUT: an owner-asked card entered a lane whose stage is a gate. */
 export const CardGateSchema = z.strictObject({
@@ -48,7 +48,7 @@ export const CardGateSchema = z.strictObject({
   cardTitle: z.string().min(1).max(MAX_GATE_TITLE_LENGTH).optional(),
   options: z.array(CardGateOptionSchema).min(1).max(MAX_GATE_ASK_OPTIONS),
 });
-export type CardGate = z.infer<typeof CardGateSchema>;
+export type TaskGate = z.infer<typeof CardGateSchema>;
 
 /** The answer an owner gave to a gate, as the Board applies it (the ask's `choice` and `text`). */
 export const CardGateAnswerSchema = z.strictObject({
@@ -56,12 +56,12 @@ export const CardGateAnswerSchema = z.strictObject({
   text: z.string().trim().min(1).optional(),
   at: InstantSchema,
 });
-export type CardGateAnswer = z.infer<typeof CardGateAnswerSchema>;
+export type TaskGateAnswer = z.infer<typeof CardGateAnswerSchema>;
 
 // ─── the gate's reference ────────────────────────────────────────────────────────────────────────────────────────
 
 const GATE_REFERENCE_PREFIX = 'gate:';
-const CARD_ID = /^[BFIC][1-9][0-9]{0,8}$/u;
+const TASK_ID = /^[BFIC][1-9][0-9]{0,8}$/u;
 const LANE_ID = /^[^\s:]{1,64}$/u;
 const ENTRY = /^[1-9][0-9]{0,8}$/u;
 
@@ -85,9 +85,9 @@ export const parseGateReference = (entry: string | null | undefined): GateRefere
   if (typeof entry !== 'string' || !entry.startsWith(GATE_REFERENCE_PREFIX)) return undefined;
   const parts = entry.slice(GATE_REFERENCE_PREFIX.length).split(':');
   if (parts.length !== 3) return undefined;
-  const [cardId = '', laneId = '', at = ''] = parts;
-  if (!CARD_ID.test(cardId) || !LANE_ID.test(laneId) || !ENTRY.test(at)) return undefined;
-  return { cardId, laneId, entry: Number(at) };
+  const [taskId = '', laneId = '', at = ''] = parts;
+  if (!TASK_ID.test(taskId) || !LANE_ID.test(laneId) || !ENTRY.test(at)) return undefined;
+  return { cardId: taskId, laneId, entry: Number(at) };
 };
 
 // ─── what a chosen label means ───────────────────────────────────────────────────────────────────────────────────
@@ -100,20 +100,20 @@ export const GATE_NOT_YET_LABEL = 'Not yet';
 const GATE_NOT_YET_FALLBACK = 'Not now';
 
 /** The "not yet" label of a gate with one option, or `undefined` when its options are already a choice. */
-export const gateNotYetLabel = (gate: Pick<CardGate, 'options'>): string | undefined => {
+export const gateNotYetLabel = (gate: Pick<TaskGate, 'options'>): string | undefined => {
   if (gate.options.length !== 1) return undefined;
   const taken = gate.options.some(option => option.label.trim().toLowerCase() === GATE_NOT_YET_LABEL.toLowerCase());
   return taken ? GATE_NOT_YET_FALLBACK : GATE_NOT_YET_LABEL;
 };
 
-const isForward = (option: CardGateOption): boolean => option.outcome !== 'reopen-with-ask';
+const isForward = (option: TaskGateOption): boolean => option.outcome !== 'reopen-with-ask';
 
 /**
  * The ask's option labels in SWIPE order (the owner's decision !A205: → Done, ← Not good): ← the reopen option (else
  * "Not yet"), ↑ a third, → the first option that moves the card on (next, a lane, close). A choice card lays its
  * options out in the order of its ask; `gate.options` keeps the lane's own order; "Not yet" is the one label it lacks.
  */
-export const gateAskLabels = (gate: Pick<CardGate, 'options'>): string[] => {
+export const gateAskLabels = (gate: Pick<TaskGate, 'options'>): string[] => {
   const notYet = gateNotYetLabel(gate);
   const labels = [...gate.options.map(option => option.label), ...(notYet === undefined ? [] : [notYet])];
   const forward = gate.options.find(isForward)?.label;
@@ -127,12 +127,12 @@ export const gateAskLabels = (gate: Pick<CardGate, 'options'>): string[] => {
 
 /** What a chosen label means on this gate: one of its options, "Not yet", or nothing it offers. */
 export type GateChoice =
-  | { readonly kind: 'option'; readonly option: CardGateOption }
+  | { readonly kind: 'option'; readonly option: TaskGateOption }
   | { readonly kind: 'not-yet' }
   | { readonly kind: 'unknown' };
 
 /** The gate's reading of the label the owner chose, compared as options are compared. Total. */
-export const gateChoice = (gate: Pick<CardGate, 'options'>, label: string): GateChoice => {
+export const gateChoice = (gate: Pick<TaskGate, 'options'>, label: string): GateChoice => {
   const wanted = label.trim();
   const option = gate.options.find(candidate => candidate.label.trim() === wanted);
   if (option !== undefined) return { kind: 'option', option };
@@ -140,11 +140,11 @@ export const gateChoice = (gate: Pick<CardGate, 'options'>, label: string): Gate
 };
 
 /** The gate's reopen option, when it has one: what an answer in the owner's own words means. */
-export const gateReopenOption = (gate: Pick<CardGate, 'options'>): CardGateOption | undefined =>
+export const gateReopenOption = (gate: Pick<TaskGate, 'options'>): TaskGateOption | undefined =>
   gate.options.find(option => option.outcome === 'reopen-with-ask');
 
 /** What an ask needs of the owner: a test to try (its gate can send the card back with words), else a plan to approve. */
-export const gateStage = (gate: Pick<CardGate, 'options'>): 'test' | 'plan' =>
+export const gateStage = (gate: Pick<TaskGate, 'options'>): 'test' | 'plan' =>
   gate.options.some(option => option.outcome === 'reopen-with-ask') ? 'test' : 'plan';
 
 // ─── what an ask says ────────────────────────────────────────────────────────────────────────────────────────────
@@ -153,7 +153,7 @@ export const gateStage = (gate: Pick<CardGate, 'options'>): 'test' | 'plan' =>
 export type GateStyle = 'try-it' | 'approval';
 
 /** The style of a gate: a try-it when one of its options reopens the card, else an approval. */
-export const gateStyle = (gate: Pick<CardGate, 'options'>): GateStyle =>
+export const gateStyle = (gate: Pick<TaskGate, 'options'>): GateStyle =>
   gateReopenOption(gate) === undefined ? 'approval' : 'try-it';
 
 /** The lane's own pass label that reads as "Good" on a try-it. A lane that says something else keeps its words. */
@@ -164,31 +164,31 @@ export const GATE_GOOD_LABEL = 'Good';
  * What a button says for a gate option. A try-it's pass reads **Good** when the lane left its default "Done"; every
  * other label is the lane's own. The answer SENT is always the option's real label.
  */
-export const gateButtonLabel = (gate: Pick<CardGate, 'options'>, option: CardGateOption): string =>
+export const gateButtonLabel = (gate: Pick<TaskGate, 'options'>, option: TaskGateOption): string =>
   gateStyle(gate) === 'try-it' && option.outcome === 'close' && option.label.trim() === DEFAULT_PASS_LABEL
     ? GATE_GOOD_LABEL
     : option.label;
 
 /** The options one tap answers: every one but the one that sends the card back, which is answered in words. */
-export const gateTapOptions = (gate: Pick<CardGate, 'options'>): readonly CardGateOption[] =>
+export const gateTapOptions = (gate: Pick<TaskGate, 'options'>): readonly TaskGateOption[] =>
   gate.options.filter(option => option.outcome !== 'reopen-with-ask');
 
 /** The answer typed words are: the reopen option ("Not good"), else "Not yet" (the card waits, the ferret reads them). */
-export const gateTypedLabel = (gate: Pick<CardGate, 'options'>): string | undefined =>
+export const gateTypedLabel = (gate: Pick<TaskGate, 'options'>): string | undefined =>
   gateReopenOption(gate)?.label ?? gateNotYetLabel(gate);
 
 /** What the owner is told to do with words, one plain sentence, under the buttons. */
-export const gateTypedLead = (gate: Pick<CardGate, 'options'>): string =>
+export const gateTypedLead = (gate: Pick<TaskGate, 'options'>): string =>
   gateStyle(gate) === 'try-it'
     ? 'Not good? Type what is wrong below and send.'
     : 'Want something changed first? Type it in the box below, then send. The ferret reads your words first, and nothing is built yet.';
 
 /** The words under a card's buttons when the owner is looking at several asks: which answer a typed message is. */
-export const gateTypedPlaceholder = (gate: Pick<CardGate, 'options'>): string =>
+export const gateTypedPlaceholder = (gate: Pick<TaskGate, 'options'>): string =>
   gateStyle(gate) === 'try-it' ? 'What is wrong, or what needs changing?' : 'What should change first?';
 
 /** The ask in one line, in the lane's words: "Try it: <what>" at a try-it, else "<option>? <what>". */
-export const gateAskLine = (gate: Pick<CardGate, 'options' | 'laneName'>, said: string): string =>
+export const gateAskLine = (gate: Pick<TaskGate, 'options' | 'laneName'>, said: string): string =>
   gateStyle(gate) === 'try-it' ? `Try it: ${said}` : `${gate.options[0]?.label ?? gate.laneName}? ${said}`;
 
 /**
@@ -217,7 +217,7 @@ interface GuidePr {
 }
 
 /** The parts of a card the guide reads. */
-export interface TryItCard {
+export interface TryItTask {
   readonly howToTest: string | null | undefined;
   readonly links: { readonly prs: readonly GuidePr[]; readonly docs?: readonly string[] };
 }
@@ -227,8 +227,8 @@ export interface TryItCard {
  * (`https://<branch-or-hash>.<project>.pages.dev/…`), never the production host (`<project>.pages.dev`). It is what
  * `fy card link <card> --doc <url>` records; nothing invents one, so a card with no preview says where to try it for real.
  */
-export const previewUrlOf = (card: Pick<TryItCard, 'links'>): string | undefined => {
-  for (const link of card.links.docs ?? []) {
+export const previewUrlOf = (task: Pick<TryItTask, 'links'>): string | undefined => {
+  for (const link of task.links.docs ?? []) {
     try {
       const url = new URL(link.trim());
       const labels = url.hostname.split('.');
@@ -288,18 +288,18 @@ const standing = (prs: readonly GuidePr[], product: GuideProduct | undefined): r
  * card, never a cut-off copy. `limit` is the most characters the text may have.
  */
 export const tryItText = (
-  card: TryItCard,
+  task: TryItTask,
   pointer: (length: number) => string,
   limit: number,
   product?: GuideProduct,
 ): string => {
-  const preview = previewUrlOf(card);
-  const steps = card.howToTest?.trim() ?? '';
+  const preview = previewUrlOf(task);
+  const steps = task.howToTest?.trim() ?? '';
   const head =
     preview === undefined
       ? 'There is no preview for this one. Try it for real: the steps below say where.'
       : `**Try it on the preview:** ${preview}`;
-  const tail = standing(card.links.prs, product).join('\n');
+  const tail = standing(task.links.prs, product).join('\n');
   const frame = [head, tail].filter(text => text !== '');
   const used = frame.join('\n\n').length + 2;
   const middle =

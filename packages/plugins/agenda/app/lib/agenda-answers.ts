@@ -24,9 +24,9 @@
 
 import {
   type AgendaAskOption,
-  type AgendaCardAnswer,
-  agendaCardAnswers,
-  type AgendaCardSource,
+  type AgendaTaskAnswer,
+  agendaTaskAnswers,
+  type AgendaTaskSource,
   type AgendaDirection,
   type AgendaGate,
   agendaInDiscussion,
@@ -64,7 +64,7 @@ export type InboxAction =
   | { readonly kind: 'unsnooze'; readonly label: string };
 
 /** The item fields the answers are read from. */
-export type AnswerSource = AgendaCardSource &
+export type AnswerSource = AgendaTaskSource &
   Pick<AgendaItem, 'waitingOn' | 'waitingFor'> & {
     readonly raisedBy?: AgendaItem['raisedBy'];
     readonly gate?: AgendaGate;
@@ -79,11 +79,11 @@ export type SwipeDirection = AnswerDirection;
 const withNote = (note: string | undefined): { readonly note?: string } => (note === undefined ? {} : { note });
 
 /** Whether the ferret worded this answer itself, rather than leaving its effect's default word. */
-export const hasCustomLabel = (answer: Pick<AgendaCardAnswer, 'does' | 'label'>): boolean =>
+export const hasCustomLabel = (answer: Pick<AgendaTaskAnswer, 'does' | 'label'>): boolean =>
   answer.does !== 'choose' && !isDefaultAnswerLabel(answer.does, answer.label);
 
 /** The note an answer carries: its own wording when that is not the default, then the reply. */
-export const answerNote = (answer: Pick<AgendaCardAnswer, 'does' | 'label'>, reply: string): string | undefined => {
+export const answerNote = (answer: Pick<AgendaTaskAnswer, 'does' | 'label'>, reply: string): string | undefined => {
   const text = reply.trim();
   const head = hasCustomLabel(answer) ? answer.label.trim() : '';
   const note = head !== '' && text !== '' ? `${head} — ${text}` : head !== '' ? head : text;
@@ -91,13 +91,13 @@ export const answerNote = (answer: Pick<AgendaCardAnswer, 'does' | 'label'>, rep
 };
 
 /** Whether the answer needs the reply box to hold text before it can be sent. */
-export const needsReplyText = (answer: Pick<AgendaCardAnswer, 'does'>): boolean => answer.does === 'clarify';
+export const needsReplyText = (answer: Pick<AgendaTaskAnswer, 'does'>): boolean => answer.does === 'clarify';
 
 /**
  * One answer as an action carrying `reply`, or `null` when it cannot be sent yet — a `clarify` with an
  * empty box. The caller opens the box instead.
  */
-export const answerAction = (answer: AgendaCardAnswer, reply: string): InboxAction | null => {
+export const answerAction = (answer: AgendaTaskAnswer, reply: string): InboxAction | null => {
   const note = answerNote(answer, reply);
   const label = answer.label;
   switch (answer.does) {
@@ -175,8 +175,8 @@ export const optionAction = (option: AgendaAskOption, reply: string): InboxActio
  * lays it out (`agendaCardAnswers`). A to-do waiting on its ferret cannot be done yet and asking again is the same
  * request, so it keeps only an answer the ferret added (a Skip).
  */
-export const cardAnswers = (item: AnswerSource): readonly AgendaCardAnswer[] => {
-  const answers = agendaCardAnswers(item);
+export const cardAnswers = (item: AnswerSource): readonly AgendaTaskAnswer[] => {
+  const answers = agendaTaskAnswers(item);
   // A card in discussion stays fully answerable: only a plain "need more info" wait takes Done away.
   const waiting = item.ask?.kind === 'task' && item.waitingOn === 'ferret' && !agendaInDiscussion(item);
   return waiting ? answers.filter(answer => answer.does !== 'done' && answer.does !== 'needs-info') : answers;
@@ -186,7 +186,7 @@ export const cardAnswers = (item: AnswerSource): readonly AgendaCardAnswer[] => 
 export interface SwipeTarget {
   readonly label: string;
   readonly description?: string;
-  readonly answer?: AgendaCardAnswer;
+  readonly answer?: AgendaTaskAnswer;
   readonly action: InboxAction | null;
 }
 

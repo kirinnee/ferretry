@@ -16,23 +16,23 @@
  *   owner overrides a dependency, and the override is recorded. Cycles are refused.
  */
 import {
-  type CardActor,
-  cardRevision,
+  type TaskActor,
+  taskRevision,
   type BoardAttachment,
   type BoardClarification,
   type BoardEditableField,
   type Progress,
   BoardEditableFieldSchema,
-  type CardVisibility,
+  type TaskVisibility,
   type BoardProjectId,
-  type Card,
-  type CardActionRequest,
-  type CardCreateRequest,
-  type CardEvent,
-  type CardId,
+  type Task,
+  type TaskActionRequest,
+  type TaskCreateRequest,
+  type TaskEvent,
+  type TaskId,
   categoryOf,
   firstLaneOfCategory,
-  formatCardRef,
+  formatTaskRef,
   gateOptions,
   isBackwardMove,
   LANE_CATEGORIES,
@@ -47,14 +47,14 @@ import {
   type PrLink,
   prUrlParts,
   type BoardReopenAttachments,
-  type CardRef,
+  type TaskRef,
   variantLanes,
 } from '../../../contract/index.ts';
 import {
   type BoardCaller,
   type BoardOperation,
   type BoardStanding,
-  type CardAudience,
+  type TaskAudience,
   claimRefusalMessage,
   effectiveAssignee,
   mayDo,
@@ -66,14 +66,14 @@ import { queueBehindClashes } from './clash-queue.ts';
 import { BoardError } from './errors.ts';
 import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
 import { laneFromFacts } from './lane-facts.ts';
-import { closedLaneOf, shippedCloseReason, SUB_CARD_SHIPPED_REASON } from './sub-task-close.ts';
-import { cardVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
+import { closedLaneOf, shippedCloseReason, SUB_TASK_SHIPPED_REASON } from './sub-task-close.ts';
+import { taskVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
 
 /** The facts every rule may consult, gathered by the service before it calls one. */
-export interface CardContext {
+export interface TaskContext {
   readonly now: string;
   /** Who acts, as the card records them: an owner on the admin token says so in its `via`. */
-  readonly actor: CardActor;
+  readonly actor: TaskActor;
   readonly standing: BoardStanding;
   /** True when the caller is the card's assignee and the new assignee is its own descendant (`mayHandDown`). */
   readonly handsDown?: boolean;
@@ -91,7 +91,7 @@ export interface CardContext {
    * Who the card's gates ask (`CardAudience`): an internal card's owner ferret and leads pass its gates themselves.
    * Absent reads as `external`, the strict reading: only the owner passes a gate.
    */
-  readonly audience?: CardAudience;
+  readonly audience?: TaskAudience;
   /**
    * The files the request carries, as the service found them in the attachment store; absent when it carries
    * none. Only a reopen takes them.
@@ -103,8 +103,8 @@ export interface CardContext {
 }
 
 /** What a rule decided. `task: null` changes nothing on the card. */
-export interface CardOutcome {
-  readonly task: Card | null;
+export interface TaskOutcome {
+  readonly task: Task | null;
   /** Set when the card was sent back with someone's words: the service delivers it to its ferret. */
   readonly reopened?: {
     readonly from: string;
@@ -118,34 +118,34 @@ export interface CardOutcome {
 /** The source recorded with an owner's words when they arrived as a move on the board. */
 export const OWNER_MOVE_SOURCE = 'owner (board move)';
 
-type NewEvent = CardEvent extends infer E ? (E extends CardEvent ? Omit<E, 'seq' | 'at' | 'actor'> : never) : never;
+type NewEvent = TaskEvent extends infer E ? (E extends TaskEvent ? Omit<E, 'seq' | 'at' | 'actor'> : never) : never;
 
 /** The card with one more history event: next seq, this instant, this actor. */
-export const withEvent = (card: Card, event: NewEvent, context: Pick<CardContext, 'now' | 'actor'>): Card => ({
-  ...card,
+export const withEvent = (task: Task, event: NewEvent, context: Pick<TaskContext, 'now' | 'actor'>): Task => ({
+  ...task,
   history: [
-    ...card.history,
-    { ...event, seq: card.history.length + 1, at: context.now, actor: context.actor } as CardEvent,
+    ...task.history,
+    { ...event, seq: task.history.length + 1, at: context.now, actor: context.actor } as TaskEvent,
   ],
 });
 
 export const requireStanding = (
   operation: BoardOperation,
   standing: BoardStanding,
-  card: Pick<Card, 'id' | 'owner' | 'assignee'>,
+  task: Pick<Task, 'id' | 'owner' | 'assignee'>,
 ): void => {
   if (!mayDo(operation, standing)) {
-    throw new BoardError('forbidden', refusalMessage(operation, card), OPERATION_STANDINGS[operation]);
+    throw new BoardError('forbidden', refusalMessage(operation, task), OPERATION_STANDINGS[operation]);
   }
 };
 
 /** The refusal for a reassign: an assignee is told the one reassign it has, handing the card down. */
-const requireAssign = (standing: BoardStanding, card: Pick<Card, 'id' | 'owner' | 'assignee'>): void => {
+const requireAssign = (standing: BoardStanding, task: Pick<Task, 'id' | 'owner' | 'assignee'>): void => {
   if (mayDo('assign', standing)) return;
   const message =
     standing === 'assignee'
-      ? `${refusalMessage('assign', card)}; its assignee may only hand it down to one of its own helpers`
-      : refusalMessage('assign', card);
+      ? `${refusalMessage('assign', task)}; its assignee may only hand it down to one of its own helpers`
+      : refusalMessage('assign', task);
   throw new BoardError('forbidden', message, OPERATION_STANDINGS.assign);
 };
 
@@ -173,9 +173,9 @@ const isBackward = (laneSet: LaneSet, from: string, to: string): boolean => {
   return backward.ok && backward.value;
 };
 
-const requireOpen = (card: Card, doing: string): void => {
-  if (card.dropped !== null) {
-    throw new BoardError('invalid', `${formatCardRef(card)} is dropped; reopen it before you ${doing} it`);
+const requireOpen = (task: Task, doing: string): void => {
+  if (task.dropped !== null) {
+    throw new BoardError('invalid', `${formatTaskRef(task)} is dropped; reopen it before you ${doing} it`);
   }
 };
 
@@ -186,13 +186,13 @@ const requireOpen = (card: Card, doing: string): void => {
 const requireOwnerForClosed = (
   lane: Lane,
   standing: BoardStanding,
-  card: Pick<Card, 'id'>,
-  audience: CardAudience = 'external',
+  task: Pick<Task, 'id'>,
+  audience: TaskAudience = 'external',
 ): void => {
   if (lane.category === 'closed' && lane.ownerGate === true && !mayPassGate(standing, audience)) {
     throw new BoardError(
       'owner-gate',
-      `only the owner closes a task; move ${formatCardRef(card)} to the lane before ${lane.name} and the owner closes it`,
+      `only the owner closes a task; move ${formatTaskRef(task)} to the lane before ${lane.name} and the owner closes it`,
       ['owner-human'],
     );
   }
@@ -208,12 +208,12 @@ const isGate = (lane: Lane): boolean => laneStage(lane).kind === 'gate';
  * The gate lanes the card's variant walks strictly between its lane and `target`, in order. Entering a gate is not
  * passing it, so `target` never counts; a move back passes none.
  */
-export const gatesBetween = (laneSet: LaneSet, card: Pick<Card, 'laneId' | 'workflow'>, target: Lane): Lane[] => {
+export const gatesBetween = (laneSet: LaneSet, task: Pick<Task, 'laneId' | 'workflow'>, target: Lane): Lane[] => {
   const at = (id: string): number => laneSet.lanes.findIndex(lane => lane.id === id);
   // A variant naming a lane the set lacks cannot say what is walked, so every lane is.
-  const walked = variantLanes(laneSet, card.workflow);
+  const walked = variantLanes(laneSet, task.workflow);
   return (walked.ok ? walked.value : laneSet.lanes).filter(
-    lane => at(lane.id) > at(card.laneId) && at(lane.id) < at(target.id) && isGate(lane),
+    lane => at(lane.id) > at(task.laneId) && at(lane.id) < at(target.id) && isGate(lane),
   );
 };
 
@@ -221,23 +221,23 @@ export const gatesBetween = (laneSet: LaneSet, card: Pick<Card, 'laneId' | 'work
 // Moves
 // ---------------------------------------------------------------------------------------------------
 
-const move = (card: Card, to: string, reason: string | undefined, context: CardContext): CardOutcome => {
-  requireStanding('move', context.standing, card);
-  requireOpen(card, 'move');
-  const ref = formatCardRef(card);
-  if (to === card.laneId) throw new BoardError('invalid', `${ref} is already in ${to}`);
+const move = (task: Task, to: string, reason: string | undefined, context: TaskContext): TaskOutcome => {
+  requireStanding('move', context.standing, task);
+  requireOpen(task, 'move');
+  const ref = formatTaskRef(task);
+  if (to === task.laneId) throw new BoardError('invalid', `${ref} is already in ${to}`);
   const target = requireLane(context.laneSet, to);
-  const from = requireLane(context.laneSet, card.laneId);
-  if (!moveReasonProblem(context.laneSet, card.laneId, to, reason).ok) {
+  const from = requireLane(context.laneSet, task.laneId);
+  if (!moveReasonProblem(context.laneSet, task.laneId, to, reason).ok) {
     throw new BoardError('reason-required', `moving ${ref} back from ${from.name} to ${target.name} needs a reason`);
   }
-  const gated = needsOwner(context.laneSet, card.laneId, to);
+  const gated = needsOwner(context.laneSet, task.laneId, to);
   const audience = context.audience ?? 'external';
-  const forward = !isBackward(context.laneSet, card.laneId, to);
+  const forward = !isBackward(context.laneSet, task.laneId, to);
   // Leaving a gate is `needsOwner`'s; a gate on the way is passed too, and entering one is fine.
-  const passed = forward ? gatesBetween(context.laneSet, card, target)[0] : undefined;
+  const passed = forward ? gatesBetween(context.laneSet, task, target)[0] : undefined;
   if (((gated.ok && gated.value) || passed !== undefined) && !mayPassGate(context.standing, audience)) {
-    requireOwnerForClosed(target, context.standing, card, audience);
+    requireOwnerForClosed(target, context.standing, task, audience);
     const gate = passed ?? from;
     const where = gate.id === from.id ? `on from ${from.name}` : `past ${gate.name}`;
     throw new BoardError(
@@ -248,26 +248,26 @@ const move = (card: Card, to: string, reason: string | undefined, context: CardC
       audience === 'internal' ? ['owner-human', 'owner', 'ancestor'] : ['owner-human'],
     );
   }
-  if (rank(context.laneSet, to) > rank(context.laneSet, card.laneId)) {
-    const blockers = blockedBy(card, context.index, context.laneSets);
+  if (rank(context.laneSet, to) > rank(context.laneSet, task.laneId)) {
+    const blockers = blockedBy(task, context.index, context.laneSets);
     if (blockers.length > 0) {
       throw new BoardError(
         'blocked-by',
-        `${ref} is blocked by ${blockers.map(formatCardRef).join(', ')}: it can move sideways or back, but not on to ${target.name} until they ship (only the owner may override a dependency)`,
+        `${ref} is blocked by ${blockers.map(formatTaskRef).join(', ')}: it can move sideways or back, but not on to ${target.name} until they ship (only the owner may override a dependency)`,
       );
     }
   }
-  const backward = isBackwardMove(context.laneSet, card.laneId, to);
+  const backward = isBackwardMove(context.laneSet, task.laneId, to);
   const isBack = backward.ok && backward.value;
   if (isBack && context.standing === 'owner-human') {
-    return reopenTo(card, to, reason ?? '', { text: reason ?? '', source: OWNER_MOVE_SOURCE }, context);
+    return reopenTo(task, to, reason ?? '', { text: reason ?? '', source: OWNER_MOVE_SOURCE }, context);
   }
   if (context.attachments !== undefined) {
     throw new BoardError('invalid', `files ride only the owner's move back; ${ref} is not being sent back`);
   }
   return {
     task: {
-      ...withEvent(card, { type: 'moved', from: card.laneId, to, backward: isBack, reason: reason ?? null }, context),
+      ...withEvent(task, { type: 'moved', from: task.laneId, to, backward: isBack, reason: reason ?? null }, context),
       laneId: to,
     },
   };
@@ -275,12 +275,12 @@ const move = (card: Card, to: string, reason: string | undefined, context: CardC
 
 /** The reopen itself: the owner's words become a clarification, then the card goes to `to` (§2.9). */
 const reopenTo = (
-  card: Card,
+  task: Task,
   to: string,
   reason: string,
   ask: { readonly text: string; readonly source: string },
-  context: CardContext,
-): CardOutcome => {
+  context: TaskContext,
+): TaskOutcome => {
   const clarification: BoardClarification = {
     text: ask.text,
     source: ask.source,
@@ -289,10 +289,10 @@ const reopenTo = (
   };
   const files = context.attachments;
   const reopened = withEvent(
-    card,
+    task,
     {
       type: 'reopened',
-      from: card.laneId,
+      from: task.laneId,
       to,
       reason,
       ask,
@@ -301,44 +301,44 @@ const reopenTo = (
     context,
   );
   return {
-    task: { ...reopened, laneId: to, dropped: null, clarifications: [...card.clarifications, clarification] },
-    reopened: { from: card.laneId, to, reason, ...(files === undefined ? {} : { attachments: files.request }) },
+    task: { ...reopened, laneId: to, dropped: null, clarifications: [...task.clarifications, clarification] },
+    reopened: { from: task.laneId, to, reason, ...(files === undefined ? {} : { attachments: files.request }) },
   };
 };
 
 const reopen = (
-  card: Card,
-  action: Extract<CardActionRequest, { action: 'reopen' }>,
-  context: CardContext,
-): CardOutcome => {
-  requireStanding('reopen', context.standing, card);
-  const ref = formatCardRef(card);
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'reopen' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('reopen', context.standing, task);
+  const ref = formatTaskRef(task);
   const target = requireLane(context.laneSet, action.to);
   if (target.category === 'closed') {
     throw new BoardError('invalid', `a reopen opens a task; to close ${ref}, move it to ${target.name}`);
   }
-  if (card.dropped === null) {
-    const backward = isBackwardMove(context.laneSet, card.laneId, action.to);
+  if (task.dropped === null) {
+    const backward = isBackwardMove(context.laneSet, task.laneId, action.to);
     if (!(backward.ok && backward.value)) {
       throw new BoardError(
         'invalid',
-        `a reopen goes back to an earlier lane; ${ref} is in ${card.laneId}, so move it on instead`,
+        `a reopen goes back to an earlier lane; ${ref} is in ${task.laneId}, so move it on instead`,
       );
     }
   } else if (
-    action.to !== card.laneId &&
-    !isBackward(context.laneSet, card.laneId, action.to) &&
+    action.to !== task.laneId &&
+    !isBackward(context.laneSet, task.laneId, action.to) &&
     !mayPassGate(context.standing, context.audience ?? 'external')
   ) {
     // A dropped card comes back where it was dropped, or earlier: a drop is no way past a gate.
-    const from = requireLane(context.laneSet, card.laneId);
+    const from = requireLane(context.laneSet, task.laneId);
     throw new BoardError(
       'owner-gate',
       `only the owner reopens ${ref} past ${from.name}, where it was dropped; reopen it there or earlier`,
       ['owner-human'],
     );
   }
-  return reopenTo(card, action.to, action.reason, action.ask, context);
+  return reopenTo(task, action.to, action.reason, action.ask, context);
 };
 
 /**
@@ -351,33 +351,33 @@ const reopen = (
  * signal, and a move that would pass one on the way stops in it. Only the owner's own report (`passGates`) goes on.
  */
 export const triggerMove = (
-  card: Card,
+  task: Task,
   trigger: LaneTrigger,
   reason: string | undefined,
-  context: CardContext,
+  context: TaskContext,
   backward = false,
   passGates = false,
-): Card | null => {
-  requireStanding('trigger', context.standing, card);
-  if (card.dropped !== null) return null;
-  const lane = laneForTrigger(context.laneSet, card.workflow, trigger);
-  if (!lane.ok || lane.value === null || lane.value.id === card.laneId) return null;
+): Task | null => {
+  requireStanding('trigger', context.standing, task);
+  if (task.dropped !== null) return null;
+  const lane = laneForTrigger(context.laneSet, task.workflow, trigger);
+  if (!lane.ok || lane.value === null || lane.value.id === task.laneId) return null;
   if (lane.value.category === 'closed' && lane.value.ownerGate === true) return null;
-  const movesBack = isBackwardMove(context.laneSet, card.laneId, lane.value.id);
+  const movesBack = isBackwardMove(context.laneSet, task.laneId, lane.value.id);
   if (!movesBack.ok || movesBack.value !== backward) return null;
-  if (!passGates && isGate(requireLane(context.laneSet, card.laneId))) return null;
-  const stop = passGates ? undefined : gatesBetween(context.laneSet, card, lane.value)[0];
+  if (!passGates && isGate(requireLane(context.laneSet, task.laneId))) return null;
+  const stop = passGates ? undefined : gatesBetween(context.laneSet, task, lane.value)[0];
   const to = stop ?? lane.value;
-  const blockers = backward ? [] : blockedBy(card, context.index, context.laneSets);
-  const note = blockers.length === 0 ? null : `${trigger} while blocked by ${blockers.map(formatCardRef).join(', ')}`;
+  const blockers = backward ? [] : blockedBy(task, context.index, context.laneSets);
+  const note = blockers.length === 0 ? null : `${trigger} while blocked by ${blockers.map(formatTaskRef).join(', ')}`;
   const held = stop === undefined ? null : `stopped at ${stop.name}, which waits for the owner`;
   const said = [reason, note, held].filter(part => part !== undefined && part !== null).join('; ');
   return {
     ...withEvent(
-      card,
+      task,
       {
         type: 'moved',
-        from: card.laneId,
+        from: task.laneId,
         to: to.id,
         backward,
         reason: said === '' ? null : said,
@@ -398,11 +398,11 @@ export const triggerMove = (
  */
 export const gateOnTheWay = (
   laneSet: LaneSet,
-  card: Pick<Card, 'laneId' | 'workflow'>,
+  task: Pick<Task, 'laneId' | 'workflow'>,
   target: Lane,
 ): Lane | undefined => {
-  const from = requireLane(laneSet, card.laneId);
-  return isGate(from) ? from : gatesBetween(laneSet, card, target)[0];
+  const from = requireLane(laneSet, task.laneId);
+  return isGate(from) ? from : gatesBetween(laneSet, task, target)[0];
 };
 
 /**
@@ -415,22 +415,22 @@ export const gateOnTheWay = (
  * ({@link gateOnTheWay}). Already there, or past it, is no change.
  */
 const report = (
-  card: Card,
-  action: Extract<CardActionRequest, { action: 'trigger' }>,
-  context: CardContext,
-): CardOutcome => {
-  requireStanding('report', context.standing, card);
-  requireOpen(card, 'report an event on');
-  const ref = formatCardRef(card);
-  const found = laneForTrigger(context.laneSet, card.workflow, action.event);
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'trigger' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('report', context.standing, task);
+  requireOpen(task, 'report an event on');
+  const ref = formatTaskRef(task);
+  const found = laneForTrigger(context.laneSet, task.workflow, action.event);
   if (!found.ok || found.value === null) {
     throw new BoardError(
       'invalid',
-      `no lane of this board enters on ${action.event} for ${card.workflow} work, so it does not move ${ref}; its lanes are ${laneNames(context.laneSet)}`,
+      `no lane of this board enters on ${action.event} for ${task.workflow} work, so it does not move ${ref}; its lanes are ${laneNames(context.laneSet)}`,
     );
   }
   const target = found.value;
-  if (target.id === card.laneId) return { task: null };
+  if (target.id === task.laneId) return { task: null };
   // Only the owner closes on a report: a fact may close a set with no verify lane, a caller's word may not.
   if (target.category === 'closed' && (target.ownerGate === true || context.standing !== 'owner-human')) {
     throw new BoardError(
@@ -441,10 +441,10 @@ const report = (
       ['owner-human'],
     );
   }
-  const from = requireLane(context.laneSet, card.laneId);
-  const back = isBackwardMove(context.laneSet, card.laneId, target.id);
+  const from = requireLane(context.laneSet, task.laneId);
+  const back = isBackwardMove(context.laneSet, task.laneId, target.id);
   if (!back.ok || back.value) return { task: null };
-  const gate = context.standing === 'owner-human' ? undefined : gateOnTheWay(context.laneSet, card, target);
+  const gate = context.standing === 'owner-human' ? undefined : gateOnTheWay(context.laneSet, task, target);
   if (gate !== undefined) {
     throw new BoardError(
       'owner-gate',
@@ -456,17 +456,17 @@ const report = (
   }
   // A dependency holds a caller's word as it holds a move: only a fact, or the owner, moves a blocked card on.
   const blockers =
-    context.standing !== 'owner-human' && rank(context.laneSet, target.id) > rank(context.laneSet, card.laneId)
-      ? blockedBy(card, context.index, context.laneSets)
+    context.standing !== 'owner-human' && rank(context.laneSet, target.id) > rank(context.laneSet, task.laneId)
+      ? blockedBy(task, context.index, context.laneSets)
       : [];
   if (blockers.length > 0) {
     throw new BoardError(
       'blocked-by',
-      `${ref} is blocked by ${blockers.map(formatCardRef).join(', ')}: a report does not move it on to ${target.name} until they ship (only the owner may override a dependency)`,
+      `${ref} is blocked by ${blockers.map(formatTaskRef).join(', ')}: a report does not move it on to ${target.name} until they ship (only the owner may override a dependency)`,
     );
   }
   const moved = triggerMove(
-    card,
+    task,
     action.event,
     action.reason,
     { ...context, actor: { kind: 'daemon' }, standing: 'daemon' },
@@ -478,7 +478,7 @@ const report = (
 };
 
 /** The move just made, with who reported the trigger beside the daemon that made it. */
-const reportedBy = (moved: Card, context: Pick<CardContext, 'actor'>): Card => ({
+const reportedBy = (moved: Task, context: Pick<TaskContext, 'actor'>): Task => ({
   ...moved,
   history: moved.history.map((event, index) =>
     index === moved.history.length - 1 && event.type === 'moved' ? { ...event, reportedBy: context.actor } : event,
@@ -492,31 +492,31 @@ const reportedBy = (moved: Card, context: Pick<CardContext, 'actor'>): Card => (
  * put the card where it already is, or have no opinion. Whoever asked for the write, the move is the
  * daemon's: a card the facts moved was moved by no one.
  */
-export const reconcileFacts = (card: Card, context: CardContext): Card | null => {
-  const move = laneFromFacts(card, context.laneSet, card.workflow, {
-    prs: card.links.prs,
+export const reconcileFacts = (task: Task, context: TaskContext): Task | null => {
+  const move = laneFromFacts(task, context.laneSet, task.workflow, {
+    prs: task.links.prs,
     runningVersion: context.runningVersion ?? null,
   });
   const moved =
     move === null
       ? null
       : triggerMove(
-          card,
+          task,
           move.trigger,
           move.reason,
           { ...context, actor: { kind: 'daemon' }, standing: 'daemon' },
           move.backward,
         );
   // A sub-card that ships does not wait for the owner to try it: its parent carries the test.
-  const reason = shippedCloseReason(moved ?? card, context.laneSet);
-  return reason === null ? moved : (closeAsDaemon(moved ?? card, reason, context) ?? moved);
+  const reason = shippedCloseReason(moved ?? task, context.laneSet);
+  return reason === null ? moved : (closeAsDaemon(moved ?? task, reason, context) ?? moved);
 };
 
 /** What a close is recorded as: the release or merge that shipped a sub-card, else the helper's own done. */
-const closeTrigger = (card: Card, reason: string): LaneTrigger =>
-  reason !== SUB_CARD_SHIPPED_REASON
+const closeTrigger = (task: Task, reason: string): LaneTrigger =>
+  reason !== SUB_TASK_SHIPPED_REASON
     ? 'signal.done'
-    : card.links.prs.some(pr => pr.releasedIn !== null)
+    : task.links.prs.some(pr => pr.releasedIn !== null)
       ? 'release.published'
       : 'pr.merged';
 
@@ -524,20 +524,20 @@ const closeTrigger = (card: Card, reason: string): LaneTrigger =>
  * The daemon's automatic move of a card into the board's closed lane, with the reason beside it. It is for a sub-card
  * that shipped or whose helper finished ({@link sub-card-close}); the owner's own Done is a verdict, not this.
  */
-export const closeAsDaemon = (card: Card, reason: string, context: CardContext): Card | null => {
+export const closeAsDaemon = (task: Task, reason: string, context: TaskContext): Task | null => {
   const target = closedLaneOf(context.laneSet);
-  if (target === undefined || target.id === card.laneId) return null;
+  if (target === undefined || target.id === task.laneId) return null;
   return {
     ...withEvent(
-      card,
+      task,
       {
         type: 'moved',
-        from: card.laneId,
+        from: task.laneId,
         to: target.id,
         backward: false,
         reason,
         auto: true,
-        trigger: closeTrigger(card, reason),
+        trigger: closeTrigger(task, reason),
       },
       { ...context, actor: { kind: 'daemon' } },
     ),
@@ -553,17 +553,17 @@ export const closeAsDaemon = (card: Card, reason: string, context: CardContext):
  * still refused by `move`, and nothing on the wire reaches this. `null` when the card is not at such a gate, is
  * dropped, or the board has no closed lane: nothing is written.
  */
-export const closeNothingToTry = (card: Card, reason: string, context: CardContext): Card | null => {
-  requireStanding('trigger', context.standing, card);
-  if (card.dropped !== null) return null;
-  const from = laneOf(context.laneSet, card.laneId);
+export const closeNothingToTry = (task: Task, reason: string, context: TaskContext): Task | null => {
+  requireStanding('trigger', context.standing, task);
+  if (task.dropped !== null) return null;
+  const from = laneOf(context.laneSet, task.laneId);
   if (!from.ok || !gateOptions(from.value).some(option => option.outcome.kind === 'reopen-with-ask')) return null;
   const target = closedLaneOf(context.laneSet);
-  if (target === undefined || target.id === card.laneId) return null;
+  if (target === undefined || target.id === task.laneId) return null;
   return {
     ...withEvent(
-      card,
-      { type: 'moved', from: card.laneId, to: target.id, backward: false, reason, auto: true, trigger: 'signal.done' },
+      task,
+      { type: 'moved', from: task.laneId, to: target.id, backward: false, reason, auto: true, trigger: 'signal.done' },
       { ...context, actor: { kind: 'daemon' } },
     ),
     laneId: target.id,
@@ -575,53 +575,53 @@ export const closeNothingToTry = (card: Card, reason: string, context: CardConte
 // ---------------------------------------------------------------------------------------------------
 
 /** A dependency target on this machine, or the refusal that says why it cannot be one. */
-export const requireLocalCard = (index: BoardIndex, ref: CardRef, role: string): Card => {
+export const requireLocalTask = (index: BoardIndex, ref: TaskRef, role: string): Task => {
   if (!index.isLocal(ref)) {
     throw new BoardError(
       'invalid',
-      `${formatCardRef(ref)} is on another machine; a ${role} must be a task on this machine for now`,
+      `${formatTaskRef(ref)} is on another machine; a ${role} must be a task on this machine for now`,
     );
   }
   const found = index.get(ref);
-  if (found === undefined) throw new BoardError('not-found', `there is no task ${formatCardRef(ref)} on this machine`);
+  if (found === undefined) throw new BoardError('not-found', `there is no task ${formatTaskRef(ref)} on this machine`);
   return found;
 };
 
-const sameRef = (left: CardRef, right: CardRef): boolean => left.id === right.id;
+const sameRef = (left: TaskRef, right: TaskRef): boolean => left.id === right.id;
 
 const depend = (
-  card: Card,
-  action: Extract<CardActionRequest, { action: 'depend' }>,
-  context: CardContext,
-): CardOutcome => {
-  requireStanding('depend', context.standing, card);
-  if (action.override !== undefined) requireStanding('override', context.standing, card);
-  const ref = formatCardRef(card);
-  const blocker = requireLocalCard(context.index, action.task, 'dependency');
-  if (blocker.id === card.id) throw new BoardError('invalid', `${ref} cannot depend on itself`);
+  boardTask: Task,
+  action: Extract<TaskActionRequest, { action: 'depend' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('depend', context.standing, boardTask);
+  if (action.override !== undefined) requireStanding('override', context.standing, boardTask);
+  const ref = formatTaskRef(boardTask);
+  const blocker = requireLocalTask(context.index, action.task, 'dependency');
+  if (blocker.id === boardTask.id) throw new BoardError('invalid', `${ref} cannot depend on itself`);
   const override =
     action.override === undefined
       ? undefined
       : { by: 'owner' as const, reason: action.override.reason, at: context.now };
   const task = { id: blocker.id };
-  const existing = card.dependsOn.find(dependency => sameRef(dependency.task, task));
+  const existing = boardTask.dependsOn.find(dependency => sameRef(dependency.task, task));
   if (existing !== undefined && override === undefined && existing.until === action.until) {
-    throw new BoardError('invalid', `${ref} already depends on ${formatCardRef(task)}`);
+    throw new BoardError('invalid', `${ref} already depends on ${formatTaskRef(task)}`);
   }
   if (existing === undefined) {
-    const cycle = dependencyCycle(context.index, card.id, task);
+    const cycle = dependencyCycle(context.index, boardTask.id, task);
     if (cycle !== null) throw new BoardError('cycle', `that dependency would close a cycle: ${cycle}`);
   }
   const kept = override ?? existing?.override;
   const entry = { task, until: action.until, ...(kept === undefined ? {} : { override: kept }) };
   const dependsOn =
     existing === undefined
-      ? [...card.dependsOn, entry]
-      : card.dependsOn.map(dependency => (sameRef(dependency.task, task) ? entry : dependency));
+      ? [...boardTask.dependsOn, entry]
+      : boardTask.dependsOn.map(dependency => (sameRef(dependency.task, task) ? entry : dependency));
   return {
     task: {
       ...withEvent(
-        card,
+        boardTask,
         { type: 'depended', task, until: action.until, ...(override === undefined ? {} : { override }) },
         context,
       ),
@@ -631,18 +631,18 @@ const depend = (
 };
 
 const undepend = (
-  card: Card,
-  action: Extract<CardActionRequest, { action: 'undepend' }>,
-  context: CardContext,
-): CardOutcome => {
-  requireStanding('undepend', context.standing, card);
-  if (!card.dependsOn.some(dependency => sameRef(dependency.task, action.task))) {
-    throw new BoardError('invalid', `${formatCardRef(card)} does not depend on ${formatCardRef(action.task)}`);
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'undepend' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('undepend', context.standing, task);
+  if (!task.dependsOn.some(dependency => sameRef(dependency.task, action.task))) {
+    throw new BoardError('invalid', `${formatTaskRef(task)} does not depend on ${formatTaskRef(action.task)}`);
   }
   return {
     task: {
-      ...withEvent(card, { type: 'undepended', task: action.task, reason: action.reason }, context),
-      dependsOn: card.dependsOn.filter(dependency => !sameRef(dependency.task, action.task)),
+      ...withEvent(task, { type: 'undepended', task: action.task, reason: action.reason }, context),
+      dependsOn: task.dependsOn.filter(dependency => !sameRef(dependency.task, action.task)),
     },
   };
 };
@@ -687,20 +687,20 @@ const unpolledPr = (url: string, index: BoardIndex): PrLink => {
 };
 
 const link = (
-  card: Card,
-  action: Extract<CardActionRequest, { action: 'link' }>,
-  context: CardContext,
-): CardOutcome => {
-  requireStanding('link', context.standing, card);
-  const ref = formatCardRef(card);
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'link' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('link', context.standing, task);
+  const ref = formatTaskRef(task);
   const already = (value: string): never => {
     throw new BoardError('invalid', `${ref} already links ${value}`);
   };
-  const { links } = card;
+  const { links } = task;
   if (action.pr !== undefined) {
     if (links.prs.some(pr => pr.url === action.pr)) already(action.pr);
-    const linked: Card = {
-      ...withEvent(card, { type: 'linked', field: 'pr', value: action.pr }, context),
+    const linked: Task = {
+      ...withEvent(task, { type: 'linked', field: 'pr', value: action.pr }, context),
       links: { ...links, prs: [...links.prs, unpolledPr(action.pr, context.index)] },
     };
     return { task: reconcileFacts(linked, context) ?? linked };
@@ -709,7 +709,7 @@ const link = (
     if (links.branch === action.branch) already(action.branch);
     return {
       task: {
-        ...withEvent(card, { type: 'linked', field: 'branch', value: action.branch }, context),
+        ...withEvent(task, { type: 'linked', field: 'branch', value: action.branch }, context),
         links: { ...links, branch: action.branch },
       },
     };
@@ -718,7 +718,7 @@ const link = (
     if (links.commits.includes(action.commit)) already(action.commit);
     return {
       task: {
-        ...withEvent(card, { type: 'linked', field: 'commit', value: action.commit }, context),
+        ...withEvent(task, { type: 'linked', field: 'commit', value: action.commit }, context),
         links: { ...links, commits: [...links.commits, action.commit] },
       },
     };
@@ -727,7 +727,7 @@ const link = (
   if (links.docs.includes(doc)) already(doc);
   return {
     task: {
-      ...withEvent(card, { type: 'linked', field: 'doc', value: doc }, context),
+      ...withEvent(task, { type: 'linked', field: 'doc', value: doc }, context),
       links: { ...links, docs: [...links.docs, doc] },
     },
   };
@@ -741,64 +741,64 @@ const link = (
 const PLAN_FIELDS: readonly BoardEditableField[] = ['title', 'brief'];
 
 /** A card's status with the parts an edit names replaced, inside the card's own write (docs/board.md § The card's Status). */
-const mergedProgress = (card: Card, parts: Partial<Progress> | undefined): Progress | undefined =>
+const mergedProgress = (task: Task, parts: Partial<Progress> | undefined): Progress | undefined =>
   parts === undefined
     ? undefined
     : {
-        now: parts.now ?? card.progress?.now ?? '',
-        doneSoFar: parts.doneSoFar ?? card.progress?.doneSoFar ?? '',
-        next: parts.next ?? card.progress?.next ?? '',
+        now: parts.now ?? task.progress?.now ?? '',
+        doneSoFar: parts.doneSoFar ?? task.progress?.doneSoFar ?? '',
+        next: parts.next ?? task.progress?.next ?? '',
       };
 
 const edit = (
-  card: Card,
-  request: Extract<CardActionRequest, { action: 'edit' }>,
-  context: CardContext,
-): CardOutcome => {
-  requireStanding('edit', context.standing, card);
-  const action = { ...request, progress: mergedProgress(card, request.progress) };
+  task: Task,
+  request: Extract<TaskActionRequest, { action: 'edit' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('edit', context.standing, task);
+  const action = { ...request, progress: mergedProgress(task, request.progress) };
   // READ BEFORE WRITE (`fy card patch`): the writer read the card at `revision`; a change since would be overwritten unseen.
-  if (action.revision !== undefined && cardRevision(card) !== action.revision) {
+  if (action.revision !== undefined && taskRevision(task) !== action.revision) {
     throw new BoardError(
       'version-conflict',
-      `${formatCardRef(card)} changed since you read it: read it again (task show ${card.id} --yaml), update every part that is out of date, and patch it back`,
+      `${formatTaskRef(task)} changed since you read it: read it again (task show ${task.id} --yaml), update every part that is out of date, and patch it back`,
     );
   }
   const changed = BoardEditableFieldSchema.options.filter(
-    field => action[field] !== undefined && JSON.stringify(action[field]) !== JSON.stringify(card[field]),
+    field => action[field] !== undefined && JSON.stringify(action[field]) !== JSON.stringify(task[field]),
   );
-  if (changed.some(field => PLAN_FIELDS.includes(field))) requireStanding('replan', context.standing, card);
+  if (changed.some(field => PLAN_FIELDS.includes(field))) requireStanding('replan', context.standing, task);
   const visibility =
-    action.visibility === undefined || alreadyChosen(card, action.visibility) ? undefined : action.visibility;
+    action.visibility === undefined || alreadyChosen(task, action.visibility) ? undefined : action.visibility;
   if (changed.length === 0 && visibility === undefined) {
-    throw new BoardError('invalid', `that edit changes nothing on ${formatCardRef(card)}`);
+    throw new BoardError('invalid', `that edit changes nothing on ${formatTaskRef(task)}`);
   }
-  let next = card;
+  let next = task;
   for (const field of changed)
     next = { ...withEvent(next, { type: 'field-edited', field }, context), [field]: action[field] };
-  return { task: visibility === undefined ? next : visibilityChanged(next, card, visibility, undefined, context) };
+  return { task: visibility === undefined ? next : visibilityChanged(next, task, visibility, undefined, context) };
 };
 
 /**
  * Whether `to` is already the card's recorded choice. The same value as the derived default is still a change when
  * nobody chose it: recording the choice is what keeps a later repair of the default from undoing it.
  */
-const alreadyChosen = (card: Card, to: CardVisibility): boolean =>
-  visibilityChosen(card) && cardVisibility(card) === to;
+const alreadyChosen = (task: Task, to: TaskVisibility): boolean =>
+  visibilityChosen(task) && taskVisibility(task) === to;
 
 /**
  * Makes a card public or private ({@link visibilityVerdict} says who may). The change is stored on the card and
  * written to its history as a note, which every app already reads.
  */
 const setVisibility = (
-  card: Card,
-  action: Extract<CardActionRequest, { action: 'visibility' }>,
-  context: CardContext,
-): CardOutcome => {
-  if (alreadyChosen(card, action.visibility)) {
-    throw new BoardError('invalid', `${formatCardRef(card)} is already ${action.visibility}`);
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'visibility' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  if (alreadyChosen(task, action.visibility)) {
+    throw new BoardError('invalid', `${formatTaskRef(task)} is already ${action.visibility}`);
   }
-  return { task: visibilityChanged(card, card, action.visibility, action.reason, context) };
+  return { task: visibilityChanged(task, task, action.visibility, action.reason, context) };
 };
 
 /**
@@ -806,40 +806,40 @@ const setVisibility = (
  * is stored as chosen, so no later repair of the derived default can undo it.
  */
 const visibilityChanged = (
-  card: Card,
-  original: Card,
-  to: CardVisibility,
+  task: Task,
+  original: Task,
+  to: TaskVisibility,
   reason: string | undefined,
-  context: CardContext,
-): Card => {
+  context: TaskContext,
+): Task => {
   const refusal = visibilityVerdict(original, to, context.standing);
   if (refusal !== null) {
-    throw new BoardError('forbidden', `${formatCardRef(original)}: ${refusal.message}`, refusal.allowed);
+    throw new BoardError('forbidden', `${formatTaskRef(original)}: ${refusal.message}`, refusal.allowed);
   }
   const why = reason === undefined ? '' : `: ${reason}`;
-  const was = cardVisibility(original);
+  const was = taskVisibility(original);
   const change = was === to ? `${to} (chosen)` : `${was} → ${to}`;
   return {
-    ...withEvent(card, { type: 'note', text: `visibility: ${change}${why}` }, context),
+    ...withEvent(task, { type: 'note', text: `visibility: ${change}${why}` }, context),
     visibility: to,
     visibilitySource: 'chosen',
   };
 };
 
 const file = (
-  card: Card,
-  action: Extract<CardActionRequest, { action: 'file' }>,
-  context: CardContext,
-): CardOutcome => {
-  requireStanding('file', context.standing, card);
-  const ref = formatCardRef(card);
-  const held = card.files.includes(action.path);
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'file' }>,
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('file', context.standing, task);
+  const ref = formatTaskRef(task);
+  const held = task.files.includes(action.path);
   if (action.release === true) {
     if (!held) throw new BoardError('invalid', `${ref} has not claimed ${action.path}`);
     return {
       task: {
-        ...withEvent(card, { type: 'file-released', path: action.path, reason: action.reason ?? null }, context),
-        files: card.files.filter(path => path !== action.path),
+        ...withEvent(task, { type: 'file-released', path: action.path, reason: action.reason ?? null }, context),
+        files: task.files.filter(path => path !== action.path),
       },
     };
   }
@@ -847,7 +847,7 @@ const file = (
   // A claim that clashes with an open card's queues this one behind it (docs/design/clash-queue.md).
   return {
     task: queueBehindClashes(
-      { ...withEvent(card, { type: 'file-claimed', path: action.path }, context), files: [...card.files, action.path] },
+      { ...withEvent(task, { type: 'file-claimed', path: action.path }, context), files: [...task.files, action.path] },
       [action.path],
       context,
     ),
@@ -860,13 +860,13 @@ const file = (
  * lane. A closed card stays closed: it lands in a closed lane of the other board even when its workflow does
  * not walk one, rather than being reopened.
  */
-const refileLane = (card: Card, from: LaneSet, target: LaneSet, laneId: string | undefined): Lane => {
+const refileLane = (task: Task, from: LaneSet, target: LaneSet, laneId: string | undefined): Lane => {
   if (laneId !== undefined) return requireLane(target, laneId);
-  const category = categoryOf(from, card.laneId);
-  const same = category.ok ? firstLaneOfCategory(target, card.workflow, category.value) : undefined;
+  const category = categoryOf(from, task.laneId);
+  const same = category.ok ? firstLaneOfCategory(target, task.workflow, category.value) : undefined;
   if (same?.ok === true) return same.value;
   const closed = category.ok && category.value === 'closed' ? target.lanes.find(isClosedLane) : undefined;
-  return closed ?? entryLane(target, card.workflow);
+  return closed ?? entryLane(target, task.workflow);
 };
 
 const isClosedLane = (lane: Lane): boolean => lane.category === 'closed';
@@ -878,36 +878,36 @@ const isClosedLane = (lane: Lane): boolean => lane.category === 'closed';
  * test, into a Released · to test lane, and facts never move a card back. `undefined` when the facts say
  * nothing, so the card lands by category.
  */
-const factsLandingLane = (card: Card, target: LaneSet, context: CardContext): Lane | undefined => {
-  const lanes = variantLanesOf(target, card.workflow);
-  const resume = lanes.findLast(lane => lane.category === 'active') ?? entryLane(target, card.workflow);
-  const move = laneFromFacts({ ...card, laneId: resume.id }, target, card.workflow, {
-    prs: card.links.prs,
+const factsLandingLane = (task: Task, target: LaneSet, context: TaskContext): Lane | undefined => {
+  const lanes = variantLanesOf(target, task.workflow);
+  const resume = lanes.findLast(lane => lane.category === 'active') ?? entryLane(target, task.workflow);
+  const move = laneFromFacts({ ...task, laneId: resume.id }, target, task.workflow, {
+    prs: task.links.prs,
     runningVersion: context.runningVersion ?? null,
   });
   return move === null ? undefined : resume;
 };
 
-const variantLanesOf = (laneSet: LaneSet, workflow: Card['workflow']): readonly Lane[] => {
+const variantLanesOf = (laneSet: LaneSet, workflow: Task['workflow']): readonly Lane[] => {
   const lanes = variantLanes(laneSet, workflow);
   return lanes.ok ? lanes.value : laneSet.lanes;
 };
 
 /** The first backlog lane a workflow walks, else its first lane: where a new card goes. */
-const entryLane = (laneSet: LaneSet, workflow: Card['workflow']): Lane => {
+const entryLane = (laneSet: LaneSet, workflow: Task['workflow']): Lane => {
   const backlog = firstLaneOfCategory(laneSet, workflow, 'backlog');
   return backlog.ok ? backlog.value : (laneSet.lanes[0] as Lane);
 };
 
 const refile = (
-  card: Card,
-  action: Extract<CardActionRequest, { action: 'refile' }>,
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'refile' }>,
   target: LaneSet | null,
-  context: CardContext,
-): CardOutcome => {
-  requireStanding('refile', context.standing, card);
-  const ref = formatCardRef(card);
-  if (action.projectId === card.projectId) throw new BoardError('invalid', `${ref} is already on that board`);
+  context: TaskContext,
+): TaskOutcome => {
+  requireStanding('refile', context.standing, task);
+  const ref = formatTaskRef(task);
+  if (action.projectId === task.projectId) throw new BoardError('invalid', `${ref} is already on that board`);
   if (target === null) {
     throw new BoardError(
       'no-lane-set',
@@ -916,30 +916,30 @@ const refile = (
   }
   // A refile keeps the card's state. The owner already closed a card that is closed here, so carrying it
   // into the other board's closed lane is no closing; the gate is for a card that is not closed yet.
-  const source = categoryOf(context.laneSet, card.laneId);
+  const source = categoryOf(context.laneSet, task.laneId);
   const alreadyClosed = source.ok && source.value === 'closed';
   // Its facts land it where work resumes there, and move it on from there only as far as the first gate.
-  const atGate = card.dropped === null && !alreadyClosed && isGate(requireLane(context.laneSet, card.laneId));
+  const atGate = task.dropped === null && !alreadyClosed && isGate(requireLane(context.laneSet, task.laneId));
   const byFacts =
-    action.laneId === undefined && !alreadyClosed && card.dropped === null
-      ? factsLandingLane(card, target, context)
+    action.laneId === undefined && !alreadyClosed && task.dropped === null
+      ? factsLandingLane(task, target, context)
       : undefined;
-  const landing = byFacts ?? refileLane(card, context.laneSet, target, action.laneId);
-  if (!(alreadyClosed && isClosedLane(landing))) requireOwnerForClosed(landing, context.standing, card);
+  const landing = byFacts ?? refileLane(task, context.laneSet, target, action.laneId);
+  if (!(alreadyClosed && isClosedLane(landing))) requireOwnerForClosed(landing, context.standing, task);
   const lane =
     alreadyClosed || mayPassGate(context.standing, context.audience ?? 'external')
       ? landing
-      : refileGateLanding(card, {
+      : refileGateLanding(task, {
           from: context.laneSet,
           target,
           lane: landing,
           named: action.laneId !== undefined,
           atGate,
         });
-  const fromProject: BoardProjectId = card.projectId;
-  const refiled: Card = {
+  const fromProject: BoardProjectId = task.projectId;
+  const refiled: Task = {
     ...withEvent(
-      card,
+      task,
       { type: 'refiled', fromProject, toProject: action.projectId, toLane: lane.id, reason: action.reason ?? null },
       context,
     ),
@@ -956,7 +956,7 @@ const refile = (
  * gate. Throws `owner-gate` naming the gate.
  */
 const refileGateLanding = (
-  card: Card,
+  task: Task,
   facts: {
     readonly from: LaneSet;
     readonly target: LaneSet;
@@ -965,8 +965,8 @@ const refileGateLanding = (
     readonly atGate: boolean;
   },
 ): Lane => {
-  const ref = formatCardRef(card);
-  const source = requireLane(facts.from, card.laneId);
+  const ref = formatTaskRef(task);
+  const source = requireLane(facts.from, task.laneId);
   const stage = (lane: Lane): number => LANE_CATEGORIES.indexOf(lane.category);
   if (
     facts.atGate &&
@@ -978,8 +978,8 @@ const refileGateLanding = (
       ['owner-human'],
     );
   }
-  const entry = entryLane(facts.target, card.workflow);
-  const passed = gatesBetween(facts.target, { laneId: entry.id, workflow: card.workflow }, facts.lane)[0];
+  const entry = entryLane(facts.target, task.workflow);
+  const passed = gatesBetween(facts.target, { laneId: entry.id, workflow: task.workflow }, facts.lane)[0];
   if (passed === undefined) return facts.lane;
   if (!facts.named) return passed;
   throw new BoardError(
@@ -989,7 +989,7 @@ const refileGateLanding = (
   );
 };
 
-const sameParent = (left: CardRef | null, right: CardRef | null): boolean =>
+const sameParent = (left: TaskRef | null, right: TaskRef | null): boolean =>
   left === null || right === null ? left === right : sameRef(left, right);
 
 /**
@@ -998,39 +998,39 @@ const sameParent = (left: CardRef | null, right: CardRef | null): boolean =>
  * never lands on a tree its caller cannot write.
  */
 const reparent = (
-  card: Card,
-  action: Extract<CardActionRequest, { action: 'reparent' }>,
-  context: CardContext,
+  task: Task,
+  action: Extract<TaskActionRequest, { action: 'reparent' }>,
+  context: TaskContext,
   parentStanding: BoardStanding | null,
-): CardOutcome => {
-  requireStanding('reparent', context.standing, card);
-  const ref = formatCardRef(card);
-  let to: CardRef | null = null;
+): TaskOutcome => {
+  requireStanding('reparent', context.standing, task);
+  const ref = formatTaskRef(task);
+  let to: TaskRef | null = null;
   if (action.parent !== null) {
-    const parent = requireLocalCard(context.index, action.parent, 'parent');
+    const parent = requireLocalTask(context.index, action.parent, 'parent');
     requireStanding('adopt', parentStanding ?? 'reader', parent);
-    if (parentLoop(context.index, card.id, { id: parent.id })) {
+    if (parentLoop(context.index, task.id, { id: parent.id })) {
       throw new BoardError(
         'cycle',
-        `${ref} cannot sit under ${formatCardRef(parent)}: that task is ${ref} or inside it`,
+        `${ref} cannot sit under ${formatTaskRef(parent)}: that task is ${ref} or inside it`,
       );
     }
     to = { id: parent.id };
   }
-  if (sameParent(card.parent, to)) {
+  if (sameParent(task.parent, to)) {
     throw new BoardError(
       'invalid',
-      `${ref} is already ${to === null ? 'at the top level' : `under ${formatCardRef(to)}`}`,
+      `${ref} is already ${to === null ? 'at the top level' : `under ${formatTaskRef(to)}`}`,
     );
   }
-  const sitting = { ...card, parent: to };
-  const moved = card.visibility === undefined ? sitting : withDefaultVisibility(sitting);
-  const was = cardVisibility(card);
-  const now = cardVisibility(moved);
+  const sitting = { ...task, parent: to };
+  const moved = task.visibility === undefined ? sitting : withDefaultVisibility(sitting);
+  const was = taskVisibility(task);
+  const now = taskVisibility(moved);
   // Where a card sits is part of what decides who can see it: a card never becomes a public sub-card, and a
   // person's card is never hidden, by a caller the visibility rules would stop doing either directly.
   const refusal =
-    now === 'public' && card.parent === null && to !== null
+    now === 'public' && task.parent === null && to !== null
       ? visibilityVerdict(moved, 'public', context.standing)
       : was === 'public' && now === 'private'
         ? visibilityVerdict(moved, 'private', context.standing)
@@ -1040,7 +1040,7 @@ const reparent = (
   }
   return {
     task: {
-      ...withEvent(moved, { type: 'reparented', from: card.parent, to, reason: action.reason ?? null }, context),
+      ...withEvent(moved, { type: 'reparented', from: task.parent, to, reason: action.reason ?? null }, context),
       parent: to,
     },
   };
@@ -1052,51 +1052,51 @@ const reparent = (
  * board's lanes, which the service reads first. `reparent` needs the caller's standing on the NEW parent.
  */
 export const applyAction = (
-  card: Card,
-  action: CardActionRequest,
-  context: CardContext,
+  task: Task,
+  action: TaskActionRequest,
+  context: TaskContext,
   refileTarget: LaneSet | null = null,
   parentStanding: BoardStanding | null = null,
-): CardOutcome => {
-  const ref = formatCardRef(card);
+): TaskOutcome => {
+  const ref = formatTaskRef(task);
   switch (action.action) {
     case 'move':
-      return move(card, action.to, action.reason, context);
+      return move(task, action.to, action.reason, context);
     case 'focus':
-      requireStanding('focus', context.standing, card);
+      requireStanding('focus', context.standing, task);
       return { task: null };
     case 'block':
-      requireStanding('block', context.standing, card);
-      requireOpen(card, 'block');
+      requireStanding('block', context.standing, task);
+      requireOpen(task, 'block');
       return {
         task: {
-          ...withEvent(card, { type: 'blocked', reason: action.reason }, context),
+          ...withEvent(task, { type: 'blocked', reason: action.reason }, context),
           blocked: { on: 'external', reason: action.reason, since: context.now },
         },
       };
     case 'unblock':
-      requireStanding('unblock', context.standing, card);
-      if (card.blocked === null) throw new BoardError('invalid', `${ref} is not blocked`);
+      requireStanding('unblock', context.standing, task);
+      if (task.blocked === null) throw new BoardError('invalid', `${ref} is not blocked`);
       return {
-        task: { ...withEvent(card, { type: 'unblocked', reason: action.reason ?? null }, context), blocked: null },
+        task: { ...withEvent(task, { type: 'unblocked', reason: action.reason ?? null }, context), blocked: null },
       };
     case 'depend':
-      return depend(card, action, context);
+      return depend(task, action, context);
     case 'undepend':
-      return undepend(card, action, context);
+      return undepend(task, action, context);
     case 'drop':
-      requireStanding('drop', context.standing, card);
-      requireOpen(card, 'drop');
+      requireStanding('drop', context.standing, task);
+      requireOpen(task, 'drop');
       return {
         task: {
-          ...withEvent(card, { type: 'dropped', reason: action.reason }, context),
+          ...withEvent(task, { type: 'dropped', reason: action.reason }, context),
           dropped: { reason: action.reason, at: context.now },
         },
       };
     case 'reopen':
-      return reopen(card, action, context);
+      return reopen(task, action, context);
     case 'clarify': {
-      requireStanding('clarify', context.standing, card);
+      requireStanding('clarify', context.standing, task);
       const clarification: BoardClarification = {
         text: action.text,
         source: action.source,
@@ -1105,25 +1105,25 @@ export const applyAction = (
       };
       return {
         task: {
-          ...withEvent(card, { type: 'clarified', text: action.text, source: action.source }, context),
-          clarifications: [...card.clarifications, clarification],
+          ...withEvent(task, { type: 'clarified', text: action.text, source: action.source }, context),
+          clarifications: [...task.clarifications, clarification],
         },
       };
     }
     case 'link':
-      return link(card, action, context);
+      return link(task, action, context);
     case 'trigger':
-      return report(card, action, context);
+      return report(task, action, context);
     case 'assign':
-      if (context.handsDown !== true) requireAssign(context.standing, card);
-      if (action.assignee === card.assignee) throw new BoardError('invalid', `${ref} is already assigned that way`);
+      if (context.handsDown !== true) requireAssign(context.standing, task);
+      if (action.assignee === task.assignee) throw new BoardError('invalid', `${ref} is already assigned that way`);
       return {
         task: {
           ...withEvent(
-            card,
+            task,
             {
               type: 'assigned',
-              from: card.assignee,
+              from: task.assignee,
               to: action.assignee,
               ...(context.handsDown === true ? { handedDown: true as const } : {}),
             },
@@ -1137,14 +1137,14 @@ export const applyAction = (
       if (context.claimedFrom === undefined || actor.kind !== 'ferret') {
         const caller: BoardCaller =
           actor.kind === 'ferret' ? { kind: 'ferret', ferret: actor.ferret } : { kind: 'owner' };
-        throw new BoardError('forbidden', claimRefusalMessage(card, caller));
+        throw new BoardError('forbidden', claimRefusalMessage(task, caller));
       }
       const claimer = actor.ferret;
       return {
         task: {
           ...withEvent(
-            card,
-            { type: 'assigned', from: card.assignee, to: claimer, claimedFrom: context.claimedFrom },
+            task,
+            { type: 'assigned', from: task.assignee, to: claimer, claimedFrom: context.claimedFrom },
             context,
           ),
           assignee: claimer,
@@ -1163,14 +1163,14 @@ export const applyAction = (
       return {
         task: {
           ...withEvent(
-            card,
+            task,
             {
               type: 'assigned',
-              from: card.assignee,
+              from: task.assignee,
               to: adopter,
               adopted: {
                 from: context.adoptedFrom,
-                reason: action.reason ?? `owner ferret ${card.owner} and assignee ${effectiveAssignee(card)} ended`,
+                reason: action.reason ?? `owner ferret ${task.owner} and assignee ${effectiveAssignee(task)} ended`,
               },
             },
             context,
@@ -1181,40 +1181,40 @@ export const applyAction = (
       };
     }
     case 'note':
-      requireStanding('note', context.standing, card);
-      return { task: withEvent(card, { type: 'note', text: action.text }, context) };
+      requireStanding('note', context.standing, task);
+      return { task: withEvent(task, { type: 'note', text: action.text }, context) };
     case 'edit':
-      return edit(card, action, context);
+      return edit(task, action, context);
     case 'file':
-      return file(card, action, context);
+      return file(task, action, context);
     case 'order':
-      requireStanding('order', context.standing, card);
-      if (action.order === card.order) throw new BoardError('invalid', `${ref} already has that order`);
+      requireStanding('order', context.standing, task);
+      if (action.order === task.order) throw new BoardError('invalid', `${ref} already has that order`);
       return {
         task: {
-          ...withEvent(card, { type: 'ordered', from: card.order, to: action.order }, context),
+          ...withEvent(task, { type: 'ordered', from: task.order, to: action.order }, context),
           order: action.order,
         },
       };
     case 'snooze':
-      requireStanding('snooze', context.standing, card);
+      requireStanding('snooze', context.standing, task);
       if (action.until === null) {
-        if (card.snoozed == null) throw new BoardError('invalid', `${ref} is not snoozed`);
+        if (task.snoozed == null) throw new BoardError('invalid', `${ref} is not snoozed`);
       } else if (Date.parse(action.until) <= Date.parse(context.now)) {
         throw new BoardError('invalid', `${ref} can only be snoozed to a time that has not passed`);
       }
       return {
         task: {
-          ...withEvent(card, { type: 'snoozed', until: action.until }, context),
-          snoozed: action.until === null ? null : { until: action.until, laneId: card.laneId },
+          ...withEvent(task, { type: 'snoozed', until: action.until }, context),
+          snoozed: action.until === null ? null : { until: action.until, laneId: task.laneId },
         },
       };
     case 'refile':
-      return refile(card, action, refileTarget, context);
+      return refile(task, action, refileTarget, context);
     case 'reparent':
-      return reparent(card, action, context, parentStanding);
+      return reparent(task, action, context, parentStanding);
     case 'visibility':
-      return setVisibility(card, action, context);
+      return setVisibility(task, action, context);
   }
 };
 
@@ -1222,11 +1222,11 @@ export const applyAction = (
 // Create
 // ---------------------------------------------------------------------------------------------------
 
-export interface NewCardContext {
-  readonly id: CardId;
+export interface NewTaskContext {
+  readonly id: TaskId;
   readonly machineId: string;
   readonly now: string;
-  readonly actor: CardActor;
+  readonly actor: TaskActor;
   readonly standing: BoardStanding;
   /** The accountable ferret: the creating session, or the assignee the owner named. */
   readonly owner: string;
@@ -1236,13 +1236,13 @@ export interface NewCardContext {
 }
 
 /** A new card, before the store has it: in its variant's first backlog lane unless one is named. */
-export const newCard = (request: CardCreateRequest, context: NewCardContext): Card => {
+export const newTask = (request: TaskCreateRequest, context: NewTaskContext): Task => {
   const lane =
     request.laneId === undefined
       ? entryLane(context.laneSet, request.workflow)
       : requireLane(context.laneSet, request.laneId);
   requireOwnerForClosed(lane, context.standing, { id: context.id });
-  for (const dependency of request.dependsOn) requireLocalCard(context.index, dependency.task, 'dependency');
+  for (const dependency of request.dependsOn) requireLocalTask(context.index, dependency.task, 'dependency');
   return {
     format: 1,
     id: context.id,

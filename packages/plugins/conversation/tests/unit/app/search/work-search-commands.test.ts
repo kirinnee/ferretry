@@ -22,7 +22,7 @@ import { testHref } from '../../../support/app/client.tsx';
 const RELAY_PROJECT = '6f1c2f0e-3a4b-4c55-9d1e-0a7b8c9d1e2f';
 const AT = '2026-10-30T10:00:00.000Z' as WorkHit['updatedAt'];
 
-const card = (id: string, patch: Partial<Extract<WorkHit, { kind: 'card' }>> = {}): WorkHit => ({
+const task = (id: string, patch: Partial<Extract<WorkHit, { kind: 'card' }>> = {}): WorkHit => ({
   kind: 'card',
   id,
   project: RELAY_PROJECT,
@@ -146,7 +146,7 @@ describe('the work search command source', () => {
     source('relay');
     pause();
     pending[0]?.resolve(
-      answer(card('F10', { title: 'Harden the relay' }), ask('A3', { title: 'Pick a relay region' })),
+      answer(task('F10', { title: 'Harden the relay' }), ask('A3', { title: 'Pick a relay region' })),
     );
     await land();
     expect(changes()).toBe(1);
@@ -163,7 +163,7 @@ describe('the work search command source', () => {
     const { source, pending, pause, land } = harness();
     source('handshake');
     pause();
-    pending[0]?.resolve(answer(card('F10', { title: 'Harden the relay' })));
+    pending[0]?.resolve(answer(task('F10', { title: 'Harden the relay' })));
     await land();
     expect(source('handshake')[0]?.keywords).toEqual(['handshake', 'F10']);
   });
@@ -172,12 +172,12 @@ describe('the work search command source', () => {
     const { source, pending, pause, land } = harness();
     source('relay');
     pause();
-    pending[0]?.resolve(answer(card('F10')));
+    pending[0]?.resolve(answer(task('F10')));
     await land();
 
     expect(source('relay handshake').map(entry => entry.id)).toEqual(['work-card:F10']);
     pause();
-    pending[1]?.resolve(answer(card('F11')));
+    pending[1]?.resolve(answer(task('F11')));
     await land();
     expect(source('relay handshake').map(entry => entry.id)).toEqual(['work-card:F11']);
   });
@@ -189,7 +189,7 @@ describe('the work search command source', () => {
     source('relay handshake');
     expect(pending[0]?.signal?.aborted).toBe(true);
 
-    pending[0]?.resolve(answer(card('F9')));
+    pending[0]?.resolve(answer(task('F9')));
     await land();
     expect(changes()).toBe(0);
     expect(source('relay handshake')).toEqual([]);
@@ -208,7 +208,7 @@ describe('the work search command source', () => {
     const { source, pending, pause, land, changes } = harness();
     source('relay');
     pause();
-    pending[0]?.resolve(answer(card('F10')));
+    pending[0]?.resolve(answer(task('F10')));
     await land();
     source('relay handshake');
     pause();
@@ -230,9 +230,9 @@ describe('the work search command source', () => {
     const { source, pending, pause, land } = harness();
     source('relay');
     pause();
-    const cards = Array.from({ length: 9 }, (_, index) => card(`F${index + 1}`));
+    const tasks = Array.from({ length: 9 }, (_, index) => task(`F${index + 1}`));
     const asks = Array.from({ length: 8 }, (_, index) => ask(`A${index + 1}`));
-    pending[0]?.resolve(answer(...cards, ...asks));
+    pending[0]?.resolve(answer(...tasks, ...asks));
     await land();
     const entries = source('relay');
     expect(MAX_WORK_ROWS_PER_KIND).toBe(6);
@@ -245,7 +245,7 @@ describe('the work search command source', () => {
     const { source, pending, pause, land } = harness();
     source('relay');
     pause();
-    pending[0]?.resolve(answer(card('F11', { project: 'unfiled' }), card('F12', { title: 'Orphan relay card' })));
+    pending[0]?.resolve(answer(task('F11', { project: 'unfiled' }), task('F12', { title: 'Orphan relay card' })));
     await land();
     const [unfiled, orphan] = source('relay');
     // The project is the row's second line (S11), not part of its description.
@@ -264,7 +264,7 @@ describe('the work search command source', () => {
     const { source, pending, pause, land, navigated } = harness();
     source('relay');
     pause();
-    pending[0]?.resolve(answer(card('F10'), ask('A3')));
+    pending[0]?.resolve(answer(task('F10'), ask('A3')));
     await land();
     for (const entry of source('relay')) entry.run();
     expect(navigated).toEqual(['/alpha/board/card?id=F10', '/alpha/agenda/agenda-ask?ferret=f1&ask=A3']);
@@ -275,7 +275,7 @@ describe('where a hit opens', () => {
   const context = { daemon: 'alpha', screenHref: testHref, navigate: () => undefined };
 
   it("asks the shell for the card's screen and the ask's, never a hard-coded address", () => {
-    expect(workHitHref(card('F10'), context)).toBe('/alpha/board/card?id=F10');
+    expect(workHitHref(task('F10'), context)).toBe('/alpha/board/card?id=F10');
     expect(workHitHref(ask('A3', { ferret: 'f2' }), context)).toBe('/alpha/agenda/agenda-ask?ferret=f2&ask=A3');
   });
 
@@ -290,14 +290,14 @@ describe('where a hit opens', () => {
     const { source, pending, pause, land } = harness(screenHref);
     source('relay');
     pause();
-    pending[0]?.resolve(answer(card('F10'), ask('A3')));
+    pending[0]?.resolve(answer(task('F10'), ask('A3')));
     await land();
     expect(source('relay').map(entry => entry.id)).toEqual(['work-card:F10']);
     expect(asked).toContain('agenda');
   });
 
   it('says only its standing when the hit matched by title', () => {
-    const entry = workHitEntry(card('F10', { match: { field: 'title', line: 'Card F10' } }), 'card', context);
+    const entry = workHitEntry(task('F10', { match: { field: 'title', line: 'Card F10' } }), 'card', context);
     expect(entry?.description).toBe('Doing');
   });
 });
@@ -332,7 +332,7 @@ describe('S11 the work search chips, pending line and muted rows', () => {
     const { answered, pending, pause, land } = harness();
     expect(answered('relay')).toEqual({ entries: [], pending: 'Searching tasks and agenda…' });
     pause();
-    pending[0]?.resolve(answer(card('F10')));
+    pending[0]?.resolve(answer(task('F10')));
     await land();
     expect('pending' in (answered('relay') as object)).toBe(false);
     // a chip is a new question: the rows stay, the line is back
@@ -357,7 +357,7 @@ describe('S11 the work search chips, pending line and muted rows', () => {
     source('relay');
     pause();
     pending[0]?.resolve(
-      answer(card('F1'), card('F2', { state: 'closed' }), ask('A1', { state: 'dropped' }), ask('A2')),
+      answer(task('F1'), task('F2', { state: 'closed' }), ask('A1', { state: 'dropped' }), ask('A2')),
     );
     await land();
     expect(source('relay').map(entry => [entry.id, entry.muted === true])).toEqual([
@@ -370,10 +370,10 @@ describe('S11 the work search chips, pending line and muted rows', () => {
 
   it('S11 one kind alone shows everything the daemon returned; both kinds together are capped at six each', async () => {
     const { source, pending, pause, land } = harness();
-    const cards = Array.from({ length: 9 }, (_, index) => card(`F${index + 1}`));
+    const tasks = Array.from({ length: 9 }, (_, index) => task(`F${index + 1}`));
     source('relay', { kind: 'card', state: 'everything' });
     pause();
-    pending[0]?.resolve(answer(...cards));
+    pending[0]?.resolve(answer(...tasks));
     await land();
     expect(source('relay', { kind: 'card', state: 'everything' })).toHaveLength(9);
     expect(source('relay', RESTING)).toHaveLength(6);
@@ -426,7 +426,7 @@ describe('S11 the work search rows are named by Projects and Ferrets', () => {
     );
     source('relay');
     pause();
-    pending[0]?.resolve(answer(card('F10'), ask('A3', { ferret: 'f1' }), ask('A4', { ferret: 'stranger' })));
+    pending[0]?.resolve(answer(task('F10'), ask('A3', { ferret: 'f1' }), ask('A4', { ferret: 'stranger' })));
     await land();
     const [named, owned, unowned] = source('relay');
     expect(named?.detail).toBe('Relay');
@@ -444,7 +444,7 @@ describe('S11 the work search rows are named by Projects and Ferrets', () => {
     );
     source('relay');
     pause();
-    pending[0]?.resolve(answer(card('F10')));
+    pending[0]?.resolve(answer(task('F10')));
     await land();
     expect(source('relay')[0]?.detail).toBeUndefined();
     const before = changes();
@@ -463,7 +463,7 @@ describe('S11 the work search rows are named by Projects and Ferrets', () => {
     );
     source('relay');
     pause();
-    pending[0]?.resolve(answer(card('F10')));
+    pending[0]?.resolve(answer(task('F10')));
     await land();
     source('relay');
     source('relay');
@@ -484,7 +484,7 @@ describe('S11 the work search rows are named by Projects and Ferrets', () => {
     );
     source('relay');
     pause();
-    pending[0]?.resolve(answer(card('F10')));
+    pending[0]?.resolve(answer(task('F10')));
     await land();
     source('relay');
     expect(projects.asked.names).toBeGreaterThan(0);
@@ -531,7 +531,7 @@ describe('S11 the work search rows are named by Projects and Ferrets', () => {
       const { source, pending, pause, land } = harness(testHref, appHook);
       source('relay');
       pause();
-      pending[0]?.resolve(answer(card('F10'), card('F11', { project: 'unfiled' }), ask('A3')));
+      pending[0]?.resolve(answer(task('F10'), task('F11', { project: 'unfiled' }), ask('A3')));
       await land();
       const [orphan, unfiled, owned] = source('relay');
       expect(orphan?.detail).toBeUndefined();

@@ -24,7 +24,7 @@ function board(
   options: { failRaise?: () => boolean; failClose?: () => boolean; homeOf?: (ferret: string) => string } = {},
 ) {
   const homeOf = options.homeOf ?? ((ferret: string) => ferret);
-  const cards = new Map<string, { ref: AskRef; open: boolean; draft: AskDraft }>();
+  const tasks = new Map<string, { ref: AskRef; open: boolean; draft: AskDraft }>();
   const raises: AskDraft[] = [];
   const opens: string[] = [];
   const closes: { ref: AskRef; reason: string; entry: string | undefined }[] = [];
@@ -33,26 +33,26 @@ function board(
     raise: async draft => {
       if (options.failRaise?.() === true) throw new Error('asks is down');
       raises.push(draft);
-      const known = cards.get(String(draft.entry));
+      const known = tasks.get(String(draft.entry));
       if (known !== undefined) return known.ref;
       const ref = { ferret: homeOf(draft.ferret ?? ''), id: `A${++next}` } as AskRef;
-      cards.set(String(draft.entry), { ref, open: true, draft });
+      tasks.set(String(draft.entry), { ref, open: true, draft });
       return ref;
     },
     close: async (ref, reason, entry) => {
       if (options.failClose?.() === true) throw new Error('asks is down');
       closes.push({ ref, reason, entry: entry === undefined ? undefined : String(entry) });
-      for (const card of cards.values())
-        if (card.ref.id === ref.id && card.ref.ferret === ref.ferret) card.open = false;
+      for (const task of tasks.values())
+        if (task.ref.id === ref.id && task.ref.ferret === ref.ferret) task.open = false;
     },
     open: async filter => {
       opens.push(String(filter.entry));
-      return [...cards.values()]
-        .filter(card => card.open && (filter.entry === undefined || String(card.draft.entry) === String(filter.entry)))
-        .map(card => ({ ferret: card.ref.ferret, id: card.ref.id }) as AskSummary);
+      return [...tasks.values()]
+        .filter(task => task.open && (filter.entry === undefined || String(task.draft.entry) === String(filter.entry)))
+        .map(task => ({ ferret: task.ref.ferret, id: task.ref.id }) as AskSummary);
     },
   };
-  return { port, raises, closes, opens, open: () => [...cards.values()].filter(card => card.open) };
+  return { port, raises, closes, opens, open: () => [...tasks.values()].filter(task => task.open) };
 }
 
 /** The records in memory, the way the plugin's state dir keeps them: they outlive any one `PromptAsks`. */
@@ -254,7 +254,7 @@ describe('a ferret parked on a prompt', () => {
     expect(asks.open()).toHaveLength(2);
 
     await prompts.sweep([{ id: 'f1', state: 'stopped' }, ...idle('f2')]);
-    expect(asks.open().map(card => card.draft.ferret)).toEqual(['f2']);
+    expect(asks.open().map(task => task.draft.ferret)).toEqual(['f2']);
     expect(store.files.get('f1')).toMatchObject({ waiting: false });
 
     await prompts.sweep([]);

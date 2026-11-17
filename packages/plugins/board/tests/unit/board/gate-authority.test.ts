@@ -1,15 +1,15 @@
 import { describe, it } from 'bun:test';
-import { type Card, CardActionRequestSchema } from '../../../contract/index.ts';
+import { type Task, CardActionRequestSchema } from '../../../contract/index.ts';
 import should from 'should';
 import {
   type BoardCaller,
   BoardError,
   BoardService,
   type BoardStanding,
-  type CardAudience,
+  type TaskAudience,
   mayPassGate,
 } from '../../../daemon/lib/board/index.ts';
-import { card, MemoryBoardStore, world } from './support.ts';
+import { boardTask, MemoryBoardStore, world } from './support.ts';
 
 /**
  * WHO PASSES A GATE (docs/board.md § Cards show progress): the owner always; on an INTERNAL card (a ferret's own
@@ -47,8 +47,8 @@ const CALLERS: Readonly<Record<Exclude<BoardStanding, 'daemon' | 'assignee-lead'
 };
 
 /** An external card is one a person asked for (its ask names the owner); an internal one is `child`'s own errand. */
-const cardFor = (audience: CardAudience, laneId: string): Card =>
-  card({
+const taskFor = (audience: TaskAudience, laneId: string): Task =>
+  boardTask({
     laneId,
     owner: 'child',
     assignee: 'grandchild',
@@ -73,7 +73,7 @@ const MOVES = [
   { kind: 'close', from: 'tested', to: 'closed' },
 ] as const;
 
-const allowed = (standing: BoardStanding, audience: CardAudience, kind: (typeof MOVES)[number]['kind']): boolean => {
+const allowed = (standing: BoardStanding, audience: TaskAudience, kind: (typeof MOVES)[number]['kind']): boolean => {
   if (kind === 'ordinary') return standing !== 'reader';
   return mayPassGate(standing, audience);
 };
@@ -88,7 +88,7 @@ describe('moving a card through a gate, by standing and audience', () => {
         const expected = allowed(standing, audience, move.kind);
         it(`${expected ? 'lets' : 'refuses'} ${standing} on an ${audience} card: ${move.from} → ${move.to}`, async () => {
           // Arrange
-          const store = new MemoryBoardStore([cardFor(audience, move.from)]);
+          const store = new MemoryBoardStore([taskFor(audience, move.from)]);
           const service = new BoardService(world({ store }));
           const request = CardActionRequestSchema.parse({ action: 'move', to: move.to });
 
@@ -114,7 +114,7 @@ describe('moving a card through a gate, by standing and audience', () => {
 
   it('tells a ferret refused at an external gate that the owner is asked in the Inbox', async () => {
     // Arrange
-    const store = new MemoryBoardStore([cardFor('external', 'plan')]);
+    const store = new MemoryBoardStore([taskFor('external', 'plan')]);
     const service = new BoardService(world({ store }));
 
     // Act
@@ -133,7 +133,7 @@ describe('moving a card through a gate, by standing and audience', () => {
 
   it('names the owner ferret and its leads when an internal card’s assignee is refused', async () => {
     // Arrange
-    const store = new MemoryBoardStore([cardFor('internal', 'plan')]);
+    const store = new MemoryBoardStore([taskFor('internal', 'plan')]);
     const service = new BoardService(world({ store }));
 
     // Act
@@ -151,7 +151,7 @@ describe('moving a card through a gate, by standing and audience', () => {
 
   it('keeps a lead’s move of its internal card recorded as the lead’s', async () => {
     // Arrange
-    const store = new MemoryBoardStore([cardFor('internal', 'tested')]);
+    const store = new MemoryBoardStore([taskFor('internal', 'tested')]);
     const service = new BoardService(world({ store }));
 
     // Act
@@ -169,14 +169,14 @@ describe('moving a card through a gate, by standing and audience', () => {
 
 describe('a lead above only the assignee of an internal card', () => {
   // lead > child > grandchild, but the card is owned by `stranger`, who is nobody's descendant.
-  const strangersCard = (laneId: string): Card => ({ ...cardFor('internal', laneId), owner: 'stranger' });
+  const strangersTask = (laneId: string): Task => ({ ...taskFor('internal', laneId), owner: 'stranger' });
   const lead: BoardCaller = { kind: 'ferret', ferret: 'lead' };
 
   it.each(MOVES.filter(move => move.kind !== 'ordinary'))(
     'should be refused the owner ferret’s gate: $from → $to',
     async move => {
       // Arrange
-      const store = new MemoryBoardStore([strangersCard(move.from)]);
+      const store = new MemoryBoardStore([strangersTask(move.from)]);
       const service = new BoardService(world({ store }));
 
       // Act
@@ -196,7 +196,7 @@ describe('a lead above only the assignee of an internal card', () => {
 
   it('should be refused an ordinary move, an edit and a re-plan of it, but may drop it', async () => {
     // Arrange
-    const store = new MemoryBoardStore([strangersCard('implement'), { ...strangersCard('implement'), id: 'F2' }]);
+    const store = new MemoryBoardStore([strangersTask('implement'), { ...strangersTask('implement'), id: 'F2' }]);
     const service = new BoardService(world({ store }));
     const attempt = async (id: string, body: unknown) =>
       await service.act(id, CardActionRequestSchema.parse(body), lead).then(

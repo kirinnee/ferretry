@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { CardEvent, PrLink } from '../../../contract/index.ts';
+import type { TaskEvent, PrLink } from '../../../contract/index.ts';
 
 import {
   activityText,
@@ -17,7 +17,7 @@ import {
   testSteps,
   written,
 } from '../../../app/lib/board-detail.ts';
-import { card, laneSetFor } from './board-support.ts';
+import { boardTask, laneSetFor } from './board-support.ts';
 
 const lanes = laneSetFor();
 const AT = '2026-07-01T10:00:00.000Z';
@@ -121,7 +121,7 @@ describe('history', () => {
   };
   const ferret = { kind: 'ferret', ferret: 'abc' } as const;
   const event = (seq: number, type: string, extra: Record<string, unknown> = {}, actor: unknown = ferret) =>
-    ({ seq, at: AT, actor, type, ...extra }) as unknown as CardEvent;
+    ({ seq, at: AT, actor, type, ...extra }) as unknown as TaskEvent;
   const rowOf = (type: string, extra: Record<string, unknown> = {}) => {
     const [row] = historyRows([event(1, type, extra)], context);
     if (row === undefined) throw new Error('no row');
@@ -297,7 +297,7 @@ describe('written and hasLinks', () => {
   });
 
   it('has links for a PR, a branch, a doc or a release, and none otherwise', () => {
-    const bare = card('F1', {});
+    const bare = boardTask('F1', {});
     expect(hasLinks(bare)).toBe(false);
     const links = bare.links;
     expect(hasLinks({ ...bare, links: { ...links, branch: 'feat/x' } })).toBe(true);

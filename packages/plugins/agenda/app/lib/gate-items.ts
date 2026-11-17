@@ -15,11 +15,11 @@ import {
   type AgendaGate,
   type AgendaItem,
   type BoardReopenAttachments,
-  cardAskOf,
+  taskAskOf,
   gateAnswers,
   gateAskOptions,
   gateReference,
-  openCardAsks,
+  openTaskAsks,
   TEST_KIND_LABEL,
 } from '@ferretry/core-asks/contract';
 import type { InboxAction } from './agenda-answers.ts';
@@ -31,7 +31,7 @@ export type GateItem = AgendaItem & { readonly gate: AgendaGate };
 export const gateOf = (item: AgendaItem): AgendaGate | undefined => (item as Partial<GateItem>).gate;
 
 /** The first open card ask's gate: the one a thread shows its Done / Not good for. */
-export const firstOpenGate = (item: AgendaItem): AgendaGate | undefined => openCardAsks(item)[0]?.gate;
+export const firstOpenGate = (item: AgendaItem): AgendaGate | undefined => openTaskAsks(item)[0]?.gate;
 
 /** Whether a gate item is a plan to approve ("OK to build"), not a card to test. The one place that reads it. */
 export const isPlanGate = (item: Pick<AgendaItem, 'subject'>): boolean => item.subject.startsWith('OK to build');
@@ -54,7 +54,7 @@ export type GateWords = 'required' | 'optional' | 'none';
  */
 const answeredGate = (item: AgendaItem, action: InboxAction): AgendaGate | undefined => {
   if (action.kind !== 'respond' || action.gate !== true) return gateOf(item);
-  const named = action.cardAsk === undefined ? undefined : cardAskOf(item, action.cardAsk)?.gate;
+  const named = action.cardAsk === undefined ? undefined : taskAskOf(item, action.cardAsk)?.gate;
   return named ?? firstOpenGate(item);
 };
 

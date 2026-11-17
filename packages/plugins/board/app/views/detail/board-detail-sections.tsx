@@ -4,7 +4,7 @@
  * renderer (`cardProse`), so references and code read the same everywhere on a card.
  */
 
-import { type CardView, formatCardRef } from '../../../contract/index.ts';
+import { type TaskView, formatTaskRef } from '../../../contract/index.ts';
 import { ExternalLink, GitBranch } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import {
@@ -18,9 +18,9 @@ import {
   testSteps,
 } from '../../lib/board-detail.ts';
 import type { RunningOnMachine } from '../../lib/board-model.ts';
-import { askHeading, type CardAsks } from '../../lib/board-asks.ts';
+import { askHeading, type TaskAsks } from '../../lib/board-asks.ts';
 import { ageLabel, type FerretNames } from '../../lib/board-present.ts';
-import { cardProse, type ProseRenderer } from '../prose.tsx';
+import { taskProse, type ProseRenderer } from '../prose.tsx';
 import { BoardIcon } from '../board-icons.tsx';
 
 export interface DetailSectionProps {
@@ -54,7 +54,7 @@ export function Avatar({ name }: { readonly name: string }) {
 }
 
 export function Prose({ text }: { readonly text: string }) {
-  return <div className="fy-board-detail__prose">{cardProse(text)}</div>;
+  return <div className="fy-board-detail__prose">{taskProse(text)}</div>;
 }
 
 /**
@@ -124,7 +124,7 @@ export function AskSection({
   now,
   onOpenSession,
 }: {
-  readonly task: CardView;
+  readonly task: TaskView;
   readonly names: FerretNames;
   readonly now: number;
   readonly onOpenSession: (sessionId: string) => void;
@@ -132,7 +132,7 @@ export function AskSection({
   const origin = askOrigin(task, names, ageLabel(task.createdAt, now));
   return (
     <>
-      <blockquote className="fy-board-detail__ask">{cardProse(askWords(task.ask.text))}</blockquote>
+      <blockquote className="fy-board-detail__ask">{taskProse(askWords(task.ask.text))}</blockquote>
       <p className="fy-board-detail__quiet" data-kind="ask-origin">
         from {origin.who}
         {origin.via === null ? null : ` via ${origin.via}`}
@@ -163,7 +163,7 @@ export function AskSection({
                     : 'you'}
                 {clarification.by.kind === 'ferret' ? ` (${names(clarification.by.ferret)})` : ''}:{' '}
               </span>
-              <div className="fy-board-detail__clarified">{cardProse(clarification.text)}</div>
+              <div className="fy-board-detail__clarified">{taskProse(clarification.text)}</div>
             </li>
           ))}
         </ul>
@@ -172,7 +172,7 @@ export function AskSection({
   );
 }
 
-export function TermsTable({ terms }: { readonly terms: CardView['terms'] }) {
+export function TermsTable({ terms }: { readonly terms: TaskView['terms'] }) {
   if (terms.length === 0) return <p className="fy-board-detail__quiet">No terms spelled out yet.</p>;
   return (
     <table className="fy-board-detail__terms">
@@ -186,7 +186,7 @@ export function TermsTable({ terms }: { readonly terms: CardView['terms'] }) {
         {terms.map(entry => (
           <tr key={entry.term}>
             <th scope="row">{entry.term}</th>
-            <td>{cardProse(entry.meaning)}</td>
+            <td>{taskProse(entry.meaning)}</td>
           </tr>
         ))}
       </tbody>
@@ -195,7 +195,7 @@ export function TermsTable({ terms }: { readonly terms: CardView['terms'] }) {
 }
 
 export interface ChildLine {
-  readonly task: CardView;
+  readonly task: TaskView;
   readonly laneName: string;
 }
 
@@ -214,7 +214,7 @@ export function ChildrenList({
       {lines.map(({ task, laneName }) => (
         <li key={task.id}>
           <button className="fy-board-detail__link" onClick={() => onOpen(task.id)} type="button">
-            {formatCardRef({ id: task.id })} {task.title}
+            {formatTaskRef({ id: task.id })} {task.title}
           </button>
           <span className="fy-board-detail__quiet">
             {' '}
@@ -227,15 +227,15 @@ export function ChildrenList({
   );
 }
 
-export function DependencyChips({ task, onOpen }: { readonly task: CardView; readonly onOpen: (id: string) => void }) {
-  const waiting = new Set(task.blockedBy.map(ref => formatCardRef(ref)));
+export function DependencyChips({ task, onOpen }: { readonly task: TaskView; readonly onOpen: (id: string) => void }) {
+  const waiting = new Set(task.blockedBy.map(ref => formatTaskRef(ref)));
   if (task.dependsOn.length === 0 && task.blocks.length === 0) return null;
   return (
     <div className="fy-board-detail__chips">
       {task.dependsOn.length === 0 ? null : (
         <fieldset aria-label="Depends on" className="fy-board-detail__chiprow">
           {task.dependsOn.map(dependency => {
-            const label = formatCardRef(dependency.task);
+            const label = formatTaskRef(dependency.task);
             return (
               <span className="fy-board-chip" data-waiting={waiting.has(label) ? '' : undefined} key={label}>
                 <button className="fy-board-chip__open" onClick={() => onOpen(dependency.task.id)} type="button">
@@ -251,9 +251,9 @@ export function DependencyChips({ task, onOpen }: { readonly task: CardView; rea
         <fieldset aria-label="Blocks" className="fy-board-detail__chiprow">
           <span className="fy-board-detail__quiet">Blocks</span>
           {task.blocks.map(ref => (
-            <span className="fy-board-chip" key={formatCardRef(ref)}>
+            <span className="fy-board-chip" key={formatTaskRef(ref)}>
               <button className="fy-board-chip__open" onClick={() => onOpen(ref.id)} type="button">
-                {formatCardRef(ref)}
+                {formatTaskRef(ref)}
               </button>
             </span>
           ))}
@@ -264,7 +264,7 @@ export function DependencyChips({ task, onOpen }: { readonly task: CardView; rea
 }
 
 /** What the card waits on and what waits on it, or one line saying nothing. Read-only: the owner edits no dependency. */
-export function DependsLine({ task, onOpen }: { readonly task: CardView; readonly onOpen: (id: string) => void }) {
+export function DependsLine({ task, onOpen }: { readonly task: TaskView; readonly onOpen: (id: string) => void }) {
   const none = task.dependsOn.length === 0 && task.blocks.length === 0;
   return none ? (
     <p className="fy-board-detail__quiet" data-kind="no-dependencies">
@@ -289,7 +289,7 @@ export function LinksSection({
   task,
   runningOn,
 }: {
-  readonly task: CardView;
+  readonly task: TaskView;
   readonly runningOn: readonly RunningOnMachine[];
 }) {
   const { prs, branch, docs } = task.links;
@@ -348,7 +348,7 @@ export function LinksSection({
 }
 
 /** The icon that says where a PR stands, for the header's one-line meta and the Links list alike. */
-export const prIconName = (pr: CardView['links']['prs'][number]) =>
+export const prIconName = (pr: TaskView['links']['prs'][number]) =>
   pr.state === 'merged'
     ? 'pr-merged'
     : pr.state === 'closed'
@@ -367,7 +367,7 @@ export function HistorySection({
   context,
   now,
 }: {
-  readonly task: CardView;
+  readonly task: TaskView;
   readonly context: HistoryContext;
   readonly now: number;
 }) {
@@ -394,7 +394,7 @@ export function HistorySection({
               {entry.text}
               <span className="fy-board-detail__quiet"> · {ageLabel(entry.at, now) ?? ''}</span>
             </p>
-            {entry.detail === null ? null : <div className="fy-board-detail__detail">{cardProse(entry.detail)}</div>}
+            {entry.detail === null ? null : <div className="fy-board-detail__detail">{taskProse(entry.detail)}</div>}
           </div>
         </li>
       ))}
@@ -411,7 +411,7 @@ export function AsksList({
   names,
   onOpen,
 }: {
-  readonly asks: CardAsks;
+  readonly asks: TaskAsks;
   readonly names: FerretNames;
   /** Open one ask in the Agenda, by the ferret whose agenda holds it. */
   readonly onOpen: (ferret: string, id: string) => void;

@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import {
   type BoardAttachment,
-  type Card,
-  type CardActionRequestInput,
+  type Task,
+  type TaskActionRequestInput,
   CardActionRequestSchema,
 } from '../../../contract/index.ts';
 import should from 'should';
@@ -15,7 +15,7 @@ import {
   ReopenDeliveryLadder,
   type ReopenMessenger,
 } from '../../../daemon/lib/board/index.ts';
-import { card, MemoryBoardStore, NOW, type ServiceWorld, world } from './support.ts';
+import { boardTask, MemoryBoardStore, NOW, type ServiceWorld, world } from './support.ts';
 
 /** "Not good" with pictures: the files the owner sends with a move back reach the card's history and its ferret. */
 
@@ -25,7 +25,7 @@ const ferret = (ferret: string): BoardCaller => ({ kind: 'ferret', ferret });
 const IMAGE = `att_${'a'.repeat(64)}`;
 const SHOT = `att_${'b'.repeat(64)}`;
 
-const action = (input: CardActionRequestInput) => CardActionRequestSchema.parse(input);
+const action = (input: TaskActionRequestInput) => CardActionRequestSchema.parse(input);
 
 /** An attachment store holding `held` in each session, recording what it was asked. */
 class FakeAttachments implements BoardAttachmentSource {
@@ -49,9 +49,9 @@ const FILES: readonly BoardAttachment[] = [
   { id: SHOT, filename: 'after.jpg', mime: 'image/jpeg' },
 ];
 
-const serviceWith = (cards: readonly Card[], overrides: Partial<ServiceWorld> = {}) => {
+const serviceWith = (tasks: readonly Task[], overrides: Partial<ServiceWorld> = {}) => {
   const ports = world({
-    store: new MemoryBoardStore(cards),
+    store: new MemoryBoardStore(tasks),
     attachments: new FakeAttachments({ child: FILES }),
     ...overrides,
   });
@@ -78,7 +78,7 @@ const notGood = (extra: Partial<{ from: string; ids: readonly string[] }> = {}) 
 describe("the owner's move back with files", () => {
   it('should name the files in the reopen and hand them to the delivery', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'tested', assignee: 'child' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'tested', assignee: 'child' })]);
 
     // Act
     const response = await service.act('F1', notGood(), owner);
@@ -97,7 +97,7 @@ describe("the owner's move back with files", () => {
 
   it('should take files on a reopen request too', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'tested', assignee: 'child' })], {
+    const { ports, service } = serviceWith([boardTask({ laneId: 'tested', assignee: 'child' })], {
       attachments: new FakeAttachments({ lead: FILES }),
     });
 
@@ -120,7 +120,7 @@ describe("the owner's move back with files", () => {
 
   it('should keep a reopen with no files exactly as before', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'tested', assignee: 'child' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'tested', assignee: 'child' })]);
 
     // Act
     await service.act('F1', action({ action: 'move', to: 'implement', reason: 'no' }), owner);
@@ -133,7 +133,9 @@ describe("the owner's move back with files", () => {
   it('should refuse files from anybody but the owner, before reading the store', async () => {
     // Arrange
     const store = new FakeAttachments({ child: FILES });
-    const { ports, service } = serviceWith([card({ laneId: 'tested', assignee: 'child' })], { attachments: store });
+    const { ports, service } = serviceWith([boardTask({ laneId: 'tested', assignee: 'child' })], {
+      attachments: store,
+    });
 
     // Act
     const error = await refusal(service.act('F1', notGood(), ferret('lead')));
@@ -148,7 +150,7 @@ describe("the owner's move back with files", () => {
   it("should refuse files uploaded anywhere but the card's assignee or owner ferret", async () => {
     // Arrange
     const store = new FakeAttachments({ stranger: FILES });
-    const { service } = serviceWith([card({ laneId: 'tested', assignee: 'child' })], { attachments: store });
+    const { service } = serviceWith([boardTask({ laneId: 'tested', assignee: 'child' })], { attachments: store });
 
     // Act
     const error = await refusal(service.act('F1', notGood({ from: 'stranger' }), owner));
@@ -161,7 +163,7 @@ describe("the owner's move back with files", () => {
 
   it('should refuse a file the session does not hold, and write nothing', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'tested', assignee: 'child' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'tested', assignee: 'child' })]);
 
     // Act
     const error = await refusal(service.act('F1', notGood({ ids: [`att_${'c'.repeat(64)}`] }), owner));
@@ -180,7 +182,7 @@ describe("the owner's move back with files", () => {
         throw 'disk gone';
       },
     };
-    const { service } = serviceWith([card({ laneId: 'tested', assignee: 'child' })], { attachments: odd });
+    const { service } = serviceWith([boardTask({ laneId: 'tested', assignee: 'child' })], { attachments: odd });
 
     // Act
     const error = await refusal(service.act('F1', notGood(), owner));
@@ -191,7 +193,7 @@ describe("the owner's move back with files", () => {
 
   it('should refuse files on a daemon built without the attachment store', async () => {
     // Arrange
-    const ports = world({ store: new MemoryBoardStore([card({ laneId: 'tested', assignee: 'child' })]) });
+    const ports = world({ store: new MemoryBoardStore([boardTask({ laneId: 'tested', assignee: 'child' })]) });
     const service = new BoardService(ports);
 
     // Act
@@ -203,7 +205,7 @@ describe("the owner's move back with files", () => {
 
   it('should refuse files on a move that sends nothing back', async () => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'implement', assignee: 'child' })]);
+    const { ports, service } = serviceWith([boardTask({ laneId: 'implement', assignee: 'child' })]);
 
     // Act
     const error = await refusal(
@@ -234,7 +236,7 @@ describe('delivering a reopen with files', () => {
     const messenger = new Messenger({ lead: 'delivered' });
     const ladder = new ReopenDeliveryLadder(messenger, { warn: () => undefined });
     const files = { from: 'child', ids: [IMAGE] };
-    const task = card({
+    const task = boardTask({
       id: 'F7',
       laneId: 'implement',
       assignee: 'child',

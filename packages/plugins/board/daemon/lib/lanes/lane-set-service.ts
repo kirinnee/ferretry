@@ -7,7 +7,7 @@
  */
 import { err, ok, type Result } from '@ferretry/std';
 import { type BoardProjectId, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
-import { laneChangeCard, laneProposalCard } from './lane-proposal-task.ts';
+import { laneChangeTask, laneProposalTask } from './lane-proposal-task.ts';
 import {
   decideLaneChange,
   type LaneActor,
@@ -18,7 +18,7 @@ import {
 import { ancestorsOf, type FerretParents } from './lineage.ts';
 import { laneProposalReference, type LaneSet, type LaneSetActionRequest } from './model.ts';
 import type {
-  CardRelocator,
+  TaskRelocator,
   LaneProposalAsks,
   LaneSetSource,
   LaneSetStore,
@@ -52,7 +52,7 @@ export class LaneSetService implements LaneSetSource {
     private readonly registry: ProjectRegistry,
     private readonly ferrets: Pick<FerretProjects, 'projectOf'>,
     private readonly asks: LaneProposalAsks,
-    private readonly relocator: CardRelocator,
+    private readonly relocator: TaskRelocator,
     /** Who started whom, so a lead may replace its own ferret's waiting proposal. Absent, only that ferret may. */
     private readonly parents?: FerretParents,
   ) {}
@@ -127,7 +127,7 @@ export class LaneSetService implements LaneSetSource {
       await this.asks.raise(
         actor.ferretId,
         laneProposalReference(projectId, pending?.version ?? laneSet.version),
-        pending === undefined ? laneProposalCard(board.name, laneSet) : laneChangeCard(board.name, laneSet, pending),
+        pending === undefined ? laneProposalTask(board.name, laneSet) : laneChangeTask(board.name, laneSet, pending),
       );
       return ok({ laneSet, ask: 'raised' });
     } catch {

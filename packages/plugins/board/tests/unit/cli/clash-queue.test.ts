@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { BoardMergeGateResponse, CardEvent, CardResponse } from '../../../contract/index.ts';
+import type { BoardMergeGateResponse, TaskEvent, TaskResponse } from '../../../contract/index.ts';
 import should from 'should';
 import { BoardController } from '../../../cli/lib/board-controller.ts';
 import { queuedLines } from '../../../cli/lib/clash-notes.ts';
@@ -10,16 +10,16 @@ import {
   mergeGateLines,
 } from '../../../cli/lib/merge-gate.ts';
 import type { BoardGateway } from '../../../cli/lib/ports.ts';
-import { AT, card, DENISHA, directory, laneSet, listing, response, cardResponse } from './fixtures.ts';
+import { AT, boardTask, DENISHA, directory, laneSet, listing, response, taskResponse } from './fixtures.ts';
 
 const PR = 'https://github.com/kirinnee/ferretry/pull/42';
 const QUEUED =
   'queued behind &F18 to merge: both claim knip.json. It can be built now; its PR merges after &F18 ships.';
 
-const event = (seq: number, rest: Record<string, unknown>): CardEvent =>
-  ({ seq, at: AT, actor: { kind: 'ferret', name: DENISHA, ferret: DENISHA }, ...rest }) as CardEvent;
-const daemonNote = (seq: number, text: string): CardEvent =>
-  ({ seq, at: AT, actor: { kind: 'daemon' }, type: 'note', text }) as CardEvent;
+const event = (seq: number, rest: Record<string, unknown>): TaskEvent =>
+  ({ seq, at: AT, actor: { kind: 'ferret', name: DENISHA, ferret: DENISHA }, ...rest }) as TaskEvent;
+const daemonNote = (seq: number, text: string): TaskEvent =>
+  ({ seq, at: AT, actor: { kind: 'daemon' }, type: 'note', text }) as TaskEvent;
 
 class Io {
   readonly reports: string[] = [];
@@ -148,7 +148,7 @@ describe('checkMergeGate', () => {
 describe('fy task file prints the queue', () => {
   it('should say which card a clashing claim queued this one behind', async () => {
     // Arrange
-    const queued = card({
+    const queued = boardTask({
       history: [
         event(1, { type: 'created', laneId: 'todo' }),
         event(2, { type: 'file-claimed', path: 'knip.json' }),
@@ -157,9 +157,9 @@ describe('fy task file prints the queue', () => {
     });
     const gateway: BoardGateway = {
       board: async () => response(),
-      card: async () => cardResponse(),
-      create: async () => cardResponse(),
-      act: async (): Promise<CardResponse> => cardResponse(queued, laneSet()),
+      card: async () => taskResponse(),
+      create: async () => taskResponse(),
+      act: async (): Promise<TaskResponse> => taskResponse(queued, laneSet()),
       skip: async () => ({ ferret: DENISHA, skip: { reason: 'x', at: AT } }),
       projects: async () => listing(),
       ferrets: async () => directory,

@@ -12,9 +12,9 @@
 
 import type { LaneCategory } from '../../contract/index.ts';
 import { inDateRange } from './board-model.ts';
-import { groupUnderHuman, type HumanCard, humanScope } from './board-human.ts';
+import { groupUnderHuman, type HumanTask, humanScope } from './board-human.ts';
 import { ageLabel } from './board-present.ts';
-import type { BoardCardOf, BoardListRow } from './board-view.ts';
+import type { BoardTaskOf, BoardListRow } from './board-view.ts';
 
 export const SUMMARY_WINDOWS = ['today', '7d'] as const;
 export type SummaryWindow = (typeof SUMMARY_WINDOWS)[number];
@@ -55,8 +55,8 @@ export const SUMMARY_SECTIONS: Readonly<Record<SummarySectionId, SectionMeta>> =
 };
 
 /** A row of the summary: the card, where it sits, and when it last mattered. */
-export interface SummaryRow extends HumanCard {
-  readonly card: BoardCardOf;
+export interface SummaryRow extends HumanTask {
+  readonly card: BoardTaskOf;
   readonly row: BoardListRow;
   readonly section: SummarySectionId;
   /** The instant the row is ordered by and the window counts from. */
@@ -81,55 +81,55 @@ export const agoLabel = (instant: string | null, now: number): string | null => 
 };
 
 /** Which section a card belongs to; `null` for a card that is not part of the story (backlog, closed, unplaced). */
-export const sectionOf = (card: BoardCardOf, category: LaneCategory | null): SummarySectionId | null => {
+export const sectionOf = (task: BoardTaskOf, category: LaneCategory | null): SummarySectionId | null => {
   if (category === null) return null;
   if (isActionCategory(category)) return 'to-test';
   if (category === 'active' || category === 'review') return 'working';
-  if (category === 'shipped') return card.task.shippedIn === null ? 'merged' : 'released';
+  if (category === 'shipped') return task.task.shippedIn === null ? 'merged' : 'released';
   return null;
 };
 
-const mergedAt = (card: BoardCardOf): string | null => {
-  const merged = card.task.links.prs
+const mergedAt = (task: BoardTaskOf): string | null => {
+  const merged = task.task.links.prs
     .filter(pr => pr.state === 'merged' && pr.mergedAt !== null)
     .map(pr => pr.mergedAt ?? '')
     .sort();
   return merged[merged.length - 1] ?? null;
 };
 
-const touchedAt = (card: BoardCardOf): string => card.task.lastTouchedAt ?? card.task.createdAt;
+const touchedAt = (task: BoardTaskOf): string => task.task.lastTouchedAt ?? task.task.createdAt;
 
-const releasedText = (card: BoardCardOf, now: number): string => {
-  const shipped = card.task.shippedIn;
+const releasedText = (task: BoardTaskOf, now: number): string => {
+  const shipped = task.task.shippedIn;
   const ago = agoLabel(shipped?.at ?? null, now);
   const base = shipped === null ? 'released' : `released in ${shipped.version}`;
   return ago === null ? base : `${base} · ${ago}`;
 };
 
-const whenOf = (section: SummarySectionId, card: BoardCardOf, at: string | null, now: number): string => {
+const whenOf = (section: SummarySectionId, task: BoardTaskOf, at: string | null, now: number): string => {
   const ago = agoLabel(at, now);
   switch (section) {
     case 'to-test':
-      return card.task.shippedIn === null ? 'ready to test' : releasedText(card, now);
+      return task.task.shippedIn === null ? 'ready to test' : releasedText(task, now);
     case 'released':
-      return releasedText(card, now);
+      return releasedText(task, now);
     case 'merged':
       return ago === null ? 'merged' : `merged ${ago}`;
     case 'working':
-      if (card.task.activity === 'active') return 'working now';
-      return ago === null ? card.task.activity : `${card.task.activity} · touched ${ago}`;
+      if (task.task.activity === 'active') return 'working now';
+      return ago === null ? task.task.activity : `${task.task.activity} · touched ${ago}`;
   }
 };
 
-const atOf = (section: SummarySectionId, card: BoardCardOf): string | null => {
+const atOf = (section: SummarySectionId, task: BoardTaskOf): string | null => {
   switch (section) {
     case 'to-test':
     case 'released':
-      return card.task.shippedIn?.at ?? touchedAt(card);
+      return task.task.shippedIn?.at ?? touchedAt(task);
     case 'merged':
-      return mergedAt(card) ?? touchedAt(card);
+      return mergedAt(task) ?? touchedAt(task);
     case 'working':
-      return touchedAt(card);
+      return touchedAt(task);
   }
 };
 

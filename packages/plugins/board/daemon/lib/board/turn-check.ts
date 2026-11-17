@@ -1,4 +1,4 @@
-import type { BoardSkip, CardResponse, CardRef } from '../../../contract/index.ts';
+import type { BoardSkip, TaskResponse, TaskRef } from '../../../contract/index.ts';
 import type { TranscriptEvent } from './transcript-events.ts';
 import { BoardError } from './errors.ts';
 
@@ -107,7 +107,7 @@ export const boardCheckSendId = (ferret: string, now: number): string =>
   `board-check-${ferret}-${Math.floor(now / BOARD_CHECK_INTERVAL_MS)}`;
 
 /** Whether a card is still being worked: in a lane that is not `closed`, and not dropped. */
-export const isOpenCard = (response: CardResponse): boolean => {
+export const isOpenTask = (response: TaskResponse): boolean => {
   if (response.card.dropped !== null) return false;
   const lane = response.laneSet?.lanes.find(candidate => candidate.id === response.card.laneId);
   return lane !== undefined && lane.category !== 'closed';
@@ -123,11 +123,11 @@ export interface BoardTurnCheckPorts {
   readonly tail: (ferret: string, limit: number) => Promise<readonly TranscriptEvent[]>;
   /** The session's focus card and standing skip (`config.focusCard`, `config.boardSkip`). */
   readonly focus: {
-    focusOf(ferret: string): Promise<CardRef | null>;
+    focusOf(ferret: string): Promise<TaskRef | null>;
     skipOf(ferret: string): Promise<BoardSkip | null>;
   };
   /** One card with its board's lanes; a card that is gone is refused `not-found`. */
-  readonly card: (ref: CardRef) => Promise<CardResponse>;
+  readonly card: (ref: TaskRef) => Promise<TaskResponse>;
   /** The ordinary send; the same id twice is one message. */
   readonly send: (ferret: string, sendId: string, message: string) => Promise<void>;
   /** Journals that a nudge went out, with the work it saw. */
@@ -168,7 +168,7 @@ export class BoardTurnCheck {
     const focus = await this.ports.focus.focusOf(ferret);
     if (focus === null) return false;
     try {
-      return isOpenCard(await this.ports.card(focus));
+      return isOpenTask(await this.ports.card(focus));
     } catch (error) {
       if (error instanceof BoardError && error.code === 'not-found') return false;
       throw error;

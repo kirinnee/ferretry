@@ -1,10 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
-import type { Card } from '../../../contract/index.ts';
+import type { Task } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
-import { as, boot, makeCard, TEST_IDENTITY } from '../../integration/daemon/harness.ts';
-import { card, PROJECT } from './support.ts';
+import { as, boot, makeTask, TEST_IDENTITY } from '../../integration/daemon/harness.ts';
+import { boardTask, PROJECT } from './support.ts';
 
 /**
  * The busy-daemon fix, held at the PRODUCTION wiring (`assemble`, the way the daemon builds it): the board's gate list
@@ -12,7 +12,7 @@ import { card, PROJECT } from './support.ts';
  * ledger read goes through, so a board of N cards reading its ledgers once per card is a number, not a feeling.
  */
 
-const CARDS = 3000;
+const TASKS = 3000;
 const FERRETS = 20;
 
 /**
@@ -47,30 +47,32 @@ const seed = async (
   host: Awaited<ReturnType<typeof boot>>['host'],
   ferrets: number,
   gated = 0,
-): Promise<readonly Card[]> => {
+): Promise<readonly Task[]> => {
   const state = host.state('board').port(manifest.data.state);
   const def = manifest.data.state.find(file => file.name === 'cards');
   if (def === undefined) throw new Error('Board declares no cards file');
-  const cards = Array.from({ length: CARDS }, (_, i) => {
+  const tasks = Array.from({ length: TASKS }, (_, i) => {
     const base = {
       id: `F${i + 1}`,
       machineId: TEST_IDENTITY.daemonId,
-      projectId: (i < gated ? 'unfiled' : PROJECT) as Card['projectId'],
+      projectId: (i < gated ? 'unfiled' : PROJECT) as Task['projectId'],
       owner: `ferret-${i % ferrets}`,
       assignee: `ferret-${(i + 1) % ferrets}`,
     };
     return i >= gated
-      ? card(base)
-      : card({
+      ? boardTask(base)
+      : boardTask({
           ...base,
           laneId: 'to-test',
           summary: `Gate card ${String(i + 1)}`,
           howToTest: '1. Open the Inbox\n2. Answer the card',
-          history: [{ seq: 1, at: card().createdAt, actor: card().createdBy, type: 'created', laneId: 'to-test' }],
+          history: [
+            { seq: 1, at: boardTask().createdAt, actor: boardTask().createdBy, type: 'created', laneId: 'to-test' },
+          ],
         });
   });
-  for (const each of cards) await state.write(def as never, each as never, each.id);
-  return cards;
+  for (const each of tasks) await state.write(def as never, each as never, each.id);
+  return tasks;
 };
 
 describe('the board gate list through the real wiring (G1)', () => {
@@ -78,10 +80,10 @@ describe('the board gate list through the real wiring (G1)', () => {
     // Arrange: the daemon's own Board half over a counting Asks, with 3000 cards on disk, 5 of them at a gate
     const { asks, calls } = counting();
     const world = await boot({ asks });
-    const cards = await seed(world.host, FERRETS, 5);
+    const tasks = await seed(world.host, FERRETS, 5);
     const job = world.jobs.get('board-gates');
     if (job === undefined) throw new Error('Board registers no board-gates job');
-    should(cards).have.length(CARDS);
+    should(tasks).have.length(TASKS);
 
     // Act: the gate reconcile, whose card list is `gateBoard.cards()`
     await job.run(new AbortController().signal);
@@ -119,7 +121,7 @@ describe('the board sweep reads the board afresh on every pass (G3)', () => {
     const world = await boot({ asks });
     const job = world.jobs.get('board-sweep');
     if (job === undefined) throw new Error('Board registers no board-sweep job');
-    const made = await makeCard(world.host, { howToTest: 'Open the badge and look at its colour.' });
+    const made = await makeTask(world.host, { howToTest: 'Open the badge and look at its colour.' });
     const move = async (to: string) =>
       await world.host.request('POST', `/v1/board/tasks/${made.id}`, {
         body: { action: 'move', to, reason: 'for the test' },

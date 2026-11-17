@@ -1,6 +1,6 @@
 import { render } from '@ferretry/app/testing';
 import { describe, expect, it } from 'bun:test';
-import { FyRenderCardEmbed } from '../../../../app/render/fy-render-task-embed.tsx';
+import { FyRenderTaskEmbed } from '../../../../app/render/fy-render-task-embed.tsx';
 import { type FyRenderParsedBlock, isFyRenderEmbedBlock, parseFyRender } from '../../../../app/render/fy-render.ts';
 
 /**
@@ -21,7 +21,7 @@ const blockOf = (type: 'task' | 'board', payload: string) => {
 
 describe('FyRenderCardEmbed: a task', () => {
   it('names the group for what it shows and holds one row for the task', () => {
-    const tree = render(<FyRenderCardEmbed block={blockOf('task', '&F12')} host={host} />);
+    const tree = render(<FyRenderTaskEmbed block={blockOf('task', '&F12')} host={host} />);
     const group = tree.root.findByProps({ 'data-fy-card-embed': 'task' });
     expect(group.props.role).toBe('group');
     expect(group.props['aria-label']).toBe('Live work');
@@ -29,7 +29,7 @@ describe('FyRenderCardEmbed: a task', () => {
   });
 
   it('keeps the written reference as text when no Board renderer is mounted, never as a link', () => {
-    const tree = render(<FyRenderCardEmbed block={blockOf('task', '&F12')} host={host} />);
+    const tree = render(<FyRenderTaskEmbed block={blockOf('task', '&F12')} host={host} />);
     expect(tree.root.findAllByType('a')).toHaveLength(0);
     expect(JSON.stringify(tree.toJSON())).toContain('F12');
   });
@@ -37,7 +37,7 @@ describe('FyRenderCardEmbed: a task', () => {
 
 describe('FyRenderCardEmbed: a board', () => {
   it('holds one row per listed card', () => {
-    const tree = render(<FyRenderCardEmbed block={blockOf('board', '&F1 &F2 &F3')} host={host} />);
+    const tree = render(<FyRenderTaskEmbed block={blockOf('board', '&F1 &F2 &F3')} host={host} />);
     expect(tree.root.findAllByProps({ 'data-fy-card-embed': 'board' })).toHaveLength(1);
     expect(tree.root.findAllByProps({ 'data-fy-card-embed-card': 'F2' })).toHaveLength(1);
     expect(
@@ -46,7 +46,7 @@ describe('FyRenderCardEmbed: a board', () => {
   });
 
   it('says whose cards a parent block names, with the parent as the way in', () => {
-    const tree = render(<FyRenderCardEmbed block={blockOf('board', 'parent: &F7')} host={host} />);
+    const tree = render(<FyRenderTaskEmbed block={blockOf('board', 'parent: &F7')} host={host} />);
     expect(tree.root.findAllByProps({ 'data-fy-card-embed-note': 'F7' })).toHaveLength(1);
     expect(tree.root.findAllByProps({ 'data-fy-card-embed-card': 'F7' })).toHaveLength(1);
   });

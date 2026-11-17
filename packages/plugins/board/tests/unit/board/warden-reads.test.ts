@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import { ferretId } from '@ferretry/core-ferrets/contract/testing';
-import { BoardPort, CardCreateRequestSchema, type CardCreateRequestInput } from '../../../contract/index.ts';
+import { BoardPort, CardCreateRequestSchema, type TaskCreateRequestInput } from '../../../contract/index.ts';
 import { boardConformance } from '../../../contract/testing/index.ts';
 import manifest from '../../../manifest.ts';
 import { boot, TEST_IDENTITY } from '../../integration/daemon/harness.ts';
@@ -12,7 +12,7 @@ import { boot, TEST_IDENTITY } from '../../integration/daemon/harness.ts';
  */
 
 const PERSON_ASK = { text: 'make the badge green', source: 'owner (board)' } as const;
-const create = (input: Partial<CardCreateRequestInput> = {}) =>
+const create = (input: Partial<TaskCreateRequestInput> = {}) =>
   CardCreateRequestSchema.parse({ kind: 'feature', title: 'Badge colour', ask: PERSON_ASK, assignee: 'f1', ...input });
 
 const FOCUS = manifest.data.state.find(file => file.name === 'focus');
@@ -24,7 +24,7 @@ boardConformance('the real Board daemon half', async () => (await boot()).host.p
 const world = async () => {
   const { host, ferrets } = await boot();
   const board = host.provided(BoardPort);
-  const made = async (by: 'owner' | FerretId, input: Partial<CardCreateRequestInput> = {}) => {
+  const made = async (by: 'owner' | FerretId, input: Partial<TaskCreateRequestInput> = {}) => {
     const result = await board.create(by, create(input));
     if (!result.ok) throw new Error(`create refused: ${result.error.message}`);
     return result.value;
@@ -36,7 +36,7 @@ const world = async () => {
       JSON.stringify({
         format: 1,
         ferrets: Object.fromEntries(
-          Object.entries(entries).map(([ferret, card]) => [ferret, { card, anchor: null, skip: null }]),
+          Object.entries(entries).map(([ferret, task]) => [ferret, { card: task, anchor: null, skip: null }]),
         ),
       }),
     );
@@ -51,13 +51,13 @@ describe('BoardApi.laneSets', () => {
     expect(await board.laneSets()).toEqual([]);
 
     // Act
-    const card = await made('owner');
+    const task = await made('owner');
     const sets = await board.laneSets();
 
     // Assert
     expect(sets).toHaveLength(1);
-    expect(sets[0]?.projectId).toBe(card.projectId);
-    expect(sets[0]?.lanes.some(lane => lane.id === card.laneId)).toBe(true);
+    expect(sets[0]?.projectId).toBe(task.projectId);
+    expect(sets[0]?.lanes.some(lane => lane.id === task.laneId)).toBe(true);
   });
 });
 
@@ -76,7 +76,7 @@ describe('BoardApi.cardsPage', () => {
     expect(first.nextCursor).not.toBeNull();
     expect(second.cards).toHaveLength(1);
     expect(second.nextCursor).toBeNull();
-    expect(new Set([...first.cards, ...second.cards].map(card => card.id)).size).toBe(3);
+    expect(new Set([...first.cards, ...second.cards].map(task => task.id)).size).toBe(3);
   });
 
   test('the whole read still agrees with `cards`', async () => {
@@ -95,22 +95,22 @@ describe('BoardApi.focusOf', () => {
   test('is the card a ferret works on, in full', async () => {
     // Arrange
     const { board, made, plantFocus } = await world();
-    const card = await made('owner');
-    plantFocus({ f1: { id: card.id } });
+    const task = await made('owner');
+    plantFocus({ f1: { id: task.id } });
 
     // Act
     const focus = await board.focusOf(f1);
 
     // Assert
-    expect(focus?.card.id).toBe(card.id);
+    expect(focus?.card.id).toBe(task.id);
     expect(focus?.card.title).toBe('Badge colour');
   });
 
   test('comes with the lane set of the card’s board, as the card read does', async () => {
     // Arrange
     const { board, made, plantFocus } = await world();
-    const card = await made('owner');
-    plantFocus({ f1: { id: card.id } });
+    const task = await made('owner');
+    plantFocus({ f1: { id: task.id } });
 
     // Act
     const focus = await board.focusOf(f1);
@@ -118,21 +118,21 @@ describe('BoardApi.focusOf', () => {
 
     // Assert
     expect(focus?.laneSet).not.toBeNull();
-    expect(focus?.laneSet).toEqual(sets.find(set => set.projectId === card.projectId));
+    expect(focus?.laneSet).toEqual(sets.find(set => set.projectId === task.projectId));
   });
 
   test('a ferret that wrote to a card is focused on it', async () => {
     // Arrange
     const { board, made } = await world();
-    const card = await made('owner');
+    const task = await made('owner');
     expect(await board.focusOf(f1)).toBeUndefined();
 
     // Act
-    const wrote = await board.progress(f1, card.id, { now: 'colouring' });
+    const wrote = await board.progress(f1, task.id, { now: 'colouring' });
     expect(wrote.ok).toBe(true);
 
     // Assert
-    expect((await board.focusOf(f1))?.card.id).toBe(card.id);
+    expect((await board.focusOf(f1))?.card.id).toBe(task.id);
   });
 
   test('a ferret with no focus gets none', async () => {
@@ -146,32 +146,32 @@ describe('BoardApi.focusOf', () => {
   test('a private card is answered to its own ferret’s focus, as the resume brief always did', async () => {
     // Arrange: the owner makes the card private
     const { board, made, plantFocus } = await world();
-    const card = await made('owner');
-    const hidden = await board.act('owner', card.id, { action: 'visibility', visibility: 'private' });
+    const task = await made('owner');
+    const hidden = await board.act('owner', task.id, { action: 'visibility', visibility: 'private' });
     expect(hidden.ok).toBe(true);
-    plantFocus({ f1: { id: card.id } });
+    plantFocus({ f1: { id: task.id } });
 
     // Act
     const focus = await board.focusOf(f1);
 
     // Assert
-    expect(focus?.card.id).toBe(card.id);
+    expect(focus?.card.id).toBe(task.id);
     expect(focus?.card.visibility).toBe('private');
   });
 
   test('a card of another machine, or one that is gone, is not answered', async () => {
     // Arrange
     const { board, made, plantFocus } = await world();
-    const card = await made('owner');
+    const task = await made('owner');
 
     // Act / Assert
-    plantFocus({ f1: { id: card.id, machineId: 'fy_daemon_someone-else' } });
+    plantFocus({ f1: { id: task.id, machineId: 'fy_daemon_someone-else' } });
     expect(await board.focusOf(f1)).toBeUndefined();
     plantFocus({ f1: { id: 'F999' } });
     expect(await board.focusOf(f1)).toBeUndefined();
     // …and this machine's own id still answers.
-    plantFocus({ f1: { id: card.id, machineId: TEST_IDENTITY.daemonId } });
-    expect((await board.focusOf(f1))?.card.id).toBe(card.id);
+    plantFocus({ f1: { id: task.id, machineId: TEST_IDENTITY.daemonId } });
+    expect((await board.focusOf(f1))?.card.id).toBe(task.id);
   });
 });
 
@@ -188,9 +188,9 @@ describe('BoardApi.orphanedCards', () => {
     const read = await board.orphanedCards();
 
     // Assert
-    expect(read.cards.map(card => card.id)).toEqual([ended.id]);
-    expect(read.cards.every(card => card.activity === 'orphaned')).toBe(true);
-    expect(read.cards.map(card => card.id)).not.toContain(live.id);
+    expect(read.cards.map(task => task.id)).toEqual([ended.id]);
+    expect(read.cards.every(task => task.activity === 'orphaned')).toBe(true);
+    expect(read.cards.map(task => task.id)).not.toContain(live.id);
     expect(read.laneSets.map(set => set.projectId)).toEqual([ended.projectId]);
   });
 

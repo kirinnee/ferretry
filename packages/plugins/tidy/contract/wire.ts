@@ -12,11 +12,11 @@ import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 /** A card's id as Board mints it (`B12`, `F412`, `I3`, `C9`); Tidy reads it, never makes one. */
 export const TidyCardIdSchema = z.string().regex(/^[BFIC][1-9][0-9]{0,8}$/u);
-export type TidyCardId = z.infer<typeof TidyCardIdSchema>;
+export type TidyTaskId = z.infer<typeof TidyCardIdSchema>;
 
 /** Why a card is kept. */
 export const TidyCardKeepCodeSchema = z.enum(['owner-asked', 'board-on', 'assigned-to-live-ferret', 'waiting-at-gate']);
-export type TidyCardKeepCode = z.infer<typeof TidyCardKeepCodeSchema>;
+export type TidyTaskKeepCode = z.infer<typeof TidyCardKeepCodeSchema>;
 
 /** Why an ask is kept. */
 export const TidyAskKeepCodeSchema = z.enum(['gate', 'not-yours', 'owner-replying', 'needs-owner']);

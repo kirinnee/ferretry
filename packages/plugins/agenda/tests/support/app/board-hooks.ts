@@ -3,7 +3,7 @@
  * suite hands Agenda's ask surfaces to prove they are wired to the hook, with every call recorded. Which lane a Done
  * moves a card into is Board's rule (tested in Board); these only answer.
  */
-import type { AgendaCardAnswer, AgendaCardReference, AgendaCardView } from '../../../contract/app-hooks.ts';
+import type { AgendaTaskAnswer, AgendaTaskReference, AgendaCardView } from '../../../contract/app-hooks.ts';
 
 /** One card on the board, every call recorded. A card in lane `closed` reads as already closed. */
 export const fakeAnswer = (laneId = 'tested') => {
@@ -14,7 +14,7 @@ export const fakeAnswer = (laneId = 'tested') => {
     title: 'Pair a second phone',
     closed: laneId === 'closed',
   };
-  const answer: AgendaCardAnswer = {
+  const answer: AgendaTaskAnswer = {
     subscribe: () => () => undefined,
     watch: card => {
       calls.push(`watch:${card}`);
@@ -38,7 +38,7 @@ export const fakeAnswer = (laneId = 'tested') => {
 };
 
 /** `F12` is this machine's card, nothing else is. */
-export const fakeReference = (): AgendaCardReference & { readonly watched: string[] } => {
+export const fakeReference = (): AgendaTaskReference & { readonly watched: string[] } => {
   const watched: string[] = [];
   const proves = (id: string) => id.toUpperCase() === 'F12';
   return {

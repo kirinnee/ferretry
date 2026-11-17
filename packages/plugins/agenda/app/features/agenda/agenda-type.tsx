@@ -5,7 +5,7 @@
  * what it asks.
  */
 
-import { AGENDA_KIND_LABELS, agendaCardKind, type AgendaItem, type AgendaKind } from '@ferretry/core-asks/contract';
+import { AGENDA_KIND_LABELS, agendaTaskKind, type AgendaItem, type AgendaKind } from '@ferretry/core-asks/contract';
 import { gateVerb, gateOf } from '../../lib/gate-items.ts';
 
 type AgendaTypeTone = 'decision' | 'approval' | 'todo' | 'review' | 'note' | 'reply';
@@ -29,7 +29,7 @@ const TONES: Readonly<Record<AgendaKind, AgendaTypeTone>> = {
 };
 
 export const agendaTypeMeta = (item: AgendaItem): AgendaTypeMeta => {
-  const kind = agendaCardKind(item);
+  const kind = agendaTaskKind(item);
   const label = gateOf(item) === undefined ? AGENDA_KIND_LABELS[kind] : gateVerb(item);
   return { kind, tone: TONES[kind], label };
 };

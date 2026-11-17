@@ -8,7 +8,7 @@ import type { ScreenProps } from '@ferretry/kernel/manifest';
 import { MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
 import { useCallback } from 'react';
 import { useAgendaReferenceFacts } from '../hooks/use-agenda-reference-facts.ts';
-import { AgendaBoardProviders, useAgendaBoardHooks, useCardBoards } from '../features/agenda/agenda-board-hooks.tsx';
+import { AgendaBoardProviders, useAgendaBoardHooks, useTaskBoards } from '../features/agenda/agenda-board-hooks.tsx';
 import { AgendaCardConversation } from '../features/agenda/agenda-conversation-slot.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { useAskFocus } from '../features/agenda/use-ask-focus.ts';
@@ -36,7 +36,7 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
     const references = useAgendaReferenceFacts(runtime, go);
     // Board's hooks per OPEN CARD's machine (the Inbox is every machine's): Done · closes, a notice's Start and Close,
     // Edit's lane editor and `&F12` proof. Each strips the page's proofs before it adds its own machine's.
-    const { laneEditor, cardBoard } = useCardBoards(go);
+    const { laneEditor, cardBoard: taskBoard } = useTaskBoards(go);
     // Told on the OPENED CARD's machine (it may be another machine's, from the fleet Inbox), never the page's.
     const itemOpened = useItemOpened({ daemon, client: runtime.client }, fleet);
     const inbox = useRuntimeInbox(runtime, laneEditor, fleet);
@@ -49,7 +49,7 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
           <AgendaInboxContext.Provider value={inbox}>
             {itemOpened.host}
             <AgendaInboxPage
-              cardBoard={cardBoard}
+              cardBoard={taskBoard}
               inbox={inbox}
               phone={phone}
               clearPort={runtime.clearPort}

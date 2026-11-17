@@ -16,7 +16,7 @@
  * buttons stay, so the owner can try the other one.
  */
 
-import { type AgendaCardRow, type BoardTaskIdSchema, formatTaskRef } from '@ferretry/core-asks/contract';
+import { type AgendaTaskRow, type BoardTaskIdSchema, formatTaskRef } from '@ferretry/core-asks/contract';
 import { type ReactNode, useState } from 'react';
 import type { z } from 'zod';
 import { defaultAgendaProse } from './agenda-prose.tsx';
@@ -64,7 +64,7 @@ function CardRow({
   actions,
   renderProse,
 }: {
-  readonly card: AgendaCardRow;
+  readonly card: AgendaTaskRow;
   readonly actions: AgendaCardsActions;
   readonly renderProse: (text: string) => ReactNode;
 }) {
@@ -208,7 +208,7 @@ export function AgendaCardsList({
   actions,
   renderProse = defaultAgendaProse,
 }: {
-  readonly cards: readonly AgendaCardRow[];
+  readonly cards: readonly AgendaTaskRow[];
   readonly actions: AgendaCardsActions;
   readonly renderProse?: (text: string) => ReactNode;
 }) {

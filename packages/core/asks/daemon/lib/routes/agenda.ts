@@ -51,7 +51,7 @@ import {
   lintAgendaWriting,
 } from '../agenda/index.ts';
 import { type AgendaConfigPort, answerConfirmation, raiseRequestOf } from './agenda-confirms.ts';
-import { type AgendaGatePort, answerGate, cardAnswerPermission, refuseGateDismissal } from './agenda-gates.ts';
+import { type AgendaGatePort, answerGate, taskAnswerPermission, refuseGateDismissal } from './agenda-gates.ts';
 import type { SourceAnswer } from './agenda-gates.ts';
 import type { AgendaMutation } from '../agenda/index.ts';
 
@@ -391,7 +391,7 @@ async function apply(
           actor,
           cardAsk: request.cardAsk,
           gate: request.gate,
-          permitted: () => cardAnswerPermission(context),
+          permitted: () => taskAnswerPermission(context),
           askVersion: request.askVersion,
           ...(context.credential?.tokenClass === 'device'
             ? { holder: String(context.credential.principal.holder) }

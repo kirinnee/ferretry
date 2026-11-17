@@ -38,7 +38,7 @@ import {
   AgendaSnapshotSchema,
   AskItemSchema,
   AskVersionsFiles,
-  parseCardAgendaReference,
+  parseTaskAgendaReference,
   ResolvedAgendaItemSchema,
 } from '@ferretry/core-asks/contract';
 import { Database } from 'bun:sqlite';
@@ -140,7 +140,7 @@ function v5Item(item: Json, closed: boolean, tally: Pick<Tally, 'gateFields' | '
     out.raisedBy === 'daemon' &&
     out.source === 'task' &&
     typeof out.subject === 'string' &&
-    parseCardAgendaReference(typeof out.sourceRef === 'string' ? out.sourceRef : undefined) !== undefined
+    parseTaskAgendaReference(typeof out.sourceRef === 'string' ? out.sourceRef : undefined) !== undefined
   ) {
     out.generatedSubject = out.subject;
   }
@@ -595,7 +595,7 @@ const V4NotificationLine = z.looseObject({
  */
 async function convertNotifications(
   ctx: StepContext,
-  cardAskItems: ReadonlySet<string>,
+  taskAskItems: ReadonlySet<string>,
 ): Promise<{ buzzes: number; seen: number; lines: number; skipped: number }> {
   const bytes = await regularFile(join(ctx.v4.state, 'notifications.jsonl'));
   if (bytes === undefined) return { buzzes: 0, seen: 0, lines: 0, skipped: 0 };
@@ -631,7 +631,7 @@ async function convertNotifications(
       key => value[key] !== undefined,
     );
     const kind =
-      value.ping === true ? 'notice' : !variant && cardAskItems.has(`${ferret}:${ask}`) ? 'card-ask' : undefined;
+      value.ping === true ? 'notice' : !variant && taskAskItems.has(`${ferret}:${ask}`) ? 'card-ask' : undefined;
     const key = `ask:${ferret}:${ask}`;
     if (kind === undefined || buzzes.has(key)) continue;
     const sent = value.sent as Json | undefined;

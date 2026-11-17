@@ -5,7 +5,7 @@
  * own sign-in. The watcher never reads, holds or stores a token — the secret store's "use, never read"
  * holds because there is nothing here that could read one.
  */
-import type { BoardProjectId, Card, CardActionRequest, CardId, CardResponse } from '../../../contract/index.ts';
+import type { BoardProjectId, Task, TaskActionRequest, TaskId, TaskResponse } from '../../../contract/index.ts';
 import type { BoardCaller, LaneSets, PrAlertReason, PrUpdate, PrUpdateOutcome } from '../board/index.ts';
 
 /**
@@ -44,14 +44,14 @@ export interface ProjectFolders {
 
 /** The board, as the watcher reads and writes it: through `BoardService`, as the daemon. */
 export interface WatchedBoard {
-  snapshot(): Promise<{ readonly cards: readonly Card[]; readonly laneSets: LaneSets }>;
-  recordPullRequests(id: CardId, update: PrUpdate): Promise<PrUpdateOutcome>;
-  act(id: CardId, request: CardActionRequest, caller: BoardCaller): Promise<CardResponse>;
+  snapshot(): Promise<{ readonly cards: readonly Task[]; readonly laneSets: LaneSets }>;
+  recordPullRequests(id: TaskId, update: PrUpdate): Promise<PrUpdateOutcome>;
+  act(id: TaskId, request: TaskActionRequest, caller: BoardCaller): Promise<TaskResponse>;
 }
 
 /** Queues one message about a card to the ferret that answers for it, through the ordinary send path. */
 export interface PrNudgeSender {
-  send(card: Pick<Card, 'id' | 'owner' | 'assignee'>, message: string, reason: PrAlertReason): Promise<void>;
+  send(task: Pick<Task, 'id' | 'owner' | 'assignee'>, message: string, reason: PrAlertReason): Promise<void>;
 }
 
 export interface WatcherClock {

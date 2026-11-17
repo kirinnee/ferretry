@@ -11,6 +11,6 @@ export {
   laneEditProblems,
 } from '../../../contract/index.ts';
 export {
-  type CardActorVia as BoardActorVia,
+  type TaskActorVia as BoardActorVia,
   CardActorViaSchema as BoardActorViaSchema,
 } from '../../../contract/index.ts';

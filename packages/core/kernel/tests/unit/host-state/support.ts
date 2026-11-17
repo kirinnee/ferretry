@@ -30,12 +30,12 @@ export const rulesFile = defineState({
   schema: z.strictObject({ rules: z.array(z.string()) }),
   onDamaged: { narrower: 'reads as zero rules' },
 });
-export const cardFile = defineState({ name: 'card', path: 'cards/*.json', store: 'json', format: 1, schema: Counter });
+export const taskFile = defineState({ name: 'card', path: 'cards/*.json', store: 'json', format: 1, schema: Counter });
 export const logFile = defineState({ name: 'log', path: 'log.jsonl', store: 'jsonl', format: 1, schema: Counter });
 export const keyFile = defineState({ name: 'key', path: 'message-token.key', store: 'secret', format: 1 });
 export const blobFile = defineState({ name: 'blob', path: 'blob.bin', store: 'opaque', format: 1 });
 
-export const allFiles = [counterFile, requiredFile, rulesFile, cardFile, logFile, keyFile, blobFile] as const;
+export const allFiles = [counterFile, requiredFile, rulesFile, taskFile, logFile, keyFile, blobFile] as const;
 
 export function memoryStore(overrides: Partial<StatePortOptions> = {}) {
   const fs = createMemoryHostFs();

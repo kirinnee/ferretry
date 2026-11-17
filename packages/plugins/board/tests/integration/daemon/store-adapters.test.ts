@@ -2,19 +2,19 @@ import { describe, expect, test } from 'bun:test';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
-import type { BoardProjectId, Card, CardId } from '../../../contract/index.ts';
+import type { BoardProjectId, Task, TaskId } from '../../../contract/index.ts';
 import { BoardFiles, BoardSwitchFiles, LaneSetFiles } from '../../../daemon/adapters/lanes/index.ts';
-import { KernelCardStore } from '../../../daemon/adapters/store/task-store.ts';
+import { KernelTaskStore } from '../../../daemon/adapters/store/task-store.ts';
 import { KernelFerretFocus } from '../../../daemon/adapters/store/focus-store.ts';
 import { KernelSweepMemory } from '../../../daemon/adapters/store/sweep-memory.ts';
 import { BoardUnavailableError, EMPTY_SWEEP_MEMORY } from '../../../daemon/lib/board/index.ts';
 import { KeyedSerial } from '../../../daemon/lib/lanes/index.ts';
 import manifest from '../../../manifest.ts';
-import { card } from '../../support/board.ts';
+import { boardTask } from '../../support/board.ts';
 
 const file = (name: string): StateFileDef<string, never> =>
   manifest.data.state.find(candidate => candidate.name === name) as never;
-const CARDS = file('cards');
+const TASKS = file('cards');
 const COUNTERS = file('counters');
 const SWEEP = file('sweep');
 const FOCUS = file('focus');
@@ -28,29 +28,29 @@ const warnings = () => {
 describe('the card store over the board’s state folder', () => {
   const store = (folder = new MemoryStateFolder()) => {
     const { said, diagnostics } = warnings();
-    const state = folder.port([CARDS, COUNTERS]);
+    const state = folder.port([TASKS, COUNTERS]);
     return {
       folder,
       said,
       state,
-      store: new KernelCardStore(
+      store: new KernelTaskStore(
         state,
-        { cards: CARDS as never, counters: COUNTERS as never },
+        { cards: TASKS as never, counters: COUNTERS as never },
         new KeyedSerial(),
         diagnostics,
       ),
     };
   };
   const keep =
-    (id: string, over: Partial<Card> = {}): Parameters<KernelCardStore['write']>[1] =>
-    async () => ({ task: card({ id, ...over }), result: id });
+    (id: string, over: Partial<Task> = {}): Parameters<KernelTaskStore['write']>[1] =>
+    async () => ({ task: boardTask({ id, ...over }), result: id });
 
   test('ids are handed out per kind and a restarted store carries on above them, never reusing one', async () => {
     const { folder, store: first } = store();
     expect(await first.allocateId('feature')).toBe('F1');
     expect(await first.allocateId('feature')).toBe('F2');
     expect(await first.allocateId('bug')).toBe('B1');
-    await first.write('F2' as CardId, keep('F2'));
+    await first.write('F2' as TaskId, keep('F2'));
 
     const again = store(folder).store;
 
@@ -59,40 +59,40 @@ describe('the card store over the board’s state folder', () => {
   });
 
   test('a card written is read back; a decision that stores nothing writes nothing and answers its result', async () => {
-    const { folder, store: cards } = store();
+    const { folder, store: tasks } = store();
 
-    expect(await cards.write('F1' as CardId, keep('F1'))).toBe('F1');
-    expect(await cards.write('F1' as CardId, async current => ({ task: null, result: current?.id }))).toBe('F1');
-    expect(await cards.write('F9' as CardId, async current => ({ task: null, result: current?.id }))).toBeUndefined();
+    expect(await tasks.write('F1' as TaskId, keep('F1'))).toBe('F1');
+    expect(await tasks.write('F1' as TaskId, async current => ({ task: null, result: current?.id }))).toBe('F1');
+    expect(await tasks.write('F9' as TaskId, async current => ({ task: null, result: current?.id }))).toBeUndefined();
 
     expect([...folder.files.keys()]).toEqual(['cards/F1.json', 'counters.json'].filter(path => folder.files.has(path)));
-    expect((await cards.read()).quarantined).toEqual([]);
+    expect((await tasks.read()).quarantined).toEqual([]);
   });
 
   test('a write that stores another card than it was asked for is refused', async () => {
-    const { store: cards } = store();
+    const { store: tasks } = store();
 
-    await expect(cards.write('F1' as CardId, keep('F2'))).rejects.toBeInstanceOf(BoardUnavailableError);
+    await expect(tasks.write('F1' as TaskId, keep('F2'))).rejects.toBeInstanceOf(BoardUnavailableError);
   });
 
   test('a damaged card file is quarantined, reported once, never fatal, refused a write, and its number is never reused', async () => {
-    const { folder, said, store: cards } = store();
-    folder.plant(CARDS, '{ not json', 'F4');
-    folder.plant(CARDS, JSON.stringify(card({ id: 'F7' })), 'F5');
-    folder.plant(CARDS, JSON.stringify(card({ id: 'F1' })), 'F1');
-    folder.plant(CARDS, JSON.stringify(card({ id: 'F6' })), 'notes');
+    const { folder, said, store: tasks } = store();
+    folder.plant(TASKS, '{ not json', 'F4');
+    folder.plant(TASKS, JSON.stringify(boardTask({ id: 'F7' })), 'F5');
+    folder.plant(TASKS, JSON.stringify(boardTask({ id: 'F1' })), 'F1');
+    folder.plant(TASKS, JSON.stringify(boardTask({ id: 'F6' })), 'notes');
 
-    const snapshot = await cards.read();
+    const snapshot = await tasks.read();
 
     expect(snapshot.cards.map(each => each.id)).toEqual(['F1']);
     expect(snapshot.quarantined.map(each => each.id).sort()).toEqual(['F4', 'F5']);
     expect(said.join('\n')).toContain('board task F4 is quarantined');
     expect(said.join('\n')).toContain('board task F5 is quarantined: the task file names another task');
-    await expect(cards.write('F4' as CardId, keep('F4'))).rejects.toMatchObject({
+    await expect(tasks.write('F4' as TaskId, keep('F4'))).rejects.toMatchObject({
       detail: expect.stringContaining('quarantined'),
     });
-    expect(folder.raw(CARDS, 'F4')).toBe('{ not json');
-    expect(await cards.allocateId('feature')).toBe('F6');
+    expect(folder.raw(TASKS, 'F4')).toBe('{ not json');
+    expect(await tasks.allocateId('feature')).toBe('F6');
   });
 
   test('a file that lists but reads as nothing is skipped, not quarantined', async () => {
@@ -102,45 +102,45 @@ describe('the card store over the board’s state folder', () => {
       list: async () => ['F3'],
       read: async () => ({ ok: true, value: undefined }),
     } as unknown as StatePort;
-    const cards = new KernelCardStore(
+    const tasks = new KernelTaskStore(
       phantom,
-      { cards: CARDS as never, counters: COUNTERS as never },
+      { cards: TASKS as never, counters: COUNTERS as never },
       new KeyedSerial(),
       warnings().diagnostics,
     );
 
-    expect(await cards.read()).toEqual({ cards: [], quarantined: [] });
+    expect(await tasks.read()).toEqual({ cards: [], quarantined: [] });
   });
 
   test('a damaged id counter is started again above the highest card on disk, and said so', async () => {
-    const { folder, said, store: cards } = store();
-    await cards.write('F5' as CardId, keep('F5'));
+    const { folder, said, store: tasks } = store();
+    await tasks.write('F5' as TaskId, keep('F5'));
     folder.plant(COUNTERS, 'garbage');
 
-    expect(await cards.allocateId('feature')).toBe('F6');
-    expect(await cards.allocateId('feature')).toBe('F7');
+    expect(await tasks.allocateId('feature')).toBe('F6');
+    expect(await tasks.allocateId('feature')).toBe('F7');
     expect(said.filter(line => line.includes('id counter was damaged'))).toHaveLength(1);
   });
 
   test('an id counter at its end refuses to hand out another number', async () => {
-    const { folder, store: cards } = store();
+    const { folder, store: tasks } = store();
     folder.plant(COUNTERS, JSON.stringify({ format: 1, next: { bug: 1, feature: 1_000_000_000, infra: 1, chore: 1 } }));
 
-    await expect(cards.allocateId('feature')).rejects.toMatchObject({
+    await expect(tasks.allocateId('feature')).rejects.toMatchObject({
       detail: expect.stringContaining('counter is exhausted'),
     });
   });
 
   test('a first read that fails is not remembered: the next read loads again', async () => {
-    const { folder, state, store: cards } = store();
-    await state.write(CARDS as never, card({ id: 'F1' }), 'F1');
+    const { folder, state, store: tasks } = store();
+    await state.write(TASKS as never, boardTask({ id: 'F1' }), 'F1');
     folder.armCrash();
-    await state.write(CARDS as never, card({ id: 'F2' }), 'F2').catch(() => undefined);
+    await state.write(TASKS as never, boardTask({ id: 'F2' }), 'F2').catch(() => undefined);
 
-    await expect(cards.read()).rejects.toThrow('simulated crash');
+    await expect(tasks.read()).rejects.toThrow('simulated crash');
     folder.revive();
 
-    expect((await cards.read()).cards.map(each => each.id)).toEqual(['F1', 'F2']);
+    expect((await tasks.read()).cards.map(each => each.id)).toEqual(['F1', 'F2']);
   });
 });
 

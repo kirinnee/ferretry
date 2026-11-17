@@ -3,22 +3,22 @@ import { useState } from 'react';
 import { renderToString } from 'react-dom/server';
 
 import { interact, type Mounted, mount } from '@ferretry/app/testing';
-import type { CardId } from '../../../contract/index.ts';
+import type { TaskId } from '../../../contract/index.ts';
 import {
   type BoardMachine,
   type BoardView,
   useBoard,
   useBoardActions,
-  useBoardCard,
+  useBoardTask,
   useBoardFilters,
   useBoardProjects,
 } from '../../../app/hooks/use-board.ts';
 import type { BoardActions } from '../../../app/lib/board-actions.ts';
 import { type BoardFilters, NO_BOARD_FILTERS } from '../../../app/lib/board-model.ts';
-import { type BoardCardState, type BoardProjectsState, DaemonBoardStore } from '../../../app/lib/board-store.ts';
+import { type BoardTaskState, type BoardProjectsState, DaemonBoardStore } from '../../../app/lib/board-store.ts';
 import {
   boardAnswer,
-  card,
+  boardTask,
   fakeEnvironment,
   fakePort,
   flush,
@@ -41,7 +41,7 @@ const machines: BoardMachine[] = [
 
 interface Seen {
   board?: BoardView;
-  task?: BoardCardState;
+  task?: BoardTaskState;
   projects?: ReadonlyMap<unknown, BoardProjectsState>;
   actions?: BoardActions;
   filters?: BoardFilters;
@@ -60,7 +60,7 @@ function Probe({
   readonly filters?: BoardFilters;
 }) {
   seen.board = useBoard(store, list, filters);
-  seen.task = useBoardCard(store, list[0]?.connection, 'F1' as CardId);
+  seen.task = useBoardTask(store, list[0]?.connection, 'F1' as TaskId);
   seen.projects = useBoardProjects(
     store,
     list.map(machine => machine.connection),
@@ -83,11 +83,11 @@ function Filters({ seen }: { readonly seen: Seen }) {
 const store = () => {
   const port = fakePort({
     board: async daemon =>
-      boardAnswer([card(daemon.daemonId === laptop.daemonId ? 'F1' : 'F2')], {
+      boardAnswer([boardTask(daemon.daemonId === laptop.daemonId ? 'F1' : 'F2')], {
         projectId: PROJECT,
         laneSet: laneSetFor(),
       }),
-    card: async () => ({ card: card('F1'), laneSet: laneSetFor() }),
+    card: async () => ({ card: boardTask('F1'), laneSet: laneSetFor() }),
     projects: async () => [{ id: PROJECT, name: 'ferretry', path: null, laneSet: laneSetFor() }],
   });
   return new DaemonBoardStore(port, fakeEnvironment());

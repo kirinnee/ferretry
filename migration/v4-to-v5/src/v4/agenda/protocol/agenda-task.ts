@@ -42,10 +42,10 @@ import {
   type AgendaAsk,
   type AgendaAskOption,
   type AgendaBrief,
-  type AgendaCardAnswer,
+  type AgendaTaskAnswer,
   type AgendaDirection,
   type AgendaKind,
-  MAX_AGENDA_CARD_ANSWERS,
+  MAX_AGENDA_TASK_ANSWERS,
   recommendedAgendaOption,
   singleAgendaQuestion,
 } from './agenda.ts';
@@ -132,12 +132,12 @@ export const GOT_IT_LABEL = 'Got it';
 export const ANSWER_DIRECTIONS: readonly AgendaDirection[] = ['left', 'up', 'right'];
 
 /** What the card fields are read from: an item, or a request to raise one. */
-export interface AgendaCardSource extends AgendaBrief {
+export interface AgendaTaskSource extends AgendaBrief {
   readonly subject: string;
   readonly ask?: AgendaAsk | undefined;
   readonly title?: string | undefined;
   readonly kind?: AgendaKind | undefined;
-  readonly answers?: readonly AgendaCardAnswer[] | undefined;
+  readonly answers?: readonly AgendaTaskAnswer[] | undefined;
 }
 
 /** Whether a choice ask is exactly Yes and No, in either order and case. */
@@ -163,7 +163,7 @@ export const kindOfAsk = (ask: AgendaAsk | undefined): AgendaKind => {
 };
 
 /** The card's kind: the one it was raised with, else the one its ask means. */
-export const agendaCardKind = (item: Pick<AgendaCardSource, 'kind' | 'ask'>): AgendaKind =>
+export const agendaTaskKind = (item: Pick<AgendaTaskSource, 'kind' | 'ask'>): AgendaKind =>
   item.kind ?? kindOfAsk(item.ask);
 
 /**
@@ -186,8 +186,8 @@ export const AGENDA_KIND_LABELS: Readonly<Record<AgendaKind, string>> = {
 export const TEST_KIND_LABEL = 'Test';
 
 /** The chip word of an item or a request: the kind's plain word. */
-export const agendaKindLabel = (item: Pick<AgendaCardSource, 'kind' | 'ask'>): string =>
-  AGENDA_KIND_LABELS[agendaCardKind(item)];
+export const agendaKindLabel = (item: Pick<AgendaTaskSource, 'kind' | 'ask'>): string =>
+  AGENDA_KIND_LABELS[agendaTaskKind(item)];
 
 /** The ask each kind is raised with; `choice` and `yesno` need their options, `info` asks nothing. */
 export const askForKind = (kind: AgendaKind, options: readonly AgendaAskOption[] = []): AgendaAsk | undefined => {
@@ -214,10 +214,10 @@ export const askForKind = (kind: AgendaKind, options: readonly AgendaAskOption[]
 
 const answer = (
   direction: AgendaDirection,
-  does: AgendaCardAnswer['does'],
+  does: AgendaTaskAnswer['does'],
   label: string,
   description?: string,
-): AgendaCardAnswer => ({ direction, does, label, ...(description === undefined ? {} : { description }) });
+): AgendaTaskAnswer => ({ direction, does, label, ...(description === undefined ? {} : { description }) });
 
 /** The label a choice option is answered with, as the ask spells it. */
 const optionLabel = (options: readonly AgendaAskOption[], wanted: string): AgendaAskOption | undefined =>
@@ -228,7 +228,7 @@ const optionLabel = (options: readonly AgendaAskOption[], wanted: string): Agend
  * at most. Their directions are then the options list's order (`inOptionOrder`). Options past the third have no
  * direction; the card offers them in its options list.
  */
-const choiceAnswers = (options: readonly AgendaAskOption[], recommended: string | undefined): AgendaCardAnswer[] => {
+const choiceAnswers = (options: readonly AgendaAskOption[], recommended: string | undefined): AgendaTaskAnswer[] => {
   const middle = (recommended === undefined ? undefined : optionLabel(options, recommended)) ?? options[0];
   if (middle === undefined) return [];
   const rest = options.filter(option => option !== middle);
@@ -236,7 +236,7 @@ const choiceAnswers = (options: readonly AgendaAskOption[], recommended: string 
   return [
     answer('up', 'choose', middle.label, middle.description),
     ...rest
-      .slice(0, MAX_AGENDA_CARD_ANSWERS - 1)
+      .slice(0, MAX_AGENDA_TASK_ANSWERS - 1)
       .map((option, index) => answer(directions[index] ?? 'left', 'choose', option.label, option.description)),
   ];
 };
@@ -256,9 +256,9 @@ export const defaultAgendaAnswers = (
   ask: AgendaAsk | undefined,
   recommended?: string,
   up?: UpAnswer,
-): AgendaCardAnswer[] => {
+): AgendaTaskAnswer[] => {
   const labels = DEFAULT_ANSWER_LABELS;
-  const answers = ((): AgendaCardAnswer[] => {
+  const answers = ((): AgendaTaskAnswer[] => {
     switch (kind) {
       case 'task':
         return [
@@ -294,7 +294,7 @@ export const defaultAgendaAnswers = (
 };
 
 /** Answers in the order the answer bar draws them: left, up, right. */
-export const byDirection = (answers: readonly AgendaCardAnswer[]): AgendaCardAnswer[] =>
+export const byDirection = (answers: readonly AgendaTaskAnswer[]): AgendaTaskAnswer[] =>
   [...answers].sort(
     (left, right) => ANSWER_DIRECTIONS.indexOf(left.direction) - ANSWER_DIRECTIONS.indexOf(right.direction),
   );
@@ -315,9 +315,9 @@ const optionKey = (label: string): string => label.trim().toLowerCase();
  * order (`yesNoOrder`).
  */
 const inOptionOrder = (
-  item: Pick<AgendaCardSource, 'ask' | 'questions'>,
-  answers: readonly AgendaCardAnswer[],
-): AgendaCardAnswer[] => {
+  item: Pick<AgendaTaskSource, 'ask' | 'questions'>,
+  answers: readonly AgendaTaskAnswer[],
+): AgendaTaskAnswer[] => {
   if (answers.every(each => each.does === 'choose') && isYesNoPair(answers.map(each => each.label)))
     return yesNoOrder(answers, each => each.label).map((each, at) => ({
       ...each,
@@ -364,7 +364,7 @@ export type AgendaShape =
   | 'input';
 
 /** What a card's shape is read from: its kind, ask, questions and steps, and whether it is a notice. */
-export type AgendaShapeSource = Pick<AgendaCardSource, 'kind' | 'ask' | 'questions' | 'steps'> & {
+export type AgendaShapeSource = Pick<AgendaTaskSource, 'kind' | 'ask' | 'questions' | 'steps'> & {
   readonly notice?: true | undefined;
   readonly confirms?: unknown;
 };
@@ -372,7 +372,7 @@ export type AgendaShapeSource = Pick<AgendaCardSource, 'kind' | 'ask' | 'questio
 /** The card's shape, from its stored fields alone, so an item raised before shapes reads in one too. */
 export const agendaShape = (item: AgendaShapeSource): AgendaShape => {
   if (item.notice === true) return 'info';
-  const kind = agendaCardKind(item);
+  const kind = agendaTaskKind(item);
   if (kind === 'input') return 'input';
   // A held configuration change is one choice the daemon wrote: Allow, Deny or Discard change.
   if (item.confirms !== undefined) return 'choice';
@@ -396,7 +396,7 @@ export const agendaShape = (item: AgendaShapeSource): AgendaShape => {
 };
 
 /** The answers a shape keeps on its card: none when the reply box is the answer, only Mark as done or Got it. */
-const SHAPE_KEEPS: Readonly<Partial<Record<AgendaShape, (answer: AgendaCardAnswer) => boolean>>> = {
+const SHAPE_KEEPS: Readonly<Partial<Record<AgendaShape, (answer: AgendaTaskAnswer) => boolean>>> = {
   reply: () => false,
   answers: () => false,
   form: () => false,
@@ -410,30 +410,30 @@ const SHAPE_KEEPS: Readonly<Partial<Record<AgendaShape, (answer: AgendaCardAnswe
  * is how an item from before cards reads (its choice keeps on its row what its brief recommends) — a row of
  * options always in the options list's order (`inOptionOrder`), and only those its shape offers (`SHAPE_KEEPS`).
  */
-export const agendaCardAnswers = (item: AgendaCardSource & AgendaShapeSource): AgendaCardAnswer[] => {
+export const agendaTaskAnswers = (item: AgendaTaskSource & AgendaShapeSource): AgendaTaskAnswer[] => {
   const keeps = SHAPE_KEEPS[agendaShape(item)] ?? (() => true);
   return byDirection(
     inOptionOrder(
       item,
-      item.answers ?? defaultAgendaAnswers(agendaCardKind(item), item.ask, recommendedAgendaOption(item)),
+      item.answers ?? defaultAgendaAnswers(agendaTaskKind(item), item.ask, recommendedAgendaOption(item)),
     ),
   ).filter(keeps);
 };
 
 /** The answer a direction gives on this card, if any. */
 export const answerInDirection = (
-  answers: readonly AgendaCardAnswer[],
+  answers: readonly AgendaTaskAnswer[],
   direction: AgendaDirection,
-): AgendaCardAnswer | undefined => answers.find(each => each.direction === direction);
+): AgendaTaskAnswer | undefined => answers.find(each => each.direction === direction);
 
 /**
  * The choice options a card offers as buttons but NOT as swipes: an old item's options past the third.
  * New items cannot have any (the CLI refuses more than three).
  */
-export const unswipedChoices = (item: AgendaCardSource): AgendaAskOption[] => {
+export const unswipedChoices = (item: AgendaTaskSource): AgendaAskOption[] => {
   if (item.ask?.kind !== 'multiple-choice') return [];
   const swiped = new Set(
-    agendaCardAnswers(item)
+    agendaTaskAnswers(item)
       .filter(each => each.does === 'choose')
       .map(each => each.label.trim()),
   );
@@ -479,13 +479,13 @@ export const agendaAnswerText = (label: string, slots = 1): string => {
  * The card's title: the one it was raised with, else — an item from before titles — the start of its
  * ask, cut at a word to fit a lock screen's heading.
  */
-export const agendaTitle = (item: Pick<AgendaCardSource, 'title' | 'subject'>): string => {
+export const agendaTitle = (item: Pick<AgendaTaskSource, 'title' | 'subject'>): string => {
   const title = item.title?.trim() ?? '';
   return title !== '' ? title : clipAtWord(item.subject, AGENDA_PUSH_TITLE_LENGTH);
 };
 
 /** Whether the card has a title of its own, rather than one cut from its ask. */
-export const hasOwnTitle = (item: Pick<AgendaCardSource, 'title' | 'subject'>): boolean =>
+export const hasOwnTitle = (item: Pick<AgendaTaskSource, 'title' | 'subject'>): boolean =>
   (item.title?.trim() ?? '') !== '';
 
 /**

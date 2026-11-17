@@ -6,38 +6,38 @@
  * A card stores its `visibility`; one without it reads by {@link cardVisibility}. Who may change it is
  * {@link visibilityVerdict}, a pure function of the card and the caller's standing.
  */
-import type { Card, CardVisibility } from '../../../contract/index.ts';
+import type { Task, TaskVisibility } from '../../../contract/index.ts';
 import type { BoardStanding } from './authority.ts';
-import { cardAskedBy } from './origin.ts';
+import { taskAskedBy } from './origin.ts';
 
 /** The facts a card's visibility rests on. */
-export type VisibilityFacts = Pick<Card, 'ask' | 'askedBy' | 'parent' | 'visibility' | 'visibilitySource'>;
+export type VisibilityFacts = Pick<Task, 'ask' | 'askedBy' | 'parent' | 'visibility' | 'visibilitySource'>;
 
 /**
  * What a card without a stored visibility reads as: public when a person asked for it and it sits at the top
  * level, private otherwise (an agent's card, a sub-card). A stored value wins. Pure and total.
  */
-export const defaultVisibility = (card: Pick<Card, 'ask' | 'askedBy' | 'parent'>): CardVisibility =>
-  (card.askedBy ?? cardAskedBy(card)) === 'person' && card.parent === null ? 'public' : 'private';
+export const defaultVisibility = (task: Pick<Task, 'ask' | 'askedBy' | 'parent'>): TaskVisibility =>
+  (task.askedBy ?? taskAskedBy(task)) === 'person' && task.parent === null ? 'public' : 'private';
 
 /** A card's visibility: the stored one, else {@link defaultVisibility}. Pure and total. */
-export const cardVisibility = (card: VisibilityFacts): CardVisibility => card.visibility ?? defaultVisibility(card);
+export const taskVisibility = (task: VisibilityFacts): TaskVisibility => task.visibility ?? defaultVisibility(task);
 
 /** Whether a stored visibility is a choice (set by a person or a ferret) rather than the derived default. */
-export const visibilityChosen = (card: Pick<Card, 'visibility' | 'visibilitySource'>): boolean =>
-  card.visibility !== undefined && card.visibilitySource !== 'default';
+export const visibilityChosen = (task: Pick<Task, 'visibility' | 'visibilitySource'>): boolean =>
+  task.visibility !== undefined && task.visibilitySource !== 'default';
 
 /**
  * The card with its AUTOMATIC visibility settled from the facts as they stand now (who asked, where it sits). A
  * chosen visibility is never touched, so no repair can undo a choice. Answers the same object when nothing would
  * change, so a caller can tell whether there is anything to write. Pure and total.
  */
-export const withDefaultVisibility = <T extends VisibilityFacts>(card: T): T => {
-  if (visibilityChosen(card)) return card;
-  const visibility = defaultVisibility(card);
-  return card.visibility === visibility && card.visibilitySource === 'default'
-    ? card
-    : { ...card, visibility, visibilitySource: 'default' };
+export const withDefaultVisibility = <T extends VisibilityFacts>(task: T): T => {
+  if (visibilityChosen(task)) return task;
+  const visibility = defaultVisibility(task);
+  return task.visibility === visibility && task.visibilitySource === 'default'
+    ? task
+    : { ...task, visibility, visibilitySource: 'default' };
 };
 
 /** The standings that may change a ferret's own card: its owner ferret, the leads above it, and the owner. */
@@ -59,8 +59,8 @@ export interface VisibilityRefusal {
  * - a sub-card is private unless the owner makes it public, so a ferret may not publish one.
  */
 export const visibilityVerdict = (
-  card: Pick<Card, 'ask' | 'askedBy' | 'parent'>,
-  to: CardVisibility,
+  task: Pick<Task, 'ask' | 'askedBy' | 'parent'>,
+  to: TaskVisibility,
   standing: BoardStanding,
 ): VisibilityRefusal | null => {
   if (standing === 'owner-human') return null;
@@ -71,10 +71,10 @@ export const visibilityVerdict = (
       allowed: KEEPERS,
     };
   }
-  if ((card.askedBy ?? cardAskedBy(card)) === 'person' && to === 'private') {
+  if ((task.askedBy ?? taskAskedBy(task)) === 'person' && to === 'private') {
     return { message: 'only the owner may make a task they asked for private', allowed: owner };
   }
-  if (card.parent !== null && to === 'public') {
+  if (task.parent !== null && to === 'public') {
     return { message: 'a sub-task is private unless the owner makes it public', allowed: owner };
   }
   return null;

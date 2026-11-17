@@ -20,8 +20,8 @@ export interface BoardReaderFacts {
 export function boardReader(board: BoardApi, facts: BoardReaderFacts): WardenBoardPort {
   return {
     read: async (): Promise<WardenBoardRead> => {
-      const { cards, laneSets } = await board.orphanedCards();
-      return { views: cards, laneSets: new Map(laneSets.map((laneSet: LaneSet) => [laneSet.projectId, laneSet])) };
+      const { cards: tasks, laneSets } = await board.orphanedCards();
+      return { views: tasks, laneSets: new Map(laneSets.map((laneSet: LaneSet) => [laneSet.projectId, laneSet])) };
     },
     focusCard: async sessionId => {
       const focus = await board.focusOf(sessionId as Parameters<BoardApi['focusOf']>[0]);

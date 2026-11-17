@@ -25,7 +25,7 @@
  */
 import { compareVersions } from './versions.ts';
 import {
-  type Card,
+  type Task,
   categoryOf,
   isBackwardMove,
   type Lane,
@@ -70,9 +70,9 @@ interface Candidate {
 }
 
 /** When the card was last sent back by a person or a ferret (a reopen, or a move to an earlier lane). */
-const lastSentBackMs = (card: Card): number | null => {
+const lastSentBackMs = (task: Task): number | null => {
   let latest: number | null = null;
-  for (const event of card.history) {
+  for (const event of task.history) {
     const back = event.type === 'reopened' || (event.type === 'moved' && event.backward && event.auto !== true);
     const at = Date.parse(event.at);
     if (back && !Number.isNaN(at) && (latest === null || at > latest)) latest = at;
@@ -81,8 +81,8 @@ const lastSentBackMs = (card: Card): number | null => {
 };
 
 /** The PRs that can still say where the card belongs: not closed unmerged, and not merged before it was sent back. */
-const livePrs = (card: Card, prs: readonly PrLink[]): readonly PrLink[] => {
-  const sentBack = lastSentBackMs(card);
+const livePrs = (task: Task, prs: readonly PrLink[]): readonly PrLink[] => {
+  const sentBack = lastSentBackMs(task);
   return prs.filter(pr => {
     if (pr.state === 'closed') return false;
     if (pr.state !== 'merged' || sentBack === null || pr.mergedAt === null) return true;
@@ -138,15 +138,15 @@ const factMayEnter = (lane: Lane, laneSet: LaneSet): boolean =>
  * The lane the card's PR facts put it in, or `null` for no opinion (see the file header). Pure and total:
  * a lane id the set does not know, or a workflow with no lane for the fact, is no opinion.
  */
-export const laneFromFacts = (card: Card, laneSet: LaneSet, workflow: Workflow, facts: LaneFacts): FactMove | null => {
-  if (card.dropped !== null) return null;
-  const category = categoryOf(laneSet, card.laneId);
+export const laneFromFacts = (task: Task, laneSet: LaneSet, workflow: Workflow, facts: LaneFacts): FactMove | null => {
+  if (task.dropped !== null) return null;
+  const category = categoryOf(laneSet, task.laneId);
   if (!category.ok || category.value === 'closed') return null;
-  for (const candidate of candidatesOf(livePrs(card, facts.prs), facts.runningVersion)) {
+  for (const candidate of candidatesOf(livePrs(task, facts.prs), facts.runningVersion)) {
     const found = laneForTrigger(laneSet, workflow, candidate.trigger);
     if (!found.ok || found.value === null || !factMayEnter(found.value, laneSet)) continue;
-    if (found.value.id === card.laneId) return null;
-    const backward = isBackwardMove(laneSet, card.laneId, found.value.id);
+    if (found.value.id === task.laneId) return null;
+    const backward = isBackwardMove(laneSet, task.laneId, found.value.id);
     if (!backward.ok) return null;
     if (!backward.value)
       return { lane: found.value, trigger: candidate.trigger, reason: candidate.reason, backward: false };

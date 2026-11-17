@@ -29,8 +29,8 @@ interface BoardApi {
   count(): number;
 }
 const BoardPort = definePort<BoardApi>('board');
-const CardMoved = defineEvent('board.card-moved', z.strictObject({ card: z.string() }));
-const Cards = defineState({
+const TaskMoved = defineEvent('board.card-moved', z.strictObject({ card: z.string() }));
+const Tasks = defineState({
   name: 'cards',
   path: 'cards.json',
   store: 'json',
@@ -66,7 +66,7 @@ function plugins(admission: Admission, events: string[]) {
         }),
       ],
     },
-    data: { state: [Cards], publishes: [CardMoved] },
+    data: { state: [Tasks], publishes: [TaskMoved] },
     hooks: { takes: [{ hook: DoctorChecks }] },
     doctor: ['board-ok'],
   });
@@ -78,7 +78,7 @@ function plugins(admission: Admission, events: string[]) {
     core: false,
     kinds: [],
     needs: { board: BoardPort },
-    data: { subscribes: [CardMoved] },
+    data: { subscribes: [TaskMoved] },
     actions: {
       routes: [
         route('GET /v1/agenda', {
@@ -117,14 +117,14 @@ function plugins(admission: Admission, events: string[]) {
           schedule: { onceAfterStart: true, delay: milliseconds(0) },
           run: async () => {
             events.push('job');
-            ctx.kernel.events.publish(CardMoved, { card: 'F1' });
+            ctx.kernel.events.publish(TaskMoved, { card: 'F1' });
           },
         });
         return {
           provides: { board: { count: () => 1 } },
           routes: {
             'GET /v1/board': async () => {
-              await ctx.kernel.state.write(Cards, { format: 1, cards: ['F1'] });
+              await ctx.kernel.state.write(Tasks, { format: 1, cards: ['F1'] });
               return jsonResponse({ cards: 1 });
             },
           },

@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  detectOrphanedCards,
+  detectOrphanedTasks,
   fingerprintAnomalies,
   type OrphanMemory,
   type OrphanPlanInput,
@@ -10,7 +10,7 @@ import {
   WARDEN_LABEL,
   type WardenAnomaly,
 } from '../../daemon/lib/index.ts';
-import { boardOf, cardView, orphanView } from './board-fixtures.ts';
+import { boardOf, taskView, orphanView } from './board-fixtures.ts';
 import { NOW, session } from './sweep-harness.ts';
 
 const worker = session({ id: 'worker', status: 'stopped' });
@@ -22,7 +22,7 @@ describe('detectOrphanedCards', () => {
     const board = boardOf(orphanView({ title: 'Ship the thing' }));
 
     // Act
-    const [anomaly, ...rest] = detectOrphanedCards(
+    const [anomaly, ...rest] = detectOrphanedTasks(
       board,
       [{ ...worker, config: { ...worker.config, teammate: 'ada' } }],
       NOW,
@@ -48,12 +48,12 @@ describe('detectOrphanedCards', () => {
     // Arrange
     const board = boardOf(
       ...(['active', 'idle', 'stale'] as const).map((activity, index) =>
-        cardView({ id: `F${index + 2}`, assignee: 'worker' }, { activity }),
+        taskView({ id: `F${index + 2}`, assignee: 'worker' }, { activity }),
       ),
     );
 
     // Act + Assert
-    should(detectOrphanedCards(board, [worker], NOW)).be.empty();
+    should(detectOrphanedTasks(board, [worker], NOW)).be.empty();
   });
 
   it('should say a ferret gone from this machine is gone, and stand it in as stopped', () => {
@@ -61,7 +61,7 @@ describe('detectOrphanedCards', () => {
     const board = boardOf(orphanView({ assignee: null, owner: 'vanished' }));
 
     // Act
-    const [anomaly] = detectOrphanedCards(board, [], NOW);
+    const [anomaly] = detectOrphanedTasks(board, [], NOW);
 
     // Assert
     should(anomaly?.sessionId).equal('vanished');
@@ -73,10 +73,10 @@ describe('detectOrphanedCards', () => {
   it('should carry the label, and date a never-touched card from its creation', () => {
     // Arrange
     const labelled = { ...worker, config: { ...worker.config, label: 'nightly' } };
-    const view = cardView({ assignee: 'worker' }, { activity: 'orphaned', lastTouchedAt: null });
+    const view = taskView({ assignee: 'worker' }, { activity: 'orphaned', lastTouchedAt: null });
 
     // Act
-    const [anomaly] = detectOrphanedCards(boardOf(view), [labelled], NOW);
+    const [anomaly] = detectOrphanedTasks(boardOf(view), [labelled], NOW);
 
     // Assert
     should(anomaly?.label).equal('nightly');
@@ -89,7 +89,7 @@ describe('detectOrphanedCards', () => {
     const unreadable = orphanView({ id: 'F2' }, 'not a time');
 
     // Act
-    const anomalies = detectOrphanedCards(boardOf(ahead, unreadable), [worker], NOW);
+    const anomalies = detectOrphanedTasks(boardOf(ahead, unreadable), [worker], NOW);
 
     // Assert
     should(anomalies).have.length(2);
@@ -106,7 +106,7 @@ describe('detectOrphanedCards', () => {
     const board = boardOf(orphanView(), orphanView({ id: 'F2', assignee: 'child' }));
 
     // Act + Assert
-    should(detectOrphanedCards(board, [warden, child], NOW)).be.empty();
+    should(detectOrphanedTasks(board, [warden, child], NOW)).be.empty();
   });
 
   it('should key each card apart, so two cards one ferret left are two flags in the fingerprint', () => {
@@ -114,7 +114,7 @@ describe('detectOrphanedCards', () => {
     const board = boardOf(orphanView(), orphanView({ id: 'F2' }));
 
     // Act
-    const anomalies = detectOrphanedCards(board, [worker], NOW);
+    const anomalies = detectOrphanedTasks(board, [worker], NOW);
 
     // Assert
     should(anomalies.map(anomaly => anomaly.fleetKey)).eql([orphanFleetKey('F1'), orphanFleetKey('F2')]);
@@ -125,7 +125,7 @@ describe('detectOrphanedCards', () => {
 describe('planOrphanEscalations', () => {
   const plan = (overrides: Partial<OrphanPlanInput> & { readonly board: OrphanPlanInput['board'] }) => {
     const fleet = overrides.fleet ?? [worker, lead];
-    const orphans = overrides.orphans ?? detectOrphanedCards(overrides.board, fleet, NOW);
+    const orphans = overrides.orphans ?? detectOrphanedTasks(overrides.board, fleet, NOW);
     return planOrphanEscalations({ memory: {}, enabled: true, clientName: 'fy', ...overrides, fleet, orphans });
   };
   const told = (via: 'owner' | 'list' | 'notice', to: string, assignee = 'worker'): OrphanMemory => ({
@@ -180,7 +180,7 @@ describe('planOrphanEscalations', () => {
 
     // Assert
     should(result.tell).be.empty();
-    should(result.list.map(card => card.id)).eql(['F1']);
+    should(result.list.map(task => task.id)).eql(['F1']);
   });
 
   it('should list the card, never type into it, when the owner is in an interactive chat', () => {
@@ -192,7 +192,7 @@ describe('planOrphanEscalations', () => {
 
     // Assert
     should(result.tell).be.empty();
-    should(result.list.map(card => card.id)).eql(['F1']);
+    should(result.list.map(task => task.id)).eql(['F1']);
   });
 
   it('should list a card even when nobody on this machine can be told: the item is the machine’s own', () => {
@@ -201,7 +201,7 @@ describe('planOrphanEscalations', () => {
 
     // Assert
     should(result.tell).be.empty();
-    should(result.list.map(card => card.id)).eql(['F1']);
+    should(result.list.map(task => task.id)).eql(['F1']);
     should(result.memory).eql({});
   });
 
@@ -210,13 +210,13 @@ describe('planOrphanEscalations', () => {
     const title = 'A very long card title '.repeat(10).trim();
 
     // Act
-    const [card] = plan({ board: boardOf(orphanView({ title })), fleet: [worker] }).list;
+    const [task] = plan({ board: boardOf(orphanView({ title })), fleet: [worker] }).list;
 
     // Assert
-    should(card?.line.length).be.belowOrEqual(120);
-    should(card?.line).startWith('&F1 A very long card');
-    should(card?.line).containEql('…');
-    should(card?.line).endWith(', but no ferret is assigned, so nothing will happen to it.');
+    should(task?.line.length).be.belowOrEqual(120);
+    should(task?.line).startWith('&F1 A very long card');
+    should(task?.line).containEql('…');
+    should(task?.line).endWith(', but no ferret is assigned, so nothing will happen to it.');
   });
 
   it('should not tell anybody twice in one episode, and keep a listed card listed', () => {
@@ -229,7 +229,7 @@ describe('planOrphanEscalations', () => {
     should(owner.list).be.empty();
     should(owner.memory).eql(told('owner', 'lead'));
     should(listed.tell).be.empty();
-    should(listed.list.map(card => card.id)).eql(['F1']);
+    should(listed.list.map(task => task.id)).eql(['F1']);
     should(listed.memory).eql(told('list', 'machine-agenda'));
   });
 
@@ -241,7 +241,7 @@ describe('planOrphanEscalations', () => {
     const result = plan({ board: boardOf(orphanView()), fleet, memory: told('owner', 'lead') });
 
     // Assert
-    should(result.list.map(card => card.id)).eql(['F1']);
+    should(result.list.map(task => task.id)).eql(['F1']);
     should(result.memory).eql({});
   });
 
@@ -278,7 +278,7 @@ describe('planOrphanEscalations', () => {
       },
     ]);
     should(result.tell).be.empty();
-    should(result.list.map(card => card.id)).eql(['F1']);
+    should(result.list.map(task => task.id)).eql(['F1']);
     // News on the list (the per-card ask that told the owner is closed), and no per-card ask is remembered any more.
     should(result.memory).eql({});
   });
@@ -292,7 +292,7 @@ describe('planOrphanEscalations', () => {
     };
 
     // Act
-    const result = plan({ board: boardOf(cardView({ assignee: 'worker' }, { activity: 'active' })), memory });
+    const result = plan({ board: boardOf(taskView({ assignee: 'worker' }, { activity: 'active' })), memory });
 
     // Assert
     should(result.memory).eql({});
@@ -348,13 +348,13 @@ describe('planOrphanEscalations', () => {
   it('should date a row from the card’s creation when the anomaly carries no anchor', () => {
     // Arrange
     const view = orphanView();
-    const [anomaly] = detectOrphanedCards(boardOf(view), [worker], NOW);
+    const [anomaly] = detectOrphanedTasks(boardOf(view), [worker], NOW);
     const { since: _since, ...unanchored } = anomaly as WardenAnomaly;
 
     // Act
-    const [card] = plan({ board: boardOf(view), fleet: [worker], orphans: [unanchored] }).list;
+    const [task] = plan({ board: boardOf(view), fleet: [worker], orphans: [unanchored] }).list;
 
     // Assert
-    should(card?.waitingSince).equal(view.createdAt);
+    should(task?.waitingSince).equal(view.createdAt);
   });
 });

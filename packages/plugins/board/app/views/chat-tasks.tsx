@@ -19,7 +19,7 @@ import { chatSiblings } from '../lib/board-chat.ts';
 import { ferretNamer } from '../lib/board-present.ts';
 import { boardSideView } from '../lib/board-side-view.ts';
 import type { DaemonBoardStore } from '../lib/board-store.ts';
-import type { BoardCardOf } from '../lib/board-view.ts';
+import type { BoardTaskOf } from '../lib/board-view.ts';
 import type { DaemonId, FerretScope } from '../lib/machine.ts';
 import { boardPath } from '../lib/paths.ts';
 import { BoardSideTab } from './board-side-tab.tsx';
@@ -48,7 +48,7 @@ const subscribeView = (listener: () => void): (() => void) => boardSideView.subs
 const readView = () => boardSideView.snapshot();
 
 /** The card id a board address names, when it is one of this machine's cards. */
-const cardIdOf = (to: string, daemonId: DaemonId): string | null => {
+const taskIdOf = (to: string, daemonId: DaemonId): string | null => {
   const base = `${boardPath(daemonId)}/`;
   const path = to.split(/[?#]/)[0] ?? '';
   if (!path.startsWith(base)) return null;
@@ -83,12 +83,12 @@ export function ChatTasks({
       for (const project of state.projects ?? []) byId.set(project.id, project.name);
     return byId;
   }, [projects]);
-  const openCard = useCallback((card: BoardCardOf): void => {
-    setOpenId(card.task.id);
+  const openTask = useCallback((task: BoardTaskOf): void => {
+    setOpenId(task.task.id);
   }, []);
   const navigateFromDrawer = useCallback(
     (to: string): void => {
-      const id = cardIdOf(to, daemonId);
+      const id = taskIdOf(to, daemonId);
       if (id !== null) {
         setOpenId(id);
         return;
@@ -108,7 +108,7 @@ export function ChatTasks({
         now={now}
         onAgents={onAgents}
         onExpand={onExpand}
-        onOpenCard={openCard}
+        onOpenCard={openTask}
         onView={next => boardSideView.set(next)}
         scope={scope}
         view={view}

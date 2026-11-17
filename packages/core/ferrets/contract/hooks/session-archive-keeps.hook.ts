@@ -10,7 +10,7 @@ import { FerretIdSchema } from '../ids.ts';
  * `owner` and `assignee` are FERRET IDS, never callsigns: the rule matches them against the ids it is deciding about,
  * so a callsign would keep nobody.
  */
-export interface ArchiveCardStanding {
+export interface ArchiveTaskStanding {
   /** The ferret id that owns the card (never a callsign). */
   readonly owner: FerretId;
   /** The ferret id the card is assigned to (never a callsign), or `null` for nobody. */
@@ -39,7 +39,7 @@ export const ArchiveCardStandingsSchema = z.array(
  * board holds an item still open. A source that throws, or that nobody contributes, keeps every ferret live.
  */
 export type ArchiveKeepSource =
-  | { readonly kind: 'board'; cards(): Promise<readonly ArchiveCardStanding[]> }
+  | { readonly kind: 'board'; cards(): Promise<readonly ArchiveTaskStanding[]> }
   | { readonly kind: 'agenda'; hasOpenItem(ferret: FerretId): Promise<boolean> };
 
 /** Whether a contributed item is a keep source at all: a known kind with its answering function. */

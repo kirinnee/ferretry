@@ -46,7 +46,7 @@ import {
   CountersFileSchema,
   FocusFileSchema,
   SweepFileSchema,
-  type Card,
+  type Task,
   type FocusFile,
 } from '@ferretry/plugin-board/contract';
 import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
@@ -58,14 +58,14 @@ import {
   BoardInputError,
   boardFiles,
   defaultLaneTargets,
-  KNOWN_CARD_FIELDS,
+  KNOWN_TASK_FIELDS,
   readDocument,
-  unknownCardFields,
+  unknownTaskFields,
   V4Actor,
   V4BoardSkip,
-  V4Card,
+  V4Task,
   type V4ActorValue,
-  type V4CardValue,
+  type V4TaskValue,
   V4Counters,
   type V4CountersValue,
   V4_EVENT_TYPES,
@@ -110,7 +110,7 @@ const BOARD_NOT_CARRIED: readonly NotCarried[] = [
 
 const V4_COUNTER_LETTERS = { bug: 'B', feature: 'F', infra: 'I', chore: 'C' } as const;
 const MAX_COUNTER = 999_999_999;
-const CARD_FILE = /^([BFIC][1-9][0-9]{0,8})\.json$/u;
+const TASK_FILE = /^([BFIC][1-9][0-9]{0,8})\.json$/u;
 /** A v4 event type safe to name in a report: v4's own types are all this shape. */
 const TYPE_NAME = /^[a-z][a-z-]{0,31}$/u;
 
@@ -118,7 +118,7 @@ const TYPE_NAME = /^[a-z][a-z-]{0,31}$/u;
 const V5_EVENT_FIELDS: ReadonlyMap<string, ReadonlySet<string>> = new Map(
   CardEventSchema.options.map(option => [option.shape.type.value, new Set(Object.keys(option.shape))]),
 );
-const V5_CARD_FIELDS: ReadonlySet<string> = new Set(Object.keys(CardSchema.shape));
+const V5_TASK_FIELDS: ReadonlySet<string> = new Set(Object.keys(CardSchema.shape));
 const CLARIFICATION_FIELDS = ['text', 'source', 'at', 'by'] as const;
 
 interface Planned {
@@ -240,7 +240,7 @@ async function eventOf(
   return only(mapped, fields, facts.eventFields);
 }
 
-async function mapCard(names: FerretNames, card: V4CardValue, facts: Facts): Promise<Card> {
+async function mapTask(names: FerretNames, task: V4TaskValue, facts: Facts): Promise<Task> {
   const {
     v: _v,
     status,
@@ -252,13 +252,13 @@ async function mapCard(names: FerretNames, card: V4CardValue, facts: Facts): Pro
     history,
     clarifications,
     ...rest
-  } = card;
+  } = task;
   // Unknown top-level fields are reported by name in notCarried; they never reach the strict v5 schema.
   const same = Object.fromEntries(
-    Object.entries(rest).filter(([key]) => KNOWN_CARD_FIELDS.has(key) && V5_CARD_FIELDS.has(key)),
+    Object.entries(rest).filter(([key]) => KNOWN_TASK_FIELDS.has(key) && V5_TASK_FIELDS.has(key)),
   );
   const events: Record<string, unknown>[] = [];
-  for (const event of history) events.push(await eventOf(names, card.id, event, facts));
+  for (const event of history) events.push(await eventOf(names, task.id, event, facts));
   const clarified: Record<string, unknown>[] = [];
   for (const item of clarifications) {
     const mapped = await withV5Actors(names, item, facts);
@@ -370,13 +370,13 @@ async function convert(ctx: StepContext): Promise<{ kept: KeptItem[]; notCarried
   // ── cards ───────────────────────────────────────────────────────────────────────────────────────────────────────
   const highest: Record<string, number> = { B: 0, F: 0, I: 0, C: 0 };
   const unknownFields = new Set<string>();
-  let cards = 0;
+  let tasks = 0;
   let dropped = 0;
   let approvals = 0;
   let events = 0;
   let ignored = 0;
   for (const file of await boardFiles(paths.tasks, 'state/board/tasks')) {
-    const id = CARD_FILE.exec(file)?.[1];
+    const id = TASK_FILE.exec(file)?.[1];
     if (id === undefined) {
       ignored++;
       continue;
@@ -385,33 +385,33 @@ async function convert(ctx: StepContext): Promise<{ kept: KeptItem[]; notCarried
     const letter = id.slice(0, 1);
     highest[letter] = Math.max(highest[letter] ?? 0, Number(id.slice(1)));
     const raw = await readDocument(join(paths.tasks, file), label);
-    const parsed = V4Card.safeParse(raw);
+    const parsed = V4Task.safeParse(raw);
     if (!parsed.success) throw new BoardInputError(`task ${id} (${label}) is not a v4 task`);
     if (parsed.data.id !== id) throw new BoardInputError(`task ${id} (${label}) holds another task's id`);
-    const extra = unknownCardFields(raw as Record<string, unknown>);
+    const extra = unknownTaskFields(raw as Record<string, unknown>);
     if (extra === undefined) throw new BoardInputError(`task ${id} (${label}) has an unreadable field name`);
     for (const field of extra) unknownFields.add(field);
-    let card: Card;
+    let task: Task;
     try {
-      card = await mapCard(names, parsed.data, facts);
+      task = await mapTask(names, parsed.data, facts);
     } catch (error) {
       if (error instanceof BoardInputError) {
         throw error.message.startsWith(`task ${id} `) ? error : new BoardInputError(`task ${id} has ${error.message}`);
       }
       throw new BoardInputError(`task ${id} does not fit the v5 task schema`);
     }
-    cards++;
-    if (card.dropped !== null) dropped++;
-    if (card.approval !== undefined) approvals++;
-    events += card.history.length;
+    tasks++;
+    if (task.dropped !== null) dropped++;
+    if (task.approval !== undefined) approvals++;
+    events += task.history.length;
     plan.push({
       path: `state/board/cards/${id}.json`,
       write: async target =>
-        await target.v5.json({ path: `state/board/cards/${id}.json`, format: 1, schema: CardSchema }, card),
+        await target.v5.json({ path: `state/board/cards/${id}.json`, format: 1, schema: CardSchema }, task),
     });
   }
   kept.push(
-    { what: 'tasks (ids unchanged; dropped and closed tasks included)', count: cards },
+    { what: 'tasks (ids unchanged; dropped and closed tasks included)', count: tasks },
     { what: 'dropped tasks', count: dropped },
     { what: 'task approvals linked to their ferret’s ask', count: approvals },
     { what: 'task history events (actors in v5 shape)', count: events },

@@ -26,7 +26,7 @@
  * of a tick; a failure is reported and the next tick runs.
  */
 import { ReleaseVersionSchema } from '../board/versions.ts';
-import { type Card, formatCardRef, prUrlParts, type ReleasedIn } from '../../../contract/index.ts';
+import { type Task, formatTaskRef, prUrlParts, type ReleasedIn } from '../../../contract/index.ts';
 import {
   applyPrUpdate,
   type BoardDiagnostics,
@@ -38,7 +38,7 @@ import {
 } from '../board/index.ts';
 import type { FerretTranscriptTail } from '../board/transcript-events.ts';
 import {
-  cardCategory,
+  taskCategory,
   isLinkable,
   isWatched,
   jittered,
@@ -106,7 +106,7 @@ interface BranchCandidate {
   readonly because: string;
 }
 
-interface CardCandidates {
+interface TaskCandidates {
   readonly branches: readonly BranchCandidate[];
   readonly createdUrls: readonly { readonly url: string; readonly because: string }[];
 }
@@ -116,7 +116,7 @@ export const GH_MISSING_WARNING =
 export const ghSignedOutWarning = (detail: string): string =>
   `GitHub watcher: \`gh\` is not signed in (${detail}), so PR state on the board stays unknown; run \`gh auth login\``;
 
-const NO_CANDIDATES: CardCandidates = { branches: [], createdUrls: [] };
+const NO_CANDIDATES: TaskCandidates = { branches: [], createdUrls: [] };
 
 const detail = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -177,23 +177,23 @@ export class GitHubWatcher {
 
   /** One look at GitHub and the board (see the file header). */
   async tick(): Promise<WatchReport> {
-    const { cards, laneSets } = await this.ports.board.snapshot();
+    const { cards: tasks, laneSets } = await this.ports.board.snapshot();
     const nowMs = Date.parse(this.ports.clock.now());
-    const watched = cards.filter(card => isWatched(card, laneSets));
+    const watched = tasks.filter(task => isWatched(task, laneSets));
     const projects = await this.projectRemotes(nowMs);
     const candidates = await this.candidates(watched, laneSets, projects);
     const polls = this.polls(watched, candidates);
     const fresh = this.freshRepositories(watched);
     const { answers, reachable, polled } = await this.poll(polls, nowMs, fresh);
-    const claimed = new Set(cards.flatMap(card => card.links.prs.map(pr => prKey(pr.repo, pr.number))));
+    const claimed = new Set(tasks.flatMap(task => task.links.prs.map(pr => prKey(pr.repo, pr.number))));
     const budget = { compares: MAX_COMPARES_PER_TICK };
     const written: string[] = [];
-    const index = new BoardIndex(cards, '');
-    for (const card of watched) {
+    const index = new BoardIndex(tasks, '');
+    for (const task of watched) {
       if (this.stopped) break;
-      const update = await this.updateFor(card, candidates.get(card.id) ?? NO_CANDIDATES, answers, claimed, budget);
-      if (!this.wouldChange(card, update, index, laneSets)) continue;
-      if (await this.record(card, update)) written.push(card.id);
+      const update = await this.updateFor(task, candidates.get(task.id) ?? NO_CANDIDATES, answers, claimed, budget);
+      if (!this.wouldChange(task, update, index, laneSets)) continue;
+      if (await this.record(task, update)) written.push(task.id);
     }
     const refiled = this.stopped ? [] : await this.ports.unfiled.run(projects);
     return { polled, written, refiled, reachable };
@@ -217,29 +217,29 @@ export class GitHubWatcher {
 
   /** The branches and `gh pr create` URLs each linkable card's work points at. */
   private async candidates(
-    watched: readonly Card[],
+    watched: readonly Task[],
     laneSets: LaneSets,
     projects: readonly ProjectRemote[],
-  ): Promise<ReadonlyMap<string, CardCandidates>> {
-    const linkable = watched.filter(card => isLinkable(card, laneSets));
+  ): Promise<ReadonlyMap<string, TaskCandidates>> {
+    const linkable = watched.filter(task => isLinkable(task, laneSets));
     const assigned = new Map<string, number>();
-    for (const card of linkable) {
-      const session = effectiveAssignee(card);
+    for (const task of linkable) {
+      const session = effectiveAssignee(task);
       assigned.set(session, (assigned.get(session) ?? 0) + 1);
     }
-    const found = new Map<string, CardCandidates>();
-    for (const card of linkable) {
-      const session = effectiveAssignee(card);
-      const projectRepo = projects.find(project => project.id === card.projectId)?.repo ?? null;
-      const named = [projectRepo, ...card.links.prs.map(pr => pr.repo)].filter((repo): repo is string => repo !== null);
+    const found = new Map<string, TaskCandidates>();
+    for (const task of linkable) {
+      const session = effectiveAssignee(task);
+      const projectRepo = projects.find(project => project.id === task.projectId)?.repo ?? null;
+      const named = [projectRepo, ...task.links.prs.map(pr => pr.repo)].filter((repo): repo is string => repo !== null);
       const repos = [...new Map(named.map(repo => [repoKey(repo), repo] as const)).values()];
       const branches: BranchCandidate[] =
-        card.links.branch === null || SHARED_BRANCHES.has(card.links.branch)
+        task.links.branch === null || SHARED_BRANCHES.has(task.links.branch)
           ? []
           : repos.map(repo => ({
               repo,
-              branch: card.links.branch as string,
-              because: `its head branch ${card.links.branch as string} is the task's branch`,
+              branch: task.links.branch as string,
+              because: `its head branch ${task.links.branch as string} is the task's branch`,
             }));
       const own = assigned.get(session) === 1;
       const ferretBranch = own ? await this.ferretBranch(session) : null;
@@ -252,7 +252,7 @@ export class GitHubWatcher {
       const createdUrls = own
         ? (await this.createdBy(session)).map(url => ({ url, because: `${session} opened it with gh pr create` }))
         : [];
-      if (branches.length > 0 || createdUrls.length > 0) found.set(card.id, { branches, createdUrls });
+      if (branches.length > 0 || createdUrls.length > 0) found.set(task.id, { branches, createdUrls });
     }
     return found;
   }
@@ -273,8 +273,8 @@ export class GitHubWatcher {
 
   /** What each repository will be asked: its linked PRs that can change, and the branches to look for. */
   private polls(
-    watched: readonly Card[],
-    candidates: ReadonlyMap<string, CardCandidates>,
+    watched: readonly Task[],
+    candidates: ReadonlyMap<string, TaskCandidates>,
   ): ReadonlyMap<string, RepositoryPoll> {
     const polls = new Map<string, { repo: string; numbers: Set<number>; branches: Set<string>; releases: boolean }>();
     const entry = (repo: string) => {
@@ -285,13 +285,13 @@ export class GitHubWatcher {
       polls.set(key, created);
       return created;
     };
-    for (const card of watched) {
-      for (const pr of card.links.prs.filter(needsPoll)) {
+    for (const task of watched) {
+      for (const pr of task.links.prs.filter(needsPoll)) {
         const poll = entry(pr.repo);
         poll.numbers.add(pr.number);
         if (pr.state !== 'open') poll.releases = true;
       }
-      for (const candidate of candidates.get(card.id)?.branches ?? [])
+      for (const candidate of candidates.get(task.id)?.branches ?? [])
         entry(candidate.repo).branches.add(candidate.branch);
     }
     return new Map(
@@ -311,10 +311,10 @@ export class GitHubWatcher {
    * polled at once rather than when its cadence next comes round, so a PR linked after it merged moves its
    * card within one tick. Each PR gets that one early look, whatever GitHub answers.
    */
-  private freshRepositories(watched: readonly Card[]): ReadonlyMap<string, readonly string[]> {
+  private freshRepositories(watched: readonly Task[]): ReadonlyMap<string, readonly string[]> {
     const fresh = new Map<string, string[]>();
-    for (const card of watched) {
-      for (const pr of card.links.prs) {
+    for (const task of watched) {
+      for (const pr of task.links.prs) {
         const key = prKey(pr.repo, pr.number);
         if (pr.state !== 'unknown' || this.looked.has(key)) continue;
         const repository = repoKey(pr.repo);
@@ -389,15 +389,15 @@ export class GitHubWatcher {
 
   /** One card's update from this tick's answers: what was observed, what to link, which releases were found. */
   private async updateFor(
-    card: Card,
-    candidates: CardCandidates,
+    task: Task,
+    candidates: TaskCandidates,
     answers: ReadonlyMap<string, RepositoryAnswer>,
     claimed: Set<string>,
     budget: { compares: number },
   ): Promise<PrUpdate> {
     const observed: PrObservation[] = [];
     const link: { url: string; because: string }[] = [];
-    for (const pr of card.links.prs) {
+    for (const pr of task.links.prs) {
       const polled = answers.get(repoKey(pr.repo))?.prs.get(pr.number);
       if (polled !== undefined) observed.push({ ...polled.observation, url: pr.url });
     }
@@ -407,7 +407,7 @@ export class GitHubWatcher {
         const fresh =
           pr.observation.state === 'open' ||
           (pr.observation.state === 'merged' &&
-            Date.parse(pr.observation.mergedAt ?? '') >= Date.parse(card.createdAt));
+            Date.parse(pr.observation.mergedAt ?? '') >= Date.parse(task.createdAt));
         if (!fresh || claimed.has(key)) continue;
         claimed.add(key);
         link.push({ url: pr.observation.url, because: candidate.because });
@@ -421,19 +421,19 @@ export class GitHubWatcher {
       claimed.add(key);
       link.push(created);
     }
-    const releases = await this.releasesFor(card, observed, answers, budget);
+    const releases = await this.releasesFor(task, observed, answers, budget);
     return { link, observed, releases, runningVersion: this.runningVersion() };
   }
 
   /** The release each merged, unreleased PR of the card first shipped in, as far as this tick can tell. */
   private async releasesFor(
-    card: Card,
+    task: Task,
     observed: readonly PrObservation[],
     answers: ReadonlyMap<string, RepositoryAnswer>,
     budget: { compares: number },
   ): Promise<readonly { readonly url: string; readonly releasedIn: ReleasedIn }[]> {
     const found: { url: string; releasedIn: ReleasedIn }[] = [];
-    for (const pr of card.links.prs) {
+    for (const pr of task.links.prs) {
       if (pr.releasedIn !== null) continue;
       const seen = observed.find(entry => entry.url === pr.url);
       const mergedAt = seen === undefined ? pr.mergedAt : seen.mergedAt;
@@ -468,10 +468,10 @@ export class GitHubWatcher {
    * Whether an update would change the card, decided by the same rules the write applies, on the card as
    * this tick read it. It keeps a poll that learned nothing from costing a card write.
    */
-  private wouldChange(card: Card, update: PrUpdate, index: BoardIndex, laneSets: LaneSets): boolean {
-    const laneSet = laneSets.get(card.projectId);
-    if (laneSet === undefined || cardCategory(card, laneSets) === null) return false;
-    const dry = applyPrUpdate(card, update, {
+  private wouldChange(task: Task, update: PrUpdate, index: BoardIndex, laneSets: LaneSets): boolean {
+    const laneSet = laneSets.get(task.projectId);
+    if (laneSet === undefined || taskCategory(task, laneSets) === null) return false;
+    const dry = applyPrUpdate(task, update, {
       now: this.ports.clock.now(),
       actor: { kind: 'daemon' },
       standing: 'daemon',
@@ -483,22 +483,22 @@ export class GitHubWatcher {
   }
 
   /** Writes one card's update and queues its nudges. `true` when the card was written. */
-  private async record(card: Card, update: PrUpdate): Promise<boolean> {
+  private async record(task: Task, update: PrUpdate): Promise<boolean> {
     try {
-      const outcome = await this.ports.board.recordPullRequests(card.id, update);
-      this.warned.delete(`card:${card.id}`);
+      const outcome = await this.ports.board.recordPullRequests(task.id, update);
+      this.warned.delete(`card:${task.id}`);
       for (const nudge of outcome.nudges) {
         await this.ports.nudges
-          .send(card, nudge.message, nudge.reason)
+          .send(task, nudge.message, nudge.reason)
           .catch((error: unknown) =>
             this.ports.diagnostics.warn(
-              `GitHub watcher: could not nudge anyone about ${formatCardRef(card)}: ${detail(error)}`,
+              `GitHub watcher: could not nudge anyone about ${formatTaskRef(task)}: ${detail(error)}`,
             ),
           );
       }
       return outcome.task !== null;
     } catch (error) {
-      this.warnOnce(`card:${card.id}`, `GitHub watcher: could not update ${formatCardRef(card)}: ${detail(error)}`);
+      this.warnOnce(`card:${task.id}`, `GitHub watcher: could not update ${formatTaskRef(task)}: ${detail(error)}`);
       return false;
     }
   }

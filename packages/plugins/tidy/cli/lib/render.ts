@@ -56,7 +56,7 @@ export interface TidyResult {
   readonly closed: readonly TidyOutcome[];
 }
 
-const card = (id: string) => `&${id}`;
+const task = (id: string) => `&${id}`;
 const ask = (id: string) => `${ASK_REFERENCE_SIGIL}${id}`;
 
 function section(heading: string, rows: readonly string[]): string[] {
@@ -65,11 +65,11 @@ function section(heading: string, rows: readonly string[]): string[] {
 
 function lines(plan: TidyPlan): { drop: string[]; close: string[]; keep: string[] } {
   return {
-    drop: plan.drop.map(each => `${card(each.id)}  ${clip(each.title, TITLE_WIDTH)} — ${each.why}`),
+    drop: plan.drop.map(each => `${task(each.id)}  ${clip(each.title, TITLE_WIDTH)} — ${each.why}`),
     close: plan.close.map(each => `${ask(each.id)}  ${clip(each.subject, TITLE_WIDTH)} — ${each.why}`),
     keep: plan.keep.map(each =>
       each.kind === 'card'
-        ? `${card(each.id)}  ${clip(each.title, TITLE_WIDTH)} — ${each.why}`
+        ? `${task(each.id)}  ${clip(each.title, TITLE_WIDTH)} — ${each.why}`
         : `${ask(each.id)}  ${clip(each.title, TITLE_WIDTH)} — ${each.why}`,
     ),
   };

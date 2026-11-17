@@ -257,9 +257,9 @@ test('a v4 card agenda (daemon-raised, card-agenda:<card>) is carried with gener
   expect(item(v5, 'A1')?.item.generatedSubject).toBeUndefined();
   expect(item(v5, 'A2')?.item.generatedSubject).toBeUndefined();
   // v5's own rule now reads it as the generated card ask: its whole ask is its card asks.
-  const { isGeneratedCardAgendaAsk } = await import('@ferretry/core-asks/contract');
-  const carried = item(v5, 'A3')?.item as Parameters<typeof isGeneratedCardAgendaAsk>[0];
-  expect(isGeneratedCardAgendaAsk(carried)).toBe(true);
+  const { isGeneratedTaskAgendaAsk } = await import('@ferretry/core-asks/contract');
+  const carried = item(v5, 'A3')?.item as Parameters<typeof isGeneratedTaskAgendaAsk>[0];
+  expect(isGeneratedTaskAgendaAsk(carried)).toBe(true);
   expect((await readWithV5(['f1'])).f1).toMatchObject({ read: true, unreadable: 0, historyMatchesCursor: true });
 });
 
@@ -365,11 +365,11 @@ test('the machine agenda, a never-renamed attention.json, damaged files set asid
   await putText('state/sessions/f2/attention.json', `${JSON.stringify(document(v4Board('f2')), null, 2)}\n`);
   await putText('state/sessions/f2/attention-replies.json', 'FAKE-DAMAGED');
   await putText('state/sessions/f2/agenda-seen.json.corrupt-1', 'FAKE-CORRUPT');
-  const card = document(v4Board('f3'));
-  const a1 = item(card, 'A1');
+  const task = document(v4Board('f3'));
+  const a1 = item(task, 'A1');
   if (a1 === undefined) throw new Error('fixture');
   a1.item.gateAttached = GATE; // v4's read lifts it into a card ask
-  await putText('state/sessions/f3/agenda.json', `${JSON.stringify(card, null, 2)}\n`);
+  await putText('state/sessions/f3/agenda.json', `${JSON.stringify(task, null, 2)}\n`);
   const sent = { kind: 'agenda', interactive: false, title: 'FAKE buzz', body: 'FAKE' };
   const notification = (extra: Json) =>
     JSON.stringify({

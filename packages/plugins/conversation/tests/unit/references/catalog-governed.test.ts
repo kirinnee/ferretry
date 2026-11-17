@@ -340,7 +340,7 @@ describe('GET /v1/ferrets/:ferretId/references keeps the grants of the facts it 
     const s = await setup({ provide: { '&': many(500) }, files: folder });
     const files = await ask(s, '@', 'owner');
     expect(files.json<{ entries: unknown[] }>().entries).toHaveLength(2_000);
-    const cards = await ask(s, '&', 'owner');
-    expect(cards.json<{ entries: unknown[] }>().entries).toHaveLength(200);
+    const tasks = await ask(s, '&', 'owner');
+    expect(tasks.json<{ entries: unknown[] }>().entries).toHaveLength(200);
   });
 });

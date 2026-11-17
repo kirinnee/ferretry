@@ -16,19 +16,19 @@
  * `touch` is the phone: thumb-sized targets.
  */
 
-import { formatCardRef, type LaneCategory } from '../../contract/index.ts';
+import { formatTaskRef, type LaneCategory } from '../../contract/index.ts';
 import { MessageSquarePlus } from 'lucide-react';
 import type { CSSProperties } from 'react';
-import { cardSegments, type FerretNames } from '../lib/board-present.ts';
-import type { BoardCardOf } from '../lib/board-view.ts';
+import { taskSegments, type FerretNames } from '../lib/board-present.ts';
+import type { BoardTaskOf } from '../lib/board-view.ts';
 import { plainPreview } from '../lib/plain-label.ts';
 import { RouteLink } from '@ferretry/app/ui';
 import { BoardIcon } from './board-icons.tsx';
 
 export type BoardDensity = 'page' | 'side';
 
-export interface BoardCardProps {
-  readonly card: BoardCardOf;
+export interface BoardTaskProps {
+  readonly card: BoardTaskOf;
   readonly density: BoardDensity;
   readonly category: LaneCategory | null;
   readonly names: FerretNames;
@@ -43,13 +43,13 @@ export interface BoardCardProps {
   /** Nesting under a lead, for the Tree. */
   readonly depth?: number;
   /** Present where a card can be pointed at from a chat (the per-chat Tasks tab): puts the card's `&F18` in the draft. */
-  readonly onAddToChat?: (card: BoardCardOf) => void;
+  readonly onAddToChat?: (task: BoardTaskOf) => void;
   /** A phone: bigger targets. */
   readonly touch?: boolean;
 }
 
-export function BoardCard({
-  card,
+export function BoardTask({
+  card: boardTask,
   density,
   category,
   names,
@@ -61,14 +61,14 @@ export function BoardCard({
   depth,
   onAddToChat,
   touch = false,
-}: BoardCardProps) {
-  const { task } = card;
+}: BoardTaskProps) {
+  const { task } = boardTask;
   const preview = plainPreview(task.summary);
-  const segments = cardSegments(task, {
+  const segments = taskSegments(task, {
     names,
     now,
     category,
-    machine: showMachine ? card.machine : null,
+    machine: showMachine ? boardTask.machine : null,
   }).filter(segment => density === 'page' || !segment.optional);
   return (
     <li
@@ -113,10 +113,10 @@ export function BoardCard({
       </RouteLink>
       {onAddToChat === undefined ? null : (
         <button
-          aria-label={`Add ${formatCardRef(task)} to chat`}
+          aria-label={`Add ${formatTaskRef(task)} to chat`}
           className="fy-board-card__chat"
           data-add-to-chat={task.id}
-          onClick={() => onAddToChat(card)}
+          onClick={() => onAddToChat(boardTask)}
           title="Add to chat"
           type="button"
         >

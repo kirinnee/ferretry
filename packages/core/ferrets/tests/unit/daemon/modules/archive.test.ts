@@ -276,14 +276,14 @@ describe('Board and Agenda must both have answered', () => {
 
   test('a dropped card holds nobody, and a card of a closed lane holds nobody', async () => {
     const w = await world(['aa-1', 'bb-1']);
-    const cards: ArchiveKeepSource = {
+    const tasks: ArchiveKeepSource = {
       kind: 'board',
       cards: async () => [
         { owner: fid('aa-1'), assignee: null, dropped: true, category: 'active' },
         { owner: fid('bb-1'), assignee: null, dropped: false, category: 'closed' },
       ],
     };
-    await mount(w, { now: T0 }, { keeps: [cards, agenda] }).tick();
+    await mount(w, { now: T0 }, { keeps: [tasks, agenda] }).tick();
     expect(w.storage.listArchivedSessions().map(row => String(row.id))).toEqual(['aa-1', 'bb-1']);
   });
 });

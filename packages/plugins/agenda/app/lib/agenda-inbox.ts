@@ -333,7 +333,7 @@ export const inboxCards = (
 ): readonly InboxCard[] => collectCards(entries, boardFor, hidden, isOnOwner);
 
 /** The items on the FERRET's turn, as cards of the same shape and order as the deck's: the "With ferrets" section. */
-export const withFerretCards = (
+export const withFerretTasks = (
   entries: readonly UnreadSession[],
   boardFor: (daemonId: DaemonId, sessionId: string) => BoardItems | undefined,
   hidden: ReadonlySet<string> = new Set(),

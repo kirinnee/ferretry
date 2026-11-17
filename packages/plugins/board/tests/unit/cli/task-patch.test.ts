@@ -1,10 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { cardPatchDocument, composeCardPatch, parseCardPatch } from '../../../cli/lib/task-patch.ts';
+import { taskPatchDocument, composeTaskPatch, parseTaskPatch } from '../../../cli/lib/task-patch.ts';
 import { patchYaml } from '../../../cli/lib/patch-document.ts';
-import { card } from './fixtures.ts';
+import { boardTask } from './fixtures.ts';
 
-const task = card({
+const task = boardTask({
   title: 'Patch-edit agenda and tasks',
   summary: 'Ferrets send one patch',
   premise: '- Many flags today',
@@ -13,7 +13,7 @@ const task = card({
 });
 
 const parsed = (text: string) => {
-  const result = parseCardPatch(text, 'f1.yaml');
+  const result = parseTaskPatch(text, 'f1.yaml');
   if (!result.ok) throw new Error(result.problems.join('\n'));
   return result.patch;
 };
@@ -21,7 +21,7 @@ const parsed = (text: string) => {
 describe('task show --yaml', () => {
   it('should print the revision (the newest history seq) and every field a patch changes', () => {
     // Act
-    const document = cardPatchDocument(task);
+    const document = taskPatchDocument(task);
 
     // Assert
     should(document).deepEqual({
@@ -38,7 +38,7 @@ describe('task show --yaml', () => {
 
   it('should round-trip: the printed YAML patched back changes nothing', () => {
     // Act
-    const plan = composeCardPatch(task, parsed(patchYaml(cardPatchDocument(task), ['comment'])));
+    const plan = composeTaskPatch(task, parsed(patchYaml(taskPatchDocument(task), ['comment'])));
 
     // Assert
     should(plan).deepEqual({ kind: 'unchanged' });
@@ -48,7 +48,7 @@ describe('task show --yaml', () => {
 describe('task patch', () => {
   it('should send ONE edit with what differs and the revision; null empties, a list of points becomes bullets', () => {
     // Act
-    const plan = composeCardPatch(
+    const plan = composeTaskPatch(
       task,
       parsed('revision: 1\nsummary: Ferrets send one patch\ncontext:\n  - one\n  - two\nhowToTest: null\nterms: null'),
     );
@@ -62,12 +62,12 @@ describe('task patch', () => {
 
   it('should refuse a patch written against an older revision', () => {
     // Act + Assert
-    should(composeCardPatch(task, parsed('revision: 7\nbrief: new plan'))).deepEqual({ kind: 'stale' });
+    should(composeTaskPatch(task, parsed('revision: 7\nbrief: new plan'))).deepEqual({ kind: 'stale' });
   });
 
   it('should refuse a document that names no field to change', () => {
     // Act
-    const empty = parseCardPatch('revision: 1', 'f1.yaml');
+    const empty = parseTaskPatch('revision: 1', 'f1.yaml');
 
     // Assert
     should(empty.ok).be.false();
@@ -76,7 +76,7 @@ describe('task patch', () => {
 
   it('should read a null point list as emptied', () => {
     // Act
-    const plan = composeCardPatch(task, parsed('revision: 1\npremise: null'));
+    const plan = composeTaskPatch(task, parsed('revision: 1\npremise: null'));
 
     // Assert
     should(plan).deepEqual({ kind: 'edit', request: { action: 'edit', revision: 1, premise: '' } });
@@ -84,8 +84,8 @@ describe('task patch', () => {
 
   it('should require the revision, refuse unknown or read-only keys, and never empty the title', () => {
     // Act
-    const missing = parseCardPatch('brief: new plan', 'f1.yaml');
-    const wrong = parseCardPatch('revision: 1\nlaneId: done\nassignee: me\ntitle: null', 'f1.yaml');
+    const missing = parseTaskPatch('brief: new plan', 'f1.yaml');
+    const wrong = parseTaskPatch('revision: 1\nlaneId: done\nassignee: me\ntitle: null', 'f1.yaml');
 
     // Assert
     should(!missing.ok && missing.problems[0]).match(/^revision: required — read the whole task first/u);
@@ -97,12 +97,12 @@ describe('task patch', () => {
 });
 
 describe('task patch: the task progress merges by key', () => {
-  const withProgress = card({ progress: { now: 'designing', doneSoFar: '- the schema', next: '1. the CLI' } });
+  const withProgress = boardTask({ progress: { now: 'designing', doneSoFar: '- the schema', next: '1. the CLI' } });
 
   it('should print the progress whole and send only the parts that changed', () => {
     // Act
-    const document = cardPatchDocument(withProgress);
-    const plan = composeCardPatch(
+    const document = taskPatchDocument(withProgress);
+    const plan = composeTaskPatch(
       withProgress,
       parsed('revision: 1\nprogress:\n  now: testing\n  doneSoFar: "- the schema"'),
     );
@@ -114,8 +114,8 @@ describe('task patch: the task progress merges by key', () => {
 
   it('should read a task with no progress as empty parts, and send nothing when the parts already match', () => {
     // Act
-    const fresh = composeCardPatch(task, parsed('revision: 1\nprogress:\n  next: "1. ship"\n  now: ""'));
-    const same = composeCardPatch(withProgress, parsed('revision: 1\nprogress:\n  now: designing'));
+    const fresh = composeTaskPatch(task, parsed('revision: 1\nprogress:\n  next: "1. ship"\n  now: ""'));
+    const same = composeTaskPatch(withProgress, parsed('revision: 1\nprogress:\n  now: designing'));
 
     // Assert
     should(fresh).deepEqual({ kind: 'edit', request: { action: 'edit', revision: 1, progress: { next: '1. ship' } } });
@@ -124,8 +124,8 @@ describe('task patch: the task progress merges by key', () => {
 
   it('should refuse null on the progress and an unknown part', () => {
     // Act
-    const nulled = parseCardPatch('revision: 1\nprogress: null', 'f1.yaml');
-    const unknown = parseCardPatch('revision: 1\nprogress:\n  later: x', 'f1.yaml');
+    const nulled = parseTaskPatch('revision: 1\nprogress: null', 'f1.yaml');
+    const unknown = parseTaskPatch('revision: 1\nprogress:\n  later: x', 'f1.yaml');
 
     // Assert
     should(nulled.ok).be.false();
@@ -146,7 +146,7 @@ describe('task patch: a file that parses but is not a value', () => {
 
   it('should say why in one sentence instead of throwing', () => {
     // Act
-    const result = parseCardPatch(ALIAS_BOMB, 'f1.yaml');
+    const result = parseTaskPatch(ALIAS_BOMB, 'f1.yaml');
 
     // Assert
     should(result.ok).be.false();

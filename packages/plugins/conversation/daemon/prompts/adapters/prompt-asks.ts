@@ -194,8 +194,8 @@ export class PromptAsks {
     const ref = promptRefOfKey(record.key);
     if (ref === undefined) return;
     const entry = EntryIdSchema.parse(promptEntry(id, ref, record.occurrence));
-    for (const card of await this.asks.open({ source: PROMPT_SOURCE, entry }))
-      await this.asks.close({ ferret: card.ferret ?? id, id: card.id }, 'withdrawn', entry);
+    for (const task of await this.asks.open({ source: PROMPT_SOURCE, entry }))
+      await this.asks.close({ ferret: task.ferret ?? id, id: task.id }, 'withdrawn', entry);
   }
 
   async #close(ask: NonNullable<PromptWaitRecord['ask']>): Promise<void> {

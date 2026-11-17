@@ -9,8 +9,8 @@ import { describe, expect, it } from 'bun:test';
 import type { AppHookProviders } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import app from '../../../app/index.ts';
-import type { CardView, LaneSet } from '../../../contract/index.ts';
-import { card, flush, laneSetFor, PROJECT } from './board-support.ts';
+import type { TaskView, LaneSet } from '../../../contract/index.ts';
+import { boardTask, flush, laneSetFor, PROJECT } from './board-support.ts';
 
 interface Sent {
   readonly route: string;
@@ -21,7 +21,7 @@ interface Sent {
 
 /** A daemon with `cards` on one lane set; a write answers what `answer` says (the moved card by default). */
 const scripted = (
-  cards: readonly CardView[],
+  tasks: readonly TaskView[],
   options: {
     readonly laneSet?: LaneSet;
     readonly refuse?: { readonly status: number; readonly message: string };
@@ -39,12 +39,12 @@ const scripted = (
         readonly headers?: Readonly<Record<string, string>>;
       },
     ) => {
-      const cardId = init?.params?.taskId;
-      const found = cards.find(each => each.id === cardId);
+      const taskId = init?.params?.taskId;
+      const found = tasks.find(each => each.id === taskId);
       if (route.startsWith('POST ')) {
         sent.push({
           route,
-          ...(cardId === undefined ? {} : { cardId }),
+          ...(taskId === undefined ? {} : { cardId: taskId }),
           ...(init?.body === undefined ? {} : { body: init.body }),
           ...(init?.headers?.['x-fy-request-id'] === undefined ? {} : { key: init.headers['x-fy-request-id'] }),
         });
@@ -56,13 +56,13 @@ const scripted = (
           if (found === undefined) throw Object.assign(new Error('no such task'), { status: 404 });
           return { card: found, laneSet };
         case 'GET /v1/board/ids':
-          return { ids: cards.map(each => each.id) };
+          return { ids: tasks.map(each => each.id) };
         case 'POST /v1/board/tasks/:taskId': {
           const body = init?.body as { readonly action: string; readonly to?: string };
           return { card: { ...found, ...(body.action === 'move' ? { laneId: body.to } : {}) }, laneSet };
         }
         case 'POST /v1/board/tasks/:taskId/start':
-          return { task: cardId, ferret: 'mvuc7tsf-0c3d50df', started: options.started ?? true };
+          return { task: taskId, ferret: 'mvuc7tsf-0c3d50df', started: options.started ?? true };
         default:
           throw new Error(`no route ${route}`);
       }
@@ -74,27 +74,27 @@ const scripted = (
 
 const hooks = (app as unknown as { readonly shell: { readonly hooks: AppHookProviders } }).shell.hooks;
 
-interface CardAnswer {
+interface TaskAnswer {
   readonly subscribe: (listener: () => void) => () => void;
-  readonly watch: (card: string) => () => void;
-  readonly card: (card: string) => {
+  readonly watch: (task: string) => () => void;
+  readonly card: (task: string) => {
     readonly status: string;
     readonly missing: boolean;
     readonly title?: string;
     readonly closed: boolean;
   };
   readonly done: (
-    card: string,
+    task: string,
   ) => Promise<{ readonly ok: boolean; readonly status?: number; readonly message?: string }>;
   readonly start: (
-    card: string,
+    task: string,
     key: string,
   ) => Promise<{ readonly ok: boolean; readonly value?: { readonly started: boolean; readonly ferret: string } }>;
-  readonly drop: (card: string, reason: string) => Promise<{ readonly ok: boolean; readonly message?: string }>;
+  readonly drop: (task: string, reason: string) => Promise<{ readonly ok: boolean; readonly message?: string }>;
 }
 
-const answerOver = (client: PluginClient): CardAnswer =>
-  must(hooks['agenda.card-answer'])({ client, daemon: 'daemon/laptop' }) as CardAnswer;
+const answerOver = (client: PluginClient): TaskAnswer =>
+  must(hooks['agenda.card-answer'])({ client, daemon: 'daemon/laptop' }) as TaskAnswer;
 
 const must = <T>(value: T | undefined): T => {
   if (value === undefined) throw new Error('the half provides no such hook');
@@ -102,7 +102,7 @@ const must = <T>(value: T | undefined): T => {
 };
 
 /** Watches `id` and lets the read land, as Agenda's ask does before it offers Done · closes. */
-const read = async (answer: CardAnswer, id: string): Promise<void> => {
+const read = async (answer: TaskAnswer, id: string): Promise<void> => {
   answer.watch(id);
   await flush();
 };
@@ -115,7 +115,7 @@ describe('the hooks Board provides to Agenda', () => {
 
 describe('agenda.card-answer: Done · closes is the board’s own Done', () => {
   it('sends ONE move into the board’s Done lane, the request today’s Done sends', async () => {
-    const { client, sent } = scripted([card('F1', { laneId: 'tested' })]);
+    const { client, sent } = scripted([boardTask('F1', { laneId: 'tested' })]);
     const answer = answerOver(client);
     await read(answer, 'F1');
 
@@ -127,7 +127,7 @@ describe('agenda.card-answer: Done · closes is the board’s own Done', () => {
   });
 
   it('sends ONE move for taps that overlap, and every tap gets that move’s outcome', async () => {
-    const { client, sent } = scripted([card('F1', { laneId: 'tested' })]);
+    const { client, sent } = scripted([boardTask('F1', { laneId: 'tested' })]);
     const answer = answerOver(client);
     await read(answer, 'F1');
 
@@ -140,7 +140,7 @@ describe('agenda.card-answer: Done · closes is the board’s own Done', () => {
   });
 
   it('lets a later tap send again once the move has settled (a refused one is not remembered)', async () => {
-    const { client, sent } = scripted([card('F1', { laneId: 'tested' })], {
+    const { client, sent } = scripted([boardTask('F1', { laneId: 'tested' })], {
       refuse: { status: 409, message: 'stale' },
     });
     const answer = answerOver(client);
@@ -152,7 +152,7 @@ describe('agenda.card-answer: Done · closes is the board’s own Done', () => {
   });
 
   it('sends nothing for a card that is already closed, and counts it as closed', async () => {
-    const { client, sent } = scripted([card('F1', { laneId: 'closed' })]);
+    const { client, sent } = scripted([boardTask('F1', { laneId: 'closed' })]);
     const answer = answerOver(client);
     await read(answer, 'F1');
 
@@ -162,11 +162,11 @@ describe('agenda.card-answer: Done · closes is the board’s own Done', () => {
   });
 
   it('refuses, without a request, a card it has not read, a dropped one and one the board has no Done for', async () => {
-    const dropped = card('F2', { laneId: 'tested', dropped: { at: '2026-08-01T10:00:00.000Z', reason: 'no' } });
-    const unread = scripted([card('F1', { laneId: 'tested' })]);
+    const dropped = boardTask('F2', { laneId: 'tested', dropped: { at: '2026-08-01T10:00:00.000Z', reason: 'no' } });
+    const unread = scripted([boardTask('F1', { laneId: 'tested' })]);
     const droppedWorld = scripted([dropped]);
     // A card in a lane its board does not have: the board has no Done for it.
-    const noDone = scripted([card('F3', { laneId: 'gone-lane' })]);
+    const noDone = scripted([boardTask('F3', { laneId: 'gone-lane' })]);
 
     const neverRead = answerOver(unread.client);
     const droppedAnswer = answerOver(droppedWorld.client);
@@ -189,7 +189,7 @@ describe('agenda.card-answer: Done · closes is the board’s own Done', () => {
   });
 
   it('answers the daemon’s refusal in its own words: the route is the authority', async () => {
-    const { client, sent } = scripted([card('F1', { laneId: 'tested' })], {
+    const { client, sent } = scripted([boardTask('F1', { laneId: 'tested' })], {
       refuse: { status: 403, message: 'only the owner closes this task' },
     });
     const answer = answerOver(client);
@@ -208,7 +208,7 @@ describe('agenda.card-answer: Done · closes is the board’s own Done', () => {
   });
 
   it('keeps one card view while the card is unchanged, so a reader re-renders only on a change', async () => {
-    const { client } = scripted([card('F1', { laneId: 'tested' })]);
+    const { client } = scripted([boardTask('F1', { laneId: 'tested' })]);
     const answer = answerOver(client);
     await read(answer, 'F1');
 
@@ -219,7 +219,7 @@ describe('agenda.card-answer: Done · closes is the board’s own Done', () => {
 
 describe('agenda.card-answer: a notice’s Start and Close', () => {
   it('starts a ferret with the click’s key and names it', async () => {
-    const { client, sent } = scripted([card('F1')], { started: false });
+    const { client, sent } = scripted([boardTask('F1')], { started: false });
     const answer = answerOver(client);
 
     expect(await answer.start('F1', 'click-1')).toEqual({
@@ -230,7 +230,7 @@ describe('agenda.card-answer: a notice’s Start and Close', () => {
   });
 
   it('closes a card with the board’s drop and the owner’s reason', async () => {
-    const { client, sent } = scripted([card('F1')]);
+    const { client, sent } = scripted([boardTask('F1')]);
     const answer = answerOver(client);
 
     expect(await answer.drop('F1', 'not needed any more')).toEqual({ ok: true });
@@ -274,7 +274,7 @@ describe('agenda.card-reference: `&F12` proves against this machine’s cards', 
     };
 
   it('proves nothing before the ids are read, then exactly the ids the machine lists', async () => {
-    const reference = referenceOver(scripted([card('F1'), card('F12')]).client);
+    const reference = referenceOver(scripted([boardTask('F1'), boardTask('F12')]).client);
     expect(reference.proves()('F12')).toBe(false);
 
     reference.watch();

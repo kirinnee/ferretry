@@ -7,8 +7,8 @@
 import {
   AGENDA_SHAPE_LEADS,
   type AgendaAskOption,
-  type AgendaCardAnswer,
-  agendaCardKind,
+  type AgendaTaskAnswer,
+  agendaTaskKind,
   type AgendaItem,
   type AgendaShape,
   agendaShape,
@@ -30,11 +30,11 @@ export interface CardModel {
   /** What the card needs from the owner, and so how its "What I need from you" segment reads (`agendaShape`). */
   readonly shape: AgendaShape;
   /** The card's answers as buttons (left · up · right), without one that needs the owner's words. */
-  readonly answers: readonly AgendaCardAnswer[];
+  readonly answers: readonly AgendaTaskAnswer[];
   /** An old choice's options past the third: plain buttons, never a swipe. */
   readonly extras: readonly AgendaAskOption[];
   /** A review's Request changes: its words are the message box's, so it is a button that takes them, never a swipe. */
-  readonly requestChanges: AgendaCardAnswer | undefined;
+  readonly requestChanges: AgendaTaskAnswer | undefined;
   /** A review that wants changes written: the words are the message box's. */
   readonly asksForWords: boolean;
   readonly textOnly: boolean;
@@ -68,7 +68,7 @@ export const cardModel = (item: AgendaItem): CardModel => {
   // repeat its first words above it. (A push still cuts one, to fit a lock screen: `agendaTitle`.)
   const title = hasOwnTitle(item) ? agendaTitle(item) : item.subject.trim();
   const subject = item.subject.trim();
-  const asking = !notice && !['info', 'task'].includes(agendaCardKind(item));
+  const asking = !notice && !['info', 'task'].includes(agendaTaskKind(item));
   const asksInHeading = asking && subject !== '' && subject.length <= QUESTION_HEADING_MAX;
   // `fy agenda add --recommend` puts a lone question's pick ON the question: the card says it in its
   // Recommendation all the same, so it never depends on where the ferret wrote it.

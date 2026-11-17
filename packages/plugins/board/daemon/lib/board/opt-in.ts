@@ -21,7 +21,7 @@
  *
  * Pure and total: the service gathers the facts and throws the refusal.
  */
-import { type Card, TRACK_ASK_COMMAND } from '../../../contract/index.ts';
+import { type Task, TRACK_ASK_COMMAND } from '../../../contract/index.ts';
 import type { AnsweredAsk } from './ports.ts';
 import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
@@ -29,10 +29,10 @@ import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 export const TRACK_QUESTION = /^\s*track\b[^?]*\bon the board\b\s*\??\s*$/iu;
 
 /** What a ferret's card on a board rests on; `null` is a refusal. */
-export type CardLicence = 'board-on' | 'parent' | 'approval';
+export type TaskLicence = 'board-on' | 'parent' | 'approval';
 
 /** Everything the decision reads, gathered by the service. */
-export interface CardLicenceFacts {
+export interface TaskLicenceFacts {
   /** Whether the card's board is switched on. */
   readonly boardOn: boolean;
   /** Whether the card goes under a live parent on that board the caller may adopt under (the service checked). */
@@ -42,7 +42,7 @@ export interface CardLicenceFacts {
 }
 
 /** The first proof that holds, in the order the rule reads; `null` when none does. */
-export const cardLicence = (facts: CardLicenceFacts): CardLicence | null => {
+export const taskLicence = (facts: TaskLicenceFacts): TaskLicence | null => {
   if (facts.boardOn) return 'board-on';
   if (facts.parent) return 'parent';
   if (facts.approved) return 'approval';
@@ -67,7 +67,7 @@ export const approvalProblem = (
   id: string,
   ask: AnsweredAsk | undefined,
   caller: string,
-  usedBy: Pick<Card, 'id'> | undefined,
+  usedBy: Pick<Task, 'id'> | undefined,
 ): string | null => {
   const ref = `${ASK_REFERENCE_SIGIL}${id}`;
   if (ask === undefined) return `${ref} is not an answered ask on your ledger`;

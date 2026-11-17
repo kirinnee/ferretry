@@ -1,19 +1,19 @@
 import { describe, it } from 'bun:test';
 import type { AskDraft } from '@ferretry/core-asks/contract';
-import type { Card, CardActionRequest, CardId } from '../../../contract/index.ts';
+import type { Task, TaskActionRequest, TaskId } from '../../../contract/index.ts';
 import should from 'should';
 import {
   type BoardCaller,
   BoardService,
-  type CardObligations,
+  type TaskObligations,
   type GateAnswer,
   type GateBoard,
-  type GateCard,
+  type GateTask,
   GateItems,
-  type OpenCardAskEntry,
+  type OpenTaskAskEntry,
   stageGateLanes,
 } from '../../../daemon/lib/board/index.ts';
-import { card, MemoryBoardStore, NOW, world } from './support.ts';
+import { boardTask, MemoryBoardStore, NOW, world } from './support.ts';
 
 /**
  * CARD ASKS (docs/board.md § Cards show progress; their asks ride Asks, source `card`, #1552): a card entering a gate has
@@ -44,10 +44,10 @@ class AsksTurns {
 }
 
 /** Asks' `card` source in memory: idempotent by entry, with the ledger id the real one would give. */
-class Obligations implements CardObligations {
+class Obligations implements TaskObligations {
   readonly raised: AskDraft[] = [];
   private readonly state = new Map<string, 'open' | 'answered' | 'withdrawn'>();
-  private readonly ledger = new Map<string, OpenCardAskEntry>();
+  private readonly ledger = new Map<string, OpenTaskAskEntry>();
   failing = false;
   openFails = false;
   withdrawFails = false;
@@ -70,8 +70,13 @@ class Obligations implements CardObligations {
       if (this.state.has(entry)) return false;
       this.state.set(entry, 'open');
       this.raised.push(draft);
-      const cardId = (draft.ref as { card: CardId }).card;
-      this.ledger.set(entry, { entry, ask: `A${String(this.raised.length)}`, ferret: draft.ferret as string, cardId });
+      const taskId = (draft.ref as { card: TaskId }).card;
+      this.ledger.set(entry, {
+        entry,
+        ask: `A${String(this.raised.length)}`,
+        ferret: draft.ferret as string,
+        cardId: taskId,
+      });
       return true;
     });
   }
@@ -87,19 +92,19 @@ class Obligations implements CardObligations {
     return this.state.get(entry);
   }
 
-  async open(cardId?: CardId): Promise<readonly OpenCardAskEntry[]> {
-    if (this.openFails && cardId === undefined) throw new Error('Asks cannot list');
-    if (cardId !== undefined) this.scans.perCard += 1;
+  async open(taskId?: TaskId): Promise<readonly OpenTaskAskEntry[]> {
+    if (this.openFails && taskId === undefined) throw new Error('Asks cannot list');
+    if (taskId !== undefined) this.scans.perCard += 1;
     return [...this.ledger.values()].filter(
-      each => this.state.get(each.entry) === 'open' && (cardId === undefined || each.cardId === cardId),
+      each => this.state.get(each.entry) === 'open' && (taskId === undefined || each.cardId === taskId),
     );
   }
 
-  async answered(cardId: CardId): Promise<ReadonlySet<string>> {
+  async answered(taskId: TaskId): Promise<ReadonlySet<string>> {
     this.scans.perCard += 1;
     return new Set(
       [...this.ledger.values()]
-        .filter(e => e.cardId === cardId && this.state.get(e.entry) === 'answered')
+        .filter(e => e.cardId === taskId && this.state.get(e.entry) === 'answered')
         .map(e => e.entry),
     );
   }
@@ -107,20 +112,20 @@ class Obligations implements CardObligations {
   /** Whole-board scans a pass made (`openAll` and `answeredAll`), against the per-card reads it must not make. */
   scans = { all: 0, perCard: 0 };
 
-  async openAll(): Promise<ReadonlyMap<CardId, readonly OpenCardAskEntry[]>> {
+  async openAll(): Promise<ReadonlyMap<TaskId, readonly OpenTaskAskEntry[]>> {
     this.scans.all += 1;
-    const byCard = new Map<CardId, OpenCardAskEntry[]>();
-    for (const each of await this.open()) byCard.set(each.cardId, [...(byCard.get(each.cardId) ?? []), each]);
-    return byCard;
+    const byTask = new Map<TaskId, OpenTaskAskEntry[]>();
+    for (const each of await this.open()) byTask.set(each.cardId, [...(byTask.get(each.cardId) ?? []), each]);
+    return byTask;
   }
 
-  async answeredAll(): Promise<ReadonlyMap<CardId, ReadonlySet<string>>> {
+  async answeredAll(): Promise<ReadonlyMap<TaskId, ReadonlySet<string>>> {
     this.scans.all += 1;
-    const byCard = new Map<CardId, Set<string>>();
+    const byTask = new Map<TaskId, Set<string>>();
     for (const each of this.ledger.values())
       if (this.state.get(each.entry) === 'answered')
-        byCard.set(each.cardId, (byCard.get(each.cardId) ?? new Set<string>()).add(each.entry));
-    return byCard;
+        byTask.set(each.cardId, (byTask.get(each.cardId) ?? new Set<string>()).add(each.entry));
+    return byTask;
   }
 
   /** Asks marks the entry answered once the Board has applied the answer. */
@@ -133,9 +138,9 @@ class Obligations implements CardObligations {
   }
 }
 
-const external = (overrides: Partial<Card> = {}): Card => {
+const external = (overrides: Partial<Task> = {}): Task => {
   const laneId = overrides.laneId ?? 'implement';
-  return card({
+  return boardTask({
     owner: 'child',
     assignee: 'grandchild',
     createdBy: { kind: 'ferret', name: 'child', ferret: 'child' },
@@ -149,16 +154,16 @@ const external = (overrides: Partial<Card> = {}): Card => {
 };
 
 const fixture = (
-  cards: readonly Card[],
+  tasks: readonly Task[],
   options: {
     readonly noCarrier?: boolean;
     readonly turns?: AsksTurns;
     readonly toldFails?: boolean;
     readonly carryFails?: boolean;
-    readonly actFails?: (request: CardActionRequest) => boolean;
+    readonly actFails?: (request: TaskActionRequest) => boolean;
   } = {},
 ) => {
-  const store = new MemoryBoardStore(cards);
+  const store = new MemoryBoardStore(tasks);
   const obligations = new Obligations(options.turns);
   const warnings: string[] = [];
   const told: { readonly card: string; readonly message: string; readonly key: string }[] = [];
@@ -172,7 +177,7 @@ const fixture = (
       },
     }),
   );
-  const read = async (id: CardId): Promise<GateCard | undefined> => {
+  const read = async (id: TaskId): Promise<GateTask | undefined> => {
     const stored = store.cards.get(id);
     if (stored === undefined) return undefined;
     const response = await service.card(id);
@@ -245,13 +250,13 @@ const fixture = (
     told,
     answer,
     gates: gates as GateItems,
-    stored: (id = 'F1') => store.cards.get(id) as Card,
+    stored: (id = 'F1') => store.cards.get(id) as Task,
   };
 };
 
 /** A card at To test: its obligation raised, and the entry's reference. */
-const atTest = async (cards: readonly Card[] = [external()]) => {
-  const world_ = fixture(cards);
+const atTest = async (tasks: readonly Task[] = [external()]) => {
+  const world_ = fixture(tasks);
   await world_.service.trigger('F1', 'release.running');
   const [open] = await world_.obligations.open('F1');
   if (open === undefined) throw new Error('expected an obligation at To test');
@@ -283,9 +288,9 @@ describe('a card at a gate has one obligation through Asks, never an ask of its 
   });
 
   it('should read Asks twice for a pass over 100 gate cards, not twice per card', async () => {
-    const cards = Array.from({ length: 100 }, (_, i) => external({ id: `F${i + 1}` }));
-    const w = fixture(cards);
-    for (const each of cards) await w.service.trigger(each.id, 'release.running');
+    const tasks = Array.from({ length: 100 }, (_, i) => external({ id: `F${i + 1}` }));
+    const w = fixture(tasks);
+    for (const each of tasks) await w.service.trigger(each.id, 'release.running');
     should(w.obligations.openEntries()).have.length(100);
     w.obligations.scans.all = 0;
     w.obligations.scans.perCard = 0;
@@ -299,9 +304,9 @@ describe('a card at a gate has one obligation through Asks, never an ask of its 
   });
 
   it('should look at no card on its own while sweeping 100 cards that hold an open ask', async () => {
-    const cards = Array.from({ length: 100 }, (_, i) => external({ id: `F${i + 1}` }));
-    const w = fixture(cards);
-    for (const each of cards) await w.service.trigger(each.id, 'release.running');
+    const tasks = Array.from({ length: 100 }, (_, i) => external({ id: `F${i + 1}` }));
+    const w = fixture(tasks);
+    for (const each of tasks) await w.service.trigger(each.id, 'release.running');
     w.boardCalls.card = 0;
 
     await w.gates.sweep();
@@ -311,9 +316,9 @@ describe('a card at a gate has one obligation through Asks, never an ask of its 
   });
 
   it('should read Asks twice for a pass over 3000 gate cards, not twice per card', async () => {
-    const cards = Array.from({ length: 3000 }, (_, i) => external({ id: `F${i + 1}` }));
-    const w = fixture(cards);
-    for (const each of cards) await w.service.trigger(each.id, 'release.running');
+    const tasks = Array.from({ length: 3000 }, (_, i) => external({ id: `F${i + 1}` }));
+    const w = fixture(tasks);
+    for (const each of tasks) await w.service.trigger(each.id, 'release.running');
     should(w.obligations.openEntries()).have.length(3000);
     w.obligations.scans.all = 0;
     w.obligations.scans.perCard = 0;
@@ -326,8 +331,8 @@ describe('a card at a gate has one obligation through Asks, never an ask of its 
   }, 60_000);
 
   it('should stop a pass at the next card once its signal aborts', async () => {
-    const cards = Array.from({ length: 20 }, (_, i) => external({ id: `F${i + 1}` }));
-    const w = fixture(cards);
+    const tasks = Array.from({ length: 20 }, (_, i) => external({ id: `F${i + 1}` }));
+    const w = fixture(tasks);
     const controller = new AbortController();
     controller.abort();
 
@@ -667,7 +672,7 @@ describe('a gate that cannot reach its neighbours says so and goes on', () => {
   });
 
   it('should warn and go on to the next card when one card’s ask cannot be put', async () => {
-    const w = fixture([external({ id: 'F1' as CardId, laneId: 'tested' })]);
+    const w = fixture([external({ id: 'F1' as TaskId, laneId: 'tested' })]);
     w.obligations.failing = true;
 
     should(await w.gates.backfill()).equal(0);

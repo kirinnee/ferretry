@@ -4,13 +4,13 @@ import type { SpawnOptions, SpawnResult } from '@ferretry/kernel/contract';
 import { fixedClock } from '@ferretry/kernel/testing';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
-import type { CardView } from '../../../contract/index.ts';
+import type { TaskView } from '../../../contract/index.ts';
 import { GhSpawnRunner, GitSpawnCopies, KEPT_FOR_MS } from '../../../daemon/adapters/github.ts';
 import { ConversationMessages, sendIdOf } from '../../../daemon/adapters/messages.ts';
 import { ConversationOwnerWords } from '../../../daemon/adapters/owner-words.ts';
 import { BoardReferenceCatalog } from '../../../daemon/adapters/reference-catalog.ts';
-import { BoardWorkSource, cardWork } from '../../../daemon/adapters/work-source.ts';
-import { card, lanes, PROJECT } from '../../support/board.ts';
+import { BoardWorkSource, taskWork } from '../../../daemon/adapters/work-source.ts';
+import { boardTask, lanes, PROJECT } from '../../support/board.ts';
 
 const spawned = (stdout = '', exitCode: number | null = 0, stderr = ''): SpawnResult => ({
   exitCode,
@@ -357,8 +357,8 @@ describe('what the owner said to a ferret, read for the board', () => {
   });
 });
 
-const view = (over: Partial<ReturnType<typeof card>> = {}, touched: string | null = null): CardView => ({
-  ...card(over),
+const view = (over: Partial<ReturnType<typeof boardTask>> = {}, touched: string | null = null): TaskView => ({
+  ...boardTask(over),
   lastTouchedAt: touched,
   touchedBy: null,
   activity: 'idle',
@@ -376,7 +376,7 @@ const view = (over: Partial<ReturnType<typeof card>> = {}, touched: string | nul
 });
 
 describe('the & menu of one ferret’s composer', () => {
-  const catalog = (views: readonly CardView[], withLanes = true) =>
+  const catalog = (views: readonly TaskView[], withLanes = true) =>
     new BoardReferenceCatalog({
       sweepBoard: async () => ({ views, laneSets: withLanes ? new Map([[PROJECT, lanes()]]) : new Map() }),
     });
@@ -386,7 +386,7 @@ describe('the & menu of one ferret’s composer', () => {
     const dropped = {
       ...view({ id: 'F5', owner: 'f1' }),
       dropped: { reason: 'no', at: '2026-11-02T00:00:00.000Z', by: { kind: 'owner' } },
-    } as CardView;
+    } as TaskView;
     const entries = await catalog([
       view(
         { id: 'F1', owner: 'f1', laneId: 'todo', assignee: 'helper', summary: 'green badge' },
@@ -448,10 +448,10 @@ describe('the & menu of one ferret’s composer', () => {
 });
 
 describe('Board’s cards as work for the search', () => {
-  const cardOf = (over: Parameters<typeof card>[0] = {}) => card(over);
+  const taskOf = (over: Parameters<typeof boardTask>[0] = {}) => boardTask(over);
 
   test('a card is open, closed in a closed lane or dropped, with its standing, its notes and its progress as fields', () => {
-    const base = cardOf({
+    const base = taskOf({
       id: 'F1',
       progress: { now: 'writing', doneSoFar: 'plan', next: 'test' } as never,
       clarifications: [{ text: 'which green?' }] as never,
@@ -462,13 +462,13 @@ describe('Board’s cards as work for the search', () => {
     });
     const set = lanes();
 
-    const open = cardWork(base, set);
-    const closed = cardWork({ ...base, laneId: 'closed' }, set);
-    const dropped = cardWork(
+    const open = taskWork(base, set);
+    const closed = taskWork({ ...base, laneId: 'closed' }, set);
+    const dropped = taskWork(
       { ...base, dropped: { reason: 'no', at: '2026-11-02T00:00:00.000Z', by: { kind: 'owner' } } as never },
       set,
     );
-    const lost = cardWork({ ...base, laneId: 'mystery' }, undefined);
+    const lost = taskWork({ ...base, laneId: 'mystery' }, undefined);
 
     expect(open.identity).toMatchObject({ state: 'open', standing: 'Todo' });
     expect(closed.identity).toMatchObject({ state: 'closed', standing: 'Closed' });
@@ -477,18 +477,20 @@ describe('Board’s cards as work for the search', () => {
     expect(Object.fromEntries(open.fields)).toMatchObject({ note: 'a note', progress: 'writing\nplan\ntest' });
     expect(Object.fromEntries(open.fields).ask).toContain('which green?');
     expect(open.updatedAtMs).toBe(Date.parse('2026-10-31T10:00:00.000Z'));
-    expect(cardWork({ ...base, history: [], createdAt: 'nonsense' }, set).updatedAtMs).toBe(0);
-    expect(Object.fromEntries(cardWork(cardOf({ id: 'F2' }), set).fields).progress).toBe('');
+    expect(taskWork({ ...base, history: [], createdAt: 'nonsense' }, set).updatedAtMs).toBe(0);
+    expect(Object.fromEntries(taskWork(taskOf({ id: 'F2' }), set).fields).progress).toBe('');
   });
 
   test('a card that did not change is handed over as the same object, one that did as a new one, and a gone one is dropped', async () => {
-    let cards = [cardOf({ id: 'F1' }), cardOf({ id: 'F2' })];
-    const source = new BoardWorkSource({ snapshot: async () => ({ cards, laneSets: new Map([[PROJECT, lanes()]]) }) });
+    let tasks = [taskOf({ id: 'F1' }), taskOf({ id: 'F2' })];
+    const source = new BoardWorkSource({
+      snapshot: async () => ({ cards: tasks, laneSets: new Map([[PROJECT, lanes()]]) }),
+    });
 
     const first = await source.list();
-    cards = [cardOf({ id: 'F1' }), cardOf({ id: 'F2', title: 'Renamed' })];
+    tasks = [taskOf({ id: 'F1' }), taskOf({ id: 'F2', title: 'Renamed' })];
     const second = await source.list();
-    cards = [cardOf({ id: 'F1' })];
+    tasks = [taskOf({ id: 'F1' })];
     const third = await source.list();
 
     expect(source.id).toBe('board');

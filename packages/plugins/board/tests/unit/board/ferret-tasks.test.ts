@@ -1,25 +1,25 @@
 import { describe, it } from 'bun:test';
 import {
   type BoardProjectId,
-  type Card,
+  type Task,
   type LaneSet,
-  MAX_CARD_BRIEF_LENGTH,
+  MAX_TASK_BRIEF_LENGTH,
   UNFILED_PROJECT_ID,
 } from '../../../contract/index.ts';
 import should from 'should';
 import {
   askOf,
   BoardService,
-  cardFooterLine,
-  cardOrigin,
-  cardTitle,
+  taskFooterLine,
+  taskOrigin,
+  taskTitle,
   type DelegationRequest,
   ownerDelegation,
-  FerretCards,
-  type FerretCardsPorts,
+  FerretTasks,
+  type FerretTasksPorts,
 } from '../../../daemon/lib/board/index.ts';
 import {
-  card,
+  boardTask,
   FakeFocus,
   FakeLanes,
   FakeParents,
@@ -41,13 +41,13 @@ const NAMES: Readonly<Record<string, string>> = {
 };
 
 interface Options {
-  readonly cards?: readonly Card[];
+  readonly cards?: readonly Task[];
   /** Where each session works; absent means PROJECT. */
   readonly projects?: Readonly<Record<string, BoardProjectId>>;
   /** What a proposal answers; absent proposes nothing. */
   readonly proposed?: LaneSet | 'fail';
   readonly world?: Partial<ServiceWorld>;
-  readonly adoption?: FerretCardsPorts['adoption'];
+  readonly adoption?: FerretTasksPorts['adoption'];
   /** The board refuses to move a card on the session's start. */
   readonly failTrigger?: boolean;
   /** The boards that are off; absent means every board is on. */
@@ -55,7 +55,7 @@ interface Options {
   /** The board a child started in each folder works on; absent means PROJECT. */
   readonly folders?: Readonly<Record<string, BoardProjectId>>;
   /** Replaces the lookup of a board's name. */
-  readonly nameOf?: FerretCardsPorts['projects']['nameOf'];
+  readonly nameOf?: FerretTasksPorts['projects']['nameOf'];
 }
 
 const build = (options: Options = {}) => {
@@ -75,7 +75,7 @@ const build = (options: Options = {}) => {
     ...options.world,
   });
   const service = new BoardService(ports);
-  const board: FerretCardsPorts['board'] =
+  const board: FerretTasksPorts['board'] =
     options.failTrigger === true
       ? {
           reserve: service.reserve.bind(service),
@@ -93,7 +93,7 @@ const build = (options: Options = {}) => {
       : service;
   const proposals: Array<readonly [BoardProjectId, string]> = [];
   const warnings: string[] = [];
-  const cardsPorts: FerretCardsPorts = {
+  const tasksPorts: FerretTasksPorts = {
     board,
     lanes: lanesSource,
     starts: { projectForStart: async ({ cwd }) => options.folders?.[cwd] ?? PROJECT },
@@ -111,34 +111,34 @@ const build = (options: Options = {}) => {
     bin: 'fy',
     ...(options.adoption === undefined ? {} : { adoption: options.adoption }),
   };
-  return { subject: new FerretCards(cardsPorts), ports, focus, proposals, warnings };
+  return { subject: new FerretTasks(tasksPorts), ports, focus, proposals, warnings };
 };
 
-const stored = (ports: ServiceWorld, id: string): Card => ports.store.cards.get(id) as Card;
+const stored = (ports: ServiceWorld, id: string): Task => ports.store.cards.get(id) as Task;
 
 describe('what a start card is called and asks', () => {
   it("should take the session's name, else the brief's own title", () => {
     // Act / Assert
-    should(cardTitle('board-u7 spawn and signal tasks now please', 'ignored')).equal('board-u7 Spawn and Signal Tasks');
-    should(cardTitle(undefined, '# Fix the tunnel credit burst\nmore')).equal('Fix the Tunnel Credit Burst');
-    should(cardTitle(undefined, 'You are a ferret.')).match(/^Task [0-9a-z]{4}$/u);
+    should(taskTitle('board-u7 spawn and signal tasks now please', 'ignored')).equal('board-u7 Spawn and Signal Tasks');
+    should(taskTitle(undefined, '# Fix the tunnel credit burst\nmore')).equal('Fix the Tunnel Credit Burst');
+    should(taskTitle(undefined, 'You are a ferret.')).match(/^Task [0-9a-z]{4}$/u);
   });
 
   it('should keep the ask verbatim, cut only at the field', () => {
     // Act / Assert
     should(askOf('  exactly this  ', 'owner')).deepEqual({ text: '  exactly this  ', source: 'owner' });
-    should(askOf('z'.repeat(MAX_CARD_BRIEF_LENGTH + 1), 'owner').text.length).equal(MAX_CARD_BRIEF_LENGTH);
+    should(askOf('z'.repeat(MAX_TASK_BRIEF_LENGTH + 1), 'owner').text.length).equal(MAX_TASK_BRIEF_LENGTH);
   });
 
   it('should name the card and its board in the footer line', () => {
     // Act / Assert
-    should(cardFooterLine('F413', 'Ferretry', 'fy')).equal(
+    should(taskFooterLine('F413', 'Ferretry', 'fy')).equal(
       'Your task is &F413 on the Ferretry board; the daemon moves it for you (`fy task note` adds progress).',
     );
-    should(cardFooterLine('F413', 'Ferretry', 'fy', { id: 'F85' })).equal(
+    should(taskFooterLine('F413', 'Ferretry', 'fy', { id: 'F85' })).equal(
       'Your task is &F413 on the Ferretry board, under &F85; the daemon moves it for you (`fy task note` adds progress).',
     );
-    should(cardFooterLine('F413', undefined, 'ferret')).equal(
+    should(taskFooterLine('F413', undefined, 'ferret')).equal(
       "Your task is &F413 on the project's board; the daemon moves it for you (`ferret task note` adds progress).",
     );
   });
@@ -194,7 +194,7 @@ describe('a session started with a brief', () => {
   it('should not pull a card back that is already past the lane work starts in', async () => {
     // Arrange
     const { subject, ports } = build({
-      cards: [card({ id: 'F9', owner: 'lead', workflow: 'quick', laneId: 'merged' })],
+      cards: [boardTask({ id: 'F9', owner: 'lead', workflow: 'quick', laneId: 'merged' })],
     });
     const { delegation } = await subject.delegate('lead', { brief: 'Build it', card: 'F9' }, true);
 
@@ -233,7 +233,7 @@ describe('a session started with a brief', () => {
       const made = stored(ports, 'F1');
       should(made.ask).deepEqual({ text: 'Read-only review of the screenshots', source: 'fy new' });
       should(made).match({ askedBy: 'agent', visibility: 'private', parent: null });
-      should(cardOrigin(made, { startedByFerret: () => false })).equal('agent');
+      should(taskOrigin(made, { startedByFerret: () => false })).equal('agent');
     });
 
     it('should keep a fy new card agent-asked and private when its brief quotes the owner, now and after a reboot', async () => {
@@ -246,7 +246,7 @@ describe('a session started with a brief', () => {
 
       // Assert
       should(stored(ports, 'F1')).match({ askedBy: 'agent', visibility: 'private' });
-      should(cardOrigin(stored(ports, 'F1'), { startedByFerret: () => false })).equal('agent');
+      should(taskOrigin(stored(ports, 'F1'), { startedByFerret: () => false })).equal('agent');
     });
 
     it("should still make the owner's own New session their ask: public, person-asked", async () => {
@@ -309,7 +309,7 @@ describe('a session started with a brief', () => {
 
     it("should still make the helper's card under the card its lead holds", async () => {
       // Arrange
-      const { subject, focus } = build({ off: [PROJECT], cards: [card({ id: 'F1', owner: 'lead' })] });
+      const { subject, focus } = build({ off: [PROJECT], cards: [boardTask({ id: 'F1', owner: 'lead' })] });
       focus.anchors.set('lead', { id: 'F1' });
 
       // Act
@@ -323,12 +323,12 @@ describe('a session started with a brief', () => {
 
     it("should make no card under a card the brief merely names: somebody else's, closed or dropped", async () => {
       // Arrange
-      const cards = [
-        card({ id: 'F1', owner: 'stranger' }),
-        card({ id: 'F2', owner: 'lead', laneId: 'closed' }),
-        card({ id: 'F3', owner: 'lead', dropped: { reason: 'superseded', at: NOW } }),
+      const tasks = [
+        boardTask({ id: 'F1', owner: 'stranger' }),
+        boardTask({ id: 'F2', owner: 'lead', laneId: 'closed' }),
+        boardTask({ id: 'F3', owner: 'lead', dropped: { reason: 'superseded', at: NOW } }),
       ];
-      const { subject, ports, focus } = build({ off: [PROJECT], cards });
+      const { subject, ports, focus } = build({ off: [PROJECT], cards: tasks });
       focus.anchors.set('lead', { id: 'F2' });
 
       // Act
@@ -349,13 +349,13 @@ describe('a session started with a brief', () => {
       const { subject, ports, focus } = build({
         off: [OTHER_PROJECT],
         folders: { '/work/other': OTHER_PROJECT },
-        cards: [card({ id: 'F1', owner: 'lead' })],
+        cards: [boardTask({ id: 'F1', owner: 'lead' })],
       });
 
       // Act
       const bare = await subject.delegate('lead', { brief: 'Build it', name: 'Build it' }, false, '/work/other');
       focus.anchors.set('lead', { id: 'F1' });
-      const underFerretryCard = await subject.delegate(
+      const underFerretryTask = await subject.delegate(
         'lead',
         { brief: 'Build it under &F1', name: 'Build it' },
         false,
@@ -363,7 +363,7 @@ describe('a session started with a brief', () => {
       );
 
       // Assert
-      for (const outcome of [bare, underFerretryCard]) {
+      for (const outcome of [bare, underFerretryTask]) {
         should(outcome.delegation).be.undefined();
         should(outcome.notes[0]).startWith('No task was made for the helper: the Home board is off');
       }
@@ -375,7 +375,7 @@ describe('a session started with a brief', () => {
       const { subject } = build({
         off: [OTHER_PROJECT],
         folders: { '/work/other': OTHER_PROJECT },
-        cards: [card({ id: 'F1', owner: 'lead', projectId: OTHER_PROJECT, laneId: 'todo' })],
+        cards: [boardTask({ id: 'F1', owner: 'lead', projectId: OTHER_PROJECT, laneId: 'todo' })],
       });
 
       // Act
@@ -395,7 +395,7 @@ describe('a session started with a brief', () => {
       const { subject, ports } = build({
         off: [OTHER_PROJECT],
         projects: { child: OTHER_PROJECT },
-        cards: [card({ id: 'F1', owner: 'lead' })],
+        cards: [boardTask({ id: 'F1', owner: 'lead' })],
       });
       const delegation = { lead: 'lead', brief: 'Build it', id: 'F2', existing: false, parent: { id: 'F1' } };
 
@@ -411,12 +411,12 @@ describe('a session started with a brief', () => {
   });
 
   describe('the parent of the card a fy new makes', () => {
-    const delegate = (subject: FerretCards, brief: string, extra: Partial<DelegationRequest> = {}) =>
+    const delegate = (subject: FerretTasks, brief: string, extra: Partial<DelegationRequest> = {}) =>
       subject.delegate('lead', { brief, name: 'Build the board store', ...extra }, true);
 
     it("should put the card under the lead's anchor, owned by the lead and worked by the child", async () => {
       // Arrange
-      const { subject, ports, focus } = build({ cards: [card({ id: 'F1', owner: 'lead', laneId: 'implement' })] });
+      const { subject, ports, focus } = build({ cards: [boardTask({ id: 'F1', owner: 'lead', laneId: 'implement' })] });
       focus.anchors.set('lead', { id: 'F1' });
       focus.focused.set('lead', { id: 'F1' });
 
@@ -456,7 +456,7 @@ describe('a session started with a brief', () => {
     it("should prefer the card the brief names over the lead's anchor", async () => {
       // Arrange
       const { subject, focus } = build({
-        cards: [card({ id: 'F1', owner: 'lead' }), card({ id: 'F138', owner: 'lead' })],
+        cards: [boardTask({ id: 'F1', owner: 'lead' }), boardTask({ id: 'F138', owner: 'lead' })],
       });
       focus.anchors.set('lead', { id: 'F1' });
 
@@ -472,8 +472,8 @@ describe('a session started with a brief', () => {
       // Arrange
       const { subject, focus } = build({
         cards: [
-          card({ id: 'F1', owner: 'lead' }),
-          card({ id: 'F7', owner: 'lead', dropped: { at: NOW, reason: 'x' } }),
+          boardTask({ id: 'F1', owner: 'lead' }),
+          boardTask({ id: 'F7', owner: 'lead', dropped: { at: NOW, reason: 'x' } }),
         ],
       });
       focus.anchors.set('lead', { id: 'F1' });
@@ -491,7 +491,7 @@ describe('a session started with a brief', () => {
 
     it('should never use a card the lead merely touched last: no anchor means a top-level card, said once', async () => {
       // Arrange
-      const { subject, ports, focus } = build({ cards: [card({ id: 'F1', owner: 'lead' })] });
+      const { subject, ports, focus } = build({ cards: [boardTask({ id: 'F1', owner: 'lead' })] });
       focus.focused.set('lead', { id: 'F1' });
 
       // Act
@@ -510,7 +510,7 @@ describe('a session started with a brief', () => {
 
     it('should set an anchor only by choice: a focus, a create or a start does; a note does not', async () => {
       // Arrange
-      const { ports, focus } = build({ cards: [card({ id: 'F1', owner: 'lead', assignee: null })] });
+      const { ports, focus } = build({ cards: [boardTask({ id: 'F1', owner: 'lead', assignee: null })] });
       const board = new BoardService({ ...ports, parents: new FakeParents({ child: 'lead' }) });
       const lead = { kind: 'ferret', ferret: 'lead' } as const;
 
@@ -532,7 +532,7 @@ describe('a session started with a brief', () => {
     it("should assign the lead's own open card with the same title instead of making a second", async () => {
       // Arrange
       const { subject, ports, focus } = build({
-        cards: [card({ id: 'F5', owner: 'lead', title: 'Build the Board Store', parent: { id: 'F1' } })],
+        cards: [boardTask({ id: 'F5', owner: 'lead', title: 'Build the Board Store', parent: { id: 'F1' } })],
       });
 
       // Act
@@ -562,11 +562,11 @@ describe('a session started with a brief', () => {
       const title = 'Build the Board Store';
       const { subject } = build({
         cards: [
-          card({ id: 'F2', owner: 'stranger', title }),
-          card({ id: 'F3', owner: 'lead', assignee: 'worker', title }),
-          card({ id: 'F4', owner: 'lead', title, laneId: 'closed' }),
-          card({ id: 'F5', owner: 'lead', title, dropped: { at: NOW, reason: 'x' } }),
-          card({ id: 'F6', owner: 'lead', title, projectId: OTHER_PROJECT, laneId: 'todo' }),
+          boardTask({ id: 'F2', owner: 'stranger', title }),
+          boardTask({ id: 'F3', owner: 'lead', assignee: 'worker', title }),
+          boardTask({ id: 'F4', owner: 'lead', title, laneId: 'closed' }),
+          boardTask({ id: 'F5', owner: 'lead', title, dropped: { at: NOW, reason: 'x' } }),
+          boardTask({ id: 'F6', owner: 'lead', title, projectId: OTHER_PROJECT, laneId: 'todo' }),
         ],
       });
 
@@ -579,7 +579,7 @@ describe('a session started with a brief', () => {
 
     it('should not look for a twin when the child runs in another folder', async () => {
       // Arrange
-      const { subject } = build({ cards: [card({ id: 'F5', owner: 'lead', title: 'Build the Board Store' })] });
+      const { subject } = build({ cards: [boardTask({ id: 'F5', owner: 'lead', title: 'Build the Board Store' })] });
 
       // Act
       const { delegation } = await subject.delegate('lead', request, false);
@@ -594,8 +594,8 @@ describe('a session started with a brief', () => {
       // Arrange
       const { subject, ports, focus } = build({
         cards: [
-          card({ id: 'F9', owner: 'lead', assignee: 'worker', parent: { id: 'F1' } }),
-          card({ id: 'F1', owner: 'lead' }),
+          boardTask({ id: 'F9', owner: 'lead', assignee: 'worker', parent: { id: 'F1' } }),
+          boardTask({ id: 'F1', owner: 'lead' }),
         ],
       });
       focus.focused.set('worker', { id: 'F9' });
@@ -619,7 +619,7 @@ describe('a session started with a brief', () => {
     it('should make no card, and leave the ferret alone, when the card was dropped after the owner chose it', async () => {
       // Arrange
       const { subject, ports } = build({
-        cards: [card({ id: 'F9', owner: 'lead', dropped: { at: NOW, reason: 'x' } })],
+        cards: [boardTask({ id: 'F9', owner: 'lead', dropped: { at: NOW, reason: 'x' } })],
       });
 
       // Act
@@ -639,8 +639,14 @@ describe('a session started with a brief', () => {
       // Arrange
       const { subject, ports, focus } = build({
         cards: [
-          card({ id: 'F9', owner: 'lead', title: 'Something else', parent: { id: 'F1' }, workflow: 'design-first' }),
-          card({ id: 'F1', owner: 'lead' }),
+          boardTask({
+            id: 'F9',
+            owner: 'lead',
+            title: 'Something else',
+            parent: { id: 'F1' },
+            workflow: 'design-first',
+          }),
+          boardTask({ id: 'F1', owner: 'lead' }),
         ],
       });
       focus.focused.set('lead', { id: 'F1' });
@@ -673,8 +679,8 @@ describe('a session started with a brief', () => {
       // Arrange
       const { subject, ports } = build({
         cards: [
-          card({ id: 'F2', owner: 'stranger', assignee: 'stranger' }),
-          card({ id: 'F3', owner: 'lead', dropped: { at: NOW, reason: 'x' } }),
+          boardTask({ id: 'F2', owner: 'stranger', assignee: 'stranger' }),
+          boardTask({ id: 'F3', owner: 'lead', dropped: { at: NOW, reason: 'x' } }),
         ],
       });
 
@@ -696,7 +702,7 @@ describe('a session started with a brief', () => {
     it("should assign the lead's existing card to the new session and journal it, with no second card", async () => {
       // Arrange
       const { subject, ports, focus } = build({
-        cards: [card({ id: 'F9', owner: 'lead', title: 'Something else' })],
+        cards: [boardTask({ id: 'F9', owner: 'lead', title: 'Something else' })],
       });
 
       // Act
@@ -719,8 +725,8 @@ describe('a session started with a brief', () => {
       // Arrange
       const { subject, ports } = build({
         cards: [
-          card({ id: 'F2', owner: 'stranger', assignee: 'stranger' }),
-          card({ id: 'F3', owner: 'sibling', assignee: 'sibling' }),
+          boardTask({ id: 'F2', owner: 'stranger', assignee: 'stranger' }),
+          boardTask({ id: 'F3', owner: 'sibling', assignee: 'sibling' }),
         ],
       });
 
@@ -739,7 +745,7 @@ describe('a session started with a brief', () => {
 
     it("should let the owner's start take any card that exists, as the owner's act", async () => {
       // Arrange
-      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { subject, ports } = build({ cards: [boardTask({ id: 'F9', owner: 'lead' })] });
 
       // Act
       const { delegation, refusal } = await subject.startOn(undefined, 'F9');
@@ -765,8 +771,8 @@ describe('a session started with a brief', () => {
       // Arrange
       const { subject, ports } = build({
         cards: [
-          card({ id: 'F3', owner: 'lead', dropped: { at: NOW, reason: 'superseded' } }),
-          card({ id: 'F4', owner: 'lead', laneId: 'closed' }),
+          boardTask({ id: 'F3', owner: 'lead', dropped: { at: NOW, reason: 'superseded' } }),
+          boardTask({ id: 'F4', owner: 'lead', laneId: 'closed' }),
         ],
       });
 
@@ -791,7 +797,7 @@ describe('a session started with a brief', () => {
 
     it('should refuse a start that is not an ordinary ferret, whatever the card', async () => {
       // Arrange
-      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { subject, ports } = build({ cards: [boardTask({ id: 'F9', owner: 'lead' })] });
 
       // Act
       const byLead = await subject.startOn('lead', 'F9', false);
@@ -806,7 +812,7 @@ describe('a session started with a brief', () => {
 
     it('should refuse, not fail, when the board cannot be read', async () => {
       // Arrange
-      const store = new MemoryBoardStore([card({ id: 'F9', owner: 'lead' })]);
+      const store = new MemoryBoardStore([boardTask({ id: 'F9', owner: 'lead' })]);
       store.read = async () => {
         throw new TypeError('the board is unreadable');
       };
@@ -822,7 +828,7 @@ describe('a session started with a brief', () => {
 
     it('should hand the card over and stop nothing when it is still open', async () => {
       // Arrange
-      const { subject, ports, focus } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { subject, ports, focus } = build({ cards: [boardTask({ id: 'F9', owner: 'lead' })] });
       const { stopped, stop } = stopper();
       const { delegation } = await subject.startOn('lead', 'F9');
 
@@ -839,10 +845,13 @@ describe('a session started with a brief', () => {
 
     it('should stop the session and leave the card alone when it was dropped after the preflight', async () => {
       // Arrange
-      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { subject, ports } = build({ cards: [boardTask({ id: 'F9', owner: 'lead' })] });
       const { stopped, stop } = stopper();
       const { delegation } = await subject.startOn('lead', 'F9');
-      ports.store.cards.set('F9', card({ id: 'F9', owner: 'lead', dropped: { at: NOW, reason: 'changed course' } }));
+      ports.store.cards.set(
+        'F9',
+        boardTask({ id: 'F9', owner: 'lead', dropped: { at: NOW, reason: 'changed course' } }),
+      );
 
       // Act
       const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
@@ -857,10 +866,10 @@ describe('a session started with a brief', () => {
 
     it('should stop the session when the owner’s card was closed after the preflight', async () => {
       // Arrange
-      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { subject, ports } = build({ cards: [boardTask({ id: 'F9', owner: 'lead' })] });
       const { stopped, stop } = stopper();
       const { delegation } = await subject.startOn(undefined, 'F9');
-      ports.store.cards.set('F9', card({ id: 'F9', owner: 'lead', laneId: 'closed' }));
+      ports.store.cards.set('F9', boardTask({ id: 'F9', owner: 'lead', laneId: 'closed' }));
 
       // Act
       const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
@@ -873,10 +882,10 @@ describe('a session started with a brief', () => {
 
     it('should stop the session when the card was reassigned away from the lead after the preflight', async () => {
       // Arrange
-      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { subject, ports } = build({ cards: [boardTask({ id: 'F9', owner: 'lead' })] });
       const { stopped, stop } = stopper();
       const { delegation } = await subject.startOn('lead', 'F9');
-      ports.store.cards.set('F9', card({ id: 'F9', owner: 'stranger', assignee: 'stranger' }));
+      ports.store.cards.set('F9', boardTask({ id: 'F9', owner: 'stranger', assignee: 'stranger' }));
 
       // Act
       const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
@@ -891,7 +900,7 @@ describe('a session started with a brief', () => {
 
     it('should stop the second of two starts racing for a lead’s card, and keep the first one’s assignment', async () => {
       // Arrange: both starts judge the card while the lead alone holds it.
-      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { subject, ports } = build({ cards: [boardTask({ id: 'F9', owner: 'lead' })] });
       const { stopped, stop } = stopper();
       const first = await subject.startOn('lead', 'F9');
       const second = await subject.startOn('lead', 'F9');
@@ -913,7 +922,7 @@ describe('a session started with a brief', () => {
 
     it('should stop the second of two owner starts racing for a card, though the owner may always assign', async () => {
       // Arrange
-      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { subject, ports } = build({ cards: [boardTask({ id: 'F9', owner: 'lead' })] });
       const { stopped, stop } = stopper();
       const first = await subject.startOn(undefined, 'F9');
       const second = await subject.startOn(undefined, 'F9');
@@ -931,10 +940,10 @@ describe('a session started with a brief', () => {
 
     it('should stop a start when only the assignee changed after the preflight, the lead still owning the card', async () => {
       // Arrange
-      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { subject, ports } = build({ cards: [boardTask({ id: 'F9', owner: 'lead' })] });
       const { stopped, stop } = stopper();
       const { delegation } = await subject.startOn('lead', 'F9');
-      ports.store.cards.set('F9', card({ id: 'F9', owner: 'lead', assignee: 'other-child' }));
+      ports.store.cards.set('F9', boardTask({ id: 'F9', owner: 'lead', assignee: 'other-child' }));
 
       // Act
       const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
@@ -948,10 +957,10 @@ describe('a session started with a brief', () => {
 
     it('should stop a start when the owner started it and only the assignee changed after the preflight', async () => {
       // Arrange
-      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { subject, ports } = build({ cards: [boardTask({ id: 'F9', owner: 'lead' })] });
       const { stopped, stop } = stopper();
       const { delegation } = await subject.startOn(undefined, 'F9');
-      ports.store.cards.set('F9', card({ id: 'F9', owner: 'lead', assignee: 'other-child' }));
+      ports.store.cards.set('F9', boardTask({ id: 'F9', owner: 'lead', assignee: 'other-child' }));
 
       // Act
       const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
@@ -966,7 +975,7 @@ describe('a session started with a brief', () => {
       // Arrange: the name is read for the preflight, then the lookup fails once the card has been assigned.
       let failing = false;
       const { subject, ports, warnings } = build({
-        cards: [card({ id: 'F9', owner: 'lead' })],
+        cards: [boardTask({ id: 'F9', owner: 'lead' })],
         nameOf: async projectId => {
           if (failing) throw new Error('the project registry is unreadable');
           return NAMES[projectId] ?? projectId;
@@ -990,7 +999,7 @@ describe('a session started with a brief', () => {
 
     it('should refuse a delegation that was never judged, rather than assign on a guess', async () => {
       // Arrange
-      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { subject, ports } = build({ cards: [boardTask({ id: 'F9', owner: 'lead' })] });
       const { stopped, stop } = stopper();
       const { delegation } = await subject.startOn('lead', 'F9');
       const { held: _held, ...unjudged } = delegation as NonNullable<typeof delegation>;
@@ -1006,9 +1015,9 @@ describe('a session started with a brief', () => {
 
     it('should still refuse, and say the stop failed, when the session cannot be stopped', async () => {
       // Arrange
-      const { subject, ports, warnings } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { subject, ports, warnings } = build({ cards: [boardTask({ id: 'F9', owner: 'lead' })] });
       const { delegation } = await subject.startOn('lead', 'F9');
-      ports.store.cards.set('F9', card({ id: 'F9', owner: 'lead', dropped: { at: NOW, reason: 'x' } }));
+      ports.store.cards.set('F9', boardTask({ id: 'F9', owner: 'lead', dropped: { at: NOW, reason: 'x' } }));
 
       // Act
       const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', async () => {
@@ -1023,7 +1032,7 @@ describe('a session started with a brief', () => {
 
   it('should start without a card, and say why, when the card cannot be read', async () => {
     // Arrange
-    const store = new MemoryBoardStore([card({ id: 'F9', owner: 'lead' })]);
+    const store = new MemoryBoardStore([boardTask({ id: 'F9', owner: 'lead' })]);
     store.read = async () => {
       throw new TypeError('the board is unreadable');
     };
@@ -1041,7 +1050,7 @@ describe('a session started with a brief', () => {
   it('should say where the card really is when the child runs on another board than the brief said', async () => {
     // Arrange
     const { subject, focus } = build({
-      cards: [card({ id: 'F1', owner: 'lead' })],
+      cards: [boardTask({ id: 'F1', owner: 'lead' })],
       projects: { child: OTHER_PROJECT },
     });
     focus.anchors.set('lead', { id: 'F1' });
@@ -1069,7 +1078,7 @@ describe('a session started with a brief', () => {
       projectOf: async (ferret: string) => await stored.projectOf(ferret),
       laneSet: async (projectId: BoardProjectId) => (proposedYet ? await stored.laneSet(projectId) : null),
     };
-    const subject = new FerretCards({
+    const subject = new FerretTasks({
       board: new BoardService(world({ lanes: projectLanes })),
       lanes: projectLanes,
       starts: { projectForStart: async () => BARE_PROJECT },
@@ -1118,7 +1127,7 @@ describe('a session started with a brief', () => {
   it('should put the card of a start on the Unfiled board on the board of the repository it registers', async () => {
     // Arrange
     const adopted: string[] = [];
-    const adoption = (proposed: boolean): FerretCardsPorts['adoption'] => ({
+    const adoption = (proposed: boolean): FerretTasksPorts['adoption'] => ({
       adopt: async (ferret, proposer) => {
         adopted.push(`${ferret}:${proposer ?? ferret}`);
         return { projectId: OTHER_PROJECT, proposed };
@@ -1144,7 +1153,7 @@ describe('a session started with a brief', () => {
   it('should keep a start on its board when registering does nothing or fails, and never ask for a filed one', async () => {
     // Arrange
     const asked: string[] = [];
-    const recording = (prefix: string): FerretCardsPorts['adoption'] => ({
+    const recording = (prefix: string): FerretTasksPorts['adoption'] => ({
       adopt: async ferret => {
         asked.push(`${prefix}${ferret}`);
         return null;
@@ -1197,7 +1206,7 @@ describe("a ferret's done on the board", () => {
   it('should note it and move the card, and tell nobody: the done reaches the lead through fy wait', async () => {
     // Arrange
     const { subject, ports, focus, warnings } = build({
-      cards: [card({ id: 'F2', owner: 'lead', assignee: 'child', laneId: 'implement', workflow: 'quick' })],
+      cards: [boardTask({ id: 'F2', owner: 'lead', assignee: 'child', laneId: 'implement', workflow: 'quick' })],
     });
     focus.focused.set('child', { id: 'F2' });
 
@@ -1214,7 +1223,7 @@ describe("a ferret's done on the board", () => {
   it('should never fail the signal: no card or a refused write is only said', async () => {
     // Arrange
     const none = build();
-    const refused = build({ cards: [card({ id: 'F1', owner: 'lead' })] });
+    const refused = build({ cards: [boardTask({ id: 'F1', owner: 'lead' })] });
     refused.focus.focused.set('stranger', { id: 'F1' });
 
     // Act

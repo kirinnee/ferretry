@@ -32,7 +32,7 @@
  */
 
 import { gateOf } from '../../lib/gate-items.ts';
-import type { AgendaCardAnswer, AgendaItem } from '@ferretry/core-asks/contract';
+import type { AgendaTaskAnswer, AgendaItem } from '@ferretry/core-asks/contract';
 import { GitCompareArrows, Merge } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { DoneCloseSource } from '../../lib/agenda-done-close.ts';
@@ -306,7 +306,7 @@ export function AgendaItemView({
     onSnooze !== undefined ||
     (merge !== undefined && latest);
   // Request changes IS the owner's words: sent with what the composer holds, or the owner is put in the composer first.
-  const requestChanges = (answer: AgendaCardAnswer): void => {
+  const requestChanges = (answer: AgendaTaskAnswer): void => {
     const composer = quoteScope === null ? null : composerQuoteTarget(ferretScopeOf(quoteScope));
     const words = composer?.draft().trim() ?? '';
     if (words === '') {

@@ -1,31 +1,31 @@
 import { describe, expect, it } from 'bun:test';
 import {
   groupUnderHuman,
-  type HumanCard,
-  humanCardKey,
+  type HumanTask,
+  humanTaskKey,
   humanParentKey,
   humanScope,
   isAgentTask,
-  isPrivateCard,
+  isPrivateTask,
   splitAvailable,
   taskAsker,
 } from '../../../app/lib/board-human.ts';
-import { card, originCard, unasked } from './board-support.ts';
+import { boardTask, originTask, unasked } from './board-support.ts';
 
-const entry = (daemonId: string, task: ReturnType<typeof card>): HumanCard & { readonly task: typeof task } => ({
+const entry = (daemonId: string, task: ReturnType<typeof boardTask>): HumanTask & { readonly task: typeof task } => ({
   daemonId,
   task,
 });
 
 describe('who asked for a card', () => {
   it('reads only what the daemon declared', () => {
-    expect(taskAsker(originCard('F1', 'human'))).toBe('person');
-    expect(taskAsker(originCard('F2', 'agent'))).toBe('agent');
-    expect(taskAsker(unasked([card('F3')])[0] ?? {})).toBeNull();
+    expect(taskAsker(originTask('F1', 'human'))).toBe('person');
+    expect(taskAsker(originTask('F2', 'agent'))).toBe('agent');
+    expect(taskAsker(unasked([boardTask('F3')])[0] ?? {})).toBeNull();
     expect(taskAsker({ origin: 'robot' })).toBeNull();
     expect(taskAsker({ askedBy: 'robot' })).toBeNull();
-    expect(isAgentTask(originCard('F2', 'agent'))).toBe(true);
-    expect(isAgentTask(card('F3'))).toBe(false);
+    expect(isAgentTask(originTask('F2', 'agent'))).toBe(true);
+    expect(isAgentTask(boardTask('F3'))).toBe(false);
   });
 
   it('reads askedBy first and falls back to origin for a daemon that sends only that', () => {
@@ -45,8 +45,8 @@ describe('who asked for a card', () => {
   });
 
   it('offers the split only when some card says who asked', () => {
-    expect(splitAvailable(unasked([card('F1'), card('F2')]))).toBe(false);
-    expect(splitAvailable([card('F1'), originCard('F2', 'agent')])).toBe(true);
+    expect(splitAvailable(unasked([boardTask('F1'), boardTask('F2')]))).toBe(false);
+    expect(splitAvailable([boardTask('F1'), originTask('F2', 'agent')])).toBe(true);
     expect(splitAvailable([{ origin: 'agent' }])).toBe(true);
     expect(splitAvailable([])).toBe(false);
   });
@@ -56,16 +56,16 @@ describe('private cards', () => {
   const sub = { parent: { id: 'F1' } };
 
   it('believes the daemon’s visibility over who asked', () => {
-    expect(isPrivateCard(card('F2', { askedBy: 'person', visibility: 'private' }))).toBe(true);
-    expect(isPrivateCard(card('F3', { askedBy: 'agent', visibility: 'public' }))).toBe(false);
-    expect(isPrivateCard(card('F4', { ...sub, askedBy: 'person', visibility: 'public' }))).toBe(false);
+    expect(isPrivateTask(boardTask('F2', { askedBy: 'person', visibility: 'private' }))).toBe(true);
+    expect(isPrivateTask(boardTask('F3', { askedBy: 'agent', visibility: 'public' }))).toBe(false);
+    expect(isPrivateTask(boardTask('F4', { ...sub, askedBy: 'person', visibility: 'public' }))).toBe(false);
   });
 
   it('falls back to the older rule for a card whose daemon sends no visibility', () => {
-    expect(isPrivateCard(card('F2', { askedBy: 'agent' }))).toBe(true);
-    expect(isPrivateCard(card('F3', { ...sub, askedBy: 'agent' }))).toBe(true);
-    expect(isPrivateCard(card('F4', { ...sub, askedBy: 'person' }))).toBe(false);
-    expect(isPrivateCard(card('F5', { askedBy: 'person' }))).toBe(false);
+    expect(isPrivateTask(boardTask('F2', { askedBy: 'agent' }))).toBe(true);
+    expect(isPrivateTask(boardTask('F3', { ...sub, askedBy: 'agent' }))).toBe(true);
+    expect(isPrivateTask(boardTask('F4', { ...sub, askedBy: 'person' }))).toBe(false);
+    expect(isPrivateTask(boardTask('F5', { askedBy: 'person' }))).toBe(false);
   });
 
   it('offers the split when a card says its visibility, even if nothing says who asked', () => {
@@ -75,46 +75,46 @@ describe('private cards', () => {
 });
 
 describe('the human card an agent card serves', () => {
-  const human = entry('d', originCard('F1', 'human'));
-  const sub = entry('d', originCard('F2', 'agent', undefined, { parent: { id: 'F1' } }));
-  const deep = entry('d', originCard('F3', 'agent', undefined, { parent: { id: 'F2' } }));
-  const told = entry('d', originCard('F4', 'agent', { id: 'F1' }, { parent: null }));
-  const untold = entry('d', originCard('F5', 'agent', undefined, { parent: null }));
+  const human = entry('d', originTask('F1', 'human'));
+  const sub = entry('d', originTask('F2', 'agent', undefined, { parent: { id: 'F1' } }));
+  const deep = entry('d', originTask('F3', 'agent', undefined, { parent: { id: 'F2' } }));
+  const told = entry('d', originTask('F4', 'agent', { id: 'F1' }, { parent: null }));
+  const untold = entry('d', originTask('F5', 'agent', undefined, { parent: null }));
   const scope = humanScope([human, sub, deep, told, untold]);
 
   it('believes the declared human parent, and has none for a human card', () => {
-    expect(humanParentKey(told, scope)).toBe(humanCardKey(human));
+    expect(humanParentKey(told, scope)).toBe(humanTaskKey(human));
     expect(humanParentKey(human, scope)).toBeNull();
     expect(humanParentKey(untold, scope)).toBeNull();
-    expect(humanParentKey(entry('d', originCard('F6', 'agent', null, { parent: { id: 'F1' } })), scope)).toBeNull();
+    expect(humanParentKey(entry('d', originTask('F6', 'agent', null, { parent: { id: 'F1' } })), scope)).toBeNull();
   });
 
   it('walks the parent chain to the nearest human when nothing was declared', () => {
-    expect(humanParentKey(sub, scope)).toBe(humanCardKey(human));
-    expect(humanParentKey(deep, scope)).toBe(humanCardKey(human));
+    expect(humanParentKey(sub, scope)).toBe(humanTaskKey(human));
+    expect(humanParentKey(deep, scope)).toBe(humanTaskKey(human));
   });
 
   it('has nothing to group under when the human is not on the board, or the chain loops', () => {
     expect(humanParentKey(sub, humanScope([sub]))).toBeNull();
     expect(humanParentKey(told, humanScope([told]))).toBeNull();
-    const a = entry('d', originCard('F11', 'agent', undefined, { parent: { id: 'F12' } }));
-    const b = entry('d', originCard('F12', 'agent', undefined, { parent: { id: 'F11' } }));
+    const a = entry('d', originTask('F11', 'agent', undefined, { parent: { id: 'F12' } }));
+    const b = entry('d', originTask('F12', 'agent', undefined, { parent: { id: 'F11' } }));
     expect(humanParentKey(a, humanScope([a, b]))).toBeNull();
   });
 
   it('never mixes up two machines that use the same task id', () => {
-    const other = entry('e', originCard('F1', 'human'));
-    const child = entry('e', originCard('F9', 'agent', { id: 'F1' }));
-    expect(humanParentKey(child, humanScope([human, other, child]))).toBe(humanCardKey(other));
+    const other = entry('e', originTask('F1', 'human'));
+    const child = entry('e', originTask('F9', 'agent', { id: 'F1' }));
+    expect(humanParentKey(child, humanScope([human, other, child]))).toBe(humanTaskKey(other));
   });
 });
 
 describe('grouping agent cards under their human card', () => {
-  const a = entry('d', originCard('F1', 'human'));
-  const b = entry('d', originCard('F2', 'human'));
-  const x = entry('d', originCard('F3', 'agent', { id: 'F1' }));
-  const y = entry('d', originCard('F4', 'agent', { id: 'F1' }));
-  const lost = entry('d', originCard('F5', 'agent', { id: 'F8' }));
+  const a = entry('d', originTask('F1', 'human'));
+  const b = entry('d', originTask('F2', 'human'));
+  const x = entry('d', originTask('F3', 'agent', { id: 'F1' }));
+  const y = entry('d', originTask('F4', 'agent', { id: 'F1' }));
+  const lost = entry('d', originTask('F5', 'agent', { id: 'F8' }));
 
   it('moves an agent card to sit after its human, keeping the order of the rest', () => {
     const scope = humanScope([a, b, x, y, lost]);

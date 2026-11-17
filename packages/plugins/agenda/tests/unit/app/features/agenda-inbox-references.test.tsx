@@ -18,8 +18,8 @@ import type { ReactNode } from 'react';
 import {
   AgendaBoardProviders,
   agendaBoardHooks,
-  CardReferenceScope,
-  useCardBoards,
+  TaskReferenceScope,
+  useTaskBoards,
 } from '../../../../app/features/agenda/agenda-board-hooks.tsx';
 import { agendaProse } from '../../../../app/features/agenda/agenda-prose.tsx';
 import { AgendaInboxPage, AgendaNeedsYou } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
@@ -90,11 +90,11 @@ const linksIn = (root: ParentNode): ReadonlyArray<readonly [string, string | nul
     .map(link => [link.textContent ?? '', link.getAttribute('href')] as const);
 
 /** The page the screen draws: per-card Board, the way `createAgendaScreen` binds it. */
-function CardBoardPage({ inbox, open }: { inbox: Parameters<typeof AgendaInboxPage>[0]['inbox']; open?: string }) {
-  const { cardBoard } = useCardBoards(() => undefined);
+function TaskBoardPage({ inbox, open }: { inbox: Parameters<typeof AgendaInboxPage>[0]['inbox']; open?: string }) {
+  const { cardBoard: taskBoard } = useTaskBoards(() => undefined);
   return (
     <AgendaInboxPage
-      cardBoard={cardBoard}
+      cardBoard={taskBoard}
       inbox={inbox}
       {...(open === undefined ? {} : { initialOpen: open })}
       now={NOW}
@@ -114,7 +114,7 @@ const openCard = async (card: ReturnType<typeof cardOn>) => {
         cards={[card]}
         fake={fake}
         reading={false}
-        render={inbox => <CardBoardPage inbox={inbox} open={card.key} />}
+        render={inbox => <TaskBoardPage inbox={inbox} open={card.key} />}
       />,
     ),
   );
@@ -240,7 +240,7 @@ describe('a nested provider for another machine', () => {
           hooks={agendaBoardHooks(DESK, { cardAnswer: undefined, laneProposal: undefined, cardReference: undefined })}
           onNavigate={() => undefined}
         >
-          <CardReferenceScope daemonId={DESK}>{agendaProse()(WORDS)}</CardReferenceScope>
+          <TaskReferenceScope daemonId={DESK}>{agendaProse()(WORDS)}</TaskReferenceScope>
         </AgendaBoardProviders>
       </AgendaBoardProviders>,
     );
@@ -254,7 +254,7 @@ describe('a card scope outside the providers', () => {
   it('fails closed: nothing says whose proofs the surface carries, so it removes them', async () => {
     view = await mount(
       <ReferenceSurfaceProvider surface={{ taskReferenceResolver: () => true, onTaskOpen: () => undefined }}>
-        <CardReferenceScope daemonId={DESK}>{agendaProse()('see &F12')}</CardReferenceScope>
+        <TaskReferenceScope daemonId={DESK}>{agendaProse()('see &F12')}</TaskReferenceScope>
       </ReferenceSurfaceProvider>,
     );
 

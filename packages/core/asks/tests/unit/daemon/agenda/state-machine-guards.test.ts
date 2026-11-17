@@ -11,7 +11,7 @@ import {
   parseAgendaLedger,
   type RaiseAgendaRequest,
 } from '../../../../daemon/lib/agenda/state-machine.ts';
-import { cardAgendaReference } from '../../../../daemon/lib/protocol/agenda-task-asks.ts';
+import { taskAgendaReference } from '../../../../daemon/lib/protocol/agenda-task-asks.ts';
 import { gateReference } from '../../../../daemon/lib/protocol/agenda-gate.ts';
 import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
 import type { AgendaItem } from '../../../../daemon/lib/protocol/agenda.ts';
@@ -196,7 +196,7 @@ describe('the agenda of a card, when its only ask is withdrawn', () => {
       cardTitle: 'Badge',
       options: [{ id: 'o0', label: 'Done', outcome: 'close' as const }],
     };
-    const opened = raise(DAEMON, { source: 'task', sourceRef: cardAgendaReference('F1'), task: { id: 'F1' } });
+    const opened = raise(DAEMON, { source: 'task', sourceRef: taskAgendaReference('F1'), task: { id: 'F1' } });
     const asked = succeeded(
       applyAgendaCommand(opened.ledger, {
         action: 'card-ask',

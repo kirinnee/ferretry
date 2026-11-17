@@ -6,12 +6,12 @@ import {
   ferretAgendaView,
   ferretRunView,
   ferretStatusView,
-  type WardenFocusCard,
+  type WardenFocusTask,
   type WardenReadScope,
 } from '../../daemon/lib/index.ts';
 import { toWireAgenda, toWireStatus } from '../../daemon/lib/wire-map.ts';
 import { lanes, PROJECT } from '../support/board.ts';
-import { boardOf, cardView } from './board-fixtures.ts';
+import { boardOf, taskView } from './board-fixtures.ts';
 import { enabled, harness, type Harness, NOW, no, session, yes, type JevScript } from './sweep-harness.ts';
 
 /**
@@ -63,8 +63,8 @@ const peerWaiter = (id: string, overrides: Parameters<typeof session>[0]['state'
 const peer = () => session({ id: 'p9', status: PEER_STATE, label: PEER });
 
 /** The focus card a restarted or resumed ferret is handed, so the turn typed into it is delivered and read. */
-const card: WardenFocusCard = { task: cardView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
-const board = { read: async () => boardOf(), focusCard: async () => card };
+const task: WardenFocusTask = { task: taskView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
+const board = { read: async () => boardOf(), focusCard: async () => task };
 
 const nudgedBefore: WardenAction = {
   at: iso(NOW - 60 * MINUTE),

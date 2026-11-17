@@ -140,8 +140,8 @@ export type FerretRecord = z.infer<typeof FerretRecordSchema>;
  * Ferrets is core and cannot import the Board's contract, so the shape is kept here: a start names the EXISTING card
  * the ferret works on, and the summary shows it.
  */
-export const FERRET_CARD_ID_PATTERN = /^[BFIC][1-9][0-9]{0,8}$/u;
-export const FerretCardIdSchema = z.string().regex(FERRET_CARD_ID_PATTERN);
+export const FERRET_TASK_ID_PATTERN = /^[BFIC][1-9][0-9]{0,8}$/u;
+export const FerretCardIdSchema = z.string().regex(FERRET_TASK_ID_PATTERN);
 
 /**
  * A ferret's task title (today's `start --name <title>`, `new --name <title>`, `rename --title`): free-form, kept

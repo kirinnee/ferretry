@@ -23,13 +23,13 @@ import type { ReactNode } from 'react';
 import type { FyRenderEmbedBlock } from './fy-render.ts';
 
 /** What a host that can reach a board lends a block: the daemon whose board to ask. */
-export interface FyRenderCardEmbedHost {
+export interface FyRenderTaskEmbedHost {
   readonly daemon: string;
 }
 
-export interface FyRenderCardEmbedProps {
+export interface FyRenderTaskEmbedProps {
   readonly block: FyRenderEmbedBlock;
-  readonly host: FyRenderCardEmbedHost;
+  readonly host: FyRenderTaskEmbedHost;
   /** Opens a card the way a written `&F12` does; absent, the Board's own link is the way in. */
   readonly onTaskOpen?: ((id: string, opener?: HTMLElement | null) => void) | undefined;
 }
@@ -44,7 +44,7 @@ const noteRow = (id: string, sentence: string): ReactNode => (
   </div>
 );
 
-function CardRow({ id, host }: { readonly id: string; readonly host: FyRenderCardEmbedHost }) {
+function CardRow({ id, host }: { readonly id: string; readonly host: FyRenderTaskEmbedHost }) {
   return (
     <ul className="fy-card-embed-list" data-fy-card-embed-card={id}>
       <li>
@@ -60,7 +60,7 @@ function FallbackRows({
   host,
 }: {
   readonly embed: FyRenderEmbedBlock['embed'];
-  readonly host: FyRenderCardEmbedHost;
+  readonly host: FyRenderTaskEmbedHost;
 }) {
   return (
     <>
@@ -77,7 +77,7 @@ function FallbackRows({
   );
 }
 
-export function FyRenderCardEmbed({ block, host }: FyRenderCardEmbedProps) {
+export function FyRenderTaskEmbed({ block, host }: FyRenderTaskEmbedProps) {
   const { embed } = block;
   return (
     // biome-ignore lint/a11y/useSemanticElements: a fieldset draws a border and legend; this is a plain labelled group of cards.

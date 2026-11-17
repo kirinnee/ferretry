@@ -7,14 +7,14 @@ import {
   type ReviveEvent,
   type ReviveState,
   WARDEN_LABEL,
-  type WardenFocusCard,
+  type WardenFocusTask,
   type WardenResumeOutcome,
   type WardenReviveNotice,
   WardenReviveService,
   type WardenSessionView,
 } from '../../daemon/lib/index.ts';
 import { lanes, PROJECT } from '../support/board.ts';
-import { cardView } from './board-fixtures.ts';
+import { taskView } from './board-fixtures.ts';
 
 const NOW = Date.parse('2026-10-30T12:00:00.000Z');
 const ago = (seconds: number): string => new Date(NOW - seconds * 1000).toISOString();
@@ -76,7 +76,7 @@ const harness = (
   options: {
     resume?: (id: string) => WardenResumeOutcome;
     tmux?: (probe: number) => boolean;
-    focusCard?: (id: string) => Promise<WardenFocusCard | undefined>;
+    focusCard?: (id: string) => Promise<WardenFocusTask | undefined>;
   } = {},
 ): Harness => {
   const resumed: { id: string; message: string }[] = [];
@@ -415,7 +415,7 @@ describe('the circuit breaker', () => {
 });
 
 describe('the card a revived ferret carries on', () => {
-  const card: WardenFocusCard = { task: cardView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
+  const task: WardenFocusTask = { task: taskView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
 
   it('should hand an auto ferret its focus card with the notice', async () => {
     // Arrange
@@ -425,7 +425,7 @@ describe('the card a revived ferret carries on', () => {
       {
         focusCard: async id => {
           asked.push(id);
-          return card;
+          return task;
         },
       },
     );
@@ -448,7 +448,7 @@ describe('the card a revived ferret carries on', () => {
       {
         focusCard: async id => {
           asked.push(id);
-          return card;
+          return task;
         },
       },
     );

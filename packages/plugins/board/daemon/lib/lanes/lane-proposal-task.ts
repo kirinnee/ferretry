@@ -17,7 +17,7 @@ import {
 } from './model.ts';
 import { clipAtWord } from './text.ts';
 
-export interface LaneProposalCard {
+export interface LaneProposalTask {
   readonly subject: string;
   readonly title: string;
   readonly kind: 'choice';
@@ -45,9 +45,9 @@ const EDIT = {
 const answered = (
   left: { readonly label: string; readonly description: string },
   right: { readonly label: string; readonly description: string },
-): Pick<LaneProposalCard, 'options'> => ({ options: [left, right] });
+): Pick<LaneProposalTask, 'options'> => ({ options: [left, right] });
 
-export const laneProposalCard = (projectName: string, laneSet: LaneSet): LaneProposalCard => {
+export const laneProposalTask = (projectName: string, laneSet: LaneSet): LaneProposalTask => {
   const accept = { label: LANE_PROPOSAL_ANSWERS.accept, description: 'Keep these lanes; the board stays as it is' };
   const path = laneSet.lanes.map(lane => lane.name).join(' → ');
   return {
@@ -78,7 +78,7 @@ export const LANE_CHANGE_READ_FIRST = 'It changes what only you decide: read it 
  * Then Edit is recommended. A bullet is never cut short: the ones that do not fit are counted — and then the card has
  * no Accept, so a change the owner has not read in full is accepted only in the lane editor, which lists it all.
  */
-export const laneChangeCard = (projectName: string, live: LaneSet, pending: PendingLaneSet): LaneProposalCard => {
+export const laneChangeTask = (projectName: string, live: LaneSet, pending: PendingLaneSet): LaneProposalTask => {
   const accept = { label: LANE_PROPOSAL_ANSWERS.accept, description: 'Switch the board to these lanes' };
   const later = { label: LANE_CHANGE_LATER, description: 'Leave it waiting; the board keeps its lanes' };
   const path = pending.lanes.map(lane => lane.name).join(' → ');

@@ -81,9 +81,9 @@ describe('the screens Ferretry clears, over a fake screen', () => {
           const tab = await context.newPage();
           try {
             await tab.goto(`${origin}/?theme=${theme}&state=${state.name === 'held' ? 'held' : 'proposal'}`);
-            const card = tab.locator('[aria-label="Screens Ferretry clears"]');
-            await card.waitFor({ state: 'visible' });
-            const text = await card.innerText();
+            const task = tab.locator('[aria-label="Screens Ferretry clears"]');
+            await task.waitFor({ state: 'visible' });
+            const text = await task.innerText();
             expect(text).toContain(state.expects);
             expect(text.includes('Save this rule')).toBe(state.saves);
             // No horizontal scroll on a phone: the card fits the width it is given.

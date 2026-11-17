@@ -19,8 +19,8 @@
  * - **`releasedIn` is immutable** once set: a later poll never rewrites the release a PR shipped in.
  */
 import {
-  type Card,
-  formatCardRef,
+  type Task,
+  formatTaskRef,
   type LaneTrigger,
   type PrChangeKind,
   type PrChecks,
@@ -28,7 +28,7 @@ import {
   prUrlParts,
   type ReleasedIn,
 } from '../../../contract/index.ts';
-import { type CardContext, reconcileFacts, requireStanding, triggerMove, withEvent } from './task-actions.ts';
+import { type TaskContext, reconcileFacts, requireStanding, triggerMove, withEvent } from './task-actions.ts';
 import type { PrAlertReason } from './notice-route.ts';
 
 /**
@@ -73,7 +73,7 @@ interface PrNudge {
 
 export interface PrUpdateOutcome {
   /** The card as written, or `null` when the poll changed nothing on it. */
-  readonly task: Card | null;
+  readonly task: Task | null;
   readonly nudges: readonly PrNudge[];
 }
 
@@ -211,10 +211,10 @@ const nextLink = (pr: PrLink, update: PrUpdate, now: string): LinkChange => {
  * released), then the reconcile that puts the card where its facts say (running here included).
  * `task: null` when nothing changed.
  */
-export const applyPrUpdate = (card: Card, update: PrUpdate, context: CardContext): PrUpdateOutcome => {
-  requireStanding('trigger', context.standing, card);
-  const ref = formatCardRef(card);
-  let next = card;
+export const applyPrUpdate = (task: Task, update: PrUpdate, context: TaskContext): PrUpdateOutcome => {
+  requireStanding('trigger', context.standing, task);
+  const ref = formatTaskRef(task);
+  let next = task;
   for (const candidate of update.link) {
     if (next.links.prs.some(pr => samePr(pr.url, candidate.url))) continue;
     const link = unpolled(candidate.url);
@@ -257,5 +257,5 @@ export const applyPrUpdate = (card: Card, update: PrUpdate, context: CardContext
   next =
     reconcileFacts(next, { ...context, runningVersion: update.runningVersion ?? context.runningVersion ?? null }) ??
     next;
-  return { task: next === card ? null : next, nudges };
+  return { task: next === task ? null : next, nudges };
 };

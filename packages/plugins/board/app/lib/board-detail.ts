@@ -11,16 +11,16 @@ import {
   ADMIN_TOKEN_ACTOR_NOTE,
   ADMIN_TOKEN_ACTOR_WORDS,
   attachmentsPhrase,
-  type CardActor,
+  type TaskActor,
   type BoardEditableField,
-  type CardEvent,
-  type CardView,
+  type TaskEvent,
+  type TaskView,
   boardEventActor,
-  formatCardRef,
+  formatTaskRef,
   type LaneCategory,
   type LaneSet,
   type PrLink,
-  type CardRef,
+  type TaskRef,
 } from '../../contract/index.ts';
 import type { FerretNames } from './board-present.ts';
 
@@ -36,11 +36,11 @@ export const laneNameOf = (laneSet: Lanes | null, laneId: string): string =>
 // Header
 // ---------------------------------------------------------------------------------------------------
 
-export const kindLabel = (kind: CardView['kind']): string =>
+export const kindLabel = (kind: TaskView['kind']): string =>
   ({ bug: 'Bug', feature: 'Feature', infra: 'Infra', chore: 'Chore' })[kind];
 
 /** The words for the card's liveness; a card in a verify lane waits for the owner, whatever it derived. */
-export const activityText = (task: Pick<CardView, 'activity'>, category: LaneCategory | null): string => {
+export const activityText = (task: Pick<TaskView, 'activity'>, category: LaneCategory | null): string => {
   if (category === 'verify') return 'Waiting for you to try it';
   switch (task.activity) {
     case 'active':
@@ -101,7 +101,7 @@ export interface HistoryContext {
   readonly laneName: (laneId: string) => string;
 }
 
-const actorName = (actor: CardActor, names: FerretNames): string => {
+const actorName = (actor: TaskActor, names: FerretNames): string => {
   if (actor.kind === 'owner') return actor.via === 'admin-token' ? 'Admin token' : 'You';
   if (actor.kind === 'daemon') return 'Ferretry';
   return names(actor.ferret);
@@ -119,12 +119,12 @@ export interface HistoryRow {
   readonly detail: string | null;
   /** A row the page folds into a run when several come together. */
   readonly minor: boolean;
-  readonly type: CardEvent['type'];
+  readonly type: TaskEvent['type'];
 }
 
-const refText = (ref: CardRef): string => formatCardRef(ref);
+const refText = (ref: TaskRef): string => formatTaskRef(ref);
 
-const describe = (event: CardEvent, context: HistoryContext): Pick<HistoryRow, 'text' | 'detail' | 'minor'> => {
+const describe = (event: TaskEvent, context: HistoryContext): Pick<HistoryRow, 'text' | 'detail' | 'minor'> => {
   const lane = context.laneName;
   switch (event.type) {
     case 'created':
@@ -233,7 +233,7 @@ const describe = (event: CardEvent, context: HistoryContext): Pick<HistoryRow, '
 };
 
 /** Every event as a row, newest first. */
-export const historyRows = (history: readonly CardEvent[], context: HistoryContext): readonly HistoryRow[] =>
+export const historyRows = (history: readonly TaskEvent[], context: HistoryContext): readonly HistoryRow[] =>
   [...history]
     .sort((a, b) => b.seq - a.seq)
     .map(event => {
@@ -361,7 +361,7 @@ const FIELD_WORDS: Readonly<Record<BoardEditableField, string>> = {
 };
 
 /** The card has a PR, a branch, a doc or a release to show. */
-export const hasLinks = (task: Pick<CardView, 'links' | 'shippedIn'>): boolean =>
+export const hasLinks = (task: Pick<TaskView, 'links' | 'shippedIn'>): boolean =>
   task.links.prs.length > 0 || task.links.branch !== null || task.links.docs.length > 0 || task.shippedIn !== null;
 
 /** Who said the ask and where, in the parts the section strings together. */
@@ -380,7 +380,7 @@ export interface AskOrigin {
 const SESSION_SOURCE = 'session:';
 
 export const askOrigin = (
-  task: Pick<CardView, 'ask' | 'createdBy' | 'createdAt'>,
+  task: Pick<TaskView, 'ask' | 'createdBy' | 'createdAt'>,
   names: FerretNames,
   age: string | null,
 ): AskOrigin => {
@@ -397,7 +397,7 @@ export const askOrigin = (
 };
 
 /** Who opened a card, as its byline says it. The admin token is said for what it is: it may be either. */
-const askAuthor = (author: CardActor, names: FerretNames): string => {
+const askAuthor = (author: TaskActor, names: FerretNames): string => {
   if (author.kind === 'owner') return author.via === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : 'you';
   if (author.kind === 'ferret') return names(author.ferret);
   return 'the daemon';

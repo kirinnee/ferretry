@@ -191,7 +191,7 @@ parked item). Each is read afresh on every pass. A board that cannot be read, an
 board, and an agenda board with entries that did not parse all reject, which keeps the ferret live.
 
 **Board answers only ferret ids.** It stores a task's owner and assignee as plain text, and Ferrets parses its whole
-answer against `ArchiveCardStandingsSchema` (in Ferrets' contract, beside `ArchiveCardStanding`), so one standing that
+answer against `ArchiveCardStandingsSchema` (in Ferrets' contract, beside `ArchiveTaskStanding`), so one standing that
 is not a ferret id would make every pass keep every ferret. Board therefore leaves out a party that is not a ferret id:
 such a string can never match a ferret the archive decides about, so nobody is kept less than before. A task whose owner
 is not a ferret id but whose assignee is answers with the assignee as its owner (the rule keeps owner and assignee

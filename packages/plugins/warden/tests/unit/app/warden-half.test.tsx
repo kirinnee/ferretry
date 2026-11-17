@@ -613,9 +613,9 @@ describe('the settings card hears the files it reads move on the daemon', () => 
       return found;
     };
     const fileRead = kernelConfig.CONFIG_FILE_READ;
-    const cardRead = declared('GET /v1/warden/config', manifest.actions?.routes);
+    const taskRead = declared('GET /v1/warden/config', manifest.actions?.routes);
     // The card opens (warden.use), and the kernel would not show this device a config frame (fleet.use).
-    expect(admission.admit({ table: 'route', descriptor: cardRead, request, params: new Map() }).outcome).toBe(
+    expect(admission.admit({ table: 'route', descriptor: taskRead, request, params: new Map() }).outcome).toBe(
       'admitted',
     );
     expect(kernelConfig.configFrameShown(admission, request, frame('warden.yaml'), fileRead)).toBe(false);

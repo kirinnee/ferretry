@@ -17,7 +17,7 @@ import {
   useMemo,
   useSyncExternalStore,
 } from 'react';
-import type { AgendaCardAnswer, AgendaCardView } from '../../contract/app-hooks.ts';
+import type { AgendaTaskAnswer, AgendaCardView } from '../../contract/app-hooks.ts';
 import {
   closeCards,
   type DoneCloseCard,
@@ -28,7 +28,7 @@ import {
 import type { DaemonId } from '../lib/machine.ts';
 
 /** The board a Done · closes reads and closes through: the provided hook, and the daemon it was built for. */
-export interface DoneCloseBoard extends Pick<AgendaCardAnswer, 'subscribe' | 'watch' | 'card' | 'done'> {
+export interface DoneCloseBoard extends Pick<AgendaTaskAnswer, 'subscribe' | 'watch' | 'card' | 'done'> {
   readonly daemonId: DaemonId;
 }
 

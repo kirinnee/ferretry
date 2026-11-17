@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { AgendaCardAnswer } from '../../../../daemon/lib/protocol/agenda.ts';
-import { agendaCardAnswers, agendaShape, isDefaultAnswerLabel } from '../../../../daemon/lib/protocol/agenda-task.ts';
+import type { AgendaTaskAnswer } from '../../../../daemon/lib/protocol/agenda.ts';
+import { agendaTaskAnswers, agendaShape, isDefaultAnswerLabel } from '../../../../daemon/lib/protocol/agenda-task.ts';
 import {
   AGENDA_NEED_HEADING,
   AGENDA_SHAPE_ERRORS,
@@ -13,8 +13,8 @@ import {
 } from '../../../../daemon/lib/protocol/agenda-shape.ts';
 
 const choice = { kind: 'multiple-choice' as const, options: [{ label: 'EU' }, { label: 'US' }] };
-const card = (fields: Omit<Parameters<typeof agendaCardAnswers>[0], 'subject'>) => ({ subject: 'x', ...fields });
-const labels = (answers: readonly AgendaCardAnswer[]) => answers.map(each => `${each.direction}:${each.label}`);
+const task = (fields: Omit<Parameters<typeof agendaTaskAnswers>[0], 'subject'>) => ({ subject: 'x', ...fields });
+const labels = (answers: readonly AgendaTaskAnswer[]) => answers.map(each => `${each.direction}:${each.label}`);
 
 describe('agendaShape', () => {
   it('should read one shape per kind from the stored fields', () => {
@@ -50,11 +50,11 @@ describe('agendaShape', () => {
 
 describe('agendaCardAnswers by shape', () => {
   it('should give an open question and several questions no buttons, even with answers stored', () => {
-    const stored: AgendaCardAnswer[] = [{ direction: 'right', does: 'done', label: 'Done' }];
-    should(agendaCardAnswers(card({ kind: 'reply', ask: { kind: 'open-question' }, answers: stored }))).eql([]);
+    const stored: AgendaTaskAnswer[] = [{ direction: 'right', does: 'done', label: 'Done' }];
+    should(agendaTaskAnswers(task({ kind: 'reply', ask: { kind: 'open-question' }, answers: stored }))).eql([]);
     should(
-      agendaCardAnswers(
-        card({
+      agendaTaskAnswers(
+        task({
           ask: { kind: 'open-question' },
           questions: [
             { question: 'a?', options: [{ label: 'A' }, { label: 'B' }] },
@@ -63,33 +63,33 @@ describe('agendaCardAnswers by shape', () => {
         }),
       ),
     ).eql([]);
-    should(agendaCardAnswers(card({ kind: 'choice', ask: choice, steps: ['Open it'] }))).eql([]);
+    should(agendaTaskAnswers(task({ kind: 'choice', ask: choice, steps: ['Open it'] }))).eql([]);
   });
 
   it('should give a to-do only Mark as done (and a Skip its ferret added), even when stored with Need more info', () => {
-    should(labels(agendaCardAnswers(card({ kind: 'task', ask: { kind: 'task' } })))).eql(['right:Mark as done']);
-    const old: AgendaCardAnswer[] = [
+    should(labels(agendaTaskAnswers(task({ kind: 'task', ask: { kind: 'task' } })))).eql(['right:Mark as done']);
+    const old: AgendaTaskAnswer[] = [
       { direction: 'left', does: 'needs-info', label: 'Need more info' },
       { direction: 'up', does: 'dismiss', label: 'Skip' },
       { direction: 'right', does: 'done', label: 'Done' },
     ];
-    should(labels(agendaCardAnswers(card({ kind: 'task', ask: { kind: 'task' }, answers: old })))).eql([
+    should(labels(agendaTaskAnswers(task({ kind: 'task', ask: { kind: 'task' }, answers: old })))).eql([
       'up:Skip',
       'right:Done',
     ]);
   });
 
   it('should give info one Got it, approval Approve and Deny, review Approve and Request changes', () => {
-    should(labels(agendaCardAnswers(card({ kind: 'info' })))).eql(['right:Got it']);
-    should(labels(agendaCardAnswers(card({ kind: 'permission', ask: { kind: 'permission' } })))).eql([
+    should(labels(agendaTaskAnswers(task({ kind: 'info' })))).eql(['right:Got it']);
+    should(labels(agendaTaskAnswers(task({ kind: 'permission', ask: { kind: 'permission' } })))).eql([
       'left:Deny',
       'right:Approve',
     ]);
-    should(labels(agendaCardAnswers(card({ kind: 'review', ask: { kind: 'answer-review' } })))).eql([
+    should(labels(agendaTaskAnswers(task({ kind: 'review', ask: { kind: 'answer-review' } })))).eql([
       'left:Request changes',
       'right:Approve',
     ]);
-    should(labels(agendaCardAnswers(card({ kind: 'choice', ask: choice })))).eql(['left:EU', 'right:US']);
+    should(labels(agendaTaskAnswers(task({ kind: 'choice', ask: choice })))).eql(['left:EU', 'right:US']);
   });
 
   it('should still read the words an older default answer was stored with as default words', () => {

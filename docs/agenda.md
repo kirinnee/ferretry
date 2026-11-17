@@ -189,7 +189,7 @@ good**) — the daemon puts a **task ask** on the agenda that carries the task, 
 ([board.md](board.md#tasks-show-progress-their-asks-ride-the-agenda) owns the rules: which agenda, who passes, what
 each answer does to the task).
 
-- **`cardAsks`** (`AgendaCardAskSchema`, oldest first, at most 16): each one carries its `gate` (`cardId`, `laneId`,
+- **`cardAsks`** (`AgendaTaskAskSchema`, oldest first, at most 16): each one carries its `gate` (`cardId`, `laneId`,
   `laneName`, `entry` — the task history's `seq` that put it there —, `projectId`, `projectName?`, `cardTitle?`, and
   the lane's `options`: `id`, `label`, `outcome` of `next`, `lane`, `reopen-with-agenda` or `close`), `at` (when it
   was put on this agenda), the task's **How to test** (`howToTest`, Markdown as written), and once answered its

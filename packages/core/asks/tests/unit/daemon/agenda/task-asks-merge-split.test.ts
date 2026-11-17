@@ -1,15 +1,15 @@
 import { describe, it } from 'bun:test';
 import {
-  type AgendaCardAsk,
+  type AgendaTaskAsk,
   type AgendaGate,
   type AgendaItem,
-  MAX_AGENDA_CARD_ASKS,
+  MAX_AGENDA_TASK_ASKS,
 } from '../../../../daemon/lib/protocol/agenda.ts';
 import { agendaState } from '../../../../daemon/lib/protocol/agenda-state.ts';
-import { cardAgendaReference, cardAskReference } from '../../../../daemon/lib/protocol/agenda-task-asks.ts';
+import { taskAgendaReference, taskAskReference } from '../../../../daemon/lib/protocol/agenda-task-asks.ts';
 import { gateReference } from '../../../../daemon/lib/protocol/agenda-gate.ts';
 import should from 'should';
-import { joinCardAsks, leaveCardAsks, sealCardAsks, withoutCardAsks } from '../../../../daemon/lib/agenda/task-asks.ts';
+import { joinTaskAsks, leaveTaskAsks, sealTaskAsks, withoutTaskAsks } from '../../../../daemon/lib/agenda/task-asks.ts';
 import {
   type AgendaActor,
   type AgendaLedger,
@@ -32,8 +32,8 @@ const HUMAN: AgendaActor = { kind: 'human' };
 const AGENT: AgendaActor = { kind: 'agent', sessionId: SESSION, name: 'Ada' };
 const SYSTEM: AgendaActor = { kind: 'daemon', cause: 'system' };
 
-const gate = (cardId: string, entry = 2): AgendaGate => ({
-  cardId,
+const gate = (taskId: string, entry = 2): AgendaGate => ({
+  cardId: taskId,
   laneId: 'tested',
   laneName: 'Ready to try',
   entry,
@@ -45,14 +45,14 @@ const gate = (cardId: string, entry = 2): AgendaGate => ({
   ],
 });
 
-const ask = (cardId: string, at: number, extra: Partial<AgendaCardAsk> = {}): AgendaCardAsk => ({
-  gate: gate(cardId),
+const ask = (taskId: string, at: number, extra: Partial<AgendaTaskAsk> = {}): AgendaTaskAsk => ({
+  gate: gate(taskId),
   at: minute(at),
   ...extra,
 });
 
-const answered = (cardId: string, at: number): AgendaCardAsk =>
-  ask(cardId, at, {
+const answered = (taskId: string, at: number): AgendaTaskAsk =>
+  ask(taskId, at, {
     answer: {
       at: minute(at + 1),
       response: { kind: 'multiple-choice', choice: 'Done' },
@@ -89,12 +89,12 @@ const resting = (extra: Partial<AgendaItem> = {}): AgendaItem =>
 /** The stage move the state machine lends, reduced to a marker the tests can read. */
 const stage = (item: AgendaItem, to: 'test' | 'plan'): AgendaItem => ({ ...item, stage: to });
 
-const moved = (outcome: ReturnType<typeof joinCardAsks>): AgendaItem => {
+const moved = (outcome: ReturnType<typeof joinTaskAsks>): AgendaItem => {
   if (outcome.kind !== 'moved') throw new Error(`expected the asks to move: ${outcome.message}`);
   return outcome.into;
 };
 
-const references = (item: AgendaItem): string[] => (item.cardAsks ?? []).map(cardAskReference);
+const references = (item: AgendaItem): string[] => (item.cardAsks ?? []).map(taskAskReference);
 
 describe('joining card asks onto an item (the pure half)', () => {
   it('keeps every ask of both, once per card and entry, in the order they were put', () => {
@@ -102,7 +102,7 @@ describe('joining card asks onto an item (the pure half)', () => {
     const into = thread({ cardAsks: [ask('F1', 1), ask('F2', 3)] });
 
     // Act
-    const joined = moved(joinCardAsks(into, [answered('F2', 2), ask('F3', 2)], stage));
+    const joined = moved(joinTaskAsks(into, [answered('F2', 2), ask('F3', 2)], stage));
 
     // Assert — one F2, the answered one; ordered by when each was put
     should(references(joined)).eql([gateReference(gate('F1')), gateReference(gate('F2')), gateReference(gate('F3'))]);
@@ -115,7 +115,7 @@ describe('joining card asks onto an item (the pure half)', () => {
     const into = thread({ cardAsks: [ask('F1', 1, { howToTest: 'mine' }), ask('F2', 1)] });
 
     // Act
-    const joined = moved(joinCardAsks(into, [ask('F1', 0, { howToTest: 'theirs' }), notYet], stage));
+    const joined = moved(joinTaskAsks(into, [ask('F1', 0, { howToTest: 'theirs' }), notYet], stage));
 
     // Assert
     should(joined.cardAsks?.find(each => each.gate.cardId === 'F1')?.howToTest).equal('mine');
@@ -126,7 +126,7 @@ describe('joining card asks onto an item (the pure half)', () => {
   it('keeps two entries of one card apart: each is its own ask', () => {
     // Act
     const joined = moved(
-      joinCardAsks(thread({ cardAsks: [answered('F1', 1)] }), [{ ...ask('F1', 5), gate: gate('F1', 7) }], stage),
+      joinTaskAsks(thread({ cardAsks: [answered('F1', 1)] }), [{ ...ask('F1', 5), gate: gate('F1', 7) }], stage),
     );
 
     // Assert
@@ -138,7 +138,7 @@ describe('joining card asks onto an item (the pure half)', () => {
     const into = thread();
 
     // Act
-    const outcome = joinCardAsks(into, [], stage);
+    const outcome = joinTaskAsks(into, [], stage);
 
     // Assert
     should(outcome).eql({ kind: 'moved', into });
@@ -146,14 +146,14 @@ describe('joining card asks onto an item (the pure half)', () => {
 
   it('refuses more open asks than one agenda carries, and an item that cannot carry one', () => {
     // Arrange
-    const half = Math.ceil((MAX_AGENDA_CARD_ASKS + 1) / 2);
+    const half = Math.ceil((MAX_AGENDA_TASK_ASKS + 1) / 2);
     const mine = Array.from({ length: half }, (_, index) => ask(`F${String(index + 1)}`, index));
     const theirs = Array.from({ length: half }, (_, index) => ask(`F${String(index + 100)}`, index));
 
     // Act
-    const full = joinCardAsks(thread({ cardAsks: mine }), theirs, stage);
-    const input = joinCardAsks(thread({ kind: 'input' }), [ask('F1', 1)], stage);
-    const notice = joinCardAsks(thread({ notice: true }), [ask('F1', 1)], stage);
+    const full = joinTaskAsks(thread({ cardAsks: mine }), theirs, stage);
+    const input = joinTaskAsks(thread({ kind: 'input' }), [ask('F1', 1)], stage);
+    const notice = joinTaskAsks(thread({ notice: true }), [ask('F1', 1)], stage);
 
     // Assert
     should(full).match({ kind: 'refused', code: 'full' });
@@ -163,22 +163,22 @@ describe('joining card asks onto an item (the pure half)', () => {
 
   it('refuses answered asks past what one agenda carries too, and drops no answer or receipt to fit', () => {
     // Arrange — all answered: 18 would not fit, and no receipt may be the one that goes; exactly 16 fit
-    const half = Math.ceil((MAX_AGENDA_CARD_ASKS + 1) / 2);
+    const half = Math.ceil((MAX_AGENDA_TASK_ASKS + 1) / 2);
     const mine = Array.from({ length: half }, (_, index) => answered(`F${String(index + 1)}`, index));
     const theirs = Array.from({ length: half }, (_, index) => answered(`F${String(index + 100)}`, index));
-    const exactly = Array.from({ length: MAX_AGENDA_CARD_ASKS - half }, (_, index) =>
+    const exactly = Array.from({ length: MAX_AGENDA_TASK_ASKS - half }, (_, index) =>
       answered(`F${String(index + 200)}`, index),
     );
 
     // Act
-    const over = joinCardAsks(thread({ cardAsks: mine }), theirs, stage);
-    const at = joinCardAsks(thread({ cardAsks: mine }), exactly, stage);
+    const over = joinTaskAsks(thread({ cardAsks: mine }), theirs, stage);
+    const at = joinTaskAsks(thread({ cardAsks: mine }), exactly, stage);
 
     // Assert
     should(over).match({ kind: 'refused', code: 'full' });
     should(at).match({ kind: 'moved' });
     should(at.kind === 'moved' ? at.into.cardAsks?.filter(each => each.answer !== undefined) : []).have.length(
-      MAX_AGENDA_CARD_ASKS,
+      MAX_AGENDA_TASK_ASKS,
     );
   });
 
@@ -188,7 +188,7 @@ describe('joining card asks onto an item (the pure half)', () => {
     const incoming = ask('F1', 5, { woke: { waitingSince: minute(-30) } });
 
     // Act
-    const joined = moved(joinCardAsks(into, [incoming], stage));
+    const joined = moved(joinTaskAsks(into, [incoming], stage));
 
     // Assert — the ask's own turn is the survivor's, not the absorbed item's
     should(agendaState(joined).state).equal('needs-you');
@@ -210,8 +210,8 @@ describe('joining card asks onto an item (the pure half)', () => {
     const awake = { ...asking, waitingOn: undefined, askedAt: undefined, waitingFor: undefined, resting: undefined };
 
     // Act
-    const first = moved(joinCardAsks(onTurn, [ask('F2', 5)], stage));
-    const second = moved(joinCardAsks(awake as AgendaItem, [ask('F2', 5)], stage));
+    const first = moved(joinTaskAsks(onTurn, [ask('F2', 5)], stage));
+    const second = moved(joinTaskAsks(awake as AgendaItem, [ask('F2', 5)], stage));
 
     // Assert — the first takes the ask's stage and keeps its place; the newcomer to the second remembers the turn the
     // first waiting ask ended, as a second ask put on would, and changes nothing else
@@ -224,11 +224,11 @@ describe('joining card asks onto an item (the pure half)', () => {
 
   it('takes asks onto the card’s own agenda without a turn to go back to, and answered asks without waking it', () => {
     // Arrange
-    const card = resting({ raisedBy: 'daemon', source: 'task', sourceRef: cardAgendaReference('F1') });
+    const task = resting({ raisedBy: 'daemon', source: 'task', sourceRef: taskAgendaReference('F1') });
 
     // Act
-    const waiting = moved(joinCardAsks(card, [ask('F1', 5, { woke: { waitingSince: minute(-1) } })], stage));
-    const quiet = moved(joinCardAsks(resting(), [answered('F1', 5)], stage));
+    const waiting = moved(joinTaskAsks(task, [ask('F1', 5, { woke: { waitingSince: minute(-1) } })], stage));
+    const quiet = moved(joinTaskAsks(resting(), [answered('F1', 5)], stage));
 
     // Assert
     should(waiting.cardAsks?.[0]?.woke).be.undefined();
@@ -244,7 +244,7 @@ describe('leaving card asks behind (the pure half)', () => {
     const item = thread({ cardAsks: [ask('F1', 1)] });
 
     // Act
-    const { left, moved: gone } = leaveCardAsks(item, each => each.gate.cardId === 'F9', minute(10));
+    const { left, moved: gone } = leaveTaskAsks(item, each => each.gate.cardId === 'F9', minute(10));
 
     // Assert
     should(left).equal(item);
@@ -260,13 +260,13 @@ describe('leaving card asks behind (the pure half)', () => {
       askedAt: minute(-5),
       waitingFor: 'discussion' as const,
     };
-    const item = sealCardAsks(thread({ waitingSince: minute(1), cardAsks: [ask('F1', 1, { woke })] }));
+    const item = sealTaskAsks(thread({ waitingSince: minute(1), cardAsks: [ask('F1', 1, { woke })] }));
 
     // Act
-    const { left, moved: gone } = leaveCardAsks(item, each => each.gate.cardId === 'F1', minute(10));
+    const { left, moved: gone } = leaveTaskAsks(item, each => each.gate.cardId === 'F1', minute(10));
 
     // Assert
-    should(gone.map(cardAskReference)).eql([gateReference(gate('F1'))]);
+    should(gone.map(taskAskReference)).eql([gateReference(gate('F1'))]);
     should(left.cardAsks).be.undefined();
     should(agendaState(left)).match({ state: 'resting', sub: 'working' });
     should(left.waitingSince).equal(minute(-5));
@@ -274,38 +274,38 @@ describe('leaving card asks behind (the pure half)', () => {
 
   it('rests the card’s own agenda, and a thread whose moved ask names no turn, on its ferret', () => {
     // Arrange
-    const card = thread({
+    const task = thread({
       raisedBy: 'daemon',
       source: 'task',
-      sourceRef: cardAgendaReference('F1'),
+      sourceRef: taskAgendaReference('F1'),
       waitingSince: minute(1),
       cardAsks: [ask('F1', 1)],
     });
-    const old = sealCardAsks(thread({ waitingSince: minute(1), cardAsks: [ask('F1', 1)] }));
+    const old = sealTaskAsks(thread({ waitingSince: minute(1), cardAsks: [ask('F1', 1)] }));
 
     // Act
-    const fromCard = leaveCardAsks(card, () => true, minute(10)).left;
-    const fromOld = leaveCardAsks(old, () => true, minute(10)).left;
+    const fromTask = leaveTaskAsks(task, () => true, minute(10)).left;
+    const fromOld = leaveTaskAsks(old, () => true, minute(10)).left;
 
     // Assert
-    should(agendaState(fromCard)).match({ state: 'resting', sub: 'waiting-on-ferret' });
+    should(agendaState(fromTask)).match({ state: 'resting', sub: 'waiting-on-ferret' });
     should(agendaState(fromOld)).match({ state: 'resting', sub: 'waiting-on-ferret' });
   });
 
   it('leaves the state alone when another ask still waits, the thread asked something of its own, or it rests', () => {
     // Arrange
     const two = thread({ waitingSince: minute(1), cardAsks: [ask('F1', 1), ask('F2', 1)] });
-    const own = sealCardAsks(
+    const own = sealTaskAsks(
       thread({ subject: 'Should keyboard focus change too?', waitingSince: minute(5), cardAsks: [ask('F1', 1)] }),
     );
     const rested = resting({ cardAsks: [ask('F1', 0)] });
 
     // Act
-    const results = [two, own, rested].map(item => leaveCardAsks(item, each => each.gate.cardId === 'F1', minute(10)));
+    const results = [two, own, rested].map(item => leaveTaskAsks(item, each => each.gate.cardId === 'F1', minute(10)));
 
     // Assert
     should(results.map(result => agendaState(result.left).state)).eql(['needs-you', 'needs-you', 'resting']);
-    should(results[0]?.left.cardAsks?.map(cardAskReference)).eql([gateReference(gate('F2'))]);
+    should(results[0]?.left.cardAsks?.map(taskAskReference)).eql([gateReference(gate('F2'))]);
   });
 
   it('strips every ask and the seal off an item whose asks went elsewhere', () => {
@@ -316,7 +316,7 @@ describe('leaving card asks behind (the pure half)', () => {
     });
 
     // Act
-    const bare = withoutCardAsks(item);
+    const bare = withoutTaskAsks(item);
 
     // Assert
     should(bare).eql(thread());
@@ -459,7 +459,7 @@ describe('a merge carries card asks', () => {
 
   it('refuses a merge that would carry more asks than one agenda does, and writes nothing', () => {
     // Arrange
-    const half = Math.ceil((MAX_AGENDA_CARD_ASKS + 1) / 2);
+    const half = Math.ceil((MAX_AGENDA_TASK_ASKS + 1) / 2);
     const ledger = twoThreads(
       Array.from({ length: half }, (_, index) => gate(`F${String(index + 1)}`)),
       Array.from({ length: half }, (_, index) => gate(`F${String(index + 100)}`)),
@@ -560,7 +560,7 @@ describe('a split carries a moved card’s asks', () => {
       applyAgendaCommandToSession(null, SESSION, {
         action: 'raise',
         actor: SYSTEM,
-        request: request({ source: 'task', sourceRef: cardAgendaReference('F1'), task: { id: 'F1' } }),
+        request: request({ source: 'task', sourceRef: taskAgendaReference('F1'), task: { id: 'F1' } }),
         at: minute(0),
       }),
     ).ledger;

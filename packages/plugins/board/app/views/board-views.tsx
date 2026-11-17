@@ -6,50 +6,50 @@
  * nothing is draggable and no lane takes a drop, the board moves its own cards.
  */
 
-import { formatCardRef } from '../../contract/index.ts';
+import { formatTaskRef } from '../../contract/index.ts';
 import { type ReactNode, useMemo } from 'react';
 import type { BoardModel } from '../lib/board-model.ts';
 import type { FerretNames } from '../lib/board-present.ts';
 import {
   ARCHIVE_PAGE,
-  type BoardCardOf,
-  type BoardCardPlace,
+  type BoardTaskOf,
+  type BoardTaskPlace,
   type BoardGroupOf,
   buildTree,
   flattenTree,
 } from '../lib/board-view.ts';
-import { BoardCard } from './board-task.tsx';
+import { BoardTask } from './board-task.tsx';
 import { BoardIcon } from './board-icons.tsx';
 import { BoardLane } from './board-lane.tsx';
 import { archiveRowsOf, TableRows } from './board-table.tsx';
 
 /** What every view needs to draw and wire a card. */
-export interface BoardCardEnv {
+export interface BoardTaskEnv {
   readonly names: FerretNames;
   readonly now: number;
   readonly showMachine: boolean;
-  readonly hrefFor: (card: BoardCardOf) => string;
+  readonly hrefFor: (task: BoardTaskOf) => string;
   readonly onNavigate: (to: string) => void;
-  readonly places: ReadonlyMap<string, BoardCardPlace>;
+  readonly places: ReadonlyMap<string, BoardTaskPlace>;
   /** A phone: thumb-sized cards. */
   readonly touch?: boolean;
 }
 
 interface PlacedProps {
-  readonly card: BoardCardOf;
-  readonly env: BoardCardEnv;
+  readonly card: BoardTaskOf;
+  readonly env: BoardTaskEnv;
   readonly lane?: string;
   readonly depth?: number;
 }
 
-export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
-  const place = env.places.get(card.key);
+export function PlacedTask({ card: task, env, lane, depth }: PlacedProps) {
+  const place = env.places.get(task.key);
   return (
-    <BoardCard
-      card={card}
+    <BoardTask
+      card={task}
       category={place?.category ?? null}
       density="page"
-      href={env.hrefFor(card)}
+      href={env.hrefFor(task)}
       names={env.names}
       now={env.now}
       onNavigate={env.onNavigate}
@@ -67,7 +67,7 @@ export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
 
 export interface KanbanViewProps {
   readonly model: BoardModel;
-  readonly env: BoardCardEnv;
+  readonly env: BoardTaskEnv;
   readonly projectName: (group: BoardGroupOf) => string;
   /** The Closed lane is not drawn (closed is hidden by default). */
   readonly hideClosed: boolean;
@@ -79,7 +79,7 @@ function KanbanBoard({
   hideClosed,
 }: {
   readonly group: BoardGroupOf;
-  readonly env: BoardCardEnv;
+  readonly env: BoardTaskEnv;
   readonly hideClosed: boolean;
 }) {
   const lanes = hideClosed ? group.lanes.filter(lane => lane.category !== 'closed') : group.lanes;
@@ -90,14 +90,14 @@ function KanbanBoard({
           {lane.cards.length === 0 ? (
             <li className="fy-board-lane__empty">Nothing here</li>
           ) : (
-            lane.cards.map(card => <PlacedCard card={card} env={env} key={card.key} />)
+            lane.cards.map(task => <PlacedTask card={task} env={env} key={task.key} />)
           )}
         </BoardLane>
       ))}
       {group.unplaced.length === 0 ? null : (
         <BoardLane category={null} count={group.unplaced.length} density="page" name="Unplaced">
-          {group.unplaced.map(card => (
-            <PlacedCard card={card} env={env} key={card.key} />
+          {group.unplaced.map(task => (
+            <PlacedTask card={task} env={env} key={task.key} />
           ))}
         </BoardLane>
       )}
@@ -135,7 +135,7 @@ function Empty({ children }: { readonly children: ReactNode }) {
 
 export interface TreeViewProps {
   readonly model: BoardModel;
-  readonly env: BoardCardEnv;
+  readonly env: BoardTaskEnv;
 }
 
 /** A lead's card with its sub-ferrets' cards indented under it. */
@@ -145,7 +145,7 @@ export function TreeView({ model, env }: TreeViewProps) {
   return (
     <ul className="fy-board-tree">
       {rows.map(row => (
-        <PlacedCard
+        <PlacedTask
           card={row.card}
           depth={row.depth}
           env={env}
@@ -163,7 +163,7 @@ export function TreeView({ model, env }: TreeViewProps) {
 
 export interface DependenciesViewProps {
   readonly model: BoardModel;
-  readonly env: BoardCardEnv;
+  readonly env: BoardTaskEnv;
 }
 
 /**
@@ -171,23 +171,23 @@ export interface DependenciesViewProps {
  * A list rather than a graph: the dependency lines are said in words under each card.
  */
 export function DependenciesView({ model, env }: DependenciesViewProps) {
-  const linked = model.cards.filter(card => card.task.blockedBy.length > 0 || card.task.blocks.length > 0);
+  const linked = model.cards.filter(task => task.task.blockedBy.length > 0 || task.task.blocks.length > 0);
   if (linked.length === 0) return <Empty>No task depends on another.</Empty>;
   return (
     <ul className="fy-board-deps">
-      {linked.map(card => (
-        <li className="fy-board-dep" key={card.key}>
+      {linked.map(task => (
+        <li className="fy-board-dep" key={task.key}>
           <ul className="fy-board-dep__card">
-            <PlacedCard card={card} env={env} lane={env.places.get(card.key)?.laneName ?? card.task.laneId} />
+            <PlacedTask card={task} env={env} lane={env.places.get(task.key)?.laneName ?? task.task.laneId} />
           </ul>
           <p className="fy-board-dep__line">
-            {card.task.blockedBy.length === 0 ? null : (
+            {task.task.blockedBy.length === 0 ? null : (
               <span data-dep="blocked-by">
-                <BoardIcon name="blocked" /> waits on {card.task.blockedBy.map(formatCardRef).join(', ')}
+                <BoardIcon name="blocked" /> waits on {task.task.blockedBy.map(formatTaskRef).join(', ')}
               </span>
             )}
-            {card.task.blocks.length === 0 ? null : (
-              <span data-dep="blocks">unblocks {card.task.blocks.map(formatCardRef).join(', ')}</span>
+            {task.task.blocks.length === 0 ? null : (
+              <span data-dep="blocks">unblocks {task.task.blocks.map(formatTaskRef).join(', ')}</span>
             )}
           </p>
         </li>
@@ -202,14 +202,14 @@ export function DependenciesView({ model, env }: DependenciesViewProps) {
 
 export interface ArchiveViewProps {
   /** Closed and dropped cards, newest first, already narrowed by the search. */
-  readonly shown: readonly BoardCardOf[];
+  readonly shown: readonly BoardTaskOf[];
   readonly remaining: number;
   readonly total: number;
   readonly query: string;
   readonly onQuery: (query: string) => void;
   readonly onMore: () => void;
   readonly loading: boolean;
-  readonly env: BoardCardEnv;
+  readonly env: BoardTaskEnv;
 }
 
 /** Closed and dropped work, newest first, a page at a time, searchable. */

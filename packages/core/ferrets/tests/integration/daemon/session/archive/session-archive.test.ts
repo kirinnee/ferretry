@@ -4,7 +4,7 @@ import { createSessionArchive } from '../../../../../daemon/adapters/session/arc
 import { createFoundationPaths, createSessionPaths } from '../../../../support/daemon/state-paths.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import type { IndexedSession } from '../../../../../daemon/lib/storage-types.ts';
-import type { OpenCardStanding } from '../../../../../daemon/lib/session/peers/board.ts';
+import type { OpenTaskStanding } from '../../../../../daemon/lib/session/peers/board.ts';
 import { sessionView } from '../../../../support/daemon/session-view.ts';
 import { archiveDeadline } from '../../../../support/daemon/archive-deadline.ts';
 import { RecordingLog } from '../../../../support/daemon/storage.ts';
@@ -83,7 +83,7 @@ describe('the session archive as the daemon builds it', () => {
 
 describe('a pass of the session archive as the daemon builds it', () => {
   const OLD = ago(72);
-  const card: OpenCardStanding = { owner: 'busy-1', assignee: null, dropped: null, category: 'active' };
+  const task: OpenTaskStanding = { owner: 'busy-1', assignee: null, dropped: null, category: 'active' };
 
   function world(openAgenda: readonly string[] = []) {
     const documents = new Map(
@@ -118,7 +118,7 @@ describe('a pass of the session archive as the daemon builds it', () => {
       passLimit: 200,
       sources: {
         pinned: async () => new Map([['pinned-1', 'x']]),
-        board: async () => [card],
+        board: async () => [task],
         hasOpenAgendaItem: async id => openAgenda.includes(id),
       },
       yieldToLoop: async () => undefined,

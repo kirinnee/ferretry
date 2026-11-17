@@ -1,6 +1,6 @@
 import {
   type BoardResponse,
-  type CardView,
+  type TaskView,
   CardViewSchema,
   type LaneSet,
   WorkflowSchema,
@@ -85,7 +85,7 @@ export const laneSetFor = (projectId: string = PROJECT): LaneSet => ({
 export const COUNTS = { closedHidden: 0, stale: 0, orphaned: 0, active: 0 };
 
 /** A valid card as a daemon serves it; `extra` overrides any field. */
-export const card = (id: string, extra: Record<string, unknown> = {}): CardView =>
+export const boardTask = (id: string, extra: Record<string, unknown> = {}): TaskView =>
   CardViewSchema.parse({
     format: 1,
     id,
@@ -135,24 +135,24 @@ export const card = (id: string, extra: Record<string, unknown> = {}): CardView 
   });
 
 /** A card as a newer daemon serves it: who it was asked for, and (when given) the human card it serves. */
-export const originCard = (
+export const originTask = (
   id: string,
   origin: 'human' | 'agent',
   humanParent?: { id: string } | null,
   extra: Record<string, unknown> = {},
-): CardView =>
+): TaskView =>
   Object.assign(
-    card(id, { askedBy: origin === 'agent' ? 'agent' : 'person', ...extra }),
+    boardTask(id, { askedBy: origin === 'agent' ? 'agent' : 'person', ...extra }),
     humanParent === undefined ? { origin } : { origin, humanParent },
   );
 
 /** The cards as an older daemon serves them: nothing says who asked for any of them. */
-export const unasked = (cards: readonly CardView[]): CardView[] => cards.map(({ askedBy: _askedBy, ...rest }) => rest);
+export const unasked = (tasks: readonly TaskView[]): TaskView[] => tasks.map(({ askedBy: _askedBy, ...rest }) => rest);
 
-export const boardAnswer = (cards: readonly CardView[], extra: Partial<BoardResponse> = {}): BoardResponse => ({
+export const boardAnswer = (tasks: readonly TaskView[], extra: Partial<BoardResponse> = {}): BoardResponse => ({
   projectId: null,
   laneSet: null,
-  cards: [...cards],
+  cards: [...tasks],
   counts: COUNTS,
   nextCursor: null,
   quarantined: [],
@@ -257,7 +257,7 @@ export const flush = async (): Promise<void> => {
 
 /** The merged board of one machine, for tests that draw cards and need real `BoardModel` cards. */
 export const boardModelOf = async (
-  cards: readonly CardView[],
+  tasks: readonly TaskView[],
   filters?: import('../../../app/lib/board-model.ts').BoardFilters,
 ) => {
   const { mergeBoard, NO_BOARD_FILTERS } = await import('../../../app/lib/board-model.ts');
@@ -267,7 +267,7 @@ export const boardModelOf = async (
         daemonId: laptop.daemonId,
         machine: 'laptop',
         version: '4.110.0',
-        cards,
+        cards: tasks,
         laneSets: new Map([
           [PROJECT, laneSetFor()],
           [OTHER_PROJECT, laneSetFor(OTHER_PROJECT)],

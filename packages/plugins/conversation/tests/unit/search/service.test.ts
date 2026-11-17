@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { WorkSearchService, WORK_SEARCH_SWEEP_MS } from '../../../daemon/search/lib/service.ts';
-import { askWork, cardWork, FakeRedaction, FakeSource, NOW_MS, query } from '../../support/work.ts';
+import { askWork, taskWork, FakeRedaction, FakeSource, NOW_MS, query } from '../../support/work.ts';
 
 const build = (sources: readonly FakeSource[], options: { redaction?: FakeRedaction; clock?: { ms: number } } = {}) => {
   const warnings: string[] = [];
@@ -16,20 +16,20 @@ const build = (sources: readonly FakeSource[], options: { redaction?: FakeRedact
 
 describe('the work search service', () => {
   test('the first search builds from every source and answers with what it indexed', async () => {
-    const cards = new FakeSource('cards', [cardWork({ id: 'F1', title: 'Relay carrier' })], true);
+    const tasks = new FakeSource('cards', [taskWork({ id: 'F1', title: 'Relay carrier' })], true);
     const asks = new FakeSource('asks', [askWork({ id: 'A1', title: 'Relay question' })]);
-    const { service } = build([cards, asks]);
+    const { service } = build([tasks, asks]);
     const answer = await service.search(query('relay'));
     expect(answer.hits.map(hit => hit.id).sort()).toEqual(['A1', 'F1']);
     expect(answer.indexed).toEqual({ cards: 1, asks: 1 });
   });
 
   test('a cheap source is read on every search, another only when it says it changed', async () => {
-    const cards = new FakeSource('cards', [cardWork({ id: 'F1', title: 'Relay carrier' })], true);
+    const tasks = new FakeSource('cards', [taskWork({ id: 'F1', title: 'Relay carrier' })], true);
     const asks = new FakeSource('asks', [askWork({ id: 'A1', title: 'Relay question' })]);
-    const { service } = build([cards, asks]);
+    const { service } = build([tasks, asks]);
     await service.search(query('relay'));
-    cards.works.set('card:F2', cardWork({ id: 'F2', title: 'Relay pairing' }));
+    tasks.works.set('card:F2', taskWork({ id: 'F2', title: 'Relay pairing' }));
     asks.works.set('ask:A2', askWork({ id: 'A2', title: 'Relay second' }));
     const seen = (await service.search(query('relay'))).hits.map(hit => hit.id);
     expect(seen).toContain('F2');
@@ -50,20 +50,20 @@ describe('the work search service', () => {
   });
 
   test('a piece of work that went away leaves the index', async () => {
-    const cards = new FakeSource('cards', [cardWork({ id: 'F1', title: 'Relay carrier' })], true);
-    const { service } = build([cards]);
+    const tasks = new FakeSource('cards', [taskWork({ id: 'F1', title: 'Relay carrier' })], true);
+    const { service } = build([tasks]);
     expect((await service.search(query('relay'))).total).toBe(1);
-    cards.works.clear();
+    tasks.works.clear();
     expect((await service.search(query('relay'))).total).toBe(0);
   });
 
   test('a secret is never indexed, and a changed epoch rebuilds before the next answer', async () => {
     const redaction = new FakeRedaction();
     redaction.values = ['hunter2'];
-    const cards = new FakeSource('cards', [
-      cardWork({ id: 'F1', title: 'Login', fields: { summary: 'the password is hunter2' } }),
+    const tasks = new FakeSource('cards', [
+      taskWork({ id: 'F1', title: 'Login', fields: { summary: 'the password is hunter2' } }),
     ]);
-    const { service } = build([cards], { redaction });
+    const { service } = build([tasks], { redaction });
     expect((await service.search(query('hunter2'))).total).toBe(0);
     redaction.values = ['password'];
     redaction.generation += 1;
@@ -83,8 +83,8 @@ describe('the work search service', () => {
   });
 
   test('the related check answers with strength and masks what it quotes', async () => {
-    const cards = new FakeSource('cards', [cardWork({ id: 'F1', title: 'Agenda focus view' })], true);
-    const { service } = build([cards]);
+    const tasks = new FakeSource('cards', [taskWork({ id: 'F1', title: 'Agenda focus view' })], true);
+    const { service } = build([tasks]);
     const answer = await service.related({ kind: 'card', title: 'Agenda focus view' });
     expect(answer.matches[0]?.strength).toBe('strong');
     expect(answer.matches[0]?.hit.id).toBe('F1');
@@ -93,7 +93,7 @@ describe('the work search service', () => {
 
 describe('a value that became a secret after it was indexed (no epoch moved)', () => {
   const secretCard = () =>
-    new FakeSource('cards', [cardWork({ id: 'F1', title: 'Login', fields: { summary: 'the password is hunter2' } })]);
+    new FakeSource('cards', [taskWork({ id: 'F1', title: 'Login', fields: { summary: 'the password is hunter2' } })]);
 
   test('is no longer found, counted or quoted by a search', async () => {
     const redaction = new FakeRedaction();
@@ -109,8 +109,8 @@ describe('a value that became a secret after it was indexed (no epoch moved)', (
 
   test('is no longer what a related check matches on', async () => {
     const redaction = new FakeRedaction();
-    const cards = new FakeSource('cards', [cardWork({ id: 'F1', title: 'Quokka zebra' })], true);
-    const { service } = build([cards], { redaction });
+    const tasks = new FakeSource('cards', [taskWork({ id: 'F1', title: 'Quokka zebra' })], true);
+    const { service } = build([tasks], { redaction });
     expect((await service.related({ kind: 'card', title: 'Quokka zebra' })).matches).toHaveLength(1);
     redaction.values = ['Quokka zebra'];
     expect((await service.related({ kind: 'card', title: 'Quokka zebra' })).matches).toEqual([]);
@@ -135,10 +135,10 @@ describe('G164 work search cannot tell whether a value that became a secret appe
     new FakeSource(
       'cards',
       [
-        cardWork({ id: 'F1', title: 'Quokka widget' }),
-        cardWork({ id: 'F2', title: `Plinth ${HIDDEN}` }),
-        cardWork({ id: 'F3', title: `Marble ${HIDDEN}` }),
-        cardWork({ id: 'F4', title: 'Unrelated thing' }),
+        taskWork({ id: 'F1', title: 'Quokka widget' }),
+        taskWork({ id: 'F2', title: `Plinth ${HIDDEN}` }),
+        taskWork({ id: 'F3', title: `Marble ${HIDDEN}` }),
+        taskWork({ id: 'F4', title: 'Unrelated thing' }),
       ],
       true,
     );
@@ -206,18 +206,18 @@ describe('G164 a related check that never names the secret cannot tell a guessed
   const world = async (key: string, options: { tracks?: boolean } = {}) => {
     const redaction = new FakeRedaction();
     redaction.epochTracksValues = options.tracks ?? false;
-    const cards = new FakeSource(
+    const tasks = new FakeSource(
       'cards',
       [
-        cardWork({ id: 'F1', title: 'Quokka widget' }),
-        cardWork({ id: 'F9', title: 'Quokka zqbody' }),
-        cardWork({ id: 'F4', title: 'Unrelated thing' }),
-        cardWork({ id: 'F20', title: `Deploy ${key}` }),
-        cardWork({ id: 'F21', title: `Rotate ${key}` }),
+        taskWork({ id: 'F1', title: 'Quokka widget' }),
+        taskWork({ id: 'F9', title: 'Quokka zqbody' }),
+        taskWork({ id: 'F4', title: 'Unrelated thing' }),
+        taskWork({ id: 'F20', title: `Deploy ${key}` }),
+        taskWork({ id: 'F21', title: `Rotate ${key}` }),
       ],
       true,
     );
-    const { service } = build([cards], { redaction });
+    const { service } = build([tasks], { redaction });
     await service.search(query('quokka'));
     redaction.values = [key];
     return { service, redaction };

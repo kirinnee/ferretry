@@ -5,7 +5,7 @@
  */
 
 import type { ReactNode } from 'react';
-import { boardCardPath } from '../lib/paths.ts';
+import { boardTaskPath } from '../lib/paths.ts';
 
 const INLINE = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)\s]+\)|(?<![\w&])&[BFIC][1-9][0-9]{0,8}(?!\w))/gu;
 const BULLET = /^\s*(?:[-*•])\s+(.*)$/u;
@@ -33,7 +33,7 @@ const inline = (text: string): ReactNode[] =>
       return (
         <a
           data-card-reference={part.slice(1).toUpperCase()}
-          href={boardCardPath(undefined, part.slice(1).toUpperCase())}
+          href={boardTaskPath(undefined, part.slice(1).toUpperCase())}
           key={key}
         >
           {part}
@@ -43,7 +43,7 @@ const inline = (text: string): ReactNode[] =>
   });
 
 /** The text, drawn: blank lines separate paragraphs; a run of bullet or numbered lines is a list. */
-export const cardProse: ProseRenderer = text => {
+export const taskProse: ProseRenderer = text => {
   const blocks: ReactNode[] = [];
   let list: { readonly ordered: boolean; readonly items: string[] } | null = null;
   let paragraph: string[] = [];
@@ -93,7 +93,7 @@ export const cardProse: ProseRenderer = text => {
 export function PointForm({
   text,
   className = '',
-  renderProse = cardProse,
+  renderProse = taskProse,
 }: {
   readonly text: string;
   readonly className?: string;

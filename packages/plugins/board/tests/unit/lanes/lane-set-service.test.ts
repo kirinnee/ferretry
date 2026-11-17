@@ -8,10 +8,10 @@ import {
 import { type BoardProjectId, UNFILED_PROJECT_ID } from '../../../contract/index.ts';
 import should from 'should';
 import {
-  type CardRelocator,
+  type TaskRelocator,
   type LaneActor,
   type LaneProposalAsks,
-  type LaneProposalCard,
+  type LaneProposalTask,
   type LaneSetMutation,
   LaneSetService,
   type LaneSetStore,
@@ -38,12 +38,12 @@ class MemoryStore implements LaneSetStore {
 }
 
 class Agenda implements LaneProposalAsks {
-  readonly raised: Array<readonly [string, string, LaneProposalCard]> = [];
+  readonly raised: Array<readonly [string, string, LaneProposalTask]> = [];
   readonly withdrawn: Array<readonly [string, string, string]> = [];
   failure?: Error;
-  async raise(ferretId: string, reference: string, card: LaneProposalCard): Promise<void> {
+  async raise(ferretId: string, reference: string, task: LaneProposalTask): Promise<void> {
     if (this.failure !== undefined) throw this.failure;
-    this.raised.push([ferretId, reference, card]);
+    this.raised.push([ferretId, reference, task]);
   }
   async withdraw(ferretId: string, reference: string, note: string): Promise<void> {
     if (this.failure !== undefined) throw this.failure;
@@ -51,7 +51,7 @@ class Agenda implements LaneProposalAsks {
   }
 }
 
-class Relocator implements CardRelocator {
+class Relocator implements TaskRelocator {
   readonly moves: Array<readonly [string, Readonly<Record<string, string>>]> = [];
   readonly reasons: Array<string | undefined> = [];
   readonly authorities: RelocationAuthority[] = [];
