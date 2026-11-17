@@ -5,7 +5,6 @@ import {
   CLAUDE_NO_QUESTIONS_FLAG,
   homeText,
   launchCommand,
-  questionArguments,
   settingsDocument,
   settingsFlags,
   channelsOn,
@@ -239,9 +238,6 @@ describe('launchCommand', () => {
     home: '/state/claude-code/agent-homes/f1',
     permissionMode: 'auto' as const,
     hasMcp: false,
-    // An opted-in interactive ferret keeps the question tool, so these argv assertions are about the rest of the argv only.
-    mode: 'interactive' as const,
-    questionTool: true,
     conversation: { kind: 'new' as const, id: 'c-1' },
   };
 
@@ -262,6 +258,7 @@ describe('launchCommand', () => {
       '/state/claude-code/agent-homes/f1/launch-settings.json',
       '--permission-mode',
       'auto',
+      CLAUDE_NO_QUESTIONS_FLAG,
       '--session-id',
       'c-1',
     ]);
@@ -278,6 +275,7 @@ describe('launchCommand', () => {
     should(argv.slice(argv.indexOf('--permission-mode'))).eql([
       '--permission-mode',
       'bypassPermissions',
+      CLAUDE_NO_QUESTIONS_FLAG,
       '--mcp-config',
       '/state/claude-code/agent-homes/f1/mcp.json',
       '--resume',
@@ -294,10 +292,8 @@ describe('launchCommand with settings flags', () => {
     home: '/state/claude-code/agent-homes/f1',
     permissionMode: 'auto' as const,
     hasMcp: true,
-    mode: 'interactive' as const,
     conversation: { kind: 'resume' as const, id: 'c-1' },
     model: 'claude-opus-5-5',
-    questionTool: false,
   };
   /** The words after the seeded shell's own: what claude is `exec`ed with. */
   const claudeWords = (argv: readonly string[]): readonly string[] => argv.slice(argv.indexOf(base.binary));
@@ -558,13 +554,12 @@ describe('transcript', () => {
   });
 });
 
-describe('the question tool (^A527: withheld from every ferret unless the questionTool setting opts in)', () => {
-  const inputs = (mode?: 'interactive' | 'auto', questionTool = false) => ({
+describe('the question tool (^A527, again 2026-11-17: withheld from EVERY ferret, with no setting to turn it back on)', () => {
+  const inputs = (mode?: 'interactive' | 'auto') => ({
     binary: '/opt/bin/claude',
     home: '/fy/agent-homes/f1',
     permissionMode: 'auto' as const,
     hasMcp: false,
-    questionTool,
     conversation: { kind: 'new' as const, id: 'conv-1' },
     ...(mode === undefined ? {} : { mode }),
   });
@@ -573,33 +568,21 @@ describe('the question tool (^A527: withheld from every ferret unless the questi
     should(CLAUDE_NO_QUESTIONS_FLAG).equal('--disallowed-tools=AskUserQuestion');
   });
 
-  it('withholds the tool by default from an interactive ferret, an auto one and one with no mode', () => {
-    should(questionArguments('interactive', false)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
-    should(questionArguments('auto', false)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
-    should(questionArguments(undefined, false)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
-  });
-
-  it('keeps the tool only for an interactive ferret, and only with the setting on: an auto one or one with no mode stays withheld', () => {
-    should(questionArguments('interactive', true)).eql([]);
-    should(questionArguments('auto', true)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
-    should(questionArguments(undefined, true)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
-  });
-
-  it('carries the flag in every default argv, new or resumed', () => {
+  it('carries the flag exactly once in every argv, new or resumed, interactive, auto or with no mode', () => {
     for (const conversation of [
       { kind: 'new' as const, id: 'c' },
       { kind: 'resume' as const, id: 'c' },
     ]) {
       for (const mode of ['interactive', 'auto', undefined] as const)
-        should(launchCommand({ ...inputs(mode), conversation })).containEql(CLAUDE_NO_QUESTIONS_FLAG);
-      should(launchCommand({ ...inputs('interactive', true), conversation })).not.containEql(CLAUDE_NO_QUESTIONS_FLAG);
+        should(launchCommand({ ...inputs(mode), conversation }).filter(word => word === CLAUDE_NO_QUESTIONS_FLAG)).eql([
+          CLAUDE_NO_QUESTIONS_FLAG,
+        ]);
     }
   });
 
-  it('adds nothing else: an opted-in interactive argv is a default argv without the one flag', () => {
-    should(launchCommand(inputs('interactive')).filter(argument => argument !== CLAUDE_NO_QUESTIONS_FLAG)).eql(
-      launchCommand(inputs('interactive', true)),
-    );
+  it('hands the same argv to every mode: nothing about the ferret can turn the tool back on', () => {
+    should(launchCommand(inputs('interactive'))).eql(launchCommand(inputs('auto')));
+    should(launchCommand(inputs('interactive'))).eql(launchCommand(inputs()));
   });
 
   // M7: a runtime that turns the tool back on has its open form read off the pane, so the layer writes no hook for it.
@@ -672,8 +655,6 @@ describe('Ferretry’s message channel in a launch (the pure parts)', () => {
       home: '/h',
       permissionMode: 'auto' as const,
       hasMcp: false,
-      questionTool: true,
-      mode: 'interactive' as const,
       conversation: { kind: 'new' as const, id: 'c-1' },
     };
     const on = launchCommand({ ...base, channels: true });

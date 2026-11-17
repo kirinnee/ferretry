@@ -635,7 +635,6 @@ function promptSnapshotLines(harness: HarnessKind, command: string): string[] {
  * that follows is never swallowed as a tool name. Codex gets an explicit OFF, not silence: `-c
  * features.default_mode_request_user_input=false` always beats `config.toml`, where a selected settings component may
  * have switched the feature on (the same spelling as the Codex harness's launch, `CODEX_QUESTIONS_OFF`).
- * GAP(runtimes): this wrapper has no opt-in; the `questionTool` setting governs the harness launch only.
  */
 function questionLines(harness: HarnessKind): string[] {
   return harness === 'claude'

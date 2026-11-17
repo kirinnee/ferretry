@@ -1887,7 +1887,7 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
   describe('O11b: the prompt keys a real start asserts', () => {
     const WAIVER = 'CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1';
     const config = (permissionMode: 'auto' | 'skip', dangerousRmWaiver: boolean) => ({
-      file: () => ({ searchPaths: [], permissionMode, questionTool: false, dangerousRmWaiver }),
+      file: () => ({ searchPaths: [], permissionMode, dangerousRmWaiver }),
       collection: () => new Map(),
     });
     const command = async (options: Parameters<typeof build>[0]): Promise<readonly string[]> => {
@@ -1921,7 +1921,7 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
       const state = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
       let waiver = false;
       const live = {
-        file: () => ({ searchPaths: [], permissionMode: 'skip', questionTool: false, dangerousRmWaiver: waiver }),
+        file: () => ({ searchPaths: [], permissionMode: 'skip', dangerousRmWaiver: waiver }),
         collection: () => new Map(),
       };
       const { harness } = build({ state, config: live });
@@ -1934,7 +1934,7 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
       const state = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
       let waiver = true;
       const live = {
-        file: () => ({ searchPaths: [], permissionMode: 'skip', questionTool: false, dangerousRmWaiver: waiver }),
+        file: () => ({ searchPaths: [], permissionMode: 'skip', dangerousRmWaiver: waiver }),
         collection: () => new Map(),
       };
       const { harness } = build({ state, config: live });
@@ -1945,16 +1945,17 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     });
   });
 
-  describe('the question tool (^A527: withheld from every ferret unless config/harness-claude-code.yaml opts in)', () => {
+  describe('the question tool (^A527, again 2026-11-17: withheld from every ferret, with no setting to turn it back on)', () => {
     const NO_QUESTIONS = '--disallowed-tools=AskUserQuestion';
-    const optedIn = {
+    // The old opt-in, as a file that still says it: nothing reads it any more, so it changes nothing.
+    const staleOptIn = {
       file: () => ({ searchPaths: [], permissionMode: 'auto', questionTool: true }),
       collection: () => new Map(),
     };
     const launched = async (
       call: 'start' | 'resume',
       mode: 'interactive' | 'auto' | undefined,
-      config?: typeof optedIn,
+      config?: typeof staleOptIn,
     ) => {
       const { harness } = build(config === undefined ? {} : { config });
       const started: { command?: readonly string[] } = {};
@@ -1973,10 +1974,9 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
           expect((await launched(call, mode)).filter(argument => argument === NO_QUESTIONS)).toEqual([NO_QUESTIONS]);
       });
 
-      test(`a ${call} with questionTool on keeps it for an interactive ferret only`, async () => {
-        expect(await launched(call, 'interactive', optedIn)).not.toContain(NO_QUESTIONS);
-        for (const mode of ['auto', undefined] as const)
-          expect((await launched(call, mode, optedIn)).filter(argument => argument === NO_QUESTIONS)).toEqual([
+      test(`a ${call} still withholds it when the config file carries the old questionTool opt-in`, async () => {
+        for (const mode of ['interactive', 'auto', undefined] as const)
+          expect((await launched(call, mode, staleOptIn)).filter(argument => argument === NO_QUESTIONS)).toEqual([
             NO_QUESTIONS,
           ]);
       });

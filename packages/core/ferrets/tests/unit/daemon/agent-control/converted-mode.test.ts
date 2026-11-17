@@ -17,9 +17,8 @@ import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
 /**
  * A ferret converted from v4 carries NO `ferret.json.mode`: v4's mode survives as
  * `details.options.mode`. The registry already reads that for the summary (the Agents filter); the LAUNCH must read the
- * same fact, or the first relaunch of an owner's interactive session hands the harness no mode and takes its question
- * tool away. The harness side is each plugin's own tests (Claude's `questionArguments('interactive')` keeps
- * `AskUserQuestion`, `undefined` withholds it; Codex's `codexQuestionArguments('interactive')` adds `--enable`); a
+ * same fact, or the first relaunch of an owner's interactive session hands the harness no mode. The question tool
+ * is withheld from every ferret whatever its mode (each plugin's own tests pin that); a
  * core test cannot import a plugin's daemon half (the context-imports gate), so this pins what the harness is HANDED:
  * `LaunchSpec.mode` (what both read) and the pane's `FY_SESSION_MODE`.
  */

@@ -50,8 +50,6 @@ export const lifecyclePart = (core: ClaudeCore): Serves<'discover' | 'resume' | 
       model: spec.model,
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
       channels: channelsOn(inputs.channels, spec.parts),
-      mode: spec.mode,
-      questionTool: inputs.questionTool,
       dangerousRmWaiver: inputs.dangerousRmWaiver,
       conversation,
       readable: spec.readable,

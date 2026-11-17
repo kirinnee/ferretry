@@ -320,12 +320,6 @@ export const HarnessConfigSchema = z.strictObject({
   searchPaths: z.array(HarnessPathSchema).default([]),
   permissionMode: PermissionModeSchema.default('skip'),
   /**
-   * Opt a harness's question tool back in (owner !A527: off by default, so no ferret stops on a prompt only the pane
-   * shows). `true` gives an INTERACTIVE ferret the tool again; an auto ferret never has it. It makes ferrets block
-   * rather than act, so it is never held.
-   */
-  questionTool: z.boolean().default(false),
-  /**
    * The full dangerous-rm waiver (`CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS`), so Claude's guard on `rm` stops
    * no ferret. Default OFF until the owner rules (c58 O11b). Set only when this is true AND the permission mode is
    * `skip`. A loosening: an agent's edit turning it on is held for the owner.
