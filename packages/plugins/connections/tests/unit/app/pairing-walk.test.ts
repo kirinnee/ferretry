@@ -8,6 +8,7 @@ import {
   type PairDirectInput,
   type PairedDaemon,
   PairingOutcomeUnknownError,
+  RELAY_CLOSE_CODES,
   type RelayCrypto,
   RelayPairingRefusedError,
   toBase64Url,
@@ -377,25 +378,84 @@ describe('what a failed pairing says', () => {
     run.fx.layer.close();
   });
 
-  test('P30 every leg failed: loopback named, relay reason given; with no relay discovered that is said too', async () => {
-    const withRelay = await walkOver(
-      { '127.0.0.1:8443': { kind: 'dead' }, [hostOf(RELAY)]: { kind: 'absent', code: 4404 } },
+  const failureOf = async (
+    sockets: Parameters<typeof walkOver>[0],
+    hosted: string | null,
+    address?: string,
+  ): Promise<string> => {
+    const run = await walkOver(sockets, hosted);
+    const failure = await run.pair(await pairingInput(run.fx.daemonId, address)).catch((error: unknown) => error);
+    run.fx.layer.close();
+    expect(failure).toBeInstanceOf(PairingUnreachableError);
+    return (failure as Error).message;
+  };
+
+  const TUNNEL = 'http://127.0.0.1:7617';
+  const TUNNEL_HOST = '127.0.0.1:7617';
+  const fixList = (message: string): readonly string[] => message.split('\n').filter(line => /^\d+\. /.test(line));
+
+  test('P30 an SSH tunnel to loopback with the relay saying the machine is not connected: what was tried, then the likely fixes', async () => {
+    const message = await failureOf(
+      { [TUNNEL_HOST]: { kind: 'dead' }, [hostOf(RELAY)]: { kind: 'absent', code: 4404 } },
+      RELAY,
+      TUNNEL,
+    );
+    const lines = message.split('\n');
+    // What was tried, in order, one short sentence each.
+    expect(lines[0]).toBe(
+      'First, directly at 127.0.0.1:7617: no answer. 127.0.0.1 only works through an SSH tunnel from this computer.',
+    );
+    expect(lines[1]).toBe(
+      "Then Ferretry's relay (relay.example) answered, but the machine is not connected to it, so it could not carry the pairing.",
+    );
+    // The loopback address is not the verdict.
+    expect(message).not.toContain('"this computer itself"');
+    expect(message).not.toContain('can never reach');
+    expect(message).not.toContain('Check that Ferretry is running');
+    expect(lines[2]).toBe('Most likely fix:');
+    const fixes = fixList(message);
+    expect(fixes).toHaveLength(4);
+    expect(fixes[0]).toContain('If you use an SSH tunnel: check it is still running');
+    expect(fixes[0]).toContain('"Could not request local forwarding"');
+    expect(fixes[1]).toContain('same browser, on the same computer as the tunnel');
+    expect(fixes[2]).toContain('Chrome asked about local network access, allow it');
+    // The link carries no relay state, so it is "may be", never a fact.
+    expect(fixes[3]).toContain('The relay may be switched off on that machine');
+    expect(fixes[3]).toContain('Pairing from another device needs the relay switched on there (or an SSH tunnel)');
+    expect(fixes.map(fix => fix.slice(0, 2))).toEqual(['1.', '2.', '3.', '4.']);
+  });
+
+  test('P30 loopback with no relay discovered says the relay was never tried, and does not blame the relay', async () => {
+    const message = await failureOf({ [TUNNEL_HOST]: { kind: 'dead' } }, null, TUNNEL);
+    expect(message).toContain('First, directly at 127.0.0.1:7617: no answer.');
+    expect(message).toContain('There was no relay to fall back to');
+    expect(message).not.toContain('switched off');
+    expect(fixList(message)).toHaveLength(3);
+    expect(message).not.toContain('"this computer itself"');
+  });
+
+  test('P30 a direct failure at a non-loopback address does not talk about a tunnel', async () => {
+    const message = await failureOf({ [hostOf(DIRECT)]: { kind: 'dead' } }, null);
+    expect(message).toContain('First, directly at laptop.example.test: no answer. The machine may be asleep');
+    expect(message).toContain('There was no relay to fall back to');
+    expect(message).not.toContain('SSH tunnel');
+    expect(fixList(message)).toEqual([
+      '1. Check the machine is awake and on a network this device can reach.',
+      '2. If Chrome asked about local network access, allow it.',
+    ]);
+  });
+
+  test('P30 a relay that is switched off at the relay says that, and adds no machine-side relay advice', async () => {
+    const message = await failureOf(
+      {
+        [hostOf(DIRECT)]: { kind: 'dead' },
+        [hostOf(RELAY)]: { kind: 'absent', code: RELAY_CLOSE_CODES.hostedDisabled },
+      },
       RELAY,
     );
-    const both = await withRelay
-      .pair(await pairingInput(withRelay.fx.daemonId, 'https://127.0.0.1:8443'))
-      .catch((error: unknown) => error);
-    expect(both).toBeInstanceOf(PairingUnreachableError);
-    expect((both as Error).message).toContain('"this computer itself"');
-    expect((both as Error).message).toContain('is not connected to it right now');
-    expect((both as Error).message).not.toContain('There was no relay to fall back to');
-    withRelay.fx.layer.close();
-
-    const noRelay = await walkOver({ [hostOf(DIRECT)]: { kind: 'dead' } }, null);
-    const alone = await noRelay.pair(await pairingInput(noRelay.fx.daemonId)).catch((error: unknown) => error);
-    expect((alone as Error).message).toContain('could not reach the machine directly at laptop.example.test');
-    expect((alone as Error).message).toContain('There was no relay to fall back to');
-    noRelay.fx.layer.close();
+    expect(message).toContain("Then Ferretry's relay (relay.example) is switched off right now");
+    expect(message).not.toContain('may be switched off on that machine');
+    expect(fixList(message)).toHaveLength(2);
   });
 
   test('P31 failure sentences name a host and port only — never a path, so the fingerprint stays out', async () => {
