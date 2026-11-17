@@ -227,6 +227,16 @@ function cursorOf(stdout: string): readonly [number, number] | readonly [] {
 }
 
 /** Whether a tmux session is a ferret's: `fy-…`, and not one of Terminals' own shells (`fy-webterm-…`). */
+/**
+ * Whether a targeted command's refusal says the server holds NO session at all (measured, tmux 3.7b): a server kept up
+ * with `exit-empty` off and nothing in it cannot even resolve a "current" session to start the lookup from, so
+ * `has-session -t =<name>` answers `no current target` instead of `can't find session`. With any session there the
+ * lookup proceeds and the ordinary `can't find session` answers. Either way the named session is not there.
+ */
+function isServerEmpty(stderr: string): boolean {
+  return /^no current target\b/imu.test(stderr);
+}
+
 function isFerretSession(session: string): boolean {
   return session.startsWith(FERRET_TMUX_PREFIX) && !session.startsWith(TERMINAL_TMUX_PREFIX);
 }
@@ -348,8 +358,9 @@ export class TmuxRunner implements Runner {
 
   /**
    * Whether the ferret's own tmux session is PROVEN not there (W2-a, today's `TmuxSessionExitObserver.exitOf` `gone`):
-   * tmux answers that it cannot find the session, or that the private server is not running (which takes every pane
-   * with it). Asked by the ferret's session name, never by the handle: pane ids start again when the server does, so a
+   * tmux answers that it cannot find the session, that the private server holds no session at all (`no current
+   * target`: a server kept up empty, e.g. one started before the daemon with `exit-empty` off), or that the private
+   * server is not running (which takes every pane with it). Asked by the ferret's session name, never by the handle: pane ids start again when the server does, so a
    * stale handle can name another ferret's pane. A live session, one tmux kept with a dead pane, and every refusal that
    * proves nothing (a socket this daemon may not open, a server that went away mid-request) answer false. Only asks.
    */
@@ -363,7 +374,9 @@ export class TmuxRunner implements Runner {
     // `=` is tmux's exact-name match: without it `fy-abc` would also find a session named `fy-abcdef`.
     const present = await this.options.tmux.execute(['has-session', '-t', `=${session}`]).catch(() => undefined);
     if (present === undefined || present.code === 0) return false;
-    return /can't find session/iu.test(present.stderr) || isTmuxServerAbsent(present.stderr);
+    return (
+      /can't find session/iu.test(present.stderr) || isServerEmpty(present.stderr) || isTmuxServerAbsent(present.stderr)
+    );
   }
 
   /**
