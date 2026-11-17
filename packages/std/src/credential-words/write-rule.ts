@@ -74,11 +74,13 @@ const KNOWN_SHAPES: readonly RegExp[] = [
 const KNOWN_SHAPES_EVERYWHERE: readonly RegExp[] = KNOWN_SHAPES.map(shape => new RegExp(shape.source, 'gu'));
 
 /**
- * A value that names a secret rather than holding one: `${secret:NAME}`, `${NAME}` or `$NAME`. Linear: anchored at
- * both ends, so it is tried from one start, and each branch is one class run with one way to end it. Tested only on a
- * value of at most {@link SCAN_WINDOW} characters: a longer one is no reference.
+ * A value that names a secret rather than holding one: `${secret:NAME}`, `${secret?:NAME}`, `${NAME}` or `$NAME`
+ * (docs/secrets.md: "a pointer is only…"). The braces hold a NAME and nothing else: `${X:-<literal>}` is a shell
+ * default, which carries a literal and so can carry a credential, and is no pointer. Linear: anchored at both ends, so
+ * it is tried from one start, and each branch is one class run with one way to end it. Tested only on a value of at
+ * most {@link SCAN_WINDOW} characters: a longer one is no reference.
  */
-const REFERENCE = /^\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
+const REFERENCE = /^\$(?:\{(?:secret\??:)?[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
 
 /**
  * A path or a URL: a scheme and `://`, or a leading `/`, `~` or `.`. Linear: anchored at the start, one class run, then

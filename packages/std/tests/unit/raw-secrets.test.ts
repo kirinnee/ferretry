@@ -153,6 +153,39 @@ describe('looksLikeRawSecret — a high-entropy value under a credential key', (
     should(actual).be.false();
   });
 
+  it.each([
+    ['a shell default holding a random value', `${DOLLAR}{ANTHROPIC_API_KEY_VALUE:-${RANDOM_LOOKING}}`],
+    ['a shell default under a secret pointer name', `${DOLLAR}{secret:ANTHROPIC_API_KEY:-${RANDOM_LOOKING}}`],
+    ['an assigning default', `${DOLLAR}{ANTHROPIC_API_KEY_VALUE:=${RANDOM_LOOKING}}`],
+    ['an alternative-value form', `${DOLLAR}{ANTHROPIC_API_KEY_VALUE:+${RANDOM_LOOKING}}`],
+    ['a default with no colon', `${DOLLAR}{ANTHROPIC_API_KEY_VALUE-${RANDOM_LOOKING}}`],
+  ])('should flag %s: only a bare NAME is a pointer', (_label, input) => {
+    // Act
+    const actual = looksLikeRawSecret('API_KEY', input);
+
+    // Assert
+    should(actual).be.true();
+  });
+
+  it('should flag a shell default in a written document, so the write is refused', () => {
+    // Arrange
+    const input = { env: { OPENAI_API_KEY: `${DOLLAR}{HOME_KEY:-${RANDOM_LOOKING}}` } };
+
+    // Act
+    const actual = findRawSecrets(input);
+
+    // Assert
+    should(actual.map(finding => finding.path)).eql([['env', 'OPENAI_API_KEY']]);
+  });
+
+  it('should still read the optional secret pointer as a reference', () => {
+    // Act
+    const actual = looksLikeRawSecret('API_KEY', `${DOLLAR}{secret?:ANTHROPIC_API_KEY}`);
+
+    // Assert
+    should(actual).be.false();
+  });
+
   it('should draw the length line at sixteen characters', () => {
     // Arrange
     const sixteen = 'abcdefghijklmnop';
