@@ -24,7 +24,11 @@ async function watched(state: 'working' | 'idle' = 'working', status: 'running' 
   cleanups.push(async () => await made.storage.close());
   const id = parseSessionId('vanish-1');
   await made.storage.writeConfig(id, sessionConfig(id));
-  await made.storage.writeState(id, { id, status, turn: 1, turnState: 'working', turnStateAt: AT });
+  // A declared wait (and a converted v4 copy) has no turn state: the watch's roster drops it, so only the sweep can ask.
+  await made.storage.writeState(
+    id,
+    status === 'running' ? { id, status, turn: 1, turnState: 'working', turnStateAt: AT } : { id, status, turn: 1 },
+  );
   const runner = new FakeRunner();
   const record = {
     format: 1,
@@ -43,10 +47,12 @@ async function watched(state: 'working' | 'idle' = 'working', status: 'running' 
   const stillGones: Array<() => Promise<boolean>> = [];
   let timer: (() => void) | undefined;
   const log = new RecordingLog();
-  const { host } = buildTurnWatch({
+  const timers: Array<() => void> = [];
+  const { host, startSweep } = buildTurnWatch({
     storage: made.storage,
     tail: { tail: async () => ({ kind: 'unresolved' }) },
     record: () => record,
+    live: () => [record],
     runner: () => runner,
     turnObserved: async () => undefined,
     settleGone: async (ferret, handle, exited, stillGone) => {
@@ -56,7 +62,8 @@ async function watched(state: 'working' | 'idle' = 'working', status: 'running' 
     },
     clock: { now: () => AT },
     every: (_intervalMs, tick) => {
-      timer = tick;
+      timers.push(tick);
+      timer = timers[0];
       return () => undefined;
     },
     yieldToLoop: async () => undefined,
@@ -67,7 +74,13 @@ async function watched(state: 'working' | 'idle' = 'working', status: 'running' 
     timer?.();
     await new Promise(resolve => setTimeout(resolve, 50));
   };
-  return { runner, record, settled, stillGones, tick, id: id as unknown as FerretId };
+  /** One run of the 30 s sweep over every live registry record. */
+  const sweep = async (): Promise<void> => {
+    startSweep();
+    timers[timers.length - 1]?.();
+    await new Promise(resolve => setTimeout(resolve, 50));
+  };
+  return { runner, record, settled, stillGones, tick, sweep, id: id as unknown as FerretId };
 }
 
 describe('a ferret whose terminal vanished', () => {
@@ -100,21 +113,34 @@ describe('a ferret whose terminal vanished', () => {
     expect(await stillGone?.()).toBe(false);
   });
 
-  it('is settled gone while its document says `waiting` (a status the watch never looks at)', async () => {
+  it('is settled gone by the sweep while its document says `waiting` (the watch never looks at it)', async () => {
     const fleet = await watched('working', 'waiting');
     fleet.runner.reboot();
 
     await fleet.tick();
+    expect(fleet.settled).toEqual([]);
+    await fleet.sweep();
 
     expect(fleet.settled.map(one => one.handle)).toEqual([fleet.record.handle as string]);
   });
 
-  it('is not asked about while `waiting` and its pane is alive', async () => {
+  it('is asked about by the sweep and left alone while its pane is alive', async () => {
     const fleet = await watched('working', 'waiting');
 
-    await fleet.tick();
+    await fleet.sweep();
 
     expect(fleet.runner.goneAsked).toEqual([fleet.id]);
+    expect(fleet.settled).toEqual([]);
+  });
+
+  it('is not asked about by the sweep once the registry says it is stopped', async () => {
+    const fleet = await watched();
+    fleet.runner.reboot();
+    (fleet.record as { state: string }).state = 'stopped';
+
+    await fleet.sweep();
+
+    expect(fleet.runner.goneAsked).toEqual([]);
     expect(fleet.settled).toEqual([]);
   });
 

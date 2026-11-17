@@ -18,6 +18,11 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     storage: sessionStore,
     tail: transcripts.tail,
     record: ferret => registry.get(ferret),
+    live: () =>
+      registry.list().flatMap(ferret => {
+        const held = registry.get(ferret.id);
+        return held === undefined ? [] : [held];
+      }),
     runner: () => {
       const found = hooks.provider(Runners, 'tmux');
       return found === 'unavailable' ? undefined : found;
@@ -51,6 +56,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       for (const record of registry.list()) if (record.state === 'stopped') removeEnvironment(record.id);
       turnWatch.host.arm();
       kernel.lifecycle.onStop(async () => await turnWatch.host.close());
+      kernel.lifecycle.onStop(turnWatch.startSweep());
     },
   });
 
