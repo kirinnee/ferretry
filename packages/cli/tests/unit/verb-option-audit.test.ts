@@ -14,6 +14,7 @@
 import { describe, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { VerbOptionDecl } from '@ferretry/kernel/manifest';
 import should from 'should';
 import { registry } from '../../src/generated/commands.ts';
 import { flagNames } from '../../src/lib/argv.ts';
@@ -52,6 +53,21 @@ const PATIENCE_MS = 400;
 
 const WALKS = '<walks every option>';
 const READS_RAW = '<reads the raw words>';
+
+/**
+ * The words that satisfy a verb's REQUIRED options, typed on the line: the shell refuses a run lacking one before the
+ * handler is called (`lesson suggest` wants `--scope`), so a probe that typed none would record no read at all.
+ */
+function requiredWords(entry: { readonly options?: readonly VerbOptionDecl[] }): string[] {
+  return (entry.options ?? [])
+    .filter(option => option.required === true)
+    .flatMap(option => {
+      const name = flagNames(option.flag)
+        .toSorted((a, b) => b.length - a.length)
+        .at(0);
+      return name === undefined ? [] : /[<[]/u.test(option.flag) ? [`--${name}`, 'x'] : [`--${name}`];
+    });
+}
 
 const table = buildVerbTable(registry);
 const pluginVerbs = table.entries.filter(entry => entry.owner !== 'shell' && entry.alias === undefined);
@@ -151,7 +167,7 @@ async function probeReads(): Promise<ReadonlyMap<string, ReadonlySet<string>>> {
             ),
         );
         const { world } = fakeWorld({ registry: wrapped });
-        await runFy([...entry.words, ...words], world).catch(() => 0);
+        await runFy([...entry.words, ...words, ...requiredWords(entry)], world).catch(() => 0);
       }
   return reads;
 }
@@ -187,6 +203,23 @@ describe('verb options audit (the real generated registry)', () => {
   );
 
   it(
+    'should reach the handler of every verb that has a required option, so what it reads is audited too',
+    async () => {
+      // Arrange
+      const reads = await recordReads();
+      const withRequired = pluginVerbs.filter(entry => (entry.options ?? []).some(option => option.required === true));
+
+      // Act: a verb the shell refused for lacking its required option would have recorded no read at all.
+      const unreached = withRequired.filter(entry => (reads.get(entry.line)?.size ?? 0) === 0).map(e => e.line);
+
+      // Assert
+      should(withRequired.length).be.above(0);
+      should(unreached).deepEqual([]);
+    },
+    AUDIT_TIMEOUT_MS,
+  );
+
+  it(
     'should leave only the opted-out verbs walking their options or reading the raw words',
     async () => {
       // Arrange
@@ -214,7 +247,7 @@ describe('verb options audit (the real generated registry)', () => {
       for (const entry of pluginVerbs.filter(each => isSelfValidating(each.owner, each.line))) {
         const transport = new RecordingTransport();
         const { world, io } = fakeWorld({ registry, transport });
-        const code = await runFy([...entry.words, '--zz-unknown'], world).catch(() => -1);
+        const code = await runFy([...entry.words, ...requiredWords(entry), '--zz-unknown'], world).catch(() => -1);
         if (code === 0 || !io.stderr().includes('zz-unknown') || transport.sent.length > 0)
           failures.push(`${entry.owner}: ${entry.line} → exit ${String(code)}, sent ${String(transport.sent.length)}`);
       }
