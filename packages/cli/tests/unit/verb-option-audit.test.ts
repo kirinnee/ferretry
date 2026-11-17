@@ -57,8 +57,15 @@ const table = buildVerbTable(registry);
 const pluginVerbs = table.entries.filter(entry => entry.owner !== 'shell' && entry.alias === undefined);
 const shellVerbs = table.entries.filter(entry => entry.owner === 'shell' && entry.alias === undefined);
 
-/** Every name each plugin verb's handler asked its `options` for, by verb line. */
-async function recordReads(): Promise<ReadonlyMap<string, ReadonlySet<string>>> {
+/** The probe is slow (every verb, five times, twice) and its answer never changes: it runs once for the file. */
+let recorded: Promise<ReadonlyMap<string, ReadonlySet<string>>> | undefined;
+const recordReads = (): Promise<ReadonlyMap<string, ReadonlySet<string>>> => {
+  recorded ??= probeReads();
+  return recorded;
+};
+
+/** The probe itself: every name each plugin verb's handler asked its `options` for, by verb line. */
+async function probeReads(): Promise<ReadonlyMap<string, ReadonlySet<string>>> {
   const reads = new Map<string, Set<string>>();
   const current = { line: '', mode: 'nothing' as Mode, shape: new Map<string, true | 'x'>() };
   const answer = (name: string, mode: Mode): unknown => {
@@ -149,82 +156,101 @@ async function recordReads(): Promise<ReadonlyMap<string, ReadonlySet<string>>> 
   return reads;
 }
 
+/** A verb-by-verb probe of the whole registry is seconds, not milliseconds: far over bun's 5 s default on a CI runner. */
+const AUDIT_TIMEOUT_MS = 120_000;
+
 const camelToKebab = (name: string): string => name.replace(/[A-Z]/gu, letter => `-${letter.toLowerCase()}`);
 
 describe('verb options audit (the real generated registry)', () => {
-  it('should declare every option a plugin verb reads', async () => {
-    // Arrange
-    const reads = await recordReads();
-    const undeclared: string[] = [];
+  it(
+    'should declare every option a plugin verb reads',
+    async () => {
+      // Arrange
+      const reads = await recordReads();
+      const undeclared: string[] = [];
 
-    // Act
-    for (const entry of pluginVerbs) {
-      if (isSelfValidating(entry.owner, entry.line)) continue;
-      const known = declaredOptionNames(entry.options);
-      const ignored = READ_AND_IGNORED[entry.line] ?? [];
-      const missing = [...(reads.get(entry.line) ?? [])].filter(
-        name => !known.has(name) && !known.has(camelToKebab(name)) && !ignored.includes(name),
+      // Act
+      for (const entry of pluginVerbs) {
+        if (isSelfValidating(entry.owner, entry.line)) continue;
+        const known = declaredOptionNames(entry.options);
+        const ignored = READ_AND_IGNORED[entry.line] ?? [];
+        const missing = [...(reads.get(entry.line) ?? [])].filter(
+          name => !known.has(name) && !known.has(camelToKebab(name)) && !ignored.includes(name),
+        );
+        if (missing.length > 0) undeclared.push(`${entry.owner}: ${entry.line} reads ${missing.join(', ')}`);
+      }
+
+      // Assert
+      should(undeclared).deepEqual([]);
+    },
+    AUDIT_TIMEOUT_MS,
+  );
+
+  it(
+    'should leave only the opted-out verbs walking their options or reading the raw words',
+    async () => {
+      // Arrange
+      const reads = await recordReads();
+
+      // Act
+      const walking = pluginVerbs
+        .filter(entry => !isSelfValidating(entry.owner, entry.line))
+        .filter(entry => reads.get(entry.line)?.has(WALKS) === true || reads.get(entry.line)?.has(READS_RAW) === true)
+        .map(entry => `${entry.owner}: ${entry.line}`);
+
+      // Assert
+      should(walking).deepEqual([]);
+    },
+    AUDIT_TIMEOUT_MS,
+  );
+
+  it(
+    'should have every opted-out verb refuse an unknown option itself, naming it, with nothing sent',
+    async () => {
+      // Arrange
+      const failures: string[] = [];
+
+      // Act
+      for (const entry of pluginVerbs.filter(each => isSelfValidating(each.owner, each.line))) {
+        const transport = new RecordingTransport();
+        const { world, io } = fakeWorld({ registry, transport });
+        const code = await runFy([...entry.words, '--zz-unknown'], world).catch(() => -1);
+        if (code === 0 || !io.stderr().includes('zz-unknown') || transport.sent.length > 0)
+          failures.push(`${entry.owner}: ${entry.line} → exit ${String(code)}, sent ${String(transport.sent.length)}`);
+      }
+
+      // Assert
+      should(failures).deepEqual([]);
+    },
+    AUDIT_TIMEOUT_MS,
+  );
+
+  it(
+    'should declare every literal option name the shell’s own verbs read',
+    () => {
+      // Arrange
+      const folder = new URL('../../src/lib/', import.meta.url).pathname;
+      const sources = ['commands', 'machine'].flatMap(directory =>
+        readdirSync(join(folder, directory)).map(file => readFileSync(join(folder, directory, file), 'utf8')),
       );
-      if (missing.length > 0) undeclared.push(`${entry.owner}: ${entry.line} reads ${missing.join(', ')}`);
-    }
+      const read =
+        /\b(?:optionOn|optionText|optionList|on|text|flag)\(\s*(?:ctx\.)?(?:invocation|ctx),\s*'([a-z][a-z-]*)'/gu;
+      const direct =
+        /(?<![/\w.])(?:flags|invocation\.options)\[\s*'([a-z][a-z-]*)'\s*\]|(?<![/\w.])(?:flags|invocation\.options)\.([a-z]\w*)(?!\.ts)/gu;
+      const names = new Set<string>();
+      for (const source of sources) {
+        for (const match of source.matchAll(read)) names.add(match[1] as string);
+        for (const match of source.matchAll(direct)) names.add((match[1] ?? match[2]) as string);
+      }
+      const declared = new Set<string>(SHELL_WIDE_OPTIONS);
+      for (const entry of shellVerbs) for (const name of declaredOptionNames(entry.options)) declared.add(name);
 
-    // Assert
-    should(undeclared).deepEqual([]);
-  });
+      // Act
+      const undeclared = [...names].filter(name => !declared.has(name)).sort();
 
-  it('should leave only the opted-out verbs walking their options or reading the raw words', async () => {
-    // Arrange
-    const reads = await recordReads();
-
-    // Act
-    const walking = pluginVerbs
-      .filter(entry => !isSelfValidating(entry.owner, entry.line))
-      .filter(entry => reads.get(entry.line)?.has(WALKS) === true || reads.get(entry.line)?.has(READS_RAW) === true)
-      .map(entry => `${entry.owner}: ${entry.line}`);
-
-    // Assert
-    should(walking).deepEqual([]);
-  });
-
-  it('should have every opted-out verb refuse an unknown option itself, naming it, with nothing sent', async () => {
-    // Arrange
-    const failures: string[] = [];
-
-    // Act
-    for (const entry of pluginVerbs.filter(each => isSelfValidating(each.owner, each.line))) {
-      const transport = new RecordingTransport();
-      const { world, io } = fakeWorld({ registry, transport });
-      const code = await runFy([...entry.words, '--zz-unknown'], world).catch(() => -1);
-      if (code === 0 || !io.stderr().includes('zz-unknown') || transport.sent.length > 0)
-        failures.push(`${entry.owner}: ${entry.line} → exit ${String(code)}, sent ${String(transport.sent.length)}`);
-    }
-
-    // Assert
-    should(failures).deepEqual([]);
-  });
-
-  it('should declare every literal option name the shell’s own verbs read', () => {
-    // Arrange
-    const folder = new URL('../../src/lib/', import.meta.url).pathname;
-    const sources = ['commands', 'machine'].flatMap(directory =>
-      readdirSync(join(folder, directory)).map(file => readFileSync(join(folder, directory, file), 'utf8')),
-    );
-    const read =
-      /\b(?:optionOn|optionText|optionList|on|text|flag)\(\s*(?:ctx\.)?(?:invocation|ctx),\s*'([a-z][a-z-]*)'/gu;
-    const direct =
-      /(?<![/\w.])(?:flags|invocation\.options)\[\s*'([a-z][a-z-]*)'\s*\]|(?<![/\w.])(?:flags|invocation\.options)\.([a-z]\w*)(?!\.ts)/gu;
-    const names = new Set<string>();
-    for (const source of sources) {
-      for (const match of source.matchAll(read)) names.add(match[1] as string);
-      for (const match of source.matchAll(direct)) names.add((match[1] ?? match[2]) as string);
-    }
-    const declared = new Set<string>(SHELL_WIDE_OPTIONS);
-    for (const entry of shellVerbs) for (const name of declaredOptionNames(entry.options)) declared.add(name);
-
-    // Act
-    const undeclared = [...names].filter(name => !declared.has(name)).sort();
-
-    // Assert
-    should(undeclared).deepEqual([]);
-  });
+      // Assert
+      should(undeclared).deepEqual([]);
+    },
+    AUDIT_TIMEOUT_MS,
+  );
 });
