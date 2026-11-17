@@ -904,6 +904,26 @@ export class DaemonStorage {
     return await this.updateDocument(id, 'state', transform, () => transform(undefined));
   }
 
+  /**
+   * The journal's next line without the session index: the sequence after the last readable event, chosen and written
+   * in the session's serial lane, the SAME lane {@link append} takes. This storage is the one owner of a journal's
+   * sequence, so two writers (a service ferret's history and a session's) can never both be given the next number.
+   * A journal that cannot be read to its end throws out of the read: nothing is written after a short read.
+   */
+  async appendHistory(id: SessionId, type: string, data: unknown): Promise<SessionEvent> {
+    this.assertOpen();
+    return await this.serial.run(id, async () => {
+      let last = 0;
+      for await (const line of this.state.lines(FerretHistoryFiles, id)) {
+        const event = parseSessionEvent(line, id);
+        if (event !== undefined) last = Math.max(last, event.sequence);
+      }
+      const event = createSessionEvent(id, last, this.clock.now(), type, data);
+      await this.state.append(FerretHistoryFiles, encodeSessionEvent(event), id);
+      return event;
+    });
+  }
+
   async append(id: SessionId, type: string, data: unknown): Promise<SessionEvent> {
     this.assertOpen();
     const validated = createSessionEvent(id, 0, this.clock.now(), type, data);
@@ -912,7 +932,8 @@ export class DaemonStorage {
       const read = await this.readSession(id);
       const file = fileOf(FerretHistoryFiles, id);
       // A journal read that stopped at a damaged line cannot say what sequence comes next: appending would risk
-      // writing a sequence a later line already holds.
+      // writing a sequence a later line already holds. (The state port's own refusal of a damaged file is not enough:
+      // it looks again before writing, and a fault that has passed by then would let this partial scan number the line.)
       if (!read.journal.complete)
         throw new Error(`session ${id} journal ${file} could not be read to its end; refusing to append`);
       const inspection = this.inspectSource(id, read.source);
