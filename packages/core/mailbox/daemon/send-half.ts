@@ -1015,17 +1015,20 @@ export function buildSendHalf(deps: SendHalfDeps) {
     if (request.senderSessionId !== undefined && pane.draft !== undefined && pane.draft.trim() !== '') return 'draft';
     return undefined;
   };
+  /** The refusal for a message that must never start a stopped ferret: Agenda's own words, and a monitor's wake. */
+  const neverRevives = (request: TypedSend): SessionSendError =>
+    new SessionSendError(
+      'refused',
+      `the ferret is stopped and ${request.monitor === true ? 'a wake' : 'an Agenda message'} never revives it, so nothing was typed`,
+    );
   const typeLocked = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
     // A ferret that has stopped has no pane to type into: the message revives it (see {@link reviveLocked}).
     const first = await readTarget(ferret);
     if (TERMINAL_SEND_STATUSES.has(first.status)) {
-      // Agenda's own words never revive: a nudge is no reason to start a ferret the owner (or its own end) stopped. Refused
-      // before any record, so nothing is typed, nothing is kept, and nothing is recorded under the owner's name.
-      if (request.agenda === true)
-        throw new SessionSendError(
-          'refused',
-          'the ferret is stopped and an Agenda message never revives it, so nothing was typed',
-        );
+      // Agenda's own words and a monitor's wake never revive: a nudge is no reason to start a ferret the owner (or its own end)
+      // stopped, and a wake queued behind a gate reaches here after the stop. Refused before any record, so nothing is typed,
+      // nothing is kept, and nothing is recorded under the owner's name.
+      if (request.agenda === true || request.monitor === true) throw neverRevives(request);
       return await reviveLocked(ferret, request);
     }
     // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
@@ -1371,6 +1374,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
             : request.by?.kind === 'ferretry' && request.by.feature === 'Agenda'
               ? { agenda: true as const }
               : { notice: true as const }),
+          ...(request.by?.kind === 'ferretry' && request.by.feature === 'Monitor' ? { monitor: true as const } : {}),
         }),
       // A message waiting on a person is refused here, as it always was: it is not carried to wait behind a question.
       authorize: async (id: SessionId) => await refuseWhileAsking(id),
@@ -1387,11 +1391,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
   const submit = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
     const stopped = TERMINAL_SEND_STATUSES.has((await readTarget(ferret)).status);
     // Agenda's own words and a monitor's wake never revive a stopped ferret: refused before anything is kept.
-    if ((request.agenda === true || request.monitor === true) && stopped)
-      throw new SessionSendError(
-        'refused',
-        `the ferret is stopped and ${request.monitor === true ? 'a wake' : 'an Agenda message'} never revives it, so nothing was typed`,
-      );
+    if ((request.agenda === true || request.monitor === true) && stopped) throw neverRevives(request);
     // The ferret's terminal is opened first, as the typing send opens it: a ferret with no terminal to reach, or one
     // Ferrets will not let this caller touch, is refused here in plain words, before anything is kept or queued.
     if (!stopped) await terminal.bind(ferret);
