@@ -6,10 +6,9 @@
  * asks again every few seconds so Send comes back by itself. The last request read is kept: once it is sent the daemon
  * stops listing it, and the card must still say what happened rather than vanish.
  *
- * WHICH REQUEST. The ask carries the ferret and, when the Agenda passes it, the request id (`ref.request`). The Agenda
- * passes only `{ kind: 'input' }` today (GAP(ask-input)), so the host then picks the ferret's open request whose
- * prompt is the one the ask's context quotes after "The agent says: ". Two requests with the same prompt on one ferret
- * are told apart by the id when it is there, and otherwise the first is drawn.
+ * WHICH REQUEST. The ask carries the ferret and the request id (`ref.request`) the Agenda raised the card for, and the
+ * host binds that request and no other: two open requests with the same prompt are told apart by the id. An ask with
+ * no id, or an id the ferret no longer lists, says the request is no longer open; it never binds another request.
  */
 import { AskOnScreenSchema } from '@ferretry/core-asks/contract';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -19,8 +18,6 @@ import type { VaultClient } from '../../shell.tsx';
 import { InputCard } from './input-card.tsx';
 
 const INPUT_REFRESH_MS = 3_000;
-/** What the daemon writes before the agent's own prompt in the ask's context. */
-const PROMPT_MARKER = 'The agent says: ';
 
 export interface InputCardHostProps {
   readonly client: VaultClient;
@@ -39,13 +36,12 @@ type Read =
   | { readonly kind: 'unreadable' }
   | { readonly kind: 'failed'; readonly text: string };
 
-/** Whether a listed request is the one this ask is the card of. */
+/** Whether a listed request is the one this ask is the card of: the one whose id the ask carries. */
 export function isAskRequest(
   request: InputRequest,
-  ask: { readonly ref: { readonly [key: string]: unknown }; readonly context?: string | undefined },
+  ask: { readonly ref: { readonly [key: string]: unknown } },
 ): boolean {
-  if (typeof ask.ref.request === 'string') return request.id === ask.ref.request;
-  return ask.context?.endsWith(`${PROMPT_MARKER}${request.prompt}`) === true;
+  return typeof ask.ref.request === 'string' && request.id === ask.ref.request;
 }
 
 export function InputCardHost({ client, value, agentName, onDone, onHold }: InputCardHostProps) {
@@ -53,7 +49,6 @@ export function InputCardHost({ client, value, agentName, onDone, onHold }: Inpu
   const ferret = ask.success ? ask.data.ferret : undefined;
   const isAsk = ask.success;
   const askRequest = ask.success && typeof ask.data.ref.request === 'string' ? ask.data.ref.request : undefined;
-  const askContext = ask.success ? ask.data.context : undefined;
   const name = agentName ?? (ask.success ? ask.data.ferretName : undefined);
   const [read, setRead] = useState<Read>({ kind: 'loading' });
   const settled = useRef(false);
@@ -65,14 +60,9 @@ export function InputCardHost({ client, value, agentName, onDone, onHold }: Inpu
       const open = listed.find(
         each =>
           each.kind === 'open' &&
-          isAskRequest(each.request, {
-            ref: askRequest === undefined ? {} : { request: askRequest },
-            context: askContext,
-          }),
+          isAskRequest(each.request, { ref: askRequest === undefined ? {} : { request: askRequest } }),
       );
-      const unreadable = listed.find(
-        each => each.kind === 'unreadable' && (askRequest === undefined || each.id === askRequest),
-      );
+      const unreadable = listed.find(each => each.kind === 'unreadable' && each.id === askRequest);
       setRead(previous =>
         open?.kind === 'open'
           ? { kind: 'open', request: open.request }
@@ -89,7 +79,7 @@ export function InputCardHost({ client, value, agentName, onDone, onHold }: Inpu
           : { kind: 'failed', text: cause instanceof Error ? cause.message : String(cause) },
       );
     }
-  }, [client, ferret, isAsk, askRequest, askContext]);
+  }, [client, ferret, isAsk, askRequest]);
 
   useEffect(() => {
     void refresh();
