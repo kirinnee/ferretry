@@ -34,6 +34,7 @@ export * from './session-id.ts';
 export type {
   SendFate as LedgerFate,
   SendLedger,
+  SendLedgerTail,
   SendNoticeOwed,
   SendPath as LedgerPath,
   SendRecord as LedgerRecord,
