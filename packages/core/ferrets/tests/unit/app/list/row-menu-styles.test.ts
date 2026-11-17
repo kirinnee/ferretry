@@ -55,3 +55,14 @@ test('the stylesheet really holds the rules the row menu draws', async () => {
     expect(css).toContain(rule);
   }
 });
+
+test('a parent row reveals its own ⋯ and pin buttons on hover, never its sub-ferrets’, and the nesting keeps its indent', async () => {
+  // A sub-ferret's row is INSIDE its parent's `li`, so a descendant selector would light up every child's buttons.
+  // A real browser proved it (a shot of a hovered parent); unit tests load no CSS, so the rules are read from source.
+  const css = await readFile(resolve(APP, 'features/list/ferret-list.css'), 'utf8');
+  expect(css).toContain('.fy-sbar__row:hover > .fy-sbar__more');
+  expect(css).toContain('.fy-sbar__row:hover > .fy-sbar__pin');
+  expect(css).not.toMatch(/\.fy-sbar__row:hover \.fy-sbar__(?:more|pin)/u);
+  // `.fy-sbar__list ul` strips every list's padding, so the nested list needs a rule at least as specific.
+  expect(css).toMatch(/\.fy-sbar__list \.fy-sbar__children\s*\{[^}]*padding:\s*0 0 0 14px/u);
+});

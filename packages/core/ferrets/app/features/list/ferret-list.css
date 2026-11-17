@@ -316,7 +316,7 @@
   color: var(--muted);
   opacity: 0;
 }
-.fy-sbar__row:hover .fy-sbar__more,
+.fy-sbar__row:hover > .fy-sbar__more,
 .fy-sbar__more:focus-visible {
   opacity: 1;
 }
@@ -365,15 +365,19 @@
 .fy-sbar__pin[aria-pressed='true'] {
   color: var(--accent);
 }
-.fy-sbar__row:hover .fy-sbar__pin,
+/* A pinned ferret's pin is filled, so it never differs from an unpinned one by colour alone. */
+.fy-sbar__pin[aria-pressed='true'] svg {
+  fill: currentColor;
+}
+.fy-sbar__row:hover > .fy-sbar__pin,
 .fy-sbar__pin:focus-visible,
 .fy-sbar__pin[aria-pressed='true'] {
   opacity: 1;
 }
-.fy-sbar__children {
-  margin: 0;
+/* Beats `.fy-sbar__list ul` (no padding), which would flatten the nesting. The hover rules above use `>` so a parent's
+   hover reveals its own buttons, never its sub-ferrets'. */
+.fy-sbar__list .fy-sbar__children {
   padding: 0 0 0 14px;
-  list-style: none;
 }
 @media (pointer: coarse) {
   .fy-sbar__branch,
