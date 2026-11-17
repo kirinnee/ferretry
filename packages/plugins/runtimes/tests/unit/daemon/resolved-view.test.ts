@@ -379,7 +379,6 @@ describe('resolvedEntries — a credential in a command line', () => {
       '--token=$API_TOKEN',
       // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
       '--token="${secret:API_TOKEN}"',
-      "--token='$API_TOKEN'",
       '--token',
       '"$API_TOKEN"',
       '--auth=1',
@@ -481,16 +480,23 @@ function familyCases(): readonly FamilyCase[] {
     ...HARMLESS_NAMED.map(flag => ({ flag, named: false, separators: ['=', 'next word', 'space'] as Separator[] })),
     ...ONE_LETTER.map(flag => ({ flag, named: false, separators: ['=', 'next word', 'space', 'none'] as Separator[] })),
     // `-p` means "password" (mysql's `-p<password>`) when the value is stuck to the letter, and only as `-p`: `-P` is a
-    // port, and with a separator of its own the flag is `-p` as any other one-letter flag.
+    // port, and with a separator of its own in another word the flag is `-p` as any other one-letter flag. A `=` stuck
+    // to the letter is the password's first character, not a separator (`-p=<password>`): the second entry's cases
+    // replace the first's for the lowercase letter (the cases are keyed by their words).
     { flag: '-p', named: false, separators: ['=', 'next word', 'space'] as Separator[] },
-    { flag: '-p', named: true, separators: ['none'] as Separator[], lowerOnly: true },
+    { flag: '-p', named: true, separators: ['none', '='] as Separator[], lowerOnly: true },
   ];
   for (const spelling of spellings) {
     for (const spell of SPELLING_CASES) {
       const flag = spell(spelling.flag);
       for (const separator of spelling.separators) {
         for (const quote of QUOTES) {
-          for (const { value, secret, body } of VALUES) {
+          for (const entry of VALUES) {
+            // A single-quoted `$NAME` is a value: a shell expands nothing in single quotes.
+            const literal = quote === "'" && entry.value === '$API_TOKEN';
+            const { value } = entry;
+            const secret = literal ? 'under a secret name' : entry.secret;
+            const body = literal ? 'API_TOKEN' : entry.body;
             for (const last of [true, false]) {
               const quoted = `${quote}${value}${quote}`;
               const shape =
@@ -511,7 +517,7 @@ function familyCases(): readonly FamilyCase[] {
                     spelling.named &&
                     (!('lowerOnly' in spelling) || flag === spelling.flag)),
                 body,
-                overHidden: flag === '-password' && separator !== 'next word' && !value.includes('$'),
+                overHidden: flag === '-password' && separator !== 'next word' && (literal || !value.includes('$')),
               });
             }
           }
@@ -977,27 +983,29 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
     // Assert
     // CFG-LEAK-R (ii): a `?` glues the next key to the pointer, so the first value is cut whole; and each `P'x` glues a
     // quote and text to its pointer, so each of those is cut. `spaced` holds no glue and is shown exactly as before.
-    // `defaults` is shown as before by the cutter, but it is an F5 line (a `${A:-` pointer never closed under a credential
-    // key): the write rule refuses it, so the NET (CFG-LEAK ii) withholds it in words rather than show raw text.
+    // `defaults` is a default LITERAL (`${A:-API_KEY=…`): the shell uses that text when A is unset, so it is a value written
+    // here, not a pointer, and the cutter cuts it whole from the first key's value on (a default is no reference unless it is one).
     should(actual.map(word => word.value)).deepEqual([
       `--set=password=${HIDDEN}`,
       spaced,
-      defaults, // at 20 pointers the write rule does not refuse it; the withheld words at 20,000 are tests/perf/daemon/resolved-view.test.ts
+      `--set=API_KEY=${HIDDEN}`,
       `--set=${`api_key=${HIDDEN} `.repeat(20)}`,
     ]);
   });
 });
 
 describe('resolvedEntries — a long run of unclosed default references', () => {
-  it('should withhold in words a default-reference run past the scan window of the write rule (340 repeats)', () => {
+  it('should cut a default-literal run whole, past the scan window of the write rule too (340 repeats)', () => {
     // Arrange — 20 repeats stay under the window (the control above); 340 is 4427 characters, past SCAN_WINDOW (4096).
+    // A `${A:-…` default is a value, so the cutter hides it and no longer leaves the line to the NET (which withholds a
+    // line W refuses and the cutter shows: the F5 shapes of `kernel-cutter-f1-f7-pin.test.ts`).
     const defaults = `--set=${'API_KEY=${A:-'.repeat(340)}}`;
 
     // Act
     const actual = shownFlags([defaults]);
 
     // Assert
-    should(actual.map(word => word.value)).deepEqual([WITHHELD_WORDS_TEXT]);
+    should(actual.map(word => word.value)).deepEqual([`--set=API_KEY=${HIDDEN}`]);
   });
 });
 
@@ -1062,7 +1070,7 @@ describe('resolvedEntries — the #40 rule after review r3 (N1, L1)', () => {
     // Arrange
     const words = [
       `API_KEY=$LONG_POINTER_NAME ${P}`,
-      `API_KEY='$LONG_POINTER_NAME' ${P}`,
+      `API_KEY="$LONG_POINTER_NAME" ${P}`,
       `API_KEY="\${LONG_POINTER_NAME}" ${P}`,
       `API_KEY=short== ${P}`,
       `Authorization: Basic ${P}`,
