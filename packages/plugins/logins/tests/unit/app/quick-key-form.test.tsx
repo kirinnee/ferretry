@@ -146,7 +146,13 @@ describe('the key-only form', () => {
     // The key is typed into a hidden field, and it is the only field there is.
     expect(field.type).toBe('password');
     expect(c.querySelectorAll('input')).toHaveLength(1);
+    // Uncontrolled and not autofilled: the browser is told this is a new secret, and React mirrors nothing into the DOM.
+    expect(field.autocomplete).toBe('new-password');
     await type(view, KEY);
+    expect(field.value).toBe(KEY);
+    expect(field.getAttribute('value')).toBeNull();
+    expect(c.innerHTML).not.toContain(KEY);
+    expect(c.outerHTML).not.toContain(KEY);
     await press(c.querySelector('[data-change-submit]'), 'Add');
     await until(() => added.length > 0, 'the login to be added');
 
@@ -188,8 +194,12 @@ describe('the key-only form', () => {
       'ZAI_API_KEY is already in the secret store',
     );
     expect(calls.some(call => call.route === FILE || call.route === STAGE)).toBe(false);
-    // While it waits for the answer the key sits in the hidden field and nowhere else.
+    // While it waits for the answer the key sits in the hidden field and nowhere else: not in the markup, not in an attribute.
     expect(c.textContent).not.toContain(KEY);
+    expect(c.innerHTML).not.toContain(KEY);
+    expect(c.outerHTML).not.toContain(KEY);
+    const asked = must(c.querySelector<HTMLInputElement>('[data-quick-key-input]'), 'the key field');
+    expect(asked.getAttribute('value')).toBeNull();
 
     // Back changes nothing; replacing files the typed key and then adds the login.
     await press(c.querySelector('[data-quick-key-back]'), 'Back');
@@ -220,6 +230,7 @@ describe('the key-only form', () => {
     expect(JSON.stringify(calls)).not.toContain(KEY);
     expect(c.innerHTML).not.toContain(KEY);
     for (const input of Array.from(c.querySelectorAll('input'))) expect(input.value).toBe('');
+    for (const input of Array.from(c.querySelectorAll('input'))) expect(input.getAttribute('value') ?? '').toBe('');
     await view.unmount();
   });
 
@@ -272,6 +283,118 @@ describe('the key-only form', () => {
     await until(() => added.length > 0, 'the login to be added');
     expect(calls.filter(call => call.route === FILE)).toHaveLength(1);
     expect(c.innerHTML).not.toContain(KEY);
+    await view.unmount();
+  });
+});
+
+describe('one click files one key', () => {
+  /** A route that answers only when the test lets it. */
+  const gated = () => {
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      open = resolve;
+    });
+    return { gate, open: () => open() };
+  };
+
+  it('files the key and stages the login once when Add is clicked twice during the slow Vault read', async () => {
+    const calls: Call[] = [];
+    const added: string[] = [];
+    const { gate, open } = gated();
+    const client = scripted(
+      {
+        [LIST]: loginList(),
+        [GRANTS]: OPEN,
+        [HELD]: async () => {
+          await gate;
+          return NONE_HELD;
+        },
+        [FILE]: { name: 'ZAI_API_KEY' },
+        [STAGE]: staged,
+        [APPLY]: { outcome: 'applied' },
+      },
+      calls,
+    );
+    const view = await mountForm(client, added);
+    const c = view.container;
+    await type(view, KEY);
+    const add = must(c.querySelector<HTMLButtonElement>('[data-change-submit]'), 'Add');
+    await until(() => !add.disabled, 'Add to be enabled');
+    // Two clicks in the same tick, before any render could disable the button.
+    await interact(() => {
+      add.click();
+      add.click();
+    });
+    // The button shows it is working while the Vault is still being read.
+    await until(() => (c.querySelector('[data-change-submit]') as HTMLButtonElement).disabled, 'Add to disable');
+    await interact(() => {
+      (c.querySelector('[data-change-submit]') as HTMLButtonElement).click();
+    });
+    open();
+    await until(() => added.length > 0, 'the login to be added');
+    expect(calls.filter(call => call.route === HELD)).toHaveLength(1);
+    expect(calls.filter(call => call.route === FILE)).toHaveLength(1);
+    expect(calls.filter(call => call.route === STAGE)).toHaveLength(1);
+    expect(added).toEqual(['claude-zai-glm']);
+    await view.unmount();
+  });
+
+  it('stages the login once when Add is clicked twice on the retry after the key was filed', async () => {
+    const calls: Call[] = [];
+    const added: string[] = [];
+    let refuse = true;
+    const { gate, open } = gated();
+    const client = scripted(
+      {
+        [LIST]: async () => {
+          if (!refuse) await gate;
+          return loginList();
+        },
+        [GRANTS]: OPEN,
+        [HELD]: NONE_HELD,
+        [FILE]: { name: 'ZAI_API_KEY' },
+        [STAGE]: () => (refuse ? new Error('refused for now') : staged),
+        [APPLY]: { outcome: 'applied' },
+      },
+      calls,
+    );
+    const view = await mountForm(client, added);
+    const c = view.container;
+    await type(view, KEY);
+    await press(c.querySelector('[data-change-submit]'), 'Add');
+    await until(() => c.querySelector('[data-change-refusal]') !== null, 'the refusal');
+    expect(c.querySelector('[data-quick-key-filed]')).not.toBeNull();
+    refuse = false;
+    const retry = must(c.querySelector<HTMLButtonElement>('[data-change-submit]'), 'Add again');
+    await until(() => !retry.disabled, 'Add to be enabled');
+    await interact(() => {
+      retry.click();
+      retry.click();
+    });
+    open();
+    await until(() => added.length > 0, 'the login to be added');
+    expect(calls.filter(call => call.route === FILE)).toHaveLength(1);
+    // One refused stage, one good one: the two clicks made ONE retry.
+    expect(calls.filter(call => call.route === STAGE)).toHaveLength(2);
+    await view.unmount();
+  });
+
+  it('files the key once when Replace it with mine is clicked twice', async () => {
+    const calls: Call[] = [];
+    const added: string[] = [];
+    const view = await mountForm(routes(holding('ZAI_API_KEY'), calls), added);
+    const c = view.container;
+    await type(view, KEY);
+    await press(c.querySelector('[data-change-submit]'), 'Add');
+    await until(() => c.querySelector('[data-quick-key-replace]') !== null, 'the question');
+    const replace = must(c.querySelector<HTMLButtonElement>('[data-quick-key-replace]'), 'Replace');
+    await interact(() => {
+      replace.click();
+      replace.click();
+    });
+    await until(() => added.length > 0, 'the login to be added');
+    expect(calls.filter(call => call.route === FILE)).toHaveLength(1);
+    expect(calls.filter(call => call.route === STAGE)).toHaveLength(1);
     await view.unmount();
   });
 });
