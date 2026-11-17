@@ -4,6 +4,7 @@
  *
  *   packages/core/kernel/src/generated/plugins.ts   daemon halves in start order + contract hashes
  *   packages/core/kernel/src/generated/glossary.ts  every manifest's words
+ *   packages/core/kernel/src/generated/instructions.ts  the text of every manifest instruction, for the kernel snapshot
  *   packages/core/kernel/src/generated/client-binary.ts  the client binary name (`bin` key of packages/cli/package.json)
  *   packages/cli/src/generated/commands.ts          CLI halves + contract hashes
  *   packages/cli/src/generated/slim.ts              what `fy mcp serve` loads instead of the registry (tool door facts + serve half)
@@ -59,6 +60,7 @@ import {
 export const GENERATED = {
   plugins: 'packages/core/kernel/src/generated/plugins.ts',
   glossary: 'packages/core/kernel/src/generated/glossary.ts',
+  instructions: 'packages/core/kernel/src/generated/instructions.ts',
   clientBinary: 'packages/core/kernel/src/generated/client-binary.ts',
   commands: 'packages/cli/src/generated/commands.ts',
   slim: 'packages/cli/src/generated/slim.ts',
@@ -409,6 +411,39 @@ function glossary(model: Model): string {
       'export const glossary: readonly GlossaryEntry[] = [',
       words.map(word => JSON.stringify(word)),
       '];',
+    ),
+    '',
+  ].join('\n');
+}
+
+/**
+ * `instructions.ts`: the text of every `instructions/<file>.md` a started manifest declares, keyed `<plugin id>/<path>`, as
+ * text imports so `bun build --compile` bundles the words into `fyd`. The kernel snapshot reads them (`instructionText`);
+ * without this map no manifest instruction ever reaches a ferret.
+ */
+export function instructionTexts(model: Model): string {
+  const out = join(model.ws.root, GENERATED.instructions);
+  const declared = model.loaded.flatMap(s =>
+    (s.manifest.instructions ?? []).map(entry => ({
+      plugin: s.id,
+      path: entry.text,
+      file: join(model.ws.byId(s.id)?.dir ?? '', entry.text),
+    })),
+  );
+  const names = declared.map((_, index) => `instruction${index}`);
+  return [
+    HEADER,
+    // The ambient `*.md` module, so a project that reaches this file types the text imports without listing the declaration.
+    `/// <reference path="${importPath(out, join(model.ws.root, 'packages/core/kernel/host/md-text.d.ts'))}" />`,
+    ...declared.map(
+      (entry, index) => `import ${names[index]} from '${importPath(out, entry.file)}' with { type: 'text' };`,
+    ),
+    '',
+    '/** The text of each declared instruction file, keyed `<plugin id>/<path inside the package>`. */',
+    ...entryList(
+      'export const instructionTexts: Readonly<Record<string, string>> = {',
+      declared.map((entry, index) => `${JSON.stringify(`${entry.plugin}/${entry.path}`)}: ${names[index]}`),
+      '};',
     ),
     '',
   ].join('\n');
@@ -792,6 +827,7 @@ export function generateGlobal(model: Model): ReadonlyMap<string, string> {
       halfRegistry(model, GENERATED.plugins, 'daemon', 'DaemonImplementation', 'daemonImplementations'),
     ],
     [GENERATED.glossary, glossary(model)],
+    [GENERATED.instructions, instructionTexts(model)],
     [GENERATED.clientBinary, clientBinary(model)],
     [GENERATED.commands, commandsRegistry(model)],
     ...slimFiles(model),

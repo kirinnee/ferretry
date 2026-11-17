@@ -253,3 +253,19 @@ export function realAdapters(
 export function fileLogSink(append: (line: string) => void): LogSink {
   return record => append(`${JSON.stringify({ at: new Date().toISOString(), ...record })}\n`);
 }
+
+/**
+ * The words of every manifest instruction, as the compiled `fyd` carries them: the generated `instructions.ts` holds one
+ * bundled text import per declared `instructions/<file>.md` (`scripts/gen/registries.ts`), keyed `<plugin id>/<path>`. The
+ * kernel snapshot asks for them through `HostOptions.instructionText`; a plugin or path the map does not hold answers
+ * `undefined` and that instruction is left out, never guessed.
+ *
+ * The import path is a LITERAL for the same reason `fyd.ts` imports its registry that way: `bun build --compile` bundles only
+ * an import it can read.
+ */
+export async function bundledInstructionText(): Promise<(plugin: string, path: string) => string | undefined> {
+  const { instructionTexts } = (await import('../src/generated/instructions.ts')) as {
+    readonly instructionTexts: Readonly<Record<string, string>>;
+  };
+  return (plugin, path) => instructionTexts[`${plugin}/${path}`];
+}
