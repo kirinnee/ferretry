@@ -330,8 +330,10 @@ export interface Permissions {
   readonly whichOverrides?: readonly string[];
   /**
    * The shell variables this plugin's `fy` half may read through `CliContext.readEnvironment` (Logins: the variable
-   * names its provider presets declare, for `fy login add --from-env`), by exact name; `'*'` or a pattern matches no
-   * variable. `CliContext.env` is unchanged. Absent or empty: every read answers nothing, whatever the shell holds.
+   * names its provider presets declare, for `fy login add --from-env`), by exact name or as one family
+   * (`ZAI_*`: a prefix of at least two characters ending in an underscore, then `*`, which answers every set variable
+   * of that prefix when it is asked for by that same spelling); a bare `'*'`, any other pattern and every `FY_` name or
+   * family match no variable. `CliContext.env` is unchanged. Absent or empty: every read answers nothing, whatever the shell holds.
    */
   readonly cliEnvReads?: readonly string[];
   /**

@@ -30,14 +30,16 @@ export function builtInsText(values: BuiltIns): string {
 }
 
 /**
- * The variable names the presets declare, sorted, each once: the one list `permissions.cliEnvReads` is built from
- * (`contract/preset-env-names.ts`), so `fy login add --from-env` may read exactly these shell variables.
+ * The variable names the presets declare, then the `PREFIX_*` families their `detect.variables` name, sorted, each once:
+ * the one list `permissions.cliEnvReads` is built from (`contract/preset-env-names.ts`), so `fy login add --from-env`
+ * may read exactly these shell variables and these families (a provider the shell tells only through `ZAI_*`).
  */
 export function presetEnvNames(presets: BuiltIns['presets']): readonly string[] {
   const names = presets
     .flatMap(preset => [preset, ...Object.values(preset.halves)])
     .flatMap(from => Object.keys(from?.env ?? {}));
-  return [...new Set(names)].sort();
+  const families = presets.flatMap(preset => (preset.detect?.variables ?? []).filter(name => name.endsWith('_*')));
+  return [...new Set([...names, ...families])].sort();
 }
 
 /** Whether `file` holds `expected` (values, not formatting); an unreadable or unparseable file does not. */

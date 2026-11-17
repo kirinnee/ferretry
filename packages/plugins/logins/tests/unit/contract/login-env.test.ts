@@ -157,7 +157,8 @@ describe('a login environment', () => {
   });
 
   it('should still accept every name a preset sets', () => {
-    for (const name of PRESET_ENV_NAMES) {
+    // A `PREFIX_*` family is a detect clue the shell reads by, never a name a preset writes into a login's env.
+    for (const name of PRESET_ENV_NAMES.filter(entry => !entry.endsWith('_*'))) {
       should(LoginHalfSchema.safeParse({ env: { [name]: 'x' } }).success).be.true();
     }
   });

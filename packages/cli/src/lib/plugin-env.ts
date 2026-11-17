@@ -32,11 +32,23 @@ const READABLE_NAME = /^[A-Z_][A-Z0-9_]*$/u;
 const isReadable = (name: string): boolean => READABLE_NAME.test(name) && !name.startsWith('FY_');
 
 /**
+ * A family a manifest may declare and a half may ask for: one POSIX prefix, an underscore, then `*` (`ZAI_*`), at
+ * least two letters before the underscore, and never one of Ferretry's own (`FY_*`). It names the variables whose name
+ * starts with that prefix and nothing else: a bare `*`, a prefix with no underscore, a pattern in the middle and a
+ * family under `FY_` all read nothing.
+ */
+const FAMILY_NAME = /^[A-Z][A-Z0-9]+_(?:[A-Z0-9]+_)*\*$/u;
+const isFamily = (name: string): boolean => FAMILY_NAME.test(name) && !name.startsWith('FY_');
+
+/**
  * What `CliContext.readEnvironment(names)` answers: the names asked for that the plugin's manifest DECLARED
- * (`permissions.cliEnvReads`, exact names) and the shell has set. A name outside the declaration reads nothing, so a
- * half cannot widen what it sees by asking; nothing declared means nothing read. WHATEVER A MANIFEST DECLARES, a name
- * that is not a POSIX variable name or that starts with `FY_` reads nothing: Ferretry's own credentials
- * (`FY_TOKEN`, `FY_SESSION_TOKEN`, `FY_SESSION_BOARD_CAPABILITY`) never reach a half through this door.
+ * (`permissions.cliEnvReads`) and the shell has set. A name outside the declaration reads nothing, so a half cannot
+ * widen what it sees by asking; nothing declared means nothing read. A declared name is exact, or a family
+ * (`ZAI_*`: see {@link FAMILY_NAME}): asking for a declared family answers every set variable of that prefix, under its
+ * own name, and asking for one the manifest did not declare answers nothing. WHATEVER A MANIFEST DECLARES, a name that
+ * is not a POSIX variable name or that starts with `FY_` reads nothing, and a family never reaches a `FY_` variable:
+ * Ferretry's own credentials (`FY_TOKEN`, `FY_SESSION_TOKEN`, `FY_SESSION_BOARD_CAPABILITY`) never reach a half
+ * through this door.
  */
 export function declaredEnvironment(
   environment: Environment,
@@ -45,8 +57,16 @@ export function declaredEnvironment(
 ): CliEnvironment {
   const allowed: Record<string, string> = {};
   for (const name of names) {
+    if (declared?.includes(name) !== true) continue;
+    if (isFamily(name)) {
+      const prefix = name.slice(0, -1);
+      for (const [variable, value] of Object.entries(environment)) {
+        if (variable.startsWith(prefix) && isReadable(variable) && value !== undefined) allowed[variable] = value;
+      }
+      continue;
+    }
     const value = environment[name];
-    if (isReadable(name) && declared?.includes(name) === true && value !== undefined) allowed[name] = value;
+    if (isReadable(name) && value !== undefined) allowed[name] = value;
   }
   return Object.freeze(allowed);
 }
