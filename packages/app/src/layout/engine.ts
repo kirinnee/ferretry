@@ -88,7 +88,12 @@ export interface FramePlan {
     readonly entries: readonly NavEntry[];
   };
   readonly top: readonly string[];
-  readonly side: { readonly show: ResolvedLayout['side']['show']; readonly holds: SideHolds };
+  readonly side: {
+    readonly show: ResolvedLayout['side']['show'];
+    readonly holds: SideHolds;
+    /** The edge the column sits on; a layout that names none keeps it on the right. */
+    readonly at: 'left' | 'right';
+  };
   readonly density: ResolvedLayout['density'];
   /** The panels a slot shows, in order. */
   panels(slot: string): readonly PanelRef[];
@@ -131,7 +136,7 @@ export function planFrame(layout: ResolvedLayout, views: Views): FramePlan {
     layoutId: layout.id,
     nav: { side: layout.nav.side, style: layout.nav.style, entries },
     top: layout.top,
-    side: { show: layout.side.show, holds: side },
+    side: { show: layout.side.show, holds: side, at: layout.side.at ?? 'right' },
     density: layout.density,
     panels: slot => chosen.get(slot) ?? views.panels.get(slot) ?? [],
   };

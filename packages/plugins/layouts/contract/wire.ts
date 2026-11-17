@@ -37,6 +37,8 @@ const SideSchema = z.strictObject({
   show: z.enum(['never', 'wide-only', 'always']),
   /** What it holds: `none`, a screen, or `panels` (the `side` slot's panels). */
   holds: ViewNameSchema,
+  /** Which edge of the page it sits on. Absent means the right, so a layout saved before this field draws as it did. */
+  at: z.enum(['left', 'right']).optional(),
 });
 
 const DensitySchema = z.enum(['compact', 'comfortable']);

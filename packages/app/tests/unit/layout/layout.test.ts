@@ -70,6 +70,37 @@ const surfaces = [
 ];
 const views = viewsOf(surfaces);
 
+describe('U-L: the default layout puts the ferret list on the left, and a saved layout is kept as it was', () => {
+  const planOf = (layout: typeof DEFAULT_LAYOUT) => planFrame(resolveLayout(layout, 'wide'), viewsOf(surfaces));
+
+  test('the built-in default is a top nav row with the ferret column on the left', () => {
+    const plan = planOf(DEFAULT_LAYOUT);
+    expect(plan.nav.side).toBe('top');
+    expect(plan.side.at).toBe('left');
+    expect(plan.side.holds).toMatchObject({ kind: 'screen', screen: { id: 'ferrets' } });
+  });
+
+  test('a layout saved before the field names no edge, parses unchanged and keeps the column on the right', () => {
+    const saved = LayoutSchema.parse({
+      id: 'mine',
+      nav: { side: 'left', style: 'list', items: ['ferrets', 'agenda'] },
+      side: { show: 'wide-only', holds: 'ferrets' },
+    });
+    expect(saved.side).toEqual({ show: 'wide-only', holds: 'ferrets' });
+    expect(planOf(saved).side.at).toBe('right');
+    expect(planOf(saved).nav.side).toBe('left');
+  });
+
+  test('the phone keeps the bottom bar, and a device override that names an edge wins', () => {
+    expect(resolveLayout(DEFAULT_LAYOUT, 'phone').nav.side).toBe('bottom');
+    const moved = applyOverrides(DEFAULT_LAYOUT, { side: { at: 'right' } });
+    expect(moved === undefined ? undefined : planOf(moved).side.at).toBe('right');
+    const set = setDeviceOverride(DEFAULT_LAYOUT, {}, 'side.at', 'right');
+    expect(set).toEqual({ ok: true, overrides: { side: { at: 'right' } } });
+    expect(setDeviceOverride(DEFAULT_LAYOUT, {}, 'side.at', 'middle').ok).toBe(false);
+  });
+});
+
 describe('slots', () => {
   test('the frame slot list matches the leaf', () => {
     expect(FRAME_SLOTS_COMPLETE).toBe(true);
@@ -106,9 +137,9 @@ describe('the layout item', () => {
   });
 
   test('phone overrides apply only on a phone', () => {
-    expect(resolveLayout(DEFAULT_LAYOUT, 'wide').nav.side).toBe('left');
+    expect(resolveLayout(DEFAULT_LAYOUT, 'wide').nav.side).toBe('top');
     const phone = resolveLayout(DEFAULT_LAYOUT, 'phone');
-    expect(phone.nav).toEqual({ side: 'bottom', style: 'list', items: ['ferrets', 'agenda', 'board'] });
+    expect(phone.nav).toEqual({ side: 'bottom', style: 'bar', items: ['ferrets', 'agenda', 'board'] });
     // The ferret list is the first bottom-nav item on a phone (S-0231: no Ferrets drawer).
     const bottom = planFrame(phone, views).nav.entries[0];
     expect(bottom?.kind === 'screen' ? `${bottom.screen.plugin}.${bottom.screen.id}` : bottom?.item).toBe(

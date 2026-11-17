@@ -262,6 +262,8 @@ const connectionsManifest = manifestOf('relaynote', {
   ui: { screens: [{ id: 'note', path: 'note' }] },
 });
 function RelayFallbackWatcher(): ReactNode {
+  // `?relay=0`: the shell shots compare pages, not the status strip, so they leave the line out.
+  if (params.get('relay') === '0') return null;
   return (
     <p role="status" className="fy-shell-line fy-shell-line--warn" data-relay-fallback="">
       {RELAY_FALLBACK_LINE}

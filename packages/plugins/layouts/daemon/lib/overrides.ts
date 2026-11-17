@@ -22,11 +22,13 @@ const SCALAR_PATHS: ReadonlySet<string> = new Set([
   'nav.style',
   'side.show',
   'side.holds',
+  'side.at',
   'density',
   'phone.nav.side',
   'phone.nav.style',
   'phone.side.show',
   'phone.side.holds',
+  'phone.side.at',
   'phone.density',
 ]);
 

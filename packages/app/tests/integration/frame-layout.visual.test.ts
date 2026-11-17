@@ -476,3 +476,57 @@ describe('the ferret page on a phone (390)', () => {
     }
   });
 });
+
+// U-L: the default layout is v4's shell — the ferret list is a column on the LEFT of every page, the nav a short row of
+// destinations (a phone keeps the bottom bar), and no second "Needs you" list under the nav. The same fake pages are what
+// `v4-vs-v5` side-by-side shots are taken from (`FY_LAYOUT_SHOTS_DIR`, named `v5-<viewport>-<mode>-<page>.png`).
+describe('the default shell is v4’s: ferret list on the left, a compact nav', () => {
+  const SHELL_VIEWPORTS = [
+    { name: 'desktop', width: 1_440, height: 900, phone: false },
+    { name: 'phone', width: 390, height: 844, phone: true },
+  ] as const;
+  const PAGES = [
+    { name: 'chat', path: '/d/ws/ferrets/zoe', ready: '[data-chat]' },
+    { name: 'board', path: '/d/ws/board', ready: '.fy-main' },
+  ] as const;
+
+  for (const viewport of SHELL_VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      for (const page of PAGES)
+        it(`${viewport.name}, ${mode}, ${page.name}: ${viewport.phone ? 'bottom bar, no side column' : 'list left of the page, one nav row'}, nothing overflows`, async () => {
+          const { tab, close } = await open(viewport, page.path, page.ready, '&relay=0', `studio-${mode}`);
+          try {
+            await shotOf(tab, `v5-${viewport.name}-${mode}-${page.name}`);
+            const geometry = await tab.evaluate(() => {
+              const box = (query: string) => document.querySelector(query)?.getBoundingClientRect();
+              const nav = document.querySelector('nav.fy-nav') as HTMLElement | null;
+              return {
+                navClass: nav?.className ?? '',
+                navHeight: nav?.getBoundingClientRect().height ?? -1,
+                navOverflows: nav === null ? true : nav.scrollWidth > nav.clientWidth + 1,
+                side: box('.fy-side'),
+                main: box('.fy-main'),
+                navPanels: document.querySelectorAll('[data-device-slot="nav"]').length,
+                pageOverflows: document.documentElement.scrollWidth > window.innerWidth + 1,
+              };
+            });
+            expect(geometry.navPanels, 'no second "Needs you" list in the nav').toBe(0);
+            expect(geometry.navOverflows, 'the nav does not overflow').toBe(false);
+            expect(geometry.pageOverflows, 'the page does not scroll sideways').toBe(false);
+            if (viewport.phone) {
+              expect(geometry.navClass).toContain('fy-nav--bottom');
+              expect(geometry.side, 'a phone draws no side column').toBeUndefined();
+            } else {
+              expect(geometry.navClass).toContain('fy-nav--top');
+              expect(geometry.navHeight, 'one short row').toBeLessThanOrEqual(52);
+              expect(geometry.side, 'the ferret list is drawn').not.toBeUndefined();
+              expect(geometry.side?.right ?? 9_999, 'the list is left of the page').toBeLessThanOrEqual(
+                geometry.main?.left ?? 0,
+              );
+              expect(geometry.side?.width ?? 0, 'a column, not half the row').toBeLessThanOrEqual(320);
+            }
+          } finally {
+            await close();
+          }
+        });
+});
