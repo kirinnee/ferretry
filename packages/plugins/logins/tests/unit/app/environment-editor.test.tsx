@@ -214,3 +214,82 @@ describe('editing a login’s environment', () => {
     await t.view.unmount();
   });
 });
+
+describe('what is typed over a secret or into a new row', () => {
+  const REPLACEMENT = `\${secret:FAKE_REPLACEMENT_REF}`;
+  const NEW_VALUE = 'https://fake-gateway.example.test/v1';
+
+  it('is masked and never put in the markup while typed, yet saving sends it', async () => {
+    const t = await setup();
+    await click(t.c.querySelector('[data-login-env-edit]'), 'Edit variables');
+    const secret = t.field('ANTHROPIC_AUTH_TOKEN value');
+    expect(secret.type).toBe('password');
+    await typeInto(secret, REPLACEMENT);
+    await click(t.c.querySelector('[data-env-add]'), 'Add a variable');
+    await typeInto(t.field('New variable name'), 'EXTRA_SETTING');
+    const fresh = t.field('EXTRA_SETTING value');
+    expect(fresh.type).toBe('password');
+    await typeInto(fresh, NEW_VALUE);
+    expect(secret.value).toBe(REPLACEMENT);
+    expect(secret.getAttribute('value')).toBeNull();
+    expect(fresh.getAttribute('value')).toBeNull();
+    expect(t.c.innerHTML).not.toContain(REPLACEMENT);
+    expect(t.c.innerHTML).not.toContain(NEW_VALUE);
+    // Typing is what turns Save on, though the row's own state holds no value.
+    expect((t.c.querySelector('[data-change-submit]') as HTMLButtonElement).disabled).toBe(false);
+    await click(t.c.querySelector('[data-change-submit]'), 'Save variables');
+    await until(() => t.stages().length === 1, 'the stage');
+    expect(t.stages()[0]?.body).toEqual({
+      kind: 'login.env',
+      id: 'zai',
+      env: {
+        ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+        ANTHROPIC_AUTH_TOKEN: REPLACEMENT,
+        ODD_TOKEN: { keep: true },
+        EXTRA_SETTING: NEW_VALUE,
+      },
+    });
+    await t.view.unmount();
+  });
+
+  it('turns Save on for a typed replacement alone, and off again once it is emptied', async () => {
+    const t = await setup();
+    await click(t.c.querySelector('[data-login-env-edit]'), 'Edit variables');
+    const submit = t.c.querySelector('[data-change-submit]') as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    await typeInto(t.field('ODD_TOKEN value'), REPLACEMENT);
+    expect(submit.disabled).toBe(false);
+    await typeInto(t.field('ODD_TOKEN value'), '');
+    expect(submit.disabled).toBe(true);
+    await t.view.unmount();
+  });
+
+  it('drops a replacement when its row is removed, and sends nothing for it', async () => {
+    const t = await setup();
+    await click(t.c.querySelector('[data-login-env-edit]'), 'Edit variables');
+    await typeInto(t.field('ANTHROPIC_AUTH_TOKEN value'), REPLACEMENT);
+    await click(t.c.querySelector('[data-env-remove="ANTHROPIC_AUTH_TOKEN"]'), 'Remove');
+    await click(t.c.querySelector('[data-change-submit]'), 'Save variables');
+    await until(() => t.stages().length === 1, 'the stage');
+    expect(JSON.stringify(t.stages()[0]?.body)).not.toContain(REPLACEMENT);
+    expect(t.stages()[0]?.body).toMatchObject({ env: { ODD_TOKEN: { keep: true } } });
+    expect(t.stages()[0]?.body).toHaveProperty('env');
+    expect(JSON.stringify(t.stages()[0]?.body)).not.toContain('ANTHROPIC_AUTH_TOKEN');
+    await t.view.unmount();
+  });
+
+  it('is emptied once the change is applied', async () => {
+    const t = await setup({
+      [APPLY]: { outcome: 'held', sentences: ['ANTHROPIC_AUTH_TOKEN now points somewhere new'] },
+    });
+    await click(t.c.querySelector('[data-login-env-edit]'), 'Edit variables');
+    const secret = t.field('ANTHROPIC_AUTH_TOKEN value');
+    await typeInto(secret, REPLACEMENT);
+    await click(t.c.querySelector('[data-change-submit]'), 'Save variables');
+    await until(() => t.reloads() === 1, 'the reload');
+    // A held edit keeps the editor open, and the typed value is already gone from it.
+    expect(t.c.querySelector('[data-login-env-editor]')).not.toBeNull();
+    expect(t.field('ANTHROPIC_AUTH_TOKEN value').value).toBe('');
+    await t.view.unmount();
+  });
+});

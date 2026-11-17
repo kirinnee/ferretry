@@ -28,7 +28,7 @@ import {
   readPaste,
 } from '../lib/paste-model.ts';
 import { heldSecretNames, saveSecret } from '../lib/secrets-api.ts';
-import { Button } from '../ui.ts';
+import { Button, SecretTextarea, useSecretTextarea } from '../ui.ts';
 
 export interface PasteVariablesProps {
   readonly client: LoginsClient;
@@ -41,7 +41,8 @@ export interface PasteVariablesProps {
 
 export function PasteVariables({ client, presets, onBack, onContinue }: PasteVariablesProps) {
   const ids = useId();
-  const [text, setText] = useState('');
+  /** The pasted block lives only in the textarea's own value: read when Read is pressed, never held in state or markup. */
+  const paste = useSecretTextarea(typed => typed.trim().length);
   const [reading, setReading] = useState<PasteReading | null>(null);
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -70,13 +71,13 @@ export function PasteVariables({ client, presets, onBack, onContinue }: PasteVar
 
   /** Reads the paste, empties the box, and asks the Vault which pasted keys it already holds (names only). */
   const read = (): void => {
-    const next = readPaste(presets, text);
+    const next = readPaste(presets, paste.read());
     const to = pasteTarget(presets, next.detection);
     const names = to === undefined ? [] : Object.keys(pastedSecrets(to, next.values));
     latest.current += 1;
     const turn = latest.current;
     setReading(next);
-    setText('');
+    paste.clear();
     setReplacing([]);
     setRefusal(null);
     if (names.length === 0) {
@@ -118,17 +119,12 @@ export function PasteVariables({ client, presets, onBack, onContinue }: PasteVar
         <label htmlFor={`${ids}-paste`} className="text-ui font-semibold text-fg">
           Paste your variables
         </label>
-        <textarea
+        <SecretTextarea
+          field={paste}
           id={`${ids}-paste`}
           className="kt-input min-h-32 min-w-0 font-mono"
-          autoComplete="off"
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
           placeholder={'export ANTHROPIC_BASE_URL=https://…\nexport ANTHROPIC_AUTH_TOKEN=…'}
-          value={text}
           data-paste-input=""
-          onChange={event => setText(event.target.value)}
         />
         <span className="text-meta leading-base text-muted">
           NAME=value lines, YAML, or a Codex [model_providers] table. Read here and cleared; a new key goes straight to
@@ -137,7 +133,7 @@ export function PasteVariables({ client, presets, onBack, onContinue }: PasteVar
         </span>
       </div>
       <div>
-        <Button type="button" data-paste-read="" disabled={text.trim() === ''} onClick={read}>
+        <Button type="button" data-paste-read="" disabled={!paste.filled} onClick={read}>
           Read
         </Button>
       </div>

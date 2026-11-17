@@ -32,9 +32,9 @@
 
 import type { CodexLoginFlow, HarnessLoginLastCode } from '../../contract/index.ts';
 import { CheckCircle2, KeyRound, Link2, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
+import type { FormEvent } from 'react';
 import { cn } from '../ui.ts';
-import { Button } from '../ui.ts';
+import { Button, SecretTextarea, useSecretTextarea } from '../ui.ts';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../ui.ts';
 import { ResumedNote, StartOverButton } from './sign-in-restart.tsx';
 import type { LoginPanelWording } from '../lib/harness-login-model.ts';
@@ -119,15 +119,16 @@ export function CodexLoginPanel({
   wording,
   className,
 }: CodexLoginPanelProps) {
-  const [address, setAddress] = useState('');
+  /** The pasted address lives only in the textarea's own value: read on submit, never held in state or markup. */
+  const address = useSecretTextarea(typed => typed.trim().length);
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
-    if (address.trim() === '' || busy) return;
+    if (!address.filled || busy) return;
     // Cleared before the request settles: the address carries an authorization code, which must not sit
     // in the rendered tree, a retry affordance, or a screenshot.
-    const submitted = address;
-    setAddress('');
+    const submitted = address.read();
+    address.clear();
     onSubmitAddress(submitted);
   };
 
@@ -264,22 +265,16 @@ export function CodexLoginPanel({
               <label htmlFor={`codex-login-address-${loginId}`} className="block text-ui font-semibold text-fg">
                 3 · Paste that address here
               </label>
-              <textarea
+              <SecretTextarea
+                field={address}
                 id={`codex-login-address-${loginId}`}
-                name="codex-login-address"
                 className="kt-input min-h-24 w-full resize-y font-mono text-meta"
-                value={address}
-                onChange={event => setAddress(event.target.value)}
                 placeholder="http://localhost:1455/auth/callback?code=…"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
                 disabled={busy}
                 required
               />
               <div className="flex flex-wrap items-center gap-3">
-                <Button type="submit" variant="primary" disabled={busy || address.trim() === ''}>
+                <Button type="submit" variant="primary" disabled={busy || !address.filled}>
                   <ShieldCheck size={16} aria-hidden="true" />
                   {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
                 </Button>

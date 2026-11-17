@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { type ReactElement, useState } from 'react';
-import { SecretInput, useSecretField } from '../../../src/ui/secret-field.tsx';
+import { SecretInput, SecretTextarea, useSecretField, useSecretTextarea } from '../../../src/ui/secret-field.tsx';
 import { interact, mount, must } from '../../support/dom.ts';
 
 /** A made-up value: no real credential is ever typed in a test. */
@@ -183,6 +183,142 @@ describe('useSecretField / SecretInput', () => {
     try {
       await typeInto(must(mounted.container.querySelector<HTMLInputElement>('input'), 'the field'), FAKE);
       expect(seen).toEqual([FAKE.length]);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+});
+
+const typeIntoTextarea = async (area: HTMLTextAreaElement, value: string): Promise<void> => {
+  await interact(() => {
+    const setter = must(Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set, 'a value setter');
+    setter.call(area, value);
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+
+/** A made-up pasted block: no real credential is ever typed in a test. */
+const BLOCK = 'export FAKE_NAME=fake-secret-value-0123456789\nexport OTHER=another-fake-value';
+
+interface AreaProbe {
+  read?: () => string;
+  clear?: () => void;
+}
+
+function AreaForm({ probe, open = true }: { readonly probe: AreaProbe; readonly open?: boolean }): ReactElement {
+  const field = useSecretTextarea(typed => typed.trim().length);
+  probe.read = field.read;
+  probe.clear = field.clear;
+  return (
+    <div>
+      {open ? <SecretTextarea field={field} /> : null}
+      <output data-test-length="">{field.length}</output>
+      <output data-test-filled="">{String(field.filled)}</output>
+    </div>
+  );
+}
+
+describe('useSecretTextarea / SecretTextarea', () => {
+  it('never puts what was pasted into the markup (a controlled textarea would, as its text content)', async () => {
+    const probe: AreaProbe = {};
+    const mounted = await mount(<AreaForm probe={probe} />);
+    try {
+      const area = must(mounted.container.querySelector<HTMLTextAreaElement>('textarea'), 'the field');
+      expect(area.getAttribute('autocomplete')).toBe('off');
+      await typeIntoTextarea(area, BLOCK);
+      expect(area.value).toBe(BLOCK);
+      expect(area.textContent).toBe('');
+      expect(area.outerHTML).not.toContain('fake-secret-value');
+      expect(mounted.container.innerHTML).not.toContain('fake-secret-value');
+      expect(mounted.container.innerHTML).not.toContain('another-fake-value');
+      expect(length(mounted.container)).toBe(String(BLOCK.length));
+      expect(probe.read?.()).toBe(BLOCK);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('keeps the markup clean across a re-render caused by something else', async () => {
+    function Wrapper(): ReactElement {
+      const field = useSecretTextarea();
+      const [other, setOther] = useState('a');
+      return (
+        <div>
+          <SecretTextarea field={field} />
+          <button data-test-bump="" onClick={() => setOther(`${other}b`)} type="button">
+            {other}
+          </button>
+        </div>
+      );
+    }
+    const mounted = await mount(<Wrapper />);
+    try {
+      const area = must(mounted.container.querySelector<HTMLTextAreaElement>('textarea'), 'the field');
+      await typeIntoTextarea(area, BLOCK);
+      await interact(() =>
+        must(mounted.container.querySelector<HTMLButtonElement>('[data-test-bump]'), 'bump').click(),
+      );
+      expect(area.value).toBe(BLOCK);
+      expect(mounted.container.innerHTML).not.toContain('fake-secret-value');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('counts with its measure, and clear() empties the node itself', async () => {
+    const probe: AreaProbe = {};
+    const mounted = await mount(<AreaForm probe={probe} />);
+    try {
+      const area = must(mounted.container.querySelector<HTMLTextAreaElement>('textarea'), 'the field');
+      await typeIntoTextarea(area, '  abc  \n');
+      expect(length(mounted.container)).toBe('3');
+      await interact(() => probe.clear?.());
+      expect(area.value).toBe('');
+      expect(length(mounted.container)).toBe('0');
+      expect(probe.read?.()).toBe('');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('empties the node when the page is hidden, and when the field leaves the screen', async () => {
+    const probe: AreaProbe = {};
+    const mounted = await mount(<AreaForm probe={probe} />);
+    try {
+      const area = must(mounted.container.querySelector<HTMLTextAreaElement>('textarea'), 'the field');
+      await typeIntoTextarea(area, BLOCK);
+      await hide(true);
+      expect(area.value).toBe('');
+      expect(length(mounted.container)).toBe('0');
+      await hide(false);
+      await typeIntoTextarea(area, BLOCK);
+      await mounted.render(<AreaForm probe={probe} open={false} />);
+      expect(mounted.container.querySelector('textarea')).toBeNull();
+      expect(area.value).toBe('');
+      expect(probe.read?.()).toBe('');
+    } finally {
+      await hide(false);
+      await mounted.unmount();
+    }
+  });
+
+  it('tells onTyped the measured length only, for the input and the textarea alike', async () => {
+    const seen: number[] = [];
+    function Told(): ReactElement {
+      const input = useSecretField(typed => typed.trim().length);
+      const area = useSecretTextarea(typed => typed.trim().length);
+      return (
+        <div>
+          <SecretInput field={input} onTyped={count => seen.push(count)} />
+          <SecretTextarea field={area} onTyped={count => seen.push(count)} />
+        </div>
+      );
+    }
+    const mounted = await mount(<Told />);
+    try {
+      await typeInto(must(mounted.container.querySelector<HTMLInputElement>('input'), 'the input'), '  abc  ');
+      await typeIntoTextarea(must(mounted.container.querySelector<HTMLTextAreaElement>('textarea'), 'area'), ' de ');
+      expect(seen).toEqual([3, 2]);
     } finally {
       await mounted.unmount();
     }

@@ -476,3 +476,47 @@ describe('PairingScreen naming this device', () => {
     await screen.unmount();
   });
 });
+
+describe('PairingScreen pasted link', () => {
+  const FAKE_LINK =
+    'https://pwa.example.test/pair#v1;url=https%3A%2F%2Fdaemon.example.test;code=7F3K-Q2ND;fp=fy_daemon_ddddddddddddddddddddddddddddddddddddddddddd';
+
+  it('is never put in the markup while typed, and is masked and unnamed', async () => {
+    const screen = await screenWith({ scanHost: null });
+    await typeLink(screen.container, FAKE_LINK);
+    const input = must(
+      screen.container.querySelector('input[aria-label="Pairing link"]'),
+      'the paste field',
+    ) as HTMLInputElement;
+    expect(input.value).toBe(FAKE_LINK);
+    expect(input.type).toBe('password');
+    expect(input.hasAttribute('name')).toBe(false);
+    expect(input.getAttribute('value')).toBeNull();
+    expect(screen.container.innerHTML).not.toContain('7F3K-Q2ND');
+    // Typing is still what turns the button on.
+    expect(buttonNamed(screen.container, 'Use this link').disabled).toBe(false);
+    await screen.unmount();
+  });
+
+  it('still pairs with the typed link, and empties the field when it is used', async () => {
+    const seen: PairingSeed[] = [];
+    const screen = await screenWith({
+      scanHost: null,
+      onPair: async seed => {
+        seen.push(seed);
+      },
+    });
+    const input = must(
+      screen.container.querySelector('input[aria-label="Pairing link"]'),
+      'the paste field',
+    ) as HTMLInputElement;
+    await typeLink(screen.container, FAKE_LINK);
+    await submitForm(screen.container);
+    expect(input.value).toBe('');
+    expect(screen.container.innerHTML).not.toContain('7F3K-Q2ND');
+    await interact(() => buttonNamed(screen.container, 'Pair this device').click());
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.code).toBe('7F3K-Q2ND');
+    await screen.unmount();
+  });
+});

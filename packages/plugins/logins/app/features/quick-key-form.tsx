@@ -10,14 +10,14 @@
  * opens that full form for any preset.
  */
 
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import type { ProviderPresetView } from '../../contract/index.ts';
 import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { useLoginChanges } from '../lib/login-changes.ts';
 import { readLogins } from '../lib/logins-api.ts';
 import { type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
 import { heldSecretNames, saveSecret } from '../lib/secrets-api.ts';
-import { Button, ChangeApplyPanel } from '../ui.ts';
+import { Button, ChangeApplyPanel, SecretInput, useSecretField } from '../ui.ts';
 import { usableHarnesses } from './provider-grid.tsx';
 
 type PresetVariable = ProviderPresetView['variables'][number];
@@ -69,9 +69,8 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
   const harnesses = usableHarnesses(preset);
   const harness: HarnessKind = harnesses[0] ?? preset.harness;
   /** The key lives only in the field's own value: read from here on submit, never held in React state. */
-  const field = useRef<HTMLInputElement>(null);
-  /** Whether the field has anything in it — a boolean, so Add can disable without the key being in state. */
-  const [hasKey, setHasKey] = useState(false);
+  const field = useSecretField();
+  const inputId = useId();
   /** Set synchronously the moment a submit starts: a second click in the same tick finds it taken. */
   const inFlight = useRef(false);
   /** The Vault already holds the name: asked about before anything is written. */
@@ -101,12 +100,6 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
     if (result.kind === 'applied') onAdded(id);
   };
 
-  /** Empties the field itself (not a state copy of it). */
-  const clearField = (): void => {
-    if (field.current !== null) field.current.value = '';
-    setHasKey(false);
-  };
-
   /**
    * Runs one submit at a time. The guard is a ref, so it holds against a second click in the same tick, before any
    * render has disabled the button; `saving` then shows it. Every path that reads the Vault or writes to it goes
@@ -130,13 +123,13 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
     if (write) {
       changes.clear();
       try {
-        await saveSecret(client, name, field.current?.value ?? '');
+        await saveSecret(client, name, field.read());
       } catch (error) {
         changes.refuse(refusalSentence(error));
         return;
       }
     }
-    clearField();
+    field.clear();
     setFiled(true);
     await addLogin();
   };
@@ -146,7 +139,7 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
       await addLogin();
       return;
     }
-    if ((field.current?.value ?? '') === '') return;
+    if (field.read() === '') return;
     changes.clear();
     let held: ReadonlySet<string>;
     try {
@@ -171,19 +164,14 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
           {`\${secret:${name}}`}.
         </p>
       ) : (
-        <label className="flex flex-col gap-1 text-cell text-fg">
+        <label htmlFor={inputId} className="flex flex-col gap-1 text-cell text-fg">
           <span>{variable.description ?? `${preset.label} key`}</span>
-          <input
+          <SecretInput
+            field={field}
+            id={inputId}
             className="kt-input font-mono"
-            type="password"
-            autoComplete="new-password"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            ref={field}
             disabled={asking || saving}
             data-quick-key-input=""
-            onChange={event => setHasKey(event.target.value !== '')}
           />
           <span className="text-meta leading-base text-muted">
             Goes straight to the secret store as <span className="font-mono">{name}</span>; the login only holds its
@@ -221,7 +209,7 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
           busy={changes.busy || saving}
           busyLabel="Adding…"
           refusal={changes.refusal}
-          disabled={!filed && !hasKey}
+          disabled={!filed && !field.filled}
           submitLabel={`Add ${preset.label}`}
           onSubmit={() => void exclusive(submit)}
         >

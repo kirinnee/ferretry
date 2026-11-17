@@ -416,3 +416,52 @@ describe('the paste screen', () => {
     await view.unmount();
   });
 });
+
+describe('the paste box while it holds a pasted block', () => {
+  const BLOCK = 'export ANTHROPIC_BASE_URL=https://api.z.ai/api/paas/v4\nexport ZAI_API_KEY=SENTINEL-sk-typed-not-read';
+
+  it('never puts the pasted block into the markup before Read is pressed, yet still enables Read and reads it', async () => {
+    const view = await mount(
+      <PasteVariables
+        client={scripted({})}
+        presets={[ZAI, GATEWAY]}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+      />,
+    );
+    const c = view.container;
+    const box = must(c.querySelector('[data-paste-input]') as HTMLTextAreaElement | null, 'the box');
+    expect((c.querySelector('[data-paste-read]') as HTMLButtonElement).disabled).toBe(true);
+    await interact(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(box, BLOCK);
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(box.value).toBe(BLOCK);
+    expect(box.textContent).toBe('');
+    expect(c.innerHTML).not.toContain('SENTINEL-sk-typed-not-read');
+    expect((c.querySelector('[data-paste-read]') as HTMLButtonElement).disabled).toBe(false);
+    await interact(() => (c.querySelector('[data-paste-read]') as HTMLButtonElement).click());
+    expect(c.querySelector('[data-paste-result="zai-glm"]')).not.toBeNull();
+    expect(box.value).toBe('');
+    expect(c.innerHTML).not.toContain('SENTINEL-sk-typed-not-read');
+    await view.unmount();
+  });
+
+  it('keeps Read off for a box holding only spaces', async () => {
+    const view = await mount(
+      <PasteVariables
+        client={scripted({})}
+        presets={[ZAI, GATEWAY]}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+      />,
+    );
+    const box = must(view.container.querySelector('[data-paste-input]') as HTMLTextAreaElement | null, 'the box');
+    await interact(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(box, '  \n ');
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect((view.container.querySelector('[data-paste-read]') as HTMLButtonElement).disabled).toBe(true);
+    await view.unmount();
+  });
+});

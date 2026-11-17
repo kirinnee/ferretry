@@ -5,8 +5,10 @@
  * A device grant completes at the provider, so a device screen that offered somewhere to paste would be
  * asking for a value this harness has no way to receive. The link sign-in has exactly one field, for the
  * address the browser ends on, and it is cleared before the request settles.
+ * (That field is uncontrolled, so its tests need a real DOM: see codex-login-panel-address.test.tsx.)
  */
 import { afterEach, describe, expect, it } from 'bun:test';
+import '../support/dom.ts';
 import type { CodexLoginFlow } from '../../../contract/index.ts';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { CodexLoginPanel } from '../../../app/features/codex-login-panel.tsx';
@@ -207,7 +209,6 @@ describe('CodexLoginPanel with the wording of a login', () => {
 
 describe('CodexLoginPanel with a link', () => {
   const callbackFlow = codexFlow('awaiting-callback');
-  const ADDRESS = 'http://localhost:1455/auth/callback?code=code-TESTONLY&state=fixture';
 
   it('offers a link while a device code is showing, and asks for it on the button', () => {
     let switches = 0;
@@ -236,39 +237,6 @@ describe('CodexLoginPanel with a link', () => {
     });
 
     expect(texts(view)).toContain('This account doesn’t allow device codes');
-  });
-
-  it('hands the address over and clears it from the screen, never sending a blank one', () => {
-    const sent: string[] = [];
-    const view = mount({ flow: callbackFlow, linked: true, onSubmitAddress: address => sent.push(address) });
-    const form = view.root.findByType('form');
-
-    run(() => form.props.onSubmit({ preventDefault: () => undefined }));
-    run(() => view.root.findByType('textarea').props.onChange({ target: { value: ADDRESS } }));
-    run(() => form.props.onSubmit({ preventDefault: () => undefined }));
-
-    expect(sent).toEqual([ADDRESS]);
-    expect(view.root.findByType('textarea').props.value).toBe('');
-    expect(texts(view)).not.toContain('code-TESTONLY');
-  });
-
-  it('refuses to send while busy, and shows the finish label it was given', () => {
-    const sent: string[] = [];
-    const view = mount({
-      flow: callbackFlow,
-      linked: true,
-      wording: { ...WORDING, finishLabel: 'Finish and launch' },
-      onSubmitAddress: address => sent.push(address),
-    });
-    expect(texts(view)).toContain('Finish and launch');
-    run(() => view.root.findByType('textarea').props.onChange({ target: { value: ADDRESS } }));
-    run(() =>
-      mounted?.update(element({ flow: callbackFlow, linked: true, busy: true, onSubmitAddress: a => sent.push(a) })),
-    );
-    run(() => view.root.findByType('form').props.onSubmit({ preventDefault: () => undefined }));
-
-    expect(sent).toEqual([]);
-    expect(texts(view)).toContain('Sending…');
   });
 
   it('says Codex is finishing once the address is delivered, and can still be cancelled', () => {
