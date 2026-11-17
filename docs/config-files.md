@@ -996,7 +996,7 @@ the file.
 - A reviewed change in the app is made against the configuration IN EFFECT. If `machine.yaml` holds a
   loosening that is waiting, a change saved from the app rewrites that file from the version in effect,
   which drops the waiting edit — confirm or revert it first.
-- There is no back-compat: a `fleet/config.yaml` is refused by sentence ([account-model.md](account-model.md)).
+- There is no back-compat: a `fleet/config.yaml` is ignored, never read, converted or refused ([account-model.md](account-model.md)).
 - Live changes ([above](#live-changes)) cover the screens that show configuration. The session page's
   "This folder" rail reads its MCP sign-ins when it opens, not when one changes elsewhere.
 - A login's status that moves on its own — a token refreshed or expired by the harness, with no route

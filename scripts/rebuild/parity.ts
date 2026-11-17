@@ -299,6 +299,9 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
   if (kind === 'R' && /legacy-tasks/.test(file)) return 'removed by design (§9.1, §9.2: per-ferret tasks/old readers)';
   if (kind === 'F' && (/\/cgroups\//.test(what) || /\/cgroups\/legacy-documents/.test(file)))
     return 'removed by design (§9.2: old cgroups directory)';
+  // Owner ruling (lead, 2026-11-17): v4 refused a stray fleet/config.yaml by sentence; 5.0 ignores it, with no compat code (F-0423).
+  if (kind === 'F' && what === '{locations.fleetDirectory}/config.yaml')
+    return 'removed by design (owner ruling 2026-11-17: 5.0 ignores a stray fleet/config.yaml; v4 refused it by sentence, no compat deadweight)';
   if (kind === 'F' && /fleet\/config\.yaml|account\/document\.ts/.test(what + file))
     return 'removed by design (§9.2: fleet/config.yaml)';
   return undefined;
