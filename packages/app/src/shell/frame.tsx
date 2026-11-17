@@ -57,6 +57,12 @@ function navHref(
 
 function Nav({ daemon }: { readonly daemon: string | undefined }) {
   const { plan, routes } = useShell();
+  const { route } = useRouter();
+  // The entry whose page is on screen: a plugin's entry for any screen of that plugin (the ferret page is Ferrets'), Settings for either settings page.
+  const onScreen = (entry: NavEntry): boolean =>
+    entry.kind === 'screen'
+      ? route.kind === 'screen' && route.screen.plugin === entry.screen.plugin
+      : entry.item === 'settings' && (route.kind === 'device-settings' || route.kind === 'daemon-settings');
   const href = (entry: NavEntry): string | undefined => {
     if (entry.kind !== 'screen') return undefined;
     const { screen } = entry;
@@ -89,7 +95,7 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
             {badge}
           </span>
         ) : (
-          <Link key={key} to={to} className="fy-nav__item">
+          <Link key={key} to={to} className="fy-nav__item" current={onScreen(entry)}>
             {label}
             {badge}
           </Link>

@@ -623,6 +623,18 @@ describe('the side column', () => {
     expect(app.view.container.querySelector('.fy-nav--top')).not.toBeNull();
   });
 
+  test('U-L: the nav entry whose page is on screen is marked as the current page', async () => {
+    const app = await bootApp({
+      surfaces: [inbox],
+      machines: ['d1'],
+      path: '/d/d1/inbox',
+      storage: deviceLayout({ items: ['inbox', 'settings'] }),
+    });
+    view = app.view;
+    const current = [...app.view.container.querySelectorAll('.fy-nav__item[aria-current="page"]')];
+    expect(current.map(node => node.textContent)).toEqual(['Inbox']);
+  });
+
   test('U-L: a layout that asks for the right edge gets the side column after the page', async () => {
     const storage = memoryStore();
     writeRecord(storage, APP_STORAGE.layout, {

@@ -102,6 +102,19 @@
   color: inherit;
   border-radius: var(--radius-sm);
 }
+/* Where you are: the entry whose page is on screen reads stronger, with an accent line under it on a top row and beside it in a column. */
+.fy-nav__item[aria-current='page'] {
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.fy-nav--left .fy-nav__item[aria-current='page'],
+.fy-nav--right .fy-nav__item[aria-current='page'] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.fy-nav--bottom .fy-nav__item[aria-current='page'] {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
 .fy-nav__item--off {
   color: var(--faint);
 }
