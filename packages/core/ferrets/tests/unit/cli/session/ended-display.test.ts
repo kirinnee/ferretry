@@ -40,6 +40,12 @@ describe('a stopped ferret says why it ended', () => {
       expect(renderFerret(view)).toHaveLength(3);
   });
 
+  test('status: a crashed terminal server says so', () => {
+    expect(renderFerret(sessionView({ state: 'stopped', cause: { kind: 'tmux_crashed' } })).at(-1)).toBe(
+      '  ended: its terminal server crashed',
+    );
+  });
+
   test('ps: the STATE cell carries the reason in a few words', () => {
     const rows = renderSessionTable(
       [
@@ -50,5 +56,20 @@ describe('a stopped ferret says why it ended', () => {
     );
     expect(rows[1]).toContain('stopped (signal 9)');
     expect(rows[2]).not.toContain('(');
+  });
+
+  test('ps: every end nobody chose is a few words in the STATE cell, and a stop is just stopped', () => {
+    const causes = [
+      [{ kind: 'agent_crashed', exitCode: 3 }, 'stopped (exit 3)'],
+      [{ kind: 'clean_exit' }, 'stopped (exited)'],
+      [{ kind: 'tmux_crashed' }, 'stopped (terminal crashed)'],
+      [{ kind: 'terminal_gone' }, 'stopped (terminal gone)'],
+      [{ kind: 'stopped' }, 'stopped'],
+    ] as const;
+    const rows = renderSessionTable(
+      causes.map(([cause], at) => sessionView({ id: `r${at}`, state: 'stopped', cause })),
+      PLAIN,
+    );
+    for (const [at, [, cell]] of causes.entries()) expect(rows[at + 1]).toContain(cell);
   });
 });
