@@ -210,6 +210,37 @@ const ROWS: readonly Row[] = [
   },
 ];
 
+/**
+ * Owner ruling !A525 item 9 ("agents may write config/instructions and codex/hooks behind an owner hold"): for these two
+ * files EVERY agent add and EVERY agent change is HELD, not only a loosening, so they cannot share the rows above (whose
+ * first test has the agent write the base into effect). Each is proved below by its own tests.
+ */
+interface HoldEveryRow {
+  readonly path: string;
+  /** Written by the owner (confirmed): in effect. */
+  readonly base: string;
+  /** A different text the agent writes over it. */
+  readonly changed: string;
+  readonly addSentence: string;
+  readonly changeSentence: string;
+}
+const HOLD_EVERY: readonly HoldEveryRow[] = [
+  {
+    path: 'instructions/guide.yaml',
+    base: 'text: Be kind.\n',
+    changed: 'text: Be kind. Also run the build.\n',
+    addSentence: 'agents now run with a new instructions component',
+    changeSentence: 'agents now run with changed instructions',
+  },
+  {
+    path: 'codex/hooks/h.yaml',
+    base: 'hooks: {}\n',
+    changed: 'hooks:\n  Stop:\n    - command: echo done\n',
+    addSentence: 'agents now run a new Codex hooks component',
+    changeSentence: 'agents now run changed Codex hooks',
+  },
+];
+
 const owning = (path: string): Declared => {
   const found = DECLARED.find(({ def }) =>
     def.shape === 'file'
@@ -260,13 +291,13 @@ describe('T-0034 R-0073 every file in the agent’s reach is a row, and nothing 
 
   test('R-0073 T-0034 the declared files an agent may name are exactly the rows', () => {
     const reachable = DECLARED.filter(({ def }) => agentMayName(samplePath(def))).map(({ def }) => placeOf(def));
-    const rowPlaces = ROWS.map(row => placeOf(owning(row.path).def));
+    const rowPlaces = [...ROWS, ...HOLD_EVERY].map(row => placeOf(owning(row.path).def));
     expect(reachable.toSorted()).toEqual([...new Set(rowPlaces)].toSorted());
-    for (const row of ROWS) expect(agentMayName(row.path)).toBe(true);
+    for (const row of [...ROWS, ...HOLD_EVERY]) expect(agentMayName(row.path)).toBe(true);
   });
 
   test('T-0034 no row is person-only', () => {
-    for (const row of ROWS) expect(owning(row.path).def.personOnly).toBeUndefined();
+    for (const row of [...ROWS, ...HOLD_EVERY]) expect(owning(row.path).def.personOnly).toBeUndefined();
   });
 
   test('T-0034 every row proves a held loosening, or says why no edit of it loosens', () => {
@@ -274,6 +305,70 @@ describe('T-0034 R-0073 every file in the agent’s reach is a row, and nothing 
       expect(row.loosening !== undefined || row.secretAdded !== undefined || row.neverLoosens !== undefined).toBe(true);
   });
 });
+
+for (const row of HOLD_EVERY)
+  describe(`T-0034 ${row.path}: every agent add and every agent change is HELD (owner ruling !A525 item 9)`, () => {
+    const ownerWrites = async (files: ReturnType<typeof world>['files'], text: string): Promise<void> => {
+      const { plugin, def } = owning(row.path);
+      const name = def.shape === 'file' ? undefined : row.path.slice(def.collection.length + 1, -'.yaml'.length);
+      expect((await files.write(plugin, def, name, text, { confirmedLoosening: true })).kind).toBe('applied');
+      await files.reload();
+    };
+    const agentWrites = async (agent: ReturnType<typeof world>['agent'], text: string) =>
+      await agent.run(call({ tool: 'config.write', path: row.path, text }), ferret);
+
+    test(`T-0032 T-0033 ${row.path}: an agent may read it and validate a text`, async () => {
+      const { agent, files } = world();
+      await files.reload();
+      const starter = await agent.run(call({ tool: 'config.read', path: row.path }), ferret);
+      expect(starter.summary).toBe(`${row.path} does not exist yet; this is the starter a new one begins with.`);
+      const checked = await agent.run(call({ tool: 'config.validate', path: row.path, text: row.base }), ferret);
+      expect(checked).toEqual({ summary: `${row.path} checks.`, issues: [] });
+    });
+
+    test(`T-0034 ${row.path}: an agent's ADD is HELD and NOT applied`, async () => {
+      const { agent, files } = world();
+      await files.reload();
+      const answer = await agentWrites(agent, row.base);
+      expect(answer.summary).toStartWith(`Wrote ${row.path}, but it loosens what this machine allows (`);
+      expect(answer.summary).toContain(row.addSentence);
+      expect(answer.summary).toContain(`--confirms ${row.path}`);
+      expect(inEffect(files, row.path)).toBeUndefined();
+      expect(files.status().held.map(held => held.path)).toEqual([row.path]);
+    });
+
+    test(`T-0034 ${row.path}: an agent's CHANGE of one the owner wrote is HELD and the owner's version stays in effect`, async () => {
+      const { agent, files } = world();
+      await files.reload();
+      await ownerWrites(files, row.base);
+      const before = inEffect(files, row.path);
+      expect(before).toBeDefined();
+      const answer = await agentWrites(agent, row.changed);
+      expect(answer.summary).toStartWith(`Wrote ${row.path}, but it loosens what this machine allows (`);
+      expect(answer.summary).toContain(row.changeSentence);
+      expect(inEffect(files, row.path)).toEqual(before);
+      expect(files.status().held.map(held => held.path)).toEqual([row.path]);
+    });
+
+    test(`T-0034 ${row.path}: an agent's write of the very same text changes nothing, so nothing is held`, async () => {
+      const { agent, files } = world();
+      await files.reload();
+      await ownerWrites(files, row.base);
+      const answer = await agentWrites(agent, row.base);
+      expect(answer.summary).toBe(`Wrote ${row.path}; it is in effect.`);
+      expect(files.status().held).toEqual([]);
+    });
+
+    test(`T-0034 ${row.path}: a raw secret is refused, nothing is written, and the value is never repeated`, async () => {
+      const { agent, files, fs } = world();
+      await files.reload();
+      await ownerWrites(files, row.base);
+      const answer = await agentWrites(agent, `${row.changed}apiToken: ${FAKE_SECRET}\n`);
+      expect(answer.summary).toBe(`Nothing was written: ${row.path} does not check. Fix each issue and try again.`);
+      expect(JSON.stringify(answer)).not.toContain(FAKE_SECRET);
+      expect(await fs.readText(`${HOME}/config/${row.path}`)).toBe(row.base);
+    });
+  });
 
 for (const row of ROWS)
   describe(`T-0034 ${row.path}, written by an agent through the real ${owning(row.path).plugin} def`, () => {
@@ -779,6 +874,9 @@ const TODAY_KINDS_OF: Readonly<Record<string, readonly string[]>> = {
   'claude-code/settings': [],
   'codex/settings': [],
   'claude-code/hooks': [],
+  // Owner ruling !A525 item 9: no today's rule judged them; every agent add or change is held (HOLD_EVERY).
+  instructions: [],
+  'codex/hooks': [],
   'model-sets': [],
 };
 

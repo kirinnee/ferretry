@@ -3,12 +3,20 @@
  * Packs imports `RuntimeId` from here (the one plugin→plugin contract edge §2.4 allows to Runtimes).
  */
 import { type Brand, InstantSchema } from '@ferretry/std';
-import { defineConfig, defineEvent, definePort, neverLoosens, type Word } from '@ferretry/kernel/contract';
+import {
+  defineConfig,
+  defineEvent,
+  definePort,
+  type Loosens,
+  neverLoosens,
+  type Word,
+} from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { FerretsPort, HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { configDef } from './config-def.ts';
 import {
   ITEM_NAME_PATTERN,
+  type InstructionsFile,
   InstructionsFileSchema,
   ModelSetFileSchema,
   ProfileFileSchema,
@@ -198,8 +206,23 @@ export const PROFILE_ITEMS = configDef(
 );
 
 /**
+ * What an AGENT's write of `config/instructions/<name>.yaml` is held for: EVERY add and EVERY change (owner ruling
+ * !A525 item 9). Instructions are what a ferret is told to do, so a new or edited one is authority the owner must see;
+ * an unchanged text holds nothing. Compared as written (a re-ordered key counts as a change: it fails closed). The
+ * sentence names the file's kind, never its text. The owner's write through fy, the app or PUT /v1/config/file is never
+ * held; a hand edit or a file copied onto disk is held like any unacknowledged edit until `fy config confirm`.
+ */
+export const instructionsItemHeld: Loosens<InstructionsFile> = (before, after) =>
+  before === undefined
+    ? ['agents now run with a new instructions component']
+    : JSON.stringify(before) === JSON.stringify(after)
+      ? []
+      : ['agents now run with changed instructions'];
+
+/**
  * `config/instructions/<name>.yaml`: the instructions components. No other plugin owns this kind, so Runtimes does; the
- * profile component source reads it live as its own. An edit changes what an agent runs with, nothing it may spend.
+ * profile component source reads it live as its own. An edit changes what an agent runs with: an agent's add or change
+ * is HELD for the owner (`instructionsItemHeld`).
  */
 export const INSTRUCTION_ITEMS = configDef(
   defineConfig({
@@ -207,7 +230,7 @@ export const INSTRUCTION_ITEMS = configDef(
     name: ITEM_NAME_PATTERN,
     schema: InstructionsFileSchema,
     axis: 'configure',
-    loosens: neverLoosens,
+    loosens: instructionsItemHeld,
   }),
 );
 

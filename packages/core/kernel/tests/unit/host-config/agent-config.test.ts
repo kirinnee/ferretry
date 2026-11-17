@@ -570,6 +570,9 @@ describe('the files an agent may name are today’s and no more (C2)', () => {
       'claude-code/settings/a.yaml',
       'codex/settings/a.yaml',
       'claude-code/hooks/h.yaml',
+      // Owner ruling !A525 item 9: reachable, every agent add or change held by the plugin's own rule.
+      'instructions/x.yaml',
+      'codex/hooks/h.yaml',
       'model-sets/fast.yaml',
     ])
       expect(agentMayName(path)).toBe(true);
@@ -591,7 +594,9 @@ describe('the files an agent may name are today’s and no more (C2)', () => {
       'harness/claude-code.yaml',
       'harness-codex.yaml/x.yaml',
       './harness-codex.yaml',
-      'instructions/x.yaml',
+      'instructions/x/y.yaml',
+      'instructions/x.yml',
+      'codex/hooks/x/y.yaml',
       'endpoints/x.yaml',
       // No today equivalent at all.
       'gate.yaml',

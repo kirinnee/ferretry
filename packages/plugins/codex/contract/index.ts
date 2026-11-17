@@ -10,7 +10,6 @@ import {
   definePort,
   defineState,
   type Loosens,
-  neverLoosens,
 } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { configDef } from './config-def.ts';
@@ -21,6 +20,7 @@ import {
   type Discovery,
   type HarnessCliView,
   type HarnessConfig,
+  type HooksItem,
   HooksItemSchema,
   type SettingsItem,
   SettingsItemSchema,
@@ -245,13 +245,27 @@ export const CODEX_SETTINGS = configDef(
   }),
 );
 
-/** `config/codex/hooks/<name>.yaml`. Same shape as Claude Code's hooks items; Runtimes renders them as the runtime's `hooks.json`. */
+/**
+ * What an AGENT's write of `config/codex/hooks/<name>.yaml` is held for: EVERY add and EVERY change (owner ruling !A525
+ * item 9). A hook is a shell command Codex runs on an event, so a new or edited one is code the owner must see; an
+ * unchanged file holds nothing. Compared as written (a re-ordered key counts as a change: it fails closed). The sentence
+ * never names a command. The owner's write through fy, the app or PUT /v1/config/file is never held; a hand edit or a
+ * file copied onto disk is held like any unacknowledged edit until `fy config confirm`.
+ */
+export const hooksItemHeld: Loosens<HooksItem> = (before, after) =>
+  before === undefined
+    ? ['agents now run a new Codex hooks component']
+    : JSON.stringify(before) === JSON.stringify(after)
+      ? []
+      : ['agents now run changed Codex hooks'];
+
+/** `config/codex/hooks/<name>.yaml`. Same shape as Claude Code's hooks items; Runtimes renders them as the runtime's `hooks.json`. An agent's add or change is HELD (`hooksItemHeld`). */
 export const CODEX_HOOKS = configDef(
   defineConfig({
     collection: 'codex/hooks',
     name: ITEM_NAME_PATTERN,
     schema: HooksItemSchema,
     axis: 'configure',
-    loosens: neverLoosens,
+    loosens: hooksItemHeld,
   }),
 );

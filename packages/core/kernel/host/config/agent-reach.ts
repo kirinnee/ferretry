@@ -16,11 +16,15 @@
  * Never `gate.yaml`, `plugins.yaml` or any file the 5.0 plugins added with no today equivalent: widening that is the
  * owner's decision, not a side effect of the declared-file reader.
  *
- * NOT MAPPED, each a declared GAP (docs/config-files.md, the agent's tools):
- * - `components/instructions/<n>` and `components/hooks/<n>` of Codex: now `config/instructions/<n>.yaml` (Runtimes) and
- *   `config/codex/hooks/<n>.yaml` (Codex), which plugins DO declare, but are left out on purpose. Their `neverLoosens` holds
- *   nothing (as in v4), so mapping them would let an agent add agent instructions and shell hook commands with no owner
- *   hold. Today's `claude-code/hooks` is mapped (above); mapping these two is the owner's decision, not a side effect.
+ * Also, by owner ruling (!A525 item 9, "agents may write config/instructions and codex/hooks behind an owner hold"):
+ * `instructions/<n>.yaml` (Runtimes; today's `components/instructions/<n>`) and `codex/hooks/<n>.yaml` (Codex; today's
+ * Codex `components/hooks/<n>`). Each plugin's `loosens` HOLDS EVERY add and EVERY change by an agent for the owner (it is
+ * not `neverLoosens`: instructions are what a ferret is told and a hook is a shell command, so no agent's write of either
+ * is ever applied unseen). The owner's write through fy, the app or PUT /v1/config/file is never held; a hand edit or a
+ * file copied onto disk is held like any unacknowledged edit until `fy config confirm`. Whoever adds a folder here must
+ * give its def a `loosens` that holds every change.
+ *
+ * NOT MAPPED, a declared GAP (docs/config-files.md, the agent's tools):
  * - `presets/<n>.yaml`: no declared successor (Logins to rule whether `endpoints/` is one).
  *
  * Pure and total over every string.
@@ -60,6 +64,9 @@ const FOLDERS: ReadonlyMap<string, string> = new Map([
   ['claude-code/settings', 'components/settings/<name>'],
   ['codex/settings', 'components/settings/<name>'],
   ['claude-code/hooks', 'components/hooks/<name>'],
+  // Owner ruling !A525 item 9: each def's `loosens` holds EVERY agent add or change for the owner.
+  ['instructions', 'components/instructions/<name> (every add or change is held)'],
+  ['codex/hooks', "Codex's components/hooks/<name> (every add or change is held)"],
   ['model-sets', 'components/modelSets/<name>'],
 ]);
 
