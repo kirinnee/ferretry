@@ -11,6 +11,7 @@ import { compactAt, setCompactAt } from './compact-at.ts';
 import { agentControl, effectiveLimits, revokeToken, turnUsage } from './insights.ts';
 import { repointRuntime, runtimeRecords } from './runtime-records.ts';
 import { lastSnapshot, prompt, turnObserved, turns } from './turns.ts';
+import { endOfExit } from './exit-cause.ts';
 import { KeyedSerialExecutor } from './serial.ts';
 import { typePointer } from './pointer-retry.ts';
 import type { SerialExecutor } from '../ports.ts';
@@ -48,6 +49,7 @@ import type {
   FerretRecord,
   FerretRuntimeRecord,
   FerretRuntimeRename,
+  RunnerExit,
   FerretAddress,
   FerretsApi,
   FerretState,
@@ -1334,6 +1336,43 @@ export class FerretsService implements FerretsApi {
         pane: 'gone',
         exitCode: null,
         signal: null,
+      });
+      return true;
+    });
+  }
+
+  /**
+   * Settles a ferret whose pane the runner PROVED dead but KEPT (`Runner.exited`: `remain-on-exit`, `pane_dead` 1), the
+   * way {@link FerretsService.settleGone} settles a vanished one: a COMPARE-AND-SET under the ferret's own queue, only
+   * while it is still live on exactly `handle`, and `stillExited` asked AGAIN inside the queue (a relaunch that ran
+   * while this waited may have put a live pane on the same handle). An owner's stop wins by construction: it runs in the
+   * same queue and leaves the record `stopped`, so this answers false. The end is {@link endOfExit}: its cause carries
+   * the exit status or signal and the harness's last lines, and the journal says the same. Nothing is killed or
+   * launched; the dead pane is cleared by the next launch. True only when it landed.
+   */
+  async settleExited(
+    ferret: FerretId,
+    handle: string,
+    exit: RunnerExit,
+    from: string,
+    stillExited: () => Promise<boolean>,
+  ) {
+    const end = endOfExit(exit);
+    return await this.serial.run(ferret, async () => {
+      await this.ports.ready?.();
+      const record = this.registry.get(ferret);
+      if (record === undefined || (record.state !== 'working' && record.state !== 'idle') || record.handle !== handle)
+        return false;
+      if (!(await stillExited().catch(() => false))) return false;
+      this.ports.stopping?.(ferret);
+      await this.settle(record, 'stopped', 'stopped', end.cause);
+      await this.ports.history?.(ferret, 'session.exited', {
+        reason: end.reason,
+        from,
+        status: end.status,
+        pane: 'dead',
+        exitCode: exit.status ?? null,
+        signal: exit.signal ?? null,
       });
       return true;
     });

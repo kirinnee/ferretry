@@ -301,6 +301,33 @@ export interface Runner {
    * asks: nothing is started, typed or killed. Absent: nothing is ever proven gone, so nothing is auto-resumed.
    */
   gone?(ferret: FerretId): Promise<boolean>;
+  /**
+   * Additive (dead pane): whether the runner PROVES that the pane `handle` of `ferret` is still THERE but its program
+   * has ended (tmux: `remain-on-exit` keeps the pane, `pane_dead` is 1), and how it ended. `undefined` for a live pane,
+   * for a pane that is not that ferret's own, for a terminal that is not there at all (that is {@link Runner.gone}'s
+   * proof), and for ANY answer that proves nothing. A pane id is not an incarnation, so it is asked by the ferret AND the
+   * handle, and the caller asks again inside its own queue before it acts. It only asks: nothing is started, typed or
+   * killed. Absent: a pane that died and stayed is never noticed.
+   */
+  exited?(ferret: FerretId, handle: RunnerHandle): Promise<RunnerExit | undefined>;
+}
+
+/** Longest `lastLines` an {@link RunnerExit} carries: the harness's closing words, not its whole screen. */
+export const RUNNER_EXIT_LAST_LINES = 8;
+/** The most characters `lastLines` carries, counted from its end. */
+export const RUNNER_EXIT_LAST_BYTES = 600;
+
+/**
+ * How a pane's program ended, as the runner proved it. `status` is the program's exit status and `signal` the signal that
+ * ended it INSTEAD (tmux's `pane_dead_status` / `pane_dead_signal`); neither is present when tmux recorded none.
+ * `lastLines` is the last non-empty lines the pane still shows, MASKED by the runner (the same redaction a look gets),
+ * at most {@link RUNNER_EXIT_LAST_LINES} lines and {@link RUNNER_EXIT_LAST_BYTES} characters; absent when the pane could
+ * not be read (a hold, nothing left on screen).
+ */
+export interface RunnerExit {
+  readonly status?: number | undefined;
+  readonly signal?: number | undefined;
+  readonly lastLines?: string | undefined;
 }
 
 /**

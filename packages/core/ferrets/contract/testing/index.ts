@@ -56,6 +56,7 @@ import {
   type RunnerFormCapture,
   type TranscriptEntry,
   type RunnerHeldAt,
+  type RunnerExit,
   type RunnerLook,
   type RunnerPaneObservation,
   type RunnerStop,
@@ -271,7 +272,7 @@ export class FakeRunner implements Runner {
   readonly looked: RunnerHandle[] = [];
   async look(handle: RunnerHandle): Promise<RunnerLook | undefined> {
     this.looked.push(handle);
-    if (!this.#live.has(handle)) return undefined;
+    if (!this.#live.has(handle) || this.deadPanes.has(handle)) return undefined;
     return this.screens.get(handle) ?? { frame: 'idle', working: false, atPrompt: true, permission: false };
   }
   /**
@@ -286,6 +287,21 @@ export class FakeRunner implements Runner {
     if ([...this.#live.values()].some(live => live.ferret === ferret)) return false;
     if (this.goneAnswer === 'throw') throw new Error('the fake runner could not ask');
     return this.goneAnswer;
+  }
+  /** TEST ONLY: how a pane whose program ended is answered by `exited`, per handle; absent = the pane is live (or not there). */
+  readonly deadPanes = new Map<RunnerHandle, RunnerExit>();
+  /** Every `[ferret, handle]` `exited` was asked about, in order. */
+  readonly exitedAsked: (readonly [FerretId, RunnerHandle])[] = [];
+  /** What the next `exited` does instead of answering: a test's own throw. */
+  exitedAnswer: 'answer' | 'throw' = 'answer';
+  async exited(ferret: FerretId, handle: RunnerHandle): Promise<RunnerExit | undefined> {
+    this.exitedAsked.push([ferret, handle]);
+    if (this.exitedAnswer === 'throw') throw new Error('the fake runner could not ask');
+    return this.#live.get(handle)?.ferret === ferret ? this.deadPanes.get(handle) : undefined;
+  }
+  /** TEST ONLY: the program in the pane behind `handle` ended and tmux kept the pane. */
+  die(handle: RunnerHandle, how: RunnerExit = {}): void {
+    this.deadPanes.set(handle, how);
   }
   /** TEST ONLY: the host went down and took the runner's server with it: every pane is gone. */
   reboot(): void {

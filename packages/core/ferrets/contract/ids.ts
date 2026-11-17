@@ -67,6 +67,9 @@ export type FerretRole = z.infer<typeof FerretRoleSchema>;
 /** The longest harness sentence a `start_failed` cause keeps (`explained`). */
 export const START_EXPLAINED_MAX = 300;
 
+/** The longest closing words of a dead harness an end cause keeps (`lastLines`, already masked by the runner). */
+export const END_LAST_LINES_MAX = 600;
+
 /**
  * Why a ferret ended, in today's words (the Warden's `ReviveCause` and `ReviveLeaveReason` names, unchanged). The
  * first four are an END NOBODY CHOSE (the terminal vanished, a signal killed the agent, it exited non-zero); the rest
@@ -79,9 +82,17 @@ export const START_EXPLAINED_MAX = 300;
  */
 export const FerretEndCauseSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('tmux_crashed') }),
-  z.strictObject({ kind: z.literal('terminal_gone') }),
-  z.strictObject({ kind: z.literal('signal'), signal: z.number().int().positive() }),
-  z.strictObject({ kind: z.literal('agent_crashed'), exitCode: z.number().int() }),
+  z.strictObject({ kind: z.literal('terminal_gone'), lastLines: z.string().min(1).max(END_LAST_LINES_MAX).optional() }),
+  z.strictObject({
+    kind: z.literal('signal'),
+    signal: z.number().int().positive(),
+    lastLines: z.string().min(1).max(END_LAST_LINES_MAX).optional(),
+  }),
+  z.strictObject({
+    kind: z.literal('agent_crashed'),
+    exitCode: z.number().int(),
+    lastLines: z.string().min(1).max(END_LAST_LINES_MAX).optional(),
+  }),
   z.strictObject({ kind: z.literal('stopped') }),
   z.strictObject({ kind: z.literal('completed') }),
   z.strictObject({ kind: z.literal('start_failed'), explained: z.string().min(1).max(START_EXPLAINED_MAX).optional() }),

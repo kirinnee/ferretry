@@ -27,9 +27,68 @@ function headline(view: FerretSummary): string {
     .join('  ');
 }
 
+/**
+ * Why a stopped ferret ended, as lines a person reads, when nobody chose it to: the terminal vanished, a signal or a
+ * non-zero exit ended the agent, or the harness left on its own; and what the harness said last when the runner read it.
+ * A stop, a `signal done` and a launch that never ran say nothing here (the state already does). Empty for a live ferret.
+ */
+function endedLines(view: FerretSummary): string[] {
+  const why = endedWhy(view);
+  const cause = view.cause;
+  if (why === undefined || cause === undefined) return [];
+  const lastLines =
+    'lastLines' in cause && cause.lastLines !== undefined
+      ? [`  its last words:`, ...cause.lastLines.split('\n').map(line => `    ${line}`)]
+      : [];
+  return [`  ended: ${why}`, ...lastLines];
+}
+
+/** The short reason a stopped ferret's end was nobody's choice, or `undefined` (a live ferret, a stop, a finish). */
+function endedWhy(view: FerretSummary): string | undefined {
+  const cause = view.cause;
+  if (view.state !== 'stopped' || cause === undefined) return undefined;
+  switch (cause.kind) {
+    case 'tmux_crashed':
+      return 'its terminal server crashed';
+    case 'terminal_gone':
+      return 'its terminal ended and how it ended was not recorded';
+    case 'signal':
+      return `the agent was killed by signal ${cause.signal}`;
+    case 'agent_crashed':
+      return `the agent exited with code ${cause.exitCode}`;
+    case 'clean_exit':
+      return 'the agent exited on its own (exit code 0)';
+    default:
+      return undefined;
+  }
+}
+
+/** The `ps` STATE cell: the state, and for an end nobody chose, why in a few words. */
+function stateCell(view: FerretSummary): string {
+  const cause = view.cause;
+  if (endedWhy(view) === undefined || cause === undefined) return view.state;
+  switch (cause.kind) {
+    case 'signal':
+      return `${view.state} (signal ${cause.signal})`;
+    case 'agent_crashed':
+      return `${view.state} (exit ${cause.exitCode})`;
+    case 'clean_exit':
+      return `${view.state} (exited)`;
+    case 'tmux_crashed':
+      return `${view.state} (terminal crashed)`;
+    default:
+      return `${view.state} (terminal gone)`;
+  }
+}
+
 /** The single-ferret detail block printed by `status`, `start`, `resume` and `rename --json`-less answers. */
 export function renderFerret(view: FerretSummary): string[] {
-  return [headline(view), `  ${view.folder}`, `  ${view.state} since ${view.stateAt}; started ${view.createdAt}`];
+  return [
+    headline(view),
+    `  ${view.folder}`,
+    `  ${view.state} since ${view.stateAt}; started ${view.createdAt}`,
+    ...endedLines(view),
+  ];
 }
 
 const TABLE_HEADER = ['TEAMMATE', 'ID', 'STATE', 'HARNESS', 'RUNTIME', 'ROLE', 'PACK', 'PARENT'] as const;
@@ -55,7 +114,7 @@ export function renderSessionTable(views: readonly ListedFerret[], colour: ICell
     ...(showPins ? [view.pinnedAt === undefined ? '' : PINNED_MARK] : []),
     view.name,
     view.id,
-    view.state,
+    stateCell(view),
     view.harness,
     view.runtime ?? '-',
     view.role,

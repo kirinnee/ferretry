@@ -91,6 +91,11 @@ export function InfoOverview({
         {ferret.cause === undefined ? null : (
           <InfoRow hint={INFO_HINT.cause} label="Ended">
             <span data-info-cause={ferret.cause.kind}>{endCauseWord(ferret.cause)}</span>
+            {'lastLines' in ferret.cause && ferret.cause.lastLines !== undefined ? (
+              <pre className="fy-info-muted font-mono" data-info-last-lines="">
+                {ferret.cause.lastLines}
+              </pre>
+            ) : null}
           </InfoRow>
         )}
         <InfoRow label="Project">
