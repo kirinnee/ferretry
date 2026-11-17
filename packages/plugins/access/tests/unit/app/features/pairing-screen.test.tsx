@@ -551,3 +551,68 @@ describe('PairingScreen pasted link', () => {
     await screen.unmount();
   });
 });
+
+describe('PairingScreen never shows the loopback address of a relayed daemon', () => {
+  const LOOPBACK_SEED: PairingSeed = {
+    daemonUrl: 'http://127.0.0.1:7617',
+    daemonId: 'fy_daemon_ddddddddddddddddddddddddddddddddddddddddddd',
+    code: 'single-use',
+  };
+  const loopbackArrival: PairingArrival = { kind: 'seed', seed: LOOPBACK_SEED };
+
+  it('confirms with "through the relay" and no address, and keeps the fingerprint behind Details', async () => {
+    const screen = await screenWith({ arrival: loopbackArrival, sameMachine: false });
+
+    expect(screen.container.textContent).toContain('through the relay');
+    expect(screen.container.textContent).not.toContain('127.0.0.1');
+    expect(screen.container.textContent).not.toContain('7617');
+    const details = must(screen.container.querySelector('details[data-pair-details]'), 'the Details toggle');
+    expect(details.hasAttribute('open')).toBe(false);
+    expect(details.querySelector('summary')?.textContent).toBe('Details');
+    expect(details.textContent).toContain(LOOPBACK_SEED.daemonId);
+    await interact(() => (details as HTMLDetailsElement).setAttribute('open', ''));
+    expect(details.hasAttribute('open')).toBe(true);
+    await screen.unmount();
+  });
+
+  it("says it is direct, with the address, when the page runs on the daemon's own machine", async () => {
+    const screen = await screenWith({ arrival: loopbackArrival, sameMachine: true });
+
+    expect(screen.container.textContent).toContain('127.0.0.1:7617');
+    expect(screen.container.textContent).toContain('direct');
+    expect(screen.container.textContent).not.toContain('through the relay');
+    await screen.unmount();
+  });
+
+  it('names the machine and the relay once paired, with no address', async () => {
+    const screen = await screenWith({
+      arrival: loopbackArrival,
+      sameMachine: false,
+      onPair: async () => ({ machine: 'studio', via: 'relay' }),
+    });
+    await interact(() => buttonNamed(screen.container, 'Pair this device').click());
+
+    expect(screen.container.textContent).toContain('Paired with studio, through the relay.');
+    expect(screen.container.textContent).not.toContain('127.0.0.1');
+    await screen.unmount();
+  });
+
+  it('lists a relayed daemon by its name and "through the relay", not its loopback address', async () => {
+    const relayed = daemonConnection({
+      daemonId: 'relayed',
+      baseUrl: 'http://127.0.0.1:7617',
+      deviceId: 'relayed-secret',
+      daemonName: 'studio',
+    });
+    const screen = await screenWith({
+      connections: [{ ...relayed, pairedAt: 1, lastSelectedAt: 1 }],
+      selectedDaemonId: relayed.daemonId,
+      sameMachine: false,
+    });
+
+    expect(screen.container.textContent).toContain('studio');
+    expect(screen.container.textContent).toContain('through the relay');
+    expect(screen.container.textContent).not.toContain('127.0.0.1');
+    await screen.unmount();
+  });
+});

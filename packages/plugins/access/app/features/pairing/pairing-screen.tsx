@@ -29,6 +29,7 @@
 import { SecretInput, useSecretField } from '@ferretry/app/ui';
 import { Check, ChevronRight, Link2, ShieldCheck, Trash2 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { type DaemonPath, describeDaemonPath } from '@ferretry/plugin-connections/contract';
 import { PAIRING_DEVICE_NAME_MAX_LENGTH } from '../../../contract/index.ts';
 import {
   BrandMark,
@@ -39,14 +40,28 @@ import {
 } from '../../shell-pairing.ts';
 import type { QrScanHost } from '../../lib/pair-scan.ts';
 import { usePairingScreenMarker } from '../../lib/pairing-screen-marker.ts';
-import { type PairingArrival, pairingDaemonHost, pairingSeedFromUrl, type PairingSeed } from '../../lib/pairing.ts';
+import { type PairingArrival, pairingSeedFromUrl, type PairingSeed } from '../../lib/pairing.ts';
 import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
 import { browserDeviceName } from '@ferretry/app';
 import { normalizedDeviceName } from '../../lib/device-name.ts';
 import { PairScanner } from './pair-scanner.tsx';
 
+/** What the exchange learned, so the screen can say how it got there. Both parts are optional: a host may know neither. */
+interface PairedAs {
+  /** What the daemon calls its machine. */
+  readonly machine?: string;
+  /** Which path carried the exchange. */
+  readonly via?: 'direct' | 'relay';
+}
+
 /** Exchanges the code; `deviceName` is what the person called this device on the confirm screen. */
-type PairingExchange = (seed: PairingSeed, deviceName: string) => Promise<void>;
+type PairingExchange = (seed: PairingSeed, deviceName: string) => Promise<PairedAs | void>;
+
+/** Whether this page runs on a loopback address, i.e. on the daemon's own machine. */
+const pageIsLocal = (): boolean => {
+  const host = globalThis.location?.hostname;
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+};
 
 export interface PairingScreenProps {
   /** Existing pairings from the host-owned, browser-local registry. */
@@ -58,6 +73,8 @@ export interface PairingScreenProps {
   readonly scanHost?: QrScanHost | null;
   /** Exchanges the one-time code and adds the resulting connection. */
   readonly onPair: PairingExchange;
+  /** Whether this page runs on the daemon's own machine. Defaults to reading the page's address. */
+  readonly sameMachine?: boolean;
   readonly onSelect: (daemonId: DaemonId) => void;
   readonly onRemove: (daemonId: DaemonId) => void;
   /**
@@ -104,7 +121,7 @@ type Stage =
   | { readonly kind: 'browse' }
   | { readonly kind: 'confirm'; readonly seed: PairingSeed }
   | { readonly kind: 'pairing'; readonly seed: PairingSeed }
-  | { readonly kind: 'paired'; readonly host: string }
+  | { readonly kind: 'paired'; readonly path: DaemonPath }
   | { readonly kind: 'failed'; readonly message: string; readonly cause: PairingFailureCause };
 
 /**
@@ -161,6 +178,7 @@ export function PairingScreen({
   embedded = false,
   defaultName = browserDeviceName,
   onStatedFailure,
+  sameMachine = pageIsLocal(),
 }: PairingScreenProps) {
   const [stage, setStage] = useState<Stage>(() => initialStage(arrival));
   const statedFailure = stage.kind === 'failed' && stage.cause === 'stated';
@@ -212,8 +230,11 @@ export function PairingScreen({
   const pair = async (seed: PairingSeed, name: string): Promise<void> => {
     setStage({ kind: 'pairing', seed });
     try {
-      await onPair(seed, name);
-      setStage({ kind: 'paired', host: pairingDaemonHost(seed) });
+      const as = await onPair(seed, name);
+      setStage({
+        kind: 'paired',
+        path: describeDaemonPath({ address: seed.daemonUrl, name: as?.machine, via: as?.via, sameMachine }),
+      });
     } catch (reason) {
       setStage({
         kind: 'failed',
@@ -242,6 +263,7 @@ export function PairingScreen({
         onCancel={startOver}
         paired={connections.length > 0}
         embedded={embedded}
+        sameMachine={sameMachine}
       />
     );
   }
@@ -274,7 +296,14 @@ export function PairingScreen({
         <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Paired daemons">
           {connections.map(connection => {
             const selected = connection.daemonId === selectedDaemonId;
-            const name = daemonDisplayName(connection);
+            // A relayed daemon is its name and "through the relay", never the loopback address it listens on.
+            const path = describeDaemonPath({
+              address: connection.baseUrl,
+              name: connection.label?.trim() || connection.daemonName,
+              sameMachine,
+            });
+            // A direct daemon keeps the name it always had, with its address beneath.
+            const name = path.kind === 'relay' ? path.title : daemonDisplayName(connection);
             return (
               <li
                 key={connection.daemonId}
@@ -294,9 +323,11 @@ export function PairingScreen({
                   </span>
                   <span className="min-w-0">
                     <span className="block truncate text-ui font-semibold text-fg">{name}</span>
-                    {name === connection.baseUrl ? null : (
-                      <span className="block truncate font-mono text-meta text-faint">{connection.baseUrl}</span>
-                    )}
+                    <span className="block truncate font-mono text-meta text-faint" data-daemon-path={path.kind}>
+                      {path.kind === 'relay' || name === connection.baseUrl
+                        ? path.path
+                        : `${path.path} · ${connection.baseUrl}`}
+                    </span>
                   </span>
                   <ChevronRight size={16} className="shrink-0 text-faint" aria-hidden="true" />
                 </button>
@@ -496,6 +527,7 @@ interface PairingFocusProps {
   /** Whether anything is paired yet, so the cancel control names the right place. */
   readonly paired: boolean;
   readonly embedded: boolean;
+  readonly sameMachine: boolean;
 }
 
 /**
@@ -505,7 +537,16 @@ interface PairingFocusProps {
  * from a QR has exactly one thing to decide, and every other control on the
  * page is a way to get that wrong.
  */
-function PairingFocus({ stage, onPair, onCancel, paired, embedded, deviceName, onDeviceName }: PairingFocusProps) {
+function PairingFocus({
+  stage,
+  onPair,
+  onCancel,
+  paired,
+  embedded,
+  deviceName,
+  onDeviceName,
+  sameMachine,
+}: PairingFocusProps) {
   // Whether the name is being edited. Above every early return: hooks run in the same order each render.
   const [renaming, setRenaming] = useState(false);
   /*
@@ -533,7 +574,7 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded, deviceName, o
             Connected
           </Title>
           <p className="m-0 text-ui leading-base text-muted" role="status">
-            Paired with <span className="font-mono text-fg">{stage.host}</span>.
+            Paired with <span className="font-semibold text-fg">{stage.path.title}</span>, {stage.path.path}.
           </p>
         </div>
       </PairingFrame>
@@ -581,6 +622,7 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded, deviceName, o
   }
 
   const { seed } = stage;
+  const target = describeDaemonPath({ address: seed.daemonUrl, sameMachine });
   const busy = stage.kind === 'pairing';
   const sendableName = normalizedDeviceName(deviceName);
   return (
@@ -601,11 +643,20 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded, deviceName, o
         <TargetTitle id="pairing-target" className="sr-only">
           The daemon this link points at
         </TargetTitle>
-        <p className="m-0 break-all font-mono text-title font-semibold text-fg">{pairingDaemonHost(seed)}</p>
-        <p className="m-0 mt-1 break-all font-mono text-meta text-faint">
-          <span className="sr-only">Daemon fingerprint: </span>
-          {seed.daemonId}
+        {/* A link carries no machine name, only an address: say HOW it will be reached, and show the address only when that is direct. */}
+        <p className="m-0 break-all text-title font-semibold text-fg" data-daemon-path={target.kind}>
+          {target.address === undefined ? target.title : <span className="font-mono">{target.address}</span>}
         </p>
+        <p className="m-0 mt-1 text-ui text-muted">{target.address === undefined ? target.path : 'direct'}</p>
+        <details className="mt-2" data-pair-details="">
+          <summary className="min-h-[44px] cursor-pointer text-ui font-medium text-muted hover:text-accent">
+            Details
+          </summary>
+          <p className="m-0 break-all font-mono text-meta text-faint">
+            <span className="sr-only">Daemon fingerprint: </span>
+            {seed.daemonId}
+          </p>
+        </details>
       </section>
 
       {/*

@@ -151,6 +151,7 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
           onPair={async (seed, deviceName) => {
             const paired = await exchangePairing({ ports, claims, store }, seed, deviceName);
             navigate(returnPathOf(location()) ?? daemonHomeHref(paired.daemon));
+            return { machine: paired.machine, via: paired.pairedOver === 'direct' ? 'direct' : 'relay' };
           }}
           onSelect={id => {
             ports.daemons.select(String(id));
