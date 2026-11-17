@@ -1438,6 +1438,14 @@ a.fy-inbox-row:focus-visible {
   flex-direction: column;
   gap: var(--gap-sm);
 }
+/* The send-back box's buttons (Attach, Cancel, Send back): a row that wraps on a phone, with the gap every action row uses. */
+.fy-send-back__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--gap-sm);
+}
 .fy-totest__answers {
   display: grid;
   grid-template-columns: 1fr 1fr;

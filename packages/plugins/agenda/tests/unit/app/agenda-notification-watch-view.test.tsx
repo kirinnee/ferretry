@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { clearForegroundPinScope, daemonFerretScope, setForegroundPinScope } from '@ferretry/app';
 import { mount } from '@ferretry/app/testing';
 import half from '../../../app/index.ts';
 import { daemonId } from '../../../app/lib/machine.ts';
@@ -14,6 +15,7 @@ import { DEFAULT_NOTIFICATION_PREFERENCES } from '../../../app/lib/notification-
 import type { NotificationSurface } from '../../../app/lib/notify.ts';
 import type { NotifiedFleet, NotifiedView } from '../../../app/lib/notification-ledger.ts';
 import {
+  browserNotificationWatchWiring,
   createNotificationWatchView,
   type NotificationWatchWiring,
 } from '../../../app/views/agenda-notification-watch-view.tsx';
@@ -101,5 +103,22 @@ describe('Agenda’s notification-watch background view', () => {
 
     expect(rig.shown.map(each => each.title)).toEqual(['Fix it']);
     expect(rig.asks()).toBe(0);
+  });
+
+  it('reads the foreground ferret from the one place the chat declares it, so the open chat is not notified about', () => {
+    // Arrange — Conversation declares the pane in front of the reader through the app's one foreground scope.
+    const scope = daemonFerretScope({ daemonId: DAEMON }, 'open-chat');
+    const wired = browserNotificationWatchWiring({ daemon: DAEMON, client: {} as never, navigate: () => {} });
+    expect(wired.host.foregroundSession()).toBeNull();
+
+    // Act
+    setForegroundPinScope(scope);
+    try {
+      // Assert — the same ferret, named in the Agenda's own words.
+      expect(wired.host.foregroundSession()).toEqual({ daemonId: daemonId(DAEMON), sessionId: 'open-chat' });
+    } finally {
+      clearForegroundPinScope(scope);
+    }
+    expect(wired.host.foregroundSession()).toBeNull();
   });
 });

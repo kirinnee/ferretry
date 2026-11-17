@@ -1262,6 +1262,14 @@ body {
   border-color: var(--accent);
   color: var(--accent);
 }
+/* THE KEYBOARD RING. `.kt-btn` resets `outline` to `--outline-always` (none in every family but the contrast ones) and is
+   loaded after the shell's global `:focus-visible` rule at the same specificity, so a Button drew NO ring at all: not
+   a weak one in dark, none in any theme. The ring is the shell's own, from its own tokens (colour, width, offset), so
+   each theme and its dark twin keep the ≥3:1 ring they already declare; only a keyboard focus draws it. */
+.kt-btn:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
 .kt-btn:active:not(:disabled) {
   translate: var(--press-translate) var(--press-translate);
   box-shadow: var(--shadow-active);

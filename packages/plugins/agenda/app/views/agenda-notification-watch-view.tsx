@@ -9,8 +9,7 @@
  * client handed to it would replace that one.
  */
 
-import { type BackgroundViewProps, useOptionalRouter } from '@ferretry/app';
-import { getForegroundPinScope } from '@ferretry/app/ui';
+import { type BackgroundViewProps, getForegroundPinScope, useOptionalRouter } from '@ferretry/app';
 import { useMemo, useRef, useSyncExternalStore } from 'react';
 import { type NotificationWatchHost, useNotificationWatch } from '../hooks/use-notifications.ts';
 import { browserNotificationSurface, subscribeNotificationPermission } from '../lib/browser-notification-surface.ts';
@@ -79,7 +78,7 @@ export const browserNotificationWatchWiring = ({
       hidden: () => globalThis.document?.hidden ?? false,
       foregroundSession: () => {
         const scope = getForegroundPinScope();
-        return scope === null ? null : daemonSessionScope({ daemonId: daemonId(scope.daemonId) }, scope.sessionId);
+        return scope === null ? null : daemonSessionScope({ daemonId: daemonId(scope.daemonId) }, scope.ferretId);
       },
       now: Date.now,
     },
