@@ -251,7 +251,18 @@ describe('recordTurnChange over a damaged state.json (today’s rule, R/src/adap
       tail: MID_TURN_TAIL,
       record: ferret => records.get(ferret),
       runner: () => runner,
-      turnObserved: async (ferret, turn) => void followed.push(`${ferret}:${turn}`),
+      // FerretsService.turnObserved, reduced: the registry takes the state the turn says, so a look that later agrees
+      // with the recorded turn (FX6) finds nothing to move.
+      turnObserved: async (ferret, turn) => {
+        followed.push(`${ferret}:${turn}`);
+        const record = records.get(ferret);
+        if (record !== undefined)
+          records.set(ferret, {
+            ...record,
+            state: turn === 'working' ? 'working' : 'idle',
+            stateAt: new Date(nowMs).toISOString(),
+          } as FerretRecord);
+      },
       clock: { now: () => new Date(nowMs).toISOString() },
       every: () => () => undefined,
       yieldToLoop: async () => undefined,

@@ -57,8 +57,12 @@ export interface PacedTurnPorts extends SessionTurnPorts {
    * the ferret to `working` without touching the document, and a resume that lands before a tick saw the old pane gone
    * keeps the last run's `your-turn` there. If the new run's turns all end between two looks, no look ever records a
    * change, so only this tells the follower the turn it should be on. Absent: nothing follows an agreeing look.
+   *
+   * `since` is when the oldest look the agreement rests on was taken: this look's for a confirmed one, the look before
+   * it for two unconfirmed frames. A follower moved AFTER `since` (a launch) must not take it: that frame may be the
+   * old pane's.
    */
-  agreed?(id: SessionId, state: SessionTurnState): void;
+  agreed?(id: SessionId, state: SessionTurnState, since: string): void;
 }
 
 /** The frame identity a look carries: its digest, `absent` for no pane, `undefined` when the runner gave none. */
@@ -110,6 +114,8 @@ const message = (error: unknown): string => (error instanceof Error ? error.mess
 export class PacedTurnWatcher implements SessionTurnWatcher {
   readonly intervalMs = TURN_WATCH_INTERVAL_MS;
   private readonly previous = new Map<SessionId, TurnObservation | undefined>();
+  /** When the look behind {@link previous} was taken (epoch ms), so an agreement can say what it rests on. */
+  private readonly lookedAt = new Map<SessionId, number>();
   private readonly paces = new Map<SessionId, Pace>();
   /** How many times each session was woken: a look compares it across itself, so a wake it overlapped is kept. */
   private readonly wakes = new Map<SessionId, number>();
@@ -149,6 +155,7 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
     }
     const roster = new Set(sessions.map(session => session.id));
     for (const id of this.previous.keys()) if (!roster.has(id)) this.previous.delete(id);
+    for (const id of this.lookedAt.keys()) if (!roster.has(id)) this.lookedAt.delete(id);
     for (const id of this.paces.keys()) if (!roster.has(id)) this.paces.delete(id);
     for (const id of this.told.keys()) if (!roster.has(id)) this.told.delete(id);
     for (const id of this.wakes.keys()) if (!roster.has(id)) this.wakes.delete(id);
@@ -216,15 +223,26 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
 
   /**
    * Tells the host a look that recorded nothing because it decided exactly the recorded turn (see
-   * {@link PacedTurnPorts.agreed}). Only a CONFIRMED observation counts. The two-frame allowance that records an
-   * unconfirmed `your-turn` is no agreement here: after a kill and a resume inside one tick, its first frame may be the
-   * old pane's, so the new pane's first unconfirmed look would read as two (an idle blip and a spurious turn end).
+   * {@link PacedTurnPorts.agreed}), by the rule that would have RECORDED it (`settleTurnState`): a confirmed
+   * observation on sight, an unconfirmed `your-turn` when the look before it said the same. The fake Claude (and a real
+   * one whose last record carries no `end_turn`) leaves a transcript that never proves the end, so its prompt is only
+   * ever an unconfirmed `your-turn`: a confirmed-only rule left jajuan `working` for ever. Two frames may straddle a
+   * kill and a resume inside one tick, so the agreement carries when its OLDER look was taken, and the host refuses one
+   * older than its own last move.
    */
-  private tellAgreed(session: TurnWatchSession, observation: TurnObservation | undefined): void {
+  private tellAgreed(
+    session: TurnWatchSession,
+    observation: TurnObservation | undefined,
+    before: TurnObservation | undefined,
+    lookedMs: number,
+    lookedBeforeMs: number | undefined,
+  ): void {
     const recorded = session.state.turnState;
-    if (recorded === undefined || observation?.confirmed !== true || observation.state !== recorded) return;
+    if (recorded === undefined || observation === undefined || observation.state !== recorded) return;
+    const sinceMs = observation.confirmed ? lookedMs : before?.state === observation.state ? lookedBeforeMs : undefined;
+    if (sinceMs === undefined) return;
     try {
-      this.ports.agreed?.(session.id, recorded);
+      this.ports.agreed?.(session.id, recorded, new Date(sinceMs).toISOString());
     } catch {}
   }
 
@@ -246,8 +264,10 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
       look = { transcript, pane, questionOpen };
     }
     const before = this.previous.get(session.id);
+    const lookedBeforeMs = this.lookedAt.get(session.id);
     const step = stepTurn(session.state, before, look);
     this.previous.set(session.id, step.observation);
+    this.lookedAt.set(session.id, nowMs);
     const change = step.change;
     const frame = frameOf(look);
     const quiet =
@@ -270,7 +290,7 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
       facts,
     });
     if (change === undefined) {
-      this.tellAgreed(session, step.observation);
+      this.tellAgreed(session, step.observation, before, nowMs, lookedBeforeMs);
       return undefined;
     }
     const recorded = await this.ports.record(session.id, change, this.ports.clock.now());

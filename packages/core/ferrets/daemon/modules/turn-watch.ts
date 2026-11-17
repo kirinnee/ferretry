@@ -357,11 +357,13 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
           // a launch (start, resume, attach) set it `working` while the document kept the last run's `your-turn` (a
           // resume that beat the tick which would have cleared it), and a run whose turns all end between two looks
           // never records a change. Left alone, the ferret read `working` for ever and the Warden nudged it every few
-          // minutes. One registry read per look; the registry is written only when it disagrees.
-          agreed: (id: SessionId, turn: SessionTurnState) => {
+          // minutes. One registry read per look; the registry is written only when it disagrees, and never on evidence
+          // older than its own last move (a frame of the pane a launch replaced).
+          agreed: (id: SessionId, turn: SessionTurnState, since: string) => {
             const record = ferretOf(id);
             if (record === undefined || (record.state !== 'working' && record.state !== 'idle')) return;
             if (record.state === (turn === 'working' ? 'working' : 'idle')) return;
+            if (Date.parse(since) < Date.parse(record.stateAt)) return;
             void deps.turnObserved(id as unknown as FerretId, turn).catch((error: unknown) =>
               deps.log.warn("a ferret's state could not follow its recorded turn", {
                 ferret: id,
