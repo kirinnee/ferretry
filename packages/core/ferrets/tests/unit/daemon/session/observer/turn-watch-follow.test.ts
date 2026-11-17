@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
+import { type Instant, instantFromEpochMs } from '@ferretry/std';
 import should from 'should';
 import type { FerretId, FerretRecord, RunnerHandle } from '../../../../../contract/index.ts';
-import { fleetOf } from '../../../../support/daemon/turn-watch-fleet.ts';
+import { FLEET_NOW, fleetOf } from '../../../../support/daemon/turn-watch-fleet.ts';
 
 /**
  * The registry follows the RECORDED turn, not only its changes (FX5): a resumed ferret whose document still held the
@@ -12,7 +13,11 @@ import { fleetOf } from '../../../../support/daemon/turn-watch-fleet.ts';
 
 type Turn = 'working' | 'your-turn' | 'needs-input';
 
-const following = async (turnState: 'your-turn' | 'working' | 'needs-input', registry: 'working' | 'idle') => {
+const following = async (
+  turnState: 'your-turn' | 'working' | 'needs-input',
+  registry: 'working' | 'idle',
+  more: { readonly openTurn?: boolean; readonly stateAt?: Instant } = {},
+) => {
   const observed: { readonly ferret: FerretId; readonly turn: Turn }[] = [];
   let records: Map<string, FerretRecord> | undefined;
   const fleet = await fleetOf(
@@ -21,6 +26,7 @@ const following = async (turnState: 'your-turn' | 'working' | 'needs-input', reg
     {},
     {
       registry,
+      ...more,
       // FerretsService.turnObserved, reduced: the registry takes the state the turn says.
       turnObserved: async (ferret, turn) => {
         observed.push({ ferret, turn });
@@ -67,9 +73,64 @@ describe('the turn watch moves a registry state that disagrees with an agreeing 
     should(fleet.records.get(id as string)?.state).equal('idle');
   });
 
-  it('should not take an unconfirmed your-turn as agreement, on its first look or on the frames after it', async () => {
-    // Arrange: a spinner-shaped line over a transcript whose turn ended is a weak your-turn (unconfirmed): after a kill
-    // and a resume inside one tick its first frame may be the old pane's, so it must never move the registry.
+  it('should make jajuan idle: registry working after a resume, document your-turn, pane at its prompt, transcript ending on a reply with no boundary', async () => {
+    // Arrange: slot 8's jajuan (FX6). The fake Claude writes no `stop_reason`, so its transcript never proves the turn
+    // ended and every look at its prompt is an UNCONFIRMED your-turn. The daemon was restarted, so no look is remembered.
+    const { fleet, observed, settle } = await following('your-turn', 'working', { openTurn: true });
+    const [id] = [...fleet.records.keys()];
+
+    // Act: the first look alone is no agreement; the second frame agrees with it, as two frames record a your-turn.
+    await fleet.tick(() => undefined, 0);
+    await settle();
+    const afterOne = [...observed];
+    for (let n = 1; n < 3; n += 1) await fleet.tick(() => undefined, n);
+    await settle();
+
+    // Assert
+    should(afterOne).deepEqual([]);
+    should(observed).deepEqual([{ ferret: id, turn: 'your-turn' }]);
+    should(fleet.records.get(id as string)?.state).equal('idle');
+  });
+
+  it('should not take two frames as agreement when the older one was looked at before the launch moved the registry', async () => {
+    // Arrange: a kill and a resume inside one tick: the launch moved the registry 1 s after the first look, so that
+    // look may be the old pane's. Only two frames taken after the launch may agree.
+    const launchedAt = instantFromEpochMs(Date.parse(FLEET_NOW) + 1_000);
+    const { fleet, observed, settle } = await following('your-turn', 'working', {
+      openTurn: true,
+      stateAt: launchedAt,
+    });
+    const [id] = [...fleet.records.keys()];
+
+    // Act
+    for (let n = 0; n < 2; n += 1) await fleet.tick(() => undefined, n);
+    await settle();
+    const straddling = [...observed];
+    // The quiet pane backs off: its third look is due 4 s after its second (two more ticks).
+    for (let n = 2; n < 4; n += 1) await fleet.tick(() => undefined, n);
+    await settle();
+
+    // Assert
+    should(straddling).deepEqual([]);
+    should(observed).deepEqual([{ ferret: id, turn: 'your-turn' }]);
+  });
+
+  it('should not take a confirmed look taken before the launch moved the registry as agreement', async () => {
+    // Arrange: the registry moved after the only look began (a launch landing mid-look).
+    const launchedAt = instantFromEpochMs(Date.parse(FLEET_NOW) + 1_000);
+    const { fleet, observed, settle } = await following('your-turn', 'working', { stateAt: launchedAt });
+
+    // Act
+    await fleet.tick(() => undefined, 0);
+    await settle();
+
+    // Assert
+    should(observed).deepEqual([]);
+  });
+
+  it('should not take a single unconfirmed your-turn as agreement', async () => {
+    // Arrange: a spinner-shaped line over a transcript whose turn ended is a weak your-turn (unconfirmed), and one
+    // weak frame between two spinner redraws must never end a turn.
     const { fleet, observed, settle } = await following('your-turn', 'working');
     const spinner = (handle: RunnerHandle) =>
       fleet.runner.screens.set(handle, {
@@ -81,7 +142,7 @@ describe('the turn watch moves a registry state that disagrees with an agreeing 
       });
 
     // Act
-    for (let n = 0; n < 3; n += 1) await fleet.tick(spinner, n);
+    await fleet.tick(spinner, 0);
     await settle();
 
     // Assert

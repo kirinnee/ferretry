@@ -1,4 +1,5 @@
 import { afterEach } from 'bun:test';
+import type { Instant } from '@ferretry/std';
 import type {
   FerretId,
   FerretRecord,
@@ -21,6 +22,8 @@ import { memoryStorage, RecordingLog, sessionConfig } from './storage.ts';
  */
 
 export const WARM_TICKS = 10;
+/** When the fleet's first tick looks; each tick after it is one 2 s interval later. */
+export const FLEET_NOW = '2026-11-08T10:00:00.000Z';
 export const MEASURED_TICKS = 30; // one minute of 2 s ticks
 
 /** About one 512 KB window of a Claude transcript: ~300 records of ~1.7 KB, each one parsed on every read. */
@@ -36,13 +39,16 @@ class TailHarness extends FakeHarness {
   readonly #sizes = new Map<FerretId, number>();
   readonly #lines: readonly string[];
 
-  constructor() {
+  /** `openTurn`: the tail ends on the agent's reply with no turn boundary, as the fake Claude writes it. */
+  constructor(openTurn = false) {
     super();
     const at = new Date(RECORD_T0).toISOString();
+    // The last line (odd) is the turn boundary, or with `openTurn` the reply it would have followed.
+    const boundary = (index: number) => !openTurn && index === TAIL_LINES - 1;
     this.#lines = Array.from({ length: TAIL_LINES }, (_, index) =>
       JSON.stringify({
-        kind: index === TAIL_LINES - 1 ? 'turn' : index % 2 === 0 ? 'work' : 'message',
-        ...(index === TAIL_LINES - 1 ? { state: 'completed' } : index % 2 === 0 ? {} : { role: 'assistant' }),
+        kind: boundary(index) ? 'turn' : index % 2 === 0 ? 'work' : 'message',
+        ...(boundary(index) ? { state: 'completed' } : index % 2 === 0 ? {} : { role: 'assistant' }),
         at,
         pad: 'x'.repeat(RECORD_LINE_BYTES),
       }),
@@ -84,6 +90,10 @@ export interface FleetHooks {
 export interface FleetOptions {
   /** The registry state every ferret starts on; absent: the one its recorded turn says. */
   readonly registry?: 'working' | 'idle';
+  /** When the registry state was last moved (a launch); absent: the fixture's T0, long before the first look. */
+  readonly stateAt?: Instant;
+  /** The transcript tail ends on a reply with no turn boundary (the fake Claude's), so a prompt is an unconfirmed look. */
+  readonly openTurn?: boolean;
   readonly turnObserved?: (ferret: FerretId, turn: 'working' | 'your-turn' | 'needs-input') => Promise<void>;
 }
 
@@ -96,7 +106,7 @@ export async function fleetOf(
   const { storage } = await memoryStorage({ clock: { now: () => new Date(RECORD_T0).toISOString() } });
   cleanups.push(async () => await storage.close());
   const runner = Object.assign(new FakeRunner(), { requireFerret: true });
-  const harness = new TailHarness();
+  const harness = new TailHarness(options.openTurn);
   const transcripts = new HarnessTranscript(
     () => harness,
     () => 'claude-code',
@@ -117,10 +127,10 @@ export async function fleetOf(
       state: options.registry ?? (turnState === 'working' ? 'working' : 'idle'),
       handle: runner.adoptable(id as unknown as FerretId),
       createdAt: RECORD_T0,
-      stateAt: RECORD_T0,
+      stateAt: options.stateAt ?? RECORD_T0,
     } as FerretRecord);
   }
-  let nowMs = Date.parse('2026-11-08T10:00:00.000Z');
+  let nowMs = Date.parse(FLEET_NOW);
   const { host } = buildTurnWatch({
     storage,
     tail: transcripts.tail,
