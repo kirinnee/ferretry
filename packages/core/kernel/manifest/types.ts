@@ -439,7 +439,7 @@ export interface PublicFileDecl {
  * write returns: those writers ask the index to look again first, so a first write has no window. Root calls made
  * after the write returns are covered; a root call already running alongside the write is not. A private file made
  * OUTSIDE the daemon is pinned only at the index's next look, within 250 ms (as in v4): a file a child process makes
- * inside a private folder. (A file the CLI's own state port makes is built without the pin, so a private file is never
+ * inside a private folder, unless its owner tells the port with `pinMade` once the child has made it. (A file the CLI's own state port makes is built without the pin, so a private file is never
  * made there: Access's `fy pair --open` redirect page under `pairing-redirects` is made by the daemon,
  * `POST /v1/pair/redirect`.) An entry met through any root under another name, a bind mount included, is refused
  * `fenced` (fail closed). A look that cannot be made fails closed too: the write rejects with `private_unpinned` and
