@@ -78,9 +78,10 @@ export default implementCli(manifest, {
               ...options(invocation),
               estimate: flag(invocation, 'estimate'),
               start: flag(invocation, 'start'),
-              ...(value(invocation, 'ferrets') === undefined
+              // `--sessions` is the declared name; `--ferrets` is what the code read before, and still works.
+              ...((value(invocation, 'sessions') ?? value(invocation, 'ferrets')) === undefined
                 ? {}
-                : { ferrets: value(invocation, 'ferrets') as string }),
+                : { ferrets: (value(invocation, 'sessions') ?? value(invocation, 'ferrets')) as string }),
               ...(value(invocation, 'agent') === undefined ? {} : { agent: value(invocation, 'agent') as string }),
               ...(value(invocation, 'model') === undefined ? {} : { model: value(invocation, 'model') as string }),
             }),

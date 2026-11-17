@@ -12,6 +12,7 @@ export default fragment({
         { name: 'message', help: 'the message text', optional: true, variadic: true },
       ],
       options: [
+        { flag: '-s, --session <id>', help: 'send as this ferret; defaults to the one this runs inside', hidden: true },
         { flag: '-f, --file <file>', help: 'attach a supported image or document; repeatable (default: [])' },
         { flag: '--message-file <file>', help: 'read the message from a file (use for long messages)' },
         { flag: '--now', help: 'interrupt the active turn and deliver immediately instead of riding the queue' },
@@ -36,6 +37,16 @@ export default fragment({
         { name: 'message', help: 'the reply text', variadic: true },
       ],
       options: [
+        {
+          flag: '-s, --session <id>',
+          help: 'reply as this ferret; defaults to the one this runs inside',
+          hidden: true,
+        },
+        { flag: '-f, --file <file>', help: 'attach a supported image or document; repeatable', hidden: true },
+        { flag: '--message-file <file>', help: 'read the reply from a file', hidden: true },
+        { flag: '--now', help: 'interrupt the active turn and deliver immediately', hidden: true },
+        { flag: '--until <when>', help: 'give up waiting after this long', hidden: true },
+        { flag: '--wait', help: 'wait until the reply is proven delivered', hidden: true },
         {
           flag: '--kind <kind>',
           help: "blocker | action | fyi (default action): how soon it is delivered — a blocker at once, actions combined for a minute, an fyi held until the receiver's turn ends",

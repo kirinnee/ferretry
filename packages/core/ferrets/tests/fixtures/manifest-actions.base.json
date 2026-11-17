@@ -106,6 +106,11 @@
       "args": [],
       "options": [
         {
+          "flag": "--pack <label>",
+          "help": "only the sessions in this pack",
+          "hidden": true
+        },
+        {
           "flag": "-a, --all",
           "help": "include terminal sessions (completed/failed/stalled/stopped)"
         },
@@ -152,6 +157,16 @@
         }
       ],
       "options": [
+        {
+          "flag": "--runtime <name>",
+          "help": "the same as --agent",
+          "hidden": true
+        },
+        {
+          "flag": "--card <id>",
+          "help": "the former name of --task",
+          "hidden": true
+        },
         {
           "flag": "-a, --agent <agent>",
           "help": "the runtime to run it on, such as claude-default (--runtime also works); leave it out to use this machine’s default runtime for new agents"
@@ -290,6 +305,26 @@
         }
       ],
       "options": [
+        {
+          "flag": "-a, --agent <agent>",
+          "help": "the same as --runtime",
+          "hidden": true
+        },
+        {
+          "flag": "--card <id>",
+          "help": "the former name of --task",
+          "hidden": true
+        },
+        {
+          "flag": "-f, --file <file>",
+          "help": "refused with a sentence: attachments belong to `start`",
+          "hidden": true
+        },
+        {
+          "flag": "--request-id <id>",
+          "help": "refused with a sentence: an idempotency key belongs to `start`",
+          "hidden": true
+        },
         {
           "flag": "--runtime <name>",
           "help": "the runtime to run it on (`fy recommend` lists them); name one, or pass --auto"

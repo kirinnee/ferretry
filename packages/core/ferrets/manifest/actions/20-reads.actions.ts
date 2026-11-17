@@ -32,6 +32,7 @@ export default fragment({
       summary: 'list ferrets',
       args: [],
       options: [
+        { flag: '--pack <label>', help: 'only the sessions in this pack', hidden: true },
         { flag: '-a, --all', help: 'include terminal sessions (completed/failed/stalled/stopped)' },
         { flag: '-l, --label <label>', help: 'only sessions started with this ownership label' },
         { flag: '--json', help: 'print the selected sessions as JSON' },

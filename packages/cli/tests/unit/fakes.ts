@@ -64,7 +64,14 @@ export const boardManifest = definePlugin({
       route('POST /v1/cards/:id/move', { ...SCOPE, caller: 'person' }),
     ],
     agentTools: [tool('card_show', { ...SCOPE, caller: 'any' }), tool('card_rules', { ...SCOPE, caller: 'person' })],
-    cli: [verb('task show', { summary: 'show a card' }), verb('task move', { summary: 'move a card' }), verb('board')],
+    cli: [
+      verb('task show', { summary: 'show a card', options: [{ flag: '--json', help: 'print it as JSON' }] }),
+      verb('task move', {
+        summary: 'move a card',
+        options: [{ flag: '--to <lane>', help: 'the lane it moves to' }],
+      }),
+      verb('board'),
+    ],
   },
 });
 

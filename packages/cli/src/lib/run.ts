@@ -44,6 +44,7 @@ import { wordsVerb } from './commands/words.ts';
 import { updateVerb } from './commands/update.ts';
 import { EXIT, reportFailure, ShellError } from './errors.ts';
 import { lazyClient } from './lazy-client.ts';
+import { undeclaredOption } from './option-guard.ts';
 import { declaredEnvironment, pluginEnvironment } from './plugin-env.ts';
 import { buildPluginGraph } from './plugin-graph.ts';
 import type { ShellContext, ShellVerb } from './shell-context.ts';
@@ -265,6 +266,16 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     return EXIT.ok;
   }
   const invocation = parseArgs(resolved.rest, declaredSwitches(entry.options));
+  // An option the verb does not declare is refused here, before anything connects or runs: a verb reads only the names
+  // it knows, so an undeclared one (`restart --outdated --dry-run`) would otherwise be dropped without a word.
+  const stray = undeclaredOption(entry.owner, entry.line, entry.options, invocation);
+  if (stray !== undefined) {
+    const verbLine = entry.words.join(' ');
+    io.err(
+      `${identity.binary}: unknown option ${stray} for "${verbLine}"; see \`${identity.binary} ${verbLine} --help\`\n`,
+    );
+    return EXIT.usage;
+  }
   const lacking = missingRequiredOption(entry, invocation);
   if (lacking !== undefined) {
     io.err(`error: required option '${lacking.flag}' not specified\n${usageLine(identity.binary, entry)}\n`);

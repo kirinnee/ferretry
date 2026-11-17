@@ -14,7 +14,7 @@
  */
 import { editConfigText, readConfigText } from '@ferretry/std/yaml';
 import type { CliContext, VerbHandler, VerbInvocation } from './implement.ts';
-import type { Manifest } from './types.ts';
+import type { Manifest, VerbOptionDecl } from './types.ts';
 
 /** The terminal's exit codes this uses: success, a refusal, a mistake in how the verb was typed. */
 const OK = 0;
@@ -85,6 +85,19 @@ interface PutResult {
 
 /** The component flags today's `fy` took; each collection takes the ones its `keys` name and refuses the rest. */
 const V4_ONLY_FLAGS = ['command', 'arg', 'url', 'env', 'flag', 'item', 'model', 'default', 'harness'] as const;
+
+/**
+ * The component flags a collection does NOT take, as hidden declarations for its `add` and `edit` verbs. The shell
+ * refuses an option a verb does not declare; these are read, and refused with a sentence that names what the collection
+ * does take (`A hooks item has no --env: --file <path>.`), so they are declared hidden: they reach the verb, never `--help`.
+ * `held` are the flags the collection takes (its `keys.flags`), declared by the manifest in the ordinary way.
+ */
+export const refusedItemOptions = (held: readonly string[]): readonly VerbOptionDecl[] =>
+  V4_ONLY_FLAGS.filter(flag => !held.includes(flag)).map(flag => ({
+    flag: `--${flag} <value>`,
+    help: 'refused with a sentence: this collection does not take it',
+    hidden: true,
+  }));
 
 /** An item's name as typed: one path segment, never a way out of the collection. */
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;

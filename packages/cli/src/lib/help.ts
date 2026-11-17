@@ -133,7 +133,12 @@ export function renderVerbHelp(binary: string, entry: VerbEntry, table: VerbTabl
   lines.push(
     '',
     'Options:',
-    ...columns([...(entry.options ?? []).map(option => [option.flag, option.help] as const), [...pair(HELP_OPTION)]]),
+    ...columns([
+      ...(entry.options ?? [])
+        .filter(option => option.hidden !== true)
+        .map(option => [option.flag, option.help] as const),
+      [...pair(HELP_OPTION)],
+    ]),
   );
   if (below.length > 0) lines.push('', ...groupList(binary, entry.words, below));
   return lines.join('\n');
