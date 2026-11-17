@@ -117,6 +117,46 @@ describe('the Secrets page', () => {
     }
   });
 
+  it('S4 never puts the typed value in the value attribute of the field, the markup or a DOM snapshot', async () => {
+    const { client } = daemon();
+    const mounted = await mount(<SecretsSurface client={client} />);
+    await settle();
+    try {
+      const form = q(mounted.container, 'form');
+      const value = q<HTMLInputElement>(form, 'input[type=password]');
+      await typeInto(q(form, 'input:not([type=password])'), 'NEW_TOKEN');
+      await typeInto(value, FAKE_VALUE);
+      // Typed, and Save is ready: the field holds it, but only as its live value, never as the `value` attribute.
+      expect(value.value).toBe(FAKE_VALUE);
+      expect(q<HTMLButtonElement>(form, 'button[type=submit]').disabled).toBe(false);
+      expect(value.getAttribute('value')).toBeNull();
+      expect(value.outerHTML).not.toContain(FAKE_VALUE);
+      expect(mounted.container.innerHTML).not.toContain(FAKE_VALUE);
+      // A re-render while it is typed (the name changes) does not sync it into the markup either.
+      await typeInto(q(form, 'input:not([type=password])'), 'OTHER_TOKEN');
+      expect(value.value).toBe(FAKE_VALUE);
+      expect(value.getAttribute('value')).toBeNull();
+      expect(mounted.container.innerHTML).not.toContain(FAKE_VALUE);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('S4 keeps Save disabled and says so while the typed value is too short, without holding it', async () => {
+    const { client } = daemon();
+    const mounted = await mount(<SecretsSurface client={client} />);
+    await settle();
+    try {
+      const form = q(mounted.container, 'form');
+      await typeInto(q(form, 'input:not([type=password])'), 'NEW_TOKEN');
+      await typeInto(q(form, 'input[type=password]'), 'x');
+      expect(q<HTMLButtonElement>(form, 'button[type=submit]').disabled).toBe(true);
+      expect(form.textContent).toContain('At least');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
   it('S4 replaces a secret by naming it, saying it is a replacement, and shows it as changed', async () => {
     const { client, calls } = daemon();
     const mounted = await mount(<SecretsSurface client={client} />);
