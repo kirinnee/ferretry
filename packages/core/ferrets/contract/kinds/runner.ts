@@ -227,13 +227,16 @@ export interface Runner {
    * this start, descends from this pane's root at the moment of the call. `false`: not delivered (not a descendant, the
    * pid was reused, it is protected, or the pane is gone). Never init, the daemon or its parents. It is the narrowest
    * kill there is: the runner proves descent, so core holds no capability to signal an arbitrary pid. Absent: nothing is
-   * signalled, and the job's own pane is left to the person.
+   * signalled, and the job's own pane is left to the person. The `ferret` is REQUIRED: a call that names none would match
+   * ANY ferret's pane, so a stale handle (the private server hands pane ids out again after a restart) could signal another
+   * ferret's process tree. A pane that is another ferret's is refused as {@link Runner.identify} refuses it (`false`).
    */
   signalDescendant?(
     handle: RunnerHandle,
     pid: number,
     start: string | undefined,
     signal: 'SIGTERM' | 'SIGKILL',
+    ferret: FerretId,
   ): Promise<boolean>;
   /**
    * Additive (U4, today's `StorageTurnPorts.pane` over `PaneFrames`): ONE look at the live ferret pane behind `handle`,

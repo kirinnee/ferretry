@@ -18,6 +18,7 @@ import { waitFor } from '../support/wait-for.ts';
  */
 const linux = process.platform === 'linux';
 const TMUX = Bun.which('tmux');
+const FERRET = ferretId('idn');
 const cleanups: (() => Promise<void> | void)[] = [];
 
 afterEach(async () => {
@@ -62,7 +63,7 @@ async function pane(signal?: (pid: number, signal: 'SIGTERM' | 'SIGKILL') => voi
     processes: signal === undefined ? paneProcessHost(spawn) : { ...paneProcessHost(spawn), signal },
   });
   const started = await runner.start({
-    ferret: ferretId('idn'),
+    ferret: FERRET,
     command: ['sh', '-c', 'sleep 300 & sleep 301 & wait'],
     cwd: fenced(root),
     env: handle,
@@ -101,9 +102,9 @@ describe('TmuxRunner.identify and signalDescendant over a real tmux server', () 
 
       // Act + Assert
       for (code of ['ESRCH', 'EPERM'])
-        should(await runner.signalDescendant(handle, target.pid, target.start, 'SIGTERM')).equal(false);
+        should(await runner.signalDescendant(handle, target.pid, target.start, 'SIGTERM', FERRET)).equal(false);
       code = 'EINVAL';
-      await runner.signalDescendant(handle, target.pid, target.start, 'SIGTERM').then(
+      await runner.signalDescendant(handle, target.pid, target.start, 'SIGTERM', FERRET).then(
         () => {
           throw new Error('an unexpected errno must reject');
         },
@@ -141,25 +142,29 @@ describe('TmuxRunner.identify and signalDescendant over a real tmux server', () 
     const outsiderStart = await kernelStart(outsider.pid);
 
     // Act + Assert — a process outside the pane, a wrong start, the root itself and the daemon are all refused
-    should(await runner.signalDescendant(handle, outsider.pid, outsiderStart, 'SIGKILL')).equal(false);
-    should(await runner.signalDescendant(handle, first.pid, String(Number(first.start) + 1), 'SIGKILL')).equal(false);
-    should(await runner.signalDescendant(handle, rootPid, await kernelStart(rootPid), 'SIGKILL')).equal(false);
-    should(await runner.signalDescendant(handle, process.pid, await kernelStart(process.pid), 'SIGKILL')).equal(false);
+    should(await runner.signalDescendant(handle, outsider.pid, outsiderStart, 'SIGKILL', FERRET)).equal(false);
+    should(await runner.signalDescendant(handle, first.pid, String(Number(first.start) + 1), 'SIGKILL', FERRET)).equal(
+      false,
+    );
+    should(await runner.signalDescendant(handle, rootPid, await kernelStart(rootPid), 'SIGKILL', FERRET)).equal(false);
+    should(await runner.signalDescendant(handle, process.pid, await kernelStart(process.pid), 'SIGKILL', FERRET)).equal(
+      false,
+    );
     should(await running(outsider.pid)).equal(true);
     should(await running(first.pid)).equal(true);
     should(await running(second.pid)).equal(true);
 
     // Act — the proved descendant gets the signal
-    should(await runner.signalDescendant(handle, first.pid, first.start, 'SIGTERM')).equal(true);
+    should(await runner.signalDescendant(handle, first.pid, first.start, 'SIGTERM', FERRET)).equal(true);
 
     // Assert — only that pid ended; its sibling, the pane and the outsider are untouched
     await waitFor(async () => !(await running(first.pid)), 'the signalled process to end');
     should(await running(second.pid)).equal(true);
     should(await running(rootPid)).equal(true);
     should(await running(outsider.pid)).equal(true);
-    should(await runner.signalDescendant(handle, second.pid, second.start, 'SIGKILL')).equal(true);
+    should(await runner.signalDescendant(handle, second.pid, second.start, 'SIGKILL', FERRET)).equal(true);
     await waitFor(async () => !(await running(second.pid)), 'the SIGKILLed process to end');
     // A pid that has ended is no descendant any more.
-    should(await runner.signalDescendant(handle, first.pid, first.start, 'SIGTERM')).equal(false);
+    should(await runner.signalDescendant(handle, first.pid, first.start, 'SIGTERM', FERRET)).equal(false);
   });
 });
