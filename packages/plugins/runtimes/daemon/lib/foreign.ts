@@ -121,7 +121,6 @@ export const AGENDA_SHAPE_LINE =
 export type LaunchInstructionSectionId =
   | 'tools'
   | 'settings'
-  | 'jobs'
   | 'notify'
   | 'board'
   | 'sub-ferret'

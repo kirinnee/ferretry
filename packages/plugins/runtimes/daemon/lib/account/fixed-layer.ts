@@ -455,23 +455,15 @@ export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   ].join('\n');
 
 /**
- * Long jobs and the job keeper (docs/jobs.md § How agents are told). There are NO hooks: this section is how a Claude or
- * a Codex ferret learns to run a long or watch-style command through `fy job run`, so it survives a move or a restart,
- * and to re-attach afterwards. Always on, for every agent runtime, because every one can start a background command.
- */
-export const JOBS_INSTRUCTION = (fy: string): string =>
-  `Ferretry jobs: run long or watch-style commands (dev servers, watchers, tails, builds or tests over ~2 min) as a BACKGROUND \`${fy} job run --name <x> -- <cmd>\` (Claude: Bash with run_in_background; Codex: not a background terminal); short ones stay as they are. That command is only an attachment: the job keeps running if it ends. Read with \`${fy} job logs <id>\`, wait with \`${fy} job wait <id>\`. After a move or restart, re-attach with a new background \`${fy} job attach <id>\` (\`${fy} job ls\`; the restart notice's "Your jobs"). Stop with \`${fy} job stop <id>\`; TaskStop or closing the terminal only detaches.`;
-
-/**
- * What every agent runtime is told, whoever it is: the tools, the settings rules and the jobs rule. The wrapper appends
+ * What every agent runtime is told, whoever it is: the tools and the settings rules. The wrapper appends
  * a sub-ferret's {@link SUB_FERRET_INSTRUCTION} after it.
  */
 export const AGENT_BASE_INSTRUCTION = (fy: string): string =>
-  `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}\n\n${JOBS_INSTRUCTION(fy)}`;
+  `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}`;
 
 /** One section every agent runtime is told, whatever its switches: its id and its exact text. */
 export interface AlwaysOnSection {
-  readonly id: 'tools' | 'settings' | 'jobs' | 'sub-ferret';
+  readonly id: 'tools' | 'settings' | 'sub-ferret';
   readonly text: string;
 }
 
@@ -482,7 +474,6 @@ export interface AlwaysOnSection {
 export const ALWAYS_ON_SECTIONS = (fy: string, subFerret = false): readonly AlwaysOnSection[] => [
   { id: 'tools', text: AGENT_TOOLS_INSTRUCTION },
   { id: 'settings', text: SET_UP_FERRETRY_INSTRUCTION(fy) },
-  { id: 'jobs', text: JOBS_INSTRUCTION(fy) },
   ...(subFerret ? [{ id: 'sub-ferret' as const, text: SUB_FERRET_INSTRUCTION(fy) }] : []),
 ];
 
@@ -509,7 +500,7 @@ export function instructionDigest(text: string): string {
  * tool is left in.
  *
  * Read off the same constants the wrapper renders (`../wrappers.ts`), so it cannot describe a prompt
- * the wrapper would not build: the tools, settings and jobs sections always (and the sub-ferret section for a sub-ferret) (each with its {@link instructionDigest}), each {@link FERRET_SECTIONS}
+ * the wrapper would not build: the tools and settings sections always (and the sub-ferret section for a sub-ferret) (each with its {@link instructionDigest}), each {@link FERRET_SECTIONS}
  * entry whose variable is exactly `1`. The question tool is never left in (owner !A527), so `questions` is always
  * `false`. It describes an AGENT runtime's wrapper, the only kind a session can be started on.
  */

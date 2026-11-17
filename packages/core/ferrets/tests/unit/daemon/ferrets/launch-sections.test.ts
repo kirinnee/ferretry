@@ -79,3 +79,31 @@ describe('a launch records what it told the ferret', () => {
     await h.stop();
   });
 });
+
+describe('the job keeper section (F4316: Terminals declares `jobs` for every role, no harness named)', () => {
+  const jobs = entry('jobs', 'Ferretry jobs: run long commands as `fy job run`.', { role: 'any' });
+  const others = [
+    entry('board', 'the board rules', { role: 'lead' }),
+    entry('rm-targets', 'rm', { harness: 'claude-code' }),
+  ];
+
+  test('every role on every harness is given it, in auto and interactive alike (a launch narrows by role and harness only)', () => {
+    for (const role of ['lead', 'helper'] as const)
+      for (const harness of ['claude-code', 'codex'] as const)
+        expect(applicableInstructions([...others, jobs], { role, harness }).map(each => each.id)).toContain('jobs');
+  });
+
+  test('a ferret launched before the section existed is shown it as outdated, nothing else, and nothing throws', () => {
+    const before = sectionDigests([entry('board', 'the board rules', { role: 'lead' })]);
+    const now = sectionDigests([entry('board', 'the board rules', { role: 'lead' }), jobs]);
+    expect(outdatedSectionIds(before, now)).toEqual(['jobs']);
+    // And the same ferret once relaunched has recorded it: current again.
+    expect(outdatedSectionIds(now, now)).toEqual([]);
+  });
+
+  test('a rewording of the section is outdated too', () => {
+    const told = sectionDigests([jobs]);
+    const reworded = sectionDigests([entry('jobs', 'a better paragraph', { role: 'any' })]);
+    expect(outdatedSectionIds(told, reworded)).toEqual(['jobs']);
+  });
+});

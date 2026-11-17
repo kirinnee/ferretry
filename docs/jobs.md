@@ -1,9 +1,9 @@
 # Background jobs (the job keeper)
 
 A **job** is a non-interactive command that Ferretry keeps for a ferret, so a long watcher or build survives the agent being moved,
-restarted or killed. This is parts 1 and 2 of three: the keeper and the `fy job` verbs (1), and how moves and restarts treat jobs (2, [below](#moves-and-restarts)).
-The agent instructions are part 3 (see [What is not here yet](#what-is-not-here-yet)). **There are no hooks of any kind** — no Claude
-PreToolUse rewrite, no TaskStop/KillShell hook, no Codex hook: agents are taught to use `fy job run` by instruction alone.
+restarted or killed. It has three parts: the keeper and the `fy job` verbs, how moves and restarts treat jobs ([below](#moves-and-restarts)),
+and how agents are told to use it ([below](#how-agents-are-told)). **There are no hooks of any kind**: agents are taught to use `fy job run`
+by instruction alone.
 
 ## Who owns what
 
@@ -140,13 +140,17 @@ in the ferret's limits scope like a terminal an agent opened.
 
 ## How agents are told
 
-Agents learn to use the keeper from their system prompt **alone**. There are no hooks of any kind: no Claude PreToolUse rewrite, no
-TaskStop/KillShell hook, no Codex hook. The words are the always-on **`jobs`** section (`JOBS_INSTRUCTION` in
-`plugins/runtimes/daemon/lib/account/fixed-layer.ts`), appended to the prompt of every agent runtime, Claude and Codex, interactive or auto,
-lead or sub-ferret, rendered with the binary's own name. It teaches four things in one paragraph:
+Agents learn to use the keeper from their system prompt **alone**. The words are one paragraph in
+[`packages/plugins/terminals/instructions/jobs.md`](../packages/plugins/terminals/instructions/jobs.md), declared by the Terminals manifest as
+`instructions: [{ id: 'jobs', text: 'instructions/jobs.md', when: { role: 'any' } }]`. That is the path every plugin instruction takes: the
+kernel snapshot reads the entry, a launch gives it to every ferret whose `when` matches (`role: any` and no harness named: lead and
+sub-ferret, Claude and Codex, interactive and auto), and the harness writes it into the ferret's own memory file (Claude's `CLAUDE.md`,
+Codex's `AGENTS.md`). The file spells the binary `fy` literally, as the other instruction files do; a rename changes it with
+`scripts/local/rename.sh`. It teaches four things:
 
 1. Start a long or watch-style command (dev server, watcher, tail, a build or tests over about 2 minutes) as a BACKGROUND
-   `fy job run --name <x> -- <cmd>` (Claude: Bash with `run_in_background`; Codex: instead of a background terminal). Short commands stay as they are.
+   `fy job run --name <x> -- <cmd>` (Claude: Bash with `run_in_background`; Codex: `exec_command` with a short `yield_time_ms`, never the bare
+   command left running). Short commands stay as they are.
 2. That background command is only an attachment: the job keeps running if it ends. Read output with `fy job logs <id>`; wait with `fy job wait <id>`.
 3. After a move or restart, re-attach with a new background `fy job attach <id>` (`fy job ls` lists the jobs; the restart notice lists them under "Your jobs").
 4. Stop a job with `fy job stop <id>`. Stopping the background command (TaskStop, or closing the terminal) only detaches.
@@ -154,14 +158,16 @@ lead or sub-ferret, rendered with the binary's own name. It teaches four things 
 Why the prompt can do this alone: on a move or restart Claude TERM→KILLs its background shells about 1.45 s after the pane dies, and Codex SIGKILLs its
 background terminals 60 s after the client leaves; a job the keeper holds is neither's child, so only the attachment dies, and the agent re-attaches.
 
-It is a section of its own (not part of `tools`) so a running ferret is told the new words once, by the instruction-refresh note
-([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)); its id is `jobs`, shown as "Jobs" in that note and
-"background jobs" on the outdated mark. A text change to it is picked up the same way.
+**A ferret already running.** A harness reads its prompt once, at launch. A launch records each section's id and fingerprint, so a ferret launched before
+this section existed is marked **outdated** (the mark reads "background jobs", and **Restart outdated** reloads it); nothing breaks, it simply lacks the
+section. **Declared gap:** running ferrets are **not** sent the note live. They learn it at their next restart or move.
+
+The words reach a ferret through the generated instruction-text map that feeds every manifest instruction to the daemon ([launch-settings.md](launch-settings.md)).
 
 ## Measuring it
 
 Whether agents obey is a **hand check**, not a dashboard. **Obedience** is the share of a ferret's long or watch-style _background_ commands that went
-through `fy job run`. Count, from a ferret's transcript, the background commands (Claude: Bash with `run_in_background`; Codex: background terminals)
+through `fy job run`. Count, from a ferret's transcript, the background commands (Claude: Bash with `run_in_background`; Codex: `exec_command` sessions left running)
 that are long or watch-style by the section's own test, and how many of them were `fy job run`; cross-check against the keeper's list (`fy job ls --all`). Short
 background commands are not counted either way. The bar is **70%**: below it the words need work (shorter, an example, a stronger verb), not a hook.
 There is nothing to build or schedule for this; do the check when a change to the section ships, and when the move gate keeps naming un-kept jobs.
@@ -256,7 +262,7 @@ that was SIGKILLed leaves the tool shell and the attachment running, reparented 
 
 ## What is not here yet
 
-- Agent instructions telling agents to start long jobs with `fy job run` and re-attach after a move (part 3).
+- Running ferrets are not sent the jobs instruction live: they learn it at their next restart or move (see [How agents are told](#how-agents-are-told)).
 - `detach` also asks an attachment in a person's own terminal (outside the pane) to let go.
 - During a move the hand-over and the backstop can both tell the same job if it ends in that window (the two are not atomic).
 - The detach runs before the relaunch, and a relaunch that then refuses (the pane changed, the spawn failed) leaves the attachments already let go.

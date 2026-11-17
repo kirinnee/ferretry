@@ -30,7 +30,6 @@ import {
   PACK_ROUTING_ENV,
   PASSIVE_LEARNING_ENV,
   SESSION_MODE_ENV,
-  JOBS_INSTRUCTION,
   SET_UP_FERRETRY_INSTRUCTION,
   SUB_FERRET_ENV,
   SUB_FERRET_INSTRUCTION,
@@ -858,84 +857,9 @@ describe('ALWAYS_ON_SECTIONS', () => {
     const sections = ALWAYS_ON_SECTIONS('zz');
 
     // Assert
-    should(sections.map(section => section.id)).deepEqual(['tools', 'settings', 'jobs']);
+    should(sections.map(section => section.id)).deepEqual(['tools', 'settings']);
     should(sections.map(section => section.text).join('\n\n')).equal(AGENT_BASE_INSTRUCTION('zz'));
   });
-});
-
-describe('JOBS_INSTRUCTION', () => {
-  it('should teach the four job rules in one short paragraph, with the real verbs', () => {
-    // Act
-    const text = JOBS_INSTRUCTION('zz');
-
-    // Assert — 1: what runs through the keeper, and how, for each harness.
-    should(text).containEql('`zz job run --name <x> -- <cmd>`');
-    should(text).containEql('BACKGROUND');
-    should(text).containEql('Claude: Bash with run_in_background');
-    should(text).containEql('Codex: not a background terminal');
-    should(text).containEql('short ones stay as they are');
-    // 2: the command is only an attachment; logs and wait.
-    should(text).containEql('the job keeps running if it ends');
-    should(text).containEql('`zz job logs <id>`');
-    should(text).containEql('`zz job wait <id>`');
-    // 3: re-attach after a move or restart.
-    should(text).containEql('`zz job attach <id>`');
-    should(text).containEql('`zz job ls`');
-    should(text).containEql('"Your jobs"');
-    // 4: stopping is `job stop`; closing the command only detaches.
-    should(text).containEql('`zz job stop <id>`');
-    should(text).containEql('TaskStop or closing the terminal only detaches');
-    should(text).not.containEql('\n');
-    should(text.length).be.below(600);
-  });
-
-  it("should name the binary it is given and never hard-code 'fy'", () => {
-    // Act
-    const text = JOBS_INSTRUCTION('zz');
-
-    // Assert
-    should(text.match(/`zz job /g)?.length).equal(6);
-    should(text).not.match(/\bfy\b/);
-  });
-
-  it.each([
-    ['claude', 'auto', 'auto'],
-    ['claude', 'skip', 'interactive'],
-    ['codex', 'auto', 'auto'],
-    ['codex', 'skip', 'interactive'],
-  ] as const)(
-    'should be in the %s launch (permissions %s, session %s), told by name, size and digest, for a lead and a sub-ferret',
-    (harness, agentPermissions, mode) => {
-      // Arrange
-      const rendered = layerOf({
-        harness,
-        agentPermissions,
-        cwd: CWD,
-        fyCommand: FY,
-        acceptsAutoPermissionMode: true,
-      }).args.join('\n');
-
-      for (const subFerret of [false, true]) {
-        // Act
-        const launched = launchInstructions('zz', {
-          [SESSION_MODE_ENV]: mode,
-          ...(subFerret ? { [SUB_FERRET_ENV]: '1' } : {}),
-        });
-
-        // Assert
-        should(launched.sections.find(section => section.id === 'jobs')).deepEqual({
-          id: 'jobs',
-          chars: JOBS_INSTRUCTION('zz').length,
-          digest: instructionDigest(JOBS_INSTRUCTION('zz')),
-        });
-        should(launched.sections.map(section => section.id).slice(0, 3)).deepEqual(['tools', 'settings', 'jobs']);
-        should(launched.mode).equal(mode);
-      }
-      // The words the harness is launched with carry the section for the binary the wrapper runs.
-      const words = JOBS_INSTRUCTION('fy');
-      should(rendered).containEql(harness === 'claude' ? words : tomlString(words).slice(1, -1));
-    },
-  );
 });
 
 describe('instructionDigest', () => {
@@ -1031,11 +955,6 @@ describe('launchInstructions', () => {
           digest: instructionDigest(SET_UP_FERRETRY_INSTRUCTION(binary)),
         },
         {
-          id: 'jobs',
-          chars: JOBS_INSTRUCTION(binary).length,
-          digest: instructionDigest(JOBS_INSTRUCTION(binary)),
-        },
-        {
           id: 'hypermedia',
           chars: HYPERMEDIA_INSTRUCTION(binary).length,
           digest: instructionDigest(HYPERMEDIA_INSTRUCTION(binary)),
@@ -1065,7 +984,7 @@ describe('launchInstructions', () => {
     should(pack?.chars).equal(PACK_INSTRUCTION('fy').length + 1 + line.length);
     should(pack?.digest).equal(instructionDigest(`${PACK_INSTRUCTION('fy')}\n${line}`));
     should(pack?.digest).not.equal(instructionDigest(PACK_INSTRUCTION('fy')));
-    should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'jobs']);
+    should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings']);
   });
 
   it.each([
@@ -1074,19 +993,16 @@ describe('launchInstructions', () => {
     ['unset', {}],
     ['every switch on', { [HYPERMEDIA_ENV]: '1', [PACK_ENV]: '1', [AGENDA_ENV]: '1', [PASSIVE_LEARNING_ENV]: '1' }],
     ['every switch off', { [HYPERMEDIA_ENV]: '0', [PACK_ENV]: '0', [AGENDA_ENV]: '0', [PASSIVE_LEARNING_ENV]: '0' }],
-  ])(
-    'should report only the tools, settings and jobs sections before the per-ferret ones, for a %s launch',
-    (_name, env) => {
-      // Act
-      const ids = launchInstructions('fy', env).sections.map(section => section.id);
+  ])('should report only the tools and settings sections before the per-ferret ones, for a %s launch', (_name, env) => {
+    // Act
+    const ids = launchInstructions('fy', env).sections.map(section => section.id);
 
-      // Assert — no notify, board or learning section: the plugins say those.
-      should(ids.slice(0, 3)).deepEqual(['tools', 'settings', 'jobs']);
-      should(ids).not.containEql('notify');
-      should(ids).not.containEql('board');
-      should(ids).not.containEql('learning');
-    },
-  );
+    // Assert — no notify, board or learning section: the plugins say those.
+    should(ids.slice(0, 2)).deepEqual(['tools', 'settings']);
+    should(ids).not.containEql('notify');
+    should(ids).not.containEql('board');
+    should(ids).not.containEql('learning');
+  });
 
   it('should carry only the always-on sections, and withhold questions, for a launch with no mode and no switch exactly 1', () => {
     // Arrange
@@ -1096,7 +1012,7 @@ describe('launchInstructions', () => {
     const launched = launchInstructions('fy', env);
 
     // Assert
-    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'jobs']);
+    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings']);
     should(launched.mode).equal('auto');
     should(launched.questions).be.false();
   });
@@ -1117,14 +1033,7 @@ describe('launchInstructions', () => {
     should(off.sections.map(section => section.id)).not.containEql('agenda');
     should(zero.sections.map(section => section.id)).not.containEql('agenda');
     should(yes.sections.map(section => section.id)).not.containEql('agenda');
-    should(on.sections.map(section => section.id)).deepEqual([
-      'tools',
-      'settings',
-      'jobs',
-      'hypermedia',
-      'pack',
-      'agenda',
-    ]);
+    should(on.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'hypermedia', 'pack', 'agenda']);
     // A per-ferret section carries a size and a fingerprint, so a changed word is told from a changed switch.
     should(on.sections.find(section => section.id === 'agenda')).deepEqual({
       id: 'agenda',
@@ -1192,7 +1101,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     });
 
     // Assert
-    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'jobs', 'sub-ferret', 'pack']);
+    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'sub-ferret', 'pack']);
     should(launched.sections.find(section => section.id === 'sub-ferret')?.chars).equal(
       SUB_FERRET_INSTRUCTION('zz').length,
     );
@@ -1200,17 +1109,11 @@ describe('SUB_FERRET_INSTRUCTION', () => {
 
   it('should name the sub-ferret always-on sections in order, and none of them when the switch is off', () => {
     // Assert
-    should(ALWAYS_ON_SECTIONS('zz', true).map(section => section.id)).deepEqual([
-      'tools',
-      'settings',
-      'jobs',
-      'sub-ferret',
-    ]);
+    should(ALWAYS_ON_SECTIONS('zz', true).map(section => section.id)).deepEqual(['tools', 'settings', 'sub-ferret']);
     should(ALWAYS_ON_SECTIONS('zz', false)).deepEqual(ALWAYS_ON_SECTIONS('zz'));
     should(launchInstructions('zz', { [SUB_FERRET_ENV]: '0', [AGENDA_ENV]: '1' }).sections.map(s => s.id)).deepEqual([
       'tools',
       'settings',
-      'jobs',
       'agenda',
     ]);
   });

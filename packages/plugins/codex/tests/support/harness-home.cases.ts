@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LaunchSpec, Runner, RunSpec } from '@ferretry/core-ferrets/contract';
 import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/testing';
 import { defineState, type FerretId, type SharedCredential } from '@ferretry/kernel/contract';
+import { buildSnapshot } from '@ferretry/kernel/host';
 import { ok } from '@ferretry/std';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { CODEX_SETTINGS } from '../../contract/index.ts';
@@ -115,6 +117,38 @@ export function harnessHomeCases(): void {
   }
 
   const ENV = {} as RunSpec['env'];
+
+  describe('the AGENTS.md a launch writes carries the job keeper words (F4316)', () => {
+    // The ACTIVE path: a manifest `instructions` entry -> the kernel snapshot (text read from the real
+    // `instructions/jobs.md`) -> the launch's instruction list -> the file Codex reads. Terminals' own unit test pins the
+    // declaration; this builds the real Codex home from it for auto and interactive ferrets, lead and helper.
+    const JOBS_FILE = join(import.meta.dir, '../../../terminals/instructions/jobs.md');
+    const snapshot = buildSnapshot(
+      [
+        {
+          id: 'terminals',
+          instructions: [{ id: 'jobs', text: 'instructions/jobs.md', when: { role: 'any' } }],
+        } as never,
+      ],
+      [],
+      () => readFileSync(JOBS_FILE, 'utf8'),
+    );
+    const JOBS = readFileSync(JOBS_FILE, 'utf8').trim();
+
+    for (const mode of ['auto', 'interactive'] as const)
+      for (const role of ['lead', 'helper'] as const)
+        test(`a ${mode} ${role} reads them`, async () => {
+          const { harness } = build();
+          const home = await harness.homeFor('f2' as FerretId);
+          const instructions = snapshot.instructions.filter(
+            entry => entry.when.role === undefined || entry.when.role === 'any' || entry.when.role === role,
+          );
+          await harness.prepareHome({ ...spec('f2', home), role, mode, instructions } as unknown as LaunchSpec);
+          const agents = await readFile(join(home, 'AGENTS.md'), 'utf8');
+          expect(agents).toContain(JOBS);
+          expect(agents).toContain('Codex: exec_command with a short yield_time_ms');
+        });
+  });
 
   describe('the Codex harness over the real kernel roots', () => {
     test('S42 the home homeFor names ends 0700 before launch, a link at agent-homes/<ferret> is refused, and nothing runs', async () => {

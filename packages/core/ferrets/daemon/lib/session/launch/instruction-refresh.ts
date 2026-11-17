@@ -30,7 +30,6 @@ import type { LaunchInstructionSection, SessionLaunchInstructions } from '../../
 const SECTION_NAMES: Readonly<Record<AlwaysOnSection['id'], string>> = {
   tools: 'Tools',
   settings: 'Settings',
-  jobs: 'Jobs',
   notify: 'Notify',
   board: 'Board',
   'sub-ferret': 'Sub-ferret',
@@ -83,7 +82,7 @@ export function recordTold(
   const kept = recorded.sections.filter(
     section => !ids.has(section.id as AlwaysOnSection['id']) && section.id !== 'attention',
   );
-  const order = ['tools', 'settings', 'jobs', 'notify', 'board', 'sub-ferret'];
+  const order = ['tools', 'settings', 'notify', 'board', 'sub-ferret'];
   const always = [...kept.filter(section => order.includes(section.id)), ...fresh].toSorted(
     (left, right) => order.indexOf(left.id) - order.indexOf(right.id),
   );
