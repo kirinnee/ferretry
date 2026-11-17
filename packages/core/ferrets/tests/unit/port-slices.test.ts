@@ -90,6 +90,7 @@ interface FerretsApiAtBase {
   runtimeRecords?(): Promise<readonly FerretRuntimeRecord[]>;
   repointRuntime?(rename: FerretRuntimeRename): Promise<number>;
   markStalled?(ferret: FerretId, stalled: boolean): Promise<boolean>;
+  exclusive?<T>(ferret: FerretId, work: () => Promise<T>): Promise<T>;
   runtimeControl?: RuntimeControlApi['runtimeControl'];
 }
 

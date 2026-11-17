@@ -918,6 +918,15 @@ export class FerretsService implements FerretsApi {
     return (await this.ports.session?.markStalled?.(ferret, stalled)) ?? false;
   }
 
+  /**
+   * `FerretsApi.exclusive`: `work` on the ferret's one mutation queue (the same one a start, stop and resume run on), after the
+   * service is ready. Not re-entrant.
+   */
+  async exclusive<T>(ferret: FerretId, work: () => Promise<T>): Promise<T> {
+    await this.ports.ready?.();
+    return await this.serial.run(ferret, work);
+  }
+
   /** The handle `ferret.json` keeps while the ferret runs; a stop clears it. */
   async handle(ferret: FerretId): Promise<RunnerHandle | undefined> {
     await this.ports.ready?.();
