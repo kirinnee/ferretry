@@ -8,7 +8,7 @@ export function layoutLines(layout: Layout): readonly string[] {
   const lines = [
     `layout   ${layout.id}`,
     `nav      ${layout.nav.side}, ${layout.nav.style}: ${join(layout.nav.items)}`,
-    `side     ${layout.side.show}, holds ${layout.side.holds}`,
+    `side     ${layout.side.show}, holds ${layout.side.holds}${layout.side.at === undefined ? '' : `, on the ${layout.side.at}`}`,
     `top      ${join(layout.top)}`,
     `composer ${join(layout['composer.tools'])}`,
     `density  ${layout.density}`,

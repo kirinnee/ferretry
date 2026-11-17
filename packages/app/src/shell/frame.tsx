@@ -57,6 +57,12 @@ function navHref(
 
 function Nav({ daemon }: { readonly daemon: string | undefined }) {
   const { plan, routes } = useShell();
+  const { route } = useRouter();
+  // The entry whose page is on screen: a plugin's entry for any screen of that plugin (the ferret page is Ferrets'), Settings for either settings page.
+  const onScreen = (entry: NavEntry): boolean =>
+    entry.kind === 'screen'
+      ? route.kind === 'screen' && route.screen.plugin === entry.screen.plugin
+      : entry.item === 'settings' && (route.kind === 'device-settings' || route.kind === 'daemon-settings');
   const href = (entry: NavEntry): string | undefined => {
     if (entry.kind !== 'screen') return undefined;
     const { screen } = entry;
@@ -89,7 +95,7 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
             {badge}
           </span>
         ) : (
-          <Link key={key} to={to} className="fy-nav__item">
+          <Link key={key} to={to} className="fy-nav__item" current={onScreen(entry)}>
             {label}
             {badge}
           </Link>
@@ -194,7 +200,7 @@ function Side({ daemon, route }: { readonly daemon: string | undefined; readonly
   )
     return null;
   return (
-    <aside className="fy-side" data-slot="side">
+    <aside className={`fy-side fy-side--${plan.side.at}`} data-slot="side">
       {holds.kind === 'screen' ? <ScreenView daemon={daemon} screen={holds.screen} params={{}} /> : null}
       {/* The side column that holds panels (S4): the `side` slot's panels, for the route's daemon. */}
       {holds.kind === 'panels' ? <PanelSlot daemon={daemon} slot="side" /> : null}
@@ -348,12 +354,14 @@ export function Frame() {
             <BackgroundViews />
           </div>
           <div className="fy-columns">
+            {/* The side column is drawn first when the layout puts it on the left, so the reading and the tab order match the eye. */}
+            {whole === undefined && plan.side.at === 'left' ? <Side daemon={daemon} route={route} /> : null}
             <main className="fy-main" data-slot="main">
               <PageScrollRegion entryKey={entryKey} memory={scroll}>
                 {whole === undefined ? <Main route={route} /> : <WholeLine daemon={daemon} line={whole} />}
               </PageScrollRegion>
             </main>
-            {whole === undefined ? <Side daemon={daemon} route={route} /> : null}
+            {whole === undefined && plan.side.at === 'right' ? <Side daemon={daemon} route={route} /> : null}
           </div>
         </div>
         <ShellCommandBar

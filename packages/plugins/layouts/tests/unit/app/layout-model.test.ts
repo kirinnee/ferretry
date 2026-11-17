@@ -65,7 +65,7 @@ describe('the layout settings', () => {
 
   test('a phone key is what the layout sets for a phone, else what the wide layout holds', () => {
     expect(choiceOf(DEFAULT_LAYOUT, 'phone.nav.side')).toBe('bottom');
-    expect(choiceOf(DEFAULT_LAYOUT, 'nav.side')).toBe('left');
+    expect(choiceOf(DEFAULT_LAYOUT, 'nav.side')).toBe('top');
     expect(listOf(DEFAULT_LAYOUT, 'phone.nav.items')).toEqual(['ferrets', 'agenda', 'board']);
     const bare = LayoutSchema.parse({ id: 'bare', nav: { side: 'right', style: 'bar', items: ['agenda'] } });
     expect(choiceOf(bare, 'phone.nav.side')).toBe('right');

@@ -166,7 +166,8 @@ const poster = entryOf(
   }),
 );
 
-const LIST = { style: 'list', items: ['inbox', 'settings'] };
+/** A left column nav: the built-in default's nav is a top row now, so a test of the column names its side. */
+const LIST = { side: 'left', style: 'list', items: ['inbox', 'settings'] };
 const PHONE = { side: 'bottom', items: ['inbox'] };
 
 /**
@@ -233,7 +234,7 @@ describe('the nav count', () => {
       surfaces: [inbox],
       machines: ['d1'],
       path: '/d/d1/inbox',
-      storage: deviceLayout({ style: 'rail', items: ['inbox'] }),
+      storage: deviceLayout({ side: 'left', style: 'rail', items: ['inbox'] }),
     });
     view = app.view;
     expect(app.view.container.querySelector('.fy-nav--rail .fy-nav__badge')).not.toBeNull();
@@ -320,7 +321,7 @@ describe('the nav count', () => {
       surfaces: [quiet, inbox],
       machines: ['d1'],
       path: '/',
-      storage: deviceLayout({ style: 'list', items: ['q', 'inbox'] }),
+      storage: deviceLayout({ side: 'left', style: 'list', items: ['q', 'inbox'] }),
     });
     view = app.view;
     counts.set('d1', 1);
@@ -335,7 +336,7 @@ describe('the nav badge origin (R1 m5)', () => {
       surfaces: [poster],
       machines: ['d1', 'd2'],
       path: '/d/d2/poster',
-      storage: deviceLayout({ style: 'list', items: ['poster'] }, { side: 'bottom', items: ['poster'] }),
+      storage: deviceLayout({ side: 'left', style: 'list', items: ['poster'] }, { side: 'bottom', items: ['poster'] }),
     });
     view = app.view;
     expect([...pokes.keys()].sort()).toEqual(['d1', 'd2']);
@@ -419,7 +420,7 @@ describe('the Needs-you nav panel (device-level)', () => {
       surfaces: [inbox],
       machines: ['d1', 'd2'],
       path: '/d/d1/inbox',
-      storage: deviceLayout({ style: 'rail', items: ['inbox'] }),
+      storage: deviceLayout({ side: 'left', style: 'rail', items: ['inbox'] }),
     });
     view = rail.view;
     expect(panels('inbox.needs-you')).toBe(1);
@@ -438,11 +439,11 @@ describe('the Needs-you nav panel (device-level)', () => {
     expect(column.view.container.querySelector('[data-testid="needs-you"]')?.getAttribute('data-form')).toBe('column');
   });
 
+  // The default nav is v4's destination row along the top: no second "Needs you" list under it (the Agenda entry's count
+  // is the one badge), so only `compact`, a rail, still draws the panel.
   for (const layout of BUILT_IN_LAYOUTS) {
-    // R2 m2: v4 drew the full group in the sessions column on a desktop, so the DEFAULT layout's nav is a list (column)
-    // and only `compact` is a rail.
-    const form = layout.id === 'default' ? 'column' : 'rail';
-    test(`shell S4 (R1 M1, R2 m2): under the built-in "${layout.id}" layout on a desktop the Needs-you panel is drawn, once, in the ${form} form`, async () => {
+    const drawn = layout.nav.side !== 'top';
+    test(`shell S4 (U-L): under the built-in "${layout.id}" layout on a desktop the Needs-you panel is ${drawn ? 'drawn once, in the rail form' : 'not drawn (the nav is a top row, its badge is the count)'}`, async () => {
       const app = await bootApp({
         surfaces: [inbox],
         machines: ['d1', 'd2'],
@@ -450,9 +451,10 @@ describe('the Needs-you nav panel (device-level)', () => {
         storage: deviceLayout({ side: layout.nav.side, style: layout.nav.style, items: ['inbox'] }),
       });
       view = app.view;
-      expect(layout.nav.style).toBe(form === 'column' ? 'list' : 'rail');
-      expect(panels('inbox.needs-you')).toBe(1);
-      expect(app.view.container.querySelector('[data-testid="needs-you"]')?.getAttribute('data-form')).toBe(form);
+      expect(panels('inbox.needs-you')).toBe(drawn ? 1 : 0);
+      if (drawn)
+        expect(app.view.container.querySelector('[data-testid="needs-you"]')?.getAttribute('data-form')).toBe('rail');
+      else expect(app.view.container.querySelector('.fy-nav--top')).not.toBeNull();
     });
   }
 
@@ -601,6 +603,50 @@ describe('the side column', () => {
     const home = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/app/', arrived: true, storage });
     view = home.view;
     expect(panels('inbox.side-note')).toBe(0);
+  });
+
+  // U-L: v4 keeps its fleet column on the LEFT of every page. The built-in default says so (`side.at: left`); a layout that
+  // names no edge (every layout saved before the field) keeps the column on the right (`layout.test.ts` holds that).
+  const orderOf = (container: HTMLElement): string[] =>
+    [...(container.querySelector('.fy-columns')?.children ?? [])].map(node => node.getAttribute('data-slot') ?? '');
+
+  test('U-L: the default layout draws the side column first, before the page, on the left', async () => {
+    const app = await bootApp({
+      surfaces: [inbox],
+      machines: ['d1'],
+      path: '/d/d1/inbox',
+      storage: deviceLayout({ items: ['inbox'] }),
+    });
+    view = app.view;
+    expect(orderOf(app.view.container)).toEqual(['side', 'main']);
+    expect(app.view.container.querySelector('.fy-side--left')).not.toBeNull();
+    expect(app.view.container.querySelector('.fy-nav--top')).not.toBeNull();
+  });
+
+  test('U-L: the nav entry whose page is on screen is marked as the current page', async () => {
+    const app = await bootApp({
+      surfaces: [inbox],
+      machines: ['d1'],
+      path: '/d/d1/inbox',
+      storage: deviceLayout({ items: ['inbox', 'settings'] }),
+    });
+    view = app.view;
+    const current = [...app.view.container.querySelectorAll('.fy-nav__item[aria-current="page"]')];
+    expect(current.map(node => node.textContent)).toEqual(['Inbox']);
+  });
+
+  test('U-L: a layout that asks for the right edge gets the side column after the page', async () => {
+    const storage = memoryStore();
+    writeRecord(storage, APP_STORAGE.layout, {
+      nav: { side: 'left', style: 'list', items: ['inbox'] },
+      side: { show: 'wide-only', holds: 'panels', at: 'right' },
+      phone: { nav: PHONE },
+      panels: { 'ferret.side': [] },
+      'composer.tools': [],
+    });
+    const app = await bootApp({ surfaces: [inbox], machines: ['d1'], path: '/d/d1/inbox', storage });
+    view = app.view;
+    expect(orderOf(app.view.container)).toEqual(['main', 'side']);
   });
 
   test('shell S4: the side column is not drawn on a phone (wide-only)', async () => {

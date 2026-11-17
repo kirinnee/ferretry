@@ -8,8 +8,8 @@ import { LayoutSchema, ThemeSchema } from './wire.ts';
 /** The built-in default (design §5.3). With Layouts off, the app shell uses its own copy of the same layout. */
 export const DEFAULT_LAYOUT = LayoutSchema.parse({
   id: 'default',
-  nav: { side: 'left', style: 'list', items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'] },
-  side: { show: 'wide-only', holds: 'ferrets' },
+  nav: { side: 'top', style: 'bar', items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'] },
+  side: { show: 'wide-only', holds: 'ferrets', at: 'left' },
   top: ['daemon-picker', 'search'],
   'composer.tools': ['attachments', 'dictation', 'runtime-picker', 'composer-quota'],
   // Every panel a plugin declares for the ferret's side pane: a slot a layout lists draws exactly what it lists, so an

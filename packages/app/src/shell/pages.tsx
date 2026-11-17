@@ -17,10 +17,13 @@ export function Link({
   to,
   children,
   className,
+  current,
 }: {
   readonly to: string;
   readonly children: React.ReactNode;
   readonly className?: string;
+  /** The page this link names is the one on screen (`aria-current="page"`). */
+  readonly current?: boolean;
 }) {
   const router = useRouter();
   const onClick = (event: MouseEvent<HTMLAnchorElement>): void => {
@@ -37,7 +40,7 @@ export function Link({
     router.navigate(to);
   };
   return (
-    <a href={to} onClick={onClick} className={className}>
+    <a href={to} onClick={onClick} className={className} aria-current={current === true ? 'page' : undefined}>
       {children}
     </a>
   );

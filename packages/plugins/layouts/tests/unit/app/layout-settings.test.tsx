@@ -86,7 +86,7 @@ describe('the Layout tab', () => {
       expect(text).toContain(name);
     expect(text).toContain('the layout in use, with your changes applied');
     expect(group(view.container, 'Navigation side').querySelector<HTMLInputElement>('input:checked')?.value).toBe(
-      'left',
+      'top',
     );
     expect(view.container.textContent).not.toContain('this device only');
     await view.unmount();
