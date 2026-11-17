@@ -186,6 +186,31 @@ describe('the conversation index updater', () => {
     expect(owner.bytesRead).toBe(0);
   });
 
+  test('the transcripts it could not read are counted per harness, and a harness filter counts only its own', async () => {
+    const sqlite = memorySqlite();
+    const claude = new MemoryHistory();
+    const codex = new MemoryHistory();
+    claude.set(pathOf(A), `${claudeRecord('assistant', 'unprompted', '2026-02-01T09:00:00.000Z')}\n`);
+    claude.set(pathOf(B), `${claudeRecord('assistant', 'also unprompted', '2026-02-01T09:00:00.000Z')}\n`);
+    codex.set(
+      `sessions/2026/10/10/rollout-2026-10-10T09-00-00-${CODEX}.jsonl`,
+      `${JSON.stringify({ type: 'session_meta', timestamp: '2026-10-10T09:00:00.000Z', payload: { id: CODEX, cwd: '/w' } })}\n`,
+    );
+    const index = new ConversationIndex({
+      sqlite: () => sqlite,
+      sources: async () => [
+        { harness: 'claude-code', parser: 'claude', kind: 'computer', label: 'owner', files: claude },
+        { harness: 'codex', parser: 'codex', kind: 'computer', label: 'owner', files: codex },
+      ],
+      ferretNames: async () => new Map(),
+      parsers: PARSERS,
+      nowMs: () => 0,
+    });
+    await index.refresh();
+    expect(index.query()).toMatchObject({ skipped: 3, skippedBy: { 'claude-code': 2, codex: 1 } });
+    expect(index.query({ harness: 'codex' })).toMatchObject({ skipped: 1, skippedBy: { codex: 1 } });
+  });
+
   test('a custom title names the conversation, and a rename appended later is picked up', async () => {
     const { index, owner } = setup();
     const title = (name: string) => `${JSON.stringify({ type: 'custom-title', customTitle: name })}\n`;

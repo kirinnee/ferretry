@@ -23,6 +23,12 @@ export const readHistoryEntry = async (client: Pick<PluginClient, 'call'>, entry
 export const harnessName = (harness: string): string =>
   harness === 'claude-code' ? 'Claude Code' : harness === 'codex' ? 'Codex' : harness;
 
+/** "2 Claude Code, 1 Codex": where the unreadable transcripts are, or `undefined` when the daemon did not say. */
+const skippedWhere = (skippedBy: HistoryList['skippedBy']): string | undefined => {
+  const parts = Object.entries(skippedBy ?? {}).map(([harness, count]) => `${count} ${harnessName(harness)}`);
+  return parts.length === 0 ? undefined : parts.join(', ');
+};
+
 export interface HistoryPageProps {
   /** The daemon the history is on, for the eyebrow. */
   readonly daemon: string;
@@ -140,6 +146,11 @@ export function HistoryPage({ daemon, readHistory: read, readEntry }: HistoryPag
               <h2 className="font-display text-lg font-semibold">
                 {history.skipped} transcript{history.skipped === 1 ? '' : 's'} not read
               </h2>
+              {skippedWhere(history.skippedBy) !== undefined && (
+                <p className="mt-1 text-sm text-fg" data-skipped-by="">
+                  {skippedWhere(history.skippedBy)}
+                </p>
+              )}
               <p className="mt-1 text-sm text-muted">
                 Ferretry did not replace unreadable history with an empty conversation.
               </p>

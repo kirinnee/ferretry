@@ -138,6 +138,38 @@ describe('the reading verbs', () => {
     expect(out.join('')).toContain('refused c2');
   });
 
+  test('link says how many conversations could not be read, and in which harness', async () => {
+    const { verbs, out } = harness({
+      'GET /v1/links/conversations': {
+        conversations: [],
+        matched: 0,
+        skipped: 3,
+        skippedBy: { 'claude-code': 2, codex: 1 },
+      },
+    });
+    await run(verbs['link [query...]'], []);
+    expect(out.join('')).toContain('No conversations match.');
+    const withRows = harness({
+      'GET /v1/links/conversations': {
+        conversations: [
+          {
+            id: 'c1',
+            harness: 'codex',
+            project: '/w',
+            preview: 'hi',
+            lastActivityAt: '2026-02-01T09:05:00.000Z',
+            turns: 1,
+          },
+        ],
+        matched: 1,
+        skipped: 3,
+        skippedBy: { 'claude-code': 2, codex: 1 },
+      },
+    });
+    await run(withRows.verbs['link [query...]'], []);
+    expect(withRows.out.join('')).toContain('3 could not be read and are not listed (2 claude-code, 1 codex).');
+  });
+
   test('link lists, with the kept-by mark, and link preview prints the exchanges', async () => {
     const { verbs, out } = harness({
       'GET /v1/links/conversations': {

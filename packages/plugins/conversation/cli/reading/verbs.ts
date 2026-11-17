@@ -84,7 +84,13 @@ function renderListing(listing: LinkListing): string {
     listing.matched > listing.conversations.length
       ? [`Showing ${String(listing.conversations.length)} of ${String(listing.matched)}.`]
       : [];
-  const skipped = listing.skipped > 0 ? [`${String(listing.skipped)} could not be read and are not listed.`] : [];
+  const where = Object.entries(listing.skippedBy ?? {}).map(([harness, count]) => `${String(count)} ${harness}`);
+  const skipped =
+    listing.skipped > 0
+      ? [
+          `${String(listing.skipped)} could not be read and are not listed${where.length > 0 ? ` (${where.join(', ')})` : ''}.`,
+        ]
+      : [];
   return [...lines, ...more, ...skipped, ...indexing].join('\n');
 }
 

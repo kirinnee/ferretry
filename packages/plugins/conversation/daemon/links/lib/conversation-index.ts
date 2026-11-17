@@ -166,6 +166,8 @@ export interface IndexAnswer {
   readonly conversations: readonly IndexedConversation[];
   readonly matched: number;
   readonly skipped: number;
+  /** `skipped` split by harness; empty when nothing was skipped. */
+  readonly skippedBy: Readonly<Record<string, number>>;
 }
 
 /** The text a search word is looked for in, lower-cased as the matcher always did. */
@@ -877,12 +879,14 @@ export class ConversationIndex {
          AND e.rowid <> c.rowid) AS also ${filter} ORDER BY c.last_at DESC, c.rowid LIMIT ?`,
       [...filterParams, limit],
     );
-    const skipped =
-      db.query<{ n: number }>(
-        `SELECT count(*) AS n FROM conv c WHERE c.ok = 0${query.harness === undefined ? '' : ' AND c.harness = ?'}${kinds.length === 0 ? '' : ` AND c.kind IN (${kinds.map(() => '?').join(', ')})`}`,
-        [...(query.harness === undefined ? [] : [query.harness]), ...kinds],
-      )[0]?.n ?? 0;
-    return { conversations: rows.map(row => this.#wire(row)), matched, skipped };
+    const skippedBy: Record<string, number> = {};
+    for (const { harness: skippedHarness, n } of db.query<{ harness: string; n: number }>(
+      `SELECT c.harness AS harness, count(*) AS n FROM conv c WHERE c.ok = 0${query.harness === undefined ? '' : ' AND c.harness = ?'}${kinds.length === 0 ? '' : ` AND c.kind IN (${kinds.map(() => '?').join(', ')})`} GROUP BY c.harness ORDER BY c.harness`,
+      [...(query.harness === undefined ? [] : [query.harness]), ...kinds],
+    ))
+      skippedBy[skippedHarness] = n;
+    const skipped = Object.values(skippedBy).reduce((sum, n) => sum + n, 0);
+    return { conversations: rows.map(row => this.#wire(row)), matched, skipped, skippedBy };
   }
 
   /** One conversation, as listed (the newest copy), or `undefined`. */

@@ -82,7 +82,11 @@ export interface LinkServiceNeeds {
 const HISTORY_MESSAGES = 200;
 
 type ForeignHistoryEntry = z.infer<typeof ForeignHistoryEntrySchema>;
-type ForeignHistoryList = { readonly entries: readonly ForeignHistoryEntry[]; readonly skipped: number };
+type ForeignHistoryList = {
+  readonly entries: readonly ForeignHistoryEntry[];
+  readonly skipped: number;
+  readonly skippedBy?: Readonly<Record<string, number>>;
+};
 type ForeignHistoryDetail = { readonly entry: ForeignHistoryEntry; readonly messages: LinkPreview['messages'] };
 
 /** A listed conversation as the read-only history names it. */
@@ -140,6 +144,7 @@ export class LinkService {
       }),
       matched: answer.matched,
       skipped: answer.skipped,
+      ...(answer.skipped > 0 ? { skippedBy: answer.skippedBy } : {}),
       ...(indexing ? { indexing: true as const } : {}),
     };
   }
@@ -160,6 +165,7 @@ export class LinkService {
     return {
       entries: answer.conversations.map(({ row }) => historyEntryOf(row)),
       skipped: answer.skipped,
+      ...(answer.skipped > 0 ? { skippedBy: answer.skippedBy } : {}),
     };
   }
 
