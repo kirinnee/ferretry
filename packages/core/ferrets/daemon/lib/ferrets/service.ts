@@ -93,7 +93,8 @@ import { effectiveMode, type FerretRegistry, type FerretFilter } from '../regist
 import { STOP_UNCONFIRMED, withStampedLabel } from './restart-guards.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { resumeTurnAuthor } from '../session/resume/policy.ts';
-import type { ResumeActor } from '../session/resume/types.ts';
+import type { LaunchGate, ResumeActor } from '../session/resume/types.ts';
+import type { SessionId } from '../session-id.ts';
 import type { SessionEffectAdmission } from '../session/effects/types.ts';
 import { SessionMoveError } from '../runtime/mounts/session-move.ts';
 import type { AgentControl, LimitsFile } from '../../../contract/index.ts';
@@ -174,6 +175,13 @@ export interface FerretsPorts {
    * unit fixture, which gets a queue of its own.
    */
   serial?: Pick<SerialExecutor, 'run'>;
+  /**
+   * The ONE in-memory launch gate the daemon shares (`SessionFiles.launchGate`): every launch this service makes (a start
+   * or a resume) is registered in it from before the pane is asked for until the launch has settled, success or failure, so
+   * the lifecycle's stop wait and the interrupted-launch reconciler see THIS process's launches. Unbound only in a unit
+   * fixture, where nothing is registered.
+   */
+  launches?: Pick<LaunchGate, 'register'>;
   /**
    * The session document's half of the owner's cut-off (`credentialRevoked`), kept in step with the token directory's:
    * a ferret is cut off when EITHER says so, and a cut-off or a restore is written to BOTH. Unbound only in a unit
@@ -1891,7 +1899,24 @@ export class FerretsService implements FerretsApi {
     this.registry.putDetails(ferret, details);
   }
 
+  /** One launch, registered in the shared launch gate for as long as it runs and released however it ends. */
   private async launch(
+    record: FerretRecord,
+    prompt: string | undefined,
+    conversation: string | undefined,
+    kind: 'start' | 'resume',
+    revive?: ReviveTurnRequest,
+    extras: LaunchExtras = {},
+  ): Promise<Result<FerretId, StartFailure>> {
+    const registration = this.ports.launches?.register(record.id as unknown as SessionId);
+    try {
+      return await this.launchUngated(record, prompt, conversation, kind, revive, extras);
+    } finally {
+      registration?.release();
+    }
+  }
+
+  private async launchUngated(
     record: FerretRecord,
     prompt: string | undefined,
     conversation: string | undefined,

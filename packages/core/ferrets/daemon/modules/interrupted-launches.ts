@@ -51,8 +51,9 @@ interface InterruptedLaunches {
 /**
  * Mounts today's `InterruptedLaunchReconciler` over 5.0's owners.
  *
- * FerretsService starts a ferret through its own queue and does not register in the lifecycle's launch gate, so the gate
- * alone cannot tell a launch THIS process is making from one a dead daemon left. The registry can: a ferret this process
+ * FerretsService registers each launch it makes in the shared launch gate (FerretsPorts.launches), but a launch the lifecycle makes
+ * outside it (a revive) is not guaranteed to, so the gate alone is not trusted to tell a launch THIS process is making from
+ * one a dead daemon left. The registry can: a ferret this process
  * started or resumed has a `stateAt` at or after the boot, a record a restart left has one from before it. A launch is
  * "under way here" when either says so.
  *

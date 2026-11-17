@@ -445,6 +445,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // ONE queue and ONE cut-off fact with the lifecycle (`SessionFiles`): a start, a stop and a resume here and a
     // lifecycle's launch of the same ferret never interleave, and a cut-off is read from and written to both halves.
     serial: sessionFiles.serial,
+    // The same gate the lifecycle's stop wait and the interrupted-launch reconciler read: this service's launches register in it.
+    launches: sessionFiles.launchGate,
     cutOffMark: sessionFiles.cutOffMark,
     // A resume refuses over a stop nobody confirmed: the state document says `kill_failed` (a missing one says nothing).
     stopUnconfirmed: async ferret => {
