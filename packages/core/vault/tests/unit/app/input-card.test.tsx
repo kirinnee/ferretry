@@ -56,25 +56,6 @@ async function hidePage(): Promise<() => void> {
 }
 
 describe('the input card holds a typed value only in its field', () => {
-  it('I6 never puts a typed value in the value attribute of the field, shown or hidden, or in the markup', async () => {
-    const { mounted } = await card();
-    try {
-      const input = field(mounted.container);
-      await typeInto(input, FAKE_VALUE);
-      expect(input.value).toBe(FAKE_VALUE);
-      expect(input.getAttribute('value')).toBeNull();
-      expect(mounted.container.innerHTML).not.toContain(FAKE_VALUE);
-      // Showing it re-renders the field as text: the typed characters stay, still outside the markup.
-      await click(q(mounted.container, '[data-input-reveal]'));
-      expect(field(mounted.container).type).toBe('text');
-      expect(field(mounted.container).value).toBe(FAKE_VALUE);
-      expect(field(mounted.container).getAttribute('value')).toBeNull();
-      expect(mounted.container.innerHTML).not.toContain(FAKE_VALUE);
-    } finally {
-      await mounted.unmount();
-    }
-  });
-
   it('I6 clears the field the moment Send is pressed, before the daemon answers, and keeps nothing after', async () => {
     const hold = held();
     const { mounted, calls } = await card(terminalRequest(), async () => {

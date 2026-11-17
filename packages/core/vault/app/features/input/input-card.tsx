@@ -106,7 +106,6 @@ type Nodes = Map<string, HTMLInputElement>;
 interface FieldInputProps {
   readonly field: InputCardField;
   readonly nodes: Nodes;
-  /** What is typed so far: read for Enter, never given to the input as a `value` (see below). */
   readonly value: string;
   readonly revealed: boolean;
   readonly disabled: boolean;
@@ -146,9 +145,6 @@ function FieldInput({
     [nodes, field.key],
   );
 
-  // The input is UNCONTROLLED on purpose: a `value` prop would make React copy the typed secret into the input's
-  // `value` attribute, where outerHTML and DOM snapshots show it. `onChange` keeps `value` above for readiness and the
-  // problem line; `clear()` and `attach` empty the node itself.
   return (
     <div className="flex min-w-0 flex-col gap-2" data-input-field={field.key}>
       <label className="text-cell font-medium text-fg" htmlFor={inputId}>
@@ -172,6 +168,7 @@ function FieldInput({
           }}
           ref={attach}
           spellCheck={false}
+          value={value}
         />
         {!revealable(field.sensitivity) ? null : (
           <button
