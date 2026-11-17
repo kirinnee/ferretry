@@ -8,6 +8,7 @@ import { definePlugin, implementCli, verb, type VerbHandler } from '@ferretry/ke
 import type { DaemonController, DaemonControlReads } from '../../src/lib/daemon/controller.ts';
 import { runFy } from '../../src/lib/run.ts';
 import { runSetup, type SetupHealth, type SetupSteps } from '../../src/lib/setup/setup.ts';
+import type { Probe } from '../../src/lib/world.ts';
 import { entry, fakeWorld, registryOf } from './fakes.ts';
 
 interface Scene {
@@ -150,8 +151,9 @@ const onboardingManifest = definePlugin({
 });
 
 /** The real router, over a fake controller and fake `pair` / `onboard` halves, all writing to one ordered log. */
-function routed(options: { tty: boolean; probeUp?: boolean; installCode?: number }) {
+function routed(options: { tty: boolean; probeUp?: boolean; installCode?: number; downLooks?: number }) {
   const log: string[] = [];
+  const looks = { probes: 0, sleeps: 0 };
   const record =
     (name: string, code = 0): VerbHandler =>
     async invocation => {
@@ -180,12 +182,27 @@ function routed(options: { tty: boolean; probeUp?: boolean; installCode?: number
   const controller = {
     install: async () => void log.push('install'),
   } as unknown as DaemonController;
+  // The daemon the install just started takes `downLooks` looks to bind; the wait between looks is instant here.
+  const downLooks = options.downLooks ?? 0;
+  const probe = async (): Promise<Probe> => {
+    looks.probes += 1;
+    return looks.probes > downLooks && options.probeUp !== false
+      ? { state: 'up', baseUrl: 'http://127.0.0.1:7431', health: { protocol: 1, version: '5.0.0' } }
+      : { state: 'down', baseUrl: 'http://127.0.0.1:7431', why: 'connection refused' };
+  };
   const world = {
     ...made.world,
+    probe,
+    host: {
+      ...made.world.host,
+      sleep: async () => {
+        looks.sleeps += 1;
+      },
+    },
     io: { ...made.io, isTty: options.tty },
     daemon: (_reads: DaemonControlReads) => ({ controller, exitCode: () => options.installCode ?? 0 }),
   };
-  return { world, io: made.io, log };
+  return { world, io: made.io, log, looks };
 }
 
 describe('fy setup, through the router', () => {
@@ -215,6 +232,21 @@ describe('fy setup, through the router', () => {
     expect(run.log).toEqual(['install', 'onboard json,yes']);
     expect(run.io.stdout()).toBe('');
     expect(run.io.stderr()).toContain('run `fy pair` at one');
+  });
+
+  it('V-0436 a daemon still binding is waited for: it is looked at again, then setup goes on', async () => {
+    const run = routed({ tty: true, downLooks: 3 });
+    expect(await runFy(['setup'], run.world)).toBe(0);
+    expect(run.looks.sleeps).toBe(3);
+    expect(run.log).toEqual(['install', 'pair wait', 'onboard']);
+  });
+
+  it('V-0436 a daemon that never answers is given a bounded number of looks, then setup stops before pairing', async () => {
+    const run = routed({ tty: true, probeUp: false });
+    expect(await runFy(['setup'], run.world)).toBe(1);
+    expect(run.looks.sleeps).toBe(19);
+    expect(run.log).toEqual(['install']);
+    expect(run.io.stderr()).toContain('connection refused');
   });
 
   it('V-0436 a failed install is the exit code and nothing after it runs', async () => {
