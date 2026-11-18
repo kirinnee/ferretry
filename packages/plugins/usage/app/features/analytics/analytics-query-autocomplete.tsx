@@ -129,7 +129,7 @@ export function AnalyticsCompletionList({
           : 'No matching insights suggestions';
   return (
     <div
-      className="absolute inset-x-0 top-[calc(100%+var(--gap-xs))] z-40 overflow-hidden rounded-panel border-panel border-border-strong bg-surface shadow-popover"
+      className="kt-popover absolute inset-x-0 top-[calc(100%+var(--gap-xs))] z-40 overflow-hidden"
       data-analytics-autocomplete={contextLabel[context]}
     >
       <div className="flex min-h-[34px] items-center border-b border-border-soft bg-surface-2 px-control-x py-1">

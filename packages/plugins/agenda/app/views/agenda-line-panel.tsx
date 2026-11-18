@@ -19,14 +19,18 @@ import { useAgendaSnapshot } from '../hooks/use-agenda.ts';
 import { useAgendaReplies } from '../hooks/use-agenda-replies.ts';
 import { useFerretAgenda } from '../hooks/use-ferret-agenda.ts';
 import { readSessionAgenda } from '../lib/agenda-api.ts';
+import { chatLineMode } from '../lib/chat-line-mode.ts';
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import { agendaConversationPath } from '../lib/agenda-inbox.ts';
 import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
 import { daemonSessionScope } from '../lib/machine.ts';
 import { useRouter } from '../shell.ts';
 
-/** Whether this ferret works in agenda mode; a read that fails says no, so the chat never draws a line it cannot back. */
-const useAgendaMode = (runtime: AgendaRuntime, ferret: string): boolean => {
+/**
+ * Whether this ferret works in agenda mode; a read that fails says no, so the chat never draws a line it cannot back.
+ * `undefined` until the read answers.
+ */
+const useAgendaMode = (runtime: AgendaRuntime, ferret: string): boolean | undefined => {
   const [mode, setMode] = useState<{ readonly ferret: string; readonly enabled: boolean } | null>(null);
   useEffect(() => {
     let live = true;
@@ -38,7 +42,7 @@ const useAgendaMode = (runtime: AgendaRuntime, ferret: string): boolean => {
       live = false;
     };
   }, [runtime, ferret]);
-  return mode?.ferret === ferret && mode.enabled;
+  return mode?.ferret === ferret ? mode.enabled : undefined;
 };
 
 function AgendaLine({ runtime, ferret }: { readonly runtime: AgendaRuntime; readonly ferret: string }) {
@@ -49,7 +53,14 @@ function AgendaLine({ runtime, ferret }: { readonly runtime: AgendaRuntime; read
   // Reads this ferret's board into the store (and names the ferret); the snapshot below is what the line counts.
   const named = useFerretAgenda(runtime, ferret);
   const snapshot = useAgendaSnapshot(runtime.agenda, scope);
-  const agendaMode = useAgendaMode(runtime, ferret);
+  const modeRead = useAgendaMode(runtime, ferret);
+  const agendaMode = modeRead === true;
+  // Tells the app shell whether this chat draws the line, so its side toggle counts the asks only when it does not.
+  useEffect(() => {
+    if (modeRead === undefined) return undefined;
+    chatLineMode.report(daemon, ferret, modeRead);
+    return () => chatLineMode.forget(daemon, ferret);
+  }, [daemon, ferret, modeRead]);
   const replies = useAgendaReplies(runtime.agenda, runtime.connection, scope);
   const ferretName = named?.name ?? ferret;
   // The slot is handed only while something is held: a slot that is present at all makes the line draw a status end.

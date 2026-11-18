@@ -2049,6 +2049,74 @@ body {
   clip-path: var(--clip-panel);
 }
 
+/* ---- popover + menu rows (the menu role tokens in themes.css) ------------
+   ONE look for everything that floats and lists: the context menu, the picker's option list, the Modes menu, the
+   add menu. The surface, edge and shadow are the menu roles' (so the edge is a >=3:1 control edge and never the
+   decorative hairline, and a dark theme's menu is one step off its page). A row's states are separate marks, so no
+   one of them has to carry the others: HOVER is a wash, the CURSOR (`aria-selected`, `data-active`) and a
+   CHECKED switch are the accent fill and ink, and the KEYBOARD is the same focus ring as everywhere else, drawn
+   inside the row so the menu's own clipping can never hide it. */
+.kt-popover {
+  border: var(--stroke-panel) solid var(--menu-edge);
+  border-radius: var(--menu-radius);
+  background: var(--menu-bg);
+  box-shadow: var(--menu-shadow);
+  color: var(--fg);
+}
+/* A row's own measures are ROW VARS, not utilities: this file loads after Tailwind, so an equal-specificity
+   `py-1` / `min-h-[44px]` / `items-start` / `text-fg` on a row never wins. A caller sets `--menu-item-h`, `--menu-item-py`,
+   `--menu-item-align` or `--menu-item-fg` instead. */
+.kt-menu-item {
+  display: flex;
+  align-items: var(--menu-item-align, center);
+  gap: var(--gap-sm);
+  width: 100%;
+  min-height: max(var(--menu-item-h), var(--target-floor));
+  padding: var(--menu-item-py, var(--pad-row-y)) var(--pad-cell-x);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--menu-item-fg, var(--fg-soft));
+  text-align: left;
+}
+.kt-menu-item:hover:not(:disabled, [aria-disabled='true']) {
+  background: var(--menu-item-hover);
+  color: var(--menu-item-hover-fg, var(--fg));
+}
+/* ONE highlight at a time: while the keyboard ring is on a row, a pointer resting over another row is not a second one. */
+.kt-popover:has(.kt-menu-item:focus-visible)
+.kt-menu-item:hover:not(:focus-visible, [aria-selected='true'], [aria-checked='true'], [data-active='true']) {
+  background: transparent;
+  color: var(--menu-item-fg, var(--fg-soft));
+}
+.kt-menu-item[aria-selected='true'],
+.kt-menu-item[aria-checked='true'],
+.kt-menu-item[data-active='true'] {
+  background: var(--menu-item-active);
+  box-shadow: var(--rail-active);
+  color: var(--menu-item-active-fg);
+}
+.kt-menu-item:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+/* The danger ink rides the same two vars as every row ink, so no state rule (hover, the one-highlight reset) can out-rank it. */
+.kt-menu-item[data-danger] {
+  --menu-item-fg: var(--err);
+  --menu-item-hover-fg: var(--err);
+}
+.kt-menu-item:disabled,
+.kt-menu-item[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.kt-menu-sep {
+  height: 0;
+  margin: var(--gap-xs) var(--gap-xs);
+  border: 0;
+  border-top: var(--divider-width) solid var(--menu-sep);
+}
+
 /* ---- the conversation measure (Settings › Appearance › Conversation width)
    ONE column with two halves: the transcript's text column and the composer under it share one
    measure and one side padding, so their left and right edges are the same line. The SURFACE is

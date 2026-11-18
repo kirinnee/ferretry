@@ -303,6 +303,9 @@ describe('the image viewer’s zoom controls', () => {
 
   it('draws a picture smaller than the stage at its own size, not enlarged', async () => {
     const proto = HTMLElement.prototype;
+    const originals = (['clientWidth', 'clientHeight'] as const).map(
+      name => [name, Object.getOwnPropertyDescriptor(proto, name)] as const,
+    );
     Object.defineProperty(proto, 'clientWidth', { configurable: true, get: () => 400 });
     Object.defineProperty(proto, 'clientHeight', { configurable: true, get: () => 300 });
     const view = await mount(<Harness images={pictures(1)} />);
@@ -317,8 +320,11 @@ describe('the image viewer’s zoom controls', () => {
       expect(tool('Actual size').getAttribute('aria-disabled')).toBe('true');
     } finally {
       await view.unmount();
-      Reflect.deleteProperty(proto, 'clientWidth');
-      Reflect.deleteProperty(proto, 'clientHeight');
+      // Put back what happy-dom had, not nothing: every later file in this process reads these.
+      for (const [name, original] of originals) {
+        if (original) Object.defineProperty(proto, name, original);
+        else Reflect.deleteProperty(proto, name);
+      }
     }
   });
 

@@ -21,7 +21,7 @@ beforeAll(async () => {
   browser = await sharedChromium();
   directory = await mkdtemp(join(tmpdir(), 'ferretry-board-app-'));
   const child = Bun.spawn(
-    [process.execPath, sceneBuilder, '--out', directory, '--entry', 'fixtures/board-card-scene.tsx'],
+    [process.execPath, sceneBuilder, '--out', directory, '--entry', 'fixtures/board-task-scene.tsx'],
     { cwd: packageRoot, stderr: 'pipe', stdout: 'pipe' },
   );
   const [stdout, stderr, code] = await Promise.all([

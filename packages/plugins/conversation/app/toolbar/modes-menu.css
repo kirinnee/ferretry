@@ -18,10 +18,10 @@
   max-height: min(560px, 70vh);
   overflow-y: auto;
   padding: 8px 12px 12px;
-  border: var(--stroke-panel, 1px) solid var(--border-strong);
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-popover);
+  border: var(--stroke-panel, 1px) solid var(--menu-edge);
+  border-radius: var(--menu-radius);
+  background: var(--menu-bg);
+  box-shadow: var(--menu-shadow);
   color: var(--fg);
 }
 .fy-modes__popover:focus {
@@ -48,7 +48,7 @@
 }
 .fy-modes [data-modes-body] .fy-panel + .fy-panel,
 .fy-modes__sheet .fy-panel + .fy-panel {
-  border-top: var(--divider-width, 1px) solid var(--border-soft);
+  border-top: var(--divider-width, 1px) solid var(--menu-sep);
 }
 
 /* ONE ROW STYLE for every mode, whoever draws it: a chip button, a switch with its label, a scan button all read as a
@@ -67,7 +67,7 @@
 }
 .fy-modes [data-modes-body] .fy-panel .kt-btn:hover:not(:disabled),
 .fy-modes__sheet .fy-panel .kt-btn:hover:not(:disabled) {
-  background: var(--surface-2, var(--border-soft));
+  background: var(--menu-item-hover);
 }
 .fy-modes [data-modes-body] .fy-panel .kt-btn > span,
 .fy-modes__sheet .fy-panel .kt-btn > span {
@@ -118,7 +118,7 @@
 .fy-modes__section + .fy-modes__section {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: var(--divider-width, 1px) solid var(--border-soft);
+  border-top: var(--divider-width, 1px) solid var(--menu-sep);
 }
 .fy-modes__popover[hidden] {
   display: none;

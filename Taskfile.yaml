@@ -132,6 +132,11 @@ tasks:
     cmds:
       - task: unit:default
 
+  test:unit:file:
+    desc: 'Run ONE test file under the unit config; a file of another tier says "not in this config" and how to run it'
+    cmds:
+      - bun scripts/test/unit-file.ts {{.CLI_ARGS}}
+
   test:int:
     desc: Run the integration suite without coverage
     cmds:

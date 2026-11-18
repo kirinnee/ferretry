@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'bun:test';
 import { AsksChanged } from '@ferretry/core-asks/contract';
 import { isFerretsNeedsYou } from '@ferretry/core-ferrets/contract';
+import { ChatLineMode } from '../../../app/lib/chat-line-mode.ts';
 import { createNeedsYou } from '../../../app/lib/needs-you-hook.ts';
 import { callFromFetch } from '../../support/app/call-from-fetch.ts';
 import { agendaItem } from '../../support/app/agenda-inbox.tsx';
@@ -74,6 +75,8 @@ describe('the ferrets.needs-you provider', () => {
       count: 2,
       latestAt: '2026-08-01T12:00:00.000Z',
       ask: 'Which branch?',
+      waitingOnOwner: 2,
+      lineShown: true,
     });
     release();
   });
@@ -111,5 +114,56 @@ describe('the ferrets.needs-you provider', () => {
     b();
     expect(daemon.listeners.size).toBe(0);
     expect(AsksChanged.name).toBeTruthy();
+  });
+
+  it("counts only the items on the OWNER's turn for the side toggle: an item with the ferret is not an ask on the owner", async () => {
+    const daemon = scripted(() => [
+      {
+        sessionId: 'mixed',
+        items: [
+          agendaItem('A1'),
+          agendaItem('A2', { waitingOn: 'ferret', askedAt: '2026-08-01T11:30:00.000Z' }),
+          agendaItem('A3', { waitingOn: 'ferret', askedAt: '2026-08-01T11:30:00.000Z' }),
+        ],
+      },
+      { sessionId: 'replied', items: [agendaItem('A4', { waitingOn: 'ferret', askedAt: '2026-08-01T11:30:00.000Z' })] },
+    ]);
+    const hook = createNeedsYou(daemon.client, immediate, new ChatLineMode());
+    const release = hook.watch();
+    await settle();
+    // `count` is Ferrets' (every open item); `waitingOnOwner` is the agenda pill's "need you".
+    expect(hook.needing().get('mixed')).toMatchObject({ count: 3, waitingOnOwner: 1 });
+    expect(hook.needing().get('replied')).toMatchObject({ count: 1, waitingOnOwner: 0 });
+    release();
+  });
+
+  it('says per ferret whether its chat draws the agenda line, and tells listeners when that changes', async () => {
+    const daemon = scripted(() => [
+      { sessionId: 'zoe', items: [agendaItem('A1')] },
+      { sessionId: 'kai', items: [agendaItem('A2')] },
+    ]);
+    const lines = new ChatLineMode();
+    const hook = createNeedsYou(daemon.client, immediate, lines);
+    const release = hook.watch();
+    await settle();
+    // Nothing reported: taken as shown, so no count flashes before the mode is read.
+    expect(hook.needing().get('zoe')?.lineShown).toBe(true);
+    let heard = 0;
+    hook.subscribe(() => {
+      heard += 1;
+    });
+    const before = hook.needing();
+    lines.report('this-daemon', 'zoe', false);
+    expect(heard).toBe(1);
+    expect(hook.needing()).not.toBe(before);
+    expect(hook.needing().get('zoe')?.lineShown).toBe(false);
+    expect(hook.needing().get('kai')?.lineShown).toBe(true);
+    lines.report('this-daemon', 'zoe', false);
+    expect(heard).toBe(1);
+    lines.forget('this-daemon', 'zoe');
+    expect(hook.needing().get('zoe')?.lineShown).toBe(true);
+    release();
+    lines.report('this-daemon', 'zoe', false);
+    expect(heard).toBe(2);
   });
 });

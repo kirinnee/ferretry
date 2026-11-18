@@ -104,7 +104,9 @@ export type BrowserLoginPortFactory = (daemon: BrowserDaemon) => BrowserLoginPor
  * and this module never constructs a URL or a header of its own.
  */
 export const browserLoginPort = (client: Pick<PluginClient, 'call'>): BrowserLoginPort => ({
-  status: () => client.call(BROWSER_LOGIN_ROUTES.status),
+  // A poll while the panel is mounted is not the person acting, so it is quiet: no passkey card on every load. The
+  // daemon's refusal still stands (the banner shows `unknown`), and pressing Open asks at once, as a press always does.
+  status: () => client.call(BROWSER_LOGIN_ROUTES.status, { quiet: true }),
   // Explicit intent on the wire, validated by the schema: the daemon is told what the human chose, never asked to infer it.
   act: action => client.call(BROWSER_LOGIN_ROUTES.act, { body: BrowserLoginActionSchema.parse(action) }),
 });
