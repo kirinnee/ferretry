@@ -2441,7 +2441,7 @@ async function resetV5Verb(slot: Slot, rest: readonly string[]): Promise<void> {
   await assertResettable(slot, 'reset-v5', { pinned: true });
   const libexec = resolve(args[1] ?? '');
   const next = await checkNewBuild(slot, libexec);
-  await assertPagesDeployLive(next.commit);
+  await ensurePreviewDeployed(next.commit);
   const bin = slot.v5.bin;
   const installBuild = async (): Promise<void> => {
     const before = await readStamp(bin);
