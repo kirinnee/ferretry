@@ -7,6 +7,7 @@ import { memberCarriers } from './carriers/member-carriers.ts';
 import { CarrierRouter } from './carriers/router.ts';
 import { bundledRelayDirectory, documentRelayDiscovery } from './discovery/hosted-relay.ts';
 import { ActiveCarrierCard } from './features/carrier/active-carrier-card.tsx';
+import { CarrierInUse } from './features/carrier/carrier-in-use.tsx';
 import { DeviceConnectionPanel } from './features/carrier/device-connection-panel.tsx';
 import { relayFallbackView } from './features/carrier/relay-fallback-notice.tsx';
 import { CarrierPreferenceSelector, tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
@@ -233,22 +234,38 @@ export function buildConnectionsApp(
     useEffect(() => {
       if (daemonId !== undefined) void tunnelSwitch?.refresh({ daemonId });
     }, []);
+    // What is carrying the connection now, beside what was asked for: with "Relay (default)" ticked while the direct
+    // address carries (the relay could not be reached), the two differ, and only the measurement is the answer.
+    const measured = useSyncExternalStore(measurements.subscribe.bind(measurements), () =>
+      daemonId === undefined ? undefined : measurements.choice(daemonId),
+    );
+    const outage = useSyncExternalStore(
+      listener =>
+        health === undefined || daemonId === undefined ? () => undefined : health.subscribe(daemonId, listener),
+      () => (health === undefined || daemonId === undefined ? UNMEASURED_HEALTH : health.state(daemonId)),
+    );
     if (daemonId === undefined) return null;
-    return createElement(CarrierPreferenceSelector, {
-      legend: 'Connection preference',
-      value: settingOf(snapshot[daemonId]),
-      onChange: value => (value === 'default' ? preferences.reset(daemonId) : preferences.set(daemonId, value)),
-      availability: {
-        // Without an RTCPeerConnection (a browser that switched WebRTC off) the walk passes WebRTC over untried and
-        // says so.
-        webrtc: webrtc !== undefined,
-        tunnelNote: carriers.some(c => c.kind === 'tunnel') ? undefined : 'This machine has no tunnel yet.',
-        tunnel:
-          tunnelSwitch === undefined
-            ? undefined
-            : tunnelSwitchOffer(switches[daemonId], () => tunnelSwitch.set({ daemonId }, true)),
-      },
-    });
+    const relayFallback = measurements.relayFallback?.(daemonId);
+    return createElement(
+      'div',
+      { className: 'flex min-w-0 flex-col gap-3', 'data-connection-preference': '' },
+      createElement(CarrierInUse, { choice: measured, health: outage, relayFallback }),
+      createElement(CarrierPreferenceSelector, {
+        legend: 'Connection preference',
+        value: settingOf(snapshot[daemonId]),
+        onChange: value => (value === 'default' ? preferences.reset(daemonId) : preferences.set(daemonId, value)),
+        availability: {
+          // Without an RTCPeerConnection (a browser that switched WebRTC off) the walk passes WebRTC over untried and
+          // says so.
+          webrtc: webrtc !== undefined,
+          tunnelNote: carriers.some(c => c.kind === 'tunnel') ? undefined : 'This machine has no tunnel yet.',
+          tunnel:
+            tunnelSwitch === undefined
+              ? undefined
+              : tunnelSwitchOffer(switches[daemonId], () => tunnelSwitch.set({ daemonId }, true)),
+        },
+      }),
+    );
   }
   function Panel() {
     const carriers = useCarriers();
