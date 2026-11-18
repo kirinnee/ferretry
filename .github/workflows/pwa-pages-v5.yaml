@@ -24,7 +24,8 @@ name: Deploy 5.0 preview PWA to Pages
 #      misses a deploy made by the old per-merge trigger, a cancelled run and a failed re-run) and not from `event.before`
 #      (a refused force-rewind still moves the ref). The compare API must say the pushed commit is `ahead` or `identical`;
 #      `behind` or `diverged` builds, signs and deploys NOTHING. An unreadable, non-200 or unverifiable live record, or a
-#      failed compare, FAILS the job (closed); only a 404 for the manifest (nothing ever published) follows the push. A
+#      failed compare, FAILS the job (closed); a 404 fails too unless the commit declares the first deploy
+#      (`scripts/ci/preview-first-deploy`, docs/pwa-release-signing.md). A
 #      skipped run is a green run with no deploy, so a consumer must read the `deploy` job's own conclusion, not the run's.
 #   2. A STALE COMMIT NEVER DEPLOYS LAST. The concurrency group below serialises runs but does NOT order them: pushes A
 #      then B can run B first, and re-running an older green run does the same, so A would then overwrite the production
@@ -98,8 +99,8 @@ jobs:
       # downloads the live `release-manifest.json` and `.sig`, PROVES the signature with the same script the deploy uses
       # (against this commit's committed preview key), and requires the pushed commit to be the live commit or a
       # descendant of it (the compare API). Anything it cannot read, prove or relate FAILS CLOSED: the job fails, nothing
-      # is built, signed or deployed. The only thing that is not a failure is the site answering 404 for the manifest:
-      # nothing has ever been published there, so there is nothing to go backwards from.
+      # is built, signed or deployed. That includes a 404 for the manifest: the preview is already live, so a 404 means
+      # something is wrong, and the one declared way past it is a commit carrying scripts/ci/preview-first-deploy.
       - name: Apply the never-backwards rule
         id: rule
         env:
@@ -129,9 +130,17 @@ jobs:
             exit 1
           }
           if [[ ${manifest_status} == 404 ]]; then
-            echo "${origin} has no release manifest (HTTP 404): nothing has been published there, so the preview follows ${AFTER}"
-            echo "deploy=true" >> "${GITHUB_OUTPUT}"
-            exit 0
+            # The preview is already live, so a 404 today means something is wrong (a path change, a Pages hiccup, a wrong
+            # origin) and following it would let older code deploy. The ONE way past it is the documented first-deploy
+            # step: a commit that carries `scripts/ci/preview-first-deploy` (docs/pwa-release-signing.md), removed again
+            # once the first deploy has succeeded.
+            if [[ -f scripts/ci/preview-first-deploy ]]; then
+              echo "${origin} has no release manifest (HTTP 404) and this commit carries scripts/ci/preview-first-deploy: the declared first deploy, so the preview follows ${AFTER}"
+              echo "deploy=true" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            echo "❌ ${origin}/release-manifest.json answered HTTP 404 and this commit does not declare a first deploy (scripts/ci/preview-first-deploy); refusing to guess what is live" >&2
+            exit 1
           fi
           if [[ ${manifest_status} != 200 ]]; then
             echo "❌ ${origin}/release-manifest.json answered HTTP ${manifest_status}; refusing to guess what is live" >&2

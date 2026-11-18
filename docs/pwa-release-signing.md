@@ -351,8 +351,12 @@ touching none of it:
   the pushed commit is `ahead` of it or `identical` (a redeploy of the live commit is harmless and gives the kit its
   green run); `behind` or `diverged` builds, signs and deploys nothing. **It fails closed**: a manifest or signature
   that cannot be read, answers anything but 200, does not verify, or names no full commit id, or a compare that cannot
-  be read, fails the job. The one exception is the site answering 404 for the manifest, which means nothing was ever
-  published there (the first deploy ever), so the push is followed. A deleted ref deploys nothing. There is **no manual
+  be read, fails the job. **A 404 for the manifest fails too**: the preview is already live, so a 404 means something is
+  wrong (a path change, a Pages hiccup, a wrong origin), and following it would let older code deploy. The ONLY way past
+  it is the one-time first-deploy step for a brand-new Pages project: commit an (empty or one-line) file
+  `scripts/ci/preview-first-deploy` on the commit the kit pushes, let that first deploy succeed, then delete the file in
+  the next PR (no `workflow_dispatch`, no setup-script flag). The file only opens a 404: a manifest that IS there is
+  always compared. A deleted ref deploys nothing. There is **no manual
   trigger** (`workflow_dispatch` is gone, and `release-guards.sh` refuses it): the kit's push is the only way in, so no
   entry path skips the comparison. A skipped run is green with no deploy: read the `deploy` job's own conclusion, not the
   run's. (2) A stale commit never deploys last, below.

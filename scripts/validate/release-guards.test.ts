@@ -365,7 +365,13 @@ describe('the preview gate compares the pushed commit with what the LIVE site sa
    * answers only `compare` (any other read, such as run history, fails the script); `compare` maps "<live>...<after>" to a
    * status, and a pair not in it is an unreadable compare.
    */
-  function runGate(spec: { live: Live; compare?: Record<string, string>; after: string; deleted?: boolean }) {
+  function runGate(spec: {
+    live: Live;
+    compare?: Record<string, string>;
+    after: string;
+    deleted?: boolean;
+    firstDeploy?: boolean;
+  }) {
     const directory = mkdtempSync(join(tmpdir(), 'preview-gate-'));
     scratch.push(directory);
     const bin = join(directory, 'bin');
@@ -379,6 +385,7 @@ describe('the preview gate compares the pushed commit with what the LIVE site sa
       `#!/bin/sh\n[ -s "$1/release-manifest.json" ] && [ -s "$1/release-manifest.sig" ] && exit ${spec.live.verifies === false ? 1 : 0}\nexit 1\n`,
       { mode: 0o755 },
     );
+    if (spec.firstDeploy === true) writeFileSync(join(directory, 'scripts/ci/preview-first-deploy'), 'first deploy\n');
     const answers = {
       'release-manifest.json': spec.live.manifest,
       'release-manifest.sig': spec.live.signature ?? { status: 200 },
@@ -473,11 +480,18 @@ describe('the preview gate compares the pushed commit with what the LIVE site sa
     expect(runGate({ live: liveC, compare: { [`${C}...${B}`]: 'diverged' }, after: B }).deploy).toBe('deploy=false');
   });
 
-  test('the first deploy ever (the site answers 404 for the manifest) follows the push', () => {
-    expect(runGate({ live: { manifest: { status: 404 } }, after: A })).toMatchObject({
+  test('a 404 for the manifest FAILS CLOSED (the preview is live, so a 404 means something is wrong); only a commit that declares the first deploy follows it', () => {
+    const refused = runGate({ live: { manifest: { status: 404 } }, after: A });
+    expect(refused).toMatchObject({ status: 1, deploy: '' });
+    expect(refused.err).toContain('does not declare a first deploy');
+    expect(runGate({ live: { manifest: { status: 404 } }, after: A, firstDeploy: true })).toMatchObject({
       status: 0,
       deploy: 'deploy=true',
     });
+    // The declaration only opens a 404: it never skips the comparison with a record that IS there.
+    expect(runGate({ live: liveC, compare: { [`${C}...${B}`]: 'behind' }, after: B, firstDeploy: true }).deploy).toBe(
+      'deploy=false',
+    );
   });
 
   test('the live record is read as unproven unless it is reachable, a 200, signed and names a commit: every other state fails the job', () => {
