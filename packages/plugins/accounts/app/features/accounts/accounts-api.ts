@@ -50,6 +50,7 @@ import {
   TwoFactorSeedStageViewSchema,
   type TwoFactorStageId,
 } from '../../../contract/routes/index.ts';
+import { quietInit, type ReadMode } from '../../lib/step-up-refusal.ts';
 import type { AccountsClient } from '../../shell.tsx';
 
 export type { AccountsClient };
@@ -157,8 +158,8 @@ export async function keepApart(client: AccountsClient, one: AccountId, other: A
 
 // ─── today's `lib/input-api.ts` calls the accounts screens and the seed card make ────────────────────────────────
 
-export async function readAccounts(client: AccountsClient): Promise<AccountList> {
-  return await ask(client, 'GET /v1/accounts', AccountListSchema);
+export async function readAccounts(client: AccountsClient, read: ReadMode = {}): Promise<AccountList> {
+  return await ask(client, 'GET /v1/accounts', AccountListSchema, quietInit(read));
 }
 
 export async function putAccountDefault(
@@ -202,22 +203,25 @@ export async function readSeedStage(
   client: AccountsClient,
   account: AccountId | undefined,
   stage: TwoFactorStageId,
+  read: ReadMode = {},
 ): Promise<TwoFactorSeedStageView> {
   // A card from this daemon names no account (its handle is often the label and username): the stage says which.
   if (account === undefined)
     return await ask(client, 'GET /v1/accounts/seed-stages/:stage', TwoFactorSeedStageViewSchema, {
       params: { stage },
+      ...quietInit(read),
     });
   return await ask(client, 'GET /v1/accounts/:id/factors/seed/:stage', TwoFactorSeedStageViewSchema, {
     params: { id: account, stage },
+    ...quietInit(read),
   });
 }
 
 // ─── the approve-on-phone card (today's `lib/input-api.ts`) ──────────────────────────────────────────────────────
 
 /** The approve-on-phone cards still waiting (owner only). Nothing is cached: the daemon is the only source of a number. */
-export async function listPhoneApprovals(client: AccountsClient): Promise<PhoneApprovalList> {
-  return await ask(client, 'GET /v1/phone-approvals', PhoneApprovalListSchema);
+export async function listPhoneApprovals(client: AccountsClient, read: ReadMode = {}): Promise<PhoneApprovalList> {
+  return await ask(client, 'GET /v1/phone-approvals', PhoneApprovalListSchema, quietInit(read));
 }
 
 /** "Not me — stop": the only answer a card gives. There is no route that says the owner approved. */

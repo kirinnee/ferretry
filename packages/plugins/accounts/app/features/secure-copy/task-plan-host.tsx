@@ -20,6 +20,8 @@ import {
   runMachineConfirm,
   type TaskPlanClient,
 } from '../../lib/task-plan.ts';
+import { isStepUpRefusal } from '../../lib/step-up-refusal.ts';
+import { ConfirmToSee } from '../confirm-to-see.tsx';
 import { TaskPlanCard, type TaskPlanPhase } from './task-plan-card.tsx';
 
 const POLL_MS = 3_000;
@@ -43,30 +45,39 @@ export function TaskPlanHost({ client, ferret, planId, agentName, askPasskey, on
     { readonly stage: string; readonly summary: readonly string[]; readonly codes: readonly number[] } | undefined
   >(undefined);
   const [forbidden, setForbidden] = useState(false);
+  /** The daemon wants the owner's step-up to show this plan; the quiet read did not ask for it. */
+  const [locked, setLocked] = useState(false);
   const [reads, setReads] = useState(0);
   const settled = useRef(false);
+  /** Set by the owner's press on "Confirm it's you": the next read is theirs, so it may ask for the passkey. */
+  const pressed = useRef(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` re-runs the read after an answer
   useEffect(() => {
     let current = true;
     setForbidden(false);
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const read = async (): Promise<void> => {
+    const read = async (quiet: boolean): Promise<void> => {
       try {
-        const { plans } = await listTaskPlans(client);
+        const { plans } = await listTaskPlans(client, { quiet });
         const plan = plans.find(each => each.sessionId === ferret && each.id === planId);
         if (!current) return;
+        setLocked(false);
         setFound(plan ?? null);
         // A waiting plan is watched: the machine can stage a selection for this card at any moment.
-        if (plan?.state === 'pending') timer = setTimeout(() => void read(), POLL_MS);
+        if (plan?.state === 'pending') timer = setTimeout(() => void read(true), POLL_MS);
       } catch (cause) {
-        // A device that can't see accounts is refused every time: say so once and stop asking.
         if (!current) return;
-        if (isForbidden(cause)) setForbidden(true);
-        else timer = setTimeout(() => void read(), POLL_MS * 3);
+        // The page's own read is quiet: a step-up the daemon wants waits for the owner's press, not for opening the chat.
+        if (isStepUpRefusal(cause)) setLocked(true);
+        // A device that can't see accounts is refused every time: say so once and stop asking.
+        else if (isForbidden(cause)) setForbidden(true);
+        else timer = setTimeout(() => void read(true), POLL_MS * 3);
       }
     };
-    void read();
+    const owned = pressed.current;
+    pressed.current = false;
+    void read(!owned);
     return () => {
       current = false;
       if (timer !== undefined) clearTimeout(timer);
@@ -80,7 +91,7 @@ export function TaskPlanHost({ client, ferret, planId, agentName, askPasskey, on
   useEffect(() => {
     if (foundPlanId === undefined || foundSessionId === undefined || stage === undefined) return undefined;
     let current = true;
-    void readStage(client, { id: foundPlanId, sessionId: foundSessionId }, stage).then(
+    void readStage(client, { id: foundPlanId, sessionId: foundSessionId }, stage, { quiet: true }).then(
       view => {
         if (current) setStaged({ stage, summary: view.summary, codes: view.codes });
       },
@@ -107,6 +118,15 @@ export function TaskPlanHost({ client, ferret, planId, agentName, askPasskey, on
     [onDone],
   );
 
+  if (locked)
+    return (
+      <ConfirmToSee
+        onConfirm={() => {
+          pressed.current = true;
+          setReads(count => count + 1);
+        }}
+      />
+    );
   if (forbidden)
     return (
       <div className="flex min-w-0 flex-col gap-3" data-task-plan-forbidden="">
