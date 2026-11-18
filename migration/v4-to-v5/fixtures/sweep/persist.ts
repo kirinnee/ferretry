@@ -365,6 +365,7 @@ export const KIT_FILES = [
   'fake-codex-auth.ts',
   'persist.ts',
   'real-claude.ts',
+  'reset.ts',
   'service-guard.ts',
   'slot.ts',
 ] as const;
