@@ -2149,7 +2149,7 @@ session (opened by the next attempt itself, about a second):
   connection was lost before it answered and decides.
 
 The resend is a single one: a second failure always ends in the "lost" sentence, and a caller that has already
-given up is never answered with a resend. Nothing on the wire changed.
+The router's own fence refusals (a re-pair or unpair, a changed preference, a republish while the request was in flight) are a decision about this daemon, not a carrier that died, so they are never resent: the walk would meet the same refusal. Nothing on the wire changed.
 
 **A daemon bounds its WHOLE answers, not their parts.** The reference daemon ends a session when more
 than one credit window of whole answers is waiting for the browser's credit, because answers pile up

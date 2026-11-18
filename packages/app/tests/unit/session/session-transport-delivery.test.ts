@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { PAIRING_CLEARED_REASON } from '../../../src/session/session-error.ts';
 import { carrierFateOf } from '../../../src/client/transport.ts';
 import type { CarrierSocketEvents } from '../../../src/session/session-transport.ts';
 import { SessionTransport } from '../../../src/session/session-transport.ts';
@@ -24,8 +25,9 @@ const REQUEST_ID = 'x-fy-request-id';
 /**
  * A daemon whose dials each follow a script: `answer` (a normal session), `dead` (the carrier closes before the
  * daemon is ever reached) or `dies` (the session opens, takes the request, then the carrier closes under it).
+ * `fenced` is the router closing the session itself (code 1000, its fence sentence) as it takes the request.
  */
-async function scripted(script: readonly ('answer' | 'dead' | 'dies')[]) {
+async function scripted(script: readonly ('answer' | 'dead' | 'dies' | 'fenced' | 'closed')[]) {
   const identity = await newDaemonIdentity();
   let dials = 0;
   const dial = (events: CarrierSocketEvents) => {
@@ -61,6 +63,14 @@ async function scripted(script: readonly ('answer' | 'dead' | 'dies')[]) {
             return;
           }
           if (record.t !== 'req') return;
+          if (mode === 'closed') {
+            events.onClose(1000, 'the carrier closed it');
+            return;
+          }
+          if (mode === 'fenced') {
+            events.onClose(1000, PAIRING_CLEARED_REASON);
+            return;
+          }
           if (mode === 'dies') {
             events.onClose(1006, 'the carrier dropped');
             return;
@@ -202,6 +212,24 @@ describe('a request whose carrier died is sent again only when that is safe', ()
     );
     expect(result).toBe('failed');
     expect(transport.dials()).toBeLessThanOrEqual(1);
+    transport.close();
+  });
+});
+
+describe('the router’s own fence refusal is not a dead carrier, so it is never sent again', () => {
+  test('a read the router fenced (re-paired, unpaired, republished) is lost once, with no second dial', async () => {
+    const transport = await scripted(['fenced', 'answer']);
+    const result = await attempt(transport, 'GET');
+    expect(result.answered).toBe(false);
+    expect((result.failure as Error).message).toBe(PAIRING_CLEARED_REASON);
+    expect(transport.dials()).toBe(1);
+    transport.close();
+  });
+
+  test('a same-code close that is NOT one of the fence sentences is still a carrier that died', async () => {
+    const transport = await scripted(['closed', 'answer']);
+    expect((await attempt(transport, 'GET')).answered).toBe(true);
+    expect(transport.dials()).toBe(2);
     transport.close();
   });
 });

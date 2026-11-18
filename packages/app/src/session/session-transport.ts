@@ -19,6 +19,7 @@ import {
   type RelayTunnelAnswer,
   type SessionDeviceClaim,
 } from './session-client.ts';
+import { isFenceRefusal } from './session-error.ts';
 import { sharingIdenticalReads } from './shared-reads.ts';
 import {
   fromBase64Url,
@@ -410,7 +411,7 @@ export class SessionTransport implements DaemonTransport {
    *   any method, because nothing can have been done twice;
    * - otherwise only an idempotent read (GET/HEAD), which is safe to ask twice;
    * - NEVER a press (POST/PUT/PATCH/DELETE) on a guess: it keeps the "lost before it answered" sentence.
-   * Only a session's own end counts (a refusal, a queue-full or a deadline is not the carrier dying), and never after the
+   * Never the router's own fence refusals ({@link isFenceRefusal}). Only a session's own end counts (a refusal, a queue-full or a deadline is not the carrier dying), and never after the
    * caller aborted. A second failure is final.
    */
   #mayResend(given: TransportRequest, reason: unknown, left: boolean, handedToSession: boolean): boolean {
@@ -418,6 +419,9 @@ export class SessionTransport implements DaemonTransport {
     // A session that never opened was already walked over every carrier the person has: asking again at once would only
     // dial the same dead ones twice. The resend is for a carrier that WAS up and was found dead by this request.
     if (!handedToSession) return false;
+    // The router's own fence (re-paired, new preference, republish) is a decision, not a dead carrier: walking again
+    // meets it again.
+    if (isFenceRefusal(reason)) return false;
     const id = requestIdOf(given);
     const inDoubt = left || (id !== undefined && this.#doubted.has(id));
     return !inDoubt || ['GET', 'HEAD'].includes(given.method.toUpperCase());
