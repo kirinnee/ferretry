@@ -8,7 +8,9 @@
  *   bun slot.ts status <1..9>
  *   bun slot.ts cli  <1..9> <v4|v5> [args…]       the fy4s<N> / fy5s<N> wrappers call this
  *   bun slot.ts pair <1..9> <v4|v5>               opens ONE agent-browser tab already pairing (the link never appears here)
- *   bun slot.ts upgrade-v5 <1..9> <libexec-dir>   move ONLY the 5.0 daemon to a newer build, keeping its home, data and pairing
+ *   bun slot.ts upgrade-v5 <1..9> <libexec-dir>   move ONLY the 5.0 daemon to a newer build, keeping its home, data and pairing. FIRST it fast-forwards the
+ *                                      preview ref (origin rebuild/preview) to the build's commit and waits for that deploy (the hosted app moves only
+ *                                      with the slot; never backwards), and only then stops the daemon
  *   bun slot.ts stamp-v5 <libexec-dir> <commit>   record which commit a 5.0 build came from (BUILD.json), for upgrade-v5
  *   bun slot.ts persist <1..9> [dir]   move ONE slot to a persistent folder (default ~/.local/share/fy-sweep/slot<N>) and run
  *                                      both daemons as enabled user units, so they come back after a reboot with the same
@@ -63,13 +65,7 @@ import {
 import { createServer, type Server } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { basename, dirname, join, relative, isAbsolute, resolve } from 'node:path';
-import {
-  candidateRunIds,
-  deployJobSucceeded,
-  PREVIEW_BRANCHES,
-  PREVIEW_DEPLOY_JOB,
-  PREVIEW_DEPLOY_WORKFLOW,
-} from './deploy-gate.ts';
+import { ensurePreviewDeployed as ensurePreviewDeployedWith, PreviewRefusal } from './preview-ref.ts';
 import { fakeCodexAuthText } from './fake-codex-auth.ts';
 import {
   KIT_FILES,
@@ -1555,54 +1551,29 @@ async function checkNewBuild(slot: Slot, libexec: string): Promise<Stamp> {
 }
 
 /**
- * The hosted 5.0 app must already be live for the commit, or the app would say "Reload to get the new app". Read-only `gh`.
- * The rule (deploy-gate.ts): a successful preview Pages run for this exact commit on `rebuild/5.0` or `rebuild/5.0-after`
- * whose `Deploy PWA` job itself succeeded; a run whose deploy was skipped (the never-backwards skip) deployed nothing.
+ * The hosted 5.0 app must be live for the commit, or the app would say "Reload to get the new app". It deploys only when the preview
+ * ref is pushed, so this FIRST fast-forwards `rebuild/preview` to the commit (refusing a commit that is not a descendant of what the
+ * ref holds: never backwards), then waits for that run's `Deploy PWA` job to succeed (preview-ref.ts; the rules are deploy-gate.ts).
+ * Everything here happens before anything is stopped. `reset-v5` calls it at the same point.
  */
-async function assertPagesDeployLive(commit: string): Promise<void> {
+async function ensurePreviewDeployed(commit: string): Promise<void> {
   const env = process.env as Record<string, string>;
-  const ran = await run(
-    'gh',
-    [
-      'run',
-      'list',
-      '--workflow',
-      PREVIEW_DEPLOY_WORKFLOW,
-      '--limit',
-      '300',
-      '--json',
-      'databaseId,headSha,conclusion,headBranch',
-    ],
-    env,
-    FIXTURES,
-  );
-  if (ran.code !== 0)
-    die(
-      `refusing: could not read the Pages deploy runs with gh (exit ${String(ran.code)}: ${ran.err.trim().slice(0, 200)}), so I cannot say commit ${commit.slice(0, 10)} is live`,
-    );
-  let runs: unknown;
+  const seam = (program: string) => (args: readonly string[]) => run(program, args, env, FIXTURES);
   try {
-    runs = JSON.parse(ran.out);
-  } catch {
-    die('refusing: gh did not return the deploy runs as JSON');
+    await ensurePreviewDeployedWith(
+      {
+        git: seam('git'),
+        gh: seam('gh'),
+        sleep: ms => Bun.sleep(ms),
+        now: () => Date.now(),
+        say: line => console.log(line),
+      },
+      commit,
+    );
+  } catch (error) {
+    if (error instanceof PreviewRefusal) die(`refusing: ${error.message}`);
+    throw error;
   }
-  for (const id of candidateRunIds(runs, commit).slice(0, 10)) {
-    const viewed = await run('gh', ['run', 'view', String(id), '--json', 'jobs'], env, FIXTURES);
-    if (viewed.code !== 0)
-      die(
-        `refusing: could not read the jobs of Pages deploy run ${String(id)} with gh (exit ${String(viewed.code)}: ${viewed.err.trim().slice(0, 200)}), so I cannot say commit ${commit.slice(0, 10)} is live`,
-      );
-    let view: unknown;
-    try {
-      view = JSON.parse(viewed.out);
-    } catch {
-      die(`refusing: gh did not return the jobs of run ${String(id)} as JSON`);
-    }
-    if (deployJobSucceeded(view)) return;
-  }
-  die(
-    `refusing: commit ${commit.slice(0, 10)} has no successful "${PREVIEW_DEPLOY_WORKFLOW}" run on ${PREVIEW_BRANCHES.join(' or ')} whose "${PREVIEW_DEPLOY_JOB}" job succeeded (a run whose deploy was skipped does not count), so the hosted app does not match it; nothing was stopped`,
-  );
 }
 
 async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<void> {
@@ -1631,13 +1602,14 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
       );
   }
   const next = await checkNewBuild(slot, libexec);
-  await assertPagesDeployLive(next.commit);
   const before = await readStamp(bin);
   const oldLabel = before === undefined ? 'unknown (no BUILD.json beside the running programs)' : before.commit;
   if (before?.commit === next.commit && V5_PROGRAMS.every(name => before.sha256[name] === next.sha256[name])) {
     console.log(`slot ${n}: already on ${next.commit}; nothing to do`);
     return;
   }
+  // Only now: a slot that is already on this build pushes nothing. Every refusal of this step is before anything is stopped.
+  await ensurePreviewDeployed(next.commit);
   console.log(`slot ${n}: 5.0 daemon ${oldLabel} -> ${next.commit} (programs in ${bin})`);
 
   const prev = (name: string): string => join(bin, `${name}.prev`);

@@ -70,6 +70,20 @@ Do these on the paired 5.0 app (the `fy5` preview).
 `migration/v4-to-v5/tests/unit/sweep-real-claude.test.ts` runs the shim in a real `sh` against a **stub** "real" binary and drives
 `on` / `off` on a scratch folder. No real claude, no login and no network is ever used.
 
+## The hosted app moves with the slot (`upgrade-v5`, `reset-v5`)
+
+The 5.0 preview app (https://ferretry-v5.pages.dev) is deployed only when the ref `rebuild/preview` is pushed; a merge to 5.0 deploys
+nothing, so the app never gets ahead of the owner's daemon (it refuses a daemon whose plugin contracts differ). `upgrade-v5`, given a
+build stamped with commit X (`BUILD.json`), does this BEFORE it stops anything (`reset-v5` does the same, through the same `ensurePreviewDeployed`):
+
+1. reads `rebuild/preview` on `origin` (read-only);
+2. creates or fast-forwards it to X, never forced; **a commit that is not a descendant of what the ref holds is refused** (never backwards);
+3. waits (up to 40 minutes; 4 for the run to appear) until the run of "Deploy 5.0 preview PWA to Pages" for exactly X has a successful
+   `Deploy PWA` job. A run that ended any other way, a green run whose deploy was skipped, or no run, refuses.
+
+A slot that is already on the build pushes nothing. There is no `gh workflow run`. Tests (`sweep-deploy-gate.test.ts`,
+`sweep-preview-ref.test.ts`) use a fake `git` and `gh`; nothing is ever pushed.
+
 # Start from scratch: an EMPTY 5.0 home (`reset-v5` / `restore-v5`)
 
 For an owner who wants to re-pair and start with nothing: no fixture ferrets, conversations, logins, runtimes, profiles, projects,
@@ -95,7 +109,7 @@ Not defended (out of scope by the above): a kept folder whose self-asserted reco
 ## `reset-v5`
 
 1. **Refuses first** (nothing is stopped): not persisted; the home does not pin this slot's port; a unit that is not this slot's; the
-   build is not stamped or its Pages deploy is not live (the same gate as `upgrade-v5`); **real claude is on and `--keep-real-claude` was not given**.
+   build is not stamped or the preview ref cannot be fast-forwarded to it and deployed (the same step as `upgrade-v5`: `rebuild/preview` is pushed, then its deploy awaited); **real claude is on and `--keep-real-claude` was not given**.
 2. Stops **only** the 5.0 daemon, the 5.0 tmux server (its socket lives inside the home that goes away) and the headless Chrome of the 5.0
    browser profile. v4 keeps running.
 3. Puts the given 5.0 programs in place (old ones kept as `<name>.prev`, a hard link to the old file; nothing if the slot already runs that
