@@ -17,21 +17,26 @@ interface FloatingSurface {
   readonly element: HTMLElement | null;
   /** Puts the surface the panel sits in away (the menu), for a panel that is about to open a dialog of its own. */
   readonly dismiss: (() => void) | null;
+  /** Whether the surface is on the screen now. A panel stays mounted in a shut one and may need to reset (an armed confirm). */
+  readonly open: boolean;
 }
 
-const NO_SURFACE: FloatingSurface = { element: null, dismiss: null };
+const NO_SURFACE: FloatingSurface = { element: null, dismiss: null, open: true };
 const FloatingContext = createContext<FloatingSurface>(NO_SURFACE);
 
 export function FloatingHost({
   element,
   dismiss,
+  open = true,
   children,
 }: {
   readonly element: HTMLElement | null;
   readonly dismiss: () => void;
+  /** Whether the host's surface is open; omitted means always (a host that never shuts). */
+  readonly open?: boolean;
   readonly children: ReactNode;
 }) {
-  const value = useMemo<FloatingSurface>(() => ({ element, dismiss }), [element, dismiss]);
+  const value = useMemo<FloatingSurface>(() => ({ element, dismiss, open }), [element, dismiss, open]);
   return <FloatingContext.Provider value={value}>{children}</FloatingContext.Provider>;
 }
 
@@ -39,6 +44,11 @@ export function FloatingHost({
 export function useDismissSurface(): () => void {
   const { dismiss } = useContext(FloatingContext);
   return dismiss ?? noop;
+}
+
+/** Whether the surface this panel is drawn in is open now (true outside any host). */
+export function useSurfaceOpen(): boolean {
+  return useContext(FloatingContext).open;
 }
 
 const noop = (): void => undefined;

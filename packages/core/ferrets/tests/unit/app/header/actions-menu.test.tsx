@@ -20,6 +20,8 @@ interface State {
   /** How many times the surface the rows sit in (the ferret's menu) was asked to put itself away. */
   dismissed: number;
   resolveToggle?: () => void;
+  /** Shuts or reopens the surface the rows sit in (the ferret's menu), which keeps the rows mounted. */
+  setSurfaceOpen?: (open: boolean) => void;
 }
 
 const formA = (host: FerretActionFormHost) => (
@@ -162,12 +164,15 @@ const openMenu = async (options: { compact?: boolean } = {}): Promise<Harness> =
   function Host() {
     const [form, setForm] = useState<string | null>(null);
     const [toggled, setToggled] = useState(false);
+    const [surfaceOpen, setSurfaceOpen] = useState(true);
+    state.setSurfaceOpen = setSurfaceOpen;
     return (
       <FloatingHost
         dismiss={() => {
           state.dismissed += 1;
         }}
         element={document.body}
+        open={surfaceOpen}
       >
         <ActionsMenu
           compact={options.compact ?? false}
@@ -333,6 +338,29 @@ describe('ActionsMenu — inline confirm', () => {
     await interact(() => row(h.container, 'stop').click());
     await interact(() => must(h.container.querySelector<HTMLElement>('[data-menu-confirm-yes]'), 'yes').click());
     expect(h.state.failures).toEqual(['Stop ferret failed: refused']);
+  });
+});
+
+describe('ActionsMenu — a menu put away with a confirm armed', () => {
+  it('reopens with the rows, not the armed question (the panel stays mounted while the menu is shut)', async () => {
+    const h = await openMenu();
+    await interact(() => row(h.container, 'restart').click());
+    expect(h.container.querySelector('[data-menu-confirm="restart"]')).not.toBeNull();
+
+    await interact(() => h.state.setSurfaceOpen?.(false));
+    await interact(() => h.state.setSurfaceOpen?.(true));
+
+    expect(h.container.querySelector('[data-menu-confirm]')).toBeNull();
+    expect(h.container.querySelector('[data-ferret-action-item="restart"]')).not.toBeNull();
+  });
+
+  it('keeps the confirm armed while the menu stays open', async () => {
+    const h = await openMenu();
+    await interact(() => row(h.container, 'restart').click());
+
+    await interact(() => h.state.setSurfaceOpen?.(true));
+
+    expect(h.container.querySelector('[data-menu-confirm="restart"]')).not.toBeNull();
   });
 });
 

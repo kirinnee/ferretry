@@ -164,7 +164,13 @@ export function useDialogFocus(
     }
     const previous = restoreTo.current;
     restoreTo.current = null;
-    if (previous && typeof previous.focus === 'function' && document.contains(previous)) previous.focus();
+    // FOCUS BACK ONLY WHERE FOCUS STILL IS. A surface that closes in the same commit another dialog opens (a menu row
+    // that puts the menu away and opens a form or a sheet) runs this AFTER the new dialog has focused itself, and
+    // pulling focus back to the opener would leave the new dialog open with focus behind it: typing goes nowhere and
+    // its Tab trap is bypassed. Focus that is inside this dialog, or nowhere (the body), is ours to return.
+    const active = document.activeElement;
+    const ours = active === null || active === document.body || ref.current?.contains(active) === true;
+    if (ours && previous && typeof previous.focus === 'function' && document.contains(previous)) previous.focus();
   }, [open, autoFocus, ref]);
 
   const onKeyDown = useCallback(

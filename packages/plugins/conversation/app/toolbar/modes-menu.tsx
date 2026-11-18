@@ -59,7 +59,7 @@ export function ModesMenu({ daemon, ferret }: { readonly daemon: string; readonl
 
   const floating = typeof document === 'undefined' ? null : document.body;
   const body = opened ? (
-    <FloatingHost dismiss={close} element={floating}>
+    <FloatingHost dismiss={close} element={floating} open={open}>
       {hasFerretRows ? (
         <section aria-label="This ferret" className="fy-modes__section" data-modes-section="ferret">
           <PanelSlot daemon={daemon} slot={FERRET_MENU_SLOT} subject={ferret} />

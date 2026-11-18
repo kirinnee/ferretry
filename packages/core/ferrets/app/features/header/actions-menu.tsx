@@ -12,8 +12,8 @@
  *     boxed in the menu's sheet, and it outlives the menu being shut.
  */
 
-import { type ReactNode, useRef } from 'react';
-import { BottomSheet, Floating, useDialogFocus, useDismissSurface } from '../../ui.ts';
+import { type ReactNode, useEffect, useRef } from 'react';
+import { BottomSheet, Floating, useDialogFocus, useDismissSurface, useSurfaceOpen } from '../../ui.ts';
 import {
   findFerretAction,
   type FerretActionEntry,
@@ -54,6 +54,13 @@ export function ActionsMenu({ sections, compact, name, form, onFormChange, onFai
       onFormChange(id);
     },
   });
+
+  // The panel stays mounted while the menu is shut, so a confirm armed when the menu closed (Escape, a click outside, the
+  // scrim) would still be armed on the next opening: a destructive question the person no longer remembers asking.
+  const surfaceOpen = useSurfaceOpen();
+  useEffect(() => {
+    if (!surfaceOpen) setConfirming(null);
+  }, [surfaceOpen, setConfirming]);
 
   const formEntry = form === null ? undefined : findFerretAction(sections, form);
   const shownForm = formEntry?.kind === 'form' ? formEntry : undefined;
