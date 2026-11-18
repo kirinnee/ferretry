@@ -432,3 +432,103 @@ describe('an identical live answer keeps the first drawn screen mounted', () => 
     }
   });
 });
+
+describe('a bootstrap read that never answers cannot hold sockets for ever', () => {
+  const sockets = surface('stream', { sockets: ['GET /v1/stream'] });
+  const withSocket = [...CORE, board, sockets];
+  const remembered = (): Extract<Inventory, { kind: 'read' }> => ({
+    kind: 'read',
+    entries: new Map(
+      (inventoryOf(withSocket) as { plugins: { id: string; on: boolean; contract: string }[] }).plugins.map(p => [
+        p.id,
+        { on: p.on, contract: p.contract },
+      ]),
+    ),
+  });
+  const never = new Promise<never>(() => {});
+  const wait = (ms: number) => interact(() => new Promise(resolve => setTimeout(resolve, ms)));
+  const closing = () => {
+    const closes: [string, number | undefined][] = [];
+    return { closes, listeners: { onFrame: () => {}, onClose: (r: string, c?: number) => void closes.push([r, c]) } };
+  };
+
+  test('the live list answered but the health read is held: stop() tells the waiting socket once, and none ever opens', async () => {
+    const transport = new FakeTransport((request: TransportRequest) =>
+      request.path === '/v1/plugins' ? json(inventoryOf(withSocket)) : never,
+    );
+    const client = new DaemonClient({ transport, surfaces: withSocket, remembered: remembered() });
+    const { closes, listeners } = closing();
+    client.forPackage('stream').socket('GET /v1/stream', {}, listeners);
+    void client.start();
+    await wait(10);
+    expect(transport.sockets).toHaveLength(0);
+    expect(closes).toEqual([]);
+    client.stop();
+    await wait(10);
+    expect(closes).toHaveLength(1);
+    expect(closes[0]?.[1]).toBe(1008);
+    expect(transport.sockets).toHaveLength(0);
+    client.stop();
+    expect(closes).toHaveLength(1);
+  });
+
+  test('a health read that never answers is given up after the deadline and the socket opens on the live list', async () => {
+    const transport = new FakeTransport((request: TransportRequest) =>
+      request.path === '/v1/plugins' ? json(inventoryOf(withSocket)) : never,
+    );
+    const client = new DaemonClient({
+      transport,
+      surfaces: withSocket,
+      remembered: remembered(),
+      bootstrapDeadlineMs: 30,
+    });
+    const { closes, listeners } = closing();
+    client.forPackage('stream').socket('GET /v1/stream', {}, listeners);
+    await client.start();
+    await wait(5);
+    expect(transport.sockets.map(s => s.path)).toEqual(['/v1/stream']);
+    expect(closes).toEqual([]);
+    expect(client.daemonVersion).toBeUndefined();
+    client.stop();
+  });
+
+  test('a plugin list that never answers is unreadable after the deadline: the socket closes once, retryably, and is asked again by the re-read plan', async () => {
+    let answered = false;
+    const transport = new FakeTransport((request: TransportRequest) => {
+      if (request.path === '/v1/plugins') return answered ? json(inventoryOf(withSocket)) : never;
+      return json({ protocol: 1, version: '5.0.0' });
+    });
+    const client = new DaemonClient({
+      transport,
+      surfaces: withSocket,
+      remembered: remembered(),
+      bootstrapDeadlineMs: 30,
+      rereadAfterMs: [20],
+    });
+    const { closes, listeners } = closing();
+    client.forPackage('stream').socket('GET /v1/stream', {}, listeners);
+    await client.start();
+    await wait(5);
+    expect(transport.sockets).toHaveLength(0);
+    expect(closes).toHaveLength(1);
+    // Retryable: no refusal code, so a view dials again on its own pause.
+    expect(closes[0]?.[1]).toBeUndefined();
+    expect(client.inventory?.kind).toBe('unreadable');
+    // The view dials again while the list is still unreadable: a handle, never a throw, and closed again retryably.
+    const again = closing();
+    client.forPackage('stream').socket('GET /v1/stream', {}, again.listeners);
+    await wait(5);
+    expect(again.closes).toHaveLength(1);
+    expect(again.closes[0]?.[1]).toBeUndefined();
+    // The re-read plan asks again; once the daemon answers, a socket opens.
+    answered = true;
+    await wait(80);
+    expect(client.inventory?.kind).toBe('read');
+    const last = closing();
+    client.forPackage('stream').socket('GET /v1/stream', {}, last.listeners);
+    await wait(5);
+    expect(transport.sockets).toHaveLength(1);
+    expect(last.closes).toEqual([]);
+    client.stop();
+  });
+});

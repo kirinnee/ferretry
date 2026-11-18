@@ -101,6 +101,13 @@ export interface DaemonClientOptions {
    */
   readonly rereadAfterMs?: readonly number[];
   /**
+   * How long (ms) each bootstrap read (the plugin list, then the health read) may wait for its answer. A carrier that is
+   * healthy but never answers one would otherwise leave every call and socket waiting on the list for ever. On timeout the
+   * plugin list is told as unreadable (and asked again by the same re-read plan as any failed read) and the health read as
+   * absent. Default 15 s.
+   */
+  readonly bootstrapDeadlineMs?: number;
+  /**
    * The daemon this client reaches and Access's passkey handler (`passkey/passkey.ts`): a refusal for want of an
    * unlock or a step-up is shown to it, and the call is sent again ONCE when the person confirmed. Absent, nothing can
    * ask and every refusal is returned as it came.
@@ -192,6 +199,20 @@ function refusal(answer: TransportAnswer): DaemonCallError {
 
 /** 1 s doubling to 30 s: a read that failed is asked again until it answers. */
 const DEFAULT_REREAD_AFTER_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
+const DEFAULT_BOOTSTRAP_DEADLINE_MS = 15_000;
+
+/** `work`, or a rejection once `ms` has passed without it: the bootstrap reads never wait for ever. */
+async function within<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`the daemon did not answer within ${Math.round(ms / 1000)} s`)), ms);
+  });
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export class DaemonClient {
   readonly #transport: DaemonTransport;
@@ -224,6 +245,9 @@ export class DaemonClient {
   readonly #refusedListeners = new Set<() => void>();
   #refused = false;
   readonly #rereadAfterMs: readonly number[];
+  readonly #bootstrapDeadlineMs: number;
+  /** Sockets handed out before the live list answered: each is told once if this client stops first. */
+  readonly #waitingSockets = new Set<() => void>();
   /** Failed reads in a row, and the pending re-read's timer; both reset by an answered read. */
   #failedReads = 0;
   #rereadTimer: ReturnType<typeof setTimeout> | undefined;
@@ -240,6 +264,7 @@ export class DaemonClient {
     this.#transport = options.transport;
     this.#surfaces = options.surfaces;
     this.#rereadAfterMs = options.rereadAfterMs ?? DEFAULT_REREAD_AFTER_MS;
+    this.#bootstrapDeadlineMs = options.bootstrapDeadlineMs ?? DEFAULT_BOOTSTRAP_DEADLINE_MS;
     this.#passkey = options.passkey;
     this.#learnName = options.learnName;
     this.#onRead = options.onRead;
@@ -276,6 +301,9 @@ export class DaemonClient {
     this.#stopped = true;
     // Whatever waits for the inventory (an admission, a deferred socket) is woken to find the client stopped.
     this.#settle();
+    // A socket still waiting for the live list is told once that it will never open.
+    for (const abandon of [...this.#waitingSockets]) abandon();
+    this.#waitingSockets.clear();
     this.#stopEvents?.();
     this.#stopEvents = undefined;
     this.#setFeedLive(false);
@@ -442,14 +470,20 @@ export class DaemonClient {
   async #read(): Promise<void> {
     let inventory: Inventory;
     try {
-      const answer = await this.#transport.request({ method: 'GET', path: parseRouteKey(INVENTORY_ROUTE).path });
+      const answer = await within(
+        this.#transport.request({ method: 'GET', path: parseRouteKey(INVENTORY_ROUTE).path }),
+        this.#bootstrapDeadlineMs,
+      );
       inventory = inventoryFromAnswer(answer);
     } catch (error) {
       if (isDeviceRefusal(error)) this.#refuse();
       inventory = unreadableBecause(error);
     }
     try {
-      const health = await this.#transport.request({ method: 'GET', path: parseRouteKey(HEALTH_ROUTE).path });
+      const health = await within(
+        this.#transport.request({ method: 'GET', path: parseRouteKey(HEALTH_ROUTE).path }),
+        this.#bootstrapDeadlineMs,
+      );
       const parsed = HealthEnvelopeSchema.safeParse(health.body);
       this.#daemonVersion = parsed.success ? parsed.data.version : undefined;
     } catch {
@@ -799,7 +833,8 @@ export class DaemonClient {
     // A remembered list only DRAWS: no socket opens on it. The handle is returned at once and the socket opens only when
     // the LIVE list has answered (or closes as paused if that list says no), so a view that opens its socket in an
     // effect on a reload is never thrown at while the live read is still on its way.
-    if (this.#provisional) return this.#deferSocket(caller, owner, key, params, listeners, query);
+    if (this.#provisional || this.#inventory === undefined || this.#inventory.kind === 'unreadable')
+      return this.#deferSocket(caller, owner, key, params, listeners, query);
     return this.#openSocket(caller, owner, key, params, listeners, query);
   }
 
@@ -813,16 +848,24 @@ export class DaemonClient {
   ): TransportSocket {
     let inner: TransportSocket | undefined;
     let closed = false;
+    const abandon = (): void => {
+      if (closed) return;
+      closed = true;
+      listeners.onClose('This connection was closed.', 1008);
+    };
+    this.#waitingSockets.add(abandon);
     void (async () => {
       while ((this.#inventory === undefined || this.#provisional) && !this.#stopped) await this.#ready;
+      this.#waitingSockets.delete(abandon);
       if (closed || this.#stopped) return;
       try {
         inner = this.#openSocket(caller, owner, key, params, listeners, query);
       } catch {
-        // The live list refused it: told as a refusal (1008), which a view does not dial again.
         closed = true;
-        listeners.onClose(KERNEL_REFUSALS.pluginPaused.code, 1008);
-        return;
+        // A list that could not be read is no verdict: the close is retryable (no code), and the re-read plan answers by
+        // the time the view dials again. A live list that says no is a refusal (1008), which a view does not dial again.
+        if (this.#inventory?.kind === 'unreadable') listeners.onClose(KERNEL_REFUSALS.pluginPaused.code);
+        else listeners.onClose(KERNEL_REFUSALS.pluginPaused.code, 1008);
       }
     })();
     return {
