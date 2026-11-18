@@ -144,6 +144,8 @@ export interface BrowserLoginStoreOptions {
   readonly closedPollMs?: number;
   /** Injected so the cadence and the no-listener case are deterministic. */
   readonly schedule?: ScheduleBrowserLoginPoll;
+  /** Injected so an open window's own expiry is deterministic. */
+  readonly now?: () => number;
 }
 
 interface DaemonLogin {
@@ -151,6 +153,8 @@ interface DaemonLogin {
   port: BrowserLoginPort;
   readonly listeners: Set<() => void>;
   snapshot: BrowserLoginSnapshot | null;
+  /** The snapshot is the daemon's answer to the person's own confirm: only then may a quiet refusal be outweighed by it. */
+  confirmed: boolean;
   cancelPoll: CancelBrowserLoginPoll | null;
   generation: number;
   inFlight: { readonly generation: number; readonly promise: Promise<BrowserLoginSnapshot> } | null;
@@ -160,8 +164,9 @@ const notify = (login: DaemonLogin): void => {
   for (const listener of login.listeners) listener();
 };
 
-const publish = (login: DaemonLogin, snapshot: BrowserLoginSnapshot): void => {
+const publish = (login: DaemonLogin, snapshot: BrowserLoginSnapshot, confirmed = false): void => {
   login.snapshot = snapshot;
+  login.confirmed = confirmed;
   notify(login);
 };
 
@@ -201,12 +206,14 @@ export class DaemonBrowserLoginStore {
   readonly #openPollMs: number;
   readonly #closedPollMs: number;
   readonly #schedule: ScheduleBrowserLoginPoll;
+  readonly #now: () => number;
 
   constructor(createPort: BrowserLoginPortFactory, options: BrowserLoginStoreOptions = {}) {
     this.#createPort = createPort;
     this.#openPollMs = options.openPollMs ?? BROWSER_LOGIN_OPEN_POLL_MS;
     this.#closedPollMs = options.closedPollMs ?? BROWSER_LOGIN_CLOSED_POLL_MS;
     this.#schedule = options.schedule ?? scheduleWithTimeout;
+    this.#now = options.now ?? Date.now;
   }
 
   /**
@@ -313,6 +320,7 @@ export class DaemonBrowserLoginStore {
         port: this.#createPort(daemon),
         listeners: new Set(),
         snapshot: null,
+        confirmed: false,
         cancelPoll: null,
         generation: 0,
         inFlight: null,
@@ -346,7 +354,7 @@ export class DaemonBrowserLoginStore {
     if (login.inFlight?.generation === requestGeneration) return login.inFlight.promise;
     const promise = login.port
       .status(explicit ? { explicit } : undefined)
-      .then(value => this.#settle(login, requestGeneration, readStatus(value)))
+      .then(value => this.#settle(login, requestGeneration, readStatus(value), explicit))
       .catch(caught =>
         this.#settle(
           login,
@@ -355,6 +363,7 @@ export class DaemonBrowserLoginStore {
           isStepUpRefusal(caught)
             ? { state: 'step-up-required' }
             : unknownFrom(caught, 'Cannot reach the browser-login window.'),
+          explicit,
         ),
       )
       .finally(() => {
@@ -370,12 +379,40 @@ export class DaemonBrowserLoginStore {
     clearPoll(login);
   }
 
-  #settle(login: DaemonLogin, requestGeneration: number, snapshot: BrowserLoginSnapshot): BrowserLoginSnapshot {
-    if (login.generation === requestGeneration) {
-      publish(login, snapshot);
-      this.#schedulePoll(login, snapshot);
+  #settle(
+    login: DaemonLogin,
+    requestGeneration: number,
+    snapshot: BrowserLoginSnapshot,
+    explicit: boolean,
+  ): BrowserLoginSnapshot {
+    if (login.generation !== requestGeneration) return snapshot;
+    const held = this.#heldConfirmedWindow(login, snapshot, explicit);
+    if (held !== null) {
+      // A quiet read the daemon refused for want of the step-up says nothing about the window the person already saw
+      // after their own confirm, so it neither replaces nor downgrades it; polling goes on so its expiry is noticed.
+      this.#schedulePoll(login, held);
+      return held;
     }
+    // Only the daemon's answer to the person's own confirm is ever held against a later quiet refusal.
+    publish(login, snapshot, explicit);
+    this.#schedulePoll(login, snapshot);
     return snapshot;
+  }
+
+  /**
+   * The window the person confirmed to see, while a quiet refusal would otherwise flip it back (a machine that keeps no
+   * step-up window refuses every quiet read, even right after a confirm). Never anything the daemon did not return to
+   * the explicit read, and gone the moment its own `expiresAt` passes or any other answer arrives.
+   */
+  #heldConfirmedWindow(
+    login: DaemonLogin,
+    incoming: BrowserLoginSnapshot,
+    explicit: boolean,
+  ): BrowserLoginSnapshot | null {
+    const current = login.snapshot;
+    if (explicit || !login.confirmed || incoming.state !== 'step-up-required') return null;
+    if (current === null || (current.state !== 'open' && current.state !== 'closing')) return null;
+    return Date.parse(current.expiresAt) > this.#now() ? current : null;
   }
 
   #schedulePoll(login: DaemonLogin, snapshot: BrowserLoginSnapshot): void {
