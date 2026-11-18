@@ -72,6 +72,7 @@ import {
   type FyRenderBlock as ParsedBlock,
 } from './fy-render.ts';
 import { fyRenderHeightKey, recallFyRenderHeight, rememberFyRenderHeight } from './fy-render-height-memory.ts';
+import { FyRenderZoomImage } from './fy-render-image-zoom.tsx';
 import {
   FY_RENDER_HTML_PAGE_TOKENS,
   FY_RENDER_HTML_TOKENS,
@@ -667,7 +668,7 @@ export function FyRenderBlock({
         src={svgDataUrl(block.payload)}
       />
     ) : picture ? (
-      <img
+      <FyRenderZoomImage
         alt={block.alt}
         className="fy-render-image"
         key={`${generation.current}:${revision}`}

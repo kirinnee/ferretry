@@ -43,6 +43,7 @@ import {
   fyRenderRasterRefusal,
   fyRenderReadBoundedBytes,
 } from './fy-render.ts';
+import { FyRenderZoomImage } from './fy-render-image-zoom.tsx';
 
 /** Why a block shows a card instead of its media, as a closed set. */
 export type FyRenderMediaFallback =
@@ -289,7 +290,7 @@ export function FyRenderMedia({ block, readWorkspaceMedia, onShape }: FyRenderMe
   switch (block.type) {
     case 'image':
       return (
-        <img
+        <FyRenderZoomImage
           alt={block.alt}
           className="fy-render-image"
           data-fy-render-media="image"
