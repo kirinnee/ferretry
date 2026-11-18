@@ -149,22 +149,34 @@ if [[ -f ${preview} ]]; then
                   and ($r | contains("exit 1")))]
            | length > 0)' >/dev/null ||
     fail "${preview}: the deploy job must, before wrangler pages deploy, read the run branch head with git ls-remote --exit-code --heads, refuse (exit 1) unless it equals GITHUB_SHA (an older commit must not publish after a newer one)"
-  # THE DEPLOY JOB IS THE AUTHORITY ON "NEVER BACKWARDS". GitHub can re-run it alone on a stale gate result, so a step
-  # BEFORE `wrangler pages deploy` must read the project's production deployment from the Pages API (canonical_deployment)
-  # and ask git whether it is an ancestor (`merge-base --is-ancestor`), and the upload must be skippable only by that step.
+  # THE DEPLOY JOB IS THE AUTHORITY ON "NEVER BACKWARDS". GitHub can re-run it alone on a stale gate result, so BEFORE
+  # `wrangler pages deploy` it must (1) in a step that holds the Cloudflare token and runs nothing from the checkout (no
+  # `./scripts/`), read the project's production deployment from the Pages API (canonical_deployment), and (2) in a LATER
+  # step that holds no Cloudflare credential at all (the pushed commit's scripts run there), prove the signed record and ask
+  # git whether the live commit is an ancestor (`merge-base --is-ancestor`).
   json "${preview}" | jq -e '
     .jobs.deploy.steps as $steps
     | ([$steps | to_entries[] | select((.value.run // "") | contains("wrangler pages deploy")) | .key] | first) as $deploy_at
-    | $deploy_at != null
-      and ([$steps | to_entries[]
+    | ([$steps | to_entries[]
             | select(.key < $deploy_at)
             | select((.value.run // "") as $r
-                | ($r | contains("api.cloudflare.com/client/v4/accounts/"))
+                | ((.value.env // {}) | tostring | contains("secrets.CLOUDFLARE_PAGES_V5_API_TOKEN"))
+                  and ($r | contains("api.cloudflare.com/client/v4/accounts/"))
                   and ($r | contains("canonical_deployment"))
+                  and (($r | contains("./scripts/")) | not))
+            | .key] | first) as $read_at
+    | $deploy_at != null
+      and $read_at != null
+      and ([$steps | to_entries[]
+            | select(.key > $read_at and .key < $deploy_at)
+            | select((.value.run // "") as $r
+                | (((.value.env // {}) | tostring | contains("secrets.")) | not)
+                  and (($r | contains("CLOUDFLARE")) | not)
+                  and ($r | contains("verify-pwa-release.sh"))
                   and ($r | contains("merge-base --is-ancestor"))
                   and ($r | contains("fail")))]
            | length > 0)' >/dev/null ||
-    fail "${preview}: the deploy job must, before wrangler pages deploy, read the production deployment from the Cloudflare Pages API (canonical_deployment) and refuse (git merge-base --is-ancestor) a commit that is not a descendant of it (a re-run of the deploy job alone must not reuse a stale gate)"
+    fail "${preview}: the deploy job must, before wrangler pages deploy, (1) read the production deployment from the Cloudflare Pages API in a step that runs nothing from the checkout, then (2) in a later step with no secret and no Cloudflare variable, verify the signed record and refuse (git merge-base --is-ancestor) a commit that is not a descendant of it (a re-run of the deploy job alone must not reuse a stale gate, and the token must not reach the pushed commit's scripts)"
   json "${preview}" | jq -e '(.jobs.sign.environment == "pwa-release-v5") and (.jobs.deploy.environment == "pwa-deploy-v5")' >/dev/null ||
     fail "${preview}: sign must use pwa-release-v5 and deploy pwa-deploy-v5"
   json "${preview}" | jq -e '[.jobs[] | .permissions // {} | .["contents"] // "none"] | all(. == "read")' >/dev/null ||

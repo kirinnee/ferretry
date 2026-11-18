@@ -350,21 +350,26 @@ touching none of it:
   force-rewind), and it fails on anything it cannot read, prove or relate, except a 404 for the manifest, which it passes
   on because it holds no Cloudflare credential and cannot tell a never-deployed project from a wrong origin. It is not the
   authority: GitHub can re-run the `deploy` job alone, reusing a stale "allow" after the live release has moved on.
-  (2) The `deploy` job's **`Refuse a release that goes backwards` step is the authority**, immediately before the
-  upload and on every attempt, with the Pages-only token that job already holds (sent to `curl` on stdin, never as an
-  argument). It reads the project's **current production deployment** from the Cloudflare Pages API
-  (`canonical_deployment`; every upload records its commit hash: this workflow passes `--commit-hash`, and the old
-  per-merge trigger's wrangler inferred it from its checkout) and cross-checks it with the live **signed record**, which
-  also gives the live sequence. Then: the live commit must be an ancestor of the commit being deployed
+  (2) The `deploy` job is the **authority**, in two steps immediately before the upload, on every attempt.
+  **`Read the production deployment`** holds the Pages-only token (in that step's environment alone, sent to `curl` on
+  stdin, never as an argument) and runs nothing from the checkout: it asks the Cloudflare Pages API for the project's
+  `canonical_deployment` and leaves the answer in a file. **`Refuse a release that goes backwards`** holds no secret, so
+  the scripts it runs from the pushed commit (`hosted-app-origin.sh`, `verify-pwa-release.sh`) never see the token. It
+  checks the deployment is of `ferretry-v5` and that its URL is `https://<first 8 characters of its id>.<alias host>`,
+  then reads and proves the signed record **from that deployment's own URL** (the alias is mutable and not bound to the
+  deployment, so the alias's record must additionally agree with it, commit and sequence, or the job fails). The live
+  commit is the API's recorded commit hash (this workflow passes `--commit-hash`; the old per-merge trigger's wrangler
+  inferred it from its checkout), which the deployment's own record must match; a deployment with no recorded hash is
+  decided by its own record. Then the live commit must be an ancestor of the commit being deployed
   (`git merge-base --is-ancestor`, on a full-history checkout; a live commit missing from it is a failure); the **same**
   commit is a no-op (the upload step is skipped and the job stays green, so the kit still sees a green `Deploy PWA`);
-  otherwise this run's sequence must **exceed** the live signed sequence. A deployment with no recorded commit hash falls
-  back to the signed record's commit. The API is the only first-deploy signal: **no production deployment** means nothing
-  is older and the deploy proceeds; a manifest that is missing, unverifiable or disagreeing with the API while a
-  deployment exists (a stale CDN copy, or a deploy in flight) **fails the job**, as does any API error or answer it
-  cannot parse. There is no bootstrap marker and no manual trigger (`workflow_dispatch` is gone and
-  `release-guards.sh` refuses it, and refuses a deploy job without this step). A skipped run is green with no deploy:
-  read the `deploy` job's own conclusion, not the run's. (3) A stale commit never deploys last, below.
+  otherwise this run's sequence must **exceed** the live signed sequence. The API is the only first-deploy signal: **no
+  production deployment** (`canonical_deployment: null`) means nothing is older and the deploy proceeds; anything else
+  that is missing, malformed, unverifiable or disagreeing (an absent field, a missing record, a stale alias) **fails the
+  job**, as does any API error or answer it cannot parse. There is no bootstrap marker and no manual trigger
+  (`workflow_dispatch` is gone and `release-guards.sh` refuses it, and refuses a deploy job without these two steps or
+  with a secret in the second). A skipped run is green with no deploy: read the `deploy` job's own conclusion, not the
+  run's. (3) A stale commit never deploys last, below.
 - **A stale commit never deploys last.** The shared, non-cancelling concurrency group serialises the runs but does not
   order them: pushes A then B can run B first, and re-running an older green run does the same, so A would overwrite the
   production alias with older app code. So the `deploy` job's `Refuse a stale commit` step, the one right before

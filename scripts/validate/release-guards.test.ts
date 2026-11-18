@@ -541,12 +541,23 @@ describe('the preview gate compares the pushed commit with what the LIVE site sa
 
 describe('the deploy job re-checks, before the upload and on every attempt, against the Pages API and the signed record', () => {
   const text = readFileSync(join(repository, '.github/workflows/pwa-pages-v5.yaml'), 'utf8');
-  const start = text.indexOf('      - name: Refuse a release that goes backwards');
-  const section = text.slice(start, text.indexOf('      # `--branch` is the Pages project'));
-  const script = (section.split('        run: |\n')[1] ?? '')
-    .split('\n')
-    .map(line => (line.startsWith('          ') ? line.slice(10) : line))
-    .join('\n');
+  const stepSource = (name: string, until: string) => {
+    const start = text.indexOf(`      - name: ${name}`);
+    const body = text.slice(start, text.indexOf(until, start + 1));
+    return {
+      body,
+      script: (body.split('        run: |\n')[1] ?? '')
+        .split('\n')
+        .map(line => (line.startsWith('          ') ? line.slice(10) : line))
+        .join('\n'),
+    };
+  };
+  const read = stepSource('Read the production deployment', '      # STEP 2');
+  const decide = stepSource('Refuse a release that goes backwards', '      # `--branch` is the Pages project');
+  const TOKEN = 'token-not-in-args';
+  const ID = 'abcd1234-0000-4000-8000-000000000000';
+  const ALIAS_HOST = 'ferretry-v5.pages.dev';
+  const DEPLOYMENT_HOST = `abcd1234.${ALIAS_HOST}`;
 
   const git = (cwd: string, ...args: string[]) => {
     const result = Bun.spawnSync(['git', ...args], {
@@ -582,121 +593,132 @@ describe('the deploy job re-checks, before the upload and on every attempt, agai
 
   type Answer = { status: number; body?: unknown } | 'unreachable';
   type Spec = {
-    /** The Pages API's answer for the project; `body` defaults to a deployment of `commit`. */
+    /** The Pages API's answer for the project. */
     api: Answer;
-    /** The live signed record. */
-    manifest?: Answer;
-    signature?: Answer;
+    /** The signed record at the production deployment's own URL, and at the alias (default: the same). */
+    deployment?: Answer;
+    alias?: Answer;
+    signature?: { deployment?: Answer; alias?: Answer };
     verifies?: boolean;
     after: string;
     sequence?: number;
   };
 
+  /** Runs step 1 (with the token) and, if it passes, step 2 (without any), as GitHub would, with fake curl. */
   function run(directory: string, spec: Spec) {
-    mkdirSync(join(directory, 'scripts/ci'), { recursive: true });
-    mkdirSync(join(directory, '.fake'), { recursive: true });
-    mkdirSync(join(directory, '.bin'), { recursive: true });
-    writeFileSync(join(directory, 'scripts/ci/hosted-app-origin.sh'), '#!/bin/sh\necho https://preview.example\n', {
-      mode: 0o755,
-    });
+    for (const dir of ['scripts/ci', '.bin', '.runner']) mkdirSync(join(directory, dir), { recursive: true });
     writeFileSync(
-      join(directory, 'scripts/ci/verify-pwa-release.sh'),
-      `#!/bin/sh\n[ -s "$1/release-manifest.json" ] && [ -s "$1/release-manifest.sig" ] && exit ${spec.verifies === false ? 1 : 0}\nexit 1\n`,
+      join(directory, 'scripts/ci/hosted-app-origin.sh'),
+      `#!/bin/sh\nenv > .seen-by-origin\necho https://${ALIAS_HOST}\n`,
       { mode: 0o755 },
     );
-    const answers: Record<string, Answer | undefined> = {
-      api: spec.api,
-      'release-manifest.json': spec.manifest,
-      'release-manifest.sig': spec.signature ?? { status: 200, body: 'signature-bytes' },
-    };
-    for (const [name, answer] of Object.entries(answers)) {
-      if (answer === undefined || answer === 'unreachable') continue;
+    writeFileSync(
+      join(directory, 'scripts/ci/verify-pwa-release.sh'),
+      `#!/bin/sh\nenv > .seen-by-verify\n[ -s "$1/release-manifest.json" ] && [ -s "$1/release-manifest.sig" ] && exit ${spec.verifies === false ? 1 : 0}\nexit 1\n`,
+      { mode: 0o755 },
+    );
+    const put = (host: string, name: string, answer: Answer | undefined) => {
+      if (answer === undefined || answer === 'unreachable') return;
+      mkdirSync(join(directory, '.fake', host), { recursive: true });
       const body = typeof answer.body === 'string' ? answer.body : JSON.stringify(answer.body ?? {});
-      writeFileSync(join(directory, '.fake', name), body);
-      writeFileSync(join(directory, '.fake', `${name}.status`), String(answer.status));
-    }
+      writeFileSync(join(directory, '.fake', host, name), body);
+      writeFileSync(join(directory, '.fake', host, `${name}.status`), String(answer.status));
+    };
+    const ok: Answer = { status: 200, body: 'signature-bytes' };
+    put('api', 'project', spec.api);
+    put(DEPLOYMENT_HOST, 'release-manifest.json', spec.deployment);
+    put(DEPLOYMENT_HOST, 'release-manifest.sig', spec.signature?.deployment ?? ok);
+    put(ALIAS_HOST, 'release-manifest.json', spec.alias ?? spec.deployment);
+    put(ALIAS_HOST, 'release-manifest.sig', spec.signature?.alias ?? ok);
     writeFileSync(
       join(directory, '.bin/curl'),
       [
         '#!/usr/bin/env bash',
         'set -euo pipefail',
+        'printf "%s\\n" "$*" >> .curl-args',
         'out=""; url=""',
         'while (($#)); do case "$1" in --output) shift; out="$1" ;; --header) shift; [[ $1 == @- ]] && cat >/dev/null ;; --write-out|--max-time|--retry) shift ;; --*) ;; *) url="$1" ;; esac; shift; done',
         'case "$url" in',
-        '  https://api.cloudflare.com/client/v4/accounts/acct/pages/projects/ferretry-v5) name=api ;;',
-        '  https://preview.example/*) name="${url##*/}"; name="${name%%\\?*}" ;;',
+        '  https://api.cloudflare.com/client/v4/accounts/acct/pages/projects/ferretry-v5) host=api; name=project ;;',
+        '  https://*) rest="${url#https://}"; host="${rest%%/*}"; name="${rest#*/}"; name="${name%%\\?*}" ;;',
         '  *) echo "unexpected url: ${url}" >&2; exit 2 ;;',
         'esac',
-        '[[ -f .fake/${name}.status ]] || exit 6',
-        'cp ".fake/${name}" "${out}"',
-        'cat ".fake/${name}.status"',
+        '[[ -f ".fake/${host}/${name}.status" ]] || exit 6',
+        'cp ".fake/${host}/${name}" "${out}"',
+        'cat ".fake/${host}/${name}.status"',
         '',
       ].join('\n'),
       { mode: 0o755 },
     );
     const output = join(directory, 'github-output');
     writeFileSync(output, '');
-    const result = Bun.spawnSync(['bash', '-c', script], {
+    const base: Record<string, string | undefined> = {
+      ...process.env,
+      PATH: `${join(directory, '.bin')}:${process.env.PATH ?? ''}`,
+      GITHUB_OUTPUT: output,
+      GITHUB_RUN_ID: '99',
+      RUNNER_TEMP: join(directory, '.runner'),
+    };
+    delete base.CLOUDFLARE_API_TOKEN;
+    delete base.CLOUDFLARE_ACCOUNT_ID;
+    const first = Bun.spawnSync(['bash', '-c', read.script], {
       cwd: directory,
-      env: {
-        ...process.env,
-        PATH: `${join(directory, '.bin')}:${process.env.PATH ?? ''}`,
-        GITHUB_OUTPUT: output,
-        GITHUB_RUN_ID: '99',
-        CLOUDFLARE_API_TOKEN: 'token-not-in-args',
-        CLOUDFLARE_ACCOUNT_ID: 'acct',
-        AFTER: spec.after,
-        SEQUENCE: String(spec.sequence ?? 10),
-        ATTEMPT: '1',
-      },
+      env: { ...base, CLOUDFLARE_API_TOKEN: TOKEN, CLOUDFLARE_ACCOUNT_ID: 'acct' },
     });
-    return { status: result.exitCode, err: result.stderr.toString(), out: readFileSync(output, 'utf8').trim() };
+    if (first.exitCode !== 0) {
+      return { step: 1, status: first.exitCode, err: first.stderr.toString(), out: '' };
+    }
+    const second = Bun.spawnSync(['bash', '-c', decide.script], {
+      cwd: directory,
+      env: { ...base, AFTER: spec.after, SEQUENCE: String(spec.sequence ?? 10), ATTEMPT: '1' },
+    });
+    return {
+      step: 2,
+      status: second.exitCode,
+      err: second.stderr.toString(),
+      out: readFileSync(output, 'utf8').trim(),
+    };
   }
 
   const project = (deployment: unknown) => ({
     status: 200,
-    body: { success: true, result: { canonical_deployment: deployment } },
+    body: { success: true, result: { name: 'ferretry-v5', canonical_deployment: deployment } },
   });
-  const deployedAt = (commit: string | undefined) => ({
-    id: 'dep',
+  const deployedAt = (commit: string | undefined, over: Record<string, unknown> = {}) => ({
+    id: ID,
+    url: `https://${DEPLOYMENT_HOST}`,
+    project_name: 'ferretry-v5',
     deployment_trigger: { metadata: commit === undefined ? {} : { commit_hash: commit } },
+    ...over,
   });
   const record = (commit: string, sequence = 5) => ({ status: 200, body: { commit, sequence } });
+  const live = (commit: string, sequence = 5) => ({
+    api: project(deployedAt(commit)),
+    deployment: record(commit, sequence),
+  });
 
   test('a stale gate "allow" cannot deploy once the live release has moved on: an older commit is refused', () => {
     const r = repo();
-    const result = run(r.directory, { api: project(deployedAt(r.c3)), manifest: record(r.c3), after: r.c2 });
-    expect(result.status).toBe(1);
+    const result = run(r.directory, { ...live(r.c3), after: r.c2 });
+    expect(result).toMatchObject({ step: 2, status: 1, out: '' });
     expect(result.err).toContain('is not an ancestor');
-    expect(result.out).toBe('');
   });
 
   test('a diverged commit is refused', () => {
     const r = repo();
-    const result = run(r.directory, { api: project(deployedAt(r.c3)), manifest: record(r.c3), after: r.d });
+    const result = run(r.directory, { ...live(r.c3), after: r.d });
     expect(result.status).toBe(1);
     expect(result.err).toContain('is not an ancestor');
   });
 
-  test('a descendant of the live commit with a higher sequence deploys', () => {
+  test('a descendant of the live commit with a higher sequence deploys; one that does not exceed the live sequence is refused', () => {
     const r = repo();
-    expect(
-      run(r.directory, { api: project(deployedAt(r.c2)), manifest: record(r.c2, 5), after: r.c3, sequence: 6 }),
-    ).toMatchObject({
+    expect(run(r.directory, { ...live(r.c2, 5), after: r.c3, sequence: 6 })).toMatchObject({
       status: 0,
       out: 'skip=false',
     });
-  });
-
-  test('a descendant whose sequence does not exceed the live signed sequence is refused', () => {
-    const r = repo();
     for (const sequence of [5, 4]) {
-      const result = run(r.directory, {
-        api: project(deployedAt(r.c2)),
-        manifest: record(r.c2, 5),
-        after: r.c3,
-        sequence,
-      });
+      const result = run(r.directory, { ...live(r.c2, 5), after: r.c3, sequence });
       expect(result.status).toBe(1);
       expect(result.err).toContain('does not exceed the live signed sequence');
     }
@@ -704,20 +726,18 @@ describe('the deploy job re-checks, before the upload and on every attempt, agai
 
   test('an identical commit is a no-op: nothing is uploaded and the job stays green', () => {
     const r = repo();
-    expect(
-      run(r.directory, { api: project(deployedAt(r.c3)), manifest: record(r.c3, 5), after: r.c3, sequence: 6 }),
-    ).toMatchObject({
+    expect(run(r.directory, { ...live(r.c3, 5), after: r.c3, sequence: 6 })).toMatchObject({
       status: 0,
       out: 'skip=true',
     });
   });
 
-  test('the first deploy ever (the API shows no production deployment) deploys, and needs no manifest', () => {
+  test('the first deploy ever (the API shows no production deployment) deploys, and needs no record', () => {
     const r = repo();
     expect(run(r.directory, { api: project(null), after: r.c1 })).toMatchObject({ status: 0, out: 'skip=false' });
   });
 
-  test('an API error, an unreadable or unparseable answer, or a project without the production field is refused', () => {
+  test('step 1 fails on an API error, an unreadable or unparseable answer, or a project without the production field', () => {
     const r = repo();
     const cases: Array<[string, Answer]> = [
       ['unreachable', 'unreachable'],
@@ -725,23 +745,47 @@ describe('the deploy job re-checks, before the upload and on every attempt, agai
       ['HTTP 403', { status: 403, body: { success: false } }],
       ['not json', { status: 200, body: 'not json' }],
       ['success false', { status: 200, body: { success: false, result: { canonical_deployment: null } } }],
-      ['no production field', { status: 200, body: { success: true, result: {} } }],
+      ['no production field', { status: 200, body: { success: true, result: { name: 'ferretry-v5' } } }],
     ];
     for (const [label, api] of cases) {
-      const result = run(r.directory, { api, manifest: record(r.c3), after: r.c3 });
-      expect({ label, status: result.status, out: result.out }).toEqual({ label, status: 1, out: '' });
+      const result = run(r.directory, { api, deployment: record(r.c3), after: r.c3 });
+      expect({ label, step: result.step, status: result.status }).toEqual({ label, step: 1, status: 1 });
     }
   });
 
-  test('a manifest that is missing or unverifiable while the API shows a deployment is a failure, never a first deploy', () => {
+  test('a deployment that is not bound to this project and this address is refused: another project, a bad id, a foreign or alias URL', () => {
+    const r = repo();
+    const cases: Array<[string, unknown]> = [
+      [
+        'wrong project name on the result',
+        { ...project(deployedAt(r.c3)).body, result: { name: 'other', canonical_deployment: deployedAt(r.c3) } },
+      ],
+      ['wrong deployment project_name', project(deployedAt(r.c3, { project_name: 'other' })).body],
+      ['id is not a deployment id', project(deployedAt(r.c3, { id: 'abcd1234' })).body],
+      ['url of another deployment', project(deployedAt(r.c3, { url: `https://ffffffff.${ALIAS_HOST}` })).body],
+      ['url is the mutable alias', project(deployedAt(r.c3, { url: `https://${ALIAS_HOST}` })).body],
+      ['url on another host', project(deployedAt(r.c3, { url: `https://abcd1234.evil.example` })).body],
+    ];
+    for (const [label, body] of cases) {
+      const result = run(r.directory, { api: { status: 200, body }, deployment: record(r.c3), after: r.c3 });
+      expect({ label, step: result.step, status: result.status, out: result.out }).toEqual({
+        label,
+        step: 2,
+        status: 1,
+        out: '',
+      });
+    }
+  });
+
+  test("the deployment's own signed record must be there and verify; a missing one is never a first deploy", () => {
     const r = repo();
     const cases: Array<[string, Partial<Spec>]> = [
-      ['manifest 404', { manifest: { status: 404 } }],
-      ['manifest unreachable', { manifest: 'unreachable' }],
-      ['signature 404', { manifest: record(r.c3), signature: { status: 404 } }],
-      ['does not verify', { manifest: record(r.c3), verifies: false }],
-      ['record commit is not an id', { manifest: record('abc') }],
-      ['record sequence is not a number', { manifest: { status: 200, body: { commit: r.c3, sequence: 'x' } } }],
+      ['record 404', { deployment: { status: 404 } }],
+      ['record unreachable', { deployment: 'unreachable' }],
+      ['signature 404', { deployment: record(r.c3), signature: { deployment: { status: 404 } } }],
+      ['does not verify', { deployment: record(r.c3), verifies: false }],
+      ['commit is not an id', { deployment: record('abc') }],
+      ['sequence is not a number', { deployment: { status: 200, body: { commit: r.c3, sequence: 'x' } } }],
     ];
     for (const [label, partial] of cases) {
       const result = run(r.directory, { api: project(deployedAt(r.c3)), after: r.c3, ...partial });
@@ -749,63 +793,92 @@ describe('the deploy job re-checks, before the upload and on every attempt, agai
     }
   });
 
-  test('a signed record that disagrees with the API (a stale CDN copy, or a deploy in flight) is refused', () => {
+  test('the deployment record must agree with the API commit, and the ALIAS record with the deployment record (a stale alias cannot authorise a rewind or a false skip)', () => {
     const r = repo();
-    const result = run(r.directory, { api: project(deployedAt(r.c3)), manifest: record(r.c2), after: r.c3 });
-    expect(result.status).toBe(1);
-    expect(result.err).toContain('stale copy or a deploy in flight');
+    // The API says c3; the deployment's own record says c2.
+    expect(run(r.directory, { api: project(deployedAt(r.c3)), deployment: record(r.c2), after: r.c3 }).status).toBe(1);
+    // Everything about the deployment says c3, but the alias still serves c2: not a record we can reason from.
+    const staleAlias = run(r.directory, { ...live(r.c3), alias: record(r.c2), after: r.c3 });
+    expect(staleAlias.status).toBe(1);
+    expect(staleAlias.err).toContain('differs from the production deployment');
+    // A different sequence on the alias is a difference too; a missing alias record fails.
+    expect(run(r.directory, { ...live(r.c3, 5), alias: record(r.c3, 4), after: r.c3 }).status).toBe(1);
+    expect(run(r.directory, { ...live(r.c3), alias: { status: 404 }, after: r.c3 }).status).toBe(1);
   });
 
-  test('a deployment with no recorded commit falls back to the signed record, and says so', () => {
+  test("with no recorded commit hash the deployment's OWN record decides (not the alias, which must then agree)", () => {
     const r = repo();
-    const result = run(r.directory, {
-      api: project(deployedAt(undefined)),
-      manifest: record(r.c2, 5),
-      after: r.c3,
-      sequence: 6,
+    const noHash = project(deployedAt(undefined));
+    expect(run(r.directory, { api: noHash, deployment: record(r.c2, 5), after: r.c3, sequence: 6 })).toMatchObject({
+      status: 0,
+      out: 'skip=false',
     });
-    expect(result).toMatchObject({ status: 0, out: 'skip=false' });
-    const older = run(r.directory, {
-      api: project(deployedAt(undefined)),
-      manifest: record(r.c3, 5),
-      after: r.c2,
-      sequence: 6,
-    });
-    expect(older.status).toBe(1);
+    // An older record at the deployment's own URL refuses a rewind even though the alias would have allowed it.
+    expect(run(r.directory, { api: noHash, deployment: record(r.c3, 5), after: r.c2, sequence: 6 }).status).toBe(1);
+    // An alias that is newer or older than the deployment's own record fails closed.
+    expect(
+      run(r.directory, { api: noHash, deployment: record(r.c3), alias: record(r.c1), after: r.c3, sequence: 6 }).status,
+    ).toBe(1);
   });
 
   test('a live commit that is not in the checkout is refused, not assumed old', () => {
     const r = repo();
     const unknown = 'f'.repeat(40);
-    const result = run(r.directory, { api: project(deployedAt(unknown)), manifest: record(unknown), after: r.c3 });
+    const result = run(r.directory, { ...live(unknown), after: r.c3 });
     expect(result.status).toBe(1);
     expect(result.err).toContain('is not in this checkout');
   });
 
-  test('the step sits before the upload, the upload is skipped on a no-op, and it records the commit', () => {
-    expect(text.indexOf('- name: Refuse a release that goes backwards')).toBeGreaterThan(
-      text.indexOf('name: Refuse a stale commit'),
-    );
-    expect(text.indexOf('- name: Refuse a release that goes backwards')).toBeLessThan(
-      text.indexOf('name: Deploy production bundle'),
-    );
-    expect(text).toContain("if: steps.live.outputs.skip != 'true'");
-    expect(text).toContain('--commit-hash="${GITHUB_SHA}"');
-    expect(section).not.toContain('--header "Authorization');
-    expect(section).toContain('--header @-');
+  test('the token reaches only step 1, never an argument, and never a script run from the checkout', () => {
+    const r = repo();
+    expect(run(r.directory, { ...live(r.c2, 5), after: r.c3, sequence: 6 }).status).toBe(0);
+    for (const seen of ['.seen-by-origin', '.seen-by-verify']) {
+      const env = readFileSync(join(r.directory, seen), 'utf8');
+      expect(env).not.toContain(TOKEN);
+      expect(env).not.toContain('CLOUDFLARE_');
+    }
+    expect(readFileSync(join(r.directory, '.curl-args'), 'utf8')).not.toContain(TOKEN);
+    // Step 1 runs no script from the checkout; step 2 holds no secret at all.
+    expect(read.script).not.toContain('./scripts/');
+    expect(read.body).toContain('secrets.CLOUDFLARE_PAGES_V5_API_TOKEN');
+    expect(decide.body).not.toContain('secrets.');
+    expect(decide.script).not.toContain('CLOUDFLARE');
   });
 
-  test('mutation: a workflow whose deploy job lacks the live check is refused', () => {
-    const result = gate(
+  test('the steps sit before the upload, the upload is skipped on a no-op, and it records the commit', () => {
+    const at = (needle: string) => text.indexOf(needle);
+    expect(at('- name: Read the production deployment')).toBeGreaterThan(at('name: Refuse a stale commit'));
+    expect(at('- name: Refuse a release that goes backwards')).toBeGreaterThan(
+      at('- name: Read the production deployment'),
+    );
+    expect(at('- name: Refuse a release that goes backwards')).toBeLessThan(at('name: Deploy production bundle'));
+    expect(text).toContain("if: steps.live.outputs.skip != 'true'");
+    expect(text).toContain('--commit-hash="${GITHUB_SHA}"');
+    expect(read.script).toContain('--header @-');
+  });
+
+  test('mutation: a deploy job without the live check, or with the token in the checking step, is refused', () => {
+    const withoutRead = gate(
       checkout(p =>
         edit(
           p('.github/workflows/pwa-pages-v5.yaml'),
-          /      # THE AUTHORITATIVE NEVER-BACKWARDS CHECK[\s\S]*?echo "skip=false" >> "\$\{GITHUB_OUTPUT\}"\n(?=      # `--branch`)/u,
+          /      - name: Read the production deployment[\s\S]*?(?=      # STEP 2)/u,
           '',
         ),
       ),
     );
-    expect(result.status).toBe(1);
-    expect(result.err).toContain('Pages API');
+    expect(withoutRead.status).toBe(1);
+    expect(withoutRead.err).toContain('Pages API');
+    const tokenInStep2 = gate(
+      checkout(p =>
+        edit(
+          p('.github/workflows/pwa-pages-v5.yaml'),
+          '          AFTER: ${{ github.sha }}\n          SEQUENCE:',
+          '          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_V5_API_TOKEN }}\n          AFTER: ${{ github.sha }}\n          SEQUENCE:',
+        ),
+      ),
+    );
+    expect(tokenInStep2.status).toBe(1);
+    expect(tokenInStep2.err).toContain('no secret');
   });
 });
