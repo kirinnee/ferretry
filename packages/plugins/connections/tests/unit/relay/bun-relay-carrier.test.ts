@@ -509,13 +509,13 @@ describe('a carrier that notices a dead path in seconds', () => {
     socket.onopen?.(undefined);
 
     // Act + Assert — nothing is sent before the keepalive interval.
-    clock.advance(19_999);
+    clock.advance(4_999);
     should(socket.sent).be.empty();
     clock.advance(1);
     should(socket.sent).deepEqual(['fy-ping']);
 
-    // Act + Assert — and nothing answers: the deadline is ten seconds after the ping.
-    clock.advance(9_999);
+    // Act + Assert — and nothing answers: the deadline is five seconds after the ping (a dead flow is found in 10 s).
+    clock.advance(4_999);
     should(socket.closes).be.empty();
     clock.advance(1);
 
@@ -524,7 +524,7 @@ describe('a carrier that notices a dead path in seconds', () => {
     should(socket.closes).deepEqual([{ code: 4408, reason: 'no answer within the heartbeat deadline' }]);
     should(carrier.status().detail).match(/stopped answering/u);
     should(lines).deepEqual([
-      'relay https://relay.example: liveness: no reply within 10.0s of the ping — dropping the socket',
+      'relay https://relay.example: liveness: no reply within 5.0s of the ping — dropping the socket',
       'relay https://relay.example: disconnected (4408 no answer within the heartbeat deadline) — redial attempt 1 in 0ms',
     ]);
     clock.advance(0);
@@ -539,17 +539,17 @@ describe('a carrier that notices a dead path in seconds', () => {
     const socket = socketAt(0);
     socket.onopen?.(undefined);
 
-    // Act — three keepalive rounds, each answered a second after its ping.
+    // Act — three keepalive rounds, each answered the moment it is sent, then past the last one's deadline.
     for (let round = 0; round < 3; round += 1) {
-      clock.advance(20_000 - (round === 0 ? 0 : 1_000));
+      clock.advance(5_000 - (round === 0 ? 0 : 1_000));
       socket.onmessage?.({ data: 'fy-pong' });
       clock.advance(1_000);
     }
-    clock.advance(10_000);
+    clock.advance(4_500);
 
-    // Assert — never closed, three pings sent.
+    // Assert — never closed, and still pinging every five seconds (the fourth ping went at 20 s).
     should(socket.closes).be.empty();
-    should(socket.sent.filter(sent => sent === 'fy-ping')).have.length(3);
+    should(socket.sent.filter(sent => sent === 'fy-ping')).have.length(4);
     should(carrier.status().phase).equal('dialling');
     carrier.stop();
   });
@@ -560,11 +560,11 @@ describe('a carrier that notices a dead path in seconds', () => {
     carrier.start();
     const socket = socketAt(0);
     socket.onopen?.(undefined);
-    clock.advance(20_000);
+    clock.advance(5_000);
 
     // Act — the peer's own ping arrives inside the window; that is evidence of life.
     socket.onmessage?.({ data: 'fy-ping' });
-    clock.advance(10_000);
+    clock.advance(5_000);
 
     // Assert
     should(socket.closes).be.empty();
@@ -614,22 +614,21 @@ describe('a carrier that asks the rendezvous itself whether it still holds the c
     carrier.stop();
   });
 
-  it('R53 should probe on every keepalive once the rendezvous agreed, and keep a socket whose claim is held', async () => {
+  it('R53 should probe every 20 s (not every 5 s ping) once the rendezvous agreed, and keep a socket whose claim is held', async () => {
     const { carrier, clock, socketAt, claimOn } = redialingCarrier();
     carrier.start();
     const socket = socketAt(0);
     socket.onopen?.(undefined);
     await claimOn(socket, PROBING);
 
-    for (let round = 0; round < 3; round += 1) {
-      clock.advance(20_000 - (round === 0 ? 0 : 1_000));
+    // Twelve five-second pings, each answered; the claim is asked about on every fourth.
+    for (let round = 0; round < 12; round += 1) {
+      clock.advance(5_000);
       socket.onmessage?.({ data: 'fy-pong' });
       socket.onmessage?.({ data: controlFrame({ t: 'held' }) });
       // Binary frames are handled on the carrier's inbox chain; let it run before the deadline is read.
       await nextTurn();
-      clock.advance(1_000);
     }
-    clock.advance(10_000);
 
     should(probesIn(socket)).equal(3);
     should(socket.closes).be.empty();
@@ -644,9 +643,10 @@ describe('a carrier that asks the rendezvous itself whether it still holds the c
     socket.onopen?.(undefined);
     await claimOn(socket);
 
-    clock.advance(20_000);
-    socket.onmessage?.({ data: 'fy-pong' });
-    clock.advance(10_000);
+    for (let round = 0; round < 4; round += 1) {
+      clock.advance(5_000);
+      socket.onmessage?.({ data: 'fy-pong' });
+    }
 
     should(probesIn(socket)).equal(0);
     should(socket.closes).be.empty();
@@ -662,9 +662,11 @@ describe('a carrier that asks the rendezvous itself whether it still holds the c
     await claimOn(socket, PROBING);
     lines.length = 0;
 
-    clock.advance(20_000);
-    socket.onmessage?.({ data: 'fy-pong' });
-    clock.advance(10_000);
+    // The edge answers every five-second ping; the probe goes at 20 s and the rendezvous gets ten seconds to confirm.
+    for (let round = 0; round < 6; round += 1) {
+      clock.advance(5_000);
+      socket.onmessage?.({ data: 'fy-pong' });
+    }
 
     should(socket.closes).deepEqual([{ code: 4408, reason: 'the rendezvous did not confirm the claim' }]);
     should(carrier.status().detail).match(/stopped confirming the claim/u);

@@ -37,8 +37,10 @@ const hand = () => {
   const armed: { delay: number; run: () => void; ran: boolean }[] = [];
   return {
     after: (delay: number, run: () => void) => void armed.push({ delay, run, ran: false }),
-    fire: (delay: number): void => {
-      const entry = [...armed].reverse().find(item => item.delay === delay && !item.ran);
+    // The keepalive interval and its deadline share a delay (5 s), a tick arms the deadline BEFORE re-arming the interval,
+    // so a deadline is the OLDEST unfired timer of that delay and an interval the newest.
+    fire: (delay: number, which: 'newest' | 'oldest' = 'newest'): void => {
+      const entry = (which === 'newest' ? [...armed].reverse() : armed).find(item => item.delay === delay && !item.ran);
       if (entry === undefined) throw new Error(`no armed ${String(delay)} ms timer`);
       entry.ran = true;
       entry.run();
@@ -202,10 +204,10 @@ describe("B15 a driven member session keeps today's deadline and heartbeat", () 
     await driven;
     timers.fire(KEEPALIVE_INTERVAL_MS);
     raw.onmessage?.({ data: 'fy-pong' }); // answered: the deadline is disarmed
-    timers.fire(KEEPALIVE_DEADLINE_MS);
+    timers.fire(KEEPALIVE_DEADLINE_MS, 'oldest');
     expect(log.ended).toEqual([]);
     timers.fire(KEEPALIVE_INTERVAL_MS);
-    timers.fire(KEEPALIVE_DEADLINE_MS); // not answered
+    timers.fire(KEEPALIVE_DEADLINE_MS, 'oldest'); // not answered
     expect(log.ended[0]?.[0]).toBe(RELAY_CLOSE_CODES.heartbeatTimeout);
     expect(raw.closed?.code).toBe(RELAY_CLOSE_CODES.heartbeatTimeout);
   });

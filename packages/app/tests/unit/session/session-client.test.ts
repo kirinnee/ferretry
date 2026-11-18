@@ -693,6 +693,26 @@ describe('a relay session under a burst of its own requests', () => {
     should((await Promise.all(queued)).every(reason => reason instanceof RelaySessionError)).be.true();
   });
 
+  it('should say which requests never left when the session ends: those still queued are neverSent, those already sent are not', async () => {
+    const { session } = await serving();
+    const all = Array.from({ length: CREDIT_WINDOW_FRAMES + 3 }, (_, index) =>
+      rejection(session.request({ method: 'POST', path: `/v1/${index}` })),
+    );
+    await drain();
+    session.close();
+    const failures = (await Promise.all(all)) as RelaySessionError[];
+    // Credit is spent in order, so the requests that left come first and the ones still waiting for credit come after.
+    const flags = failures.map(failure => failure.neverSent);
+    const firstWaiting = flags.indexOf(true);
+    should(firstWaiting).be.above(0);
+    should(flags.slice(0, firstWaiting).every(flag => !flag)).be.true();
+    should(flags.slice(firstWaiting).every(flag => flag)).be.true();
+    // A request made after the session ended carried nothing either.
+    const late = await rejection(session.request({ method: 'POST', path: '/v1/late' }));
+    should((late as RelaySessionError).neverSent).be.true();
+    should((late as RelaySessionError).code).equal(failures[0]?.code);
+  });
+
   it('R531 should withdraw a request whose caller gives up before it leaves, parts and all, and never send it', async () => {
     const { session, socket, daemon } = await serving();
     const filling = Array.from({ length: CREDIT_WINDOW_FRAMES }, (_, index) =>

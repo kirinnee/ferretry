@@ -281,3 +281,18 @@ export function connectionsLoosens(before: ConnectionsConfig | undefined, after:
     widened.push('the direct listener binds a different address');
   return widened;
 }
+
+// ─── liveness cadence ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How often each end pings a relay socket, and how long a ping may go unanswered before the socket is dead: ONE
+ * source for the daemon's carrier and the app's carrier (docs/relay-protocol.md §8). The ping is the text `fy-ping`,
+ * which the edge answers without waking the Durable Object, so five seconds costs the deployment nothing — and a
+ * flow the path has reset is found within `INTERVAL + DEADLINE` (10 s) instead of most of a minute.
+ */
+export const RELAY_KEEPALIVE_INTERVAL_MS = 5_000;
+export const RELAY_KEEPALIVE_DEADLINE_MS = 5_000;
+/** How often the daemon asks the rendezvous itself whether it still holds the claim (wakes the object, so slower). */
+export const RELAY_CLAIM_PROBE_INTERVAL_MS = 20_000;
+/** How long the rendezvous gets to answer a claim probe (an object that was asleep must wake first). */
+export const RELAY_CLAIM_PROBE_DEADLINE_MS = 10_000;

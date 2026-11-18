@@ -41,6 +41,12 @@ export {
 } from './connect/provides.ts';
 export { CONTROL_UNREACHABLE, type DirectDial, PairingOutcomeUnknownError } from './connect/connector.ts';
 export { daemonOfClient } from './connect/daemon-of.ts';
+export {
+  isFenceRefusal,
+  PAIRING_CLEARED_REASON,
+  PREFERENCE_CHANGED_REASON,
+  STALE_WALK_REASON,
+} from './session/session-error.ts';
 export { directDial, type DirectDialOptions, directSessionUrl, type SocketLike } from './session/direct-dial.ts';
 export {
   PAIRING_REFUSED_REASON,

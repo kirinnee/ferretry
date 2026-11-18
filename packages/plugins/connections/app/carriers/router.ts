@@ -21,6 +21,9 @@ import {
   type CarrierDialer,
   CONTROL_UNREACHABLE,
   DaemonIdSchema,
+  PAIRING_CLEARED_REASON,
+  PREFERENCE_CHANGED_REASON,
+  STALE_WALK_REASON,
   type PairedDaemon,
   RELAY_CLOSE_CODES,
 } from '@ferretry/app';
@@ -85,13 +88,8 @@ export const RELAY_FALLBACK_LINE = 'Couldn’t reach it through the relay, using
  */
 export const RELAY_UNDETERMINED_LINE =
   'Couldn’t look up the relay, so this is using the direct connection. Reload the page to try the relay again.';
-/** Said to every session a new preference closes (today's `PREFERENCE_CHANGED_REASON`). */
-export const PREFERENCE_CHANGED_REASON = 'the connection preference for this machine changed';
-/** Said to every session an unpair or a re-pair closes (today's `clearDaemon` sentence). */
-export const PAIRING_CLEARED_REASON = 'this daemon was re-paired or unpaired';
-/** Said to a walk whose entry a republish replaced while it was in flight (today's `STALE_WALK_REASON`). */
-const STALE_WALK_REASON =
-  'this daemon was re-paired, unpaired or republished, or its connection preference changed, while this request was in flight, so it was not carried to another carrier';
+/** The three fence sentences are owned by the app (its transport reads them to never resend a fenced request). */
+export { PAIRING_CLEARED_REASON, PREFERENCE_CHANGED_REASON };
 /** Said to a session on a carrier the daemon's republished set no longer names (today's `#refreshed` sentence). */
 export const WITHDRAWN_CARRIER_REASON = 'this rendezvous is not named in the carriers this daemon publishes';
 /**

@@ -215,7 +215,7 @@ describe('R244 the app session lease retry', () => {
       ['DELETE', 4441],
       ['GET', 4403],
       ['HEAD', 4403],
-      ['GET', 1006],
+      ['POST', 1006],
     ] as const) {
       const { daemon, transport } = await transportFor([code]);
       await expect(transport.request({ method, path: '/v1/health' })).rejects.toMatchObject({ code });

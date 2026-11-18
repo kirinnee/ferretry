@@ -19,6 +19,7 @@ import {
   type RelayTunnelAnswer,
   type SessionDeviceClaim,
 } from './session-client.ts';
+import { isFenceRefusal } from './session-error.ts';
 import { sharingIdenticalReads } from './shared-reads.ts';
 import {
   fromBase64Url,
@@ -368,20 +369,62 @@ export class SessionTransport implements DaemonTransport {
    */
   async #send(given: TransportRequest): Promise<TransportAnswer> {
     const id = requestIdOf(given);
+    // Whether ANY attempt may have reached the daemon; `resent` is the one extra attempt this request is allowed.
     let left = false;
-    try {
-      return await this.#attempt(given, () => {
-        left = true;
-      });
-    } catch (reason) {
-      if (isCarrierGone(reason)) {
+    let resent = false;
+    for (;;) {
+      let leftThis = false;
+      try {
+        return await this.#attempt(
+          given,
+          () => {
+            leftThis = true;
+          },
+          () => {
+            // The lease-lapse retry inside the attempt IS this request's one extra attempt.
+            resent = true;
+          },
+        );
+      } catch (reason) {
+        // The session says its own request never left (still queued, or the session had already ended): that overrules
+        // the optimistic `leftThis`, which only knows the record was handed to the session.
+        const neverSent = reason instanceof RelaySessionError && reason.neverSent;
+        left = left || (leftThis && !neverSent);
+        if (!isCarrierGone(reason)) throw reason;
+        if (!resent && this.#mayResend(given, reason, left, leftThis)) {
+          resent = true;
+          continue;
+        }
         const doubted = left || (id !== undefined && this.#doubted.has(id));
         if (doubted && id !== undefined) this.#remember(id);
         const fate: CarrierFate = doubted ? 'unknown' : 'unsent';
         markCarrierFate(reason, fate);
+        throw reason;
       }
-      throw reason;
     }
+  }
+
+  /**
+   * THE RESEND RULE, once per request, for a carrier that died under it (a flow the path reset is only found out by
+   * using it). Sent again on a fresh session, which the next attempt opens by itself:
+   * - when it is PROVED the request never reached the daemon (the session ended while the record was still queued):
+   *   any method, because nothing can have been done twice;
+   * - otherwise only an idempotent read (GET/HEAD), which is safe to ask twice;
+   * - NEVER a press (POST/PUT/PATCH/DELETE) on a guess: it keeps the "lost before it answered" sentence.
+   * Never the router's own fence refusals ({@link isFenceRefusal}). Only a session's own end counts (a refusal, a queue-full or a deadline is not the carrier dying), and never after the
+   * caller aborted. A second failure is final.
+   */
+  #mayResend(given: TransportRequest, reason: unknown, left: boolean, handedToSession: boolean): boolean {
+    if (!(reason instanceof RelaySessionError) || given.signal?.aborted === true) return false;
+    // A session that never opened was already walked over every carrier the person has: asking again at once would only
+    // dial the same dead ones twice. The resend is for a carrier that WAS up and was found dead by this request.
+    if (!handedToSession) return false;
+    // The router's own fence (re-paired, new preference, republish) is a decision, not a dead carrier: walking again
+    // meets it again.
+    if (isFenceRefusal(reason)) return false;
+    const id = requestIdOf(given);
+    const inDoubt = left || (id !== undefined && this.#doubted.has(id));
+    return !inDoubt || ['GET', 'HEAD'].includes(given.method.toUpperCase());
   }
 
   /** Remembers a request id as in doubt, most recent last; the oldest is forgotten past the bound. */
@@ -394,7 +437,7 @@ export class SessionTransport implements DaemonTransport {
     }
   }
 
-  async #attempt(given: TransportRequest, onLeaving: () => void): Promise<TransportAnswer> {
+  async #attempt(given: TransportRequest, onLeaving: () => void, onResending: () => void): Promise<TransportAnswer> {
     const lane = requestLane(encodeBody(given.body));
     const session = await this.#requestSession(lane);
     const rotation = this.#options.rotation;
@@ -434,6 +477,7 @@ export class SessionTransport implements DaemonTransport {
         lostUnder(session, reason, request.signal);
         throw reason;
       }
+      onResending();
       const fresh = await this.#requestSession(lane);
       try {
         answer = await fresh.session.request(record, request.signal);

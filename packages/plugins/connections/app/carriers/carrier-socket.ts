@@ -32,14 +32,15 @@ import {
 import type { RelayCarrierSocket } from '../adapters/browser-relay-dial.ts';
 import type { CarrierSessionEnd } from '../lib/carrier-drops.ts';
 import type { ConnectionMethod } from '../lib/connection.ts';
+import { RELAY_KEEPALIVE_DEADLINE_MS, RELAY_KEEPALIVE_INTERVAL_MS } from '../../contract/index.ts';
 import { rendezvousRefusal } from '../lib/rendezvous-refusal.ts';
 
 /** How long a DIRECT session may take to answer before the walk moves on to a rendezvous (today's value). */
 export const DIRECT_SESSION_DEADLINE_MS = 4_000;
 /** How often this side pings a live session: inside `heartbeatSeconds`, which §8 makes a ceiling. */
-export const KEEPALIVE_INTERVAL_MS = 20_000;
+export const KEEPALIVE_INTERVAL_MS = RELAY_KEEPALIVE_INTERVAL_MS;
 /** How long a ping may go unanswered before the socket is treated as dead. */
-export const KEEPALIVE_DEADLINE_MS = 10_000;
+export const KEEPALIVE_DEADLINE_MS = RELAY_KEEPALIVE_DEADLINE_MS;
 /** The shorter deadline a liveness check uses. */
 export const LIVENESS_CHECK_DEADLINE_MS = 4_000;
 /** How late a heartbeat deadline may fire before the silence it measured is not believed. */

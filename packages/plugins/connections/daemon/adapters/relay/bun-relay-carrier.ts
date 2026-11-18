@@ -15,7 +15,7 @@
  *   the request it completed to be answered: that runs beside the frames behind it, or one slow
  *   route would hold up every session on the link.
  * - **Liveness.** A ping every {@link RELAY_KEEPALIVE_MS}, and a socket that has received NOTHING
- *   {@link RELAY_PONG_DEADLINE_MS} after one is dropped and redialled — a dead path is found within 30
+ *   {@link RELAY_PONG_DEADLINE_MS} after one is dropped and redialled — a dead path is found within 10
  *   seconds, not 75. The older rule (no evidence of life for the grace window) stays as the backstop
  *   for a tick that fires late. No evidence means dead: waiting for a close that a suspended laptop
  *   will never send is how a daemon believes it holds a rendezvous slot it lost. A socket WE condemn
@@ -36,6 +36,7 @@
 import type { Carrier, CarrierStatus, SessionLayer } from '@ferretry/kernel/contract';
 import { decodeControlMessage } from '../../lib/relay/control.ts';
 import { decodeFrame, FRAME_KINDS, SESSION_CLOSE_CODES } from '@ferretry/kernel/wire';
+import { RELAY_CLAIM_PROBE_DEADLINE_MS, RELAY_CLAIM_PROBE_INTERVAL_MS } from '../../../contract/index.ts';
 import { parseHostedBandwidthRefusal } from '../../lib/relay/bandwidth.ts';
 import { RelayLink, type RelayLinkScheduler, type RelayLinkSocket, type RelayLinkTimer } from '../../lib/relay/link.ts';
 import type { RendezvousSigner } from '../../lib/relay/session-ports.ts';
@@ -137,6 +138,8 @@ export class BunRelayCarrier {
   #pongDeadline: RelayLinkTimer | undefined;
   #redial: RelayLinkTimer | undefined;
   #lastSeen = 0;
+  /** When this socket last asked the rendezvous about its claim: that ask wakes the object, so it keeps its own, slower cadence. */
+  #lastProbe = 0;
   /** Messages received on this socket, so "anything since the ping" is a comparison and not a clock. */
   #received = 0;
   /** Redials scheduled since the rendezvous last accepted a claim. */
@@ -216,6 +219,7 @@ export class BunRelayCarrier {
     socket.binaryType = 'arraybuffer';
     this.#socket = socket;
     this.#lastSeen = this.#now();
+    this.#lastProbe = this.#now();
     this.#received = 0;
     this.#dialledAt = this.#now();
     this.#inBand = undefined;
@@ -319,11 +323,15 @@ export class BunRelayCarrier {
     // `fy-pong` proves the edge still holds the socket and nothing more: the auto-responder answers it
     // without consulting the rendezvous. So where the rendezvous speaks it, the same tick also asks the
     // rendezvous ITSELF whether this socket still holds the claim, and only `held` answers that.
-    const probing = link.report().claimProbe;
-    if (probing) link.probeClaim();
+    const probing = link.report().claimProbe && this.#now() - this.#lastProbe >= RELAY_CLAIM_PROBE_INTERVAL_MS;
+    if (probing) {
+      this.#lastProbe = this.#now();
+      link.probeClaim();
+    }
+    const deadlineMs = probing ? RELAY_CLAIM_PROBE_DEADLINE_MS : RELAY_PONG_DEADLINE_MS;
     const heard = this.#received;
     const held = link.report().held;
-    this.#pongDeadline = this.#scheduler.after(RELAY_PONG_DEADLINE_MS, () => {
+    this.#pongDeadline = this.#scheduler.after(deadlineMs, () => {
       if (!this.#live(socket, link)) return;
       if (this.#received === heard) {
         this.#abandon(
@@ -331,7 +339,7 @@ export class BunRelayCarrier {
           link,
           'the rendezvous stopped answering, so the daemon dropped the socket',
           'no answer within the heartbeat deadline',
-          `no reply within ${formatSeconds(RELAY_PONG_DEADLINE_MS)} of the ping — dropping the socket`,
+          `no reply within ${formatSeconds(deadlineMs)} of the ping — dropping the socket`,
         );
         return;
       }
@@ -341,7 +349,7 @@ export class BunRelayCarrier {
           link,
           'the rendezvous stopped confirming the claim, so the daemon dropped the socket to claim again',
           'the rendezvous did not confirm the claim',
-          `the edge answered but the rendezvous did not confirm the claim within ${formatSeconds(RELAY_PONG_DEADLINE_MS)} — dropping the socket to claim again`,
+          `the edge answered but the rendezvous did not confirm the claim within ${formatSeconds(deadlineMs)} — dropping the socket to claim again`,
         );
       }
     });
