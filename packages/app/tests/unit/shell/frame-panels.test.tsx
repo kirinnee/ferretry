@@ -542,7 +542,7 @@ describe('the device.settings slot', () => {
     // Under the Appearance block: after the theme/mode/text-size controls, before the layout line.
     const page = text();
     expect(page.indexOf('Text size')).toBeLessThan(page.indexOf('message marks'));
-    expect(page.indexOf('message marks')).toBeLessThan(page.indexOf('Layout:'));
+    expect(page.indexOf('message marks')).toBeLessThan(page.indexOf('Layout in use:'));
   });
 
   test('shell S4: draws with the selected machine offline, and with a machine locked', async () => {
