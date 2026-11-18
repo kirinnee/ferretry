@@ -114,9 +114,15 @@ function foldTurnUsage(
   };
 }
 
-/** What the turns say about activity: how many turns, and nothing about time (the reader carries tokens, not timing). */
+/**
+ * What the turns say about activity: how many turns, and nothing about time (the reader carries tokens, not timing).
+ *
+ * A reader that answered with NO turns has not said the ferret took none: a ferret converted from v4 has no
+ * transcript this daemon can read, and its own recorded turn count must answer for it. So an empty answer is "not
+ * stated" like an absent one; the stored count only ever loses to turns the reader actually saw.
+ */
 function turnActivity(evidence: TurnEvidence): AnalyticsSessionActivity {
-  return { activeDurationMs: null, turns: evidence === undefined ? null : evidence.length };
+  return { activeDurationMs: null, turns: evidence === undefined || evidence.length === 0 ? null : evidence.length };
 }
 
 /** The ONE fold ingestion uses. */

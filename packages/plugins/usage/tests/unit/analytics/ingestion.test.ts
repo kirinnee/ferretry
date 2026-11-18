@@ -274,6 +274,21 @@ describe('AnalyticsIngestionService.ingest', () => {
     should(rows.get('s2')?.turns).equal(4);
   });
 
+  it('should keep the daemon turn counter when the harness reader answers with no turns (a converted v4 ferret)', async () => {
+    // Arrange — v4 showed 3 turns for these three sessions; a reader that finds no transcript answers [], not "zero turns"
+    const test = harness(
+      [candidate({ id: 's1', turns: 1 }), candidate({ id: 's2', turns: 1 }), candidate({ id: 's3', turns: 1 })],
+      async () => readEvidence([]),
+    );
+
+    // Act
+    await test.service.ingest();
+
+    // Assert
+    const turns = test.store.rows().map(row => row.raw.turns);
+    should(turns).deepEqual([1, 1, 1]);
+  });
+
   it('should keep the display model distinct from the model the transcript priced', async () => {
     // A selector encodes a context-window choice the underlying model does not, so the display identity
     // and the pricing evidence are two facts. Overwriting one with the other loses which was which.

@@ -21,7 +21,7 @@ describe('foldAnalyticsTurns', () => {
     });
     expect(foldAnalyticsTurns([])).toEqual({
       usage: { kind: 'refused', reason: 'no_usage_evidence' },
-      activity: { activeDurationMs: null, turns: 0 },
+      activity: { activeDurationMs: null, turns: null },
     });
   });
 

@@ -33,6 +33,8 @@ export interface LessonSessionFacts {
   readonly harness: 'claude' | 'codex';
   readonly mode: 'interactive' | 'auto';
   readonly teammate?: string | undefined;
+  /** The ferret's own name, a lead's included, so a view can name a ferret that is not a helper. */
+  readonly name?: string | undefined;
   readonly label?: string | undefined;
   readonly createdAt: string;
   /** Its pane is up, so a queued message reaches it. */
@@ -153,7 +155,7 @@ export class LessonsService {
   async directory(): Promise<readonly LessonsFerret[]> {
     return (await this.deps.sessions.list()).map(fact => ({
       ferretId: fact.ferretId,
-      ...(fact.teammate === undefined ? {} : { name: fact.teammate }),
+      ...((fact.name ?? fact.teammate) === undefined ? {} : { name: fact.name ?? fact.teammate }),
       folder: fact.cwd,
     }));
   }
