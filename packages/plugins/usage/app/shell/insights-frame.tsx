@@ -1,10 +1,10 @@
 /**
- * INSIGHTS — Insights and Warden as ONE place with two views.
+ * INSIGHTS — Insights, Warden and Learning as ONE place with three entries.
  *
  * The approved session-view redesign gathers the read-mostly fleet surfaces under one entry, so the app's
  * navigation is not a row of peer destinations competing for the top of every page. Each view keeps its own
  * address — a link to `/warden` still lands on Warden — and the strip above it is the ordinary level-three
- * underlined tabs. (Today's third tab, Learning, has no screen of its own in 5.0: Lessons is a panel.)
+ * underlined tabs. Learning (v4's third tab) is Lessons' own screen, so its tab leads there, as Warden's leads to Warden.
  *
  * THE GUTTER IS SET HERE, ONCE. A phone gets 16px either side, wider screens the panel padding, and it
  * applies to the tab strip and to the page under it alike, so a page cannot forget it and its edges
@@ -29,9 +29,13 @@ const INSIGHTS_GUTTER_CLASS = 'px-4 sm:px-5';
 /** Warden's screen (`/warden` in its manifest), addressed under a daemon. */
 const daemonWardenPath = (id: DaemonId): string => `/d/${encodeURIComponent(id)}/warden`;
 
+/** Lessons' screen (`lessons` in its manifest), addressed under a daemon. */
+const daemonLessonsPath = (id: DaemonId): string => `/d/${encodeURIComponent(id)}/lessons`;
+
 const INSIGHTS_TABS = [
   { id: 'insights', label: 'Insights', path: daemonInsightsPath },
   { id: 'warden', label: 'Warden', path: daemonWardenPath },
+  { id: 'learning', label: 'Learning', path: daemonLessonsPath },
 ] as const;
 
 export interface InsightsFrameProps {
