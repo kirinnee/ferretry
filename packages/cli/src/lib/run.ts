@@ -29,6 +29,7 @@ import {
   configStatusVerb,
   configWriteVerb,
 } from './commands/config.ts';
+import { daemonName } from './commands/daemon-name.ts';
 import { doctorVerb } from './commands/doctor.ts';
 import { pluginInstall, pluginList, pluginOff, pluginOn, pluginShow } from './commands/plugin.ts';
 import {
@@ -81,6 +82,7 @@ const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'daemon logs': daemonLogs,
   'daemon which': daemonWhich,
   'daemon reset': daemonReset,
+  'daemon name': daemonName,
   ask: askVerb,
   machine: machineShowVerb,
   'machine set': machineSetVerb,

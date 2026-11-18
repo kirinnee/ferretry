@@ -134,7 +134,6 @@ export interface DaemonConnection {
 
 /** A pairing as the browser-local registry keeps it. COPY of today's `connections.ts` record. */
 export interface DaemonConnectionRecord extends DaemonConnection {
-  readonly label?: string;
   readonly pairedAt: number;
   readonly lastSelectedAt: number;
 }
@@ -211,9 +210,8 @@ export const daemonConnection = (input: DaemonConnectionInput): DaemonConnection
   };
 };
 
-/** The name a machine is shown by: the owner's label, then the daemon's own name, then its address. COPY. */
-export const daemonDisplayName = (connection: DaemonConnection & { readonly label?: string }): string =>
-  connection.label?.trim() || connection.daemonName || connection.baseUrl;
+/** The name a machine is shown by: the daemon's own name (the owner's, else its host name), then its address. */
+export const daemonDisplayName = (connection: DaemonConnection): string => connection.daemonName || connection.baseUrl;
 
 // ─── 3. bytes and keys (today: `relay/src/lib/binary.ts`, `crypto.ts`; spine-app-shell: `src/session/wire/`) ───
 

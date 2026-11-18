@@ -14,9 +14,8 @@ const paired = (daemon: string, overrides: Partial<PairedDaemon> = {}): PairedDa
 });
 
 describe('distinctDaemonName', () => {
-  test('a name nobody shares is the title alone, the owner’s label first', () => {
+  test('a name nobody shares is the title alone', () => {
     expect(distinctDaemonName(paired('a'), [paired('a')])).toBe('dev-box');
-    expect(distinctDaemonName(paired('a', { label: 'Desk' }), [paired('a', { label: 'Desk' })])).toBe('Desk');
   });
 
   test('a twin at another address is followed by its address', () => {

@@ -4,10 +4,12 @@ import {
   ConfigChanged,
   DoctorChecks,
   defineConfig,
+  neverLoosens,
   PluginsChanged,
   policyRef,
   SessionModes,
 } from './contract/index.ts';
+import { MachineNameSchema } from './contract/kernel.ts';
 import { definePlugin, route, settingsTab, socket, tool } from './manifest/index.ts';
 import { AgentConfigCallSchemas, AGENT_CONFIG_TOOLS } from './contract/agent-config.ts';
 
@@ -35,6 +37,19 @@ export const PluginsConfig = defineConfig({
           .filter(id => before?.plugins[id] === 'off' && after.plugins[id] === undefined)
           .map(id => `turns ${id} on (its off line was removed)`),
       ),
+});
+
+/**
+ * `config/host.yaml` (docs/config-files.md): what the owner calls this machine. Absent, or no `name`, the host name is
+ * the name. Not `machine.yaml`: a v4 home still carries one, which a strict v5 reader would refuse. It names, and
+ * widens nothing, so no edit of it is ever held.
+ */
+export const HostConfigFile = defineConfig({
+  file: 'host.yaml',
+  schema: z.strictObject({ name: MachineNameSchema.optional() }),
+  axis: 'configure',
+  personOnly: true,
+  loosens: neverLoosens,
 });
 
 /** Gate's vocabulary by name: the kernel carries these refs and never reads them (§7.1). */
@@ -224,12 +239,13 @@ export default definePlugin({
   // configuration files. After Access (20-23) and the plugins' own tabs, before the daemon-wide ones at 90 and above.
   ui: {
     settings: [
+      settingsTab('name', { group: 'general', label: 'Name', order: 10 }),
       settingsTab('doctor', { group: 'health', label: 'Doctor', order: 80 }),
       settingsTab('host-checks', { group: 'health', label: 'Host checks', order: 81 }),
       settingsTab('files', { group: 'advanced', label: 'Files', order: 90 }),
     ],
   },
-  data: { publishes: [PluginsChanged, ConfigChanged], config: [PluginsConfig] },
+  data: { publishes: [PluginsChanged, ConfigChanged], config: [PluginsConfig, HostConfigFile] },
   hooks: {
     offers: [{ hook: Carriers }, { hook: SessionModes }, { hook: DoctorChecks }],
   },

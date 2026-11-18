@@ -52,10 +52,8 @@ const OriginSchema = z
 
 export const PairedDaemonSchema = z.strictObject({
   daemon: z.string().min(1).max(128),
-  /** What the daemon calls its machine (its host name, from the pairing answer). */
+  /** What the daemon calls its machine: the owner's name for it, else its host name. The daemon's word, learned again on every read. */
   machine: z.string().min(1).max(128),
-  /** The owner's own name for this daemon, when they gave one. */
-  label: z.string().min(1).max(80).optional(),
   deviceId: z.string().min(1).max(128),
   address: OriginSchema,
   /**
@@ -102,8 +100,18 @@ export interface DaemonListOptions {
   readonly forget?: (daemon: string) => void | Promise<void>;
 }
 
-/** A display name: the owner's label, else the machine name. */
-export const daemonTitle = (daemon: PairedDaemon): string => daemon.label ?? daemon.machine;
+/** A display name: the machine's own name, the only one there is. */
+export const daemonTitle = (daemon: PairedDaemon): string => daemon.machine;
+
+/**
+ * A record stored with a device-side `label` still parses: the key is dropped on read, so the pairing is not lost to a
+ * strict schema. The daemon's own name is the only one now.
+ */
+function withoutDeviceLabel(candidate: unknown): unknown {
+  if (typeof candidate !== 'object' || candidate === null || !('label' in candidate)) return candidate;
+  const { label: _label, ...kept } = candidate as Record<string, unknown>;
+  return kept;
+}
 
 /** Groups by machine (case-insensitive), machines and the daemons inside each sorted by name. */
 export function groupByMachine(daemons: readonly PairedDaemon[]): readonly MachineGroup[] {
@@ -128,7 +136,7 @@ function parseList(raw: z.infer<typeof ListSchema> | undefined): DaemonListSnaps
   if (raw === undefined) return { daemons: [], selected: null };
   const byId = new Map<string, PairedDaemon>();
   for (const candidate of raw.daemons) {
-    const parsed = PairedDaemonSchema.safeParse(candidate);
+    const parsed = PairedDaemonSchema.safeParse(withoutDeviceLabel(candidate));
     if (!parsed.success) continue;
     const previous = byId.get(parsed.data.daemon);
     if (previous === undefined || parsed.data.lastSelectedAt >= previous.lastSelectedAt) {
@@ -147,7 +155,6 @@ export interface PairingInput {
   readonly address: string;
   readonly pairedOver?: 'direct';
   readonly carriers?: readonly unknown[];
-  readonly label?: string;
 }
 
 /** The list, shaped for `useSyncExternalStore`: `snapshot()` is identity-stable between changes. */
@@ -198,7 +205,7 @@ export class DaemonList {
     return groupByMachine(this.#snapshot.daemons);
   }
 
-  /** Adds a pairing, or replaces it on a re-pair (keeping its label and first pairing time). */
+  /** Adds a pairing, or replaces it on a re-pair (keeping its first pairing time). */
   add(input: PairingInput): PairedDaemon {
     const now = this.#now();
     const existing = this.get(input.daemon);
@@ -211,7 +218,6 @@ export class DaemonList {
       carriers: input.carriers ?? [],
       pairedAt: existing?.pairedAt ?? now,
       lastSelectedAt: now,
-      ...((input.label ?? existing?.label) === undefined ? {} : { label: input.label ?? existing?.label }),
     });
     for (const cache of this.#caches) cache.clearDaemon(record.daemon);
     const others = this.#snapshot.daemons.filter(entry => entry.daemon !== record.daemon);
@@ -227,14 +233,6 @@ export class DaemonList {
     this.#gone(daemon);
     const selected = this.#snapshot.selected === daemon ? (daemons[0]?.daemon ?? null) : this.#snapshot.selected;
     this.#commit({ daemons, selected });
-  }
-
-  rename(daemon: string, label: string | undefined): void {
-    const trimmed = label?.trim();
-    this.#replace(daemon, entry => {
-      const { label: _old, ...rest } = entry;
-      return trimmed === undefined || trimmed.length === 0 ? rest : { ...rest, label: trimmed.slice(0, 80) };
-    });
   }
 
   select(daemon: string): void {

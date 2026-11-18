@@ -6,6 +6,7 @@ import { configFilesCommands } from './config-files/commands.ts';
 import { ConfigFilesSurface } from './config-files/panel.tsx';
 import { DoctorSettings } from './doctor/doctor-settings.tsx';
 import { HostChecks } from './doctor/host-checks.tsx';
+import { NameSettings } from './name-settings.tsx';
 
 /**
  * The Kernel's app half (§2.3): the settings every daemon has whatever plugins it runs — the configuration FILES (the
@@ -18,6 +19,7 @@ export default provideToShell(
   implementApp(manifest, {
     build: ({ client }) => ({
       settings: {
+        name: () => createElement(NameSettings, { client }),
         files: () => createElement(ConfigFilesSurface, { client }),
         doctor: () => createElement(DoctorSettings, { client }),
         'host-checks': () => createElement(HostChecks, { client }),

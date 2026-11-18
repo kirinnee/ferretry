@@ -6,6 +6,7 @@
  * ids, their headings and their order. A tab that names none is listed last, under "More".
  */
 export const SETTINGS_GROUPS = [
+  { id: 'general', label: 'General' },
   { id: 'behaviour', label: 'Behaviour' },
   { id: 'agents', label: 'Agents and logins' },
   { id: 'supervision', label: 'Supervision' },

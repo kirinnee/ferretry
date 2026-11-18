@@ -533,7 +533,7 @@ describe('the view place', () => {
     expect(seen.locked).toEqual(['d1']);
   });
 
-  test('online follows the feed; the machine is the owner label else the name', async () => {
+  test('online follows the feed; the machine is the name the daemon gives it, as it changes', async () => {
     const parts = setup();
     await open(parts);
     expect(view?.container.querySelector('[data-testid="online"]')?.textContent).toBe('offline');
@@ -541,7 +541,7 @@ describe('the view place', () => {
     expect(view?.container.querySelector('[data-testid="online"]')?.textContent).toBe('online');
     await interact(() => parts.machine().transport.dropFeed());
     expect(view?.container.querySelector('[data-testid="online"]')?.textContent).toBe('offline');
-    await interact(() => parts.list.rename('d1', 'Laptop'));
+    await interact(() => parts.list.learnMachine('d1', 'Laptop'));
     expect(view?.container.querySelector('[data-testid="machine"]')?.textContent).toBe('Laptop');
   });
 

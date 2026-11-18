@@ -16,9 +16,7 @@ describe('G95 what every screen calls a paired machine', () => {
       ...(daemonName === undefined ? {} : { daemonName }),
     });
 
-  it('G95 should prefer the owner label, then the name the machine gave itself, and never lead with the address', () => {
-    should(daemonDisplayName({ ...at('workstation'), label: '  Desk  ' })).equal('Desk');
-    should(daemonDisplayName({ ...at('workstation'), label: '   ' })).equal('workstation');
+  it('G95 should call a machine the name it gave itself, and never lead with the address', () => {
     should(daemonDisplayName(at('workstation'))).equal('workstation');
     should(daemonDisplayName(at())).equal('http://127.0.0.1:40245');
   });

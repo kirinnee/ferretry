@@ -106,7 +106,7 @@ describe('the command bar', () => {
     const source = placeSource({
       daemons: [
         { ...base, daemon: 'a', machine: 'workshop-host' },
-        { ...base, daemon: 'b', machine: 'attic-host', label: 'Attic' },
+        { ...base, daemon: 'b', machine: 'attic-host' },
       ],
       daemon: undefined,
       screens: [],
@@ -116,7 +116,7 @@ describe('the command bar', () => {
     const entries = commandBarResults([source], '').results.filter(entry => entry.id.startsWith('daemon-'));
     expect(entries.map(entry => [entry.label, entry.description])).toEqual([
       ['workshop-host', undefined],
-      ['Attic', 'attic-host'],
+      ['attic-host', undefined],
     ]);
   });
 

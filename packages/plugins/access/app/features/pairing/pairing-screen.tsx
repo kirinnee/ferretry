@@ -318,7 +318,7 @@ export function PairingScreen({
             // A list row never claims a path: it names the daemon, and shows its address only when that is not loopback.
             const listed = describeListedDaemon({
               address: connection.baseUrl,
-              name: connection.label?.trim() || connection.daemonName,
+              name: connection.daemonName,
             });
             const name = listed.title;
             return (

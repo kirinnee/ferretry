@@ -25,7 +25,6 @@ export const connectionRecord = (paired: PairedDaemon): DaemonConnectionRecord =
     deviceId: paired.deviceId,
     daemonName: paired.machine,
   }),
-  ...(paired.label === undefined ? {} : { label: paired.label }),
   pairedAt: paired.pairedAt,
   lastSelectedAt: paired.lastSelectedAt,
 });

@@ -83,9 +83,29 @@ export const HealthSchema = z.strictObject({
 });
 export type Health = z.infer<typeof HealthSchema>;
 
-/** `GET /v1/plugins`, projected by Gate per standing (§9.6). `contract` is the effective contract hash. */
+/** At most this many characters of a machine name (today's `PAIRING_DEVICE_NAME_MAX_LENGTH`). */
+export const MACHINE_NAME_MAX_LENGTH = 100;
+
+/**
+ * The name an owner gives a machine (`config/host.yaml` `name`): trimmed, 1 to 100 characters, any printable Unicode.
+ * Control and format characters are REFUSED, not stripped, so what the owner typed is what every device shows. The same
+ * rule as the pairing wire's daemon name, so a name that is set always passes it.
+ */
+export const MachineNameSchema = z
+  .string()
+  .refine(value => !/[\p{Cc}\p{Cf}]/u.test(value), 'a machine name cannot hold a control or invisible character')
+  .transform(value => value.trim())
+  .pipe(z.string().min(1, 'a machine name cannot be empty').max(MACHINE_NAME_MAX_LENGTH));
+
+/**
+ * `GET /v1/plugins`, projected by Gate per standing (§9.6). `contract` is the effective contract hash. `daemonName` is
+ * what this machine is called (the owner's name, else its host name): served here because the inventory is read by an
+ * authenticated caller only, where `GET /v1/health` is pre-auth and relay-reachable. Gate's projection never carries
+ * it (it projects the plugin list); the route adds it, and a daemon older than the field answers without it.
+ */
 export const PluginInventorySchema = z.strictObject({
   protocol: z.literal(PROTOCOL),
+  daemonName: z.string().optional(),
   plugins: z.array(z.strictObject({ id: z.string(), on: z.boolean(), contract: z.string() })),
 });
 export type PluginInventory = z.infer<typeof PluginInventorySchema>;

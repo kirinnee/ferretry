@@ -2068,6 +2068,39 @@ describe('PairingService rows the cases above do not name', () => {
   });
 });
 
+describe('a machine the owner renames while the daemon runs', () => {
+  it('is called its new name by the next mint, with no restart', () => {
+    // Arrange — the runtime hands the name as a getter over the kernel's identity, which follows `config/host.yaml`.
+    let name = 'workstation';
+    const service = new AuditedPairingService(
+      {
+        daemonId: DAEMON_ID,
+        get daemonName() {
+          return name;
+        },
+        reach: () => ({
+          advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+        }),
+        carriers: { current: () => CARRIERS },
+        clock: new FakeClock(),
+        cryptography: new FakeCryptography(),
+        devices: new RecordingDevices(),
+        credentials: new PairingDeviceRegistry(DAEMON_ID),
+      },
+      { log: async () => undefined, alert: { newDevicePaired: async () => undefined }, failures: () => undefined },
+    );
+
+    // Act
+    const before = service.mint().daemonName;
+    name = 'pebox';
+    const after = service.mint().daemonName;
+
+    // Assert
+    should(before).equal('workstation');
+    should(after).equal('pebox');
+  });
+});
+
 describe('PushNewDeviceAlert (every other enrolled browser hears of a new device)', () => {
   const grant = (carrier: 'direct' | 'relay'): PairingGrant => ({
     deviceId: FIRST_DEVICE_ID,

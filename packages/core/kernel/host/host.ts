@@ -76,7 +76,7 @@ import type {
   ToolResult,
 } from '../manifest/implement.ts';
 import type { Manifest, Needer, ToolDecl } from '../manifest/types.ts';
-import kernelManifest, { PluginsConfig, type PluginsYaml } from '../plugin.ts';
+import kernelManifest, { HostConfigFile, PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import { bindDirectory } from './bound-directory.ts';
@@ -171,7 +171,7 @@ const NO_SCRATCH: ScratchPort = {
 };
 import { buildSnapshot, type DataPluginManifest } from './snapshot.ts';
 import { configEtagKey } from './config/etag.ts';
-import { type DaemonIdentity, daemonNameFrom, loadIdentity } from './identity.ts';
+import { type DaemonIdentity, daemonNameOf, loadIdentity } from './identity.ts';
 import {
   createSessionLayer,
   type SessionCrypto,
@@ -511,9 +511,15 @@ async function bootLocked(
   const identityOutcome = await loadIdentity(adapters.fs, home);
   if (identityOutcome.kind === 'damaged') return { kind: 'refused', sentence: identityOutcome.sentence, trace };
   const identity = identityOutcome.identity;
+  // The name is the owner's `host.yaml` `name` when there is one, read at every use so a rename needs no restart; a
+  // missing or broken file leaves the last good one in effect, and none is the host name.
+  let hostConfig: ConfigPort | undefined;
+  const hostname = adapters.hostname;
   const identityPort = Object.freeze({
     daemonId: identity.daemonId,
-    daemonName: daemonNameFrom(adapters.hostname?.() ?? ''),
+    get daemonName(): string {
+      return daemonNameOf(readHostName(hostConfig), hostname?.() ?? '');
+    },
     binaries: options.binaries ?? PRODUCT_BINARIES,
   });
   /** Set once the local listener has bound; cleared as it stops. Read lazily through `kernel.bind`. */
@@ -592,6 +598,7 @@ async function bootLocked(
   const stopWatching = config.startWatching?.();
   if (stopWatching !== undefined) own(stopWatching);
   const pluginsYaml = readPluginsYaml(config.port('kernel'));
+  hostConfig = config.port('kernel');
   const configWriter = config.writer?.();
 
   // 1. Check the enabled graph.
@@ -779,6 +786,8 @@ async function bootLocked(
     }
   });
   if (stopConfigFeed !== undefined) own(stopConfigFeed);
+  // A renamed machine: every open app re-reads the inventory, which carries the name.
+  own(config.port('kernel').watch(HostConfigFile, () => events.publish(PluginsChanged, { generation: 1 })));
   const jobs = new JobRunner(
     clock,
     log,
@@ -1101,7 +1110,7 @@ async function bootLocked(
   };
   for (const manifest of order) {
     if (manifest.id === 'kernel') {
-      records.get('kernel')!.status = 'serving';
+      (records.get('kernel') as PluginRecord).status = 'serving';
       continue;
     }
     const record = records.get(manifest.id) as PluginRecord;
@@ -1306,6 +1315,7 @@ async function bootLocked(
   );
   const kernelSources: KernelHalfSources = {
     version: options.version,
+    daemonName: () => identityPort.daemonName,
     inventory,
     project,
     tools: {
@@ -1715,6 +1725,15 @@ async function bootLocked(
 function readPluginsYaml(port: ConfigPort): PluginsYaml | undefined {
   try {
     return port.file(PluginsConfig);
+  } catch {
+    return undefined;
+  }
+}
+
+/** `config/host.yaml`'s `name`, or undefined when it names none, is missing or broken (its last good version stands). */
+function readHostName(port: ConfigPort | undefined): string | undefined {
+  try {
+    return port?.file(HostConfigFile)?.name;
   } catch {
     return undefined;
   }
