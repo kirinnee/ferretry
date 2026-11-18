@@ -85,6 +85,12 @@
   padding: 4px 10px;
   white-space: nowrap;
 }
+/* A phone's finger is 44px: a top row of tabs on a phone is as tall as a bottom bar's entry. */
+@media (max-width: 767.98px) {
+  .fy-nav--top .fy-nav__item {
+    min-height: 44px;
+  }
+}
 .fy-nav--bottom {
   justify-content: space-around;
   padding-bottom: calc(8px + env(safe-area-inset-bottom));
@@ -369,6 +375,22 @@
   font-size: calc(var(--fy-text-scale, 1) * 0.75rem);
   line-height: 1.5;
   text-align: center;
+}
+/* The count on the closed side column's toggle: the asks that wait on the owner behind it. Sits on the button's corner. */
+.fy-side-toggle__count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 1.25em;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  font-size: calc(var(--fy-text-scale, 1) * 0.6875rem);
+  font-weight: 600;
+  line-height: 1.45;
+  text-align: center;
+  pointer-events: none;
 }
 .fy-nav__badge .sr-only {
   position: absolute;

@@ -16,6 +16,7 @@ import { PanelRight, PanelRightClose } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { cn } from '../ui/lib/class-names.ts';
 import { useLayoutMode } from '../ui/hooks/use-layout-mode.ts';
+import { useAppHook } from './app-hooks.ts';
 import { FerretWorkspaceActionsProvider } from './ferret-workspace-actions.tsx';
 import {
   CHAT_TAB,
@@ -32,6 +33,45 @@ import { sidePaneOpen } from './side-pane-open.ts';
 import { PanelSlot, useSlotPanels } from './views.tsx';
 
 const SIDE = 'ferret.side';
+
+/**
+ * `ferrets.needs-you`: the hook Ferrets OFFERS and the plugin holding the asks provides (`core/ferrets/contract/app-hooks/
+ * needs-you.app-hook.ts` owns the name and the shape; the app does not depend on that package, so it narrows the value
+ * itself, as every taker of an app hook does). `needing()` maps a ferret id to its entry; Agenda's entries also say how many
+ * items are on the OWNER's turn (`waitingOnOwner`, the number the agenda line's pill shows) and whether this ferret's chat
+ * draws that line (`lineShown`, agenda mode on).
+ */
+const NEEDS_YOU_HOOK = 'ferrets.needs-you';
+interface NeedsYouHook {
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly watch: () => () => void;
+  readonly needing: () => ReadonlyMap<string, { readonly waitingOnOwner?: number; readonly lineShown?: boolean }>;
+}
+const isNeedsYouHook = (value: unknown): value is NeedsYouHook =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as NeedsYouHook).subscribe === 'function' &&
+  typeof (value as NeedsYouHook).watch === 'function' &&
+  typeof (value as NeedsYouHook).needing === 'function';
+const noSubscription = (): (() => void) => () => undefined;
+const nothing = (): number => 0;
+
+/**
+ * HOW MANY ASKS WAIT ON THE OWNER IN THIS FERRET: what the closed side column hides. With Agenda mode off the chat draws no
+ * agenda line above the composer, so the asks live only in the side tab; the toggle carries the count instead. With the line
+ * drawn the toggle says nothing (the same asks would show twice). Only items on the owner's turn count: the pill's number.
+ * 0 with no provider (Agenda off or not installed on that machine).
+ */
+function useWaitingAsks(daemon: string, subject: string): number {
+  const hook = useAppHook(daemon, NEEDS_YOU_HOOK);
+  const needsYou = isNeedsYouHook(hook) ? hook : undefined;
+  useEffect(() => needsYou?.watch(), [needsYou]);
+  const read = useCallback(() => {
+    const entry = needsYou?.needing().get(subject);
+    return entry === undefined || entry.lineShown !== false ? 0 : (entry.waitingOnOwner ?? 0);
+  }, [needsYou, subject]);
+  return useSyncExternalStore(needsYou?.subscribe ?? noSubscription, read, nothing);
+}
 
 export interface FerretWorkspaceProps {
   readonly daemon: string;
@@ -85,7 +125,7 @@ export function FerretWorkspace({ daemon, subject, chat, canControl = true }: Fe
               <PanelSlot daemon={daemon} slot={SIDE} subject={subject} />
             </div>
           ) : null}
-          {panels.length === 0 ? null : <SideToggle controls={sideId} open={open} />}
+          {panels.length === 0 ? null : <SideToggle controls={sideId} daemon={daemon} open={open} subject={subject} />}
         </div>
       </FerretWorkspaceActionsProvider>
     );
@@ -93,8 +133,21 @@ export function FerretWorkspace({ daemon, subject, chat, canControl = true }: Fe
 }
 
 /** The page's one way to the side column: a slim rail on the right edge holding a single toggle, so a closed column costs 40px. */
-function SideToggle({ open, controls }: { readonly open: boolean; readonly controls: string }) {
+function SideToggle({
+  open,
+  controls,
+  daemon,
+  subject,
+}: {
+  readonly open: boolean;
+  readonly controls: string;
+  readonly daemon: string;
+  readonly subject: string;
+}) {
   const Icon = open ? PanelRightClose : PanelRight;
+  // Only a CLOSED column hides the asks: open, the agenda tab is on screen and says them itself.
+  const waiting = useWaitingAsks(daemon, subject);
+  const count = open ? 0 : waiting;
   return (
     <div
       className={cn('flex w-10 shrink-0 flex-col items-center py-2', open ? '' : 'border-l border-border-soft')}
@@ -103,14 +156,26 @@ function SideToggle({ open, controls }: { readonly open: boolean; readonly contr
       <button
         aria-controls={controls}
         aria-expanded={open}
-        aria-label={open ? 'Hide side panels' : 'Show side panels'}
-        className="flex h-8 w-8 items-center justify-center rounded-control border border-border-strong bg-surface text-fg hover:bg-surface-2"
+        aria-label={
+          open
+            ? 'Hide side panels'
+            : count === 0
+              ? 'Show side panels'
+              : `Show side panels, ${count} ${count === 1 ? 'ask waits' : 'asks wait'} on you`
+        }
+        className="relative flex h-8 w-8 items-center justify-center rounded-control border border-border-strong bg-surface text-fg hover:bg-surface-2"
+        data-waiting={count === 0 ? undefined : count}
         data-side-toggle=""
         onClick={() => sidePaneOpen.set(!open)}
         title={open ? 'Hide side panels' : 'Agenda, queue, tasks, terminals, files…'}
         type="button"
       >
         <Icon aria-hidden="true" size={16} />
+        {count === 0 ? null : (
+          <span aria-hidden="true" className="fy-side-toggle__count" data-side-toggle-count="">
+            {count > 99 ? '99+' : count}
+          </span>
+        )}
       </button>
     </div>
   );
