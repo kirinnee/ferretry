@@ -36,7 +36,7 @@ export interface RegistrationInput {
   readonly attestationObject: Uint8Array;
   /** The challenge the daemon issued. */
   readonly expectedChallenge: Uint8Array;
-  /** The daemon's `corsOrigins`; `clientData.origin` must equal one exactly. */
+  /** The app origins this daemon answers for; `clientData.origin` must equal one exactly. */
   readonly allowedOrigins: readonly string[];
 }
 
@@ -219,7 +219,7 @@ export interface StoredAssertionInput {
  * missing counter safe here is the challenge: it is derived from the approved bytes, so a kept assertion verifies only
  * against exactly those bytes, and nothing that checks a stored proof ever grants a live step-up.
  *
- * The origin is the passkey's own, never the daemon's `corsOrigins`: a kept proof outlives any config change, and it
+ * The origin is the passkey's own, never the daemon's current allowed origins: a kept proof outlives any change to them, and it
  * was made at exactly one origin.
  */
 export async function verifyStoredAssertion(

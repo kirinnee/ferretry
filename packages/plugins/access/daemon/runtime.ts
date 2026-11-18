@@ -79,7 +79,7 @@ import { stateRedirectWriter } from './adapters/pairing/redirect-writer.ts';
 import { pairingRoutes } from './lib/routes/pairing.ts';
 import { pairingRedirectRoutes } from './lib/routes/pairing-redirect.ts';
 import { pushRoutes } from './lib/routes/push.ts';
-import { stepUpRoutes } from './lib/routes/step-up.ts';
+import { isExpectedRefusal, stepUpRoutes } from './lib/routes/step-up.ts';
 import {
   ChallengeLedger,
   PasskeysChangedSignal,
@@ -386,6 +386,14 @@ export class AccessRuntime {
       { boundSubjectOf: id => stage('approve-task-plan')?.subjectOf?.(id, '') },
       { challengeOf: (id, deviceId) => stage('approve-sign-in-rule')?.challengeOf?.(id, deviceId) },
       { boundSubjectOf: (id, kind, deviceId) => stage('approve-paste-rule')?.subjectOf?.(id, deviceId, kind) },
+      note => {
+        // Said, not audited: a refusal is not a change, and the audit log is names of what happened to the machine.
+        const { log } = this.#deps.kernel;
+        const line = `a passkey request was refused: ${note.reason}`;
+        const fields = { request: note.request, ...(note.deviceId === undefined ? {} : { deviceId: note.deviceId }) };
+        if (isExpectedRefusal(note.reason)) log.info(line, fields);
+        else log.warn(line, fields);
+      },
     );
   }
 

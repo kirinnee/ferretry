@@ -41,6 +41,7 @@ import {
   stepUpRefusalCode,
   UnlockGrantedSchema,
 } from '../wire.ts';
+import { HOSTED_APP_ORIGIN } from '../../../contract/index.ts';
 import type { StepUpCaller, StepUpOutcome, StepUpService } from '../step-up/index.ts';
 
 /** The staged subjects every-caller acts bind to (Gate's stage id schemas). */
@@ -80,7 +81,7 @@ const REFUSALS: Readonly<Record<StepUpRefusal, { readonly status: number; readon
   'not-a-device': { status: 400, message: 'a passkey belongs to a paired device, and this caller is not one' },
   'origin-not-allowed': {
     status: 403,
-    message: 'this copy of the app is not one this machine serves; add its origin to corsOrigins on the machine',
+    message: `this copy of the app is not one this machine serves; it answers only for the hosted app at ${HOSTED_APP_ORIGIN}, so open Ferretry there`,
   },
   'registration-closed': {
     status: 403,
@@ -121,8 +122,26 @@ const callerOf = (context: RouteContext): StepUpCaller => {
   };
 };
 
-const answer = <T>(outcome: StepUpOutcome<T>, parse: (value: T) => unknown, status = 200): ApiResponse =>
-  outcome.ok ? jsonResponse(parse(outcome.value), status) : refusal(outcome.refusal);
+/**
+ * One refusal, as the daemon's log hears it: WHAT was refused and for WHOM, so an owner asking "why can't my phone
+ * unlock?" finds it in the log. It carries the reason word, the request and the device id — never a credential, a
+ * challenge, an origin the caller chose or any part of the body.
+ */
+export interface PasskeyRefusalNote {
+  readonly reason: StepUpRefusal;
+  readonly request: string;
+  readonly deviceId: string | undefined;
+}
+
+/** The refusals that are an ordinary state to be in (no passkey yet, the window closed, a key due for replacement). */
+const EXPECTED_REFUSALS: ReadonlySet<StepUpRefusal> = new Set([
+  'no-passkey',
+  'registration-closed',
+  'rotation-required',
+]);
+
+/** Whether a refusal is the machine working as designed rather than something to look at. */
+export const isExpectedRefusal = (reason: StepUpRefusal): boolean => EXPECTED_REFUSALS.has(reason);
 
 /**
  * What the step-up options need of the staged 2FA seeds: what a proof for one is bound to, or nothing when it is not
@@ -166,7 +185,23 @@ export function stepUpRoutes(
   plans?: StagedTaskPlanBinding,
   rules?: StagedSignInRuleBinding,
   pasteRules?: StagedPasteRuleBinding,
+  /** Told every refusal a passkey route answers; the daemon logs it. Absent: nothing is said (a test, a bare embed). */
+  onRefusal?: (note: PasskeyRefusalNote) => void,
 ): readonly ApiRoute[] {
+  const answer = <T>(
+    context: RouteContext,
+    outcome: StepUpOutcome<T>,
+    parse: (value: T) => unknown,
+    status = 200,
+  ): ApiResponse => {
+    if (outcome.ok) return jsonResponse(parse(outcome.value), status);
+    onRefusal?.({
+      reason: outcome.refusal,
+      request: `${context.request.method} ${context.request.path}`,
+      deviceId: sessionDevice(context)?.deviceId ?? undefined,
+    });
+    return refusal(outcome.refusal);
+  };
   return [
     {
       method: 'GET',
@@ -176,7 +211,8 @@ export function stepUpRoutes(
       noStore: true,
       // The panel that offers the first passkey must load on a machine that asks for one on opening.
       unlockExempt: true,
-      handle: async context => answer(await service.view(caller(context)), value => PasskeysViewSchema.parse(value)),
+      handle: async context =>
+        answer(context, await service.view(caller(context)), value => PasskeysViewSchema.parse(value)),
     },
     {
       method: 'POST',
@@ -190,7 +226,7 @@ export function stepUpRoutes(
       unlockExempt: true,
       handle: async context => {
         const body = await parseBody(context.request, PasskeyOptionsRequestSchema);
-        return answer(await service.registrationOptions(caller(context), body.origin), value =>
+        return answer(context, await service.registrationOptions(caller(context), body.origin), value =>
           PasskeyRegistrationOptionsSchema.parse(value),
         );
       },
@@ -204,7 +240,12 @@ export function stepUpRoutes(
       unlockExempt: true,
       handle: async context => {
         const body = await parseBody(context.request, PasskeyRegistrationSchema);
-        return answer(await service.register(caller(context), body), value => PasskeyViewSchema.parse(value), 201);
+        return answer(
+          context,
+          await service.register(caller(context), body),
+          value => PasskeyViewSchema.parse(value),
+          201,
+        );
       },
     },
     {
@@ -226,7 +267,7 @@ export function stepUpRoutes(
               'that 2FA key is not waiting to be saved: it was saved, dropped or timed out; stage it again',
               STAGE_REFUSALS.twoFactor.code,
             );
-          return answer(await service.stepUpOptions(caller(context), body.origin, body.act, bound), value =>
+          return answer(context, await service.stepUpOptions(caller(context), body.origin, body.act, bound), value =>
             StepUpOptionsSchema.parse(value),
           );
         }
@@ -240,7 +281,7 @@ export function stepUpRoutes(
               'that task plan selection is not waiting for a passkey: stage it again from the plan',
               STAGE_REFUSALS.taskPlan.code,
             );
-          return answer(await service.stepUpOptions(caller(context), body.origin, body.act, bound), value =>
+          return answer(context, await service.stepUpOptions(caller(context), body.origin, body.act, bound), value =>
             StepUpOptionsSchema.parse(value),
           );
         }
@@ -259,7 +300,7 @@ export function stepUpRoutes(
                 );
           if (bound === undefined)
             return errorResponse(404, STAGE_REFUSALS.pasteRule.words, STAGE_REFUSALS.pasteRule.code);
-          return answer(await service.stepUpOptions(caller(context), body.origin, body.act, bound), value =>
+          return answer(context, await service.stepUpOptions(caller(context), body.origin, body.act, bound), value =>
             StepUpOptionsSchema.parse(value),
           );
         }
@@ -273,11 +314,14 @@ export function stepUpRoutes(
             stage === undefined || deviceId === undefined ? undefined : rules?.challengeOf(stage, deviceId);
           if (stage === undefined || challenge === undefined)
             return errorResponse(404, STAGE_REFUSALS.signInRule.words, STAGE_REFUSALS.signInRule.code);
-          return answer(await service.stepUpOptions(caller(context), body.origin, body.act, stage, challenge), value =>
-            StepUpOptionsSchema.parse(value),
+          return answer(
+            context,
+            await service.stepUpOptions(caller(context), body.origin, body.act, stage, challenge),
+            value => StepUpOptionsSchema.parse(value),
           );
         }
         return answer(
+          context,
           await service.stepUpOptions(caller(context), body.origin, body.act as MachineSkippableStepUpAct | undefined),
           value => StepUpOptionsSchema.parse(value),
         );
@@ -291,7 +335,7 @@ export function stepUpRoutes(
       noStore: true,
       handle: async context => {
         const body = await parseBody(context.request, StepUpAssertionSchema);
-        return answer(await service.stepUp(caller(context), body), value => StepUpGrantedSchema.parse(value));
+        return answer(context, await service.stepUp(caller(context), body), value => StepUpGrantedSchema.parse(value));
       },
     },
     // A CONFIRMATION ON OPENING (`unlockOnOpen`): the same ceremony on its own challenge, served to a
@@ -305,7 +349,7 @@ export function stepUpRoutes(
       unlockExempt: true,
       handle: async context => {
         const body = await parseBody(context.request, PasskeyOptionsRequestSchema);
-        return answer(await service.unlockOptions(caller(context), body.origin), value =>
+        return answer(context, await service.unlockOptions(caller(context), body.origin), value =>
           StepUpOptionsSchema.parse(value),
         );
       },
@@ -319,7 +363,7 @@ export function stepUpRoutes(
       unlockExempt: true,
       handle: async context => {
         const body = await parseBody(context.request, StepUpAssertionSchema);
-        return answer(await service.unlock(caller(context), body), value => UnlockGrantedSchema.parse(value));
+        return answer(context, await service.unlock(caller(context), body), value => UnlockGrantedSchema.parse(value));
       },
     },
     {
@@ -334,7 +378,7 @@ export function stepUpRoutes(
       noStore: true,
       handle: async context => {
         const body = await parseBody(context.request, PasskeyWindowRequestSchema);
-        return answer(await service.reopenRegistration(caller(context), body.deviceId), value =>
+        return answer(context, await service.reopenRegistration(caller(context), body.deviceId), value =>
           PasskeyWindowOpenedSchema.parse(value),
         );
       },

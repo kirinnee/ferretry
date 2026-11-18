@@ -7,6 +7,7 @@
  */
 
 import { type StepUpRefusal, stepUpRefusalCode } from '@ferretry/core-gate/contract';
+import { HOSTED_APP_ORIGIN } from '../../contract/index.ts';
 import { FyHttpError } from '../shell-grants.ts';
 import { PasskeyCeremonyError, passkeySentence } from '@ferretry/app';
 
@@ -106,7 +107,7 @@ export function registrationMinutesLeft(closesAt: string | undefined, nowMs: num
 const REFUSAL_SENTENCES: Readonly<Record<StepUpRefusal, (origin: string) => string>> = {
   'not-a-device': () => 'Only a paired device can hold a passkey, and this browser is not paired to that machine.',
   'origin-not-allowed': origin =>
-    `This machine does not serve the copy of the app at ${origin}. Open Ferretry at an address the machine lists.`,
+    `This machine serves only the hosted copy of the app, at ${HOSTED_APP_ORIGIN}, and this one is at ${origin}. Open Ferretry at ${HOSTED_APP_ORIGIN}.`,
   'registration-closed': () => registrationClosedSentence(false),
   'too-many-passkeys': () => 'This device already holds as many passkeys as this machine allows.',
   'no-passkey': origin => passkeySentence('no-passkey', origin),

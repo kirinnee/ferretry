@@ -7,7 +7,7 @@
  */
 
 import { type StepUpAct, type StepUpRefusal, stepUpRefusalCode } from '@ferretry/core-gate/contract';
-import type { PasskeyView } from '../../contract/index.ts';
+import { HOSTED_APP_ORIGIN, type PasskeyView } from '../../contract/index.ts';
 import { type DaemonConnection, FyHttpError } from '../shell-grants.ts';
 import {
   assertPasskey,
@@ -130,7 +130,7 @@ export const describeStepUpFailure =
     if (refusalWith(reason, 'no-passkey') || refusalWith(reason, 'registration-closed'))
       return passkeySentence('no-passkey', origin);
     if (refusalWith(reason, 'origin-not-allowed'))
-      return `This machine does not serve the copy of the app at ${origin}. Open Ferretry at an address the machine lists, or add ${origin} to its corsOrigins.`;
+      return `This machine serves only the hosted copy of the app, at ${HOSTED_APP_ORIGIN}, and this one is at ${origin}. Open Ferretry at ${HOSTED_APP_ORIGIN}.`;
     if (refusalWith(reason, 'not-verified')) return 'That passkey confirmation did not check out. Try again.';
     return reason instanceof Error ? reason.message : 'The passkey confirmation did not finish. Try again.';
   };
