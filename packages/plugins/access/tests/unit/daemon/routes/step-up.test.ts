@@ -76,6 +76,8 @@ const verifier: PasskeyVerifierPort = {
 };
 
 interface StagedBindings {
+  /** Stands in for the authenticator check on a registration; absent, every registration is refused. */
+  readonly registers?: PasskeyVerifierPort['verifyRegistration'];
   readonly seeds?: StagedSeedBinding;
   readonly plans?: StagedTaskPlanBinding;
   readonly pasteRules?: StagedPasteRuleBinding;
@@ -91,7 +93,7 @@ function machine(bindings: StagedBindings = {}) {
   const draws: number[] = [];
   const service = new StepUpService({
     store: new MemoryStore(),
-    verifier,
+    verifier: bindings.registers === undefined ? verifier : { ...verifier, verifyRegistration: bindings.registers },
     registry,
     challenges: new ChallengeLedger(),
     random: {
@@ -302,6 +304,36 @@ describe('the ceremonies that need no staged subject', () => {
     // Assert
     refusedAs(atMachine, 400, stepUpRefusalCode('not-a-device'));
     refusedAs(unchallenged, 401, stepUpRefusalCode('not-verified'));
+  });
+});
+
+describe('adding a passkey', () => {
+  it('P2 should answer a registration the authenticator attests with the new passkey, 201, once the owner re-opened the window', async () => {
+    // Arrange
+    const credential = new Uint8Array([10, 11, 12, 13]);
+    const world = machine({
+      registers: async () => ({
+        ok: true,
+        credentialId: credential,
+        algorithm: -7,
+        publicKeySpki: new Uint8Array([1, 2, 3, 4]),
+        signCount: 0,
+        origin: ORIGIN,
+      }),
+    });
+    await world.ask('POST /v1/passkeys/registration-window', { deviceId: phoneId }, { host: true });
+    await world.ask('POST /v1/passkeys/options', { origin: ORIGIN }, { device: phone });
+
+    // Act
+    const added = await world.ask(
+      'POST /v1/passkeys',
+      { credentialId: toBase64Url(credential), clientDataJSON: 'Y2xpZW50', attestationObject: 'YXR0ZXN0' },
+      { device: phone },
+    );
+
+    // Assert
+    should(added.status).equal(201);
+    should(jsonBody(added)).have.property('id', toBase64Url(credential));
   });
 });
 
