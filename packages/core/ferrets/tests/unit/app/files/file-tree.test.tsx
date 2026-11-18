@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { StrictMode } from 'react';
 import { FileTree, FileTreeRows } from '../../../../app/features/files/file-tree.tsx';
 import type { TreeRow } from '../../../../app/features/files/file-tree-model.ts';
 import { render, run, runAsync } from '../support/react.ts';
@@ -101,6 +102,22 @@ describe('file tree rows', () => {
       expect(asked.every(call => call.ferretId === 'tree/ferret')).toBeTrue();
       renderer.unmount();
     }
+  });
+
+  it('under StrictMode (effects set up, torn down, set up again) still loads the listing and lets the loader go', async () => {
+    const scope = scopeFor({ listings: { '': { entries: [{ name: 'a.ts', type: 'file' }] } } });
+    const renderer = render(
+      <StrictMode>
+        <FileTree scope={scope} dir="" onEnter={() => {}} onOpenFile={() => {}} />
+      </StrictMode>,
+    );
+    await runAsync(async () => {
+      for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+    });
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain('a.ts');
+    expect(text).not.toContain('data-loading');
+    renderer.unmount();
   });
 
   it('renders a listing error instead of silently presenting an empty tree', async () => {

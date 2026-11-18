@@ -190,6 +190,9 @@ export const FileTree = ({ scope, dir, refreshNonce = 0, hidden, onEnter, onOpen
   useEffect(
     () => () => {
       for (const controller of inflight.current.values()) controller.abort();
+      // Forget them too: a replayed setup (StrictMode, or any teardown that is followed by a setup) must start its own
+      // request, not find the aborted one still listed and skip, which would leave the node loading for good.
+      inflight.current.clear();
     },
     [],
   );

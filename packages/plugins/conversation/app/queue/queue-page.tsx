@@ -454,6 +454,8 @@ function QueuePage({
   const held = useRef<QueueHistory | undefined>(undefined);
   // The number of the newest window poll started; see `read`.
   const generation = useRef(0);
+  // The number of the newest poll whose answer was applied; an older answer never replaces a newer one.
+  const applied = useRef(0);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderFailed, setOlderFailed] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -486,13 +488,14 @@ function QueuePage({
         // An unreachable machine shows only what this device still holds for it.
       }
       if (!live) return;
-      // A newer poll is in the air. Once something is on screen its answer is the one to apply; but while NOTHING has
-      // been answered yet this answer is applied, so a first load slower than the poll still settles (never a bar and
-      // a blank queue until reads happen to finish in order).
-      if (mine !== generation.current && held.current !== undefined) {
+      // Any answer NEWER than the newest one already applied is applied, even while a still newer poll is in the air: when
+      // reads take longer than the poll, requiring "the latest started" would drop every answer and freeze the window at
+      // the first one. Only an answer older than one already applied is dropped, so it can never put the window back.
+      if (mine < applied.current) {
         setLoading(false);
         return;
       }
+      applied.current = mine;
       // What is held is read NOW, after the answer: an older page the person loaded while this poll was in the air is
       // in it, and the window answered is applied over it rather than over what was held when the poll began.
       const next = page === undefined ? held.current : refreshQueueHistory(held.current, page);
