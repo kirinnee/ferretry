@@ -394,6 +394,21 @@ describe('fy daemon install and uninstall', () => {
     expect(h.out.text).not.toContain('stopping it so');
   });
 
+  test("a home that is not Ferretry 5's is refused by the install, never by the service-manager preflight", async () => {
+    const h = await harness({
+      installed: false,
+      home: 'unclaimed',
+      managerDown: 'Failed to connect to bus: No medium found',
+    });
+    const refused = await h.controller.install().then(
+      () => '',
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    expect(refused).toContain('is not a Ferretry home');
+    expect(refused).not.toContain('does not answer from here');
+    expect(h.trail.filter(line => line.includes('show-environment'))).toEqual([]);
+  });
+
   test('V-0249 stops the daemon and removes the service definition, naming the root it keeps', async () => {
     const h = await harness({ installed: true });
     await h.controller.uninstall();
