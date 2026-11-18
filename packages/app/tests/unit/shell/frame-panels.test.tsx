@@ -413,7 +413,9 @@ describe('the nav on the "All daemons" route', () => {
     });
     view = app.view;
     await settle();
-    expect(app.view.container.querySelector('.fy-daemon-picker')?.getAttribute('aria-label')).toBe('Daemon');
+    expect(app.view.container.querySelector('.fy-daemon-picker')?.getAttribute('aria-label')).toBe(
+      'Machine: All daemons. Switch machine',
+    );
     const door = app.view.container.querySelector('.fy-nav--top .fy-nav__item');
     expect(door?.tagName).toBe('A');
     expect(door?.getAttribute('href')).toBe('/d/d2/inbox');
