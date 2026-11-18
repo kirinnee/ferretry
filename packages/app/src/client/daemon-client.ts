@@ -333,6 +333,8 @@ export class DaemonClient {
     this.#setUnasked(undefined);
     this.#generation += 1;
     this.#signal({ kind: 'confirmed' });
+    // A locked machine refused its live feed until now: open it again, so the machine is live, not merely reachable.
+    this.#ensureEvents();
   }
 
   /**

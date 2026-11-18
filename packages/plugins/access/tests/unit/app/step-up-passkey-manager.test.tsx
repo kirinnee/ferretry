@@ -47,13 +47,14 @@ const onePasswordCredential = () => ({
   }),
 });
 
-function machine(created: () => unknown) {
+function machine(created: () => unknown, registration = 'reopened') {
   const sent: { route: string; body?: unknown }[] = [];
   const client = {
     call: async (route: string, init?: { readonly body?: unknown }) => {
       sent.push({ route, ...(init?.body === undefined ? {} : { body: init.body }) });
       if (route === 'POST /v1/step-up/options') throw refusal(403, 'step_up_no_passkey');
-      if (route === 'GET /v1/passkeys') return { passkeys: [], registration: 'reopened' };
+      if (route === 'GET /v1/passkeys')
+        return { passkeys: [], registration, registrationClosesAt: '2099-01-01T00:00:00.000Z' };
       if (route === 'POST /v1/passkeys/options')
         return {
           challenge: CHALLENGE,
@@ -143,4 +144,25 @@ describe('A555 r7 Add a passkey, answered by a passkey manager', () => {
       await view.unmount();
     }
   });
+
+  for (const [need, registration] of [
+    [{ kind: 'unlock' }, 'first-window'],
+    [{ kind: 'unlock' }, 'reopened'],
+    [{ kind: 'step-up', act: 'change the settings' }, 'first-window'],
+  ] as const)
+    it(`kasen (c): a ${need.kind} pressed on a device with NO passkey (${registration}) says "Add a passkey", never "Unlock"`, async () => {
+      const { provision } = machine(onePasswordCredential, registration);
+      const view = await mount(<provision.Prompts />);
+      try {
+        await interact(() => void provision.handler.confirm(ONE, need, 'explicit'));
+        await settle();
+        const dialog = must(view.container.querySelector('[data-step-up-dialog]'), 'the dialog');
+        expect(dialog.querySelector('h2')?.textContent).toBe('Add a passkey to this device');
+        const confirm = must(dialog.querySelector<HTMLButtonElement>('[data-step-up-confirm]'), 'the button');
+        expect(confirm.textContent).toContain('Add a passkey');
+        expect(confirm.textContent).not.toContain('Unlock');
+      } finally {
+        await view.unmount();
+      }
+    });
 });

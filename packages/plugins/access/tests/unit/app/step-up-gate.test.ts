@@ -796,3 +796,26 @@ describe('A555 r7: a screen offering the first passkey in place holds its machin
     should(await waiting).be.false();
   });
 });
+
+describe('A555 r7 kasen (c): a device with no passkey reads "Add a passkey" even when the first read failed', () => {
+  it('should try the passkeys read again while the prompt is on screen, and adopt its answer', async () => {
+    let reads = 0;
+    const gate = new StepUpGate({
+      ceremony: async () => undefined,
+      describe: () => 'no',
+      retryMs: 1,
+      firstPasskey: async () => {
+        reads += 1;
+        if (reads === 1) throw new Error('a moment out of reach');
+        return true;
+      },
+    });
+    const pressed = gate.require(first, 'change the settings', 'explicit');
+    for (let i = 0; i < 20 && gate.snapshot()?.firstPasskey !== true; i += 1)
+      await new Promise(resolve => setTimeout(resolve, 2));
+    should(reads).equal(2);
+    should(gate.snapshot()?.firstPasskey).be.true();
+    gate.dismiss();
+    should(await pressed).be.false();
+  });
+});

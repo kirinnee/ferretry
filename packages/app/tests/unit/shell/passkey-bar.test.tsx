@@ -146,7 +146,7 @@ function setup(made: PasskeyProvision, refusal: TransportAnswer) {
       scroll={new ScrollMemory(null)}
     />
   );
-  return { app, transport, confirm: () => (confirmed = true) };
+  return { app, transport, runtime, confirm: () => (confirmed = true) };
 }
 
 const go = (path: string): void => window.history.replaceState({}, '', path);
@@ -193,6 +193,24 @@ describe('A555 r7 one press for a passkey nobody asked for', () => {
     await settle();
     expect(page()).toBe('the cards');
     expect(bar()).toBeNull();
+    await view.unmount();
+  });
+
+  test('a locked machine whose live feed is refused is reachable, never "Offline", and goes live again once unlocked', async () => {
+    go('/d/d1/board');
+    const { made } = provision();
+    const { app, transport, runtime, confirm } = setup(made, UNLOCK);
+    const view = await mount(app);
+    await settle();
+    // The machine refuses its feed (`GET /v1/bus` is not unlock-exempt): the feed closes, but a 401 is not a lost line.
+    await interact(() => transport.dropFeed());
+    expect(runtime.online('d1')).toBe(true);
+    confirm();
+    await interact(() => bar()?.querySelector<HTMLButtonElement>('[data-passkey-bar-press]')?.click());
+    await settle();
+    // The confirm opens the feed again.
+    await interact(() => transport.openFeed());
+    expect(runtime.online('d1')).toBe(true);
     await view.unmount();
   });
 });

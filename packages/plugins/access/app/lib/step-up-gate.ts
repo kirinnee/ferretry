@@ -106,6 +106,8 @@ export interface StepUpGateDependencies {
    * nothing a person did not press raises this gate's prompt for it, until {@link StepUpGate.recheck} says it let go.
    */
   readonly held?: (daemonId: DaemonId) => boolean;
+  /** How long a failed read of this device's passkeys waits before it is tried again (tests shorten it). */
+  readonly retryMs?: number;
 }
 
 interface Waiting {
@@ -330,18 +332,36 @@ export class StepUpGate {
         scope => this.#adopt(waiting, { scope }),
         () => undefined,
       );
+    // A device with no passkey must read "Add a passkey", never "Unlock" (A555 r7, kasen (c)): a read of its passkeys
+    // that failed (the machine a moment out of reach) is tried again while this prompt is the one on screen.
     const first = this.deps.firstPasskey;
     if (first !== undefined)
-      void first(waiting.daemon).then(
-        firstPasskey => this.#adopt(waiting, { firstPasskey }),
-        () => undefined,
+      void this.#whileShown(waiting, () => first(waiting.daemon)).then(firstPasskey =>
+        firstPasskey === undefined ? undefined : this.#adopt(waiting, { firstPasskey }),
       );
     const owner = this.deps.ownerCommand;
     if (owner !== undefined)
-      void owner(waiting.daemon).then(
-        ownerCommand => (ownerCommand === undefined ? undefined : this.#adopt(waiting, { ownerCommand })),
-        () => undefined,
+      void this.#whileShown(waiting, () => owner(waiting.daemon)).then(ownerCommand =>
+        ownerCommand === undefined ? undefined : this.#adopt(waiting, { ownerCommand }),
       );
+  }
+
+  /** `read`, tried up to three times a second apart while `waiting`'s prompt is on screen; `undefined` if none answered. */
+  async #whileShown<T>(waiting: Waiting, read: () => Promise<T>): Promise<T | undefined> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt > 0) await new Promise(resolve => setTimeout(resolve, this.deps.retryMs ?? 1_000));
+      if (
+        this.#prompt?.daemon.daemonId !== waiting.daemon.daemonId ||
+        this.#waiting.get(waiting.daemon.daemonId) !== waiting
+      )
+        return undefined;
+      try {
+        return await read();
+      } catch {
+        // Tried again below, while the prompt is still this one.
+      }
+    }
+    return undefined;
   }
 
   /** What the machine said about this prompt, if its prompt is still the one on screen. */

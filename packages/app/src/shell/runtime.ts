@@ -448,7 +448,10 @@ export class ShellRuntime {
   /** Whether the daemon's event feed is live (a view's `online`). */
   online(daemon: string): boolean {
     const connection = this.#connections.get(daemon);
-    return connection?.kind === 'connected' && connection.client.feedLive;
+    if (connection?.kind !== 'connected') return false;
+    // A LOCKED machine is reachable (A555 r7): it answered, and refuses its live feed (`GET /v1/bus` is not
+    // unlock-exempt) only until the unlock. A 401 is not a lost connection, so it never reads "Offline".
+    return connection.client.feedLive || this.isLocked(daemon) || connection.client.unaskedNeed()?.kind === 'unlock';
   }
 
   /** What this device may do with (capability, axis) on this daemon, from the one grants cache. */
