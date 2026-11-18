@@ -428,7 +428,15 @@ jobs:
           deployment_origin="https://${deployment_id:0:8}.${alias_origin#https://}"
           [[ "$(jq -er '.result.canonical_deployment.url' "${project_file}")" == "${deployment_origin}" ]] ||
             fail "the production deployment's URL is not ${deployment_origin} (its id's first 8 characters on the alias host); refusing to read a record from an unbound address"
-          api_commit="$(jq -r '.result.canonical_deployment.deployment_trigger.metadata.commit_hash // ""' "${project_file}")"
+          # A recorded hash that is PRESENT must be a full commit id (anything else fails); only an ABSENT (or null) one falls back
+          # to the deployment's own signed record.
+          api_commit=""
+          if [[ "$(jq -r '(.result.canonical_deployment.deployment_trigger.metadata // {}) | (has("commit_hash") and .commit_hash != null)' "${project_file}")" == true ]]; then
+            api_commit="$(jq -er '.result.canonical_deployment.deployment_trigger.metadata.commit_hash | strings' "${project_file}")" ||
+              fail "the production deployment's recorded commit hash is not a string; refusing to guess what is live"
+            [[ ${api_commit} =~ ^[0-9a-f]{40}$ ]] ||
+              fail "the production deployment's recorded commit hash '${api_commit}' is not a full commit id; refusing to guess what is live"
+          fi
           # 2. The signed record: the deployment's own, then the alias's, each proved against the committed key. A record
           # that is missing or unverifiable while a deployment exists is a failure, never a first deploy.
           nonce="${GITHUB_RUN_ID}-${ATTEMPT}-$(date +%s%N)"
@@ -448,7 +456,7 @@ jobs:
           read_record "${alias_origin}" "${work_dir}/alias"
           record_commit="$(jq -er '.commit' "${work_dir}/deployment/release-manifest.json")"
           live_sequence="$(jq -er '.sequence' "${work_dir}/deployment/release-manifest.json")"
-          if [[ ${api_commit} =~ ^[0-9a-f]{40}$ ]]; then
+          if [[ -n ${api_commit} ]]; then
             # The API's commit is the authority. A deployment's record that says otherwise is not evidence.
             [[ ${api_commit} == "${record_commit}" ]] ||
               fail "the production deployment is ${api_commit} but its own signed record says ${record_commit}; refusing to guess what is live"

@@ -821,6 +821,34 @@ describe('the deploy job re-checks, before the upload and on every attempt, agai
     ).toBe(1);
   });
 
+  test("a recorded commit hash that is PRESENT but malformed fails; only an ABSENT hash falls back to the deployment's own record", () => {
+    const r = repo();
+    for (const hash of ['abc123', '', 'Z'.repeat(40), r.c2.toUpperCase(), `${r.c2}0`, 7, true, ['x']]) {
+      const result = run(r.directory, {
+        api: project(deployedAt(undefined, { deployment_trigger: { metadata: { commit_hash: hash } } })),
+        deployment: record(r.c2, 5),
+        after: r.c3,
+        sequence: 6,
+      });
+      expect({ hash, step: result.step, status: result.status, out: result.out }).toEqual({
+        hash,
+        step: 2,
+        status: 1,
+        out: '',
+      });
+    }
+    // Absent and null both fall back (the record decides).
+    for (const metadata of [{}, { commit_hash: null }]) {
+      const absent = run(r.directory, {
+        api: project(deployedAt(undefined, { deployment_trigger: { metadata } })),
+        deployment: record(r.c2, 5),
+        after: r.c3,
+        sequence: 6,
+      });
+      expect(absent).toMatchObject({ status: 0, out: 'skip=false' });
+    }
+  });
+
   test('a live commit that is not in the checkout is refused, not assumed old', () => {
     const r = repo();
     const unknown = 'f'.repeat(40);
