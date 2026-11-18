@@ -15,6 +15,12 @@ import {
   verificationBadge,
 } from './lib/model.ts';
 
+/** When the last check ran, in the reader's own clock (the raw instant when it cannot be read). */
+const checkedWords = (instant: string): string => {
+  const when = new Date(instant);
+  return Number.isNaN(when.getTime()) ? instant : when.toLocaleString();
+};
+
 type Loaded = { kind: 'loading' } | { kind: 'view'; view: HarnessCliView } | { kind: 'failed'; reason: string };
 interface Confirmation {
   readonly target?: string;
@@ -122,7 +128,7 @@ export function CodexSettingsView({ settings }: { readonly settings: CodexSettin
               'Not checked yet.'
             ) : (
               <>
-                {knownLatest(view.check) ?? 'Unknown'} · Checked {view.check.checkedAt}
+                {knownLatest(view.check) ?? 'Unknown'} · Checked {checkedWords(view.check.checkedAt)}
                 {view.check.state === 'failed' ? ': ' + view.check.reason : ''}
               </>
             )
