@@ -1,6 +1,6 @@
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import { daemonHomeHref, daemonSettingsHref, DEVICE_SETTINGS_HREF, HOME_HREF } from '../router/routes.ts';
-import { useRouter } from '../router/router.tsx';
+import { destinationPath, useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import { firstRunEntry, ONBOARDING_SCREEN, PAIR_SCREEN } from './first-run.ts';
 import { SettingGroup } from '../compose/setting-row.tsx';
@@ -135,6 +135,34 @@ export function DaemonHomePage({ daemon }: { readonly daemon: string }) {
 }
 
 /**
+ * The phone's way back from a settings panel to the list. The list is the entry just behind the panel when the person came
+ * through it, so that is Back (the history goes back; it does not grow); a deep link into a panel has no list behind it, so
+ * the list REPLACES the panel. Either way a browser Back from the list never returns to the panel just left.
+ */
+function SettingsBackLink({ to }: { readonly to: string }) {
+  const router = useRouter();
+  const onClick = (event: MouseEvent<HTMLAnchorElement>): void => {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
+    event.preventDefault();
+    if (router.previousPath === destinationPath(to)) router.back(to);
+    else router.navigate(to, { replace: true });
+  };
+  return (
+    <a href={to} onClick={onClick} className="fy-settings-back">
+      ‹ Settings
+    </a>
+  );
+}
+
+/**
  * A daemon's settings: one tab per plugin, saved on that daemon (§5.2). Laid out as v4's Settings was: a machine header
  * (its name, whether it answers, and that these settings belong to THAT machine), the titled groups as a compact list
  * BESIDE the panel on a wide screen, the panel always at its own top. On a phone the list is a page of its own and a tab
@@ -149,7 +177,7 @@ export function DaemonSettingsPage({
   readonly tab?: string;
   readonly tabId?: string;
 }) {
-  const { runtime, scroll } = useShell();
+  const { runtime, scroll, viewport } = useShell();
   const { entryKey } = useRouter();
   useRuntimeVersion(runtime);
   const paired = runtime.daemons.get(daemon);
@@ -161,7 +189,10 @@ export function DaemonSettingsPage({
   // A tab is found by its plugin AND its own id; a plugin's first tab is what `settings/<plugin>` names, a bare tab id
   // names that tab, and a name nothing answers to is said so (never the first tab in its place).
   const choice = resolveSettingsTab(tabs, tab, tabId);
-  const active = choice.kind === 'tab' ? choice.tab : undefined;
+  // A phone's bare /settings is the LIST and nothing else: no tab is marked and none is mounted behind it (a wide screen
+  // opens the first tab beside the list, so it keeps one).
+  const listOnly = viewport === 'phone' && tab === undefined;
+  const active = choice.kind === 'tab' && !listOnly ? choice.tab : undefined;
   // A tab the address NAMES (a click on its link, or a deep link) takes focus (a screen reader says its name) and the
   // page opens at ITS TOP: the panel sits beside the list now, so there is nothing to scroll past. A bare /settings
   // steals no focus, and a Back/Forward/reload whose scroll was saved is the scroll memory's to put back.
@@ -180,9 +211,7 @@ export function DaemonSettingsPage({
     <section className="fy-page fy-settings" data-settings-open={named === undefined ? 'list' : 'panel'}>
       <header className="fy-settings-head">
         {/* A phone's way back from a panel to the list of them (hidden wherever the list is beside the panel). */}
-        <Link to={daemonSettingsHref(daemon)} className="fy-settings-back">
-          ‹ Settings
-        </Link>
+        <SettingsBackLink to={daemonSettingsHref(daemon)} />
         <h1>Settings</h1>
         {paired === undefined ? null : (
           <p className="fy-settings-machine">
@@ -225,7 +254,7 @@ export function DaemonSettingsPage({
           <ShellLine>No plugin on this daemon has settings.</ShellLine>
         ) : choice.kind === 'missing' ? (
           <ShellLine>{`There is no settings tab called "${choice.name}" on this daemon. Pick one from the list.`}</ShellLine>
-        ) : (
+        ) : listOnly ? null : (
           <section ref={pageRef} className="fy-settings-page" aria-label={choice.tab.label} tabIndex={-1}>
             <PluginView daemon={daemon} plugin={choice.tab.plugin} section="settings" id={choice.tab.id} props={{}} />
           </section>
