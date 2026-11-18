@@ -533,14 +533,23 @@ export function RuntimesTab({
   const defaultRef = useRef<HTMLDivElement | null>(null);
   const refusal = runtimeActionRefusal(changes.authority);
 
-  // M3: a machine that is not set up has no runtimes; the banner above the tabs resumes its setup.
-  if (machine !== null && !machine.setUp)
+  const start = (): void => {
+    changes.clear();
+    setAdding(true);
+  };
+
+  // M3: a machine that is not set up has no runtimes. Bringing in the host's setup is one way to get the first; adding
+  // one by hand is the other, and it stays reachable because a machine with no host login to import has no other way.
+  if (machine !== null && !machine.setUp && !adding)
     return (
-      <div className="kt-panel flex flex-col items-start gap-1 p-panel" data-runtimes-not-set-up="">
+      <div className="kt-panel flex flex-col items-start gap-2 p-panel" data-runtimes-not-set-up="">
         <h3 className="m-0 text-row font-semibold text-fg">No runtimes on {machineName} yet</h3>
         <p className="m-0 text-cell leading-base text-muted">
-          Finish setting it up above to bring in your Claude Code and Codex setup.
+          Finish setting it up above to bring in your Claude Code and Codex setup, or add a runtime yourself.
         </p>
+        <Button type="button" variant="primary" data-add-runtime="" onClick={start}>
+          Add a runtime
+        </Button>
       </div>
     );
 
@@ -571,11 +580,6 @@ export function RuntimesTab({
         }}
       />
     );
-
-  const start = (): void => {
-    changes.clear();
-    setAdding(true);
-  };
 
   const open = (next: RuntimeAct): void => {
     changes.clear();
