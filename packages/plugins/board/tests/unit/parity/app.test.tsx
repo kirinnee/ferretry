@@ -6,7 +6,7 @@
  * the test reads what it drew. The views' own behaviour is in the ported rendering suites under `tests/unit/app/`,
  * whose test names carry the same row ids.
  */
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
 import type { PanelProps, PluginClient, RendererProps, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { createElement, type FunctionComponent, Suspense } from 'react';
@@ -65,6 +65,15 @@ const daemon: PluginClient = {
 } as unknown as PluginClient;
 
 const half = app.build?.({ manifest, client: daemon });
+
+/**
+ * Every surface is a lazy chunk (`import('./views/surfaces.tsx')`), and `settleUntil` counts event-loop turns, not
+ * time: on a loaded runner the first, cold load outlasts the turns and the first draw is empty. Loading the chunk once
+ * here, with a real-time budget, makes every draw below wait on a warm module.
+ */
+beforeAll(async () => {
+  await import('../../../app/views/surfaces.tsx');
+}, 60_000);
 
 let view: Mounted | null = null;
 afterEach(async () => {
