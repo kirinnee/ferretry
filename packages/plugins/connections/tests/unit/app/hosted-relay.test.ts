@@ -26,6 +26,7 @@ import {
   HOSTED_RELAY_UNDETERMINED_NOTE,
   type HostedRelayFetch,
   NO_RELAY_DIRECTORY,
+  relayReadFailed,
   activeCarrierStatus,
   parseHostedRelayAdvertisement,
   readHostedRelayFallback,
@@ -163,6 +164,17 @@ describe('readHostedRelayFallback', () => {
     const answer = await readHostedRelayFallback({ directoryUrl: DIRECTORY, fetcher });
     expect(answer.kind).toBe('undetermined');
     if (answer.kind === 'undetermined') expect(answer.reason).toContain('not a document');
+  });
+
+  it('names a FAILED read apart from "no relay offered": only the failed read is worth saying fell back', async () => {
+    const failed = await readHostedRelayFallback({
+      directoryUrl: DIRECTORY,
+      fetcher: answering(new Response('gone', { status: 503 })).fetcher,
+    });
+    expect(relayReadFailed(failed)).toBe(true);
+    expect(relayReadFailed({ kind: 'disabled' })).toBe(false);
+    expect(relayReadFailed(NO_RELAY_DIRECTORY)).toBe(false);
+    expect(relayReadFailed({ kind: 'available', relayUrl: 'wss://relay.example.test' })).toBe(false);
   });
 
   it('carries the switch straight through when it is off', async () => {

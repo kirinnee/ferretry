@@ -78,6 +78,13 @@ const RELAY_UNAVAILABLE = 'there is no relay for this machine right now';
  * paired over, because the relay could not be reached. It goes away when the relay answers again.
  */
 export const RELAY_FALLBACK_LINE = 'Couldn’t reach it through the relay, using the direct connection.';
+/**
+ * Said (quietly) when the relay is ON but this page could not find out where it is — the directory read failed — so the
+ * paired direct address carries instead. It names the consequence and the remedy; a relay that is off by choice (or a
+ * build with no directory) says nothing, because nothing was offered.
+ */
+export const RELAY_UNDETERMINED_LINE =
+  'Couldn’t look up the relay, so this is using the direct connection. Reload the page to try the relay again.';
 /** Said to every session a new preference closes (today's `PREFERENCE_CHANGED_REASON`). */
 export const PREFERENCE_CHANGED_REASON = 'the connection preference for this machine changed';
 /** Said to every session an unpair or a re-pair closes (today's `clearDaemon` sentence). */
@@ -131,6 +138,11 @@ export interface CarrierRouterDependencies extends CarrierSocketDependencies {
   readonly chosen?: (daemonId: string) => boolean;
   /** The one advertisement read this document performed (`hosted-relay.ts`): a last-resort address, never stored. */
   readonly hostedRelay: () => Promise<string | undefined>;
+  /**
+   * Whether that read FAILED to determine an answer (network, 5xx) while a directory was asked — as opposed to a relay
+   * switched off or a build with no directory, where there is simply no relay. Absent: never undetermined.
+   */
+  readonly relayUndetermined?: () => Promise<boolean>;
   /** The hosted tunnel service's one read, awaited only when "Tunnel only" finds no tunnel, to say why. */
   readonly tunnelService?: () => Promise<TunnelServiceState>;
   readonly health?: CarrierHealthReporter;
@@ -228,6 +240,8 @@ interface WalkPlan {
   /** The unchosen default: after the relay, the direct address this device paired over may carry the session. */
   readonly fallsBackToPairedDirect: boolean;
   why?: string;
+  /** The relay is on but its address could not be determined (distinct from "no relay is offered"). */
+  relayUndetermined?: boolean;
 }
 
 /**
@@ -328,6 +342,8 @@ class Generation {
 /** One accepted session that is still alive: whether it stands in for the relay, and the choice it made. */
 interface LiveSession {
   readonly standsIn: boolean;
+  /** The line this session's stand-in is told with (unreachable vs. undetermined); meaningful when it stands in. */
+  readonly line: string;
   readonly choice: ConnectionChoice;
 }
 
@@ -343,6 +359,8 @@ interface CarrierEntry {
   choice: ConnectionChoice | undefined;
   /** The choice is the paired direct address standing in for an unreachable relay (never a remembered winner). */
   fellBack: boolean;
+  /** Which line the fallback is told with while {@link fellBack}. */
+  fellBackLine: string;
   /**
    * Every ACCEPTED session of this pairing that is still alive, request lanes and streams alike (shared across a
    * republish, which keeps the sessions). The fallback is told for as long as any of them stands in for the relay.
@@ -429,6 +447,7 @@ export class CarrierRouter {
       published: entry.published,
       choice: undefined,
       fellBack: false,
+      fellBackLine: RELAY_FALLBACK_LINE,
       live: new Set(),
       generation: new Generation(),
       lookup: entry.lookup,
@@ -497,7 +516,8 @@ export class CarrierRouter {
    * or `undefined` once none does (the relay carries it, or nothing has been carried).
    */
   relayFallback(daemonId: string): string | undefined {
-    return this.#entries.get(daemonId)?.fellBack === true ? RELAY_FALLBACK_LINE : undefined;
+    const entry = this.#entries.get(daemonId);
+    return entry?.fellBack === true ? entry.fellBackLine : undefined;
   }
 
   /**
@@ -528,6 +548,7 @@ export class CarrierRouter {
         published,
         choice: undefined,
         fellBack: false,
+        fellBackLine: RELAY_FALLBACK_LINE,
         live: new Set(),
         generation: new Generation(),
         lookup: undefined,
@@ -558,6 +579,7 @@ export class CarrierRouter {
       published,
       choice: kept ? chosen : standingIn.at(-1)?.choice,
       fellBack: (current.fellBack && kept) || standingIn.length > 0,
+      fellBackLine: standingIn.at(-1)?.line ?? current.fellBackLine,
       live: current.live,
       generation: current.generation,
       lookup: current.lookup,
@@ -651,7 +673,10 @@ export class CarrierRouter {
       const hosted = hostedRelayFallback(daemon, await this.deps.hostedRelay());
       if (hosted !== undefined) {
         if (winner === undefined || !sameCarrier(hosted, winner)) yield this.#leg(daemon, hosted);
-      } else plan.why = RELAY_UNAVAILABLE;
+      } else {
+        plan.why = RELAY_UNAVAILABLE;
+        plan.relayUndetermined = (await this.deps.relayUndetermined?.()) === true;
+      }
     }
     // The unchosen default, and the relay carried nothing: the direct address this device paired over (that exact one;
     // nothing discovered, published later or guessed) is the last leg. A device with no such address gets no leg.
@@ -749,18 +774,23 @@ export class CarrierRouter {
         if (!decides) return undefined;
         // Under the unchosen default the only direct leg is the fallback: the relay did not carry this session.
         // With no relay known at all (switched off, none advertised) the direct address is simply the connection: it
-        // stands in for nothing that was ever offered, so no line says a relay failed.
-        const standsIn = plan.fallsBackToPairedDirect && method.kind === 'direct' && plan.why !== RELAY_UNAVAILABLE;
+        // stands in for nothing that was ever offered, so no line says a relay failed. A relay that is ON but whose
+        // address could not be read (the directory failed) IS a fallback, and says so with its own line.
+        const noRelayOffered = plan.why === RELAY_UNAVAILABLE && plan.relayUndetermined !== true;
+        const standsIn = plan.fallsBackToPairedDirect && method.kind === 'direct' && !noRelayOffered;
+        const line = plan.relayUndetermined === true ? RELAY_UNDETERMINED_LINE : RELAY_FALLBACK_LINE;
         const chosen = choiceFor([...probes, carrierProbe(method, { kind: 'answered', status: 101 })], plan);
         const session: LiveSession = {
           standsIn: standsIn && chosen.ok,
-          choice: standsIn && chosen.ok ? { ...chosen, reason: RELAY_FALLBACK_LINE } : chosen,
+          line,
+          choice: standsIn && chosen.ok ? { ...chosen, reason: line } : chosen,
         };
         entry.live.add(session);
         if (session.standsIn) {
           // A session on the paired direct address is live: the connection says so, whatever else carries.
           entry.choice = session.choice;
           entry.fellBack = true;
+          entry.fellBackLine = session.line;
           this.#announce();
         } else if (![...entry.live].some(live => live.standsIn)) {
           // Initial sessions may walk concurrently; once one has a winner, that is the connection's fact — except that

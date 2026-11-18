@@ -3043,7 +3043,10 @@ and it is said only where the connection matters: the Connection panel, and the 
 screen, never on an ordinary page. On one screen it is told once: the Connection panel says it, and the frame's own
 status line for that machine stays quiet while the panel is up. **When no relay is known at all** (the hosted relay is
 switched off or none is advertised, and none is published) the direct address is simply the connection: it stands in
-for nothing that was offered, so no line says a relay failed. A chosen "Relay only" never falls back. When the read
+for nothing that was offered, so no line says a relay failed. **When the directory read FAILED** (network, a 5xx, not a document — a
+relay may well exist, this page just could not learn where) the fallback is told, quietly, in its own line that names the
+consequence and the remedy ("Couldn’t look up the relay, so this is using the direct connection. Reload the page to
+try the relay again."): failing closed to direct-only is never silent. A chosen "Relay only" never falls back. When the read
 that opens a machine fails, the block page names the carrier's own cause and links Settings › This device
 › Connection, which needs no machine.
 

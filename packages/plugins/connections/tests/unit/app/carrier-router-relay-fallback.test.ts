@@ -8,7 +8,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { PairedDaemon } from '@ferretry/app';
 import type { BrowserSocket } from '../../../app/adapters/browser-relay-dial.ts';
-import { RELAY_FALLBACK_LINE, WITHDRAWN_CARRIER_REASON } from '../../../app/carriers/router.ts';
+import {
+  RELAY_FALLBACK_LINE,
+  RELAY_UNDETERMINED_LINE,
+  WITHDRAWN_CARRIER_REASON,
+} from '../../../app/carriers/router.ts';
 import type { ScriptedHost } from '../../support/browser-network.ts';
 import { carriedOver, rig } from '../../support/router-rig.ts';
 
@@ -38,6 +42,36 @@ describe('the unchosen default (Relay) with a relay that cannot carry', () => {
     expect(hostsDialled(r.network.dialled)).toEqual([new URL(DIRECT).host]);
     expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'direct', daemonUrl: DIRECT } });
     expect(r.router.choice(r.fx.daemonId)).not.toMatchObject({ reason: RELAY_FALLBACK_LINE });
+    expect(r.router.relayFallback(r.fx.daemonId)).toBeUndefined();
+    r.fx.layer.close();
+  });
+
+  test('relay ON but the directory read could not be determined (network/5xx): direct carries and the router SAYS it fell back, and what to do', async () => {
+    const r = await rig(hostsOf({ kind: 'dead' }), PUBLISHED, 'relay', null, undefined, {
+      chosen: () => false,
+      relayUndetermined: async () => true,
+    });
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await transport.request({ method: 'GET', path: '/v1/carriers' });
+    expect(carriedOver(r.fx)).toEqual(['/v1/carriers direct']);
+    // Distinct from "no relay offered": its own line, with the consequence and the remedy.
+    expect(r.router.relayFallback(r.fx.daemonId)).toBe(RELAY_UNDETERMINED_LINE);
+    expect(RELAY_UNDETERMINED_LINE).toContain('direct connection');
+    expect(RELAY_UNDETERMINED_LINE).toContain('Reload');
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, reason: RELAY_UNDETERMINED_LINE });
+    r.fx.layer.close();
+  });
+
+  test('a directory that said "no relay" (switched off) or was never configured stays silent even when asked', async () => {
+    const r = await rig(hostsOf({ kind: 'dead' }), PUBLISHED, 'relay', null, undefined, {
+      chosen: () => false,
+      relayUndetermined: async () => false,
+    });
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await transport.request({ method: 'GET', path: '/v1/carriers' });
+    expect(carriedOver(r.fx)).toEqual(['/v1/carriers direct']);
     expect(r.router.relayFallback(r.fx.daemonId)).toBeUndefined();
     r.fx.layer.close();
   });
