@@ -89,7 +89,7 @@ const SELF_HOSTING_NOTE =
   'whatever the daemon publishes.';
 
 /** The lead word for each status. */
-const CONNECTION_STATUS_LABEL: Readonly<Record<ConnectionStatusKind, string>> = {
+export const CONNECTION_STATUS_LABEL: Readonly<Record<ConnectionStatusKind, string>> = {
   direct: 'Direct',
   webrtc: 'WebRTC',
   tunnel: 'Via Cloudflare tunnel',
@@ -116,14 +116,14 @@ const relayName = (method: Extract<ConnectionMethod, { kind: 'relay' }>): string
  * What follows the status word, naming WHICH carrier of its kind: a relay's operator and host, a
  * tunnel's hostname (one random label, never the fingerprint). Direct and WebRTC need nothing more.
  */
-const carrierDetail = (method: ConnectionMethod): string | undefined => {
+export const carrierDetail = (method: ConnectionMethod): string | undefined => {
   if (method.kind === 'relay') return relayName(method);
   if (method.kind === 'tunnel') return new URL(method.tunnelUrl).host;
   return undefined;
 };
 
 /** Reconnecting outranks any measured carrier: the router's answer is the LAST one that won. */
-const connectionStatusKind = (
+export const connectionStatusKind = (
   method: ConnectionMethod | undefined,
   health: ConnectionHealthState | undefined,
 ): ConnectionStatusKind => (health?.kind === 'reconnecting' ? 'reconnecting' : (method?.kind ?? 'none'));
@@ -134,7 +134,7 @@ const connectionStatusKind = (
  * them. Not "not measured yet": something was measured, and the answer was no. The machine-readable
  * status stays `none`, because no carrier is live.
  */
-const NOT_CONNECTED_LABEL = 'Not connected';
+export const NOT_CONNECTED_LABEL = 'Not connected';
 
 export const CARRIER_UNMEASURED =
   'Nothing has been carried yet, so there is no carrier to name. This will say which one is in use, ' +
