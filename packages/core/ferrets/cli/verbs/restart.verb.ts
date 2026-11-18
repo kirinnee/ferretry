@@ -11,6 +11,7 @@ export default defineVerbs(({ client, verb, json }) => ({
       ...(on(invocation, 'outdated') ? { outdated: true } : {}),
       ...(on(invocation, 'all') ? { all: true } : {}),
       ...(on(invocation, 'cancel') ? { cancel: true } : {}),
+      ...(on(invocation, 'dry-run') ? { dryRun: true } : {}),
       ...(requestId === undefined ? {} : { requestId }),
       ...json(invocation),
     });

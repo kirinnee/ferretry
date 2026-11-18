@@ -116,6 +116,25 @@ describe('RestartController', () => {
     ]);
   });
 
+  it('should only list what is out of date for --dry-run, whatever else was asked, and restart nothing', async () => {
+    // Arrange
+    const { controller: sut, gateway, io } = controller();
+
+    // Act
+    await sut.execute([], { dryRun: true });
+    const bare = [...io.out];
+    await sut.execute([], { outdated: true, dryRun: true });
+    await sut.execute([], { all: true, dryRun: true });
+    await sut.execute(['Wren'], { dryRun: true });
+    await sut.execute([], { cancel: true, dryRun: true });
+
+    // Assert
+    should(bare[0]).equal('Out of date: 1');
+    should(io.out).deepEqual([...bare, ...bare, ...bare, ...bare, ...bare]);
+    should(gateway.requests).deepEqual([]);
+    should(gateway.cancels).equal(0);
+  });
+
   it('should say when everything is current', async () => {
     // Arrange
     const current = new RecordingRestartGateway(undefined, { outdated: [], queued: [] });

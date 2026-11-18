@@ -44,6 +44,7 @@ export default fragment({
       options: [
         { flag: '--outdated', help: 'restart every ferret whose instructions are out of date' },
         { flag: '--all', help: 'restart every running ferret' },
+        { flag: '--dry-run', help: 'list only; restarts nothing (the same list as `fy restart` with no flag)' },
         { flag: '--cancel', help: 'clear the restarts that are waiting for a ferret to go idle' },
         { flag: '--request-id <id>', help: 'stable idempotency key for an explicit retry of this restart' },
         { flag: '--json', help: 'print the result as JSON' },
