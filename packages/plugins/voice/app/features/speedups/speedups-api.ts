@@ -20,8 +20,8 @@ import {
 /** The only client capability the Speed-ups surface uses. */
 export type SpeedupClient = Pick<IFyApiClient, 'request'>;
 
-export async function readSpeedups(client: SpeedupClient): Promise<SpeedupsView> {
-  return await client.request(SPEEDUPS_PATH, SpeedupsViewSchema);
+export async function readSpeedups(client: SpeedupClient, pressed = false): Promise<SpeedupsView> {
+  return await client.request(SPEEDUPS_PATH, SpeedupsViewSchema, pressed ? { pressed: true } : undefined);
 }
 
 /** Spends the provider's key once, the cheapest way that provider allows. Never on a timer. */

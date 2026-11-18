@@ -48,6 +48,35 @@ const settled = async (container: HTMLElement, selector: string): Promise<void> 
 };
 
 describe('TerminalSlotsSettings', () => {
+  it('a cancelled passkey prompt shows "Confirm it’s you to see this" (never "Reading…" or data), and pressing it reads again as the owner’s own read', async () => {
+    const reads: boolean[] = [];
+    let refused = true;
+    const createClient = async (): Promise<TerminalSlotsClient> =>
+      ({
+        request: (async (_path: string, _schema: unknown, init?: { readonly pressed?: boolean }) => {
+          reads.push(init?.pressed === true);
+          if (refused)
+            throw Object.assign(new Error('needs a passkey confirmation'), {
+              status: 403,
+              code: 'grant_step_up_required',
+            });
+          return { limit: 24, open: 1, holders: [live] };
+        }) as TerminalSlotsClient['request'],
+      }) satisfies TerminalSlotsClient;
+    const shown = await mount(<TerminalSlotsSettings connection={alpha} createClient={createClient} />);
+    await settled(shown.container, '[data-confirm-to-see]');
+    expect(shown.container.textContent).toContain('Confirm it’s you to see this');
+    expect(shown.container.textContent).not.toContain('Reading');
+    expect(shown.container.querySelector('[data-terminal-slots]')).toBeNull();
+    refused = false;
+    await interact(() =>
+      must(shown.container.querySelector<HTMLButtonElement>('[data-confirm-to-see] button'), 'confirm').click(),
+    );
+    await settled(shown.container, '[data-terminal-slots]');
+    expect(reads).toEqual([false, true]);
+    await shown.unmount();
+  });
+
   it('lists who holds the slots, closes the finished ferrets’ terminals, and shows what is left', async () => {
     // Arrange
     const daemon = machine(

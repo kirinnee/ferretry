@@ -129,7 +129,13 @@ const ROUTES: readonly {
 });
 
 /** Calls the route a concrete `method path` names, through the plugin client, and answers the parsed JSON. */
-async function callPath(client: VoicePluginClient, method: string, path: string, body?: unknown): Promise<unknown> {
+async function callPath(
+  client: VoicePluginClient,
+  method: string,
+  path: string,
+  body?: unknown,
+  pressed = false,
+): Promise<unknown> {
   const [pathname = path, search = ''] = path.split('?');
   const query = Object.fromEntries(new URLSearchParams(search));
   for (const route of ROUTES) {
@@ -143,6 +149,8 @@ async function callPath(client: VoicePluginClient, method: string, path: string,
       ...(route.names.length === 0 ? {} : { params }),
       ...(Object.keys(query).length === 0 ? {} : { query }),
       ...(body === undefined ? {} : { body }),
+      // A read the owner pressed for (a retry after a cancelled passkey prompt) is theirs, so it may ask again.
+      ...(pressed ? { quiet: false } : {}),
     });
   }
   throw new Error(`no route of this plugin answers ${method} ${path}`);
@@ -209,7 +217,13 @@ export interface IFyApiClient {
   request<T>(
     path: string,
     schema: { parse(value: unknown): T },
-    init?: { readonly method?: string; readonly headers?: Readonly<Record<string, string>>; readonly body?: string },
+    init?: {
+      readonly method?: string;
+      readonly headers?: Readonly<Record<string, string>>;
+      readonly body?: string;
+      /** The owner pressed for this read (a retry after a cancelled passkey prompt): it may ask for the step-up again. */
+      readonly pressed?: boolean;
+    },
     timeoutMs?: number,
   ): Promise<T>;
 }
@@ -242,7 +256,7 @@ export function apiClientOver(client: VoicePluginClient): IFyApiClient {
           ([name]) => name.toLowerCase() === CONFIG_IF_MATCH_HEADER,
         )?.[1];
         const body = etag === undefined ? parsed : { ...(parsed as object), etag };
-        const call = callPath(client, (init?.method ?? 'GET').toUpperCase(), path, body);
+        const call = callPath(client, (init?.method ?? 'GET').toUpperCase(), path, body, init?.pressed === true);
         return schema.parse(await (timeoutMs === undefined ? call : within(call, timeoutMs)));
       } catch (error) {
         if (isCallRefusal(error)) throw new FyHttpError(error.status, error.code, error.message);

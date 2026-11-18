@@ -470,6 +470,15 @@ describe('a quiet read: the page asking for what a person has not yet pressed', 
     expect(sends()).toHaveLength(2);
   });
 
+  test('a read the person pressed for (quiet: false) is theirs: it asks as an explicit prompt and reads again', async () => {
+    const { fake, asked } = handler([true]);
+    const { client, sends } = daemon([STEP_UP, OK], fake);
+    await client.start();
+    expect(await client.forPackage('board').call('GET /v1/board', { quiet: false })).toEqual({ cards: [] });
+    expect(asked.map(entry => entry.origin)).toEqual(['explicit']);
+    expect(sends()).toHaveLength(2);
+  });
+
   test('ferret page: a press on the same route is NOT quiet: it asks for the step-up at once, so a protected panel still needs it before it acts', async () => {
     const { fake, asked } = handler([true]);
     const { client } = daemon([STEP_UP, OK], fake);

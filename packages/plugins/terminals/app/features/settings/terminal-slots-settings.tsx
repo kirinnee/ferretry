@@ -13,6 +13,7 @@ import { CircleAlert, SquareTerminal } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { Badge, Button } from '@ferretry/app';
+import { ConfirmToSee, isStepUpRefusal } from '@ferretry/app/ui';
 import type { DaemonConnection } from '../../shell.ts';
 import { closeFinishedTerminals, readTerminalHolders, type TerminalSlotsClient } from './terminal-slots-api.ts';
 
@@ -21,7 +22,9 @@ export type TerminalSlotsClientFactory = (connection: DaemonConnection) => Promi
 type Load =
   | { readonly status: 'loading' }
   | { readonly status: 'loaded'; readonly view: TerminalHoldersView; readonly closed: number | null }
-  | { readonly status: 'failed'; readonly reason: string };
+  | { readonly status: 'failed'; readonly reason: string }
+  /** The read was refused for want of the passkey step-up (a cancelled prompt): offer to ask again. */
+  | { readonly status: 'step-up' };
 
 const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : '');
 const terminals = (count: number): string => `${count} terminal${count === 1 ? '' : 's'}`;
@@ -39,22 +42,28 @@ export function TerminalSlotsSettings({
     load: { status: 'loading' },
   });
   const [closing, setClosing] = useState(false);
+  /** How many times the owner pressed "Confirm it's you to see this"; the read after a press is theirs. */
+  const [reads, setReads] = useState(0);
 
   useEffect(() => {
     let current = true;
     setState({ daemonId: connection.daemonId, load: { status: 'loading' } });
     void createClient(connection)
-      .then(async client => await readTerminalHolders(client))
+      .then(async client => await readTerminalHolders(client, reads > 0))
       .then(view => {
         if (current) setState({ daemonId: connection.daemonId, load: { status: 'loaded', view, closed: null } });
       })
       .catch((cause: unknown) => {
-        if (current) setState({ daemonId: connection.daemonId, load: { status: 'failed', reason: reasonOf(cause) } });
+        if (!current) return;
+        const load: Load = isStepUpRefusal(cause)
+          ? { status: 'step-up' }
+          : { status: 'failed', reason: reasonOf(cause) };
+        setState({ daemonId: connection.daemonId, load });
       });
     return () => {
       current = false;
     };
-  }, [connection, createClient]);
+  }, [connection, createClient, reads]);
 
   const closeFinished = useCallback(() => {
     const daemonId = connection.daemonId;
@@ -71,6 +80,18 @@ export function TerminalSlotsSettings({
   }, [connection, createClient]);
 
   const load: Load = state.daemonId === connection.daemonId ? state.load : { status: 'loading' };
+  if (load.status === 'step-up')
+    return (
+      <section className="kt-panel p-panel" role="status" aria-label="Terminals need your passkey">
+        <h3 className="m-0 text-row font-semibold text-fg">Terminals</h3>
+        <div className="mt-2">
+          <ConfirmToSee
+            line="This machine wants your passkey before it shows its terminals."
+            onConfirm={() => setReads(n => n + 1)}
+          />
+        </div>
+      </section>
+    );
   if (load.status === 'failed')
     return (
       <section

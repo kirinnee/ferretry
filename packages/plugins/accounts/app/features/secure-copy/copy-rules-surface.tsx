@@ -16,7 +16,9 @@ import type {
   PasteRuleSettingsView,
   PasteRuleStaged,
 } from '../../../contract/routes/index.ts';
+import { ConfirmToSee } from '@ferretry/app/ui';
 import { useCallback, useEffect, useState } from 'react';
+import { isStepUpRefusal } from '../../lib/step-up-refusal.ts';
 import {
   changeCopySettings,
   type CopyClient,
@@ -52,9 +54,9 @@ const loadedFrom = (list: PasteRuleList, settings: CopySettingsRead, waiting: re
 });
 
 /** Every read, side by side. Waiting stages that cannot be read show none: the add still stages and asks. */
-const readAll = async (client: CopyClient) =>
+const readAll = async (client: CopyClient, pressed = false) =>
   await Promise.all([
-    listRules(client),
+    listRules(client, pressed ? { quiet: false } : {}),
     readCopySettings(client),
     listPasteRuleStages(client).catch((): readonly PasteRuleStaged[] => []),
   ] as const);
@@ -74,23 +76,30 @@ export function CopyRulesSurface({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  /** The read was refused for want of the passkey step-up (a cancelled prompt): offer to ask again. */
+  const [stepUp, setStepUp] = useState(false);
+  /** How many times the owner pressed "Confirm it's you to see this"; the read after a press is theirs. */
+  const [reads, setReads] = useState(0);
 
   useEffect(() => {
     let current = true;
     setLoaded(null);
     setError(null);
     setFailure(null);
-    void readAll(client)
+    setStepUp(false);
+    void readAll(client, reads > 0)
       .then(([list, settings, waiting]) => {
         if (current) setLoaded(loadedFrom(list, settings, waiting));
       })
       .catch(cause => {
-        if (current) setFailure(message(cause));
+        if (!current) return;
+        setStepUp(isStepUpRefusal(cause));
+        setFailure(message(cause));
       });
     return () => {
       current = false;
     };
-  }, [client]);
+  }, [client, reads]);
 
   /** Runs one change, re-reads so the screen is what the daemon holds, and says whether it took. */
   const write = useCallback(
@@ -145,6 +154,18 @@ export function CopyRulesSurface({
     [write, approve],
   );
 
+  if (failure !== null && stepUp)
+    return (
+      <section className="kt-panel p-panel" role="status" aria-label="Approved pastes need your passkey">
+        <h3 className="m-0 text-row font-semibold text-fg">Approved pastes</h3>
+        <div className="mt-2">
+          <ConfirmToSee
+            line="This machine wants your passkey before it shows its paste rules."
+            onConfirm={() => setReads(n => n + 1)}
+          />
+        </div>
+      </section>
+    );
   if (failure !== null)
     return (
       <section className="kt-panel p-panel" role="status" aria-label="Approved pastes unavailable">

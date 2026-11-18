@@ -8,7 +8,9 @@
 
 import type { SignInRuleList, SignInRuleStaged, SignInRuleView } from '../../../contract/routes/index.ts';
 import { daemonOfClient } from '@ferretry/app';
+import { ConfirmToSee } from '@ferretry/app/ui';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { isStepUpRefusal } from '../../lib/step-up-refusal.ts';
 import {
   dropRuleStage,
   failureWords,
@@ -51,6 +53,8 @@ type Read =
   | { readonly kind: 'loading' }
   | { readonly kind: 'forbidden' }
   | { readonly kind: 'failed'; readonly words: string }
+  /** The read was refused for want of the passkey step-up (a cancelled prompt): offer to ask again. */
+  | { readonly kind: 'step-up' }
   | { readonly kind: 'ready'; readonly list: SignInRuleList };
 
 const PROGRESS_WORDS: Readonly<Record<RuleProgress, string>> = {
@@ -183,7 +187,7 @@ export function SignInRulesSurface({ client, askPasskey: ask, pollMs = POLL_MS, 
     forbidden.current = false;
     const readOnce = async (next: RuleClient): Promise<void> => {
       try {
-        const list = await listRules(next);
+        const list = await listRules(next, reads > 0 ? { quiet: false } : {});
         if (!current) return;
         setRead({ kind: 'ready', list });
         timer = setTimeout(() => void readOnce(next), pollMs);
@@ -193,6 +197,9 @@ export function SignInRulesSurface({ client, askPasskey: ask, pollMs = POLL_MS, 
         if (isForbidden(cause)) {
           forbidden.current = true;
           setRead({ kind: 'forbidden' });
+        } else if (isStepUpRefusal(cause)) {
+          // Waiting for the owner's press: nothing to poll until they confirm.
+          setRead({ kind: 'step-up' });
         } else {
           setRead({ kind: 'failed', words: failureWords(cause) });
           timer = setTimeout(() => void readOnce(next), pollMs * 3);
@@ -265,6 +272,14 @@ export function SignInRulesSurface({ client, askPasskey: ask, pollMs = POLL_MS, 
         <p className="mb-0 mt-3 text-ui text-warn" data-sign-in-rules-forbidden="" role="status">
           {RULE_NO_ACCOUNTS_DEVICE_WORDS}
         </p>
+      ) : null}
+      {read.kind === 'step-up' ? (
+        <div className="mt-3">
+          <ConfirmToSee
+            line="This machine wants your passkey before it shows its standing sign-in rules."
+            onConfirm={reload}
+          />
+        </div>
       ) : null}
       {read.kind === 'failed' ? (
         <p className="mb-0 mt-3 text-ui text-err" data-sign-in-rules-error="" role="alert">

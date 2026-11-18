@@ -10,6 +10,7 @@ export * from './brand-mark.tsx';
 export * from './cache-updating.tsx';
 export * from './chunk-error-boundary.tsx';
 export * from './command-bar.tsx';
+export * from './confirm-to-see.tsx';
 export * from './command-bar-model.ts';
 export * from './context-menu.tsx';
 export * from './fast-switch.tsx';

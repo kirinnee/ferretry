@@ -31,6 +31,7 @@
  */
 
 import { CAPABILITY_AXES, CAPABILITY_NAMES, type CapabilityName } from '@ferretry/core-gate/contract';
+import { ConfirmToSee, STEP_UP_REFUSAL_CODE } from '@ferretry/app/ui';
 import type { CapabilityAxis } from '@ferretry/kernel/contract';
 import { Check, ChevronRight, CircleAlert, MonitorSmartphone, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { localQr, PanelSlot, QrEncodeError, type QrMatrix } from '@ferretry/app';
@@ -684,6 +685,8 @@ export function AddDeviceSurface({
     readonly failure: PairingFailure;
   } | null>(null);
   const [nowMs, setNowMs] = useState(() => now());
+  /** How many times the owner pressed "Confirm it's you to see this"; the read after a press is theirs. */
+  const [reads, setReads] = useState(0);
   useEffect(() => {
     let current = true;
     setClient(null);
@@ -696,7 +699,7 @@ export function AddDeviceSurface({
     setInvite(null);
     void createClient(connection)
       .then(async next => {
-        const view = await readPairedDevices(next);
+        const view = await readPairedDevices(next, reads > 0);
         if (!current) return;
         setClient(next);
         setLoaded({ daemonId: connection.daemonId, view });
@@ -707,7 +710,7 @@ export function AddDeviceSurface({
     return () => {
       current = false;
     };
-  }, [connection, createClient]);
+  }, [connection, createClient, reads]);
 
   /**
    * The countdown's clock, running ONLY while a code is on screen.
@@ -809,6 +812,18 @@ export function AddDeviceSurface({
         onRevokeDevice={deviceId => void revokeDevice(deviceId)}
         onChangeDeviceGrants={(deviceId, patch) => void changeGrants(deviceId, patch)}
       />
+    );
+  if (loadFailure?.daemonId === connection.daemonId && loadFailure.failure.code === STEP_UP_REFUSAL_CODE)
+    return (
+      <section className="kt-panel p-panel" role="status" aria-label="Devices need your passkey">
+        <h3 className="m-0 text-row font-semibold text-fg">Devices</h3>
+        <div className="mt-2">
+          <ConfirmToSee
+            line="This machine wants your passkey before it shows which devices may reach it."
+            onConfirm={() => setReads(n => n + 1)}
+          />
+        </div>
+      </section>
     );
   if (loadFailure?.daemonId === connection.daemonId)
     return (

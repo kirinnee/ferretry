@@ -29,6 +29,7 @@ import {
   RUNS_WHAT_IT_READS_WARNING,
 } from '../../contract/routes/index.ts';
 import type { AccountsClient, PasskeyWords } from '../shell.tsx';
+import { quietInit, type ReadMode } from './step-up-refusal.ts';
 
 export type CopyClient = AccountsClient;
 
@@ -46,8 +47,8 @@ async function ask<Schema extends z.ZodType>(
 
 const RemovedSchema = z.strictObject({ removed: z.literal(true) });
 
-export async function listRules(client: CopyClient): Promise<PasteRuleList> {
-  return await ask(client, 'GET /v1/copy-rules', PasteRuleListSchema);
+export async function listRules(client: CopyClient, read: ReadMode = {}): Promise<PasteRuleList> {
+  return await ask(client, 'GET /v1/copy-rules', PasteRuleListSchema, quietInit(read));
 }
 
 /** What `GET /v1/copy-rules/settings` came to: the view, or why it could not be read. */

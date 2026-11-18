@@ -75,8 +75,8 @@ export async function revokePairingCode(
  * the entire requirement. A UI that discovers its limits by watching calls fail has nothing to say until
  * after the click.
  */
-export async function readPairedDevices(client: PairingClient): Promise<PairedDevicesView> {
-  return await client.request(PAIRED_DEVICES_PATH, PairedDevicesViewSchema);
+export async function readPairedDevices(client: PairingClient, pressed = false): Promise<PairedDevicesView> {
+  return await client.request(PAIRED_DEVICES_PATH, PairedDevicesViewSchema, pressed ? { pressed: true } : undefined);
 }
 
 /**

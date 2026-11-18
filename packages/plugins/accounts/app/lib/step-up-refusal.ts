@@ -8,8 +8,8 @@
 
 import { STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 
-/** The words on the button an ask card draws while the owner has not yet confirmed. */
-export const CONFIRM_TO_SEE_WORDS = 'Confirm it’s you to see this';
+/** The words on the button an ask card draws while the owner has not yet confirmed (the shared kit owns them). */
+export { CONFIRM_TO_SEE_WORDS } from '@ferretry/app/ui';
 
 /** Whether a read was refused only for want of the step-up (a 403 with the step-up code), not refused outright. */
 export const isStepUpRefusal = (cause: unknown): boolean =>
@@ -28,6 +28,9 @@ export interface ReadMode {
   readonly quiet?: boolean;
 }
 
-/** The call init a read mode stands for: nothing, or `quiet`. */
-export const quietInit = (read: ReadMode): { readonly quiet: true } | Record<string, never> =>
-  read.quiet === true ? { quiet: true } : {};
+/**
+ * The call init a read mode stands for: `quiet`, `quiet: false` (a read the owner pressed for, which asks for the step-up
+ * even after a cancelled prompt), or nothing.
+ */
+export const quietInit = (read: ReadMode): { readonly quiet: boolean } | Record<string, never> =>
+  read.quiet === undefined ? {} : { quiet: read.quiet };

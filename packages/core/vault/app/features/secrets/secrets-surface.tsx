@@ -8,6 +8,7 @@
  * secrets" — a person shown that over a store the browser simply could not reach will set every secret again, which is
  * the exact failure this project keeps finding.
  */
+import { ConfirmToSee, isStepUpRefusal } from '@ferretry/app/ui';
 import { useCallback, useEffect, useState } from 'react';
 import type { SecretList } from '../../../contract/index.ts';
 import type { VaultClient } from '../../shell.tsx';
@@ -23,23 +24,30 @@ export function SecretsSurface({ client }: { readonly client: VaultClient }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadFailure, setLoadFailure] = useState<string | null>(null);
+  /** The read was refused for want of the passkey step-up (a cancelled prompt): offer to ask again. */
+  const [stepUp, setStepUp] = useState(false);
+  /** How many times the owner pressed "Confirm it's you to see this"; the read after a press is theirs. */
+  const [reads, setReads] = useState(0);
 
   useEffect(() => {
     let current = true;
     setList(null);
     setError(null);
     setLoadFailure(null);
-    void listSecrets(client)
+    setStepUp(false);
+    void listSecrets(client, reads > 0)
       .then(next => {
         if (current) setList(next);
       })
       .catch(cause => {
-        if (current) setLoadFailure(message(cause));
+        if (!current) return;
+        setStepUp(isStepUpRefusal(cause));
+        setLoadFailure(message(cause));
       });
     return () => {
       current = false;
     };
-  }, [client]);
+  }, [client, reads]);
 
   /** Re-reads after a write, so what is on screen is what the daemon holds rather than a guess. */
   const write = useCallback(
@@ -58,6 +66,18 @@ export function SecretsSurface({ client }: { readonly client: VaultClient }) {
     [client],
   );
 
+  if (loadFailure !== null && stepUp)
+    return (
+      <section className="kt-panel p-panel" role="status" aria-label="Secrets need your passkey">
+        <h3 className="m-0 text-row font-semibold text-fg">Secrets</h3>
+        <div className="mt-2">
+          <ConfirmToSee
+            line="This machine wants your passkey before it shows its secret store."
+            onConfirm={() => setReads(n => n + 1)}
+          />
+        </div>
+      </section>
+    );
   if (loadFailure !== null)
     return (
       <section className="kt-panel p-panel" role="status" aria-label="Secrets unavailable">

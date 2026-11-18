@@ -56,7 +56,12 @@ export { type DaemonConnection, type DaemonId, daemonConnection } from './shell-
 
 /** The one client capability these screens use (today's `Pick<IFyApiClient, 'request'>`). */
 export interface IFyApiClient {
-  request<T>(path: string, schema: z.ZodType<T>, init?: RequestInit, timeoutMs?: number): Promise<T>;
+  request<T>(
+    path: string,
+    schema: z.ZodType<T>,
+    init?: RequestInit & { readonly pressed?: boolean },
+    timeoutMs?: number,
+  ): Promise<T>;
 }
 
 /** Today's `FyHttpError`: a daemon refusal with its status, code and whole body. */
