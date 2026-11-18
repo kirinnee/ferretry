@@ -853,7 +853,7 @@ function InboxEmpty() {
 }
 
 function InboxReading({ words = 'Reading what your ferrets asked…' }: { readonly words?: string }) {
-  return <Loading kind="page" label={words} />;
+  return <Loading kind="page" label={words} marks={{ 'data-agenda-reading': '' }} />;
 }
 
 /** Find, the machine filter or the Warden chip left nothing: say so, and offer the way back. */

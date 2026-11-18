@@ -212,7 +212,14 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
           </dl>
         </div>
       )}
-      {eligibility === undefined ? <Loading kind="bar" label="Checking whether this sign-in can have a rule…" /> : null}
+      {/* Waiting only while the read is still pending: a rejected one is in `phase` (the error shows) and lets the bar go. */}
+      {eligibility === undefined && phase.kind !== 'failed' ? (
+        <Loading
+          kind="bar"
+          label="Checking whether this sign-in can have a rule…"
+          marks={{ 'data-rule-eligibility': 'reading' }}
+        />
+      ) : null}
       {ineligible === undefined ? null : (
         <p className="m-0 text-ui text-warn" data-rule-ineligible={ineligible} role="status">
           {INELIGIBLE_WORDS[ineligible]}.

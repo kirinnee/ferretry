@@ -485,7 +485,14 @@ function QueuePage({
       } catch {
         // An unreachable machine shows only what this device still holds for it.
       }
-      if (!live || mine !== generation.current) return;
+      if (!live) return;
+      // A newer poll is in the air. Once something is on screen its answer is the one to apply; but while NOTHING has
+      // been answered yet this answer is applied, so a first load slower than the poll still settles (never a bar and
+      // a blank queue until reads happen to finish in order).
+      if (mine !== generation.current && held.current !== undefined) {
+        setLoading(false);
+        return;
+      }
       // What is held is read NOW, after the answer: an older page the person loaded while this poll was in the air is
       // in it, and the window answered is applied over it rather than over what was held when the poll began.
       const next = page === undefined ? held.current : refreshQueueHistory(held.current, page);

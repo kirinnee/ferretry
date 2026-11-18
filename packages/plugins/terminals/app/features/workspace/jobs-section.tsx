@@ -102,7 +102,10 @@ function JobLog({
         </p>
       )}
       {text === null ? (
-        <Loading kind="bar" label="Loading…" />
+        // Waiting only while no read has answered at all: a refusal ends the wait (the line above says why) and lets the bar go.
+        problem === null ? (
+          <Loading kind="bar" label="Loading…" />
+        ) : null
       ) : (
         <pre className="fy-proc-job-log__text">{text === '' ? '(no output yet)' : text}</pre>
       )}

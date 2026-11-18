@@ -276,7 +276,14 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
     };
   }, [connection, createClient]);
 
-  if (loaded.kind === 'loading') return <Loading kind="page" label="Reading this machine’s security settings…" />;
+  if (loaded.kind === 'loading')
+    return (
+      <Loading
+        kind="page"
+        label="Reading this machine’s security settings…"
+        marks={{ 'data-security-settings-state': 'loading' }}
+      />
+    );
   if (loaded.kind !== 'ready')
     return (
       <section

@@ -97,7 +97,13 @@ export function SignInRuleSheetHost(props: SignInRuleSheetHostProps): ReactNode 
   const replaces = props.replaces ?? eligibility?.rule;
   const pending = !named && eligibility?.rule !== undefined;
   if (pending && existing === undefined)
-    return <Loading kind="bar" label="Reading the standing rule this sign-in already has…" />;
+    return (
+      <Loading
+        kind="bar"
+        label="Reading the standing rule this sign-in already has…"
+        marks={{ 'data-rule-replaces-reading': '' }}
+      />
+    );
   if (pending && existing === 'unreadable')
     return (
       <div className="flex min-w-0 flex-col gap-2">
@@ -173,7 +179,8 @@ export function SignInRulePanel({ rules, signIn, account }: SignInRulePanelProps
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | undefined>(undefined);
 
-  if (read.kind === 'loading') return <Loading kind="page" label="Reading the standing rules…" />;
+  if (read.kind === 'loading')
+    return <Loading kind="page" label="Reading the standing rules…" marks={{ 'data-rule-panel': 'loading' }} />;
   if (read.kind === 'forbidden')
     return (
       <p className="m-0 text-ui text-warn" data-rule-panel="forbidden" role="status">

@@ -297,6 +297,38 @@ describe('QueuePanel', () => {
     }
   });
 
+  test('a first load slower than the poll still settles on the answer that lands, and lets the bar go', async () => {
+    const message = { ...queued('q0', 'words of q0'), enqueuedAt: at(0) };
+    const resolvers: Array<(value: unknown) => void> = [];
+    const answers: Answers = {
+      '/v1/ferrets/s1/queue': new Promise(resolve => resolvers.push(resolve)),
+    };
+    const beats: Array<() => void> = [];
+    const realSetInterval = globalThis.setInterval;
+    globalThis.setInterval = ((callback: () => void) => {
+      beats.push(callback);
+      return 0;
+    }) as unknown as typeof setInterval;
+    try {
+      open(daemon(answers));
+      await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 20)));
+      expect(page()).toContain('data-loading');
+
+      // Act — the poll starts again before the first read answered; then the FIRST read answers (the newer one is still out).
+      answers['/v1/ferrets/s1/queue'] = new Promise(resolve => resolvers.push(resolve));
+      await runAsync(async () => beats.at(-1)?.());
+      await runAsync(async () => resolvers[0]?.({ messages: [message], nextCursor: null }));
+      await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 20)));
+
+      // Assert — the answer is shown and no first-load bar is held, though a newer read is still in the air.
+      expect(resolvers).toHaveLength(2);
+      expect(rowIds()).toEqual(['q0']);
+      expect(page()).not.toContain('"data-loading":"background"');
+    } finally {
+      globalThis.setInterval = realSetInterval;
+    }
+  });
+
   test('keeps Show older messages when the newest window holds only cancelled messages', async () => {
     const second = (n: number) => new Date(Date.UTC(2026, 9, 30, 10, 5, n)).toISOString();
     const cancelled = Array.from({ length: 100 }, (_, n) => ({

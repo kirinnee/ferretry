@@ -89,10 +89,12 @@ export interface LoadingProps {
    * a page) that must not jump tall while it waits. A page-sized wait leaves this off.
    */
   readonly compact?: boolean;
+  /** `data-*` attributes a test or another feature reads off the loader (the marker the inline line used to carry). */
+  readonly marks?: Readonly<Record<`data-${string}`, string>>;
 }
 
-export function Loading({ kind, label, className, compact = false }: LoadingProps) {
-  if (kind === 'bar') return <BackgroundLoading label={label} />;
+export function Loading({ kind, label, className, compact = false, marks }: LoadingProps) {
+  if (kind === 'bar') return <BackgroundLoading label={label} marks={marks} />;
   const extra = (compact ? ' fy-loading--compact' : '') + (className === undefined ? '' : ` ${className}`);
   return (
     <div
@@ -101,6 +103,7 @@ export function Loading({ kind, label, className, compact = false }: LoadingProp
       data-loading="page"
       role="status"
       style={delayStyle}
+      {...marks}
     >
       <span aria-hidden="true" className="fy-loading__orb">
         <span className="fy-loading__ring" />
@@ -113,10 +116,16 @@ export function Loading({ kind, label, className, compact = false }: LoadingProp
 }
 
 /** The non-intrusive kind: the words only for a screen reader, and the shell's one bar for everyone else. */
-function BackgroundLoading({ label }: { readonly label: string | undefined }) {
+function BackgroundLoading({
+  label,
+  marks,
+}: {
+  readonly label: string | undefined;
+  readonly marks: LoadingProps['marks'];
+}) {
   useBackgroundLoad(true);
   return (
-    <span className="sr-only" data-loading="background" role="status">
+    <span className="sr-only" data-loading="background" role="status" {...marks}>
       {label ?? 'Loading…'}
     </span>
   );

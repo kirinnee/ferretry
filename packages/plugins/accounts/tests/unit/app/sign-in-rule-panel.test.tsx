@@ -206,6 +206,8 @@ describe('making a rule', () => {
       await click(q(mounted.container, '[data-rule-start]'));
       await settle();
       expect(q(mounted.container, '[data-rule-failure]').textContent).toBe('eligibility is down');
+      // The rejected read ends the wait: no eligibility bar is held while the error shows.
+      expect(mounted.container.querySelector('[data-rule-sheet] [data-loading="background"]')).toBeNull();
       await click(q(mounted.container, '[data-rule-cancel]'));
       expect(mounted.container.querySelector('[data-rule-sheet]')).toBeNull();
       expect(q(mounted.container, '[data-rule-start]')).toBeTruthy();
