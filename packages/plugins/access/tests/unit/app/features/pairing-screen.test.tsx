@@ -11,6 +11,7 @@ const alpha = daemonConnection({
   daemonId: 'alpha',
   baseUrl: 'https://alpha.example.test',
   deviceId: 'alpha-secret',
+  daemonName: 'Studio daemon',
 });
 const beta = daemonConnection({
   daemonId: 'beta',
@@ -21,7 +22,7 @@ const beta = daemonConnection({
 /** Paired before the daemon's own name was kept: its address is all this browser has. */
 const gamma = daemonConnection({ daemonId: 'gamma', baseUrl: 'https://gamma.example.test', deviceId: 'gamma-secret' });
 const records = [
-  { ...alpha, label: 'Studio daemon', pairedAt: 1, lastSelectedAt: 2 },
+  { ...alpha, pairedAt: 1, lastSelectedAt: 2 },
   { ...beta, pairedAt: 1, lastSelectedAt: 1 },
   { ...gamma, pairedAt: 1, lastSelectedAt: 0 },
 ] as const;
