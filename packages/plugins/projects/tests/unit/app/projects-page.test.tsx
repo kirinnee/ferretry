@@ -63,7 +63,7 @@ describe('ProjectsPage', () => {
     const mounted = await mount(page(scripted({ [LIST]: () => pending, [FERRETS]: [] })));
 
     expect(mounted.container.textContent).toContain('Loading registered projects…');
-    expect(mounted.container.querySelector('[aria-busy="true"]')).not.toBeNull();
+    expect(mounted.container.querySelector('[data-loading="page"]')).not.toBeNull();
 
     release([]);
     await settle();
