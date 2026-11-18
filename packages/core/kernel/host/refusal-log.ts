@@ -25,6 +25,18 @@ export interface RefusalNote {
 /** The longest sentence kept: a reason to read, not a body. */
 const REASON_MAX = 240;
 
+/**
+ * The sentence with the caller's own path swapped for the route's declared template. An admission sentence may embed
+ * `METHOD /the/raw/path` (the caller already has it), but the LOG names the route, never the path: the same pattern
+ * must give the same line (so the dedupe holds) and no path a caller made up may reach the file. Total.
+ */
+function withoutCallerPath(reason: string, request: ApiRequest, route: string | undefined): string {
+  const path = request.path;
+  if (path.length <= 1) return reason;
+  const template = route ?? '(no route)';
+  return reason.split(`${request.method} ${path}`).join(`${request.method} ${template}`).split(path).join(template);
+}
+
 /** `{ error, code }` out of a refusal's JSON body, when it has that shape; anything else is no reason. Total. */
 function readReason(response: ApiResponse): { readonly reason?: string; readonly code?: string } {
   const type = response.headers.get('content-type') ?? '';
@@ -55,7 +67,9 @@ function arrivalOf(request: ApiRequest): string {
 
 /** The `warn` line and fields for one refusal. Pure and total. */
 export function describeRefusal(note: RefusalNote): { readonly message: string; readonly fields: LogFields } {
-  const { reason, code } = readReason(note.response);
+  const read = readReason(note.response);
+  const code = read.code;
+  const reason = read.reason === undefined ? undefined : withoutCallerPath(read.reason, note.request, note.route);
   const where = `${note.method} ${note.route ?? '(no route)'}`;
   const status = `${note.response.status}${code === undefined ? '' : ` ${code}`}`;
   return {
@@ -90,7 +104,13 @@ export function dedupedWarnings(log: Log, nowMs: () => number, windowMs: number 
       prior.held += 1;
       return;
     }
-    if (prior === undefined && seen.size >= REFUSAL_KEYS_MAX) seen.clear();
+    if (prior === undefined && seen.size >= REFUSAL_KEYS_MAX) {
+      // The memory starts over, but the repeats it held are still counted: said once, so none goes uncounted.
+      let lost = 0;
+      for (const entry of seen.values()) lost += entry.held;
+      seen.clear();
+      if (lost > 0) log.warn('refusal memory was reset', { suppressed: lost });
+    }
     const held = prior?.held ?? 0;
     seen.set(key, { at: now, held: 0 });
     log.warn(message, held === 0 ? fields : { ...fields, suppressed: held });

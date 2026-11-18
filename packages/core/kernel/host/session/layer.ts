@@ -741,7 +741,9 @@ class SealedSession implements CarrierLink {
           ? `the ${modeKey} mode is off or answers for no holder`
           : holder === undefined
             ? `no ${modeKey} holder answers for this credential (unknown, revoked, or idle too long)`
-            : `the ${modeKey} signature did not verify against the holder's key`,
+            : transcript === undefined
+              ? `the ${modeKey} session had no handshake transcript to sign`
+              : `the ${modeKey} signature did not verify against the holder's key`,
         typeof claimed === 'string' ? claimed : undefined,
       );
       return false;

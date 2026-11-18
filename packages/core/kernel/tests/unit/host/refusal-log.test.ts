@@ -7,6 +7,8 @@ import type { Log, LogFields } from '../../../contract/ports.ts';
 import type { RouteDescriptor } from '../../../contract/route.ts';
 import { Dispatcher, type MountedRoute, type Owner } from '../../../host/dispatch.ts';
 import { dedupedWarnings, describeRefusal, REFUSAL_WINDOW_MS, type RefusalNote } from '../../../host/refusal-log.ts';
+import { fileLogSink } from '../../../host/wiring.ts';
+import { scopedLog } from '../../../host/log.ts';
 import { request } from './fixtures.ts';
 
 /** A log that keeps what was said at each level. */
@@ -214,5 +216,86 @@ describe('the same refusal is said once a minute', () => {
     warnings.info('hello');
     warnings.info('hello');
     expect(said.map(entry => entry.level)).toEqual(['warn', 'warn', 'warn', 'info', 'info']);
+  });
+});
+
+describe('the log names the route, never the caller path', () => {
+  test('an admission sentence that embeds METHOD /raw/path is said with the route template, so the dedupe key is stable', () => {
+    const note = (path: string): RefusalNote => ({
+      table: 'route',
+      method: 'GET',
+      route: '/v1/pair/devices/:deviceId',
+      request: { ...request('GET', path), principal: device().principal as never },
+      response: errorResponse(403, `the request may not use GET ${path}`, 'forbidden'),
+    });
+    const first = describeRefusal(note('/v1/pair/devices/abc-123'));
+    const second = describeRefusal(note('/v1/pair/devices/zzz-999'));
+    expect(first.message).toBe(
+      'refused GET /v1/pair/devices/:deviceId (403 forbidden): the request may not use GET /v1/pair/devices/:deviceId',
+    );
+    expect(first.message).not.toContain('abc-123');
+    expect(second.message).toBe(first.message);
+  });
+
+  test('a path no route claims is said as (no route), not as what the caller typed', () => {
+    const line = describeRefusal({
+      table: 'route',
+      method: 'GET',
+      route: undefined,
+      request: request('GET', '/v1/secret-looking/path'),
+      response: errorResponse(403, 'the request may not use GET /v1/secret-looking/path', 'forbidden'),
+    });
+    expect(line.message).not.toContain('secret-looking');
+    expect(line.message).toContain('GET (no route)');
+  });
+});
+
+describe('no refusal goes uncounted', () => {
+  test('every held repeat is counted on the next line, across several windows', () => {
+    const { log, said } = recording();
+    let now = 0;
+    const warnings = dedupedWarnings(log, () => now);
+    const line = (): void => warnings.warn('refused GET /v1/plugins (403)', { who: 'device a' });
+    line();
+    line();
+    now += REFUSAL_WINDOW_MS;
+    line();
+    line();
+    line();
+    line();
+    now += REFUSAL_WINDOW_MS;
+    line();
+    const counted = said.map(entry => (entry.fields?.['suppressed'] as number | undefined) ?? 0);
+    expect(counted).toEqual([0, 1, 3]);
+    expect(counted.reduce((a, b) => a + b, 0) + said.length).toBe(7);
+  });
+
+  test('a flood of distinct strangers that resets the memory still says how many repeats it held', () => {
+    const { log, said } = recording();
+    const warnings = dedupedWarnings(log, () => 0);
+    warnings.warn('refused', { who: 'device a' });
+    warnings.warn('refused', { who: 'device a' });
+    warnings.warn('refused', { who: 'device a' });
+    for (let index = 0; index < 600; index += 1) warnings.warn('refused', { who: `stranger ${index}` });
+    const reset = said.find(entry => entry.message === 'refusal memory was reset');
+    expect(reset?.fields).toMatchObject({ suppressed: 2 });
+  });
+});
+
+describe('every line in fyd.log carries its time', () => {
+  test('a warn line, deduped or not, is written with an ISO `at` so a refusal can be matched to a reload', () => {
+    const lines: string[] = [];
+    const warnings = dedupedWarnings(
+      scopedLog(
+        fileLogSink(line => void lines.push(line)),
+        'refusals',
+      ),
+      () => 0,
+    );
+    warnings.warn('refused GET /v1/plugins (403)', { who: 'device a' });
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0] ?? '{}') as { at?: string; level?: string };
+    expect(parsed.level).toBe('warn');
+    expect(Number.isNaN(Date.parse(parsed.at ?? ''))).toBe(false);
   });
 });

@@ -233,6 +233,7 @@ mode that is off) are each one `warn` line, so "the app says it could not read t
 only evidence. The line carries the route's **declared template** (`GET /v1/plugins`, never the caller's own
 path), the status, the machine code and the sentence the caller was given, and **who**: a proved device's id (an
 id, not a name) or only the KIND of credential presented. It never carries a token, a digest, a key, a body, a
-query or a session id. The same line for the same caller is said once a minute (`suppressed: N` says how many
+query or a session id, and when the sentence the caller was given embeds its own path the log says the template
+instead. Every line carries its time (`at`). The same line for the same caller is said once a minute (`suppressed: N` says how many
 were held back), so a page that retries cannot fill the log. This is the log, not the audit record: it is
 bounded by the log's own rotation and is not the place to count activity.
