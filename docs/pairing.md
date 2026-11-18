@@ -626,6 +626,14 @@ is replaced by the device's id. The screen only READS `GET /v1/passkeys` (which 
 `deviceName` and `clientName`, the client program this machine runs: `fy5` on a preview, so the printed line reaches THIS daemon and
 not whichever one a bare `fy` points at); it opens nothing. Pressing **Add a passkey** afterwards works only once the owner has run the command.
 
+**The step-up prompt ("Confirm it's you") says the same, in the same order.** A device with no passkey is never left at a dead end
+when it opens a terminal or changes a setting: (a) with a passkey window open it offers **Add a passkey** in place and confirms with the new
+passkey in the same press, (b) with no window it says "This device has no passkey yet" and prints the owner's command, and (c) with a passkey
+held it confirms as before. Only the daemon decides: a registration outside an open window is refused exactly as in Settings, and the screen
+never offers a way around the step-up. The program in the command is the `clientName` the daemon reports, which the daemon reads from the
+`FY_BINARY_NAME` of its own environment (a launcher that runs a renamed client, such as a `fy5` preview, sets it); a daemon that reports none
+is printed as `fy`.
+
 **The first window is offered at pairing.** Where the success screen has a way to reach the machine it just paired with, it offers
 **Add a passkey now** while that first window is open (with the minutes left) and runs the same ceremony; once the window has
 closed, or the device holds a passkey, nothing is offered. The post-pairing reminder line also says how many minutes the window has left.
