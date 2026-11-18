@@ -127,7 +127,7 @@ export function FirstPasskeyOffer({
       data-first-passkey-offer=""
       className="flex w-full min-w-0 flex-col items-center gap-2 rounded-control border border-border-strong bg-surface-2 px-3 py-2"
     >
-      <p className="m-0 text-cell leading-base text-fg">
+      <p className="m-0 text-balance text-cell leading-base text-fg">
         You can add a passkey for this device now{left === null ? '' : ` — ${left}`}.
       </p>
       <button
@@ -135,6 +135,7 @@ export function FirstPasskeyOffer({
         disabled={busy}
         data-first-passkey-add=""
         onClick={() => void add()}
+        data-variant="primary"
         className="kt-btn disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Fingerprint size={15} aria-hidden="true" />

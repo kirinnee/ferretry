@@ -39,14 +39,15 @@
 /* READABLE OVER THE SKY. A star or a shooting star is a pale or dark speck on the page's own background, so a glyph that
    happens to sit on one could lose contrast. Text on the sky therefore carries a halo in the page background colour:
    whatever is behind a letter within a few pixels is erased, so a letter always reads as text on `--bg`. Panels and
-   controls draw their own surface, so they take no halo (it would glow around a button label). */
+   controls draw their own surface, so they take no halo (it would glow around a button label); the first-passkey offer is
+   one such surface (`bg-surface-2`), not a `.kt-panel`. */
 .fy-pair-scene main {
   text-shadow:
     0 0 5px var(--bg),
     0 0 10px var(--bg),
     0 0 16px var(--bg);
 }
-.fy-pair-scene main :is(.kt-btn, .kt-panel, .kt-input, input, select, textarea) {
+.fy-pair-scene main :is(.kt-btn, .kt-panel, .kt-input, input, select, textarea, [data-first-passkey-offer]) {
   text-shadow: none;
 }
 

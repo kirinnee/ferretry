@@ -10,7 +10,9 @@ import {
 } from '@ferretry/app';
 import { deviceViewHarness } from '@ferretry/app/testing';
 import half from '../../../app/index.ts';
-import { OPENING_LINK, pairPage, returnPathOf } from '../../../app/pair-page.tsx';
+import { OPENING_LINK, type PairPageEnvironment, pairPage, returnPathOf } from '../../../app/pair-page.tsx';
+import type { StepUpClient } from '../../../app/lib/step-up-client.ts';
+import { toBase64Url } from '../../../app/shell-grants.ts';
 import { MemoryDeviceKeyStore, testDeviceKeyCrypto } from '../../support/app/device-keys.ts';
 import { interact, type Mounted, mount, must } from '../../support/app/dom.ts';
 
@@ -71,7 +73,11 @@ function fakeDaemons(initial: readonly PairedDaemon[] = []) {
   };
 }
 
-function setup(carrier: (input: PairDirectInput) => Promise<PairedOver>, initial: readonly PairedDaemon[] = []) {
+function setup(
+  carrier: (input: PairDirectInput) => Promise<PairedOver>,
+  initial: readonly PairedDaemon[] = [],
+  environment: Partial<PairPageEnvironment> = {},
+) {
   const store = new MemoryDeviceKeyStore();
   const daemons = fakeDaemons(initial);
   const ports = {
@@ -83,7 +89,7 @@ function setup(carrier: (input: PairDirectInput) => Promise<PairedOver>, initial
     },
     pair: carrier,
   } as unknown as DaemonlessPorts;
-  const Page = pairPage(ports, { store, scanHost: () => null, defaultName: () => 'My phone' });
+  const Page = pairPage(ports, { store, scanHost: () => null, defaultName: () => 'My phone', ...environment });
   return { Page, store, daemons };
 }
 
@@ -433,5 +439,127 @@ describe('the /pair page', () => {
       must(view?.container.querySelector<HTMLElement>('[data-device-refused-pair]') ?? null, 'pair again').click(),
     );
     expect(view.container.querySelector('[data-device-refused]')).toBeNull();
+  });
+});
+
+/** The hosted page's first-passkey offer (P-H*): the success screen stays while the offer shows, and moves on as before when it does not. */
+describe('the /pair page offers the first passkey on its success screen', () => {
+  const NOW = Date.parse('2026-11-17T10:00:00.000Z');
+  const CLOSES = '2026-11-17T10:07:00.000Z';
+  const paired = async (input: PairDirectInput): Promise<PairedOver> => {
+    await input.key.save(answer as never);
+    return {
+      kind: 'paired',
+      response: answer,
+      via: { kind: 'direct', address: 'https://daemon.example.test' },
+    } as PairedOver;
+  };
+  const machine = (view: unknown, paths: string[] = []) => {
+    const client: StepUpClient = {
+      request: async <T,>(path: string, schema: { parse: (value: unknown) => T }): Promise<T> => {
+        paths.push(path);
+        const answers: Record<string, unknown> = {
+          '/v1/passkeys':
+            paths.filter(p => p === '/v1/passkeys').length > 1
+              ? {
+                  id: toBase64Url(Uint8Array.of(0xaa, 0xbb)),
+                  createdAt: '2026-11-17T10:03:00.000Z',
+                  origin: 'https://pwa.example.test',
+                }
+              : view,
+          '/v1/passkeys/options': {
+            challenge: toBase64Url(Uint8Array.of(9)),
+            rp: { id: 'pwa.example.test', name: 'Ferretry' },
+            user: { id: toBase64Url(Uint8Array.of(1)), name: 'd', displayName: 'd' },
+            pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+            timeout: 60_000,
+            excludeCredentials: [],
+          },
+        };
+        return schema.parse(answers[path]);
+      },
+    };
+    return { client, paths };
+  };
+  const environmentFor = (client: StepUpClient): Partial<PairPageEnvironment> => ({
+    passkeyClient: async () => client,
+    passkeyOffer: { origin: () => 'https://pwa.example.test', supported: () => true, now: () => NOW },
+  });
+  const pairNow = async (Page: ReturnType<typeof setup>['Page'], moves: Navigation[]) => {
+    const shell = shellAt(`/pair${FRAGMENT}`);
+    view = await mount(
+      <shell.Harness place="daemonless" screen="pair">
+        <Page {...props(PAGE, moves)} />
+      </shell.Harness>,
+    );
+    await interact(() => button('Pair this device').click());
+    await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
+  };
+
+  it('P-H1 should stay on "Connected" with the button and the minutes left while the first window is open, and not navigate', async () => {
+    const { client } = machine({ passkeys: [], registration: 'first-window', registrationClosesAt: CLOSES });
+    const { Page } = setup(paired, [], environmentFor(client));
+    const moves: Navigation[] = [];
+    await pairNow(Page, moves);
+    const page = must(view, 'the page').container;
+    expect(page.textContent).toContain('Connected');
+    expect(must(page.querySelector('[data-first-passkey-offer]'), 'the offer').textContent).toContain('7 minutes left');
+    expect(page.textContent).toContain('Add a passkey now');
+    expect(moves).toEqual([]);
+    // One clear way on, and it moves on.
+    await interact(() => button('Not now').click());
+    expect(moves).toEqual([{ to: `/d/${DAEMON}`, replace: undefined }]);
+  });
+
+  it('P-H2 should start the existing ceremony when pressed, then offer "Continue" instead of navigating by itself', async () => {
+    const { client, paths } = machine({ passkeys: [], registration: 'first-window', registrationClosesAt: CLOSES });
+    const { Page } = setup(paired, [], {
+      ...environmentFor(client),
+      passkeyOffer: {
+        origin: () => 'https://pwa.example.test',
+        supported: () => true,
+        now: () => NOW,
+        credentials: () => ({
+          create: async () =>
+            ({
+              type: 'public-key',
+              rawId: Uint8Array.from([0xaa, 0xbb]).buffer,
+              response: {
+                clientDataJSON: Uint8Array.from([0x7b, 0x7d]).buffer,
+                attestationObject: Uint8Array.of(1).buffer,
+                getTransports: () => [],
+              },
+            }) as unknown as Credential,
+          get: async () => null,
+        }),
+      },
+    });
+    const moves: Navigation[] = [];
+    await pairNow(Page, moves);
+    await interact(() => button('Add a passkey now').click());
+    await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
+    expect(paths.slice(0, 2)).toEqual(['/v1/passkeys', '/v1/passkeys/options']);
+    expect(moves).toEqual([]);
+    await interact(() => button('Continue').click());
+    expect(moves).toEqual([{ to: `/d/${DAEMON}`, replace: undefined }]);
+  });
+
+  it('P-H3 should show no button and navigate as before when the window is closed, a passkey is held or the machine cannot be reached', async () => {
+    for (const environment of [
+      environmentFor(machine({ passkeys: [], registration: 'closed' }).client),
+      {
+        passkeyClient: async () => {
+          throw new Error('no client yet');
+        },
+      } satisfies Partial<PairPageEnvironment>,
+    ]) {
+      const { Page } = setup(paired, [], environment);
+      const moves: Navigation[] = [];
+      await pairNow(Page, moves);
+      expect(must(view, 'the page').container.querySelector('[data-first-passkey-offer]')).toBeNull();
+      expect(moves).toEqual([{ to: `/d/${DAEMON}`, replace: undefined }]);
+      await view?.unmount();
+      view = null;
+    }
   });
 });

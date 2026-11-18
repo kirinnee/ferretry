@@ -629,6 +629,10 @@ not whichever one a bare `fy` points at); it opens nothing. Pressing **Add a pas
 **The first window is offered at pairing.** Where the success screen has a way to reach the machine it just paired with, it offers
 **Add a passkey now** while that first window is open (with the minutes left) and runs the same ceremony; once the window has
 closed, or the device holds a passkey, nothing is offered. The post-pairing reminder line also says how many minutes the window has left.
+The hosted `/pair` page, which has no daemon client of its own, reaches the machine it just paired with through Access's passkey
+provision (the same guarded client the unlock prompt uses), so the owner who pairs there meets the button too. While the offer
+shows, that page stays on "Connected" and moves on only when the person presses **Not now** (or **Continue** once the passkey
+is added); with nothing to offer (window closed, a passkey held, no browser support, or no way to reach the machine) it moves on at once, as before.
 
 - **The browser cannot scan on WebKit.** `BarcodeDetector` is Chromium-only, so the in-app scanner is
   absent there. This is not the blocked path it looks like — the intended carrier is the phone's own

@@ -10,7 +10,8 @@
  *  - text on the sky keeps >= 4.5:1: muted text on the page background, and the halo that erases a star behind a glyph.
  *
  * Set `FY_PAIRING_SCENE_SHOTS_DIR` to keep `<viewport>-<scheme>-<case>.png` (phone 390 and desktop 1280, light and dark):
- * `pair`, `details`, `success-f1..f3` (the success motion at 0.25 s, 0.7 s and 1.5 s), `success` (settled), `success-reduced`.
+ * `pair`, `details`, `success-f1..f3` (the success motion at 0.25 s, 0.7 s and 1.5 s), `success` (settled), `success-reduced`,
+ * and `offer` / `offer-reduced`: the success screen WITH "Add a passkey now" (first window open, 7 minutes left).
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -225,6 +226,38 @@ describe('The pair page: mascot and night sky', () => {
           );
           expect(arm, `${how}: the waving arm is out in the still picture`).toBe('1');
           if (how === 'os') await shot(tab, variant, 'success-reduced');
+        } finally {
+          await close();
+        }
+      }
+    });
+  }
+
+  for (const variant of VARIANTS) {
+    it(`${variant.name}: the success screen offers "Add a passkey now" with the minutes left, one clear way on, readable on the sky`, async () => {
+      for (const how of ['normal', 'reduced'] as const) {
+        const { tab, problems, close } = await open(
+          variant,
+          '&offer=open',
+          how === 'reduced' ? 'reduce' : 'no-preference',
+        );
+        try {
+          await pair(tab);
+          await tab.waitForSelector('[data-first-passkey-offer]');
+          const offer = tab.locator('[data-first-passkey-offer]');
+          expect(await offer.innerText()).toContain('7 minutes left');
+          expect(await tab.getByRole('button', { name: 'Add a passkey now' }).isVisible()).toBe(true);
+          // ONE primary action: the passkey. "Not now" is the quiet way on; nothing else asks for a press.
+          expect(await tab.locator('main button:visible').allInnerTexts()).toEqual(['Add a passkey now', 'Not now']);
+          expect(await tab.locator('[data-variant="primary"]').allInnerTexts()).toEqual(['Add a passkey now']);
+          expect(await tab.locator('#pairing-title').innerText()).toBe('Connected');
+          // The offer draws its own surface, so it carries no sky halo around its words.
+          expect(await offer.evaluate(node => getComputedStyle(node).textShadow)).toBe('none');
+          // It sits inside the viewport on a phone: no horizontal scroll.
+          expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+          if (how === 'normal') await seek(tab, 4_000);
+          await shot(tab, variant, how === 'reduced' ? 'offer-reduced' : 'offer');
+          expect(problems).toEqual([]);
         } finally {
           await close();
         }
