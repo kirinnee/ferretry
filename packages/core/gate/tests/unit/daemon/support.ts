@@ -199,7 +199,7 @@ export const later = (instant: Instant, ms: number): Instant => instantFromEpoch
 // ─── the routes the shipped manifests declare ─────────────────────────────────────────────────────────────────────
 
 /** Every route, socket and member route a shipped manifest declares, by `METHOD path`, as admission is asked it. */
-async function declaredRoutes(): Promise<ReadonlyMap<string, ScopedRoute>> {
+export async function declaredRoutes(): Promise<ReadonlyMap<string, ScopedRoute>> {
   const { loaded, failures } = await loadManifests(loadWorkspace(REPO_ROOT));
   if (failures.length > 0) throw new Error(`a manifest failed to load: ${failures.join('; ')}`);
   const routes = new Map<string, ScopedRoute>();

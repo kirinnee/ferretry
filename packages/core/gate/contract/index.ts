@@ -13,6 +13,7 @@ export {
   type SessionPrincipal,
 } from '@ferretry/kernel/contract';
 export * from './audit.ts';
+export * from './capability-rule.ts';
 export * from './credentials.ts';
 export * from './gate-config.ts';
 export * from './grants.ts';

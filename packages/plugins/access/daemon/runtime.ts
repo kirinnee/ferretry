@@ -635,6 +635,7 @@ function gateGuard(gate: GateApi, clientName: string): CapabilityGuard {
     governed: isGovernedCaller({ loopback: presentation.local }),
     hostLocal: presentation.local,
     stepUp: presentation.stepUp,
+    ...(presentation.useAsksStepUp === undefined ? {} : { useAsksStepUp: presentation.useAsksStepUp }),
     ...(isGovernedCaller({ loopback: presentation.local }) && presentation.deviceGrants !== undefined
       ? { device: presentation.deviceGrants }
       : {}),

@@ -125,3 +125,26 @@ describe('the --open redirect page', () => {
     expect(admit(w, redirect, { bearer: ADMIN, arrival: local(), method: 'POST' }).outcome).toBe('admitted');
   });
 });
+
+describe('the start doors', () => {
+  test('promptsAsUse sits on exactly the doors that start a ferret, always on the fleet.configure grant', async () => {
+    const { declaredRoutes } = await import('../support.ts');
+    const marked = [...(await declaredRoutes())]
+      .filter(([, route]) => (route.capability as { promptsAsUse?: true } | undefined)?.promptsAsUse === true)
+      .map(([key, route]) => ({ key, capability: route.capability?.capability, axis: route.capability?.axis }));
+    // The board task Start is also served under its former path: one door, one descriptor.
+    expect(marked.map(row => row.key).sort()).toEqual([
+      'POST /v1/board/cards/:cardId/start',
+      'POST /v1/board/tasks/:taskId/start',
+      'POST /v1/ferrets',
+      'POST /v1/lessons/run',
+      'POST /v1/lessons/scan',
+      'POST /v1/pack/routing/clean-up',
+    ]);
+    for (const row of marked)
+      expect({ capability: String(row.capability), axis: row.axis }).toEqual({
+        capability: 'fleet',
+        axis: 'configure',
+      });
+  });
+});
