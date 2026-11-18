@@ -119,8 +119,8 @@ done
 if [[ -f ${preview} ]]; then
   triggers "${preview}" | jq -e '.push.branches == ["rebuild/preview"] and ((.push | has("tags")) | not) and ((.push | has("paths")) | not)' >/dev/null ||
     fail "${preview} must be triggered by pushes to rebuild/preview alone"
-  triggers "${preview}" | jq -e '(keys | sort) == ["push", "workflow_dispatch"]' >/dev/null ||
-    fail "${preview} may be triggered only by a push and a dispatch"
+  triggers "${preview}" | jq -e 'keys == ["push"]' >/dev/null ||
+    fail "${preview} may be triggered only by a push (no workflow_dispatch: a dispatch would skip the never-backwards comparison)"
   # The guard must OPEN the `if`, and only `&&` may follow it: a correctly parenthesised guard followed by a top-level
   # `|| <anything>` would let another condition (another ref, an event) ride along outside it. `||` inside parentheses
   # or a quoted string is fine; one at parenthesis depth 0 after the guard is refused.

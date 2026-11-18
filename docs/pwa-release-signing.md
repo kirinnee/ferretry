@@ -342,11 +342,17 @@ touching none of it:
   project setting and not a git ref this workflow reads); the signed list names the real built commit and this run's
   number.
 - **Never backwards, in two layers.** An installed copy refuses a release whose sequence is lower than the one it holds,
-  so an older commit behind a newer run number would strand the preview. (1) The `gate` job refuses a push that is not a
-  fast-forward: the compare API must say the pushed commit is `ahead` of (or `identical` to) the commit the ref held
-  before the push, otherwise the run builds, signs and deploys nothing (a force-push to an older or diverged commit; the
-  kit also refuses to make such a push). A skipped run is green with no deploy: read the `deploy` job's own conclusion,
-  not the run's. A failed compare read fails the job: never a guess. (2) A stale commit never deploys last, below.
+  so an older commit behind a newer run number would strand the preview. (1) The `gate` job compares the pushed commit
+  with the **last deployed commit**, never with `event.before`: a refused force-rewind still moves the ref, so a later
+  forward push from that lower ref would look like a fast-forward of `before` while being older than the live app. The
+  last deployed commit is the head commit of the newest earlier run of this workflow, on `rebuild/preview`, whose
+  `Deploy PWA` job concluded `success` (a green run whose deploy was skipped does not count). The compare API must say
+  the pushed commit is `ahead` of it; `identical` is a no-op; `behind` or `diverged` builds, signs and deploys nothing.
+  With no earlier successful deploy (the first ever) the push is followed, and a deleted ref deploys nothing. There is
+  **no manual trigger** (`workflow_dispatch` is gone, and `release-guards.sh` refuses it): the kit's push is the only
+  way in, so no entry path skips the comparison. A skipped run is green with no deploy: read the `deploy` job's own
+  conclusion, not the run's. A failed read (runs, jobs or compare) fails the job: never a guess. (2) A stale commit never
+  deploys last, below.
 - **A stale commit never deploys last.** The shared, non-cancelling concurrency group serialises the runs but does not
   order them: pushes A then B can run B first, and re-running an older green run does the same, so A would overwrite the
   production alias with older app code. So the `deploy` job's `Refuse a stale commit` step, the one right before
