@@ -623,7 +623,12 @@ its unlock prompt (and Settings → Security) says so in plain words and prints 
 this device's own name in it and a copy button: `fy passkey window 'Name'`. The name is text the device chose, so it
 is always printed as ONE single-quoted word, and a name that is empty, starts with `-` or holds a control character
 is replaced by the device's id. The screen only READS `GET /v1/passkeys` (which now also answers the caller's own
-`deviceName`); it opens nothing. Pressing **Add a passkey** afterwards works only once the owner has run the command.
+`deviceName` and `clientName`, the client program this machine runs: `fy5` on a preview, so the printed line reaches THIS daemon and
+not whichever one a bare `fy` points at); it opens nothing. Pressing **Add a passkey** afterwards works only once the owner has run the command.
+
+**The first window is offered at pairing.** Where the success screen has a way to reach the machine it just paired with, it offers
+**Add a passkey now** while that first window is open (with the minutes left) and runs the same ceremony; once the window has
+closed, or the device holds a passkey, nothing is offered. The post-pairing reminder line also says how many minutes the window has left.
 
 - **The browser cannot scan on WebKit.** `BarcodeDetector` is Chromium-only, so the in-app scanner is
   absent there. This is not the blocked path it looks like — the intended carrier is the phone's own
