@@ -14,7 +14,10 @@
  *                                      both daemons as enabled user units, so they come back after a reboot with the same
  *                                      identity, pairing and data (the ferrets' panes do not: they are revived, as after a restart)
  *   bun slot.ts unpersist <1..9>       the reverse: units removed, folder back under the sweep root, daemons running as before
- *   bun slot.ts wrappers <1..9>        (re)write ONLY the wrappers + kit copy of an already persisted slot: stops and restarts nothing
+ *   bun slot.ts wrappers <1..9> [--cli-name <name>] [--v4-cli-name <name>]
+ *                                      (re)write ONLY the wrappers + kit copy of an already persisted slot: stops and restarts nothing.
+ *                                      --cli-name records what the owner types for the 5.0 CLI (e.g. fy5): the daemon prints it in its
+ *                                      hints (FY_BINARY_NAME), from the next daemon start on; default is the wrapper's name (fy5s<N>)
  *   bun slot.ts real-claude <1..9> on <login> [--binary <abs path>] | off [--force]
  *                                      the ONE exception to "no real model": a persisted slot's 5.0 side runs the REAL claude for ONE
  *                                      ferretry-managed login (the owner signs in on the 5.0 Logins screen); every other caller keeps the fake
@@ -67,9 +70,14 @@ import {
   KIT_FILES,
   LINK_SCRIPT,
   addStoreRoots,
+  cliNamesFile,
+  cliNamesText,
+  daemonBinaryName,
   daemonUnitText,
   defaultPersistDir,
+  isCliName,
   ownerLauncher,
+  parseCliNames,
   persistTargetProblem,
   persistedBinDir,
   persistedKitDir,
@@ -330,6 +338,15 @@ const richHelpers = (slot: Slot): Record<string, string> => ({
     : join(FIXTURES, 'support', 'fake-claude-rich.ts'),
 });
 
+/** The CLI names recorded for this slot (`wrappers <N> --cli-name fy5`); none recorded, or a record that does not parse, is {}. */
+function readCliNames(slot: Slot): ReturnType<typeof parseCliNames> {
+  try {
+    return parseCliNames(readFileSync(cliNamesFile(slot.real), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
 function daemonEnvironment(slot: Slot, which: Which): Record<string, string> {
   const world =
     which === 'v4'
@@ -357,6 +374,9 @@ function daemonEnvironment(slot: Slot, which: Which): Record<string, string> {
     XDG_RUNTIME_DIR: world.runtime,
     FY_HOME: world.home,
     PATH: [world.harness, base.PATH ?? ''].join(':'),
+    // The CLI name the daemon's own hints print: what the owner types (the recorded override, else the wrapper's name), NOT the
+    // product default `fy`. The daemon reads it from this variable only; the env file is rewritten from here at every start.
+    FY_BINARY_NAME: daemonBinaryName(slot.n, which, readCliNames(slot)),
     FERRETRY_TEST: '1',
     FY_UPDATE_CHECK: 'off',
     FY_LOCAL_MODELS: 'off',
@@ -2158,13 +2178,42 @@ async function unpersist(slot: Slot): Promise<void> {
   await status(plain);
 }
 
+/** `--cli-name <name>` (the 5.0 side) and `--v4-cli-name <name>`; undefined when neither is given. Anything else is refused. */
+function cliNamesFromFlags(flags: readonly string[]): { v4?: string; v5?: string } | undefined {
+  if (flags.length === 0) return undefined;
+  const out: { v4?: string; v5?: string } = {};
+  for (let i = 0; i < flags.length; i += 2) {
+    const flag = flags[i];
+    const value = flags[i + 1];
+    const side = flag === '--cli-name' ? 'v5' : flag === '--v4-cli-name' ? 'v4' : undefined;
+    if (side === undefined)
+      die(`wrappers: unknown option "${String(flag)}" (use --cli-name <name> and/or --v4-cli-name <name>)`, 64);
+    if (value === undefined || !isCliName(value))
+      die(
+        `wrappers: ${String(flag)} needs a plain program name (lowercase letters, digits, - and _, starting with a letter), not "${String(value)}"`,
+        64,
+      );
+    out[side] = value;
+  }
+  return out;
+}
+
+/** Merges the given names into the slot's record, then rewrites BOTH fyd.env files from it (read at the next daemon start only). */
+async function recordCliNames(slot: Slot, names: { v4?: string; v5?: string }): Promise<void> {
+  const merged = { ...readCliNames(slot), ...names };
+  const file = cliNamesFile(slot.real);
+  await writeFile(file, cliNamesText(merged), { mode: 0o600 });
+  await chmod(file, 0o600);
+  for (const which of ['v4', 'v5'] as const) await writeEnvFile(slot, which);
+}
+
 /**
  * `slot.ts wrappers <N>`: (re)writes ONLY the wrappers (<persistent folder>/bin/fy4s<N>, fy5s<N>), their PATH links and the kit copy
  * they run, for a slot that is ALREADY persisted. It stops nothing and starts nothing (no systemctl, no tmux, no daemon), reads
  * and writes no file inside either home, and leaves the unit files alone, so it is safe against a slot in use. The one thing
  * besides those files it may do is add a nix GC root for the bun the wrappers name.
  */
-async function wrappers(slot: Slot): Promise<void> {
+async function wrappers(slot: Slot, flags: readonly string[] = []): Promise<void> {
   const n = String(slot.n);
   if (!slot.persisted)
     die(
@@ -2172,6 +2221,8 @@ async function wrappers(slot: Slot): Promise<void> {
       99,
     );
   await assertSlotPath(slot);
+  const names = cliNamesFromFlags(flags);
+  if (names !== undefined) await recordCliNames(slot, names);
   await writeWrappers(slot);
   const nixStore = Bun.which('nix-store');
   const root = storeRootOf(await realpath(process.execPath).catch(() => process.execPath));
@@ -2194,6 +2245,15 @@ async function wrappers(slot: Slot): Promise<void> {
   console.log(`  fy4s${n}: ${join(slot.bin, wrapperName(slot.n, 'v4'))}`);
   console.log(`  fy5s${n}: ${join(slot.bin, wrapperName(slot.n, 'v5'))}`);
   console.log(`  PATH links (gone at boot, put back by the next slot.ts command): ${slot.pathBin}/fy4s${n}, fy5s${n}`);
+  if (names !== undefined) {
+    const now = readCliNames(slot);
+    console.log(
+      `  daemon CLI names recorded in ${cliNamesFile(slot.real)}: v4 ${daemonBinaryName(slot.n, 'v4', now)}, 5.0 ${daemonBinaryName(slot.n, 'v5', now)}; both fyd.env files rewritten`,
+    );
+    console.log(
+      `  a RUNNING daemon keeps its old name until it restarts (nothing was restarted): upgrade-v5 ${n} <libexec-dir> or systemctl --user restart ${serviceOf(slot, 'v5')}`,
+    );
+  }
   console.log(`  a launcher for the owner's own fy5 (e.g. ~/bin/fy5) execs the persisted wrapper:`);
   console.log(`    ${ownerLauncher(slot.real, slot.n)}`);
 }
@@ -2357,7 +2417,7 @@ try {
       await unpersist(await healedSlot(slotArg));
       break;
     case 'wrappers':
-      await wrappers(await healedSlot(slotArg));
+      await wrappers(await healedSlot(slotArg), rest);
       break;
     case 'real-claude':
       await realClaude(await healedSlot(slotArg), rest);

@@ -9,11 +9,16 @@ import {
   KIT_FILES,
   LINK_SCRIPT,
   addStoreRoots,
+  cliNamesFile,
+  cliNamesText,
+  daemonBinaryName,
   daemonUnitText,
   defaultPersistDir,
   execLine,
   execWord,
+  isCliName,
   ownerLauncher,
+  parseCliNames,
   persistTargetProblem,
   persistedBinDir,
   persistedKitDir,
@@ -529,5 +534,48 @@ describe('persisted wrappers and the kit copy they run', () => {
     const real = '/home/u/.local/share/fy-sweep/slot8';
     expect(persistedBinDir(real)).toBe(`${real}/bin`);
     expect(ownerLauncher(real, 8)).toBe(`exec '${real}/bin/fy5s8' "$@"`);
+  });
+});
+
+describe('the CLI name the daemon prints in its hints (FY_BINARY_NAME)', () => {
+  test('with no record the daemon is told its wrapper name, never the product default `fy`', () => {
+    expect(daemonBinaryName(8, 'v5', {})).toBe('fy5s8');
+    expect(daemonBinaryName(8, 'v4', {})).toBe('fy4s8');
+  });
+
+  test('a recorded name wins for its own side only', () => {
+    expect(daemonBinaryName(8, 'v5', { v5: 'fy5' })).toBe('fy5');
+    expect(daemonBinaryName(8, 'v4', { v5: 'fy5' })).toBe('fy4s8');
+    expect(daemonBinaryName(8, 'v4', { v4: 'fy4', v5: 'fy5' })).toBe('fy4');
+  });
+
+  test('the record lives in the slot folder, so a persisted slot carries it across a reboot and an upgrade', () => {
+    expect(cliNamesFile('/home/u/.local/share/fy-sweep/slot8')).toBe(
+      '/home/u/.local/share/fy-sweep/slot8/cli-names.json',
+    );
+  });
+
+  test('the record round-trips', () => {
+    expect(parseCliNames(cliNamesText({ v5: 'fy5' }))).toEqual({ v5: 'fy5' });
+    expect(parseCliNames(cliNamesText({ v4: 'fy4', v5: 'fy5' }))).toEqual({ v4: 'fy4', v5: 'fy5' });
+  });
+
+  test('a missing, unparsable or foreign record means no record; a bad name in it is dropped, not trusted', () => {
+    expect(parseCliNames(undefined)).toEqual({});
+    expect(parseCliNames('not json')).toEqual({});
+    expect(parseCliNames('[]')).toEqual({});
+    expect(parseCliNames('null')).toEqual({});
+    expect(parseCliNames('{"v5":5,"v4":"a b"}')).toEqual({});
+    expect(parseCliNames('{"v5":"fy5\\nFY_X=1","v4":"fy4"}')).toEqual({ v4: 'fy4' });
+  });
+
+  test('only a plain program name is a CLI name (nothing that could break an env line or a shell word)', () => {
+    for (const ok of ['fy5', 'fy5s8', 'my-fy', 'fy_5']) expect(isCliName(ok)).toBe(true);
+    for (const bad of ['', 'Fy5', '5fy', 'fy 5', 'fy=5', 'fy5\n', '-fy', 'a/b', 'a'.repeat(33)])
+      expect(isCliName(bad)).toBe(false);
+  });
+
+  test('FY_BINARY_NAME is not a credential-shaped name, so fyd-exec.sh and the env guard let it through', () => {
+    expect(/_(TOKEN|KEY|SECRET|PASSWORD|PASS|CREDENTIALS?)$/u.test('FY_BINARY_NAME')).toBe(false);
   });
 });

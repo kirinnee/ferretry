@@ -412,3 +412,48 @@ export const persistedKitDir = (real: string): string => join(real, 'kit');
 export function ownerLauncher(real: string, slot: number): string {
   return `exec ${shellQuote(join(persistedBinDir(real), wrapperName(slot, 'v5')))} "$@"`;
 }
+
+// ─── the CLI name a daemon's hints use (FY_BINARY_NAME) ──────────────────────────────────────────────────────────────
+
+/**
+ * What the owner actually types for a side's CLI. The daemon reads it ONLY from FY_BINARY_NAME, and prints it in its step-up hints
+ * ("run `fy5 …`"). With no record it is the wrapper's own name (fy4s<N> / fy5s<N>); a record (`wrappers <N> --cli-name fy5`) says
+ * the owner's launcher has another name (~/bin/fy5). Kept in the slot's folder, so a rebuilt env file, an upgrade-v5 and a reboot
+ * all read the same answer.
+ */
+export interface CliNames {
+  readonly v4?: string;
+  readonly v5?: string;
+}
+
+/** `<slot folder>/cli-names.json`: names only. */
+export const cliNamesFile = (real: string): string => join(real, 'cli-names.json');
+
+/** A program name a shell can type: lowercase letters, digits, `-`, `_`; starts with a letter; at most 32 characters. */
+export const isCliName = (value: string): boolean => /^[a-z][a-z0-9_-]{0,31}$/u.test(value);
+
+/** The record's text (`undefined` or garbage means no record): a name that is not a plain program name is dropped, never trusted. */
+export function parseCliNames(text: string | undefined): CliNames {
+  if (text === undefined) return {};
+  let document: unknown;
+  try {
+    document = JSON.parse(text);
+  } catch {
+    return {};
+  }
+  if (typeof document !== 'object' || document === null) return {};
+  const record = document as Record<string, unknown>;
+  const pick = (side: 'v4' | 'v5'): string | undefined => {
+    const value = record[side];
+    return typeof value === 'string' && isCliName(value) ? value : undefined;
+  };
+  const v4 = pick('v4');
+  const v5 = pick('v5');
+  return { ...(v4 === undefined ? {} : { v4 }), ...(v5 === undefined ? {} : { v5 }) };
+}
+
+/** The FY_BINARY_NAME a side's daemon gets: the recorded CLI name, else the wrapper's own. */
+export const daemonBinaryName = (slot: number, side: 'v4' | 'v5', names: CliNames): string =>
+  names[side] ?? wrapperName(slot, side);
+
+export const cliNamesText = (names: CliNames): string => `${JSON.stringify(names, null, 2)}\n`;
