@@ -119,7 +119,7 @@ describe('Settings shell', () => {
     it(`${variant.name}: Settings lists its tabs under titled groups, with This device one click away`, async () => {
       const { tab, close } = await open(variant, '/d/ws/settings', 'nav[aria-label="Plugin settings"] .fy-tab-group');
       try {
-        const headings = await tab.locator('nav[aria-label="Plugin settings"] h2').allInnerTexts();
+        const headings = await tab.locator('nav[aria-label="Plugin settings"] summary').allInnerTexts();
         expect(headings.slice(0, 3)).toEqual(['Behaviour', 'Agents and logins', 'Supervision']);
         expect(headings).toContain('Devices & access');
         expect(headings).not.toContain('More');
@@ -147,9 +147,9 @@ describe('Settings shell', () => {
 });
 
 /**
- * PICKING A SETTINGS TAB SHOWS IT (p2 settings-nav). The list of every tab sits above the page: at 390x844 it is about three
- * screens tall and at 1280x713 it fills the window, so the chosen page used to stay below the fold and a click looked like
- * nothing. Now the page is scrolled up to the head of its scroller and takes focus, and a wide window keeps its layout.
+ * PICKING A SETTINGS TAB SHOWS IT. The list of titled groups sits BESIDE the page on a wide window and is a page of its own on
+ * a phone (a tab opens full-screen, with a way back); only the group holding the current tab is open. Either way the picked
+ * page starts at the top of the screen and takes focus.
  */
 const PICKED: readonly Variant[] = [
   { name: '390x844', width: 390, height: 844, phone: true, scheme: 'light' },
@@ -157,8 +157,14 @@ const PICKED: readonly Variant[] = [
   { name: '1920x1080', width: 1_920, height: 1_080, phone: false, scheme: 'light' },
 ];
 
-/** How far down the window a picked page may start: the upper half of a small one, 200px of room above the end of a tall one. */
-const reach = (variant: Variant): number => (variant.height < 1_000 ? variant.height / 2 : variant.height - 200);
+/** Open a tab from the list: its group first when it is shut, and the way back first when a phone shows a page. */
+const pick = async (tab: Page, label: string): Promise<void> => {
+  const back = tab.locator('.fy-settings-back');
+  if (await back.isVisible()) await back.click();
+  const link = tab.getByRole('link', { name: label, exact: true });
+  if (!(await link.isVisible())) await tab.locator(`details.fy-tab-group:has(a:text-is("${label}")) > summary`).click();
+  await link.click();
+};
 
 describe('Settings shell: a picked tab is on screen', () => {
   for (const variant of PICKED) {
@@ -167,30 +173,25 @@ describe('Settings shell: a picked tab is on screen', () => {
       try {
         const page = tab.locator('.fy-settings-page');
         await shotOf(tab, variant, 'picked-0-before');
-        await tab.getByRole('link', { name: 'Budgets', exact: true }).click();
+        await pick(tab, 'Budgets');
         await tab.waitForSelector('text=Budgets settings (fake data)');
         await tab.waitForFunction(() => document.activeElement?.classList.contains('fy-settings-page') === true);
         expect(await page.getAttribute('aria-label')).toBe('Budgets');
         const box = await page.boundingBox();
         expect(box).not.toBeNull();
-        // The page's first line is in the upper half of a small window; a tall one (already showing it) is left as it was.
-        expect(box?.y ?? 9_999).toBeLessThan(reach(variant));
+        // The page starts at the top of the screen (beside the list, or full-screen on a phone).
+        expect(box?.y ?? 9_999).toBeLessThan(400);
         expect(await tab.getByText('Budgets settings (fake data)').isVisible()).toBe(true);
-        // A tall window already showed the page, so the list above it has not moved (the layout it had before).
-        if (variant.height >= 1_000) {
-          const heading = await tab.getByRole('heading', { name: 'Behaviour', exact: true }).boundingBox();
-          expect(heading?.y ?? -1).toBeGreaterThan(0);
-        }
         const sideways = await tab.evaluate(
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
         );
         expect(sideways).toBeLessThanOrEqual(0);
         await shotOf(tab, variant, 'picked-1-budgets');
-        // And the list is still one scroll up, so another tab can be picked.
-        await tab.getByRole('link', { name: 'Logins', exact: true }).click();
+        // And another tab can be picked from the list (a phone goes back to it first).
+        await pick(tab, 'Logins');
         await tab.waitForSelector('text=Logins settings (fake data)');
         expect(await page.getAttribute('aria-label')).toBe('Logins');
-        expect((await page.boundingBox())?.y ?? 9_999).toBeLessThan(reach(variant));
+        expect((await page.boundingBox())?.y ?? 9_999).toBeLessThan(400);
         await shotOf(tab, variant, 'picked-2-logins');
       } finally {
         await close();
