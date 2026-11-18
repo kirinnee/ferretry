@@ -6,7 +6,7 @@
  * person believing the relay is working. It is a status line, so a reader on assistive tech hears it appear and go.
  */
 
-import { type BackgroundViewProps, useOptionalRouter } from '@ferretry/app';
+import { type BackgroundViewProps, type PairedDaemon, useOptionalRouter, usePairedDaemons } from '@ferretry/app';
 import { createElement, useEffect, useSyncExternalStore } from 'react';
 import type { CarrierRouter } from '../../carriers/router.ts';
 
@@ -54,6 +54,19 @@ export function RelayFallbackNotice({ line }: { readonly line: string }) {
 }
 
 /**
+ * The line as ONE machine says it. With a single machine paired it is the plain line; with several, each machine's line
+ * names its machine (and, for two that share a host name, the tail of its id) so two fallbacks never read as one
+ * line said twice.
+ */
+export function relayFallbackLine(line: string, daemons: readonly PairedDaemon[], daemon: string): string {
+  if (daemons.length < 2) return line;
+  const mine = daemons.find(candidate => candidate.daemon === daemon);
+  if (mine === undefined || mine.machine === '') return line;
+  const twin = daemons.some(other => other.daemon !== daemon && other.machine === mine.machine);
+  return `${mine.machine}${twin ? ` (…${daemon.slice(-4)})` : ''}: ${line}`;
+}
+
+/**
  * A background view, mounted once per paired daemon where Connections may run: it draws the line while that daemon is
  * carried by the paired direct address, and nothing otherwise. It follows the router, so the line goes the moment the
  * relay answers again. It speaks only on a settings screen (where connection matters); on every other page the
@@ -62,6 +75,7 @@ export function RelayFallbackNotice({ line }: { readonly line: string }) {
 export function relayFallbackView(router: () => Pick<CarrierRouter, 'subscribe' | 'relayFallback'> | undefined) {
   return function RelayFallbackWatcher({ daemon }: BackgroundViewProps) {
     const held = router();
+    const daemons = usePairedDaemons();
     const where = useOptionalRouter()?.route.kind;
     const matters = where === undefined || where === 'device-settings' || where === 'daemon-settings';
     const read = () => held?.relayFallback(daemon);
@@ -71,6 +85,8 @@ export function relayFallbackView(router: () => Pick<CarrierRouter, 'subscribe' 
       () => cardsOnScreen.has(daemon),
       () => false,
     );
-    return line === undefined || cardSaysIt || !matters ? null : createElement(RelayFallbackNotice, { line });
+    return line === undefined || cardSaysIt || !matters
+      ? null
+      : createElement(RelayFallbackNotice, { line: relayFallbackLine(line, daemons, daemon) });
   };
 }

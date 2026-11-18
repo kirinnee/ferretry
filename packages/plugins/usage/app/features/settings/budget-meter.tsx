@@ -17,19 +17,23 @@ import { budgetMeterRows, budgetScopeNote } from '../../lib/budget-model.ts';
  * start and end in the same place: a label column, the bar, and a words column of one fixed width.
  */
 const METER_LABEL = 'w-12 shrink-0 whitespace-nowrap text-muted';
-const METER_WORDS = 'w-48 shrink-0 text-right text-muted';
+// On a phone the words sit beside the label and the bar takes the full width below them (as Logins' quota bars do).
+const METER_ROW = 'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta sm:flex-nowrap';
+const METER_BAR = 'order-last basis-full sm:order-none sm:basis-0';
+// `basis-0` keeps the words on the label's line on a phone (they wrap inside their share) rather than dropping to a line of their own.
+const METER_WORDS = 'min-w-0 flex-1 basis-0 text-right text-muted sm:flex-none sm:basis-auto sm:w-48 sm:shrink-0';
 
 /** A login's budget as the Budgets tab shows it, wherever a row or page lists one. */
 export function BudgetMeter({ budget, machineName }: { readonly budget: LoginBudget; readonly machineName: string }) {
   return (
     <div className="flex flex-col gap-1" data-credential-budget="">
       {budgetMeterRows(budget).map(row => (
-        <div key={row.label} className="flex min-w-0 items-center gap-2 text-meta">
+        <div key={row.label} className={METER_ROW}>
           <span className={METER_LABEL}>{row.label}</span>
           <span
             role="img"
             aria-label={row.words}
-            className="relative h-1.5 min-w-0 flex-1 rounded-full bg-surface-2"
+            className={cn('relative h-1.5 min-w-0 flex-1 rounded-full bg-surface-2', METER_BAR)}
             data-budget-bar={row.label}
           >
             <span

@@ -95,7 +95,9 @@ test('a card names its machine and lists only the drops of that machine, never o
     lastHeardMs: 100,
   });
   const mine = renderToStaticMarkup(createElement(CarrierDropsCard, { log, daemonId: MACHINE, machine: 'studio' }));
-  expect(mine).toContain('Connection drops on this device · studio');
+  expect(mine).toContain(
+    'Connection drops on this device</span> <span class="inline-block max-w-full break-words">· studio</span>',
+  );
   expect(mine).not.toContain('elsewhere');
   const other = renderToStaticMarkup(
     createElement(CarrierDropsCard, { log, daemonId: 'fy_daemon_machineTwo', machine: 'laptop' }),

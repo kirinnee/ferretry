@@ -57,6 +57,15 @@ const row = (root: ParentNode, id: string): HTMLElement => must(root.querySelect
 const open = async (root: ParentNode, id: string) => click(must(row(root, id).querySelector('button'), 'row header'));
 
 describe('the Lessons hub', () => {
+  it('keeps its title whole and shares a phone’s width among the four status tabs instead of scrolling one away', async () => {
+    const view = await hub(fakeLessonsDaemon(LESSONS));
+    // The title never shrinks under the Scan button (the button wraps below it), and every tab takes an equal share.
+    expect(must(view.container.querySelector('#lessons-hub-title'), 'the title').className).toContain('min-w-max');
+    for (const label of ['To review', 'Accepted', 'Applied', 'Rejected'])
+      expect(tab(view.container, label).className).toContain('flex-1');
+    await view.unmount();
+  });
+
   it('lists To review with strength, type and source chips, and counts every tab', async () => {
     const daemon = fakeLessonsDaemon(LESSONS);
     const view = await hub(daemon);

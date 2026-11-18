@@ -6,6 +6,7 @@ import {
   NotificationsOffPanel,
   THIS_MACHINE,
 } from '../../../../../app/features/settings/machine-notifications-settings.tsx';
+import { machineNameOf } from '../../../../../app/surfaces.tsx';
 import type { MachineSource } from '../../../../../app/hooks/use-machines-notifications.ts';
 import type { PushHost } from '../../../../../app/lib/push-host.ts';
 import { AUTH, browser, deviceOf, ENDPOINT, machine, P256DH } from '../../../../support/app/push.ts';
@@ -41,6 +42,20 @@ const marked = (surface: ReactTestRenderer, marker: string) =>
 const text = (surface: ReactTestRenderer): string => JSON.stringify(surface.toJSON());
 
 const BANNER = `Notifications are off for ${THIS_MACHINE} on every device — turn them on`;
+
+describe('the banner under the Agenda header', () => {
+  it('names the machine as v4 did, by the host name its pairing recorded', () => {
+    const paired = [
+      { daemon: 'daemon-a', machine: 'ip-172-27-76-90' },
+      { daemon: 'daemon-b', machine: '' },
+    ] as never;
+    expect(machineNameOf(paired, 'daemon-a')).toBe('ip-172-27-76-90');
+    // An unnamed or unlisted machine falls back to "This machine" (no label is passed).
+    expect(machineNameOf(paired, 'daemon-b')).toBeUndefined();
+    expect(machineNameOf(paired, 'daemon-c')).toBeUndefined();
+    expect(machineNameOf(paired, undefined)).toBeUndefined();
+  });
+});
 
 describe('Access draws every machine’s Web Push', () => {
   it('shows the "Notifications are off" banner when no device is enrolled anywhere, and never asks by itself', async () => {

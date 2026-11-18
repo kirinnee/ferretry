@@ -160,6 +160,8 @@ describe('usage parity · the app half', () => {
     expect(meter.textContent).toContain('$/day');
     expect(meter.textContent).toContain('$0.00 of $10.00');
     expect(meter.textContent).toContain('studio-mac');
+    // On a phone the bar takes the full width under its label and words, instead of shrinking to a tick.
+    expect(meter.querySelector('[data-budget-bar]')?.className).toContain('basis-full');
     await view.unmount();
     // A card that hands no budget draws nothing.
     expect(panel({ subject: 'claude-personal', machineName: 'studio-mac' })).toBeNull();

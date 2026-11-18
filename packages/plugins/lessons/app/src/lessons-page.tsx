@@ -156,7 +156,7 @@ function LessonsHub({
         <header className="flex flex-wrap items-center gap-3">
           <h2
             id="lessons-hub-title"
-            className="m-0 flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap font-display text-display font-bold tracking-display"
+            className="m-0 flex min-w-max flex-1 items-center gap-2 whitespace-nowrap font-display text-display font-bold tracking-display"
           >
             <Lightbulb size={20} aria-hidden="true" className="shrink-0 text-accent" />
             Lessons hub
@@ -369,7 +369,8 @@ function LessonTabs({
             onClick={() => onSelect(entry.state)}
             onKeyDown={event => onKeyDown(event, index)}
             className={cn(
-              '-mb-px flex min-h-[44px] shrink-0 items-center gap-1.5 border-b-heavy px-3 text-ui',
+              // Four tabs share a phone's width (count under the word) and sit in a row from `sm`, so none is scrolled out of view.
+              '-mb-px flex min-h-[44px] flex-1 flex-col items-center justify-center border-b-heavy px-1 text-ui sm:flex-none sm:flex-row sm:gap-1.5 sm:px-3',
               selected ? 'border-accent font-semibold text-fg' : 'border-transparent text-muted hover:text-fg',
             )}
           >

@@ -71,7 +71,9 @@ export function CarrierDropsCard({
       data-carrier-drops={daemonId}
     >
       <h3 id={`carrier-drops-${daemonId}`} className="m-0 text-row font-semibold text-fg">
-        Connection drops on this device · {machine}
+        {/* The title never breaks inside a word: on a phone the machine drops to its own line at the " · ". */}
+        <span className="inline-block">Connection drops on this device</span>{' '}
+        <span className="inline-block max-w-full break-words">· {machine}</span>
       </h3>
       <p className="m-0 text-cell leading-base text-muted">
         Every time a held connection to {machine} was lost without this app asking. Kept on this device only.

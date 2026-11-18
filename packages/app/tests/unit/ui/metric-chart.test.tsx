@@ -105,6 +105,17 @@ describe('AnalyticsMetricChart', () => {
     await empty.unmount();
   });
 
+  it('prints at most four x labels on a phone, so neighbours never run together', async () => {
+    const days = Array.from({ length: 14 }, (_, day) => point(`2026-10-${String(day + 1).padStart(2, '0')}`, [day]));
+    const view = await mount(<AnalyticsMetricChart {...COST} points={days} />);
+    // The first x axis is the phone's (`sm:hidden`); the second is the wide one.
+    const phone = must(view.container.querySelector('[class*="sm:hidden"]'), 'the phone axis');
+    const printed = [...phone.querySelectorAll('[data-chart-xlabel]')].filter(label => label.textContent !== '');
+    expect(printed.length).toBeLessThanOrEqual(4);
+    expect(printed.at(-1)?.textContent).toBe('10-14');
+    await view.unmount();
+  });
+
   it('prints every nth label counted back from the last', () => {
     expect([...chartLabelKeys(POINTS, 2)]).toEqual(['2026-10-12', '2026-10-14']);
   });
