@@ -64,9 +64,10 @@ const TONE_CLASS: Readonly<Record<GrantGuidance['tone'], string>> = {
 /**
  * One axis: what it is, whether it is on, and — when it is not changeable — why.
  *
- * THE EXPLANATION IS NOT CONDITIONAL ON HOVER, a title attribute or a disclosure. A person meeting a
- * control they cannot move needs the reason at the same moment they meet it, which means in the flow
- * of the page.
+ * THE REASON IS NEVER HOVER-ONLY. A person meeting a control they cannot move needs the reason at the same
+ * moment, in the flow of the page: a refusal that is a fault is shown whole, and one that repeats on every row (a
+ * passkey; fixed on the host) is a short visible badge, with its full sentence kept in the page for a screen reader
+ * (it is what the switch is described by) and said once, in full, in the panels above the cards.
  */
 function AxisControl({
   entry,
