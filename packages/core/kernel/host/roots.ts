@@ -364,6 +364,35 @@ export async function resolveInRoot(
   return resolved.ok ? ok(resolved.value.full) : resolved;
 }
 
+type ResolvedPath = { readonly full: FencedPath; readonly base: CheckedBase };
+
+/**
+ * How long a path that resolved clean is not walked again, as long as the ENTRY it resolved to is still the same one. A
+ * reader that looks at the same few files every tick (a transcript, a state file) used to pay the whole walk on each
+ * look: the base's real path, the anchor's, one `lstat` per segment and the nearest existing folder. Now a repeat look
+ * inside this window costs a look at the entry itself and the private-places question about it (asked again, from a fresh
+ * look at the places, so a look that cannot be made still refuses). An entry that is gone, replaced (another device or
+ * inode) or another kind is walked in full again.
+ *
+ * LOOSER than the walk was, for at most this long and only for an internal root (an owner's root is never remembered): a
+ * folder BETWEEN the base and the entry that is renamed or swapped for a link, or the base itself swapped, is not seen by
+ * a repeat look of the same path. The entry is looked at by its own name every time, so a swap that reaches a DIFFERENT
+ * file shows at once; one that moves the very same inode (renaming the whole folder away and linking it back) does not,
+ * and every open that follows a resolve proves its own file again (`openCheckedFile`: real path, identity, private
+ * places). It needs same-uid write access to the host.
+ */
+const RESOLVED_PATH_MS = 1_000;
+const MAX_RESOLVED_PATHS = 2_048;
+
+interface RememberedPath {
+  readonly value: ResolvedPath;
+  /** What the entry was when the walk finished: a repeat look is served only while it is still this. */
+  readonly entry: { readonly kind: FileIdentity['kind']; readonly key: string };
+  readonly until: number;
+}
+
+const RESOLVED = new WeakMap<HostFs, WeakMap<PrivatePlaces, Map<string, RememberedPath>>>();
+
 async function resolveChecked(
   fs: HostFs,
   home: string,
@@ -372,7 +401,50 @@ async function resolveChecked(
   relativePath: string,
   anchor: string | undefined,
   privateFiles: PrivatePlaces = NO_PRIVATE,
-): Promise<Result<{ readonly full: FencedPath; readonly base: CheckedBase }, FolderRefusal>> {
+  now: () => number = () => performance.now(),
+): Promise<Result<ResolvedPath, FolderRefusal>> {
+  // An owner's root is judged against the whole fence every time; nothing of it is remembered.
+  if (ownerRoot) return await resolveCheckedWalk(fs, home, base, ownerRoot, relativePath, anchor, privateFiles);
+  const byPlaces = RESOLVED.get(fs) ?? new WeakMap<PrivatePlaces, Map<string, RememberedPath>>();
+  RESOLVED.set(fs, byPlaces);
+  const remembered = byPlaces.get(privateFiles) ?? new Map<string, RememberedPath>();
+  byPlaces.set(privateFiles, remembered);
+  const name = [home, base, anchor ?? '', relativePath].join('\0');
+  const kept = remembered.get(name);
+  if (kept !== undefined) {
+    const entry = kept.until > now() ? await fs.identity(kept.value.full).catch(() => undefined) : undefined;
+    if (entry !== undefined && entry.kind === kept.entry.kind && identityKey(entry) === kept.entry.key) {
+      // The private places are asked about the entry AGAIN, from a fresh look at the places (a look that cannot be made
+      // refuses here, as it does in the walk): only the folders above the entry and the base are taken from memory.
+      const guard = privateCheckOf(fs, home, kept.value.base.real, privateFiles);
+      if (!(await guard.held(kept.value.full)))
+        return ok({ full: kept.value.full, base: { ...kept.value.base, guard } });
+    }
+    remembered.delete(name);
+  }
+  const walked = await resolveCheckedWalk(fs, home, base, ownerRoot, relativePath, anchor, privateFiles);
+  if (!walked.ok) return walked;
+  const entry = await fs.identity(walked.value.full).catch(() => undefined);
+  if (entry !== undefined) {
+    if (remembered.size >= MAX_RESOLVED_PATHS) remembered.clear();
+    remembered.set(name, {
+      value: walked.value,
+      entry: { kind: entry.kind, key: identityKey(entry) },
+      until: now() + RESOLVED_PATH_MS,
+    });
+  }
+  return walked;
+}
+
+async function resolveCheckedWalk(
+  fs: HostFs,
+  home: string,
+  base: string,
+  ownerRoot: boolean,
+  relativePath: string,
+  anchor: string | undefined,
+  privateFiles: PrivatePlaces,
+): Promise<Result<ResolvedPath, FolderRefusal>> {
   const lexical = lexicalInRoot(home, base, ownerRoot, relativePath);
   if (!lexical.ok) return lexical;
   const checked = await checkBase(fs, home, base, ownerRoot, anchor, privateFiles);
