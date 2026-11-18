@@ -32,6 +32,8 @@ async function scriptedDaemon(
 ) {
   const identity = await newDaemonIdentity();
   const seen: string[] = [];
+  /** Each request's `presence` mark, in arrival order: `true` or `undefined`. */
+  const presences: unknown[] = [];
   let dials = 0;
   let requests = 0;
   const dial = (events: CarrierSocketEvents) => {
@@ -65,6 +67,7 @@ async function scriptedDaemon(
           if (record.t === 'req') {
             const request = { method: String(record.method), path: String(record.path) };
             seen.push(`${request.method} ${request.path}`);
+            presences.push(record.presence);
             const code = options.closes?.[requests++];
             if (code !== undefined) {
               events.onClose(code, 'the session ended');
@@ -81,7 +84,7 @@ async function scriptedDaemon(
       close() {},
     };
   };
-  return { identity, dial, seen, dials: () => dials };
+  return { identity, dial, seen, presences, dials: () => dials };
 }
 
 describe('the generated client over a sealed session', () => {
@@ -110,6 +113,38 @@ describe('the generated client over a sealed session', () => {
     ]);
     // One request session carried every call; the second session is the event stream (opened after the bootstrap).
     expect(daemon.dials()).toBe(2);
+  });
+
+  test('a request made while the tab is visible is marked presence; one from a hidden tab is not', async () => {
+    const daemon = await scriptedDaemon(({ path }) =>
+      path === '/v1/plugins' ? { status: 200, body: inventoryOf(compiled) } : { status: 200, body: { ok: path } },
+    );
+    const transport = new SessionTransport({
+      crypto: relayCrypto,
+      daemonId: daemon.identity.daemonId,
+      device: device.claim,
+      dial: daemon.dial,
+    });
+    const before = Object.getOwnPropertyDescriptor(globalThis, 'document');
+    const show = (state: string): void => {
+      Object.defineProperty(globalThis, 'document', { value: { visibilityState: state }, configurable: true });
+    };
+    try {
+      show('hidden');
+      await transport.request({ method: 'GET', path: '/v1/hidden' });
+      show('visible');
+      await transport.request({ method: 'GET', path: '/v1/visible' });
+      await transport.request({ method: 'POST', path: '/v1/visible-write', body: {} });
+    } finally {
+      if (before === undefined) Reflect.deleteProperty(globalThis, 'document');
+      else Object.defineProperty(globalThis, 'document', before);
+    }
+    expect(daemon.seen.filter(line => line.includes('/v1/hidden') || line.includes('visible'))).toEqual([
+      'GET /v1/hidden',
+      'GET /v1/visible',
+      'POST /v1/visible-write',
+    ]);
+    expect(daemon.presences).toEqual([undefined, true, true]);
   });
 
   test('a session to a daemon that is not the pinned one never sends a request', async () => {

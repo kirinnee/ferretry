@@ -185,6 +185,9 @@ interface OpenedSession {
   readonly device?: SessionDeviceClaim;
 }
 
+/** A person is looking at this app: a tab in the background polls, it does not use the device (the daemon's idle clock). */
+const tabVisible = (): boolean => globalThis.document?.visibilityState === 'visible';
+
 function openSession(
   options: SessionTransportOptions,
   dial: CarrierDial,
@@ -203,6 +206,7 @@ function openSession(
     daemonId: options.daemonId,
     mode,
     socket,
+    attended: tabVisible,
     ...(onData === undefined ? {} : { onData }),
   });
   return { session, socket };
