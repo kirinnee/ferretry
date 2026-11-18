@@ -94,7 +94,8 @@ import {
 } from './wire/index.ts';
 import { RELAY_SESSION_CONCLUDED_CLOSE_CODE, relayDataByteBudget } from '@ferretry/kernel/session';
 import { z } from 'zod';
-import { acceptEncodingHeader, decodeCompressedAnswer } from './compression.ts';
+import { decodeCompressedAnswer } from './compression.ts';
+import { outgoingRequest } from './outgoing-request.ts';
 
 /**
  * A device key replacing the one that opened this session (`docs/design/zero-trust.md` B6): the NEW key's SPKI and
@@ -490,11 +491,7 @@ export interface RelayClientSessionDependencies {
   readonly maxRequestId?: number;
   /** Timers for {@link REQUEST_QUEUE_WAIT_MS}. The real clock by default. */
   readonly schedule?: RelaySessionSchedule;
-  /**
-   * Asked once per request: is a person at this device right now? A yes marks the request `presence`, the ONE
-   * thing the daemon counts as use (its idle clock moves on a marked request and on nothing else, a renewal
-   * included). Absent, no request is marked. The browser's answer lives in the transport, not in this pure module.
-   */
+  /** Is a person at this device right now? A yes marks the request `presence` (`outgoing-request.ts`). */
   readonly attended?: () => boolean;
   /** One arrived stream frame. Only a stream session ever calls it. */
   readonly onData?: (frame: RelayStreamFrame) => void;
@@ -991,13 +988,7 @@ export class RelayClientSession {
     asked: Omit<Extract<RelayTunnelClientMessage, { t: 'req' }>, 't' | 'id'>,
     signal?: AbortSignal,
   ): Promise<RelayTunnelAnswer> {
-    // A relayed answer is not a browser fetch, so this side asks for gzip itself and decodes it below.
-    // Only a `GET` is ever answered compressed, so nothing else carries the header.
-    const asking = asked.method === 'GET' ? acceptEncodingHeader() : {};
-    const compressed =
-      Object.keys(asking).length === 0 ? asked : { ...asked, headers: { ...asking, ...asked.headers } };
-    // EVERY request of a session, direct or relayed, passes here, so this is the one place presence is decided.
-    const message = this.deps.attended?.() === true ? { ...compressed, presence: true as const } : compressed;
+    const message = outgoingRequest(asked, this.deps.attended);
     if (this.#failure !== undefined) throw this.#failure;
     signal?.throwIfAborted();
     if (this.#phase !== 'serving') {
