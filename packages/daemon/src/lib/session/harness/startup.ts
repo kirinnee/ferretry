@@ -1,7 +1,6 @@
-import type { RuntimeControlRequest, RuntimeModelChoice } from '@ferretry/protocol';
+import type { RuntimeModelChoice } from '@ferretry/protocol';
 import type { HarnessKind } from '../../core/inventory.ts';
 import { reasoningLevel } from './launch-effort.ts';
-import { harnessQuirks } from './quirks.ts';
 
 /**
  * The model selection every new harness invocation receives on its launch argv.
@@ -35,27 +34,26 @@ export function startupModelArguments(model: string): readonly string[] {
  * and effort through the startup picker hook, and that drive tolerates a slow startup because frames
  * showing Codex's `Waiting for startup` line are not charged to its budget (`CODEX_STARTUP_WAIT_OBSERVATIONS`).
  *
- * Claude keeps `/effort` here: it is a command Claude answers locally, it opens no picker, and its
- * start has never been seen to lose one.
+ * CLAUDE IS `argv` TOO. A Claude start used to type `/effort <level>` into the pane before turn one and
+ * accept only a delivery proven handled locally. Under Claude Code 2.1.327 that proof stopped arriving, so every
+ * `--effort` start was refused with "consumed /effort … as a model turn" (start_failed, 2026-11-18).
+ * `--effort <level>` is a launch flag (`claude --help`), read before the pane draws anything, and it is the form
+ * every relaunch already uses — so nothing needs typing into the pane or proving afterwards.
  */
-export type StartupEffort =
-  | { readonly kind: 'argv'; readonly effort: string }
-  | { readonly kind: 'command'; readonly effort: string };
+export type StartupEffort = { readonly kind: 'argv'; readonly effort: string };
 
 /**
  * The way this harness's start carries `effort`, or `undefined` when none was asked for.
  *
  * The level goes through `reasoningLevel`, the very normaliser `launchReasoningEffort` records the document's
  * level with, so the level on the argv and the level the session records can never differ — and a level that
- * normaliser rejects (`x_high`, `9`) is carried as none here, and `planStartupEffort` refuses it. An `argv`
- * answer also tells the caller it must read the login's catalog before `planStartupEffort`.
+ * normaliser rejects (`x_high`, `9`) is carried as none here, and `planStartupEffort` refuses it. A Codex
+ * level must also be checked against the login's catalog before `planStartupEffort`; a Claude one is not.
  */
-export function startupEffort(harness: HarnessKind, effort: string | undefined): StartupEffort | undefined {
+export function startupEffort(_harness: HarnessKind, effort: string | undefined): StartupEffort | undefined {
   const level = reasoningLevel(effort);
   if (level === undefined) return undefined;
-  return harnessQuirks(harness).effortIsRuntimeCommand
-    ? { kind: 'command', effort: level }
-    : { kind: 'argv', effort: level };
+  return { kind: 'argv', effort: level };
 }
 
 /**
@@ -98,10 +96,8 @@ export type StartupEffortPlan =
     }
   | {
       readonly kind: 'planned';
-      /** The level for the launch argv (Codex). */
+      /** The level for the launch argv (both harnesses). */
       readonly argvEffort?: string;
-      /** The runtime command to apply before turn one (Claude). */
-      readonly startupRuntime?: RuntimeControlRequest;
     };
 
 /**
@@ -110,7 +106,7 @@ export type StartupEffortPlan =
  * `catalog` is what the caller read for a Codex level — the login's models, or the `Error` its probe threw —
  * and is only consulted for an `argv` start (`startupEffort` says whether the caller must read it). No level
  * plans nothing; a Codex level is checked against the catalog (`codexStartupEffortRefusal`) and then rides the
- * argv; a Claude level becomes an `effort` runtime command.
+ * argv; a Claude level rides the argv as asked.
  */
 export function planStartupEffort(
   harness: HarnessKind,
@@ -127,8 +123,8 @@ export function planStartupEffort(
       ? { kind: 'planned' }
       : { kind: 'refused', cause: 'invalid', reason: `${asked} is not a reasoning level` };
   }
-  if (carried.kind === 'command')
-    return { kind: 'planned', startupRuntime: { action: 'effort', effort: carried.effort } };
+  // Claude's `--effort` is checked by Claude itself and has no catalog to read, so its level is planned as asked.
+  if (harness === 'claude') return { kind: 'planned', argvEffort: carried.effort };
   const reason = codexStartupEffortRefusal(model, carried.effort, catalog);
   if (reason === undefined) return { kind: 'planned', argvEffort: carried.effort };
   return {

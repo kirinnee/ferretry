@@ -39,8 +39,25 @@ describe('how a start carries its reasoning level', () => {
     expect(argv).toEqual(['/fleet/bin/codex-work', '--model', 'gpt-6.1-sol', '-c', 'model_reasoning_effort="high"']);
   });
 
-  it('keeps a Claude level as the command it answers locally before turn one', () => {
-    expect(startupEffort('claude', 'xhigh')).toEqual({ kind: 'command', effort: 'xhigh' });
+  it('puts a Claude level on the launch argv as --effort, so no /effort is typed into a booting pane', () => {
+    // Arrange
+    const effort = startupEffort('claude', 'high');
+
+    // Act
+    const argv = buildLaunchArgv({
+      harness: 'claude',
+      executable: '/fleet/bin/claude-work',
+      remoteControl: [],
+      transcript: [],
+      readableFolders: [],
+      model: 'claude-opus-5-5',
+      ...(effort === undefined ? {} : { effort: effort.effort }),
+      harnessFlags: [],
+    });
+
+    // Assert
+    expect(effort).toEqual({ kind: 'argv', effort: 'high' });
+    expect(argv).toEqual(['/fleet/bin/claude-work', '--model', 'claude-opus-5-5', '--effort', 'high']);
   });
 
   it('carries nothing when no level, or only a blank one, was asked for', () => {
@@ -55,7 +72,7 @@ describe('how a start carries its reasoning level', () => {
 
   it('lowercases the level, as a relaunch does, so both spell it the way the catalog does', () => {
     expect(startupEffort('codex', ' High ')).toEqual({ kind: 'argv', effort: 'high' });
-    expect(startupEffort('claude', 'XHigh')).toEqual({ kind: 'command', effort: 'xhigh' });
+    expect(startupEffort('claude', 'XHigh')).toEqual({ kind: 'argv', effort: 'xhigh' });
   });
 
   it('normalises exactly as the document records it, so a level the launch rejects is carried as none (and refused by the plan)', () => {
@@ -130,10 +147,10 @@ describe('the plan for a start’s reasoning level', () => {
     });
   });
 
-  it('turns a Claude level into the effort command and puts nothing on the argv, whatever the catalog', () => {
+  it('puts a Claude level on the argv and types no runtime command, whatever the catalog', () => {
     expect(planStartupEffort('claude', 'claude-opus-5-5', 'xhigh', undefined)).toEqual({
       kind: 'planned',
-      startupRuntime: { action: 'effort', effort: 'xhigh' },
+      argvEffort: 'xhigh',
     });
   });
 

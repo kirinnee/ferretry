@@ -75,7 +75,6 @@ import {
   type RegisterProjectRequest,
   type ResolvedAgendaItem,
   type ResolvedBrowserPorts,
-  type RuntimeControlRequest,
   type RuntimeModelChoice,
   readLoopbackFirewallMarker,
   refusalNotice,
@@ -2509,15 +2508,6 @@ function createSessionControlSubsystem(
   /** The session's own private directory, which is the string a Codex rollout is correlated by. */
   sessionDirectory: (id: SessionId) => string,
   /**
-   * The STARTUP half of the one runtime subsystem, applying a Claude start's effort (and a fork's target
-   * model and effort) before turn one is delivered. A Codex start does not use it: its level rides the argv.
-   *
-   * Not the mounted control, and for the same reason a fork does not use it: at this point the
-   * session is `starting`, which the public path refuses by design. A Claude start and a fork occupy the
-   * identical window and go through the identical entry point.
-   */
-  runtime: SessionRuntimeStartupHeldPort,
-  /**
    * The spawn-side warden stamp, decided at create because create is the only moment it can be.
    *
    * It also owns the LABEL: a warden descendant is force-labelled, so the label and the stamp have
@@ -2742,13 +2732,13 @@ function createSessionControlSubsystem(
           'the login’s fixed settings could not be read, so fast mode cannot be applied',
         );
       }
-      // THE REQUESTED LEVEL: on the argv for Codex, a command before turn one for Claude (`startupEffort`).
+      // THE REQUESTED LEVEL: on the argv for both harnesses (`startupEffort`).
       // A Codex level on the argv is checked here against the login's live catalog, the check the picker
       // drive used to make after the pane existed; a refusal releases the callsign like the ones above.
       // The catalog is read only when the level rides the argv, and a failed read is passed on AS the error,
       // so the refusal can say why the probe failed.
       const catalog =
-        startupEffort(account.kind, request.effort)?.kind === 'argv'
+        account.kind === 'codex' && startupEffort(account.kind, request.effort) !== undefined
           ? await fast
               .codexChoices(executable, cwd)
               .catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))))
@@ -2767,13 +2757,12 @@ function createSessionControlSubsystem(
           effortPlan.reason,
         );
       }
-      const startupRuntime: RuntimeControlRequest | undefined = effortPlan.startupRuntime;
       // The remote-control arguments are added only when the caller asked for the surface, because
       // they are what makes the harness publish one — adding them anyway would open a control channel
       // for a session whose own document records that it has none.
       // THE SAME BUILD a Restart CLI, a migration and a revive run, so the four can never disagree
-      // about what a launch carries. A Codex start carries its level here; a Claude start applies it as a
-      // runtime command before turn one (`startupRuntime` above); a relaunch passes the level the session
+      // about what a launch carries. A start carries its level here, Codex as `-c` and Claude as
+      // `--effort`, so nothing is typed into a booting pane; a relaunch passes the level the session
       // is on by then.
       const command = await (async (): Promise<readonly string[]> => {
         try {
@@ -2908,14 +2897,7 @@ function createSessionControlSubsystem(
             delegation: startDelegation,
             ...(caller.pack === true ? { viaPack: true as const } : {}),
           });
-        await lifecycle.start(
-          id,
-          startupRuntime === undefined
-            ? undefined
-            : async () => {
-                await runtime.startupWhileHeld(id, startupRuntime, `${requestId}:startup-runtime`);
-              },
-        );
+        await lifecycle.start(id);
       } catch (error) {
         // A refused card is the caller's to read, not a launch failure: the record was stopped with the reason.
         if (error instanceof SessionControlError) {
@@ -9682,7 +9664,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             transcriptProvenance,
             new NodeWorkingDirectoryResolver(),
             id => createSessionPaths(paths, id).directory,
-            sessionRuntime,
             // The stamper the world already constructed, now actually called. Before this it was a field
             // nothing dereferenced: a shield the fork wrote and no ordinary start ever did.
             spawnProvenance,
