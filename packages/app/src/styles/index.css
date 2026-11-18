@@ -98,8 +98,13 @@ textarea {
    decorative half. */
 input:focus,
 textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 var(--focus-width) var(--ring);
+  border-color: var(--focus-color);
+}
+/* A text field inside a surface that is itself the focus context (the finder, a dialog, a sheet) draws NO ring of its
+   own: the surface already says "you are typing here", and a second ring around the field is the double ring the owner
+   called over-highlighting. A thin keyboard-only outline survives only on a field that has a visible edge of its own. */
+:is([role='dialog'], .kt-overlay) :is(input, textarea):focus-visible {
+  outline: none;
 }
 
 /* A native dropdown wears the same edge as a text field (the control edge, >=3:1), so it is a visible control on every page
@@ -120,6 +125,11 @@ select:focus {
 :focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: var(--focus-offset);
+}
+/* A text field's ring hugs its own edge (offset 0) instead of floating beside the border colour it also changes. */
+input:focus-visible,
+textarea:focus-visible {
+  outline-offset: 0;
 }
 
 code,

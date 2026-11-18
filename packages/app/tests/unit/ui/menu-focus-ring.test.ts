@@ -14,11 +14,12 @@ describe('the shared menu row', () => {
     expect(ring).toContain('outline-offset: calc(-1 * var(--focus-width));');
   });
 
-  it('never switches its outline off, and marks the cursor and a checked row by more than a faint fill', () => {
+  it('never switches its outline off, and marks the cursor and a checked row by ONE cue: the neutral fill', () => {
     expect(rule(/\n\.kt-menu-item \{[^}]*\}/u)).not.toContain('outline');
     const cursor = rule(/\n\.kt-menu-item\[aria-selected='true'\],[^{]*\{[^}]*\}/u);
     expect(cursor).toContain('background: var(--menu-item-active);');
-    expect(cursor).toContain('box-shadow: var(--rail-active);');
+    expect(cursor).not.toMatch(/box-shadow|border|font-weight|color:/u);
+    expect(themes).toContain('--menu-item-active: var(--select-fill);');
   });
 
   it('the popover wears the control edge, not the decorative hairline', () => {
