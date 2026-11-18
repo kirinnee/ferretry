@@ -44,6 +44,12 @@ import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
 import { browserDeviceName } from '@ferretry/app';
 import { normalizedDeviceName } from '../../lib/device-name.ts';
 import { PairScanner } from './pair-scanner.tsx';
+import {
+  FirstPasskeyOffer,
+  type FirstPasskeyClientFactory,
+  type FirstPasskeyOfferProps,
+} from './first-passkey-offer.tsx';
+import type { DaemonConnection } from '../../shell-grants.ts';
 
 /** What the exchange learned, so the screen can say how it got there. Both parts are optional: a host may know neither. */
 interface PairedAs {
@@ -51,6 +57,8 @@ interface PairedAs {
   readonly machine?: string;
   /** Which path carried the exchange. */
   readonly via?: 'direct' | 'relay';
+  /** The machine just paired with, so the success screen can offer its first passkey while that window is open. */
+  readonly connection?: DaemonConnection;
 }
 
 /** Exchanges the code; `deviceName` is what the person called this device on the confirm screen. */
@@ -105,6 +113,13 @@ export interface PairingScreenProps {
    * finishing itself), which is about the one thing that was working.
    */
   readonly onStatedFailure?: (stated: boolean) => void;
+  /**
+   * How the success screen reaches the machine just paired with, to offer "Add a passkey now" while its first-passkey
+   * window is open. Absent (a screen with no daemon client, like the daemon-less `/pair` page), no offer is made.
+   */
+  readonly passkeyClient?: FirstPasskeyClientFactory;
+  /** Test seams of that offer (credentials, origin, browser support, clock); production reads the browser's own. */
+  readonly passkeyOffer?: Pick<FirstPasskeyOfferProps, 'credentials' | 'origin' | 'supported' | 'now'>;
 }
 
 /**
@@ -120,7 +135,7 @@ type Stage =
   | { readonly kind: 'browse' }
   | { readonly kind: 'confirm'; readonly seed: PairingSeed }
   | { readonly kind: 'pairing'; readonly seed: PairingSeed }
-  | { readonly kind: 'paired'; readonly path: DaemonPath }
+  | { readonly kind: 'paired'; readonly path: DaemonPath; readonly connection?: DaemonConnection }
   | { readonly kind: 'failed'; readonly message: string; readonly cause: PairingFailureCause };
 
 /**
@@ -177,6 +192,8 @@ export function PairingScreen({
   embedded = false,
   defaultName = browserDeviceName,
   onStatedFailure,
+  passkeyClient,
+  passkeyOffer,
   sameMachine = pageIsLocal(),
 }: PairingScreenProps) {
   const [stage, setStage] = useState<Stage>(() => initialStage(arrival));
@@ -233,6 +250,7 @@ export function PairingScreen({
       setStage({
         kind: 'paired',
         path: describeDaemonPath({ address: seed.daemonUrl, name: as?.machine, via: as?.via, sameMachine }),
+        ...(as?.connection === undefined ? {} : { connection: as.connection }),
       });
     } catch (reason) {
       setStage({
@@ -263,6 +281,8 @@ export function PairingScreen({
         paired={connections.length > 0}
         embedded={embedded}
         sameMachine={sameMachine}
+        passkeyClient={passkeyClient}
+        passkeyOffer={passkeyOffer}
       />
     );
   }
@@ -523,6 +543,8 @@ interface PairingFocusProps {
   readonly paired: boolean;
   readonly embedded: boolean;
   readonly sameMachine: boolean;
+  readonly passkeyClient: FirstPasskeyClientFactory | undefined;
+  readonly passkeyOffer: PairingScreenProps['passkeyOffer'];
 }
 
 /**
@@ -541,6 +563,8 @@ function PairingFocus({
   deviceName,
   onDeviceName,
   sameMachine,
+  passkeyClient,
+  passkeyOffer,
 }: PairingFocusProps) {
   // Whether the name is being edited. Above every early return: hooks run in the same order each render.
   const [renaming, setRenaming] = useState(false);
@@ -571,6 +595,9 @@ function PairingFocus({
           <p className="m-0 text-ui leading-base text-muted" role="status">
             Paired with <span className="font-semibold text-fg">{stage.path.title}</span>, {stage.path.path}.
           </p>
+          {stage.connection === undefined || passkeyClient === undefined ? null : (
+            <FirstPasskeyOffer {...passkeyOffer} connection={stage.connection} createClient={passkeyClient} />
+          )}
         </div>
       </PairingFrame>
     );

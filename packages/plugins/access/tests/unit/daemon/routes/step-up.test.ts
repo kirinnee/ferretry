@@ -350,3 +350,50 @@ describe('re-opening a passkey window', () => {
     ]);
   });
 });
+
+describe('U-P: the passkey routes decide who may add a passkey from who ARRIVED, never from the request', () => {
+  it('UP-R1 should tell a paired device its own name, and tell an unpaired caller nothing — at the machine or off it', async () => {
+    // Arrange
+    const world = machine();
+
+    // Act
+    const own = await world.ask('GET /v1/passkeys', {}, { device: phone });
+    const onHost = await world.ask('GET /v1/passkeys', {}, { host: true });
+    const offHost = await world.ask('GET /v1/passkeys', {}, {});
+
+    // Assert
+    should(jsonBody(own)).have.property('deviceName', 'Phone');
+    refusedAs(onHost, 400, stepUpRefusalCode('not-a-device'));
+    refusedAs(offHost, 400, stepUpRefusalCode('not-a-device'));
+  });
+
+  it('UP-R2 should issue no registration options, and spend no randomness, for an unpaired caller', async () => {
+    // Arrange
+    const world = machine();
+
+    // Act
+    const unpaired = await world.ask('POST /v1/passkeys/options', { origin: ORIGIN }, {});
+    const onHost = await world.ask('POST /v1/passkeys/options', { origin: ORIGIN }, { host: true });
+
+    // Assert
+    refusedAs(unpaired, 400, stepUpRefusalCode('not-a-device'));
+    refusedAs(onHost, 400, stepUpRefusalCode('not-a-device'));
+    should(world.draws).deepEqual([]);
+  });
+
+  it('UP-R3 should let ONLY the host open a window, and only for the device it names: the phone is refused until then, the laptop never', async () => {
+    // Arrange
+    const world = machine();
+
+    // Act
+    const opened = await world.ask('POST /v1/passkeys/registration-window', { deviceId: phoneId }, { host: true });
+    const laptopView = await world.ask('GET /v1/passkeys', {}, { device: laptop });
+    const phoneView = await world.ask('GET /v1/passkeys', {}, { device: phone });
+
+    // Assert — the phone's window is `reopened` (and, holding a passkey, would skip the confirmation: the owner's call);
+    // the laptop's is untouched
+    should(opened.status).equal(200);
+    should(jsonBody(phoneView)).have.property('registration', 'reopened');
+    should(jsonBody(laptopView)).have.property('registration', 'confirm-existing');
+  });
+});

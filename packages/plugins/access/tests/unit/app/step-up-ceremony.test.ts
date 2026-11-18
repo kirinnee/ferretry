@@ -14,6 +14,7 @@ import {
   browserCredentials,
   describeStepUpFailure,
   firstPasskeyOffer,
+  ownerCommandOffer,
   unlockCeremony,
   stepUpCeremony,
 } from '../../../app/lib/step-up-ceremony.ts';
@@ -379,6 +380,52 @@ describe('running the presence ceremony', () => {
     should(await offer([], 'reopened')).be.true();
     should(await offer([], 'closed')).be.false();
     should(await offer(held, 'confirm-existing')).be.false();
+  });
+
+  it('U-P should offer the owner command only while this device has no passkey AND no window, naming the device', async () => {
+    const offer = async (passkeys: unknown[], registration: string, deviceName?: string) =>
+      await ownerCommandOffer(async () => ({
+        request: async <T>(_path: string, schema: z.ZodType<T>): Promise<T> =>
+          schema.parse({ passkeys, registration, ...(deviceName === undefined ? {} : { deviceName }) }),
+      }))(daemon);
+    const held = [{ id: 'aabb', createdAt: INSTANT, origin: ORIGIN }];
+
+    should(await offer([], 'closed', 'Liftoff Browser')).equal("fy passkey window 'Liftoff Browser'");
+    // An older machine sends no name: the device's id stands in, which `fy` accepts too.
+    should(await offer([], 'closed')).equal('fy passkey window device-one');
+    should(await offer([], 'first-window', 'Liftoff Browser')).be.undefined();
+    should(await offer([], 'reopened', 'Liftoff Browser')).be.undefined();
+    should(await offer(held, 'confirm-existing', 'Liftoff Browser')).be.undefined();
+  });
+
+  it('U-P should print the client program the machine says it runs (fy5 on a preview), never a bare fy', async () => {
+    const offer = async (clientName?: string) =>
+      await ownerCommandOffer(async () => ({
+        request: async <T>(_path: string, schema: z.ZodType<T>): Promise<T> =>
+          schema.parse({
+            passkeys: [],
+            registration: 'closed',
+            deviceName: 'Liftoff Browser',
+            ...(clientName === undefined ? {} : { clientName }),
+          }),
+      }))(daemon);
+
+    should(await offer('fy5')).equal("fy5 passkey window 'Liftoff Browser'");
+    should(await offer()).equal("fy passkey window 'Liftoff Browser'");
+  });
+
+  it('U-P should answer a closed window with the command already on screen, and keep the old sentence when none is', () => {
+    const describe = describeStepUpFailure(ORIGIN);
+    const closed = new FyHttpError('closed', 403, 'step_up_registration_closed');
+
+    should(describe(closed, { ownerCommand: "fy passkey window 'Phone'" })).equal(
+      "No passkey window is open for this device yet. Run `fy passkey window 'Phone'` on the machine, then try again.",
+    );
+    should(describe(closed)).equal(passkeySentence('no-passkey', ORIGIN));
+    // A different failure is never rewritten by the hint.
+    should(describe(new FyHttpError('x', 401, 'step_up_not_verified'), { ownerCommand: 'fy passkey window x' })).equal(
+      'That passkey confirmation did not check out. Try again.',
+    );
   });
 
   it('should use the presence routes, never the step-up ones', async () => {

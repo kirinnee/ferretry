@@ -78,6 +78,8 @@ export function fixture(
     deviceName?: string;
     /** This machine's name as pairing knows it; `studio` otherwise. */
     machineName?: string;
+    /** The client program this machine runs (`binaries.client`); absent wires none, as an older machine does. */
+    clientName?: string;
     /** Where unlocks are kept across a restart; absent keeps them in memory only. */
     unlocks?: UnlockLedgerPort;
     /** Told after a device is forgotten with its passkeys; absent tells nobody. */
@@ -125,6 +127,7 @@ export function fixture(
     allowedOrigins: () => options.origins ?? [ORIGIN, OTHER_ORIGIN],
     relyingPartyName: 'Ferretry',
     machineName: options.machineName ?? 'studio',
+    ...(options.clientName === undefined ? {} : { clientName: options.clientName }),
     ...(options.withSettings === true || options.settings !== undefined
       ? { settings: () => ({ ...DEFAULT_SECURITY_SETTINGS, ...options.settings }) }
       : {}),

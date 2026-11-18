@@ -145,6 +145,7 @@ describe('StepUpService', () => {
         ok: true,
         value: {
           passkeys: [],
+          deviceName: 'Phone',
           registration: 'first-window',
           registrationClosesAt: new Date(PAIRED_AT_MS + PASSKEY_REGISTRATION_WINDOW_SECONDS * 1_000).toISOString(),
         },
@@ -160,7 +161,7 @@ describe('StepUpService', () => {
       const options = await service.registrationOptions(remote(), ORIGIN);
 
       // Assert
-      should(view).eql({ ok: true, value: { passkeys: [], registration: 'closed' } });
+      should(view).eql({ ok: true, value: { passkeys: [], deviceName: 'Phone', registration: 'closed' } });
       should(options).eql({ ok: false, refusal: 'registration-closed' });
     });
 
@@ -359,7 +360,10 @@ describe('StepUpService', () => {
       should(byBrowser).eql({ ok: false, refusal: 'not-at-machine' });
       should(byOwner).eql({ ok: true, value: { deviceId: phone.deviceId, deviceName: 'Phone', closesAt } });
       should(unknown).eql({ ok: false, refusal: 'unknown-device' });
-      should(view).eql({ ok: true, value: { passkeys: [], registration: 'reopened', registrationClosesAt: closesAt } });
+      should(view).eql({
+        ok: true,
+        value: { passkeys: [], deviceName: 'Phone', registration: 'reopened', registrationClosesAt: closesAt },
+      });
       should(added.ok).be.true();
       should(afterwards.ok && afterwards.value.registration).equal('confirm-existing');
       should(audited).eql([
@@ -2263,5 +2267,136 @@ describe('StepUpService stored proofs (approve-sign-in-rule: a derived challenge
         ['Error: rules could not be read', 'device-forgotten'],
       ]);
     });
+  });
+});
+
+describe('U-P: a freshly paired FIRST device adds its passkey, and nobody else can add one outside a window', () => {
+  const DAY = 86_400_000;
+  const TEN_MINUTES = PASSKEY_REGISTRATION_WINDOW_SECONDS * 1_000;
+
+  it('UP-1 should let the first paired device add its passkey inside the ten minutes after pairing, with no other device', async () => {
+    // Arrange — the only paired device, one minute after pairing
+    const { service, store } = fixture();
+
+    // Act
+    const view = await service.view(remote());
+    const added = await enrol(service, await es256Authenticator());
+
+    // Assert
+    should(view.ok && view.value.registration).equal('first-window');
+    should(view.ok && view.value.deviceName).equal('Phone');
+    should(added.ok).be.true();
+    should(store.rows.map(row => row.deviceId)).eql([phone.deviceId]);
+  });
+
+  it('UP-2 should refuse a device with no passkey and no window at view, options and registration, and store nothing', async () => {
+    // Arrange — paired a day ago; the owner has opened nothing
+    const { service, store, audited } = fixture({ nowMs: PAIRED_AT_MS + DAY });
+
+    // Act
+    const view = await service.view(remote());
+    const options = await service.registrationOptions(remote(), ORIGIN);
+    const added = await service.register(remote(), await registrationBody(await es256Authenticator()));
+
+    // Assert — the view still names the device, so the screen can print the owner's exact command
+    should(view).eql({ ok: true, value: { passkeys: [], deviceName: 'Phone', registration: 'closed' } });
+    should(options).eql({ ok: false, refusal: 'registration-closed' });
+    should(added).eql({ ok: false, refusal: 'registration-closed' });
+    should(store.rows).eql([]);
+    should(audited).eql([]);
+  });
+
+  it('UP-2b should tell the device which client program this machine runs, so the printed command reaches THIS daemon', async () => {
+    // Arrange — a preview machine whose client is `fy5`, and an older one that names none
+    const preview = fixture({ nowMs: PAIRED_AT_MS + DAY, clientName: 'fy5' });
+    const older = fixture({ nowMs: PAIRED_AT_MS + DAY });
+
+    // Act
+    const named = await preview.service.view(remote());
+    const unnamed = await older.service.view(remote());
+
+    // Assert
+    should(named).eql({
+      ok: true,
+      value: { passkeys: [], deviceName: 'Phone', clientName: 'fy5', registration: 'closed' },
+    });
+    should(unnamed.ok && unnamed.value.clientName).be.undefined();
+  });
+
+  it('UP-3 should refuse a caller that is not a paired device, whether or not it is on the host, and open nothing for it', async () => {
+    // Arrange
+    const { service, store, audited } = fixture({ nowMs: PAIRED_AT_MS + DAY });
+    const authenticator = await es256Authenticator();
+    const strangers: StepUpCaller[] = [{ hostLocal: false }, { hostLocal: true }];
+
+    for (const stranger of strangers) {
+      // Act
+      const outcomes = [
+        await service.view(stranger),
+        await service.registrationOptions(stranger, ORIGIN),
+        await service.register(stranger, await registrationBody(authenticator)),
+      ];
+
+      // Assert
+      should(outcomes).eql(outcomes.map(() => ({ ok: false, refusal: 'not-a-device' })));
+    }
+    should(await service.reopenRegistration({ hostLocal: false }, phone.deviceId)).eql({
+      ok: false,
+      refusal: 'not-at-machine',
+    });
+    should(store.rows).eql([]);
+    should(audited).eql([]);
+  });
+
+  it('UP-4 should bind a window the owner opened to ONE device: another device is still refused', async () => {
+    // Arrange — both devices paired a day ago, the owner opens the LAPTOP's window
+    const { service, store } = fixture({ nowMs: PAIRED_AT_MS + DAY });
+    await service.reopenRegistration({ hostLocal: true, actor: 'admin-cli' }, laptop.deviceId);
+
+    // Act
+    const phoneView = await service.view(remote());
+    const phoneOptions = await service.registrationOptions(remote(), ORIGIN);
+    const phoneAdded = await service.register(remote(), await registrationBody(await es256Authenticator()));
+    const laptopView = await service.view(remote(laptop));
+
+    // Assert
+    should(phoneView.ok && phoneView.value.registration).equal('closed');
+    should(phoneOptions).eql({ ok: false, refusal: 'registration-closed' });
+    should(phoneAdded).eql({ ok: false, refusal: 'registration-closed' });
+    should(laptopView.ok && laptopView.value.registration).equal('reopened');
+    should(store.rows).eql([]);
+  });
+
+  it('UP-5 should refuse at registration a passkey whose window expired between the options and the answer', async () => {
+    // Arrange — the owner opens the phone's window; options are issued with a minute to spare
+    const { clock, service, store } = fixture({ nowMs: PAIRED_AT_MS + DAY });
+    await service.reopenRegistration({ hostLocal: true }, phone.deviceId);
+    clock.now += TEN_MINUTES - 60_000;
+    const options = await service.registrationOptions(remote(), ORIGIN);
+    clock.now += 60_000;
+
+    // Act
+    const added = await service.register(remote(), await registrationBody(await es256Authenticator()));
+    const view = await service.view(remote());
+
+    // Assert
+    should(options.ok).be.true();
+    should(added).eql({ ok: false, refusal: 'registration-closed' });
+    should(view.ok && view.value.registration).equal('closed');
+    should(store.rows).eql([]);
+  });
+
+  it('UP-6 should spend an owner-opened window on one passkey: the next add needs a confirmation, not another window', async () => {
+    // Arrange
+    const { service } = fixture({ nowMs: PAIRED_AT_MS + DAY });
+    await service.reopenRegistration({ hostLocal: true }, phone.deviceId);
+
+    // Act
+    const first = await enrol(service, await es256Authenticator());
+    const after = await service.view(remote());
+
+    // Assert
+    should(first.ok).be.true();
+    should(after.ok && after.value.registration).equal('confirm-existing');
   });
 });

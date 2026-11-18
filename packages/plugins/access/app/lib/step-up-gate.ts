@@ -67,6 +67,11 @@ export interface StepUpPrompt {
    * open). The prompt then leads with setting one up, which its button does before it unlocks.
    */
   readonly firstPasskey?: boolean;
+  /**
+   * This device has no passkey and no window to add one, so only the owner at the machine can get it in: the exact
+   * command they run there, with this device's own name in it. Read once when the prompt opens.
+   */
+  readonly ownerCommand?: string;
 }
 
 /**
@@ -79,8 +84,11 @@ export type PromptOrigin = 'explicit' | 'background';
 export interface StepUpGateDependencies {
   /** Runs the whole ceremony for one machine: options, the passkey sheet, and the daemon's verdict. */
   readonly ceremony: (daemon: DaemonConnection, act?: StepUpAct, subject?: StepUpSubject) => Promise<void>;
-  /** The sentence a person is shown for a ceremony that failed. Never a raw exception. */
-  readonly describe: (reason: unknown) => string;
+  /**
+   * The sentence a person is shown for a ceremony that failed. Never a raw exception. `hints` carries what the prompt
+   * already shows, so a sentence never contradicts or repeats the screen it lands on.
+   */
+  readonly describe: (reason: unknown, hints?: { readonly ownerCommand?: string }) => string;
   /**
    * What a confirmation on this machine buys, read ONCE when its prompt opens. A read that fails says
    * nothing: the prompt keeps the words it already has, and a confirmation never waits on it.
@@ -91,6 +99,8 @@ export interface StepUpGateDependencies {
    * the prompt opens, like {@link scope}; a read that fails says nothing.
    */
   readonly firstPasskey?: (daemon: DaemonConnection) => Promise<boolean>;
+  /** The owner's command when this device cannot add a passkey by itself, else nothing. Read once, like {@link firstPasskey}. */
+  readonly ownerCommand?: (daemon: DaemonConnection) => Promise<string | undefined>;
 }
 
 interface Waiting {
@@ -228,7 +238,11 @@ export class StepUpGate {
       const proof = this.#soleProof(prompt.daemon.daemonId);
       await this.deps.ceremony(prompt.daemon, proof?.act, proof?.subject);
     } catch (reason) {
-      this.#set({ ...kept, busy: false, failure: this.deps.describe(reason) });
+      this.#set({
+        ...kept,
+        busy: false,
+        failure: this.deps.describe(reason, kept.ownerCommand === undefined ? {} : { ownerCommand: kept.ownerCommand }),
+      });
       return;
     }
     this.#settle(prompt.daemon.daemonId, true);
@@ -295,10 +309,16 @@ export class StepUpGate {
         firstPasskey => this.#adopt(waiting, { firstPasskey }),
         () => undefined,
       );
+    const owner = this.deps.ownerCommand;
+    if (owner !== undefined)
+      void owner(waiting.daemon).then(
+        ownerCommand => (ownerCommand === undefined ? undefined : this.#adopt(waiting, { ownerCommand })),
+        () => undefined,
+      );
   }
 
   /** What the machine said about this prompt, if its prompt is still the one on screen. */
-  #adopt(waiting: Waiting, said: Pick<StepUpPrompt, 'scope' | 'firstPasskey'>): void {
+  #adopt(waiting: Waiting, said: Pick<StepUpPrompt, 'scope' | 'firstPasskey' | 'ownerCommand'>): void {
     const prompt = this.#prompt;
     if (prompt?.daemon.daemonId !== waiting.daemon.daemonId || this.#waiting.get(waiting.daemon.daemonId) !== waiting)
       return;

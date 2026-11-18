@@ -16,6 +16,7 @@ import {
   PasskeyCeremonyError,
   passkeySentence,
 } from '@ferretry/app';
+import { passkeyWindowCommand, stillClosedSentence } from './passkey-panel.ts';
 import {
   fetchPasskeys,
   passkeyRegistrationOptions,
@@ -75,6 +76,25 @@ export const firstPasskeyOffer =
   };
 
 /**
+ * The exact command the owner runs at the machine, when this device has NO passkey and NO window to add one — the
+ * only state a person cannot get out of on their own. Anything else (a passkey held, a window open, a read that
+ * failed) answers nothing, and the prompt keeps its ordinary words.
+ *
+ * Nothing here opens or widens a window: it only reads this device's own view and prints a line for the owner.
+ */
+export const ownerCommandOffer =
+  (client: (daemon: DaemonConnection) => Promise<StepUpClient>) =>
+  async (daemon: DaemonConnection): Promise<string | undefined> => {
+    const view = await fetchPasskeys(await client(daemon));
+    if (view.passkeys.length > 0 || view.registration !== 'closed') return undefined;
+    return passkeyWindowCommand({
+      ...(view.deviceName === undefined ? {} : { name: view.deviceName }),
+      id: daemon.deviceId,
+      ...(view.clientName === undefined ? {} : { clientName: view.clientName }),
+    });
+  };
+
+/**
  * Add a passkey in ONE ceremony. A device that already holds a passkey must first answer the options'
  * `confirm` with it (an assertion), then create the new one; the registration carries that assertion so
  * the daemon can bind the two. A first passkey carries no `confirm` and so asks for no assertion.
@@ -99,7 +119,13 @@ const refusalWith = (reason: unknown, refusal: StepUpRefusal): boolean =>
 /** The one sentence for a failed ceremony. */
 export const describeStepUpFailure =
   (origin: string) =>
-  (reason: unknown): string => {
+  (reason: unknown, hints: { readonly ownerCommand?: string } = {}): string => {
+    // With the owner's command already on screen, a closed window is answered by that command, not by a placeholder.
+    if (
+      hints.ownerCommand !== undefined &&
+      (refusalWith(reason, 'no-passkey') || refusalWith(reason, 'registration-closed'))
+    )
+      return stillClosedSentence(hints.ownerCommand);
     if (reason instanceof PasskeyCeremonyError) return passkeySentence(reason.kind, origin);
     if (refusalWith(reason, 'no-passkey') || refusalWith(reason, 'registration-closed'))
       return passkeySentence('no-passkey', origin);

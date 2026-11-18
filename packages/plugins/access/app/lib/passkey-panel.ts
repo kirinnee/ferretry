@@ -32,11 +32,54 @@ export const unsupportedSentence = (origin: string): string =>
 export const confirmExistingSentence = (machine: string): string =>
   `Adding a passkey for ${machine} asks you to confirm with a passkey this device already holds first.`;
 
-/** Why no passkey can be added right now, per the registration rule. */
-export const registrationClosedSentence = (hasPasskeys: boolean): string =>
+/** One shell-safe word: the only shape of client name this screen will paste into a command. */
+const SAFE_CLIENT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+
+const PASSKEY_WINDOW_PLACEHOLDER = 'fy passkey window <this device>';
+
+/**
+ * The exact command the owner runs AT THE MACHINE to open this device's passkey window (`docs/pairing.md`).
+ *
+ * A device's name is text the DEVICE chose, and this string is made to be pasted into a shell, so the name is
+ * always one single-quoted word (a `'` becomes `'\''`), and a name with a control character, a newline or a leading
+ * `-` (which the client would read as an option) is not printed at all: the device's id, which is a fixed-shape token,
+ * stands in. The client accepts either.
+ *
+ * The program is the one THIS machine says it runs (`clientName`: `fy5` on a preview): a bare `fy` would reach whatever
+ * other daemon the owner's `fy` points at. `fy` is said only by a machine that named none (an older one).
+ */
+export function passkeyWindowCommand(device: {
+  readonly name?: string;
+  readonly id: string;
+  readonly clientName?: string;
+}): string {
+  const name = device.name?.trim();
+  const printable =
+    name !== undefined && name !== '' && !name.startsWith('-') && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(name);
+  const who = printable ? `'${name.replaceAll("'", "'\\''")}'` : device.id;
+  const client = device.clientName !== undefined && SAFE_CLIENT_NAME.test(device.clientName) ? device.clientName : 'fy';
+  return `${client} passkey window ${who}`;
+}
+
+/** Why no passkey can be added right now, per the registration rule; `command` is the exact line for the owner when known. */
+export const registrationClosedSentence = (
+  hasPasskeys: boolean,
+  command: string = PASSKEY_WINDOW_PLACEHOLDER,
+): string =>
   hasPasskeys
-    ? 'This device cannot add another passkey right now: ask the owner to run `fy passkey window <this device>` at the machine.'
-    : 'A first passkey can be added only within 10 minutes of pairing: add one from a device that already has access, or ask the owner to run `fy passkey window <this device>` at the machine.';
+    ? `This device cannot add another passkey right now: ask the owner to run \`${command}\` at the machine.`
+    : `A first passkey can be added only within 10 minutes of pairing: add one from a device that already has access, or ask the owner to run \`${command}\` at the machine.`;
+
+/** The plain sentence a device with no passkey and no open window is told, with the command shown beside it. */
+export const NO_WINDOW_SENTENCE = 'No window is open to add one. On the machine itself, run this:';
+
+/** What to do once the owner has run it. */
+export const AFTER_WINDOW_SENTENCE =
+  'Then press Add a passkey. The window stays open for 10 minutes and takes one passkey.';
+
+/** The failure line for a press that met a closed window while the command is on screen. */
+export const stillClosedSentence = (command: string): string =>
+  `No passkey window is open for this device yet. Run \`${command}\` on the machine, then try again.`;
 
 /** When an open registration window closes, in one sentence, or `null` when the machine named no end. */
 export function registrationClosesSentence(closesAt: string | undefined): string | null {
@@ -44,6 +87,20 @@ export function registrationClosesSentence(closesAt: string | undefined): string
   const closes = new Date(closesAt);
   if (Number.isNaN(closes.getTime())) return null;
   return `You can add a passkey until ${closes.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}.`;
+}
+
+/**
+ * How long an open registration window has left, as a short phrase ("7 minutes left"), or `null` when the machine named
+ * no end, the end is not a time, or it has passed. Rounded UP: a window with 61 s left says 2 minutes, never a
+ * false "closed", and under a minute says so.
+ */
+export function registrationMinutesLeft(closesAt: string | undefined, nowMs: number): string | null {
+  if (closesAt === undefined) return null;
+  const closes = new Date(closesAt).getTime();
+  if (Number.isNaN(closes) || closes <= nowMs) return null;
+  const minutes = Math.ceil((closes - nowMs) / 60_000);
+  if (minutes <= 1) return 'less than a minute left';
+  return `${minutes} minutes left`;
 }
 
 const REFUSAL_SENTENCES: Readonly<Record<StepUpRefusal, (origin: string) => string>> = {
