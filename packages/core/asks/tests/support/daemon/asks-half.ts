@@ -40,6 +40,19 @@ export const EVERY_FERRET: AgendaFerretsContext = {
   all: async () => [],
 };
 
+/**
+ * The fixed clock never fires a timer by itself, so its `sleep(0)` (the turn the daemon gives the event loop between
+ * agenda version archives) would wait for an `advance` no handler test makes: a close of several items at once hung for
+ * ever. A zero sleep is one real turn; any other keeps the clock's own timer.
+ */
+const withZeroSleepTurn = (clock: DrivenClock): DrivenClock => ({
+  ...clock,
+  sleep: async (delay, signal) => {
+    if (delay > 0) return await clock.sleep(delay, signal);
+    await new Promise<void>(resolve => setImmediate(resolve));
+  },
+});
+
 /** What a handler answered, as a client reads it. */
 export interface Answered {
   readonly status: number;
@@ -71,7 +84,7 @@ export async function asksHalf(
   } = {},
 ) {
   const home = options.home ?? (await mkdtemp(join(tmpdir(), 'asks-half-')));
-  const clock = options.clock ?? fixedClock();
+  const clock = options.clock ?? withZeroSleepTurn(fixedClock());
   const hooks = {
     provider: (hook: { readonly name: string }, key: string) => {
       const name = `${hook.name}:${key}`;
