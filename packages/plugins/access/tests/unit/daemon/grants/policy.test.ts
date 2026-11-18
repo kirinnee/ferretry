@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { GRANT_REFUSALS } from '@ferretry/core-gate/contract';
+import { GRANT_REFUSALS, type GrantDecision } from '@ferretry/core-gate/contract';
 import should from 'should';
 import {
   applyGrantPatch,
@@ -26,6 +26,9 @@ import {
   type GrantRefusal,
 } from '../../../../daemon/lib/wire.ts';
 import { request } from '../../../support/daemon/call.ts';
+
+/** A decision's single-use mark: only an allowed act that leaned on a step-up carries it. */
+const steppedUpOf = (decision: GrantDecision): true | undefined => decision.steppedUp;
 
 /** A demand as a route declares one: the capability's name as Gate's policy ref. */
 const demandOf = (capability: DaemonCapability, axis: CapabilityAxis, narrowing?: true): CapabilityDemand => ({
@@ -255,10 +258,10 @@ describe('the per-capability decision matrix', () => {
         for (const stepUp of [true, false]) {
           const demand = demandOf(capability, axis);
           const needs = NEEDS_STEP_UP[capability][axis];
-          should(decideCapability(demand, evaluation({ stepUp })).steppedUp === true).equal(needs && stepUp);
-          should(decideCapability(demand, evaluation({ stepUp, governed: false })).steppedUp).be.undefined();
-          should(decideCapability(demand, evaluation({ stepUp, grants: undefined })).steppedUp).be.undefined();
-          should(decideCapability(demand, evaluation({ stepUp, grants: SHUT })).steppedUp).be.undefined();
+          should(steppedUpOf(decideCapability(demand, evaluation({ stepUp }))) === true).equal(needs && stepUp);
+          should(steppedUpOf(decideCapability(demand, evaluation({ stepUp, governed: false })))).be.undefined();
+          should(steppedUpOf(decideCapability(demand, evaluation({ stepUp, grants: undefined })))).be.undefined();
+          should(steppedUpOf(decideCapability(demand, evaluation({ stepUp, grants: SHUT })))).be.undefined();
         }
       }
     }

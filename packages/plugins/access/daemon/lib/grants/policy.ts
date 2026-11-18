@@ -8,8 +8,7 @@ import {
   type GrantsPatch,
   nameOf,
 } from '../wire.ts';
-import type { CapabilityDemand, GrantDecision } from '../wire.ts';
-import type { EnforcedGrants } from './types.ts';
+import type { CapabilityDemand } from '../wire.ts';
 
 /**
  * The product's answers when an operator has not given their own.
@@ -77,101 +76,8 @@ export function isGovernedCaller(arrival: CallerArrival): boolean {
   return !arrival.loopback;
 }
 
-/**
- * The demands that need a passkey step-up from a governed caller even when the axis is granted.
- *
- * Every `configure`, and the `use` of the capabilities whose ordinary use already reaches past the
- * daemon — except a {@link CapabilityDemand.narrowing} route's, which only takes away and asks the grant alone: `terminal` is arbitrary code on the host, `browser` drives a browser the operator is signed
- * into, `pairing` hands out credentials for the machine, and `sharing` publishes its material to people
- * who are not its devices. Every other `use` — watching
- * sessions, reading the fleet, the filesystem view, the warden — is ordinary operation and needs
- * nothing beyond the grant.
- */
-export function demandNeedsStepUp(demand: CapabilityDemand): boolean {
-  if (demand.narrowing === true) return false;
-  if (demand.axis === 'configure') return true;
-  return STEP_UP_USE_CAPABILITIES.has(nameOf(demand.capability));
-}
-
-/**
- * `secrets.use` is here because it RUNS A COMMAND — the value goes into a child's environment — so it is
- * code execution on the host exactly as a terminal is (`docs/design/zero-trust.md` B1).
- *
- * `sharing.use` is here because it makes this machine VOUCH for something: an export is signed with the
- * daemon identity and handed to people outside it (`docs/grants.md`, capability eight).
- */
-const STEP_UP_USE_CAPABILITIES: ReadonlySet<DaemonCapability> = new Set([
-  'terminal',
-  'browser',
-  'pairing',
-  'secrets',
-  'sharing',
-]);
-
-/** Everything the per-request decision reads, gathered so none of it comes from a global. */
-export interface GrantEvaluation {
-  readonly grants: EnforcedGrants;
-  /** Whether the operator's grants apply to this caller at all. See {@link isGovernedCaller}. */
-  readonly governed: boolean;
-  /**
-   * Whether the request ARRIVED on this host — the locality fact that decides whether a capability can
-   * ever be turned back ON. Today it is exactly `!governed`; it is kept as its own field so widening
-   * reads the fact it means rather than a rule it would have to restate.
-   */
-  readonly hostLocal: boolean;
-  /** Whether this caller's proven device holds a live passkey step-up for this app session. */
-  readonly stepUp: boolean;
-  /**
-   * What the caller's OWN paired device has been granted, for a governed device caller.
-   *
-   * `undefined` for a caller that is not a paired device (a remote warden) — no device narrowing then
-   * applies, because there is no device record to narrow by — and for an ungoverned caller, which nothing
-   * narrows. `null` is a device the session proved but whose record is gone: it is refused, never treated
-   * as unnarrowed.
-   */
-  readonly device?: CapabilityGrants | null;
-}
-
-/**
- * The one decision, and the only place authority is ever removed.
- *
- * IT NEVER GRANTS. Every branch either keeps the answer the route's scope check already produced —
- * because this caller is ungoverned, or because the operator said yes — or removes it. There is
- * deliberately no input that turns a refused route into a served one, which is what makes "a grant
- * can only narrow" a property of the code rather than a promise in a document.
- *
- * `configure` IMPLIES `use`. A capability the UI may not exercise but may reconfigure is incoherent:
- * it would let a browser change how a shell spawns on the host while being unable to open one.
- */
-export function decideCapability(demand: CapabilityDemand, evaluation: GrantEvaluation): GrantDecision {
-  if (!evaluation.governed) return { allowed: true, refusal: 'granted' };
-  const grants = evaluation.grants;
-  // Not "assume the benign reading": a daemon that cannot say what it is enforcing enforces nothing.
-  // Permissive defaults settle what SILENCE means, never what damage means.
-  if (grants === undefined) return { allowed: false, refusal: 'undetermined' };
-  const grant = grants[nameOf(demand.capability)];
-  if (!grant.use) return { allowed: false, refusal: 'not-granted' };
-  if (demand.axis === 'configure' && !grant.configure) return { allowed: false, refusal: 'not-granted' };
-  // effective = daemonWide ∧ device. The machine-wide answer is asked first so its remedy, a host
-  // change for everyone, is named before the per-device one.
-  if (evaluation.device === null) return { allowed: false, refusal: 'undetermined' };
-  if (evaluation.device !== undefined) {
-    const own = evaluation.device[nameOf(demand.capability)];
-    if (!own.use || (demand.axis === 'configure' && !own.configure))
-      return { allowed: false, refusal: 'device-not-granted' };
-  }
-  // A narrowing skips the per-act step-up, never the proven device it stood for (secrev-1329b L3): a governed caller
-  // with no device (the admin token off loopback, a remote warden) is refused as it was when it had to step up.
-  if (
-    demand.narrowing === true &&
-    evaluation.device === undefined &&
-    demandNeedsStepUp({ capability: demand.capability, axis: demand.axis })
-  )
-    return { allowed: false, refusal: 'step-up-required' };
-  if (!demandNeedsStepUp(demand)) return { allowed: true, refusal: 'granted' };
-  if (!evaluation.stepUp) return { allowed: false, refusal: 'step-up-required' };
-  return { allowed: true, refusal: 'granted', steppedUp: true };
-}
+// The grant decision itself is Gate's one rule (`@ferretry/core-gate/contract`); Access renders it and keeps no copy.
+export { decideCapability, demandNeedsStepUp, type GrantEvaluation } from '../wire.ts';
 
 /** The capability name as an operator reads it, so a refusal names a thing rather than a key. */
 const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {

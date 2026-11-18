@@ -26,7 +26,10 @@ export {
   DEVICE_ACTOR_PREFIX,
   type EveryCallerStepUpAct,
   FULL_DEVICE_GRANTS,
+  decideCapability,
+  demandNeedsStepUp,
   type GrantDecision,
+  type GrantEvaluation,
   type GrantRefusal,
   grantRefusalCode,
   isReservedActorPhrase,
@@ -48,10 +51,7 @@ export {
   stepUpRefusalCode,
   stepUpSkippableAtMachine,
 } from '@ferretry/core-gate/contract';
-export {
-  type PublishedCarrier as DaemonCarrier,
-  PublishedCarriersSchema,
-} from '@ferretry/plugin-connections/contract';
+export { type PublishedCarrier as DaemonCarrier, PublishedCarriersSchema } from '@ferretry/plugin-connections/contract';
 export { type Instant, instantFromEpochMs } from '@ferretry/std';
 export type { CapabilityGuard } from './grants/types.ts';
 export { parseBody, parseOptionalBody } from './body.ts';

@@ -394,7 +394,9 @@ cost stated below.
   over loopback) is never asked.
 - **The per-act step-up remains as an option** (`stepUpOnActions`, off by default). When the owner turns
   it on, the acts below ask for a passkey again inside an unlock, for `stepUpWindowMinutes`. A machine
-  with the unlock turned off always asks per act.
+  with the unlock turned off asks per act for a `configure` only; a plain `use` (a read included) asks a passkey
+  only when `stepUpOnActions` is on, so a machine with both switches off asks none for it (the device key alone
+  governs, an accepted trade-off).
 
 The acts a per-act step-up covers, when it is asked for:
 
@@ -427,7 +429,7 @@ unlock at once, from the machine or from any other device.
 - **A start that is a terminal in disguise is decided as one** (review R2-H1). `POST /v1/ferrets` with
   harness flags of its own, or with a working directory outside every registered project and the
   managed-worktree root, is a `terminal.use` act: covered by the unlock under the defaults, and asked
-  per act when `stepUpOnActions` is on or the unlock is off — exactly as opening a terminal is. A plain
+  per act when `stepUpOnActions` is on — exactly as opening a terminal is. A plain
   start in a known project asks for nothing more. The prompt names it ("open a terminal").
 
 ### B2. The ceremony, and who verifies it
@@ -444,8 +446,8 @@ challenge is single-use and bound to one device and `appSession`).
   with `credentialId`, `clientDataJSON`, `authenticatorData`, `signature` (B1). The ceremony a device
   meets first, so an overdue device key is replaced here too (B6).
 - Step-up — `POST /v1/step-up/options` and `POST /v1/step-up`, the same shapes on their own challenge,
-  asked only when the machine wants a per-act confirmation inside an unlock (`stepUpOnActions`) or has no
-  unlock at all.
+  asked only when the machine wants a per-act confirmation (`stepUpOnActions`) or a `configure` is made with no
+  unlock held.
 - The daemon checks, in order: the challenge is one it issued to this device and `appSession`,
   unexpired (2 minutes) and unspent, and it is spent now; `clientData.type` is `webauthn.create` /
   `webauthn.get`; `clientData.origin` is the hosted app's origin (`HOSTED_APP_ORIGIN`), the only one the daemon serves; `rpIdHash` equals
@@ -779,7 +781,7 @@ default and hard bounds; a value outside the bounds is refused, never clamped.
 - **Ask again for each change** (`stepUpOnActions`). Off by default, so the unlock covers every act.
   When on, the acts B1 lists ask for a passkey again inside an unlock, and each confirmation lasts
   `stepUpWindowMinutes` for one `appSession` (`0` asks every time). A machine with the unlock turned
-  off always asks per act, whatever this says.
+  off still asks per act for a `configure`, whatever this says, but a plain `use` asks only when this is on.
 - **Device-key rotation.** The `authenticated` and `stream-opened` records carry `rotateBy`. Once it
   has passed, the next passkey ceremony — the unlock, or a step-up — also rotates the key: the browser
   mints a new non-extractable key, the daemon receives `{ deviceKey, proof }` where `proof` is the NEW
@@ -852,7 +854,8 @@ fail-closed path; and the audit record for every change.
   browser is asked, on the host too (B4).
 - **The unlock is the step-up.** `StepUpService.held` — the witness the boundary asks — answers yes for a
   device inside its unlock unless `asksStepUpPerAction` (the owner turned `stepUpOnActions` on, or the
-  unlock off), so every step-up-gated act is served with no further prompt. `spend` never spends an
+  unlock off) — and a plain `use` skips the question unless `stepUpOnActions` is on (`useAsksStepUp`, one rule in Gate) —
+  so every step-up-gated act is served with no further prompt. `spend` never spends an
   unlock. An unlock also records a per-act step-up for its `appSession`, so a machine that asks per act
   does not ask again for the act that follows the unlock at once.
 - **Per-act window.** `StepUpRegistry` reads the window at every question, so a shortened window applies
