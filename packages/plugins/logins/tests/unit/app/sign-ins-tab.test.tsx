@@ -65,6 +65,9 @@ describe('the Sign-ins tab', () => {
     const c = view.container;
     expect(c.querySelector('[data-logins-group="claude-code"]')?.textContent).toContain('you@example.com');
     expect(c.querySelector('[data-logins-group="codex"]')?.textContent).toContain('c@x.y');
+    // A narrow card may break the email after its "@" (never inside a word), and the bar sits under its label on a phone.
+    expect(c.querySelector('[data-login-row="claude-you"] wbr')?.previousSibling?.textContent).toBe('you@');
+    expect(c.querySelector('[data-login-usage] [role="img"]')?.className).toContain('basis-full');
     expect(c.textContent).toContain('Ready · Used by 1 runtime');
     expect(c.textContent).toContain('5h12% used');
     await click(c.querySelector('[data-login-row="claude-you"]'), 'the row');

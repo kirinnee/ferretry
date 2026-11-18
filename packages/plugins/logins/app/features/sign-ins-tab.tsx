@@ -51,12 +51,27 @@ import { environmentChip, LoginEnvironmentSection } from './login-environment.ts
 import { LoginSignIn } from './login-sign-in.tsx';
 import { useLocalModels } from './use-local-models.ts';
 
+/** An email that may wrap AFTER its "@" (and nowhere inside a word) when the card is narrow. */
+function breakAtAt(email: string) {
+  const at = email.indexOf('@');
+  return at < 0 ? (
+    email
+  ) : (
+    <>
+      {email.slice(0, at + 1)}
+      <wbr />
+      {email.slice(at + 1)}
+    </>
+  );
+}
+
 /** The columns every meter on a login shares, so the bars start and end in the same place. */
 const METER_LABEL = 'w-12 shrink-0 whitespace-nowrap text-muted';
 // On a phone the words sit beside the label and the bar takes the full width below them; from `sm` all three share a row.
 const METER_ROW = 'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta sm:flex-nowrap';
 const METER_BAR = 'order-last basis-full sm:order-none sm:basis-0';
-const METER_WORDS = 'ml-auto min-w-0 text-right text-muted sm:ml-0 sm:w-48 sm:shrink-0';
+// `basis-0` keeps the words on the label's line on a phone (they wrap inside their share) rather than dropping to a line of their own.
+const METER_WORDS = 'min-w-0 flex-1 basis-0 text-right text-muted sm:flex-none sm:basis-auto sm:w-48 sm:shrink-0';
 
 function UsageBars({ login, now }: { readonly login: LoginView; readonly now: number }) {
   const bars = usageBars(login, now);
@@ -379,8 +394,8 @@ function LoginRow({
         >
           <AccountStatus word={login.status.word} className="mt-1" />
           <span className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="break-all font-mono text-row text-fg sm:truncate">
-              {login.store === 'environment' ? login.id : loginEmail(login)}
+            <span className="break-words font-mono text-row text-fg sm:truncate">
+              {login.store === 'environment' ? login.id : breakAtAt(loginEmail(login))}
             </span>
             <LoginBadges login={login} />
             <span className="text-cell text-muted">
