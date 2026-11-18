@@ -281,5 +281,7 @@ export const FY_RENDER_VISUAL_CASES: Record<string, string> = {
   'mermaid-lr': fence('mermaid', 'How a message travels from the owner to the daemon and back', MERMAID_LEFT_TO_RIGHT),
   'mermaid-tall': fence('mermaid', 'The path of one message through Ferretry', MERMAID_TALL),
   'mermaid-wide': fence('mermaid', 'Every kind of fy-render block', MERMAID_WIDE),
+  /** A 400x3000 picture the scene draws itself (see `fy-render-visual-scene.tsx`): far taller than any window. */
+  'image-tall': 'type: image\nalt: A very tall chart\nsrc: @tall.png\n---\n',
   'mermaid-failure': fence('mermaid', 'A diagram that cannot be drawn', MERMAID_BROKEN),
 };
