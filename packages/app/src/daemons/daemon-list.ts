@@ -54,6 +54,12 @@ export const PairedDaemonSchema = z.strictObject({
   daemon: z.string().min(1).max(128),
   /** What the daemon calls its machine: the owner's name for it, else its host name. The daemon's word, learned again on every read. */
   machine: z.string().min(1).max(128),
+  /**
+   * The POSITIVE mark that `machine` is a name the daemon itself gave on an authenticated read (`learnMachine`), not
+   * only the name its pairing answered with (often the host name). Once set, a re-pair keeps that name instead of
+   * going back to the pairing's, so a name the device has learned is never lost to a read that is refused or slow.
+   */
+  learned: z.literal(true).optional(),
   deviceId: z.string().min(1).max(128),
   address: OriginSchema,
   /**
@@ -155,6 +161,8 @@ export interface PairingInput {
   readonly address: string;
   readonly pairedOver?: 'direct';
   readonly carriers?: readonly unknown[];
+  /** Ask, once this app shows the machine, whether to name it (set by a pairing; never stored, never set by a re-read). */
+  readonly askName?: true;
 }
 
 /** The list, shaped for `useSyncExternalStore`: `snapshot()` is identity-stable between changes. */
@@ -165,6 +173,8 @@ export class DaemonList {
   readonly #listeners = new Set<() => void>();
   readonly #unpaired = new Set<(daemon: string) => void>();
   readonly #caches = new Set<DaemonScopedCache>();
+  /** Machines just paired that may still be asked for a name. In memory only: a reload does not ask again. */
+  readonly #naming = new Set<string>();
   #snapshot: DaemonListSnapshot;
 
   constructor(options: DaemonListOptions) {
@@ -209,9 +219,12 @@ export class DaemonList {
   add(input: PairingInput): PairedDaemon {
     const now = this.#now();
     const existing = this.get(input.daemon);
+    // A name this device learned from the daemon outranks the one a pairing answers with.
+    const kept = existing?.learned === true;
     const record = PairedDaemonSchema.parse({
       daemon: input.daemon,
-      machine: input.machine,
+      machine: kept ? existing.machine : input.machine,
+      ...(kept ? { learned: true } : {}),
       deviceId: input.deviceId,
       address: input.address,
       ...(input.pairedOver === 'direct' ? { pairedOver: 'direct' } : {}),
@@ -221,9 +234,10 @@ export class DaemonList {
     });
     for (const cache of this.#caches) cache.clearDaemon(record.daemon);
     const others = this.#snapshot.daemons.filter(entry => entry.daemon !== record.daemon);
-    const kept = [record, ...others].slice(0, MAX_DAEMONS);
+    const retained = [record, ...others].slice(0, MAX_DAEMONS);
     for (const evicted of [record, ...others].slice(MAX_DAEMONS)) this.#gone(evicted.daemon);
-    this.#commit({ daemons: kept, selected: record.daemon });
+    if (input.askName === true) this.#naming.add(record.daemon);
+    this.#commit({ daemons: retained, selected: record.daemon });
     return record;
   }
 
@@ -246,11 +260,24 @@ export class DaemonList {
     this.#replace(daemon, entry => ({ ...entry, carriers: [...carriers].slice(0, 16) }));
   }
 
-  /** The daemon said what its machine is called. */
+  /** The daemon said what its machine is called: kept, marked learned, until the daemon says another name. */
   learnMachine(daemon: string, machine: string): void {
     const name = machine.trim().slice(0, 128);
     if (name.length === 0) return;
-    this.#replace(daemon, entry => (entry.machine === name ? entry : { ...entry, machine: name }));
+    this.#replace(daemon, entry =>
+      entry.machine === name && entry.learned === true ? entry : { ...entry, machine: name, learned: true },
+    );
+  }
+
+  /** Whether a pairing just made asked to offer this machine a name, and that has not been settled yet. */
+  namePending(daemon: string): boolean {
+    return this.#naming.has(daemon);
+  }
+
+  /** The offer to name this machine was answered or skipped: it is not made again. */
+  nameSettled(daemon: string): void {
+    if (!this.#naming.delete(daemon)) return;
+    for (const listener of this.#listeners) listener();
   }
 
   #replace(daemon: string, edit: (entry: PairedDaemon) => PairedDaemon, selected = this.#snapshot.selected): void {
@@ -266,6 +293,7 @@ export class DaemonList {
   }
 
   #gone(daemon: string): void {
+    this.#naming.delete(daemon);
     for (const cache of this.#caches) cache.clearDaemon(daemon);
     let forgotten: void | Promise<void>;
     try {

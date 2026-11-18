@@ -123,3 +123,43 @@ describe('DaemonList', () => {
     ]);
   });
 });
+
+describe('a name the daemon gave is kept', () => {
+  test('a re-pair that answers with the host name keeps the learned name', () => {
+    const list = new DaemonList({ storage: memoryStore(), now: clock() });
+    list.add(pairing('d1', 'ip-10-0-0-7'));
+    list.learnMachine('d1', 'studio');
+    list.add(pairing('d1', 'ip-10-0-0-7'));
+    expect(list.get('d1')?.machine).toBe('studio');
+  });
+
+  test('a pairing that never learned a name takes the one the re-pair answers with', () => {
+    const list = new DaemonList({ storage: memoryStore(), now: clock() });
+    list.add(pairing('d1', 'ip-10-0-0-7'));
+    list.add(pairing('d1', 'renamed'));
+    expect(list.get('d1')?.machine).toBe('renamed');
+  });
+
+  test('the learned name survives a reload and a daemon that says another name replaces it', () => {
+    const storage = memoryStore();
+    const list = new DaemonList({ storage, now: clock() });
+    list.add(pairing('d1', 'ip-10-0-0-7'));
+    list.learnMachine('d1', 'studio');
+    const reloaded = new DaemonList({ storage, now: clock() });
+    expect(reloaded.get('d1')).toMatchObject({ machine: 'studio', learned: true });
+    reloaded.learnMachine('d1', 'lab');
+    expect(reloaded.get('d1')?.machine).toBe('lab');
+  });
+
+  test('the offer to name a machine is made once per pairing that asks, and cleared by unpairing', () => {
+    const list = new DaemonList({ storage: memoryStore(), now: clock() });
+    list.add({ ...pairing('d1'), askName: true });
+    list.add(pairing('d2'));
+    expect([list.namePending('d1'), list.namePending('d2')]).toEqual([true, false]);
+    list.nameSettled('d1');
+    expect(list.namePending('d1')).toBe(false);
+    list.add({ ...pairing('d3'), askName: true });
+    list.remove('d3');
+    expect(list.namePending('d3')).toBe(false);
+  });
+});
