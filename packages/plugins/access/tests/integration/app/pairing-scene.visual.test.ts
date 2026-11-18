@@ -246,7 +246,7 @@ describe('The pair page: mascot and night sky', () => {
       await setHidden(true);
       await tab.waitForSelector('[data-sky][data-paused]');
       const states = await tab.evaluate(() =>
-        [...document.querySelectorAll('[data-sky] *')]
+        [...document.querySelectorAll('[data-sky] *, svg.fy-ferret *')]
           .flatMap(node => node.getAnimations())
           .filter(animation => animation instanceof CSSAnimation)
           .map(animation => animation.playState),

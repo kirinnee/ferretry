@@ -191,7 +191,7 @@
 
 /* ───────── the sky ───────── */
 .fy-sky {
-  --fy-star: color-mix(in srgb, var(--accent) 65%, var(--fg));
+  --fy-star: color-mix(in srgb, var(--accent) 88%, var(--bg));
   --fy-star-peak: 0.75;
   position: absolute;
   inset: 0;
@@ -200,6 +200,10 @@
   pointer-events: none;
   background: radial-gradient(130% 60% at 50% -8%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 72%);
 }
+:root[data-theme$='-dark'] .fy-sky,
+:root[data-theme='dark'] .fy-sky {
+  --fy-star: color-mix(in srgb, var(--accent) 60%, var(--fg));
+}
 .fy-sky[data-celebrating] {
   --fy-star-peak: 0.95;
 }
@@ -207,7 +211,7 @@
   position: absolute;
   inset: 0;
   color: var(--accent);
-  opacity: 0.1;
+  opacity: 0.07;
   /* The grid fades out behind the card, so it is texture at the edges and never behind a line of text. */
   -webkit-mask-image: radial-gradient(ellipse 60% 50% at 50% 45%, transparent 0 30%, #000 90%);
   mask-image: radial-gradient(ellipse 60% 50% at 50% 45%, transparent 0 30%, #000 90%);
@@ -220,7 +224,8 @@
   width: 1.5px;
   height: 1.5px;
   border-radius: 50%;
-  color: color-mix(in srgb, var(--fy-star) 42%, transparent);
+  color: color-mix(in srgb, var(--fy-star) 55%, transparent);
+  opacity: 0.7;
   box-shadow:
     3vw 6vh 0 0 currentColor,
     9vw 22vh 0 0 currentColor,
@@ -252,6 +257,9 @@
     89vw 72vh 0 0 currentColor,
     95vw 90vh 0 0 currentColor,
     1vw 77vh 0 0 currentColor;
+}
+.fy-sky[data-celebrating] .fy-sky-dust {
+  opacity: 1;
 }
 .fy-sky-stars {
   position: absolute;
@@ -326,7 +334,7 @@
     animation: fy-pair-rise 560ms 350ms ease-out both;
   }
 
-  :root:not([data-motion='reduced']) .fy-sky-stars {
+  :root:not([data-motion='reduced']) .fy-sky-dust {
     transition: opacity 600ms ease;
   }
   :root:not([data-motion='reduced']) .fy-sky-star {
@@ -341,10 +349,11 @@
   :root:not([data-motion='reduced']) .fy-sky-streak {
     animation: fy-sky-streak 1500ms 250ms cubic-bezier(0.3, 0.6, 0.4, 1) both;
   }
-  /* A hidden tab keeps nothing running. */
+  /* A hidden tab keeps nothing running: the sky and the mascot both pause. */
   :root:not([data-motion='reduced']) .fy-sky[data-paused] *,
-  :root:not([data-motion='reduced']) .fy-sky[data-paused] *::before {
-    animation-play-state: paused;
+  :root:not([data-motion='reduced']) .fy-ferret[data-paused] * {
+    /* `!important`: the pose rules above are more specific than this one, and a hidden tab must win over all of them. */
+    animation-play-state: paused !important;
   }
 }
 
