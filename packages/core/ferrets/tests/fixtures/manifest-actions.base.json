@@ -657,6 +657,10 @@
           "help": "restart every running ferret"
         },
         {
+          "flag": "--dry-run",
+          "help": "list only; restarts nothing (the same list as `fy restart` with no flag)"
+        },
+        {
           "flag": "--cancel",
           "help": "clear the restarts that are waiting for a ferret to go idle"
         },

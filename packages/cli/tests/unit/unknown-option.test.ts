@@ -1,13 +1,15 @@
 /**
  * The shell refuses an option the resolved verb does not declare, before the verb runs and before any daemon call:
- * `fy restart --outdated --dry-run` used to restart for real because the verb read only the names it knew and the
- * unknown `--dry-run` was dropped. These run the REAL generated registry through `runFy`; the audit of every verb's reads
+ * `fy restart --outdated --bogus` would restart for real if the verb read only the names it knew and dropped the
+ * unknown `--bogus` (`--dry-run` was such a name until `restart` declared it: see the last describe). These run the REAL generated registry through `runFy`; the audit of every verb's reads
  * is `verb-option-audit.test.ts`.
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { registry } from '../../src/generated/commands.ts';
 import { EXIT } from '../../src/lib/errors.ts';
+import type { DaemonReply, SendOptions } from '../../src/lib/client.ts';
+import type { DaemonRequest } from '../../src/lib/request.ts';
 import { runFy } from '../../src/lib/run.ts';
 import { fakeWorld, RecordingTransport } from './fakes.ts';
 
@@ -22,20 +24,20 @@ const refusal = (option: string, verb: string): string =>
   `unknown option ${option} for "${verb}"; see \`fy ${verb} --help\``;
 
 describe('an undeclared option', () => {
-  it('should refuse `restart --outdated --dry-run` with the usage code and make no restart call', async () => {
+  it('should refuse `restart --outdated --bogus` with the usage code and make no restart call', async () => {
     // Act
-    const result = await typed('restart', '--outdated', '--dry-run');
+    const result = await typed('restart', '--outdated', '--bogus');
 
     // Assert
     should(result.code).equal(EXIT.usage);
-    should(result.err).containEql(refusal('--dry-run', 'restart'));
+    should(result.err).containEql(refusal('--bogus', 'restart'));
     should(result.transport.sent).deepEqual([]);
     should(result.connects).deepEqual([]);
   });
 
   it('should refuse it wherever it stands among the options', async () => {
     // Act
-    const result = await typed('restart', '--dry-run', '--outdated');
+    const result = await typed('restart', '--bogus', '--outdated');
 
     // Assert
     should(result.code).equal(EXIT.usage);
@@ -121,10 +123,94 @@ describe('a declared option', () => {
   });
 });
 
+describe('`restart --dry-run`', () => {
+  /** A daemon that answers every call with an empty restart list, and writes down each call it was asked. */
+  class Listing extends RecordingTransport {
+    override async send(request: DaemonRequest, options?: SendOptions): Promise<DaemonReply> {
+      this.sent.push(request);
+      this.options.push(options);
+      return { status: 200, body: { outdated: [], queued: [], cancelled: 0 } };
+    }
+  }
+  const read = [{ method: 'GET', path: '/v1/restarts' }];
+  const dry = async (...argv: string[]) => {
+    const transport = new Listing();
+    const made = fakeWorld({
+      registry,
+      transport,
+      inventory: {
+        protocol: 'x' as never,
+        plugins: [
+          { id: 'kernel', on: true, contract: registry.kernel.contract },
+          ...registry.plugins.map(plugin => ({ id: plugin.id, on: true, contract: plugin.contract })),
+        ],
+      },
+    });
+    const code = await runFy(argv, made.world);
+    return {
+      code,
+      err: made.io.stderr(),
+      out: made.io.stdout(),
+      calls: transport.sent.map(({ method, path }) => ({ method, path })),
+    };
+  };
+
+  it('should only list what is out of date, with or without --outdated: the one read route, no restart', async () => {
+    // Act
+    const bare = await dry('restart');
+    const results = [
+      await dry('restart', '--dry-run'),
+      await dry('restart', '--outdated', '--dry-run'),
+      await dry('restart', '--dry-run', '--outdated'),
+    ];
+
+    // Assert
+    should(bare.calls).deepEqual(read);
+    for (const result of results) {
+      should(result.err).not.containEql('unknown option');
+      should(result.code).equal(EXIT.ok);
+      should(result.out).equal(bare.out);
+      should(result.calls).deepEqual(read);
+    }
+  });
+
+  it('should not restart or clear anything when it stands beside another mode', async () => {
+    // Act
+    const results = await Promise.all([dry('restart', '--all', '--dry-run'), dry('restart', '--cancel', '--dry-run')]);
+
+    // Assert
+    for (const result of results) should(result.calls).deepEqual(read);
+  });
+
+  it('should fail closed: any value but false is a dry run, so `=yes` and `=1` restart nothing', async () => {
+    // Act
+    const results = await Promise.all([
+      dry('restart', '--outdated', '--dry-run=yes'),
+      dry('restart', '--outdated', '--dry-run=1'),
+      dry('restart', '--all', '--dry-run=on'),
+      dry('restart', '--outdated', '--dry-run=true'),
+    ]);
+
+    // Assert
+    for (const result of results) should(result.calls).deepEqual(read);
+  });
+
+  it('should still restart for real when it is switched off outright', async () => {
+    // Act
+    const results = await Promise.all([
+      dry('restart', '--outdated', '--dry-run=false'),
+      dry('restart', '--outdated', '--no-dry-run'),
+    ]);
+
+    // Assert
+    for (const result of results) should(result.calls).not.deepEqual(read);
+  });
+});
+
 describe('the options every verb accepts', () => {
   it('should pass `--help` and `-h` (the help answers before anything runs)', async () => {
     // Act
-    const long = await typed('restart', '--dry-run', '--help');
+    const long = await typed('restart', '--bogus', '--help');
     const short = await typed('ps', '--bogus', '-h');
 
     // Assert

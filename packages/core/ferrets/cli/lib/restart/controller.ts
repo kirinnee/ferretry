@@ -9,6 +9,8 @@ export interface RestartCommandOptions {
   readonly outdated?: boolean;
   readonly all?: boolean;
   readonly cancel?: boolean;
+  /** `--dry-run`: only list what is out of date (what a bare `fy restart` does); restart and clear nothing. */
+  readonly dryRun?: boolean;
   /** `--request-id`: the idempotency key of an explicit retry; the daemon answers a repeat from memory. */
   readonly requestId?: string;
   readonly json?: boolean;
@@ -36,13 +38,13 @@ export class RestartController {
     if (modes > 1)
       throw new SessionCommandError('pass one of: ferret ids, --outdated, --all or --cancel (not a mix)', 2);
 
-    if (options.cancel === true) {
+    if (options.dryRun !== true && options.cancel === true) {
       const cancelled = await this.gateway.cancelRestarts();
       if (json) this.presenter.json(cancelled);
       else this.presenter.lines([`Cleared ${plural(cancelled.cancelled, 'waiting restart')}.`]);
       return;
     }
-    if (modes === 0) {
+    if (modes === 0 || options.dryRun === true) {
       const status = await this.gateway.restartStatus();
       if (json) this.presenter.json(status);
       else this.presenter.lines(renderRestartStatus(status));
