@@ -5,7 +5,7 @@
  */
 
 import type { TaskPlan } from '../../../contract/routes/index.ts';
-import { ConfirmToSee } from '@ferretry/app/ui';
+import { ConfirmToSee, Loading } from '@ferretry/app/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { isStepUpRefusal } from '../../lib/step-up-refusal.ts';
 import {
@@ -173,12 +173,7 @@ export function TaskPlansSurface({ client }: { readonly client: TaskPlanClient }
         </div>
       </section>
     );
-  if (plans === null && error === null)
-    return (
-      <section className="kt-panel p-panel" role="status" aria-label="Loading sign-in plans">
-        <p className="m-0 text-ui text-faint">Reading this daemon’s sign-in plans…</p>
-      </section>
-    );
+  if (plans === null && error === null) return <Loading kind="page" label="Reading this daemon’s sign-in plans…" />;
   return (
     <TaskPlansCard busy={busy} error={error} onRevoke={(plan, lines) => void revoke(plan, lines)} plans={plans ?? []} />
   );

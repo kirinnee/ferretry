@@ -1,6 +1,7 @@
 import { RouterProvider } from '../router/router.tsx';
 import { type ShellProviderProps, ShellProvider, useShell } from './context.tsx';
 import { Frame } from './frame.tsx';
+import { LoadingBarHost } from '../ui/loading.tsx';
 import { NotificationTaps } from './notification-taps.tsx';
 
 function Routed() {
@@ -8,6 +9,8 @@ function Routed() {
   return (
     <RouterProvider parseRoute={routes.parse} onAddress={runtime.addressChanged}>
       <Frame />
+      {/* The ONE background-loading bar (ui/loading.tsx): fixed to the top of the window, so it moves nothing. */}
+      <LoadingBarHost />
       {/* A tap on a notification is routed in the app, never by reloading it (S6). */}
       {runtime.notificationOpens === undefined ? null : <NotificationTaps inbox={runtime.notificationOpens} />}
     </RouterProvider>

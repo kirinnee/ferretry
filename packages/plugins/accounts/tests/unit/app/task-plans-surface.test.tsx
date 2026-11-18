@@ -139,7 +139,7 @@ describe('the surface', () => {
   it('says it is reading while the first read is out', async () => {
     const mounted = await mount(<TaskPlansSurface client={{ call: () => new Promise<never>(() => undefined) }} />);
     try {
-      expect(mounted.container.querySelector('[aria-label="Loading sign-in plans"]')).not.toBeNull();
+      expect(mounted.container.querySelector('[data-loading="page"]')).not.toBeNull();
     } finally {
       await mounted.unmount();
     }

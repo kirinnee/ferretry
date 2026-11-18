@@ -1,7 +1,8 @@
 import { skeletonSentence } from '@ferretry/kernel/contract';
-import { Component, type ErrorInfo, type ReactNode, Suspense, useMemo, useSyncExternalStore } from 'react';
+import { Component, type ErrorInfo, type ReactNode, Suspense, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { PanelRef, ScreenRef } from '../layout/engine.ts';
 import { useRouter } from '../router/router.tsx';
+import { Loading, useHeldLoading } from '../ui/loading.tsx';
 import { useOptionalShell, useRuntimeVersion, useShell, WithoutShell } from './context.tsx';
 import { useDaemonChooser } from './daemon-chooser.tsx';
 import { identityOf, WithPluginIdentity } from './plugin-identity.tsx';
@@ -30,11 +31,27 @@ export function ShellLine({
 }
 
 /**
+ * WHAT A VIEW SHOWS WHILE IT WAITS (the one loading system, `ui/loading.tsx`). A page-sized view (a screen, a settings
+ * tab) is the whole area the person is looking at, so it draws the page animation — once, because only one is on
+ * screen. Anything smaller (a panel in a slot, a renderer) draws NOTHING of its own and tells the shell's one top bar
+ * instead: ten panels waiting on the same daemon are one bar, never ten stacked lines.
+ */
+function Waiting({ page, label }: { readonly page: boolean; readonly label: string }) {
+  return <Loading kind={page ? 'page' : 'bar'} label={label} />;
+}
+
+/**
  * A view that throws while rendering is contained to its own box, and one that SUSPENDS (a lazy half's first draw) is
  * too: only its own box shows "Loading {title}…" until its chunk arrives, and the frame around it is never blanked (S10).
  */
 export class ViewBoundary extends Component<
-  { readonly title: string; readonly children: ReactNode; readonly fallback?: ReactNode },
+  {
+    readonly title: string;
+    readonly children: ReactNode;
+    readonly fallback?: ReactNode;
+    /** Whether this view is page-sized, which decides how it waits ({@link Waiting}). */
+    readonly page?: boolean;
+  },
   { failed: boolean }
 > {
   override state = { failed: false };
@@ -54,7 +71,15 @@ export class ViewBoundary extends Component<
       return <ShellLine tone="warn">{this.props.title} stopped working on this screen.</ShellLine>;
     }
     return (
-      <Suspense fallback={fallback === undefined ? <ShellLine>Loading {this.props.title}…</ShellLine> : fallback}>
+      <Suspense
+        fallback={
+          fallback === undefined ? (
+            <Waiting page={this.props.page === true} label={`Loading ${this.props.title}…`} />
+          ) : (
+            fallback
+          )
+        }
+      >
         {this.props.children}
       </Suspense>
     );
@@ -82,8 +107,16 @@ export function PluginView({ daemon, plugin, section, id, props, fallback }: Plu
   // Who is drawn here (§1.1): this plugin, on a daemon, with its own reach into every paired daemon (S2).
   const identity = useMemo(() => identityOf(runtime, plugin, 'daemon'), [runtime, plugin]);
   const title = runtime.titleOf(plugin);
-  const stood = (line: ReactNode): ReactNode => (fallback === undefined ? line : <>{fallback}</>);
+  const stood = (line: ReactNode): ReactNode => (fallback === undefined ? line : fallback);
   const blocked = runtime.blockedLine(daemon, plugin);
+  const page = section === 'screens' || section === 'settings';
+  // Still waiting for the daemon to say what it offers: a loader, not a sentence per view (a page of panels was a stack of
+  // them). Held steady (`useHeldLoading`): never shown for a fast answer, never blinked off and on for a slow one.
+  const waiting = blocked !== undefined && runtime.waiting(daemon, plugin);
+  const said = useRef(blocked);
+  if (waiting) said.current = blocked;
+  const held = useHeldLoading(waiting);
+  if (held) return stood(<Waiting page={page} label={said.current ?? 'Loading…'} />);
   if (blocked !== undefined) return stood(<ShellLine tone="warn">{blocked}</ShellLine>);
   const half = runtime.half(daemon, plugin);
   if (half === undefined || half.kind === 'skeleton') return stood(<ShellLine>{skeletonSentence(title)}</ShellLine>);
@@ -93,7 +126,7 @@ export function PluginView({ daemon, plugin, section, id, props, fallback }: Plu
   const Rendered = view;
   // Where the view is drawn (S1): ITS daemon's machine, feed and authority, never the selected daemon's.
   return (
-    <ViewBoundary title={title} fallback={fallback}>
+    <ViewBoundary title={title} fallback={fallback} page={page}>
       <WithPluginIdentity identity={identity}>
         <WithViewPlace place={runtime.place(daemon)}>
           <Rendered {...props} />
@@ -132,7 +165,7 @@ function DaemonlessScreen({
   if (View === undefined) return <ShellLine>{skeletonSentence(screen.label)}</ShellLine>;
   return (
     <>
-      <ViewBoundary title={runtime.titleOf(screen.plugin)}>
+      <ViewBoundary title={runtime.titleOf(screen.plugin)} page>
         <WithPluginIdentity identity={identity}>
           <WithoutShell>
             <View params={params} navigate={router.navigate} location={runtime.location} chooseDaemon={chooseDaemon} />

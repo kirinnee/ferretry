@@ -311,6 +311,17 @@ export class ShellRuntime {
     return blockedLine(this.titleOf(packageId), this.standing(daemon, packageId), this.remedy(daemon), this.titleOf);
   }
 
+  /**
+   * Whether the one reason a package cannot draw yet is that this daemon has not answered: its connection is still
+   * opening or its plugin list is unread. A wait, not a verdict — the shell shows it as a loader, not as a sentence.
+   */
+  waiting(daemon: string, packageId: string): boolean {
+    const connection = this.connection(daemon);
+    if (connection.kind === 'unreachable' || connection.kind === 'refused') return false;
+    const standing = this.standing(daemon, packageId);
+    return standing.state === 'blocked' && standing.reason === 'unread';
+  }
+
   /** A package's built half on this daemon, only once it is allowed there (no plugin code starts before). */
   half(daemon: string, packageId: string): BuiltHalf | undefined {
     if (this.standing(daemon, packageId).state !== 'allowed') return undefined;

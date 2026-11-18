@@ -31,7 +31,7 @@
  */
 
 import { CAPABILITY_AXES, CAPABILITY_NAMES, type CapabilityName } from '@ferretry/core-gate/contract';
-import { ConfirmToSee, STEP_UP_REFUSAL_CODE } from '@ferretry/app/ui';
+import { ConfirmToSee, STEP_UP_REFUSAL_CODE, Loading } from '@ferretry/app/ui';
 import type { CapabilityAxis } from '@ferretry/kernel/contract';
 import { Check, ChevronRight, CircleAlert, MonitorSmartphone, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { localQr, PanelSlot, QrEncodeError, type QrMatrix } from '@ferretry/app';
@@ -834,9 +834,5 @@ export function AddDeviceSurface({
         </p>
       </section>
     );
-  return (
-    <section className="kt-panel p-panel" role="status" aria-label="Loading paired devices">
-      <p className="m-0 text-cell leading-base text-muted">Reading which devices may reach this machine…</p>
-    </section>
-  );
+  return <Loading kind="page" label="Reading which devices may reach this machine…" />;
 }
