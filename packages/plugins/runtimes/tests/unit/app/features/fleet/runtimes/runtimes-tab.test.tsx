@@ -163,15 +163,18 @@ describe('Runtimes tab list', () => {
     await view.unmount();
   });
 
-  it('M3: a machine that is not set up says it has no runtimes, and offers nothing to add yet', async () => {
+  it('M3: a machine that is not set up says it has no runtimes, and still lets the person add the first one', async () => {
     const view = await open({ machine: machine({ setUp: false }) });
     const note = must(view.container.querySelector('[data-runtimes-not-set-up]'), 'not set up');
     expect(text(note, 'h3')).toBe('No runtimes on studio-mac yet');
-    // The way into setup is the banner above the tabs, so this card carries no second copy of it.
-    expect(note.textContent).toContain('Finish setting it up above to bring in your Claude Code and Codex setup.');
-    expect(note.querySelector('a, button')).toBeNull();
+    expect(note.textContent).toContain('Finish setting it up above to bring in your Claude Code and Codex setup');
+    // A machine with no host login to import has no other way to its first runtime, so the card offers it.
+    expect(text(note, 'button')).toBe('Add a runtime');
+    expect(note.querySelector('a')).toBeNull();
     expect(view.container.querySelector('[data-runtimes-tab]')).toBeNull();
-    expect(view.container.querySelector('[data-add-runtime]')).toBeNull();
+    await click(view.container, '[data-runtimes-not-set-up] [data-add-runtime]');
+    expect(text(view.container, '[data-add-runtime] h3')).toBe('Add a runtime');
+    expect(view.container.querySelector('[data-runtimes-not-set-up]')).toBeNull();
     await view.unmount();
   });
 
