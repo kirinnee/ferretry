@@ -15,6 +15,9 @@
  *                                      identity, pairing and data (the ferrets' panes do not: they are revived, as after a restart)
  *   bun slot.ts unpersist <1..9>       the reverse: units removed, folder back under the sweep root, daemons running as before
  *   bun slot.ts wrappers <1..9>        (re)write ONLY the wrappers + kit copy of an already persisted slot: stops and restarts nothing
+ *   bun slot.ts real-claude <1..9> on <login> [--binary <abs path>] | off [--force]
+ *                                      the ONE exception to "no real model": a persisted slot's 5.0 side runs the REAL claude for ONE
+ *                                      ferretry-managed login (the owner signs in on the 5.0 Logins screen); every other caller keeps the fake
  *
  * Everything lives under SWEEP_ROOT/slot<N>/ (refused anywhere else, links resolved first). Ports: v4 is 7600+2N, 5.0 is
  * 7601+2N. Nothing here touches ~/.ferretry (v4, 7457), ~/.ferretry-v5 (the owner's preview, 7458) or v4's default 7431:
@@ -22,7 +25,8 @@
  * own files (never from FY_URL / FY_PORT) and refuses if it is not this slot's.
  *
  * Both daemons run with a private XDG_RUNTIME_DIR (no user systemd manager, no session bus), an EMPTY HOME, an allow-list
- * environment, their own tmux socket, and the fake claude/codex first on PATH. No real model is ever called.
+ * environment, their own tmux socket, and the fake claude/codex first on PATH. No real model is ever called, EXCEPT after
+ * `real-claude <N> on <login>`: then `harness-bin/claude` is a dispatcher that runs the real claude only for that login's store.
  *
  * WHERE they run (the caller's tool, not the daemon's environment): each daemon is a transient USER SERVICE of the caller's
  * systemd manager (fy4-slot<N>.service / fy5-slot<N>.service, Restart=on-failure, KillMode=process), so a crash brings it back
@@ -81,6 +85,19 @@ import {
   wrapperName,
   wrapperText,
 } from './persist.ts';
+import {
+  FAKE_NAME,
+  Refusal,
+  RECORD_FILE,
+  disableReal,
+  enableReal,
+  isShim,
+  readRecord,
+  recordPathOf,
+  runtimesUsing,
+  statusLine,
+  type RealPaths,
+} from './real-claude.ts';
 import {
   assertScopeOwned,
   assertServiceOwned,
@@ -902,6 +919,12 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
       99,
     );
   await assertSlotPath(slot);
+  // A rebuild would copy the fakes over the shim and reconvert the home, which deletes the login the owner signed in.
+  if ((await readRecord(realPathsOf(slot))) !== undefined)
+    die(
+      `refusing: slot ${String(slot.n)} has real claude switched on (${recordPathOf(realPathsOf(slot))}); "up" would wipe the shim and the login. Run "slot.ts real-claude ${String(slot.n)} off" first`,
+      99,
+    );
   if ((await pidsHolding(slot.v4.lock)).length + (await pidsHolding(slot.v5.lock)).length > 0)
     die(`slot ${String(slot.n)} is already up; run sweep-down.sh ${String(slot.n)} first (or use it as it is)`);
   // A unit or scope under this slot's name that is not this slot's refuses the whole up before anything is removed or started.
@@ -1310,6 +1333,7 @@ async function status(slot: Slot): Promise<void> {
     `  5.0  http://127.0.0.1:${String(slot.v5Port)}    app: https://ferretry-v5.pages.dev/app/    CLI: fy5s${n}   home: ${slot.v5.home}`,
   );
   for (const which of ['v4', 'v5'] as const) await statusServices(slot, which);
+  console.log(`  ${await realClaudeLine(slot)}`);
   if (slot.persisted) {
     const names = [serviceOf(slot, 'v4'), serviceOf(slot, 'v5'), terminalsOf(slot, 'v4'), terminalsOf(slot, 'v5')];
     const enabled = await Promise.all(
@@ -1642,6 +1666,8 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
     console.log(
       `  the old programs are kept as ${bin}/<name>.prev; the home, identity and paired devices were not touched`,
     );
+    // A 5.0 build that changes how claude is found would skip the shim: say where real claude stands after every upgrade.
+    console.log(`  ${await realClaudeLine(slot)}`);
     return;
   }
 
@@ -2172,6 +2198,121 @@ async function wrappers(slot: Slot): Promise<void> {
   console.log(`    ${ownerLauncher(slot.real, slot.n)}`);
 }
 
+// ─── real claude, for ONE login ───────────────────────────────────────────────────────────────────────────────────
+
+const realPathsOf = (slot: Slot): RealPaths => ({ v5Dir: slot.v5.dir, fyHome: slot.v5.home, harness: slot.v5.harness });
+
+/** The `real claude:` line of `status` / `upgrade-v5`: off, on (with the shim checked), never anything from inside a store. */
+async function realClaudeLine(slot: Slot): Promise<string> {
+  const record = await readRecord(realPathsOf(slot));
+  if (record === undefined) return statusLine(undefined);
+  const claude = await readFile(join(slot.v5.harness, 'claude'), 'utf8').catch(() => '');
+  return statusLine(record, isShim(claude) ? 'ok' : 'shim-missing');
+}
+
+/** The real claude on the caller's PATH, skipping every sweep harness-bin folder (those hold the fakes and the shim). */
+async function findRealClaude(slot: Slot): Promise<string | undefined> {
+  for (const folder of (process.env.PATH ?? '').split(':')) {
+    if (folder === '' || !isAbsolute(folder)) continue;
+    if (folder.startsWith(`${SWEEP_ROOT}/`) || folder.startsWith(`${slot.real}/`)) continue;
+    const candidate = join(folder, 'claude');
+    const real = await realpath(candidate).catch(() => undefined);
+    if (real !== undefined) return real;
+  }
+  return undefined;
+}
+
+async function realClaude(slot: Slot, rest: readonly string[]): Promise<void> {
+  const n = String(slot.n);
+  const usage = 'usage: slot.ts real-claude <1..9> on <login> [--binary <abs path>] | off [--force]';
+  const [action, ...args] = rest;
+  if (action !== 'on' && action !== 'off') die(usage, 64);
+  if (!slot.persisted)
+    die(
+      `refusing: slot ${n} is not persisted; real claude is only for a persisted slot (its folder and units survive a reboot). Run persist ${n} first`,
+      99,
+    );
+  await assertSlotPath(slot);
+  await guard(slot, 'v5');
+  const paths = realPathsOf(slot);
+  try {
+    if (action === 'on') {
+      const flag = args.indexOf('--binary');
+      const given = flag >= 0 ? args[flag + 1] : undefined;
+      if (flag >= 0 && given === undefined) die(usage, 64);
+      const login = args.filter((_, i) => flag < 0 || (i !== flag && i !== flag + 1))[0];
+      const binary = given ?? (await findRealClaude(slot));
+      if (binary === undefined)
+        die('no real claude on PATH (outside the sweep folders); pass its absolute path with --binary <path>');
+      const folder = join(slot.real, GCROOTS);
+      const { record, notes } = await enableReal(paths, login, binary, {
+        root: async path => {
+          const root = storeRootOf(path);
+          if (root === undefined)
+            return { link: undefined, note: `${path} is not a nix store path: it is NOT rooted against a GC` };
+          const nixStore = Bun.which('nix-store');
+          await mkdir(folder, { recursive: true, mode: 0o700 });
+          const { rooted, failed } = await addStoreRoots(
+            { nixStore: nixStore === null ? undefined : async a => await run(nixStore, [...a], baseEnvironment()) },
+            folder,
+            [root],
+          );
+          if (rooted.length === 1) return { link: join(folder, root.slice('/nix/store/'.length)) };
+          return {
+            link: undefined,
+            note: `WARNING: ${root} is NOT rooted (${failed[0]?.why ?? 'unknown'}); a nix GC could remove the real claude`,
+          };
+        },
+      });
+      console.log(`slot ${n}: real claude is ON for login ${record.login}`);
+      console.log(`  real binary: ${record.binary}`);
+      console.log(`  store matched exactly: ${record.store}`);
+      console.log(
+        `  every other caller (every other login, store: host) still gets the fake: ${join(slot.v5.harness, FAKE_NAME)}`,
+      );
+      for (const note of notes) console.log(`  ${note}`);
+      console.log(
+        `  no daemon was stopped or restarted. Next: the owner presses Sign in on the 5.0 Logins screen for ${record.login}`,
+      );
+    } else {
+      const { was } = await disableReal(
+        paths,
+        { liveFerrets: login => liveFerretsOn(slot, login) },
+        { force: args.includes('--force') },
+      );
+      console.log(
+        was === undefined
+          ? `slot ${n}: real claude was already off (${RECORD_FILE} not present); nothing changed`
+          : `slot ${n}: real claude is OFF; the fake claude is back and ${RECORD_FILE} is gone. Login ${was.login} and its store were not touched (remove them on the Logins screen)`,
+      );
+    }
+  } catch (error) {
+    if (error instanceof Refusal) die(`refusing: ${error.message}; nothing was changed`, 99);
+    throw error;
+  }
+}
+
+/**
+ * `off` waits for the ferrets on the login's runtimes. Names only: the runtimes whose file says `login: <login>`, then
+ * `fy ps --json` of the slot (when its 5.0 daemon is up); any of those runtime names in it is a live ferret. A daemon that is up
+ * but cannot be asked refuses (--force skips this check); a daemon that is down has no live ferret.
+ */
+async function liveFerretsOn(slot: Slot, login: string): Promise<string | undefined> {
+  const dir = join(slot.v5.home, 'config', 'runtimes');
+  const files = new Map<string, string>();
+  for (const name of await readdir(dir).catch(() => [] as string[]))
+    if (/\.ya?ml$/u.test(name)) files.set(name, await readFile(join(dir, name), 'utf8').catch(() => ''));
+  const runtimes = runtimesUsing(login, files);
+  if (runtimes.length === 0 || (await pidsHolding(slot.v5.lock)).length === 0) return undefined;
+  const listed = await cli(slot, 'v5', ['ps', '--json']);
+  if (listed.code !== 0)
+    return `could not ask the 5.0 daemon which ferrets are running (fy ps exited ${String(listed.code)}), so ${runtimes.join(', ')} may be in use; stop them, or pass --force`;
+  const busy = runtimes.filter(name => listed.out.includes(`"${name}"`));
+  return busy.length === 0
+    ? undefined
+    : `a ferret still runs on runtime ${busy.join(', ')} (login ${login}); stop it first, or pass --force`;
+}
+
 // ─── main ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The slot named on the command line; a persisted slot's /tmp link (empty after a boot) is put back first. */
@@ -2218,11 +2359,17 @@ try {
     case 'wrappers':
       await wrappers(await healedSlot(slotArg));
       break;
+    case 'real-claude':
+      await realClaude(await healedSlot(slotArg), rest);
+      break;
     case 'stamp-v5':
       await stampV5(slotArg, rest[0]);
       break;
     default:
-      die('usage: slot.ts <up|down|status|cli|pair|upgrade-v5|persist|unpersist|wrappers|stamp-v5> <slot 1..9> …', 64);
+      die(
+        'usage: slot.ts <up|down|status|cli|pair|upgrade-v5|persist|unpersist|wrappers|real-claude|stamp-v5> <slot 1..9> …',
+        64,
+      );
   }
 } catch (error) {
   if (error instanceof Failure) {
