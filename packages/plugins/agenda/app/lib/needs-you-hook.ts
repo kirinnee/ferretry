@@ -12,9 +12,25 @@ import { AsksChanged } from '@ferretry/core-asks/contract';
 import type { FerretNeedsYou, FerretsNeedsYou } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { AgendaRollupStore } from './agenda-rollup.ts';
+import { agendaCounts, agendaItems } from './agenda-chat.ts';
+import { chatLineMode, type ChatLineMode } from './chat-line-mode.ts';
 import { agendaSummaryOf } from './ferret-view.ts';
 import { daemonConnection } from './machine.ts';
 import { browserListRefreshEnvironment, daemonOfClient, ListRefresh, type ListRefreshEnvironment } from '@ferretry/app';
+
+/**
+ * One ferret that waits on the owner, with the two facts the app shell's side toggle needs to count it WITHOUT repeating the
+ * agenda line: how many items are on the owner's turn (the number the line's pill says; `count` also holds items with the
+ * ferret) and whether this ferret's chat draws the line (agenda mode on). It adds to Ferrets' entry; it changes none of it.
+ */
+interface AgendaNeedsYouEntry extends FerretNeedsYou {
+  readonly waitingOnOwner: number;
+  readonly lineShown: boolean;
+}
+
+export interface AgendaNeedsYou extends FerretsNeedsYou {
+  readonly needing: () => ReadonlyMap<string, AgendaNeedsYouEntry>;
+}
 
 /** The shortest gap between two reads of the roll-up: a burst of asks is one read. */
 const NEEDS_YOU_REFRESH_MIN_MS = 750;
@@ -22,22 +38,30 @@ const NEEDS_YOU_REFRESH_MIN_MS = 750;
 export function createNeedsYou(
   client: Pick<PluginClient, 'call'> & Partial<Pick<PluginClient, 'subscribe'>>,
   environment: ListRefreshEnvironment = browserListRefreshEnvironment,
-): FerretsNeedsYou {
+  lines: ChatLineMode = chatLineMode,
+): AgendaNeedsYou {
   const connection = daemonConnection({ daemonId: daemonOfClient(client) ?? 'this-daemon' });
   const rollup = new AgendaRollupStore(client);
   const refresh = new ListRefresh(() => rollup.read(connection), environment, NEEDS_YOU_REFRESH_MIN_MS);
   const listeners = new Set<() => void>();
-  let held: ReadonlyMap<string, FerretNeedsYou> = new Map();
+  let held: ReadonlyMap<string, AgendaNeedsYouEntry> = new Map();
   let watching = 0;
   let stop: (() => void) | undefined;
+  let stopLines: (() => void) | undefined;
 
   const rebuild = (): void => {
     const boards = rollup.getSnapshot().boards.get(connection.daemonId);
-    const next = new Map<string, FerretNeedsYou>();
+    const next = new Map<string, AgendaNeedsYouEntry>();
     for (const [ferret, items] of boards ?? []) {
       const summary = agendaSummaryOf(items);
       if (summary !== undefined)
-        next.set(ferret, { count: summary.open, latestAt: summary.latestAt, ask: summary.ask });
+        next.set(ferret, {
+          count: summary.open,
+          latestAt: summary.latestAt,
+          ask: summary.ask,
+          waitingOnOwner: agendaCounts(agendaItems(items)).needYou,
+          lineShown: lines.shown(connection.daemonId, ferret),
+        });
     }
     held = next;
     for (const listener of listeners) listener();
@@ -52,6 +76,7 @@ export function createNeedsYou(
     watch: () => {
       watching += 1;
       if (watching === 1) {
+        stopLines = lines.subscribe(rebuild);
         void refresh.request().catch(() => undefined);
         stop = client.subscribe?.(AsksChanged, () => void refresh.invalidate().catch(() => undefined));
       }
@@ -63,6 +88,8 @@ export function createNeedsYou(
         if (watching === 0) {
           stop?.();
           stop = undefined;
+          stopLines?.();
+          stopLines = undefined;
         }
       };
     },

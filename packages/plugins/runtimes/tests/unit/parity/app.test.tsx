@@ -197,7 +197,9 @@ describe('the Runtimes Settings tab the half builds', () => {
     expect(items.get('make-default')?.textContent).toBe('Make default');
     expect(items.get('rename')?.textContent).toBe('Rename');
     expect(items.get('remove')?.textContent).toBe('Remove');
-    expect(items.get('remove')?.className).toContain('text-err');
+    // The danger ink is the shared row's own `[data-danger]` rule (--menu-item-fg), not a `text-err` utility.
+    expect(items.get('remove')?.hasAttribute('data-danger')).toBe(true);
+    expect(items.get('rename')?.hasAttribute('data-danger')).toBe(false);
     // Escape closes the menu, as the shared menu's keyboard contract says.
     await interact(() => {
       document.activeElement?.dispatchEvent(

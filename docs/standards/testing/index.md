@@ -687,6 +687,13 @@ task test:int:coverage
 task test:sit:coverage   # in-process driver, full-system ledger
 ```
 
+**One file:** `task test:unit:file -- <file>` (`scripts/test/unit-file.ts`). Raw `bun test --config=bunfig.unit.toml <file>`
+exits 1 ("filters did not match any test files") for a file the unit config leaves out — a perf, integration, SIT or
+realworld test, a `scripts/` test, a tool package's tests — which reads as a failure though the file passes under its own
+runner. The wrapper reads the bunfigs, and for such a file prints "not in this config" with the command that runs it and
+exits 0; a file the unit config holds keeps Bun's verdict (and a configured file that runs 0 tests exits 1); a file no
+config claims exits 1, because no job would run it.
+
 The tiers exist as separate configs precisely so the inner loop stays fast: `task test:watch`
 never compiles a binary. See [Taskfile Conventions](../taskfile/index.md) for the task surface
 and [CI/CD](../ci-cd/index.md) for how these run in the pipeline.

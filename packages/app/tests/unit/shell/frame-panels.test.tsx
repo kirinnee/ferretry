@@ -400,6 +400,27 @@ describe('a provider that misbehaves', () => {
   });
 });
 
+describe('the nav on the "All daemons" route', () => {
+  test('shell S4: with the top nav, Agenda is ONE click from the home route (a link, with its count over every machine)', async () => {
+    counts.set('d1', 2);
+    counts.set('d2', 3);
+    const app = await bootApp({
+      surfaces: [inbox],
+      machines: ['d1', 'd2'],
+      path: '/',
+      arrived: true,
+      storage: deviceLayout({ side: 'top', style: 'list', items: ['inbox'] }),
+    });
+    view = app.view;
+    await settle();
+    expect(app.view.container.querySelector('.fy-daemon-picker')?.getAttribute('aria-label')).toBe('Daemon');
+    const door = app.view.container.querySelector('.fy-nav--top .fy-nav__item');
+    expect(door?.tagName).toBe('A');
+    expect(door?.getAttribute('href')).toBe('/d/d2/inbox');
+    expect(door?.querySelector('.fy-nav__badge')?.getAttribute('data-count')).toBe('5');
+  });
+});
+
 describe('the Needs-you nav panel (device-level)', () => {
   test('shell S4: a nav panel is drawn ONCE, not once per daemon, in a column nav, and lists both machines', async () => {
     const app = await bootApp({

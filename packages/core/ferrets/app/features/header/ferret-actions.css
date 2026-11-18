@@ -20,8 +20,8 @@
   max-width: calc(100vw - 32px);
   border: var(--stroke-panel, 1px) solid var(--border-strong);
   border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-popover);
+  background: var(--menu-bg);
+  box-shadow: var(--menu-shadow);
   color: var(--fg);
   font-family: var(--font-ui);
 }
@@ -385,8 +385,8 @@
   padding: 8px 8px 8px 12px;
   border: var(--stroke-panel, 1px) solid var(--border-strong);
   border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-popover);
+  background: var(--menu-bg);
+  box-shadow: var(--menu-shadow);
   color: var(--fg);
   font-family: var(--font-ui);
   font-size: var(--text-sm);
@@ -430,8 +430,8 @@
   padding: 12px 14px;
   border: var(--stroke-panel, 1px) solid var(--err-border);
   border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-popover);
+  background: var(--menu-bg);
+  box-shadow: var(--menu-shadow);
   color: var(--fg);
   font-family: var(--font-ui);
   font-size: var(--text-sm);

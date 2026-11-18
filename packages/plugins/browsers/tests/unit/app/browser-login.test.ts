@@ -122,7 +122,7 @@ const byDaemon =
   };
 
 describe('browserLoginPort', () => {
-  it('reads with a bare GET and closes with an explicit, schema-validated intent', async () => {
+  it('reads quietly (a mounted panel polling is not the person acting, so no passkey card) and closes with an explicit, schema-validated intent', async () => {
     const { client, calls } = recordingClient(() => closed);
     const port = browserLoginPort(client);
 
@@ -132,7 +132,7 @@ describe('browserLoginPort', () => {
 
     const [read, stop, start] = calls;
     // The route is the daemon's own, reached by key through the guarded client: no URL, no header, no credential here.
-    should(read).deepEqual({ route: BROWSER_LOGIN_ROUTES.status });
+    should(read).deepEqual({ route: BROWSER_LOGIN_ROUTES.status, init: { quiet: true } });
     // Closing says which of the two human answers was given; the daemon is never left to infer "I signed in".
     should(stop).deepEqual({ route: BROWSER_LOGIN_ROUTES.act, init: { body: { action: 'stop', primed: true } } });
     should(start).deepEqual({ route: BROWSER_LOGIN_ROUTES.act, init: { body: { action: 'start', minutes: 5 } } });

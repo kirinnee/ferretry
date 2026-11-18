@@ -26,8 +26,9 @@
  * shared by every scene; a scene's bundle by every file that asks for it. Writes land through a rename,
  * so two test processes asking at once never read half a file. `FY_FIXTURE_CACHE=off` builds every time.
  */
+import { readdirSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import postcss from 'postcss';
 import tailwindcss from 'tailwindcss';
 import { cachedText, cacheRootFor, hashFixtureInputs, sceneInputEnv, sceneInputPatterns } from './fixture-inputs.ts';
@@ -52,9 +53,44 @@ const viteAssetUrls: Bun.BunPlugin = {
   },
 };
 
+/**
+ * A plugin half loads a view by a Vite dynamic-import variable, an `import()` of a template literal such as
+ * `./views/${name}.tsx`, which Vite expands to every file the pattern matches and Bun cannot. This writes the same
+ * expansion (one literal `import()` per matching file in the folder), so a scene over the REAL generated surfaces draws
+ * the real views instead of "stopped working".
+ */
+const viteDynamicImports: Bun.BunPlugin = {
+  name: 'vite-dynamic-import-variables',
+  setup(build) {
+    build.onLoad({ filter: /\/(?:plugins|core)\/[^/]+\/app\/.*\.tsx?$/u }, async args => {
+      const source = await Bun.file(args.path).text();
+      const pattern = /import\(`(\.\/[^`$]*)\$\{([^}]+)\}(\.tsx?)`\)/gu;
+      if (!source.match(pattern)) return undefined;
+      const contents = source.replace(pattern, (_whole, prefix: string, expression: string, extension: string) => {
+        const folder = resolve(dirname(args.path), prefix);
+        const names = readdirSync(folder)
+          .filter(name => name.endsWith(extension))
+          .map(name => name.slice(0, -extension.length));
+        const cases = names
+          .map(
+            name => `case ${JSON.stringify(name)}: return import(${JSON.stringify(`${prefix}${name}${extension}`)});`,
+          )
+          .join(' ');
+        return `((__view) => { switch (__view) { ${cases} default: return Promise.reject(new Error('no view ' + __view)); } })(${expression})`;
+      });
+      return { contents, loader: args.path.endsWith('x') ? 'tsx' : 'ts' };
+    });
+  },
+};
+
 /** What a Bun build made: the script and, when the entry's graph imports stylesheets, their CSS (in import order). */
 const bundleOf = async (entry: string, label: string): Promise<{ readonly js: string; readonly css: string }> => {
-  const result = await Bun.build({ entrypoints: [entry], target: 'browser', throw: false, plugins: [viteAssetUrls] });
+  const result = await Bun.build({
+    entrypoints: [entry],
+    target: 'browser',
+    throw: false,
+    plugins: [viteAssetUrls, viteDynamicImports],
+  });
   if (!result.success) throw new Error(`❌ ${label} did not build:\n${result.logs.join('\n')}`);
   const sheets = result.outputs.filter(output => output.path.endsWith('.css'));
   const script = result.outputs.find(output => output.path.endsWith('.js'));

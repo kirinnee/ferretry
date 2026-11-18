@@ -12,9 +12,9 @@
  */
 
 import { Fingerprint } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { CredentialsPort } from '@ferretry/app';
+import { type CredentialsPort, type DeadlineSchedule, MACHINE_READ_DEADLINE_MS, withDeadline } from '@ferretry/app';
 import type { PasskeysView } from '../../../contract/index.ts';
 import { passkeyFailureSentence, registrationMinutesLeft, webAuthnSupported } from '../../lib/passkey-panel.ts';
 import { addPasskeyCeremony, browserCredentials } from '../../lib/step-up-ceremony.ts';
@@ -35,7 +35,19 @@ export interface FirstPasskeyOfferProps {
   readonly supported?: () => boolean;
   /** Test seam: the clock the minutes left are counted against. */
   readonly now?: () => number;
+  /** How long the read of the machine's view may take before the offer gives up (`none`); the app's machine deadline. */
+  readonly deadlineMs?: number;
+  /** Test seam: the timer that deadline runs on. */
+  readonly schedule?: DeadlineSchedule;
+  /**
+   * Told what the machine decided, once: `none` (nothing to offer: no window, a passkey held, no browser support, or a
+   * read that failed), `offered` (the button is showing) and later `added`. A host that moves on by itself (the
+   * daemon-less `/pair` page) waits for this so it never navigates away from a button the person could still press.
+   */
+  readonly onSettled?: (outcome: FirstPasskeyOutcome) => void;
 }
+
+export type FirstPasskeyOutcome = 'none' | 'offered' | 'added';
 
 type State =
   | { readonly kind: 'hidden' }
@@ -53,28 +65,47 @@ export function FirstPasskeyOffer({
   origin = () => window.location.origin,
   supported = webAuthnSupported,
   now = Date.now,
+  deadlineMs = MACHINE_READ_DEADLINE_MS,
+  schedule,
+  onSettled,
 }: FirstPasskeyOfferProps) {
   const [state, setState] = useState<State>({ kind: 'hidden' });
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // The latest listener, read when an answer arrives: a host passing a fresh closure each render must not restart the read.
+  const settled = useRef(onSettled);
+  settled.current = onSettled;
 
   // Read as a value, so the effect depends on the answer and not on the seam's identity.
   const canRun = supported();
   useEffect(() => {
     let current = true;
     setState({ kind: 'hidden' });
-    if (!canRun) return;
-    void createClient(connection)
-      .then(async client => ({ client, view: await fetchPasskeys(client) }))
+    if (!canRun) {
+      settled.current?.('none');
+      return;
+    }
+    // A machine that never answers settles as `none` at the deadline, so a host waiting on this never waits for ever.
+    void withDeadline(
+      createClient(connection).then(async client => ({ client, view: await fetchPasskeys(client) })),
+      deadlineMs,
+      schedule,
+    )
       .then(({ client, view }) => {
-        if (current && firstWindowOpen(view)) setState({ kind: 'offered', client, view });
+        if (!current) return;
+        if (firstWindowOpen(view)) {
+          setState({ kind: 'offered', client, view });
+          settled.current?.('offered');
+        } else settled.current?.('none');
       })
       // A machine that cannot answer is an offer that stays quiet.
-      .catch(() => undefined);
+      .catch(() => {
+        if (current) settled.current?.('none');
+      });
     return () => {
       current = false;
     };
-  }, [canRun, connection, createClient]);
+  }, [canRun, connection, createClient, deadlineMs, schedule]);
 
   const add = useCallback(async () => {
     if (state.kind !== 'offered') return;
@@ -90,6 +121,7 @@ export function FirstPasskeyOffer({
     }
     setState({ kind: 'added' });
     setBusy(false);
+    settled.current?.('added');
   }, [credentials, origin, state, supported]);
 
   if (state.kind === 'hidden') return null;
@@ -105,7 +137,7 @@ export function FirstPasskeyOffer({
       data-first-passkey-offer=""
       className="flex w-full min-w-0 flex-col items-center gap-2 rounded-control border border-border-strong bg-surface-2 px-3 py-2"
     >
-      <p className="m-0 text-cell leading-base text-fg">
+      <p className="m-0 text-balance text-cell leading-base text-fg">
         You can add a passkey for this device now{left === null ? '' : ` — ${left}`}.
       </p>
       <button
@@ -113,6 +145,7 @@ export function FirstPasskeyOffer({
         disabled={busy}
         data-first-passkey-add=""
         onClick={() => void add()}
+        data-variant="primary"
         className="kt-btn disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Fingerprint size={15} aria-hidden="true" />

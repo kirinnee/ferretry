@@ -578,13 +578,7 @@ export function RuntimeChoiceMenu({ ariaLabel, items, disabled, presentation = '
             aria-busy={item.pending || undefined}
             aria-checked={item.checked}
             aria-label={item.ariaLabel}
-            className={cn(
-              'flex w-full items-center gap-sm rounded-control px-cell-x text-left',
-              dense ? 'min-h-[34px] py-1' : 'min-h-[44px] py-1.5',
-              'hover:bg-surface-2 focus:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
-              item.checked ? 'text-fg' : 'text-fg-soft',
-            )}
+            className={cn('kt-menu-item', dense ? '[--menu-item-py:4px]' : '[--menu-item-py:6px] [--menu-item-h:44px]')}
             disabled={disabled}
             key={item.key}
             onClick={item.onSelect}

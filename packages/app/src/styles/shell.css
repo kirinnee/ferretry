@@ -85,6 +85,12 @@
   padding: 4px 10px;
   white-space: nowrap;
 }
+/* A phone's finger is 44px: a top row of tabs on a phone is as tall as a bottom bar's entry. */
+@media (max-width: 767.98px) {
+  .fy-nav--top .fy-nav__item {
+    min-height: 44px;
+  }
+}
 .fy-nav--bottom {
   justify-content: space-around;
   padding-bottom: calc(8px + env(safe-area-inset-bottom));
@@ -129,6 +135,14 @@
 .fy-search {
   flex: 1;
   max-width: 420px;
+  /* A control wears the control edge like every field (the machine picker beside it does). */
+  min-height: var(--control-h);
+  padding: 0 var(--pad-control-x);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  background: var(--surface);
+  color: var(--fg);
+  text-align: left;
   /* One line, whatever the bar's width: the shortcut hint never wraps under the word, against the edge. */
   white-space: nowrap;
 }
@@ -362,6 +376,22 @@
   line-height: 1.5;
   text-align: center;
 }
+/* The count on the closed side column's toggle: the asks that wait on the owner behind it. Sits on the button's corner. */
+.fy-side-toggle__count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 1.25em;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  font-size: calc(var(--fy-text-scale, 1) * 0.6875rem);
+  font-weight: 600;
+  line-height: 1.45;
+  text-align: center;
+  pointer-events: none;
+}
 .fy-nav__badge .sr-only {
   position: absolute;
   width: 1px;
@@ -383,7 +413,7 @@
    column instead of along one long wrapped row. */
 .fy-tabs--grouped {
   flex-direction: column;
-  gap: 12px;
+  gap: var(--flow-3, 12px);
 }
 .fy-tab-group__title {
   margin: 0 0 4px;
@@ -395,10 +425,15 @@
 .fy-tab-group__tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  /* A wrapped row is the same group: its rows sit closer than two groups do. */
+  gap: var(--flow-1, 4px) var(--flow-2, 8px);
 }
 .fy-settings-device {
   margin: 0 0 12px;
+}
+/* Setting groups on a page (a title over a grouped card) stand a whole step apart, so a title belongs to the card under it. */
+.fy-page [data-setting-group] {
+  margin-bottom: var(--flow-4, 16px);
 }
 .fy-settings-device__hint {
   color: var(--fg-soft);

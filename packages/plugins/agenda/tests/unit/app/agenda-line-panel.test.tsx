@@ -8,6 +8,8 @@ import { ensureDom, interact, type Mounted, mount, RouterProvider, settleUntil }
 import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { createElement, Suspense } from 'react';
 import app from '../../../app/index.ts';
+import { chatLineMode } from '../../../app/lib/chat-line-mode.ts';
+import { THIS_MACHINE } from '../../../app/lib/machine.ts';
 import manifest from '../../../manifest.ts';
 import { projectionSnapshot } from '../../support/app/agenda-projection.ts';
 
@@ -128,6 +130,39 @@ describe('the ferret-agenda-line panel', () => {
     const root = await draw(client, FERRET);
     await settled(client, root);
     expect(root.querySelector('[data-agenda-line]')).toBeNull();
+  });
+
+  it('tells the app shell whether the chat draws the line (agenda mode on), so its side toggle never repeats the asks', async () => {
+    const leave = async (): Promise<void> => {
+      await view?.unmount();
+      view = null;
+    };
+    const shown = () => chatLineMode.shown(THIS_MACHINE.daemonId, FERRET);
+    // Until the mode is read nothing is said: taken as shown, so no count flashes.
+    expect(shown()).toBe(true);
+    const on = daemon({ mode: true });
+    await settled(on, await draw(on, FERRET));
+    expect(shown()).toBe(true);
+    await leave();
+    const off = daemon({ mode: false });
+    const root = await draw(off, FERRET);
+    await settled(off, root);
+    await settleUntil(
+      () => !shown(),
+      () => 'the panel never said the line is not drawn',
+      interact,
+    );
+    await leave();
+    // The panel went away: nothing is known again.
+    expect(shown()).toBe(true);
+    const refused = daemon({ mode: 'refused' });
+    const gone = await draw(refused, FERRET);
+    await settled(refused, gone);
+    await settleUntil(
+      () => !shown(),
+      () => 'a mode that cannot be read is not a drawn line',
+      interact,
+    );
   });
 
   it('draws no line when the mode cannot be read: it never draws what it cannot back', async () => {

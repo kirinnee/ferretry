@@ -352,7 +352,7 @@ function ThemeToggle({ theme }: { readonly theme: DeviceTheme }) {
           role="dialog"
           aria-label="Theme"
           onKeyDown={onPanelKeyDown}
-          className="absolute right-0 top-full z-50 mt-1 w-[272px] rounded-panel border border-border bg-surface p-panel shadow-popover sm:w-[292px]"
+          className="kt-popover absolute right-0 top-full z-50 mt-1 w-[272px] p-panel sm:w-[292px]"
         >
           <div className="mb-2 mt-0 flex items-center justify-between gap-2 text-meta">
             <span className="font-semibold text-fg">Theme</span>

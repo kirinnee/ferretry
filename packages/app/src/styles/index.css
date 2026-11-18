@@ -102,6 +102,20 @@ textarea:focus {
   box-shadow: 0 0 0 var(--focus-width) var(--ring);
 }
 
+/* A native dropdown wears the same edge as a text field (the control edge, >=3:1), so it is a visible control on every page
+   rather than the browser's default grey bar. Element selector on purpose: a select a feature styles with a class wins. */
+select {
+  background: var(--surface);
+  color: var(--fg);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  padding: 4px 8px;
+  min-height: var(--control-h);
+}
+select:focus {
+  border-color: var(--accent);
+}
+
 /* Every theme keeps a visible focus ring — at least 2px, 3px in High Contrast. */
 :focus-visible {
   outline: var(--focus-width) solid var(--focus-color);

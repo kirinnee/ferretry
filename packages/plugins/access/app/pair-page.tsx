@@ -22,17 +22,19 @@ import {
   distinctDaemonName,
   useFragment,
 } from '@ferretry/app';
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { accessClaims, accessKeyStore } from './connect.ts';
 import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.tsx';
-import { PairingScreen } from './features/pairing/pairing-screen.tsx';
+import type { FirstPasskeyClientFactory } from './features/pairing/first-passkey-offer.tsx';
+import { PairingScreen, type PairingScreenProps } from './features/pairing/pairing-screen.tsx';
+import { pairedPasskeyClient } from './pair-passkey.ts';
 import { exchangePairing } from './lib/pair-exchange.ts';
 import { type QrScanHost, browserQrScanHost, type QrDetectorLike } from './lib/pair-scan.ts';
 import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
 import { type DecodePixels, frameQrDetector } from './lib/qr-frame-decoder.ts';
 import type { DeviceKeyStore } from './lib/device-keys.ts';
 import { connectionRecord } from './daemon-scope.tsx';
-import { daemonId } from './shell-pairing.ts';
+import { daemonConnection, daemonId } from './shell-pairing.ts';
 
 /** The browser objects a scan reads; the page's own unless a suite hands others in. */
 export interface PairPageEnvironment {
@@ -46,6 +48,13 @@ export interface PairPageEnvironment {
   readonly defaultName?: () => string;
   /** Where the device keys live; the page's IndexedDB unless a suite hands one in. */
   readonly store?: DeviceKeyStore;
+  /**
+   * How the success screen reaches the machine just paired with, to offer its first passkey while that window is open;
+   * the shell's own (`pair-passkey.ts`) unless a suite hands another. Without a way to reach it the screen moves on.
+   */
+  readonly passkeyClient?: FirstPasskeyClientFactory;
+  /** The offer's test seams (credentials, origin, browser support, clock). */
+  readonly passkeyOffer?: PairingScreenProps['passkeyOffer'];
 }
 
 /** The camera, or `null` where this browser has no QR decoder of its own to offer (the paste path stays). */
@@ -107,6 +116,7 @@ export const daemonlessPlaceholder = (): null => null;
 export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironment = {}) {
   const store = environment.store ?? accessKeyStore(ports);
   const claims = accessClaims(ports, { store });
+  const passkeyClient = environment.passkeyClient ?? pairedPasskeyClient();
   return function PairPage({ navigate, location }: DaemonlessScreenProps) {
     // The code is taken once per arrival, never re-read from an address the shell already emptied, so a plain render
     // cannot resurrect a code the reader declined. Each new arrival restarts the screen (the new key) for that link.
@@ -134,6 +144,8 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
         })),
       [snapshot],
     );
+    // Where the success screen goes on to: set by the exchange, read when the offer is settled or declined.
+    const landing = useRef<string | undefined>(undefined);
     const refused = refusedBy === null ? undefined : snapshot.daemons.find(entry => entry.daemon === refusedBy);
     if (link === null && fragment.arrival > 0)
       return (
@@ -156,10 +168,26 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
           connections={connections}
           selectedDaemonId={snapshot.selected === null ? null : daemonId(snapshot.selected)}
           {...(environment.defaultName === undefined ? {} : { defaultName: environment.defaultName })}
+          passkeyClient={passkeyClient}
+          {...(environment.passkeyOffer === undefined ? {} : { passkeyOffer: environment.passkeyOffer })}
+          onContinue={() => {
+            if (landing.current !== undefined) navigate(landing.current);
+          }}
           onPair={async (seed, deviceName) => {
             const paired = await exchangePairing({ ports, claims, store }, seed, deviceName);
-            navigate(returnPathOf(location()) ?? daemonHomeHref(paired.daemon));
-            return { machine: paired.machine, via: paired.pairedOver === 'direct' ? 'direct' : 'relay' };
+            // The screen says "Connected" and navigates here once the first-passkey offer has been settled (or at once
+            // when there is none to make): never away from a button the person could still press.
+            landing.current = returnPathOf(location()) ?? daemonHomeHref(paired.daemon);
+            return {
+              machine: paired.machine,
+              via: paired.pairedOver === 'direct' ? 'direct' : 'relay',
+              connection: daemonConnection({
+                daemonId: paired.daemon,
+                baseUrl: paired.address,
+                deviceId: paired.deviceId,
+                daemonName: paired.machine,
+              }),
+            };
           }}
           onSelect={id => {
             ports.daemons.select(String(id));

@@ -421,26 +421,24 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
           top: (position?.top ?? anchor.y) - frame.y,
           visibility: positioned ? 'visible' : 'hidden',
         }}
-        className="kt-panel fixed z-50 min-w-[196px] max-w-[min(280px,calc(100vw-16px))] overflow-hidden p-1 font-ui shadow-popover"
+        className="kt-popover fixed z-50 min-w-[196px] max-w-[min(280px,calc(100vw-16px))] overflow-hidden p-1 font-ui"
       >
         {items.map((item, index) => (
           <Fragment key={item.key}>
-            {item.separatorBefore ? (
-              <hr className="mx-1 my-1 border-0 border-t border-border" data-menu-separator="" />
-            ) : null}
+            {item.separatorBefore ? <hr className="kt-menu-sep" data-menu-separator="" /> : null}
             <button
               type="button"
               role="menuitem"
               data-menu-key={item.key}
+              data-danger={item.danger ? '' : undefined}
               tabIndex={index === active ? 0 : -1}
               disabled={item.disabled}
               onClick={() => activate(item)}
               onPointerEnter={() => !item.disabled && setActive(index)}
               className={cn(
-                'flex w-full items-center gap-sm rounded-control px-cell-x text-left text-ui',
-                touch ? 'min-h-[44px]' : 'min-h-[34px]',
-                (!touch || item.hint) && 'py-1',
-                'hover:bg-surface-2 focus:bg-surface-2 focus:outline-none',
+                'kt-menu-item text-ui',
+                touch && '[--menu-item-h:44px]',
+                (!touch || item.hint) && '[--menu-item-py:4px]',
                 // The ink is EXCLUSIVE, not layered. kteam wrote this as
                 // `text-fg-soft` plus `text-err` on a danger row, and which one
                 // wins is decided by the order Tailwind emits the two utilities,
@@ -448,8 +446,7 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
                 // `.text-fg-soft` is emitted last, so Stop and Migrate rendered
                 // in the same ink as Resume and the destructive tone was silently
                 // lost. Verified in the harness screenshot at both viewports.
-                item.danger ? 'text-err' : 'text-fg-soft',
-                item.disabled && 'cursor-not-allowed opacity-40 hover:bg-transparent',
+                // (the danger ink and the disabled state are the row class's own, from `data-danger` / `disabled`)
               )}
             >
               {item.icon && <span className="shrink-0">{item.icon}</span>}
