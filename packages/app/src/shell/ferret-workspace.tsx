@@ -37,13 +37,15 @@ const SIDE = 'ferret.side';
 /**
  * `ferrets.needs-you`: the hook Ferrets OFFERS and the plugin holding the asks provides (`core/ferrets/contract/app-hooks/
  * needs-you.app-hook.ts` owns the name and the shape; the app does not depend on that package, so it narrows the value
- * itself, as every taker of an app hook does). `needing()` maps a ferret id to how many open asks wait on the owner.
+ * itself, as every taker of an app hook does). `needing()` maps a ferret id to its entry; Agenda's entries also say how many
+ * items are on the OWNER's turn (`waitingOnOwner`, the number the agenda line's pill shows) and whether this ferret's chat
+ * draws that line (`lineShown`, agenda mode on).
  */
 const NEEDS_YOU_HOOK = 'ferrets.needs-you';
 interface NeedsYouHook {
   readonly subscribe: (listener: () => void) => () => void;
   readonly watch: () => () => void;
-  readonly needing: () => ReadonlyMap<string, { readonly count: number }>;
+  readonly needing: () => ReadonlyMap<string, { readonly waitingOnOwner?: number; readonly lineShown?: boolean }>;
 }
 const isNeedsYouHook = (value: unknown): value is NeedsYouHook =>
   typeof value === 'object' &&
@@ -56,14 +58,18 @@ const nothing = (): number => 0;
 
 /**
  * HOW MANY ASKS WAIT ON THE OWNER IN THIS FERRET: what the closed side column hides. With Agenda mode off the chat draws no
- * agenda line above the composer, so the asks live only in the side tab; the toggle carries the count instead. 0 with no
- * provider (Agenda off or not installed on that machine).
+ * agenda line above the composer, so the asks live only in the side tab; the toggle carries the count instead. With the line
+ * drawn the toggle says nothing (the same asks would show twice). Only items on the owner's turn count: the pill's number.
+ * 0 with no provider (Agenda off or not installed on that machine).
  */
 function useWaitingAsks(daemon: string, subject: string): number {
   const hook = useAppHook(daemon, NEEDS_YOU_HOOK);
   const needsYou = isNeedsYouHook(hook) ? hook : undefined;
   useEffect(() => needsYou?.watch(), [needsYou]);
-  const read = useCallback(() => needsYou?.needing().get(subject)?.count ?? 0, [needsYou, subject]);
+  const read = useCallback(() => {
+    const entry = needsYou?.needing().get(subject);
+    return entry === undefined || entry.lineShown !== false ? 0 : (entry.waitingOnOwner ?? 0);
+  }, [needsYou, subject]);
   return useSyncExternalStore(needsYou?.subscribe ?? noSubscription, read, nothing);
 }
 

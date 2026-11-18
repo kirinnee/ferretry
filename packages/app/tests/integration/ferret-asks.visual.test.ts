@@ -2,7 +2,8 @@
  * A FERRET WITH A PENDING ASK SHOWS IT, in a real browser, over fake data (`fixtures/ferret-asks-scene.tsx`): the REAL app
  * over the REAL generated plugins (Conversation's chat and composer, Agenda's line above it), a fake machine behind them.
  *
- *  - agenda mode ON: the Agenda pill sits above the composer and says how many asks wait.
+ *  - agenda mode ON: the Agenda pill sits above the composer and says how many asks wait; the side toggle draws NO count
+ *    (the same asks are not said twice).
  *  - agenda mode OFF: the chat draws no line (the asks live in the side column), so the CLOSED column's toggle carries the
  *    count, and its label says it. On a phone the Agenda chip is the way in, and the line is Conversation's to draw.
  *  - the top nav is 44px tall on a phone, 32px at a desk.
@@ -121,6 +122,10 @@ describe('a ferret with a pending ask', () => {
           });
           expect(pill.text).toContain('2 need you');
           expect(pill.lineBottom, 'the pill is above the composer').toBeLessThanOrEqual(pill.composerTop);
+          // The line is drawn, so the toggle (a desk has one; a phone has chips instead) carries no badge.
+          expect(await tab.locator('[data-side-toggle-count]').count(), 'no badge beside the pill').toBe(0);
+          if (!viewport.phone)
+            expect(await tab.locator('[data-side-toggle]').getAttribute('aria-label')).toBe('Show side panels');
         } finally {
           await close();
         }

@@ -17,12 +17,16 @@ import { bootApp, entryOf, manifestOf, settle } from './frame-fixtures.tsx';
  */
 
 const mounts: string[] = [];
-/** The asks that wait on the owner, by ferret: what Agenda's `ferrets.needs-you` provider says. */
-const waiting = new Map<string, { readonly count: number }>();
+/** What Agenda's `ferrets.needs-you` provider says, by ferret: items on the owner's turn, and whether the chat draws the line. */
+interface Entry {
+  readonly waitingOnOwner: number;
+  readonly lineShown: boolean;
+}
+const waiting = new Map<string, Entry>();
 const heard = new Set<() => void>();
-const setWaiting = (ferret: string, count: number): void => {
-  if (count === 0) waiting.delete(ferret);
-  else waiting.set(ferret, { count });
+const setWaiting = (ferret: string, waitingOnOwner: number, lineShown = false): void => {
+  if (waitingOnOwner === 0) waiting.delete(ferret);
+  else waiting.set(ferret, { waitingOnOwner, lineShown });
   for (const listener of [...heard]) listener();
 };
 let bring: ((panel: string) => void) | undefined;
@@ -64,7 +68,7 @@ const plugin = entryOf(
     {
       hooks: {
         'ferrets.needs-you': () => {
-          let snapshot: ReadonlyMap<string, { readonly count: number }> = new Map(waiting);
+          let snapshot: ReadonlyMap<string, Entry> = new Map(waiting);
           return {
             subscribe: (listener: () => void) => {
               heard.add(listener);
@@ -175,7 +179,7 @@ describe('the ferret page opens on the chat, with the side column one click away
 
 describe('a closed side column says how many asks wait behind it', () => {
   test('a ferret with open asks puts the count on the toggle, and its label says it', async () => {
-    waiting.set('zoe', { count: 3 });
+    waiting.set('zoe', { waitingOnOwner: 3, lineShown: false });
     const page = await open();
     await settle();
     expect(page.querySelector('[data-side-toggle-count]')?.textContent).toBe('3');
@@ -183,7 +187,7 @@ describe('a closed side column says how many asks wait behind it', () => {
   });
 
   test('one ask reads in the singular, and the count follows the provider live', async () => {
-    waiting.set('zoe', { count: 1 });
+    waiting.set('zoe', { waitingOnOwner: 1, lineShown: false });
     const page = await open();
     await settle();
     expect(toggle(page).getAttribute('aria-label')).toBe('Show side panels, 1 ask waits on you');
@@ -195,7 +199,7 @@ describe('a closed side column says how many asks wait behind it', () => {
   });
 
   test('only THIS ferret’s asks count, and an open column draws no count (its agenda tab says them)', async () => {
-    waiting.set('kai', { count: 5 });
+    waiting.set('kai', { waitingOnOwner: 5, lineShown: false });
     const page = await open();
     await settle();
     expect(page.querySelector('[data-side-toggle-count]')).toBeNull();
@@ -205,5 +209,25 @@ describe('a closed side column says how many asks wait behind it', () => {
     await settle();
     expect(page.querySelector('[data-side-toggle-count]')).toBeNull();
     expect(toggle(page).getAttribute('aria-label')).toBe('Hide side panels');
+  });
+  test('agenda mode ON: the chat draws the agenda line, so the toggle draws no badge (the asks are not said twice)', async () => {
+    waiting.set('zoe', { waitingOnOwner: 3, lineShown: true });
+    const page = await open();
+    await settle();
+    expect(page.querySelector('[data-side-toggle-count]')).toBeNull();
+    expect(toggle(page).getAttribute('aria-label')).toBe('Show side panels');
+    await interact(() => setWaiting('zoe', 3, false));
+    expect(page.querySelector('[data-side-toggle-count]')?.textContent).toBe('3');
+    await interact(() => setWaiting('zoe', 3, true));
+    expect(page.querySelector('[data-side-toggle-count]')).toBeNull();
+  });
+
+  test('items that wait on the ferret are not asks on the owner: with none on the owner the toggle draws no badge', async () => {
+    // Agenda counts `waitingOnOwner` from the owner's turn only; a ferret whose items all moved to the ferret's turn has 0.
+    waiting.set('zoe', { waitingOnOwner: 0, lineShown: false });
+    const page = await open();
+    await settle();
+    expect(page.querySelector('[data-side-toggle-count]')).toBeNull();
+    expect(toggle(page).getAttribute('aria-label')).toBe('Show side panels');
   });
 });
