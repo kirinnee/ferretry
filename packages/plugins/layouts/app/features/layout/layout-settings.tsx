@@ -48,28 +48,24 @@ function ListRow({
     setRefusal(await apply(setting.path, draft));
   };
   return (
-    <SettingRow
-      name={setting.name}
-      hint={setting.hint}
-      wide
-      control={labelId => (
-        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1 max-md:w-full">
-          <input
-            id={id}
-            type="text"
-            aria-labelledby={labelId}
-            aria-invalid={refusal === undefined ? undefined : true}
-            className={INPUT_CLASS}
-            value={draft}
-            disabled={busy}
-            onChange={event => setDraft(event.target.value)}
-          />
-          <Button type="button" size="sm" disabled={busy || draft === held} onClick={() => void save()}>
-            Save
-          </Button>
-        </span>
-      )}
-    >
+    <SettingRow name={setting.name} hint={setting.hint}>
+      {/* The list is long ("ferrets, agenda, board, projects, insights, …"), so it gets the row's whole width under its
+          name rather than a narrow box beside it that cuts it off. */}
+      <span className="flex min-w-0 items-center gap-2 px-panel pb-3">
+        <input
+          id={id}
+          type="text"
+          aria-label={setting.name}
+          aria-invalid={refusal === undefined ? undefined : true}
+          className={INPUT_CLASS}
+          value={draft}
+          disabled={busy}
+          onChange={event => setDraft(event.target.value)}
+        />
+        <Button type="button" size="sm" disabled={busy || draft === held} onClick={() => void save()}>
+          Save
+        </Button>
+      </span>
       {refusal === undefined ? null : (
         <p role="alert" className="m-0 px-panel pb-2 text-meta text-err">
           {refusal}
@@ -339,27 +335,35 @@ export function LayoutSettings({ client, device }: LayoutSettingsProps) {
       </SettingGroup>
 
       {device === undefined ? null : (
-        <SettingGroup label="Layout — this device only">
-          <Keys layout={device.inForce} apply={theirs} busy={false} />
-          <SettingRow
-            name="Follow the owner's layout"
-            hint={
-              Object.keys(device.overrides).length === 0
-                ? 'This device has no changes of its own'
-                : 'Drop what this device changed'
-            }
-            control={() => (
-              <Button
-                type="button"
-                size="sm"
-                disabled={Object.keys(device.overrides).length === 0}
-                onClick={() => device.reset()}
-              >
-                Follow again
-              </Button>
-            )}
-          />
-        </SettingGroup>
+        // The same keys again, for this device alone: closed until this device has changes of its own.
+        <details open={Object.keys(device.overrides).length > 0} data-layout-device="">
+          <summary className="cursor-pointer text-meta font-semibold uppercase tracking-wide text-muted">
+            Layout — this device only
+          </summary>
+          <div className="mt-2">
+            <SettingGroup label="Layout — this device only">
+              <Keys layout={device.inForce} apply={theirs} busy={false} />
+              <SettingRow
+                name="Follow the owner's layout"
+                hint={
+                  Object.keys(device.overrides).length === 0
+                    ? 'This device has no changes of its own'
+                    : 'Drop what this device changed'
+                }
+                control={() => (
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={Object.keys(device.overrides).length === 0}
+                    onClick={() => device.reset()}
+                  >
+                    Follow again
+                  </Button>
+                )}
+              />
+            </SettingGroup>
+          </div>
+        </details>
       )}
     </div>
   );
