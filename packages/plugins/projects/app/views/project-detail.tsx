@@ -1,5 +1,5 @@
 import { useRouter } from '@ferretry/app';
-import { RouteLink } from '@ferretry/app/ui';
+import { Loading, RouteLink } from '@ferretry/app/ui';
 import { ArrowLeft, Bot, FolderTree, KanbanSquare, LayoutList } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { type ProjectInfo, ProjectInfoSchema } from '../../contract/index.ts';
@@ -122,9 +122,7 @@ function ProjectDetailView({
         <div className="grid gap-panel">
           <Section icon={<Bot className="text-muted" size={16} aria-hidden="true" />} title="Active ferrets">
             {reading === 'unread' ? (
-              <p className="m-0 text-meta text-muted" aria-busy="true" data-project-agents="unread">
-                Loading this daemon’s ferrets…
-              </p>
+              <Loading kind="bar" label="Loading this daemon’s ferrets…" />
             ) : reading === 'failed' ? (
               <p className="m-0 text-meta text-warn" role="status" data-project-agents="failed">
                 Could not read this daemon’s ferrets: {read.failure ?? 'the read failed'}.
@@ -233,11 +231,7 @@ export function ProjectDetailPage({
           Could not read this daemon’s project registry: {projects.error}
         </section>
       );
-    return (
-      <section className="kt-panel m-panel p-panel" aria-busy="true">
-        Loading this daemon’s project registry…
-      </section>
-    );
+    return <Loading kind="page" label="Loading this daemon’s project registry…" />;
   }
   const candidate = projects.projects.find(project => project.id === projectId);
   const parsed = candidate === undefined ? undefined : ProjectInfoSchema.safeParse(candidate);

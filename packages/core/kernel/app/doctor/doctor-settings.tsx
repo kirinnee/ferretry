@@ -8,6 +8,7 @@
 import { CircleAlert, CircleCheck, CircleMinus, Stethoscope } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { type DoctorReport, DoctorReportSchema, notBuiltCheck } from '../../contract/doctor.ts';
+import { Loading } from '@ferretry/app/ui';
 import type { KernelClient } from '../lib/client.ts';
 
 type Held =
@@ -107,21 +108,16 @@ export function DoctorSettings({ client }: { readonly client: KernelClient }) {
   }, [client, reads]);
   const again = useCallback(() => setReads(count => count + 1), []);
   if (held.status === 'ready') return <DoctorReportView report={held.report} />;
+  if (held.status === 'loading') return <Loading kind="page" label="Reading the host checks…" />;
   return (
     <section className="kt-panel p-panel" role="status" aria-label="Doctor report unavailable">
-      <h3 className="m-0 text-row font-semibold text-fg">
-        {held.status === 'loading' ? 'Reading the host checks…' : 'Doctor unavailable'}
-      </h3>
-      {held.status === 'unavailable' ? (
-        <>
-          <p className="mb-0 mt-1 text-cell leading-base text-muted">
-            This daemon did not provide a dependency report. No missing evidence is treated as a healthy host.
-          </p>
-          <button type="button" className="kt-btn mt-2 min-h-[44px]" data-doctor-retry="" onClick={again}>
-            Try again
-          </button>
-        </>
-      ) : null}
+      <h3 className="m-0 text-row font-semibold text-fg">Doctor unavailable</h3>
+      <p className="mb-0 mt-1 text-cell leading-base text-muted">
+        This daemon did not provide a dependency report. No missing evidence is treated as a healthy host.
+      </p>
+      <button type="button" className="kt-btn mt-2 min-h-[44px]" data-doctor-retry="" onClick={again}>
+        Try again
+      </button>
     </section>
   );
 }

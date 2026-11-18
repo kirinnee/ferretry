@@ -4,6 +4,7 @@
  */
 
 import { Badge, Button, SettingGroup, SettingRow } from '@ferretry/app';
+import { Loading } from '@ferretry/app/ui';
 import type { AppComponent, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useState } from 'react';
 import type { HarnessCliView } from '../../contract/index.ts';
@@ -34,7 +35,8 @@ export const createSettings = (client: PluginClient): AppComponent<SettingsProps
         setNote(cause instanceof Error ? cause.message : 'The update could not be started.');
       }
     };
-    if (view === null) return <p role="status">{note ?? 'Reading Claude Code…'}</p>;
+    if (view === null)
+      return note === null ? <Loading kind="page" label="Reading Claude Code…" /> : <p role="status">{note}</p>;
     const running = view.job?.state === 'running';
     const where = view.location.state === 'located' ? view.location.path : undefined;
     const verified = view.verification === 'verified';

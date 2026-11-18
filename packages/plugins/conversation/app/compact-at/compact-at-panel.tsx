@@ -9,7 +9,7 @@
  */
 
 import { controlState, useViewPlace } from '@ferretry/app';
-import { Floating } from '@ferretry/app/ui';
+import { Floating, Loading } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { Gauge, X } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
@@ -148,12 +148,7 @@ export function CompactAtLoader({
     };
   }, [client, ferretId]);
 
-  if (reading === 'pending')
-    return (
-      <p className="fy-action-form__note" role="status">
-        Reading the current setting…
-      </p>
-    );
+  if (reading === 'pending') return <Loading kind="page" label="Reading the current setting…" />;
   return (
     <CompactAtForm
       current={reading === 'unavailable' ? own : reading.own}

@@ -233,7 +233,7 @@ export const FilesTab = ({
   if (!stateMatchesScope)
     return (
       <div className="kt-fs rounded-md border border-border bg-surface">
-        <Loading what="ferret files" />
+        <Loading what="ferret files" kind="page" />
       </div>
     );
 
@@ -363,7 +363,7 @@ export const FilesTab = ({
           ) : listing.error ? (
             <Failed what={dir || 'the ferret’s root'} error={listing.error} onRetry={listing.reload} />
           ) : (
-            <Loading what={dir || 'the ferret’s root'} />
+            <Loading what={dir || 'the ferret’s root'} kind="bar" />
           )}
         </div>
       </div>

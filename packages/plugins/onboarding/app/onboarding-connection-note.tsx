@@ -11,6 +11,7 @@
  * a step here.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type { ReactNode } from 'react';
 import type { HostedRelayFallback } from './hosted-relay-state.ts';
 
@@ -74,11 +75,7 @@ export function OnboardingConnectionNote({ fallback }: OnboardingConnectionNoteP
  */
 function HostedRelayState({ fallback }: { readonly fallback: HostedRelayFallback }) {
   if (fallback.kind === 'checking') {
-    return (
-      <span className="text-meta leading-base text-faint" role="status">
-        Checking whether the hosted relay is available&hellip;
-      </span>
-    );
+    return <Loading kind="bar" label="Checking whether the hosted relay is available…" />;
   }
   if (fallback.kind === 'available') {
     return (

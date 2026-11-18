@@ -26,7 +26,7 @@ import { StaleNotice } from './files-reload.tsx';
 import { useFsResource } from './files-resource.ts';
 import { type FilesScope, scopeKey } from './scope.ts';
 import { ExternalLink as ExternalAnchor } from './seams.tsx';
-import { ImageViewer } from '../../ui.ts';
+import { ImageViewer, Loading } from '../../ui.ts';
 
 const CSV_PREVIEW_BYTES = 512 * 1024;
 const CSV_PREVIEW_ROWS = 400;
@@ -217,11 +217,7 @@ export const RichFilePreview = ({ scope, path, revision }: RichFilePreviewProps)
           </button>
         </div>
       );
-    return (
-      <div className="kt-fs-note" role="status">
-        Loading safe preview…
-      </div>
-    );
+    return <Loading kind="page" label="Loading safe preview…" />;
   }
   // THE SAME notice the surfaces show, retrying the preview's own byte read.
   // Not dismissible here: this sits inside a small document rather than above a

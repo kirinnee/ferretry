@@ -8,6 +8,7 @@
  */
 import type { DeviceLayout } from '@ferretry/app';
 import { Button, Segmented, SettingGroup, SettingRow } from '@ferretry/app';
+import { Loading } from '@ferretry/app/ui';
 import { type ReactNode, useCallback, useId, useState } from 'react';
 import type { Layout } from '../../../contract/index.ts';
 import { useLayouts } from '../../hooks/use-layouts.ts';
@@ -204,7 +205,7 @@ export function LayoutSettings({ client, device }: LayoutSettingsProps) {
     [refresh],
   );
 
-  if (state.status === 'loading') return <p role="status">Reading the layout…</p>;
+  if (state.status === 'loading') return <Loading kind="page" label="Reading the layout…" />;
   if (state.status === 'failed') return <Problem>{state.error}</Problem>;
 
   const { current, list } = state.read;

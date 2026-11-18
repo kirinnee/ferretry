@@ -5,6 +5,7 @@
  */
 
 import { type TaskView, formatTaskRef } from '../../../contract/index.ts';
+import { Loading } from '@ferretry/app/ui';
 import { ExternalLink, GitBranch } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import {
@@ -417,7 +418,11 @@ export function AsksList({
   readonly onOpen: (ferret: string, id: string) => void;
 }) {
   if (asks.open.length === 0 && asks.resolved.length === 0) {
-    return <p className="fy-board-detail__quiet">{asks.reading ? 'Reading the asks…' : 'No asks have been raised.'}</p>;
+    return asks.reading ? (
+      <Loading kind="bar" label="Reading the asks…" />
+    ) : (
+      <p className="fy-board-detail__quiet">No asks have been raised.</p>
+    );
   }
   return (
     <ul className="fy-board-detail__list" data-kind="asks">

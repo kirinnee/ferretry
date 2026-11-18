@@ -20,7 +20,7 @@
 import { formatTaskRef } from '../../contract/index.ts';
 import { Columns3, List, Maximize2, Minimize2 } from 'lucide-react';
 import { type ReactElement, useState } from 'react';
-import { Spinner } from '@ferretry/app/ui';
+import { Loading } from '@ferretry/app/ui';
 import type { BoardChat } from '../lib/board-chat.ts';
 import { NO_BOARD_FILTERS } from '../lib/board-model.ts';
 import { ferretNamer } from '../lib/board-present.ts';
@@ -193,10 +193,7 @@ export function BoardSideTab({
               : `No tasks of your own yet. ${tasks.hiddenAgents} agent ${tasks.hiddenAgents === 1 ? 'task is' : 'tasks are'} hidden.`}
           </p>
         ) : (
-          <p className="fy-board__reading" role="status">
-            <Spinner size={14} />
-            Reading the board…
-          </p>
+          <Loading kind="bar" label="Reading the board…" />
         )
       ) : view === 'kanban' ? (
         <div className={density === 'page' ? 'fy-board-kanban' : 'fy-board-side__kanban'} data-board-side-kanban="">

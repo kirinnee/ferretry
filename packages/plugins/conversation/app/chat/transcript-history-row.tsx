@@ -1,4 +1,4 @@
-import { LoaderCircle } from 'lucide-react';
+import { Loading } from '@ferretry/app/ui';
 import type { TranscriptHistoryStatus } from './transcript-history.ts';
 
 /** What the top of the transcript offers, and the one way to ask for more of it. */
@@ -33,10 +33,7 @@ export function TranscriptHistoryRow({ control }: { readonly control: Transcript
   return (
     <div className="fy-transcript-history" data-history={status}>
       {status === 'loading' ? (
-        <span className="fy-transcript-history__note" role="status">
-          <LoaderCircle aria-hidden="true" className="animate-spin" size={13} />
-          Loading older messages…
-        </span>
+        <Loading kind="bar" label="Loading older messages…" />
       ) : status === 'start' ? (
         <span className="fy-transcript-history__note">Beginning of the conversation</span>
       ) : (

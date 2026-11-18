@@ -5,6 +5,7 @@
  * nothing (no authority, no spend), so it applies at once; a daemon that refuses says so in its own words.
  */
 import { SettingGroup, SettingRow, SettingSwitch } from '@ferretry/app';
+import { useBackgroundLoad } from '@ferretry/app/ui';
 import type { AppComponent, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { editConfigText, readConfigText } from '@ferretry/std/yaml';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
@@ -35,6 +36,7 @@ export const createBoardSettings = (client: PluginClient): AppComponent<Settings
     const [held, setHeld] = useState<Held | null>(null);
     const [note, setNote] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    useBackgroundLoad(held === null && note === null);
 
     const read = useCallback(async () => {
       try {
@@ -84,7 +86,7 @@ export const createBoardSettings = (client: PluginClient): AppComponent<Settings
           <SettingRow
             settingId="board-github-watch"
             name="Watch pull requests"
-            hint={held === null ? 'Reading…' : 'Polls about once a minute'}
+            hint={held === null ? undefined : 'Polls about once a minute'}
             explanation={
               <>
                 Saved as <code>github.watch</code> in <code>config/board.yaml</code>, so editing the file by hand works

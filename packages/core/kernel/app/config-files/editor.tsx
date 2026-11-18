@@ -13,7 +13,7 @@
  * this one. An edit that loosens what the machine allows is saved and HELD for the owner; Confirm asks the kernel to put
  * it into effect.
  */
-import { BottomSheet, Button, PanelPath } from '@ferretry/app/ui';
+import { BottomSheet, Button, Loading, PanelPath } from '@ferretry/app/ui';
 import { FileCode2 } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import type { KernelClient } from '../lib/client.ts';
@@ -196,11 +196,7 @@ export function ConfigFileEditor({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-panel pb-4">
         <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-3 py-3">
-          {load.status === 'loading' ? (
-            <p role="status" className="m-0 text-cell text-muted">
-              Reading {path}…
-            </p>
-          ) : null}
+          {load.status === 'loading' ? <Loading kind="page" label={`Reading ${path}…`} /> : null}
           {load.status === 'failed' ? (
             <p role="alert" className="m-0 text-cell leading-base text-err" data-config-editor-failed="">
               {path} could not be read. {load.sentence}

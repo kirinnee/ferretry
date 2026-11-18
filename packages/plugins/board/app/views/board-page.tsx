@@ -10,7 +10,7 @@
 
 import type { BoardActivityFilter, BoardProjectId } from '../../contract/index.ts';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Spinner } from '@ferretry/app/ui';
+import { Loading } from '@ferretry/app/ui';
 import { useBoard, useBoardFilters, useBoardProjects, type BoardMachine } from '../hooks/use-board.ts';
 import { useNow } from '@ferretry/app/ui';
 import type { DaemonBoardStore } from '../lib/board-store.ts';
@@ -387,10 +387,7 @@ export function BoardPage({
           );
         })}
       {reading && model.cards.length === 0 ? (
-        <p className="fy-board__reading" role="status">
-          <Spinner size={14} />
-          Reading the board…
-        </p>
+        <Loading kind="page" label="Reading the board…" />
       ) : failed ? (
         <p className="fy-board__empty" role="alert">
           The board could not be read.{' '}

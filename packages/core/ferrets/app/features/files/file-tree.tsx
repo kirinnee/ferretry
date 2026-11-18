@@ -1,4 +1,5 @@
-import { FileText, Folder, Link2Off, Loader2, Lock, RefreshCw, ChevronRight } from 'lucide-react';
+import { FileText, Folder, Link2Off, Lock, RefreshCw, ChevronRight } from 'lucide-react';
+import { Loading } from '@ferretry/app/ui';
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { describeFsError, fsApi, isAbort } from './files-api.ts';
 import { formatBytes } from './files-model.ts';
@@ -38,10 +39,7 @@ export const FileTreeRows = ({ rows, onToggle, onEnter, onOpenFile, onRetry }: F
               style={depthStyle(row.depth)}
             >
               {row.note === 'loading' ? (
-                <>
-                  <Loader2 size={13} className="animate-spin" aria-hidden="true" />
-                  Loading…
-                </>
+                <Loading kind="bar" label="Loading…" />
               ) : row.note === 'error' ? (
                 <>
                   <span>

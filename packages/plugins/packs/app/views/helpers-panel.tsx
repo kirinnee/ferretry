@@ -6,7 +6,7 @@ import { PackNote, PackSwitchRow, usePackFerretSwitch } from '../features/pack/p
 import { type PacksClient, refusalSentence } from '../lib/client.ts';
 import { helpersOf } from '../lib/helper-state.ts';
 import { ferretHref } from '../lib/shell-ports.ts';
-import { useShellClock } from '../ui.ts';
+import { Loading, useShellClock } from '../ui.ts';
 
 /** How often the lead's table is read again while the panel is open, in milliseconds. */
 const REFRESH_MS = 5_000;
@@ -56,7 +56,7 @@ export const createPanel = (client: PacksClient): AppComponent<PanelProps> =>
       <section aria-label="Helpers" data-panel="helpers">
         <PackSwitchRow ferretId={subject} control={control} />
         <PackNote note={control.note} dismiss={control.dismiss} />
-        {read.kind === 'loading' ? <p role="status">Reading helpers…</p> : null}
+        {read.kind === 'loading' ? <Loading kind="bar" label="Reading helpers…" /> : null}
         {read.kind === 'failed' ? <p role="alert">{read.message}</p> : null}
         {read.kind === 'ready' ? (
           <HelpersPack
