@@ -119,6 +119,17 @@ const stepUpCases: SchemaCase[] = [
       stepUpUntil: LATER_INSTANT,
     },
   },
+  {
+    // A newer daemon may say more than this app knows: the read drops the extra field, it never refuses the view.
+    name: 'passkeys view read with a field a newer daemon added',
+    schema: stepUp.PasskeysViewReadSchema,
+    value: {
+      passkeys: [{ id: CREDENTIAL, origin: ORIGIN, createdAt: INSTANT, addedLater: true }],
+      registration: 'confirm-existing',
+      stepUpUntil: LATER_INSTANT,
+      alsoAddedLater: 1,
+    },
+  },
   { name: 'window request', schema: stepUp.PasskeyWindowRequestSchema, value: { deviceId: DEVICE_ID } },
   {
     name: 'stored proof',
@@ -165,6 +176,11 @@ describe('the passkey step-up wire', () => {
         name: 'an unknown registration posture',
         schema: stepUp.PasskeysViewSchema,
         value: { passkeys: [], registration: 'open' },
+      },
+      {
+        name: 'a passkeys view read whose passkeys are the wrong type',
+        schema: stepUp.PasskeysViewReadSchema,
+        value: { passkeys: 'none', registration: 'confirm-existing' },
       },
       {
         name: 'a rotation with no proof',
