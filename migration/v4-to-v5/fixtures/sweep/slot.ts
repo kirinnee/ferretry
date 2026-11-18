@@ -21,6 +21,11 @@
  *   bun slot.ts real-claude <1..9> on <login> [--binary <abs path>] | off [--force]
  *                                      the ONE exception to "no real model": a persisted slot's 5.0 side runs the REAL claude for ONE
  *                                      ferretry-managed login (the owner signs in on the 5.0 Logins screen); every other caller keeps the fake
+ *   bun slot.ts reset-v5 <1..9> --empty <libexec-dir> [--keep-real-claude]
+ *                                      a PERSISTED slot's 5.0 side back to an EMPTY first-run home (new identity, nothing from the fixture, only the port pin written): only the 5.0
+ *                                      daemon and its tmux server stop; the old home is kept as a 0600 tar in <slot>/reset-backups (0700); the port
+ *                                      pin, units, wrappers, CLI names and hosted relay discovery stay; v4 is untouched
+ *   bun slot.ts restore-v5 <1..9> <tar>   put an old home back from one of the slot's own tars (the current home is tarred first)
  *
  * Everything lives under SWEEP_ROOT/slot<N>/ (refused anywhere else, links resolved first). Ports: v4 is 7600+2N, 5.0 is
  * 7601+2N. Nothing here touches ~/.ferretry (v4, 7457), ~/.ferretry-v5 (the owner's preview, 7458) or v4's default 7431:
@@ -106,6 +111,7 @@ import {
   statusLine,
   type RealPaths,
 } from './real-claude.ts';
+import { ResetRefusal, backupDirOf, resetV5, restoreV5, type ResetPaths, type TarPorts } from './reset.ts';
 import {
   assertScopeOwned,
   assertServiceOwned,
@@ -1186,9 +1192,9 @@ async function verifyLimitsOffV5(slot: Slot): Promise<void> {
  * Chrome pid"). Stops ONLY Chrome processes whose own `--user-data-dir` is inside this slot's folder (read from each candidate's
  * command line, never matched by name alone).
  */
-async function stopSlotChrome(slot: Slot, label: string): Promise<void> {
-  const prefix = `--user-data-dir=${slot.dir}${'/'}`;
-  const listed = await run('pgrep', ['-f', '--', `--user-data-dir=${slot.dir}/`], baseEnvironment());
+async function stopSlotChrome(slot: Slot, label: string, root: string = slot.dir): Promise<void> {
+  const prefix = `--user-data-dir=${root}${'/'}`;
+  const listed = await run('pgrep', ['-f', '--', `--user-data-dir=${root}/`], baseEnvironment());
   const mine: number[] = [];
   for (const text of listed.out.split('\n')) {
     const pid = Number.parseInt(text, 10);
@@ -2373,6 +2379,194 @@ async function liveFerretsOn(slot: Slot, login: string): Promise<string | undefi
     : `a ferret still runs on runtime ${busy.join(', ')} (login ${login}); stop it first, or pass --force`;
 }
 
+// ─── reset-v5 / restore-v5: an EMPTY 5.0 home on a persisted slot, and the way back ─────────────────────────────────
+
+const resetPathsOf = (slot: Slot): ResetPaths => ({
+  real: slot.real,
+  v5Dir: slot.v5.dir,
+  home: slot.v5.home,
+  user: slot.v5.user,
+  harness: slot.v5.harness,
+  port: slot.v5Port,
+});
+
+const tarPorts: TarPorts = {
+  create: async (dir, file, members) => {
+    const ran = await run('tar', ['-C', dir, '--warning=no-file-ignored', '-cf', file, ...members], baseEnvironment());
+    return { code: ran.code, err: ran.err };
+  },
+  list: async file => {
+    const ran = await run('tar', ['-tf', file], baseEnvironment());
+    return { code: ran.code, entries: ran.out.split('\n').filter(line => line !== ''), err: ran.err };
+  },
+  extract: async (dir, file) => {
+    const ran = await run('tar', ['-C', dir, '-xpf', file], baseEnvironment());
+    return { code: ran.code, err: ran.err };
+  },
+};
+
+/** Stops ONLY this slot's 5.0 side: its daemon, its tmux server (its socket lives inside the home that goes away) and its Chrome. */
+async function stopV5Side(slot: Slot): Promise<void> {
+  await stopDaemon(slot, 'v5', '5.0 daemon');
+  await stopTerminals(slot, 'v5');
+  await stopSlotChrome(slot, 'reset', slot.v5.dir);
+  const holders = await pidsHolding(slot.v5.lock);
+  if (holders.length > 0 || (await tmuxServerPid(slot.v5.tmux)) !== undefined)
+    die(
+      `refusing: the 5.0 side of slot ${String(slot.n)} is still running after its units were stopped; nothing was removed`,
+      99,
+    );
+}
+
+async function startV5Side(slot: Slot): Promise<void> {
+  await guard(slot, 'v5');
+  await ensureTmux(slot, 'v5');
+  await startService(slot, 'v5', join(slot.v5.bin, 'fyd'), slot.v5Port, join(slot.v5.dir, 'fyd.log'), slot.v5.user);
+  await waitHealthy(slot, 'v5');
+}
+
+/**
+ * The 5.0 side on a home the kit just emptied: NO guard first (an empty home pins nothing, and a 5.0 daemon refuses a home that holds a
+ * file but has no home.json, so the kit writes nothing before the first boot). The daemon is told its port on its command line; once it
+ * serves, the pin is read from the home the daemon made. Only if the daemon recorded none does the kit write the bind pin (AFTER the first
+ * boot, merged into whatever the daemon wrote), because every wrapper refuses a home that does not pin this slot's port.
+ */
+async function startFreshV5Side(slot: Slot): Promise<void> {
+  // The daemon FIRST: the tmux socket lives inside the home (state/terminals/tmux.sock), so a tmux server started before the first boot would
+  // make the empty home "not empty". The kit's own tmux server (its terminals unit) is started once the daemon has made the home.
+  await startService(slot, 'v5', join(slot.v5.bin, 'fyd'), slot.v5Port, join(slot.v5.dir, 'fyd.log'), slot.v5.user);
+  await waitHealthy(slot, 'v5');
+  await ensureTmux(slot, 'v5');
+  const { port } = await pinnedPort(slot, 'v5');
+  if (port === slot.v5Port)
+    console.log(`  port pin: the daemon recorded ${String(port)} itself; the kit wrote nothing`);
+  else {
+    const file = join(slot.v5.home, 'config', 'daemon.json');
+    const read = JSON.parse((await readFile(file, 'utf8').catch(() => '{}')) || '{}') as unknown;
+    const document: Record<string, unknown> = isRecord(read) ? read : {};
+    const others = (Array.isArray(document.carriers) ? (document.carriers as unknown[]) : []).filter(
+      entry => !(isRecord(entry) && entry.kind === 'bind'),
+    );
+    document.carriers = [{ kind: 'bind', host: '127.0.0.1', port: slot.v5Port }, ...others];
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+    await writeFile(file, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
+    console.log(
+      `  port pin: the daemon recorded ${port === undefined ? 'none' : String(port)}; the kit wrote the bind pin ${String(slot.v5Port)} into config/daemon.json AFTER the first boot (the only file it wrote)`,
+    );
+  }
+  await guard(slot, 'v5');
+}
+
+/** The persisted slot a reset or restore may touch: every refusal is decided before anything is stopped. */
+async function assertResettable(slot: Slot, verb: string, options: { pinned: boolean }): Promise<void> {
+  if (!slot.persisted)
+    die(
+      `refusing: slot ${String(slot.n)} is not persisted; ${verb} is only for a persisted slot (its units and folder survive a reboot). Run persist ${String(slot.n)} first`,
+      99,
+    );
+  await assertSlotPath(slot);
+  // A reset starts from a home that pins this slot's port; a restore may be undoing a half-done reset, so it checks the pin of the home it
+  // PUTS BACK (startV5Side guards after the extraction), not of the one it replaces.
+  if (options.pinned) await guard(slot, 'v5');
+  await assertServiceOwned(realPorts, guardIds(slot, 'v5'));
+  await assertScopeOwned(realPorts, scopeIds(slot, 'v5'));
+}
+
+async function resetV5Verb(slot: Slot, rest: readonly string[]): Promise<void> {
+  const n = String(slot.n);
+  const usage = 'usage: slot.ts reset-v5 <1..9> --empty <libexec-dir> [--keep-real-claude]';
+  const keepRealClaude = rest.includes('--keep-real-claude');
+  const args = rest.filter(arg => arg !== '--keep-real-claude');
+  if (args.length !== 2 || args[0] !== '--empty' || args[1] === undefined) die(usage, 64);
+  await assertResettable(slot, 'reset-v5', { pinned: true });
+  const libexec = resolve(args[1] ?? '');
+  const next = await checkNewBuild(slot, libexec);
+  await assertPagesDeployLive(next.commit);
+  const bin = slot.v5.bin;
+  const installBuild = async (): Promise<void> => {
+    const before = await readStamp(bin);
+    if (
+      resolve(libexec) === resolve(bin) ||
+      (before?.commit === next.commit && V5_PROGRAMS.every(name => before.sha256[name] === next.sha256[name]))
+    ) {
+      console.log(`  5.0 programs: already ${next.commit}`);
+      return;
+    }
+    for (const name of [...V5_PROGRAMS, STAMP]) {
+      const target = join(bin, name);
+      if ((await lstat(target).catch(() => undefined)) !== undefined) {
+        await rm(`${target}.prev`, { force: true });
+        await rename(target, `${target}.prev`);
+      }
+      await copyFile(join(libexec, name), target);
+      await chmod(target, name === STAMP ? 0o644 : 0o755);
+    }
+    console.log(
+      `  5.0 programs: ${before?.commit ?? 'unknown'} -> ${next.commit} (the old ones are kept as <name>.prev)`,
+    );
+  };
+  console.log(`slot ${n}: resetting the 5.0 side to an EMPTY home (v4 is not touched)`);
+  let tarFile: string | undefined;
+  try {
+    const done = await resetV5(
+      resetPathsOf(slot),
+      realPathsOf(slot),
+      tarPorts,
+      {
+        stop: async () => await stopV5Side(slot),
+        installBuild,
+        start: async () => await startFreshV5Side(slot),
+        say: line => console.log(line),
+      },
+      { keepRealClaude, now: new Date() },
+    );
+    tarFile = done.tar;
+  } catch (error) {
+    if (error instanceof ResetRefusal) die(`refusing: ${error.message}; nothing was removed`, 99);
+    throw new Failure(
+      `slot ${n}: the reset stopped half way (${error instanceof Error ? error.message : String(error)}). The old home is in ${backupDirOf(slot.real)} (newest v5-reset-*.tar): put it back with: bun ${slotScript(slot)} restore-v5 ${n} <that tar>`,
+      2,
+    );
+  }
+  console.log(
+    `slot ${n}: 5.0 is serving an EMPTY home on http://127.0.0.1:${String(slot.v5Port)}  (new identity; no pairing code was made)`,
+  );
+  console.log(`  put the old home back: bun ${slotScript(slot)} restore-v5 ${n} ${tarFile}`);
+  if (keepRealClaude && (await readRecord(realPathsOf(slot))) !== undefined)
+    console.log(
+      '  real claude: add the login again on the 5.0 Logins screen (same name), press Sign in, add the runtime; harness-claude-code.yaml (permissionMode: auto) is empty again',
+    );
+  console.log('');
+  await status(slot);
+}
+
+async function restoreV5Verb(slot: Slot, rest: readonly string[]): Promise<void> {
+  const n = String(slot.n);
+  if (rest.length !== 1 || rest[0] === undefined)
+    die("usage: slot.ts restore-v5 <1..9> <tar in the slot's reset-backups folder>", 64);
+  await assertResettable(slot, 'restore-v5', { pinned: false });
+  console.log(`slot ${n}: putting an old 5.0 home back (v4 is not touched)`);
+  try {
+    const done = await restoreV5(
+      resetPathsOf(slot),
+      tarPorts,
+      {
+        stop: async () => await stopV5Side(slot),
+        start: async () => await startV5Side(slot),
+        say: line => console.log(line),
+      },
+      rest[0] ?? '',
+      new Date(),
+    );
+    console.log(`slot ${n}: the old home is back and serving; the home it replaced is in ${done.saved}`);
+  } catch (error) {
+    if (error instanceof ResetRefusal) die(`refusing: ${error.message}`, 99);
+    throw error;
+  }
+  console.log('');
+  await status(slot);
+}
+
 // ─── main ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The slot named on the command line; a persisted slot's /tmp link (empty after a boot) is put back first. */
@@ -2422,12 +2616,18 @@ try {
     case 'real-claude':
       await realClaude(await healedSlot(slotArg), rest);
       break;
+    case 'reset-v5':
+      await resetV5Verb(await healedSlot(slotArg), rest);
+      break;
+    case 'restore-v5':
+      await restoreV5Verb(await healedSlot(slotArg), rest);
+      break;
     case 'stamp-v5':
       await stampV5(slotArg, rest[0]);
       break;
     default:
       die(
-        'usage: slot.ts <up|down|status|cli|pair|upgrade-v5|persist|unpersist|wrappers|real-claude|stamp-v5> <slot 1..9> …',
+        'usage: slot.ts <up|down|status|cli|pair|upgrade-v5|persist|unpersist|wrappers|real-claude|reset-v5|restore-v5|stamp-v5> <slot 1..9> …',
         64,
       );
   }

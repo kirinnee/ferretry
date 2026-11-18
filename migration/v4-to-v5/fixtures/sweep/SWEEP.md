@@ -69,3 +69,50 @@ Do these on the paired 5.0 app (the `fy5` preview).
 
 `migration/v4-to-v5/tests/unit/sweep-real-claude.test.ts` runs the shim in a real `sh` against a **stub** "real" binary and drives
 `on` / `off` on a scratch folder. No real claude, no login and no network is ever used.
+
+# Start from scratch: an EMPTY 5.0 home (`reset-v5` / `restore-v5`)
+
+For an owner who wants to re-pair and start with nothing: no fixture ferrets, conversations, logins, runtimes, profiles, projects,
+agenda, board or devices. **Persisted slots only.** The v4 side is never read or written.
+
+```
+bun slot.ts reset-v5 <1..9> --empty <libexec-dir> [--keep-real-claude]
+bun slot.ts restore-v5 <1..9> <tar>
+```
+
+## `reset-v5`
+
+1. **Refuses first** (nothing is stopped): not persisted; the home does not pin this slot's port; a unit that is not this slot's; the
+   build is not stamped or its Pages deploy is not live (the same gate as `upgrade-v5`); **real claude is on and `--keep-real-claude` was not given**.
+2. Stops **only** the 5.0 daemon, the 5.0 tmux server (its socket lives inside the home that goes away) and the headless Chrome of the 5.0
+   browser profile. v4 keeps running.
+3. Puts the given 5.0 programs in place (old ones kept as `<name>.prev`; nothing if the slot already runs that build).
+4. Writes the old 5.0 home **and** the daemon's own HOME folder (`v5/user`) into `<slot folder>/reset-backups/v5-reset-<UTC stamp>.tar`
+   (file `0600`, folder `0700`), reads the tar back, and only then removes both.
+5. Makes a **first-run** home: an **empty folder** (`0700`). The kit seeds **nothing**: no `config/daemon.json`, no gate, no daemon name, no relay or
+   WebRTC key, no limits file, no setup run. (A 5.0 daemon refuses a home that holds any file but has no `home.json`, so nothing could be
+   seeded before the first boot anyway.) The daemon's own first boot makes its **new identity** and everything else, exactly as on a brand-new
+   install; the hosted relay discovery applies as for any fresh daemon. The port (7601+2N) is on the daemon's command line in the unit.
+   **Limits are therefore ON** (the daemon default), unlike a `up` home: a ferret started in this slot joins the owner's real fleet slice.
+6. Starts the 5.0 tmux server and daemon, waits for `/healthz`, then reads the port pin from the home the daemon made. If the daemon recorded the
+   slot's bind port itself the kit writes nothing; if not, the kit writes ONLY the bind pin into `config/daemon.json`, after the first boot (every
+   wrapper refuses a home that does not pin its slot's port). Prints `status`. **It never prints a pairing code and never pairs.**
+
+**Kept:** the unit files, the wrappers, `cli-names.json` (the CLI name the daemon prints), the fake harness, the v4 side.
+**Removed (into the tar first):** everything in the 5.0 home and `v5/user`.
+
+## `--keep-real-claude`
+
+With real claude on, `reset-v5` refuses without this flag (the old login and its sign-in are in the home that goes away). With it, the
+dispatcher is written again for the **same login name**, pointed at the **new** home's store path (`<FY_HOME>/state/logins/credentials/<login>`;
+the same string, because the new home lives where the old one did) and `real-claude.json` is updated. The store is **missing until the owner
+adds the login again and signs in**; until then the shim sends everything to the fake. `harness-claude-code.yaml` (`permissionMode: auto`)
+is empty again too: set it again before starting a real ferret.
+
+## `restore-v5`
+
+`restore-v5 <N> <tar>` puts an old home back. The tar must be a plain `0600` file **directly inside this slot's `reset-backups/`**, listing
+only `home/…` and `user/…`. The CURRENT home is tarred first (`v5-restore-<stamp>.tar`), so a restore never loses one. By hand, the same
+thing is: stop `fy5-slot<N>` and `fy5-slot<N>-terminals`, move `v5/home` and `v5/user` aside, `tar -C <slot>/v5 -xpf <tar>`, start both.
+
+Tests: `migration/v4-to-v5/tests/unit/sweep-reset.test.ts` (scratch folders and the real `tar`; no daemon, no systemd).
