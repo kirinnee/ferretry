@@ -110,4 +110,13 @@ describe('Settings › Lessons', () => {
     expect(toggle.getAttribute('aria-checked')).toBe('true');
     await view.unmount();
   });
+
+  it('says so, and holds no background load, when the daemon cannot answer which ferrets learn', async () => {
+    const daemon = fakeLessonsDaemon();
+    daemon.once('GET /v1/lessons/ferrets', { refuse: { status: 404, code: 'not_found', message: 'no such route' } });
+    const view = await mount(<LessonsSettingsSurface connection={daemon.connection} />);
+    await waitForText(view.container, 'isn’t available on this machine');
+    expect(view.container.querySelector('[data-loading="background"]')).toBeNull();
+    await view.unmount();
+  });
 });

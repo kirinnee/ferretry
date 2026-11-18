@@ -146,7 +146,13 @@ export function LessonsSettingsSurface({ connection, ferrets = null }: LessonsSe
           </p>
         )}
         {lessons.records === null ? (
-          <Loading kind="bar" label="Reading which ferrets learn…" />
+          lessons.unavailable ? (
+            <p className="m-0 text-meta text-muted" data-lessons-ferrets-unavailable="">
+              Which ferrets learn isn’t available on this machine.
+            </p>
+          ) : (
+            <Loading kind="bar" label="Reading which ferrets learn…" />
+          )
         ) : rows.length === 0 ? (
           <p className="m-0 text-meta text-muted">No ferrets on this machine yet.</p>
         ) : (

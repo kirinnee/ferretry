@@ -121,4 +121,15 @@ describe('Loading', () => {
     expect(page?.getAttribute('role')).toBe('status');
     expect(page?.textContent).toContain('Opening your machine…');
   });
+
+  test('a compact page loader says so on its class, so a small container never gets the page height', async () => {
+    view = await mount(<Loading compact kind="page" label="Reading the request…" />);
+    const page = view.container.querySelector('[data-loading="page"]');
+    expect(page?.classList.contains('fy-loading--compact')).toBe(true);
+    expect(page?.textContent).toContain('Reading the request…');
+    await view.render(<Loading kind="page" label="Reading the request…" />);
+    expect(view.container.querySelector('[data-loading="page"]')?.classList.contains('fy-loading--compact')).toBe(
+      false,
+    );
+  });
 });

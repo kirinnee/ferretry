@@ -25,6 +25,8 @@ const PASSIVE_LESSONS_POLL_MS = 300_000;
 export interface PassiveLessonsState {
   /** `null` until the first read answers — and for a daemon that cannot answer it. */
   readonly records: readonly FerretLessons[] | null;
+  /** True while no read has answered and the last one failed (a daemon without the route): the wait is over. */
+  readonly unavailable: boolean;
   readonly passive: ReadonlySet<string>;
   readonly refresh: () => Promise<void>;
   /** Switches one ferret and returns what the daemon did; throws with its refusal. */
@@ -38,6 +40,7 @@ export function usePassiveLessons(
   pollMs: number = PASSIVE_LESSONS_POLL_MS,
 ): PassiveLessonsState {
   const [records, setSessions] = useState<readonly FerretLessons[] | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -49,9 +52,12 @@ export function usePassiveLessons(
   const refresh = useCallback(async () => {
     try {
       const next = await fetchFerretLessons(connection);
-      if (alive.current) setSessions(next);
+      if (!alive.current) return;
+      setSessions(next);
+      setUnavailable(false);
     } catch {
-      // A daemon without the route has no ferret lessons; the mark is simply absent.
+      // A daemon without the route has no ferret lessons: the mark is absent, and a reader still waiting is told so.
+      if (alive.current) setUnavailable(true);
     }
   }, [connection]);
 
@@ -78,5 +84,5 @@ export function usePassiveLessons(
     () => (records === null ? NOBODY : new Set(records.filter(entry => entry.passive).map(entry => entry.ferretId))),
     [records],
   );
-  return { records, passive, refresh, set };
+  return { records, unavailable: unavailable && records === null, passive, refresh, set };
 }

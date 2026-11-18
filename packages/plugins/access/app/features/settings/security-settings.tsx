@@ -239,13 +239,12 @@ export function SecuritySurface({
           failure={failure}
           onAdd={() => void add()}
         />
+      ) : loaded.kind === 'loading' ? (
+        // Nothing is drawn in place while reading (an empty bordered panel would only flash): the shell's one bar says so.
+        <Loading kind="bar" label="Reading the passkeys this device holds…" />
       ) : (
         <section className="kt-panel p-panel" role="status" aria-label="Passkeys" data-security-state={loaded.kind}>
-          {loaded.kind === 'loading' ? (
-            <Loading kind="bar" label="Reading the passkeys this device holds…" />
-          ) : (
-            <p className="m-0 text-cell leading-base text-muted">{LOAD_FAILURE}</p>
-          )}
+          <p className="m-0 text-cell leading-base text-muted">{LOAD_FAILURE}</p>
         </section>
       )}
       <SecuritySettingsBlock connection={connection} createClient={createClient} />

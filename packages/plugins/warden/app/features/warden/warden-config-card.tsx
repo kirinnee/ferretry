@@ -365,7 +365,7 @@ export function WardenConfigSurface({
     if (unavailable === 'message')
       return (
         <section className="kt-panel p-panel" aria-label="Reading the Warden settings">
-          <Loading kind="page" label="Reading the Warden’s settings…" />
+          <Loading compact kind="page" label="Reading the Warden’s settings…" />
           <p className="mb-0 mt-1 text-cell leading-base text-muted">
             If this device asks you to confirm it’s you, confirm it to see them. The settings appear here as soon as the
             daemon answers.

@@ -445,7 +445,7 @@ export function RemoveRuntimeDialog({
           }}
         />
       ) : phase.kind === 'reading' ? (
-        <Loading kind="page" label={`Checking what runs on ${runtime.name}…`} />
+        <Loading compact kind="page" label={`Checking what runs on ${runtime.name}…`} />
       ) : phase.kind === 'refused' ? (
         <>
           <p role="alert" className="m-0 text-cell leading-base text-err" data-runtime-remove-refused="">

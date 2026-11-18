@@ -28,6 +28,18 @@
   text-align: center;
 }
 
+/* Compact: for a small container (popover, dialog, card, panel). No minimum height, a smaller orb, so it never makes the
+   container jump tall while it waits. */
+.fy-loading--compact {
+  gap: 8px;
+  min-height: 0;
+  padding: 14px 12px;
+}
+.fy-loading--compact .fy-loading__orb {
+  height: 48px;
+  width: 48px;
+}
+
 .fy-loading__orb {
   align-items: center;
   display: inline-flex;
@@ -148,21 +160,26 @@
   opacity: 0.7;
 }
 
-/* DARK: a mid-tone accent on a dark page is the faintest the bar can be, so the dark families lift the track, the head
-   and the glow (the light ones read well as they are). */
+/* DARK: a mid-tone accent on a dark page is the faintest the bar can be, so the dark families lift all three parts: a
+   track that is a LIGHTENED accent (not a tint of it, so the page cannot swallow it), a head that is nearly the
+   foreground colour with a firm edge (the brightest thing on the strip, readable even at phone width), and a glow that
+   reaches below the strip. Kept at 4px: thin, not heavy. */
 :root[data-theme$='-dark'] .fy-loading-bar,
 [data-swatch$='-dark'] .fy-loading-bar {
-  background: color-mix(in srgb, var(--accent) 42%, transparent);
-  box-shadow: 0 1px 10px color-mix(in srgb, var(--accent) 70%, transparent);
+  background: color-mix(in srgb, var(--accent) 65%, var(--fg));
+  box-shadow:
+    0 1px 14px color-mix(in srgb, var(--accent) 90%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
   height: 4px;
 }
 :root[data-theme$='-dark'] .fy-loading-bar__run,
 [data-swatch$='-dark'] .fy-loading-bar__run {
   background: linear-gradient(
     90deg,
-    transparent,
-    color-mix(in srgb, var(--accent) 60%, var(--fg)) 45%,
-    color-mix(in srgb, var(--accent) 60%, var(--fg)) 55%,
-    transparent
+    color-mix(in srgb, var(--accent) 80%, var(--bg)) 0%,
+    var(--fg) 14%,
+    var(--fg) 86%,
+    color-mix(in srgb, var(--accent) 80%, var(--bg)) 100%
   );
+  box-shadow: 0 0 10px color-mix(in srgb, var(--fg) 70%, transparent);
 }

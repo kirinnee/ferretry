@@ -115,7 +115,7 @@ function ShellsTab({ shells }: { readonly shells: ShellsClient }) {
 
       <SettingGroup label="Shells">
         <>
-          {list === undefined && <Loading kind="bar" label="Loading shells…" />}
+          {list === undefined && error === undefined && <Loading kind="bar" label="Loading shells…" />}
           {list?.length === 0 && <SettingRow name="No shells yet." hint="Ferrets use the machine's tools." />}
           {list?.map(shell => (
             <SettingRow

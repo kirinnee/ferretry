@@ -106,3 +106,12 @@ describe('the Shells half, bound to the shell', () => {
     await view.unmount();
   });
 });
+
+describe('a failed read releases the top bar', () => {
+  it('shows the error and holds no background load once the reads have failed', async () => {
+    const view = await open(fakeClient({}));
+    expect(view.container.querySelector('[data-testid="shells-error"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-loading="background"]')).toBeNull();
+    await view.unmount();
+  });
+});

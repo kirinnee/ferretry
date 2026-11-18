@@ -107,7 +107,7 @@ export function InputCardHost({ client, value, agentName, onDone, onHold }: Inpu
         This request is no longer open.
       </p>
     );
-  if (read.kind === 'loading') return <Loading kind="page" label="Reading the request…" />;
+  if (read.kind === 'loading') return <Loading compact kind="page" label="Reading the request…" />;
   return (
     <InputCard
       client={client}

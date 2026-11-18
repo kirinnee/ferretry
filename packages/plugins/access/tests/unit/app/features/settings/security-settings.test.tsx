@@ -428,7 +428,9 @@ describe('SecuritySurface', () => {
     let release: (client: StepUpClient) => void = () => undefined;
     const slow = (): Promise<StepUpClient> => new Promise(resolve => (release = resolve));
     const surface = await mountSurface(slow);
-    should(marked(surface, 'data-security-state')[0]?.props['data-security-state']).equal('loading');
+    // The words are the shell's one bar (screen readers only); no empty panel is drawn in place while reading.
+    expect(text(surface)).toContain('Reading the passkeys this device holds…');
+    should(marked(surface, 'data-security-state')).be.empty();
 
     // Act
     run(() => surface.unmount());

@@ -90,7 +90,7 @@ export function WardenReportDialog({
           </p>
         )}
         <div className="min-h-0 overflow-auto px-cell-x py-3 text-ui leading-base">
-          {body === null && !unavailable && <Loading kind="page" label="Loading report evidence…" />}
+          {body === null && !unavailable && <Loading compact kind="page" label="Loading report evidence…" />}
           {unavailable && (
             <section className="rounded-control border border-warn-border bg-warn-bg p-3 text-warn" role="alert">
               <h3 className="m-0 text-ui font-semibold">Report evidence unavailable</h3>

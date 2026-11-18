@@ -148,7 +148,7 @@ export function CompactAtLoader({
     };
   }, [client, ferretId]);
 
-  if (reading === 'pending') return <Loading kind="page" label="Reading the current setting…" />;
+  if (reading === 'pending') return <Loading compact kind="page" label="Reading the current setting…" />;
   return (
     <CompactAtForm
       current={reading === 'unavailable' ? own : reading.own}

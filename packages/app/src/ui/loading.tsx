@@ -84,11 +84,16 @@ export interface LoadingProps {
   /** What is being waited for, in the reader's words ("Checking what this daemon offers…"). */
   readonly label?: string;
   readonly className?: string;
+  /**
+   * `page` only: a small loader with no minimum height, for a small container (a popover, a dialog, a card, a panel inside
+   * a page) that must not jump tall while it waits. A page-sized wait leaves this off.
+   */
+  readonly compact?: boolean;
 }
 
-export function Loading({ kind, label, className }: LoadingProps) {
+export function Loading({ kind, label, className, compact = false }: LoadingProps) {
   if (kind === 'bar') return <BackgroundLoading label={label} />;
-  const extra = className === undefined ? '' : ` ${className}`;
+  const extra = (compact ? ' fy-loading--compact' : '') + (className === undefined ? '' : ` ${className}`);
   return (
     <div
       aria-live="polite"
@@ -100,7 +105,7 @@ export function Loading({ kind, label, className }: LoadingProps) {
       <span aria-hidden="true" className="fy-loading__orb">
         <span className="fy-loading__ring" />
         <span className="fy-loading__ring fy-loading__ring--late" />
-        <Spinner className="fy-loading__spin" size={38} />
+        <Spinner className="fy-loading__spin" size={compact ? 24 : 38} />
       </span>
       <span className="fy-loading__label">{label ?? 'Loading…'}</span>
     </div>
