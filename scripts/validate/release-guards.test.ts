@@ -365,13 +365,7 @@ describe('the preview gate compares the pushed commit with what the LIVE site sa
    * answers only `compare` (any other read, such as run history, fails the script); `compare` maps "<live>...<after>" to a
    * status, and a pair not in it is an unreadable compare.
    */
-  function runGate(spec: {
-    live: Live;
-    compare?: Record<string, string>;
-    after: string;
-    deleted?: boolean;
-    firstDeploy?: boolean;
-  }) {
+  function runGate(spec: { live: Live; compare?: Record<string, string>; after: string; deleted?: boolean }) {
     const directory = mkdtempSync(join(tmpdir(), 'preview-gate-'));
     scratch.push(directory);
     const bin = join(directory, 'bin');
@@ -385,7 +379,6 @@ describe('the preview gate compares the pushed commit with what the LIVE site sa
       `#!/bin/sh\n[ -s "$1/release-manifest.json" ] && [ -s "$1/release-manifest.sig" ] && exit ${spec.live.verifies === false ? 1 : 0}\nexit 1\n`,
       { mode: 0o755 },
     );
-    if (spec.firstDeploy === true) writeFileSync(join(directory, 'scripts/ci/preview-first-deploy'), 'first deploy\n');
     const answers = {
       'release-manifest.json': spec.live.manifest,
       'release-manifest.sig': spec.live.signature ?? { status: 200 },
@@ -480,18 +473,11 @@ describe('the preview gate compares the pushed commit with what the LIVE site sa
     expect(runGate({ live: liveC, compare: { [`${C}...${B}`]: 'diverged' }, after: B }).deploy).toBe('deploy=false');
   });
 
-  test('a 404 for the manifest FAILS CLOSED (the preview is live, so a 404 means something is wrong); only a commit that declares the first deploy follows it', () => {
-    const refused = runGate({ live: { manifest: { status: 404 } }, after: A });
-    expect(refused).toMatchObject({ status: 1, deploy: '' });
-    expect(refused.err).toContain('does not declare a first deploy');
-    expect(runGate({ live: { manifest: { status: 404 } }, after: A, firstDeploy: true })).toMatchObject({
+  test('a 404 for the manifest passes the PRE-FILTER only (the deploy job reads the Pages API and is the authority)', () => {
+    expect(runGate({ live: { manifest: { status: 404 } }, after: A })).toMatchObject({
       status: 0,
       deploy: 'deploy=true',
     });
-    // The declaration only opens a 404: it never skips the comparison with a record that IS there.
-    expect(runGate({ live: liveC, compare: { [`${C}...${B}`]: 'behind' }, after: B, firstDeploy: true }).deploy).toBe(
-      'deploy=false',
-    );
   });
 
   test('the live record is read as unproven unless it is reachable, a 200, signed and names a commit: every other state fails the job', () => {
@@ -550,5 +536,276 @@ describe('the preview gate compares the pushed commit with what the LIVE site sa
     );
     expect(result.status).toBe(1);
     expect(result.err).toContain('only by a push');
+  });
+});
+
+describe('the deploy job re-checks, before the upload and on every attempt, against the Pages API and the signed record', () => {
+  const text = readFileSync(join(repository, '.github/workflows/pwa-pages-v5.yaml'), 'utf8');
+  const start = text.indexOf('      - name: Refuse a release that goes backwards');
+  const section = text.slice(start, text.indexOf('      # `--branch` is the Pages project'));
+  const script = (section.split('        run: |\n')[1] ?? '')
+    .split('\n')
+    .map(line => (line.startsWith('          ') ? line.slice(10) : line))
+    .join('\n');
+
+  const git = (cwd: string, ...args: string[]) => {
+    const result = Bun.spawnSync(['git', ...args], {
+      cwd,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 't',
+        GIT_AUTHOR_EMAIL: 't@example.invalid',
+        GIT_COMMITTER_NAME: 't',
+        GIT_COMMITTER_EMAIL: 't@example.invalid',
+      },
+    });
+    if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+    return result.stdout.toString().trim();
+  };
+
+  /** c1 -> c2 -> c3 on main, and d off c1 (diverged from both). */
+  function repo() {
+    const directory = mkdtempSync(join(tmpdir(), 'preview-live-'));
+    scratch.push(directory);
+    git(directory, 'init', '-q', '-b', 'main');
+    const make = (message: string) => {
+      git(directory, 'commit', '-q', '--allow-empty', '-m', message);
+      return git(directory, 'rev-parse', 'HEAD');
+    };
+    const c1 = make('c1');
+    const c2 = make('c2');
+    const c3 = make('c3');
+    git(directory, 'checkout', '-q', '-b', 'side', c1);
+    const d = make('d');
+    return { directory, c1, c2, c3, d };
+  }
+
+  type Answer = { status: number; body?: unknown } | 'unreachable';
+  type Spec = {
+    /** The Pages API's answer for the project; `body` defaults to a deployment of `commit`. */
+    api: Answer;
+    /** The live signed record. */
+    manifest?: Answer;
+    signature?: Answer;
+    verifies?: boolean;
+    after: string;
+    sequence?: number;
+  };
+
+  function run(directory: string, spec: Spec) {
+    mkdirSync(join(directory, 'scripts/ci'), { recursive: true });
+    mkdirSync(join(directory, '.fake'), { recursive: true });
+    mkdirSync(join(directory, '.bin'), { recursive: true });
+    writeFileSync(join(directory, 'scripts/ci/hosted-app-origin.sh'), '#!/bin/sh\necho https://preview.example\n', {
+      mode: 0o755,
+    });
+    writeFileSync(
+      join(directory, 'scripts/ci/verify-pwa-release.sh'),
+      `#!/bin/sh\n[ -s "$1/release-manifest.json" ] && [ -s "$1/release-manifest.sig" ] && exit ${spec.verifies === false ? 1 : 0}\nexit 1\n`,
+      { mode: 0o755 },
+    );
+    const answers: Record<string, Answer | undefined> = {
+      api: spec.api,
+      'release-manifest.json': spec.manifest,
+      'release-manifest.sig': spec.signature ?? { status: 200, body: 'signature-bytes' },
+    };
+    for (const [name, answer] of Object.entries(answers)) {
+      if (answer === undefined || answer === 'unreachable') continue;
+      const body = typeof answer.body === 'string' ? answer.body : JSON.stringify(answer.body ?? {});
+      writeFileSync(join(directory, '.fake', name), body);
+      writeFileSync(join(directory, '.fake', `${name}.status`), String(answer.status));
+    }
+    writeFileSync(
+      join(directory, '.bin/curl'),
+      [
+        '#!/usr/bin/env bash',
+        'set -euo pipefail',
+        'out=""; url=""',
+        'while (($#)); do case "$1" in --output) shift; out="$1" ;; --header) shift; [[ $1 == @- ]] && cat >/dev/null ;; --write-out|--max-time|--retry) shift ;; --*) ;; *) url="$1" ;; esac; shift; done',
+        'case "$url" in',
+        '  https://api.cloudflare.com/client/v4/accounts/acct/pages/projects/ferretry-v5) name=api ;;',
+        '  https://preview.example/*) name="${url##*/}"; name="${name%%\\?*}" ;;',
+        '  *) echo "unexpected url: ${url}" >&2; exit 2 ;;',
+        'esac',
+        '[[ -f .fake/${name}.status ]] || exit 6',
+        'cp ".fake/${name}" "${out}"',
+        'cat ".fake/${name}.status"',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    const output = join(directory, 'github-output');
+    writeFileSync(output, '');
+    const result = Bun.spawnSync(['bash', '-c', script], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        PATH: `${join(directory, '.bin')}:${process.env.PATH ?? ''}`,
+        GITHUB_OUTPUT: output,
+        GITHUB_RUN_ID: '99',
+        CLOUDFLARE_API_TOKEN: 'token-not-in-args',
+        CLOUDFLARE_ACCOUNT_ID: 'acct',
+        AFTER: spec.after,
+        SEQUENCE: String(spec.sequence ?? 10),
+        ATTEMPT: '1',
+      },
+    });
+    return { status: result.exitCode, err: result.stderr.toString(), out: readFileSync(output, 'utf8').trim() };
+  }
+
+  const project = (deployment: unknown) => ({
+    status: 200,
+    body: { success: true, result: { canonical_deployment: deployment } },
+  });
+  const deployedAt = (commit: string | undefined) => ({
+    id: 'dep',
+    deployment_trigger: { metadata: commit === undefined ? {} : { commit_hash: commit } },
+  });
+  const record = (commit: string, sequence = 5) => ({ status: 200, body: { commit, sequence } });
+
+  test('a stale gate "allow" cannot deploy once the live release has moved on: an older commit is refused', () => {
+    const r = repo();
+    const result = run(r.directory, { api: project(deployedAt(r.c3)), manifest: record(r.c3), after: r.c2 });
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('is not an ancestor');
+    expect(result.out).toBe('');
+  });
+
+  test('a diverged commit is refused', () => {
+    const r = repo();
+    const result = run(r.directory, { api: project(deployedAt(r.c3)), manifest: record(r.c3), after: r.d });
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('is not an ancestor');
+  });
+
+  test('a descendant of the live commit with a higher sequence deploys', () => {
+    const r = repo();
+    expect(
+      run(r.directory, { api: project(deployedAt(r.c2)), manifest: record(r.c2, 5), after: r.c3, sequence: 6 }),
+    ).toMatchObject({
+      status: 0,
+      out: 'skip=false',
+    });
+  });
+
+  test('a descendant whose sequence does not exceed the live signed sequence is refused', () => {
+    const r = repo();
+    for (const sequence of [5, 4]) {
+      const result = run(r.directory, {
+        api: project(deployedAt(r.c2)),
+        manifest: record(r.c2, 5),
+        after: r.c3,
+        sequence,
+      });
+      expect(result.status).toBe(1);
+      expect(result.err).toContain('does not exceed the live signed sequence');
+    }
+  });
+
+  test('an identical commit is a no-op: nothing is uploaded and the job stays green', () => {
+    const r = repo();
+    expect(
+      run(r.directory, { api: project(deployedAt(r.c3)), manifest: record(r.c3, 5), after: r.c3, sequence: 6 }),
+    ).toMatchObject({
+      status: 0,
+      out: 'skip=true',
+    });
+  });
+
+  test('the first deploy ever (the API shows no production deployment) deploys, and needs no manifest', () => {
+    const r = repo();
+    expect(run(r.directory, { api: project(null), after: r.c1 })).toMatchObject({ status: 0, out: 'skip=false' });
+  });
+
+  test('an API error, an unreadable or unparseable answer, or a project without the production field is refused', () => {
+    const r = repo();
+    const cases: Array<[string, Answer]> = [
+      ['unreachable', 'unreachable'],
+      ['HTTP 500', { status: 500, body: {} }],
+      ['HTTP 403', { status: 403, body: { success: false } }],
+      ['not json', { status: 200, body: 'not json' }],
+      ['success false', { status: 200, body: { success: false, result: { canonical_deployment: null } } }],
+      ['no production field', { status: 200, body: { success: true, result: {} } }],
+    ];
+    for (const [label, api] of cases) {
+      const result = run(r.directory, { api, manifest: record(r.c3), after: r.c3 });
+      expect({ label, status: result.status, out: result.out }).toEqual({ label, status: 1, out: '' });
+    }
+  });
+
+  test('a manifest that is missing or unverifiable while the API shows a deployment is a failure, never a first deploy', () => {
+    const r = repo();
+    const cases: Array<[string, Partial<Spec>]> = [
+      ['manifest 404', { manifest: { status: 404 } }],
+      ['manifest unreachable', { manifest: 'unreachable' }],
+      ['signature 404', { manifest: record(r.c3), signature: { status: 404 } }],
+      ['does not verify', { manifest: record(r.c3), verifies: false }],
+      ['record commit is not an id', { manifest: record('abc') }],
+      ['record sequence is not a number', { manifest: { status: 200, body: { commit: r.c3, sequence: 'x' } } }],
+    ];
+    for (const [label, partial] of cases) {
+      const result = run(r.directory, { api: project(deployedAt(r.c3)), after: r.c3, ...partial });
+      expect({ label, status: result.status, out: result.out }).toEqual({ label, status: 1, out: '' });
+    }
+  });
+
+  test('a signed record that disagrees with the API (a stale CDN copy, or a deploy in flight) is refused', () => {
+    const r = repo();
+    const result = run(r.directory, { api: project(deployedAt(r.c3)), manifest: record(r.c2), after: r.c3 });
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('stale copy or a deploy in flight');
+  });
+
+  test('a deployment with no recorded commit falls back to the signed record, and says so', () => {
+    const r = repo();
+    const result = run(r.directory, {
+      api: project(deployedAt(undefined)),
+      manifest: record(r.c2, 5),
+      after: r.c3,
+      sequence: 6,
+    });
+    expect(result).toMatchObject({ status: 0, out: 'skip=false' });
+    const older = run(r.directory, {
+      api: project(deployedAt(undefined)),
+      manifest: record(r.c3, 5),
+      after: r.c2,
+      sequence: 6,
+    });
+    expect(older.status).toBe(1);
+  });
+
+  test('a live commit that is not in the checkout is refused, not assumed old', () => {
+    const r = repo();
+    const unknown = 'f'.repeat(40);
+    const result = run(r.directory, { api: project(deployedAt(unknown)), manifest: record(unknown), after: r.c3 });
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('is not in this checkout');
+  });
+
+  test('the step sits before the upload, the upload is skipped on a no-op, and it records the commit', () => {
+    expect(text.indexOf('- name: Refuse a release that goes backwards')).toBeGreaterThan(
+      text.indexOf('name: Refuse a stale commit'),
+    );
+    expect(text.indexOf('- name: Refuse a release that goes backwards')).toBeLessThan(
+      text.indexOf('name: Deploy production bundle'),
+    );
+    expect(text).toContain("if: steps.live.outputs.skip != 'true'");
+    expect(text).toContain('--commit-hash="${GITHUB_SHA}"');
+    expect(section).not.toContain('--header "Authorization');
+    expect(section).toContain('--header @-');
+  });
+
+  test('mutation: a workflow whose deploy job lacks the live check is refused', () => {
+    const result = gate(
+      checkout(p =>
+        edit(
+          p('.github/workflows/pwa-pages-v5.yaml'),
+          /      # THE AUTHORITATIVE NEVER-BACKWARDS CHECK[\s\S]*?echo "skip=false" >> "\$\{GITHUB_OUTPUT\}"\n(?=      # `--branch`)/u,
+          '',
+        ),
+      ),
+    );
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('Pages API');
   });
 });

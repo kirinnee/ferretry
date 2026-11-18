@@ -149,6 +149,22 @@ if [[ -f ${preview} ]]; then
                   and ($r | contains("exit 1")))]
            | length > 0)' >/dev/null ||
     fail "${preview}: the deploy job must, before wrangler pages deploy, read the run branch head with git ls-remote --exit-code --heads, refuse (exit 1) unless it equals GITHUB_SHA (an older commit must not publish after a newer one)"
+  # THE DEPLOY JOB IS THE AUTHORITY ON "NEVER BACKWARDS". GitHub can re-run it alone on a stale gate result, so a step
+  # BEFORE `wrangler pages deploy` must read the project's production deployment from the Pages API (canonical_deployment)
+  # and ask git whether it is an ancestor (`merge-base --is-ancestor`), and the upload must be skippable only by that step.
+  json "${preview}" | jq -e '
+    .jobs.deploy.steps as $steps
+    | ([$steps | to_entries[] | select((.value.run // "") | contains("wrangler pages deploy")) | .key] | first) as $deploy_at
+    | $deploy_at != null
+      and ([$steps | to_entries[]
+            | select(.key < $deploy_at)
+            | select((.value.run // "") as $r
+                | ($r | contains("api.cloudflare.com/client/v4/accounts/"))
+                  and ($r | contains("canonical_deployment"))
+                  and ($r | contains("merge-base --is-ancestor"))
+                  and ($r | contains("fail")))]
+           | length > 0)' >/dev/null ||
+    fail "${preview}: the deploy job must, before wrangler pages deploy, read the production deployment from the Cloudflare Pages API (canonical_deployment) and refuse (git merge-base --is-ancestor) a commit that is not a descendant of it (a re-run of the deploy job alone must not reuse a stale gate)"
   json "${preview}" | jq -e '(.jobs.sign.environment == "pwa-release-v5") and (.jobs.deploy.environment == "pwa-deploy-v5")' >/dev/null ||
     fail "${preview}: sign must use pwa-release-v5 and deploy pwa-deploy-v5"
   json "${preview}" | jq -e '[.jobs[] | .permissions // {} | .["contents"] // "none"] | all(. == "read")' >/dev/null ||

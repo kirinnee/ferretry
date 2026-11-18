@@ -24,8 +24,9 @@ name: Deploy 5.0 preview PWA to Pages
 #      misses a deploy made by the old per-merge trigger, a cancelled run and a failed re-run) and not from `event.before`
 #      (a refused force-rewind still moves the ref). The compare API must say the pushed commit is `ahead` or `identical`;
 #      `behind` or `diverged` builds, signs and deploys NOTHING. An unreadable, non-200 or unverifiable live record, or a
-#      failed compare, FAILS the job (closed); a 404 fails too unless the commit declares the first deploy
-#      (`scripts/ci/preview-first-deploy`, docs/pwa-release-signing.md). A
+#      failed compare, FAILS the job (closed). THAT IS ONLY A PRE-FILTER: GitHub can re-run the deploy job alone on a
+#      stale "allow", so the deploy job repeats the decision immediately before the upload from the project's CURRENT
+#      production deployment (the Cloudflare Pages API) and the signed record, on every attempt (below). A
 #      skipped run is a green run with no deploy, so a consumer must read the `deploy` job's own conclusion, not the run's.
 #   2. A STALE COMMIT NEVER DEPLOYS LAST. The concurrency group below serialises runs but does NOT order them: pushes A
 #      then B can run B first, and re-running an older green run does the same, so A would then overwrite the production
@@ -99,8 +100,11 @@ jobs:
       # downloads the live `release-manifest.json` and `.sig`, PROVES the signature with the same script the deploy uses
       # (against this commit's committed preview key), and requires the pushed commit to be the live commit or a
       # descendant of it (the compare API). Anything it cannot read, prove or relate FAILS CLOSED: the job fails, nothing
-      # is built, signed or deployed. That includes a 404 for the manifest: the preview is already live, so a 404 means
-      # something is wrong, and the one declared way past it is a commit carrying scripts/ci/preview-first-deploy.
+      # is built, signed or deployed, except a 404 for the manifest, which this pre-filter passes on to the deploy job.
+      #
+      # THIS JOB IS ONLY A FAST PRE-FILTER, NOT THE AUTHORITY. GitHub can re-run the `deploy` job alone, reusing this
+      # job's stale "allow" after the live release moved on, so the check that counts is repeated INSIDE the deploy job,
+      # immediately before the upload ("Refuse a release that goes backwards"), on every attempt.
       - name: Apply the never-backwards rule
         id: rule
         env:
@@ -130,17 +134,13 @@ jobs:
             exit 1
           }
           if [[ ${manifest_status} == 404 ]]; then
-            # The preview is already live, so a 404 today means something is wrong (a path change, a Pages hiccup, a wrong
-            # origin) and following it would let older code deploy. The ONE way past it is the documented first-deploy
-            # step: a commit that carries `scripts/ci/preview-first-deploy` (docs/pwa-release-signing.md), removed again
-            # once the first deploy has succeeded.
-            if [[ -f scripts/ci/preview-first-deploy ]]; then
-              echo "${origin} has no release manifest (HTTP 404) and this commit carries scripts/ci/preview-first-deploy: the declared first deploy, so the preview follows ${AFTER}"
-              echo "deploy=true" >> "${GITHUB_OUTPUT}"
-              exit 0
-            fi
-            echo "❌ ${origin}/release-manifest.json answered HTTP 404 and this commit does not declare a first deploy (scripts/ci/preview-first-deploy); refusing to guess what is live" >&2
-            exit 1
+            # This job is only a FAST PRE-FILTER (it holds no Cloudflare credential, so it cannot tell a never-deployed
+            # project from a wrong origin). It lets a 404 through; the deploy job's own check, which reads the project's
+            # production deployment from the Cloudflare Pages API on EVERY attempt, is the authority and fails when that
+            # shows a deployment.
+            echo "${origin} has no release manifest (HTTP 404): the deploy job decides whether anything is live, so this pre-filter passes ${AFTER} on"
+            echo "deploy=true" >> "${GITHUB_OUTPUT}"
+            exit 0
           fi
           if [[ ${manifest_status} != 200 ]]; then
             echo "❌ ${origin}/release-manifest.json answered HTTP ${manifest_status}; refusing to guess what is live" >&2
@@ -277,6 +277,8 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+          # Whole history: "Refuse a release that goes backwards" asks git whether the live commit is an ancestor of this one.
+          fetch-depth: 0
       - uses: ./.github/actions/install-nix
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -361,13 +363,93 @@ jobs:
             exit 1
           fi
           echo "${GITHUB_SHA} is the head of ${BRANCH}: deploying it"
+      # THE AUTHORITATIVE NEVER-BACKWARDS CHECK. It runs on every attempt of this job (GitHub can re-run this job alone,
+      # so nothing the gate decided earlier is trusted), right before the upload, with the token this job already has.
+      # What is live is the project's CURRENT PRODUCTION DEPLOYMENT, read from the Cloudflare Pages API
+      # (`canonical_deployment`; its commit hash is recorded by every upload, this workflow's `--commit-hash` and, before
+      # it, wrangler's own from the checkout), cross-checked against the live SIGNED release record, which also gives the
+      # live sequence. Then: the live commit must be an ancestor of (or equal to) this commit (git, on the full history);
+      # an identical commit is a no-op (the upload is skipped, the job is still green); otherwise this run's sequence must
+      # exceed the live signed sequence. Anything unreadable, unparseable, unverifiable, or disagreeing FAILS the job.
+      # "No production deployment" from the API is the one first-deploy signal; a manifest that is missing while the API
+      # shows a deployment is a failure. The token reaches curl on stdin, never in an argument.
+      - name: Refuse a release that goes backwards
+        id: live
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_V5_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_PAGES_V5_ACCOUNT_ID }}
+          AFTER: ${{ github.sha }}
+          SEQUENCE: ${{ github.run_number }}
+          ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          fail() {
+            echo "❌ $*" >&2
+            exit 1
+          }
+          work_dir="$(mktemp -d)"
+          trap 'rm -rf "${work_dir}"' EXIT
+          # 1. The project's current production deployment, from the API.
+          api_status="$(printf 'Authorization: Bearer %s\n' "${CLOUDFLARE_API_TOKEN}" |
+            curl --silent --show-error --max-time 30 --retry 2 --header @- --output "${work_dir}/project.json" \
+              --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/ferretry-v5")" ||
+            fail "could not read the Pages project ferretry-v5; refusing to guess what is live"
+          [[ ${api_status} == 200 ]] || fail "the Pages API answered HTTP ${api_status} for ferretry-v5; refusing to guess what is live"
+          jq -e '.success == true and (.result | type == "object") and (.result | has("canonical_deployment"))' "${work_dir}/project.json" >/dev/null ||
+            fail "the Pages API answer for ferretry-v5 is not a project with a production deployment field; refusing to guess what is live"
+          if [[ "$(jq -c '.result.canonical_deployment' "${work_dir}/project.json")" == null ]]; then
+            echo "the Pages API shows no production deployment of ferretry-v5: this is the first deploy, so nothing is older"
+            echo "skip=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          api_commit="$(jq -r '.result.canonical_deployment.deployment_trigger.metadata.commit_hash // ""' "${work_dir}/project.json")"
+          # 2. The live signed record: it gives the live sequence, and (when the API recorded no commit) the live commit.
+          # A manifest that is missing or unverifiable while a deployment exists is a failure, never a first deploy.
+          origin="$(./scripts/ci/hosted-app-origin.sh)"
+          nonce="${GITHUB_RUN_ID}-${ATTEMPT}-$(date +%s%N)"
+          for name in release-manifest.json release-manifest.sig; do
+            file_status="$(curl --silent --show-error --max-time 30 --retry 2 --header 'Cache-Control: no-cache' \
+              --output "${work_dir}/${name}" --write-out '%{http_code}' "${origin}/${name}?check=${nonce}")" ||
+              fail "could not read ${origin}/${name} while a production deployment exists; refusing to guess what is live"
+            [[ ${file_status} == 200 ]] || fail "${origin}/${name} answered HTTP ${file_status} while a production deployment exists; refusing to guess what is live"
+          done
+          ./scripts/ci/verify-pwa-release.sh "${work_dir}" || fail "the live release record at ${origin} does not verify; refusing to guess what is live"
+          record_commit="$(jq -er '.commit' "${work_dir}/release-manifest.json")"
+          live_sequence="$(jq -er '.sequence' "${work_dir}/release-manifest.json")"
+          [[ ${record_commit} =~ ^[0-9a-f]{40}$ ]] || fail "the live release record names '${record_commit}', which is not a commit id"
+          [[ ${live_sequence} =~ ^(0|[1-9][0-9]{0,14})$ ]] || fail "the live release record names sequence '${live_sequence}', which is not a run number"
+          if [[ ${api_commit} =~ ^[0-9a-f]{40}$ ]]; then
+            # The API's commit is the authority. A different signed record is a stale CDN copy or a deploy in flight: not evidence.
+            [[ ${api_commit} == "${record_commit}" ]] ||
+              fail "the production deployment is ${api_commit} but the signed record at ${origin} says ${record_commit} (stale copy or a deploy in flight); refusing to guess what is live"
+            live="${api_commit}"
+          else
+            echo "the production deployment records no commit hash: falling back to the signed release record's ${record_commit}"
+            live="${record_commit}"
+          fi
+          # 3. The decision.
+          git cat-file -e "${live}^{commit}" 2>/dev/null || fail "the live commit ${live} is not in this checkout's history; refusing to guess whether ${AFTER} goes backwards"
+          if [[ ${live} == "${AFTER}" ]]; then
+            echo "${AFTER} is already the live production deployment: nothing to upload (this job stays green)"
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          git merge-base --is-ancestor "${live}" "${AFTER}" ||
+            fail "the live ${live} is not an ancestor of ${AFTER}: deploying it would go backwards or sideways"
+          if ((SEQUENCE <= live_sequence)); then
+            fail "this run's sequence ${SEQUENCE} does not exceed the live signed sequence ${live_sequence}; installed copies would refuse it"
+          fi
+          echo "${AFTER} descends from the live ${live} and its sequence ${SEQUENCE} exceeds ${live_sequence}: deploying it"
+          echo "skip=false" >> "${GITHUB_OUTPUT}"
       # `--branch` is the Pages project's PRODUCTION branch whatever ref built this bundle: a deploy of any other
-      # branch name would land on a preview alias and leave https://ferretry-v5.pages.dev on the old app.
+      # branch name would land on a preview alias and leave https://ferretry-v5.pages.dev on the old app. `--commit-hash`
+      # records the built commit on the deployment, which is what the check above reads next time.
       - name: Deploy production bundle
+        if: steps.live.outputs.skip != 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_V5_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_PAGES_V5_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           nix develop .#ci -c bunx wrangler pages deploy packages/app/dist \
-            --project-name=ferretry-v5 --branch=rebuild/5.0
+            --project-name=ferretry-v5 --branch=rebuild/5.0 --commit-hash="${GITHUB_SHA}"

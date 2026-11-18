@@ -342,24 +342,29 @@ touching none of it:
   project setting and not a git ref this workflow reads); the signed list names the real built commit and this run's
   number.
 - **Never backwards, in two layers.** An installed copy refuses a release whose sequence is lower than the one it holds,
-  so an older commit behind a newer run number would strand the preview. (1) The `gate` job compares the pushed commit
-  with the commit the **live site itself says is live**: it downloads `release-manifest.json` and `release-manifest.sig`
-  from the preview origin, proves the signature with `scripts/ci/verify-pwa-release.sh` (the deploy job's own script,
-  against the committed preview key) and reads the proved `commit`. It is not taken from run history, which misses a
-  live deploy made by the old per-merge trigger on another branch, one whose run was cancelled while finishing, and one
-  whose later re-run failed; nor from `event.before`, which moves with a refused force-rewind. The compare API must say
-  the pushed commit is `ahead` of it or `identical` (a redeploy of the live commit is harmless and gives the kit its
-  green run); `behind` or `diverged` builds, signs and deploys nothing. **It fails closed**: a manifest or signature
-  that cannot be read, answers anything but 200, does not verify, or names no full commit id, or a compare that cannot
-  be read, fails the job. **A 404 for the manifest fails too**: the preview is already live, so a 404 means something is
-  wrong (a path change, a Pages hiccup, a wrong origin), and following it would let older code deploy. The ONLY way past
-  it is the one-time first-deploy step for a brand-new Pages project: commit an (empty or one-line) file
-  `scripts/ci/preview-first-deploy` on the commit the kit pushes, let that first deploy succeed, then delete the file in
-  the next PR (no `workflow_dispatch`, no setup-script flag). The file only opens a 404: a manifest that IS there is
-  always compared. A deleted ref deploys nothing. There is **no manual
-  trigger** (`workflow_dispatch` is gone, and `release-guards.sh` refuses it): the kit's push is the only way in, so no
-  entry path skips the comparison. A skipped run is green with no deploy: read the `deploy` job's own conclusion, not the
-  run's. (2) A stale commit never deploys last, below.
+  so an older commit behind a newer run number would strand the preview. (1) The `gate` job is a **fast pre-filter**:
+  it downloads the live site's `release-manifest.json` and `.sig`, proves the signature with
+  `scripts/ci/verify-pwa-release.sh` and requires the pushed commit to be the live commit or a descendant of it
+  (compare API), so an obviously older push builds nothing. It reads no run history (which misses a deploy made by the
+  old per-merge trigger, a cancelled run and a failed re-run) and not `event.before` (which moves with a refused
+  force-rewind), and it fails on anything it cannot read, prove or relate, except a 404 for the manifest, which it passes
+  on because it holds no Cloudflare credential and cannot tell a never-deployed project from a wrong origin. It is not the
+  authority: GitHub can re-run the `deploy` job alone, reusing a stale "allow" after the live release has moved on.
+  (2) The `deploy` job's **`Refuse a release that goes backwards` step is the authority**, immediately before the
+  upload and on every attempt, with the Pages-only token that job already holds (sent to `curl` on stdin, never as an
+  argument). It reads the project's **current production deployment** from the Cloudflare Pages API
+  (`canonical_deployment`; every upload records its commit hash: this workflow passes `--commit-hash`, and the old
+  per-merge trigger's wrangler inferred it from its checkout) and cross-checks it with the live **signed record**, which
+  also gives the live sequence. Then: the live commit must be an ancestor of the commit being deployed
+  (`git merge-base --is-ancestor`, on a full-history checkout; a live commit missing from it is a failure); the **same**
+  commit is a no-op (the upload step is skipped and the job stays green, so the kit still sees a green `Deploy PWA`);
+  otherwise this run's sequence must **exceed** the live signed sequence. A deployment with no recorded commit hash falls
+  back to the signed record's commit. The API is the only first-deploy signal: **no production deployment** means nothing
+  is older and the deploy proceeds; a manifest that is missing, unverifiable or disagreeing with the API while a
+  deployment exists (a stale CDN copy, or a deploy in flight) **fails the job**, as does any API error or answer it
+  cannot parse. There is no bootstrap marker and no manual trigger (`workflow_dispatch` is gone and
+  `release-guards.sh` refuses it, and refuses a deploy job without this step). A skipped run is green with no deploy:
+  read the `deploy` job's own conclusion, not the run's. (3) A stale commit never deploys last, below.
 - **A stale commit never deploys last.** The shared, non-cancelling concurrency group serialises the runs but does not
   order them: pushes A then B can run B first, and re-running an older green run does the same, so A would overwrite the
   production alias with older app code. So the `deploy` job's `Refuse a stale commit` step, the one right before
