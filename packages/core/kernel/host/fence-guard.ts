@@ -519,19 +519,60 @@ export async function privateGuardLookedAtNow(
 }
 
 /**
+ * How long a folder that was found clear of the private places is not looked at again. A read of one transcript walks the
+ * same few folders above it every time (and a hundred ferrets' reads share most of them), so each walk past the entry
+ * itself used to cost one `lstat` per folder per read. A folder is taken as clear for this long ONLY for the guard (the
+ * snapshot of the private places) and the disk it was found clear against: a new snapshot, another disk or a folder that
+ * was ever held starts from nothing. It is no longer than the places' own look interval (a kept snapshot may be that old),
+ * so it is no looser than the guard already is about a folder it cannot see change.
+ */
+export const CLEAR_FOLDER_MS = 1_000;
+
+/** The folders found clear of the guard, and until when, for one disk. */
+interface ClearFolders {
+  readonly fs: HostFs;
+  readonly until: Map<string, number>;
+}
+const CLEAR = new WeakMap<PrivateGuard, ClearFolders>();
+/** The most folders remembered per guard; a walk past it starts the memory again. */
+const MAX_CLEAR_FOLDERS = 4_096;
+
+/**
  * Whether `real` is a private place or inside one, by identity: the entry itself first, then every folder up to and
  * including the root's `base`, as {@link fencedReal} walks. A path that cannot be looked at is refused.
+ *
+ * The ENTRY ITSELF is looked at on every call (a file replaced, relinked or aliased to a private place is caught at once);
+ * the folders above it are remembered clear for {@link CLEAR_FOLDER_MS} (see there). `now` is a monotonic clock in
+ * milliseconds, injected so a test can move it.
  */
-export async function privatelyHeld(fs: HostFs, guard: PrivateGuard, real: string, base: string): Promise<boolean> {
+export async function privatelyHeld(
+  fs: HostFs,
+  guard: PrivateGuard,
+  real: string,
+  base: string,
+  now: () => number = () => performance.now(),
+): Promise<boolean> {
   if (guard.keys.size === 0 && guard.closed.size === 0) return false;
-  for (let current = absolute(real, 'the path'); ; current = dirname(current)) {
+  const known = CLEAR.get(guard);
+  const clear: ClearFolders = known?.fs === fs ? known : { fs, until: new Map<string, number>() };
+  if (clear !== known) CLEAR.set(guard, clear);
+  const at = now();
+  const walked: string[] = [];
+  const start = absolute(real, 'the path');
+  for (let current = start; ; current = dirname(current)) {
+    // A folder remembered clear was found clear together with every folder above it: nothing above it is walked.
+    if (current !== start && (clear.until.get(current) ?? 0) > at) break;
     const entry = await fs.identity(current).catch(() => undefined);
     if (entry === undefined) return true;
     if (guard.keys.has(identityKey(entry))) return true;
     // The base is the root's own folder, not an alias; everything below it on a closed tree's device is unproven.
     if (current !== base && guard.closed.has(entry.device)) return true;
-    if (current === base || dirname(current) === current || !within(base, dirname(current))) return false;
+    if (current !== start) walked.push(current);
+    if (current === base || dirname(current) === current || !within(base, dirname(current))) break;
   }
+  if (clear.until.size + walked.length > MAX_CLEAR_FOLDERS) clear.until.clear();
+  for (const folder of walked) clear.until.set(folder, at + CLEAR_FOLDER_MS);
+  return false;
 }
 
 /** The most link hops one path may take, as the kernel allows. */
