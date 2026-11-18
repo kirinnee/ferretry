@@ -31,6 +31,19 @@ const onboardingApp = provideToShell(implementApp(onboardingManifest, { build: (
   daemonless: () => ({ onboarding: () => <p data-testid="first-run">First run</p> }),
 });
 
+const accessManifest = {
+  id: 'access',
+  title: 'Access',
+  version: '5.0.0',
+  api: 5,
+  core: false,
+  kinds: ['view'],
+  ui: { screens: [{ id: 'pair', path: '/pair', daemonless: true }] },
+} as unknown as Manifest;
+const accessApp = provideToShell(implementApp(accessManifest, { build: () => ({}) }), {
+  daemonless: () => ({ pair: () => <p data-testid="pair-page">Your daemons</p> }),
+});
+
 const entry = (manifest: Manifest, app: SurfaceEntry['app']): SurfaceEntry => ({
   id: manifest.id,
   title: manifest.title,
@@ -49,10 +62,11 @@ const settle = async (): Promise<void> => {
   for (let i = 0; i < 8; i += 1) await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
 };
 
-function setup(options: { paired: boolean; withOnboarding: boolean }) {
+function setup(options: { paired: boolean; withOnboarding: boolean; withAccess?: boolean }) {
   const surfaces: SurfaceEntry[] = [
     ...CORE,
     ...(options.withOnboarding ? [entry(onboardingManifest, onboardingApp)] : []),
+    ...(options.withAccess === true ? [entry(accessManifest, accessApp)] : []),
   ];
   const transport = new FakeTransport(request => {
     if (request.path === '/v1/plugins') return json(inventoryOf(surfaces));
@@ -128,6 +142,35 @@ describe('S14 first run', () => {
     expect(window.location.pathname).toBe('/app/');
     expect(view.container.querySelector('h1')?.textContent).toBe('Daemons');
     expect(view.container.textContent).toContain('laptop');
+    await view.unmount();
+  });
+
+  test('E2-54 the daemons list links the pairing page, where a daemon is forgotten or another paired', async () => {
+    go('/nowhere');
+    const view = await mount(setup({ paired: true, withOnboarding: true, withAccess: true }));
+    await settle();
+    await interact(() => {
+      view.container.querySelector<HTMLAnchorElement>('a[href="/app/"]')?.click();
+    });
+    await settle();
+    const link = view.container.querySelector<HTMLAnchorElement>('a[href="/pair"]');
+    expect(link?.textContent).toBe('Pair another daemon, or forget one');
+    await interact(() => link?.click());
+    await settle();
+    expect(window.location.pathname).toBe('/pair');
+    expect(view.container.querySelector('[data-testid="pair-page"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  test('E2-54 with no Access installed the daemons list offers no pairing link', async () => {
+    go('/nowhere');
+    const view = await mount(setup({ paired: true, withOnboarding: true }));
+    await settle();
+    await interact(() => {
+      view.container.querySelector<HTMLAnchorElement>('a[href="/app/"]')?.click();
+    });
+    await settle();
+    expect(view.container.querySelector('a[href="/pair"]')).toBeNull();
     await view.unmount();
   });
 

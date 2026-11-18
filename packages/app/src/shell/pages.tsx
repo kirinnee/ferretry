@@ -2,7 +2,7 @@ import { daemonTitle } from '../daemons/daemon-list.ts';
 import { daemonHomeHref, daemonSettingsHref, DEVICE_SETTINGS_HREF, HOME_HREF } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
-import { firstRunEntry, ONBOARDING_SCREEN } from './first-run.ts';
+import { firstRunEntry, ONBOARDING_SCREEN, PAIR_SCREEN } from './first-run.ts';
 import { SettingGroup } from '../compose/setting-row.tsx';
 import { CachedDataSetting } from './device-cached-data.tsx';
 import { DeviceAppearance } from './device-appearance.tsx';
@@ -65,6 +65,7 @@ export function DaemonListPage() {
     setupJourney: false,
   });
   const onboarding = views.screens.get(ONBOARDING_SCREEN);
+  const pair = views.screens.get(PAIR_SCREEN);
   // WHEN THE APP IS OPENED (no entry behind this one: a fresh tab, a deep link, a first entry), a paired device with a
   // real selection goes straight to that machine. Reaching the list on purpose ("All daemons", the picker) pushes an
   // entry on top of another, so it is never bounced away from the list it asked for.
@@ -109,6 +110,12 @@ export function DaemonListPage() {
           </ul>
         </div>
       ))}
+      {/* Access's own list: addresses, the selected tick, Forget on each, and Pair another daemon. */}
+      {pair === undefined ? null : (
+        <p>
+          <Link to={routes.href(pair, {})}>Pair another daemon, or forget one</Link>
+        </p>
+      )}
     </section>
   );
 }
