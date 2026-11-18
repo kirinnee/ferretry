@@ -184,6 +184,12 @@ export interface IServiceDefinitionSupervisor extends IDaemonSupervisor {
    * out; its restart stays stop, wait until down, reload.
    */
   readonly restartInPlace?: (executable: string) => Promise<void>;
+  /**
+   * Why the manager cannot be driven right now (it does not answer, e.g. no session bus), or `undefined` when it can.
+   * Asked BEFORE an install stops or rewrites anything: a daemon stopped to hand it to a manager that then cannot take
+   * it is left down. Absent where the manager has no such failure to see.
+   */
+  readonly unreachableBecause?: () => Promise<string | undefined>;
 }
 export interface INixGcRootPort {
   /** Resolve symbolic links, so a profile or shim path is classified by what it actually points at. */

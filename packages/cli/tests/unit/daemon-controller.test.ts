@@ -49,6 +49,8 @@ interface Options {
   };
   /** A start or restart that brings no daemon up. */
   readonly startsNothing?: boolean;
+  /** The user service manager does not answer (no session bus); what `systemctl --user` says. */
+  readonly managerDown?: string;
 }
 
 type ManagerSays = 'other' | 'inactive' | 'running' | 'failed';
@@ -83,6 +85,8 @@ async function harness(options: Options = {}) {
   const processes: IDaemonProcessPort = {
     run: async argv => {
       trail.push(`run:${argv.join(' ')}`);
+      if (options.managerDown !== undefined && argv.includes('show-environment'))
+        return { code: 1, stdout: '', stderr: options.managerDown };
       if (argv.includes('stop') || argv.includes('kill')) stopOnce();
       if ((argv.includes('start') || argv.includes('restart')) && options.startsNothing !== true)
         current = { protocol: 1, version: '5.0.1', pid: 4322 };
@@ -375,6 +379,19 @@ describe('fy daemon install and uninstall', () => {
     expect(h.disk.get(h.layout.systemdUnitFile)).toContain('/fake/bin/fyd');
     expect(h.out.text).toContain('user service installed from');
     expect(h.locks[0]).toContain('install:');
+  });
+
+  test('an install the service manager cannot take refuses before it stops, writes or launches anything', async () => {
+    const h = await harness({ installed: false, managerDown: 'Failed to connect to bus: No such file or directory' });
+    await expect(h.controller.install()).rejects.toThrow(
+      'systemd does not answer from here (Failed to connect to bus: No such file or directory)',
+    );
+    expect(h.trail.filter(line => line.startsWith('signal:') || line === 'launch')).toEqual([]);
+    expect(h.trail.filter(line => /run:systemctl --user (stop|kill|enable|restart|daemon-reload)/u.test(line))).toEqual(
+      [],
+    );
+    expect(h.disk.has(h.layout.systemdUnitFile)).toBe(false);
+    expect(h.out.text).not.toContain('stopping it so');
   });
 
   test('V-0249 stops the daemon and removes the service definition, naming the root it keeps', async () => {

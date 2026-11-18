@@ -55,7 +55,7 @@ import {
   resetRoots,
   resetSurvivors,
 } from './reset.ts';
-import { UnsupportedServiceManagerError } from './supervisor.ts';
+import { ServiceManagerUnreachableError, UnsupportedServiceManagerError } from './supervisor.ts';
 
 /** Options the reporting verbs accept. */
 export interface DaemonCommandOptions {
@@ -324,6 +324,12 @@ export class DaemonController {
     const service = this.#service();
     // Before anything is written: one definition per host, and it may belong to another state home.
     await service.assertServes(undefined);
+    // Before the daemon is stopped or launched: the hand-over below ends the running daemon, and a manager that cannot
+    // then start its own (no user session bus, a service manager of another home) leaves the machine with no daemon.
+    const unreachable = await service.unreachableBecause?.();
+    if (unreachable !== undefined) {
+      throw new ServiceManagerUnreachableError(service.manager, unreachable);
+    }
     // A fresh machine has no home yet, and a definition cannot be written under one that is not ours: the daemon's
     // first start makes it. That daemon is then an orphan, and the hand-over below moves it under the manager.
     await this.#ensureHome();
