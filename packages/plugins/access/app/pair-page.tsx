@@ -130,7 +130,7 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
       () =>
         snapshot.daemons.map(entry => ({
           ...connectionRecord(entry),
-          label: distinctDaemonName(entry, snapshot.daemons),
+          daemonName: distinctDaemonName(entry, snapshot.daemons),
         })),
       [snapshot],
     );
