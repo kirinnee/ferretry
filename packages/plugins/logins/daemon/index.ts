@@ -279,7 +279,8 @@ export function buildLoginsDaemon() {
           }
         },
         portHolders: systemPortHolders(kernel.spawn, clock),
-        clientName: 'ferretry',
+        // The binary the person types (fy, or the name the operator gave it), never the product name.
+        clientName: kernel.identity.binaries.client,
         onSignedIn: loginId => {
           events.publish(LoginSignedIn, { loginId: loginId as LoginId });
           events.publish(LoginChanged, { loginId: loginId as LoginId, change: 'status' });
