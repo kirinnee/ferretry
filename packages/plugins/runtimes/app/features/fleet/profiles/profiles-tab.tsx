@@ -24,6 +24,7 @@ import {
   LinkRow,
   OpenRow,
   PageHead,
+  PlainRow,
   ReadFailed,
   RowList,
   Section,
@@ -45,13 +46,17 @@ type Page =
   /** The pages of one kind of component that has no tab of its own (Built from). */
   | { readonly kind: 'components'; readonly of: ComponentKind };
 
-/** Where a kind is managed when it is not on this tab: the plugin tab that owns it, or none (opens here). */
-const kindHref = (kind: ComponentKind, machineName: string): string | undefined => {
+/**
+ * Where a kind is managed when it is not on this tab: the plugin tab that owns it. `undefined` means it opens here;
+ * `null` means another tab owns it but this page is not under a `/d/<daemon>` route, so there is no address to name
+ * (the row is shown without a link rather than as a dead one).
+ */
+const kindHref = (kind: ComponentKind, machineName: string): string | null | undefined => {
+  if (kind !== 'modelSets' && kind !== 'mcp' && kind !== 'skills') return undefined;
   const daemon = currentDaemon();
+  if (daemon === null) return null;
   if (kind === 'modelSets') return tabHref(daemon, machineName, 'model-sets');
-  if (kind === 'mcp') return daemon === null ? '#mcp' : daemonSettingsHref(daemon, 'mcp', 'mcp');
-  if (kind === 'skills') return daemon === null ? '#skills' : daemonSettingsHref(daemon, 'skills', 'skills');
-  return undefined;
+  return daemonSettingsHref(daemon, kind, kind);
 };
 
 export function ProfilesTab(props: MachineTabProps & { readonly onAtList?: (atList: boolean) => void }) {
@@ -155,6 +160,7 @@ function BuiltFrom({
         {catalog.components.kinds.map(group => {
           const href = kindHref(group.kind, machineName);
           const sub = `${group.description} · ${counted(group.components.length, 'item')}`;
+          if (href === null) return <PlainRow key={group.kind} title={group.label} sub={sub} />;
           return href === undefined ? (
             <OpenRow
               key={group.kind}

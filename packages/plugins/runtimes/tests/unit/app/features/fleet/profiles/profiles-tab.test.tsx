@@ -688,6 +688,16 @@ describe('ProfilesTab — Built from', () => {
     expect(root.querySelectorAll('[data-built-from]')).toHaveLength(3);
   });
 
+  it('draws the kinds another tab owns as plain rows, not dead links, off a /d/<daemon> route', async () => {
+    window.history.replaceState(null, '', '/');
+    const root = await open();
+    const section = q(root, '[data-catalog-section="built-from"]');
+    expect(section.querySelectorAll('[data-catalog-link]')).toHaveLength(0);
+    expect(section.querySelectorAll('a')).toHaveLength(0);
+    expect(section.textContent).toContain('MCP servers description. · 2 items');
+    expect(section.querySelectorAll('[data-built-from]')).toHaveLength(3);
+  });
+
   it('opens a kind with no tab of its own: its list, a component with its text, and back to the profiles', async () => {
     const root = await open();
     await click(root, '[data-built-from="instructions"]');
