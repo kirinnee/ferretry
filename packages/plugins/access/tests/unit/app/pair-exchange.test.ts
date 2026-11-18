@@ -86,6 +86,7 @@ describe('the pairing exchange', () => {
         address: 'https://daemon.example.test',
         // The pairing crossed a relay, so nothing marks the link's address as one this device paired over.
         carriers: response().carriers,
+        askName: true,
       },
     ]);
     should(result.daemon).equal(daemonId);

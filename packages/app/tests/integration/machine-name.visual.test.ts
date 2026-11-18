@@ -67,6 +67,8 @@ const VIEWPORTS = [
 const VIEWS = [
   { view: 'name', path: '/d/ws/settings/kernel/name', words: ['General', 'Name', 'Shown now: pebox'] },
   { view: 'name-host', path: '/d/ws/settings/kernel/name', words: ['Using the host name (kirin-mbp.local)'] },
+  { view: 'pair-name', path: '/d/ws', words: ['Name this machine', 'Machine name', 'Save name', 'Not now'] },
+  { view: 'connecting', path: '/d/ws', words: ['pebox'] },
   // An app opened fresh goes straight to its machine: the list is reached on purpose, from the machine picker.
   { view: 'daemons', path: '/d/ws', words: ['Daemons', 'pebox', 'kirin-laptop'], viaPicker: true },
 ] as const;

@@ -84,6 +84,8 @@ export async function exchangePairing(
       address: connection.baseUrl,
       ...(outcome.via.kind === 'direct' ? { pairedOver: 'direct' as const } : {}),
       carriers: response.carriers,
+      // The shell then offers a machine with no name of the owner's a name, once (skippable, governed by the daemon).
+      askName: true,
     });
   } catch (reason) {
     // Only a key `save` wrote can differ from `previous`; before `save` there is nothing to undo.

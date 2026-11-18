@@ -7,6 +7,8 @@
  *   ?view=name        Settings › General › Name (path /d/ws/settings/kernel/name), the owner's name set
  *   ?view=name-host   the same, with no name set: the host name is the placeholder
  *   ?view=daemons     the daemon list (path /)
+ *   ?view=pair-name   a machine just paired with, no name of the owner's: the "Name this machine" step
+ *   ?view=connecting  the name this device learned, shown while the machine has not answered yet
  */
 import { createRoot } from 'react-dom/client';
 import type { TransportAnswer, TransportRequest } from '../../../src/client/transport.ts';
@@ -30,7 +32,7 @@ const root = document.getElementById('root');
 
 const OWNER_NAME = 'pebox';
 const HOST_NAME = 'kirin-mbp.local';
-const named = view !== 'name-host';
+const named = view !== 'name-host' && view !== 'pair-name';
 const daemonName = named ? OWNER_NAME : HOST_NAME;
 
 const kernel = generated.surfaces.find(entry => entry.id === 'kernel');
@@ -82,14 +84,26 @@ const provision = { handler, Prompts: () => null } as unknown as PasskeyProvisio
 
 const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
 // Paired while it still went by its host name: the plugin list teaches this device the name it has now.
-list.add({ daemon: 'ws', machine: HOST_NAME, deviceId: 'dev', address: 'http://127.0.0.1:40245' });
+list.add({
+  daemon: 'ws',
+  machine: HOST_NAME,
+  deviceId: 'dev',
+  address: 'http://127.0.0.1:40245',
+  ...(view === 'pair-name' ? { askName: true as const } : {}),
+});
+if (view === 'connecting') list.learnMachine('ws', OWNER_NAME);
 if (view === 'daemons')
   list.add({ daemon: 'lap', machine: 'kirin-laptop', deviceId: 'dev2', address: 'http://127.0.0.1:40246' });
 const runtime = new ShellRuntime({
   appVersion: '5.0.0',
   surfaces,
   daemons: list,
-  connect: async paired => (paired.daemon === 'lap' ? daemonCalled('kirin-laptop') : daemonCalled(daemonName)),
+  connect: async paired =>
+    view === 'connecting'
+      ? await new Promise<never>(() => undefined)
+      : paired.daemon === 'lap'
+        ? daemonCalled('kirin-laptop')
+        : daemonCalled(daemonName),
   passkey: () => provision,
   daemonless: {
     views: registeredDaemonless(surfaces, {} as DaemonlessPorts).views,
