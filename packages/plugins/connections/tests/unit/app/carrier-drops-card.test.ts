@@ -14,7 +14,7 @@ import {
   DeviceConnectionPanel,
   type DeviceConnectionPorts,
 } from '../../../app/features/carrier/device-connection-panel.tsx';
-import { CarrierDropLog } from '../../../app/lib/carrier-drops.ts';
+import { type CarrierDrop, CarrierDropLog } from '../../../app/lib/carrier-drops.ts';
 import { CarrierPreferenceStore } from '../../../app/lib/carrier-preference.ts';
 
 const MACHINE = 'fy_daemon_machineOne';
@@ -118,6 +118,27 @@ test('the summary line counts the drops, those while hidden and the usual time b
   log.dropped(MACHINE, 'relay', 'requests', { code: 1006, reason: 'b', livedMs: 1, lastHeardMs: 1 });
   expect(carrierDropsSummary(log.snapshot())).toBe('2 dropped · 1 while hidden · usually back in 4.0 s');
   expect(carrierDropsSummary(log.snapshot().slice(1))).toBe('1 dropped · 1 while hidden');
+});
+
+test('the usual time back is the lower middle one, as in v4: two reconnects of 2 s and 4 s say 2.0 s', () => {
+  const at = Date.UTC(2026, 10, 18, 7, 0, 0);
+  const drop = (reconnectMs: number): CarrierDrop => ({
+    at,
+    daemonId: MACHINE,
+    carrier: 'relay',
+    purpose: 'requests',
+    code: 1006,
+    reason: 'cut',
+    livedMs: 1,
+    lastHeardMs: 1,
+    hidden: false,
+    online: true,
+    reconnectMs,
+  });
+  expect(carrierDropsSummary([drop(4_000), drop(2_000)])).toBe('2 dropped · 0 while hidden · usually back in 2.0 s');
+  expect(carrierDropsSummary([drop(1_000), drop(9_000), drop(3_000)])).toBe(
+    '3 dropped · 0 while hidden · usually back in 3.0 s',
+  );
 });
 
 test('Clear forgets the drops of this machine and leaves those of another', () => {

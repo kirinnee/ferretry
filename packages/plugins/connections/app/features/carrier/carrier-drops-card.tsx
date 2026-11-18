@@ -28,7 +28,7 @@ export function carrierDropsSummary(drops: readonly CarrierDrop[]): string {
   const back = drops
     .flatMap(drop => (drop.reconnectMs === undefined ? [] : [drop.reconnectMs]))
     .toSorted((a, b) => a - b);
-  const middle = back[Math.floor(back.length / 2)];
+  const middle = back[Math.floor((back.length - 1) / 2)];
   return [
     `${String(drops.length)} dropped`,
     `${String(hidden)} while hidden`,
