@@ -17,6 +17,14 @@ import { bootApp, entryOf, manifestOf, settle } from './frame-fixtures.tsx';
  */
 
 const mounts: string[] = [];
+/** The asks that wait on the owner, by ferret: what Agenda's `ferrets.needs-you` provider says. */
+const waiting = new Map<string, { readonly count: number }>();
+const heard = new Set<() => void>();
+const setWaiting = (ferret: string, count: number): void => {
+  if (count === 0) waiting.delete(ferret);
+  else waiting.set(ferret, { count });
+  for (const listener of [...heard]) listener();
+};
 let bring: ((panel: string) => void) | undefined;
 
 function Note({ subject }: PanelProps) {
@@ -53,7 +61,25 @@ const plugin = entryOf(
         panels: { note: Note },
       }),
     }),
-    {},
+    {
+      hooks: {
+        'ferrets.needs-you': () => {
+          let snapshot: ReadonlyMap<string, { readonly count: number }> = new Map(waiting);
+          return {
+            subscribe: (listener: () => void) => {
+              heard.add(listener);
+              return () => void heard.delete(listener);
+            },
+            watch: () => () => undefined,
+            needing: () => {
+              if (snapshot.size !== waiting.size || [...waiting].some(([id, ask]) => snapshot.get(id) !== ask))
+                snapshot = new Map(waiting);
+              return snapshot;
+            },
+          };
+        },
+      },
+    },
   ),
 );
 
@@ -75,6 +101,8 @@ afterEach(async () => {
   view = null;
   sidePaneOpen.set(false);
   mounts.length = 0;
+  waiting.clear();
+  heard.clear();
   bring = undefined;
 });
 
@@ -142,5 +170,40 @@ describe('the ferret page opens on the chat, with the side column one click away
     await interact(() => bring?.('insights'));
     await settle();
     expect(column(page)).toBeNull();
+  });
+});
+
+describe('a closed side column says how many asks wait behind it', () => {
+  test('a ferret with open asks puts the count on the toggle, and its label says it', async () => {
+    waiting.set('zoe', { count: 3 });
+    const page = await open();
+    await settle();
+    expect(page.querySelector('[data-side-toggle-count]')?.textContent).toBe('3');
+    expect(toggle(page).getAttribute('aria-label')).toBe('Show side panels, 3 asks wait on you');
+  });
+
+  test('one ask reads in the singular, and the count follows the provider live', async () => {
+    waiting.set('zoe', { count: 1 });
+    const page = await open();
+    await settle();
+    expect(toggle(page).getAttribute('aria-label')).toBe('Show side panels, 1 ask waits on you');
+    await interact(() => setWaiting('zoe', 4));
+    expect(page.querySelector('[data-side-toggle-count]')?.textContent).toBe('4');
+    await interact(() => setWaiting('zoe', 0));
+    expect(page.querySelector('[data-side-toggle-count]')).toBeNull();
+    expect(toggle(page).getAttribute('aria-label')).toBe('Show side panels');
+  });
+
+  test('only THIS ferret’s asks count, and an open column draws no count (its agenda tab says them)', async () => {
+    waiting.set('kai', { count: 5 });
+    const page = await open();
+    await settle();
+    expect(page.querySelector('[data-side-toggle-count]')).toBeNull();
+    await interact(() => setWaiting('zoe', 2));
+    expect(page.querySelector('[data-side-toggle-count]')?.textContent).toBe('2');
+    await interact(() => toggle(page).click());
+    await settle();
+    expect(page.querySelector('[data-side-toggle-count]')).toBeNull();
+    expect(toggle(page).getAttribute('aria-label')).toBe('Hide side panels');
   });
 });
