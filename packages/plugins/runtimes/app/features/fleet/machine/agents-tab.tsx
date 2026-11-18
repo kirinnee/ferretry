@@ -10,6 +10,7 @@
  * `conversation.yaml`, written through the kernel's config file routes.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import { Segmented, SettingRow, SettingSwitch } from '@ferretry/app';
 import { useCallback, useEffect, useState } from 'react';
 import type { AgentControl, MachineView } from '../../../../contract/index.ts';
@@ -364,10 +365,12 @@ export function AgentsTab({ client, machine, machineName, checking, onRetry, onR
   const onSaved = onRefresh ?? onRetry;
 
   if (machine === null)
-    return (
+    return checking ? (
+      <Loading kind="page" label={`Checking ${machineName}…`} />
+    ) : (
       <div className="flex min-w-0 flex-col gap-5">
         <p role="status" className="m-0 text-cell text-muted" data-agents-waiting="">
-          {checking ? `Checking ${machineName}…` : `${machineName}’s agent settings show once it answers.`}
+          {machineName}’s agent settings show once it answers.
         </p>
       </div>
     );

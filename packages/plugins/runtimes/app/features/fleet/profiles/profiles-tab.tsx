@@ -12,6 +12,7 @@
  * panel says why in one sentence and the pages still read.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import { daemonSettingsHref } from '@ferretry/app';
 import type { AccountChange, ComponentKind, LayeredProfileView } from '../../../../contract/index.ts';
 import { useEffect, useId, useState } from 'react';
@@ -76,12 +77,7 @@ export function ProfilesTab(props: MachineTabProps & { readonly onAtList?: (atLi
     (page.kind === 'detail' && known?.some(candidate => candidate.name === page.name) === false);
   useEffect(() => onAtList?.(showingList), [onAtList, showingList]);
 
-  if (read.kind === 'loading')
-    return (
-      <p className="m-0 text-cell text-muted" role="status">
-        Reading {machineName}’s profiles…
-      </p>
-    );
+  if (read.kind === 'loading') return <Loading kind="page" label={`Reading ${machineName}’s profiles…`} />;
   if (read.kind === 'failed') return <ReadFailed reason={read.reason} onRetry={() => void reload()} />;
   const catalog = read.catalog;
   const profile =

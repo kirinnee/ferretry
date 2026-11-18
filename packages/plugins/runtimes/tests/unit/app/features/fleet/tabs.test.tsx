@@ -49,7 +49,7 @@ describe('the Runtimes tab', () => {
   it('says so when the machine cannot be read', async () => {
     const view = await open(<RuntimesTab {...props({})} />);
     expect(view.container.querySelector('[data-runtime-row]')).toBeNull();
-    expect(view.container.querySelector('[data-runtimes-loading]')).toBeNull();
+    expect(view.container.querySelector('[data-loading="page"]')).toBeNull();
     const failed = must(view.container.querySelector('[data-runtimes-failed]'), 'the unreadable-machine sentence');
     expect(failed.getAttribute('role')).toBe('alert');
     expect(failed.textContent).toBe(

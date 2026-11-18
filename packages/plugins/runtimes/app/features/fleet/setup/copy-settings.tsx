@@ -8,7 +8,7 @@
  */
 
 import { daemonOfClient, type DaemonReach, useEveryDaemon } from '@ferretry/app';
-import { RadioChoices, SetupNote, SetupSection } from '@ferretry/app/ui';
+import { Loading, RadioChoices, SetupNote, SetupSection } from '@ferretry/app/ui';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   type AccountChangeView,
@@ -219,11 +219,7 @@ export function CopySettings({
     );
 
   if (phase.kind === 'followup')
-    return (
-      <p role="status" className="m-0 text-cell text-muted" data-copy-followup="">
-        The setup landed. Reading the settings review from {phase.source}…
-      </p>
-    );
+    return <Loading kind="page" label={`The setup landed. Reading the settings review from ${phase.source}…`} />;
 
   if (phase.kind === 'confirm') {
     const here = phase;

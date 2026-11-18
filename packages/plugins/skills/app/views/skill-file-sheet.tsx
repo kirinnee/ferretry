@@ -1,6 +1,6 @@
 /** One SKILL.md, read when opened and shown as the document it is: the front matter as its lines, the body as Markdown. */
 import { Markdown } from '@ferretry/app';
-import { ContextFailure, ContextNote, useContextRead } from '@ferretry/app/ui';
+import { ContextFailure, Loading, useContextRead } from '@ferretry/app/ui';
 import { useCallback } from 'react';
 import type { SkillEntry, SkillFile } from '../../contract/index.ts';
 import { splitFrontMatter } from '../lib/skills-model.ts';
@@ -54,7 +54,7 @@ export function SkillFileSheet({
         ) : file.load.kind === 'ready' ? (
           <SkillDocument content={file.load.value.content} />
         ) : (
-          <ContextNote>Reading SKILL.md…</ContextNote>
+          <Loading kind="page" label="Reading SKILL.md…" />
         )}
       </div>
     </SkillSheet>

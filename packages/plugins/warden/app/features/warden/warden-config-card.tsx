@@ -10,6 +10,7 @@
  * unknown — and those are shown verbatim, because the daemon is the one that knows.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type { WardenAccount, WardenConfig, WardenConfigPatch, WardenConfigView } from '../../wire.ts';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -363,8 +364,8 @@ export function WardenConfigSurface({
     // for it at the request): say so, never draw an empty step. The step-up itself is not touched here.
     if (unavailable === 'message')
       return (
-        <section className="kt-panel p-panel" role="status" aria-label="Reading the Warden settings">
-          <h3 className="m-0 text-row font-semibold text-fg">Reading the Warden’s settings…</h3>
+        <section className="kt-panel p-panel" aria-label="Reading the Warden settings">
+          <Loading kind="page" label="Reading the Warden’s settings…" />
           <p className="mb-0 mt-1 text-cell leading-base text-muted">
             If this device asks you to confirm it’s you, confirm it to see them. The settings appear here as soon as the
             daemon answers.

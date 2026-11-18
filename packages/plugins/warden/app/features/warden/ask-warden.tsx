@@ -12,6 +12,7 @@
  * may control this ferret. The grants are read once per machine and never reused for another one.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type { WardenInvestigateRequest, WardenInvestigateView, WardenStatusView } from '../../wire.ts';
 import { Shield } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
@@ -127,11 +128,13 @@ export function AskWardenForm({
         />
       </FormField>
       <p className="fy-action-form__note" data-ask-warden-estimate="">
-        {read.kind === 'loading'
-          ? 'Reading the Warden’s status…'
-          : read.kind === 'failed'
-            ? `Couldn’t read the Warden’s status: ${read.reason}. The daemon still checks the cap when you ask.`
-            : `${askWardenInvestigatorLine(read.status)} ${askWardenCostLine(read.status)}`}
+        {read.kind === 'loading' ? (
+          <Loading kind="bar" label="Reading the Warden’s status…" />
+        ) : read.kind === 'failed' ? (
+          `Couldn’t read the Warden’s status: ${read.reason}. The daemon still checks the cap when you ask.`
+        ) : (
+          `${askWardenInvestigatorLine(read.status)} ${askWardenCostLine(read.status)}`
+        )}
       </p>
       <FormFailure message={blocker ?? failure} />
       <FormFoot

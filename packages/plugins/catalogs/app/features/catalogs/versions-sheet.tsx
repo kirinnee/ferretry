@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '@ferretry/app/ui';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import { useDaemonClient } from '../../lib/client-context.tsx';
-import { Button } from '@ferretry/app/ui';
+import { Button, Loading } from '@ferretry/app/ui';
 import { CatalogSheet, FailureLine, SharingOffPanel } from './catalog-parts.tsx';
 import { MarkedText } from './catalog-review-view.tsx';
 import { listMembers } from './catalog-shares-api.ts';
@@ -182,9 +182,7 @@ export function VersionsSheet({
   return (
     <CatalogSheet name="versions" title="Versions" subtitle={label} closeLabel="Close Versions" onClose={onClose}>
       {read.kind === 'loading' ? (
-        <p className="m-0 text-cell text-muted" role="status">
-          Reading the versions…
-        </p>
+        <Loading kind="page" label="Reading the versions…" />
       ) : read.kind === 'failed' ? (
         read.refusal.sharingOff ? (
           <SharingOffPanel connection={connection} createClient={createClient} />

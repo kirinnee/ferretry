@@ -8,7 +8,7 @@
  * when the daemon wants it.
  */
 
-import { Button, type ChangeAuthority, ChangeApplyPanel, cn } from '@ferretry/app/ui';
+import { Button, type ChangeAuthority, ChangeApplyPanel, cn, Loading } from '@ferretry/app/ui';
 import { Lock } from 'lucide-react';
 import { useState } from 'react';
 import type { McpOAuthFlow } from '../../contract/index.ts';
@@ -95,9 +95,7 @@ export function McpSignInSection({
   if (read.kind === 'loading')
     return (
       <Section title="Sign-in" spot="mcp-sign-in">
-        <p className="m-0 text-cell text-muted" role="status">
-          Reading whether {name} is signed in…
-        </p>
+        <Loading kind="bar" label={`Reading whether ${name} is signed in…`} />
       </Section>
     );
   if (read.kind === 'failed')
