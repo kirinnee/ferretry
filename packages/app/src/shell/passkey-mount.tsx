@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { PairedDaemon } from '../daemons/daemon-list.ts';
 import type { PasskeyAsk } from '../passkey/passkey.ts';
 import { useOptionalShell } from './context.tsx';
+import { PasskeyBar } from './passkey-bar.tsx';
 
 /**
  * WHERE THE ONE PASSKEY PROMPT IS DRAWN (G105), and which machine it may come from (G95).
@@ -19,7 +20,14 @@ import { useOptionalShell } from './context.tsx';
  * OVER a prompt raised while one was open, which could then not be pressed. At the body the z-70 competes with them (and
  * with the command bar) directly. The focus effect below does not care where the prompt is drawn.
  */
-export function PasskeyMount({ onScreen }: { readonly onScreen: string | null }) {
+export function PasskeyMount({
+  onScreen,
+  routeDaemon,
+}: {
+  readonly onScreen: string | null;
+  /** The machine the route names, if any: only its unasked passkey is offered as a press ({@link PasskeyBar}). */
+  readonly routeDaemon?: string | undefined;
+}) {
   const shell = useOptionalShell();
   const provision = shell?.runtime.passkey();
   const handler = provision?.handler;
@@ -28,7 +36,13 @@ export function PasskeyMount({ onScreen }: { readonly onScreen: string | null })
   }, [handler, onScreen]);
   if (provision === undefined) return null;
   const { Prompts } = provision;
-  return createPortal(<Prompts />, document.body);
+  return createPortal(
+    <>
+      {routeDaemon === undefined ? null : <PasskeyBar daemon={routeDaemon} />}
+      <Prompts />
+    </>,
+    document.body,
+  );
 }
 
 const NOTHING_LOCKED: readonly string[] = Object.freeze([]);

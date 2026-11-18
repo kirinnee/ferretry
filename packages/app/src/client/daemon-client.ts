@@ -214,6 +214,9 @@ export class DaemonClient {
   /** Background reads refused for a step-up, answered with that refusal for a while rather than sent again. */
   readonly #backoff: StepUpBackoff;
   readonly #personActing: () => boolean;
+  /** The passkey a read nobody caused was last refused for, until a confirm: what the shell offers a press for. */
+  #unasked: PasskeyNeed | undefined;
+  readonly #unaskedListeners = new Set<() => void>();
 
   constructor(options: DaemonClientOptions) {
     this.#backoff = new StepUpBackoff(options.now);
@@ -292,6 +295,29 @@ export class DaemonClient {
     return () => this.#liveListeners.delete(listener);
   }
 
+  /**
+   * The passkey this machine refused a read NOBODY CAUSED for (A555 r7), until a confirm: the unlock before a step-up.
+   * No prompt opened for it, so the shell offers one press for it instead (`shell/passkey-bar.tsx`); a page is never
+   * left with a refusal and no way to answer it.
+   */
+  unaskedNeed(): PasskeyNeed | undefined {
+    return this.#unasked;
+  }
+
+  /** Fires when {@link unaskedNeed} changes. */
+  onUnasked(listener: () => void): () => void {
+    this.#unaskedListeners.add(listener);
+    return () => this.#unaskedListeners.delete(listener);
+  }
+
+  #setUnasked(need: PasskeyNeed | undefined): void {
+    // The unlock comes first: while it is wanted nothing else can be read, so a step-up never replaces it.
+    if (need !== undefined && this.#unasked?.kind === 'unlock') return;
+    if (need === this.#unasked || (need?.kind === 'step-up' && this.#unasked?.kind === 'step-up')) return;
+    this.#unasked = need;
+    for (const listener of [...this.#unaskedListeners]) listener();
+  }
+
   /** Fires on every {@link AuthoritySignal}: the grants cache's re-read triggers. */
   onAuthority(listener: (signal: AuthoritySignal) => void): () => void {
     this.#authorityListeners.add(listener);
@@ -304,6 +330,7 @@ export class DaemonClient {
    */
   noteConfirmed(): void {
     this.#backoff.clear();
+    this.#setUnasked(undefined);
     this.#generation += 1;
     this.#signal({ kind: 'confirmed' });
   }
@@ -503,8 +530,8 @@ export class DaemonClient {
     // asks wherever it came from and clears the machine's "cancel stays cancelled". Absent, a GET is the page's own read.
     const origin: PromptOrigin = background ? 'background' : init.quiet === false ? 'explicit' : requestOrigin(method);
     // A READ NOBODY CAUSED (A555 r7): a background view's call, or a read sent while no person is acting on the page (a
-    // poll, an effect a re-render re-ran). Its step-up refusal is its answer — no prompt — and the same read is answered
-    // from that refusal for a while rather than sent again (`step-up-backoff.ts`).
+    // poll, an effect a re-render re-ran). Its step-up or unlock refusal is its answer — no prompt — and the same read is
+    // answered from that refusal for a while rather than sent again (`step-up-backoff.ts`).
     const unasked = origin === 'background' && (background || !this.#personActing());
     const key = unasked ? backoffKey(request) : undefined;
     const held = key === undefined ? undefined : this.#backoff.held(key);
@@ -518,10 +545,11 @@ export class DaemonClient {
       },
       init.signal,
       // Only a read can be quiet: a press asks for its step-up at once, whatever the caller said.
-      unasked || (init.quiet === true && requestOrigin(method) === 'background'),
+      init.quiet === true && requestOrigin(method) === 'background',
+      unasked,
     );
     if (key !== undefined) {
-      if (answer.status === 403 && this.#need(answer)?.kind === 'step-up') this.#backoff.refused(key, answer);
+      if (answer.status >= 400 && this.#need(answer) !== undefined) this.#backoff.refused(key, answer);
       else this.#backoff.forget(key);
     }
     return answer;
@@ -539,6 +567,7 @@ export class DaemonClient {
     resend: () => Promise<TransportAnswer>,
     signal?: AbortSignal,
     quiet = false,
+    unasked = false,
   ): Promise<TransportAnswer> {
     const passkey = this.#passkey;
     // G95: a read is the page's own work, so its unlock waits for its machine to be on screen; a press asks at once.
@@ -546,7 +575,10 @@ export class DaemonClient {
     let answer = first;
     let need = this.#need(answer);
     if (need?.kind === 'unlock') {
-      if (!(await this.#confirm(need, origin, signal))) return answer;
+      // Nobody caused this read: it waits for the unlock as every background read does, but its prompt never pops over
+      // the page (the pair-success screen's unasked modal); the shell offers the press, and the read goes once confirmed.
+      if (unasked) this.#setUnasked(need);
+      if (!(await this.#confirm(need, unasked ? 'unasked' : origin, signal))) return answer;
       answer = await resend();
       if (answer.status < 400) return answer;
       need = this.#need(answer);
@@ -555,7 +587,8 @@ export class DaemonClient {
     // A quiet read (a panel mounting, a poll, a read nobody caused) is not the person acting: the refusal is the answer
     // and no prompt opens — the page offers its own "Confirm it's you" press. The daemon's refusal still stands, so
     // nothing is read or done without the step-up.
-    if (quiet) return answer;
+    if (unasked) this.#setUnasked(need);
+    if (quiet || unasked) return answer;
     // Today's step-up wait is NOT abortable (only the unlock is), so the step-up prompt takes no signal.
     if (!(await this.#confirm(need, origin))) return answer;
     return await resend();

@@ -744,3 +744,55 @@ describe('a cancelled prompt stays cancelled (triage row 50)', () => {
     await later;
   });
 });
+
+describe('A555 r7: a screen offering the first passkey in place holds its machine', () => {
+  const heldGate = () => {
+    const held = new Set<string>();
+    const gate = new StepUpGate({
+      ceremony: async () => undefined,
+      describe: () => 'no',
+      held: daemonId => held.has(daemonId),
+    });
+    return { gate, held };
+  };
+
+  it('should pop no prompt for a request nobody pressed while the card holds the machine on screen, then show it once let go', async () => {
+    const { gate, held } = heldGate();
+    gate.focus(first.daemonId);
+    held.add(first.daemonId);
+    const waiting = gate.require(first, 'read the board', 'background');
+    await flush();
+    should(gate.snapshot()).be.null();
+    held.delete(first.daemonId);
+    gate.recheck();
+    should(gate.snapshot()?.daemon.daemonId).equal(first.daemonId);
+    gate.dismiss();
+    should(await waiting).be.false();
+  });
+
+  it('should still ask at once for a press, card or not', async () => {
+    const { gate, held } = heldGate();
+    gate.focus(first.daemonId);
+    held.add(first.daemonId);
+    const pressed = gate.require(first, 'change the settings', 'explicit');
+    await flush();
+    should(gate.snapshot()?.acts).deepEqual(['change the settings']);
+    gate.dismiss();
+    should(await pressed).be.false();
+  });
+
+  it('should take back a shown prompt nobody pressed for when a card starts holding its machine', async () => {
+    const { gate, held } = heldGate();
+    gate.focus(first.daemonId);
+    const waiting = gate.require(first, 'read the board', 'background');
+    await flush();
+    should(gate.snapshot()).not.be.null();
+    held.add(first.daemonId);
+    gate.recheck();
+    should(gate.snapshot()).be.null();
+    held.delete(first.daemonId);
+    gate.recheck();
+    gate.dismiss();
+    should(await waiting).be.false();
+  });
+});

@@ -282,6 +282,8 @@ describe("the shell's grants read and the generation (shell contract S1)", () =>
     const client = new DaemonClient({
       transport,
       surfaces: compiled,
+      // A person is acting: these tests are about the generation, not about a read nobody caused (A555 r7).
+      personActing: () => true,
       passkey: {
         daemon: { daemon: 'd1', machine: 'm', deviceId: 'dev', address: 'http://127.0.0.1:1', pairedAt: 1 } as never,
         handler: {
@@ -356,7 +358,7 @@ describe("the shell's grants read and the generation (shell contract S1)", () =>
     expect(heard).toHaveLength(5);
   });
 
-  test('a background-origin client asks as background even for a POST; the feed is told live and not', async () => {
+  test('a background-origin client waits as unasked (never shown) even for a POST; the feed is told live and not', async () => {
     const { client, confirms, transport } = locking();
     const live: boolean[] = [];
     const stop = client.onFeedLive(value => live.push(value));
@@ -368,6 +370,6 @@ describe("the shell's grants read and the generation (shell contract S1)", () =>
     stop();
     expect(live).toEqual([true, false]);
     await expect(client.forPackage('agenda', { origin: 'background' }).call('GET /v1/agenda')).rejects.toBeDefined();
-    expect(confirms).toEqual(['unlock/background']);
+    expect(confirms).toEqual(['unlock/unasked']);
   });
 });

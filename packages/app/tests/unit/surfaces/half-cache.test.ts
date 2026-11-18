@@ -179,7 +179,7 @@ describe('the one client cache', () => {
     expect(again).not.toBe(client);
   });
 
-  test('the background and ordinary entries differ; a background POST to a locked machine asks as background', async () => {
+  test('the background and ordinary entries differ; a background POST to a locked machine waits as unasked (never shown)', async () => {
     const { runtime, origins } = setup({ locked: true });
     runtime.connection('d1');
     await settle();
@@ -189,12 +189,12 @@ describe('the one client cache', () => {
     await expect(background?.call('POST /v1/board', { body: { title: 'x' } })).rejects.toMatchObject({
       code: 'unlock_required',
     });
-    expect(origins).toEqual(['background']);
+    expect(origins).toEqual(['unasked']);
     // The same POST through the ordinary entry is a press: it asks explicitly.
     await expect(ordinary?.call('POST /v1/board', { body: { title: 'x' } })).rejects.toMatchObject({
       code: 'unlock_required',
     });
-    expect(origins).toEqual(['background', 'explicit']);
+    expect(origins).toEqual(['unasked', 'explicit']);
   });
 
   test('a client is undefined before its daemon answers, and a half for an unknown package is none', () => {

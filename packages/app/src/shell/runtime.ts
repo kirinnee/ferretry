@@ -20,7 +20,7 @@ import { type BuiltHalf, HalfCache } from '../surfaces/halves.ts';
 import { indexSurfaces, type SurfaceEntry } from '../surfaces/registry.ts';
 import { DaemonLayouts } from '../layout/daemon-layout.ts';
 import { noteClientDaemon } from '../connect/daemon-of.ts';
-import type { PasskeyProvision } from '../passkey/passkey.ts';
+import type { PasskeyNeed, PasskeyProvision } from '../passkey/passkey.ts';
 import { AppHookCache, appHookProviders } from '../surfaces/app-hooks.ts';
 import {
   type DaemonlessScreenProps,
@@ -501,6 +501,39 @@ export class ShellRuntime {
     return await act();
   }
 
+  /**
+   * The passkey this machine refused a read NOBODY CAUSED for (A555 r7), until it is confirmed: no prompt opened for it,
+   * so the shell offers one press (`passkey-bar.tsx`). `undefined` when nothing waits, or the machine is not connected.
+   */
+  unaskedNeed(daemon: string): PasskeyNeed | undefined {
+    const connection = this.#connections.get(daemon);
+    return connection?.kind === 'connected' ? connection.client.unaskedNeed() : undefined;
+  }
+
+  /**
+   * The person's press for that passkey: the ONE prompt, asked as theirs (`explicit`), with "Add a passkey" in it for a
+   * device that holds none. Confirmed, the machine's views are built again ONCE, so every read the page made without it
+   * is made again with it — a view that read once on mount has no other way to learn the refusal is gone.
+   */
+  async confirmUnasked(daemon: string): Promise<boolean> {
+    const need = this.unaskedNeed(daemon);
+    const handler = this.#passkey()?.handler;
+    const paired = this.daemons.get(daemon);
+    if (need === undefined || handler === undefined || paired === undefined) return false;
+    let confirmed: boolean;
+    try {
+      confirmed = (await handler.confirm(paired, need, 'explicit')) === true;
+    } catch {
+      confirmed = false;
+    }
+    if (!confirmed) return false;
+    this.noteConfirmed(daemon);
+    this.#halves.clearDaemon(daemon);
+    this.#hooks.clearDaemon(daemon);
+    this.#changed();
+    return true;
+  }
+
   /** A confirm the shell forwarded for this machine outside a client's pause (`usePasskeyAsk`): re-read its grants. */
   noteConfirmed(daemon: string): void {
     const connection = this.#connections.get(daemon);
@@ -555,6 +588,8 @@ export class ShellRuntime {
     // new component type to React). The clients stay either way. It is also a re-read trigger for the machine's
     // grants, the first read included.
     this.#grants.attach(paired.daemon, client);
+    // A read nobody caused was refused for a passkey, or the confirm cleared it: the press the shell offers moves.
+    client.onUnasked(() => this.#changed());
     let heldStandings: string | undefined;
     client.onChange(() => {
       const standings = standingsKey(this.surfaces, id => client.standing(id));

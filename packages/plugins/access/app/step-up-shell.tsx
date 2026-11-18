@@ -42,6 +42,7 @@ import { ACCESS_ROUTE_KEYS } from './daemon-scope.tsx';
 import { routeRequestClient } from './lib/route-request.ts';
 import { PairPhoneHost } from './pair-phone-host.tsx';
 import { holdPasskeyReach } from './pair-passkey.ts';
+import { inlinePasskeyOffered, onInlinePasskeyOffer } from './lib/inline-passkey-offer.ts';
 import {
   fetchSecuritySettings,
   stepUpStaysSentence,
@@ -125,6 +126,8 @@ export function accessPasskey(ports: PasskeyPorts): PasskeyProvision {
     ownerCommand: ownerCommandOffer(client),
     // A device with no passkey, inside its window, adds one in place and then confirms with it.
     firstPasskey: firstPasskeyOffer(client),
+    // A screen offering that first passkey in place already: nothing unpressed pops over it.
+    held: inlinePasskeyOffered,
     // The machine's own window, read once as the prompt opens; a failed read leaves the prompt's neutral words.
     scope: async daemon => {
       const view = await fetchSecuritySettings(await client(daemon));
@@ -137,6 +140,7 @@ export function accessPasskey(ports: PasskeyPorts): PasskeyProvision {
     // A device with no passkey, inside its window, is offered to set one up rather than sent elsewhere.
     firstPasskey: firstPasskeyOffer(client),
     ownerCommand: ownerCommandOffer(client),
+    held: inlinePasskeyOffered,
     // The machine's own number, read once as the prompt opens (an exempt route, so it answers before an unlock).
     scope: async daemon => {
       try {
@@ -146,6 +150,11 @@ export function accessPasskey(ports: PasskeyPorts): PasskeyProvision {
         return UNLOCK_STAYS_FALLBACK;
       }
     },
+  });
+
+  onInlinePasskeyOffer(() => {
+    stepUp.recheck();
+    unlockGate.recheck();
   });
 
   const handler: PasskeyHandler = {

@@ -75,11 +75,11 @@ export interface StepUpPrompt {
 }
 
 /**
- * Who started the request that needs a passkey: a person pressing something (`explicit`), or a page
- * reading in the background (`background`). Only the first may raise a prompt for a machine that is not
- * on screen.
+ * Who started the request that needs a passkey: a person pressing something (`explicit`), a page reading in
+ * the background (`background`), or a read nobody caused (`unasked`, A555 r7). Only the first may raise a
+ * prompt for a machine that is not on screen; the last never raises one, and waits for a press to.
  */
-export type PromptOrigin = 'explicit' | 'background';
+export type PromptOrigin = 'explicit' | 'background' | 'unasked';
 
 export interface StepUpGateDependencies {
   /** Runs the whole ceremony for one machine: options, the passkey sheet, and the daemon's verdict. */
@@ -101,6 +101,11 @@ export interface StepUpGateDependencies {
   readonly firstPasskey?: (daemon: DaemonConnection) => Promise<boolean>;
   /** The owner's command when this device cannot add a passkey by itself, else nothing. Read once, like {@link firstPasskey}. */
   readonly ownerCommand?: (daemon: DaemonConnection) => Promise<string | undefined>;
+  /**
+   * Whether a screen is offering this machine's first passkey in place right now (`inline-passkey-offer.ts`): then
+   * nothing a person did not press raises this gate's prompt for it, until {@link StepUpGate.recheck} says it let go.
+   */
+  readonly held?: (daemonId: DaemonId) => boolean;
 }
 
 interface Waiting {
@@ -116,6 +121,8 @@ interface Waiting {
   words: StepUpWords | undefined;
   /** A person started at least one of these requests, so it may ask from off screen. */
   explicit: boolean;
+  /** A page read at least one of them (`background`), so it may ask once its machine is on screen; `unasked` never asks. */
+  background: boolean;
 }
 
 const NOTHING_WAITING: readonly DaemonId[] = Object.freeze([]);
@@ -175,6 +182,7 @@ export class StepUpGate {
   ): Promise<boolean> {
     return new Promise(resolve => {
       const explicit = origin === 'explicit';
+      const background = origin === 'background';
       if (explicit) this.#dismissed.delete(daemon.daemonId);
       else if (this.#dismissed.has(daemon.daemonId)) {
         resolve(false);
@@ -184,6 +192,7 @@ export class StepUpGate {
       if (waiting !== undefined) {
         waiting.resolvers.push(resolve);
         waiting.explicit ||= explicit;
+        waiting.background ||= background;
         waiting.words ??= words;
         const covered = this.#boundness(waiting);
         if (actId === undefined) waiting.unnamed = true;
@@ -206,6 +215,7 @@ export class StepUpGate {
         unnamed: actId === undefined,
         words,
         explicit,
+        background,
       };
       this.#waiting.set(daemon.daemonId, entry);
       if (this.#prompt === null && this.#mayShow(entry)) this.#show(entry);
@@ -222,6 +232,17 @@ export class StepUpGate {
     if (daemonId === this.#focus) return;
     this.#focus = daemonId;
     if (daemonId !== null) this.#dismissed.delete(daemonId);
+    const prompt = this.#prompt;
+    const shown = prompt === null ? undefined : this.#waiting.get(prompt.daemon.daemonId);
+    if (prompt !== null && !prompt.busy && shown !== undefined && !this.#mayShow(shown)) this.#prompt = null;
+    if (this.#prompt === null) this.#showNext();
+  }
+
+  /**
+   * What may show changed outside the gate (a screen held or let go of a machine): a prompt nobody pressed for that may
+   * no longer show goes back to waiting, unless the person is already answering it, and the next one that may, shows.
+   */
+  recheck(): void {
     const prompt = this.#prompt;
     const shown = prompt === null ? undefined : this.#waiting.get(prompt.daemon.daemonId);
     if (prompt !== null && !prompt.busy && shown !== undefined && !this.#mayShow(shown)) this.#prompt = null;
@@ -272,7 +293,13 @@ export class StepUpGate {
   }
 
   #mayShow(waiting: Waiting): boolean {
-    return waiting.explicit || waiting.daemon.daemonId === this.#focus;
+    if (waiting.explicit) return true;
+    // A read nobody caused (`unasked`) waits silently: only a person's press, or a page read of its own, shows it.
+    return (
+      waiting.background &&
+      waiting.daemon.daemonId === this.#focus &&
+      this.deps.held?.(waiting.daemon.daemonId) !== true
+    );
   }
 
   #settle(daemonId: DaemonId, stepped: boolean): void {

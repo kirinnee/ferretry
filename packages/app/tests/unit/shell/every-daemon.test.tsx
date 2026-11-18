@@ -122,7 +122,7 @@ describe('locked machines, press and unlock', () => {
     parts.machine('d1').locked = true;
     const onA = rowsOf(parts, 'background').find(row => row.daemon === 'd1');
     await expect(onA?.client.call(READ)).rejects.toBeDefined();
-    expect(parts.prompts.at(-1)).toMatchObject({ origin: 'background', daemon: 'd1' });
+    expect(parts.prompts.at(-1)).toMatchObject({ origin: 'unasked', daemon: 'd1' });
     expect(parts.focused).toEqual([]);
   });
 

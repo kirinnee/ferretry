@@ -327,7 +327,10 @@ export function Frame() {
         />
         {/* One passkey prompt for the whole app (Access's): any daemon call refused for want of an unlock or a step-up
       raises it, and only the machine on screen may raise a background one (G95, G105). */}
-        <PasskeyMount onScreen={runtime.passkeyOnScreen.chosen() ?? daemon ?? runtime.daemons.snapshot().selected} />
+        <PasskeyMount
+          onScreen={runtime.passkeyOnScreen.chosen() ?? daemon ?? runtime.daemons.snapshot().selected}
+          routeDaemon={daemon}
+        />
       </div>
     </FrameRootContext.Provider>
   );

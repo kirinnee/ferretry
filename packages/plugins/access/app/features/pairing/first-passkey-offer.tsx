@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { type CredentialsPort, type DeadlineSchedule, MACHINE_READ_DEADLINE_MS, withDeadline } from '@ferretry/app';
 import type { PasskeysView } from '../../../contract/index.ts';
 import { passkeyFailureSentence, registrationMinutesLeft, webAuthnSupported } from '../../lib/passkey-panel.ts';
+import { holdInlinePasskeyOffer } from '../../lib/inline-passkey-offer.ts';
 import { addPasskeyCeremony, browserCredentials } from '../../lib/step-up-ceremony.ts';
 import { fetchPasskeys, type StepUpClient } from '../../lib/step-up-client.ts';
 import type { DaemonConnection } from '../../shell-grants.ts';
@@ -106,6 +107,10 @@ export function FirstPasskeyOffer({
       current = false;
     };
   }, [canRun, connection, createClient, deadlineMs, schedule]);
+
+  // While the button shows, this machine's prompts hold back: the same offer must not pop up over it, unasked.
+  const offered = state.kind === 'offered';
+  useEffect(() => (offered ? holdInlinePasskeyOffer(connection.daemonId) : undefined), [offered, connection.daemonId]);
 
   const add = useCallback(async () => {
     if (state.kind !== 'offered') return;

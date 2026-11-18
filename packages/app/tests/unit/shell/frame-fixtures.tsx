@@ -159,8 +159,8 @@ export async function bootApp(options: BootOptions) {
     confirm: async (paired, need, origin) => {
       prompts.push({ need, origin, daemon: paired.daemon });
       const machine = machines.get(paired.daemon);
-      if (origin === 'background') {
-        // The real gate shows nothing for a machine that is not on screen: the call waits until it is unlocked.
+      if (origin === 'background' || origin === 'unasked') {
+        // The real gate shows nothing for a machine that is not on screen, nor ever for a read nobody caused: the call waits until it is unlocked.
         await new Promise<void>(resolve =>
           waiting.set(paired.daemon, [...(waiting.get(paired.daemon) ?? []), resolve]),
         );

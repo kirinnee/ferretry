@@ -198,9 +198,9 @@ describe('the background origin (R3 MJ1)', () => {
     const first = (viaProp as Mount).client.call(PING, { body: {} });
     const second = (viaRow as PluginClient).call(PING, { body: {} });
     await settle();
-    // Nothing was asked of the person: every confirm that reached the handler was a background one.
+    // Nothing was asked of the person: every confirm that reached the handler was one nobody caused (`unasked`, never shown).
     expect(app.prompts.length).toBeGreaterThan(0);
-    expect(app.prompts.every(prompt => prompt.origin === 'background')).toBe(true);
+    expect(app.prompts.every(prompt => prompt.origin === 'unasked')).toBe(true);
     expect(app.prompts.some(prompt => prompt.daemon === 'd3')).toBe(false);
     let done = 0;
     void first.then(() => (done += 1));
@@ -219,7 +219,7 @@ describe('the background origin (R3 MJ1)', () => {
         .transport.paths()
         .filter(path => path === PING),
     ).toHaveLength(2);
-    expect(app.prompts.every(prompt => prompt.origin === 'background')).toBe(true);
+    expect(app.prompts.every(prompt => prompt.origin === 'unasked')).toBe(true);
   });
 
   test('shell S5: the same POST through the ordinary client is a press and asks at once (the contrast)', async () => {

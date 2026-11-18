@@ -700,12 +700,14 @@ the admin token on loopback is answered the step-up demand, like every other cal
 them in the background, so a locked second machine used to raise its unlock over the first machine's
 page. A background read (`GET`, `HEAD`) that meets `unlock_required` now waits until its
 machine is on screen, and the Machines list shows that machine as locked; anything a person pressed asks at
-once. A read **nobody caused** that meets a **step-up** — a background view's, or one sent while no person is acting on
-the page (the browser's transient user activation, a few seconds after a click or a key, is absent: a poll, an effect a
-re-render re-ran) — never raises the prompt: its refusal is its answer, the same read is answered from that refusal
-for a wait that doubles from 2 s to a minute instead of being sent again (one page polled a refused read ~140 times a
-minute), and the page offers its own "Confirm it's you" press. A grants re-read that answers the same is not a change,
-so a refusal never re-renders the app. Two machines that answer to the same name are told apart by address in the prompt and the list; a loopback address is never printed (it means "this computer" to whoever reads it), so two daemons on one host read "name (paired 3 Nov)" or "name (2)" instead.
+once. A read **nobody caused** — a background view's, or one sent while no person is acting on the page (the browser's
+transient user activation, a few seconds after a click or a key, is absent: a reload, a deep link, a poll, an effect a
+re-render re-ran) — never raises a passkey prompt, for a step-up or the unlock: its refusal is its answer, the same
+read is answered from that refusal for a wait that doubles from 2 s to a minute instead of being sent again (one page
+polled a refused read ~140 times a minute), and the shell draws one line with one button ("Confirm it's you", or
+"Unlock") over the page whose route names that machine. Pressing it opens the one prompt as the person's own — with
+"Add a passkey" in it for a device that holds none — and once confirmed the machine's views are built again so they
+read again. A grants re-read that answers the same is not a change, so a refusal never re-renders the app. Two machines that answer to the same name are told apart by address in the prompt and the list; a loopback address is never printed (it means "this computer" to whoever reads it), so two daemons on one host read "name (paired 3 Nov)" or "name (2)" instead.
 
 There is no operator password. The passkey step-up replaced it for every purpose it had — the local
 browser's unlock, the remote `configure` lock and the per-change confirmation — and **nothing is kept for

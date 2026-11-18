@@ -124,7 +124,7 @@ describe('a background place', () => {
       expect(row.client).not.toBe(parts.runtime.client(row.daemon, 'conv') as never);
     }
     for (const row of seen.rows) await expect(row.client.call(SEND, { body: { text: 'hi' } })).rejects.toBeDefined();
-    expect(parts.prompts.map(prompt => prompt.origin)).toEqual(['background', 'background']);
+    expect(parts.prompts.map(prompt => prompt.origin)).toEqual(['unasked', 'unasked']);
   });
 });
 
