@@ -640,7 +640,9 @@ export class ShellRuntime {
     this.#grants.attach(paired.daemon, client, remembered.inventory === undefined ? undefined : remembered.grants);
     // A read nobody caused was refused for a passkey, or the confirm cleared it: the press the shell offers moves.
     client.onUnasked(() => this.#changed());
-    let heldStandings: string | undefined;
+    // Seeded from what the client draws NOW (the remembered list, or unread): the first live answer that says the same
+    // keeps every half and hook the first draw built, so a reload that changed nothing remounts nothing.
+    let heldStandings: string | undefined = standingsKey(this.surfaces, id => client.standing(id));
     client.onChange(() => {
       const standings = standingsKey(this.surfaces, id => client.standing(id));
       if (standings !== heldStandings) {

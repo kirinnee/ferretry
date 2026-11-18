@@ -26,7 +26,6 @@ const RememberedSchema = z.strictObject({
   inventory: z
     .strictObject({
       protocol: z.literal(PROTOCOL),
-      daemonName: z.string().max(128).optional(),
       plugins: z
         .array(z.strictObject({ id: z.string().min(1).max(64), on: z.boolean(), contract: z.string().max(128) }))
         .max(256),
@@ -65,7 +64,6 @@ export class ShapeMemory {
             inventory: {
               kind: 'read',
               entries: new Map(held.inventory.plugins.map(p => [p.id, { on: p.on, contract: p.contract }])),
-              ...(held.inventory.daemonName === undefined ? {} : { daemonName: held.inventory.daemonName }),
             },
           }),
       ...(held.grants === undefined ? {} : { grants: new Map(held.grants.map(row => [row.capability, row])) }),
@@ -84,7 +82,6 @@ export class ShapeMemory {
       deviceId,
       inventory: {
         protocol: PROTOCOL,
-        ...(inventory.daemonName === undefined ? {} : { daemonName: inventory.daemonName }),
         plugins: [...inventory.entries].map(([id, entry]) => ({ id, on: entry.on, contract: entry.contract })),
       },
     });

@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { implementApp } from '@ferretry/kernel/manifest';
+import { type ReactNode, useEffect } from 'react';
+import { provideToShell } from '../../../src/connect/provides.ts';
 import { DaemonClient } from '../../../src/client/daemon-client.ts';
 import type { Inventory } from '../../../src/client/inventory.ts';
 import { DaemonCallError, type TransportRequest } from '../../../src/client/transport.ts';
@@ -257,6 +260,173 @@ describe('the shell remembers a live shape and forgets it on unpair and re-pair'
         app.list.remove('d1');
       });
       expect(memory.read('d1', 'dev-2')).toEqual({});
+    } finally {
+      await app.view.unmount();
+    }
+  });
+});
+
+describe('a stopped client admits nothing, and a socket waits for the live list', () => {
+  const live = (gate: Promise<unknown>, overrides: Parameters<typeof inventoryOf>[1] = {}) =>
+    new FakeTransport((request: TransportRequest) => {
+      if (request.path === '/v1/plugins') return gate.then(() => json(inventoryOf(compiled, overrides)));
+      if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
+      return json({ cards: [] });
+    });
+  const sockets = surface('stream', { sockets: ['GET /v1/stream'] });
+  const withSocket = [...CORE, board, sockets];
+  const streaming = (gate: Promise<unknown>, overrides: Parameters<typeof inventoryOf>[1] = {}) => {
+    const transport = new FakeTransport((request: TransportRequest) => {
+      if (request.path === '/v1/plugins') return gate.then(() => json(inventoryOf(withSocket, overrides)));
+      return json({ protocol: 1, version: '5.0.0' });
+    });
+    const remembered: Extract<Inventory, { kind: 'read' }> = {
+      kind: 'read',
+      entries: new Map(
+        (inventoryOf(withSocket) as { plugins: { id: string; on: boolean; contract: string }[] }).plugins.map(p => [
+          p.id,
+          { on: p.on, contract: p.contract },
+        ]),
+      ),
+    };
+    return { transport, client: new DaemonClient({ transport, surfaces: withSocket, remembered }) };
+  };
+
+  test('a kept reference to a stopped client is refused before any standing is looked at, even from the cache alone', async () => {
+    const transport = live(Promise.resolve());
+    const client = new DaemonClient({ transport, surfaces: compiled, remembered: read() });
+    const kept = client.forPackage('board');
+    expect(client.standing('board')).toEqual({ state: 'allowed' });
+    client.stop();
+    await expect(kept.call('GET /v1/board')).rejects.toBeInstanceOf(DaemonCallError);
+    expect(transport.requests).toHaveLength(0);
+  });
+
+  test('stopping settles a call that was waiting for the live list: it is refused, never left hanging or sent', async () => {
+    let open: () => void = () => {};
+    const transport = live(new Promise<void>(resolve => (open = resolve)));
+    const client = new DaemonClient({ transport, surfaces: compiled, remembered: read() });
+    const waiting = client.forPackage('board').call('GET /v1/board');
+    const outcome = waiting.then(
+      () => 'sent',
+      (error: unknown) => (error instanceof DaemonCallError ? 'refused' : 'other'),
+    );
+    await Promise.resolve();
+    client.stop();
+    expect(await outcome).toBe('refused');
+    open();
+    await Promise.resolve();
+    expect(transport.requests.map(r => r.path)).not.toContain('/v1/board');
+  });
+
+  test('a socket asked for while only the remembered list is held opens when the live list allows it, and not before', async () => {
+    let open: () => void = () => {};
+    const { transport, client } = streaming(new Promise<void>(resolve => (open = resolve)));
+    const closed: string[] = [];
+    const handle = client
+      .forPackage('stream')
+      .socket('GET /v1/stream', {}, { onFrame: () => {}, onClose: r => closed.push(r) });
+    await Promise.resolve();
+    expect(transport.sockets).toHaveLength(0);
+    const started = client.start();
+    open();
+    await started;
+    await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
+    expect(transport.sockets.map(s => s.path)).toEqual(['/v1/stream']);
+    expect(closed).toEqual([]);
+    handle.close();
+    expect(transport.sockets[0]?.closed).toBe(true);
+  });
+
+  test('a socket the live list then refuses closes as a refusal (1008), never opens, and never throws at the caller', async () => {
+    let open: () => void = () => {};
+    const { transport, client } = streaming(new Promise<void>(resolve => (open = resolve)), { stream: { on: false } });
+    const closes: [string, number | undefined][] = [];
+    client
+      .forPackage('stream')
+      .socket('GET /v1/stream', {}, { onFrame: () => {}, onClose: (reason, code) => closes.push([reason, code]) });
+    const started = client.start();
+    open();
+    await started;
+    await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
+    expect(transport.sockets).toHaveLength(0);
+    expect(closes.map(c => c[1])).toEqual([1008]);
+  });
+
+  test('a socket still waiting when the client stops never opens', async () => {
+    let open: () => void = () => {};
+    const { transport, client } = streaming(new Promise<void>(resolve => (open = resolve)));
+    client.forPackage('stream').socket('GET /v1/stream', {}, { onFrame: () => {}, onClose: () => {} });
+    client.stop();
+    open();
+    await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
+    expect(transport.sockets).toHaveLength(0);
+    expect(() =>
+      client.forPackage('stream').socket('GET /v1/stream', {}, { onFrame: () => {}, onClose: () => {} }),
+    ).toThrow();
+  });
+});
+
+describe('an identical live answer keeps the first drawn screen mounted', () => {
+  let mounts = 0;
+  let unmounts = 0;
+  const probeManifest = manifestOf('probe', {
+    ui: { screens: [{ id: 'p', path: 'p', nav: { label: 'Probe', order: 1 } }] },
+  });
+  const probe = entryOf(
+    probeManifest,
+    provideToShell(
+      implementApp(probeManifest, {
+        build: () => ({
+          screens: {
+            p: (): ReactNode => {
+              useEffect(() => {
+                mounts += 1;
+                return () => {
+                  unmounts += 1;
+                };
+              }, []);
+              return <p data-testid="probe">probe</p>;
+            },
+          },
+        }),
+      }),
+      {},
+    ),
+  );
+
+  test('seeded from the remembered shape, the first identical live list is 1 mount and 0 unmounts', async () => {
+    mounts = 0;
+    unmounts = 0;
+    const memory = new ShapeMemory(memoryStore());
+    const everything = [...CORE, probe];
+    memory.saveInventory('d1', 'dev', {
+      kind: 'read',
+      entries: new Map(
+        (inventoryOf(everything) as { plugins: { id: string; on: boolean; contract: string }[] }).plugins.map(p => [
+          p.id,
+          { on: p.on, contract: p.contract },
+        ]),
+      ),
+    });
+    memory.saveGrants('d1', 'dev', rows(row('fleet', true)));
+    let answer: () => void = () => {};
+    const app = await bootApp({
+      surfaces: [probe],
+      machines: ['d1'],
+      path: '/d/d1/p',
+      shape: memory,
+      holdInventory: new Promise<void>(resolve => (answer = resolve)),
+    });
+    try {
+      await settle();
+      expect(app.view.container.querySelector('[data-testid="probe"]')).not.toBeNull();
+      expect(mounts).toBe(1);
+      answer();
+      await settle();
+      await interact(() => new Promise(resolve => setTimeout(resolve, 50)));
+      expect(app.view.container.querySelector('[data-testid="probe"]')).not.toBeNull();
+      expect({ mounts, unmounts }).toEqual({ mounts: 1, unmounts: 0 });
     } finally {
       await app.view.unmount();
     }

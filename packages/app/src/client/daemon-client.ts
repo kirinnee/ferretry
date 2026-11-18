@@ -179,6 +179,10 @@ function paused(owner: string, standing: Standing): DaemonCallError {
   return new DaemonCallError(0, KERNEL_REFUSALS.pluginPaused.code, `${owner} is paused on this daemon (${reason}).`);
 }
 
+function stopped(): DaemonCallError {
+  return new DaemonCallError(0, KERNEL_REFUSALS.pluginPaused.code, 'This connection was closed.');
+}
+
 function refusal(answer: TransportAnswer): DaemonCallError {
   const body = typeof answer.body === 'object' && answer.body !== null ? (answer.body as Record<string, unknown>) : {};
   const code = typeof body.code === 'string' ? body.code : `http_${answer.status}`;
@@ -270,6 +274,8 @@ export class DaemonClient {
 
   stop(): void {
     this.#stopped = true;
+    // Whatever waits for the inventory (an admission, a deferred socket) is woken to find the client stopped.
+    this.#settle();
     this.#stopEvents?.();
     this.#stopEvents = undefined;
     this.#setFeedLive(false);
@@ -498,6 +504,8 @@ export class DaemonClient {
   /** Waits for the inventory, then checks the caller and the owner. Throws `plugin_paused` without sending. */
   async #admit(caller: string, owner: string): Promise<void> {
     while ((this.#inventory === undefined || this.#provisional) && !this.#stopped) await this.#ready;
+    // A stopped client admits nothing, whatever it remembers: a kept reference never reads from the cache alone.
+    if (this.#stopped) throw stopped();
     for (const id of new Set([caller, owner])) if (!this.#allowed(id)) throw paused(id, this.standing(id));
   }
 
@@ -787,8 +795,58 @@ export class DaemonClient {
   ): TransportSocket {
     const owner = this.#socketOwner.get(key);
     if (owner === undefined) throw new TypeError(`${caller} opened ${key}, which no compiled manifest declares`);
-    // A socket is synchronous: it cannot wait for the inventory, so an unread inventory refuses like a block.
-    if (this.#provisional) throw paused(caller, { state: 'blocked', reason: 'unread' });
+    if (this.#stopped) throw stopped();
+    // A remembered list only DRAWS: no socket opens on it. The handle is returned at once and the socket opens only when
+    // the LIVE list has answered (or closes as paused if that list says no), so a view that opens its socket in an
+    // effect on a reload is never thrown at while the live read is still on its way.
+    if (this.#provisional) return this.#deferSocket(caller, owner, key, params, listeners, query);
+    return this.#openSocket(caller, owner, key, params, listeners, query);
+  }
+
+  #deferSocket(
+    caller: string,
+    owner: string,
+    key: string,
+    params: Readonly<Record<string, string>>,
+    listeners: SocketListeners,
+    query?: Readonly<Record<string, string>>,
+  ): TransportSocket {
+    let inner: TransportSocket | undefined;
+    let closed = false;
+    void (async () => {
+      while ((this.#inventory === undefined || this.#provisional) && !this.#stopped) await this.#ready;
+      if (closed || this.#stopped) return;
+      try {
+        inner = this.#openSocket(caller, owner, key, params, listeners, query);
+      } catch {
+        // The live list refused it: told as a refusal (1008), which a view does not dial again.
+        closed = true;
+        listeners.onClose(KERNEL_REFUSALS.pluginPaused.code, 1008);
+        return;
+      }
+    })();
+    return {
+      send: frame => {
+        if (closed) return;
+        // Before the live answer nothing is open: a frame sent now is dropped, as the transport drops one sent before open.
+        inner?.send(frame);
+      },
+      close: (code, reason) => {
+        if (closed) return;
+        closed = true;
+        inner?.close(code, reason);
+      },
+    };
+  }
+
+  #openSocket(
+    caller: string,
+    owner: string,
+    key: string,
+    params: Readonly<Record<string, string>>,
+    listeners: SocketListeners,
+    query?: Readonly<Record<string, string>>,
+  ): TransportSocket {
     for (const id of new Set([caller, owner])) if (!this.#allowed(id)) throw paused(id, this.standing(id));
     const { path } = parseRouteKey(key);
     const entry: { open?: OpenSocket } = {};

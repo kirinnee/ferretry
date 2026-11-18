@@ -4,8 +4,9 @@ import type { Plugin } from 'vite';
  * PREFETCH EVERY PLUGIN VIEW CHUNK, so no navigation waits on a download. A plugin's views are code-split
  * (`import('./views/…')`, loaded the first time a view is drawn), which is right for the first paint but made every first
  * visit to a screen wait for its chunk. They ship with the app anyway, so the built page asks the browser to fetch them
- * at idle priority once the page has loaded (`<link rel="prefetch">`: after the first paint, never before it, never
- * competing with it), into the HTTP cache the later `import()` reads from.
+ * at idle once the page has loaded (`public/prefetch-views.js` adds the `<link rel="prefetch">` tags: after the first
+ * paint, never before it, never competing with it), into the HTTP cache the later `import()` reads from. The tags are
+ * made at runtime so a reader who asked to save data (Save-Data, a 2g-class connection, `prefers-reduced-data`) gets none.
  *
  * Which chunks: the dynamic entries of the app page that come from a plugin or core app half, plus the shared chunks
  * those import and the page does not already load. NOT the heavy optional ones (on-device speech, diagram and map
@@ -47,11 +48,11 @@ export function prefetchViewChunks(): Plugin {
           if (chunk.isDynamicEntry && /\/packages\/(plugins|core)\/[^/]+\/app\//u.test(from)) want(chunk.fileName);
         }
         if (wanted.size === 0) return html;
-        const links = [...wanted]
-          .sort()
-          .map(file => `    <link rel="prefetch" as="script" crossorigin href="/${file}">`)
-          .join('\n');
-        return html.replace('</head>', `${links}\n  </head>`);
+        const chunkList = [...wanted].sort().join(',');
+        return html.replace(
+          '</head>',
+          `    <script defer src="/prefetch-views.js" data-chunks="${chunkList}"></script>\n  </head>`,
+        );
       },
     },
   };
