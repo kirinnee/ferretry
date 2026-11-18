@@ -76,7 +76,7 @@ const open = async (size: (typeof WINDOWS)[number], mode: 'light' | 'dark', usag
   const context = await browser.newContext({
     viewport: { width: size.width, height: size.height },
     colorScheme: mode,
-    deviceScaleFactor: size.phone ? 2 : 1,
+    deviceScaleFactor: 2,
     ...(size.phone ? { isMobile: true, hasTouch: true } : {}),
   });
   const origin = server?.url.origin ?? '';
@@ -101,6 +101,7 @@ const layout = async (tab: Page) =>
     const send = rect('[data-composer-send]');
     const row = rect('.fy-composer-row');
     const model = rect('[data-runtime-chip]');
+    const chipLabel = document.querySelector('[data-runtime-chip] > span');
     const quota = document.querySelector('.fy-composer-quota');
     const form = rect('form.fy-composer');
     return {
@@ -114,6 +115,9 @@ const layout = async (tab: Page) =>
       rowContainsModel: row !== undefined && model !== undefined && model.top >= row.top && model.bottom <= row.bottom,
       rowContainsQuota: quota !== null && row !== undefined && quota.getBoundingClientRect().top < row.bottom,
       quotaVisibleText: quota === null ? null : (quota.querySelector('[aria-hidden="true"]')?.textContent ?? ''),
+      // The chip's whole readout (model, thinking, speed) is on screen, not cut to the model by an ellipsis.
+      chipText: chipLabel?.textContent ?? '',
+      chipClipped: chipLabel === null ? true : chipLabel.scrollWidth > chipLabel.clientWidth + 1,
       quotaWidth: quota?.getBoundingClientRect().width ?? 0,
       bodyText: document.body.innerText,
     };
@@ -152,6 +156,11 @@ for (const mode of ['light', 'dark'] as const)
             expect(idle.rowContainsModel, 'the model chip is not inside the row').toBe(false);
             expect(model.top, 'the model chip is under the row').toBeGreaterThanOrEqual(row.bottom - 1);
             expect(form.height, 'row plus ONE status line, not a block').toBeLessThan(row.height + 36);
+
+            // E4b: the status line carries model, THINKING and SPEED whenever the session reports them — a fixture ferret
+            // that reports none (the relay check's) shows only the model because there is nothing more to say.
+            expect(idle.chipText).toBe('claude-opus-5-5 · high · fast');
+            expect(idle.chipClipped, 'the chip is not cut to the model alone').toBe(false);
 
             if (usage === 'unknown') {
               expect(idle.quotaVisibleText ?? '', 'unknown usage is never drawn as raw words').not.toMatch(
