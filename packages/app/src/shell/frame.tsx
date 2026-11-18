@@ -2,10 +2,12 @@ import { BackgroundViews } from './background.tsx';
 import { DevicePanels, NavCount, type NavForm } from './device-panels.tsx';
 import { DeviceViews } from './device-views.tsx';
 import { PhoneTitleBar } from './phone-title-bar.tsx';
-import { Search } from 'lucide-react';
+import { ChevronDown, Search } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_LAYOUT } from '../layout/layout.ts';
 import { CommandBar } from '../ui/command-bar.tsx';
+import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '../ui/context-menu.tsx';
+import { useInputModality } from '../ui/hooks/use-input-modality.ts';
 import { useAppViewport } from '../ui/hooks/use-app-viewport.ts';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../ui/palette-shortcut.ts';
 import { buildPluginCommandSources, deviceLayoutSource, placeSource, settingsSource } from './command-sources.ts';
@@ -40,6 +42,10 @@ import { PanelSlot, ScreenView, ShellLine } from './views.tsx';
  * phone), `top`, `main` (one screen at a time, by the router), `side` (wide screens, when the layout asks). Nothing
  * in the frame is a feature: every entry is a plugin's screen, or one of the shell's own items.
  */
+
+const ALL_DAEMONS = 'All daemons';
+const ALL_DAEMONS_KEY = '';
+const THIS_ONE = 'this one';
 
 const routeDaemon = (route: Route): string | undefined =>
   'daemon' in route && typeof route.daemon === 'string' ? route.daemon : undefined;
@@ -121,33 +127,68 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
   );
 }
 
+/**
+ * THE MACHINE SWITCHER, like v4's: a button that says which machine is on screen and opens a menu (the shared
+ * ContextMenu — role=menu, arrows, Home/End, Escape back to the button, 44px rows on a touch screen). Every machine is
+ * ONE row, in its own words, the one on screen marked "this one"; "All daemons" leads, marked the same way when the
+ * list is what is showing.
+ */
 function DaemonPicker({ daemon }: { readonly daemon: string | undefined }) {
   const { runtime } = useShell();
   const router = useRouter();
-  const groups = runtime.daemons.groups();
-  if (groups.length === 0) return null;
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
+  const { touchAffected } = useInputModality();
+  const machines = runtime.daemons.groups().flatMap(group => group.daemons);
+  if (machines.length === 0) return null;
+  const current = machines.find(entry => entry.daemon === daemon);
+  const name = current === undefined ? ALL_DAEMONS : daemonTitle(current);
+  const items: readonly ContextMenuItem[] = [
+    {
+      key: ALL_DAEMONS_KEY,
+      label: ALL_DAEMONS,
+      ...(current === undefined ? { detail: THIS_ONE } : {}),
+      onSelect: () => router.navigate(HOME_HREF),
+    },
+    ...machines.map(entry => ({
+      key: entry.daemon,
+      label: daemonTitle(entry),
+      ...(entry.daemon === current?.daemon ? { detail: THIS_ONE } : {}),
+      separatorBefore: entry === machines[0],
+      onSelect: () => {
+        runtime.daemons.select(entry.daemon);
+        router.navigate(daemonHomeHref(entry.daemon));
+      },
+    })),
+  ];
   return (
-    <select
-      className="fy-daemon-picker"
-      aria-label="Daemon"
-      value={daemon ?? ''}
-      onChange={event => {
-        if (event.target.value === '') return router.navigate(HOME_HREF);
-        runtime.daemons.select(event.target.value);
-        router.navigate(daemonHomeHref(event.target.value));
-      }}
-    >
-      <option value="">All daemons</option>
-      {groups.map(group => (
-        <optgroup key={group.machine} label={group.machine}>
-          {group.daemons.map(entry => (
-            <option key={entry.daemon} value={entry.daemon}>
-              {daemonTitle(entry)}
-            </option>
-          ))}
-        </optgroup>
-      ))}
-    </select>
+    <>
+      <button
+        aria-expanded={anchor !== null}
+        aria-haspopup="menu"
+        aria-label={`Machine: ${name}. Switch machine`}
+        className="fy-daemon-picker"
+        data-daemon-picker=""
+        onClick={() => {
+          const rect = trigger.current?.getBoundingClientRect();
+          setAnchor({ x: rect?.left ?? 0, y: rect?.bottom ?? 0 });
+        }}
+        ref={trigger}
+        type="button"
+      >
+        <span className="fy-daemon-picker__name">{name}</span>
+        <ChevronDown aria-hidden="true" size={14} />
+      </button>
+      <ContextMenu
+        anchor={anchor ?? { x: 0, y: 0 }}
+        ariaLabel="Switch machine"
+        items={items}
+        onClose={() => setAnchor(null)}
+        open={anchor !== null}
+        touch={touchAffected}
+        triggerRef={trigger}
+      />
+    </>
   );
 }
 

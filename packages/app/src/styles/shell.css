@@ -227,21 +227,38 @@
     display: none;
   }
 }
-/* The machine picker is a themed field like every other (its popup list included), so a dark theme paints it with the
-   theme's surface and ink rather than the browser's mid-grey default. */
+/* The machine switcher is v4's: a quiet, bold name and a chevron that gains a soft fill on hover and while its menu is
+   open (the menu itself is the shared ContextMenu, which draws in the theme's own surface, light and dark). The name
+   clips with an ellipsis so a long machine name never widens the bar on a phone. */
 .fy-daemon-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
   max-width: 100%;
-  border: var(--stroke-control) solid var(--border-strong);
+  min-height: var(--control-h);
+  padding: 0 var(--pad-control-x);
+  border: var(--stroke-control) solid transparent;
   border-radius: var(--radius-input);
-  background: var(--surface);
+  background: transparent;
   color: var(--fg);
   font-family: var(--font-body);
+  font-weight: 600;
+  text-align: left;
 }
-.fy-daemon-picker option,
-.fy-daemon-picker optgroup {
-  background: var(--surface);
-  color: var(--fg);
+.fy-daemon-picker:hover,
+.fy-daemon-picker[aria-expanded='true'] {
+  background: var(--nav-hover, var(--surface-2));
+}
+.fy-daemon-picker svg {
+  flex: none;
+  color: var(--muted);
+}
+.fy-daemon-picker__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fy-columns {

@@ -85,7 +85,12 @@ const open = async (viewport: (typeof VIEWPORTS)[number], scheme: 'light' | 'dar
   );
   const tab: Page = await context.newPage();
   await tab.goto(`${origin}${path}?theme=studio-${scheme}&view=${view}`);
-  await tab.waitForFunction(() => document.body.innerText.trim().length > 40, undefined, { timeout: 15_000 });
+  // The machine switcher is a closed menu button, so a page can be drawn with little text: it counts as drawn too.
+  await tab.waitForFunction(
+    () => document.body.innerText.trim().length > 40 || document.querySelector('.fy-daemon-picker') !== null,
+    undefined,
+    { timeout: 15_000 },
+  );
   await tab.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
   return { tab, close: async () => await context.close() };
 };
@@ -98,8 +103,9 @@ describe('the machine name on every screen that shows it', () => {
           const { tab, close } = await open(viewport, scheme, view, path);
           try {
             if ('viaPicker' in rest) {
-              await tab.waitForSelector('select');
-              await tab.selectOption('select', { label: 'All daemons' });
+              await tab.waitForSelector('button.fy-daemon-picker');
+              await tab.click('button.fy-daemon-picker');
+              await tab.getByRole('menuitem', { name: 'All daemons' }).click();
             }
             await tab.waitForFunction(
               (wanted: readonly string[]) => wanted.every(word => document.body.innerText.includes(word)),
