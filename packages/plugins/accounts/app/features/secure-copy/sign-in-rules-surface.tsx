@@ -10,7 +10,7 @@ import type { SignInRuleList, SignInRuleStaged, SignInRuleView } from '../../../
 import { daemonOfClient } from '@ferretry/app';
 import { ConfirmToSee } from '@ferretry/app/ui';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { isStepUpRefusal } from '../../lib/step-up-refusal.ts';
+import { isStepUpRefusal, type ReadMode } from '../../lib/step-up-refusal.ts';
 import {
   dropRuleStage,
   failureWords,
@@ -150,6 +150,9 @@ export function MachineRuleStage({
   );
 }
 
+/** A poll is the page's own read, never the owner acting. */
+const QUIET: ReadMode = { quiet: true };
+
 type StagePhase = Parameters<typeof MachineRuleStage>[0]['phase'];
 
 /** Where no link ever arrives: a surface drawn without its device view. */
@@ -165,6 +168,8 @@ export function SignInRulesSurface({ client, askPasskey: ask, pollMs = POLL_MS, 
   >(undefined);
   const [reads, setReads] = useState(0);
   const forbidden = useRef(false);
+  /** Set ONLY by the owner's press on "Confirm it's you": the next read is theirs and may ask for the passkey. */
+  const pressed = useRef(false);
   const daemon = daemonOfClient(client as never);
   const link = useSyncExternalStore(ruleLink?.subscribe ?? NO_LINK_ARRIVES, () => ruleLink?.stageFor(daemon));
   const [linked, setLinked] = useState<{ readonly stage: string; readonly listed: boolean } | undefined>(undefined);
@@ -180,33 +185,37 @@ export function SignInRulesSurface({ client, askPasskey: ask, pollMs = POLL_MS, 
     ruleLink?.settle(daemon);
   }, [link, read, ruleLink, daemon]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` re-runs the read after a change
   useEffect(() => {
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     forbidden.current = false;
-    const readOnce = async (next: RuleClient): Promise<void> => {
+    // Only the press makes the first read explicit. A mount reads as it always did, and a reload after a write is the
+    // page's own work; every poll after it is quiet, so a lapsed step-up window never raises a passkey prompt unasked.
+    const first: ReadMode = pressed.current ? { quiet: false } : reads === 0 ? {} : { quiet: true };
+    pressed.current = false;
+    const readOnce = async (next: RuleClient, mode: ReadMode): Promise<void> => {
       try {
-        const list = await listRules(next, reads > 0 ? { quiet: false } : {});
+        const list = await listRules(next, mode);
         if (!current) return;
         setRead({ kind: 'ready', list });
-        timer = setTimeout(() => void readOnce(next), pollMs);
+        timer = setTimeout(() => void readOnce(next, QUIET), pollMs);
       } catch (cause) {
         if (!current) return;
-        // A device that may not use secrets is refused every time: say so once and stop asking.
-        if (isForbidden(cause)) {
-          forbidden.current = true;
-          setRead({ kind: 'forbidden' });
-        } else if (isStepUpRefusal(cause)) {
+        // The step-up refusal is a 403 too, so it is told apart FIRST: it waits for the owner's press, not for a new device.
+        if (isStepUpRefusal(cause)) {
           // Waiting for the owner's press: nothing to poll until they confirm.
           setRead({ kind: 'step-up' });
+        } else if (isForbidden(cause)) {
+          // A device that may not use secrets is refused every time: say so once and stop asking.
+          forbidden.current = true;
+          setRead({ kind: 'forbidden' });
         } else {
           setRead({ kind: 'failed', words: failureWords(cause) });
-          timer = setTimeout(() => void readOnce(next), pollMs * 3);
+          timer = setTimeout(() => void readOnce(next, QUIET), pollMs * 3);
         }
       }
     };
-    void readOnce(client);
+    void readOnce(client, first);
     return () => {
       current = false;
       if (timer !== undefined) clearTimeout(timer);
@@ -214,6 +223,10 @@ export function SignInRulesSurface({ client, askPasskey: ask, pollMs = POLL_MS, 
   }, [client, pollMs, reads]);
 
   const reload = useCallback(() => setReads(count => count + 1), []);
+  const press = useCallback(() => {
+    pressed.current = true;
+    reload();
+  }, [reload]);
 
   const act = useCallback(
     async (key: string, action: (next: RuleClient) => Promise<unknown>): Promise<void> => {
@@ -277,7 +290,7 @@ export function SignInRulesSurface({ client, askPasskey: ask, pollMs = POLL_MS, 
         <div className="mt-3">
           <ConfirmToSee
             line="This machine wants your passkey before it shows its standing sign-in rules."
-            onConfirm={reload}
+            onConfirm={press}
           />
         </div>
       ) : null}
