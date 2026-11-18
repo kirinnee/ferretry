@@ -85,6 +85,14 @@ export const NO_RELAY_DIRECTORY: HostedRelayFallback = Object.freeze(
   undetermined('this build has no relay directory to ask'),
 );
 
+/**
+ * Whether a directory WAS asked and could not answer (network, 5xx, not a document). That is not "no relay": a relay
+ * that is switched off ('disabled') or a build with no directory at all ({@link NO_RELAY_DIRECTORY}) offered nothing,
+ * so falling back to direct says nothing; an undetermined read means a relay may well exist, so it must be said.
+ */
+export const relayReadFailed = (read: HostedRelayFallback): boolean =>
+  read.kind === 'undetermined' && read !== NO_RELAY_DIRECTORY;
+
 declare const __FY_RELAY_DIRECTORY__: string | undefined;
 
 export const bundledRelayDirectory = (): string | undefined => {

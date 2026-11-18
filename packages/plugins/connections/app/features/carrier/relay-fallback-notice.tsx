@@ -6,7 +6,7 @@
  * person believing the relay is working. It is a status line, so a reader on assistive tech hears it appear and go.
  */
 
-import { type BackgroundViewProps } from '@ferretry/app';
+import { type BackgroundViewProps, useOptionalRouter } from '@ferretry/app';
 import { createElement, useEffect, useSyncExternalStore } from 'react';
 import type { CarrierRouter } from '../../carriers/router.ts';
 
@@ -41,10 +41,13 @@ export function useConnectionCardOnScreen(daemon: string | undefined): void {
   }, [daemon]);
 }
 
-/** The line itself, as a status. */
+/**
+ * The line itself, as a QUIET status: the connection works, so it is not an error (no red, no warning tone). It is a
+ * note about which way in is being used and why.
+ */
 export function RelayFallbackNotice({ line }: { readonly line: string }) {
   return (
-    <p role="status" className="fy-shell-line fy-shell-line--warn" data-relay-fallback="">
+    <p role="status" className="fy-shell-line fy-shell-line--info text-meta text-muted" data-relay-fallback="">
       {line}
     </p>
   );
@@ -53,11 +56,14 @@ export function RelayFallbackNotice({ line }: { readonly line: string }) {
 /**
  * A background view, mounted once per paired daemon where Connections may run: it draws the line while that daemon is
  * carried by the paired direct address, and nothing otherwise. It follows the router, so the line goes the moment the
- * relay answers again.
+ * relay answers again. It speaks only on a settings screen (where connection matters); on every other page the
+ * connection simply works and the page stays clean. With no router mounted (a harness) it speaks.
  */
 export function relayFallbackView(router: () => Pick<CarrierRouter, 'subscribe' | 'relayFallback'> | undefined) {
   return function RelayFallbackWatcher({ daemon }: BackgroundViewProps) {
     const held = router();
+    const where = useOptionalRouter()?.route.kind;
+    const matters = where === undefined || where === 'device-settings' || where === 'daemon-settings';
     const read = () => held?.relayFallback(daemon);
     const line = useSyncExternalStore(listener => held?.subscribe(listener) ?? (() => undefined), read, read);
     const cardSaysIt = useSyncExternalStore(
@@ -65,6 +71,6 @@ export function relayFallbackView(router: () => Pick<CarrierRouter, 'subscribe' 
       () => cardsOnScreen.has(daemon),
       () => false,
     );
-    return line === undefined || cardSaysIt ? null : createElement(RelayFallbackNotice, { line });
+    return line === undefined || cardSaysIt || !matters ? null : createElement(RelayFallbackNotice, { line });
   };
 }

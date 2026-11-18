@@ -5,7 +5,7 @@ import type { PublishedCarriers } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { memberCarriers } from './carriers/member-carriers.ts';
 import { CarrierRouter } from './carriers/router.ts';
-import { bundledRelayDirectory, documentRelayDiscovery } from './discovery/hosted-relay.ts';
+import { bundledRelayDirectory, documentRelayDiscovery, relayReadFailed } from './discovery/hosted-relay.ts';
 import { ActiveCarrierCard } from './features/carrier/active-carrier-card.tsx';
 import { DeviceConnectionPanel } from './features/carrier/device-connection-panel.tsx';
 import { relayFallbackView } from './features/carrier/relay-fallback-notice.tsx';
@@ -120,6 +120,8 @@ export function buildConnect(
     preference: preferences.preference,
     chosen: preferences.chosen,
     hostedRelay: discovery.hostedRelay,
+    // A directory that was asked and could not answer is not "no relay": the router says it fell back (quietly).
+    relayUndetermined: async () => relayReadFailed(await discovery.fallback()),
     ...(webrtc === undefined ? {} : { webrtc }),
     introduce: daemonId => introducers.request(daemonId),
     // What a "Tunnel only" walk learned by asking the daemon is kept exactly as a refresh's tunnel is.

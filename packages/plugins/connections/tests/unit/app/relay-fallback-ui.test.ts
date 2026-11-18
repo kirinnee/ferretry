@@ -97,6 +97,12 @@ test('the background view draws the line for a daemon the router carries by the 
   ).toBe('');
 });
 
+test('the notice is quiet: an info line, never the warning (red) tone', () => {
+  const html = renderToStaticMarkup(createElement(RelayFallbackNotice, { line: RELAY_FALLBACK_LINE }));
+  expect(html).toContain('fy-shell-line--info');
+  expect(html).not.toContain('fy-shell-line--warn');
+});
+
 const times = (tree: unknown): number => JSON.stringify(tree).split(RELAY_FALLBACK_LINE).length - 1;
 
 test('on one screen the line is told ONCE: the card says it, the frame’s status line stays quiet, and returns when the card goes', () => {

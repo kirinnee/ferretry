@@ -161,13 +161,14 @@ describe('the registered production carrier router, with its real default', () =
   };
   const isRelayDial = (url: string): boolean => new URL(url).port === '9';
 
-  test('1. default + direct pairing + no relay discovered: the fleet opens over direct and says the relay was not used', async () => {
+  test('1. default + direct pairing + no relay discovered: the fleet opens over direct and says nothing about a relay', async () => {
     await withDevice({}, async session => {
       await session.ready();
       expect(inventoryKind(session)).toBe('read');
       expect(session.runtime.wholeDaemonLine(session.daemonId)).toBeUndefined();
       expect(session.runtime.wholeDaemonDetail(session.daemonId)).toBeUndefined();
-      expect(session.relayFallbackLine()).toBe(FALLBACK_LINE);
+      // The relay is simply off: nothing failed, so there is no line to say.
+      expect(session.relayFallbackLine()).toBeUndefined();
       expect(session.dialled.some(isRelayDial)).toBe(false);
     });
   }, 60_000);
