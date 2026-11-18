@@ -12,7 +12,7 @@
  */
 
 import { Fingerprint } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { CredentialsPort } from '@ferretry/app';
 import type { PasskeysView } from '../../../contract/index.ts';
@@ -35,7 +35,15 @@ export interface FirstPasskeyOfferProps {
   readonly supported?: () => boolean;
   /** Test seam: the clock the minutes left are counted against. */
   readonly now?: () => number;
+  /**
+   * Told what the machine decided, once: `none` (nothing to offer: no window, a passkey held, no browser support, or a
+   * read that failed), `offered` (the button is showing) and later `added`. A host that moves on by itself (the
+   * daemon-less `/pair` page) waits for this so it never navigates away from a button the person could still press.
+   */
+  readonly onSettled?: (outcome: FirstPasskeyOutcome) => void;
 }
+
+export type FirstPasskeyOutcome = 'none' | 'offered' | 'added';
 
 type State =
   | { readonly kind: 'hidden' }
@@ -53,24 +61,37 @@ export function FirstPasskeyOffer({
   origin = () => window.location.origin,
   supported = webAuthnSupported,
   now = Date.now,
+  onSettled,
 }: FirstPasskeyOfferProps) {
   const [state, setState] = useState<State>({ kind: 'hidden' });
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // The latest listener, read when an answer arrives: a host passing a fresh closure each render must not restart the read.
+  const settled = useRef(onSettled);
+  settled.current = onSettled;
 
   // Read as a value, so the effect depends on the answer and not on the seam's identity.
   const canRun = supported();
   useEffect(() => {
     let current = true;
     setState({ kind: 'hidden' });
-    if (!canRun) return;
+    if (!canRun) {
+      settled.current?.('none');
+      return;
+    }
     void createClient(connection)
       .then(async client => ({ client, view: await fetchPasskeys(client) }))
       .then(({ client, view }) => {
-        if (current && firstWindowOpen(view)) setState({ kind: 'offered', client, view });
+        if (!current) return;
+        if (firstWindowOpen(view)) {
+          setState({ kind: 'offered', client, view });
+          settled.current?.('offered');
+        } else settled.current?.('none');
       })
       // A machine that cannot answer is an offer that stays quiet.
-      .catch(() => undefined);
+      .catch(() => {
+        if (current) settled.current?.('none');
+      });
     return () => {
       current = false;
     };
@@ -90,6 +111,7 @@ export function FirstPasskeyOffer({
     }
     setState({ kind: 'added' });
     setBusy(false);
+    settled.current?.('added');
   }, [credentials, origin, state, supported]);
 
   if (state.kind === 'hidden') return null;
