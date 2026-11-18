@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   ContextMenu,
   type ContextMenuItem,
@@ -473,6 +475,13 @@ describe('ContextMenu', () => {
     expect(menu.rows()[2]?.textContent).toBe('Migrate');
     expect(menu.rows()[0]?.hasAttribute('data-danger')).toBe(false);
     expect(menu.rows()[2]?.className).not.toContain('text-fg-soft');
+    // ...and it cannot lose to HOVER either: the hover wash (0,3,0) out-ranks `[data-danger]` (0,2,0), so the tone is carried by
+    // the two row-ink vars that the base, hover and one-highlight rules all read (the real cascade is the visual test's).
+    const sheet = readFileSync(join(import.meta.dir, '../../../src/ui/design-system.css'), 'utf8');
+    expect(sheet).toMatch(
+      /\.kt-menu-item\[data-danger\] \{\s*--menu-item-fg: var\(--err\);\s*--menu-item-hover-fg: var\(--err\);/u,
+    );
+    expect(sheet).toContain('color: var(--menu-item-hover-fg, var(--fg));');
     await menu.unmount();
   });
 

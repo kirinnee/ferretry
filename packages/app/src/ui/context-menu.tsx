@@ -438,7 +438,7 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
               className={cn(
                 'kt-menu-item text-ui',
                 touch && '[--menu-item-h:44px]',
-                (!touch || item.hint) && 'py-1',
+                (!touch || item.hint) && '[--menu-item-py:4px]',
                 // The ink is EXCLUSIVE, not layered. kteam wrote this as
                 // `text-fg-soft` plus `text-err` on a danger row, and which one
                 // wins is decided by the order Tailwind emits the two utilities,

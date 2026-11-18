@@ -178,3 +178,139 @@ for (const size of SIZES)
         }
       });
     });
+
+/**
+ * EVERY theme, light and dark (the list is the families' `data-theme` ids; a family without a light palette of its own wears
+ * the baseline's). The first pass only looked at Studio, and the families that restate their palette (Phosphor, Blueprint,
+ * Broadsheet, Wayfinding, Ledger, Ma) inherited Studio LIGHT's focus ring and edge: a 1.3:1 ring on their dark menus and a
+ * 2.7:1 edge on three light pages. Measured per theme: the edge against the page, row text on the menu, the keyboard ring
+ * against the menu AND against a checked row, and a danger row that keeps its red under hover and under the keyboard's ring.
+ */
+const FAMILIES = [
+  'studio',
+  'mission',
+  'neo',
+  'geist',
+  'contrast',
+  'phosphor',
+  'blueprint',
+  'broadsheet',
+  'wayfinding',
+  'ledger',
+  'ma',
+] as const;
+const THEMES = FAMILIES.flatMap(family => [`${family}-light`, `${family}-dark`] as const);
+
+const phoneless = { name: '1280', width: 1_280, height: 640, phone: false } as const;
+
+const openTheme = async (theme: string, query = '') => {
+  const context = await browser.newContext({
+    viewport: { width: phoneless.width, height: phoneless.height },
+    colorScheme: theme.endsWith('-dark') ? 'dark' : 'light',
+    deviceScaleFactor: 2,
+  });
+  const origin = server?.url.origin ?? '';
+  await context.route('**/*', async route =>
+    new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+  );
+  const tab = await context.newPage();
+  await tab.goto(`${origin}/?theme=${theme}${query}`);
+  return { tab, close: async () => await context.close() };
+};
+
+describe('the shared menu in every theme', () => {
+  for (const theme of THEMES)
+    it(`${theme}: >=3:1 edge, readable rows, a >=3:1 ring on the menu and on a checked row, a danger row that stays red`, async () => {
+      const { tab, close } = await openTheme(theme);
+      try {
+        await tab.waitForSelector('[role="menu"] [role="menuitem"]');
+        const page = await channels(tab, await colours(tab, 'body', 'background-color'));
+        const menu = await tab.evaluate(() => {
+          const style = getComputedStyle(document.querySelector('[role="menu"]') as HTMLElement);
+          return { edge: style.borderTopColor, bg: style.backgroundColor };
+        });
+        const surface = await channels(tab, menu.bg);
+        expect(
+          contrast(await channels(tab, menu.edge), page),
+          `${theme}: the edge against the page`,
+        ).toBeGreaterThanOrEqual(3);
+
+        const rename = tab.locator('[role="menuitem"]').nth(1);
+        expect(
+          contrast(await channels(tab, await rename.evaluate(node => getComputedStyle(node).color)), surface),
+          `${theme}: row text on the menu`,
+        ).toBeGreaterThanOrEqual(4.5);
+
+        // The keyboard ring, on the plain menu and then on a CHECKED row (the accent fill the ring sits on).
+        await tab.keyboard.press('ArrowDown');
+        await tab.keyboard.press('ArrowDown');
+        const ring = await tab.evaluate(() => {
+          const focused = document.activeElement as HTMLElement;
+          const style = getComputedStyle(focused);
+          return { colour: style.outlineColor, width: style.outlineWidth, line: style.outlineStyle };
+        });
+        expect(ring.line, `${theme}: a ring is drawn`).toBe('solid');
+        expect(Number.parseFloat(ring.width)).toBeGreaterThanOrEqual(2);
+        const ringColour = await channels(tab, ring.colour);
+        expect(contrast(ringColour, surface), `${theme}: the ring against the menu`).toBeGreaterThanOrEqual(3);
+        const checked = await tab.evaluate(() => {
+          const focused = document.activeElement as HTMLElement;
+          focused.setAttribute('aria-checked', 'true');
+          return getComputedStyle(focused).backgroundColor;
+        });
+        expect(
+          contrast(ringColour, await channels(tab, checked)),
+          `${theme}: the ring against a checked row`,
+        ).toBeGreaterThanOrEqual(3);
+        await tab.evaluate(() => document.activeElement?.removeAttribute('aria-checked'));
+
+        // A danger row keeps its red: at rest, hovered, and hovered while the ring is on another row.
+        const stop = tab.locator('[role="menuitem"]').nth(4);
+        const ink = (): Promise<string> => stop.evaluate(node => getComputedStyle(node).color);
+        const err = await channels(tab, await colours(tab, 'html', '--err'));
+        expect(await channels(tab, await ink()), `${theme}: danger at rest`).toEqual(err);
+        await stop.hover();
+        expect(await channels(tab, await ink()), `${theme}: danger hovered`).toEqual(err);
+        await tab.keyboard.press('ArrowUp');
+        await tab.keyboard.press('ArrowUp');
+        await stop.hover();
+        expect(await channels(tab, await ink()), `${theme}: danger hovered while the ring is on another row`).toEqual(
+          err,
+        );
+        if (shotsDir !== '' && (theme === 'phosphor-dark' || theme === 'ledger-dark'))
+          await tab.screenshot({ path: join(shotsDir, `1280-${theme}-menu-focus-danger-hover.png`) });
+      } finally {
+        await close();
+      }
+    });
+});
+
+describe('the picker option list keeps the row sizes the picker asked for', () => {
+  for (const theme of ['studio-light', 'studio-dark', 'phosphor-dark'])
+    it(`${theme}: 44px rows, top-aligned, in the full ink, a disabled row muted`, async () => {
+      const { tab, close } = await openTheme(theme, '&picker=1');
+      try {
+        await tab.locator('input[role="combobox"]').focus();
+        await tab.waitForSelector('[role="option"]');
+        const rows = await tab.evaluate(() =>
+          [...document.querySelectorAll('[role="option"]')].map(node => {
+            const style = getComputedStyle(node);
+            return { height: node.getBoundingClientRect().height, align: style.alignItems, ink: style.color };
+          }),
+        );
+        const fg = await channels(tab, await colours(tab, 'body', 'color'));
+        const muted = await channels(tab, await colours(tab, 'html', '--muted'));
+        for (const row of rows) {
+          expect(row.height, 'the picker asked for 44px rows').toBeGreaterThanOrEqual(44);
+          expect(row.align, 'a multi-line row keeps its label at the top').toBe('flex-start');
+        }
+        expect(await channels(tab, rows[1]?.ink ?? ''), 'an enabled row is in the full ink, not the soft one').toEqual(
+          fg,
+        );
+        expect(await channels(tab, rows[2]?.ink ?? ''), 'a disabled row is muted').toEqual(muted);
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `1280-${theme}-picker.png`) });
+      } finally {
+        await close();
+      }
+    });
+});

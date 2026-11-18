@@ -415,8 +415,9 @@ function PickerRow<Option extends PickerOption>({
       aria-disabled={enabled ? undefined : true}
       aria-selected={active}
       className={cn(
-        'kt-menu-item min-h-[44px] select-none items-start text-cell outline-none',
-        enabled ? 'cursor-pointer text-fg' : 'cursor-not-allowed text-muted',
+        // min height, top alignment and ink are the row's own vars (a utility would lose to `.kt-menu-item`)
+        'kt-menu-item select-none text-cell outline-none [--menu-item-align:flex-start] [--menu-item-h:44px]',
+        enabled ? 'cursor-pointer [--menu-item-fg:var(--fg)]' : 'cursor-not-allowed [--menu-item-fg:var(--muted)]',
       )}
       data-active={active ? 'true' : undefined}
       // Distinct from `aria-selected`, which ARIA reserves for the cursor in a

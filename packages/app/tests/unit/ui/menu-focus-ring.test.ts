@@ -36,4 +36,38 @@ describe('the shared menu row', () => {
     expect(menu).not.toContain('focus:outline-none');
     expect(src('ui/picker-combobox.tsx')).toContain('kt-popover');
   });
+
+  it('the danger ink rides the row-ink vars, so no state rule (hover, the one-highlight reset) can out-rank it', () => {
+    const danger = rule(/\n\.kt-menu-item\[data-danger\] \{[^}]*\}/u);
+    expect(danger).toContain('--menu-item-fg: var(--err);');
+    expect(danger).toContain('--menu-item-hover-fg: var(--err);');
+    // The hover rule (0,3,0) and the reset rule beat `[data-danger]` (0,2,0) on specificity, so neither may hard-code an ink.
+    const hover = rule(/\n\.kt-menu-item:hover:not\([^{]*\{[^}]*\}/u);
+    expect(hover).toContain('color: var(--menu-item-hover-fg, var(--fg));');
+    const reset = rule(/\n\.kt-menu-item:hover:not\(:focus-visible[^{]*\{[^}]*\}/u);
+    expect(reset).toContain('color: var(--menu-item-fg, var(--fg-soft));');
+    expect(css).not.toMatch(/\.kt-menu-item[^{]*:hover[^{]*\{[^}]*color: var\(--fg(-soft)?\);/u);
+  });
+
+  it('a row is sized by row vars: this file loads after Tailwind, so a utility on a row is dead', () => {
+    const row = rule(/\n\.kt-menu-item \{[^}]*\}/u);
+    for (const variable of ['--menu-item-align', '--menu-item-py', '--menu-item-fg', '--menu-item-h'])
+      expect(row).toContain(variable);
+    const dead = /\b(?:min-h-\[|items-start|text-fg\b|text-muted\b|py-1(?:\.5)?\b)/u;
+    for (const path of ['ui/context-menu.tsx', 'ui/picker-combobox.tsx']) {
+      const classes = src(path)
+        .split('\n')
+        .filter(line => line.includes('kt-menu-item'));
+      for (const line of classes) expect(line, `${path}: ${line.trim()}`).not.toMatch(dead);
+    }
+    const picker = src('ui/picker-combobox.tsx');
+    expect(picker).toContain('[--menu-item-h:44px]');
+    expect(picker).toContain('[--menu-item-align:flex-start]');
+  });
+
+  it('every compact family names its own focus ring and a >=3:1 control edge (the baseline is Studio LIGHT)', () => {
+    const block = themes.match(/\n:root\[data-theme\^='phosphor-'\],[^{]*\{[^}]*--border-strong:[^}]*\}/u)?.[0] ?? '';
+    expect(block).toContain('--focus-color: var(--accent);');
+    expect(block).toContain('--border-strong: color-mix(in srgb, var(--fg) 58%, var(--surface));');
+  });
 });
