@@ -111,3 +111,15 @@ test('only "Ran 0 tests" output reads as a run that executed nothing', () => {
   expect(ranNoTests('\n 0 pass\n 0 fail\nRan 0 tests across 1 file. [56.00ms]')).toBe(true);
   expect(ranNoTests(' 1 pass\n 0 fail\nRan 1 test across 1 file. [5.00ms]')).toBe(false);
 });
+
+test("a scripts test listed in config/static-tests.txt says Static's guards part, any other says Quick's scripts part", () => {
+  const root = fixture({
+    'scripts/gen/tests/whole-tree.test.ts': PASSING,
+    'scripts/validate/seams.test.ts': PASSING,
+    'config/static-tests.txt': '# comment\n\nscripts/gen/tests/whole-tree.test.ts\n',
+  });
+  const listed = planFor(root, 'scripts/gen/tests/whole-tree.test.ts');
+  expect(listed.kind === 'elsewhere' && listed.where).toContain('`guards` part');
+  const other = planFor(root, 'scripts/validate/seams.test.ts');
+  expect(other.kind === 'elsewhere' && other.where).toContain('`scripts` part');
+});

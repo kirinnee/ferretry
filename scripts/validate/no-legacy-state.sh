@@ -11,6 +11,12 @@ scan_files=()
 
 while IFS= read -r -d '' path; do
   [ -f "${path}" ] || continue
+  # A tool's scratch folder is not package code, and it changes while we scan: wrangler deletes its
+  # `.wrangler/tmp/*` bundles between `git ls-files` and `rg`, so rg failed with "No such file" and the
+  # guard reported "failed to scan". Untracked and not ignored, so --exclude-standard does not drop them.
+  case "${path}" in
+  .wrangler/* | */.wrangler/* | .turbo/* | */.turbo/* | .cache/* | */.cache/* | .vite/* | */.vite/*) continue ;;
+  esac
   is_allowlisted=0
   for allowed_path in "${documentation_allowlist[@]}"; do
     if [ "${path}" = "${allowed_path}" ]; then
