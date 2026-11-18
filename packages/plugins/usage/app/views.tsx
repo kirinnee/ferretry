@@ -67,7 +67,7 @@ export function QuotaPanel({ store, login }: { readonly store: DaemonUsageStore;
  * `composer.tools:composer-quota`: the quota of the account THIS ferret runs on, on the composer's context row. Today's
  * composer read it from the session itself: the usage the ferret's monitor stamped, else the feed row of `config.agent`.
  * Conversation's composer hands both as `account` (`ComposerToolsProps`; `subject` is the ferret id, which no feed row
- * is named after). Without an account, or when the feed does not name it, it says "usage unknown": the account nearest
+ * is named after). Without an account, or when the feed does not name it, it draws nothing (spoken: "usage unknown"): the account nearest
  * its limit is not that ferret's, so it is never drawn as the composer's own (unknown is not a confident number).
  */
 export function ComposerQuotaPanel({

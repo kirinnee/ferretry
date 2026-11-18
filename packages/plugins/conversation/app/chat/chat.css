@@ -1445,6 +1445,11 @@ button.fy-receipt {
   align-items: flex-end;
   flex-direction: row;
 }
+/* ONE CLEAN ROW HOLDS NO EMPTY PLACE: with the buttons in one row (the default) the idle interrupt slot is not kept, so
+   the text keeps the room beside Send instead of a 44px blank; the field gives that room back while a turn runs. */
+.fy-composer[data-composer-layout='phone'][data-composer-dock-layout='row'] .fy-composer-slot {
+  display: none;
+}
 .fy-composer-slot {
   display: block;
   flex: 0 0 auto;
@@ -1471,7 +1476,9 @@ button.fy-receipt {
 }
 /* The status line under the row: model, effort, context, quota and the key hint, small and quiet. */
 .fy-composer-actions {
+  align-items: center;
   color: var(--faint, var(--fy-muted));
+  display: flex;
   flex-wrap: wrap;
   font-size: 12px;
   gap: 4px 10px;
@@ -1489,8 +1496,8 @@ button.fy-receipt {
   align-items: center;
   display: inline-flex;
   flex: 0 0 auto;
-  font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   gap: 5px;
   white-space: nowrap;
 }
@@ -1940,6 +1947,54 @@ button.fy-receipt {
 .fy-composer[data-composer-layout='phone'] .fy-context-ring,
 .fy-composer[data-composer-layout='phone'] .fy-composer-quota {
   flex: 0 0 auto;
+}
+
+/* THE SLOT'S WRAPPERS DRAW NO BOX. `composer.tools` is drawn in two places — the row's controls and the status line's
+   readouts (composer-status-panels.ts) — and in both the panels are items of the line they sit on: the slot and
+   each panel wrapper are `display: contents`, so attach, the mic, the model chip and the quota never stack as blocks. */
+.fy-composer-row .fy-slot,
+.fy-composer-row .fy-panel,
+.fy-composer-actions .fy-slot,
+.fy-composer-actions .fy-panel {
+  display: contents;
+}
+/* THE MODEL CHIP IS A READOUT HERE, NOT A BUTTON-SHAPED BLOCK: text on the status line (no frame, no fill, the line's
+   own size), still a real button. Its touch target is taller than it looks — an invisible band above and below —
+   because a 44px chip would make the status line a second row of controls and eat the text box's room. */
+.fy-composer-actions .fy-runtime-chip.kt-btn {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  clip-path: none;
+  color: inherit;
+  font-size: 12px;
+  height: auto;
+  max-width: min(22rem, 100%);
+  min-height: 24px;
+  padding: 0 4px;
+  position: relative;
+}
+/* The status line has the room the row does not: the name shows on a phone too (the picker hides it below `sm` for a row). */
+.fy-composer-actions .fy-runtime-chip.kt-btn > span {
+  display: inline;
+}
+.fy-composer-actions .fy-runtime-chip.kt-btn::after {
+  content: '';
+  inset: -10px -4px;
+  position: absolute;
+}
+.fy-composer-actions .fy-runtime-chip.kt-btn:hover {
+  color: var(--fy-fg);
+}
+.fy-composer-actions .fy-runtime-chip.kt-btn:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+/* The phone's rule above gives every status button the 44px floor; the chip keeps its quiet height (its band is above). */
+@media (max-width: 700px) {
+  .fy-composer-actions .fy-runtime-chip.kt-btn {
+    min-height: 24px;
+  }
 }
 
 /* A RUN OF AGENT OUTPUT names the agent once (`agentRuns`): a continuation sits close under what it

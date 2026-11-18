@@ -43,6 +43,7 @@ import { uploadAttachment as uploadFerretAttachment } from './attachment-upload.
 import { formatAttachmentSize } from './attachments.ts';
 import { type ComposerApi, composerApi } from './composer-api.ts';
 import { addMenuActions, ComposerAddMenu } from './composer-add-menu.tsx';
+import { isStatusPanel } from './composer-status-panels.ts';
 import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
 import { ComposerAttachContext } from './composer-attach.tsx';
 import {
@@ -1415,20 +1416,17 @@ export function Composer({
     }),
     [applyDictation, draft, ferretId, fieldDisabled, readConversation],
   );
-  const tools = slotted ? (
+  const slotProps = account === undefined ? {} : { props: { account } satisfies ComposerToolsProps };
+  const placeTools = (include: (panel: { readonly plugin: string; readonly id: string }) => boolean) => (
     <ComposerDraftProvider binding={draftBinding}>
       <ComposerAttachContext.Provider value={attachButton}>
-        <PanelSlot
-          daemon={daemon.daemonId}
-          slot="composer.tools"
-          subject={ferretId}
-          {...(account === undefined ? {} : { props: { account } satisfies ComposerToolsProps })}
-        />
+        <PanelSlot daemon={daemon.daemonId} include={include} slot="composer.tools" subject={ferretId} {...slotProps} />
       </ComposerAttachContext.Provider>
     </ComposerDraftProvider>
-  ) : (
-    attachButton
   );
+  // ONE SLOT, TWO PLACES: controls in the row, readouts on the status line (composer-status-panels.ts).
+  const tools = slotted ? placeTools(panel => !isStatusPanel(panel)) : attachButton;
+  const statusTools = slotted ? placeTools(isStatusPanel) : null;
 
   return (
     <form
@@ -1674,6 +1672,7 @@ export function Composer({
             unmount, so an open chip keeps its state), leaving the transcript the room. */}
           <span className="fy-composer-status-chrome" data-composer-status-chrome="">
             {statusSlot}
+            {statusTools}
             {context === undefined ? null : (
               <ContextRing
                 context={context}

@@ -90,7 +90,7 @@ describe('MarkdownComposerSettings', () => {
     });
   });
 
-  it('offers the phone button layouts as radios, Stacked by default, and changes the live preference', () => {
+  it('offers the phone button layouts as radios, One row by default, and changes the live preference', () => {
     withBrowser(storage => {
       const renderer = render(surface());
       const layouts = () =>
@@ -99,21 +99,21 @@ describe('MarkdownComposerSettings', () => {
 
       expect(tree()).toContain('Button layout');
       expect(layouts().map(layout => [layout.props.value, layout.props.checked])).toEqual([
-        ['stacked', true],
-        ['row', false],
+        ['stacked', false],
+        ['row', true],
         ['auto', false],
       ]);
       expect(DOCK_LAYOUT_EXPLANATION).toContain('never move');
       expect(tree()).toContain(DOCK_LAYOUT_EXPLANATION);
 
-      run(() => layouts()[1]?.props.onChange());
-      expect(storage.getItem(COMPOSER_DOCK_LAYOUT_KEY)).toBe('row');
-      expect(layouts()[1]?.props.checked).toBe(true);
-      run(() => layouts()[2]?.props.onChange());
-      expect(storage.getItem(COMPOSER_DOCK_LAYOUT_KEY)).toBe('auto');
       run(() => layouts()[0]?.props.onChange());
       expect(storage.getItem(COMPOSER_DOCK_LAYOUT_KEY)).toBe('stacked');
       expect(layouts()[0]?.props.checked).toBe(true);
+      run(() => layouts()[2]?.props.onChange());
+      expect(storage.getItem(COMPOSER_DOCK_LAYOUT_KEY)).toBe('auto');
+      run(() => layouts()[1]?.props.onChange());
+      expect(storage.getItem(COMPOSER_DOCK_LAYOUT_KEY)).toBe('row');
+      expect(layouts()[1]?.props.checked).toBe(true);
       run(() => renderer.unmount());
     });
   });

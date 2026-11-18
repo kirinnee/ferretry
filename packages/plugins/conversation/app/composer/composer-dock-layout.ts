@@ -3,9 +3,10 @@
  *
  * Attach and the mic on one side of the box, Interrupt & send and Send on the other:
  *
- * - `stacked` — each side a column, always (the default: owner, 2026-11-02, !A237). Nothing moves on
- *   focus or as typing starts, and the field keeps its width for typing.
- * - `row` — each side a row, always. Nothing moves either; the box is one line while the text is.
+ * - `row` — each side a row, always (the default: owner, 2026-11-17 — one clean row of attach, mic, text and send, as v4
+ *   draws it; it replaced `stacked`). Nothing moves on focus or as typing starts; the box is one line while the text is.
+ * - `stacked` — each side a column, always (the default from 2026-11-02, !A237, until the row above replaced it): the
+ *   field keeps its width for typing. A device that chose it keeps it.
  * - `auto` — a row while the box is empty, stacked once there is a draft: the old switch, kept on purpose
  *   for whoever prefers it, jump and all.
  *
@@ -16,7 +17,7 @@ import { devicePreference, localKey } from '@ferretry/app';
 
 export const COMPOSER_DOCK_LAYOUT_KEY = localKey('conversation', 'composer-dock-layout');
 export type ComposerDockLayout = 'stacked' | 'row' | 'auto';
-export const COMPOSER_DOCK_LAYOUT_DEFAULT: ComposerDockLayout = 'stacked';
+export const COMPOSER_DOCK_LAYOUT_DEFAULT: ComposerDockLayout = 'row';
 
 const preference = devicePreference<ComposerDockLayout>(
   COMPOSER_DOCK_LAYOUT_KEY,

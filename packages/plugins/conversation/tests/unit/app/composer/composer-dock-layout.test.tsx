@@ -28,13 +28,13 @@ class MemoryStorage implements DraftStorage {
 afterEach(() => writeComposerDockLayout(COMPOSER_DOCK_LAYOUT_DEFAULT));
 
 describe('the phone composer’s button layout (Settings › Composer › Button layout)', () => {
-  test('is Stacked unless this device chose One row or Auto, and nothing else is read as a choice', () => {
-    expect(COMPOSER_DOCK_LAYOUT_DEFAULT).toBe('stacked');
+  test('is One row unless this device chose Stacked or Auto, and nothing else is read as a choice', () => {
+    expect(COMPOSER_DOCK_LAYOUT_DEFAULT).toBe('row');
     expect(parseComposerDockLayout('row')).toBe('row');
     expect(parseComposerDockLayout('auto')).toBe('auto');
     expect(parseComposerDockLayout('stacked')).toBe('stacked');
-    expect(parseComposerDockLayout('column')).toBe('stacked');
-    expect(parseComposerDockLayout(null)).toBe('stacked');
+    expect(parseComposerDockLayout('column')).toBe('row');
+    expect(parseComposerDockLayout(null)).toBe('row');
   });
 
   test('is kept on this device under its own key', () => {
@@ -57,10 +57,10 @@ describe('the phone composer’s button layout (Settings › Composer › Button
       view.root.findByType('form').props['data-composer-dock-layout'] as string | undefined;
     const phone = render(composer(true));
     const desktop = render(composer(false));
-    expect(layoutOf(phone)).toBe('stacked');
-    expect(layoutOf(desktop)).toBeUndefined();
-    run(() => writeComposerDockLayout('row'));
     expect(layoutOf(phone)).toBe('row');
+    expect(layoutOf(desktop)).toBeUndefined();
+    run(() => writeComposerDockLayout('stacked'));
+    expect(layoutOf(phone)).toBe('stacked');
     expect(layoutOf(desktop)).toBeUndefined();
     run(() => phone.unmount());
     run(() => desktop.unmount());

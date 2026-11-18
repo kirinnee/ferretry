@@ -19,12 +19,15 @@ describe('the composer quota', () => {
       'Account usage: 5-hour window 12% used; weekly window unknown.',
     );
 
-    // Nothing known: said in words, with no window label and no dash.
+    // Nothing known: NOTHING is drawn (the words `usage unknown` are never shown raw on the status line); the spoken
+    // form still says why. No window label and no dash either.
     for (const quota of [undefined, null, {}, { fiveHourPercent: Number.NaN }]) {
       const unknown = render(<ComposerQuota quota={quota} />);
       const token = unknown.root.findByProps({ className: 'fy-composer-quota' });
       expect(token.props['data-quota']).toBe('unknown');
-      expect(findText(token, 'usage unknown')).toHaveLength(1);
+      expect(findText(token, 'usage unknown')).toHaveLength(0);
+      expect(token.findAll(node => node.props['aria-hidden'] === 'true')).toHaveLength(0);
+      expect(token.findByProps({ className: 'sr-only' }).children.join('')).toContain('Account usage unknown');
       expect(JSON.stringify(unknown.toJSON())).not.toContain('—');
       expect(JSON.stringify(unknown.toJSON())).not.toContain('5h');
     }

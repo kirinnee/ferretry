@@ -65,3 +65,16 @@ export const launchedModel = (config: RuntimeSessionView['config']): string | un
   });
   return flagged ?? present(config.model) ?? present(config.modelHint);
 };
+
+/**
+ * What the composer's status line says about the ferret's runtime: the model in force (else the one it was launched on,
+ * else a plain word), then its thinking level and — only when it is on — `fast`, joined by ` · `. The level and speed are
+ * the harness's own report when it gave one, else what the ferret was launched with; one the ferret has not got is left
+ * out, never drawn as a guess.
+ */
+export const runtimeReadout = (view: RuntimeSessionView): string => {
+  const model = present(view.state.observedModel) ?? launchedModel(view.config) ?? 'Model';
+  const effort = present(view.state.observedReasoningEffort) ?? present(view.config.launchReasoningEffort);
+  const fast = view.state.observedFast ?? view.config.launchFast;
+  return [model, effort, fast === true ? 'fast' : undefined].filter(part => part !== undefined).join(' · ');
+};
