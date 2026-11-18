@@ -226,6 +226,70 @@ describe('DaemonBrowserLoginStore', () => {
     should(reads).deepEqual([undefined, true, true]);
   });
 
+  it('keeps the window the person confirmed through the next quiet refusal (no step-up window on the machine), until its own expiry', async () => {
+    const refused = Object.assign(new Error('confirm it is you'), { status: 403, code: 'grant_step_up_required' });
+    const scheduler = new ManualScheduler();
+    const clock = { now: Date.parse('2026-07-31T00:05:00.000Z') };
+    const port: BrowserLoginPort = {
+      // stepUpWindowMinutes = 0: only the person's own press is answered, every quiet read is refused.
+      status: options => (options?.explicit === true ? Promise.resolve(openOn('secret-a')) : Promise.reject(refused)),
+      act: () => Promise.resolve(closed),
+    };
+    const store = new DaemonBrowserLoginStore(only(port), { schedule: scheduler.schedule, now: () => clock.now });
+    store.subscribe(daemonA, () => undefined);
+    await store.refresh(daemonA);
+    should(store.getSnapshot(daemonA.daemonId)).deepEqual({ state: 'step-up-required' });
+
+    should(passwordOf(await store.confirm(daemonA))).equal('secret-a');
+    should(scheduler.live.at(-1)?.delayMs).equal(BROWSER_LOGIN_OPEN_POLL_MS);
+
+    // The next quiet poll (~2 s later) is refused again: the open window the daemon showed must not flip back.
+    scheduler.live.at(-1)?.run();
+    await store.refresh(daemonA);
+    should(passwordOf(store.getSnapshot(daemonA.daemonId))).equal('secret-a');
+    should(scheduler.live.at(-1)?.delayMs).equal(BROWSER_LOGIN_OPEN_POLL_MS);
+
+    // Its own expiry drops it: nothing is drawn for a window the daemon has not shown for this moment.
+    clock.now = Date.parse('2026-07-31T00:10:00.000Z');
+    await store.refresh(daemonA);
+    should(store.getSnapshot(daemonA.daemonId)).deepEqual({ state: 'step-up-required' });
+    // And a dropped window is not resurrected by a later refusal.
+    await store.refresh(daemonA);
+    should(store.getSnapshot(daemonA.daemonId)).deepEqual({ state: 'step-up-required' });
+  });
+
+  it('never holds a window the person did not confirm, and any other answer or action replaces a confirmed one', async () => {
+    const refused = Object.assign(new Error('confirm it is you'), { status: 403, code: 'grant_step_up_required' });
+    const answers: Record<string, () => Promise<unknown>> = {};
+    const port: BrowserLoginPort = {
+      status: options => (options?.explicit === true ? answers.explicit!() : answers.quiet!()),
+      act: () => Promise.resolve(closed),
+    };
+    const store = new DaemonBrowserLoginStore(only(port), { now: () => Date.parse('2026-07-31T00:05:00.000Z') });
+
+    // A window a quiet read returned (never the person's confirm) is shown, but a later refusal does not keep it.
+    answers.quiet = () => Promise.resolve(openOn('quiet'));
+    should(passwordOf(await store.refresh(daemonA))).equal('quiet');
+    answers.quiet = () => Promise.reject(refused);
+    should(await store.refresh(daemonA)).deepEqual({ state: 'step-up-required' });
+
+    // A confirmed window is replaced by a quiet answer that says closed.
+    answers.explicit = () => Promise.resolve(openOn('secret-a'));
+    should(passwordOf(await store.confirm(daemonA))).equal('secret-a');
+    answers.quiet = () => Promise.resolve(closed);
+    should(await store.refresh(daemonA)).deepEqual(closed);
+    answers.quiet = () => Promise.reject(refused);
+    should(await store.refresh(daemonA)).deepEqual({ state: 'step-up-required' });
+
+    // A confirmed window is dropped by the person's next action: the read-back after it must earn its own yes.
+    should(passwordOf(await store.confirm(daemonA))).equal('secret-a');
+    should(await store.act(daemonA, { action: 'start' })).deepEqual({ state: 'step-up-required' });
+    // A refused confirm shows nothing, even over a held window.
+    should(passwordOf(await store.confirm(daemonA))).equal('secret-a');
+    answers.explicit = () => Promise.reject(refused);
+    should(await store.confirm(daemonA)).deepEqual({ state: 'step-up-required' });
+  });
+
   it('polls a refused read like a closed window, not like something happening', async () => {
     const refused = Object.assign(new Error('x'), { status: 403, code: 'grant_step_up_required' });
     const scheduler = new ManualScheduler();
