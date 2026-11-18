@@ -10,6 +10,7 @@ import {
   passkeyLabel,
   passkeyNudgeDismissed,
   passkeyWindowCommand,
+  registrationMinutesLeft,
   confirmExistingSentence,
   registrationClosedSentence,
   registrationClosesSentence,
@@ -34,6 +35,22 @@ const throwing: NudgeStorage = {
   },
 };
 
+describe('how long the first-passkey window has left (U-P)', () => {
+  const now = Date.parse('2026-11-17T10:00:00.000Z');
+
+  it('should round up to whole minutes, and say less than a minute under one', () => {
+    should(registrationMinutesLeft('2026-11-17T10:07:00.000Z', now)).equal('7 minutes left');
+    should(registrationMinutesLeft('2026-11-17T10:06:01.000Z', now)).equal('7 minutes left');
+    should(registrationMinutesLeft('2026-11-17T10:00:30.000Z', now)).equal('less than a minute left');
+  });
+
+  it('should say nothing for no end, an unreadable end, or one that has passed', () => {
+    should(registrationMinutesLeft(undefined, now)).be.null();
+    should(registrationMinutesLeft('soon', now)).be.null();
+    should(registrationMinutesLeft('2026-11-17T09:59:59.000Z', now)).be.null();
+  });
+});
+
 describe('the command the owner runs at the machine (U-P)', () => {
   const id = 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa';
 
@@ -43,6 +60,16 @@ describe('the command the owner runs at the machine (U-P)', () => {
     should(passkeyWindowCommand({ name: '$(reboot); `id` && x', id })).equal(
       "fy passkey window '$(reboot); `id` && x'",
     );
+  });
+
+  it('should say the client program the machine runs, and only fy when it named none or named something unsafe', () => {
+    should(passkeyWindowCommand({ name: 'Liftoff Browser', id, clientName: 'fy5' })).equal(
+      "fy5 passkey window 'Liftoff Browser'",
+    );
+    should(passkeyWindowCommand({ id, clientName: 'fy5' })).equal(`fy5 passkey window ${id}`);
+    should(passkeyWindowCommand({ name: 'Phone', id })).equal("fy passkey window 'Phone'");
+    should(passkeyWindowCommand({ name: 'Phone', id, clientName: 'fy; reboot' })).equal("fy passkey window 'Phone'");
+    should(passkeyWindowCommand({ name: 'Phone', id, clientName: '-x' })).equal("fy passkey window 'Phone'");
   });
 
   it('should print the id instead of a name that could change what the shell reads or what the owner sees', () => {

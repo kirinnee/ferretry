@@ -2306,6 +2306,23 @@ describe('U-P: a freshly paired FIRST device adds its passkey, and nobody else c
     should(audited).eql([]);
   });
 
+  it('UP-2b should tell the device which client program this machine runs, so the printed command reaches THIS daemon', async () => {
+    // Arrange — a preview machine whose client is `fy5`, and an older one that names none
+    const preview = fixture({ nowMs: PAIRED_AT_MS + DAY, clientName: 'fy5' });
+    const older = fixture({ nowMs: PAIRED_AT_MS + DAY });
+
+    // Act
+    const named = await preview.service.view(remote());
+    const unnamed = await older.service.view(remote());
+
+    // Assert
+    should(named).eql({
+      ok: true,
+      value: { passkeys: [], deviceName: 'Phone', clientName: 'fy5', registration: 'closed' },
+    });
+    should(unnamed.ok && unnamed.value.clientName).be.undefined();
+  });
+
   it('UP-3 should refuse a caller that is not a paired device, whether or not it is on the host, and open nothing for it', async () => {
     // Arrange
     const { service, store, audited } = fixture({ nowMs: PAIRED_AT_MS + DAY });

@@ -78,6 +78,8 @@ export interface StepUpServiceDeps {
    * manager.
    */
   readonly machineName: string;
+  /** The name of this machine's client program (`binaries.client`), told to a device so the command it prints is the right one. */
+  readonly clientName?: string;
   /**
    * The machine's security settings in force (`docs/design/zero-trust.md` B6), read at every question.
    * Absent means nobody is asked to unlock on opening and no key is ever due for rotation.
@@ -400,6 +402,7 @@ export class StepUpService {
       value: {
         passkeys: passkeys.map(passkeyView),
         ...(record === undefined ? {} : { deviceName: record.name }),
+        ...(this.deps.clientName === undefined ? {} : { clientName: this.deps.clientName }),
         registration: registration.kind,
         ...(registration.closesAtMs === undefined ? {} : { registrationClosesAt: instant(registration.closesAtMs) }),
         ...(stepUpUntil === undefined ? {} : { stepUpUntil: instant(stepUpUntil) }),

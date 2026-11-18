@@ -50,6 +50,7 @@ const mountNudge = async (
   create: () => Promise<StepUpClient>,
   storage: NudgeStorage | undefined,
   opened: string[] = [],
+  now?: () => number,
 ): Promise<ReactTestRenderer> => {
   let renderer: ReactTestRenderer | undefined;
   await runAsync(async () => {
@@ -58,6 +59,7 @@ const mountNudge = async (
         connection={connection}
         createClient={create}
         storage={() => storage}
+        {...(now === undefined ? {} : { now })}
         onOpenSecurity={() => opened.push('security')}
       />,
     );
@@ -80,6 +82,22 @@ describe('PasskeyNudge', () => {
     should(marked(nudge, 'data-passkey-nudge')).have.length(1);
     should(calls).eql(['/v1/passkeys']);
     run(() => nudge.unmount());
+  });
+
+  it('says how many minutes the window has left, rounded up, and nothing of the kind when the machine named no end', async () => {
+    // Arrange
+    const now = () => Date.parse('2026-11-17T10:00:00.000Z');
+    const closing = view({ registrationClosesAt: '2026-11-17T10:06:01.000Z' as Instant });
+
+    // Act
+    const timed = await mountNudge(answering(closing), memory(), [], now);
+    const untimed = await mountNudge(answering(view()), memory(), [], now);
+
+    // Assert
+    should(JSON.stringify(timed.toJSON())).containEql('the window to add one has 7 minutes left');
+    should(JSON.stringify(untimed.toJSON())).not.containEql('minutes left');
+    run(() => timed.unmount());
+    run(() => untimed.unmount());
   });
 
   it('points at Settings → Security and opens it', async () => {

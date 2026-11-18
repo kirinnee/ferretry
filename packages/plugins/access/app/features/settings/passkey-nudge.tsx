@@ -17,6 +17,7 @@ import {
   dismissPasskeyNudge,
   type NudgeStorage,
   passkeyNudgeDismissed,
+  registrationMinutesLeft,
 } from '../../lib/passkey-panel.ts';
 import { fetchPasskeys } from '../../lib/step-up-client.ts';
 import { type DaemonConnection, useDaemonClient } from '../../shell-grants.ts';
@@ -28,6 +29,8 @@ export interface PasskeyNudgeProps {
   readonly onOpenSecurity: () => void;
   readonly createClient?: PasskeyClientFactory;
   readonly storage?: () => NudgeStorage | undefined;
+  /** Test seam: the clock the minutes left are counted against. */
+  readonly now?: () => number;
 }
 
 export function PasskeyNudge({
@@ -35,22 +38,28 @@ export function PasskeyNudge({
   onOpenSecurity,
   createClient: injectedClient,
   storage = browserNudgeStorage,
+  now = Date.now,
 }: PasskeyNudgeProps) {
   const routedClient = useDaemonClient();
   const createClient = injectedClient ?? routedClient;
   const [dismissed, setDismissed] = useState(() => passkeyNudgeDismissed(storage(), connection.daemonId));
   const [wanted, setWanted] = useState(false);
+  // When the open window closes, as the machine said it; the minutes left are counted when the line is drawn.
+  const [closesAt, setClosesAt] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     let current = true;
     setWanted(false);
+    setClosesAt(undefined);
     const already = passkeyNudgeDismissed(storage(), connection.daemonId);
     setDismissed(already);
     if (already) return;
     void createClient(connection)
       .then(async client => await fetchPasskeys(client))
       .then(view => {
-        if (current) setWanted(view.passkeys.length === 0 && view.registration !== 'closed');
+        if (!current) return;
+        setWanted(view.passkeys.length === 0 && view.registration !== 'closed');
+        setClosesAt(view.registration === 'closed' ? undefined : view.registrationClosesAt);
       })
       // A machine that cannot answer, or answers something else, is a nudge that stays quiet.
       .catch(() => undefined);
@@ -60,6 +69,7 @@ export function PasskeyNudge({
   }, [connection, createClient, storage]);
 
   if (!wanted || dismissed) return null;
+  const left = registrationMinutesLeft(closesAt, now());
   return (
     <div
       role="status"
@@ -68,7 +78,7 @@ export function PasskeyNudge({
     >
       <Fingerprint size={16} className="shrink-0 text-accent" aria-hidden="true" />
       <p className="m-0 min-w-0 flex-1 text-cell leading-base text-fg">
-        This device has no passkey for this machine yet.{' '}
+        This device has no passkey for this machine yet{left === null ? '' : ` — the window to add one has ${left}`}.{' '}
         <button
           type="button"
           data-passkey-nudge-open=""

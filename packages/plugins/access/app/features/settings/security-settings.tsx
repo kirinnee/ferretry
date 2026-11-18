@@ -64,6 +64,11 @@ interface SecurityCardProps {
 /** The panel's content for a loaded list. Pure over its props so every state is one render. */
 function SecurityCard({ view, supported, origin, machine, deviceId, busy, failure, onAdd }: SecurityCardProps) {
   const headingId = useId();
+  const windowCommand = passkeyWindowCommand({
+    ...(view.deviceName === undefined ? {} : { name: view.deviceName }),
+    id: deviceId,
+    ...(view.clientName === undefined ? {} : { clientName: view.clientName }),
+  });
   const canAdd = supported && view.registration !== 'closed';
   const closes =
     view.registration === 'first-window' || view.registration === 'reopened'
@@ -123,13 +128,11 @@ function SecurityCard({ view, supported, origin, machine, deviceId, busy, failur
           {supported && view.passkeys.length === 0 ? (
             <>
               <p className="m-0 text-cell leading-base text-muted">{NO_WINDOW_SENTENCE}</p>
-              <OwnerCommand command={passkeyWindowCommand({ name: view.deviceName, id: deviceId })} />
+              <OwnerCommand command={windowCommand} />
             </>
           ) : (
             <p className="m-0 text-cell leading-base text-muted">
-              {supported
-                ? registrationClosedSentence(true, passkeyWindowCommand({ name: view.deviceName, id: deviceId }))
-                : unsupportedSentence(origin)}
+              {supported ? registrationClosedSentence(true, windowCommand) : unsupportedSentence(origin)}
             </p>
           )}
         </div>

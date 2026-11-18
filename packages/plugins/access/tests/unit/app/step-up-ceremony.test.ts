@@ -398,6 +398,22 @@ describe('running the presence ceremony', () => {
     should(await offer(held, 'confirm-existing', 'Liftoff Browser')).be.undefined();
   });
 
+  it('U-P should print the client program the machine says it runs (fy5 on a preview), never a bare fy', async () => {
+    const offer = async (clientName?: string) =>
+      await ownerCommandOffer(async () => ({
+        request: async <T>(_path: string, schema: z.ZodType<T>): Promise<T> =>
+          schema.parse({
+            passkeys: [],
+            registration: 'closed',
+            deviceName: 'Liftoff Browser',
+            ...(clientName === undefined ? {} : { clientName }),
+          }),
+      }))(daemon);
+
+    should(await offer('fy5')).equal("fy5 passkey window 'Liftoff Browser'");
+    should(await offer()).equal("fy passkey window 'Liftoff Browser'");
+  });
+
   it('U-P should answer a closed window with the command already on screen, and keep the old sentence when none is', () => {
     const describe = describeStepUpFailure(ORIGIN);
     const closed = new FyHttpError('closed', 403, 'step_up_registration_closed');

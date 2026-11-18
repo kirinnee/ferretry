@@ -32,6 +32,9 @@ export const unsupportedSentence = (origin: string): string =>
 export const confirmExistingSentence = (machine: string): string =>
   `Adding a passkey for ${machine} asks you to confirm with a passkey this device already holds first.`;
 
+/** One shell-safe word: the only shape of client name this screen will paste into a command. */
+const SAFE_CLIENT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+
 const PASSKEY_WINDOW_PLACEHOLDER = 'fy passkey window <this device>';
 
 /**
@@ -39,15 +42,23 @@ const PASSKEY_WINDOW_PLACEHOLDER = 'fy passkey window <this device>';
  *
  * A device's name is text the DEVICE chose, and this string is made to be pasted into a shell, so the name is
  * always one single-quoted word (a `'` becomes `'\''`), and a name with a control character, a newline or a leading
- * `-` (which `fy` would read as an option) is not printed at all: the device's id, which is a fixed-shape token,
- * stands in. `fy` accepts either.
+ * `-` (which the client would read as an option) is not printed at all: the device's id, which is a fixed-shape token,
+ * stands in. The client accepts either.
+ *
+ * The program is the one THIS machine says it runs (`clientName`: `fy5` on a preview): a bare `fy` would reach whatever
+ * other daemon the owner's `fy` points at. `fy` is said only by a machine that named none (an older one).
  */
-export function passkeyWindowCommand(device: { readonly name?: string; readonly id: string }): string {
+export function passkeyWindowCommand(device: {
+  readonly name?: string;
+  readonly id: string;
+  readonly clientName?: string;
+}): string {
   const name = device.name?.trim();
   const printable =
     name !== undefined && name !== '' && !name.startsWith('-') && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(name);
   const who = printable ? `'${name.replaceAll("'", "'\\''")}'` : device.id;
-  return `fy passkey window ${who}`;
+  const client = device.clientName !== undefined && SAFE_CLIENT_NAME.test(device.clientName) ? device.clientName : 'fy';
+  return `${client} passkey window ${who}`;
 }
 
 /** Why no passkey can be added right now, per the registration rule; `command` is the exact line for the owner when known. */
@@ -76,6 +87,20 @@ export function registrationClosesSentence(closesAt: string | undefined): string
   const closes = new Date(closesAt);
   if (Number.isNaN(closes.getTime())) return null;
   return `You can add a passkey until ${closes.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}.`;
+}
+
+/**
+ * How long an open registration window has left, as a short phrase ("7 minutes left"), or `null` when the machine named
+ * no end, the end is not a time, or it has passed. Rounded UP: a window with 61 s left says 2 minutes, never a
+ * false "closed", and under a minute says so.
+ */
+export function registrationMinutesLeft(closesAt: string | undefined, nowMs: number): string | null {
+  if (closesAt === undefined) return null;
+  const closes = new Date(closesAt).getTime();
+  if (Number.isNaN(closes) || closes <= nowMs) return null;
+  const minutes = Math.ceil((closes - nowMs) / 60_000);
+  if (minutes <= 1) return 'less than a minute left';
+  return `${minutes} minutes left`;
 }
 
 const REFUSAL_SENTENCES: Readonly<Record<StepUpRefusal, (origin: string) => string>> = {

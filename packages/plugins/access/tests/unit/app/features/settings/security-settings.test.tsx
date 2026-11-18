@@ -244,6 +244,18 @@ describe('SecuritySurface', () => {
     run(() => surface.unmount());
   });
 
+  it("prints the machine's own client program, so a preview's command is fy5 and not fy", async () => {
+    // Arrange / Act
+    const surface = await mountSurface(
+      machine([view({ registration: 'closed', deviceName: 'Phone', clientName: 'fy5' })]),
+    );
+
+    // Assert
+    expect(text(surface)).toContain("fy5 passkey window 'Phone'");
+    expect(text(surface)).not.toContain("fy passkey window 'Phone'");
+    run(() => surface.unmount());
+  });
+
   it('says when a reopened window closes, and still offers the button', async () => {
     // Arrange / Act
     const surface = await mountSurface(

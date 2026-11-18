@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'bun:test';
 import { STEP_UP_ACTS } from '@ferretry/core-gate/contract';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { z } from 'zod';
 import {
   FIRST_PASSKEY_TITLE,
   STEP_UP_BOUND_SCOPE_NOTE,
@@ -15,6 +16,7 @@ import {
   UNLOCK_COPY,
 } from '../../../app/features/step-up/step-up-dialog.tsx';
 import { type DaemonConnection, daemonConnection } from '../../../app/shell-grants.ts';
+import { ownerCommandOffer } from '../../../app/lib/step-up-ceremony.ts';
 import { StepUpGate, type StepUpGateDependencies } from '../../../app/lib/step-up-gate.ts';
 import { interact, type Mounted, mount, must } from '../../support/app/dom.ts';
 
@@ -356,6 +358,24 @@ describe('the unlock prompt for a device with no passkey and no window (U-P)', (
       expect(dialog.querySelector('button[aria-label="Copy the command"]')).not.toBeNull();
       expect(confirmButton(mounted.container).textContent).toContain('Add a passkey');
       expect(dialog.textContent).not.toContain('<this device>');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it("P-U1b should print the machine's own client program: a daemon whose client is fy5 gets fy5 passkey window <name>", async () => {
+    const offer = ownerCommandOffer(async () => ({
+      request: async <T,>(_path: string, schema: z.ZodType<T>): Promise<T> =>
+        schema.parse({ passkeys: [], registration: 'closed', deviceName: 'Liftoff Browser', clientName: 'fy5' }),
+    }));
+    const gate = gateWith(async () => await offer(studio));
+    const mounted = await mountUnlock(gate);
+    try {
+      await interact(() => void gate.require(studio));
+      await interact(async () => await Promise.resolve());
+
+      const command = must(mounted.container.querySelector('[data-passkey-owner-command] code'), 'the command');
+      expect(command.textContent).toBe("fy5 passkey window 'Liftoff Browser'");
     } finally {
       await mounted.unmount();
     }

@@ -231,6 +231,7 @@ export class AccessRuntime {
       allowedOrigins: () => host.allowedOrigins(),
       relyingPartyName: 'Ferretry',
       machineName: state.daemonName,
+      clientName,
       announce: async notice => await push.notify({ payload: notice }),
       settings: () => this.settings(),
       unlocks: this.#unlockWrites(new StateUnlockLedger(kernel.state, state.daemonId)),

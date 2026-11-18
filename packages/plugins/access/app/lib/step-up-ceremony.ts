@@ -87,7 +87,11 @@ export const ownerCommandOffer =
   async (daemon: DaemonConnection): Promise<string | undefined> => {
     const view = await fetchPasskeys(await client(daemon));
     if (view.passkeys.length > 0 || view.registration !== 'closed') return undefined;
-    return passkeyWindowCommand({ name: view.deviceName, id: daemon.deviceId });
+    return passkeyWindowCommand({
+      ...(view.deviceName === undefined ? {} : { name: view.deviceName }),
+      id: daemon.deviceId,
+      ...(view.clientName === undefined ? {} : { clientName: view.clientName }),
+    });
   };
 
 /**
