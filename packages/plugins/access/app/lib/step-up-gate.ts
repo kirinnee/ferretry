@@ -75,11 +75,11 @@ export interface StepUpPrompt {
 }
 
 /**
- * Who started the request that needs a passkey: a person pressing something (`explicit`), or a page
- * reading in the background (`background`). Only the first may raise a prompt for a machine that is not
- * on screen.
+ * Who started the request that needs a passkey: a person pressing something (`explicit`), a page reading in
+ * the background (`background`), or a read nobody caused (`unasked`, A555 r7). Only the first may raise a
+ * prompt for a machine that is not on screen; the last never raises one, and waits for a press to.
  */
-export type PromptOrigin = 'explicit' | 'background';
+export type PromptOrigin = 'explicit' | 'background' | 'unasked';
 
 export interface StepUpGateDependencies {
   /** Runs the whole ceremony for one machine: options, the passkey sheet, and the daemon's verdict. */
@@ -101,6 +101,13 @@ export interface StepUpGateDependencies {
   readonly firstPasskey?: (daemon: DaemonConnection) => Promise<boolean>;
   /** The owner's command when this device cannot add a passkey by itself, else nothing. Read once, like {@link firstPasskey}. */
   readonly ownerCommand?: (daemon: DaemonConnection) => Promise<string | undefined>;
+  /**
+   * Whether a screen is offering this machine's first passkey in place right now (`inline-passkey-offer.ts`): then
+   * nothing a person did not press raises this gate's prompt for it, until {@link StepUpGate.recheck} says it let go.
+   */
+  readonly held?: (daemonId: DaemonId) => boolean;
+  /** How long a failed read of this device's passkeys waits before it is tried again (tests shorten it). */
+  readonly retryMs?: number;
 }
 
 interface Waiting {
@@ -116,6 +123,8 @@ interface Waiting {
   words: StepUpWords | undefined;
   /** A person started at least one of these requests, so it may ask from off screen. */
   explicit: boolean;
+  /** A page read at least one of them (`background`), so it may ask once its machine is on screen; `unasked` never asks. */
+  background: boolean;
 }
 
 const NOTHING_WAITING: readonly DaemonId[] = Object.freeze([]);
@@ -175,6 +184,7 @@ export class StepUpGate {
   ): Promise<boolean> {
     return new Promise(resolve => {
       const explicit = origin === 'explicit';
+      const background = origin === 'background';
       if (explicit) this.#dismissed.delete(daemon.daemonId);
       else if (this.#dismissed.has(daemon.daemonId)) {
         resolve(false);
@@ -184,6 +194,7 @@ export class StepUpGate {
       if (waiting !== undefined) {
         waiting.resolvers.push(resolve);
         waiting.explicit ||= explicit;
+        waiting.background ||= background;
         waiting.words ??= words;
         const covered = this.#boundness(waiting);
         if (actId === undefined) waiting.unnamed = true;
@@ -206,6 +217,7 @@ export class StepUpGate {
         unnamed: actId === undefined,
         words,
         explicit,
+        background,
       };
       this.#waiting.set(daemon.daemonId, entry);
       if (this.#prompt === null && this.#mayShow(entry)) this.#show(entry);
@@ -222,6 +234,17 @@ export class StepUpGate {
     if (daemonId === this.#focus) return;
     this.#focus = daemonId;
     if (daemonId !== null) this.#dismissed.delete(daemonId);
+    const prompt = this.#prompt;
+    const shown = prompt === null ? undefined : this.#waiting.get(prompt.daemon.daemonId);
+    if (prompt !== null && !prompt.busy && shown !== undefined && !this.#mayShow(shown)) this.#prompt = null;
+    if (this.#prompt === null) this.#showNext();
+  }
+
+  /**
+   * What may show changed outside the gate (a screen held or let go of a machine): a prompt nobody pressed for that may
+   * no longer show goes back to waiting, unless the person is already answering it, and the next one that may, shows.
+   */
+  recheck(): void {
     const prompt = this.#prompt;
     const shown = prompt === null ? undefined : this.#waiting.get(prompt.daemon.daemonId);
     if (prompt !== null && !prompt.busy && shown !== undefined && !this.#mayShow(shown)) this.#prompt = null;
@@ -272,7 +295,13 @@ export class StepUpGate {
   }
 
   #mayShow(waiting: Waiting): boolean {
-    return waiting.explicit || waiting.daemon.daemonId === this.#focus;
+    if (waiting.explicit) return true;
+    // A read nobody caused (`unasked`) waits silently: only a person's press, or a page read of its own, shows it.
+    return (
+      waiting.background &&
+      waiting.daemon.daemonId === this.#focus &&
+      this.deps.held?.(waiting.daemon.daemonId) !== true
+    );
   }
 
   #settle(daemonId: DaemonId, stepped: boolean): void {
@@ -303,18 +332,36 @@ export class StepUpGate {
         scope => this.#adopt(waiting, { scope }),
         () => undefined,
       );
+    // A device with no passkey must read "Add a passkey", never "Unlock" (A555 r7, kasen (c)): a read of its passkeys
+    // that failed (the machine a moment out of reach) is tried again while this prompt is the one on screen.
     const first = this.deps.firstPasskey;
     if (first !== undefined)
-      void first(waiting.daemon).then(
-        firstPasskey => this.#adopt(waiting, { firstPasskey }),
-        () => undefined,
+      void this.#whileShown(waiting, () => first(waiting.daemon)).then(firstPasskey =>
+        firstPasskey === undefined ? undefined : this.#adopt(waiting, { firstPasskey }),
       );
     const owner = this.deps.ownerCommand;
     if (owner !== undefined)
-      void owner(waiting.daemon).then(
-        ownerCommand => (ownerCommand === undefined ? undefined : this.#adopt(waiting, { ownerCommand })),
-        () => undefined,
+      void this.#whileShown(waiting, () => owner(waiting.daemon)).then(ownerCommand =>
+        ownerCommand === undefined ? undefined : this.#adopt(waiting, { ownerCommand }),
       );
+  }
+
+  /** `read`, tried up to three times a second apart while `waiting`'s prompt is on screen; `undefined` if none answered. */
+  async #whileShown<T>(waiting: Waiting, read: () => Promise<T>): Promise<T | undefined> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt > 0) await new Promise(resolve => setTimeout(resolve, this.deps.retryMs ?? 1_000));
+      if (
+        this.#prompt?.daemon.daemonId !== waiting.daemon.daemonId ||
+        this.#waiting.get(waiting.daemon.daemonId) !== waiting
+      )
+        return undefined;
+      try {
+        return await read();
+      } catch {
+        // Tried again below, while the prompt is still this one.
+      }
+    }
+    return undefined;
   }
 
   /** What the machine said about this prompt, if its prompt is still the one on screen. */

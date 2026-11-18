@@ -696,16 +696,20 @@ machine stage in the app, a device taking one (`…/bind`) and committing loosen
 it. The commit takes only the kept `approve-sign-in-rule` assertion over that stage's bytes, from a paired device:
 the admin token on loopback is answered the step-up demand, like every other caller without one.
 
-**The app asks only for the machine on screen.** With several machines paired, every page reads all of
-them in the background, so a locked second machine used to raise its unlock over the first machine's
-page. A background read (`GET`, `HEAD`) that meets `unlock_required` now waits until its
-machine is on screen, and the Machines list shows that machine as locked; anything a person pressed asks at
-once. A read **nobody caused** that meets a **step-up** — a background view's, or one sent while no person is acting on
-the page (the browser's transient user activation, a few seconds after a click or a key, is absent: a poll, an effect a
-re-render re-ran) — never raises the prompt: its refusal is its answer, the same read is answered from that refusal
+**A read never opens the passkey prompt by itself; a press does.** With several machines paired, every page reads all
+of them, and a page opening, a poll or a re-render used to raise the unlock (or a step-up) over whatever was on
+screen, again and again. A write, or a read a person is **pressing** for — sent with `quiet: false`, or while the
+browser's transient user activation holds (a few seconds after a click or a key) and the page did not just change (a
+Retry, the machine they chose) — asks at once and clears the machine's "a cancel stays cancelled". **Every other
+read is one nobody caused** — a reload, a deep link, a navigation (the click that opened the page is not a press on
+its reads: "Not now", then Home), a poll, an effect a re-render re-ran, a background view's: it never opens the
+prompt. Its step-up refusal is its answer and its unlock waits silently; the same read is answered from that refusal
 for a wait that doubles from 2 s to a minute instead of being sent again (one page polled a refused read ~140 times a
-minute), and the page offers its own "Confirm it's you" press. A grants re-read that answers the same is not a change,
-so a refusal never re-renders the app. Two machines that answer to the same name are told apart by address in the prompt and the list; a loopback address is never printed (it means "this computer" to whoever reads it), so two daemons on one host read "name (paired 3 Nov)" or "name (2)" instead.
+minute), and the shell draws one line with one button ("Confirm it's you", or "Unlock") in the status strip of the
+page whose route names that machine. Pressing it opens the one prompt as the person's own — with "Add a passkey" in
+it for a device that holds none — and once confirmed the machine's views are built again so they read again. A
+locked machine is reachable, never "Offline": it refuses its live feed (`GET /v1/bus` is not unlock-exempt) until the
+unlock, after which the app opens the feed again. A grants re-read that answers the same is not a change, so a refusal never re-renders the app. Two machines that answer to the same name are told apart by address in the prompt and the list; a loopback address is never printed (it means "this computer" to whoever reads it), so two daemons on one host read "name (paired 3 Nov)" or "name (2)" instead.
 
 There is no operator password. The passkey step-up replaced it for every purpose it had — the local
 browser's unlock, the remote `configure` lock and the per-change confirmation — and **nothing is kept for

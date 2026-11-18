@@ -179,6 +179,9 @@ const settle = async (): Promise<void> => {
 };
 
 /** d1 runs Asker; d2 (the locked one) runs it too; d3 has Asker turned off. */
+/** The runtime's wall clock: a test moves it past the navigation grace. */
+const clock = { now: 1_000_000 };
+
 function setup(
   made: PasskeyProvision,
   down: readonly string[] = [],
@@ -230,6 +233,8 @@ function setup(
     appVersion: '5.0.0',
     surfaces,
     daemons,
+    // The person's click comes well after the page opened: past the navigation grace (A555 r7).
+    now: () => clock.now,
     connect: async paired => {
       if (down.includes(paired.daemon)) throw new Error('unreachable');
       // Never answers: the machine stays "connecting".
@@ -436,8 +441,8 @@ describe('S10 a daemon-less screen may ask for a machine', () => {
 
   test('S10 after a choice of a locked machine the install preview’s GET runs once the passkey is confirmed', async () => {
     go('/ask');
-    // The person's click on the machine is the browser's transient user activation: the read it causes may ask
-    // (a read sent with none — a poll — never does, A555 r7).
+    // The person's click on the machine is the browser's transient user activation, and the page did not just change:
+    // the read it causes is theirs and asks (a read sent with none — a poll, a page opening — never does, A555 r7).
     const activation = Object.getOwnPropertyDescriptor(navigator, 'userActivation');
     Object.defineProperty(navigator, 'userActivation', { value: { isActive: true }, configurable: true });
     const { made, asked } = provision();
@@ -445,6 +450,7 @@ describe('S10 a daemon-less screen may ask for a machine', () => {
     const view = await mount(app);
     await settle();
     await click(view, '[data-testid="ask"]');
+    clock.now += 10_000;
     // Nothing is chosen yet, so a read of d2 would wait for its prompt.
     await click(view, '[data-chooser-machine="d2"]');
     await settle();

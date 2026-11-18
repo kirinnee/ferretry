@@ -744,3 +744,120 @@ describe('a cancelled prompt stays cancelled (triage row 50)', () => {
     await later;
   });
 });
+
+describe('A555 r7: a screen offering the first passkey in place holds its machine', () => {
+  const heldGate = () => {
+    const held = new Set<string>();
+    const gate = new StepUpGate({
+      ceremony: async () => undefined,
+      describe: () => 'no',
+      held: daemonId => held.has(daemonId),
+    });
+    return { gate, held };
+  };
+
+  it('should pop no prompt for a request nobody pressed while the card holds the machine on screen, then show it once let go', async () => {
+    const { gate, held } = heldGate();
+    gate.focus(first.daemonId);
+    held.add(first.daemonId);
+    const waiting = gate.require(first, 'read the board', 'background');
+    await flush();
+    should(gate.snapshot()).be.null();
+    held.delete(first.daemonId);
+    gate.recheck();
+    should(gate.snapshot()?.daemon.daemonId).equal(first.daemonId);
+    gate.dismiss();
+    should(await waiting).be.false();
+  });
+
+  it('should still ask at once for a press, card or not', async () => {
+    const { gate, held } = heldGate();
+    gate.focus(first.daemonId);
+    held.add(first.daemonId);
+    const pressed = gate.require(first, 'change the settings', 'explicit');
+    await flush();
+    should(gate.snapshot()?.acts).deepEqual(['change the settings']);
+    gate.dismiss();
+    should(await pressed).be.false();
+  });
+
+  it('should take back a shown prompt nobody pressed for when a card starts holding its machine', async () => {
+    const { gate, held } = heldGate();
+    gate.focus(first.daemonId);
+    const waiting = gate.require(first, 'read the board', 'background');
+    await flush();
+    should(gate.snapshot()).not.be.null();
+    held.add(first.daemonId);
+    gate.recheck();
+    should(gate.snapshot()).be.null();
+    held.delete(first.daemonId);
+    gate.recheck();
+    gate.dismiss();
+    should(await waiting).be.false();
+  });
+});
+
+describe('A555 r7 kasen (c): a device with no passkey reads "Add a passkey" even when the first read failed', () => {
+  it('should try the passkeys read again while the prompt is on screen, and adopt its answer', async () => {
+    let reads = 0;
+    const gate = new StepUpGate({
+      ceremony: async () => undefined,
+      describe: () => 'no',
+      retryMs: 1,
+      firstPasskey: async () => {
+        reads += 1;
+        if (reads === 1) throw new Error('a moment out of reach');
+        return true;
+      },
+    });
+    const pressed = gate.require(first, 'change the settings', 'explicit');
+    for (let i = 0; i < 20 && gate.snapshot()?.firstPasskey !== true; i += 1)
+      await new Promise(resolve => setTimeout(resolve, 2));
+    should(reads).equal(2);
+    should(gate.snapshot()?.firstPasskey).be.true();
+    gate.dismiss();
+    should(await pressed).be.false();
+  });
+});
+
+describe('A555 r7 kasen (c): the passkeys read is tried again only while its prompt is on screen', () => {
+  it('should give up after three failed reads, leaving the ordinary words', async () => {
+    let reads = 0;
+    const gate = new StepUpGate({
+      ceremony: async () => undefined,
+      describe: () => 'no',
+      retryMs: 1,
+      firstPasskey: async () => {
+        reads += 1;
+        throw new Error('out of reach');
+      },
+      ownerCommand: async () => undefined,
+    });
+    const pressed = gate.require(first, 'change the settings', 'explicit');
+    for (let i = 0; i < 30 && reads < 3; i += 1) await new Promise(resolve => setTimeout(resolve, 2));
+    await new Promise(resolve => setTimeout(resolve, 5));
+    should(reads).equal(3);
+    should(gate.snapshot()?.firstPasskey).be.undefined();
+    gate.dismiss();
+    should(await pressed).be.false();
+  });
+
+  it('should stop trying once the prompt is gone', async () => {
+    let reads = 0;
+    const gate = new StepUpGate({
+      ceremony: async () => undefined,
+      describe: () => 'no',
+      retryMs: 5,
+      firstPasskey: async () => {
+        reads += 1;
+        throw new Error('out of reach');
+      },
+    });
+    const pressed = gate.require(first, 'change the settings', 'explicit');
+    await flush();
+    gate.dismiss();
+    should(await pressed).be.false();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    should(reads).equal(1);
+  });
+});

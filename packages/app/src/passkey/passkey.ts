@@ -17,12 +17,15 @@ import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
  *    refusal of the same kind is the answer. The unlock comes first — while it is wanted nothing else can be read —
  *    then a step-up for the act, each at most once.
  *
- * A READ IS THE PAGE'S OWN WORK (G95): a `GET` or `HEAD` is `background`, and its prompt waits until its machine is
- * on screen ({@link PasskeyHandler.focus}); anything else is a press, `explicit`, and asks at once. A READ NOBODY CAUSED
- * never raises the step-up (A555 r7: a page polling a refused read re-raised it in a loop): a background view's call, or
- * a read sent while no person is acting on the page (no transient user activation — a poll, an effect a re-render re-ran).
- * Its refusal is its answer, the client answers the same read from it for a while instead of sending it again
- * (`client/step-up-backoff.ts`), and the page offers its own "Confirm it's you" press. The unlock is unchanged.
+ * A READ NEVER OPENS THE PROMPT BY ITSELF; A PRESS DOES (G95, A555 r7). A write is a press, `explicit`, and asks at
+ * once; so is a read a person is pressing for (`quiet: false`: a Retry, an Unlock press). Transient user activation alone
+ * NEVER makes a read a press (a Cancel click grants seconds of it, and a poll tick in them must not undo the cancel): a
+ * read sent while a person acts is at most a `background` read, which respects a cancel and, for a machine that is off
+ * screen, waits. Every other read is one NOBODY CAUSED — a page opening,
+ * a poll, a re-render, a background view — and never opens the prompt: its step-up refusal is its answer, its unlock
+ * waits silently (`unasked`), the client answers the same read from that refusal for a while instead of sending it
+ * again (`client/step-up-backoff.ts`), and the shell offers ONE press for it on the page the route names
+ * (`shell/passkey-bar.tsx`), so no page is left with a refusal it cannot answer.
  *
  * NOTHING HERE HOLDS A CREDENTIAL (G100). A verified step-up is a fact the DAEMON remembers about this device and this
  * copy of the app; no challenge, assertion or proof crosses this seam, and nothing here is logged.
@@ -35,10 +38,12 @@ import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
 export const PASSKEY_TAKERS: readonly string[] = Object.freeze(['access']);
 
 /**
- * Who started the request that needs a passkey: a person pressing something (`explicit`), or a page reading in the
- * background (`background`). Only the first may raise a prompt for a machine that is not on screen.
+ * Who started the request that needs a passkey: a person pressing something (`explicit`), a page reading in the
+ * background (`background`: its prompt waits for its machine to be on screen), or a read NOBODY CAUSED (`unasked`,
+ * A555 r7: no person is acting on the page) — which waits for the unlock WITHOUT ever raising its prompt, and goes once a
+ * person's own press confirms it.
  */
-export type PromptOrigin = 'explicit' | 'background';
+export type PromptOrigin = 'explicit' | 'background' | 'unasked';
 
 /** What a request's method says about who started it: a read is the page's own work, anything else a press. */
 export const requestOrigin = (method: string): PromptOrigin => {

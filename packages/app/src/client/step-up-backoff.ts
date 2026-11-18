@@ -1,7 +1,7 @@
 import type { TransportAnswer } from './transport.ts';
 
 /**
- * A READ NOBODY PRESSED, REFUSED FOR A STEP-UP, IS NOT ASKED AGAIN AT ONCE (A555 r7).
+ * A READ NOBODY CAUSED, REFUSED FOR A PASSKEY (A STEP-UP OR THE UNLOCK), IS NOT ASKED AGAIN AT ONCE (A555 r7).
  *
  * A background read (a panel mounting, a poll, a re-render re-running an effect) that the daemon refuses with
  * `403 grant_step_up_required` raises no prompt: the person did not start it. Before, nothing stopped the page asking
@@ -48,9 +48,19 @@ export class StepUpBackoff {
   }
 }
 
-/** One request as the backoff keys it: the method, the filled path and the query, never a header or a body. */
+/**
+ * One request as the backoff keys it: the method, the filled path, the query and — for anything but a read — the body,
+ * so two different writes a background view sends to one route are never answered with each other's refusal. Never a
+ * header.
+ */
 export const backoffKey = (request: {
   readonly method: string;
   readonly path: string;
   readonly query?: Readonly<Record<string, string>>;
-}): string => `${request.method.toUpperCase()} ${request.path}?${new URLSearchParams(request.query ?? {}).toString()}`;
+  readonly body?: unknown;
+}): string => {
+  const method = request.method.toUpperCase();
+  const line = `${method} ${request.path}?${new URLSearchParams(request.query ?? {}).toString()}`;
+  const read = method === 'GET' || method === 'HEAD';
+  return read || request.body === undefined ? line : `${line}\n${JSON.stringify(request.body)}`;
+};

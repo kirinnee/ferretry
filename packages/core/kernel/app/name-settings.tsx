@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { MachineNameSchema } from '../contract/kernel.ts';
 import { readConfigFile, reasonOf, writeConfigFile } from './config-files/api.ts';
-import type { KernelClient } from './lib/client.ts';
+import { callFailure, type KernelClient } from './lib/client.ts';
 
 const HOST_FILE = 'host.yaml';
 const NAME_LINE = /^name:/mu;
@@ -23,10 +23,10 @@ interface Reading {
 /** The text a name is saved as: a JSON string is a valid YAML scalar, so no character needs its own escaping. */
 export const hostFileText = (name: string): string => `name: ${JSON.stringify(name)}\n`;
 
-async function read(client: KernelClient): Promise<Reading> {
+async function read(client: KernelClient, pressed: boolean): Promise<Reading> {
   const [file, inventory] = await Promise.all([
-    readConfigFile(client, HOST_FILE),
-    client.call('GET /v1/plugins') as Promise<{ readonly daemonName?: string }>,
+    readConfigFile(client, HOST_FILE, pressed),
+    client.call('GET /v1/plugins', pressed ? { quiet: false } : {}) as Promise<{ readonly daemonName?: string }>,
   ]);
   return {
     name: inventory.daemonName ?? '',
@@ -34,6 +34,18 @@ async function read(client: KernelClient): Promise<Reading> {
     etag: file.etag,
   };
 }
+
+/**
+ * The press a refused first read offers (A555 r7): named for the passkey the machine wants, like the shell's strip.
+ * Pressing it reads again as the person's own act, so the ONE passkey prompt opens ("Add a passkey" for a device with
+ * none); any other failure is a plain Try again.
+ */
+const retryLabel = (cause: unknown): string => {
+  const code = callFailure(cause)?.code;
+  if (code === 'unlock_required') return 'Unlock';
+  if (code === 'grant_step_up_required') return 'Confirm it’s you';
+  return 'Try again';
+};
 
 /** The tab, drawn from plain values so every state can be rendered without a daemon. */
 export function NameSettingsView({
@@ -45,6 +57,8 @@ export function NameSettingsView({
   busy,
   problem,
   saved,
+  reading = false,
+  retry,
 }: {
   readonly current: string;
   readonly source: 'owner' | 'hostname';
@@ -54,6 +68,10 @@ export function NameSettingsView({
   readonly busy: boolean;
   readonly problem?: string;
   readonly saved: boolean;
+  /** The name is still being read: nothing to save yet (never "Saving…", A555 r7). */
+  readonly reading?: boolean;
+  /** The first read was refused: one press that reads again as the person's own. */
+  readonly retry?: { readonly label: string; readonly onPress: () => void };
 }) {
   return (
     <section className="kt-panel p-panel" aria-labelledby="settings-name-heading" data-machine-name="">
@@ -95,6 +113,17 @@ export function NameSettingsView({
             {problem}
           </p>
         )}
+        {retry === undefined ? null : (
+          <button
+            type="button"
+            className="kt-btn min-h-[44px] self-start"
+            data-variant="primary"
+            data-machine-name-retry=""
+            onClick={retry.onPress}
+          >
+            {retry.label}
+          </button>
+        )}
         {saved ? (
           <p role="status" className="m-0 text-meta font-semibold text-ok">
             Saved.
@@ -102,10 +131,10 @@ export function NameSettingsView({
         ) : null}
         <button
           type="submit"
-          disabled={busy}
+          disabled={busy || reading}
           className="min-h-[44px] self-start rounded-control border border-border-strong bg-surface-3 px-control-x text-cell font-semibold text-fg hover:bg-surface-2 focus-visible:outline-focus focus-visible:outline-offset-focus disabled:opacity-60"
         >
-          {busy ? 'Saving…' : 'Save'}
+          {busy ? 'Saving…' : reading ? 'Reading…' : 'Save'}
         </button>
       </form>
     </section>
@@ -118,15 +147,19 @@ export function NameSettings({ client }: { readonly client: KernelClient }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [saved, setSaved] = useState(false);
+  const [refused, setRefused] = useState<string | undefined>(undefined);
 
   const load = useCallback(
-    async (initial: boolean) => {
+    async (initial: boolean, pressed = false) => {
       try {
-        const next = await read(client);
+        const next = await read(client, pressed);
         setReading(next);
+        setRefused(undefined);
+        setProblem(undefined);
         if (initial) setValue(next.source === 'owner' ? next.name : '');
       } catch (cause) {
         setProblem(reasonOf(cause));
+        setRefused(retryLabel(cause));
       }
     },
     [client],
@@ -174,8 +207,12 @@ export function NameSettings({ client }: { readonly client: KernelClient }) {
         setSaved(false);
       }}
       onSave={() => void save()}
-      busy={busy || reading === undefined}
+      busy={busy}
+      reading={reading === undefined}
       saved={saved}
+      {...(reading === undefined && refused !== undefined
+        ? { retry: { label: refused, onPress: () => void load(true, true) } }
+        : {})}
       {...(problem === undefined ? {} : { problem })}
     />
   );

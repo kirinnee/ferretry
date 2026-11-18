@@ -71,12 +71,18 @@ const ConfigConfirmResultSchema = z.looseObject({ path: NonEmpty, confirmed: z.b
 const ConfigInvalidBodySchema = z.looseObject({ error: NonEmpty, issues: z.array(ConfigIssueSchema) });
 type ConfigInvalidBody = z.infer<typeof ConfigInvalidBodySchema>;
 
-export async function readConfigStatus(client: KernelClient): Promise<ConfigStatusView> {
-  return ConfigStatusViewSchema.parse(await client.call('GET /v1/config/status'));
+/**
+ * `pressed`: the read is a person's own press (a "Try again" after a refused read), so it asks for the passkey at once,
+ * even after a Cancel; every other read is the page's and never opens the prompt by itself (A555 r7).
+ */
+export async function readConfigStatus(client: KernelClient, pressed = false): Promise<ConfigStatusView> {
+  return ConfigStatusViewSchema.parse(await client.call('GET /v1/config/status', pressed ? { quiet: false } : {}));
 }
 
-export async function readConfigFile(client: KernelClient, path: string): Promise<ConfigFileView> {
-  return ConfigFileViewSchema.parse(await client.call('GET /v1/config/file', { query: { path } }));
+export async function readConfigFile(client: KernelClient, path: string, pressed = false): Promise<ConfigFileView> {
+  return ConfigFileViewSchema.parse(
+    await client.call('GET /v1/config/file', { query: { path }, ...(pressed ? { quiet: false } : {}) }),
+  );
 }
 
 /** Writes one file against the etag it was edited from; the daemon refuses a file that moved since. */

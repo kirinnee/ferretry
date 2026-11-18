@@ -10,6 +10,7 @@ import type { StepUpClient } from '../../../../app/lib/step-up-client.ts';
 import type { PairingArrival, PairingSeed } from '../../../../app/lib/pairing.ts';
 import { toBase64Url } from '../../../../app/shell-grants.ts';
 import { daemonConnection } from '../../../../app/shell-pairing.ts';
+import { inlinePasskeyOffered } from '../../../../app/lib/inline-passkey-offer.ts';
 import { interact, mount, must } from '../../../support/app/dom.ts';
 
 const SEED: PairingSeed = { daemonUrl: 'https://daemon.example.test', daemonId: 'daemon-a', code: 'single-use' };
@@ -116,6 +117,24 @@ describe('the first-passkey offer on the pairing-success screen', () => {
     } finally {
       await screen.unmount();
     }
+  });
+
+  it('A555 r7 should hold its machine while the button shows, so no unasked prompt pops over it, and let go once added', async () => {
+    const { client } = machine(OPEN);
+    const screen = await pairedScreen(client);
+    try {
+      expect(screen.container.querySelector('[data-first-passkey-offer]')).not.toBeNull();
+      expect(inlinePasskeyOffered('daemon-a')).toBe(true);
+      await interact(() =>
+        (must(screen.container.querySelector('[data-first-passkey-add]'), 'the button') as HTMLElement).click(),
+      );
+      await interact(async () => await Promise.resolve());
+      expect(screen.container.querySelector('[data-first-passkey-added]')).not.toBeNull();
+      expect(inlinePasskeyOffered('daemon-a')).toBe(false);
+    } finally {
+      await screen.unmount();
+    }
+    expect(inlinePasskeyOffered('daemon-a')).toBe(false);
   });
 
   it('P-F2 should offer nothing once the window is closed', async () => {

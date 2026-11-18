@@ -351,7 +351,7 @@ describe('the nav badge origin (R1 m5)', () => {
     pokes.get('d1')?.();
     await settle();
     expect(app.prompts.length).toBeGreaterThan(0);
-    expect(app.prompts.every(prompt => prompt.origin === 'background')).toBe(true);
+    expect(app.prompts.every(prompt => prompt.origin === 'unasked')).toBe(true);
     // The one refused attempt is all that reached the machine; the mark waits for the unlock and then goes through.
     const marks = (): number =>
       app
