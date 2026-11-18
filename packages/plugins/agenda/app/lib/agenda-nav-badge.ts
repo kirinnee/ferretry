@@ -40,6 +40,31 @@ export const inboxBadgeOf = (client: RuntimeClient, seams: InboxBadgeSeams = {})
   const listeners = new Set<() => void>();
   let runtime: AgendaRuntime | undefined;
   let stop: (() => void) | undefined;
+  /**
+   * The last count taken when this machine's conversations were READ. The nav entry is unmounted and mounted again as
+   * the owner moves (opening an ask), which tears the runtime down and builds a fresh one; a fresh runtime reads the
+   * machine ledger before the conversations list, and counting that alone showed 12 -> 2 -> 12. Until the list, the
+   * roll-up (the ask summaries) and the conversations' boards are read the number is unknown, not smaller, so the last
+   * complete one stands.
+   */
+  let known = 0;
+  let boardReads: InboxBoardReads | undefined;
+  /** Runtimes whose roll-up read ended, in failure too: a read that cannot land must not hold the badge back for good. */
+  const rollupSettled = new WeakSet<AgendaRuntime>();
+
+  /**
+   * Whether the reads the count stands on have each ended: the conversations list, the roll-up and every unread
+   * conversation's board. An ended read is one that landed OR failed, so an unreachable board never holds the badge.
+   */
+  const wholeRead = (machine: AgendaRuntime, derived: ReturnType<typeof derive>): boolean => {
+    const { daemonId } = machine.connection;
+    if ((machine.ferrets.getSnapshot().daemons.get(daemonId)?.sessions ?? null) === null) return false;
+    if (!machine.agenda.rollup.getSnapshot().complete.has(daemonId) && !rollupSettled.has(machine)) return false;
+    const failed = boardReads?.getSnapshot();
+    return boardWants(derived.unread, () => machine.connection, machine.agenda).every(
+      want => want.held() || failed?.has(want.id) === true,
+    );
+  };
 
   const derive = (machine: AgendaRuntime) => {
     const boards = machine.agenda.store.getSnapshot().snapshots;
@@ -67,6 +92,7 @@ export const inboxBadgeOf = (client: RuntimeClient, seams: InboxBadgeSeams = {})
     const machine = createAgendaRuntime(client);
     runtime = machine;
     const reads = new InboxBoardReads(seams.timers ?? browserDeferredTimers);
+    boardReads = reads;
     const connection = machine.connection;
     const connectionFor = () => connection;
     // A rule suggestion the owner answered elsewhere leaves the count as it leaves the page: the same sweep, read once
@@ -75,6 +101,7 @@ export const inboxBadgeOf = (client: RuntimeClient, seams: InboxBadgeSeams = {})
     let cancelSweep: (() => void) | undefined;
     const changed = (): void => {
       const derived = derive(machine);
+      if (wholeRead(machine, derived)) known = derived.total;
       reads.sync(boardWants(derived.unread, connectionFor, machine.agenda));
       const key = suggestionsKey(derived.cards);
       if (key !== swept) {
@@ -88,11 +115,20 @@ export const inboxBadgeOf = (client: RuntimeClient, seams: InboxBadgeSeams = {})
       machine.ferrets.subscribe(changed),
       machine.agenda.store.subscribe(changed),
       local.subscribe(changed),
+      reads.subscribe(changed),
       answeredSuggestions.subscribe(changed),
     ];
     machine.agenda.hydrate(connection, daemonSessionScope(connection, MACHINE_AGENDA_ID)).catch(() => undefined);
+    // The ferret store has already started this read; asking again joins it, and it settles whether it was read or failed.
+    let live = true;
+    void machine.agenda.rollup.read(connection).then(() => {
+      rollupSettled.add(machine);
+      if (live) changed();
+    });
     changed();
     return () => {
+      live = false;
+      boardReads = undefined;
       for (const off of stops) off();
       cancelSweep?.();
       reads.dispose();
@@ -102,7 +138,12 @@ export const inboxBadgeOf = (client: RuntimeClient, seams: InboxBadgeSeams = {})
   };
 
   return {
-    count: () => (runtime === undefined ? 0 : derive(runtime).total),
+    count: () => {
+      if (runtime === undefined) return known;
+      const derived = derive(runtime);
+      if (wholeRead(runtime, derived)) known = derived.total;
+      return known;
+    },
     subscribe: listener => {
       listeners.add(listener);
       if (listeners.size === 1) stop = start();
