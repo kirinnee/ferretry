@@ -12,7 +12,11 @@ import { RELAY_FALLBACK_LINE } from '../../../app/carriers/router.ts';
 import { ActiveCarrierCard } from '../../../app/features/carrier/active-carrier-card.tsx';
 import { CarrierPreferenceSelector } from '../../../app/features/carrier/carrier-preference-selector.tsx';
 import { DeviceConnectionPanel } from '../../../app/features/carrier/device-connection-panel.tsx';
-import { relayFallbackView, RelayFallbackNotice } from '../../../app/features/carrier/relay-fallback-notice.tsx';
+import {
+  relayFallbackLine,
+  relayFallbackView,
+  RelayFallbackNotice,
+} from '../../../app/features/carrier/relay-fallback-notice.tsx';
 import {
   CARRIER_PREFERENCE_KEY,
   type CarrierPreferenceStorage,
@@ -189,4 +193,18 @@ test('with no machine paired the device panel draws nothing', () => {
     }),
   );
   expect(html).toBe('');
+});
+
+test('with several machines paired each fallback line names its machine, so two never read as one line said twice', () => {
+  const one = [paired('fy_daemon_aaaa', 'studio')];
+  const two = [paired('fy_daemon_aaaa', 'studio'), paired('fy_daemon_bbbb', 'laptop')];
+  const twins = [paired('fy_daemon_aaaa', 'studio'), paired('fy_daemon_bbbb', 'studio')];
+  expect(relayFallbackLine(RELAY_FALLBACK_LINE, one, 'fy_daemon_aaaa')).toBe(RELAY_FALLBACK_LINE);
+  expect(relayFallbackLine(RELAY_FALLBACK_LINE, two, 'fy_daemon_bbbb')).toBe(`laptop: ${RELAY_FALLBACK_LINE}`);
+  expect(relayFallbackLine(RELAY_FALLBACK_LINE, twins, 'fy_daemon_aaaa')).toBe(
+    `studio (…aaaa): ${RELAY_FALLBACK_LINE}`,
+  );
+  expect(relayFallbackLine(RELAY_FALLBACK_LINE, twins, 'fy_daemon_bbbb')).toBe(
+    `studio (…bbbb): ${RELAY_FALLBACK_LINE}`,
+  );
 });

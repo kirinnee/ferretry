@@ -1,4 +1,4 @@
-import { controlState, useEveryDaemon } from '@ferretry/app';
+import { controlState, daemonOfClient, type PairedDaemon, useEveryDaemon, usePairedDaemons } from '@ferretry/app';
 import { useMemo } from 'react';
 import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
@@ -119,6 +119,23 @@ export function NotificationsDevicePanel({ host }: { readonly host?: PushHost } 
       <MachinesNotificationsSettings sources={sources} {...(host === undefined ? {} : { host })} />
     </>
   );
+}
+
+/** The name of the machine a client talks to, as v4's banner said it (the host name); `undefined` when it is not in the list. */
+export const machineNameOf = (daemons: readonly PairedDaemon[], daemon: string | undefined): string | undefined => {
+  const name = daemons.find(candidate => candidate.daemon === daemon)?.machine;
+  return name === undefined || name === '' ? undefined : name;
+};
+
+/**
+ * `agenda.banner` › the same line under the Agenda header, naming the machine as v4's Inbox banner did ("Notifications
+ * are off for ip-172-27-76-90 on every device"). The machine home keeps "This machine": there it is the page's own.
+ */
+export function agendaNotificationsOffPanel(client: PluginClient) {
+  return function AgendaNotificationsOff() {
+    const label = machineNameOf(usePairedDaemons(), daemonOfClient(client));
+    return <NotificationsOffPanel client={client} {...(label === undefined ? {} : { label })} />;
+  };
 }
 
 /** `daemon.status` › notifications-off: one line when this machine has no device enrolled anywhere to push to. */

@@ -261,7 +261,9 @@ export function AnalyticsMetricChart({
           <>
             <XLabels
               points={points}
-              every={Math.max(1, Math.ceil(points.length / 5))}
+              // At most four labels on a phone: the last is right-aligned and its neighbour centred, so any closer and
+              // "15 Nov" and "18 Nov" run together.
+              every={Math.max(1, Math.ceil(points.length / 4))}
               className="mt-xs flex gap-[2px] text-2xs text-muted sm:hidden"
             />
             <XLabels

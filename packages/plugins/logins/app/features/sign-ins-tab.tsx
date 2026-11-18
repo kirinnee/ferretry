@@ -53,7 +53,10 @@ import { useLocalModels } from './use-local-models.ts';
 
 /** The columns every meter on a login shares, so the bars start and end in the same place. */
 const METER_LABEL = 'w-12 shrink-0 whitespace-nowrap text-muted';
-const METER_WORDS = 'w-48 shrink-0 text-right text-muted';
+// On a phone the words sit beside the label and the bar takes the full width below them; from `sm` all three share a row.
+const METER_ROW = 'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta sm:flex-nowrap';
+const METER_BAR = 'order-last basis-full sm:order-none sm:basis-0';
+const METER_WORDS = 'ml-auto min-w-0 text-right text-muted sm:ml-0 sm:w-48 sm:shrink-0';
 
 function UsageBars({ login, now }: { readonly login: LoginView; readonly now: number }) {
   const bars = usageBars(login, now);
@@ -66,12 +69,12 @@ function UsageBars({ login, now }: { readonly login: LoginView; readonly now: nu
   return (
     <div className="flex flex-col gap-1" data-login-usage="">
       {bars.map((usage: UsageBar) => (
-        <div key={usage.label} className="flex min-w-0 items-center gap-2 text-meta">
+        <div key={usage.label} className={METER_ROW}>
           <span className={METER_LABEL}>{usage.label}</span>
           <span
             role="img"
             aria-label={usageBarText(usage)}
-            className="relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-2"
+            className={cn('relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-2', METER_BAR)}
           >
             <span
               className={cn('absolute inset-y-0 left-0 rounded-full', usage.high ? 'bg-warn' : 'bg-accent')}
@@ -376,7 +379,7 @@ function LoginRow({
         >
           <AccountStatus word={login.status.word} className="mt-1" />
           <span className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="truncate font-mono text-row text-fg">
+            <span className="break-all font-mono text-row text-fg sm:truncate">
               {login.store === 'environment' ? login.id : loginEmail(login)}
             </span>
             <LoginBadges login={login} />
