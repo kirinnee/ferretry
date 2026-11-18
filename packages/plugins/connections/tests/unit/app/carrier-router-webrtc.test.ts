@@ -217,8 +217,14 @@ describe('R685 no ICE restart: reads are re-sent, writes never blind', () => {
     const w = await webrtcWalk({ hosts: { [PEER_HOST]: { kind: 'carries', carrier: 'webrtc' } } });
     await w.transport.request({ method: 'GET', path: '/v1/first' });
     const route = w.r.fx.route;
-    w.r.fx.route = request =>
-      request.method === 'PUT' || request.path === '/v1/lost-read' ? new Promise(() => undefined) : route(request);
+    let lostReads = 0;
+    w.r.fx.route = request => {
+      // Only the FIRST read waits forever: the one sent again after the channel dies is answered.
+      if (request.path === '/v1/lost-read') lostReads += 1;
+      return request.method === 'PUT' || (request.path === '/v1/lost-read' && lostReads === 1)
+        ? new Promise(() => undefined)
+        : route(request);
+    };
 
     // The channel dies while a read and a write wait for the daemon's answer.
     const read = w.transport.request({ method: 'GET', path: '/v1/lost-read' }).catch((error: unknown) => error);
@@ -229,15 +235,10 @@ describe('R685 no ICE restart: reads are re-sent, writes never blind', () => {
     for (const channel of w.script?.channels ?? []) channel.close(1011, 'peer lost');
     const failures = await Promise.all([read, write]);
     w.r.fx.route = route;
-    const lost = w.r.router.choice(w.r.fx.daemonId);
 
-    // The reader sends its read again; nothing sends the write again.
-    const again = await w.transport.request({ method: 'GET', path: '/v1/lost-read' });
-
-    expect(failures[0]).toBeInstanceOf(Error);
+    // The transport sent the read again by itself (once); nothing sent the write again.
+    expect(failures[0]).toMatchObject({ status: 200 });
     expect(failures[1]).toBeInstanceOf(Error);
-    expect(lost?.ok).not.toBe(true);
-    expect(again.status).toBe(200);
     expect(w.r.fx.requests.filter(request => request.method === 'PUT')).toHaveLength(1);
     expect(w.r.fx.requests.filter(request => request.path === '/v1/lost-read')).toHaveLength(2);
     // Every dial after the loss negotiated a connection of its own through the dialer: no path is restarted in place.

@@ -173,22 +173,15 @@ describe('a request whose carrier died is sent again only when that is safe', ()
     transport.close();
   });
 
-  test('a press whose session never opened is proved unsent: sent again once, any method', async () => {
-    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+  test('a session that never opens is not asked again at once: the walk already tried every carrier', async () => {
+    for (const method of ['GET', 'POST']) {
       const transport = await scripted(['dead', 'answer']);
-      expect((await attempt(transport, method)).answered).toBe(true);
-      expect(transport.dials()).toBe(2);
+      const result = await attempt(transport, method);
+      expect(result.answered).toBe(false);
+      expect(carrierFateOf(result.failure)).toBe('unsent');
+      expect(transport.dials()).toBe(1);
       transport.close();
     }
-  });
-
-  test('a press whose session never opens twice is lost, and still proved unsent', async () => {
-    const transport = await scripted(['dead', 'dead', 'answer']);
-    const result = await attempt(transport, 'POST');
-    expect(result.answered).toBe(false);
-    expect(carrierFateOf(result.failure)).toBe('unsent');
-    expect(transport.dials()).toBe(2);
-    transport.close();
   });
 
   test('a read that was sent, then found its fresh session dead, stays in doubt', async () => {

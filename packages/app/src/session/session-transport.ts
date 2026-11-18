@@ -390,7 +390,7 @@ export class SessionTransport implements DaemonTransport {
         const neverSent = reason instanceof RelaySessionError && reason.neverSent;
         left = left || (leftThis && !neverSent);
         if (!isCarrierGone(reason)) throw reason;
-        if (!resent && this.#mayResend(given, reason, left)) {
+        if (!resent && this.#mayResend(given, reason, left, leftThis)) {
           resent = true;
           continue;
         }
@@ -406,15 +406,18 @@ export class SessionTransport implements DaemonTransport {
   /**
    * THE RESEND RULE, once per request, for a carrier that died under it (a flow the path reset is only found out by
    * using it). Sent again on a fresh session, which the next attempt opens by itself:
-   * - when it is PROVED the request never reached the daemon (no session opened, or the session never sent its record):
+   * - when it is PROVED the request never reached the daemon (the session ended while the record was still queued):
    *   any method, because nothing can have been done twice;
    * - otherwise only an idempotent read (GET/HEAD), which is safe to ask twice;
    * - NEVER a press (POST/PUT/PATCH/DELETE) on a guess: it keeps the "lost before it answered" sentence.
    * Only a session's own end counts (a refusal, a queue-full or a deadline is not the carrier dying), and never after the
    * caller aborted. A second failure is final.
    */
-  #mayResend(given: TransportRequest, reason: unknown, left: boolean): boolean {
+  #mayResend(given: TransportRequest, reason: unknown, left: boolean, handedToSession: boolean): boolean {
     if (!(reason instanceof RelaySessionError) || given.signal?.aborted === true) return false;
+    // A session that never opened was already walked over every carrier the person has: asking again at once would only
+    // dial the same dead ones twice. The resend is for a carrier that WAS up and was found dead by this request.
+    if (!handedToSession) return false;
     const id = requestIdOf(given);
     const inDoubt = left || (id !== undefined && this.#doubted.has(id));
     return !inDoubt || ['GET', 'HEAD'].includes(given.method.toUpperCase());
