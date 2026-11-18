@@ -15,6 +15,7 @@
  * disabled with the reason, and the daemon refuses an apply it may not make whatever the screen says.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type {
   AccountChange,
   AccountChangeView,
@@ -444,9 +445,7 @@ export function RemoveRuntimeDialog({
           }}
         />
       ) : phase.kind === 'reading' ? (
-        <p role="status" className="m-0 text-cell text-muted" data-runtime-remove-reading="">
-          Checking what runs on {runtime.name}…
-        </p>
+        <Loading kind="page" label={`Checking what runs on ${runtime.name}…`} />
       ) : phase.kind === 'refused' ? (
         <>
           <p role="alert" className="m-0 text-cell leading-base text-err" data-runtime-remove-refused="">

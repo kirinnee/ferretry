@@ -189,7 +189,7 @@ describe('Runtimes tab list', () => {
         onRetry={() => undefined}
       />,
     );
-    expect(text(waiting.container, '[data-runtimes-loading]')).toBe('Reading the runtimes on studio-mac…');
+    expect(text(waiting.container, '[data-loading="page"]')).toBe('Reading the runtimes on studio-mac…');
     await waiting.unmount();
   });
 

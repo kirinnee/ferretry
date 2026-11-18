@@ -13,7 +13,7 @@ import { revealHidden } from '../../../contract/wire/index.ts';
 import { PackagePlus } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import type { DaemonConnection } from '../../lib/machine.ts';
-import { Button } from '@ferretry/app/ui';
+import { Button, Loading } from '@ferretry/app/ui';
 import { type MachineSkillEntriesLoader, noMachineSkills } from '../../lib/machine-skills.ts';
 import { AddToCatalogSheet } from './add-to-catalog-sheet.tsx';
 import { CatalogSheet, FailureLine } from './catalog-parts.tsx';
@@ -91,9 +91,7 @@ export function PublishSkillsSheet({
       onClose={onClose}
     >
       {state.kind === 'loading' ? (
-        <p className="m-0 text-cell text-muted" role="status">
-          Reading this machine’s skills…
-        </p>
+        <Loading kind="page" label="Reading this machine’s skills…" />
       ) : state.kind === 'failed' ? (
         <FailureLine sentence={state.sentence} />
       ) : (

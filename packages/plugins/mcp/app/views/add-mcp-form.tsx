@@ -15,7 +15,7 @@
  *
  * Nothing here decides what is allowed: the contract's refusal rule runs as the person types, and the daemon runs it again.
  */
-import { Button, cn } from '@ferretry/app/ui';
+import { Button, cn, Loading } from '@ferretry/app/ui';
 import { CheckCircle2, Plus, RotateCw } from 'lucide-react';
 import { type FormEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type {
@@ -382,11 +382,7 @@ const numbered = (diff: readonly SessionMcpDiffLine[]) =>
 function PreviewView({ preview, currentKey }: { readonly preview: Preview; readonly currentKey: string }) {
   if (preview.kind === 'idle' || currentKey === '') return null;
   if (preview.kind === 'loading' || preview.key !== currentKey)
-    return (
-      <p className="fy-action-form__note" role="status">
-        Reading what this would change…
-      </p>
-    );
+    return <Loading kind="bar" label="Reading what this would change…" />;
   if (preview.kind === 'failed')
     return (
       <p className="fy-action-form__failure" data-add-mcp-preview-failed="" role="alert">

@@ -8,6 +8,7 @@
  * changes the machine ends in a `ChangeApplyPanel`, so a caller that may not change it is told why before it clicks.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import { daemonOfClient, PanelSlot, useSlotHasUsablePanels } from '@ferretry/app';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -250,7 +251,11 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
       <div className="kt-panel flex flex-col gap-2 p-panel" data-login-status={word}>
         <AccountStatus word={word} showLabel className="text-row font-semibold text-fg" />
         <p className="m-0 text-cell leading-base text-muted">
-          {checking ? `Checking with ${HARNESS_NAMES[login.harness]}…` : loginExplanation(login)}
+          {checking ? (
+            <Loading kind="bar" label={`Checking with ${HARNESS_NAMES[login.harness]}…`} />
+          ) : (
+            loginExplanation(login)
+          )}
         </p>
         <Quota login={login} now={now} daemon={daemon} machineName={machineName} />
       </div>
@@ -515,12 +520,7 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs, 
     void reload();
   }, [reload]);
 
-  if (state.kind === 'loading')
-    return (
-      <p role="status" className="m-0 text-cell text-muted" data-logins-loading="">
-        Reading the logins on this machine…
-      </p>
-    );
+  if (state.kind === 'loading') return <Loading kind="page" label="Reading the logins on this machine…" />;
   if (state.kind === 'failed')
     return (
       <p role="alert" className="m-0 text-cell leading-base text-warn" data-logins-failed="">

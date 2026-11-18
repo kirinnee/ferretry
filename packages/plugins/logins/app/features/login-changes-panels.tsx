@@ -3,6 +3,7 @@
  * change to make, stages it at Logins' own route and shows the daemon's own consequences before anything that removes
  * or signs out. `ChangeApplyPanel` is the last thing each shows: the button, the passkey sentence, the grant guidance.
  */
+import { Loading } from '@ferretry/app/ui';
 import { useEffect, useRef, useState } from 'react';
 import { changeRefusalExplanation, cn } from '../ui.ts';
 import type { LoginChangeView, LoginView } from '../../contract/index.ts';
@@ -253,7 +254,7 @@ export function RemoveZone({
         <>
           {onCard ? (
             <div className="flex flex-wrap items-center gap-2" data-login-remove-pending="">
-              {changes.busy ? <span className="text-cell text-muted">Checking what removing it does…</span> : null}
+              {changes.busy ? <Loading kind="bar" label="Checking what removing it does…" /> : null}
               <Button
                 type="button"
                 data-login-remove-keep=""

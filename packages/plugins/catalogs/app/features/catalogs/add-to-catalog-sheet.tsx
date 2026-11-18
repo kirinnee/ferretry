@@ -17,7 +17,7 @@ import { CircleAlert } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import { useDaemonClient } from '../../lib/client-context.tsx';
-import { Button } from '@ferretry/app/ui';
+import { Button, Loading } from '@ferretry/app/ui';
 import { formatBytes, plural } from './catalog-review-model.ts';
 import { MarkedText, ReviewBody, WarningList } from './catalog-review-view.tsx';
 import { CatalogSheet, FailureLine, SharingOffPanel } from './catalog-parts.tsx';
@@ -329,9 +329,7 @@ export function AddToCatalogSheet({
           </Button>
         </section>
       ) : read.kind === 'loading' ? (
-        <p className="m-0 text-cell text-muted" role="status">
-          Reading your catalogs…
-        </p>
+        <Loading kind="page" label="Reading your catalogs…" />
       ) : read.kind === 'failed' ? (
         read.refusal.sharingOff ? (
           <SharingOffPanel connection={connection} createClient={createClient} />

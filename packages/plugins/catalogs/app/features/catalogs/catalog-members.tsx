@@ -12,7 +12,7 @@ import { CircleCheck, X } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import { useDaemonClient } from '../../lib/client-context.tsx';
-import { Button } from '@ferretry/app/ui';
+import { Button, Loading } from '@ferretry/app/ui';
 import { FailureLine, SharingOffPanel } from './catalog-parts.tsx';
 import {
   endShare,
@@ -179,9 +179,7 @@ export function CatalogMembersPanel({
         <p className="m-0 text-cell text-muted">{MEMBERS_NOTE}</p>
       </header>
       {read.kind === 'loading' ? (
-        <p className="m-0 text-cell text-muted" role="status">
-          Reading people…
-        </p>
+        <Loading kind="bar" label="Reading people…" />
       ) : read.kind === 'failed' ? (
         read.refusal.sharingOff ? (
           <SharingOffPanel connection={connection} createClient={createClient} />

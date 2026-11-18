@@ -8,7 +8,7 @@
  * not in the inventory and has nothing to check: the row says which.
  */
 import { type ComponentMcpSlotProps, isComponentMcpSlotProps } from '@ferretry/plugin-runtimes/contract';
-import { plainFailure } from '@ferretry/app/ui';
+import { Loading, plainFailure } from '@ferretry/app/ui';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import type { McpClient } from '../lib/client.ts';
 import { useMachineServers } from '../lib/machine-servers-store.ts';
@@ -45,12 +45,7 @@ export function ComponentMcpStatus({ client, name, usedByRuntimes, now = Date.no
         </button>
       </div>
     );
-  if (servers.kind === 'loading')
-    return (
-      <p className="m-0 text-meta text-muted" role="status" data-component-mcp-status="loading">
-        Reading where {name} stands…
-      </p>
-    );
+  if (servers.kind === 'loading') return <Loading kind="bar" label={`Reading where ${name} stands…`} />;
   const server = servers.inventory.servers.find(
     candidate => candidate.scope === 'component' && candidate.name === name,
   );

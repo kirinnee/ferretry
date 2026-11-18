@@ -21,6 +21,7 @@ import {
   ContextFailure,
   ContextFilterBar,
   ContextNote,
+  Loading,
   contextEmptyCopy,
   useContextRead,
 } from '@ferretry/app/ui';
@@ -143,7 +144,7 @@ function SkillsList({
     return (
       <ContextFailure machineName={MACHINE} what="read this ferret’s skills" reason={load.reason} onRetry={reload} />
     );
-  if (load.kind !== 'ready') return <ContextNote>Reading skills…</ContextNote>;
+  if (load.kind !== 'ready') return <Loading kind="page" label="Reading skills…" />;
 
   const inventory = load.value;
   const skills = sortedSkills(inventory.skills);

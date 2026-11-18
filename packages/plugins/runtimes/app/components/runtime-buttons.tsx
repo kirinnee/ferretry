@@ -23,6 +23,7 @@
  * "quota —" or "never checked", because on a phone chip those would be noise claiming nothing.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { UsageAccountView } from '@ferretry/plugin-usage/contract';
 import { Activity, Check } from 'lucide-react';
@@ -240,11 +241,7 @@ export function RuntimeButtons({
 
   if (offered === null) {
     if (slice.status !== 'error') {
-      return (
-        <p className="m-0 text-ui text-muted" role="status">
-          Reading this machine’s runtimes…
-        </p>
-      );
+      return <Loading kind="bar" label="Reading this machine’s runtimes…" />;
     }
     return (
       <div className="grid gap-xs">

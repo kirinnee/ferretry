@@ -11,7 +11,7 @@
 import type { OwnedCatalog, OwnedCatalogItem } from '../../../contract/wire/index.ts';
 import { CircleAlert, CircleCheck, FileDown, MoreHorizontal, PackagePlus, Share2, Star, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { cn } from '@ferretry/app/ui';
+import { cn, Loading } from '@ferretry/app/ui';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import { useDaemonClient } from '../../lib/client-context.tsx';
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '@ferretry/app/ui';
@@ -122,9 +122,7 @@ export function CatalogsSurface({
         <p className="m-0 text-cell text-muted">{CATALOGS_INTRO}</p>
       </header>
       {read.kind === 'loading' ? (
-        <p className="m-0 text-cell text-muted" role="status">
-          Reading catalogs…
-        </p>
+        <Loading kind="page" label="Reading catalogs…" />
       ) : read.kind === 'failed' ? (
         read.refusal.sharingOff ? (
           <SharingOffPanel connection={connection} createClient={createClient} />

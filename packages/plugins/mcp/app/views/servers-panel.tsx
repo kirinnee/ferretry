@@ -10,7 +10,14 @@
  * — where Catalogs draws "from Ines · v2", Share / Uninstall, and "Install from a file…".
  */
 import { daemonOfClient, PanelSlot } from '@ferretry/app';
-import { ContextFailure, ContextFilterBar, contextEmptyCopy, ContextNote, useContextRead } from '@ferretry/app/ui';
+import {
+  ContextFailure,
+  ContextFilterBar,
+  contextEmptyCopy,
+  ContextNote,
+  Loading,
+  useContextRead,
+} from '@ferretry/app/ui';
 import { Plus } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import {
@@ -81,7 +88,7 @@ export function McpServersPanel({
         onRetry={reload}
       />
     );
-  if (load.kind !== 'ready') return <ContextNote>Reading MCP servers…</ContextNote>;
+  if (load.kind !== 'ready') return <Loading kind="page" label="Reading MCP servers…" />;
 
   const nowMs = now();
   const inventory = load.value;

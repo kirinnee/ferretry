@@ -183,10 +183,10 @@ describe('the Sign-ins list', () => {
     });
     const inner = scripted({ [LIST]: loginList(login()) });
     const view = await mount(<SignInsTab client={{ call: async (...args) => (await gate, inner.call(...args)) }} />);
-    expect(text(view.container, '[data-logins-loading]')).toBe('Reading the logins on this machine…');
+    expect(text(view.container, '[data-loading="page"]')).toBe('Reading the logins on this machine…');
     release();
     await until(() => view.container.querySelector('[data-logins-tab]') !== null, 'the tab');
-    expect(view.container.querySelector('[data-logins-loading]')).toBeNull();
+    expect(view.container.querySelector('[data-loading="page"]')).toBeNull();
     await view.unmount();
   });
 

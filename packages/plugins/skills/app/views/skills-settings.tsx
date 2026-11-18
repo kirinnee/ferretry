@@ -5,7 +5,7 @@
  * It is the machine's inventory (`GET /v1/skills`, docs/skills-inventory.md), not one ferret's: a skill another one of the
  * same name hides (`shadowedBy`) is still listed here, because a person may open it on purpose.
  */
-import { Button, ContextFailure, ContextNote, useContextRead } from '@ferretry/app/ui';
+import { Button, ContextFailure, Loading, useContextRead } from '@ferretry/app/ui';
 import type { AppComponent, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useState } from 'react';
 import type { SkillEntry } from '../../contract/index.ts';
@@ -70,7 +70,7 @@ export function createSkillsSettings(client: Pick<PluginClient, 'call'>): AppCom
           onRetry={read.reload}
         />
       );
-    if (read.load.kind !== 'ready') return <ContextNote>Reading skills…</ContextNote>;
+    if (read.load.kind !== 'ready') return <Loading kind="page" label="Reading skills…" />;
     const inventory = read.load.value;
     return (
       <section className="flex min-w-0 flex-col gap-sm" aria-label="Skills" data-settings="skills">
