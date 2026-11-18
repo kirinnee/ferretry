@@ -1068,6 +1068,19 @@ describe('the session layer: pairing and modes', () => {
     expect(fx.device.seenHolders).toEqual([device.deviceId]);
   });
 
+  test('presence moves the idle clock over a direct session and a relayed one alike; an unmarked request never does', async () => {
+    for (const carrier of ['direct', 'relay']) {
+      const fx = await fixture();
+      const { client, device } = await serving(fx, carrier);
+      await client.send(req(1));
+      await client.pump();
+      expect(fx.device.seenHolders).toHaveLength(0);
+      await client.send(req(2, { presence: true }));
+      await client.pump();
+      expect(fx.device.seenHolders).toEqual([device.deviceId]);
+    }
+  });
+
   test('the lease ends a session 4441 unless the holder signs the renewal challenge', async () => {
     const fx = await fixture({ lease: { leaseMs: 60_000, renewLeadMs: 10_000, maxSessionMs: 600_000 } });
     const { client, device } = await serving(fx);
