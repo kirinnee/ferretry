@@ -55,8 +55,7 @@ export interface BrowserBarProps {
   readonly resetKey: string;
 }
 
-const popoverClass =
-  'absolute top-full z-50 mt-1 overflow-y-auto rounded-panel border border-border bg-surface p-2 shadow-popover';
+const popoverClass = 'kt-popover absolute top-full z-50 mt-1 overflow-y-auto p-2';
 
 export function BrowserBar({
   name,

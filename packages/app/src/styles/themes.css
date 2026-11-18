@@ -129,6 +129,21 @@
   --press-translate: 0px;
   --rail-active: inset 2px 0 0 var(--accent);
 
+  /* ---- menu roles: every dropdown, context menu, picker list and the Modes menu reads THESE ----
+     One surface, one edge, one shadow, and the row states a keyboard or a pointer reaches. The edge is the
+     control edge (>=3:1 against the page in every theme, >=7:1 in High Contrast), so a menu never melts into
+     the page whatever its shadow does. The hover wash is the page ink mixed into the menu surface, so it is
+     visible on a white menu and on a near-black one alike; a dark theme raises the surface (below). */
+  --menu-bg: var(--surface);
+  --menu-edge: var(--border-strong);
+  --menu-shadow: var(--shadow-popover);
+  --menu-radius: var(--radius-panel);
+  --menu-item-h: 34px;
+  --menu-item-hover: color-mix(in srgb, var(--fg) 8%, var(--menu-bg));
+  --menu-item-active: color-mix(in srgb, var(--accent) 16%, var(--menu-bg));
+  --menu-item-active-fg: var(--accent-strong);
+  --menu-sep: var(--border);
+
   /* ---- density ---- */
   --space-unit: 4px;
   --control-h-desktop: 28px;
@@ -393,6 +408,15 @@
   --step-seg-done: var(--accent);
   /* A paler step of the accent — still >=3:1, but plainly not "done". */
   --step-seg-now: #8486e2;
+}
+
+/* A dark theme raises its menus one step off the page (a black shadow is invisible on a near-black page, so the surface
+   and the edge carry the float). Equal to the family blocks' specificity and declared before them, and no family sets
+   `--menu-bg`, so every `<family>-dark` (and the legacy `dark`) gets it. */
+:root[data-theme$='-dark'],
+:root[data-theme='dark'],
+[data-swatch$='-dark'] {
+  --menu-bg: var(--surface-2);
 }
 
 /* ============================================================================
@@ -2296,7 +2320,12 @@
   --faint: var(--muted);
   --chrome-fg: var(--muted);
   --surface-3: color-mix(in srgb, var(--surface) 88%, var(--fg));
-  --border-strong: color-mix(in srgb, var(--fg) 50%, var(--surface));
+  /* 58%, not 50%: the control edge is held to >=3:1 against the PAGE (--bg), and 50% left Phosphor, Blueprint and
+     Broadsheet LIGHT at 2.7:1 (the test walks every theme). */
+  --border-strong: color-mix(in srgb, var(--fg) 58%, var(--surface));
+  /* The focus ring is the family's accent: without it these families inherited Studio LIGHT's #4f52d6 and their dark
+     modes drew a ring of 1.3-2.7:1 on the menu and on a checked row. */
+  --focus-color: var(--accent);
   --accent-strong: color-mix(in srgb, var(--accent) 78%, var(--fg));
   --code-bg: color-mix(in srgb, var(--surface) 92%, var(--fg));
   --code-border: var(--border);

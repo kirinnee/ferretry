@@ -177,7 +177,9 @@ describe('Runtime actions: the buttons', () => {
     expect(trigger.getAttribute('aria-expanded')).toBe('true');
     expect(items.get('rename')?.textContent).toBe('Rename');
     expect(items.get('remove')?.textContent).toBe('Remove');
-    expect(items.get('remove')?.className).toContain('text-err');
+    // The danger ink is the shared row's own `[data-danger]` rule (--menu-item-fg), not a `text-err` utility.
+    expect(items.get('remove')?.hasAttribute('data-danger')).toBe(true);
+    expect(items.get('rename')?.hasAttribute('data-danger')).toBe(false);
     expect(items.has('make-default')).toBe(false);
     expect(view.container.querySelector('[data-runtime-actions-refused]')).toBeNull();
   });
