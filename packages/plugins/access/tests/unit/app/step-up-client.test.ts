@@ -57,6 +57,36 @@ describe('the passkey routes', () => {
     should(view).eql({ passkeys: [passkey], registration: 'confirm-existing', stepUpUntil: INSTANT });
   });
 
+  it("should read a newer machine's passkey view, dropping a field this app does not know instead of refusing the read", async () => {
+    // Arrange: an older cached app, a newer daemon that adds a field to the view and to each passkey.
+    const passkey = { id: 'AQID', origin: ORIGIN, createdAt: INSTANT, label: 'new' };
+    const client = clientAnswering({
+      passkeys: [passkey],
+      registration: 'closed',
+      stepUpUntil: INSTANT,
+      somethingNewer: { nested: true },
+    });
+
+    // Act
+    const view = await fetchPasskeys(client);
+
+    // Assert: what it understands is kept, what it does not is gone, and nothing throws.
+    should(view).eql({
+      passkeys: [{ id: 'AQID', origin: ORIGIN, createdAt: INSTANT }],
+      registration: 'closed',
+      stepUpUntil: INSTANT,
+    });
+  });
+
+  it('should still refuse a view whose KNOWN fields are wrong, however tolerant it is of extras', async () => {
+    const client = clientAnswering({ passkeys: [], registration: 'open', somethingNewer: 1 });
+
+    await fetchPasskeys(client).then(
+      () => should.fail('', '', 'a bad registration posture must not be read'),
+      () => undefined,
+    );
+  });
+
   it('should ask for registration options with the app origin as a JSON POST', async () => {
     // Arrange
     const options = {

@@ -10,7 +10,7 @@
  * title or attribute, and never stored: it lives in the props for as long as the store holds the snapshot.
  */
 
-import { Button } from '@ferretry/app/ui';
+import { Button, ConfirmToSee } from '@ferretry/app/ui';
 import { ChevronDown, Copy, KeyRound, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { BrowserLoginSnapshot } from '../../lib/browser-login.ts';
@@ -69,11 +69,13 @@ export interface BrowserLoginBannerProps {
   readonly status: BrowserLoginSnapshot | null;
   /** Bound by the host to the one daemon whose window this is. `primed` is the person's own "I signed in". */
   readonly onClose: (primed: boolean) => Promise<BrowserLoginSnapshot>;
+  /** The person's "Confirm it's you to see the result": reads again, and the daemon may ask for the passkey. */
+  readonly onConfirm?: () => Promise<BrowserLoginSnapshot>;
   /** A frozen clock, for deterministic tests. */
   readonly now?: number;
 }
 
-export function BrowserLoginBanner({ status, onClose, now: fixedNow }: BrowserLoginBannerProps) {
+export function BrowserLoginBanner({ status, onClose, onConfirm, now: fixedNow }: BrowserLoginBannerProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [liveNow, setLiveNow] = useState(() => Date.now());
@@ -99,6 +101,28 @@ export function BrowserLoginBanner({ status, onClose, now: fixedNow }: BrowserLo
       setMenuOpen(false);
     }
   };
+
+  // The daemon wants the passkey before it shows the window: say what happened, offer the person's own press, and show
+  // nothing of the window until the daemon has said yes to it.
+  if (status.state === 'step-up-required') {
+    return (
+      <aside
+        role="status"
+        aria-live="polite"
+        data-tone="warn"
+        data-browser-login-step-up=""
+        className={`shrink-0 border-b px-panel py-1.5 text-ui ${LOGIN_TONE.warn}`}
+      >
+        <span className="flex min-w-0 items-start gap-xs">
+          <ShieldAlert size={15} aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span className="flex min-w-0 flex-col gap-2 break-words [overflow-wrap:anywhere]">
+            <span>Browser login window asked for · Confirm it’s you to see the result.</span>
+            {onConfirm === undefined ? null : <ConfirmToSee onConfirm={() => void onConfirm()} />}
+          </span>
+        </span>
+      </aside>
+    );
+  }
 
   if (status.state !== 'open') {
     const detail = status.state === 'unknown' || status.state === 'error' ? status.error : undefined;

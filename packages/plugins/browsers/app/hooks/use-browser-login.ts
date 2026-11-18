@@ -20,6 +20,8 @@ export interface BrowserLogin {
   readonly status: BrowserLoginSnapshot | null;
   /** Asks the daemon to open the window. Never rejects: a failure is an `unknown` snapshot. */
   readonly open: (() => Promise<BrowserLoginSnapshot>) | undefined;
+  /** The person's own "Confirm it's you to see the result": reads again, and the daemon may ask for the passkey. */
+  readonly confirm: (() => Promise<BrowserLoginSnapshot>) | undefined;
   /** The person's own close: `primed` is "I signed in". */
   readonly close: ((primed: boolean) => Promise<BrowserLoginSnapshot>) | undefined;
 }
@@ -41,10 +43,11 @@ export function useBrowserLogin(daemon: BrowserDaemon, store: DaemonBrowserLogin
   return useMemo(
     () =>
       store === undefined
-        ? { status, open: undefined, close: undefined }
+        ? { status, open: undefined, confirm: undefined, close: undefined }
         : {
             status,
             open: () => store.act(daemon, START),
+            confirm: () => store.confirm(daemon),
             close: primed => store.act(daemon, { action: 'stop', primed }),
           },
     [daemon, status, store],

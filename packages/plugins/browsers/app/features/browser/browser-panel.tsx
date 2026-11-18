@@ -93,6 +93,7 @@ export function BrowserPanel({ daemon, sessionId, dependencies, loginStore, inte
         loginStatus={login.status}
         {...(login.open === undefined ? {} : { onOpenLoginWindow: login.open })}
         {...(login.close === undefined ? {} : { onCloseLoginWindow: login.close })}
+        {...(login.confirm === undefined ? {} : { onConfirmLoginWindow: login.confirm })}
       />
       {control.failure === null ? null : (
         <p role="status" className="m-0 px-panel py-1 text-meta text-err" data-browser-control-failure="">
