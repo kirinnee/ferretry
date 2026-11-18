@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { STEP_UP_REFUSAL_CODE } from '@ferretry/app/ui';
 import type { Instant } from '@ferretry/std';
 import type { SpeedupStatus, SpeedupsView, SpeedupTestResult } from '../../../../contract/index.ts';
 import type { ReactTestInstance } from 'react-test-renderer';
@@ -14,7 +15,7 @@ import {
   speedupsSettingsTab,
   withTestResult,
 } from '../../../../app/features/speedups/speedups-surface.tsx';
-import { daemonConnection } from '../../../../app/shell-voice.ts';
+import { apiClientOver, daemonConnection } from '../../../../app/shell-voice.ts';
 import { mount, must, submit, typeInto } from '../../../support/app/dom.ts';
 import { render, run, runAsync } from '../../../support/app/react.ts';
 import { configChangeHarness } from '../config-change-support.tsx';
@@ -92,6 +93,42 @@ describe('speed-ups api', () => {
       ['/v1/speedups', 'GET', undefined, undefined],
       ['/v1/speedups/cerebras/test', 'POST', undefined, 15_000],
     ]);
+  });
+});
+
+describe('speed-ups read mode', () => {
+  const inits = async (read: boolean | 'pressed' | 'quiet' | undefined) => {
+    const seen: unknown[] = [];
+    const client = {
+      request: async (_path: string, schema: { parse: (value: unknown) => unknown }, init?: unknown) => {
+        seen.push(init);
+        return schema.parse(view());
+      },
+    } as never;
+    await (read === undefined ? readSpeedups(client) : readSpeedups(client, read));
+    return seen;
+  };
+
+  it('asks for no step-up on a read the page makes on its own, and may on one the person pressed for', async () => {
+    expect(await inits('quiet')).toEqual([{ quiet: true }]);
+    expect(await inits('pressed')).toEqual([{ pressed: true }]);
+    expect(await inits(true)).toEqual([{ pressed: true }]);
+    expect(await inits(undefined)).toEqual([undefined]);
+  });
+
+  it('carries the mode to the plugin client as the call’s own quiet flag', async () => {
+    const seen: unknown[] = [];
+    const plugin = {
+      call: async (_route: string, init?: unknown) => {
+        seen.push(init);
+        return view();
+      },
+    } as never;
+    const client = apiClientOver(plugin);
+    await readSpeedups(client, 'quiet');
+    await readSpeedups(client, 'pressed');
+    await readSpeedups(client);
+    expect(seen).toEqual([{ quiet: true }, { quiet: false }, {}]);
   });
 });
 
@@ -332,6 +369,31 @@ function surfaceClient(
 }
 
 describe('SpeedupsSurface', () => {
+  it('reads on mount quietly, and asks again only after the person presses "Confirm it\'s you to see this"', async () => {
+    // Arrange
+    const reads: unknown[] = [];
+    const refused = Object.assign(new Error('step-up required'), { status: 403, code: STEP_UP_REFUSAL_CODE });
+    const client = {
+      request: async (_path: string, _schema: unknown, init?: { pressed?: boolean; quiet?: boolean }) => {
+        reads.push(init);
+        throw refused;
+      },
+    } as never;
+    const renderer = render(<SpeedupsSurface connection={connection('a')} createClient={async () => client} />);
+    await runAsync(async () => undefined);
+
+    // Assert: the mount read is quiet, and the refusal is the panel's own locked state, not a pop-up.
+    expect(reads).toEqual([{ quiet: true }]);
+    expect(text(renderer.toJSON())).toContain('wants your passkey');
+
+    // Act: the person presses
+    const confirm = renderer.root.find(node => node.type === 'button');
+    await runAsync(async () => confirm.props.onClick());
+
+    // Assert
+    expect(reads).toEqual([{ quiet: true }, { pressed: true }]);
+  });
+
   it('shows a reading state before the first answer', () => {
     const renderer = render(
       <SpeedupsSurface connection={connection('a')} createClient={async () => await new Promise(() => undefined)} />,

@@ -314,7 +314,8 @@ export function SpeedupsSurface({
     setErrors({});
     void createClient(connection)
       .then(async next => {
-        const view = await readSpeedups(next, reads > 0);
+        // Quiet unless the person pressed "Confirm it's you": a mount read must not open a prompt nobody asked for.
+        const view = await readSpeedups(next, reads > 0 ? 'pressed' : 'quiet');
         if (!current) return;
         setClient(next);
         setLoaded({ daemonId: connection.daemonId, view });
@@ -335,7 +336,7 @@ export function SpeedupsSurface({
   // A key saved, removed or tested from anywhere else, or a tool installed, is read again in place.
   useConfigChangeEffect(connection.daemonId, ['speedups'], () => {
     if (client === null) return;
-    void readSpeedups(client)
+    void readSpeedups(client, 'quiet')
       .then(view => setLoaded(current => (current?.daemonId === connection.daemonId ? { ...current, view } : current)))
       .catch(() => undefined);
   });

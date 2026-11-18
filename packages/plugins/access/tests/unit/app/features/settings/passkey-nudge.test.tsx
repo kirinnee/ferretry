@@ -84,6 +84,24 @@ describe('PasskeyNudge', () => {
     run(() => nudge.unmount());
   });
 
+  it('reads quietly: a nudge nobody asked for must not open a "Confirm it\'s you" prompt', async () => {
+    // Arrange
+    const inits: unknown[] = [];
+    const client = {
+      request: async (_path: string, _schema: unknown, init?: unknown) => {
+        inits.push(init);
+        return view();
+      },
+    } as unknown as StepUpClient;
+
+    // Act
+    const nudge = await mountNudge(async () => client, memory());
+
+    // Assert
+    should(inits).eql([{ method: 'GET', quiet: true }]);
+    run(() => nudge.unmount());
+  });
+
   it('says how many minutes the window has left, rounded up, and nothing of the kind when the machine named no end', async () => {
     // Arrange
     const now = () => Date.parse('2026-11-17T10:00:00.000Z');

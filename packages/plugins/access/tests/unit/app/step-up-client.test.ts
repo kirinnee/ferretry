@@ -57,6 +57,17 @@ describe('the passkey routes', () => {
     should(view).eql({ passkeys: [passkey], registration: 'confirm-existing', stepUpUntil: INSTANT });
   });
 
+  it('should read quietly when the page does it on its own, so a step-up the machine wants asks nobody', async () => {
+    // Arrange
+    const client = clientAnswering({ passkeys: [], registration: 'first-window' });
+
+    // Act
+    await fetchPasskeys(client, 'quiet');
+
+    // Assert
+    should(client.calls[0]?.init).eql({ method: 'GET', quiet: true });
+  });
+
   it("should read a newer machine's passkey view, dropping a field this app does not know instead of refusing the read", async () => {
     // Arrange: an older cached app, a newer daemon that adds a field to the view and to each passkey.
     const passkey = { id: 'AQID', origin: ORIGIN, createdAt: INSTANT, label: 'new' };

@@ -4,7 +4,8 @@ import { CAPABILITY_NAMES } from '@ferretry/core-gate/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import app from '../../../app/index.ts';
 import { connectionRecord } from '../../../app/daemon-scope.tsx';
-import { grantsTab, securityLogTab, securityTab } from '../../../app/surfaces.tsx';
+import { RouterProvider } from '@ferretry/app/testing';
+import { grantsTab, securityLogTab, securityTab, unlockPanel } from '../../../app/surfaces.tsx';
 import manifest from '../../../manifest.ts';
 import { interact, mount } from '../../support/app/dom.ts';
 import { settleUntil } from '../../support/app/settle.ts';
@@ -100,6 +101,32 @@ describe('Access’s settings tabs beside Devices', () => {
       runAsync,
     );
     expect(shown.container.textContent).toContain('This device has no passkey for this machine yet.');
+    await shown.unmount();
+  });
+
+  it('the unlock panel draws the passkey nudge from this machine’s own client, read quietly, and opens Security', async () => {
+    const { client, calls } = clientOf({ 'GET /v1/passkeys': { passkeys: [], registration: 'first-window' } });
+    const Panel = unlockPanel(client, useAlpha);
+    const shown = await mount(
+      <RouterProvider>
+        <Panel />
+      </RouterProvider>,
+    );
+    await settleUntil(() => shown.container.querySelector('[data-passkey-nudge]') !== null, 'the nudge', runAsync);
+    expect(calls).toEqual([{ route: 'GET /v1/passkeys', init: { params: {}, quiet: true } }]);
+    const open = shown.container.querySelector('[data-passkey-nudge-open]') as HTMLElement;
+    await interact(async () => open.click());
+    expect(window.location.pathname).toBe('/d/daemon-alpha/settings/access/security');
+    await shown.unmount();
+  });
+
+  it('the unlock panel draws nothing outside a machine’s view', async () => {
+    const { client, calls } = clientOf({});
+    const Panel = unlockPanel(client, useNone);
+    const shown = await mount(<Panel />);
+    await interact(async () => {});
+    expect(shown.container.innerHTML).toBe('');
+    expect(calls).toEqual([]);
     await shown.unmount();
   });
 

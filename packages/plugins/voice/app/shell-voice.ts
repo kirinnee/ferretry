@@ -134,7 +134,7 @@ async function callPath(
   method: string,
   path: string,
   body?: unknown,
-  pressed = false,
+  read: 'pressed' | 'quiet' | 'default' = 'default',
 ): Promise<unknown> {
   const [pathname = path, search = ''] = path.split('?');
   const query = Object.fromEntries(new URLSearchParams(search));
@@ -149,8 +149,9 @@ async function callPath(
       ...(route.names.length === 0 ? {} : { params }),
       ...(Object.keys(query).length === 0 ? {} : { query }),
       ...(body === undefined ? {} : { body }),
-      // A read the owner pressed for (a retry after a cancelled passkey prompt) is theirs, so it may ask again.
-      ...(pressed ? { quiet: false } : {}),
+      // A read the owner pressed for (a retry after a cancelled passkey prompt) is theirs, so it may ask again; a read
+      // the page makes on its own (a panel mounting) is quiet: a step-up it meets asks nobody and is the panel's answer.
+      ...(read === 'pressed' ? { quiet: false } : read === 'quiet' ? { quiet: true } : {}),
     });
   }
   throw new Error(`no route of this plugin answers ${method} ${path}`);
@@ -223,6 +224,8 @@ export interface IFyApiClient {
       readonly body?: string;
       /** The owner pressed for this read (a retry after a cancelled passkey prompt): it may ask for the step-up again. */
       readonly pressed?: boolean;
+      /** The page reads this on its own (a panel mounting): a step-up the machine wants asks nobody. */
+      readonly quiet?: boolean;
     },
     timeoutMs?: number,
   ): Promise<T>;
@@ -256,7 +259,13 @@ export function apiClientOver(client: VoicePluginClient): IFyApiClient {
           ([name]) => name.toLowerCase() === CONFIG_IF_MATCH_HEADER,
         )?.[1];
         const body = etag === undefined ? parsed : { ...(parsed as object), etag };
-        const call = callPath(client, (init?.method ?? 'GET').toUpperCase(), path, body, init?.pressed === true);
+        const call = callPath(
+          client,
+          (init?.method ?? 'GET').toUpperCase(),
+          path,
+          body,
+          init?.pressed === true ? 'pressed' : init?.quiet === true ? 'quiet' : 'default',
+        );
         return schema.parse(await (timeoutMs === undefined ? call : within(call, timeoutMs)));
       } catch (error) {
         if (isCallRefusal(error)) throw new FyHttpError(error.status, error.code, error.message);

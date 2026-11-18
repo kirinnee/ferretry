@@ -171,16 +171,3 @@ export type UnlockGranted = z.infer<typeof UnlockGrantedSchema>;
 
 /** Every core audit kind by name (today's `AuditEvent`). */
 export type AuditEvent = AuditKindName;
-
-/**
- * The machine a settings tab or panel is about. STAND-IN until packages/app's app-half connect interface lands (the
- * lead names it): there is no store here to pick a machine from, so nothing is rendered rather than a guess.
- */
-export function useSelectedDaemon(_subject?: string): DaemonConnection | undefined {
-  return undefined;
-}
-
-/** Opens Settings › ‹machine› › Security. STAND-IN: the router is the shell's. */
-export function useOpenSecurity(): () => void {
-  return useCallback(() => undefined, []);
-}
