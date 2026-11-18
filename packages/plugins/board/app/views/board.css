@@ -909,6 +909,36 @@
     height: 36px;
   }
 }
+/* A FINGER STILL GETS 44px on the board's compact chrome: the view switch, the filter and count pills and the lane tabs keep their
+   small boxes (the compact board is the point) with an invisible 44px hit area laid over each, so a tap on one never lands on the
+   row above or below. The same move the receipt marks and the model chip make. */
+@media (pointer: coarse) {
+  .fy-board-card__main {
+    min-height: var(--target-floor, 44px);
+  }
+}
+@media (pointer: coarse) {
+  .fy-board__view,
+  .fy-board-filters__toggle,
+  .fy-board-count,
+  .fy-board-counts__closed,
+  .fy-board-phone__chip {
+    position: relative;
+  }
+  .fy-board__view::after,
+  .fy-board-filters__toggle::after,
+  .fy-board-count::after,
+  .fy-board-counts__closed::after,
+  .fy-board-phone__chip::after {
+    content: '';
+    height: var(--target-floor, 44px);
+    left: 50%;
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: max(100%, var(--target-floor, 44px));
+  }
+}
 .fy-board-lane[data-density='side'] {
   width: 100%;
   min-width: 0;

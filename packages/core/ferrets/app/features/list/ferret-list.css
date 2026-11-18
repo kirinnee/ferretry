@@ -107,6 +107,7 @@
 }
 .fy-sbar__project {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: var(--gap-sm);
   margin: 0;
@@ -395,6 +396,32 @@
   }
   .fy-sbar__session[data-sbar-branch] {
     padding-right: var(--target-floor, 44px);
+  }
+  /* THE TRAILING BUTTONS SIT BESIDE THE TITLE, NEVER OVER IT. Each one the row draws (the chevron, the pin, the ⋯) takes
+     one 44px slot from the right edge, in that order from the left, and the title keeps clear of all of them: a long
+     title ends in its own ellipsis before the pin, and the ⋯ is no longer hidden under the text. */
+  .fy-sbar__row {
+    --sbar-more: 0;
+    --sbar-pin: 0;
+    --sbar-branch: 0;
+  }
+  .fy-sbar__row:has(> .fy-sbar__more) {
+    --sbar-more: 1;
+  }
+  .fy-sbar__row:has(> .fy-sbar__pin) {
+    --sbar-pin: 1;
+  }
+  .fy-sbar__row:has(> .fy-sbar__branch) {
+    --sbar-branch: 1;
+  }
+  .fy-sbar__row > .fy-sbar__session {
+    padding-right: calc(var(--target-floor, 44px) * (var(--sbar-more) + var(--sbar-pin) + var(--sbar-branch)) + 4px);
+  }
+  .fy-sbar__row > .fy-sbar__pin {
+    right: calc(var(--target-floor, 44px) * var(--sbar-more));
+  }
+  .fy-sbar__row > .fy-sbar__branch {
+    right: calc(var(--target-floor, 44px) * (var(--sbar-more) + var(--sbar-pin)));
   }
 }
 /* DENSITY (the device's `density`): full is the list as drawn above. Compact drops the folder and the marks (the title,

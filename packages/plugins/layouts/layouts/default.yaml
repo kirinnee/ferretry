@@ -24,4 +24,4 @@ panels:
       insights,
     ]
 density: comfortable
-phone: { nav: { side: bottom, items: [ferrets, agenda, board] } }
+phone: { nav: { side: bottom, items: [ferrets, agenda, board, projects, insights, settings] } }

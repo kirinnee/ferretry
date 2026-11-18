@@ -7,4 +7,4 @@ composer.tools: [attachments, dictation, runtime-picker, composer-quota]
 panels:
   ferret.side: [queue]
 density: compact
-phone: { nav: { side: bottom, items: [ferrets, agenda, board] } }
+phone: { nav: { side: bottom, items: [ferrets, agenda, board, projects, insights, settings] } }

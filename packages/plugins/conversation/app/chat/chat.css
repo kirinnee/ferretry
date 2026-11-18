@@ -1974,9 +1974,21 @@ button.fy-receipt {
   padding: 0 4px;
   position: relative;
 }
-/* The status line has the room the row does not: the name shows on a phone too (the picker hides it below `sm` for a row). */
+/* The status line has the room the row does not: the name shows on a phone too (the picker hides it below `sm` for a row).
+   It is a block the line can cut short (an inline span ignores `overflow`), so a long readout — model, effort, fast — ends in
+   an ellipsis instead of pushing the context ring and quota off a 390px screen. */
 .fy-composer-actions .fy-runtime-chip.kt-btn > span {
-  display: inline;
+  display: inline-block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* THE PICKER GIVES WAY FIRST. It is `shrink-0` in the row (an icon that must stay), but on the status line it is the one
+   item allowed to shrink: the ring and the quota keep their size and the model name is what gets cut. */
+.fy-composer-actions .fy-runtime-picker {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .fy-composer-actions .fy-runtime-chip.kt-btn::after {
   content: '';

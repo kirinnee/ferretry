@@ -114,6 +114,23 @@
   font-size: var(--text-sm, 14px);
 }
 
+/* A panel that drew nothing (its owner is off, or has nothing to say for this ferret) is no row: it keeps no padding and no hairline,
+   so a run of them is not a stack of empty lines under Info. */
+.fy-modes [data-modes-body] .fy-panel:not(:has(*)),
+.fy-modes__sheet .fy-panel:not(:has(*)) {
+  display: none;
+}
+/* ON A PHONE SHEET a row whose state is a sentence ("no stuck messages") puts it UNDER the name instead of squeezing the name into
+   two lines beside it: the row wraps when the two do not fit one line. */
+.fy-modes__sheet .fy-panel .kt-btn {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+.fy-modes__sheet .fy-panel .kt-btn > span:last-child:not(:first-of-type) {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
 /* The menu's two parts: this ferret's own rows (Info, Actions), then the modes. */
 .fy-modes__section + .fy-modes__section {
   margin-top: 8px;
