@@ -135,6 +135,7 @@ import {
   type AccessLeasePolicy,
 } from './limits.ts';
 import { createIdentitySigner, signerFor } from './signer.ts';
+import * as refusal from './refusal-note.ts';
 
 /** The kernel's route table, as the one function a session's request needs from it. */
 export type SessionDispatch = (request: ApiRequest) => Promise<ApiResponse>;
@@ -400,6 +401,7 @@ class SealedSession implements CarrierLink {
   }
 
   refuseAtOpen(code: number, reason: string): void {
+    refusal.atOpen(this.deps.log, this.carrier, code, reason);
     this.layer.lastRefusal = `session ${code}: ${reason}`;
     this.#phase = 'concluding';
     this.#end = { code, reason };
@@ -732,7 +734,9 @@ class SealedSession implements CarrierLink {
       kind === 'none' ||
       kind === undefined
     ) {
-      this.#refuseHolder(modeKey);
+      // Each way in is told the peer as ONE sentence; the daemon's own log says which door was shut.
+      const why = refusal.whyHolder(modeKey, { mode, kind, holder, transcript });
+      this.#refuseHolder(modeKey, why, refusal.claimedHolder(proof));
       return false;
     }
     const sessionId = transcriptKey(transcript) as SessionId;
@@ -766,7 +770,7 @@ class SealedSession implements CarrierLink {
       return false;
     }
     if (release === undefined) {
-      this.#refuseHolder(modeKey);
+      this.#refuseHolder(modeKey, `the ${modeKey} mode could not watch this holder`, holder.holder);
       return false;
     }
     this.#release = release;
@@ -782,7 +786,8 @@ class SealedSession implements CarrierLink {
     return true;
   }
 
-  #refuseHolder(modeKey: 'device' | 'member'): void {
+  #refuseHolder(modeKey: 'device' | 'member', why: string, claimed?: string): void {
+    refusal.refused(this.deps.log, this.carrier, why, claimed);
     this.layer.lastRefusal = `a client presented a ${modeKey} this daemon does not accept`;
     this.#endSession(SESSION_CLOSE_CODES.authRejected, 'unknown device credential');
   }
@@ -853,6 +858,7 @@ class SealedSession implements CarrierLink {
       (await verifyDeviceProof(this.deps.crypto, holder.key, signature, message));
     if (!this.#live()) return;
     if (!verified) {
+      refusal.renewalUnsigned(this.deps.log, this.carrier, standing.principal.holder);
       this.#endSession(SESSION_CLOSE_CODES.authRejected, 'unknown device credential');
       return;
     }

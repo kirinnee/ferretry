@@ -224,3 +224,16 @@ per machine, not an instant, so a skewed browser clock cannot hide a device. On 
 never looked, every device paired more than a day before the newest one — by the daemon's own
 `createdAt` values — counts as seen; a recent pairing is still announced. The device list carries
 `pairedOver` (`direct` or `relay`) for devices paired since it was added.
+
+## Refusals are also said in `logs/fyd.log`
+
+A call the daemon refuses before its handler runs (admission said no, was missing, or threw; a member asked for
+the main table) and a session it turns away (an unknown or revoked device, a signature that did not verify, a
+mode that is off) are each one `warn` line, so "the app says it could not read the plugin list" is never the
+only evidence. The line carries the route's **declared template** (`GET /v1/plugins`, never the caller's own
+path), the status, the machine code and the sentence the caller was given, and **who**: a proved device's id (an
+id, not a name) or only the KIND of credential presented. It never carries a token, a digest, a key, a body, a
+query or a session id, and when the sentence the caller was given embeds its own path the log says the template
+instead. Every line carries its time (`at`). The same line for the same caller is said once a minute (`suppressed: N` says how many
+were held back), so a page that retries cannot fill the log. This is the log, not the audit record: it is
+bounded by the log's own rotation and is not the place to count activity.

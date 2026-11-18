@@ -156,6 +156,7 @@ import { composePrivateFiles, privacyRefusals } from '../manifest/privacy.ts';
 import { ensureInternalRootBases, ensureWorktreesBase, ownFolderSpellings, rootsPortFor } from './roots.ts';
 import { NO_PROCESS_TABLE, type ProcessTable, processesPortFor } from './processes.ts';
 import { PinRegistry } from './pins.ts';
+import { dedupedWarnings, describeRefusal, type RefusalNote } from './refusal-log.ts';
 import { FsError, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
 import type { PathsPort, ScratchPort } from '../contract/ports.ts';
 
@@ -1459,11 +1460,19 @@ async function bootLocked(
       tools.set(`${manifest.id}/${decl.name}`, { decl, owner, ...(handle === undefined ? {} : { handle }) });
     }
   }
+  // A call the daemon refuses is said ONCE a minute per identical line, with its reason: the app's own words for a
+  // refused device were "could not be read" and the log was silent, so nobody could say which check had said no.
+  const warnings = dedupedWarnings(log, () => clock.nowMs());
+  const refusalLog = warnings.child('refusals');
   const bindings = {
     admission: () => bound.admission,
     outputGuard: () => bound.outputGuard,
     version: options.version,
     build: bootBuild(options.version, options.build),
+    refused: (note: RefusalNote) => {
+      const line = describeRefusal(note);
+      refusalLog.warn(line.message, line.fields);
+    },
     ...(adapters.compressor === undefined ? {} : { compressor: adapters.compressor }),
   };
   const dispatcher = new Dispatcher(bindings, { routes, sockets, memberRoutes });
@@ -1539,7 +1548,7 @@ async function bootLocked(
     },
     clock,
     lease: (options.timings ?? DEFAULT_DAEMON_TIMINGS).lease,
-    log: log.child('session'),
+    log: warnings.child('session'),
   });
   own(() => sessionLayer.close());
   // The bound admission may tell the host its policy moved (`watch`): every open stream is re-asked at once. The

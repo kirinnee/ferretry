@@ -35,6 +35,7 @@ import {
   unknownRouteResponse,
   withVersion,
 } from './responses.ts';
+import type { RefusalNote } from './refusal-log.ts';
 import { orderRoutesBySpecificity, Router } from './router.ts';
 
 /** How one plugin is serving right now. Read on every call, so a failure or damage after mount is honoured. */
@@ -75,6 +76,11 @@ export interface DispatchBindings {
   readonly build?: string;
   /** Gzips an opted-in answer (`compress: true`); absent, every answer is plain. */
   readonly compressor?: ResponseCompressor;
+  /**
+   * Told of every call refused before its handler ran (admission said no, was missing or threw, a member asked for
+   * the main table). The host turns it into one `warn` line; a throw here never changes the answer.
+   */
+  readonly refused?: (note: RefusalNote) => void;
 }
 
 /**
@@ -98,25 +104,48 @@ const servableWithoutAdmission = (descriptor: ScopedRoute): boolean =>
 /** The withheld answer `late` chooses when a hold began after the body was built (§7.3). */
 const withheld = (): PlainApiResponse => errorResponse(409, WITHHELD_SENTENCE, 'withheld');
 
+/** Says one refused call to the host's refusal log, if it listens. Never throws: the refusal is already decided. */
+function noteRefusal(
+  bindings: DispatchBindings,
+  table: RefusalNote['table'],
+  route: string | undefined,
+  request: ApiRequest,
+  response: ApiResponse,
+): void {
+  try {
+    bindings.refused?.({ table, method: request.method, route, request, response });
+  } catch {
+    // The log is the host's; the answer stands.
+  }
+}
+
 function admit(
   bindings: DispatchBindings,
   table: 'route' | 'socket' | 'tool',
   descriptor: ScopedRoute,
   request: ApiRequest,
   params: ReadonlyMap<string, string>,
+  /** The route as the log names it: the declared template, or `null` for a path no route claims (never the caller's text). */
+  route: string | null = descriptor.path,
 ): AdmissionDecision {
+  const named = route ?? undefined;
+  const refuse = (response: PlainApiResponse): AdmissionDecision => {
+    noteRefusal(bindings, table, named, request, response);
+    return { outcome: 'refused', response };
+  };
   const admission = bindings.admission();
   if (admission === undefined) {
     return servableWithoutAdmission(descriptor)
       ? { outcome: 'admitted', standing: {}, actor: DEFAULT_ACTOR }
-      : { outcome: 'refused', response: ADMISSION_UNAVAILABLE() };
+      : refuse(ADMISSION_UNAVAILABLE());
   }
   try {
     const decision = admission.admit({ table, descriptor, request, params });
-    if (decision === undefined || decision === null) return { outcome: 'refused', response: ADMISSION_UNAVAILABLE() };
+    if (decision === undefined || decision === null) return refuse(ADMISSION_UNAVAILABLE());
+    if (decision.outcome === 'refused') noteRefusal(bindings, table, named, request, decision.response);
     return decision;
   } catch {
-    return { outcome: 'refused', response: ADMISSION_UNAVAILABLE() };
+    return refuse(ADMISSION_UNAVAILABLE());
   }
 }
 
@@ -244,6 +273,7 @@ export class Dispatcher {
         { ...UNROUTED, method: request.method, path: request.path },
         request,
         new Map(),
+        null,
       );
       if (decision.outcome === 'refused') return withVersion(decision.response, this.bindings.version);
       return withVersion(
@@ -334,20 +364,24 @@ export class Dispatcher {
     const request = this.stamped(incoming);
     const found = this.members.lookup(request.method, request.path);
     const admission = this.bindings.admission();
-    if (found.kind !== 'matched' || admission === undefined)
-      return withVersion(
+    if (found.kind !== 'matched' || admission === undefined) {
+      const response =
         found.kind === 'matched'
           ? ADMISSION_UNAVAILABLE()
-          : errorResponse(403, 'A member session reaches only the shared catalog routes.', 'member_only'),
-        this.bindings.version,
-      );
+          : errorResponse(403, 'A member session reaches only the shared catalog routes.', 'member_only');
+      noteRefusal(this.bindings, 'member', found.kind === 'matched' ? found.route.path : undefined, request, response);
+      return withVersion(response, this.bindings.version);
+    }
     let decision: AdmissionDecision<object>;
     try {
       decision = admission.admitMember({ table: 'member', descriptor: found.route, request, params: found.params });
     } catch {
       decision = { outcome: 'refused', response: ADMISSION_UNAVAILABLE() };
     }
-    if (decision.outcome === 'refused') return withVersion(decision.response, this.bindings.version);
+    if (decision.outcome === 'refused') {
+      noteRefusal(this.bindings, 'member', found.route.path, request, decision.response);
+      return withVersion(decision.response, this.bindings.version);
+    }
     const refusal = notServing(found.route.owner);
     const handle = found.route.handle;
     if (refusal !== undefined || handle === undefined)

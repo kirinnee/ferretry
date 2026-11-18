@@ -28,7 +28,7 @@ describe('wholeDaemonWhy: the same full-screen sentence, told apart', () => {
       'this app speaks protocol 1, this daemon speaks protocol 2',
     );
     expect(wholeDaemonWhy(parseInventory({ nope: true }), compiled)).toBe(
-      'the plugin list this daemon sent could not be read',
+      'the plugin list this daemon sent could not be read (the answer was an object with no protocol number)',
     );
   });
 
@@ -37,14 +37,20 @@ describe('wholeDaemonWhy: the same full-screen sentence, told apart', () => {
     expect(wholeDaemonWhy(inventory, compiled)).toBe('Relay only — there is no relay for this machine right now');
   });
 
-  test('the cause is one capped line, and an error with no words says nothing more than an unreadable answer', () => {
+  test('the cause is one capped line, and an error with no words still says it failed on the way, with its kind', () => {
     const long = unreadableBecause(new Error(`a\n  b ${'x'.repeat(1000)}`));
     expect(long.kind === 'unreadable' ? long.cause?.length : 0).toBe(240);
     expect(long.kind === 'unreadable' ? long.cause?.startsWith('a b x') : false).toBe(true);
-    expect(unreadableBecause(new Error('  '))).toEqual({ kind: 'unreadable' });
-    expect(unreadableBecause('not an error')).toEqual({ kind: 'unreadable' });
+    expect(unreadableBecause(new Error('  '))).toEqual({
+      kind: 'unreadable',
+      cause: 'the read failed before an answer came (Error)',
+    });
+    expect(unreadableBecause('not an error')).toEqual({
+      kind: 'unreadable',
+      cause: 'the read failed before an answer came (string)',
+    });
     expect(wholeDaemonWhy(unreadableBecause(undefined), compiled)).toBe(
-      'the plugin list this daemon sent could not be read',
+      'the read failed before an answer came (undefined)',
     );
   });
 

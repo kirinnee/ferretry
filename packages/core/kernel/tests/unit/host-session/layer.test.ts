@@ -1024,6 +1024,29 @@ describe('the session layer: pairing and modes', () => {
     expect(off.end).toEqual({ code: 4403, reason: 'unknown device credential' });
   });
 
+  test('the peer is told one sentence, but the daemon logs WHICH door shut, at warn, naming the claimed device id and never a key', async () => {
+    const fx = await fixture();
+    const device = await pairedDevice(fx.device);
+    fx.device.keys.delete(device.deviceId);
+    const unknown = TestClient.open(fx);
+    await unknown.handshake(fx.daemonId);
+    await unknown.auth(device);
+    const fresh = await pairedDevice(fx.device, 'B');
+    fx.modesOff.add('device');
+    const off = TestClient.open(fx);
+    await off.handshake(fx.daemonId);
+    await off.auth(fresh);
+    const refusals = fx.logged.filter(
+      line => line.level === 'warn' && line.message.startsWith('a session was refused'),
+    );
+    expect(refusals.map(line => line.message)).toEqual([
+      'a session was refused: no device holder answers for this credential (unknown, revoked, or idle too long)',
+      'a session was refused: the device mode is off or answers for no holder',
+    ]);
+    expect(refusals.map(line => line.fields?.['holder'])).toEqual([device.deviceId, fresh.deviceId]);
+    expect(JSON.stringify(refusals)).not.toContain('publicKey');
+  });
+
   test('a revocation the mode reports ends the session with the same 4403, and endMode ends every session of a mode', async () => {
     const fx = await fixture();
     const first = await serving(fx);
