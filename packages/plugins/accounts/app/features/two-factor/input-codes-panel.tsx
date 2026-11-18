@@ -14,10 +14,12 @@
  */
 
 import { readInputCardCodesSlotProps } from '@ferretry/core-vault/contract';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AccountList, TwoFactorStageId } from '../../../contract/routes/index.ts';
 import { codesAccounts, startingAccount } from '../../lib/automatic-codes.ts';
+import { isStepUpRefusal } from '../../lib/step-up-refusal.ts';
 import { type AccountsClient, readAccounts } from '../accounts/accounts-api.ts';
+import { ConfirmToSee } from '../confirm-to-see.tsx';
 import { AutomaticCodesPanel } from './automatic-codes.tsx';
 
 export interface InputCodesPanelProps {
@@ -35,29 +37,50 @@ export function InputCodesPanel({ client, slot, addKey }: InputCodesPanelProps) 
   const [list, setList] = useState<AccountList | undefined>(undefined);
   // A saved key changes how many keys an account holds: the accounts are read again, the panel stays where it is.
   const [reads, setReads] = useState(0);
+  /** The daemon wants the owner's step-up to list the accounts; the quiet read did not ask for it. */
+  const [locked, setLocked] = useState(false);
+  const [presses, setPresses] = useState(0);
+  /** Set by the owner's press on "Confirm it's you": the next read is theirs, so it may ask for the passkey. */
+  const pressed = useRef(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` is the re-read trigger (a saved key); the effect does not read it
   useEffect(() => {
     if (requestId === undefined) return;
     let current = true;
-    void readAccounts(client).then(
+    setLocked(false);
+    // Mounting under a card is the page's own work, not the owner acting: the read is quiet unless they pressed for it.
+    const quiet = !pressed.current;
+    pressed.current = false;
+    void readAccounts(client, { quiet }).then(
       read => {
         if (current) setList(read);
       },
-      () => {
-        if (current) setList(undefined);
+      (cause: unknown) => {
+        if (!current) return;
+        setList(undefined);
+        if (isStepUpRefusal(cause)) setLocked(true);
       },
     );
     return () => {
       current = false;
     };
-  }, [client, requestId, reads]);
+  }, [client, requestId, reads, presses]);
 
   const saved = props?.saved;
   const accounts = useMemo(() => (list === undefined ? [] : codesAccounts(saved, list)), [list, saved]);
   const initial = useMemo(() => startingAccount(saved, accounts), [saved, accounts]);
 
-  if (props === undefined || addKey === undefined || accounts.length === 0) return null;
+  if (props === undefined || addKey === undefined) return null;
+  if (locked)
+    return (
+      <ConfirmToSee
+        onConfirm={() => {
+          pressed.current = true;
+          setPresses(count => count + 1);
+        }}
+      />
+    );
+  if (accounts.length === 0) return null;
   const { refresh } = props;
   return (
     <AutomaticCodesPanel

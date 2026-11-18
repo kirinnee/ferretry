@@ -16,11 +16,13 @@
 
 import { isInputSettledSlotProps } from '@ferretry/core-vault/contract';
 import type { AccountSummary, SignInRuleScope, SignInSummary } from '../../../contract/routes/index.ts';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { readAccounts } from '../accounts/accounts-api.ts';
+import { ConfirmToSee } from '../confirm-to-see.tsx';
 import { SignInRuleSheetHost } from '../accounts/sign-in-rule-panel.tsx';
 import type { RulesBinding } from '../accounts/use-sign-in-rules.ts';
 import { codeKeyLabel, readFerretProject, type RuleClient } from '../../lib/sign-in-rules.ts';
+import { isStepUpRefusal } from '../../lib/step-up-refusal.ts';
 
 export interface SignInRuleOfferProps {
   /** The Accounts client of the machine the card is on. */
@@ -46,14 +48,24 @@ export function SignInRuleOffer({ client, slot, askPasskey }: SignInRuleOfferPro
   const [found, setFound] = useState<Found | undefined>(undefined);
   const [project, setProject] = useState<string | undefined>(undefined);
   const [offer, setOffer] = useState<Offer>('idle');
+  /** The daemon wants the owner's step-up to list the accounts; the quiet read did not ask for it. */
+  const [locked, setLocked] = useState(false);
+  const [presses, setPresses] = useState(0);
+  /** Set by the owner's press on "Confirm it's you": the next read is theirs, so it may ask for the passkey. */
+  const pressed = useRef(false);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `presses` re-runs the read when the owner confirms
   useEffect(() => {
     setFound(undefined);
     setOffer('idle');
+    setLocked(false);
     // No sign-in named: the tap used none, so there is nothing a rule could be for. Nothing is read.
     if (entry === undefined || signInId === undefined) return;
     let current = true;
-    void readAccounts(client).then(
+    // Mounting under a settled card is the page's own work, not the owner acting: quiet unless they pressed for it.
+    const quiet = !pressed.current;
+    pressed.current = false;
+    void readAccounts(client, { quiet }).then(
       list => {
         if (!current) return;
         const signIn = list.signIns.find(each => each.id === signInId);
@@ -61,12 +73,14 @@ export function SignInRuleOffer({ client, slot, askPasskey }: SignInRuleOfferPro
         const account = signIn === undefined ? undefined : list.accounts.find(each => each.id === signIn.account);
         if (signIn !== undefined && account !== undefined && account.id === entry) setFound({ signIn, account });
       },
-      () => undefined,
+      (cause: unknown) => {
+        if (current && isStepUpRefusal(cause)) setLocked(true);
+      },
     );
     return () => {
       current = false;
     };
-  }, [client, entry, signInId]);
+  }, [client, entry, signInId, presses]);
 
   // The asking ferret's board project, read from its record: the owner may limit the rule to it. When it cannot be read
   // the choice is simply not offered (a read never widens anything).
@@ -91,6 +105,15 @@ export function SignInRuleOffer({ client, slot, askPasskey }: SignInRuleOfferPro
     [ferret, project],
   );
 
+  if (locked)
+    return (
+      <ConfirmToSee
+        onConfirm={() => {
+          pressed.current = true;
+          setPresses(count => count + 1);
+        }}
+      />
+    );
   if (found === undefined) return null;
   const { signIn, account } = found;
 
