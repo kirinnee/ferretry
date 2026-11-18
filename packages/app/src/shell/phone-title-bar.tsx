@@ -1,4 +1,5 @@
 import { Users } from 'lucide-react';
+import { useLayoutEffect, useState } from 'react';
 import { PageThemeSwitch } from '../ui/theme-toggle.tsx';
 import { type Route } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
@@ -34,9 +35,42 @@ export function phoneTitleOf(
   }
 }
 
+/**
+ * Does the page under the bar already draw its own `<h1>`? Projects, Insights, Settings and the daemon list do, and a second
+ * one names the page twice to a screen reader (one h1 per page). Read from the page's own region after each render, since
+ * the page is a plugin's and the shell cannot know what it draws; the bar's words stay on screen either way.
+ */
+function usePageDrawsOwnH1(): boolean {
+  const [own, setOwn] = useState(false);
+  useLayoutEffect(() => {
+    const main = document.querySelector('[data-slot="main"]');
+    if (main === null) return undefined;
+    const read = (): void => setOwn(main.querySelector('h1') !== null);
+    read();
+    const watch = new MutationObserver(read);
+    watch.observe(main, { childList: true, subtree: true });
+    return () => watch.disconnect();
+  }, []);
+  return own;
+}
+
+/** The bar's name: a heading, or a plain line where the page has its own heading. */
+function Title({
+  as: Tag,
+  className,
+  children,
+}: {
+  readonly as: 'h1' | 'p';
+  readonly className: string;
+  readonly children: React.ReactNode;
+}) {
+  return <Tag className={className}>{children}</Tag>;
+}
+
 export function PhoneTitleBar({ daemon }: { readonly daemon: string | undefined }) {
   const { views, routes, viewport } = useShell();
   const { route } = useRouter();
+  const pageHasH1 = usePageDrawsOwnH1();
   if (viewport !== 'phone') return null;
   const named = phoneTitleOf(route);
   if (named === undefined) return null;
@@ -51,12 +85,13 @@ export function PhoneTitleBar({ daemon }: { readonly daemon: string | undefined 
           <Users aria-hidden="true" size={20} />
         </Link>
       )}
-      <h1 className="fy-phone-title__text">
+      {/* The bar's name is the page's h1 only where the page draws none of its own. */}
+      <Title as={pageHasH1 ? 'p' : 'h1'} className="fy-phone-title__text">
         {named.title}
         {named.count === undefined ? null : (
           <NavCount plugin={named.count.plugin} screen={named.count.screen} label={named.title} />
         )}
-      </h1>
+      </Title>
       <span className="fy-phone-title__side fy-phone-title__end">
         <PageThemeSwitch onPhone />
       </span>

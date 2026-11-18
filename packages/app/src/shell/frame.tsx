@@ -88,6 +88,10 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
     <nav
       className={`fy-nav fy-nav--${side} fy-nav--${plan.nav.style}`}
       data-slot={side === 'bottom' ? 'bottom' : 'nav'}
+      // THE PHONE'S BOTTOM BAR STEPS ASIDE FOR THE KEYBOARD (design-system.css `[data-kb-hide]`): it is stateless links, so it
+      // can go and come back intact, and it no longer covers the composer while someone types. Only a bar at the bottom: a
+      // rail or top row does not sit over the keyboard, and desktop never sets `data-keyboard`.
+      data-kb-hide={side === 'bottom' ? '' : undefined}
     >
       {plan.nav.entries.map(entry => {
         const to = navHref(entry, daemon, href);

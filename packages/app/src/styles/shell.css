@@ -631,9 +631,21 @@
     display: none;
   }
   .fy-settings[data-settings-open='panel'] .fy-settings-nav,
-  .fy-settings[data-settings-open='panel'] .fy-settings-head h1,
   .fy-settings[data-settings-open='panel'] .fy-settings-machine__scope {
     display: none;
+  }
+  /* The panel's visible title is `.fy-settings-title`, but the page's one real h1 stays in the accessibility tree: visually
+     hidden, never `display:none` (that would leave the panel with no heading, and the title bar's h1-probe would still count it). */
+  .fy-settings[data-settings-open='panel'] .fy-settings-head h1 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
   }
   .fy-settings[data-settings-open='panel'] .fy-settings-back {
     display: inline-flex;
