@@ -34,8 +34,11 @@ const machine = (
   ferret: ReturnType<typeof agendaItem>[],
   ledger: ReturnType<typeof agendaItem>[],
   daemon: string = DAEMON,
-  /** While set, the machine's ferret list is not answered: the ledger is read, the conversations are not yet. */
-  hold: { release?: () => void; gate?: Promise<void> } = {},
+  /**
+   * While `gate` is set the machine's ferret list is not answered; while `rollupGate` is set the roll-up (the ask
+   * summaries, `GET /v1/agenda/open`) is not; while `rollupFails` is set the roll-up answers an error.
+   */
+  hold: { release?: () => void; gate?: Promise<void>; rollupGate?: Promise<void>; rollupFails?: boolean } = {},
 ) => {
   const routes: string[] = [];
   /** The transport events the machine's runtime listens to, by the event it asked for. */
@@ -47,7 +50,11 @@ const machine = (
         await hold.gate;
         return [{ id: 'zoe', name: 'zoe', title: 'Release train' }];
       }
-      if (route === 'GET /v1/agenda/open') return { sessions: [{ sessionId: 'zoe', items: ferret }] };
+      if (route === 'GET /v1/agenda/open') {
+        await hold.rollupGate;
+        if (hold.rollupFails === true) throw new Error('roll-up down');
+        return { sessions: [{ sessionId: 'zoe', items: ferret }] };
+      }
       if (route === 'GET /v1/sign-in-rules/suggestions') return { suggestions: [] };
       if (route === 'GET /v1/machine/agenda') return snapshot(MACHINE_AGENDA_ID, ledger);
       if (route.includes('/agenda')) return snapshot('zoe', ferret);
@@ -210,6 +217,49 @@ describe('the Inbox count never drops to a partial value (E4b: 12 -> 2 -> 12 on 
     seen.push(badge.count());
 
     expect(seen.every(count => count === 3)).toBe(true);
+    again();
+  });
+
+  it('keeps the last complete count when the roll-up lands AFTER the conversations list', async () => {
+    const hold: { rollupGate?: Promise<void>; release?: () => void } = {};
+    const { client, routes } = machine([ASK, NOTICE], [LEDGER], DAEMON, hold);
+    const badge = inboxBadgeOf(client, { local: new InboxLocal() });
+    const stop = badge.subscribe(() => undefined);
+    await until(() => badge.count() === 3);
+    stop();
+
+    hold.rollupGate = new Promise<void>(resolve => {
+      hold.release = resolve;
+    });
+    const seen: number[] = [];
+    const again = badge.subscribe(() => seen.push(badge.count()));
+    seen.push(badge.count());
+    // The list and the ledger are read; the roll-up is still on the way.
+    await until(() => routes.filter(route => route === 'GET /v1/ferrets').length >= 2);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    seen.push(badge.count());
+    hold.release?.();
+    await until(() => badge.count() === 3);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    seen.push(badge.count());
+
+    expect(seen).toEqual(seen.map(() => 3));
+    again();
+  });
+
+  it('counts again once a roll-up that failed has settled, instead of holding the old number for good', async () => {
+    const hold: { rollupFails?: boolean } = {};
+    const { client } = machine([ASK, NOTICE], [LEDGER], DAEMON, hold);
+    const badge = inboxBadgeOf(client, { local: new InboxLocal() });
+    const stop = badge.subscribe(() => undefined);
+    await until(() => badge.count() === 3);
+    stop();
+
+    hold.rollupFails = true;
+    const again = badge.subscribe(() => undefined);
+    // Without the roll-up the ask summaries are the ones the conversations' own boards carry: the count moves off the stale 3.
+    await until(() => badge.count() !== 3);
+    expect(badge.count()).not.toBe(3);
     again();
   });
 });
