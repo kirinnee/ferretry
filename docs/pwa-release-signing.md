@@ -343,16 +343,19 @@ touching none of it:
   number.
 - **Never backwards, in two layers.** An installed copy refuses a release whose sequence is lower than the one it holds,
   so an older commit behind a newer run number would strand the preview. (1) The `gate` job compares the pushed commit
-  with the **last deployed commit**, never with `event.before`: a refused force-rewind still moves the ref, so a later
-  forward push from that lower ref would look like a fast-forward of `before` while being older than the live app. The
-  last deployed commit is the head commit of the newest earlier run of this workflow, on `rebuild/preview`, whose
-  `Deploy PWA` job concluded `success` (a green run whose deploy was skipped does not count). The compare API must say
-  the pushed commit is `ahead` of it; `identical` is a no-op; `behind` or `diverged` builds, signs and deploys nothing.
-  With no earlier successful deploy (the first ever) the push is followed, and a deleted ref deploys nothing. There is
-  **no manual trigger** (`workflow_dispatch` is gone, and `release-guards.sh` refuses it): the kit's push is the only
-  way in, so no entry path skips the comparison. A skipped run is green with no deploy: read the `deploy` job's own
-  conclusion, not the run's. A failed read (runs, jobs or compare) fails the job: never a guess. (2) A stale commit never
-  deploys last, below.
+  with the commit the **live site itself says is live**: it downloads `release-manifest.json` and `release-manifest.sig`
+  from the preview origin, proves the signature with `scripts/ci/verify-pwa-release.sh` (the deploy job's own script,
+  against the committed preview key) and reads the proved `commit`. It is not taken from run history, which misses a
+  live deploy made by the old per-merge trigger on another branch, one whose run was cancelled while finishing, and one
+  whose later re-run failed; nor from `event.before`, which moves with a refused force-rewind. The compare API must say
+  the pushed commit is `ahead` of it or `identical` (a redeploy of the live commit is harmless and gives the kit its
+  green run); `behind` or `diverged` builds, signs and deploys nothing. **It fails closed**: a manifest or signature
+  that cannot be read, answers anything but 200, does not verify, or names no full commit id, or a compare that cannot
+  be read, fails the job. The one exception is the site answering 404 for the manifest, which means nothing was ever
+  published there (the first deploy ever), so the push is followed. A deleted ref deploys nothing. There is **no manual
+  trigger** (`workflow_dispatch` is gone, and `release-guards.sh` refuses it): the kit's push is the only way in, so no
+  entry path skips the comparison. A skipped run is green with no deploy: read the `deploy` job's own conclusion, not the
+  run's. (2) A stale commit never deploys last, below.
 - **A stale commit never deploys last.** The shared, non-cancelling concurrency group serialises the runs but does not
   order them: pushes A then B can run B first, and re-running an older green run does the same, so A would overwrite the
   production alias with older app code. So the `deploy` job's `Refuse a stale commit` step, the one right before

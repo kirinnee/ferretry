@@ -238,8 +238,8 @@ describe('scripts/validate/release-guards.sh', () => {
 
   test('the preview keeps the never-backwards gate and deploys to the production branch whatever built it', () => {
     const workflow = readFileSync(join(repository, workflowPath), 'utf8');
-    // The gate refuses a push that is not a fast-forward of the LAST DEPLOYED commit (a read-only compare), and fails on a read it cannot make.
-    expect(workflow).toContain('compare/${last}...${AFTER}');
+    // The gate refuses a push that is not a fast-forward of the LIVE commit, read from the site's signed record (a read-only compare), and fails on a read it cannot make.
+    expect(workflow).toContain('compare/${live}...${AFTER}');
     expect(workflow).toContain('behind | diverged)');
     expect(workflow).toContain('unexpected compare status');
     // build, sign and deploy all wait on that decision.
@@ -278,7 +278,7 @@ describe('scripts/validate/release-guards.sh', () => {
       // The shared non-cancelling group stays: it serialises, the check above orders.
       expect(text).toContain('group: pwa-pages-v5\n  cancel-in-progress: false');
       // The never-backwards gate before it compares with the last deployed commit.
-      expect(text).toContain('compare/${last}...${AFTER}');
+      expect(text).toContain('compare/${live}...${AFTER}');
     });
 
     test('mutation: removing the stale-commit step is refused', () => {
@@ -342,7 +342,7 @@ describe('the honest wording about a 5.0 commit that can publish', () => {
   });
 });
 
-describe('the preview gate compares the pushed commit with the LAST DEPLOYED commit (not event.before)', () => {
+describe('the preview gate compares the pushed commit with what the LIVE site says is live', () => {
   const workflowFile = join(repository, '.github/workflows/pwa-pages-v5.yaml');
   const text = readFileSync(workflowFile, 'utf8');
   const section = text.slice(text.indexOf('      - name: Apply the never-backwards rule'), text.indexOf('\n  build:'));
@@ -352,55 +352,76 @@ describe('the preview gate compares the pushed commit with the LAST DEPLOYED com
     .join('\n');
   const [A, B, C] = ['1', '2', '3'].map(digit => digit.repeat(40)) as [string, string, string];
 
-  type Run = { id: number; number: number; sha: string; deployJob: 'success' | 'skipped' | 'failure' };
+  type Live = {
+    /** What the site answers for each file: a status and a body, or `unreachable` (curl fails). */
+    manifest?: { status: number; commit?: string } | 'unreachable';
+    signature?: { status: number } | 'unreachable';
+    /** Whether scripts/ci/verify-pwa-release.sh accepts the downloaded record. */
+    verifies?: boolean;
+  };
 
   /**
-   * Runs the workflow's own gate script with a fake `gh` that answers only the three reads it makes (runs of the
-   * workflow, jobs of a run, compare), through the real `--jq` filters, from a fixture. `compare` maps "<last>...<after>"
-   * to a status; a pair not in it is an unreadable compare (the fake exits 1).
+   * Runs the workflow's own gate script in a throwaway checkout whose `curl`, `gh` and scripts are fakes. The fake `gh`
+   * answers only `compare` (any other read, such as run history, fails the script); `compare` maps "<live>...<after>" to a
+   * status, and a pair not in it is an unreadable compare.
    */
-  function runGate(spec: {
-    runs: readonly Run[];
-    compare: Record<string, string>;
-    after: string;
-    runId?: number;
-    deleted?: boolean;
-  }) {
+  function runGate(spec: { live: Live; compare?: Record<string, string>; after: string; deleted?: boolean }) {
     const directory = mkdtempSync(join(tmpdir(), 'preview-gate-'));
     scratch.push(directory);
+    const bin = join(directory, 'bin');
+    mkdirSync(bin);
+    mkdirSync(join(directory, 'scripts/ci'), { recursive: true });
+    writeFileSync(join(directory, 'scripts/ci/hosted-app-origin.sh'), '#!/bin/sh\necho https://preview.example\n', {
+      mode: 0o755,
+    });
     writeFileSync(
-      join(directory, 'runs.json'),
-      JSON.stringify({
-        workflow_runs: spec.runs.map(run => ({ id: run.id, run_number: run.number, head_sha: run.sha })),
-      }),
+      join(directory, 'scripts/ci/verify-pwa-release.sh'),
+      `#!/bin/sh\n[ -s "$1/release-manifest.json" ] && [ -s "$1/release-manifest.sig" ] && exit ${spec.live.verifies === false ? 1 : 0}\nexit 1\n`,
+      { mode: 0o755 },
     );
-    for (const run of spec.runs) {
-      writeFileSync(
-        join(directory, `jobs-${String(run.id)}.json`),
-        JSON.stringify({
-          jobs: [
-            { name: 'Does this ref feed the preview', conclusion: 'success' },
-            { name: 'Deploy PWA', conclusion: run.deployJob },
-          ],
-        }),
-      );
+    const answers = {
+      'release-manifest.json': spec.live.manifest,
+      'release-manifest.sig': spec.live.signature ?? { status: 200 },
+    };
+    for (const [name, answer] of Object.entries(answers)) {
+      if (answer === undefined || answer === 'unreachable') continue;
+      const body =
+        name === 'release-manifest.json'
+          ? JSON.stringify({ commit: (answer as { commit?: string }).commit ?? C, sequence: 3 })
+          : 'signature-bytes';
+      writeFileSync(join(directory, `live-${name}`), body);
+      writeFileSync(join(directory, `live-${name}.status`), String((answer as { status: number }).status));
     }
-    for (const [pair, status] of Object.entries(spec.compare)) {
+    for (const [pair, status] of Object.entries(spec.compare ?? {})) {
       writeFileSync(join(directory, `compare-${pair}.json`), JSON.stringify({ status }));
     }
     writeFileSync(
-      join(directory, 'gh'),
+      join(bin, 'curl'),
+      [
+        '#!/usr/bin/env bash',
+        'set -euo pipefail',
+        'out=""; url=""',
+        'while (($#)); do case "$1" in --output) shift; out="$1" ;; --write-out|--max-time|--retry|--header) shift ;; --*) ;; *) url="$1" ;; esac; shift; done',
+        `dir=${JSON.stringify(directory)}`,
+        'name="${url##*/}"; name="${name%%\\?*}"',
+        '[[ -f ${dir}/live-${name}.status ]] || exit 6',
+        'cp "${dir}/live-${name}" "${out}"',
+        'cat "${dir}/live-${name}.status"',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(bin, 'gh'),
       [
         '#!/usr/bin/env bash',
         'set -euo pipefail',
         'url=""; filter=""',
         'while (($#)); do case "$1" in api|--paginate) ;; --jq) shift; filter="$1" ;; *) [[ -z $url ]] && url="$1" ;; esac; shift; done',
-        'dir="$(dirname "$0")"',
+        `dir=${JSON.stringify(directory)}`,
         'case "$url" in',
-        '  */actions/workflows/pwa-pages-v5.yaml/runs*) file="${dir}/runs.json" ;;',
-        '  */actions/runs/*/jobs) id="${url#*/actions/runs/}"; file="${dir}/jobs-${id%/jobs}.json" ;;',
         '  */compare/*) file="${dir}/compare-${url#*/compare/}.json" ;;',
-        '  *) echo "unexpected gh url: ${url}" >&2; exit 2 ;;',
+        '  *) echo "the gate must not read anything but compare, got: ${url}" >&2; exit 2 ;;',
         'esac',
         '[[ -f ${file} ]] || { echo "no fixture for ${url}" >&2; exit 1; }',
         'jq -r "${filter}" "${file}"',
@@ -411,92 +432,96 @@ describe('the preview gate compares the pushed commit with the LAST DEPLOYED com
     const output = join(directory, 'github-output');
     writeFileSync(output, '');
     const result = Bun.spawnSync(['bash', '-c', script], {
+      cwd: directory,
       env: {
         ...process.env,
-        PATH: `${directory}:${process.env.PATH ?? ''}`,
+        PATH: `${bin}:${process.env.PATH ?? ''}`,
         GITHUB_OUTPUT: output,
         GH_TOKEN: 'unused',
         DELETED: spec.deleted === true ? 'true' : 'false',
         AFTER: spec.after,
         REPOSITORY: 'example/repo',
-        RUN_ID: String(spec.runId ?? 99),
+        RUN_ID: '99',
       },
     });
-    return {
-      status: result.exitCode,
-      err: result.stderr.toString(),
-      deploy: readFileSync(output, 'utf8').trim(),
-    };
+    return { status: result.exitCode, err: result.stderr.toString(), deploy: readFileSync(output, 'utf8').trim() };
   }
 
-  /** A -> B -> C deployed in turn; C is live. Then C was force-rewound to A: that run deployed nothing. */
-  const history: Run[] = [
-    { id: 1, number: 1, sha: A, deployJob: 'success' },
-    { id: 2, number: 2, sha: B, deployJob: 'success' },
-    { id: 3, number: 3, sha: C, deployJob: 'success' },
-    { id: 4, number: 4, sha: A, deployJob: 'skipped' },
-  ];
+  const liveC: Live = { manifest: { status: 200, commit: C } };
 
-  test('the first deploy ever (no earlier run) follows the push', () => {
-    const result = runGate({ runs: [], compare: {}, after: A });
-    expect(result).toMatchObject({ status: 0, deploy: 'deploy=true' });
-  });
-
-  test('only a run whose Deploy PWA job succeeded counts: a green run with a skipped or failed deploy is not live', () => {
-    const runs: Run[] = [
-      { id: 1, number: 1, sha: B, deployJob: 'success' },
-      { id: 2, number: 2, sha: A, deployJob: 'skipped' },
-      { id: 3, number: 3, sha: C, deployJob: 'failure' },
-    ];
-    // B is the live commit: C (failed) and A (skipped) are ignored.
-    expect(runGate({ runs, compare: { [`${B}...${C}`]: 'ahead' }, after: C }).deploy).toBe('deploy=true');
-    expect(runGate({ runs, compare: { [`${B}...${A}`]: 'behind' }, after: A }).deploy).toBe('deploy=false');
-  });
-
-  test('after a refused force-rewind C -> A, a forward push A -> B does NOT deploy B (older than the live C)', () => {
-    const result = runGate({ runs: history, compare: { [`${C}...${B}`]: 'behind' }, after: B });
+  test("what is live is the live record's commit: B (older than the live C) deploys nothing, whatever the run history says", () => {
+    // This one fixture stands for each history the old run-based lookup got wrong: C deployed by the legacy per-merge
+    // trigger on another branch, C's run cancelled while finishing, and C's run later re-run and failed. The gate reads
+    // no run history at all (its fake gh refuses everything but compare), so none of them can hide C.
+    const result = runGate({ live: liveC, compare: { [`${C}...${B}`]: 'behind' }, after: B });
     expect(result).toMatchObject({ status: 0, deploy: 'deploy=false' });
     expect(result.err).toBe('');
   });
 
-  test('a force-rewind to A itself deploys nothing, and a recreated ref at A (before = zeros) deploys nothing either', () => {
-    // The gate does not read event.before at all, so a created ref, a force-push and a recreate are the same question.
-    expect(runGate({ runs: history, compare: { [`${C}...${A}`]: 'behind' }, after: A }).deploy).toBe('deploy=false');
-    expect(text).not.toContain('github.event.before }}');
-    expect(script).not.toContain('BEFORE');
-  });
-
-  test('a diverged commit deploys nothing; a descendant of the live commit deploys; the live commit again is a no-op', () => {
-    expect(runGate({ runs: history, compare: { [`${C}...${B}`]: 'diverged' }, after: B }).deploy).toBe('deploy=false');
-    expect(runGate({ runs: history, compare: { [`${C}...${A}`]: 'ahead' }, after: A }).deploy).toBe('deploy=true');
-    expect(runGate({ runs: history, compare: { [`${C}...${C}`]: 'identical' }, after: C }).deploy).toBe('deploy=false');
-  });
-
-  test('this run is never its own reference (a re-run of the only deploy compares with nothing, not with itself)', () => {
-    const runs: Run[] = [{ id: 7, number: 7, sha: A, deployJob: 'success' }];
-    expect(runGate({ runs, compare: {}, after: A, runId: 7 })).toMatchObject({ status: 0, deploy: 'deploy=true' });
-  });
-
-  test('a deleted ref deploys nothing', () => {
-    expect(runGate({ runs: history, compare: {}, after: A, deleted: true })).toMatchObject({
+  test('a descendant of the live commit deploys, and so does the live commit itself (the kit still needs its green run)', () => {
+    expect(runGate({ live: liveC, compare: { [`${C}...${A}`]: 'ahead' }, after: A })).toMatchObject({
       status: 0,
-      deploy: 'deploy=false',
+      deploy: 'deploy=true',
+    });
+    expect(runGate({ live: liveC, compare: { [`${C}...${C}`]: 'identical' }, after: C })).toMatchObject({
+      status: 0,
+      deploy: 'deploy=true',
     });
   });
 
+  test('a diverged commit deploys nothing', () => {
+    expect(runGate({ live: liveC, compare: { [`${C}...${B}`]: 'diverged' }, after: B }).deploy).toBe('deploy=false');
+  });
+
+  test('the first deploy ever (the site answers 404 for the manifest) follows the push', () => {
+    expect(runGate({ live: { manifest: { status: 404 } }, after: A })).toMatchObject({
+      status: 0,
+      deploy: 'deploy=true',
+    });
+  });
+
+  test('the live record is read as unproven unless it is reachable, a 200, signed and names a commit: every other state fails the job', () => {
+    const cases: Array<[string, Live]> = [
+      ['manifest unreachable', { manifest: 'unreachable' }],
+      ['manifest HTTP 500', { manifest: { status: 500 } }],
+      ['manifest redirected', { manifest: { status: 301 } }],
+      ['signature unreachable', { manifest: { status: 200, commit: C }, signature: 'unreachable' }],
+      ['signature missing (404)', { manifest: { status: 200, commit: C }, signature: { status: 404 } }],
+      ['record does not verify', { manifest: { status: 200, commit: C }, verifies: false }],
+      ['commit is not a full id', { manifest: { status: 200, commit: 'abc123' } }],
+    ];
+    for (const [label, live] of cases) {
+      const result = runGate({ live, compare: { [`${C}...${B}`]: 'ahead' }, after: B });
+      expect({ label, status: result.status, deploy: result.deploy }).toEqual({ label, status: 1, deploy: '' });
+    }
+  });
+
   test('a compare it cannot read, or a status it does not know, fails the job instead of guessing', () => {
-    const unreadable = runGate({ runs: history, compare: {}, after: B });
+    const unreadable = runGate({ live: liveC, after: B });
     expect(unreadable.status).not.toBe(0);
     expect(unreadable.deploy).toBe('');
-    const unknown = runGate({ runs: history, compare: { [`${C}...${B}`]: 'mystery' }, after: B });
+    const unknown = runGate({ live: liveC, compare: { [`${C}...${B}`]: 'mystery' }, after: B });
     expect(unknown.status).toBe(1);
     expect(unknown.err).toContain('unexpected compare status');
     expect(unknown.deploy).toBe('');
   });
 
-  test('there is no manual trigger, and the gate may read actions', () => {
+  test('a deleted ref deploys nothing', () => {
+    expect(runGate({ live: liveC, after: A, deleted: true })).toMatchObject({ status: 0, deploy: 'deploy=false' });
+  });
+
+  test("the live record is proved with the deploy job's own script before its commit is read, and event.before is not read", () => {
+    expect(section.indexOf('./scripts/ci/verify-pwa-release.sh')).toBeGreaterThan(0);
+    expect(section.indexOf('./scripts/ci/verify-pwa-release.sh')).toBeLessThan(section.indexOf("jq -er '.commit'"));
+    expect(section).toContain('./scripts/ci/hosted-app-origin.sh');
+    expect(text).not.toContain('github.event.before }}');
+    expect(script).not.toContain('BEFORE');
+    expect(script).not.toContain('actions/runs');
+  });
+
+  test('there is no manual trigger, and the gate needs no more than contents: read', () => {
     expect(text).not.toMatch(/^  workflow_dispatch:/mu);
-    expect(text).toContain('      actions: read\n');
+    expect(text).not.toContain('actions: read');
   });
 
   test('mutation: a workflow with a workflow_dispatch trigger is refused', () => {
