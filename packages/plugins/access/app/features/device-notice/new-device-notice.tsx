@@ -146,7 +146,8 @@ function MachineNewDevices({
         .then(async next => {
           // Parsed again HERE because this notice sits above every page: a malformed answer from any
           // one machine must leave the notice silent, never throw during render and take the app down.
-          const answer = PairedDevicesViewSchema.parse(await readPairedDevices(next));
+          // QUIET: this notice reads on its own above every page, so a step-up the machine wants is not asked for here.
+          const answer = PairedDevicesViewSchema.parse(await readPairedDevices(next, 'quiet'));
           if (!current) return;
           latest.current = answer;
           setClient(next);

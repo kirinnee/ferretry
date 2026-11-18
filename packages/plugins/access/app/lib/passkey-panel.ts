@@ -118,9 +118,9 @@ const REFUSAL_SENTENCES: Readonly<Record<StepUpRefusal, (origin: string) => stri
   'unknown-device': () => 'This machine does not know this device, so no passkey window can be opened for it.',
 };
 
-/** The one plain sentence for a failed registration or read — never a status code or a raw error name. */
+/** The one plain sentence for a failed registration or read — never a status code; a thrown browser error ends it with its own name and message. */
 export function passkeyFailureSentence(reason: unknown, origin: string): string {
-  if (reason instanceof PasskeyCeremonyError) return passkeySentence(reason.kind, origin);
+  if (reason instanceof PasskeyCeremonyError) return passkeySentence(reason.kind, origin, reason.browser);
   if (reason instanceof FyHttpError) {
     for (const refusal of Object.keys(REFUSAL_SENTENCES) as StepUpRefusal[])
       if (reason.code === stepUpRefusalCode(refusal)) return REFUSAL_SENTENCES[refusal](origin);

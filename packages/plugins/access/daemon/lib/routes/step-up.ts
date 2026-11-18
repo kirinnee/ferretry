@@ -191,6 +191,12 @@ export function stepUpRoutes(
   pasteRules?: StagedPasteRuleBinding,
   /** Told every refusal a passkey route answers; the daemon logs it. Absent: nothing is said (a test, a bare embed). */
   onRefusal?: (note: PasskeyRefusalNote) => void,
+  /**
+   * Told each registration a device was ANSWERED options for (`POST /v1/passkeys/options`), so "did the press reach the
+   * machine?" has an answer in the log: before this only a refusal was said, and a press that got its options and then
+   * died in the browser left no trace. The same fields as a refusal note, never the options themselves.
+   */
+  onRegistrationAsked?: (note: Omit<PasskeyRefusalNote, 'reason'>) => void,
 ): readonly ApiRoute[] {
   const answer = <T>(
     context: RouteContext,
@@ -230,9 +236,13 @@ export function stepUpRoutes(
       unlockExempt: true,
       handle: async context => {
         const body = await parseBody(context.request, PasskeyOptionsRequestSchema);
-        return answer(context, await service.registrationOptions(caller(context), body.origin), value =>
-          PasskeyRegistrationOptionsSchema.parse(value),
-        );
+        const outcome = await service.registrationOptions(caller(context), body.origin);
+        if (outcome.ok)
+          onRegistrationAsked?.({
+            request: `${context.request.method} ${context.request.path}`,
+            deviceId: sessionDevice(context)?.deviceId ?? undefined,
+          });
+        return answer(context, outcome, value => PasskeyRegistrationOptionsSchema.parse(value));
       },
     },
     {

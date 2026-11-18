@@ -446,6 +446,31 @@ describe('the new-device notice', () => {
     await shown.unmount();
   });
 
+  // The owner's 2026-11-18 report: this notice sits above every page, so an un-quiet read of a step-up-gated list popped
+  // "Confirm it's you" right after pairing, at a device that had pressed nothing and held no passkey yet.
+  it('reads the device list quietly, so a step-up the machine wants never opens a prompt by itself', async () => {
+    const inits: (RequestInit & { readonly quiet?: boolean; readonly pressed?: boolean })[] = [];
+    const inner = pool({ alpha: machine([device('phone', ago(5 * MINUTE))]) });
+    const recording: NewDeviceNoticeClients = {
+      client: async connection => {
+        const client = await inner.client(connection);
+        return {
+          request: (async (path: string, schema: unknown, init?: RequestInit) => {
+            inits.push(init ?? {});
+            return await client.request(path, schema as never, init);
+          }) as PairingClient['request'],
+        };
+      },
+    };
+    const shown = await mount(
+      <NewDeviceNotices connections={[alpha]} clients={recording} storage={memory(seenAlpha())} now={now} />,
+    );
+    await until(() => inits.length > 0, 'the first read');
+    expect(inits[0]?.quiet).toBe(true);
+    expect(inits[0]?.pressed).toBeUndefined();
+    await shown.unmount();
+  });
+
   it('uses the browser store and clock by default', async () => {
     const shown = await mount(<NewDeviceNotices connections={[alpha]} clients={pool({ alpha: 'unreachable' })} />);
     expect(shown.container.querySelector('[data-new-device-notices]')).not.toBeNull();

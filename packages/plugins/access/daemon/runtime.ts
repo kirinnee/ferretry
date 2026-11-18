@@ -394,6 +394,14 @@ export class AccessRuntime {
         if (isExpectedRefusal(note.reason)) log.info(line, fields);
         else log.warn(line, fields);
       },
+      // Said too: a device was handed registration options. Without it a press that got its options and then failed in
+      // the browser left nothing in the log, and "no registration ever reached the machine" could not be told from it.
+      note => {
+        this.#deps.kernel.log.info('a device asked to add a passkey: registration options issued', {
+          request: note.request,
+          ...(note.deviceId === undefined ? {} : { deviceId: note.deviceId }),
+        });
+      },
     );
   }
 

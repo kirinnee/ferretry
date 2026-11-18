@@ -77,7 +77,7 @@ export function routeRequestClient(
     async request<T>(
       path: string,
       schema: z.ZodType<T>,
-      init: RequestInit & { readonly pressed?: boolean } = {},
+      init: RequestInit & { readonly pressed?: boolean; readonly quiet?: boolean } = {},
     ): Promise<T> {
       // A query string is not part of the route key: it rides as the call's `query`.
       const [pathOnly = path, search = ''] = path.split('?', 2);
@@ -92,8 +92,9 @@ export function routeRequestClient(
           ...(matched === undefined ? {} : { params: matched.params }),
           ...(search === '' ? {} : { query }),
           ...(body === undefined ? {} : { body }),
-          // A read the owner pressed for (a retry after a cancelled passkey prompt) is theirs, so it may ask again.
-          ...(init.pressed === true ? { quiet: false } : {}),
+          // A read the owner pressed for (a retry after a cancelled passkey prompt) is theirs, so it may ask again; a read
+          // the page makes on its own (a notice mounting above every page) is quiet: a step-up it meets asks nobody.
+          ...(init.pressed === true ? { quiet: false } : init.quiet === true ? { quiet: true } : {}),
         });
       } catch (reason) {
         if (isRefusal(reason)) throw new FyHttpError(reason.message, reason.status, reason.code, reason.body);

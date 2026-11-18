@@ -18,7 +18,7 @@
  * ## EVERY FAILURE IS ONE SENTENCE
  *
  * A dismissed sheet, a refusal by origin and a daemon refusal code each become a plain sentence through
- * `passkeyFailureSentence`; no status, error name or stack reaches the screen.
+ * `passkeyFailureSentence`; no status or stack reaches the screen, and a browser's own error ends the sentence by name and message.
  */
 
 import type { PasskeysView } from '../../../contract/index.ts';

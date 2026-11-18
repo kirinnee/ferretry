@@ -110,7 +110,9 @@ describe('PasskeyNudge', () => {
 
     // Assert
     should(opened).eql(['security']);
-    should(JSON.stringify(nudge.toJSON())).containEql('Settings → Daemons → Security → Add a passkey');
+    should(JSON.stringify(nudge.toJSON())).containEql(
+      'Settings → this machine → Devices & access → Security → Add a passkey',
+    );
     run(() => nudge.unmount());
   });
 

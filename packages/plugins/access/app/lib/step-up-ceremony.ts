@@ -132,7 +132,7 @@ export const describeStepUpFailure =
       (refusalWith(reason, 'no-passkey') || refusalWith(reason, 'registration-closed'))
     )
       return stillClosedSentence(hints.ownerCommand);
-    if (reason instanceof PasskeyCeremonyError) return passkeySentence(reason.kind, origin);
+    if (reason instanceof PasskeyCeremonyError) return passkeySentence(reason.kind, origin, reason.browser);
     if (refusalWith(reason, 'no-passkey') || refusalWith(reason, 'registration-closed'))
       return passkeySentence('no-passkey', origin);
     if (refusalWith(reason, 'origin-not-allowed'))

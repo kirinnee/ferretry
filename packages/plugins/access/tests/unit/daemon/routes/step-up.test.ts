@@ -335,6 +335,39 @@ describe('adding a passkey', () => {
     should(added.status).equal(201);
     should(jsonBody(added)).have.property('id', toBase64Url(credential));
   });
+
+  it('should tell the log each registration a device was answered options for, and nothing for one it refused', async () => {
+    // Arrange: the owner's 2026-11-18 debug could not tell "the press never reached the machine" from "it got its
+    // options and died in the browser", because only refusals were said.
+    const world = machine();
+    const said: unknown[] = [];
+    const refused: unknown[] = [];
+    const routes = stepUpRoutes(
+      world.service,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      note => refused.push(note),
+      note => said.push(note),
+    );
+    const ask = (key: string, body: unknown, overrides: CallOverrides) =>
+      respond(routes, key, { body: JSON.stringify(body), ...overrides });
+
+    // Act: a press from a copy of the app the machine does not serve is refused; one from its own copy is answered.
+    const elsewhere = await ask(
+      'POST /v1/passkeys/options',
+      { origin: 'https://elsewhere.example' },
+      { device: phone },
+    );
+    const answered = await ask('POST /v1/passkeys/options', { origin: ORIGIN }, { device: phone });
+
+    // Assert
+    refusedAs(elsewhere, 403, stepUpRefusalCode('origin-not-allowed'));
+    should(answered.status).equal(200);
+    should(said).deepEqual([{ request: 'POST /v1/passkeys/options', deviceId: phoneId }]);
+    should(refused).have.length(1);
+  });
 });
 
 describe('re-opening a passkey window', () => {
