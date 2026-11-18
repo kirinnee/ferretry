@@ -181,6 +181,30 @@ describe('`restart --dry-run`', () => {
     // Assert
     for (const result of results) should(result.calls).deepEqual(read);
   });
+
+  it('should fail closed: any value but false is a dry run, so `=yes` and `=1` restart nothing', async () => {
+    // Act
+    const results = await Promise.all([
+      dry('restart', '--outdated', '--dry-run=yes'),
+      dry('restart', '--outdated', '--dry-run=1'),
+      dry('restart', '--all', '--dry-run=on'),
+      dry('restart', '--outdated', '--dry-run=true'),
+    ]);
+
+    // Assert
+    for (const result of results) should(result.calls).deepEqual(read);
+  });
+
+  it('should still restart for real when it is switched off outright', async () => {
+    // Act
+    const results = await Promise.all([
+      dry('restart', '--outdated', '--dry-run=false'),
+      dry('restart', '--outdated', '--no-dry-run'),
+    ]);
+
+    // Assert
+    for (const result of results) should(result.calls).not.deepEqual(read);
+  });
 });
 
 describe('the options every verb accepts', () => {
