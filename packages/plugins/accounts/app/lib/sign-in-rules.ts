@@ -54,6 +54,7 @@ import {
   type TwoFactorKeySummary,
 } from '../../contract/routes/index.ts';
 import { z } from 'zod';
+import { quietInit, type ReadMode } from './step-up-refusal.ts';
 import type { AccountsClient, PasskeyWords } from '../shell.tsx';
 
 export type RuleClient = AccountsClient;
@@ -88,7 +89,10 @@ const FerretProjectSchema = z.looseObject({ projectId: z.uuid() });
  */
 export async function readFerretProject(client: RuleClient, ferret: string): Promise<string | undefined> {
   try {
-    const answer: unknown = await client.call('GET /v1/ferrets/:ferretId', { params: { ferretId: ferret } });
+    const answer: unknown = await client.call('GET /v1/ferrets/:ferretId', {
+      params: { ferretId: ferret },
+      quiet: true,
+    });
     const read = FerretProjectSchema.safeParse(answer);
     return read.success ? read.data.projectId : undefined;
   } catch {
@@ -146,8 +150,8 @@ export async function revokeAccountRules(client: RuleClient, account: AccountId)
   return answer.revoked;
 }
 
-export async function listSuggestions(client: RuleClient): Promise<SignInRuleSuggestionList> {
-  return await ask(client, 'GET /v1/sign-in-rules/suggestions', SignInRuleSuggestionListSchema);
+export async function listSuggestions(client: RuleClient, read: ReadMode = {}): Promise<SignInRuleSuggestionList> {
+  return await ask(client, 'GET /v1/sign-in-rules/suggestions', SignInRuleSuggestionListSchema, quietInit(read));
 }
 
 export async function dismissSuggestion(client: RuleClient, suggestion: string): Promise<void> {

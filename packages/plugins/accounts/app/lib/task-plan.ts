@@ -31,6 +31,7 @@ import {
   taskPlanSelection,
 } from '../../contract/routes/index.ts';
 import { z } from 'zod';
+import { quietInit, type ReadMode } from './step-up-refusal.ts';
 import type { AccountsClient, PasskeyWords } from '../shell.tsx';
 
 export type TaskPlanClient = AccountsClient;
@@ -57,8 +58,8 @@ const planParams = (plan: Pick<TaskPlan, 'id' | 'sessionId'>) => ({ ferretId: pl
 const StageDroppedSchema = z.strictObject({ stage: z.string(), dropped: z.literal(true) });
 
 /** Every live plan on the machine (`secrets.use`: it names accounts). */
-export async function listTaskPlans(client: TaskPlanClient): Promise<TaskPlanList> {
-  return await ask(client, 'GET /v1/accounts/plans', TaskPlanListSchema);
+export async function listTaskPlans(client: TaskPlanClient, read: ReadMode = {}): Promise<TaskPlanList> {
+  return await ask(client, 'GET /v1/accounts/plans', TaskPlanListSchema, quietInit(read));
 }
 
 /**
@@ -80,9 +81,11 @@ export async function readStage(
   client: TaskPlanClient,
   plan: Pick<TaskPlan, 'id' | 'sessionId'>,
   stage: TaskPlanStageId,
+  read: ReadMode = {},
 ): Promise<TaskPlanStageView> {
   return await ask(client, 'GET /v1/ferrets/:ferretId/task-plans/:planId/approval/:stage', TaskPlanStageViewSchema, {
     params: { ...planParams(plan), stage },
+    ...quietInit(read),
   });
 }
 

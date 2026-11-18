@@ -14,7 +14,7 @@ import {
   type TwoFactorSeedStageView,
   type TwoFactorStageId,
 } from '../../../contract/routes/index.ts';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   accountWords,
   addKeyActWords,
@@ -30,6 +30,8 @@ import {
   type SeedCheck,
   seedCardFacts,
 } from '../../lib/two-factor-seed-card.ts';
+import { isStepUpRefusal } from '../../lib/step-up-refusal.ts';
+import { ConfirmToSee } from '../confirm-to-see.tsx';
 import { type SeedCardPhase, TwoFactorSeedCard } from './two-factor-seed-card.tsx';
 
 export interface TwoFactorSeedHostProps {
@@ -82,6 +84,10 @@ export function TwoFactorSeedHost({ client: given, item, addKey: askKey, onDone 
   const [staged, setStaged] = useState<AccountId | undefined>(undefined);
   const [check, setCheck] = useState<SeedCheck>('checking');
   const [reads, setReads] = useState(0);
+  /** The daemon wants the owner's step-up to show this card; the quiet read did not ask for it. */
+  const [locked, setLocked] = useState(false);
+  /** Set by the owner's press on "Confirm it's you": the next read is theirs, so it may ask for the passkey. */
+  const pressed = useRef(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` only re-runs the read when the owner presses Try again
   useEffect(() => {
@@ -89,15 +95,27 @@ export function TwoFactorSeedHost({ client: given, item, addKey: askKey, onDone 
     let current = true;
     setClient(null);
     setCheck('checking');
+    setLocked(false);
+    const mode = { quiet: !pressed.current };
+    pressed.current = false;
     void Promise.resolve(given)
       .then(async next => {
         if (!current) return;
         setClient(next);
+        let accountsRefusal: unknown;
         const [list, stage] = await Promise.all([
-          readAccounts(next).catch(() => undefined),
-          readSeedStage(next, ref.account, ref.stage).catch((cause: unknown) => cause),
+          readAccounts(next, mode).catch((cause: unknown) => {
+            accountsRefusal = cause;
+            return undefined;
+          }),
+          readSeedStage(next, ref.account, ref.stage, mode).catch((cause: unknown) => cause),
         ]);
         if (!current) return;
+        // The page's own reads are quiet: a step-up the daemon wants waits for the owner's press, not for opening the chat.
+        if (isStepUpRefusal(stage) || isStepUpRefusal(accountsRefusal)) {
+          setLocked(true);
+          return;
+        }
         setAccounts(list);
         if (!isStageView(stage)) {
           // A stage the daemon does not know for this caller is gone: saved, denied elsewhere, timed out, or staged
@@ -157,6 +175,15 @@ export function TwoFactorSeedHost({ client: given, item, addKey: askKey, onDone 
   }, [client, onDone, ref, target]);
 
   if (ref === undefined || client === null) return null;
+  if (locked)
+    return (
+      <ConfirmToSee
+        onConfirm={() => {
+          pressed.current = true;
+          setReads(count => count + 1);
+        }}
+      />
+    );
   return (
     <TwoFactorSeedCard
       check={check}
