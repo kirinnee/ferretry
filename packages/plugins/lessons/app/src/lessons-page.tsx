@@ -371,7 +371,7 @@ function LessonTabs({
             className={cn(
               // Four tabs share a phone's width (count under the word) and sit in a row from `sm`, so none is scrolled out of view.
               '-mb-px flex min-h-[44px] flex-1 flex-col items-center justify-center border-b-heavy px-1 text-ui sm:flex-none sm:flex-row sm:gap-1.5 sm:px-3',
-              selected ? 'border-accent font-semibold text-fg' : 'border-transparent text-muted hover:text-fg',
+              selected ? 'border-accent text-fg hover:bg-hover-fill' : 'border-transparent text-fg hover:bg-hover-fill',
             )}
           >
             {entry.label}

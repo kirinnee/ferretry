@@ -52,6 +52,8 @@ const config: Config = {
         accent: 'var(--accent)',
         'accent-fg': 'var(--accent-fg)',
         'accent-soft': 'var(--accent-soft)',
+        'hover-fill': 'var(--hover-fill)',
+        'select-fill': 'var(--select-fill)',
         // DECORATIVE TINT ONLY. Must not carry state — it measures 1.2-2.9:1 in
         // 6 of 10 themes. Selected/active/checked states use `accent`.
         'accent-border': 'var(--accent-border)',

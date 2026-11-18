@@ -84,7 +84,7 @@ function Segment({
       onClick={onSelect}
       className={cn(
         'min-h-[44px] shrink-0 whitespace-nowrap rounded-control px-2 text-meta',
-        selected ? 'bg-surface-2 font-semibold text-fg' : 'text-muted hover:text-fg',
+        selected ? 'bg-select-fill text-fg' : 'text-fg hover:bg-hover-fill',
       )}
     >
       {label}

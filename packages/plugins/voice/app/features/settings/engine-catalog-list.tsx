@@ -429,14 +429,12 @@ function RowFrame({ id, name, label, selected, group, onChoose, children }: RowF
     <li
       className={cn(
         'flex min-w-0 flex-col gap-2 rounded-control border p-3',
-        selected ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2',
+        selected ? 'border-border bg-select-fill' : 'border-border bg-surface-2',
       )}
       data-engine={id}
     >
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-        <span className={cn('min-w-0 break-words text-ui font-semibold', selected ? 'text-accent' : 'text-fg')}>
-          {label}
-        </span>
+        <span className="min-w-0 break-words text-ui font-semibold text-fg">{label}</span>
         <label className="flex min-h-[44px] shrink-0 cursor-pointer items-center gap-2 text-meta">
           <input
             type="radio"
@@ -446,7 +444,7 @@ function RowFrame({ id, name, label, selected, group, onChoose, children }: RowF
             onChange={() => onChoose(id)}
             aria-label={`Use ${name}`}
           />
-          <span className={selected ? 'font-semibold text-accent' : 'text-fg'}>{selected ? 'In use' : 'Use this'}</span>
+          <span className="text-fg">{selected ? 'In use' : 'Use this'}</span>
         </label>
       </div>
       {children}
