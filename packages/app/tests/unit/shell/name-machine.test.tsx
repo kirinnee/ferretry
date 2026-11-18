@@ -1,0 +1,214 @@
+import { afterEach, describe, expect, test } from 'bun:test';
+import type { TransportAnswer, TransportRequest } from '../../../src/client/transport.ts';
+import { type DaemonlessPorts, registeredDaemonless } from '../../../src/connect/provides.ts';
+import { DaemonList, type PairingInput } from '../../../src/daemons/daemon-list.ts';
+import { generated } from '../../../src/generated/surfaces.ts';
+import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
+import type { PasskeyHandler, PasskeyProvision } from '../../../src/passkey/passkey.ts';
+import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
+import { App } from '../../../src/shell/app.tsx';
+import type { ShellWindow } from '../../../src/shell/context.tsx';
+import { ShellRuntime } from '../../../src/shell/runtime.ts';
+import { memoryStore } from '../../../src/storage/records.ts';
+import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
+import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
+import { interact, must, mount } from '../../support/dom.ts';
+import { CORE, FakeTransport, inventoryOf, json } from '../client/fixtures.ts';
+
+/**
+ * THE "NAME THIS MACHINE" STEP, over a fake machine: offered once after a pairing when the machine has no name of the
+ * owner's, prefilled with the host name, skippable, written through the existing config-file route, and said plainly
+ * when the daemon refuses. Fake data only: no real daemon, address or pairing code.
+ */
+
+const HOST = 'ip-10-0-0-7';
+const kernel = generated.surfaces.find(entry => entry.id === 'kernel');
+if (kernel === undefined) throw new Error('the generated registry has no kernel');
+const surfaces: SurfaceEntry[] = [kernel, ...CORE.filter(entry => entry.id !== 'kernel')];
+
+const browser: ShellWindow = {
+  matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
+  document: { documentElement: document.documentElement },
+};
+const handler: PasskeyHandler = {
+  need: () => undefined,
+  confirm: async () => true,
+  ask: async () => false,
+  focus: () => undefined,
+  locked: () => [],
+  subscribe: () => () => undefined,
+};
+const provision = { handler, Prompts: () => null } as unknown as PasskeyProvision;
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 12; i += 1) await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
+};
+
+interface Options {
+  /** What `host.yaml` holds on the machine; `undefined` is no file. */
+  readonly hostFile?: string;
+  /** What the machine answers the write with. */
+  readonly writeAnswer?: TransportAnswer;
+  /** Whether the read of the file is refused. */
+  readonly readRefused?: boolean;
+  readonly pairing?: Partial<PairingInput>;
+  /** A name this device learned earlier; the plugin list is refused when set, as when the machine is not answering. */
+  readonly learned?: string;
+}
+
+async function boot(options: Options = {}) {
+  window.history.replaceState(null, '', '/d/ws');
+  const transport = new FakeTransport((request: TransportRequest): TransportAnswer => {
+    const path = request.path.split('?')[0];
+    if (path === '/v1/plugins')
+      return options.learned === undefined
+        ? json(inventoryOf(surfaces))
+        : json({ error: 'this device may not read that', code: 'forbidden' }, 403);
+    if (path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
+    if (path === '/v1/config/file' && request.method === 'GET')
+      return options.readRefused === true
+        ? json({ error: 'this device may not read that', code: 'forbidden' }, 403)
+        : json({
+            path: 'host.yaml',
+            exists: options.hostFile !== undefined,
+            text: options.hostFile ?? '',
+            etag: 'e1',
+          });
+    if (path === '/v1/config/file' && request.method === 'PUT')
+      return options.writeAnswer ?? json({ path: 'host.yaml', etag: 'e2', outcome: 'applied' });
+    return json({ ok: true });
+  });
+  const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
+  list.add({
+    daemon: 'ws',
+    machine: HOST,
+    deviceId: 'dev',
+    address: 'http://127.0.0.1:40245',
+    ...options.pairing,
+  });
+  if (options.learned !== undefined) list.learnMachine('ws', options.learned);
+  const runtime = new ShellRuntime({
+    appVersion: '5.0.0',
+    surfaces,
+    daemons: list,
+    connect: async () => transport,
+    passkey: () => provision,
+    daemonless: {
+      views: registeredDaemonless(surfaces, {} as DaemonlessPorts).views,
+      location: () => window.location.href,
+    },
+  });
+  const storage = memoryStore();
+  const view = await mount(
+    <App
+      runtime={runtime}
+      themes={new ThemePreferenceStore(storage)}
+      layouts={new DeviceLayoutStore(storage)}
+      browser={browser}
+      scroll={new ScrollMemory(null)}
+    />,
+  );
+  await settle();
+  const step = (): HTMLElement | null => view.container.querySelector('[data-name-machine]');
+  const writes = (): TransportRequest[] =>
+    transport.requests.filter(request => request.method === 'PUT' && request.path.startsWith('/v1/config/file'));
+  const press = async (selector: string): Promise<void> => {
+    await interact(() => must(view.container.querySelector<HTMLElement>(selector), selector).click());
+    await settle();
+  };
+  const typeName = async (value: string): Promise<void> => {
+    const input = must(view.container.querySelector<HTMLInputElement>('#name-machine-field'), 'the name field');
+    await interact(() => {
+      must(Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set, 'a value setter').call(
+        input,
+        value,
+      );
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+  return { view, list, transport, step, writes, press, typeName };
+}
+
+let open: Awaited<ReturnType<typeof boot>> | undefined;
+afterEach(async () => {
+  await open?.view.unmount();
+  open = undefined;
+  window.history.replaceState(null, '', '/');
+});
+
+describe('Name this machine', () => {
+  test('a pairing of a machine with no name offers one, prefilled with the host name', async () => {
+    open = await boot({ pairing: { askName: true } });
+    expect(open.step()?.textContent).toContain('Name this machine');
+    expect(must(open.view.container.querySelector<HTMLInputElement>('#name-machine-field'), 'field').value).toBe(HOST);
+  });
+
+  test('saving writes host.yaml through the config-file route and the machine is called that everywhere at once', async () => {
+    open = await boot({ pairing: { askName: true } });
+    await open.typeName('Studio box');
+    await open.press('button[type="submit"]');
+    const [write] = open.writes();
+    expect(write?.body).toEqual({
+      path: 'host.yaml',
+      text: 'name: "Studio box"\n',
+      etag: 'e1',
+    });
+    expect(open.list.get('ws')?.machine).toBe('Studio box');
+    expect(open.step()).toBeNull();
+  });
+
+  test('not now sends nothing and keeps the host name', async () => {
+    open = await boot({ pairing: { askName: true } });
+    await open.press('[data-name-machine-skip]');
+    expect(open.writes()).toEqual([]);
+    expect(open.list.get('ws')?.machine).toBe(HOST);
+    expect(open.step()).toBeNull();
+  });
+
+  test('a name the daemon would refuse is said before anything is sent', async () => {
+    open = await boot({ pairing: { askName: true } });
+    await open.typeName('   ');
+    await open.press('button[type="submit"]');
+    expect(open.step()?.querySelector('[role="alert"]')?.textContent ?? '').not.toBe('');
+    expect(open.writes()).toEqual([]);
+  });
+
+  test('a device the daemon refuses is told so, and goes on with the host name', async () => {
+    open = await boot({
+      pairing: { askName: true },
+      writeAnswer: json({ error: 'this device may not configure this machine', code: 'forbidden' }, 403),
+    });
+    await open.typeName('Studio box');
+    await open.press('button[type="submit"]');
+    expect(open.step()?.querySelector('[data-name-machine-refused]')?.textContent).toContain(
+      'this device may not configure this machine',
+    );
+    expect(open.list.get('ws')?.machine).toBe(HOST);
+    await open.press('[data-name-machine-skip]');
+    expect(open.step()).toBeNull();
+  });
+
+  test('a machine that already has a name of the owner’s is not asked', async () => {
+    open = await boot({ pairing: { askName: true }, hostFile: 'name: "pebox"\n' });
+    expect(open.step()).toBeNull();
+    expect(open.list.namePending('ws')).toBe(false);
+  });
+
+  test('a machine that cannot say whether it is named is left alone', async () => {
+    open = await boot({ pairing: { askName: true }, readRefused: true });
+    expect(open.step()).toBeNull();
+    expect(open.writes()).toEqual([]);
+  });
+
+  test('a pairing that did not ask never shows the step and never reads the file', async () => {
+    open = await boot();
+    expect(open.step()).toBeNull();
+    expect(open.transport.requests.some(request => request.path.startsWith('/v1/config/file'))).toBe(false);
+  });
+
+  test('the machine picker keeps the name it learned while the machine refuses its plugin list', async () => {
+    open = await boot({ learned: 'pebox' });
+    const shown = open.view.container.querySelector('[data-daemon-picker] .fy-daemon-picker__name')?.textContent;
+    expect(shown).toBe('pebox');
+    expect(shown).not.toBe(HOST);
+  });
+});
