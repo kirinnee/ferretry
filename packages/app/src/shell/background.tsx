@@ -1,6 +1,7 @@
 import { Suspense, useMemo } from 'react';
 import type { RegisteredBackgroundView } from '../connect/provides.ts';
 import { useRuntimeVersion, useShell } from './context.tsx';
+import { PasskeyBar } from './passkey-bar.tsx';
 import { identityOf, WithPluginIdentity } from './plugin-identity.tsx';
 import type { ShellRuntime } from './runtime.ts';
 import { ViewBoundary } from './views.tsx';
@@ -44,6 +45,8 @@ export function BackgroundViews() {
       {daemons.map(paired => (
         <LinkSheet key={paired.daemon} runtime={runtime} daemon={paired.daemon} />
       ))}
+      {/* A background read the machine on screen refused for a passkey nobody asked for: one press for it (A555 r7). */}
+      <PasskeyBar />
     </>
   );
 }
