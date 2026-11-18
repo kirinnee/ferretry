@@ -1,3 +1,4 @@
 kind	path	limit	expires	reason
 composition	src/index.ts	-	-	the app shell public API
 oversize	src/session/session-client.ts	1815	2026-12-16	one session client class; split by concern when next touched
+oversize	src/shell/frame.tsx	334	2026-12-16	the frame is edited by many parallel lines (churn, not size); the picker, nav targets and chat menu already moved to their own files
