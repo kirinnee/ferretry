@@ -66,7 +66,7 @@ export function pageRequest(patch: Partial<Record<string, unknown>> = {}): Input
 
 export interface Call {
   readonly route: string;
-  readonly init: { params?: Record<string, string>; body?: unknown } | undefined;
+  readonly init: { params?: Record<string, string>; body?: unknown; quiet?: boolean } | undefined;
 }
 
 /** A plugin client that records every call and answers from `answer`; a deliver can be held open. */

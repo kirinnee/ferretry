@@ -25,6 +25,7 @@ import { cn } from '../../shell-voice.ts';
 import type { DaemonConnection } from '../../shell-voice.ts';
 import { useConfigChangeEffect, useDaemonClient } from '../../lib/voice-store.tsx';
 import { putSecret } from '../../shell-voice.ts';
+import { ConfirmToSee, isStepUpRefusal } from '@ferretry/app/ui';
 import { readSpeedups, type SpeedupClient, testSpeedup } from './speedups-api.ts';
 
 export type SpeedupClientFactory = (connection: DaemonConnection) => Promise<SpeedupClient>;
@@ -294,7 +295,14 @@ export function SpeedupsSurface({
   const createClient = injectedClient ?? routedClient;
   const [client, setClient] = useState<SpeedupClient | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [failure, setFailure] = useState<{ readonly daemonId: string; readonly reason: string } | null>(null);
+  const [failure, setFailure] = useState<{
+    readonly daemonId: string;
+    readonly reason: string;
+    /** Refused only for want of the passkey step-up (a cancelled prompt): offer to ask again. */
+    readonly stepUp: boolean;
+  } | null>(null);
+  /** How many times the owner pressed "Confirm it's you to see this"; the read after a press is theirs. */
+  const [reads, setReads] = useState(0);
   const [busy, setBusy] = useState<SpeedupsPanelProps['busy']>(null);
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
 
@@ -306,18 +314,23 @@ export function SpeedupsSurface({
     setErrors({});
     void createClient(connection)
       .then(async next => {
-        const view = await readSpeedups(next);
+        const view = await readSpeedups(next, reads > 0);
         if (!current) return;
         setClient(next);
         setLoaded({ daemonId: connection.daemonId, view });
       })
       .catch(cause => {
-        if (current) setFailure({ daemonId: connection.daemonId, reason: reason(cause) });
+        if (current)
+          setFailure({
+            daemonId: connection.daemonId,
+            reason: reason(cause),
+            stepUp: isStepUpRefusal(cause),
+          });
       });
     return () => {
       current = false;
     };
-  }, [connection, createClient]);
+  }, [connection, createClient, reads]);
 
   // A key saved, removed or tested from anywhere else, or a tool installed, is read again in place.
   useConfigChangeEffect(connection.daemonId, ['speedups'], () => {
@@ -367,6 +380,18 @@ export function SpeedupsSurface({
     [act, loaded],
   );
 
+  if (failure !== null && failure.daemonId === connection.daemonId && failure.stepUp)
+    return (
+      <section className="kt-panel p-panel" role="status" aria-label="Speed-ups need your passkey">
+        <h3 className="m-0 text-row font-semibold text-fg">Speed-ups</h3>
+        <div className="mt-2">
+          <ConfirmToSee
+            line="This machine wants your passkey before it shows which keys it holds."
+            onConfirm={() => setReads(n => n + 1)}
+          />
+        </div>
+      </section>
+    );
   if (failure !== null && failure.daemonId === connection.daemonId)
     return (
       <section className="kt-panel p-panel" role="status" aria-label="Speed-ups unavailable">

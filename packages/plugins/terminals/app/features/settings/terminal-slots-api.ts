@@ -15,12 +15,16 @@ import type { z } from 'zod';
 
 /** What the tab asks of a client: one parsed request (today's `IFyApiClient.request`). */
 export interface TerminalSlotsClient {
-  request<T>(path: string, schema: z.ZodType<T>, init?: { readonly method?: string }): Promise<T>;
+  request<T>(
+    path: string,
+    schema: z.ZodType<T>,
+    init?: { readonly method?: string; readonly pressed?: boolean },
+  ): Promise<T>;
 }
 
 /** Who holds the open terminals, and the machine's limit. */
-export async function readTerminalHolders(client: TerminalSlotsClient): Promise<TerminalHoldersView> {
-  return await client.request('/v1/terminals', TerminalHoldersViewSchema);
+export async function readTerminalHolders(client: TerminalSlotsClient, pressed = false): Promise<TerminalHoldersView> {
+  return await client.request('/v1/terminals', TerminalHoldersViewSchema, pressed ? { pressed: true } : undefined);
 }
 
 /** Closes the terminals of finished ferrets; answers how many closed and who still holds the rest. */

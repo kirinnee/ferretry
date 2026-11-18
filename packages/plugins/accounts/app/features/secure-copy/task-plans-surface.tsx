@@ -5,7 +5,9 @@
  */
 
 import type { TaskPlan } from '../../../contract/routes/index.ts';
+import { ConfirmToSee } from '@ferretry/app/ui';
 import { useCallback, useEffect, useState } from 'react';
+import { isStepUpRefusal } from '../../lib/step-up-refusal.ts';
 import {
   approvedTick,
   failureWords,
@@ -115,17 +117,23 @@ export function TaskPlansSurface({ client }: { readonly client: TaskPlanClient }
   const [plans, setPlans] = useState<readonly TaskPlan[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The read was refused for want of the passkey step-up (a cancelled prompt): offer to ask again. */
+  const [stepUp, setStepUp] = useState(false);
+  /** How many times the owner pressed "Confirm it's you to see this"; the read after a press is theirs. */
+  const [reads, setReads] = useState(0);
 
   useEffect(() => {
     let current = true;
     setPlans(null);
     setError(null);
-    void listTaskPlans(client)
+    setStepUp(false);
+    void listTaskPlans(client, reads > 0 ? { quiet: false } : {})
       .then(list => {
         if (current) setPlans(list.plans);
       })
       .catch(cause => {
         if (!current) return;
+        setStepUp(isStepUpRefusal(cause));
         setError(
           isForbidden(cause)
             ? NO_ACCOUNTS_DEVICE_WORDS
@@ -135,7 +143,7 @@ export function TaskPlansSurface({ client }: { readonly client: TaskPlanClient }
     return () => {
       current = false;
     };
-  }, [client]);
+  }, [client, reads]);
 
   const revoke = useCallback(
     async (plan: TaskPlan, lines?: readonly number[]): Promise<void> => {
@@ -153,6 +161,18 @@ export function TaskPlansSurface({ client }: { readonly client: TaskPlanClient }
     [client],
   );
 
+  if (plans === null && stepUp)
+    return (
+      <section className="kt-panel p-panel" role="status" aria-label="Sign-in plans need your passkey">
+        <h3 className="m-0 text-row font-semibold text-fg">Sign-in plans</h3>
+        <div className="mt-2">
+          <ConfirmToSee
+            line="This machine wants your passkey before it shows its sign-in plans."
+            onConfirm={() => setReads(n => n + 1)}
+          />
+        </div>
+      </section>
+    );
   if (plans === null && error === null)
     return (
       <section className="kt-panel p-panel" role="status" aria-label="Loading sign-in plans">

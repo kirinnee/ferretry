@@ -75,8 +75,8 @@ async function ask<Schema extends z.ZodType>(
 // ── Routes ───────────────────────────────────────────────────────────────────────────────────────────
 
 /** Every rule on the machine and the stages waiting in the app (`secrets.use`: it names accounts). */
-export async function listRules(client: RuleClient): Promise<SignInRuleList> {
-  return await ask(client, 'GET /v1/sign-in-rules', SignInRuleListSchema);
+export async function listRules(client: RuleClient, read: ReadMode = {}): Promise<SignInRuleList> {
+  return await ask(client, 'GET /v1/sign-in-rules', SignInRuleListSchema, quietInit(read));
 }
 
 /** The one fact read of a ferret: its board's project, a UUID. `unfiled` is not one, so it reads as no project. */

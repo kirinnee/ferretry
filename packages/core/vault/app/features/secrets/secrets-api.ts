@@ -22,8 +22,9 @@ const LIST_ROUTE = 'GET /v1/secrets';
 const PUT_ROUTE = 'POST /v1/secrets';
 const REMOVE_ROUTE = 'DELETE /v1/secrets/:name';
 
-export async function listSecrets(client: VaultClient): Promise<SecretList> {
-  return SecretListSchema.parse(await client.call(LIST_ROUTE));
+/** `pressed`: the owner pressed for this read (a retry after a cancelled passkey prompt), so it may ask again. */
+export async function listSecrets(client: VaultClient, pressed = false): Promise<SecretList> {
+  return SecretListSchema.parse(await (pressed ? client.call(LIST_ROUTE, { quiet: false }) : client.call(LIST_ROUTE)));
 }
 
 /** Stores or replaces a value. There is no matching read, by design. */

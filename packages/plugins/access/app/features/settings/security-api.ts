@@ -26,7 +26,12 @@ export async function readSecurityLog(
   client: SecurityLogClient,
   limit = SECURITY_LOG_LIMIT,
   keptOffset = 0,
+  pressed = false,
 ): Promise<AuditView> {
   const skip = keptOffset === 0 ? '' : `&keptOffset=${String(keptOffset)}`;
-  return await client.request(`${AUDIT_PATH}?limit=${String(limit)}${skip}`, AuditViewSchema);
+  return await client.request(
+    `${AUDIT_PATH}?limit=${String(limit)}${skip}`,
+    AuditViewSchema,
+    pressed ? { pressed: true } : undefined,
+  );
 }

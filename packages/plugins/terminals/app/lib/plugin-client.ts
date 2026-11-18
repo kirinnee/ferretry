@@ -100,10 +100,15 @@ const ROUTE_OF: Readonly<Record<string, string>> = {
 
 /** The Settings › Terminals client (`readTerminalHolders`, `closeFinishedTerminals`) over the shell client. */
 export const pluginTerminalSlotsClient = (client: PluginClient): TerminalSlotsClient => ({
-  request: async <T>(path: string, schema: z.ZodType<T>, init?: { readonly method?: string }): Promise<T> => {
+  request: async <T>(
+    path: string,
+    schema: z.ZodType<T>,
+    init?: { readonly method?: string; readonly pressed?: boolean },
+  ): Promise<T> => {
     const route = ROUTE_OF[path];
     if (route === undefined || (init?.method ?? 'GET') !== route.split(' ')[0])
       throw new Error(`Terminals does not call ${init?.method ?? 'GET'} ${path}`);
-    return schema.parse(await client.call(route));
+    // A read the owner pressed for (a retry after a cancelled passkey prompt) is theirs, so it may ask again.
+    return schema.parse(await (init?.pressed === true ? client.call(route, { quiet: false }) : client.call(route)));
   },
 });

@@ -14,7 +14,9 @@ import type {
   PutAccountDefaultRequest,
   TwoFactorStageId,
 } from '../../../contract/routes/index.ts';
+import { ConfirmToSee } from '@ferretry/app/ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { isStepUpRefusal } from '../../lib/step-up-refusal.ts';
 import type { DefaultsRead } from '../../lib/accounts-screen.ts';
 import type { RuleAsk } from '../../lib/sign-in-rules.ts';
 import { readDefaults } from '../../shell.tsx';
@@ -45,8 +47,8 @@ interface Loaded {
 
 const message = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
-async function readAll(client: AccountsClient): Promise<Loaded> {
-  const list = await readAccounts(client);
+async function readAll(client: AccountsClient, pressed = false): Promise<Loaded> {
+  const list = await readAccounts(client, pressed ? { quiet: false } : {});
   const [lookAlike, defaults] = await Promise.all([
     readLookAlike(client).then(
       found => found.groups,
@@ -81,7 +83,9 @@ export function AccountsSurface({
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [failure, setFailure] = useState<{ readonly reason: string } | null>(null);
+  const [failure, setFailure] = useState<{ readonly reason: string; readonly stepUp: boolean } | null>(null);
+  /** How many times the owner pressed "Confirm it's you to see this"; the read after a press is theirs. */
+  const [reads, setReads] = useState(0);
 
   useEffect(() => {
     let current = true;
@@ -91,18 +95,18 @@ export function AccountsSurface({
     setFailure(null);
     void Promise.resolve(given)
       .then(async next => {
-        const all = await readAll(next);
+        const all = await readAll(next, reads > 0);
         if (!current) return;
         setClient(next);
         setLoaded(all);
       })
       .catch(cause => {
-        if (current) setFailure({ reason: message(cause) });
+        if (current) setFailure({ reason: message(cause), stepUp: isStepUpRefusal(cause) });
       });
     return () => {
       current = false;
     };
-  }, [given]);
+  }, [given, reads]);
 
   const refresh = useCallback(async (): Promise<void> => {
     if (client === null) return;
@@ -150,6 +154,18 @@ export function AccountsSurface({
     [write],
   );
 
+  if (failure?.stepUp === true)
+    return (
+      <section className="kt-panel p-panel" role="status" aria-label="Accounts need your passkey">
+        <h3 className="m-0 text-row font-semibold text-fg">Accounts</h3>
+        <div className="mt-2">
+          <ConfirmToSee
+            line="This machine wants your passkey before it shows its accounts."
+            onConfirm={() => setReads(n => n + 1)}
+          />
+        </div>
+      </section>
+    );
   if (failure !== null)
     return (
       <section className="kt-panel p-panel" role="status" aria-label="Accounts unavailable">

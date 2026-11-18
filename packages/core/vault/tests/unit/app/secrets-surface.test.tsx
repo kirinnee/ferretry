@@ -86,6 +86,33 @@ describe('the Secrets page', () => {
     }
   });
 
+  it('E2 a cancelled passkey prompt shows "Confirm it’s you to see this", never "Reading…" or data; pressing it reads again as the owner’s own read', async () => {
+    let refused = true;
+    const { client, calls } = recordingClient(async (_route, init) => {
+      if (refused && init?.quiet !== false)
+        throw Object.assign(new Error('needs a passkey confirmation'), { status: 403, code: 'grant_step_up_required' });
+      return list([{ name: 'ANTHROPIC_KEY', createdAt: CREATED, updatedAt: CHANGED }]);
+    });
+    const mounted = await mount(<SecretsSurface client={client} />);
+    await settle();
+    try {
+      expect(mounted.container.textContent).toContain('Confirm it’s you to see this');
+      expect(mounted.container.textContent).not.toContain('Reading');
+      expect(mounted.container.querySelector('[data-secret]')).toBeNull();
+      expect(calls.map(each => each.init?.quiet)).toEqual([undefined]);
+      refused = false;
+      await interact(() => {
+        q<HTMLButtonElement>(mounted.container, '[data-confirm-to-see] button').click();
+      });
+      await settle();
+      // The press is the owner's: the second read says so (`quiet: false`), and only then is data shown.
+      expect(calls.map(each => each.init?.quiet)).toEqual([undefined, false]);
+      expect(q(mounted.container, '[data-secret="ANTHROPIC_KEY"]').textContent).toContain('ANTHROPIC_KEY');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
   it('S4 creates a secret, sends the value once, clears the field at once and shows the name afterwards', async () => {
     const { client, calls } = daemon();
     const mounted = await mount(<SecretsSurface client={client} />);

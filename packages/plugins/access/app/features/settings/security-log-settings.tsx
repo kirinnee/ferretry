@@ -35,6 +35,7 @@
  * refused or failed read — so opening Security cannot make an attacker's pairing disappear unseen.
  */
 
+import { ConfirmToSee } from '@ferretry/app/ui';
 import type { AuditView } from '@ferretry/core-gate/contract';
 import { CircleAlert, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -100,7 +101,7 @@ export const SECURITY_REFUSED_INTRO =
 export const SECURITY_PASSKEY_INTRO =
   "Reading this machine's security log from this device needs your passkey, and it was not confirmed. Pairing is still on.";
 export const SECURITY_PASSKEY_REMEDY =
-  'Reload this page to be asked for your passkey again, or read the log on the machine itself: open Ferretry there, or run fy daemon audit in its terminal.';
+  'Press the button to be asked for your passkey again, or read the log on the machine itself: open Ferretry there, or run fy daemon audit in its terminal.';
 export const SECURITY_THIS_DEVICE_INTRO = 'This machine has not given this device permission to read its security log.';
 const SECURITY_OTHER_INTRO = "This machine refused this device's read of its security log.";
 
@@ -282,11 +283,14 @@ export function SecurityLogSurface({
     load: { status: 'loading' },
   });
 
+  /** How many times the owner pressed "Confirm it's you to see this"; the read after a press is theirs. */
+  const [reads, setReads] = useState(0);
+
   useEffect(() => {
     let current = true;
     setState({ daemonId: connection.daemonId, load: { status: 'loading' } });
     void createClient(connection)
-      .then(async client => await readSecurityLog(client))
+      .then(async client => await readSecurityLog(client, undefined, 0, reads > 0))
       .then(view => {
         if (!current) return;
         setState({ daemonId: connection.daemonId, load: { status: 'loaded', view, older: NO_OLDER } });
@@ -307,7 +311,7 @@ export function SecurityLogSurface({
     return () => {
       current = false;
     };
-  }, [connection, createClient]);
+  }, [connection, createClient, reads]);
 
   const showOlder = useCallback(() => {
     const daemonId = connection.daemonId;
@@ -348,6 +352,11 @@ export function SecurityLogSurface({
         <h3 className="m-0 text-row font-semibold text-fg">{REFUSAL_WORDS[load.why].heading}</h3>
         <p className="mb-0 mt-1 text-cell leading-base text-muted">{REFUSAL_WORDS[load.why].intro}</p>
         {load.reason === '' ? null : <p className="mb-0 mt-1 text-cell leading-base text-muted">{load.reason}</p>}
+        {load.why === 'passkey' ? (
+          <div className="mt-2">
+            <ConfirmToSee onConfirm={() => setReads(n => n + 1)} />
+          </div>
+        ) : null}
         <p className="mb-0 mt-1 text-cell leading-base text-fg">{REFUSAL_WORDS[load.why].remedy}</p>
       </section>
     );

@@ -477,7 +477,9 @@ export class DaemonClient {
       ...(init.signal === undefined ? {} : { signal: init.signal }),
     };
     // A resend is the same request, its request id included: the daemon sees one act asked twice, never two acts.
-    const origin: PromptOrigin = background ? 'background' : requestOrigin(method);
+    // A read sent with `quiet: false` is one a person pressed for (a retry after a cancelled prompt): it is theirs, so it
+    // asks wherever it came from and clears the machine's "cancel stays cancelled". Absent, a GET is the page's own read.
+    const origin: PromptOrigin = background ? 'background' : init.quiet === false ? 'explicit' : requestOrigin(method);
     return await this.#confirmed(
       origin,
       await this.#sent(request),
