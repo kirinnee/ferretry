@@ -69,7 +69,12 @@ export function TaskPlanHost({ client, ferret, planId, agentName, askPasskey, on
       } catch (cause) {
         if (!current) return;
         // The page's own read is quiet: a step-up the daemon wants waits for the owner's press, not for opening the chat.
-        if (isStepUpRefusal(cause)) setLocked(true);
+        if (isStepUpRefusal(cause)) {
+          // The unlock ran out while the card was on screen: what it showed is dropped, not just hidden.
+          setLocked(true);
+          setFound(null);
+          setStaged(undefined);
+        }
         // A device that can't see accounts is refused every time: say so once and stop asking.
         else if (isForbidden(cause)) setForbidden(true);
         else timer = setTimeout(() => void read(true), POLL_MS * 3);
