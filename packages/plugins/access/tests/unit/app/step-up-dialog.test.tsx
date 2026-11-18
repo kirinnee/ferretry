@@ -517,3 +517,84 @@ describe('the passkey prompt on the server', () => {
     expect(ceremonies).toEqual([]);
   });
 });
+
+describe('the step-up prompt for a device with no passkey (A555)', () => {
+  const stepUpGate = (deps: Partial<StepUpGateDependencies>) =>
+    new StepUpGate({ ceremony: async () => undefined, describe: () => 'plain', ...deps });
+  const open = async (gate: StepUpGate) => {
+    const mounted = await mount(<StepUpDialog gate={gate} machineName={id => `Name of ${id}`} />);
+    await interact(() => void gate.require(studio, 'open a terminal'));
+    await interact(async () => await Promise.resolve());
+    return mounted;
+  };
+  const passkeysView = (view: Record<string, unknown>) =>
+    ({
+      request: async <T,>(_path: string, schema: z.ZodType<T>): Promise<T> => schema.parse(view),
+    }) as const;
+
+  it('(a) should offer Add a passkey in place, and no command, when a window is open', async () => {
+    const mounted = await open(stepUpGate({ firstPasskey: async () => true, ownerCommand: async () => undefined }));
+    try {
+      const dialog = must(mounted.container.querySelector('[role="dialog"]'), 'the dialog');
+      expect(must(dialog.querySelector('h2'), 'the title').textContent).toBe(FIRST_PASSKEY_TITLE);
+      expect(dialog.textContent).toContain('no passkey for Name of daemon-studio yet, and it can add one now');
+      expect(dialog.textContent).toContain('Then it confirms.');
+      expect(dialog.textContent).not.toContain('passkey window');
+      expect(confirmButton(mounted.container).textContent).toContain('Add a passkey');
+      expect(confirmButton(mounted.container).hasAttribute('data-step-up-first-passkey')).toBe(true);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('(b) should say plainly that the device has no passkey and give the exact command, never "no window" first', async () => {
+    const offer = ownerCommandOffer(async () =>
+      passkeysView({ passkeys: [], registration: 'closed', deviceName: 'Liftoff Browser', clientName: 'fy5' }),
+    );
+    const mounted = await open(stepUpGate({ firstPasskey: async () => false, ownerCommand: offer }));
+    try {
+      const dialog = must(mounted.container.querySelector('[role="dialog"]'), 'the dialog');
+      const purpose = must(dialog.querySelector('[id$="-purpose"]'), 'the sentence').textContent ?? '';
+      expect(purpose.startsWith('This device has no passkey yet')).toBe(true);
+      expect(purpose).toContain('No window is open to add one.');
+      expect(must(dialog.querySelector('[data-passkey-owner-command] code'), 'the command').textContent).toBe(
+        "fy5 passkey window 'Liftoff Browser'",
+      );
+      expect(dialog.textContent).not.toContain('No passkey window is open for this device yet');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('(b) should fall back to fy only when the machine reported no CLI name', async () => {
+    const offer = ownerCommandOffer(async () =>
+      passkeysView({ passkeys: [], registration: 'closed', deviceName: 'Phone' }),
+    );
+    const mounted = await open(stepUpGate({ ownerCommand: offer }));
+    try {
+      expect(
+        must(mounted.container.querySelector('[data-passkey-owner-command] code'), 'the command').textContent,
+      ).toBe("fy passkey window 'Phone'");
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('(c) should keep today’s confirm for a device that holds a passkey', async () => {
+    const offer = ownerCommandOffer(async () =>
+      passkeysView({
+        passkeys: [{ id: 'AQID', origin: 'https://ferretry.pages.dev', createdAt: '2026-10-13T10:00:00.000Z' }],
+        registration: 'closed',
+      }),
+    );
+    const mounted = await open(stepUpGate({ firstPasskey: async () => false, ownerCommand: offer }));
+    try {
+      const dialog = must(mounted.container.querySelector('[role="dialog"]'), 'the dialog');
+      expect(must(dialog.querySelector('h2'), 'the title').textContent).toBe('Confirm it’s you');
+      expect(mounted.container.querySelector('[data-passkey-owner-command]')).toBeNull();
+      expect(confirmButton(mounted.container).textContent).toContain('Use passkey');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+});

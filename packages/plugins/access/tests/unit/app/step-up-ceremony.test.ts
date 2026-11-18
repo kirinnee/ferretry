@@ -467,3 +467,100 @@ describe('running the presence ceremony', () => {
     should(paths).eql(['/v1/unlock/options', '/v1/unlock']);
   });
 });
+
+describe('running the step-up ceremony for a device with no passkey', () => {
+  const hadPublicKeyCredential = 'PublicKeyCredential' in globalThis;
+  beforeEach(() => {
+    Object.defineProperty(globalThis, 'PublicKeyCredential', { value: class {}, configurable: true, writable: true });
+  });
+  afterEach(() => {
+    if (!hadPublicKeyCredential) Reflect.deleteProperty(globalThis, 'PublicKeyCredential');
+  });
+
+  const credentials: CredentialsPort = {
+    create: async () =>
+      ({
+        type: 'public-key',
+        rawId: buffer(0xaa, 0xbb),
+        response: { clientDataJSON: buffer(0x7b, 0x7d), attestationObject: buffer(1), getTransports: () => [] },
+      }) as unknown as Credential,
+    get: async () =>
+      ({
+        type: 'public-key',
+        rawId: buffer(0xaa, 0xbb),
+        response: { clientDataJSON: buffer(0x7b, 0x7d), authenticatorData: buffer(1, 2, 3), signature: buffer(4, 5) },
+      }) as unknown as Credential,
+  };
+  const answers: Record<string, unknown> = {
+    '/v1/step-up/options': {
+      challenge: toBase64Url(Uint8Array.of(5)),
+      rpId: 'ferretry.pages.dev',
+      allowCredentials: [{ type: 'public-key', id: toBase64Url(Uint8Array.of(0xaa, 0xbb)) }],
+      timeout: 60_000,
+    },
+    '/v1/passkeys/options': {
+      challenge: toBase64Url(Uint8Array.of(9)),
+      rp: { id: 'ferretry.pages.dev', name: 'Ferretry' },
+      user: { id: toBase64Url(Uint8Array.of(1)), name: 'device-one', displayName: 'device-one' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      timeout: 60_000,
+      excludeCredentials: [],
+    },
+    '/v1/passkeys': { id: toBase64Url(Uint8Array.of(0xaa, 0xbb)), createdAt: INSTANT, origin: ORIGIN },
+    '/v1/step-up': { expiresAt: INSTANT },
+  };
+
+  it('(a) should add the first passkey in place, then confirm with it, inside an open window', async () => {
+    const paths: string[] = [];
+    let registered = false;
+    const client: StepUpClient = {
+      request: async <T>(path: string, schema: z.ZodType<T>): Promise<T> => {
+        paths.push(path);
+        if (path === '/v1/passkeys') registered = true;
+        if (path === '/v1/step-up/options' && !registered) throw new FyHttpError('refused', 403, 'step_up_no_passkey');
+        return schema.parse(answers[path]);
+      },
+    };
+
+    await stepUpCeremony({ client: async () => client, credentials, origin: ORIGIN })(daemon);
+
+    should(paths).eql([
+      '/v1/step-up/options',
+      '/v1/passkeys/options',
+      '/v1/passkeys',
+      '/v1/step-up/options',
+      '/v1/step-up',
+    ]);
+  });
+
+  it('(a) should never weaken the gate: a closed window refuses the registration and the confirm never happens', async () => {
+    const paths: string[] = [];
+    const client: StepUpClient = {
+      request: async <T>(path: string, schema: z.ZodType<T>): Promise<T> => {
+        paths.push(path);
+        if (path === '/v1/step-up/options') throw new FyHttpError('refused', 403, 'step_up_no_passkey');
+        if (path === '/v1/passkeys/options') throw new FyHttpError('closed', 403, 'step_up_registration_closed');
+        return schema.parse(answers[path]);
+      },
+    };
+
+    await should(stepUpCeremony({ client: async () => client, credentials, origin: ORIGIN })(daemon)).be.rejectedWith({
+      code: 'step_up_registration_closed',
+    });
+    should(paths).eql(['/v1/step-up/options', '/v1/passkeys/options']);
+  });
+
+  it('(c) should confirm straight away, registering nothing, when the device holds a passkey', async () => {
+    const paths: string[] = [];
+    const client: StepUpClient = {
+      request: async <T>(path: string, schema: z.ZodType<T>): Promise<T> => {
+        paths.push(path);
+        return schema.parse(answers[path]);
+      },
+    };
+
+    await stepUpCeremony({ client: async () => client, credentials, origin: ORIGIN })(daemon);
+
+    should(paths).eql(['/v1/step-up/options', '/v1/step-up']);
+  });
+});

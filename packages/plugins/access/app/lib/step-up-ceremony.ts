@@ -40,7 +40,13 @@ export const stepUpCeremony =
   (deps: StepUpCeremonyDependencies) =>
   async (daemon: DaemonConnection, act?: StepUpAct, subject?: StepUpSubject): Promise<void> => {
     const client = await deps.client(daemon);
-    const options = await stepUpOptions(client, deps.origin, act, subject);
+    // A device with no passkey yet adds its first one here, in the same press, then confirms with it. The daemon
+    // decides whether that is allowed (only inside an open window): a refusal is the sentence shown, never a bypass.
+    const options = await stepUpOptions(client, deps.origin, act, subject).catch(async (reason: unknown) => {
+      if (!refusalWith(reason, 'no-passkey')) throw reason;
+      await addPasskeyCeremony(deps.credentials, client, deps.origin);
+      return await stepUpOptions(client, deps.origin, act, subject);
+    });
     const assertion = await assertPasskey(deps.credentials, options);
     await submitStepUp(client, assertion);
   };
