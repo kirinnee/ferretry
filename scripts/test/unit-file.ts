@@ -57,6 +57,18 @@ export type Plan =
   | { kind: 'elsewhere'; file: string; where: string; command: string }
   | { kind: 'unclaimed'; file: string };
 
+/** The scripts tests Static runs instead of Quick (config/static-tests.txt: one path per line, `#` comments). */
+const staticTests = (root: string): ReadonlySet<string> => {
+  const list = join(root, 'config', 'static-tests.txt');
+  if (!existsSync(list)) return new Set();
+  return new Set(
+    readFileSync(list, 'utf8')
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line !== '' && !line.startsWith('#')),
+  );
+};
+
 /** What to do with one repo-relative file. Pure over the bunfigs under `root`. */
 export const planFor = (root: string, file: string): Plan => {
   if (configHolds(root, TIERS[0]!.config, file)) return { kind: 'run', file };
@@ -69,12 +81,15 @@ export const planFor = (root: string, file: string): Plan => {
         command: `${tier.command} ${file}`,
       };
   }
-  // Outside the bunfigs' `packages` root: the repository tooling's tests run in Quick's `scripts` part, with no config.
+  // Outside the bunfigs' `packages` root: the repository tooling's tests run with no config, in Quick's `scripts` part,
+  // or in Static's `guards` part when config/static-tests.txt lists them (scripts/ci/quick-part.sh reads the same list).
   if (file.startsWith('scripts/') && TEST_NAME.test(file))
     return {
       kind: 'elsewhere',
       file,
-      where: "a repository-tooling test (Quick's `scripts` part)",
+      where: `a repository-tooling test (${
+        staticTests(root).has(file) ? "Static Checks' \`guards\` part" : "Quick's \`scripts\` part"
+      })`,
       command: `bun test ./${file}`,
     };
   // A tool beside the product that is a package of its own (its own package.json, so its own dependencies and its own
