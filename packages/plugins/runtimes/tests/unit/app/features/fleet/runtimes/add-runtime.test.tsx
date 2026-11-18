@@ -528,6 +528,19 @@ describe('Add runtime: Name and Create', () => {
     expect(submit(view.container).disabled).toBe(false);
   });
 
+  it('the first runtime on a machine is offered as an agent, so a ferret can start on it; once one exists the box is left alone', async () => {
+    const first = await ready({ data: { ...DATA, runtimes: { ...DATA.runtimes, runtimes: [] } } });
+    expect(
+      must(first.container.querySelector<HTMLInputElement>('[data-add-runtime-agent] input'), 'agent').checked,
+    ).toBe(true);
+    await first.unmount();
+    const later = await ready();
+    expect(
+      must(later.container.querySelector<HTMLInputElement>('[data-add-runtime-agent] input'), 'agent').checked,
+    ).toBe(false);
+    await later.unmount();
+  });
+
   it('E16: an invalid name says why, offers one that works, and cannot be created until fixed', async () => {
     const view = await ready();
     await type(nameInput(view.container), 'bad name!');
