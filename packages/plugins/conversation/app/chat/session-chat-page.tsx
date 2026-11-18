@@ -46,6 +46,7 @@ import {
   QuestionForm,
   questionAnswerApi,
 } from '../questions/question-form.tsx';
+import { QuestionDrawer, questionTopic } from '../questions/question-drawer.tsx';
 import { ChatSearch, type ChatSearchPort } from '../search/chat-search.tsx';
 import { displayCallsign } from '@ferretry/core-ferrets/contract';
 import { usePaneActivity } from '../transcript/live-activity.tsx';
@@ -433,28 +434,54 @@ export function SessionChatPage({
             subject={ferretId}
           />
           {question !== null && canControl ? (
-            <QuestionForm
-              api={questionApi}
-              daemon={daemonId}
-              ferretId={ferretId}
-              key={`${daemonId}:${ferretId}:${question.toolUseId}`}
-              onAnswered={onSent}
-              question={question}
-            />
+            askId === undefined ? (
+              /* On the ferret's own page the question is ONE LINE above the composer; the form opens on a click. */
+              <QuestionDrawer
+                agentName={agentName}
+                key={`${daemonId}:${ferretId}:${question.toolUseId}`}
+                label="Answer the ferret's questions"
+                topic={questionTopic(question)}
+              >
+                <QuestionForm
+                  api={questionApi}
+                  daemon={daemonId}
+                  ferretId={ferretId}
+                  onAnswered={onSent}
+                  question={question}
+                />
+              </QuestionDrawer>
+            ) : (
+              <QuestionForm
+                api={questionApi}
+                daemon={daemonId}
+                ferretId={ferretId}
+                key={`${daemonId}:${ferretId}:${question.toolUseId}`}
+                onAnswered={onSent}
+                question={question}
+              />
+            )
           ) : awaitingAnswer ? (
             /* Status without a validated payload is damaged or incomplete evidence, never an empty question. Keep the
                recovery action visible, but do not invent options or send an unbound answer. */
-            <section
-              aria-label="Structured question"
-              className="fy-question-form"
-              data-question-unavailable=""
-              role="status"
+            <QuestionDrawer
+              action="Details"
+              agentName={agentName}
+              label="Structured question"
+              topic=""
+              variant="unavailable"
             >
-              <p className="m-0">
-                This session reports a structured question, but its complete validated prompt is unavailable. No answer
-                can be sent safely; refresh the session or interrupt the turn to abandon it.
-              </p>
-            </section>
+              <section
+                aria-label="Structured question"
+                className="fy-question-form"
+                data-question-unavailable=""
+                role="status"
+              >
+                <p className="m-0">
+                  This session reports a structured question, but its complete validated prompt is unavailable. No
+                  answer can be sent safely; refresh the session or interrupt the turn to abandon it.
+                </p>
+              </section>
+            </QuestionDrawer>
           ) : null}
           {showComposer ? (
             <>
