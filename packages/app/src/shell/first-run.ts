@@ -20,6 +20,13 @@
 /** The key of Onboarding's daemon-less first-run screen: `<plugin>.<screen>`. */
 export const ONBOARDING_SCREEN = 'onboarding.onboarding';
 
+/**
+ * The key of Access's daemon-less pairing screen: its "Your daemons" page lists every paired daemon with its address,
+ * the selected one ticked and a Forget button on each, beside "Pair another daemon". The home page links it instead of
+ * drawing a second list (a second Forget would be a second place for the unpair seam to drift).
+ */
+export const PAIR_SCREEN = 'access.pair';
+
 /** Everything the decision is allowed to look at. */
 export interface FirstRunEvidence<Id extends string> {
   /** The daemon ids this browser holds a pairing for. */
