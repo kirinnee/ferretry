@@ -9,4 +9,12 @@ export interface LoopPort {
    * readings. `0` on a host whose composition root does not run the tick (a suite).
    */
   blockedMs(): number;
+  /**
+   * Hears every tick (a quarter second apart) with how late it fired in ms, the epoch ms it fired at, and a function that
+   * names the work in flight (the boot step, or the jobs still running) when the late tick finally ran. Hearing a tick
+   * costs no allocation: the observer is called with shared values, and `during` builds its labels only when called. Read
+   * only, like `blockedMs`. The function it returns stops the hearing. Nothing is heard on a host whose composition root
+   * does not run the tick (a suite), and it is called with no argument that could name a path, a value or a secret.
+   */
+  observe(observer: (lagMs: number, atMs: number, during: () => readonly string[]) => void): () => void;
 }

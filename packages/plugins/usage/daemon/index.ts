@@ -49,6 +49,7 @@ import { budgetNoticeText } from './lib/budget/notice.ts';
 import { serialExecutor, type TurnUsageSource } from './lib/ports.ts';
 import { PerformanceProfiler } from './lib/performance/profiler.ts';
 import { PerformanceRecorder } from './lib/performance/recorder.ts';
+import { feedLoopToProbe } from './lib/performance/loop-feed.ts';
 import { IDLE_DAEMON_BUDGETS } from './lib/performance/budgets.ts';
 import {
   CredentialUsageSource,
@@ -350,6 +351,9 @@ export default implementDaemon(manifest, {
 
     // ── performance: a window onto the daemon's own counters ───────────────────────────────────────────────────────────────
     const recorder = new PerformanceRecorder();
+    // The kernel's own quarter-second tick, heard for as long as the daemon runs: a window opened by a profile finds the lag
+    // and stalls of exactly the seconds it spans, and with none open the observer returns at once.
+    kernel.lifecycle.onStop(feedLoopToProbe(kernel.loop, recorder));
     // "Hot functions": the runtime's own stack sampler, started by the first profile and drained for as long as the daemon runs.
     const stackSampling = new ProfileStackSampling({
       start: async () => await JscStackSampler.start(),
@@ -379,7 +383,7 @@ export default implementDaemon(manifest, {
             : { sessions: all.length, running: all.filter(ferret => ferret.state !== 'stopped').length };
         },
         limitations: () => [
-          'The kernel does not yet hand Usage the routes, child processes, file operations or event-loop stalls it sees, so this report holds the process counters and the sampled work only.',
+          'The kernel does not yet hand Usage the routes, child processes or file operations it sees, so this report holds the event-loop lag and stalls, the process counters and the sampled work only.',
           ...(platform() === 'linux'
             ? []
             : ['System-call counts and children’s CPU are read from /proc and exist on Linux only.']),
