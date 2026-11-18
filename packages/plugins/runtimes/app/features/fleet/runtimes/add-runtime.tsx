@@ -133,7 +133,12 @@ function Part({
 }
 
 export function AddRuntime({ data, reload, changes, machine, machineName, online, onFinish }: AddRuntimeProps) {
-  const [draft, setDraft] = useState<AddRuntimeDraft>(EMPTY);
+  // Ferrets only start on an agent runtime, so a machine that has none offers the first one as an agent: left unticked it
+  // would end at "No runtime can run a ferret yet".
+  const [draft, setDraft] = useState<AddRuntimeDraft>(() => ({
+    ...EMPTY,
+    agent: !data.runtimes.runtimes.some(item => item.agent),
+  }));
   const [made, setMade] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const credentials = data.credentials.logins;
