@@ -239,6 +239,11 @@ export interface CapabilityListProps {
    * applying. Never derived from the page: a `127.0.0.1` address bar says nothing about the connection.
    */
   readonly governed?: boolean | undefined;
+  /**
+   * Draw the per-capability rows. The grants screen already draws each capability once, with its switches, so it asks
+   * for the heading, the posture and the key only (`false`); everywhere else the rows are the point.
+   */
+  readonly rows?: boolean;
 }
 
 /**
@@ -248,7 +253,7 @@ export interface CapabilityListProps {
  * an answer nobody gave. Rows are ordered by the protocol's own declaration rather than by arrival, so
  * a person can build a habit around their position.
  */
-export function CapabilityList({ connection, capabilities, governed }: CapabilityListProps) {
+export function CapabilityList({ connection, capabilities, governed, rows = true }: CapabilityListProps) {
   const headingId = useId();
   const posture = connectionPosture(governed);
   const copy = postureCopy(posture);
@@ -305,7 +310,7 @@ export function CapabilityList({ connection, capabilities, governed }: Capabilit
           This daemon listed no capabilities, so there is nothing to report. That is a failed read rather than a machine
           with no limits, and Ferretry will not present it as one.
         </p>
-      ) : (
+      ) : !rows ? null : (
         <ul className="m-0 flex list-none flex-col p-0" aria-label="Capabilities">
           {entries.map(entry => (
             <CapabilityRow key={entry.capability} entry={entry} posture={posture} />

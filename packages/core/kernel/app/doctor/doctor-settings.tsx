@@ -7,7 +7,7 @@
  */
 import { CircleAlert, CircleCheck, CircleMinus, Stethoscope } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { type DoctorReport, DoctorReportSchema } from '../../contract/doctor.ts';
+import { type DoctorReport, DoctorReportSchema, notBuiltCheck } from '../../contract/doctor.ts';
 import type { KernelClient } from '../lib/client.ts';
 
 type Held =
@@ -19,8 +19,21 @@ type Held =
 export const doctorHeadline = (report: DoctorReport): string =>
   report.ready ? 'Required dependencies are present.' : 'A required dependency is missing; sessions will not work yet.';
 
+/** A sentence's text without its last full stop, so "summary. impact" never doubles the stop. */
+const withoutFinalStop = (text: string): string => text.replace(/\.+$/u, '');
+
 /** The report, drawn from plain values so every state can be rendered without a daemon. */
 export function DoctorReportView({ report }: { readonly report: DoctorReport }) {
+  // Checks a plugin declared and nobody has built yet all say the same sentence: they are one line, not a wall of rows
+  // that reads like failures on a healthy host (the same grouping `fy doctor` makes).
+  // Only an OPTIONAL check that is missing may fold (the CLI's 'warn'): a required or failing one is never hidden.
+  const unbuiltName = (check: DoctorReport['checks'][number]): string | undefined =>
+    check.status === 'missing' && check.requirement !== 'required' ? notBuiltCheck(check.summary) : undefined;
+  const unbuilt = report.checks.flatMap(check => {
+    const name = unbuiltName(check);
+    return name === undefined ? [] : [name];
+  });
+  const checks = report.checks.filter(check => unbuiltName(check) === undefined);
   return (
     <section className="kt-panel p-panel" aria-labelledby="doctor-settings-heading" data-doctor-report="">
       <div className="flex items-center gap-2">
@@ -33,7 +46,7 @@ export function DoctorReportView({ report }: { readonly report: DoctorReport }) 
         {doctorHeadline(report)}
       </p>
       <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Host dependency checks">
-        {report.checks.map(check => {
+        {checks.map(check => {
           const Icon =
             check.status === 'present' ? CircleCheck : check.status === 'missing' ? CircleAlert : CircleMinus;
           const tone = check.status === 'missing' ? 'text-err' : check.status === 'present' ? 'text-ok' : 'text-muted';
@@ -53,12 +66,21 @@ export function DoctorReportView({ report }: { readonly report: DoctorReport }) 
               <p className="mb-0 mt-1 break-words text-meta leading-base text-muted">
                 {/* What a miss breaks is said only where there is a miss: a row that passes, or does not apply here, says
                     what it found, once. */}
-                {check.status === 'missing' ? `${check.summary}. ${check.impact}` : check.summary}
+                {check.status === 'missing' ? `${withoutFinalStop(check.summary)}. ${check.impact}` : check.summary}
               </p>
             </li>
           );
         })}
       </ul>
+      {unbuilt.length === 0 ? null : (
+        <details className="mt-3 text-meta leading-base text-muted" data-doctor-unbuilt="">
+          <summary className="cursor-pointer text-faint">
+            {unbuilt.length} {unbuilt.length === 1 ? 'check is' : 'checks are'} not built yet in this build, so nothing
+            was checked
+          </summary>
+          <p className="mb-0 mt-1 break-words">{unbuilt.join(', ')}</p>
+        </details>
+      )}
       <p className="mb-0 mt-3 text-meta leading-base text-faint">{report.limitation}</p>
     </section>
   );
