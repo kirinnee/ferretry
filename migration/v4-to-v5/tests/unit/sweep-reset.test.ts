@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -10,9 +10,14 @@ import {
   resetStamp,
   resetV5,
   restoreV5,
+  symlinkProblem,
   tarEntryProblem,
+  tarMembersProblem,
+  writeBindPin,
+  writeProvenance,
   type ResetActions,
   type ResetPaths,
+  type TarMember,
   type TarPorts,
 } from '../../fixtures/sweep/reset.ts';
 import {
@@ -83,7 +88,7 @@ async function scratch(): Promise<Scratch> {
   await writeFile(join(home, 'state', 'conversation-fixture.json'), '{"ferrets":["alpha","beta"]}\n');
   await writeFile(join(v5Dir, 'user', '.config', 'leftover'), 'x\n');
   await writeFile(join(harness, 'claude'), '#!/bin/sh\necho FAKE\n', { mode: 0o755 });
-  const paths: ResetPaths = { real: root, v5Dir, home, user: join(v5Dir, 'user'), harness, port: 7619 };
+  const paths: ResetPaths = { slot: 3, real: root, v5Dir, home, user: join(v5Dir, 'user'), harness, port: 7619 };
   return { root, paths, real: { v5Dir, fyHome: home, harness }, v4Marker };
 }
 
@@ -354,6 +359,7 @@ describe('restore-v5', () => {
       await writeFile(join(s.root, 'stage', 'etc', 'passwd'), 'x');
       Bun.spawnSync(['tar', '-C', join(s.root, 'stage'), '-cf', evil, 'etc']);
       await chmod(evil, 0o600);
+      await writeProvenance(s.paths, evil, NOW);
       await expect(restoreV5(s.paths, tar, trace.actions, evil, NOW)).rejects.toThrow(/not under home\/ or user\//u);
       expect(trace.steps).toEqual([]);
     } finally {
@@ -368,5 +374,435 @@ describe('restore-v5', () => {
     expect(tarEntryProblem('/etc/passwd')).toMatch(/unsafe/u);
     expect(tarEntryProblem('home/../../etc')).toMatch(/unsafe/u);
     expect(tarEntryProblem('v4/home')).toMatch(/not under/u);
+  });
+});
+
+// ─── the two HIGH findings of the review of PR 2054: a link in the tree, and a tar the kit did not make ─────────────
+
+describe('reset-v5: a link in the tree is refused before anything is stopped (HIGH 1)', () => {
+  test('a v5 folder that is a link to another slot removes nothing there, stops nothing', async () => {
+    const a = await scratch();
+    const foreign = await scratch();
+    try {
+      await rm(a.paths.v5Dir, { recursive: true });
+      await symlink(foreign.paths.v5Dir, a.paths.v5Dir);
+      const trace = actionsFor(a.paths);
+      await expect(resetV5(a.paths, a.real, tar, trace.actions, { keepRealClaude: false, now: NOW })).rejects.toThrow(
+        /not a plain folder|link|outside/u,
+      );
+      expect(trace.steps).toEqual([]);
+      expect(await readFile(join(foreign.paths.home, 'config', 'daemon.json'), 'utf8')).toContain('OLD');
+      expect(await readdir(backupDirOf(a.root)).catch(() => [])).toEqual([]);
+    } finally {
+      await rm(a.root, { recursive: true, force: true });
+      await rm(foreign.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a home or user folder that is a link, or a v5 parent reached through a linked slot folder, is refused too', async () => {
+    const a = await scratch();
+    const foreign = await scratch();
+    try {
+      const trace = actionsFor(a.paths);
+      await rm(a.paths.home, { recursive: true });
+      await symlink(foreign.paths.home, a.paths.home);
+      await expect(resetV5(a.paths, a.real, tar, trace.actions, { keepRealClaude: false, now: NOW })).rejects.toThrow(
+        /not a plain folder/u,
+      );
+      await rm(a.paths.home);
+      await mkdir(a.paths.home);
+      await rm(a.paths.user, { recursive: true });
+      await symlink(foreign.paths.user, a.paths.user);
+      await expect(resetV5(a.paths, a.real, tar, trace.actions, { keepRealClaude: false, now: NOW })).rejects.toThrow(
+        /not a plain folder/u,
+      );
+      await rm(a.paths.user);
+      await mkdir(a.paths.user);
+      // The backup folder as a link to somewhere else.
+      await symlink(foreign.root, backupDirOf(a.root));
+      await expect(resetV5(a.paths, a.real, tar, trace.actions, { keepRealClaude: false, now: NOW })).rejects.toThrow(
+        /not a plain folder/u,
+      );
+      expect(trace.steps).toEqual([]);
+      expect(await readFile(join(foreign.paths.home, 'config', 'daemon.json'), 'utf8')).toContain('OLD');
+    } finally {
+      await rm(a.root, { recursive: true, force: true });
+      await rm(foreign.root, { recursive: true, force: true });
+    }
+  });
+
+  test('the slot folder reached through a link whose target is another folder: v5 must resolve to <slot realpath>/v5', async () => {
+    const a = await scratch();
+    const foreign = await scratch();
+    try {
+      // `paths` says the slot is `a`, but its v5 paths are the foreign slot's (a copy of the paths with the wrong parent).
+      const crossed: ResetPaths = { ...foreign.paths, real: a.root };
+      const trace = actionsFor(crossed);
+      await expect(
+        resetV5(crossed, { ...foreign.real }, tar, trace.actions, { keepRealClaude: false, now: NOW }),
+      ).rejects.toThrow(/resolves to/u);
+      expect(trace.steps).toEqual([]);
+      expect(await lstat(join(foreign.paths.home, 'config', 'daemon.json'))).toBeDefined();
+    } finally {
+      await rm(a.root, { recursive: true, force: true });
+      await rm(foreign.root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('restore-v5: only a tar THIS slot made, and a safe one (HIGH 2)', () => {
+  /** A hand-made tar in the slot's backup folder, 0600, with (by default) a valid provenance record for it. */
+  async function plant(
+    s: Scratch,
+    name: string,
+    build: (stage: string) => Promise<void>,
+    options: { record?: boolean; extra?: string[] } = {},
+  ): Promise<string> {
+    const stage = join(s.root, `stage-${name}`);
+    await mkdir(stage, { recursive: true });
+    await build(stage);
+    const dir = join(s.root, 'reset-backups');
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    const file = join(dir, `${name}.tar`);
+    const made = Bun.spawnSync(['tar', '-C', stage, ...(options.extra ?? []), '-cf', file, 'home', 'user']);
+    if (made.exitCode !== 0) throw new Error(made.stderr.toString());
+    await chmod(file, 0o600);
+    if (options.record !== false) await writeProvenance(s.paths, file, NOW);
+    return file;
+  }
+  const plain = async (stage: string): Promise<void> => {
+    await mkdir(join(stage, 'home', 'config'), { recursive: true });
+    await writeFile(join(stage, 'home', 'config', 'daemon.json'), '{"restored":true}\n');
+    await mkdir(join(stage, 'user'), { recursive: true });
+  };
+  const refusesUntouched = async (s: Scratch, file: string, message: RegExp): Promise<void> => {
+    const trace = actionsFor(s.paths);
+    const before = await listing(s.paths.home);
+    await expect(restoreV5(s.paths, tar, trace.actions, file, NOW)).rejects.toThrow(message);
+    expect(trace.steps).toEqual([]);
+    expect(await listing(s.paths.home)).toEqual(before);
+    expect((await readdir(s.root)).filter(name => name.startsWith('.restore-'))).toEqual([]);
+  };
+
+  test('a reset tar of ANOTHER slot copied here is refused, with or without its record', async () => {
+    const b = await scratch();
+    const c = await scratch();
+    try {
+      const { tar: saved } = await resetV5(b.paths, b.real, tar, actionsFor(b.paths).actions, {
+        keepRealClaude: false,
+        now: NOW,
+      });
+      await mkdir(backupDirOf(c.root), { mode: 0o700 });
+      const copied = join(backupDirOf(c.root), 'arbitrary.tar');
+      await Bun.write(copied, Bun.file(saved));
+      await chmod(copied, 0o600);
+      await refusesUntouched(c, copied, /no provenance record/u);
+      await Bun.write(`${copied}.provenance.json`, Bun.file(`${saved}.provenance.json`));
+      await chmod(`${copied}.provenance.json`, 0o600);
+      await refusesUntouched(c, copied, /another slot|not made by this slot|does not match/u);
+    } finally {
+      await rm(b.root, { recursive: true, force: true });
+      await rm(c.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a tar of this slot that was changed after the reset (hash differs) is refused', async () => {
+    const s = await scratch();
+    try {
+      const { tar: file } = await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, {
+        keepRealClaude: false,
+        now: NOW,
+      });
+      const other = join(s.root, 'other-stage');
+      await mkdir(join(other, 'home'), { recursive: true });
+      await mkdir(join(other, 'user'), { recursive: true });
+      Bun.spawnSync(['tar', '-C', other, '-cf', file, 'home', 'user']);
+      await chmod(file, 0o600);
+      const trace = actionsFor(s.paths);
+      await expect(restoreV5(s.paths, tar, trace.actions, file, NOW)).rejects.toThrow(/hash/u);
+      expect(trace.steps).toEqual([]);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a record with a loose mode, a link as the record, or junk in it is refused', async () => {
+    const s = await scratch();
+    try {
+      const { tar: file } = await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, {
+        keepRealClaude: false,
+        now: NOW,
+      });
+      const record = `${file}.provenance.json`;
+      const good = await readFile(record, 'utf8');
+      expect(await mode(record)).toBe('600');
+      await chmod(record, 0o644);
+      await refusesUntouched(s, file, /provenance record .*readable by others/u);
+      await chmod(record, 0o600);
+      await writeFile(record, '{"slot":"x"}');
+      await refusesUntouched(s, file, /provenance record/u);
+      await rm(record);
+      await symlink(join(s.root, 'elsewhere.json'), record);
+      await refusesUntouched(s, file, /provenance record/u);
+      await rm(record);
+      await writeFile(record, good, { mode: 0o600 });
+      // Back to a good record: the restore works.
+      const trace = actionsFor(s.paths);
+      await restoreV5(s.paths, tar, trace.actions, file, new Date('2026-11-18T19:40:00Z'));
+      expect(trace.steps).toEqual(['stop (old home present: true)', 'start']);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('an unrelated tar carrying home -> /outside is refused even with a record, and the home is not replaced', async () => {
+    const s = await scratch();
+    const outside = join(s.root, 'outside-home');
+    try {
+      await mkdir(join(outside, 'config'), { recursive: true });
+      const file = await plant(s, 'unrelated', async stage => {
+        await symlink(outside, join(stage, 'home'));
+        await mkdir(join(stage, 'user'));
+      });
+      await refusesUntouched(s, file, /symlink|link/u);
+      expect(await lstat(s.paths.home)).toBeDefined();
+      expect((await lstat(s.paths.home)).isSymbolicLink()).toBe(false);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('links that point out of the archive, absolute names, .., fifos and a path through a link are refused', async () => {
+    const s = await scratch();
+    try {
+      const cases: Array<[string, (stage: string) => Promise<void>, string[], RegExp]> = [
+        [
+          'abs-link',
+          async stage => {
+            await plain(stage);
+            await symlink('/etc/passwd', join(stage, 'home', 'config', 'pw'));
+          },
+          [],
+          /points outside/u,
+        ],
+        [
+          'rel-link',
+          async stage => {
+            await plain(stage);
+            await symlink('../../../../etc', join(stage, 'home', 'config', 'up'));
+          },
+          [],
+          /points outside/u,
+        ],
+        [
+          'fifo',
+          async stage => {
+            await plain(stage);
+            Bun.spawnSync(['mkfifo', join(stage, 'home', 'pipe')]);
+          },
+          [],
+          /not a plain file|special|fifo/u,
+        ],
+        [
+          'dotdot',
+          async stage => {
+            await plain(stage);
+          },
+          ['--transform', 's,^home/config,home/../x,'],
+          /unsafe path/u,
+        ],
+        [
+          'absolute',
+          async stage => {
+            await plain(stage);
+          },
+          ['-P', '--transform', 's,^home/config,/tmp/zz,'],
+          /unsafe path/u,
+        ],
+      ];
+      for (const [name, build, extra, message] of cases) {
+        const file = await plant(s, name, build, { extra });
+        await refusesUntouched(s, file, message);
+      }
+      // A member that goes THROUGH a link the archive itself made is refused (once extracted, the link could point anywhere).
+      const through = await plant(
+        s,
+        'through',
+        async stage => {
+          await plain(stage);
+          await mkdir(join(stage, 'home', 'real'));
+          await writeFile(join(stage, 'home', 'real', 'file'), 'x');
+          await symlink('real', join(stage, 'home', 'via'));
+        },
+        { extra: ['--transform', 's,^home/real/file$,home/via/file,'] },
+      );
+      await refusesUntouched(s, through, /under a symlink it made itself/u);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a good tar round-trips: long names, inner relative links and a hard link survive; the swap is from a temp folder, nothing is left', async () => {
+    const s = await scratch();
+    try {
+      const long = join('state', 'x'.repeat(90), 'y'.repeat(90), 'z'.repeat(40));
+      await mkdir(join(s.paths.home, long), { recursive: true });
+      await writeFile(join(s.paths.home, long, 'deep.txt'), 'deep\n');
+      await symlink('conversation-fixture.json', join(s.paths.home, 'state', 'inner-link'));
+      await Bun.$`ln ${join(s.paths.home, 'state', 'conversation-fixture.json')} ${join(s.paths.home, 'state', 'hard')}`.quiet();
+      const { tar: file } = await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, {
+        keepRealClaude: false,
+        now: NOW,
+      });
+      await restoreV5(s.paths, tar, actionsFor(s.paths).actions, file, new Date('2026-11-18T19:31:00Z'));
+      expect(await readFile(join(s.paths.home, long, 'deep.txt'), 'utf8')).toBe('deep\n');
+      expect(await readFile(join(s.paths.home, 'state', 'inner-link'), 'utf8')).toBe('{"ferrets":["alpha","beta"]}\n');
+      expect(await readFile(join(s.paths.home, 'state', 'hard'), 'utf8')).toBe('{"ferrets":["alpha","beta"]}\n');
+      expect((await readdir(s.root)).filter(name => name.startsWith('.restore-'))).toEqual([]);
+      expect(await mode(join(backupDirOf(s.root), 'v5-restore-20261118T193100Z.tar.provenance.json'))).toBe('600');
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('the provenance record names the slot, its realpath, the UTC stamp and the tar hash', async () => {
+    const s = await scratch();
+    try {
+      const { tar: file } = await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, {
+        keepRealClaude: false,
+        now: NOW,
+      });
+      const record = JSON.parse(await readFile(`${file}.provenance.json`, 'utf8')) as Record<string, unknown>;
+      const hash = new Bun.CryptoHasher('sha256').update(await readFile(file)).digest('hex');
+      expect(record).toEqual({
+        format: 1,
+        slot: s.paths.slot,
+        slotRealpath: await realpath(s.root),
+        tar: 'v5-reset-20261118T191705Z.tar',
+        created: '2026-11-18T19:17:05.123Z',
+        sha256: hash,
+      });
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('tarMembersProblem and symlinkProblem (pure)', () => {
+  const v5 = '/slots/s3/v5';
+  test('links: inside is fine; outside, absolute-elsewhere and chained-through-a-link are not', () => {
+    expect(symlinkProblem('home/a/b', '../c', v5)).toBeUndefined();
+    expect(symlinkProblem('home/a', 'c/d', v5)).toBeUndefined();
+    expect(symlinkProblem('home/a', '../../etc', v5)).toMatch(/outside/u);
+    expect(symlinkProblem('home/a', '..', v5)).toMatch(/outside/u);
+    expect(symlinkProblem('home/a', '/etc/passwd', v5)).toMatch(/outside/u);
+    expect(symlinkProblem('home/a', '/slots/s3/v5/home/x', v5)).toBeUndefined();
+    expect(symlinkProblem('home/a', '/slots/s3/v5/home/../../s4/v5/home', v5)).toMatch(/outside/u);
+    expect(symlinkProblem('home/a', '/slots/s3/v5/homeX', v5)).toMatch(/outside/u);
+    expect(symlinkProblem('home/a', '', v5)).toMatch(/no target/u);
+  });
+  test('hard links must name another member of home/ or user/, never through a link; types other than file/dir/link do not reach here', () => {
+    const file = (name: string): TarMember => ({ name, kind: 'file', target: '' });
+    const hard = (name: string, target: string): TarMember => ({ name, kind: 'hardlink', target });
+    expect(tarMembersProblem([file('home/a'), hard('home/b', 'home/a')], v5)).toBeUndefined();
+    expect(tarMembersProblem([hard('home/b', 'etc/passwd')], v5)).toMatch(/hard link/u);
+    expect(tarMembersProblem([hard('home/b', '/etc/passwd')], v5)).toMatch(/hard link/u);
+    expect(tarMembersProblem([hard('home/b', 'home/../../etc')], v5)).toMatch(/hard link/u);
+    expect(
+      tarMembersProblem([{ name: 'home/l', kind: 'symlink', target: 'x' }, hard('home/b', 'home/l/y')], v5),
+    ).toMatch(/through a symlink/u);
+    expect(tarMembersProblem([file('/abs')], v5)).toMatch(/unsafe/u);
+  });
+});
+
+describe('the new home: the port pin and the stop (reviewer gaps)', () => {
+  test('writeBindPin on an empty home writes ONLY config/daemon.json: one bind carrier, 127.0.0.1 and the slot port, mode 0600', async () => {
+    const s = await scratch();
+    try {
+      await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, { keepRealClaude: false, now: NOW });
+      expect(await homeFiles(s.paths.home)).toEqual([]);
+      await writeBindPin(s.paths.home, s.paths.port);
+      expect(await homeFiles(s.paths.home)).toEqual([join('config', 'daemon.json')]);
+      const file = join(s.paths.home, 'config', 'daemon.json');
+      expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
+        carriers: [{ kind: 'bind', host: '127.0.0.1', port: 7619 }],
+      });
+      expect(await mode(file)).toBe('600');
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('writeBindPin merges into what the daemon wrote: its other carriers and keys stay, an old bind is replaced, a damaged-shape file is not trusted', async () => {
+    const s = await scratch();
+    try {
+      await rm(s.paths.home, { recursive: true });
+      const file = join(s.paths.home, 'config', 'daemon.json');
+      await mkdir(join(s.paths.home, 'config'), { recursive: true });
+      await writeFile(
+        file,
+        JSON.stringify({
+          name: 'kept',
+          carriers: [
+            { kind: 'bind', host: '0.0.0.0', port: 1 },
+            { kind: 'relay', url: 'x' },
+          ],
+        }),
+      );
+      await writeBindPin(s.paths.home, 7619);
+      expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
+        name: 'kept',
+        carriers: [
+          { kind: 'bind', host: '127.0.0.1', port: 7619 },
+          { kind: 'relay', url: 'x' },
+        ],
+      });
+      await writeFile(file, '[1,2]');
+      await writeBindPin(s.paths.home, 7619);
+      expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
+        carriers: [{ kind: 'bind', host: '127.0.0.1', port: 7619 }],
+      });
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a 5.0 side that will not stop: the reset refuses, moves and removes nothing, writes no tar, starts nothing', async () => {
+    const s = await scratch();
+    try {
+      const steps: string[] = [];
+      const stuck: ResetActions = {
+        stop: async () => {
+          steps.push('stop');
+          throw new ResetRefusal(
+            'the 5.0 side of slot 3 is still running after its units were stopped; nothing was removed',
+          );
+        },
+        installBuild: async () => void steps.push('installBuild'),
+        start: async () => void steps.push('start'),
+        say: () => undefined,
+      };
+      const before = await listing(s.root);
+      await expect(resetV5(s.paths, s.real, tar, stuck, { keepRealClaude: false, now: NOW })).rejects.toThrow(
+        /still running/u,
+      );
+      expect(steps).toEqual(['stop']);
+      expect(await listing(s.root)).toEqual(before);
+      expect(await readdir(backupDirOf(s.root)).catch(() => [])).toEqual([]);
+      // The same for a restore: the current home and the tar stay as they were.
+      const { tar: file } = await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, {
+        keepRealClaude: false,
+        now: NOW,
+      });
+      const afterReset = await listing(s.root);
+      steps.length = 0;
+      await expect(restoreV5(s.paths, tar, stuck, file, new Date('2026-11-18T19:50:00Z'))).rejects.toThrow(
+        /still running/u,
+      );
+      expect(steps).toEqual(['stop']);
+      expect(await listing(s.root)).toEqual(afterReset);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
   });
 });

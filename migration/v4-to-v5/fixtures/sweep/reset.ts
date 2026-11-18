@@ -13,8 +13,24 @@
  * folder (`v5/user`).
  * What is NEVER written: a pairing code, a device, a login, a runtime, a profile, a project, an agenda or a board entry.
  */
-import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
+import { basename, dirname, join, posix, relative, resolve } from 'node:path';
 import {
   FAKE_NAME,
   isShim,
@@ -43,6 +59,8 @@ export const backupName = (stamp: string, kind: 'reset' | 'restore'): string => 
 export const TAR_MEMBERS = ['home', 'user'] as const;
 
 export interface ResetPaths {
+  /** The slot number (1..9): a tar's provenance record is bound to it. */
+  readonly slot: number;
   /** The persistent slot folder (never the /tmp link). */
   readonly real: string;
   /** `<slot>/v5` as the daemon sees it (logical): the home, the user folder, the programs and the record live here. */
@@ -69,6 +87,218 @@ export function tarEntryProblem(entry: string): string | undefined {
   return undefined;
 }
 
+// ─── the tree a reset or restore touches: real folders, all inside this slot ─────────────────────────────────────────
+
+export interface ResetTree {
+  /** realpath of the persistent slot folder. */
+  readonly slotReal: string;
+  /** `<slotReal>/v5`: where every archived path must end up. */
+  readonly v5Real: string;
+}
+
+/**
+ * The slot folder, `v5`, `v5/home`, `v5/user` (when it exists) and the backup folder (when it exists) must each be a real folder (lstat: not a
+ * link, not a file) whose realpath is EXACTLY where it belongs under the slot's own realpath. A link anywhere in the parent chain (a `v5`
+ * that points at another slot, a slot folder reached through a link) makes the realpath differ, so it is refused. Called before anything is
+ * stopped, moved or removed, and again after the stop.
+ */
+export async function assertResetTree(paths: ResetPaths): Promise<ResetTree> {
+  const slotInfo = await lstat(paths.real).catch(() => undefined);
+  if (slotInfo === undefined || !slotInfo.isDirectory() || slotInfo.isSymbolicLink())
+    return refuse(`${paths.real} is not a plain folder`);
+  const slotReal = await realpath(paths.real);
+  const v5Real = join(slotReal, 'v5');
+  const parts: Array<[string, string, boolean]> = [
+    [paths.v5Dir, v5Real, true],
+    [paths.home, join(v5Real, 'home'), false],
+    [paths.user, join(v5Real, 'user'), false],
+    [backupDirOf(paths.real), join(slotReal, 'reset-backups'), false],
+  ];
+  for (const [path, expected, required] of parts) {
+    const info = await lstat(path).catch(() => undefined);
+    if (info === undefined) {
+      if (required) return refuse(`${path} does not exist`);
+      continue;
+    }
+    if (info.isSymbolicLink() || !info.isDirectory()) return refuse(`${path} is not a plain folder (a link or a file)`);
+    const real = await realpath(path);
+    if (real !== expected)
+      return refuse(`${path} resolves to ${real}, not ${expected}: a link in its parent chain leads out of this slot`);
+  }
+  return { slotReal, v5Real };
+}
+
+// ─── what a tar may hold ─────────────────────────────────────────────────────────────────────────────────────────
+
+export type TarKind = 'file' | 'dir' | 'symlink' | 'hardlink';
+export interface TarMember {
+  readonly name: string;
+  readonly kind: TarKind;
+  /** The link target (symlink: as written; hardlink: a name inside the archive). Empty for the rest. */
+  readonly target: string;
+}
+
+const BLOCK = 512;
+const EXTENSION_LIMIT = 1 << 20;
+
+const textField = (block: Buffer, from: number, to: number): string => {
+  const raw = block.subarray(from, to);
+  const nul = raw.indexOf(0);
+  return raw.subarray(0, nul < 0 ? raw.length : nul).toString('utf8');
+};
+
+const numberField = (block: Buffer, from: number, to: number): number | undefined => {
+  if (((block[from] ?? 0) & 0x80) !== 0) {
+    let value = (block[from] ?? 0) & 0x7f;
+    for (let at = from + 1; at < to; at += 1) value = value * 256 + (block[at] ?? 0);
+    return value;
+  }
+  const text = textField(block, from, to).trim();
+  if (text === '') return 0;
+  return /^[0-7]+$/u.test(text) ? Number.parseInt(text, 8) : undefined;
+};
+
+function paxRecords(data: Buffer): Map<string, string> {
+  const out = new Map<string, string>();
+  let at = 0;
+  while (at < data.length) {
+    const space = data.indexOf(0x20, at);
+    const length = space < 0 ? Number.NaN : Number.parseInt(data.subarray(at, space).toString('utf8'), 10);
+    if (!Number.isFinite(length) || length <= space - at + 1 || at + length > data.length)
+      return refuse('the archive has a damaged extended header');
+    const body = data.subarray(space + 1, at + length - 1).toString('utf8');
+    const equals = body.indexOf('=');
+    if (equals > 0) out.set(body.slice(0, equals), body.slice(equals + 1));
+    at += length;
+  }
+  return out;
+}
+
+/**
+ * Reads a tar's headers (never its data) and returns every member with its kind and link target, or refuses. Pure node: `tar -t` shows no
+ * link targets and no types in a form worth parsing, so the headers are read here: ustar, GNU long names (L/K) and PAX (x) are understood;
+ * a global PAX header, a sparse, a device, a fifo or any other type is refused outright.
+ */
+export async function inspectTar(file: string): Promise<TarMember[]> {
+  const handle = await open(file, 'r');
+  try {
+    const total = (await handle.stat()).size;
+    const members: TarMember[] = [];
+    const header = Buffer.alloc(BLOCK);
+    let at = 0;
+    let longName: string | undefined;
+    let longLink: string | undefined;
+    let pax = new Map<string, string>();
+    const readData = async (size: number): Promise<Buffer> => {
+      if (size > EXTENSION_LIMIT) return refuse('the archive has an oversized extended header');
+      const buffer = Buffer.alloc(size);
+      const got = size === 0 ? { bytesRead: 0 } : await handle.read(buffer, 0, size, at + BLOCK);
+      if (got.bytesRead !== size) return refuse('the archive ends in the middle of a header');
+      return buffer;
+    };
+    for (;;) {
+      if (at === total) break;
+      const read = await handle.read(header, 0, BLOCK, at);
+      if (read.bytesRead !== BLOCK) return refuse('the archive ends in the middle of a header');
+      if (header.every(byte => byte === 0)) break;
+      let sum = 0;
+      for (let index = 0; index < BLOCK; index += 1) sum += index >= 148 && index < 156 ? 0x20 : (header[index] ?? 0);
+      if (numberField(header, 148, 156) !== sum) return refuse('the archive has a header with a bad checksum');
+      const flag = header[156] === 0 ? '0' : String.fromCharCode(header[156] ?? 0);
+      const rawSize = numberField(header, 124, 136);
+      if (rawSize === undefined) return refuse('the archive has a header with an unreadable size');
+      const size = pax.has('size') ? Number.parseInt(pax.get('size') ?? '', 10) : rawSize;
+      if (!Number.isFinite(size) || size < 0) return refuse('the archive has a header with an unreadable size');
+      const padded = Math.ceil(size / BLOCK) * BLOCK;
+      if (flag === 'x' || flag === 'L' || flag === 'K') {
+        const data = await readData(rawSize);
+        if (flag === 'x') pax = new Map([...pax, ...paxRecords(data)]);
+        else {
+          const nul = data.indexOf(0);
+          const text = data.subarray(0, nul < 0 ? data.length : nul).toString('utf8');
+          if (flag === 'L') longName = text;
+          else longLink = text;
+        }
+        at += BLOCK + Math.ceil(rawSize / BLOCK) * BLOCK;
+        continue;
+      }
+      const posixMagic = textField(header, 257, 263) === 'ustar';
+      const prefix = posixMagic ? textField(header, 345, 500) : '';
+      const base = textField(header, 0, 100);
+      const name = longName ?? pax.get('path') ?? (prefix === '' ? base : `${prefix}/${base}`);
+      const target = longLink ?? pax.get('linkpath') ?? textField(header, 157, 257);
+      let kind: TarKind;
+      if (flag === '0') kind = 'file';
+      else if (flag === '5') kind = 'dir';
+      else if (flag === '2') kind = 'symlink';
+      else if (flag === '1') kind = 'hardlink';
+      else if (flag === '3' || flag === '4' || flag === '6')
+        return refuse(`the archive holds "${name}", a device or a fifo`);
+      else return refuse(`the archive holds "${name}" of a kind this kit does not restore (type "${flag}")`);
+      members.push({ name, kind, target: kind === 'symlink' || kind === 'hardlink' ? target : '' });
+      longName = undefined;
+      longLink = undefined;
+      pax = new Map();
+      at += BLOCK + (kind === 'file' ? padded : 0);
+      if (at > total) return refuse('the archive ends in the middle of a file');
+    }
+    return members;
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Where a symlink lands: undefined when that is somewhere a restore may put it. `name` is the link's own path (relative to the folder that
+ * holds home/ and user/); a relative target is resolved from the link's folder and must stay under home/ or user/; an absolute target must be
+ * under THIS slot's own v5/home or v5/user (the real path), nowhere else.
+ */
+export function symlinkProblem(name: string, target: string, v5Real: string): string | undefined {
+  const shown = `the archive holds a symlink "${name}" -> "${target}"`;
+  if (target === '' || target.includes('\0')) return `${shown}, which has no target`;
+  if (target.startsWith('/')) {
+    const clean = posix.normalize(target);
+    const inside = TAR_MEMBERS.some(
+      member => clean === join(v5Real, member) || clean.startsWith(`${join(v5Real, member)}/`),
+    );
+    return inside ? undefined : `${shown}, which points outside this slot's home`;
+  }
+  const landed = posix.normalize(posix.join(posix.dirname(name), target));
+  const first = landed.split('/')[0] ?? '';
+  if (landed.startsWith('..') || !(TAR_MEMBERS as readonly string[]).includes(first))
+    return `${shown}, which points outside home/ and user/`;
+  return undefined;
+}
+
+/** Every member's name, kind and link target: the first problem, or undefined. A member may not sit under a symlink the archive itself made. */
+export function tarMembersProblem(members: readonly TarMember[], v5Real: string): string | undefined {
+  const links = new Set<string>();
+  for (const member of members) {
+    const name = member.name.replace(/\/+$/u, '');
+    const problem = tarEntryProblem(name);
+    if (problem !== undefined) return problem;
+    const parts = name.split('/');
+    for (let depth = 1; depth < parts.length; depth += 1)
+      if (links.has(parts.slice(0, depth).join('/')))
+        return `the archive holds "${name}" under a symlink it made itself`;
+    if (member.kind === 'symlink') {
+      const bad = symlinkProblem(name, member.target, v5Real);
+      if (bad !== undefined) return bad;
+      links.add(name);
+    } else if (member.kind === 'hardlink') {
+      const target = member.target.replace(/\/+$/u, '');
+      const bad = tarEntryProblem(target);
+      if (bad !== undefined)
+        return `the archive holds a hard link "${name}" -> "${member.target}", which points outside home/ and user/`;
+      const targetParts = target.split('/');
+      for (let depth = 1; depth <= targetParts.length; depth += 1)
+        if (links.has(targetParts.slice(0, depth).join('/')))
+          return `the archive holds a hard link "${name}" through a symlink`;
+    }
+  }
+  return undefined;
+}
+
 export interface TarPorts {
   /** `tar -C <dir> -cf <file> <members…>` */
   readonly create: (dir: string, file: string, members: readonly string[]) => Promise<{ code: number; err: string }>;
@@ -87,6 +317,83 @@ export async function ensureBackupDir(real: string): Promise<string> {
   await mkdir(dir, { recursive: true, mode: 0o700 });
   await chmod(dir, 0o700);
   return dir;
+}
+
+// ─── provenance: a tar this slot made, unchanged ─────────────────────────────────────────────────────────────────────
+
+export const provenancePathOf = (tarFile: string): string => `${tarFile}.provenance.json`;
+
+export interface Provenance {
+  readonly format: 1;
+  readonly slot: number;
+  readonly slotRealpath: string;
+  readonly tar: string;
+  /** UTC instant the tar was made. */
+  readonly created: string;
+  readonly sha256: string;
+}
+
+const sha256Of = async (file: string): Promise<string> =>
+  await new Promise<string>((done, fail) => {
+    const hash = createHash('sha256');
+    const stream = createReadStream(file);
+    stream.on('error', fail);
+    stream.on('data', chunk => hash.update(chunk));
+    stream.on('end', () => done(hash.digest('hex')));
+  });
+
+/** Writes the record beside `tarFile` (0600, new file): this slot, its realpath, the instant, and the tar's sha256. */
+export async function writeProvenance(paths: ResetPaths, tarFile: string, now: Date): Promise<void> {
+  const record: Provenance = {
+    format: 1,
+    slot: paths.slot,
+    slotRealpath: await realpath(paths.real),
+    tar: basename(tarFile),
+    created: now.toISOString(),
+    sha256: await sha256Of(tarFile),
+  };
+  await writeFile(provenancePathOf(tarFile), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+  await chmod(provenancePathOf(tarFile), 0o600);
+}
+
+/** The record beside `file` must be a plain 0600 file for THIS slot (number and realpath), this tar's name, and its current hash. Returns the hash. */
+export async function checkProvenance(paths: ResetPaths, file: string): Promise<string> {
+  const path = provenancePathOf(file);
+  const info = await lstat(path).catch(() => undefined);
+  if (info === undefined)
+    return refuse(
+      `${file} has no provenance record (${basename(path)}): only a tar this slot's reset or restore made can be put back`,
+    );
+  if (info.isSymbolicLink() || !info.isFile()) return refuse(`the provenance record ${path} is not a plain file`);
+  if ((info.mode & 0o077) !== 0)
+    return refuse(`the provenance record ${path} is readable by others (mode ${(info.mode & 0o777).toString(8)})`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(path, 'utf8'));
+  } catch {
+    return refuse(`the provenance record ${path} is not valid JSON`);
+  }
+  const record = parsed as Partial<Record<keyof Provenance, unknown>> | null;
+  if (
+    typeof record !== 'object' ||
+    record === null ||
+    record.format !== 1 ||
+    typeof record.slot !== 'number' ||
+    typeof record.slotRealpath !== 'string' ||
+    typeof record.tar !== 'string' ||
+    typeof record.sha256 !== 'string' ||
+    typeof record.created !== 'string'
+  )
+    return refuse(`the provenance record ${path} is damaged`);
+  if (record.slot !== paths.slot || record.slotRealpath !== (await realpath(paths.real)))
+    return refuse(
+      `${file} was made by another slot (record: slot ${String(record.slot)} at ${record.slotRealpath}); it does not match this one`,
+    );
+  if (record.tar !== basename(file)) return refuse(`the provenance record names ${record.tar}, not ${basename(file)}`);
+  const hash = await sha256Of(file);
+  if (hash !== record.sha256)
+    return refuse(`${file} does not match the hash its provenance record holds: it was changed after it was made`);
+  return hash;
 }
 
 /**
@@ -119,6 +426,15 @@ export async function makeBackup(
     );
   }
   await chmod(file, 0o600);
+  try {
+    await writeProvenance(paths, file, now);
+  } catch (error) {
+    await rm(file, { force: true });
+    await rm(provenancePathOf(file), { force: true });
+    return refuse(
+      `could not write the provenance record (${error instanceof Error ? error.message : String(error)}); nothing was removed`,
+    );
+  }
   return file;
 }
 
@@ -226,12 +542,14 @@ export async function resetV5(
   options: ResetOptions,
 ): Promise<{ tar: string }> {
   // Everything that can refuse, BEFORE anything is stopped.
+  await assertResetTree(paths);
   const homeInfo = await lstat(paths.home).catch(() => undefined);
   if (homeInfo === undefined || !homeInfo.isDirectory() || homeInfo.isSymbolicLink())
     return refuse(`${paths.home} is missing or not a plain folder; there is no 5.0 home to reset`);
   const keep = await realClaudePreflight(real, options.keepRealClaude);
 
   await actions.stop();
+  await assertResetTree(paths);
   await actions.installBuild();
   const file = await makeBackup(tar, paths, 'reset', options.now);
   actions.say(`  the old 5.0 home is kept as ${file} (mode 0600, in a 0700 folder)`);
@@ -264,6 +582,34 @@ export async function checkBackupFile(real: string, tarArg: string): Promise<str
   return file;
 }
 
+/** After the extraction into the temp folder: home (and user) are real folders, and nothing in the tree is a device, a fifo or a bad link. */
+async function verifyExtracted(stage: string, tree: ResetTree): Promise<void> {
+  const stageReal = await realpath(stage);
+  for (const name of TAR_MEMBERS) {
+    const path = join(stage, name);
+    const info = await lstat(path).catch(() => undefined);
+    if (info === undefined) {
+      if (name === 'home') return refuse('the archive extracted no home/');
+      continue;
+    }
+    if (info.isSymbolicLink() || !info.isDirectory()) return refuse(`the extracted ${name} is not a plain folder`);
+    if ((await realpath(path)) !== join(stageReal, name))
+      return refuse(`the extracted ${name} resolves outside its folder`);
+  }
+  const walk = async (folder: string): Promise<void> => {
+    for (const entry of await readdir(folder, { withFileTypes: true })) {
+      const path = join(folder, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else if (entry.isSymbolicLink()) {
+        const bad = symlinkProblem(relative(stage, path), await readlink(path), tree.v5Real);
+        if (bad !== undefined) return refuse(bad);
+      } else if (!entry.isFile())
+        return refuse(`the extracted tree holds "${relative(stage, path)}", which is not a plain file`);
+    }
+  };
+  await walk(stage);
+}
+
 /** Puts the old home back from one of the slot's own tars; the CURRENT home is tarred first, so a restore never loses one. */
 export async function restoreV5(
   paths: ResetPaths,
@@ -272,7 +618,9 @@ export async function restoreV5(
   tarArg: string,
   now: Date,
 ): Promise<{ saved: string }> {
+  const tree = await assertResetTree(paths);
   const file = await checkBackupFile(paths.real, tarArg);
+  await checkProvenance(paths, file);
   const listed = await tar.list(file);
   if (listed.code !== 0 || listed.entries.length === 0)
     return refuse(`${file} cannot be read as a tar (${listed.err.trim().slice(0, 200)})`);
@@ -280,17 +628,52 @@ export async function restoreV5(
     const problem = tarEntryProblem(entry);
     if (problem !== undefined) return refuse(problem);
   }
-  if (!listed.entries.some(entry => entry === 'home' || entry === 'home/' || entry.startsWith('home/')))
+  const members = await inspectTar(file);
+  const bad = tarMembersProblem(members, tree.v5Real);
+  if (bad !== undefined) return refuse(bad);
+  if (!members.some(member => member.name.replace(/\/+$/u, '') === 'home' || member.name.startsWith('home/')))
     return refuse(`${file} holds no home/`);
-  await actions.stop();
-  const saved = await makeBackup(tar, paths, 'restore', now);
-  actions.say(`  the current 5.0 home is kept as ${saved}`);
-  await rm(paths.home, { recursive: true, force: true });
-  await rm(paths.user, { recursive: true, force: true });
-  const out = await tar.extract(paths.v5Dir, file);
-  if (out.code !== 0)
-    return refuse(`extracting ${file} failed (${out.err.trim().slice(0, 200)}); the home you had is in ${saved}`);
-  await mkdir(paths.user, { recursive: true, mode: 0o700 });
-  await actions.start();
-  return { saved };
+  // Extract into a fresh folder under the slot and look at what came out BEFORE anything is stopped or removed.
+  const stage = await mkdtemp(join(tree.slotReal, '.restore-'));
+  try {
+    await chmod(stage, 0o700);
+    // The tar is read again right before it is opened: the hash must still be the record's.
+    await checkProvenance(paths, file);
+    const out = await tar.extract(stage, file);
+    if (out.code !== 0)
+      return refuse(`extracting ${file} failed (${out.err.trim().slice(0, 200)}); nothing was changed`);
+    await verifyExtracted(stage, tree);
+    await actions.stop();
+    await assertResetTree(paths);
+    const saved = await makeBackup(tar, paths, 'restore', now);
+    actions.say(`  the current 5.0 home is kept as ${saved}`);
+    await rm(paths.home, { recursive: true, force: true });
+    await rm(paths.user, { recursive: true, force: true });
+    await rename(join(stage, 'home'), paths.home);
+    if ((await lstat(join(stage, 'user')).catch(() => undefined)) !== undefined)
+      await rename(join(stage, 'user'), paths.user);
+    await mkdir(paths.user, { recursive: true, mode: 0o700 });
+    await actions.start();
+    return { saved };
+  } finally {
+    await rm(stage, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The port pin, written ONLY when the first-booted daemon recorded none: `config/daemon.json` gets a bind carrier on 127.0.0.1 and the
+ * slot's port (merged into what the daemon wrote; other carriers and keys are kept). It is the only file the kit ever writes into a new home.
+ */
+export async function writeBindPin(home: string, port: number): Promise<void> {
+  const file = join(home, 'config', 'daemon.json');
+  const text = (await readFile(file, 'utf8').catch(() => '{}')) || '{}';
+  const read = JSON.parse(text) as unknown;
+  const document: Record<string, unknown> =
+    typeof read === 'object' && read !== null && !Array.isArray(read) ? (read as Record<string, unknown>) : {};
+  const others = (Array.isArray(document.carriers) ? (document.carriers as unknown[]) : []).filter(
+    entry => !(typeof entry === 'object' && entry !== null && (entry as { kind?: unknown }).kind === 'bind'),
+  );
+  document.carriers = [{ kind: 'bind', host: '127.0.0.1', port }, ...others];
+  await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+  await writeFile(file, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
 }

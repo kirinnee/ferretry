@@ -112,7 +112,7 @@ is empty again too: set it again before starting a real ferret.
 ## `restore-v5`
 
 `restore-v5 <N> <tar>` puts an old home back. The tar must be a plain `0600` file **directly inside this slot's `reset-backups/`**, listing
-only `home/…` and `user/…`. The CURRENT home is tarred first (`v5-restore-<stamp>.tar`), so a restore never loses one. By hand, the same
+only `home/…` and `user/…`. It must also have a **provenance record** beside it (`<tar>.provenance.json`, `0600`: slot number, slot realpath, UTC instant, sha256) that matches THIS slot and the tar's current hash, so only a tar this slot's own `reset-v5` or `restore-v5` made is accepted (a tar copied from another slot, or changed since, is refused). The tar's headers are read first: a symlink or hard link pointing outside `home/` and `user/` (or outside this slot's own `v5/home`, `v5/user` when absolute), an absolute or `..` name, a member under a link the tar made, a device or a fifo, are all refused. It is extracted into a fresh `<slot>/.restore-*` folder, looked at, and only then swapped in. `reset-v5` and `restore-v5` also refuse, before anything is stopped, when the slot folder, `v5`, `v5/home`, `v5/user` or `reset-backups` is a link or resolves anywhere but under this slot's own real path. The CURRENT home is tarred first (`v5-restore-<stamp>.tar`), so a restore never loses one. By hand, the same
 thing is: stop `fy5-slot<N>` and `fy5-slot<N>-terminals`, move `v5/home` and `v5/user` aside, `tar -C <slot>/v5 -xpf <tar>`, start both.
 
 Tests: `migration/v4-to-v5/tests/unit/sweep-reset.test.ts` (scratch folders and the real `tar`; no daemon, no systemd).

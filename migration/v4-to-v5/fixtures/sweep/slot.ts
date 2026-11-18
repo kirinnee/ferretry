@@ -111,7 +111,15 @@ import {
   statusLine,
   type RealPaths,
 } from './real-claude.ts';
-import { ResetRefusal, backupDirOf, resetV5, restoreV5, type ResetPaths, type TarPorts } from './reset.ts';
+import {
+  ResetRefusal,
+  backupDirOf,
+  resetV5,
+  restoreV5,
+  writeBindPin,
+  type ResetPaths,
+  type TarPorts,
+} from './reset.ts';
 import {
   assertScopeOwned,
   assertServiceOwned,
@@ -2382,6 +2390,7 @@ async function liveFerretsOn(slot: Slot, login: string): Promise<string | undefi
 // ─── reset-v5 / restore-v5: an EMPTY 5.0 home on a persisted slot, and the way back ─────────────────────────────────
 
 const resetPathsOf = (slot: Slot): ResetPaths => ({
+  slot: slot.n,
   real: slot.real,
   v5Dir: slot.v5.dir,
   home: slot.v5.home,
@@ -2441,15 +2450,7 @@ async function startFreshV5Side(slot: Slot): Promise<void> {
   if (port === slot.v5Port)
     console.log(`  port pin: the daemon recorded ${String(port)} itself; the kit wrote nothing`);
   else {
-    const file = join(slot.v5.home, 'config', 'daemon.json');
-    const read = JSON.parse((await readFile(file, 'utf8').catch(() => '{}')) || '{}') as unknown;
-    const document: Record<string, unknown> = isRecord(read) ? read : {};
-    const others = (Array.isArray(document.carriers) ? (document.carriers as unknown[]) : []).filter(
-      entry => !(isRecord(entry) && entry.kind === 'bind'),
-    );
-    document.carriers = [{ kind: 'bind', host: '127.0.0.1', port: slot.v5Port }, ...others];
-    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
-    await writeFile(file, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
+    await writeBindPin(slot.v5.home, slot.v5Port);
     console.log(
       `  port pin: the daemon recorded ${port === undefined ? 'none' : String(port)}; the kit wrote the bind pin ${String(slot.v5Port)} into config/daemon.json AFTER the first boot (the only file it wrote)`,
     );
