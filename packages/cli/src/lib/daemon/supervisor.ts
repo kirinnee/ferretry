@@ -29,6 +29,20 @@ export class UnsupportedServiceManagerError extends Error {
   }
 }
 
+/**
+ * Raised before an install touches anything when the service manager cannot be driven from here (no user session bus, a
+ * manager that does not answer). Nothing has been stopped, written or started when this is thrown.
+ */
+export class ServiceManagerUnreachableError extends Error {
+  constructor(manager: string, reason: string) {
+    super(
+      `${manager} does not answer from here (${reason}), so nothing was stopped or changed and the running daemon is untouched; ` +
+        `run this from a login session of the user the daemon runs as`,
+    );
+    this.name = 'ServiceManagerUnreachableError';
+  }
+}
+
 /** Raised when a service-manager command fails; carries whatever it said. */
 class ServiceManagerCommandError extends Error {
   constructor(argv: readonly string[], stderr: string) {
@@ -242,6 +256,16 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
     }
     return readSystemdReport(parseSystemdProperties(outcome.stdout), present);
   }
+
+  /**
+   * `systemctl --user show-environment` answers whenever the user manager does, and fails with the manager's own words
+   * ("Failed to connect to bus") when it does not, so one cheap read tells an install it would strand the daemon.
+   */
+  readonly unreachableBecause = async (): Promise<string | undefined> => {
+    const outcome = await this.#systemctl(['show-environment']);
+    if (outcome.code === 0) return undefined;
+    return outcome.stderr.trim() === '' ? 'systemctl --user show-environment failed' : outcome.stderr.trim();
+  };
 
   async #systemctl(args: readonly string[]): ReturnType<IDaemonProcessPort['run']> {
     return await this.processes.run(['systemctl', '--user', ...args]);
