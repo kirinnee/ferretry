@@ -3,11 +3,17 @@
  * who uses it, and one profile's page — its contents in the drag-and-drop editor, Where it is used,
  * and **Delete profile…**. "+ New profile" opens the same editor with a name to fill in.
  *
+ * Below the list is **Built from** (docs/design/account-model.md §4.2): the six kinds of component a profile is made
+ * of, each with its count. MCP servers, skills and model sets are drawn by the tab that owns them, so their rows link
+ * there; instructions, settings and hooks have no tab of their own, so their rows open the kind's pages in place.
+ *
+
  * Every write is one change the daemon previews and applies; while this machine refuses changes the
  * panel says why in one sentence and the pages still read.
  */
 
-import type { AccountChange, LayeredProfileView } from '../../../../contract/index.ts';
+import { daemonSettingsHref } from '@ferretry/app';
+import type { AccountChange, ComponentKind, LayeredProfileView } from '../../../../contract/index.ts';
 import { useEffect, useId, useState } from 'react';
 import { Button } from '../../../ui.ts';
 import { type AccountCatalog, allComponents, useAccountCatalog } from '../components/account-catalog.ts';
@@ -22,15 +28,31 @@ import {
   RowList,
   Section,
 } from '../components/catalog-ui.tsx';
+import { ComponentKindPages } from '../components/component-kind-pages.tsx';
 import { counted, listed, profileScopeBadge, profileScopeWord } from '../components/component-model.ts';
 import { isComponentReference, itemHref, useHashItem } from '../components/machine-links.ts';
+import { currentDaemon, tabHref } from '../shell/machine-route.ts';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machine-tab.ts';
 import { InstructionTexts } from './instruction-text.tsx';
 import { ProfileEditor } from './profile-editor.tsx';
 import { includedBy, profileUseLine, runtimesReaching } from './profile-model.ts';
 
-type Page = { readonly kind: 'list' } | { readonly kind: 'detail'; readonly name: string } | { readonly kind: 'new' };
+type Page =
+  | { readonly kind: 'list' }
+  | { readonly kind: 'detail'; readonly name: string }
+  | { readonly kind: 'new' }
+  /** The pages of one kind of component that has no tab of its own (Built from). */
+  | { readonly kind: 'components'; readonly of: ComponentKind };
+
+/** Where a kind is managed when it is not on this tab: the plugin tab that owns it, or none (opens here). */
+const kindHref = (kind: ComponentKind, machineName: string): string | undefined => {
+  const daemon = currentDaemon();
+  if (kind === 'modelSets') return tabHref(daemon, machineName, 'model-sets');
+  if (kind === 'mcp') return daemon === null ? '#mcp' : daemonSettingsHref(daemon, 'mcp', 'mcp');
+  if (kind === 'skills') return daemon === null ? '#skills' : daemonSettingsHref(daemon, 'skills', 'skills');
+  return undefined;
+};
 
 export function ProfilesTab(props: MachineTabProps & { readonly onAtList?: (atList: boolean) => void }) {
   const { client, machineName, onAtList } = props;
@@ -59,7 +81,8 @@ export function ProfilesTab(props: MachineTabProps & { readonly onAtList?: (atLi
   const catalog = read.catalog;
   const profile =
     page.kind === 'detail' ? catalog.profiles.profiles.find(candidate => candidate.name === page.name) : undefined;
-  const shown = page.kind === 'new' ? 'new' : profile === undefined ? 'list' : 'detail';
+  const shown =
+    page.kind === 'new' ? 'new' : page.kind === 'components' ? 'components' : profile === undefined ? 'list' : 'detail';
   const afterSave = (name: string, message: string) =>
     void reload().then(() => {
       setPage({ kind: 'detail', name });
@@ -73,7 +96,16 @@ export function ProfilesTab(props: MachineTabProps & { readonly onAtList?: (atLi
           {saved}
         </p>
       )}
-      {page.kind === 'new' ? (
+      {page.kind === 'components' ? (
+        <ComponentKindPages
+          {...props}
+          kind={page.of}
+          onExit={() => {
+            void reload();
+            open({ kind: 'list' });
+          }}
+        />
+      ) : page.kind === 'new' ? (
         <>
           <PageHead title="New profile" sub="Profile" onBack={() => open({ kind: 'list' })} />
           <ProfileEditor {...props} catalog={catalog} onSaved={name => afterSave(name, `Profile ${name} saved.`)}>
@@ -83,7 +115,7 @@ export function ProfilesTab(props: MachineTabProps & { readonly onAtList?: (atLi
           </ProfileEditor>
         </>
       ) : profile === undefined ? (
-        <ListPage catalog={catalog} open={open} />
+        <ListPage catalog={catalog} machineName={machineName} open={open} />
       ) : (
         <DetailPage
           key={profile.name}
@@ -106,7 +138,49 @@ export function ProfilesTab(props: MachineTabProps & { readonly onAtList?: (atLi
   );
 }
 
-function ListPage({ catalog, open }: { catalog: AccountCatalog; open: (page: Page) => void }) {
+/** Built from: each kind of component with what it is and how many are saved. */
+function BuiltFrom({
+  catalog,
+  machineName,
+  open,
+}: {
+  catalog: AccountCatalog;
+  machineName: string;
+  open: (page: Page) => void;
+}) {
+  return (
+    <Section title="Built from" spot="built-from">
+      <Hint>The parts a profile is made of. Open a kind to see what is saved, or add one.</Hint>
+      <RowList label="Built from">
+        {catalog.components.kinds.map(group => {
+          const href = kindHref(group.kind, machineName);
+          const sub = `${group.description} · ${counted(group.components.length, 'item')}`;
+          return href === undefined ? (
+            <OpenRow
+              key={group.kind}
+              title={group.label}
+              sub={sub}
+              onOpen={() => open({ kind: 'components', of: group.kind })}
+              data={{ 'data-built-from': group.kind }}
+            />
+          ) : (
+            <LinkRow key={group.kind} title={group.label} sub={sub} href={href} />
+          );
+        })}
+      </RowList>
+    </Section>
+  );
+}
+
+function ListPage({
+  catalog,
+  machineName,
+  open,
+}: {
+  catalog: AccountCatalog;
+  machineName: string;
+  open: (page: Page) => void;
+}) {
   const profiles = catalog.profiles.profiles;
   const create = (
     <Button type="button" variant="primary" data-profile-new="" onClick={() => open({ kind: 'new' })}>
@@ -115,14 +189,17 @@ function ListPage({ catalog, open }: { catalog: AccountCatalog; open: (page: Pag
   );
   if (profiles.length === 0)
     return (
-      <section className="kt-panel flex min-w-0 flex-col items-start gap-2 p-panel" data-profiles-empty="">
-        <h3 className="m-0 text-row font-semibold text-fg">No profiles yet</h3>
-        <Hint>
-          A profile is a bag of components — MCP servers, skills, instructions, settings, hooks — and other profiles.
-          Where two set the same thing, the later one wins.
-        </Hint>
-        {create}
-      </section>
+      <>
+        <section className="kt-panel flex min-w-0 flex-col items-start gap-2 p-panel" data-profiles-empty="">
+          <h3 className="m-0 text-row font-semibold text-fg">No profiles yet</h3>
+          <Hint>
+            A profile is a bag of components — MCP servers, skills, instructions, settings, hooks — and other profiles.
+            Where two set the same thing, the later one wins.
+          </Hint>
+          {create}
+        </section>
+        <BuiltFrom catalog={catalog} machineName={machineName} open={open} />
+      </>
     );
   return (
     <>
@@ -143,6 +220,7 @@ function ListPage({ catalog, open }: { catalog: AccountCatalog; open: (page: Pag
           );
         })}
       </RowList>
+      <BuiltFrom catalog={catalog} machineName={machineName} open={open} />
     </>
   );
 }
