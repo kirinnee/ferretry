@@ -236,7 +236,7 @@ describe('A555 r7 one press for a passkey nobody asked for', () => {
     now += 10_000;
     const retried = runtime
       .client('d1', 'board')
-      ?.call('GET /v1/board')
+      ?.call('GET /v1/board', { quiet: false })
       .catch(() => undefined);
     await settle();
     expect(asked.filter(entry => entry.origin === 'explicit')).toEqual([

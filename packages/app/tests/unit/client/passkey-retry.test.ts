@@ -237,12 +237,17 @@ describe('G105 one prompt, one retry', () => {
 });
 
 describe('G95 who started the request', () => {
-  test('A555 r7 a GET a person is pressing for (a Retry) is theirs and asks at once; one nobody caused waits unasked', async () => {
+  test('A555 r7 a GET pressed for (quiet: false) is theirs and asks at once; one sent during activation only SHOWS as background; one nobody caused waits unasked', async () => {
     const pressing = handler([true]);
     const { client } = daemon([UNLOCK, OK], pressing.fake);
     await client.start();
-    await client.forPackage('board').call('GET /v1/board');
+    await client.forPackage('board').call('GET /v1/board', { quiet: false });
     expect(pressing.asked[0]?.origin).toBe('explicit');
+    const acting = handler([true]);
+    const during = daemon([UNLOCK, OK], acting.fake);
+    await during.client.start();
+    await during.client.forPackage('board').call('GET /v1/board');
+    expect(acting.asked[0]?.origin).toBe('background');
     const nobody = handler([true]);
     const quiet = daemon([UNLOCK, OK], nobody.fake, { personActing: false });
     await quiet.client.start();
@@ -292,7 +297,7 @@ describe('G95 a read that stops waiting leaves its parked prompt', () => {
     const caller = new AbortController();
     const waiting = client
       .forPackage('board')
-      .call('GET /v1/board', { signal: caller.signal })
+      .call('GET /v1/board', { signal: caller.signal, quiet: false })
       .catch((error: unknown) => error);
     await Bun.sleep(0);
     expect(asked).toEqual(['explicit']);
@@ -516,7 +521,7 @@ describe('A555 r7: a request nobody pressed never opens the step-up prompt, and 
     expect(sends()).toHaveLength(1);
   });
 
-  test('a read sent while a person is pressing something (a Retry) asks at once, as theirs', async () => {
+  test('a read sent while a person is merely acting (transient activation) is a showable background read, never a press', async () => {
     const { fake, asked } = handler([true]);
     const transport = new FakeTransport(request => {
       if (request.path === '/v1/plugins') return json(inventoryOf(compiled));
@@ -531,7 +536,34 @@ describe('A555 r7: a request nobody pressed never opens the step-up prompt, and 
     });
     await client.start();
     expect(await client.forPackage('board').call('GET /v1/board')).toEqual({ cards: [] });
-    expect(asked.map(entry => entry.origin)).toEqual(['explicit']);
+    expect(asked.map(entry => entry.origin)).toEqual(['background']);
+  });
+
+  test('a poll tick during a click never clears a cancel: every tick is background, none explicit, however long the click is active', async () => {
+    const { fake, asked } = handler([false, false, false]);
+    const { client } = daemon([STEP_UP, STEP_UP, STEP_UP, STEP_UP, STEP_UP, STEP_UP], fake);
+    await client.start();
+    for (let tick = 0; tick < 3; tick += 1)
+      await client
+        .forPackage('board')
+        .call('GET /v1/board')
+        .catch(() => undefined);
+    expect(asked.map(entry => entry.origin)).toEqual(['background', 'background', 'background']);
+  });
+
+  test('only a real Retry press (quiet: false) is explicit, and a write is explicit', async () => {
+    const { fake, asked } = handler([false, false]);
+    const { client } = daemon([STEP_UP, STEP_UP, STEP_UP, STEP_UP], fake);
+    await client.start();
+    await client
+      .forPackage('board')
+      .call('GET /v1/board', { quiet: false })
+      .catch(() => undefined);
+    await client
+      .forPackage('board')
+      .call('POST /v1/board')
+      .catch(() => undefined);
+    expect(asked.map(entry => entry.origin)).toEqual(['explicit', 'explicit']);
   });
 
   test('a background-origin client raises no step-up prompt, for a read or anything else, even while a person acts', async () => {

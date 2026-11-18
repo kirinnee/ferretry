@@ -18,8 +18,10 @@ import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
  *    then a step-up for the act, each at most once.
  *
  * A READ NEVER OPENS THE PROMPT BY ITSELF; A PRESS DOES (G95, A555 r7). A write is a press, `explicit`, and asks at
- * once; so is a read a person is pressing for (`quiet: false`, or sent while a person is pressing something and the
- * page did not just change: a Retry, the machine they chose). Every other read is one NOBODY CAUSED — a page opening,
+ * once; so is a read a person is pressing for (`quiet: false`: a Retry, an Unlock press). Transient user activation alone
+ * NEVER makes a read a press (a Cancel click grants seconds of it, and a poll tick in them must not undo the cancel): a
+ * read sent while a person acts is at most a `background` read, which respects a cancel and, for a machine that is off
+ * screen, waits. Every other read is one NOBODY CAUSED — a page opening,
  * a poll, a re-render, a background view — and never opens the prompt: its step-up refusal is its answer, its unlock
  * waits silently (`unasked`), the client answers the same read from that refusal for a while instead of sending it
  * again (`client/step-up-backoff.ts`), and the shell offers ONE press for it on the page the route names

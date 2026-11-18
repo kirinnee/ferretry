@@ -529,17 +529,23 @@ export class DaemonClient {
       ...(init.signal === undefined ? {} : { signal: init.signal }),
     };
     // A resend is the same request, its request id included: the daemon sees one act asked twice, never two acts.
-    // A read a person PRESSED for — sent with `quiet: false` (a retry after a cancelled prompt), or while a person is
-    // pressing something on the page and it is not quiet (a Retry, the machine they chose) — is theirs: it asks at once
-    // and clears the machine's "cancel stays cancelled", like any press.
+    // A read a person PRESSED for — sent with `quiet: false` (a Retry, the unlock press after a cancelled prompt) — is
+    // theirs: it asks at once and clears the machine's "cancel stays cancelled", like any press. TRANSIENT ACTIVATION
+    // ALONE NEVER MAKES A READ A PRESS: the Cancel click itself grants a few seconds of it, and a poll tick inside them
+    // would clear the cancel and open the prompt again, and a poll of a machine that is off screen would open its prompt
+    // while the person clicks elsewhere. Only a caller that knows it was pressed says so, with `quiet: false`.
     const read = requestOrigin(method) === 'background';
-    const pressed = !background && read && (init.quiet === false || (init.quiet !== true && this.#personActing()));
+    const pressed = !background && read && init.quiet === false;
     const origin: PromptOrigin = background ? 'background' : pressed ? 'explicit' : requestOrigin(method);
+    // A read sent while a person is acting on the page (not quiet, not just after a navigation) may SHOW the prompt as
+    // a background read does: for the machine on screen only, never over a cancel (the gate refuses it at once while
+    // that machine is dismissed) and never for a machine that is off screen (it waits, `StepUpGate.require`).
+    const acting = !background && read && !pressed && init.quiet !== true && this.#personActing();
     // EVERY OTHER READ IS ONE NOBODY CAUSED (A555 r7): a page opening (a reload, a deep link, a navigation), a poll, an
     // effect a re-render re-ran, a background view's call. It never opens the prompt — its step-up refusal is its answer
     // and its unlock waits silently (`unasked`) while the shell offers one press — and the same read is answered from
     // that refusal for a while rather than sent again (`step-up-backoff.ts`).
-    const unasked = origin === 'background';
+    const unasked = origin === 'background' && !acting;
     const key = unasked ? backoffKey(request) : undefined;
     const held = key === undefined ? undefined : this.#backoff.held(key);
     if (held !== undefined) return held;
