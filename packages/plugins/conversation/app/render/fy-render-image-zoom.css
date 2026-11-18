@@ -24,7 +24,7 @@
   z-index: 60;
   inset: 0;
   overflow: hidden;
-  background: color-mix(in srgb, var(--bg) 97%, transparent);
+  background: var(--bg);
   color: var(--fg);
   height: 100dvh;
   overscroll-behavior: contain;
@@ -79,7 +79,10 @@
   top: max(8px, env(safe-area-inset-top));
   right: max(8px, env(safe-area-inset-right));
   left: max(8px, env(safe-area-inset-left));
-  width: fit-content;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  flex-wrap: wrap;
+  justify-content: flex-end;
   margin-left: auto;
   min-width: 0;
   display: flex;
@@ -130,4 +133,12 @@
 .fy-zoom-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* A phone's toolbar is as wide as its screen: the readout takes its own row above the buttons rather than push them off it. */
+@media (max-width: 480px) {
+  .fy-zoom-readout {
+    flex: 1 0 100%;
+    text-align: right;
+  }
 }
