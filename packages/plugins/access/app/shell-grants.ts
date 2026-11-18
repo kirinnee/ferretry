@@ -59,7 +59,11 @@ export interface IFyApiClient {
   request<T>(
     path: string,
     schema: z.ZodType<T>,
-    init?: RequestInit & { readonly pressed?: boolean },
+    /**
+     * `pressed`: a read the person pressed for, so it may ask for a passkey. `quiet`: a read the page makes on its own
+     * (a notice mounting), so a step-up the machine wants is the answer and asks nobody. Neither: the shell's default.
+     */
+    init?: RequestInit & { readonly pressed?: boolean; readonly quiet?: boolean },
     timeoutMs?: number,
   ): Promise<T>;
 }

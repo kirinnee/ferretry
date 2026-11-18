@@ -262,13 +262,47 @@ describe('the ceremony’s failures', () => {
     ).equal('cancelled');
   });
 
-  it('should let an error it does not recognise through unchanged', async () => {
+  it('should keep what the browser said — its error name and message — on every mapped refusal', async () => {
+    // Arrange: a browser that never showed a prompt (a managed profile, an automation authenticator) throws exactly this.
+    const refused = new DOMException('The operation either timed out or was not allowed.', 'NotAllowedError');
+
+    // Act
+    const created = await createPasskey(failing(refused), registrationOptions, true).catch((caught: unknown) => caught);
+    const asserted = await assertPasskey(failing(refused), assertionOptions, true).catch((caught: unknown) => caught);
+
+    // Assert
+    for (const error of [created, asserted]) {
+      should(error).be.instanceOf(PasskeyCeremonyError);
+      should((error as PasskeyCeremonyError).kind).equal('cancelled');
+      should((error as PasskeyCeremonyError).browser).eql({
+        name: 'NotAllowedError',
+        message: 'The operation either timed out or was not allowed.',
+      });
+    }
+  });
+
+  it('should turn any other browser error into a failure that keeps its name and message', async () => {
     // Arrange
     const invalidState = new DOMException('already registered', 'InvalidStateError');
+
+    // Act
+    const error = await createPasskey(failing(invalidState), registrationOptions, true).catch(
+      (caught: unknown) => caught,
+    );
+
+    // Assert
+    should(error).be.instanceOf(PasskeyCeremonyError);
+    should((error as PasskeyCeremonyError).kind).equal('failed');
+    should((error as PasskeyCeremonyError).browser).eql({ name: 'InvalidStateError', message: 'already registered' });
+  });
+
+  it('should let a throw that is not a browser error through unchanged', async () => {
+    // Arrange
     const thrown = 'a string';
+    const own = new Error('boom');
 
     // Act / Assert
-    await should(createPasskey(failing(invalidState), registrationOptions, true)).be.rejectedWith(invalidState);
+    await should(createPasskey(failing(own), registrationOptions, true)).be.rejectedWith(own);
     should(await assertPasskey(failing(thrown), assertionOptions, true).catch((caught: unknown) => caught)).equal(
       thrown,
     );
@@ -288,7 +322,7 @@ describe('the ceremony’s failures', () => {
     should((error as Error).message.includes(challenge)).be.false();
   });
 
-  it('should carry a message that names the kind and nothing the browser said', () => {
+  it('should carry a message that names the kind only; what the browser said rides apart', () => {
     const error = new PasskeyCeremonyError('cancelled');
     should(error.name).equal('PasskeyCeremonyError');
     should(error.message).not.match(/NotAllowedError/);
@@ -303,7 +337,7 @@ describe('passkeySentence', () => {
   });
 
   it('should write every kind as plain sentences naming the origin, never a DOMException name', () => {
-    for (const kind of ['no-passkey', 'cancelled', 'unsupported', 'insecure-origin'] as const) {
+    for (const kind of ['no-passkey', 'cancelled', 'unsupported', 'insecure-origin', 'failed'] as const) {
       const sentence = passkeySentence(kind, ORIGIN);
       should(sentence).containEql(ORIGIN);
       // The one command a person must run (`fy passkey window <this device>`) is the only code in any of them.
@@ -314,5 +348,20 @@ describe('passkeySentence', () => {
 
   it('should admit a dismissal, a timeout and a missing passkey look alike', () => {
     should(passkeySentence('cancelled', ORIGIN)).match(/dismissed or timed out, or this browser had no passkey/);
+  });
+
+  it('should end the sentence with the browser’s own name and message, word for word, when it threw', () => {
+    should(
+      passkeySentence('cancelled', ORIGIN, {
+        name: 'NotAllowedError',
+        message: 'The operation either timed out or was not allowed.',
+      }),
+    ).endWith(' The browser said: NotAllowedError: The operation either timed out or was not allowed.');
+    should(passkeySentence('failed', ORIGIN, { name: 'InvalidStateError', message: 'already registered' })).equal(
+      `The browser stopped the passkey at ${ORIGIN} before it finished. The browser said: InvalidStateError: already registered.`,
+    );
+    should(passkeySentence('unsupported', ORIGIN, { name: 'NotSupportedError', message: '' })).endWith(
+      ' The browser said: NotSupportedError.',
+    );
   });
 });

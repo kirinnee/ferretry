@@ -74,9 +74,17 @@ export async function revokePairingCode(
  * grant is the caller's own, so the panel can explain itself before somebody presses a button — which is
  * the entire requirement. A UI that discovers its limits by watching calls fail has nothing to say until
  * after the click.
+ *
+ * `read`: `'pressed'` (or `true`) when the person asked — a Try again — so a step-up may be asked for; `'quiet'` when
+ * the page reads on its own, so a step-up the machine wants is the answer and no prompt opens (the new-device notice
+ * above every page: it popped "Confirm it's you" at a device that had pressed nothing, before it had any passkey).
  */
-export async function readPairedDevices(client: PairingClient, pressed = false): Promise<PairedDevicesView> {
-  return await client.request(PAIRED_DEVICES_PATH, PairedDevicesViewSchema, pressed ? { pressed: true } : undefined);
+export async function readPairedDevices(
+  client: PairingClient,
+  read: boolean | 'pressed' | 'quiet' = false,
+): Promise<PairedDevicesView> {
+  const init = read === true || read === 'pressed' ? { pressed: true } : read === 'quiet' ? { quiet: true } : undefined;
+  return await client.request(PAIRED_DEVICES_PATH, PairedDevicesViewSchema, init);
 }
 
 /**

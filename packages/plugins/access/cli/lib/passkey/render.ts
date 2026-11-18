@@ -5,7 +5,7 @@ import { plainText } from '../device/render.ts';
 const WINDOW_MINUTES = PASSKEY_REGISTRATION_WINDOW_SECONDS / 60;
 
 export function renderOpened(opened: PasskeyWindowOpened, closesAtLocal: string): string {
-  return `The passkey window for ${plainText(opened.deviceName)} is open until ${closesAtLocal}. On that device, open Settings → Daemons → Security → Add a passkey within ${WINDOW_MINUTES} minutes.`;
+  return `The passkey window for ${plainText(opened.deviceName)} is open until ${closesAtLocal}. On that device, open Settings, choose this machine, then Devices & access → Security → Add a passkey, within ${WINDOW_MINUTES} minutes.`;
 }
 
 export function renderNotAtMachine(): string {

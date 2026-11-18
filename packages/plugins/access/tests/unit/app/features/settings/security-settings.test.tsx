@@ -360,7 +360,7 @@ describe('SecuritySurface', () => {
     run(() => surface.unmount());
   });
 
-  it('turns a dismissed passkey sheet into one sentence and keeps the list', async () => {
+  it('turns a dismissed passkey sheet into one sentence that ends with what the browser said, and keeps the list', async () => {
     // Arrange
     const surface = await mountSurface(machine([view()]), { credentials: credentials(named('NotAllowedError')) });
 
@@ -369,7 +369,8 @@ describe('SecuritySurface', () => {
 
     // Assert
     expect(text(surface)).toContain('did not finish');
-    expect(text(surface)).not.toContain('NotAllowedError');
+    // The browser's own words end the sentence: the same error is thrown when no prompt ever appeared (owner, 2026-11-18).
+    expect(text(surface)).toContain('The browser said: NotAllowedError');
     should(marked(surface, 'data-security-add')).have.length(1);
     run(() => surface.unmount());
   });

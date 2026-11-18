@@ -36,6 +36,16 @@ describe('the route request client', () => {
     expect(calls).toEqual([{ route: 'GET /v1/security', init: {} }]);
   });
 
+  it('should hand a quiet read over as quiet, and a pressed one as the person’s own', async () => {
+    const { client, calls } = recorder(async () => ({ ok: true }));
+    await client.request('/v1/pair/devices', z.strictObject({ ok: z.boolean() }), { quiet: true });
+    await client.request('/v1/pair/devices', z.strictObject({ ok: z.boolean() }), { pressed: true });
+    expect(calls).toEqual([
+      { route: 'GET /v1/pair/devices', init: { quiet: true } },
+      { route: 'GET /v1/pair/devices', init: { quiet: false } },
+    ]);
+  });
+
   it('should keep a query string out of the route key and hand it over as the call’s query', async () => {
     const { client, calls } = recorder(async () => ({ ok: true }));
     await client.request('/v1/audit?limit=100&keptOffset=5', z.strictObject({ ok: z.boolean() }));

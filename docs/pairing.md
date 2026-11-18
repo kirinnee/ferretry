@@ -604,7 +604,7 @@ row states what its revoke will do before the press.
   nothing about the act itself ([grants.md](grants.md), [design/zero-trust.md](design/zero-trust.md) B1).
 - **A device's first passkey has a ten-minute window.** It can be added only in the ten minutes after
   pairing (B2), so a newly paired device with no passkey for the machine sees one dismissible line
-  pointing at Settings → Daemons → Security → Add a passkey. A device that misses the window cannot unlock
+  pointing at Settings → this machine → Devices & access → Security → Add a passkey. A device that misses the window cannot unlock
   the machine, so it can do nothing there, until the owner re-opens it at the machine (below) or it pairs
   again ([design/zero-trust.md](design/zero-trust.md) B1, B2).
 
