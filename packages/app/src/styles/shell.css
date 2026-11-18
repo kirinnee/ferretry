@@ -409,34 +409,159 @@
   overflow: hidden;
 }
 
-/* Settings, grouped (v4's machine-panels groups): a heading over each run of tabs, stacked so a phone reads down one
-   column instead of along one long wrapped row. */
+/* SETTINGS (v4's Settings): a machine header over a compact list of titled groups BESIDE the panel; the panel starts at its own
+   top. A group is a <details>: only the group holding the current tab is open, so the list is a dozen headings, not a wall of
+   links. On a phone the list is a page of its own and a tab opens full-screen with a way back (`data-settings-open`). */
+.fy-settings-head {
+  margin-bottom: var(--flow-3, 12px);
+}
+.fy-settings-head h1 {
+  margin-bottom: 4px;
+}
+.fy-settings-back,
+.fy-settings-title {
+  display: none;
+}
+.fy-settings-machine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin: 0;
+  color: var(--fg-soft);
+}
+.fy-settings-machine__name {
+  color: var(--fg);
+  font-weight: 600;
+}
+.fy-settings-machine__state::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--err);
+}
+.fy-settings-machine__state[data-online='true']::before {
+  background: var(--ok);
+}
+.fy-settings-body {
+  display: grid;
+  grid-template-columns: calc(var(--fy-text-scale, 1) * 220px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.fy-settings-nav {
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  margin: 0;
+  gap: 2px;
+}
 .fy-tabs--grouped {
   flex-direction: column;
-  gap: var(--flow-3, 12px);
+  flex-wrap: nowrap;
 }
 .fy-tab-group__title {
-  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  list-style: none;
+  cursor: pointer;
+  padding: 6px 8px;
   font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--fg-soft);
 }
+.fy-tab-group__title::-webkit-details-marker {
+  display: none;
+}
+/* The open/shut cue: a chevron that turns down when the group is open (the phone list reads as rows, not as a bare heading). */
+.fy-tab-group__title::after {
+  content: '›';
+  font-size: 1.1rem;
+  line-height: 1;
+  transition: transform 0.12s;
+}
+.fy-tab-group[open] > .fy-tab-group__title::after {
+  transform: rotate(90deg);
+}
 .fy-tab-group__tabs {
   display: flex;
-  flex-wrap: wrap;
-  /* A wrapped row is the same group: its rows sit closer than two groups do. */
-  gap: var(--flow-1, 4px) var(--flow-2, 8px);
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 0 6px 8px;
 }
-.fy-settings-device {
-  margin: 0 0 12px;
+.fy-settings-nav .fy-tab {
+  display: block;
+  padding: 5px 8px;
+  border-radius: 6px;
+  text-decoration: none;
+}
+.fy-settings-nav .fy-tab--active {
+  background: var(--accent-soft);
+  text-decoration: none;
+}
+.fy-settings-nav .fy-settings-device {
+  padding: 6px 8px;
+  color: var(--fg);
+  font-weight: 600;
+}
+.fy-settings-machine__scope {
+  padding: 1px 8px;
+  border: var(--border-width, 1px) solid var(--border);
+  border-radius: 999px;
+  font-size: 0.75rem;
+}
+@media (max-width: 767.98px) {
+  .fy-settings-body {
+    display: block;
+  }
+  .fy-settings-nav {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+  .fy-settings-nav .fy-tab,
+  .fy-tab-group__title {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+  .fy-tab-group,
+  .fy-settings-nav .fy-settings-device {
+    border-bottom: var(--border-width, 1px) solid var(--border);
+  }
+  .fy-settings-nav .fy-settings-device {
+    border-radius: 0;
+  }
+  /* A phone shows the list OR the panel, never the list above the panel. */
+  .fy-settings[data-settings-open='list'] .fy-settings-page {
+    display: none;
+  }
+  .fy-settings[data-settings-open='panel'] .fy-settings-nav,
+  .fy-settings[data-settings-open='panel'] .fy-settings-head h1,
+  .fy-settings[data-settings-open='panel'] .fy-settings-machine__scope {
+    display: none;
+  }
+  .fy-settings[data-settings-open='panel'] .fy-settings-back {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .fy-settings[data-settings-open='panel'] .fy-settings-title {
+    display: block;
+    margin: 4px 0 0;
+    font-size: calc(var(--fy-text-scale, 1) * 1.2rem);
+    font-weight: 600;
+  }
 }
 /* Setting groups on a page (a title over a grouped card) stand a whole step apart, so a title belongs to the card under it. */
 .fy-page [data-setting-group] {
   margin-bottom: var(--flow-4, 16px);
-}
-.fy-settings-device__hint {
-  color: var(--fg-soft);
 }
 .fy-settings-daemons {
   list-style: none;

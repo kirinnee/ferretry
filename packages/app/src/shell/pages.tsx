@@ -9,7 +9,6 @@ import { DeviceAppearance } from './device-appearance.tsx';
 import { DevicePanels } from './device-panels.tsx';
 import { groupSettingsTabs, resolveSettingsTab } from './settings-tab.ts';
 import { PanelSlot, PluginView, ShellLine } from './views.tsx';
-import { keepSettingsPageRevealed } from './settings-reveal.ts';
 import { useEffect, useRef, type MouseEvent } from 'react';
 
 /** An in-app link: a plain click navigates in place; a modifier or middle click is the browser's (a new tab). */
@@ -128,7 +127,12 @@ export function DaemonHomePage({ daemon }: { readonly daemon: string }) {
   );
 }
 
-/** A daemon's settings: one tab per plugin, saved on that daemon (§5.2). */
+/**
+ * A daemon's settings: one tab per plugin, saved on that daemon (§5.2). Laid out as v4's Settings was: a machine header
+ * (its name, whether it answers, and that these settings belong to THAT machine), the titled groups as a compact list
+ * BESIDE the panel on a wide screen, the panel always at its own top. On a phone the list is a page of its own and a tab
+ * opens full-screen with a way back (`shell.css` shows one or the other from `data-settings-open`).
+ */
 export function DaemonSettingsPage({
   daemon,
   tab,
@@ -141,6 +145,8 @@ export function DaemonSettingsPage({
   const { runtime, scroll } = useShell();
   const { entryKey } = useRouter();
   useRuntimeVersion(runtime);
+  const paired = runtime.daemons.get(daemon);
+  const online = runtime.online(daemon);
   const tabs = runtime.surfaces.flatMap(entry =>
     (entry.manifest.ui?.settings ?? []).map(setting => ({ plugin: entry.id, ...setting })),
   );
@@ -149,60 +155,75 @@ export function DaemonSettingsPage({
   // names that tab, and a name nothing answers to is said so (never the first tab in its place).
   const choice = resolveSettingsTab(tabs, tab, tabId);
   const active = choice.kind === 'tab' ? choice.tab : undefined;
-  // A tab the address NAMES (a click on its link, or a deep link) is what the person asked to see: the page takes focus
-  // (a screen reader says its name) and is scrolled up out from under the list of every tab. A bare /settings opens
-  // at the top, and a Back/Forward/reload whose scroll was saved is the scroll memory's to put back.
+  // A tab the address NAMES (a click on its link, or a deep link) takes focus (a screen reader says its name) and the
+  // page opens at ITS TOP: the panel sits beside the list now, so there is nothing to scroll past. A bare /settings
+  // steals no focus, and a Back/Forward/reload whose scroll was saved is the scroll memory's to put back.
   const pageRef = useRef<HTMLDivElement>(null);
   const named = tab === undefined ? undefined : active === undefined ? undefined : `${active.plugin}/${active.id}`;
   useEffect(() => {
     const page = pageRef.current;
     if (named === undefined || page === null || scroll.page(entryKey) !== null) return;
-    const stop = keepSettingsPageRevealed(page);
     page.focus({ preventScroll: true });
-    return stop;
+    for (let node = page.parentElement; node !== null; node = node.parentElement) {
+      const overflow = getComputedStyle(node).overflowY;
+      if (overflow === 'auto' || overflow === 'scroll') node.scrollTop = 0;
+    }
   }, [named, entryKey, scroll]);
   return (
-    <section className="fy-page">
-      <h1>Settings</h1>
-      {/* This device's own settings (theme, text size, motion, notifications…) are saved in this browser, not on a daemon:
-      the shell's own entry, one click from here as v4's Settings had it. Its address is the one a reload still serves. */}
-      <p className="fy-settings-device">
-        <Link to={DEVICE_SETTINGS_HREF}>This device</Link>
-        <span className="fy-settings-device__hint">
-          {' '}
-          — theme, text size, motion and notifications, saved in this browser
-        </span>
-      </p>
-      {/* v4's titled groups (`machine-panels.ts`); each plugin names its tab's group in its manifest. */}
-      <nav className="fy-tabs fy-tabs--grouped" aria-label="Plugin settings">
-        {groupSettingsTabs(tabs).map(group => (
-          <section key={group.id} className="fy-tab-group" aria-labelledby={`fy-settings-group-${group.id}`}>
-            <h2 id={`fy-settings-group-${group.id}`} className="fy-tab-group__title">
-              {group.label}
-            </h2>
-            <div className="fy-tab-group__tabs">
-              {group.tabs.map(candidate => (
-                <Link
-                  key={`${candidate.plugin}.${candidate.id}`}
-                  to={daemonSettingsHref(daemon, candidate.plugin, candidate.id)}
-                  className={candidate === active ? 'fy-tab fy-tab--active' : 'fy-tab'}
-                >
-                  {candidate.label}
-                </Link>
-              ))}
-            </div>
+    <section className="fy-page fy-settings" data-settings-open={named === undefined ? 'list' : 'panel'}>
+      <header className="fy-settings-head">
+        {/* A phone's way back from a panel to the list of them (hidden wherever the list is beside the panel). */}
+        <Link to={daemonSettingsHref(daemon)} className="fy-settings-back">
+          ‹ Settings
+        </Link>
+        <h1>Settings</h1>
+        {paired === undefined ? null : (
+          <p className="fy-settings-machine">
+            <span className="fy-settings-machine__name">{daemonTitle(paired)}</span>
+            <span className="fy-settings-machine__state" data-online={online ? 'true' : 'false'}>
+              {online ? 'Online' : 'Offline'}
+            </span>
+            <span className="fy-settings-machine__scope">This machine · shared by every device paired to it</span>
+          </p>
+        )}
+        {active === undefined ? null : <p className="fy-settings-title">{active.label}</p>}
+      </header>
+      <div className="fy-settings-body">
+        {/* v4's titled groups (`machine-panels.ts`); each plugin names its tab's group in its manifest. */}
+        <nav className="fy-tabs fy-tabs--grouped fy-settings-nav" aria-label="Plugin settings">
+          {/* This device's own settings (theme, text size, motion, notifications…) are saved in this browser, not on a daemon:
+          the shell's own entry, one click from here as v4's Settings had it. Its address is the one a reload still serves. */}
+          <Link to={DEVICE_SETTINGS_HREF} className="fy-tab fy-settings-device">
+            This device
+          </Link>
+          {groupSettingsTabs(tabs).map(group => (
+            <details key={group.id} className="fy-tab-group" open={group.tabs.some(candidate => candidate === active)}>
+              <summary className="fy-tab-group__title">{group.label}</summary>
+              <div className="fy-tab-group__tabs">
+                {group.tabs.map(candidate => (
+                  <Link
+                    key={`${candidate.plugin}.${candidate.id}`}
+                    to={daemonSettingsHref(daemon, candidate.plugin, candidate.id)}
+                    className={candidate === active ? 'fy-tab fy-tab--active' : 'fy-tab'}
+                    current={candidate === active && named !== undefined}
+                  >
+                    {candidate.label}
+                  </Link>
+                ))}
+              </div>
+            </details>
+          ))}
+        </nav>
+        {choice.kind === 'none' ? (
+          <ShellLine>No plugin on this daemon has settings.</ShellLine>
+        ) : choice.kind === 'missing' ? (
+          <ShellLine>{`There is no settings tab called "${choice.name}" on this daemon. Pick one from the list.`}</ShellLine>
+        ) : (
+          <section ref={pageRef} className="fy-settings-page" aria-label={choice.tab.label} tabIndex={-1}>
+            <PluginView daemon={daemon} plugin={choice.tab.plugin} section="settings" id={choice.tab.id} props={{}} />
           </section>
-        ))}
-      </nav>
-      {choice.kind === 'none' ? (
-        <ShellLine>No plugin on this daemon has settings.</ShellLine>
-      ) : choice.kind === 'missing' ? (
-        <ShellLine>{`There is no settings tab called "${choice.name}" on this daemon. Pick one above.`}</ShellLine>
-      ) : (
-        <section ref={pageRef} className="fy-settings-page" aria-label={choice.tab.label} tabIndex={-1}>
-          <PluginView daemon={daemon} plugin={choice.tab.plugin} section="settings" id={choice.tab.id} props={{}} />
-        </section>
-      )}
+        )}
+      </div>
     </section>
   );
 }
