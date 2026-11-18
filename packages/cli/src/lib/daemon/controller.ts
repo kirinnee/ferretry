@@ -326,7 +326,10 @@ export class DaemonController {
     await service.assertServes(undefined);
     // Before the daemon is stopped or launched: the hand-over below ends the running daemon, and a manager that cannot
     // then start its own (no user session bus, a service manager of another home) leaves the machine with no daemon.
-    const unreachable = await service.unreachableBecause?.();
+    // A home that is not Ferretry 5's (a Ferretry 4 home above all) is refused by the install itself with the carry-over
+    // sentence and nothing is run against the service manager: that answer must not be pre-empted by this one.
+    const homeIsOthers = (await this.deps.claims.inspect(this.deps.layout.stateHome)) === 'unclaimed';
+    const unreachable = homeIsOthers ? undefined : await service.unreachableBecause?.();
     if (unreachable !== undefined) {
       throw new ServiceManagerUnreachableError(service.manager, unreachable);
     }
