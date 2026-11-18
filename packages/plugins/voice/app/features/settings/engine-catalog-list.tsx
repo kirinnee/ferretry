@@ -65,7 +65,8 @@ const ENGINE_LIST_INTRO =
   'Install as many as you like and try each one. The one in use is what the microphone dictates with on this device.';
 export const LIVE_WORDS_BADGE = 'Live words';
 export const NEAR_LIVE_BADGE = 'Near-live words';
-export const ON_DEVICE_BADGE = 'On this device';
+/** Where the model RUNS, not whether it is downloaded: the install state is its own line below ("Installed · size"). */
+export const ON_DEVICE_BADGE = 'Runs on this device';
 export const INSTALL_FOOTNOTE =
   'Downloaded once from Hugging Face, checked byte for byte, and kept in this browser. Browsers can clear site data they need room for; if that happens, install it again here.';
 const TRIAL_EXPLANATION = `Try it records ${TRIAL_RECORD_MS / 1000} seconds and shows what it heard and how long it took. It changes nothing: not your draft, not the engine in use.`;
@@ -488,7 +489,7 @@ function ModelRow({
     >
       <div className="flex flex-wrap gap-1">
         {defaultBadge === undefined ? null : <Badge tone="accent">{defaultBadge}</Badge>}
-        <Badge tone="ok">{ON_DEVICE_BADGE}</Badge>
+        <Badge tone="muted">{ON_DEVICE_BADGE}</Badge>
         {model.streaming ? <Badge tone="accent">{LIVE_WORDS_BADGE}</Badge> : null}
         {!model.streaming && model.nearLive ? <Badge tone="muted">{NEAR_LIVE_BADGE}</Badge> : null}
       </div>
