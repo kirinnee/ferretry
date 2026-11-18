@@ -250,7 +250,13 @@ describe('hosted relay discovery (R580)', () => {
         else Object.defineProperty(globalThis, name, descriptor);
       }
     }
-    expect(added.sort()).toEqual(['connection change', 'document visibilitychange', 'window online']);
+    // The second visibilitychange is the drop log's: it times how long the page had been hidden when a session dropped.
+    expect(added.sort()).toEqual([
+      'connection change',
+      'document visibilitychange',
+      'document visibilitychange',
+      'window online',
+    ]);
   });
 
   test('R580 a build with no directory (or a withdrawn relay) offers nothing and dials nothing', async () => {

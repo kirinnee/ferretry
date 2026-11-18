@@ -11,18 +11,21 @@ import type { DaemonList, PairedDaemon } from '@ferretry/app';
 import { createElement, useSyncExternalStore } from 'react';
 import type { CarrierPreferenceStore } from '../../lib/carrier-preference.ts';
 import { settingOf } from '../../lib/carrier-preference.ts';
+import { CarrierDropsCard, type CarrierDropsSource } from './carrier-drops-card.tsx';
 import { CarrierPreferenceSelector } from './carrier-preference-selector.tsx';
 
 export interface DeviceConnectionPorts {
   readonly daemons: Pick<DaemonList, 'snapshot' | 'subscribe'>;
   readonly preferences: CarrierPreferenceStore;
+  /** The sessions this browser lost; absent where nothing records them, which draws no card. */
+  readonly drops?: CarrierDropsSource;
   /** Whether this build can dial WebRTC at all. */
   readonly webrtc: boolean;
 }
 
 const machineName = (daemon: PairedDaemon): string => daemon.machine;
 
-export function DeviceConnectionPanel({ daemons, preferences, webrtc }: DeviceConnectionPorts) {
+export function DeviceConnectionPanel({ daemons, preferences, drops, webrtc }: DeviceConnectionPorts) {
   const list = useSyncExternalStore(daemons.subscribe, daemons.snapshot, daemons.snapshot);
   const chosen = useSyncExternalStore(
     listener => preferences.subscribe(() => listener()),
@@ -48,6 +51,7 @@ export function DeviceConnectionPanel({ daemons, preferences, webrtc }: DeviceCo
           availability: { webrtc },
         }),
       )}
+      {drops === undefined ? null : <CarrierDropsCard log={drops} />}
     </section>
   );
 }
