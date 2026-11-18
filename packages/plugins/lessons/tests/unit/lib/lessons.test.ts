@@ -82,6 +82,7 @@ describe('LessonsService', () => {
       world.sessions.sessions = [
         lessonFacts({ ferretId: 's1', teammate: 'Ada', cwd: '/work/a' }),
         lessonFacts({ ferretId: 's2', cwd: '/work/b' }),
+        lessonFacts({ ferretId: 's3', name: 'Hildred', cwd: '/work/c' }),
       ];
 
       // Act
@@ -91,6 +92,7 @@ describe('LessonsService', () => {
       should(directory).deepEqual([
         { ferretId: 's1', name: 'Ada', folder: '/work/a' },
         { ferretId: 's2', folder: '/work/b' },
+        { ferretId: 's3', name: 'Hildred', folder: '/work/c' },
       ]);
     });
   });

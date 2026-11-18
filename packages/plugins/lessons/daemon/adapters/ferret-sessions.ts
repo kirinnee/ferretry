@@ -17,6 +17,7 @@ export function lessonSessionFacts(ferret: FerretSummary): LessonSessionFacts {
     harness: ferret.harness === 'codex' ? 'codex' : 'claude',
     mode: ferret.role === 'lead' ? 'interactive' : 'auto',
     ...(ferret.role === 'helper' ? { teammate: ferret.name } : {}),
+    ...(ferret.name === undefined || ferret.name === '' ? {} : { name: ferret.name }),
     ...(ferret.name === LESSONS_MINER_NAME ? { label: LESSONS_MINER_LABEL } : {}),
     createdAt: ferret.createdAt,
     running: ferret.state !== 'stopped',

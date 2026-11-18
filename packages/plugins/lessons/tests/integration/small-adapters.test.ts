@@ -37,6 +37,8 @@ describe('lessonSessionFacts', () => {
 
     expect(lessonSessionFacts(lead)).toMatchObject({ mode: 'interactive', harness: 'claude', running: true });
     expect(lessonSessionFacts(lead).teammate).toBeUndefined();
+    // …but the lead's own name still reaches the directory, so the Learning tab never shows its raw id
+    expect(lessonSessionFacts(lead).name).toBe(lead.name);
     expect(lessonSessionFacts(helper)).toMatchObject({ mode: 'auto', teammate: 'Reviewer' });
   });
 
