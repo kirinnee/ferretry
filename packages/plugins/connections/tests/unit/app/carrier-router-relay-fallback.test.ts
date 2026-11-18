@@ -29,19 +29,16 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 const hostsDialled = (urls: readonly string[]): string[] => urls.map(url => new URL(url).host);
 
 describe('the unchosen default (Relay) with a relay that cannot carry', () => {
-  test('no relay discovered: the paired direct address carries, and the router says it stands in for the relay', async () => {
+  test('no relay discovered (switched off): the paired direct address simply carries, and nothing says a relay failed', async () => {
     const r = await rig(hostsOf({ kind: 'dead' }), PUBLISHED, 'relay', null, undefined, { chosen: () => false });
     const transport = await r.connect();
     if (transport === undefined) throw new Error('no transport');
     await transport.request({ method: 'GET', path: '/v1/carriers' });
     expect(carriedOver(r.fx)).toEqual(['/v1/carriers direct']);
     expect(hostsDialled(r.network.dialled)).toEqual([new URL(DIRECT).host]);
-    expect(r.router.choice(r.fx.daemonId)).toMatchObject({
-      ok: true,
-      method: { kind: 'direct', daemonUrl: DIRECT },
-      reason: RELAY_FALLBACK_LINE,
-    });
-    expect(r.router.relayFallback(r.fx.daemonId)).toBe(RELAY_FALLBACK_LINE);
+    expect(r.router.choice(r.fx.daemonId)).toMatchObject({ ok: true, method: { kind: 'direct', daemonUrl: DIRECT } });
+    expect(r.router.choice(r.fx.daemonId)).not.toMatchObject({ reason: RELAY_FALLBACK_LINE });
+    expect(r.router.relayFallback(r.fx.daemonId)).toBeUndefined();
     r.fx.layer.close();
   });
 

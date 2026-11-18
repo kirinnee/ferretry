@@ -748,7 +748,9 @@ export class CarrierRouter {
         this.deps.drops?.reconnected(daemonId);
         if (!decides) return undefined;
         // Under the unchosen default the only direct leg is the fallback: the relay did not carry this session.
-        const standsIn = plan.fallsBackToPairedDirect && method.kind === 'direct';
+        // With no relay known at all (switched off, none advertised) the direct address is simply the connection: it
+        // stands in for nothing that was ever offered, so no line says a relay failed.
+        const standsIn = plan.fallsBackToPairedDirect && method.kind === 'direct' && plan.why !== RELAY_UNAVAILABLE;
         const chosen = choiceFor([...probes, carrierProbe(method, { kind: 'answered', status: 101 })], plan);
         const session: LiveSession = {
           standsIn: standsIn && chosen.ok,
