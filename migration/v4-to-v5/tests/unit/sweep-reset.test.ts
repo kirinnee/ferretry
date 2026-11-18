@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   chmod,
   lstat,
@@ -6,6 +7,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  readlink,
   realpath,
   rename,
   rm,
@@ -15,24 +17,18 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  PROVENANCE_FILE,
   ResetHalfway,
   ResetRefusal,
-  STAGING_PREFIX,
-  backupDirOf,
-  backupName,
   homeFiles,
+  installPrograms,
+  keptDirOf,
   resetStamp,
   resetV5,
   restoreV5,
-  symlinkProblem,
-  tarEntryProblem,
-  tarMembersProblem,
   writeBindPin,
-  writeProvenance,
   type ResetActions,
   type ResetPaths,
-  type TarMember,
-  type TarPorts,
 } from '../../fixtures/sweep/reset.ts';
 import {
   FAKE_NAME,
@@ -45,29 +41,9 @@ import {
 } from '../../fixtures/sweep/real-claude.ts';
 
 const NOW = new Date('2026-11-18T19:17:05.123Z');
-
-/** The real `tar`, on scratch folders only. */
-const tar: TarPorts = {
-  create: async (dir, file, members) => {
-    const ran = Bun.spawnSync(['tar', '-C', dir, '--warning=no-file-ignored', '-cf', file, ...members]);
-    return { code: ran.exitCode, err: ran.stderr.toString() };
-  },
-  list: async file => {
-    const ran = Bun.spawnSync(['tar', '-tf', file]);
-    return {
-      code: ran.exitCode,
-      entries: ran.stdout
-        .toString()
-        .split('\n')
-        .filter(line => line !== ''),
-      err: ran.stderr.toString(),
-    };
-  },
-  extract: async (dir, file) => {
-    const ran = Bun.spawnSync(['tar', '-C', dir, '-xpf', file]);
-    return { code: ran.exitCode, err: ran.stderr.toString() };
-  },
-};
+const STAMP = '20261118T191705Z';
+const LATER = new Date('2026-11-18T19:30:00Z');
+const options = { keepRealClaude: false, now: NOW };
 
 interface Scratch {
   readonly root: string;
@@ -76,8 +52,8 @@ interface Scratch {
   readonly v4Marker: string;
 }
 
-/** A persisted slot's folder as the kit leaves it: a v4 side, and a RICH 5.0 side (ferrets, logins, devices, a pairing record). */
-async function scratch(): Promise<Scratch> {
+/** A persisted slot's folder as the kit leaves it: a v4 side, and a RICH 5.0 side (ferrets, logins, devices, links, modes). */
+async function scratch(slot = 3): Promise<Scratch> {
   const root = await mkdtemp(join(tmpdir(), 'kit-empty-'));
   const v4Marker = join(root, 'v4', 'home', 'marker.txt');
   await mkdir(join(root, 'v4', 'home'), { recursive: true });
@@ -85,6 +61,7 @@ async function scratch(): Promise<Scratch> {
   const v5Dir = join(root, 'v5');
   const home = join(v5Dir, 'home');
   const harness = join(v5Dir, 'harness-bin');
+  const bin = join(v5Dir, 'bin');
   await mkdir(join(home, 'config', 'logins'), { recursive: true });
   await mkdir(join(home, 'state', 'kernel', 'accepted-config'), { recursive: true });
   await mkdir(join(home, 'state', 'access'), { recursive: true });
@@ -92,17 +69,33 @@ async function scratch(): Promise<Scratch> {
   await mkdir(join(home, 'state', 'terminals'), { recursive: true });
   await mkdir(join(v5Dir, 'user', '.config'), { recursive: true });
   await mkdir(harness, { recursive: true });
+  await mkdir(bin, { recursive: true });
   await writeFile(
     join(home, 'config', 'daemon.json'),
     '{"carriers":[{"kind":"bind","host":"127.0.0.1","port":7619}],"extra":"OLD"}\n',
   );
   await writeFile(join(home, 'config', 'logins', 'codex-main.yaml'), 'harness: codex\n');
   await writeFile(join(home, 'state', 'access', 'devices.json'), '{"devices":["phone"]}\n');
-  await writeFile(join(home, 'state', 'logins', 'credentials', 'codex-main', 'auth.json'), '{"fake":true}\n');
+  await writeFile(join(home, 'state', 'logins', 'credentials', 'codex-main', 'auth.json'), '{"fake":true}\n', {
+    mode: 0o600,
+  });
   await writeFile(join(home, 'state', 'conversation-fixture.json'), '{"ferrets":["alpha","beta"]}\n');
+  await writeFile(join(home, 'state', 'run.sh'), '#!/bin/sh\n', { mode: 0o755 });
+  await symlink('conversation-fixture.json', join(home, 'state', 'inner-link'));
+  await symlink('/nonexistent-outside/anything', join(home, 'state', 'outside-link'));
   await writeFile(join(v5Dir, 'user', '.config', 'leftover'), 'x\n');
   await writeFile(join(harness, 'claude'), '#!/bin/sh\necho FAKE\n', { mode: 0o755 });
-  const paths: ResetPaths = { slot: 3, real: root, v5Dir, home, user: join(v5Dir, 'user'), harness, port: 7619 };
+  await writeFile(join(bin, 'fyd'), 'program\n', { mode: 0o755 });
+  const paths: ResetPaths = {
+    slot,
+    real: root,
+    v5Dir,
+    home,
+    user: join(v5Dir, 'user'),
+    harness,
+    bin,
+    port: 7619,
+  };
   return { root, paths, real: { v5Dir, fyHome: home, harness }, v4Marker };
 }
 
@@ -143,19 +136,50 @@ const listing = async (root: string): Promise<string[]> => {
   return out.sort();
 };
 
+/** Every path, type, mode, link target and file hash under `root`: equal digests mean every byte (and mode) is the same. */
+async function digest(root: string): Promise<string> {
+  const lines: string[] = [];
+  const walk = async (folder: string): Promise<void> => {
+    const entries = (await readdir(folder, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : 1));
+    for (const entry of entries) {
+      const path = join(folder, entry.name);
+      const info = await lstat(path);
+      const shown = `${path.slice(root.length)} ${(info.mode & 0o777).toString(8)}`;
+      if (entry.isSymbolicLink()) lines.push(`l ${shown} -> ${await readlink(path)}`);
+      else if (entry.isDirectory()) {
+        lines.push(`d ${shown}`);
+        await walk(path);
+      } else
+        lines.push(
+          `f ${shown} ${createHash('sha256')
+            .update(await readFile(path))
+            .digest('hex')}`,
+        );
+    }
+  };
+  await walk(root);
+  return lines.join('\n');
+}
+
 const mode = async (path: string): Promise<string> => ((await lstat(path)).mode & 0o777).toString(8);
+const exists = async (path: string): Promise<boolean> => (await lstat(path).catch(() => undefined)) !== undefined;
+const keptOf = (s: Scratch, stamp = STAMP): string => join(keptDirOf(s.root), stamp);
+const noTar = async (root: string): Promise<void> => {
+  expect((await listing(root)).filter(name => /\.tar|reset-backups|\.reset-staging|\.restore-/u.test(name))).toEqual(
+    [],
+  );
+};
 
 describe('reset-v5: an empty home on a persisted slot', () => {
   test('the new home is an EMPTY folder: no config, no limits file, no gate, no name, no identity, no ferret, login or device', async () => {
     const { root, paths, real } = await scratch();
     try {
-      const { actions } = actionsFor(paths);
-      await resetV5(paths, real, tar, actions, { keepRealClaude: false, now: NOW });
+      await resetV5(paths, real, actionsFor(paths).actions, options);
       expect(await homeFiles(paths.home)).toEqual([]);
       for (const gone of ['logins', 'runtimes', 'profiles', 'projects'])
-        expect(await lstat(join(paths.home, 'config', gone)).catch(() => undefined)).toBeUndefined();
-      expect(await lstat(join(paths.home, 'state', 'access')).catch(() => undefined)).toBeUndefined();
-      expect(await lstat(join(paths.home, 'state', 'kernel', 'identity.json')).catch(() => undefined)).toBeUndefined();
+        expect(await exists(join(paths.home, 'config', gone))).toBe(false);
+      expect(await exists(join(paths.home, 'state', 'access'))).toBe(false);
+      expect(await exists(join(paths.home, 'state', 'kernel', 'identity.json'))).toBe(false);
       expect(await readdir(paths.user)).toEqual([]);
       expect(await mode(paths.home)).toBe('700');
       expect(await readdir(paths.home)).toEqual([]);
@@ -164,22 +188,33 @@ describe('reset-v5: an empty home on a persisted slot', () => {
     }
   });
 
-  test('the old home is a tar: mode 0600 in a 0700 folder, UTC-stamped, holding the old data; stop comes first, start last', async () => {
+  test('the old home is MOVED, not copied or packed: same folders (same inodes), every byte and mode, a 0600 record; no tar, no backup folder, no staging; stop first, start last', async () => {
     const { root, paths, real } = await scratch();
     try {
+      const home = await lstat(paths.home);
+      const homeDigest = await digest(paths.home);
+      const userDigest = await digest(paths.user);
       const trace = actionsFor(paths);
-      const { tar: file } = await resetV5(paths, real, tar, trace.actions, { keepRealClaude: false, now: NOW });
+      const done = await resetV5(paths, real, trace.actions, options);
       expect(trace.steps).toEqual(['stop (old home present: true)', 'installBuild', 'start']);
-      expect(file).toBe(join(backupDirOf(root), 'v5-reset-20261118T191705Z.tar'));
-      expect(resetStamp(NOW)).toBe('20261118T191705Z');
-      expect(backupName('S', 'restore')).toBe('v5-restore-S.tar');
-      expect(await mode(file)).toBe('600');
-      expect(await mode(backupDirOf(root))).toBe('700');
-      const entries = (await tar.list(file)).entries;
-      expect(entries).toContain('home/state/conversation-fixture.json');
-      expect(entries).toContain('home/state/access/devices.json');
-      expect(entries).toContain('user/.config/leftover');
-      expect(entries.every(entry => tarEntryProblem(entry) === undefined)).toBe(true);
+      const dir = join(await realpath(root), 'kept', STAMP);
+      expect(done).toEqual({ kept: dir, stamp: STAMP });
+      expect(resetStamp(NOW)).toBe(STAMP);
+      expect(await mode(keptOf({ root } as Scratch))).toBe('700');
+      expect(await mode(dir)).toBe('700');
+      expect(await digest(join(dir, 'home'))).toBe(homeDigest);
+      expect(await digest(join(dir, 'user'))).toBe(userDigest);
+      const moved = await lstat(join(dir, 'home'));
+      expect([moved.ino, moved.dev]).toEqual([home.ino, home.dev]);
+      expect(await mode(join(dir, PROVENANCE_FILE))).toBe('600');
+      const record = JSON.parse(await readFile(join(dir, PROVENANCE_FILE), 'utf8')) as Record<string, unknown>;
+      expect(record).toMatchObject({ format: 1, slot: 3, slotRealpath: await realpath(root), stamp: STAMP });
+      expect(record.members).toEqual([
+        { name: 'home', ino: home.ino, dev: home.dev },
+        { name: 'user', ino: (await lstat(join(dir, 'user'))).ino, dev: home.dev },
+      ]);
+      expect((await readdir(dir)).sort()).toEqual(['home', PROVENANCE_FILE, 'user']);
+      await noTar(root);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -191,24 +226,14 @@ describe('reset-v5: an empty home on a persisted slot', () => {
       await mkdir(join(root, 'bin'), { recursive: true });
       await writeFile(join(root, 'bin', 'fy5s9'), 'wrapper\n');
       await writeFile(join(root, 'cli-names.json'), '{"v5":"fy5"}\n');
-      await mkdir(join(paths.v5Dir, 'bin'), { recursive: true });
-      await writeFile(join(paths.v5Dir, 'bin', 'fyd'), 'program\n');
       const beforeV4 = await listing(join(root, 'v4'));
-      const kept = ['bin', 'cli-names.json', join('v5', 'bin'), join('v5', 'harness-bin')];
-      const before = await Promise.all(
-        kept.map(
-          async name => await listing(join(root, name)).catch(async () => [await readFile(join(root, name), 'utf8')]),
-        ),
-      );
-      await resetV5(paths, real, tar, actionsFor(paths).actions, { keepRealClaude: false, now: NOW });
+      const kept = ['bin', join('v5', 'bin'), join('v5', 'harness-bin')];
+      const before = await Promise.all(kept.map(async name => await digest(join(root, name))));
+      await resetV5(paths, real, actionsFor(paths).actions, options);
       expect(await listing(join(root, 'v4'))).toEqual(beforeV4);
       expect(await readFile(v4Marker, 'utf8')).toBe('v4 data\n');
-      const after = await Promise.all(
-        kept.map(
-          async name => await listing(join(root, name)).catch(async () => [await readFile(join(root, name), 'utf8')]),
-        ),
-      );
-      expect(after).toEqual(before);
+      expect(await readFile(join(root, 'cli-names.json'), 'utf8')).toBe('{"v5":"fy5"}\n');
+      expect(await Promise.all(kept.map(async name => await digest(join(root, name))))).toEqual(before);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -219,26 +244,38 @@ describe('reset-v5: an empty home on a persisted slot', () => {
     try {
       await rm(paths.home, { recursive: true });
       const trace = actionsFor(paths);
-      await expect(resetV5(paths, real, tar, trace.actions, { keepRealClaude: false, now: NOW })).rejects.toThrow(
-        /no 5.0 home to reset/u,
-      );
+      await expect(resetV5(paths, real, trace.actions, options)).rejects.toThrow(/no 5.0 home to reset/u);
       expect(trace.steps).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  test('a tar that cannot be written removes nothing', async () => {
-    const { root, paths, real } = await scratch();
+  test('a 5.0 side that will not stop: the reset refuses, moves nothing and starts nothing; the same for a restore', async () => {
+    const s = await scratch();
     try {
-      const broken: TarPorts = { ...tar, create: async () => ({ code: 2, err: 'disk full' }) };
-      await expect(
-        resetV5(paths, real, broken, actionsFor(paths).actions, { keepRealClaude: false, now: NOW }),
-      ).rejects.toThrow(/nothing was removed/u);
-      expect(await lstat(join(paths.home, 'state', 'conversation-fixture.json'))).toBeDefined();
-      expect(await readdir(backupDirOf(root))).toEqual([]);
+      const steps: string[] = [];
+      const stuck: ResetActions = {
+        stop: async () => {
+          steps.push('stop');
+          throw new ResetRefusal('the 5.0 side of slot 3 is still running after its units were stopped');
+        },
+        installBuild: async () => void steps.push('installBuild'),
+        start: async () => void steps.push('start'),
+        say: () => undefined,
+      };
+      const before = await listing(s.root);
+      await expect(resetV5(s.paths, s.real, stuck, options)).rejects.toThrow(/still running/u);
+      expect(steps).toEqual(['stop']);
+      expect(await listing(s.root)).toEqual(before);
+      await resetV5(s.paths, s.real, actionsFor(s.paths).actions, options);
+      const afterReset = await listing(s.root);
+      steps.length = 0;
+      await expect(restoreV5(s.paths, stuck, STAMP, LATER)).rejects.toThrow(/still running/u);
+      expect(steps).toEqual(['stop']);
+      expect(await listing(s.root)).toEqual(afterReset);
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await rm(s.root, { recursive: true, force: true });
     }
   });
 });
@@ -267,11 +304,9 @@ describe('reset-v5 and real claude', () => {
     try {
       await withRealClaude(s);
       const trace = actionsFor(s.paths);
-      await expect(resetV5(s.paths, s.real, tar, trace.actions, { keepRealClaude: false, now: NOW })).rejects.toThrow(
-        /--keep-real-claude/u,
-      );
+      await expect(resetV5(s.paths, s.real, trace.actions, options)).rejects.toThrow(/--keep-real-claude/u);
       expect(trace.steps).toEqual([]);
-      expect(await lstat(join(s.paths.home, 'state', 'conversation-fixture.json'))).toBeDefined();
+      expect(await exists(join(s.paths.home, 'state', 'conversation-fixture.json'))).toBe(true);
     } finally {
       await rm(s.root, { recursive: true, force: true });
     }
@@ -287,14 +322,14 @@ describe('reset-v5 and real claude', () => {
         // The shim is already the new one when the daemon starts.
         startCheck: async () => void (seenAtStart = await readFile(join(s.real.harness, 'claude'), 'utf8')),
       });
-      await resetV5(s.paths, s.real, tar, trace.actions, { keepRealClaude: true, now: NOW });
+      await resetV5(s.paths, s.real, trace.actions, { keepRealClaude: true, now: NOW });
       const claude = await readFile(join(s.real.harness, 'claude'), 'utf8');
       expect(seenAtStart).toBe(claude);
       expect(isShim(claude)).toBe(true);
       expect(claude).toContain(`'${store}') exec env DISABLE_AUTOUPDATER=1 '${stub}'`);
       expect(await readRecord(s.real)).toEqual({ login: 'claude-real', store, binary: stub, rootedAt: null });
-      expect(await lstat(store).catch(() => undefined)).toBeUndefined();
-      expect(await lstat(join(s.paths.home, 'config', 'logins')).catch(() => undefined)).toBeUndefined();
+      expect(await exists(store)).toBe(false);
+      expect(await exists(join(s.paths.home, 'config', 'logins'))).toBe(false);
       // The shim still sends the store's callers to the real claude, and everybody else to the fake.
       const ran = (env: Record<string, string>): string =>
         Bun.spawnSync([join(s.real.harness, 'claude'), 'hi'], { env: { PATH: '/usr/bin:/bin', ...env } })
@@ -302,6 +337,8 @@ describe('reset-v5 and real claude', () => {
           .trim();
       expect(ran({ CLAUDE_SECURESTORAGE_CONFIG_DIR: store })).toBe('REAL hi');
       expect(ran({ CLAUDE_SECURESTORAGE_CONFIG_DIR: '' })).toBe('FAKE');
+      // The old home, with its login store, is whole in the kept folder.
+      expect(await exists(join(keptOf(s), 'home', 'state', 'logins', 'credentials', 'claude-real'))).toBe(true);
     } finally {
       await rm(s.root, { recursive: true, force: true });
     }
@@ -313,7 +350,7 @@ describe('reset-v5 and real claude', () => {
       await withRealClaude(s);
       await rm(join(s.real.v5Dir, 'real-claude.json'));
       await expect(
-        resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, { keepRealClaude: true, now: NOW }),
+        resetV5(s.paths, s.real, actionsFor(s.paths).actions, { keepRealClaude: true, now: NOW }),
       ).rejects.toThrow(/no real-claude.json/u);
     } finally {
       await rm(s.root, { recursive: true, force: true });
@@ -321,421 +358,485 @@ describe('reset-v5 and real claude', () => {
   });
 });
 
-describe('restore-v5', () => {
-  test('puts the old home back; the home it replaces is tarred first', async () => {
+describe('restore-v5: rename only', () => {
+  test('reset then restore keeps every byte: the tree hashes the same, the home it replaces is kept, the emptied kept folder is gone', async () => {
     const s = await scratch();
     try {
-      const { tar: file } = await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, {
-        keepRealClaude: false,
-        now: NOW,
-      });
+      const homeDigest = await digest(s.paths.home);
+      const userDigest = await digest(s.paths.user);
+      await resetV5(s.paths, s.real, actionsFor(s.paths).actions, options);
       await mkdir(join(s.paths.home, 'config'), { recursive: true });
       await writeFile(join(s.paths.home, 'config', 'marker-of-new-home'), 'new\n');
       const trace = actionsFor(s.paths);
-      const later = new Date('2026-11-18T19:30:00Z');
-      const { saved } = await restoreV5(s.paths, tar, trace.actions, file, later);
+      const { saved } = await restoreV5(s.paths, trace.actions, STAMP, LATER);
       expect(trace.steps).toEqual(['stop (old home present: true)', 'start']);
-      expect(await readFile(join(s.paths.home, 'state', 'conversation-fixture.json'), 'utf8')).toBe(
-        '{"ferrets":["alpha","beta"]}\n',
-      );
-      expect(await readFile(join(s.paths.user, '.config', 'leftover'), 'utf8')).toBe('x\n');
-      expect(await lstat(join(s.paths.home, 'config', 'marker-of-new-home')).catch(() => undefined)).toBeUndefined();
-      expect(saved).toBe(join(backupDirOf(s.root), 'v5-restore-20261118T193000Z.tar'));
-      expect((await tar.list(saved)).entries).toContain('home/config/marker-of-new-home');
-      expect(await mode(saved)).toBe('600');
+      expect(await digest(s.paths.home)).toBe(homeDigest);
+      expect(await digest(s.paths.user)).toBe(userDigest);
+      expect(await exists(join(s.paths.home, 'config', 'marker-of-new-home'))).toBe(false);
+      expect(saved).toBe(join(await realpath(s.root), 'kept', resetStamp(LATER)));
+      expect(await readFile(join(saved ?? '', 'home', 'config', 'marker-of-new-home'), 'utf8')).toBe('new\n');
+      expect(await exists(keptOf(s))).toBe(false);
+      await noTar(s.root);
     } finally {
       await rm(s.root, { recursive: true, force: true });
     }
   });
 
-  test("refuses a tar outside the slot's backup folder, a link, a group-readable one and an unsafe one; stops nothing", async () => {
+  test('restore works when there is no current home at all (nothing is kept for it)', async () => {
     const s = await scratch();
     try {
-      const { tar: file } = await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, {
-        keepRealClaude: false,
-        now: NOW,
-      });
+      const homeDigest = await digest(s.paths.home);
+      await resetV5(s.paths, s.real, actionsFor(s.paths).actions, options);
+      await rm(s.paths.home, { recursive: true });
+      await rm(s.paths.user, { recursive: true });
       const trace = actionsFor(s.paths);
-      const outside = join(s.root, 'elsewhere.tar');
-      await writeFile(outside, await readFile(file), { mode: 0o600 });
-      await expect(restoreV5(s.paths, tar, trace.actions, outside, NOW)).rejects.toThrow(/not directly inside/u);
-      const link = join(backupDirOf(s.root), 'link.tar');
-      await symlink(file, link);
-      await expect(restoreV5(s.paths, tar, trace.actions, link, NOW)).rejects.toThrow(/not a plain file/u);
-      await chmod(file, 0o640);
-      await expect(restoreV5(s.paths, tar, trace.actions, file, NOW)).rejects.toThrow(/readable by others/u);
-      await chmod(file, 0o600);
-      await expect(restoreV5(s.paths, tar, trace.actions, join(backupDirOf(s.root), 'nope.tar'), NOW)).rejects.toThrow(
-        /does not exist/u,
+      const { saved } = await restoreV5(s.paths, trace.actions, STAMP, LATER);
+      expect(saved).toBeUndefined();
+      expect(trace.steps).toEqual(['stop (old home present: false)', 'start']);
+      expect(await digest(s.paths.home)).toBe(homeDigest);
+      expect(await readFile(join(s.paths.user, '.config', 'leftover'), 'utf8')).toBe('x\n');
+      expect(await readdir(keptDirOf(s.root))).toEqual([]);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a kept copy with no user folder still restores (an empty user folder is made)', async () => {
+    const s = await scratch();
+    try {
+      await rm(s.paths.user, { recursive: true });
+      const homeDigest = await digest(s.paths.home);
+      await resetV5(s.paths, s.real, actionsFor(s.paths).actions, options);
+      expect((await readdir(keptOf(s))).sort()).toEqual(['home', PROVENANCE_FILE]);
+      await restoreV5(s.paths, actionsFor(s.paths).actions, STAMP, LATER);
+      expect(await digest(s.paths.home)).toBe(homeDigest);
+      expect(await readdir(s.paths.user)).toEqual([]);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses a stamp that is no stamp, a kept folder that is not there, one with no record, a loose or damaged record, a stray entry; stops nothing', async () => {
+    const s = await scratch();
+    try {
+      await resetV5(s.paths, s.real, actionsFor(s.paths).actions, options);
+      const trace = actionsFor(s.paths);
+      const before = await listing(s.root);
+      await expect(restoreV5(s.paths, trace.actions, '../v5', LATER)).rejects.toThrow(/not a stamp/u);
+      await expect(restoreV5(s.paths, trace.actions, '20261118T000000Z', LATER)).rejects.toThrow(/not a kept copy/u);
+      const record = join(keptOf(s), PROVENANCE_FILE);
+      const text = await readFile(record, 'utf8');
+      await chmod(record, 0o644);
+      await expect(restoreV5(s.paths, trace.actions, STAMP, LATER)).rejects.toThrow(/readable by others/u);
+      await chmod(record, 0o600);
+      await writeFile(record, '{"format":1', { mode: 0o600 });
+      await expect(restoreV5(s.paths, trace.actions, STAMP, LATER)).rejects.toThrow(/not valid JSON/u);
+      await writeFile(record, JSON.stringify({ format: 2 }), { mode: 0o600 });
+      await expect(restoreV5(s.paths, trace.actions, STAMP, LATER)).rejects.toThrow(/damaged/u);
+      await writeFile(record, text.replace('"home"', '"etc"'), { mode: 0o600 });
+      await expect(restoreV5(s.paths, trace.actions, STAMP, LATER)).rejects.toThrow(/does not keep|no home/u);
+      await writeFile(record, text, { mode: 0o600 });
+      await writeFile(join(keptOf(s), 'stray'), 'x');
+      await expect(restoreV5(s.paths, trace.actions, STAMP, LATER)).rejects.toThrow(/holds/u);
+      await rm(join(keptOf(s), 'stray'));
+      await rm(record);
+      await expect(restoreV5(s.paths, trace.actions, STAMP, LATER)).rejects.toThrow(/no provenance\.json/u);
+      expect(trace.steps).toEqual([]);
+      await writeFile(record, text, { mode: 0o600 });
+      expect((await listing(s.root)).filter(name => !name.includes('provenance'))).toEqual(
+        before.filter(name => !name.includes('provenance')),
       );
-      const evil = join(backupDirOf(s.root), 'evil.tar');
-      await mkdir(join(s.root, 'stage', 'etc'), { recursive: true });
-      await writeFile(join(s.root, 'stage', 'etc', 'passwd'), 'x');
-      Bun.spawnSync(['tar', '-C', join(s.root, 'stage'), '-cf', evil, 'etc']);
-      await chmod(evil, 0o600);
-      await writeProvenance(s.paths, evil, NOW);
-      await expect(restoreV5(s.paths, tar, trace.actions, evil, NOW)).rejects.toThrow(/not under home\/ or user\//u);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses to restore in the very second it would keep the current home under the same name, before stopping anything', async () => {
+    const s = await scratch();
+    try {
+      await resetV5(s.paths, s.real, actionsFor(s.paths).actions, options);
+      const trace = actionsFor(s.paths);
+      await expect(restoreV5(s.paths, trace.actions, STAMP, NOW)).rejects.toThrow(/already exists/u);
       expect(trace.steps).toEqual([]);
     } finally {
       await rm(s.root, { recursive: true, force: true });
     }
-  });
-
-  test('tarEntryProblem: only home/ and user/, nothing absolute, no ..', () => {
-    expect(tarEntryProblem('home/')).toBeUndefined();
-    expect(tarEntryProblem('home/state/a.json')).toBeUndefined();
-    expect(tarEntryProblem('user/.config/x')).toBeUndefined();
-    expect(tarEntryProblem('/etc/passwd')).toMatch(/unsafe/u);
-    expect(tarEntryProblem('home/../../etc')).toMatch(/unsafe/u);
-    expect(tarEntryProblem('v4/home')).toMatch(/not under/u);
   });
 });
 
-// ─── the two HIGH findings of the review of PR 2054: a link in the tree, and a tar the kit did not make ─────────────
+// ─── every review round's proof scenario: refused, or harmless (an external marker survives) ──────────────────────────
 
-describe('reset-v5: a link in the tree is refused before anything is stopped (HIGH 1)', () => {
-  test('a v5 folder that is a link to another slot removes nothing there, stops nothing', async () => {
+describe('reset-v5 and restore-v5: links and swaps are refused or harmless', () => {
+  const marked = async (victim: Scratch): Promise<void> => {
+    expect(await readFile(join(victim.paths.home, 'config', 'daemon.json'), 'utf8')).toContain('OLD');
+    expect(await readFile(join(victim.paths.user, '.config', 'leftover'), 'utf8')).toBe('x\n');
+    expect(await readFile(join(victim.paths.bin, 'fyd'), 'utf8')).toBe('program\n');
+  };
+  const swapV5 = async (s: Scratch, victim: Scratch): Promise<void> => {
+    await rename(s.paths.v5Dir, `${s.paths.v5Dir}.original`);
+    await symlink(victim.paths.v5Dir, s.paths.v5Dir);
+  };
+  const outcome = async (go: () => Promise<unknown>): Promise<Error | undefined> => {
+    try {
+      await go();
+      return undefined;
+    } catch (error) {
+      return error as Error;
+    }
+  };
+
+  test('a v5 folder that is a link to another slot (the original parent proof) moves nothing there and stops nothing', async () => {
     const a = await scratch();
-    const foreign = await scratch();
+    const victim = await scratch(4);
     try {
       await rm(a.paths.v5Dir, { recursive: true });
-      await symlink(foreign.paths.v5Dir, a.paths.v5Dir);
+      await symlink(victim.paths.v5Dir, a.paths.v5Dir);
+      const before = await listing(victim.root);
       const trace = actionsFor(a.paths);
-      await expect(resetV5(a.paths, a.real, tar, trace.actions, { keepRealClaude: false, now: NOW })).rejects.toThrow(
-        /not a plain folder|link|outside/u,
-      );
+      await expect(resetV5(a.paths, a.real, trace.actions, options)).rejects.toThrow(/not a plain folder/u);
       expect(trace.steps).toEqual([]);
-      expect(await readFile(join(foreign.paths.home, 'config', 'daemon.json'), 'utf8')).toContain('OLD');
-      expect(await readdir(backupDirOf(a.root)).catch(() => [])).toEqual([]);
+      await expect(restoreV5(a.paths, trace.actions, STAMP, LATER)).rejects.toThrow(/not a plain folder/u);
+      expect(trace.steps).toEqual([]);
+      await marked(victim);
+      expect(await listing(victim.root)).toEqual(before);
+      expect(await exists(keptDirOf(a.root))).toBe(false);
     } finally {
       await rm(a.root, { recursive: true, force: true });
-      await rm(foreign.root, { recursive: true, force: true });
+      await rm(victim.root, { recursive: true, force: true });
     }
   });
 
-  test('a home or user folder that is a link, or a v5 parent reached through a linked slot folder, is refused too', async () => {
+  test('a home, user, bin, config or kept folder that is a link, and a slot reached with the wrong parent, are refused before anything is stopped', async () => {
     const a = await scratch();
-    const foreign = await scratch();
+    const victim = await scratch(4);
     try {
       const trace = actionsFor(a.paths);
+      const before = await listing(victim.root);
+      const refused = async (): Promise<void> => {
+        await expect(resetV5(a.paths, a.real, trace.actions, options)).rejects.toThrow(/not a plain folder/u);
+      };
       await rm(a.paths.home, { recursive: true });
-      await symlink(foreign.paths.home, a.paths.home);
-      await expect(resetV5(a.paths, a.real, tar, trace.actions, { keepRealClaude: false, now: NOW })).rejects.toThrow(
-        /not a plain folder/u,
-      );
+      await symlink(victim.paths.home, a.paths.home);
+      await refused();
       await rm(a.paths.home);
       await mkdir(a.paths.home);
       await rm(a.paths.user, { recursive: true });
-      await symlink(foreign.paths.user, a.paths.user);
-      await expect(resetV5(a.paths, a.real, tar, trace.actions, { keepRealClaude: false, now: NOW })).rejects.toThrow(
-        /not a plain folder/u,
-      );
+      await symlink(victim.paths.user, a.paths.user);
+      await refused();
       await rm(a.paths.user);
       await mkdir(a.paths.user);
-      // The backup folder as a link to somewhere else.
-      await symlink(foreign.root, backupDirOf(a.root));
-      await expect(resetV5(a.paths, a.real, tar, trace.actions, { keepRealClaude: false, now: NOW })).rejects.toThrow(
-        /not a plain folder/u,
+      await rename(a.paths.bin, `${a.paths.bin}.real`);
+      await symlink(victim.paths.bin, a.paths.bin);
+      await refused();
+      await rm(a.paths.bin);
+      await rename(`${a.paths.bin}.real`, a.paths.bin);
+      await symlink(join(victim.paths.home, 'config'), join(a.paths.home, 'config'));
+      await refused();
+      await rm(join(a.paths.home, 'config'));
+      await symlink(victim.root, keptDirOf(a.root));
+      await refused();
+      await rm(keptDirOf(a.root));
+      // `paths` says the slot is `a`, but its v5 paths are the victim's.
+      const crossed: ResetPaths = { ...victim.paths, real: a.root };
+      await expect(resetV5(crossed, { ...victim.real }, actionsFor(crossed).actions, options)).rejects.toThrow(
+        /resolves to/u,
       );
       expect(trace.steps).toEqual([]);
-      expect(await readFile(join(foreign.paths.home, 'config', 'daemon.json'), 'utf8')).toContain('OLD');
+      expect(await listing(victim.root)).toEqual(before);
+      await marked(victim);
     } finally {
       await rm(a.root, { recursive: true, force: true });
-      await rm(foreign.root, { recursive: true, force: true });
+      await rm(victim.root, { recursive: true, force: true });
     }
   });
 
-  test('the slot folder reached through a link whose target is another folder: v5 must resolve to <slot realpath>/v5', async () => {
+  test('daemon.json that is a link makes the whole reset refuse before the stop', async () => {
     const a = await scratch();
-    const foreign = await scratch();
+    const victim = await scratch(4);
     try {
-      // `paths` says the slot is `a`, but its v5 paths are the foreign slot's (a copy of the paths with the wrong parent).
-      const crossed: ResetPaths = { ...foreign.paths, real: a.root };
-      const trace = actionsFor(crossed);
-      await expect(
-        resetV5(crossed, { ...foreign.real }, tar, trace.actions, { keepRealClaude: false, now: NOW }),
-      ).rejects.toThrow(/resolves to/u);
+      const target = join(victim.root, 'outside-target');
+      await writeFile(target, 'EXTERNAL');
+      await rm(join(a.paths.home, 'config', 'daemon.json'));
+      await symlink(target, join(a.paths.home, 'config', 'daemon.json'));
+      const trace = actionsFor(a.paths);
+      await expect(resetV5(a.paths, a.real, trace.actions, options)).rejects.toThrow(
+        /daemon\.json is not a plain file/u,
+      );
       expect(trace.steps).toEqual([]);
-      expect(await lstat(join(foreign.paths.home, 'config', 'daemon.json'))).toBeDefined();
+      expect(await readFile(target, 'utf8')).toBe('EXTERNAL');
     } finally {
       await rm(a.root, { recursive: true, force: true });
-      await rm(foreign.root, { recursive: true, force: true });
+      await rm(victim.root, { recursive: true, force: true });
     }
   });
-});
 
-describe('restore-v5: only a tar THIS slot made, and a safe one (HIGH 2)', () => {
-  /** A hand-made tar in the slot's backup folder, 0600, with (by default) a valid provenance record for it. */
-  async function plant(
-    s: Scratch,
-    name: string,
-    build: (stage: string) => Promise<void>,
-    options: { record?: boolean; extra?: string[] } = {},
-  ): Promise<string> {
-    const stage = join(s.root, `stage-${name}`);
-    await mkdir(stage, { recursive: true });
-    await build(stage);
-    const dir = join(s.root, 'reset-backups');
-    await mkdir(dir, { recursive: true, mode: 0o700 });
-    const file = join(dir, `${name}.tar`);
-    const made = Bun.spawnSync(['tar', '-C', stage, ...(options.extra ?? []), '-cf', file, 'home', 'user']);
-    if (made.exitCode !== 0) throw new Error(made.stderr.toString());
-    await chmod(file, 0o600);
-    if (options.record !== false) await writeProvenance(s.paths, file, NOW);
-    return file;
-  }
-  const plain = async (stage: string): Promise<void> => {
-    await mkdir(join(stage, 'home', 'config'), { recursive: true });
-    await writeFile(join(stage, 'home', 'config', 'daemon.json'), '{"restored":true}\n');
-    await mkdir(join(stage, 'user'), { recursive: true });
-  };
-  const refusesUntouched = async (s: Scratch, file: string, message: RegExp): Promise<void> => {
-    const trace = actionsFor(s.paths);
-    const before = await listing(s.paths.home);
-    await expect(restoreV5(s.paths, tar, trace.actions, file, NOW)).rejects.toThrow(message);
-    expect(trace.steps).toEqual([]);
-    expect(await listing(s.paths.home)).toEqual(before);
-    expect((await readdir(s.root)).filter(name => name.startsWith('.restore-'))).toEqual([]);
-  };
-
-  test('a reset tar of ANOTHER slot copied here is refused, with or without its record', async () => {
+  test('a kept copy made by ANOTHER slot, copied here with or without its record, is refused', async () => {
     const b = await scratch();
-    const c = await scratch();
+    const c = await scratch(4);
     try {
-      const { tar: saved } = await resetV5(b.paths, b.real, tar, actionsFor(b.paths).actions, {
-        keepRealClaude: false,
-        now: NOW,
-      });
-      await mkdir(backupDirOf(c.root), { mode: 0o700 });
-      const copied = join(backupDirOf(c.root), 'arbitrary.tar');
-      await Bun.write(copied, Bun.file(saved));
-      await chmod(copied, 0o600);
-      await refusesUntouched(c, copied, /no provenance record/u);
-      await Bun.write(`${copied}.provenance.json`, Bun.file(`${saved}.provenance.json`));
-      await chmod(`${copied}.provenance.json`, 0o600);
-      await refusesUntouched(c, copied, /another slot|not made by this slot|does not match/u);
+      await resetV5(b.paths, b.real, actionsFor(b.paths).actions, options);
+      await mkdir(keptDirOf(c.root), { mode: 0o700 });
+      Bun.spawnSync(['cp', '-a', keptOf(b), keptOf(c)]);
+      const trace = actionsFor(c.paths);
+      await expect(restoreV5(c.paths, trace.actions, STAMP, LATER)).rejects.toThrow(/another slot/u);
+      await rm(join(keptOf(c), PROVENANCE_FILE));
+      await expect(restoreV5(c.paths, trace.actions, STAMP, LATER)).rejects.toThrow(/no provenance\.json/u);
+      // A record forged for THIS slot over the copy: the folders are not the ones that were moved (other inodes).
+      const forged = JSON.parse(await readFile(join(keptOf(b), PROVENANCE_FILE), 'utf8')) as Record<string, unknown>;
+      await writeFile(
+        join(keptOf(c), PROVENANCE_FILE),
+        JSON.stringify({ ...forged, slot: 4, slotRealpath: await realpath(c.root) }),
+        { mode: 0o600 },
+      );
+      await expect(restoreV5(c.paths, trace.actions, STAMP, LATER)).rejects.toThrow(/not the folder that was moved/u);
+      expect(trace.steps).toEqual([]);
+      await marked(c);
     } finally {
       await rm(b.root, { recursive: true, force: true });
       await rm(c.root, { recursive: true, force: true });
     }
   });
 
-  test('a tar of this slot that was changed after the reset (hash differs) is refused', async () => {
+  test('a kept home replaced by a link to another slot is refused, and nothing there moves', async () => {
     const s = await scratch();
+    const victim = await scratch(4);
     try {
-      const { tar: file } = await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, {
-        keepRealClaude: false,
-        now: NOW,
-      });
-      const other = join(s.root, 'other-stage');
-      await mkdir(join(other, 'home'), { recursive: true });
-      await mkdir(join(other, 'user'), { recursive: true });
-      Bun.spawnSync(['tar', '-C', other, '-cf', file, 'home', 'user']);
-      await chmod(file, 0o600);
+      await resetV5(s.paths, s.real, actionsFor(s.paths).actions, options);
+      await rename(join(keptOf(s), 'home'), join(s.root, 'original-home'));
+      await symlink(victim.paths.home, join(keptOf(s), 'home'));
       const trace = actionsFor(s.paths);
-      await expect(restoreV5(s.paths, tar, trace.actions, file, NOW)).rejects.toThrow(/hash/u);
+      await expect(restoreV5(s.paths, trace.actions, STAMP, LATER)).rejects.toThrow(/not a plain folder/u);
       expect(trace.steps).toEqual([]);
+      await marked(victim);
     } finally {
       await rm(s.root, { recursive: true, force: true });
+      await rm(victim.root, { recursive: true, force: true });
     }
   });
 
-  test('a record with a loose mode, a link as the record, or junk in it is refused', async () => {
-    const s = await scratch();
-    try {
-      const { tar: file } = await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, {
-        keepRealClaude: false,
-        now: NOW,
-      });
-      const record = `${file}.provenance.json`;
-      const good = await readFile(record, 'utf8');
-      expect(await mode(record)).toBe('600');
-      await chmod(record, 0o644);
-      await refusesUntouched(s, file, /provenance record .*readable by others/u);
-      await chmod(record, 0o600);
-      await writeFile(record, '{"slot":"x"}');
-      await refusesUntouched(s, file, /provenance record/u);
-      await rm(record);
-      await symlink(join(s.root, 'elsewhere.json'), record);
-      await refusesUntouched(s, file, /provenance record/u);
-      await rm(record);
-      await writeFile(record, good, { mode: 0o600 });
-      // Back to a good record: the restore works.
-      const trace = actionsFor(s.paths);
-      await restoreV5(s.paths, tar, trace.actions, file, new Date('2026-11-18T19:40:00Z'));
-      expect(trace.steps).toEqual(['stop (old home present: true)', 'start']);
-    } finally {
-      await rm(s.root, { recursive: true, force: true });
-    }
-  });
-
-  test('an unrelated tar carrying home -> /outside is refused even with a record, and the home is not replaced', async () => {
-    const s = await scratch();
-    const outside = join(s.root, 'outside-home');
-    try {
-      await mkdir(join(outside, 'config'), { recursive: true });
-      const file = await plant(s, 'unrelated', async stage => {
-        await symlink(outside, join(stage, 'home'));
-        await mkdir(join(stage, 'user'));
-      });
-      await refusesUntouched(s, file, /symlink|link/u);
-      expect(await lstat(s.paths.home)).toBeDefined();
-      expect((await lstat(s.paths.home)).isSymbolicLink()).toBe(false);
-    } finally {
-      await rm(s.root, { recursive: true, force: true });
-    }
-  });
-
-  test('links that point out of the archive, absolute names, .., fifos and a path through a link are refused', async () => {
-    const s = await scratch();
-    try {
-      const cases: Array<[string, (stage: string) => Promise<void>, string[], RegExp]> = [
-        [
-          'abs-link',
-          async stage => {
-            await plain(stage);
-            await symlink('/etc/passwd', join(stage, 'home', 'config', 'pw'));
+  test('v5 swapped for another slot during the stop, or during the build install: refused before anything is moved; the other slot is untouched', async () => {
+    for (const during of ['stop', 'installBuild'] as const) {
+      const s = await scratch();
+      const victim = await scratch(4);
+      try {
+        const before = await listing(victim.root);
+        const steps: string[] = [];
+        const actions: ResetActions = {
+          stop: async () => {
+            steps.push('stop');
+            if (during === 'stop') await swapV5(s, victim);
           },
-          [],
-          /points outside/u,
-        ],
-        [
-          'rel-link',
-          async stage => {
-            await plain(stage);
-            await symlink('../../../../etc', join(stage, 'home', 'config', 'up'));
+          installBuild: async () => {
+            steps.push('installBuild');
+            if (during === 'installBuild') await swapV5(s, victim);
           },
-          [],
-          /points outside/u,
-        ],
-        [
-          'fifo',
-          async stage => {
-            await plain(stage);
-            Bun.spawnSync(['mkfifo', join(stage, 'home', 'pipe')]);
-          },
-          [],
-          /not a plain file|special|fifo/u,
-        ],
-        [
-          'dotdot',
-          async stage => {
-            await plain(stage);
-          },
-          ['--transform', 's,^home/config,home/../x,'],
-          /unsafe path/u,
-        ],
-        [
-          'absolute',
-          async stage => {
-            await plain(stage);
-          },
-          ['-P', '--transform', 's,^home/config,/tmp/zz,'],
-          /unsafe path/u,
-        ],
-      ];
-      for (const [name, build, extra, message] of cases) {
-        const file = await plant(s, name, build, { extra });
-        await refusesUntouched(s, file, message);
+          start: async () => void steps.push('start'),
+          say: () => undefined,
+        };
+        await expect(resetV5(s.paths, s.real, actions, options)).rejects.toThrow(/not a plain folder/u);
+        expect(steps).toEqual(during === 'stop' ? ['stop'] : ['stop', 'installBuild']);
+        expect(await listing(victim.root)).toEqual(before);
+        await marked(victim);
+        expect(await exists(join(s.root, 'kept'))).toBe(false);
+        expect(await exists(join(`${s.paths.v5Dir}.original`, 'home', 'state', 'conversation-fixture.json'))).toBe(
+          true,
+        );
+      } finally {
+        await rm(s.root, { recursive: true, force: true });
+        await rm(victim.root, { recursive: true, force: true });
       }
-      // A member that goes THROUGH a link the archive itself made is refused (once extracted, the link could point anywhere).
-      const through = await plant(
-        s,
-        'through',
-        async stage => {
-          await plain(stage);
-          await mkdir(join(stage, 'home', 'real'));
-          await writeFile(join(stage, 'home', 'real', 'file'), 'x');
-          await symlink('real', join(stage, 'home', 'via'));
-        },
-        { extra: ['--transform', 's,^home/real/file$,home/via/file,'] },
+    }
+  });
+
+  test("the last window (v5 swapped for another slot's v5 between the look and the rename): what arrived is put straight back; the other slot is untouched", async () => {
+    const s = await scratch();
+    const victim = await scratch(4);
+    try {
+      const before = await listing(victim.root);
+      const failed = await outcome(
+        async () =>
+          await resetV5(s.paths, s.real, actionsFor(s.paths).actions, {
+            ...options,
+            hooks: { beforeMove: async name => (name === 'home' ? await swapV5(s, victim) : undefined) },
+          }),
       );
-      await refusesUntouched(s, through, /under a symlink it made itself/u);
+      expect(failed).toBeInstanceOf(ResetRefusal);
+      expect(failed?.message).toMatch(/was replaced while it was being moved aside/u);
+      expect(await listing(victim.root)).toEqual(before);
+      await marked(victim);
+      expect(await exists(join(victim.root, 'kept'))).toBe(false);
+      expect(await readdir(join(await realpath(s.root), 'kept'))).toEqual([]);
+      expect(await exists(join(`${s.paths.v5Dir}.original`, 'home', 'state', 'conversation-fixture.json'))).toBe(true);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+      await rm(victim.root, { recursive: true, force: true });
+    }
+  });
+
+  test('the same window on the user folder, after home moved: home goes back, nothing of the other slot moves', async () => {
+    const s = await scratch();
+    const victim = await scratch(4);
+    try {
+      const before = await listing(victim.root);
+      const homeDigest = await digest(s.paths.home);
+      const failed = await outcome(
+        async () =>
+          await resetV5(s.paths, s.real, actionsFor(s.paths).actions, {
+            ...options,
+            hooks: {
+              beforeMove: async name => {
+                if (name === 'user') await rename(s.paths.user, join(s.root, 'user-away'));
+                if (name === 'user') await symlink(victim.paths.user, s.paths.user);
+              },
+            },
+          }),
+      );
+      expect(failed).toBeInstanceOf(ResetRefusal);
+      expect(await listing(victim.root)).toEqual(before);
+      await marked(victim);
+      expect(await digest(s.paths.home)).toBe(homeDigest);
+      expect(await readdir(join(await realpath(s.root), 'kept'))).toEqual([]);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+      await rm(victim.root, { recursive: true, force: true });
+    }
+  });
+
+  test('the new home cannot be made (a folder-shaped thing was put in its place): the old home is whole in kept/<stamp>, and restore-v5 puts it back with no current home', async () => {
+    const s = await scratch();
+    try {
+      const homeDigest = await digest(s.paths.home);
+      const userDigest = await digest(s.paths.user);
+      const trace = actionsFor(s.paths);
+      const planting: ResetActions = {
+        ...trace.actions,
+        say: () => void symlink('/nonexistent-outside/home', s.paths.home),
+      };
+      const failed = await outcome(async () => await resetV5(s.paths, s.real, planting, options));
+      expect(failed).toBeInstanceOf(ResetHalfway);
+      expect(failed?.message).toContain(`restore-v5 ${STAMP}`);
+      expect(trace.steps).toEqual(['stop (old home present: true)', 'installBuild']);
+      expect(await digest(join(keptOf(s), 'home'))).toBe(homeDigest);
+      expect(await digest(join(keptOf(s), 'user'))).toBe(userDigest);
+      // The thing in the way is gone; the owner restores. There is no current home and no current user folder.
+      await rm(s.paths.home);
+      const restoring = actionsFor(s.paths);
+      await restoreV5(s.paths, restoring.actions, STAMP, LATER);
+      expect(restoring.steps).toEqual(['stop (old home present: false)', 'start']);
+      expect(await digest(s.paths.home)).toBe(homeDigest);
+      expect(await digest(s.paths.user)).toBe(userDigest);
+      await noTar(s.root);
     } finally {
       await rm(s.root, { recursive: true, force: true });
     }
   });
 
-  test('a good tar round-trips: long names, inner relative links and a hard link survive; the swap is from a temp folder, nothing is left', async () => {
+  test('a stamp folder that already exists is never reused: nothing is moved', async () => {
     const s = await scratch();
     try {
-      const long = join('state', 'x'.repeat(90), 'y'.repeat(90), 'z'.repeat(40));
-      await mkdir(join(s.paths.home, long), { recursive: true });
-      await writeFile(join(s.paths.home, long, 'deep.txt'), 'deep\n');
-      await symlink('conversation-fixture.json', join(s.paths.home, 'state', 'inner-link'));
-      await Bun.$`ln ${join(s.paths.home, 'state', 'conversation-fixture.json')} ${join(s.paths.home, 'state', 'hard')}`.quiet();
-      const { tar: file } = await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, {
-        keepRealClaude: false,
-        now: NOW,
-      });
-      await restoreV5(s.paths, tar, actionsFor(s.paths).actions, file, new Date('2026-11-18T19:31:00Z'));
-      expect(await readFile(join(s.paths.home, long, 'deep.txt'), 'utf8')).toBe('deep\n');
-      expect(await readFile(join(s.paths.home, 'state', 'inner-link'), 'utf8')).toBe('{"ferrets":["alpha","beta"]}\n');
-      expect(await readFile(join(s.paths.home, 'state', 'hard'), 'utf8')).toBe('{"ferrets":["alpha","beta"]}\n');
-      expect((await readdir(s.root)).filter(name => name.startsWith('.restore-'))).toEqual([]);
-      expect(await mode(join(backupDirOf(s.root), 'v5-restore-20261118T193100Z.tar.provenance.json'))).toBe('600');
-    } finally {
-      await rm(s.root, { recursive: true, force: true });
-    }
-  });
-
-  test('the provenance record names the slot, its realpath, the UTC stamp and the tar hash', async () => {
-    const s = await scratch();
-    try {
-      const { tar: file } = await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, {
-        keepRealClaude: false,
-        now: NOW,
-      });
-      const record = JSON.parse(await readFile(`${file}.provenance.json`, 'utf8')) as Record<string, unknown>;
-      const hash = new Bun.CryptoHasher('sha256').update(await readFile(file)).digest('hex');
-      expect(record).toEqual({
-        format: 1,
-        slot: s.paths.slot,
-        slotRealpath: await realpath(s.root),
-        tar: 'v5-reset-20261118T191705Z.tar',
-        created: '2026-11-18T19:17:05.123Z',
-        sha256: hash,
-      });
+      await mkdir(keptOf(s), { recursive: true });
+      const homeDigest = await digest(s.paths.home);
+      await expect(resetV5(s.paths, s.real, actionsFor(s.paths).actions, options)).rejects.toThrow(/already exists/u);
+      expect(await digest(s.paths.home)).toBe(homeDigest);
     } finally {
       await rm(s.root, { recursive: true, force: true });
     }
   });
 });
 
-describe('tarMembersProblem and symlinkProblem (pure)', () => {
-  const v5 = '/slots/s3/v5';
-  test('links: inside is fine; outside, absolute-elsewhere and chained-through-a-link are not', () => {
-    expect(symlinkProblem('home/a/b', '../c', v5)).toBeUndefined();
-    expect(symlinkProblem('home/a', 'c/d', v5)).toBeUndefined();
-    expect(symlinkProblem('home/a', '../../etc', v5)).toMatch(/outside/u);
-    expect(symlinkProblem('home/a', '..', v5)).toMatch(/outside/u);
-    expect(symlinkProblem('home/a', '/etc/passwd', v5)).toMatch(/outside/u);
-    expect(symlinkProblem('home/a', '/slots/s3/v5/home/x', v5)).toBeUndefined();
-    expect(symlinkProblem('home/a', '/slots/s3/v5/home/../../s4/v5/home', v5)).toMatch(/outside/u);
-    expect(symlinkProblem('home/a', '/slots/s3/v5/homeX', v5)).toMatch(/outside/u);
-    expect(symlinkProblem('home/a', '', v5)).toMatch(/no target/u);
-  });
-  test('hard links must name another member of home/ or user/, never through a link; types other than file/dir/link do not reach here', () => {
-    const file = (name: string): TarMember => ({ name, kind: 'file', target: '' });
-    const hard = (name: string, target: string): TarMember => ({ name, kind: 'hardlink', target });
-    expect(tarMembersProblem([file('home/a'), hard('home/b', 'home/a')], v5)).toBeUndefined();
-    expect(tarMembersProblem([hard('home/b', 'etc/passwd')], v5)).toMatch(/hard link/u);
-    expect(tarMembersProblem([hard('home/b', '/etc/passwd')], v5)).toMatch(/hard link/u);
-    expect(tarMembersProblem([hard('home/b', 'home/../../etc')], v5)).toMatch(/hard link/u);
-    expect(
-      tarMembersProblem([{ name: 'home/l', kind: 'symlink', target: 'x' }, hard('home/b', 'home/l/y')], v5),
-    ).toMatch(/through a symlink/u);
-    expect(tarMembersProblem([file('/abs')], v5)).toMatch(/unsafe/u);
-  });
-});
+// ─── H1: the build installer and the bind pin write only into folders just proven to be this slot's own ─────────────────
 
-describe('the new home: the port pin and the stop (reviewer gaps)', () => {
-  test('writeBindPin on an empty home writes ONLY config/daemon.json: one bind carrier, 127.0.0.1 and the slot port, mode 0600', async () => {
+describe('installPrograms and writeBindPin: nothing is written through a link', () => {
+  const libexecOf = async (s: Scratch): Promise<string> => {
+    const libexec = join(s.root, 'libexec');
+    await mkdir(libexec);
+    for (const name of ['fy', 'fyd', 'BUILD.json']) await writeFile(join(libexec, name), `new ${name}\n`);
+    return libexec;
+  };
+  const NAMES = ['fy', 'fyd', 'BUILD.json'];
+
+  test('installs: the old program is kept as <name>.prev, new ones are 0755 (the stamp 0644), no temp or link left', async () => {
     const s = await scratch();
     try {
-      await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, { keepRealClaude: false, now: NOW });
+      const libexec = await libexecOf(s);
+      await installPrograms(s.paths, libexec, NAMES, 'BUILD.json');
+      await installPrograms(s.paths, libexec, NAMES, 'BUILD.json');
+      expect((await readdir(s.paths.bin)).sort()).toEqual([
+        'BUILD.json',
+        'BUILD.json.prev',
+        'fy',
+        'fy.prev',
+        'fyd',
+        'fyd.prev',
+      ]);
+      expect(await readFile(join(s.paths.bin, 'fyd'), 'utf8')).toBe('new fyd\n');
+      expect(await readFile(join(s.paths.bin, 'fyd.prev'), 'utf8')).toBe('new fyd\n');
+      expect(await mode(join(s.paths.bin, 'fyd'))).toBe('755');
+      expect(await mode(join(s.paths.bin, 'BUILD.json'))).toBe('644');
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a v5/bin that is a link to another slot is refused: nothing is removed, renamed or written there', async () => {
+    const s = await scratch();
+    const victim = await scratch(4);
+    try {
+      const libexec = await libexecOf(s);
+      await rename(s.paths.bin, `${s.paths.bin}.real`);
+      await symlink(victim.paths.bin, s.paths.bin);
+      const before = await listing(victim.root);
+      await expect(installPrograms(s.paths, libexec, NAMES, 'BUILD.json')).rejects.toThrow(/not a plain folder/u);
+      expect(await listing(victim.root)).toEqual(before);
+      expect(await readFile(join(victim.paths.bin, 'fyd'), 'utf8')).toBe('program\n');
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+      await rm(victim.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a program name that is a link, or a .prev that is a folder, is refused; the link target is never written', async () => {
+    const s = await scratch();
+    try {
+      const libexec = await libexecOf(s);
+      const outside = join(s.root, 'outside-file');
+      await writeFile(outside, 'EXTERNAL');
+      await rm(join(s.paths.bin, 'fyd'));
+      await symlink(outside, join(s.paths.bin, 'fyd'));
+      await expect(installPrograms(s.paths, libexec, NAMES, 'BUILD.json')).rejects.toThrow(/is not a plain file/u);
+      expect(await readFile(outside, 'utf8')).toBe('EXTERNAL');
+      await rm(join(s.paths.bin, 'fyd'));
+      await writeFile(join(s.paths.bin, 'fyd'), 'program\n');
+      await mkdir(join(s.paths.bin, 'fyd.prev'));
+      await expect(installPrograms(s.paths, libexec, NAMES, 'BUILD.json')).rejects.toThrow(/is a folder/u);
+      expect(await readFile(join(s.paths.bin, 'fyd'), 'utf8')).toBe('program\n');
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a link planted at the exact name between the rename and the create is never followed (exclusive create)', async () => {
+    const s = await scratch();
+    try {
+      const libexec = await libexecOf(s);
+      const outside = join(s.root, 'outside-file');
+      await writeFile(outside, 'EXTERNAL');
+      // The program does not exist yet, and a link sits where it will be created.
+      await rm(join(s.paths.bin, 'fyd'));
+      await symlink(outside, join(s.paths.bin, 'fyd'));
+      await expect(installPrograms(s.paths, libexec, ['fyd'], 'BUILD.json')).rejects.toThrow(/not a plain file/u);
+      expect(await readFile(outside, 'utf8')).toBe('EXTERNAL');
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('writeBindPin on an empty home writes ONLY config/daemon.json (0600, via a temp file renamed in): one bind carrier on 127.0.0.1 and the slot port', async () => {
+    const s = await scratch();
+    try {
+      await resetV5(s.paths, s.real, actionsFor(s.paths).actions, options);
       expect(await homeFiles(s.paths.home)).toEqual([]);
-      await writeBindPin(s.paths.home, s.paths.port);
+      await writeBindPin(s.paths, s.paths.port);
       expect(await homeFiles(s.paths.home)).toEqual([join('config', 'daemon.json')]);
       const file = join(s.paths.home, 'config', 'daemon.json');
       expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
@@ -747,12 +848,10 @@ describe('the new home: the port pin and the stop (reviewer gaps)', () => {
     }
   });
 
-  test('writeBindPin merges into what the daemon wrote: its other carriers and keys stay, an old bind is replaced, a damaged-shape file is not trusted', async () => {
+  test('writeBindPin merges into what the daemon wrote: other carriers and keys stay, an old bind is replaced, a non-object is not trusted, broken JSON is refused', async () => {
     const s = await scratch();
     try {
-      await rm(s.paths.home, { recursive: true });
       const file = join(s.paths.home, 'config', 'daemon.json');
-      await mkdir(join(s.paths.home, 'config'), { recursive: true });
       await writeFile(
         file,
         JSON.stringify({
@@ -763,7 +862,7 @@ describe('the new home: the port pin and the stop (reviewer gaps)', () => {
           ],
         }),
       );
-      await writeBindPin(s.paths.home, 7619);
+      await writeBindPin(s.paths, 7619);
       expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
         name: 'kept',
         carriers: [
@@ -772,366 +871,45 @@ describe('the new home: the port pin and the stop (reviewer gaps)', () => {
         ],
       });
       await writeFile(file, '[1,2]');
-      await writeBindPin(s.paths.home, 7619);
+      await writeBindPin(s.paths, 7619);
       expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
         carriers: [{ kind: 'bind', host: '127.0.0.1', port: 7619 }],
       });
+      await writeFile(file, '{"broken');
+      await expect(writeBindPin(s.paths, 7619)).rejects.toThrow(/not valid JSON/u);
+      expect(await readFile(file, 'utf8')).toBe('{"broken');
+      expect((await readdir(join(s.paths.home, 'config'))).filter(name => name.includes('tmp'))).toEqual([]);
     } finally {
       await rm(s.root, { recursive: true, force: true });
     }
   });
 
-  test('a 5.0 side that will not stop: the reset refuses, moves and removes nothing, writes no tar, starts nothing', async () => {
+  test('writeBindPin refuses a daemon.json that is a link, a config folder that is a link and a home that is a link: the external files are never written', async () => {
     const s = await scratch();
+    const victim = await scratch(4);
     try {
-      const steps: string[] = [];
-      const stuck: ResetActions = {
-        stop: async () => {
-          steps.push('stop');
-          throw new ResetRefusal(
-            'the 5.0 side of slot 3 is still running after its units were stopped; nothing was removed',
-          );
-        },
-        installBuild: async () => void steps.push('installBuild'),
-        start: async () => void steps.push('start'),
-        say: () => undefined,
-      };
-      const before = await listing(s.root);
-      await expect(resetV5(s.paths, s.real, tar, stuck, { keepRealClaude: false, now: NOW })).rejects.toThrow(
-        /still running/u,
-      );
-      expect(steps).toEqual(['stop']);
-      expect(await listing(s.root)).toEqual(before);
-      expect(await readdir(backupDirOf(s.root)).catch(() => [])).toEqual([]);
-      // The same for a restore: the current home and the tar stay as they were.
-      const { tar: file } = await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, {
-        keepRealClaude: false,
-        now: NOW,
-      });
-      const afterReset = await listing(s.root);
-      steps.length = 0;
-      await expect(restoreV5(s.paths, tar, stuck, file, new Date('2026-11-18T19:50:00Z'))).rejects.toThrow(
-        /still running/u,
-      );
-      expect(steps).toEqual(['stop']);
-      expect(await listing(s.root)).toEqual(afterReset);
-    } finally {
-      await rm(s.root, { recursive: true, force: true });
-    }
-  });
-});
-
-// ─── round 2 HIGH: the tree check goes stale before the destructive steps. The old home moves INSIDE the slot first. ───────
-
-describe('reset-v5 and restore-v5: path handling stays confined through every destructive step (round 2 HIGH)', () => {
-  /** Swaps this slot's v5 folder for a link to another slot's v5 (the race the review proved): the real one is kept beside it. */
-  const swapV5 = async (s: Scratch, victim: Scratch): Promise<void> => {
-    await rename(s.paths.v5Dir, `${s.paths.v5Dir}.original`);
-    await symlink(victim.paths.v5Dir, s.paths.v5Dir);
-  };
-  const intact = async (victim: Scratch, before: string[]): Promise<void> => {
-    expect(await readFile(join(victim.paths.home, 'config', 'daemon.json'), 'utf8')).toContain('OLD');
-    expect(await listing(victim.root)).toEqual(before);
-  };
-  const stagedFolders = async (root: string): Promise<string[]> =>
-    (await readdir(root)).filter(name => name.startsWith(STAGING_PREFIX));
-  /** Runs `go` and returns what it threw (or undefined). */
-  const outcome = async (go: () => Promise<unknown>): Promise<Error | undefined> => {
-    try {
-      await go();
-      return undefined;
-    } catch (error) {
-      return error as Error;
-    }
-  };
-  const resetOptions = { keepRealClaude: false, now: NOW };
-
-  test("the review's proof: v5 swapped for another slot's v5 while tar lists the backup leaves the other slot's home alone", async () => {
-    const s = await scratch();
-    const victim = await scratch();
-    try {
+      const external = join(victim.root, 'external.json');
+      await writeFile(external, '{"EXTERNAL":true}');
+      const file = join(s.paths.home, 'config', 'daemon.json');
+      await rm(file);
+      await symlink(external, file);
+      await expect(writeBindPin(s.paths, 7619)).rejects.toThrow(/not a plain file/u);
+      expect(await readFile(external, 'utf8')).toBe('{"EXTERNAL":true}');
+      await rm(file);
       const before = await listing(victim.root);
-      const racing: TarPorts = {
-        ...tar,
-        list: async file => {
-          const listed = await tar.list(file);
-          await swapV5(s, victim);
-          return listed;
-        },
-      };
-      const failed = await outcome(
-        async () => await resetV5(s.paths, s.real, racing, actionsFor(s.paths).actions, resetOptions),
-      );
-      expect(failed).toBeDefined();
-      await intact(victim, before);
-      // The old home is not lost: it is in the tar the reset wrote, and in its staged copy inside the slot.
-      expect(await readdir(backupDirOf(s.root))).toContain('v5-reset-20261118T191705Z.tar');
+      await rename(join(s.paths.home, 'config'), join(s.root, 'config-away'));
+      await symlink(join(victim.paths.home, 'config'), join(s.paths.home, 'config'));
+      await expect(writeBindPin(s.paths, 7619)).rejects.toThrow(/not a plain folder/u);
+      expect(await listing(victim.root)).toEqual(before);
+      await rm(join(s.paths.home, 'config'));
+      await rename(s.paths.home, join(s.root, 'home-away'));
+      await symlink(victim.paths.home, s.paths.home);
+      await expect(writeBindPin(s.paths, 7619)).rejects.toThrow(/not a plain folder/u);
+      expect(await listing(victim.root)).toEqual(before);
+      expect(await readFile(join(victim.paths.home, 'config', 'daemon.json'), 'utf8')).toContain('OLD');
     } finally {
       await rm(s.root, { recursive: true, force: true });
       await rm(victim.root, { recursive: true, force: true });
     }
-  });
-
-  test('v5 swapped while tar creates the backup: the other slot is untouched and the old home is kept', async () => {
-    const s = await scratch();
-    const victim = await scratch();
-    try {
-      const before = await listing(victim.root);
-      const racing: TarPorts = {
-        ...tar,
-        create: async (dir, file, members) => {
-          const made = await tar.create(dir, file, members);
-          await swapV5(s, victim);
-          return made;
-        },
-      };
-      expect(
-        await outcome(async () => await resetV5(s.paths, s.real, racing, actionsFor(s.paths).actions, resetOptions)),
-      ).toBeDefined();
-      await intact(victim, before);
-      expect(
-        await readFile(join(s.root, 'v5.original', 'user', '.config', 'leftover'), 'utf8').catch(() => 'x\n'),
-      ).toBe('x\n');
-    } finally {
-      await rm(s.root, { recursive: true, force: true });
-      await rm(victim.root, { recursive: true, force: true });
-    }
-  });
-
-  test('v5 swapped during the stop, or during the build install: refused before anything is moved or removed', async () => {
-    for (const where of ['stop', 'installBuild'] as const) {
-      const s = await scratch();
-      const victim = await scratch();
-      try {
-        const before = await listing(victim.root);
-        const trace = actionsFor(s.paths);
-        const actions: ResetActions = {
-          ...trace.actions,
-          [where]: async () => {
-            await trace.actions[where]();
-            await swapV5(s, victim);
-          },
-        };
-        await expect(resetV5(s.paths, s.real, tar, actions, resetOptions)).rejects.toThrow(
-          /not a plain folder|resolves to/u,
-        );
-        await intact(victim, before);
-        expect(await readdir(backupDirOf(s.root)).catch(() => [])).toEqual([]);
-        expect(
-          await readFile(join(s.root, 'v5.original', 'home', 'state', 'conversation-fixture.json'), 'utf8'),
-        ).toContain('alpha');
-        expect(await stagedFolders(s.root)).toEqual([]);
-      } finally {
-        await rm(s.root, { recursive: true, force: true });
-        await rm(victim.root, { recursive: true, force: true });
-      }
-    }
-  });
-
-  test('v5 swapped while the daemon starts: the reset is already done, the other slot is untouched', async () => {
-    const s = await scratch();
-    const victim = await scratch();
-    try {
-      const before = await listing(victim.root);
-      await resetV5(
-        s.paths,
-        s.real,
-        tar,
-        actionsFor(s.paths, { startCheck: async () => await swapV5(s, victim) }).actions,
-        resetOptions,
-      );
-      await intact(victim, before);
-    } finally {
-      await rm(s.root, { recursive: true, force: true });
-      await rm(victim.root, { recursive: true, force: true });
-    }
-  });
-
-  test('the staged home swapped for a link to another slot while it is tarred: nothing is removed through the link, the staged copy is kept and named', async () => {
-    const s = await scratch();
-    const victim = await scratch();
-    try {
-      const before = await listing(victim.root);
-      const racing: TarPorts = {
-        ...tar,
-        create: async (dir, file, members) => {
-          const made = await tar.create(dir, file, members);
-          await rename(join(dir, 'home'), join(dir, 'home.moved'));
-          await symlink(victim.paths.home, join(dir, 'home'));
-          return made;
-        },
-      };
-      const failed = await outcome(
-        async () => await resetV5(s.paths, s.real, racing, actionsFor(s.paths).actions, resetOptions),
-      );
-      expect(failed).toBeInstanceOf(ResetHalfway);
-      const [stagedName] = await stagedFolders(s.root);
-      expect(stagedName).toBeDefined();
-      expect(failed?.message).toContain(join(s.root, stagedName ?? ''));
-      await intact(victim, before);
-      // The real old home is still there, in the staged folder.
-      expect(
-        await readFile(join(s.root, stagedName ?? '', 'home.moved', 'state', 'conversation-fixture.json'), 'utf8'),
-      ).toContain('alpha');
-    } finally {
-      await rm(s.root, { recursive: true, force: true });
-      await rm(victim.root, { recursive: true, force: true });
-    }
-  });
-
-  test('a failed tar puts the old home back where it was and leaves no staging folder; a put-back that cannot happen keeps the staged copy and says where', async () => {
-    const s = await scratch();
-    try {
-      const broken: TarPorts = { ...tar, create: async () => ({ code: 2, err: 'disk full' }) };
-      await expect(resetV5(s.paths, s.real, broken, actionsFor(s.paths).actions, resetOptions)).rejects.toThrow(
-        /nothing was removed/u,
-      );
-      expect(await readFile(join(s.paths.home, 'state', 'conversation-fixture.json'), 'utf8')).toContain('alpha');
-      expect(await lstat(s.paths.user)).toBeDefined();
-      expect(await stagedFolders(s.root)).toEqual([]);
-
-      const blocked: TarPorts = {
-        ...tar,
-        create: async () => {
-          await mkdir(s.paths.home);
-          return { code: 2, err: 'disk full' };
-        },
-      };
-      const failed = await outcome(
-        async () => await resetV5(s.paths, s.real, blocked, actionsFor(s.paths).actions, resetOptions),
-      );
-      expect(failed).toBeInstanceOf(ResetHalfway);
-      const [stagedName] = await stagedFolders(s.root);
-      expect(failed?.message).toContain(join(s.root, stagedName ?? ''));
-      expect(
-        await readFile(join(s.root, stagedName ?? '', 'home', 'state', 'conversation-fixture.json'), 'utf8'),
-      ).toContain('alpha');
-    } finally {
-      await rm(s.root, { recursive: true, force: true });
-    }
-  });
-
-  test('the new home is made with mkdir that fails if something is there: a folder put in its place is not adopted, the old home stays safe', async () => {
-    const s = await scratch();
-    try {
-      let lists = 0;
-      const racing: TarPorts = {
-        ...tar,
-        list: async file => {
-          const listed = await tar.list(file);
-          lists += 1;
-          await mkdir(join(s.paths.v5Dir, 'home'));
-          await writeFile(join(s.paths.v5Dir, 'home', 'planted'), 'x');
-          return listed;
-        },
-      };
-      const failed = await outcome(
-        async () => await resetV5(s.paths, s.real, racing, actionsFor(s.paths).actions, resetOptions),
-      );
-      expect(lists).toBe(1);
-      expect(failed).toBeInstanceOf(ResetHalfway);
-      expect(await readFile(join(s.paths.home, 'planted'), 'utf8')).toBe('x');
-      const [stagedName] = await stagedFolders(s.root);
-      expect(
-        await readFile(join(s.root, stagedName ?? '', 'home', 'state', 'conversation-fixture.json'), 'utf8'),
-      ).toContain('alpha');
-      expect(await readdir(backupDirOf(s.root))).toContain('v5-reset-20261118T191705Z.tar');
-    } finally {
-      await rm(s.root, { recursive: true, force: true });
-    }
-  });
-
-  describe('restore-v5', () => {
-    const made = async (s: Scratch): Promise<string> =>
-      (await resetV5(s.paths, s.real, tar, actionsFor(s.paths).actions, resetOptions)).tar;
-    const later = new Date('2026-11-18T19:40:00Z');
-
-    test('v5 swapped while tar lists the current home (the backup step): the other slot is untouched', async () => {
-      const s = await scratch();
-      const victim = await scratch();
-      try {
-        const file = await made(s);
-        const before = await listing(victim.root);
-        let lists = 0;
-        const racing: TarPorts = {
-          ...tar,
-          list: async path => {
-            const listed = await tar.list(path);
-            lists += 1;
-            if (lists === 2) await swapV5(s, victim);
-            return listed;
-          },
-        };
-        expect(
-          await outcome(async () => await restoreV5(s.paths, racing, actionsFor(s.paths).actions, file, later)),
-        ).toBeDefined();
-        expect(lists).toBe(2);
-        await intact(victim, before);
-      } finally {
-        await rm(s.root, { recursive: true, force: true });
-        await rm(victim.root, { recursive: true, force: true });
-      }
-    });
-
-    test('v5 swapped during the stop, during the backup tar, or while the daemon starts: the other slot is untouched each time', async () => {
-      for (const where of ['stop', 'create', 'start'] as const) {
-        const s = await scratch();
-        const victim = await scratch();
-        try {
-          const file = await made(s);
-          const before = await listing(victim.root);
-          const trace = actionsFor(s.paths);
-          const actions: ResetActions =
-            where === 'create'
-              ? trace.actions
-              : {
-                  ...trace.actions,
-                  [where]: async () => {
-                    await trace.actions[where]();
-                    await swapV5(s, victim);
-                  },
-                };
-          const racing: TarPorts =
-            where === 'create'
-              ? {
-                  ...tar,
-                  create: async (dir, path, members) => {
-                    const done = await tar.create(dir, path, members);
-                    await swapV5(s, victim);
-                    return done;
-                  },
-                }
-              : tar;
-          await outcome(async () => await restoreV5(s.paths, racing, actions, file, later));
-          await intact(victim, before);
-        } finally {
-          await rm(s.root, { recursive: true, force: true });
-          await rm(victim.root, { recursive: true, force: true });
-        }
-      }
-    });
-
-    test('a restore that works leaves no staging or extraction folder, and a failed backup puts the current home back', async () => {
-      const s = await scratch();
-      try {
-        const file = await made(s);
-        const broken: TarPorts = {
-          ...tar,
-          create: async () => ({ code: 2, err: 'disk full' }),
-        };
-        await expect(restoreV5(s.paths, broken, actionsFor(s.paths).actions, file, later)).rejects.toThrow(
-          /nothing was removed|disk full/u,
-        );
-        expect(await stagedFolders(s.root)).toEqual([]);
-        expect((await readdir(s.root)).filter(name => name.startsWith('.restore-'))).toEqual([]);
-        expect(await readdir(s.paths.home)).toEqual([]);
-        await restoreV5(s.paths, tar, actionsFor(s.paths).actions, file, later);
-        expect(await readFile(join(s.paths.home, 'state', 'conversation-fixture.json'), 'utf8')).toContain('alpha');
-        expect(await stagedFolders(s.root)).toEqual([]);
-        expect((await readdir(s.root)).filter(name => name.startsWith('.restore-'))).toEqual([]);
-      } finally {
-        await rm(s.root, { recursive: true, force: true });
-      }
-    });
   });
 });

@@ -77,7 +77,7 @@ agenda, board or devices. **Persisted slots only.** The v4 side is never read or
 
 ```
 bun slot.ts reset-v5 <1..9> --empty <libexec-dir> [--keep-real-claude]
-bun slot.ts restore-v5 <1..9> <tar>
+bun slot.ts restore-v5 <1..9> <stamp>
 ```
 
 ## `reset-v5`
@@ -86,9 +86,14 @@ bun slot.ts restore-v5 <1..9> <tar>
    build is not stamped or its Pages deploy is not live (the same gate as `upgrade-v5`); **real claude is on and `--keep-real-claude` was not given**.
 2. Stops **only** the 5.0 daemon, the 5.0 tmux server (its socket lives inside the home that goes away) and the headless Chrome of the 5.0
    browser profile. v4 keeps running.
-3. Puts the given 5.0 programs in place (old ones kept as `<name>.prev`; nothing if the slot already runs that build).
-4. Writes the old 5.0 home **and** the daemon's own HOME folder (`v5/user`) into `<slot folder>/reset-backups/v5-reset-<UTC stamp>.tar`
-   (file `0600`, folder `0700`), reads the tar back, and only then removes both.
+3. Puts the given 5.0 programs in place (old ones kept as `<name>.prev`; nothing if the slot already runs that build). Before **each**
+   remove, rename and create, `v5/bin` is checked again to be a real folder (no link) that resolves under this slot's own real path; a program
+   name that is a link or a folder is refused, and the new file is created exclusively (never through a link).
+4. **Moves** the old 5.0 home **and** the daemon's own HOME folder (`v5/user`) into `<slot folder>/kept/<UTC stamp>/` with plain renames: a folder
+   this run makes (`0700`), inside the slot's real path. Each source is looked at right before its rename and the moved folder right after (same
+   inode, a real folder); a source that was swapped for something else is moved straight back. **Nothing is copied, packed, hashed or deleted**:
+   no tar, no `rm` of anything the owner made. A small `provenance.json` (`0600`: slot number, slot realpath, stamp, inode/device of each
+   moved folder) is written beside them for `restore-v5` to check.
 5. Makes a **first-run** home: an **empty folder** (`0700`). The kit seeds **nothing**: no `config/daemon.json`, no gate, no daemon name, no relay or
    WebRTC key, no limits file, no setup run. (A 5.0 daemon refuses a home that holds any file but has no `home.json`, so nothing could be
    seeded before the first boot anyway.) The daemon's own first boot makes its **new identity** and everything else, exactly as on a brand-new
@@ -96,10 +101,13 @@ bun slot.ts restore-v5 <1..9> <tar>
    **Limits are therefore ON** (the daemon default), unlike a `up` home: a ferret started in this slot joins the owner's real fleet slice.
 6. Starts the 5.0 tmux server and daemon, waits for `/healthz`, then reads the port pin from the home the daemon made. If the daemon recorded the
    slot's bind port itself the kit writes nothing; if not, the kit writes ONLY the bind pin into `config/daemon.json`, after the first boot (every
-   wrapper refuses a home that does not pin its slot's port). Prints `status`. **It never prints a pairing code and never pairs.**
+   wrapper refuses a home that does not pin its slot's port). That write is checked first (the home, its `config` folder and `daemon.json` are real
+   folders / a plain file under this slot, never a link), goes to a temp file in that folder, and is renamed over `daemon.json`; the folders are looked
+   at again right before the rename. Prints `status`. **It never prints a pairing code and never pairs.**
 
 **Kept:** the unit files, the wrappers, `cli-names.json` (the CLI name the daemon prints), the fake harness, the v4 side.
-**Removed (into the tar first):** everything in the 5.0 home and `v5/user`.
+**Moved aside (never deleted):** everything in the 5.0 home and `v5/user`, into `kept/<stamp>/`. If the new home cannot be made, `kept/<stamp>` stays whole
+and `restore-v5 <stamp>` puts it back (it needs no current home).
 
 ## `--keep-real-claude`
 
@@ -111,8 +119,13 @@ is empty again too: set it again before starting a real ferret.
 
 ## `restore-v5`
 
-`restore-v5 <N> <tar>` puts an old home back. The tar must be a plain `0600` file **directly inside this slot's `reset-backups/`**, listing
-only `home/…` and `user/…`. It must also have a **provenance record** beside it (`<tar>.provenance.json`, `0600`: slot number, slot realpath, UTC instant, sha256) that matches THIS slot and the tar's current hash, so only a tar this slot's own `reset-v5` or `restore-v5` made is accepted (a tar copied from another slot, or changed since, is refused). The tar's headers are read first: a symlink or hard link pointing outside `home/` and `user/` (or outside this slot's own `v5/home`, `v5/user` when absolute), an absolute or `..` name, a member under a link the tar made, a device or a fifo, are all refused. It is extracted into a fresh `<slot>/.restore-*` folder, looked at, and only then swapped in. `reset-v5` and `restore-v5` also refuse, before anything is stopped, when the slot folder, `v5`, `v5/home`, `v5/user` or `reset-backups` is a link or resolves anywhere but under this slot's own real path. The CURRENT home is tarred first (`v5-restore-<stamp>.tar`), so a restore never loses one. By hand, the same
-thing is: stop `fy5-slot<N>` and `fy5-slot<N>-terminals`, move `v5/home` and `v5/user` aside, `tar -C <slot>/v5 -xpf <tar>`, start both.
+`restore-v5 <N> <stamp>` puts a kept home back, by rename only. `<stamp>` names a folder in this slot's `kept/` that this slot's own reset or restore moved:
+it must be a real folder with a `0600` `provenance.json` that names THIS slot (number and realpath) and this stamp, holds exactly the moved folders
+(`home`, optionally `user`) and nothing else, and each of them must still be the very folder that was moved (same inode and device, real folder, no link).
+A copy made by another slot, a hand-made folder, or a folder replaced by a link is refused before anything is stopped. Then: stop the 5.0 side, move
+the CURRENT home and `user` (if there are any: none is fine) into `kept/<new stamp>/`, move the kept folders into `v5/`, start. Both `reset-v5` and
+`restore-v5` also refuse, before anything is stopped, when the slot folder, `v5`, `v5/home`, `v5/user`, `v5/bin`, `v5/harness-bin`, `home/config`
+or `kept` is a link or resolves anywhere but under this slot's own real path, or `config/daemon.json` is a link. By hand, the same thing is: stop
+`fy5-slot<N>` and `fy5-slot<N>-terminals`, `mv v5/home v5/user` into a new `kept/<stamp>`, `mv` the kept ones back, start both.
 
-Tests: `migration/v4-to-v5/tests/unit/sweep-reset.test.ts` (scratch folders and the real `tar`; no daemon, no systemd).
+Tests: `migration/v4-to-v5/tests/unit/sweep-reset.test.ts` (scratch folders; no daemon, no systemd, no tar).
