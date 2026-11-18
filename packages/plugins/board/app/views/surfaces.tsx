@@ -25,6 +25,7 @@ import { THIS_MACHINE } from '../lib/machine.ts';
 import { navigateTo, replaceTo } from '../lib/navigate.ts';
 import { boardTaskPath, boardPath, taskPagePath, projectLanesPath } from '../lib/paths.ts';
 import { BoardPage } from './board-page.tsx';
+import { createBoardSettings } from './board-settings.tsx';
 import { LaneEditorPage } from './lane-editor.tsx';
 import { ChatTasks } from './chat-tasks.tsx';
 import { TaskEmbed } from './embed.tsx';
@@ -220,23 +221,6 @@ const taskProgress = (runtime: BoardRuntime): AppComponent<PanelProps> =>
     );
   };
 
-/** Settings › Board: what the board watches. The GitHub watch is configured in `config/board.yaml`. */
-const boardSettings = (): AppComponent<SettingsProps> =>
-  function BoardSettings(): ReactNode {
-    return (
-      <section aria-label="Board" data-settings="board">
-        <p>
-          The board shows the work you asked for as tasks in lanes. Ferretry watches the pull requests a task links
-          through GitHub and moves the task when one is opened, passes, merges or ships.
-        </p>
-        <p>
-          The watch is on by default and polls about once a minute. To change it, edit <code>github</code> in{' '}
-          <code>config/board.yaml</code>.
-        </p>
-      </section>
-    );
-  };
-
 /** The shape of what an ask renderer is handed: the `task` source's reference, possibly inside its envelope. */
 const taskOfAsk = (value: unknown): string | null => {
   const direct = value as Partial<TaskAskRef> | null;
@@ -314,7 +298,7 @@ export const createSurfaces = (client: PluginClient): BoardSurfaces => {
   return {
     screens: { board: boardScreen(runtime), task: taskScreen(runtime), card: formerCardScreen(runtime) },
     panels: { 'cards-of-ferret': tasksOfFerret(runtime), 'card-progress': taskProgress(runtime) },
-    settings: { board: boardSettings() },
+    settings: { board: createBoardSettings(client) },
     renderers: {
       'ask:card': taskAskRenderer(runtime),
       'reference:&': taskReferenceRenderer(runtime),

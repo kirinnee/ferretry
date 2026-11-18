@@ -84,6 +84,15 @@ describe('there is no direct-local mark', () => {
    * to expect a widening it can never get, so even a daemon that reports "not governed" to this browser
    * must not be read as "you are at the machine".
    */
+  it('says so when the daemon listed no capabilities, even where a screen draws the cards itself (rows off)', () => {
+    for (const rows of [true, false]) {
+      const rendered = text(
+        render(<CapabilityList connection={localLookingConnection()} capabilities={[]} governed rows={rows} />),
+      );
+      expect(rendered).toContain('This daemon listed no capabilities');
+    }
+  });
+
   it('reads a 127.0.0.1 page the daemon reported as governed as governed, never as at the machine', () => {
     const renderer = render(
       <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed />,

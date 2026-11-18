@@ -267,6 +267,8 @@ export default definePlugin({
       panel('daemon.status', { id: 'new-devices', order: 5 }),
       panel('daemon.status', { id: 'unlock', order: 10 }),
       panel('daemon.status', { id: 'notifications-off', order: 20 }),
+      // The same line under the Agenda header (`agenda.banner`, which Agenda offers): the page people open to be told.
+      panel('agenda.banner', { id: 'agenda-notifications-off', order: 10 }),
       panel('device.settings', { id: 'notifications', order: 30 }),
     ],
   },

@@ -42,6 +42,7 @@ export default provideToShell(
         // Drawn from `shell.deviceSettings` below (no machine), never from a machine's half.
         notifications: () => null,
         'notifications-off': notificationsOffPanel(client),
+        'agenda-notifications-off': notificationsOffPanel(client),
       },
     }),
   }),

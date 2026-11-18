@@ -145,10 +145,8 @@ describe('the Layout tab', () => {
     expect(device.calls).toEqual(['set phone.density compact']);
     const box = must(
       // The phone holds the same six places as the wide bar, so the box is found by its name, not by what it reads.
-      [...view.container.querySelectorAll<HTMLInputElement>('input[aria-labelledby]')].find(
-        input =>
-          document.getElementById(input.getAttribute('aria-labelledby') ?? '')?.textContent ===
-          'Phone navigation items',
+      [...view.container.querySelectorAll<HTMLInputElement>('input[aria-label]')].find(
+        input => input.getAttribute('aria-label') === 'Phone navigation items',
       ),
       'the phone navigation box',
     );
@@ -167,7 +165,7 @@ describe('the Layout tab', () => {
     const script = scriptedLayouts();
     const view = await mount(<LayoutSettings client={script.client} />);
     await settle();
-    const box = must(view.container.querySelector<HTMLInputElement>('input[aria-labelledby]'), 'a list box');
+    const box = must(view.container.querySelector<HTMLInputElement>('input[aria-label]'), 'a list box');
     expect(box.value).toBe('ferrets, agenda, board, projects, insights, settings');
     const save = press(view.container, 'Save');
     expect(save.disabled).toBe(true);
@@ -183,7 +181,7 @@ describe('the Layout tab', () => {
     const script = scriptedLayouts();
     const view = await mount(<LayoutSettings client={script.client} />);
     await settle();
-    const box = must(view.container.querySelector<HTMLInputElement>('input[aria-labelledby]'), 'a list box');
+    const box = must(view.container.querySelector<HTMLInputElement>('input[aria-label]'), 'a list box');
     await type(box, 'agenda, ghost');
     script.refuseWith = refusal('"ghost" is not an installed screen');
     await interact(() => press(view.container, 'Save').click());
@@ -191,9 +189,7 @@ describe('the Layout tab', () => {
     const alerts = [...view.container.querySelectorAll('[role="alert"]')].map(alert => alert.textContent);
     expect(alerts).toContain('that layout cannot be used: "ghost" is not an installed screen');
     expect(
-      must(view.container.querySelector<HTMLInputElement>('input[aria-labelledby]'), 'the box').getAttribute(
-        'aria-invalid',
-      ),
+      must(view.container.querySelector<HTMLInputElement>('input[aria-label]'), 'the box').getAttribute('aria-invalid'),
     ).toBe('true');
     await view.unmount();
   });

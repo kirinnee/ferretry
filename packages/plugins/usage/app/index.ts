@@ -1,6 +1,7 @@
 import { provideToShell } from '@ferretry/app';
 import { implementApp, type PanelProps } from '@ferretry/kernel/manifest';
 import type { FerretListRowMarkSlotProps } from '@ferretry/core-ferrets/contract';
+import type { LoginMeterSlotProps } from '@ferretry/plugin-logins/contract';
 import type { ComposerToolsProps } from '@ferretry/plugin-conversation/contract';
 import { createElement } from 'react';
 import manifest from '../manifest.ts';
@@ -8,6 +9,7 @@ import { usageCommands } from './command-bar.ts';
 import { browserLongTaskObserver, observeLongTasks } from './lib/performance/main-thread.ts';
 import { PerformanceRecorder } from './lib/performance/recorder.ts';
 import { recordingClient } from './lib/performance/recording-client.ts';
+import { BudgetMeter } from './features/settings/budget-meter.tsx';
 import { forgetUsageOf, holdUsageStore } from './lib/forget-usage.ts';
 import { daemonUsagePort } from './lib/usage-store.ts';
 import { DaemonUsageStore } from './lib/usage-store.ts';
@@ -57,6 +59,11 @@ const half = implementApp(manifest, {
         usage: ({ subject }) =>
           createElement(FerretUsageInfoPanel, { client, store: usage, ...(subject === undefined ? {} : { subject }) }),
         'spend-today': () => createElement(SpendTodayPanel, { client }),
+        // `logins.login-meter`: Logins' card hands the budget the list carries; this draws its meter.
+        'login-budget': (props: PanelProps & Partial<LoginMeterSlotProps>) =>
+          props.budget === undefined
+            ? null
+            : createElement(BudgetMeter, { budget: props.budget, machineName: props.machineName ?? 'this machine' }),
         insights: ({ subject }) =>
           createElement(FerretInsightsPanel, { client, ...(subject === undefined ? {} : { subject }) }),
       },

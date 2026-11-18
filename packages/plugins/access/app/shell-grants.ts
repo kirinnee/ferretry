@@ -15,7 +15,7 @@
  *   - useDaemonClient ............ pwa/src/lib/store.tsx ................. nowhere (stand-in: no store)
  *   - useStepUpRequest ........... pwa/src/lib/store.tsx ................. `@ferretry/app` `usePasskeyAsk` (REPLACED)
  *   - Button ..................... pwa/src/shell/primitives.tsx .......... `@ferretry/app/ui` (REPLACED)
- *   - SettingRow / SettingDisclosureRow  pwa/src/features/settings/setting-row.tsx  nowhere (stand-in)
+ *   - SettingRow / SettingDisclosureRow / SettingGroup  pwa/src/features/settings/setting-row.tsx  `@ferretry/app` (REPLACED)
  *   - settingDefinition .......... pwa/src/features/settings/settings-catalog.ts  nowhere (stand-in, one entry)
  *   - useDialogFocus ............. pwa/src/hooks/use-dialog-focus.ts ..... `@ferretry/app/ui` (REPLACED)
  *   - installPlatform / InstallEnvironment  pwa/src/lib/install-prompt.ts  nowhere (copy)
@@ -35,7 +35,7 @@ import {
   type UnlockGrantedSchema,
 } from '@ferretry/core-gate/contract';
 import { usePasskeyAsk } from '@ferretry/app';
-import { createElement, type ReactNode, useCallback, useId, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import { z } from 'zod';
 import type { DaemonConnection } from './shell-pairing.ts';
 
@@ -109,64 +109,8 @@ export function useStepUpRequest(): ((daemon: DaemonConnection, act?: string) =>
 
 // ─── settings rows (stand-ins for pwa/src/features/settings/setting-row.tsx and settings-catalog.ts) ─────────────
 
-export interface SettingRowProps {
-  readonly settingId?: string;
-  readonly name: string;
-  readonly hint?: ReactNode;
-  readonly children?: ReactNode;
-}
-
-const rowAnchor = (settingId: string | undefined) =>
-  settingId === undefined ? {} : { id: `settings-${settingId}`, 'data-setting-id': settingId, tabIndex: -1 };
-
-/** STAND-IN: one settings row — its name, its hint, and anything it holds. */
-export function SettingRow({ settingId, name, hint, children }: SettingRowProps) {
-  return createElement(
-    'li',
-    { ...rowAnchor(settingId), 'data-setting-row': name },
-    createElement('span', null, name),
-    hint === undefined ? null : createElement('span', null, hint),
-    children,
-  );
-}
-
-export interface SettingDisclosureRowProps extends SettingRowProps {
-  readonly value?: ReactNode;
-  readonly onOpenChange?: (open: boolean) => void;
-}
-
-/** STAND-IN: a settings row that opens to show what it holds, behind one `aria-expanded` button. */
-export function SettingDisclosureRow({
-  settingId,
-  name,
-  hint,
-  value,
-  onOpenChange,
-  children,
-}: SettingDisclosureRowProps) {
-  const [open, setOpen] = useState(false);
-  const id = useId();
-  return createElement(
-    'li',
-    { ...rowAnchor(settingId), 'data-setting-row': name },
-    createElement(
-      'button',
-      {
-        type: 'button',
-        'aria-expanded': open,
-        'aria-controls': `${id}-more`,
-        onClick: () => {
-          setOpen(!open);
-          onOpenChange?.(!open);
-        },
-      },
-      createElement('span', null, name),
-      hint === undefined ? null : createElement('span', null, hint),
-      value === undefined ? null : createElement('span', null, value),
-    ),
-    open ? createElement('div', { id: `${id}-more`, 'data-setting-panel': '' }, children) : null,
-  );
-}
+/** The shell's own settings rows (a row is a list item inside a titled card, drawn like every other Settings page). */
+export { SettingDisclosureRow, SettingGroup, SettingRow } from '@ferretry/app';
 
 /** STAND-IN: the settings catalog entry these screens read (today's text for `device-permissions`). */
 const SETTING_DESCRIPTIONS = {

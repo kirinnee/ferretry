@@ -14,8 +14,11 @@
 /** Under an open ask: its ferret's conversation and composer. */
 export const AGENDA_CONVERSATION_SLOT = 'agenda.conversation' as const;
 
+/** Under the Agenda page's header: a line about the whole page (Access: "Notifications are off for this machine"). */
+export const AGENDA_BANNER_SLOT = 'agenda.banner' as const;
+
 /** Every slot Agenda's pages offer, in one list a test can pair against the panels other plugins contribute. */
-export const AGENDA_SLOTS = [AGENDA_CONVERSATION_SLOT] as const;
+export const AGENDA_SLOTS = [AGENDA_CONVERSATION_SLOT, AGENDA_BANNER_SLOT] as const;
 export type AgendaSlot = (typeof AGENDA_SLOTS)[number];
 
 /** What the slot's page hands its panels, besides the shell's `subject` (the ferret). */

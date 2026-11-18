@@ -383,7 +383,8 @@ export function RoutingPromptCard({ view, state, pollMs = CLEAN_UP_POLL_MS, time
               </Button>
             )}
           </div>
-          {cleanUpBlock === null || running ? null : (
+          {/* The same reason is already said once under Write it for me: say it once, not under both buttons. */}
+          {cleanUpBlock === null || running || cleanUpBlock === writeBlock ? null : (
             <p className="m-0 break-words text-meta leading-base text-warn" data-routing-clean-up-blocked="">
               {cleanUpBlock}
             </p>

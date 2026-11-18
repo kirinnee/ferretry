@@ -9,7 +9,7 @@ afterEach(async () => {
 });
 
 describe('InsightsFrame', () => {
-  test('puts Insights and Warden on one strip, each keeping its own address', async () => {
+  test('puts Insights, Warden and Learning on one strip, each keeping its own address', async () => {
     const went: string[] = [];
     view = await mount(
       <InsightsFrame current="warden" daemonId="alpha" onNavigate={to => went.push(to)}>
@@ -18,11 +18,12 @@ describe('InsightsFrame', () => {
     );
     expect(view.container.querySelector('[data-insights="warden"] [data-page]')).not.toBeNull();
     const tabs = [...view.container.querySelectorAll<HTMLElement>('[data-insights-tab]')];
-    expect(tabs.map(tab => tab.textContent)).toEqual(['Insights', 'Warden']);
+    expect(tabs.map(tab => tab.textContent)).toEqual(['Insights', 'Warden', 'Learning']);
     expect(tabs[1]?.getAttribute('aria-current')).toBe('page');
     await interact(() => must(tabs[0], 'Insights').click());
     await interact(() => must(tabs[1], 'Warden').click());
-    expect(went).toEqual(['/d/alpha/insights', '/d/alpha/warden']);
+    await interact(() => must(tabs[2], 'Learning').click());
+    expect(went).toEqual(['/d/alpha/insights', '/d/alpha/warden', '/d/alpha/lessons']);
   });
 });
 

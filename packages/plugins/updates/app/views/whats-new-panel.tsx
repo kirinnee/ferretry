@@ -7,6 +7,7 @@
  * opens. The chips are decided from the record as it stood when the sheet OPENED, so they stay on screen while it is read.
  */
 
+import { Badge, Button, SettingGroup, SettingRow } from '@ferretry/app';
 import { useLayoutMode } from '@ferretry/app/ui';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
@@ -70,10 +71,24 @@ export function WhatsNewPanel() {
   }, [asked, open]);
   return (
     <section aria-label="What’s new" data-whats-new-entry="">
-      <button type="button" data-whats-new-open="" data-unread={String(host.unread)} onClick={host.open}>
-        What’s new{host.latest === undefined ? '' : ` in ${host.latest}`}
-      </button>
-      {host.unread ? <span data-whats-new-unread=""> New</span> : null}
+      <SettingGroup label="What’s new">
+        <SettingRow
+          name="Release notes"
+          hint="What changed in the build this device runs"
+          control={() => (
+            <span className="flex items-center gap-2">
+              {host.unread ? (
+                <Badge tone="accent" data-whats-new-unread="">
+                  New
+                </Badge>
+              ) : null}
+              <Button size="sm" data-whats-new-open="" data-unread={String(host.unread)} onClick={host.open}>
+                What’s new{host.latest === undefined ? '' : ` in ${host.latest}`}
+              </Button>
+            </span>
+          )}
+        />
+      </SettingGroup>
       <WhatsNewSheet
         open={host.shown}
         onClose={host.close}
