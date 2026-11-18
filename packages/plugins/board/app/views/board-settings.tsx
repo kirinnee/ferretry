@@ -25,6 +25,8 @@ const configOf = (text: string): BoardConfig => {
   return parsed.success ? parsed.data : BoardConfigSchema.parse({});
 };
 
+const HELD_CHANGE_SENTENCE = 'Saved, but not in effect until you confirm it.';
+
 const said = (cause: unknown, fallback: string): string =>
   cause instanceof Error && cause.message.trim() !== '' ? cause.message : fallback;
 
@@ -58,8 +60,12 @@ export const createBoardSettings = (client: PluginClient): AppComponent<Settings
       try {
         const target = { ...held.config, github: { ...held.config.github, watch } };
         const text = editConfigText(held.text === '' ? undefined : held.text, target, held.config, undefined);
-        await client.call('PUT /v1/config/file', { body: { path: FILE, text, etag: held.etag } });
+        const written = (await client.call('PUT /v1/config/file', {
+          body: { path: FILE, text, etag: held.etag },
+        })) as { readonly outcome?: string };
         await read();
+        // A change that would loosen something is held until the owner confirms it: say so, never show it as saved.
+        if (written.outcome === 'pending') setNote(HELD_CHANGE_SENTENCE);
       } catch (cause) {
         setNote(said(cause, 'The change could not be saved.'));
         await read();
@@ -98,7 +104,7 @@ export const createBoardSettings = (client: PluginClient): AppComponent<Settings
           />
         </SettingGroup>
         {note === null ? null : (
-          <p className="m-0 text-ui text-err" role="alert">
+          <p className={note === HELD_CHANGE_SENTENCE ? 'm-0 text-ui text-warn' : 'm-0 text-ui text-err'} role="alert">
             {note}
           </p>
         )}

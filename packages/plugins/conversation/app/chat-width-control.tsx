@@ -12,7 +12,14 @@
  */
 
 import { useId } from 'react';
-import { type ChatWidthPreference as ChatWidth, cn, useDeviceControls } from '@ferretry/app';
+import {
+  type ChatWidthPreference as ChatWidth,
+  cn,
+  Segmented,
+  SettingGroup,
+  SettingRow,
+  useDeviceControls,
+} from '@ferretry/app';
 
 export interface ChatWidthOption {
   readonly id: ChatWidth;
@@ -126,8 +133,39 @@ export function ChatWidthControl({ value, onChange }: ChatWidthControlProps) {
   );
 }
 
-/** The `device.settings` panel: this device's conversation width, read from and written to the one controls store. */
+const WIDTH_HINT: Readonly<Record<ChatWidth, string>> = {
+  readable: 'Compact — a 720px column, centred',
+  balanced: '1200px — room for code and wide tables',
+  full: 'Full — the whole conversation pane',
+};
+
+/**
+ * The `device.settings` panel: this device's conversation width, read from and written to the one controls store. A
+ * labelled row of the Layout group — its name, the width now in force, and the three choices under it — like every
+ * other setting, not three loose boxes.
+ */
 export function ChatWidthPanel() {
   const { device, set } = useDeviceControls();
-  return <ChatWidthControl value={device.chatWidth} onChange={chatWidth => set({ chatWidth })} />;
+  return (
+    <SettingGroup label="Conversation">
+      <SettingRow
+        settingId="conversation-width"
+        name="Conversation width"
+        hint={WIDTH_HINT[device.chatWidth]}
+        explanation="How wide the messages and the composer are in a conversation. All three are maximums, so in a pane narrower than the column (a phone, or beside a split pane) they look the same. Applies to this device."
+        wide
+        control={() => (
+          <div className="w-full md:w-72">
+            <Segmented
+              fill
+              label="Conversation width"
+              value={device.chatWidth}
+              options={CHAT_WIDTH_OPTIONS.map(({ id, label, description }) => ({ id, label, title: description }))}
+              onChange={chatWidth => set({ chatWidth })}
+            />
+          </div>
+        )}
+      />
+    </SettingGroup>
+  );
 }

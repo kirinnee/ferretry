@@ -44,3 +44,22 @@ describe('Show stopped on this device', () => {
     deviceControls().setDeviceControls({ showStopped: false });
   });
 });
+
+describe('the Density row', () => {
+  it('shows the list density this device uses (Full until chosen) and a choice is kept on this device', async () => {
+    deviceControls().setDeviceControls({ density: null });
+    const Panel = deviceSettingsPanels['needs-you'];
+    mounted = await mount(<Panel />);
+    const row = must(mounted.container.querySelector('[data-setting-row="Density"]'), 'the row');
+    expect(row.textContent).toContain('Device default: Full');
+    const compact = must(
+      [...row.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find(input =>
+        input.closest('label')?.textContent?.includes('Compact'),
+      ),
+      'the Compact choice',
+    );
+    await interact(() => compact.click());
+    expect(deviceControls().snapshot().device.density).toBe('compact');
+    deviceControls().setDeviceControls({ density: null });
+  });
+});

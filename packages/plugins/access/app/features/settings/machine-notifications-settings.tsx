@@ -4,7 +4,7 @@
  * service-worker enrolment, the device memory) comes from `lib/push-host.ts`.
  */
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { daemonOfClient } from '@ferretry/app';
+import { daemonOfClient, SettingGroup } from '@ferretry/app';
 import { type ReactNode, useMemo } from 'react';
 import { type MachineNotification, useMachineNotification } from '../../hooks/use-machine-notification.ts';
 import { type MachineSource, useMachinesNotifications } from '../../hooks/use-machines-notifications.ts';
@@ -82,31 +82,35 @@ export function MachinesNotificationsSettings({ sources, host }: MachinesNotific
     [sources],
   );
   return (
-    <div className="flex flex-col gap-4" data-machine-notifications="">
-      <NotificationsOffBanner
-        rows={notifications.rows}
-        canEnrol={notifications.canEnrol}
-        busy={notifications.busy}
-        onEnable={notifications.enable}
-      />
-      <NotificationSettingsView permission={notifications.permission} />
-      <MachineNotificationList
-        rows={notifications.rows}
-        canEnrol={notifications.canEnrol}
-        busy={notifications.busy}
-        failures={notifications.failures}
-        onEnable={notifications.enable}
-        onDisable={notifications.disable}
-        onTurnOnAll={notifications.turnOnAll}
-        unlocks={unlocks}
-        detail={row => (
-          <PushDeviceList
-            devices={notifications.devicesOf(row.daemonId)}
-            currentDeviceId={notifications.currentDeviceId(row.daemonId)}
-            onRevokeDevice={deviceId => notifications.revokeDevice(row.daemonId, deviceId)}
+    <div className="pb-4" data-machine-notifications="">
+      <SettingGroup label="Notifications">
+        <li className="flex min-w-0 flex-col gap-3 px-panel py-3">
+          <NotificationsOffBanner
+            rows={notifications.rows}
+            canEnrol={notifications.canEnrol}
+            busy={notifications.busy}
+            onEnable={notifications.enable}
           />
-        )}
-      />
+          <NotificationSettingsView permission={notifications.permission} />
+          <MachineNotificationList
+            rows={notifications.rows}
+            canEnrol={notifications.canEnrol}
+            busy={notifications.busy}
+            failures={notifications.failures}
+            onEnable={notifications.enable}
+            onDisable={notifications.disable}
+            onTurnOnAll={notifications.turnOnAll}
+            unlocks={unlocks}
+            detail={row => (
+              <PushDeviceList
+                devices={notifications.devicesOf(row.daemonId)}
+                currentDeviceId={notifications.currentDeviceId(row.daemonId)}
+                onRevokeDevice={deviceId => notifications.revokeDevice(row.daemonId, deviceId)}
+              />
+            )}
+          />
+        </li>
+      </SettingGroup>
     </div>
   );
 }

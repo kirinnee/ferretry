@@ -305,12 +305,12 @@ export function CapabilityList({ connection, capabilities, governed, rows = true
 
       <WeightLegend weights={accessWeightsPresent(entries.map(entry => entry.capability))} />
 
-      {!rows ? null : entries.length === 0 ? (
+      {entries.length === 0 ? (
         <p className="m-0 text-cell leading-base text-muted" role="status">
           This daemon listed no capabilities, so there is nothing to report. That is a failed read rather than a machine
           with no limits, and Ferretry will not present it as one.
         </p>
-      ) : (
+      ) : !rows ? null : (
         <ul className="m-0 flex list-none flex-col p-0" aria-label="Capabilities">
           {entries.map(entry => (
             <CapabilityRow key={entry.capability} entry={entry} posture={posture} />

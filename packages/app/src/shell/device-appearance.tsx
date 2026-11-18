@@ -126,6 +126,7 @@ export function DeviceAppearance() {
       <SettingRow
         settingId="theme"
         name="Colour mode"
+        explanation="Auto follows this device's light or dark setting; Light and Dark stay as you choose. Saved on this device."
         hint={preference.mode === 'system' ? `Auto follows the system (now ${resolved})` : `Always ${preference.mode}`}
         wide
         control={() => (
@@ -140,13 +141,18 @@ export function DeviceAppearance() {
           </EqualWidth>
         )}
       />
-      <SettingRow name="Theme" hint={family === undefined ? undefined : `${family.label} — ${family.blurb}`}>
+      <SettingRow
+        name="Theme"
+        hint={family === undefined ? undefined : `${family.label} — ${family.blurb}`}
+        explanation="The look of the whole app. Each tile previews its light and dark versions; Colour mode picks which one is shown. Saved on this device."
+      >
         <ThemeTiles theme={theme} />
       </SettingRow>
       <SettingRow
         settingId="text-size"
         name="Text size"
         hint="Touch targets never shrink"
+        explanation="Scales the text across the app on this device. Buttons and touch targets keep their size, so nothing gets harder to tap."
         wide
         control={() => (
           <EqualWidth>
@@ -164,6 +170,7 @@ export function DeviceAppearance() {
         settingId="motion"
         name="Motion"
         hint={MOTION_HINT[device.motion]}
+        explanation="Reduced stills spinners and transitions on this device. Follow system plays animations unless this device asks for less motion."
         wide
         control={() => (
           <EqualWidth>

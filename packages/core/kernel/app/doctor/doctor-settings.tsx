@@ -26,11 +26,14 @@ const withoutFinalStop = (text: string): string => text.replace(/\.+$/u, '');
 export function DoctorReportView({ report }: { readonly report: DoctorReport }) {
   // Checks a plugin declared and nobody has built yet all say the same sentence: they are one line, not a wall of rows
   // that reads like failures on a healthy host (the same grouping `fy doctor` makes).
+  // Only an OPTIONAL check that is missing may fold (the CLI's 'warn'): a required or failing one is never hidden.
+  const unbuiltName = (check: DoctorReport['checks'][number]): string | undefined =>
+    check.status === 'missing' && check.requirement !== 'required' ? notBuiltCheck(check.summary) : undefined;
   const unbuilt = report.checks.flatMap(check => {
-    const name = notBuiltCheck(check.summary);
+    const name = unbuiltName(check);
     return name === undefined ? [] : [name];
   });
-  const checks = report.checks.filter(check => notBuiltCheck(check.summary) === undefined);
+  const checks = report.checks.filter(check => unbuiltName(check) === undefined);
   return (
     <section className="kt-panel p-panel" aria-labelledby="doctor-settings-heading" data-doctor-report="">
       <div className="flex items-center gap-2">

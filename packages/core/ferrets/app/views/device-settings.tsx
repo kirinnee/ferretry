@@ -6,8 +6,15 @@
  * open Inbox items into a "Needs you" group at the top. Off keeps them in their folders, with just the count badge.
  */
 
-import { SettingGroup, SettingRow, SettingSwitch, useDeviceControls } from '@ferretry/app';
+import { Segmented, SettingGroup, SettingRow, SettingSwitch, useDeviceControls } from '@ferretry/app';
 import type { ReactNode } from 'react';
+
+const DENSITY_OPTIONS = [
+  { id: 'full', label: 'Full' },
+  { id: 'compact', label: 'Compact' },
+  { id: 'minimal', label: 'Minimal' },
+] as const;
+const DENSITY_LABEL = { full: 'Full', compact: 'Compact', minimal: 'Minimal' } as const;
 
 function NeedsYouPanel(): ReactNode {
   const { device, set } = useDeviceControls();
@@ -24,6 +31,24 @@ function NeedsYouPanel(): ReactNode {
             labelledBy={labelId}
             onChange={groupNeedsYou => set({ groupNeedsYou })}
           />
+        )}
+      />
+      <SettingRow
+        settingId="density"
+        name="Density"
+        hint={`Device default: ${DENSITY_LABEL[device.density ?? 'full']}`}
+        explanation="How much each ferret shows in the list. Full is the list as drawn; Compact drops the folder and the marks (the title, the ferret and what it asks stay); Minimal is one line, the title and its badge. Applies to this device."
+        wide
+        control={() => (
+          <div className="w-full md:w-72">
+            <Segmented
+              fill
+              label="Density"
+              value={device.density ?? 'full'}
+              options={DENSITY_OPTIONS}
+              onChange={density => set({ density })}
+            />
+          </div>
         )}
       />
     </SettingGroup>

@@ -30,6 +30,7 @@ const TASKS = [
 /** A daemon that answers Board's reads from the tasks above; a route it does not know fails like an old daemon. */
 let configText = '# the watch\ngithub:\n  watch: true\n';
 const puts: { text: string; etag: string }[] = [];
+let putOutcome: 'applied' | 'pending' = 'applied';
 const daemon: PluginClient = {
   call: async (route: string, init?: { readonly params?: Readonly<Record<string, string>> }) => {
     switch (route) {
@@ -55,7 +56,7 @@ const daemon: PluginClient = {
         return { path: 'board.yaml', exists: true, text: configText, etag: 'etag-1' };
       case 'PUT /v1/config/file':
         puts.push((init as { body: { text: string; etag: string } }).body);
-        return { path: 'board.yaml', etag: 'etag-2', outcome: 'applied' };
+        return { path: 'board.yaml', etag: 'etag-2', outcome: putOutcome };
       default:
         throw new Error(`no route ${route}`);
     }
@@ -159,6 +160,25 @@ describe('the app half the shell builds', () => {
     expect(puts[0]?.etag).toBe('etag-1');
     expect(puts[0]?.text).toContain('# the watch');
     expect(puts[0]?.text).toContain('watch: false');
+  });
+
+  it('S-0298 feature board: a switch change the daemon holds for the owner is said to be held, not shown as saved', async () => {
+    puts.length = 0;
+    putOutcome = 'pending';
+    configText = 'github:\n  watch: true\n';
+    try {
+      const root = await draw<SettingsProps>(
+        half?.settings.board,
+        {},
+        node => node.querySelector('[data-settings="board"] [role="switch"]') !== null,
+        'the Board settings switch',
+      );
+      root.querySelector<HTMLElement>('[role="switch"]')?.click();
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(root.textContent).toContain('Saved, but not in effect until you confirm it.');
+    } finally {
+      putOutcome = 'applied';
+    }
   });
 
   it('S-0298 feature board: a &F12 reference links the card by its title, and the card ask names it with no button', async () => {
