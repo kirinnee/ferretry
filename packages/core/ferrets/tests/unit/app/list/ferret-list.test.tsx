@@ -1,6 +1,6 @@
 /**
  * The ferret list component. Ported from today's `sessions-bar.test.tsx` (lists by project and marks the open one,
- * titles, hides stopped until ticked, keeps the open one, narrows by kind with live counts, opens on Interactive, still
+ * titles, hides stopped until ticked, keeps the open one, narrows by kind with live counts, opens on Mine, still
  * reading / nothing running, navigates from a row), over the scripted daemon. Left out: the badge, preview, switch
  * marks, machine switcher, finder and foot places (not Ferrets'), and the ⋯ options menu (Show stopped is a tick here).
  */
@@ -188,21 +188,21 @@ describe('the ferret list as a column', () => {
     const root = await draw(daemon, undefined, null);
     const segment = (id: string) => root.querySelector<HTMLButtonElement>(`[data-sbar-filter="${id}"]`);
     const words = () => ['all', 'auto', 'interactive'].map(id => segment(id)?.textContent);
-    // A new device opens on Interactive.
+    // A new device opens on Mine.
     expect(segment('interactive')?.getAttribute('aria-pressed')).toBe('true');
     expect(ids(root)).toEqual(['pat-1']);
 
     await click(segment('all'), 'All');
     expect(ids(root).sort()).toEqual(['hadi-1', 'pat-1']);
-    expect(words()).toEqual(['All2', 'Agents1', 'Interactive1']);
+    expect(words()).toEqual(['All2', 'Agents1', 'Mine1']);
     await click(segment('auto'), 'Agents');
     expect(ids(root)).toEqual(['hadi-1']);
     // The numbers are what each segment would show, so choosing one leaves the others' alone.
-    expect(words()).toEqual(['All2', 'Agents1', 'Interactive1']);
+    expect(words()).toEqual(['All2', 'Agents1', 'Mine1']);
 
     await mounted?.unmount();
     const lonely = await draw(listDaemon([FERRETS[0] as FerretSummary]), undefined, null);
-    expect(lonely.textContent).toContain('No interactive ferrets.');
+    expect(lonely.textContent).toContain('No ferrets of yours.');
     // The door to a new ferret is the list's foot, whatever the list holds (v4's sessions bar ended in "New session").
     expect(lonely.querySelector('[data-ferret-new]')?.getAttribute('href')).toBe('/d/alpha/new');
   });
@@ -217,7 +217,7 @@ describe('the ferret list as a column', () => {
     expect(door[0]?.textContent).toBe('+ New ferret');
   });
 
-  it('S-0405 opens on Interactive until the device remembers another kind', async () => {
+  it('S-0405 opens on Mine until the device remembers another kind', async () => {
     const person = ferretSummary('pat-1', {
       name: 'pat',
       title: 'Pairing',

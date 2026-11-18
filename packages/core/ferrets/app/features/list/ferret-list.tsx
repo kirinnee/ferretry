@@ -1,7 +1,7 @@
 /**
  * THE FERRET LIST — this daemon's ferrets, live, grouped by folder (today's left sessions bar, as the `ferrets` screen).
  *
- * Top to bottom: Interactive · All · Agents, each with the count choosing it would show; "Show stopped (n)"; the
+ * Top to bottom: Mine · All · Agents, each with the count choosing it would show; "Show stopped (n)"; the
  * "Pinned" group; then one group per folder. The open ferret (the route's `:ferret`) is always listed and marked
  * `aria-current="page"`. A row is one link to the ferret's chat.
  *

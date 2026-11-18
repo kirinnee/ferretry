@@ -359,11 +359,22 @@ describe('the nav and the top bar stay put while a tall page scrolls', () => {
         try {
           const seen = await scrolledToEnd(tab);
           expect(seen.carried, 'the page body did scroll').toBeGreaterThan(200);
-          expect(seen.top.top, 'the top bar is still at the top of the window').toBeGreaterThanOrEqual(0);
-          expect(seen.top.bottom, 'the top bar is still on screen').toBeLessThanOrEqual(seen.window.height);
-          expect(seen.nav.top, 'the nav starts inside the window').toBeGreaterThanOrEqual(0);
-          expect(seen.nav.bottom, 'the nav is still inside the window').toBeLessThanOrEqual(seen.window.height);
-          expect(seen.nav.right, 'the nav is still in view sideways').toBeGreaterThan(0);
+          // A ferret's own page puts the bar of places and the top bar away (chat-chrome.visual.test.ts): its one menu button is
+          // the chrome that must stay put there.
+          if ((await tab.locator('.fy-frame[data-chat-chrome]').count()) > 0 && seen.nav.right === 0) {
+            const menu = await tab.evaluate(() => document.querySelector('.fy-chat-menu')?.getBoundingClientRect());
+            const column = await tab.evaluate(() => document.querySelector('.fy-main')?.getBoundingClientRect().top);
+            expect(menu?.top, 'the chat menu is still at the top of the page column').toBe(column);
+            expect(menu?.bottom ?? Number.POSITIVE_INFINITY, 'the chat menu is still on screen').toBeLessThanOrEqual(
+              seen.window.height,
+            );
+          } else {
+            expect(seen.top.top, 'the top bar is still at the top of the window').toBeGreaterThanOrEqual(0);
+            expect(seen.top.bottom, 'the top bar is still on screen').toBeLessThanOrEqual(seen.window.height);
+            expect(seen.nav.top, 'the nav starts inside the window').toBeGreaterThanOrEqual(0);
+            expect(seen.nav.bottom, 'the nav is still inside the window').toBeLessThanOrEqual(seen.window.height);
+            expect(seen.nav.right, 'the nav is still in view sideways').toBeGreaterThan(0);
+          }
           if (shotsDir !== '')
             await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${name}-page-scrolled.png`) });
         } finally {

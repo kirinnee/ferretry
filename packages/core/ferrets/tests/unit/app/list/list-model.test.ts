@@ -82,7 +82,7 @@ describe('which ferrets are over, and which kind they are', () => {
     expect([agent, person, unmoded].map(row => matchesMode(row, 'interactive'))).toEqual([false, true, false]);
   });
 
-  test('the segment counts classify every listed ferret into exactly one kind: Interactive + Agents = All', () => {
+  test('the segment counts classify every listed ferret into exactly one kind: Mine + Agents = All', () => {
     const running = [
       ferret('a', { mode: 'auto' }),
       ferret('b', { mode: undefined }),
@@ -187,7 +187,7 @@ describe('which ferrets the list lists', () => {
 
   test('an empty list says which kind found nothing, and how many stopped ones the tick would add', () => {
     expect(emptyMessage({ mode: 'all', showStopped: false }, 0)).toBe('No ferrets are running.');
-    expect(emptyMessage({ mode: 'interactive', showStopped: false }, 0)).toBe('No interactive ferrets.');
+    expect(emptyMessage({ mode: 'interactive', showStopped: false }, 0)).toBe('No ferrets of yours.');
     expect(emptyMessage({ mode: 'auto', showStopped: false }, 0)).toBe('No agent ferrets.');
     expect(emptyMessage({ mode: 'all', showStopped: false }, 1)).toBe(
       'No live ferrets — 1 stopped. Tick Show stopped.',

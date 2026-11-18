@@ -37,6 +37,10 @@ const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 // `?tall=1` makes the page's own content far taller than the window, as a long inbox or conversation is.
 const TALL = params.get('tall') === '1';
+// `?header=modes` draws the ferret header as the real chat page does: the name and the status on one line and ONE "Modes" button at its end
+// (the chips and switches live behind it), so the chrome above the first chat line can be measured as a person sees it.
+const HOST_STATE = params.get('host') === 'unnamed' ? 'unnamed' : params.get('host') === 'named' ? 'named' : null;
+const MODES_HEADER = params.get('header') === 'modes';
 const tallBlock = (what: string): ReactNode =>
   TALL ? <div data-tall-filler="" style={{ height: 3_000, flexShrink: 0 }}>{`Fake ${what}: a tall page.`}</div> : null;
 
@@ -91,7 +95,7 @@ function FerretListScreen(): ReactNode {
   return (
     <div className="fy-sbar__ferrets" data-ferret-list="">
       <div className="fy-sbar__filters">
-        <strong>Interactive 2</strong> · All 4 · Agents 2
+        <strong>Mine 2</strong> · All 4 · Agents 2
       </div>
       <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
         {FERRETS.map(([title, callsign]) => (
@@ -109,7 +113,24 @@ function FerretListScreen(): ReactNode {
 function FerretPageScreen(): ReactNode {
   return (
     <main className="flex h-full min-h-0 min-w-0 flex-col overflow-clip" data-session="zoe">
-      <PanelSlot daemon="ws" slot="ferret.toolbar" subject="zoe" />
+      {MODES_HEADER ? (
+        <div className="flex min-w-0 items-center" data-ferret-header="">
+          <div className="min-w-0 flex-1">
+            <PanelSlot daemon="ws" slot="ferret.toolbar" subject="zoe" />
+          </div>
+          <div
+            className="fy-modes"
+            data-modes-menu=""
+            style={{ display: 'flex', alignItems: 'center', paddingRight: 12 }}
+          >
+            <button className="kt-btn kt-btn--sm" data-modes-trigger="" type="button">
+              Modes
+            </button>
+          </div>
+        </div>
+      ) : (
+        <PanelSlot daemon="ws" slot="ferret.toolbar" subject="zoe" />
+      )}
       <FerretWorkspace
         chat={
           <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-chat="">
@@ -168,7 +189,42 @@ const toggle = (label: string) => () => (
     {label} <span style={{ opacity: 0.7 }}>On</span>
   </label>
 );
-const TOOLBAR: ReadonlyArray<readonly [string, () => ReactNode]> = [
+// The real name and status panels' markup and metrics (`core/ferrets` header/name-panel.tsx, status-panel.tsx and their stylesheet) for the
+// `?header=modes` header. The sizes are written inline: a scene reaches another package only through its contract, never its stylesheet.
+const REAL_TOOLBAR: ReadonlyArray<readonly [string, () => ReactNode]> = [
+  [
+    'name',
+    () => (
+      <div
+        className="fy-ferret-name"
+        data-ferret-name=""
+        style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0, flex: 1 }}
+      >
+        <h1 style={{ margin: 0, minWidth: 0, fontSize: 'var(--text-lg)', whiteSpace: 'nowrap' }}>Fixture running</h1>
+        <span style={{ flexShrink: 0, color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>zoe</span>
+      </div>
+    ),
+  ],
+  [
+    'status',
+    () => (
+      <span
+        className="fy-ferret-status"
+        data-ferret-status="idle"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          color: 'var(--muted)',
+          fontSize: 'var(--text-sm)',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <span>Your turn</span>
+      </span>
+    ),
+  ],
+];
+const LEGACY_TOOLBAR: ReadonlyArray<readonly [string, () => ReactNode]> = [
   ['name', () => <strong>Fixture running</strong>],
   ['status', () => <span>Your turn</span>],
   ['hypermedia', chip('Hypermedia', 'Off')],
@@ -191,6 +247,7 @@ const TOOLBAR: ReadonlyArray<readonly [string, () => ReactNode]> = [
     ),
   ],
 ];
+const TOOLBAR = MODES_HEADER ? REAL_TOOLBAR : LEGACY_TOOLBAR;
 const panelStand = (id: string) =>
   function SidePanel({ intent, subject }: PanelProps): ReactNode {
     // Ferrets' Instructions list opens a file in Files and brings Files on screen through the ferret's workspace.
@@ -273,7 +330,16 @@ function RelayFallbackWatcher(): ReactNode {
 
 const page = (text: string) => () => <p style={{ padding: 16 }}>{text}</p>;
 const surfaces: readonly SurfaceEntry[] = [
-  ...CORE.filter(entry => entry.id !== 'ferrets'),
+  ...CORE.filter(entry => entry.id !== 'ferrets' && entry.id !== 'kernel'),
+  // The kernel declares the one route the machine switcher reads (`host.yaml`, to know whether the machine goes by its host name).
+  entryOf(
+    manifestOf('kernel', {
+      core: true,
+      actions: { routes: [{ key: 'GET /v1/config/file', minimum: 'authenticated', caller: 'any', audit: 'skip' }] },
+    }),
+    undefined,
+    true,
+  ),
   entryOf(
     ferretsManifest,
     provideToShell(
@@ -344,6 +410,13 @@ const transport = new FakeTransport((request: TransportRequest): TransportAnswer
   if (request.path === '/v1/plugins') return json(inventoryOf(surfaces));
   if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
   if (request.path === '/v1/grants') return json(grants);
+  // `?host=unnamed`: the machine has no `host.yaml` name, so it goes by its host name (the "Name this machine" offer); `?host=named` has one.
+  if (request.path === '/v1/config/file' && HOST_STATE !== null)
+    return json(
+      HOST_STATE === 'named'
+        ? { exists: true, text: 'name: "workshop"\n', etag: 'e1' }
+        : { exists: false, text: '', etag: 'e0' },
+    );
   return json({ ok: true });
 });
 const handler: PasskeyHandler = {
