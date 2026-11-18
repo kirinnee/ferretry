@@ -141,6 +141,9 @@ it must be a real folder with a `0600` `provenance.json` that names THIS slot (n
 (`home`, optionally `user`), and each of them must still be the very folder that was recorded (same inode and device, real folder, no link), found
 either in the kept folder or back at `v5/<name>`. A record left by an **interrupted** reset or restore (`status: moving`) is accepted: a folder already
 at `v5/<name>` is left, one still in the kept folder is moved back, so running `restore-v5` again after an interrupted restore finishes it.
+A stale `provenance.json.tmp` (a kill while the record was being updated) is cleared first (that exact name, a plain file). The record stays, as
+`status: restored`, until the start has succeeded, so an interrupted start is retried with the same stamp and just starts again. `kept/` and
+`kept/<stamp>` are fsynced into their parents when made.
 A copy made by another slot, a hand-made folder, or a folder replaced by a link is refused before anything is stopped. Then: stop the 5.0 side, move
 the CURRENT home and `user` (if there are any: none is fine) into `kept/<new stamp>/`, move the kept folders into `v5/`, start. Both `reset-v5` and
 `restore-v5` also refuse, before anything is stopped, when the slot folder, `v5`, `v5/home`, `v5/user`, `v5/bin`, `v5/harness-bin`, `home/config`

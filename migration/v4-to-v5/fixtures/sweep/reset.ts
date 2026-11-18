@@ -284,7 +284,8 @@ export interface Provenance {
   readonly stamp: string;
   /** UTC instant the move began. */
   readonly created: string;
-  readonly status: 'moving' | 'kept';
+  /** 'restored': every folder is back in `v5`; only the restart (and then the removal of this record) is pending. */
+  readonly status: 'moving' | 'kept' | 'restored';
   readonly members: readonly KeptMember[];
   readonly moved: readonly string[];
 }
@@ -312,9 +313,33 @@ export interface KeepHooks {
 
 const RECORD_TEMP = `${PROVENANCE_FILE}.tmp`;
 
+/** fsync of a folder: what makes a rename or a mkdir inside it durable. */
+async function syncFolder(folder: string): Promise<void> {
+  const handle = await open(folder, constants.O_RDONLY | constants.O_DIRECTORY);
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * A run killed while updating the record leaves `provenance.json.tmp`; its exclusive create would then fail for good. Removes EXACTLY that
+ * name when it is a regular file in `dir` (the caller has proven `dir` to be a real kept folder of this slot); a link or a folder under
+ * that name is refused, never followed or removed.
+ */
+async function clearStaleRecordTemp(dir: string): Promise<void> {
+  const temp = join(dir, RECORD_TEMP);
+  const found = await lstat(temp).catch(() => undefined);
+  if (found === undefined) return;
+  if (found.isSymbolicLink() || !found.isFile()) return refuse(`${temp} is not a plain file; refusing to touch it`);
+  await rm(temp);
+}
+
 /** Writes the record: a temp file in the kept folder (exclusive), fsync, rename over, fsync of the folder. */
 async function writeRecord(dir: string, record: Provenance): Promise<void> {
   const temp = join(dir, RECORD_TEMP);
+  await clearStaleRecordTemp(dir);
   const handle = await open(
     temp,
     constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
@@ -332,12 +357,7 @@ async function writeRecord(dir: string, record: Provenance): Promise<void> {
     await rm(temp, { force: true });
     throw error;
   }
-  const folder = await open(dir, constants.O_RDONLY | constants.O_DIRECTORY);
-  try {
-    await folder.sync();
-  } finally {
-    await folder.close();
-  }
+  await syncFolder(dir);
 }
 
 /**
@@ -375,9 +395,13 @@ export async function keepAside(
   }
   if (plan.length === 0) return undefined;
   if (options.needHome && !plan.some(member => member.name === 'home')) return refuse('no home was moved aside');
-  if ((await lstat(root).catch(() => undefined)) === undefined) await mkdir(root, { mode: 0o700 });
+  if ((await lstat(root).catch(() => undefined)) === undefined) {
+    await mkdir(root, { mode: 0o700 });
+    await syncFolder(tree.slotReal);
+  }
   await plainFolder(root, root);
   await mkdir(dir, { mode: 0o700 });
+  await syncFolder(root);
   await plainFolder(dir, dir);
   const record = (status: 'moving' | 'kept', moved: readonly string[]): Provenance => ({
     format: 1,
@@ -468,7 +492,7 @@ export async function checkKept(paths: ResetPaths, tree: ResetTree, stamp: strin
     typeof record.slotRealpath !== 'string' ||
     typeof record.stamp !== 'string' ||
     typeof record.created !== 'string' ||
-    (record.status !== 'moving' && record.status !== 'kept') ||
+    (record.status !== 'moving' && record.status !== 'kept' && record.status !== 'restored') ||
     !Array.isArray(record.moved) ||
     !Array.isArray(members)
   )
@@ -676,7 +700,8 @@ export async function resetV5(
  * stop, move the CURRENT home (if there is one; none is fine) into `kept/<new stamp>`, move the kept folders back into `v5`, start.
  * Renames only: nothing is read into memory, copied or removed except the kept folder's own emptied provenance record and the then-empty
  * folder. Each folder is found by the identity the record holds, so a retry after an interruption (some folders already back, some not)
- * reconciles the split state: a folder already at `v5/<name>` is left, one still in the kept folder is moved back.
+ * reconciles the split state: a folder already at `v5/<name>` is left, one still in the kept folder is moved back. The record is kept (as
+ * `status: restored`) until the start has succeeded, so a start that was interrupted is retried with the same stamp: it just starts again.
  */
 export async function restoreV5(
   paths: ResetPaths,
@@ -687,8 +712,12 @@ export async function restoreV5(
 ): Promise<{ saved: string | undefined }> {
   const tree = await assertResetTree(paths);
   const planned = await checkKept(paths, tree, stamp);
-  // Folders already back where they belong are the kept ones; whatever else sits at `v5/<name>` is the current home.
-  const aside = KEPT_MEMBERS.filter(name => planned.places.get(name) !== 'v5');
+  // A temp a killed update left is cleared (that exact name, a plain file, in the proven kept folder) before anything is stopped or moved.
+  await clearStaleRecordTemp(planned.dir);
+  // Folders already back where they belong are the kept ones; whatever else sits at `v5/<name>` is the current home. A completed
+  // restore (status 'restored') has nothing to set aside: its `v5` IS the restored home and only the restart is left.
+  const aside =
+    planned.record.status === 'restored' ? [] : KEPT_MEMBERS.filter(name => planned.places.get(name) !== 'v5');
   const nextDir = join(tree.slotReal, 'kept', resetStamp(now));
   if ((await lstat(nextDir).catch(() => undefined)) !== undefined)
     return refuse(`${nextDir} already exists; try again in a second`);
@@ -722,10 +751,8 @@ export async function restoreV5(
       (await lstat(join(now5.v5Real, 'user')).catch(() => undefined)) === undefined
     )
       await mkdir(join(now5.v5Real, 'user'), { mode: 0o700 });
-    // Only the kit's own record and the now empty folder: both fail rather than remove anything else.
-    await rm(join(kept.dir, PROVENANCE_FILE), { force: true });
-    await rm(join(kept.dir, RECORD_TEMP), { force: true });
-    await rmdir(kept.dir);
+    // Everything is back: the record stays (as a completion record) until the start has succeeded.
+    await writeRecord(kept.dir, { ...kept.record, status: 'restored', moved: [] });
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
     throw new ResetHalfway(
@@ -734,6 +761,10 @@ export async function restoreV5(
   }
   await assertResetTree(paths);
   await actions.start();
+  // Started: only the kit's own record and the now empty folder go; both fail rather than remove anything else.
+  await rm(join(kept.dir, PROVENANCE_FILE), { force: true });
+  await rm(join(kept.dir, RECORD_TEMP), { force: true });
+  await rmdir(kept.dir);
   return { saved: saved?.dir };
 }
 

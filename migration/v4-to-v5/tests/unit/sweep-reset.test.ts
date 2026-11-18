@@ -1077,6 +1077,67 @@ describe('an interruption at any step never loses the old home, and restore-v5 a
     }
   }
 
+  test('a kill while the record was being updated leaves provenance.json.tmp: ONE restore-v5 still succeeds (the stale temp is cleared first)', async () => {
+    const s = await scratch();
+    try {
+      const before = await homes(s);
+      await resetV5(s.paths, s.real, actionsFor(s.paths).actions, options);
+      await writeFile(join(keptOf(s), `${PROVENANCE_FILE}.tmp`), '{"half', { mode: 0o600 });
+      await restoreV5(s.paths, actionsFor(s.paths).actions, STAMP, LATER);
+      expect(await homes(s)).toEqual(before);
+      expect(await exists(keptOf(s))).toBe(false);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a stale record temp that is a link or a folder is never followed or removed: restore-v5 refuses before it stops anything', async () => {
+    const s = await scratch();
+    const victim = await scratch(4);
+    try {
+      await resetV5(s.paths, s.real, actionsFor(s.paths).actions, options);
+      const outside = join(victim.root, 'marker');
+      await writeFile(outside, 'EXTERNAL');
+      const temp = join(keptOf(s), `${PROVENANCE_FILE}.tmp`);
+      await symlink(outside, temp);
+      const trace = actionsFor(s.paths);
+      await expect(restoreV5(s.paths, trace.actions, STAMP, LATER)).rejects.toThrow(/not a plain file/u);
+      expect(trace.steps).toEqual([]);
+      expect(await readFile(outside, 'utf8')).toBe('EXTERNAL');
+      expect((await lstat(temp)).isSymbolicLink()).toBe(true);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+      await rm(victim.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a kill during the start: the bytes are back, the record stays as a completion record, and the SAME stamp retried just starts again', async () => {
+    const s = await scratch();
+    try {
+      const before = await homes(s);
+      await resetV5(s.paths, s.real, actionsFor(s.paths).actions, options);
+      const dying: ResetActions = {
+        ...actionsFor(s.paths).actions,
+        start: async () => {
+          throw KILL;
+        },
+      };
+      expect(await run(async () => await restoreV5(s.paths, dying, STAMP, LATER))).toBe(KILL);
+      expect(await homes(s)).toEqual(before);
+      const record = JSON.parse(await readFile(join(keptOf(s), PROVENANCE_FILE), 'utf8')) as { status: string };
+      expect(record.status).toBe('restored');
+      const retry = actionsFor(s.paths);
+      await restoreV5(s.paths, retry.actions, STAMP, new Date('2026-11-18T19:31:00Z'));
+      expect(retry.steps).toEqual(['stop (old home present: true)', 'start']);
+      expect(await homes(s)).toEqual(before);
+      expect(await exists(keptOf(s))).toBe(false);
+      // The retry moved nothing: only the first restore set the new empty home aside.
+      expect(await exists(keptOf(s, resetStamp(new Date('2026-11-18T19:31:00Z'))))).toBe(false);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
   test('a record that names folders found nowhere, or another folder in their place, is refused and nothing moves', async () => {
     const s = await scratch();
     try {
