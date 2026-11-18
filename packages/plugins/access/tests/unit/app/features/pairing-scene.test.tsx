@@ -156,11 +156,15 @@ describe('the sky pauses when the tab is hidden', () => {
   it('marks the sky paused while hidden and running again when visible', async () => {
     const screen = await screenWith();
     const sky = must(screen.container.querySelector('[data-sky]'), 'the sky');
+    const mascot = must(screen.container.querySelector('svg.fy-ferret'), 'the mascot');
     expect(sky.hasAttribute('data-paused')).toBe(false);
+    expect(mascot.hasAttribute('data-paused')).toBe(false);
     await setVisibility('hidden');
     expect(sky.hasAttribute('data-paused')).toBe(true);
+    expect(mascot.hasAttribute('data-paused')).toBe(true);
     await setVisibility('visible');
     expect(sky.hasAttribute('data-paused')).toBe(false);
+    expect(mascot.hasAttribute('data-paused')).toBe(false);
     await screen.unmount();
   });
 

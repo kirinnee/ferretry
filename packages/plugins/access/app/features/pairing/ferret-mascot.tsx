@@ -19,7 +19,7 @@
  * (`--fy-ferret-*` in `app/styles.css`), the only literal colours here, because no theme token is a ferret.
  */
 import { useId } from 'react';
-import { cn } from '@ferretry/app/ui';
+import { cn, useDocumentVisible } from '@ferretry/app/ui';
 
 export type FerretPose = 'peek' | 'curious' | 'cheer';
 
@@ -31,17 +31,20 @@ export interface FerretMascotProps {
 export function FerretMascot({ pose, className }: FerretMascotProps) {
   // Unique per instance: two mascots on one page must not share a clip path.
   const clip = `fy-ferret-clip-${useId().replaceAll(':', '')}`;
+  // A hidden tab keeps nothing running (the sky pauses the same way).
+  const visible = useDocumentVisible();
   return (
     <svg
       className={cn('fy-ferret', className)}
       data-pose={pose}
+      data-paused={visible ? undefined : ''}
       viewBox="0 0 240 190"
       aria-hidden="true"
       focusable="false"
     >
       <defs>
         <clipPath id={clip}>
-          <rect x="0" y="-60" width="240" height="250" />
+          <rect x="0" y="-60" width="240" height="246" />
         </clipPath>
       </defs>
       <ellipse className="fy-ferret-halo" cx="120" cy="110" rx="104" ry="84" />
@@ -84,7 +87,7 @@ export function FerretMascot({ pose, className }: FerretMascotProps) {
       </g>
 
       {/* The lip of the hole sits in FRONT of the ferret, so it can sink behind it. */}
-      <path className="fy-ferret-lip" d="M66 148 Q120 180 174 148 L174 190 L66 190 Z" />
+      <path className="fy-ferret-lip" d="M66 148 Q120 180 174 148 L174 186 L66 186 Z" />
       <path className="fy-ferret-lip-edge" d="M66 148 Q120 180 174 148" />
       <ellipse className="fy-ferret-paw fy-ferret-paw-rest" cx="94" cy="160" rx="12" ry="8.5" />
     </svg>
