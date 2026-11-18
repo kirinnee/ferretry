@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { implementApp, type PanelProps } from '@ferretry/kernel/manifest';
 import { provideToShell } from '../../../src/connect/provides.ts';
+import { storedOverrides } from '../../../src/layout/device-layout.ts';
 import { FerretWorkspace } from '../../../src/shell/ferret-workspace.tsx';
 import { useFerretWorkspace } from '../../../src/shell/ferret-workspace-actions.tsx';
 import { sidePaneOpen } from '../../../src/shell/side-pane-open.ts';
@@ -89,13 +90,17 @@ const plugin = entryOf(
 
 const layout = () => {
   const storage = memoryStore();
-  writeRecord(storage, APP_STORAGE.layout, {
-    nav: { style: 'list', items: ['page', 'other'] },
-    side: { holds: 'panels' },
-    phone: { nav: { side: 'bottom', items: ['page'] } },
-    panels: { 'ferret.side': ['note'] },
-    'composer.tools': [],
-  });
+  writeRecord(
+    storage,
+    APP_STORAGE.layout,
+    storedOverrides({
+      nav: { style: 'list', items: ['page', 'other'] },
+      side: { holds: 'panels' },
+      phone: { nav: { side: 'bottom', items: ['page'] } },
+      panels: { 'ferret.side': ['note'] },
+      'composer.tools': [],
+    }),
+  );
   return storage;
 };
 

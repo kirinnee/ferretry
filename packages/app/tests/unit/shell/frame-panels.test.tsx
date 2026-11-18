@@ -3,6 +3,8 @@ import { implementApp, type PanelProps } from '@ferretry/kernel/manifest';
 import { BUILT_IN_LAYOUTS } from '@ferretry/plugin-layouts/contract';
 import { type ReactNode, useState } from 'react';
 import { provideToShell } from '../../../src/connect/provides.ts';
+import { storedOverrides } from '../../../src/layout/device-layout.ts';
+import type { LayoutOverrides } from '../../../src/layout/layout.ts';
 import { useAppHook } from '../../../src/shell/app-hooks.ts';
 import { PanelSlot } from '../../../src/shell/views.tsx';
 import { useViewPlace } from '../../../src/shell/view-place.tsx';
@@ -177,13 +179,17 @@ const PHONE = { side: 'bottom', items: ['inbox'] };
  */
 const deviceLayout = (nav: Record<string, unknown>, phoneNav: Record<string, unknown> = PHONE) => {
   const storage = memoryStore();
-  writeRecord(storage, APP_STORAGE.layout, {
-    nav,
-    side: { holds: 'panels' },
-    phone: { nav: phoneNav },
-    panels: { 'ferret.side': [] },
-    'composer.tools': [],
-  });
+  writeRecord(
+    storage,
+    APP_STORAGE.layout,
+    storedOverrides({
+      nav,
+      side: { holds: 'panels' },
+      phone: { nav: phoneNav },
+      panels: { 'ferret.side': [] },
+      'composer.tools': [],
+    } as LayoutOverrides),
+  );
   return storage;
 };
 
@@ -660,13 +666,17 @@ describe('the side column', () => {
 
   test('U-L: a layout that asks for the right edge gets the side column after the page', async () => {
     const storage = memoryStore();
-    writeRecord(storage, APP_STORAGE.layout, {
-      nav: { side: 'left', style: 'list', items: ['inbox'] },
-      side: { show: 'wide-only', holds: 'panels', at: 'right' },
-      phone: { nav: PHONE },
-      panels: { 'ferret.side': [] },
-      'composer.tools': [],
-    });
+    writeRecord(
+      storage,
+      APP_STORAGE.layout,
+      storedOverrides({
+        nav: { side: 'left', style: 'list', items: ['inbox'] },
+        side: { show: 'wide-only', holds: 'panels', at: 'right' },
+        phone: { nav: PHONE },
+        panels: { 'ferret.side': [] },
+        'composer.tools': [],
+      } as LayoutOverrides),
+    );
     const app = await bootApp({ surfaces: [inbox], machines: ['d1'], path: '/d/d1/inbox', storage });
     view = app.view;
     expect(orderOf(app.view.container)).toEqual(['main', 'side']);
@@ -683,13 +693,17 @@ describe('a screen the side column holds', () => {
   /** The column holds the inbox screen itself (as the default layout holds the ferret list). */
   const holdingInbox = () => {
     const storage = memoryStore();
-    writeRecord(storage, APP_STORAGE.layout, {
-      nav: { side: 'left', style: 'list', items: ['inbox', 'lanes', 'thread'] },
-      side: { holds: 'inbox' },
-      phone: { nav: PHONE },
-      panels: { 'ferret.side': [] },
-      'composer.tools': [],
-    });
+    writeRecord(
+      storage,
+      APP_STORAGE.layout,
+      storedOverrides({
+        nav: { side: 'left', style: 'list', items: ['inbox', 'lanes', 'thread'] },
+        side: { holds: 'inbox' },
+        phone: { nav: PHONE },
+        panels: { 'ferret.side': [] },
+        'composer.tools': [],
+      } as LayoutOverrides),
+    );
     return storage;
   };
   const drawn = (word: string): number => text().split(word).length - 1;
