@@ -115,6 +115,7 @@ describe('usage parity · the app half', () => {
     expect(Array.from(frame.querySelectorAll('[data-insights-tab]')).map(tab => tab.textContent)).toEqual([
       'Insights',
       'Warden',
+      'Learning',
     ]);
     expect(frame.querySelector('[aria-label="Global insights"]')).not.toBeNull();
     await view.unmount();

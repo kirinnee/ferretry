@@ -9,6 +9,7 @@ import { MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
 import { useCallback } from 'react';
 import { useAgendaReferenceFacts } from '../hooks/use-agenda-reference-facts.ts';
 import { AgendaBoardProviders, useAgendaBoardHooks, useTaskBoards } from '../features/agenda/agenda-board-hooks.tsx';
+import { AgendaBannerSlot } from '../features/agenda/agenda-banner-slot.tsx';
 import { AgendaCardConversation } from '../features/agenda/agenda-conversation-slot.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { useAskFocus } from '../features/agenda/use-ask-focus.ts';
@@ -52,6 +53,7 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
               cardBoard={taskBoard}
               inbox={inbox}
               phone={phone}
+              banner={<AgendaBannerSlot daemon={daemon} />}
               clearPort={runtime.clearPort}
               answerPorts={answerFilePorts({ daemon, client: runtime.client }, fleet)}
               onNavigate={to => navigate(to)}
