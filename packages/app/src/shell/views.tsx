@@ -178,11 +178,14 @@ export function PanelSlot({
   subject,
   props,
   phone,
+  include,
 }: {
   readonly daemon: string;
   readonly slot: string;
   readonly subject?: string;
   readonly props?: Readonly<Record<string, unknown>>;
+  /** Draws only the panels this accepts: a host that splits one slot across two places (the composer's row and its status line). */
+  readonly include?: (panel: PanelRef) => boolean;
   /**
    * On a phone the slot shows ONE panel at a time, full width (`ferret-workspace.tsx`). `active` is the panel on show
    * (`<plugin>.<id>`), or none while another tab (the chat) is; every panel stays mounted, only the active one is drawn,
@@ -196,7 +199,8 @@ export function PanelSlot({
   // Outside a shell (a plugin's own harness or suite) there is no layout, so no panel is placed.
   const shell = useOptionalShell();
   if (shell === null) return null;
-  const panels: readonly PanelRef[] = shell.plan.panels(slot);
+  const placed: readonly PanelRef[] = shell.plan.panels(slot);
+  const panels = include === undefined ? placed : placed.filter(include);
   if (panels.length === 0) return null;
   return (
     <div className="fy-slot" data-slot={slot} data-phone-active={phone?.active}>

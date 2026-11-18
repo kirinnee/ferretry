@@ -2,8 +2,9 @@
  * The runtime picker the composer shows (`composer.tools` › `runtime-picker`): the model and the reasoning-level
  * switches of the ferret the panel is shown for. The ferret is the panel's `subject`.
  *
- * ONE SMALL CHIP IN THE COMPOSER'S ROW, THE LISTS IN A POPOVER (v4's composer-runtime: a chip on the bar that opens a
- * picker). The panel sits in the row beside the text box, so anything it draws in flow takes the box's room: it used to
+ * ONE SMALL CHIP ON THE COMPOSER'S STATUS LINE, THE LISTS IN A POPOVER (v4's composer-runtime: a chip on the bar that opens a
+ * picker). The chip reads model · thinking · speed. The composer draws this panel on its status line, under the row
+ * (Conversation's `STATUS_PANELS`), because anything it drew in the row would take the text box's room: it used to
  * draw both lists open, a four-row column that squeezed the text to one word and pushed Send below the window. The
  * popover is a portal with fixed placement, so nothing it holds can make the composer taller, and it asks for the model
  * catalog only once opened — a daemon without runtime discovery says so inside the popover, not on every page.
@@ -17,7 +18,7 @@ import { RuntimeEffortControls, RuntimeModelControls } from '../components/runti
 import type { RuntimesClient } from '../lib/client.ts';
 import { DaemonRuntimeModelCatalogStore } from '../lib/runtime-models.ts';
 import { readRuntimeSessionView, runtimeControlApi } from '../lib/runtime-switch.ts';
-import { launchedModel, type RuntimeSessionView } from '../lib/session-view.ts';
+import { type RuntimeSessionView, runtimeReadout } from '../lib/session-view.ts';
 
 const MARGIN = 8;
 const WIDTH = 352;
@@ -42,10 +43,6 @@ const popoverPlacement = (
     maxHeight: Math.max(160, anchor.top - 2 * MARGIN),
   };
 };
-
-/** What the chip says: the model in force, else the one the session was launched on, else a plain word. */
-const chipLabel = (view: RuntimeSessionView): string =>
-  view.state.observedModel?.trim() || launchedModel(view.config) || 'Model';
 
 export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelProps> => {
   const api = runtimeControlApi(client);
@@ -122,7 +119,7 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
     if (subject === undefined) return null;
     if (failure !== null) return <p role="alert">{failure}</p>;
     if (view === null) return null;
-    const label = chipLabel(view);
+    const label = runtimeReadout(view);
     return (
       <div className="fy-runtime-picker shrink-0" data-runtime-picker={subject}>
         <button
@@ -133,11 +130,11 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
           data-runtime-chip=""
           onClick={() => setOpen(current => !current)}
           ref={chip}
-          title={`Model and reasoning level — ${label}`}
+          title={`Model, thinking and speed — ${label}`}
           type="button"
         >
           <SlidersHorizontal aria-hidden="true" className="shrink-0" size={14} />
-          {/* A phone's row has no room for a name: the icon alone is the chip (the name is on its label and in the popover). */}
+          {/* A phone's ROW has no room for a name: the icon alone is the chip. The composer's status line has the room and shows it (conversation chat.css). */}
           <span className="hidden min-w-0 truncate sm:inline">{label}</span>
         </button>
         {open && placement !== null
