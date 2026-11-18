@@ -13,7 +13,7 @@ import { CircleAlert, SquareTerminal } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { Badge, Button } from '@ferretry/app';
-import { ConfirmToSee, isStepUpRefusal } from '@ferretry/app/ui';
+import { ConfirmToSee, isStepUpRefusal, Loading } from '@ferretry/app/ui';
 import type { DaemonConnection } from '../../shell.ts';
 import { closeFinishedTerminals, readTerminalHolders, type TerminalSlotsClient } from './terminal-slots-api.ts';
 
@@ -109,12 +109,7 @@ export function TerminalSlotsSettings({
         </p>
       </section>
     );
-  if (load.status === 'loading')
-    return (
-      <section className="kt-panel p-panel" role="status" aria-label="Loading the terminals">
-        <p className="m-0 text-cell leading-base text-muted">Reading this machine’s terminals…</p>
-      </section>
-    );
+  if (load.status === 'loading') return <Loading kind="page" label="Reading this machine’s terminals…" />;
 
   const { view } = load;
   const finished = view.holders.filter(isFinished);

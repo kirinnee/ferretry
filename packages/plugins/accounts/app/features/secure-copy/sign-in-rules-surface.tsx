@@ -8,7 +8,7 @@
 
 import type { SignInRuleList, SignInRuleStaged, SignInRuleView } from '../../../contract/routes/index.ts';
 import { daemonOfClient } from '@ferretry/app';
-import { ConfirmToSee } from '@ferretry/app/ui';
+import { ConfirmToSee, Loading } from '@ferretry/app/ui';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { isStepUpRefusal, type ReadMode } from '../../lib/step-up-refusal.ts';
 import {
@@ -264,12 +264,7 @@ export function SignInRulesSurface({ client, askPasskey: ask, pollMs = POLL_MS, 
     });
   };
 
-  if (read.kind === 'loading')
-    return (
-      <section className="kt-panel p-panel" role="status" aria-label="Loading standing sign-in rules">
-        <p className="m-0 text-ui text-faint">Reading this daemon’s standing sign-in rules…</p>
-      </section>
-    );
+  if (read.kind === 'loading') return <Loading kind="page" label="Reading this daemon’s standing sign-in rules…" />;
 
   return (
     <section className="kt-panel p-panel" aria-label="Standing sign-in rules" data-sign-in-rules="">

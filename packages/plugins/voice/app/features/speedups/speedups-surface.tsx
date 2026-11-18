@@ -25,7 +25,7 @@ import { cn } from '../../shell-voice.ts';
 import type { DaemonConnection } from '../../shell-voice.ts';
 import { useConfigChangeEffect, useDaemonClient } from '../../lib/voice-store.tsx';
 import { putSecret } from '../../shell-voice.ts';
-import { ConfirmToSee, isStepUpRefusal } from '@ferretry/app/ui';
+import { ConfirmToSee, isStepUpRefusal, Loading } from '@ferretry/app/ui';
 import { readSpeedups, type SpeedupClient, testSpeedup } from './speedups-api.ts';
 
 export type SpeedupClientFactory = (connection: DaemonConnection) => Promise<SpeedupClient>;
@@ -405,11 +405,7 @@ export function SpeedupsSurface({
     );
 
   if (loaded === null || loaded.daemonId !== connection.daemonId)
-    return (
-      <section className="kt-panel p-panel" role="status" aria-label="Loading speed-ups">
-        <p className="m-0 text-ui text-faint">Reading this machine’s speed-up keys…</p>
-      </section>
-    );
+    return <Loading kind="page" label="Reading this machine’s speed-up keys…" />;
 
   return <SpeedupsPanel view={loaded.view} busy={busy} errors={errors} onSave={save} onTest={test} />;
 }

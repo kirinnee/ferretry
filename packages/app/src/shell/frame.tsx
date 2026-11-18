@@ -33,6 +33,7 @@ import {
   NotFoundPage,
 } from './pages.tsx';
 import { PageScrollRegion } from '../scroll/page-scroll-region.tsx';
+import { LoadingBarHost } from '../ui/loading.tsx';
 import { FrameRootContext } from './frame-root.tsx';
 import { NameThisMachine } from './name-machine.tsx';
 import { PasskeyMount } from './passkey-mount.tsx';
@@ -400,6 +401,8 @@ export function Frame() {
       <div ref={setFrameRoot} className={`fy-frame fy-frame--nav-${plan.nav.side}`} data-layout={plan.layoutId}>
         <Nav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
         <div className="fy-body">
+          {/* The ONE background-loading bar (ui/loading.tsx): fixed to the top of the window, so it moves nothing. */}
+          <LoadingBarHost />
           <PhoneTitleBar daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
           <TopBar daemon={daemon} onSearch={openBar} />
           {/* THE STATUS STRIP: where the views mounted at the frame root draw what they draw IN FLOW — a line a watcher

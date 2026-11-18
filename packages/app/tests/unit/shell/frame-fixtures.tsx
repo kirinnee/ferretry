@@ -114,6 +114,8 @@ export interface BootOptions {
   readonly off?: Readonly<Record<string, readonly string[]>>;
   readonly install?: InstallPromptHolder;
   readonly storage?: ReturnType<typeof memoryStore>;
+  /** Every machine's plugin list is not answered until this settles: the "daemon has not said what it offers" wait. */
+  readonly holdInventory?: Promise<unknown>;
   /** Machines are paired before the first render unless a test pairs them later. */
   readonly pairLater?: boolean;
 }
@@ -132,10 +134,11 @@ export async function bootApp(options: BootOptions) {
       off: new Set(options.off?.[id] ?? []),
       viewOnly: options.viewOnly?.includes(id) ?? false,
       answers: new Map(),
-      transport: new FakeTransport((request: TransportRequest): TransportAnswer => {
+      transport: new FakeTransport((request: TransportRequest): Promise<TransportAnswer> | TransportAnswer => {
         if (request.path === '/v1/plugins') {
           const off = Object.fromEntries([...machine.off].map(plugin => [plugin, { on: false }]));
-          return json(inventoryOf(surfaces, off));
+          const answer = json(inventoryOf(surfaces, off));
+          return options.holdInventory === undefined ? answer : options.holdInventory.then(() => answer);
         }
         if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
         if (machine.locked) return json(UNLOCK_BODY, 401);
