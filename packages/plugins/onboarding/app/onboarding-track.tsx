@@ -47,7 +47,7 @@ const MARKER_TONE: Record<OnboardingStepStatus, string> = {
 
 const LABEL_TONE: Record<OnboardingStepStatus, string> = {
   completed: 'text-muted',
-  current: 'font-semibold text-fg',
+  current: 'text-fg',
   upcoming: 'text-faint',
 };
 

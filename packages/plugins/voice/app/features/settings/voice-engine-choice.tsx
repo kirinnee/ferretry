@@ -262,7 +262,7 @@ export function VoiceEngineChoice({ value, onChange, voice, browserSupport, clas
             key={option.id}
             className={cn(
               'flex flex-col gap-2 rounded-control border p-3',
-              selected ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2',
+              selected ? 'border-border bg-select-fill' : 'border-border bg-surface-2',
             )}
           >
             <label className="flex min-h-[44px] cursor-pointer items-start gap-2">
