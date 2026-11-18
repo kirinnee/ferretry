@@ -2,6 +2,7 @@ import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type { ConfigCollectionDef, ConfigWriteAllDocument, KernelPorts } from '@ferretry/kernel/contract';
 import { testHost } from '@ferretry/kernel/testing';
+import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { fakeLoginChanges, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import { PROFILE_ITEMS, RuntimesPort, type RuntimesApi } from '../../contract/index.ts';
 import { type RuntimesAssembly, runtimesDaemon, unavailableAssembly } from '../../daemon/index.ts';
@@ -72,7 +73,12 @@ export async function world(files: Record<string, unknown> = FILES, options: Wor
             };
       }),
     ] as never,
-    fakes: { ferrets: new FakeFerrets(), logins: fakeLogins([]), loginChanges: fakeLoginChanges() },
+    fakes: {
+      ferrets: new FakeFerrets(),
+      logins: fakeLogins([]),
+      loginChanges: fakeLoginChanges(),
+      vault: new FakeVault(),
+    },
     gate: new StandInAdmission(() => ownerStanding()),
     config: files,
   });

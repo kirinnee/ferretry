@@ -12,6 +12,7 @@ import { mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/
 import { dirname, join } from 'node:path';
 import { AutoResumeDecide, FerretsChanged } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
+import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { type DaemonImplementation, definePlugin, type HookInvoker, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
@@ -27,7 +28,7 @@ import {
   RuntimesPort,
 } from '../../../contract/index.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
-import { endedSeams, fileAssembly } from '../../../daemon/host-assembly.ts';
+import { endedSeams, fileAssembly, secretNamesOver } from '../../../daemon/host-assembly.ts';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
 import { AUTO_RESUME_SWITCH_UNREAD } from '../../../daemon/lib/service/auto-resume-answer.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
@@ -59,6 +60,7 @@ async function compose(
     readonly logins?: ReturnType<typeof sampleLogin>[];
     readonly executables?: readonly string[];
     readonly ferrets?: FakeFerrets;
+    readonly vault?: FakeVault;
     readonly sources?: ModelCatalogSourcesView;
   } = {},
 ): Promise<Composed> {
@@ -83,6 +85,7 @@ async function compose(
       ferrets: options.ferrets ?? new FakeFerrets(),
       logins: composedLogins,
       loginChanges: fakeLoginChanges(),
+      vault: options.vault ?? new FakeVault(),
     },
     gate: new StandInAdmission(() => ownerStanding()),
     config: options.config ?? CONFIG,
@@ -274,6 +277,7 @@ describe('a real apply through the composed daemon', () => {
         ferrets: new FakeFerrets(),
         logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
         loginChanges: fakeLoginChanges(),
+        vault: new FakeVault(),
       },
       gate: new StandInAdmission(() => ownerStanding()),
       config: CONFIG,
@@ -810,6 +814,7 @@ describe('the default composition stands in for the services and keeps a broken 
         ferrets,
         logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
         loginChanges: fakeLoginChanges(),
+        vault: new FakeVault(),
       },
       gate: new StandInAdmission(() => ownerStanding()),
       config: CONFIG,
@@ -832,6 +837,7 @@ describe('the default composition stands in for the services and keeps a broken 
         ferrets,
         logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
         loginChanges: fakeLoginChanges(),
+        vault: new FakeVault(),
       },
       gate: new StandInAdmission(() => ownerStanding()),
       config: CONFIG,
@@ -1075,6 +1081,7 @@ describe('the homes the composed daemon provides', () => {
         ferrets: new FakeFerrets(),
         logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
         loginChanges: fakeLoginChanges(),
+        vault: new FakeVault(),
       },
       gate: new StandInAdmission(() => ownerStanding()),
       config: CONFIG,
@@ -1131,6 +1138,7 @@ describe('M2b the auto-resume switch through the composed daemon', () => {
         ferrets: new FakeFerrets(),
         logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
         loginChanges: fakeLoginChanges(),
+        vault: new FakeVault(),
       },
       gate: new StandInAdmission(() => ownerStanding()),
       config: { ...CONFIG, 'runtimes.yaml': options.file },
@@ -1212,5 +1220,65 @@ describe('a runtime’s models through the composed daemon', () => {
 
     const body = runtimes.json<{ runtimes: { name: string; models?: unknown }[] }>();
     expect(body.runtimes.find(entry => entry.name === 'claude-default')?.models).toBeUndefined();
+  });
+});
+
+describe('the setup reads this machine’s secret names through the Vault (never a value)', () => {
+  const LINK = { change: { kind: 'setup.import', include: ['claude-code'] } };
+
+  it('links claude on a fresh machine: the import is composed over the Vault’s name listing, not the refusing stub', async () => {
+    const { host } = await compose();
+
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: LINK });
+
+    expect([staged.status, JSON.stringify(staged.json())]).toEqual([200, expect.not.stringContaining('secret store')]);
+    const { id } = staged.json<{ id: string }>();
+    const applied = await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+    expect([applied.status, applied.status === 200 ? '' : JSON.stringify(applied.json())]).toEqual([200, '']);
+  });
+
+  it('answers the copy’s key-name read from the Vault’s listing, as names and times only', async () => {
+    const vault = new FakeVault();
+    vault.plant('ANTHROPIC_API_KEY' as never, 'sk-never-shown-9f3a');
+    const { host } = await compose({ vault });
+
+    const scan = await host.request('GET', '/v1/runtimes/setup/scan');
+
+    expect(scan.status).toBe(200);
+    expect(JSON.stringify(scan.json())).not.toContain('sk-never-shown-9f3a');
+  });
+
+  it('refuses in words when the Vault truly cannot be read, instead of treating it as empty', async () => {
+    const vault = new FakeVault();
+    vault.names = async () => {
+      throw new Error('the sealed store is unreadable');
+    };
+    const { host } = await compose({ vault });
+
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body: LINK });
+
+    expect(staged.status).not.toBe(200);
+    expect(JSON.stringify(staged.json())).toContain('secret store could not be read');
+  });
+});
+
+describe('secretNamesOver: the name listing is the only thing the setup is handed', () => {
+  it('carries a name and two instants, and nothing else, whatever the listing holds', async () => {
+    const read = secretNamesOver({
+      names: async () =>
+        [
+          { name: 'A_KEY', createdAt: '2026-11-07T12:00:00.000Z', updatedAt: '2026-11-08T12:00:00.000Z', value: 'v' },
+        ] as never,
+    });
+
+    expect(await read()).toEqual([
+      { name: 'A_KEY', createdAt: '2026-11-07T12:00:00.000Z', updatedAt: '2026-11-08T12:00:00.000Z' },
+    ]);
+  });
+
+  it('is typed over `names` alone: a value-bearing member of the Vault cannot be passed in', () => {
+    // @ts-expect-error — `run` is not `names`; the port takes `Pick<VaultApi, 'names'>` and nothing wider is read.
+    secretNamesOver({ run: async () => undefined });
+    expect(true).toBe(true);
   });
 });

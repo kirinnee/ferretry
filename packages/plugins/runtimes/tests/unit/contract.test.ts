@@ -158,7 +158,9 @@ describe('runtimes contract', () => {
       'GET /v1/ferrets/:id/runtime-models',
       'POST /v1/ferrets/:id/runtime',
     ]);
-    expect(Object.keys(manifest.needs)).toEqual(['ferrets', 'logins', 'loginChanges']);
+    expect(Object.keys(manifest.needs)).toEqual(['ferrets', 'logins', 'loginChanges', 'vault']);
+    // The Vault is read for the setup's secret NAMES alone (a name listing, never a value).
+    expect(manifest.permissions?.secretNamePicker).toBe(true);
   });
 
   test('Runtimes answers which runtimes use a login (logins.used-by) and whether an auto-resume may spend and which login a runtime starts with, and is the only plugin that writes logins', () => {
