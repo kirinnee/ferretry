@@ -52,6 +52,8 @@ export interface GrantEvaluation {
   /** Whether the call ARRIVED on this host. Today it is exactly `!governed`; kept apart so widening reads its fact. */
   readonly hostLocal: boolean;
   readonly stepUp: boolean;
+  /** See `CapabilityPresentation.useAsksStepUp`; absent asks. */
+  readonly useAsksStepUp?: boolean;
   /** The proved device's own half; `undefined` for a caller that is not a device; `null` for one whose record is gone. */
   readonly device?: CapabilityGrants | null;
 }
@@ -96,6 +98,14 @@ export function decideCapability(demand: CapabilityDemand, evaluation: GrantEval
   )
     return { allowed: false, refusal: 'step-up-required' };
   if (!demandNeedsStepUp(demand)) return { allowed: true, refusal: 'granted' };
+  // THE OWNER'S TWO SWITCHES ARE THE ONLY SOURCE OF A PROMPT FOR A PLAIN USE: with the per-act confirmation off, a use
+  // (a read included) asks nothing, whether or not the machine also unlocks on opening. A configure still asks.
+  if (
+    (demand.axis === 'use' || demand.promptsAsUse === true) &&
+    evaluation.useAsksStepUp === false &&
+    evaluation.device !== undefined
+  )
+    return { allowed: true, refusal: 'granted' };
   if (!evaluation.stepUp) return { allowed: false, refusal: 'step-up-required' };
   return { allowed: true, refusal: 'granted', steppedUp: true };
 }
@@ -119,6 +129,7 @@ export function grantGuard(daemonWide: () => CapabilityGrants | undefined, clien
       governed,
       hostLocal: !governed,
       stepUp: presentation.stepUp,
+      ...(presentation.useAsksStepUp === undefined ? {} : { useAsksStepUp: presentation.useAsksStepUp }),
       ...(governed && presentation.deviceGrants !== undefined ? { device: presentation.deviceGrants } : {}),
     };
   };

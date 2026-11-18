@@ -381,8 +381,13 @@ export type StepUpRequiredBody = z.infer<typeof StepUpRequiredBodySchema>;
 export function cap(
   capability: CapabilityName,
   axis: CapabilityAxis,
-  options: { readonly narrowing?: true } = {},
-): { readonly capability: PolicyRef<'capability'>; readonly axis: CapabilityAxis; readonly narrowing?: true } {
+  options: { readonly narrowing?: true; readonly promptsAsUse?: true } = {},
+): {
+  readonly capability: PolicyRef<'capability'>;
+  readonly axis: CapabilityAxis;
+  readonly narrowing?: true;
+  readonly promptsAsUse?: true;
+} {
   return Object.freeze({ capability: CAPABILITIES[capability], axis, ...options });
 }
 

@@ -71,7 +71,7 @@ export default definePlugin({
         minimum: 'operator',
         caller: 'person',
         // c58-sec3 r1: a clean-up starts a ferret, so it asks what `POST /v1/ferrets` asks.
-        capability: cap('fleet', 'configure'),
+        capability: cap('fleet', 'configure', { promptsAsUse: true }),
         noStore: true,
         audit: { record: AUDIT_KINDS['session.opened'] },
         guard: { none: 'answers a run id and a sentence' },

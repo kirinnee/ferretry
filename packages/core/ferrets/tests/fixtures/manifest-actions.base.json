@@ -1514,7 +1514,8 @@
       "caller": "any",
       "capability": {
         "axis": "configure",
-        "capability": "fleet"
+        "capability": "fleet",
+        "promptsAsUse": true
       },
       "consultsGrants": true,
       "guard": {

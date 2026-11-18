@@ -135,7 +135,7 @@ describe('who is governed, and the unlock', () => {
     expect(admit(w, fleetUse, { device: 'phone' }).outcome).toBe('401 unauthorized');
   });
 
-  test('G79 while unlocked the step-up is held for every act unless stepUpOnActions; with the unlock off, every act asks', () => {
+  test('G79 while unlocked the step-up is held for every act unless stepUpOnActions; with the unlock off, a configure asks and a use asks only under stepUpOnActions', () => {
     const w = world();
     w.enrol('phone');
     for (const name of ['fleet', 'terminal', 'browser', 'pairing', 'secrets', 'sharing'] as const)
@@ -147,7 +147,8 @@ describe('who is governed, and the unlock', () => {
       '403 grant_step_up_required',
     );
     w.policy = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_GATE_SECURITY, unlockOnOpen: false } };
-    expect(admit(w, descriptor({ capability: cap('secrets', 'use') }), { device: 'phone' }).outcome).toBe(
+    expect(admit(w, descriptor({ capability: cap('secrets', 'use') }), { device: 'phone' }).outcome).toBe('admitted');
+    expect(admit(w, descriptor({ capability: cap('secrets', 'configure') }), { device: 'phone' }).outcome).toBe(
       '403 grant_step_up_required',
     );
   });

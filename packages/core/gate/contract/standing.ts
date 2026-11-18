@@ -115,6 +115,13 @@ export interface CapabilityPresentation {
   readonly actor: ApiActor;
   readonly stepUp: boolean;
   readonly freshStepUp?: boolean;
+  /**
+   * Whether the owner asked for a passkey on every act (`stepUpOnActions`, or an undetermined policy that asks the
+   * stricter way). When `false`, a plain `use` demand needs no step-up of its own, so a READ (list, status, stream
+   * open) never asks for one on a machine whose owner turned both switches off. `configure` is unaffected. Absent
+   * means "asks", so a presentation built without it keeps today's answer.
+   */
+  readonly useAsksStepUp?: boolean;
   /** The proved device's own half; `null` when its provider could not say (undetermined). */
   readonly deviceGrants?: CapabilityGrants | null;
 }

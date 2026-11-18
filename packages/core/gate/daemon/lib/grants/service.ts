@@ -95,6 +95,7 @@ export class GrantService {
       governed,
       hostLocal: presentation.local,
       stepUp: presentation.stepUp,
+      ...(presentation.useAsksStepUp === undefined ? {} : { useAsksStepUp: presentation.useAsksStepUp }),
       ...(governed && presentation.deviceGrants !== undefined ? { device: presentation.deviceGrants } : {}),
     };
   }

@@ -27,6 +27,9 @@ export const FLEET_USE = { capability: CAPABILITIES.fleet, axis: 'use' } as cons
  */
 export const FLEET_CONFIGURE = { capability: CAPABILITIES.fleet, axis: 'configure' } as const;
 
+/** What a door that STARTS a ferret asks: the `fleet.configure` grant, and a passkey only where a `use` would (`promptsAsUse`). */
+export const FLEET_START = { ...FLEET_CONFIGURE, promptsAsUse: true } as const;
+
 type Descriptor = Parameters<typeof route>[1];
 
 /** What a read route still says: its audit and guard declarations, and a `minimum` or `caller` that differs from the default. */

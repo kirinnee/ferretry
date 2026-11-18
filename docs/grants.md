@@ -429,7 +429,7 @@ Both axes default to **enabled** for every capability. The dangerous act is stru
 unavailable to a remote caller, so starting open costs much less than it would otherwise, and starting
 closed would make a fresh remote session useless until somebody walked to the machine.
 
-**A page opening is not an act.** When the owner has turned `unlockOnOpen` off, every governed act asks its own
+**A page opening is not an act.** When the owner has turned `unlockOnOpen` off and `stepUpOnActions` on, every governed act asks its own
 step-up — but the Terminals and Browser panels read the machine on their own when a ferret page opens (the terminal
 list, the pane, the processes, the browser status), and a prompt for that would greet the person on every load. Those
 reads are sent **quiet** (`PluginClient.call`'s `quiet`, `GET`/`HEAD` only): a daemon that wants a step-up for one
@@ -640,7 +640,16 @@ milliseconds, so a proof made in the very same millisecond as the admission, or 
 is not told apart from an earlier one.
 **While a device is unlocked, its step-up is held** for every act below — the unlock IS the step-up — unless
 the owner turned on `stepUpOnActions`, which asks for a passkey again per act inside an unlock. A machine
-with the unlock turned off always asks per act. **Narrowing never asks again** (below). **Adding access always asks:** minting a pairing code,
+with the unlock turned off asks per act for every `configure` only: a plain `use` (a read included) asks a passkey
+only when the owner turned `stepUpOnActions` on, so a machine with BOTH switches off never greets a person with a
+passkey prompt for opening a page.
+**The trade-off, stated plainly:** with `unlockOnOpen` AND `stepUpOnActions` both off, a paired remote device uses
+terminals, the browser, pairing reads, secrets and sharing with its device key alone — no passkey, ever, for a `use`.
+It is the owner's explicit opt-out of both prompts, so it is not a default (both stay as they were: unlock on, per-act
+off). A `configure` still asks, and so do the acts that add access (minting a code, widening a device, agent control).
+The doors that START a ferret (`POST /v1/ferrets`, a board task's Start, `lessons/run` and `lessons/scan`, pack
+clean-up) ask the `fleet.configure` grant but a passkey only as a `use` would (`promptsAsUse` on the demand), so a
+`--limited` device is still refused there and a fully granted one starts a ferret with no prompt when both switches are off. **Narrowing never asks again** (below). **Adding access always asks:** minting a pairing code,
 widening another device, and turning "what agents may control" (terminals/browsers/files, T) back ON
 want a passkey proved for that one act, from any device, unlocked or not
 ([design/zero-trust.md](design/zero-trust.md) B6) — turning one of those three OFF never does. So does

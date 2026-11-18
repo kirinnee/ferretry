@@ -74,6 +74,7 @@ const taskRoute = <const Key extends string>(key: Key, descriptor: Parameters<ty
 
 const fleetUse = cap('fleet', 'use');
 const fleetConfigure = cap('fleet', 'configure');
+const fleetStart = { ...cap('fleet', 'configure'), promptsAsUse: true } as const;
 const read = { skip: 'a read of tasks and lanes' } as const;
 const taskText = { none: 'tasks are authored text; no pane, page or vault text' } as const;
 
@@ -177,7 +178,7 @@ export default definePlugin({
         minimum: 'operator',
         caller: 'person',
         // c58-sec3 r1: starting a task starts a ferret (the task text is its prompt), so it asks what `POST /v1/ferrets` asks.
-        capability: fleetConfigure,
+        capability: fleetStart,
         noStore: true,
         audit: { record: TASK_STARTED_AUDIT },
         guard: taskText,
