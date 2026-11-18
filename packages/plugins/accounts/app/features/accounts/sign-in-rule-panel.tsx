@@ -4,6 +4,7 @@
  * the secrets-gated rule route, and a device that may not use secrets sees one clear sentence, never names.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type {
   AccountSummary,
   Place,
@@ -96,11 +97,7 @@ export function SignInRuleSheetHost(props: SignInRuleSheetHostProps): ReactNode 
   const replaces = props.replaces ?? eligibility?.rule;
   const pending = !named && eligibility?.rule !== undefined;
   if (pending && existing === undefined)
-    return (
-      <p className="m-0 text-ui text-muted" data-rule-replaces-reading="" role="status">
-        Reading the standing rule this sign-in already has…
-      </p>
-    );
+    return <Loading kind="bar" label="Reading the standing rule this sign-in already has…" />;
   if (pending && existing === 'unreadable')
     return (
       <div className="flex min-w-0 flex-col gap-2">
@@ -176,12 +173,7 @@ export function SignInRulePanel({ rules, signIn, account }: SignInRulePanelProps
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | undefined>(undefined);
 
-  if (read.kind === 'loading')
-    return (
-      <p className="m-0 text-ui text-muted" data-rule-panel="loading" role="status">
-        Reading the standing rules…
-      </p>
-    );
+  if (read.kind === 'loading') return <Loading kind="page" label="Reading the standing rules…" />;
   if (read.kind === 'forbidden')
     return (
       <p className="m-0 text-ui text-warn" data-rule-panel="forbidden" role="status">

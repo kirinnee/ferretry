@@ -36,6 +36,7 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type { TranscriptEntry } from '../../lib/transcript.ts';
 import { itemCardKind } from '../../lib/card-kind.ts';
 import { GATE_REASON_LENGTH_LIMIT, gateReasonTooLong } from '../../lib/gate-reason.ts';
@@ -852,12 +853,7 @@ function InboxEmpty() {
 }
 
 function InboxReading({ words = 'Reading what your ferrets asked…' }: { readonly words?: string }) {
-  return (
-    <p className="fy-attn-inbox__reading" data-agenda-reading="" role="status">
-      <Spinner size={16} />
-      {words}
-    </p>
-  );
+  return <Loading kind="page" label={words} />;
 }
 
 /** Find, the machine filter or the Warden chip left nothing: say so, and offer the way back. */
@@ -1059,7 +1055,7 @@ function InboxParkedList({
       </ul>
       {inbox.parkedWhole ? (
         inbox.resolvedReading ? (
-          <p className="fy-attn-inbox__hint">Reading more…</p>
+          <Loading kind="bar" label="Reading more…" />
         ) : null
       ) : (
         <p className="fy-attn-inbox__hint" data-agenda-parked-window="">

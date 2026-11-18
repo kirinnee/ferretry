@@ -1,6 +1,7 @@
 /** Accessible, grammar-aware query input for daemon-scoped analytics surfaces. */
 
-import { Loader2, Search, SearchX, ShieldAlert } from 'lucide-react';
+import { Loading } from '@ferretry/app/ui';
+import { Search, SearchX, ShieldAlert } from 'lucide-react';
 import { type KeyboardEvent, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import {
@@ -139,13 +140,7 @@ export function AnalyticsCompletionList({
       </div>
       <div className="relative max-h-[min(240px,max(88px,calc(var(--app-h,100dvh)*0.3)))] overflow-y-auto overscroll-contain scroll-thin [touch-action:pan-y]">
         {status === 'loading' ? (
-          <div
-            className="flex min-h-[44px] items-center gap-sm px-control-x py-row-y text-meta text-muted"
-            role="status"
-          >
-            <Loader2 size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-            Loading values…
-          </div>
+          <Loading kind="bar" label="Loading values…" />
         ) : status === 'error' ? (
           <div className="flex min-h-[44px] items-center gap-sm px-control-x py-row-y text-meta text-err" role="alert">
             <ShieldAlert size={15} aria-hidden="true" />

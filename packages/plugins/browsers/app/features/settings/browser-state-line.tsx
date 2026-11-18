@@ -1,4 +1,4 @@
-import { Button, SetupNote, SetupSection } from '@ferretry/app/ui';
+import { Button, Loading, SetupNote, SetupSection } from '@ferretry/app/ui';
 import { useCallback, useEffect, useState } from 'react';
 import type { BrowserStateView, LOOPBACK_FIREWALL_STATES } from '../../../contract/index.ts';
 import type { CallClient } from '../../lib/clients.ts';
@@ -84,7 +84,7 @@ export function BrowserStateLine({
           className="m-0 min-w-0 break-words text-cell leading-base text-fg"
           data-browser-state={reading.kind === 'shown' ? reading.view.state : reading.kind}
         >
-          {words}
+          {online && reading.kind === 'reading' ? <Loading kind="bar" label={words} /> : words}
         </p>
         <Button type="button" size="sm" data-browser-state-refresh="" disabled={!online} onClick={() => void load()}>
           Refresh

@@ -9,6 +9,7 @@
  * The edits ("Updated to v2") are not words anyone said: they are the activity log's (`agenda-activity-log.tsx`).
  */
 
+import { Loading } from '@ferretry/app/ui';
 import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
@@ -50,7 +51,11 @@ function HistoryRow({ event, ferret, renderProse }: HistoryRowProps) {
         data-history-gap={event.state}
         role={event.state === 'loading' ? 'status' : 'note'}
       >
-        {GAP_WORDS(event.earlier, event.state)}
+        {event.state === 'loading' ? (
+          <Loading kind="bar" label={GAP_WORDS(event.earlier, event.state)} />
+        ) : (
+          GAP_WORDS(event.earlier, event.state)
+        )}
       </li>
     );
   }
