@@ -27,6 +27,7 @@ import {
   realpath,
   rename,
   rm,
+  rmdir,
   stat,
   writeFile,
 } from 'node:fs/promises';
@@ -97,10 +98,11 @@ export interface ResetTree {
 }
 
 /**
- * The slot folder, `v5`, `v5/home`, `v5/user` (when it exists) and the backup folder (when it exists) must each be a real folder (lstat: not a
+ * The slot folder, `v5`, `v5/home`, `v5/user` (when it exists), the harness folder and the backup folder (when they exist) must each be a real folder (lstat: not a
  * link, not a file) whose realpath is EXACTLY where it belongs under the slot's own realpath. A link anywhere in the parent chain (a `v5`
- * that points at another slot, a slot folder reached through a link) makes the realpath differ, so it is refused. Called before anything is
- * stopped, moved or removed, and again after the stop.
+ * that points at another slot, a slot folder reached through a link) makes the realpath differ, so it is refused. A check is only a
+ * snapshot: it is called before anything is stopped, and again after every step that runs foreign code (the stop, the build install,
+ * the tar), but the destructive steps never lean on it. They work on the STAGED copy (below), whose parent this run made.
  */
 export async function assertResetTree(paths: ResetPaths): Promise<ResetTree> {
   const slotInfo = await lstat(paths.real).catch(() => undefined);
@@ -112,6 +114,7 @@ export async function assertResetTree(paths: ResetPaths): Promise<ResetTree> {
     [paths.v5Dir, v5Real, true],
     [paths.home, join(v5Real, 'home'), false],
     [paths.user, join(v5Real, 'user'), false],
+    [paths.harness, join(v5Real, 'harness-bin'), false],
     [backupDirOf(paths.real), join(slotReal, 'reset-backups'), false],
   ];
   for (const [path, expected, required] of parts) {
@@ -126,6 +129,116 @@ export async function assertResetTree(paths: ResetPaths): Promise<ResetTree> {
       return refuse(`${path} resolves to ${real}, not ${expected}: a link in its parent chain leads out of this slot`);
   }
   return { slotReal, v5Real };
+}
+
+// ─── staging: the old home moves INSIDE the slot, and only the moved copy is read, hashed, tarred and removed ──────────
+
+/** Not a refusal: the run stopped after something moved. The message says where the old home is. */
+export class ResetHalfway extends Error {}
+
+export const STAGING_PREFIX = '.reset-staging-';
+
+interface StagedMember {
+  readonly name: string;
+  readonly ino: number;
+  readonly dev: number;
+}
+export interface Staged {
+  /** `<slot realpath>/.reset-staging-<stamp>-xxxxxx`: made by mkdtemp in this run (0700). */
+  readonly dir: string;
+  readonly members: readonly StagedMember[];
+  /** Where each member came from (`<slot realpath>/v5/<name>`). */
+  readonly from: ReadonlyMap<string, string>;
+}
+
+/** `path` is a real folder (lstat: no link) that resolves to exactly `expected`. Returns its identity. */
+async function plainFolder(path: string, expected: string): Promise<{ ino: number; dev: number }> {
+  const info = await lstat(path).catch(() => undefined);
+  if (info === undefined || info.isSymbolicLink() || !info.isDirectory())
+    return refuse(`${path} is not a plain folder (a link, a file or gone)`);
+  const real = await realpath(path);
+  if (real !== expected) return refuse(`${path} resolves to ${real}, not ${expected}`);
+  return { ino: info.ino, dev: info.dev };
+}
+
+/** The staged members are still the very folders that were moved: same identity, still real folders, still under the staging folder. */
+export async function assertStaged(staged: Staged): Promise<void> {
+  await plainFolder(staged.dir, staged.dir);
+  for (const member of staged.members) {
+    const found = await plainFolder(join(staged.dir, member.name), join(staged.dir, member.name));
+    if (found.ino !== member.ino || found.dev !== member.dev)
+      return refuse(`the staged ${member.name} in ${staged.dir} was replaced while the reset ran`);
+  }
+}
+
+/**
+ * Moves `v5/home` (and `v5/user` when it exists) into a NEW folder this run makes inside the slot's own realpath: a rename within one
+ * slot. Each source is looked at right before its rename and the moved folder is looked at right after (same identity, resolves under the
+ * staging folder), so a source that was swapped for another slot's folder in between is caught and moved straight back.
+ */
+export async function stageOut(tree: ResetTree, now: Date): Promise<Staged> {
+  const dir = await mkdtemp(join(tree.slotReal, `${STAGING_PREFIX}${resetStamp(now)}-`));
+  await chmod(dir, 0o700);
+  await plainFolder(dir, dir);
+  const members: StagedMember[] = [];
+  const from = new Map<string, string>();
+  const staged = (): Staged => ({ dir, members, from });
+  try {
+    for (const name of TAR_MEMBERS) {
+      const source = join(tree.v5Real, name);
+      if ((await lstat(source).catch(() => undefined)) === undefined) {
+        if (name === 'home') return refuse(`${source} does not exist; nothing to put aside`);
+        continue;
+      }
+      await plainFolder(tree.v5Real, tree.v5Real);
+      const before = await plainFolder(source, source);
+      const target = join(dir, name);
+      await rename(source, target);
+      from.set(name, source);
+      const after = await plainFolder(target, target).catch(() => undefined);
+      if (after === undefined || after.ino !== before.ino || after.dev !== before.dev) {
+        // The source was swapped between the look and the move: what arrived is not this slot's folder. Put it straight back.
+        await rename(target, source).catch(() => undefined);
+        return refuse(`${source} was replaced while it was being moved aside`);
+      }
+      members.push({ name, ino: before.ino, dev: before.dev });
+    }
+  } catch (error) {
+    throw await abandonStaging(staged(), error);
+  }
+  return staged();
+}
+
+/** Puts every staged member back where it came from, if that place is still free and still inside this slot, and removes the empty staging folder. */
+async function unstage(staged: Staged): Promise<void> {
+  await assertStaged(staged);
+  for (const member of staged.members) {
+    const to = staged.from.get(member.name) ?? '';
+    if ((await lstat(to).catch(() => undefined)) !== undefined) return refuse(`${to} exists again`);
+    await plainFolder(dirname(to), dirname(to));
+    await rename(join(staged.dir, member.name), to);
+  }
+  await rmdir(staged.dir);
+}
+
+/** A step failed after the move: try to put the old home back; if that cannot be done safely, keep the staged copy and say where it is. */
+export async function abandonStaging(staged: Staged, error: unknown): Promise<Error> {
+  const cause = error instanceof Error ? error : new Error(String(error));
+  try {
+    await unstage(staged);
+    return cause;
+  } catch (again) {
+    const why = again instanceof Error ? again.message : String(again);
+    return new ResetHalfway(
+      `${cause.message}. The old 5.0 home could not be moved back (${why}); it is kept in ${staged.dir}, and nothing outside this slot was touched`,
+    );
+  }
+}
+
+/** The old home is archived: the staged copy goes, after one more look that it is still the folder that was moved. */
+export async function removeStaged(staged: Staged): Promise<void> {
+  await assertStaged(staged);
+  await rm(staged.dir, { recursive: true, force: true });
 }
 
 // ─── what a tar may hold ─────────────────────────────────────────────────────────────────────────────────────────
@@ -397,7 +510,7 @@ export async function checkProvenance(paths: ResetPaths, file: string): Promise<
 }
 
 /**
- * Tars `members` of `v5Dir` into a NEW file in the backup folder (mode 0600 from the first byte: the file is made empty with that
+ * Tars the STAGED members (never the live v5 folder) into a NEW file in the backup folder (mode 0600 from the first byte: the file is made empty with that
  * mode, then tar writes into it), reads the tar back, and chmods it again. Returns the tar's path. A tar that cannot be written
  * or read back is removed and nothing else is touched.
  */
@@ -406,18 +519,18 @@ export async function makeBackup(
   paths: ResetPaths,
   kind: 'reset' | 'restore',
   now: Date,
+  staged: Staged,
 ): Promise<string> {
+  await assertStaged(staged);
   const dir = await ensureBackupDir(paths.real);
   const file = join(dir, backupName(resetStamp(now), kind));
   if ((await lstat(file).catch(() => undefined)) !== undefined)
     return refuse(`${file} already exists; try again in a second`);
-  const members: string[] = [];
-  for (const name of TAR_MEMBERS)
-    if ((await lstat(join(paths.v5Dir, name)).catch(() => undefined)) !== undefined) members.push(name);
-  if (!members.includes('home')) return refuse(`${paths.home} does not exist; nothing to put aside`);
+  const members = staged.members.map(member => member.name);
+  if (!members.includes('home')) return refuse(`${join(staged.dir, 'home')} does not exist; nothing to put aside`);
   await writeFile(file, '', { mode: 0o600, flag: 'wx' });
   await chmod(file, 0o600);
-  const made = await tar.create(paths.v5Dir, file, members);
+  const made = await tar.create(staged.dir, file, members);
   const back = made.code === 0 ? await tar.list(file) : { code: made.code, entries: [] as string[], err: made.err };
   if (made.code !== 0 || back.code !== 0 || back.entries.length === 0) {
     await rm(file, { force: true });
@@ -427,6 +540,7 @@ export async function makeBackup(
   }
   await chmod(file, 0o600);
   try {
+    await assertStaged(staged);
     await writeProvenance(paths, file, now);
   } catch (error) {
     await rm(file, { force: true });
@@ -443,10 +557,16 @@ export async function makeBackup(
  * kit can seed NOTHING before the first boot (not a port pin, not limits); the daemon makes home.json, its identity and the rest itself.
  */
 export async function writeFreshHome(paths: ResetPaths): Promise<void> {
-  await mkdir(paths.home, { recursive: true, mode: 0o700 });
-  await chmod(paths.home, 0o700);
-  await mkdir(paths.user, { recursive: true, mode: 0o700 });
-  await chmod(paths.user, 0o700);
+  // The tree is looked at right now, and each folder is made with a plain mkdir (no `recursive`: it FAILS if something is already there,
+  // so a folder that was put in the way is never adopted) under the slot's own v5 realpath, then looked at again.
+  const tree = await assertResetTree(paths);
+  for (const name of TAR_MEMBERS) {
+    const path = join(tree.v5Real, name);
+    await mkdir(path, { mode: 0o700 });
+    await plainFolder(path, path);
+    await chmod(path, 0o700);
+  }
+  await assertResetTree(paths);
 }
 
 /** What is in a home that has just been made empty: used by tests and by the post-start proof. Names of files under `config/` and `state/`. */
@@ -551,17 +671,35 @@ export async function resetV5(
   await actions.stop();
   await assertResetTree(paths);
   await actions.installBuild();
-  const file = await makeBackup(tar, paths, 'reset', options.now);
+  // The install ran foreign code: look again, then move the old home INSIDE the slot. From here on only the staged copy is read,
+  // tarred and removed; no destructive step names a path under `v5` that was resolved before an earlier step ran.
+  const tree = await assertResetTree(paths);
+  const staged = await stageOut(tree, options.now);
+  let file: string;
+  try {
+    file = await makeBackup(tar, paths, 'reset', options.now, staged);
+    await assertStaged(staged);
+  } catch (error) {
+    throw await abandonStaging(staged, error);
+  }
   actions.say(`  the old 5.0 home is kept as ${file} (mode 0600, in a 0700 folder)`);
-  await rm(paths.home, { recursive: true, force: true });
-  await rm(paths.user, { recursive: true, force: true });
-  await writeFreshHome(paths);
+  try {
+    await writeFreshHome(paths);
+    await removeStaged(staged);
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    throw new ResetHalfway(
+      `the new empty home could not be made safely (${why}). The old 5.0 home is in ${file} and its staged copy is kept in ${staged.dir}; nothing outside this slot was touched`,
+    );
+  }
   if (keep !== undefined) {
+    await assertResetTree(paths);
     const done = await repointRealClaude(real);
     actions.say(
       `  real claude: dispatcher kept for login ${done.login}, pointed at ${done.store} (missing until the owner signs in)`,
     );
   }
+  await assertResetTree(paths);
   await actions.start();
   return { tar: file };
 }
@@ -644,15 +782,44 @@ export async function restoreV5(
       return refuse(`extracting ${file} failed (${out.err.trim().slice(0, 200)}); nothing was changed`);
     await verifyExtracted(stage, tree);
     await actions.stop();
-    await assertResetTree(paths);
-    const saved = await makeBackup(tar, paths, 'restore', now);
+    const live = await assertResetTree(paths);
+    const staged = await stageOut(live, now);
+    let saved: string;
+    try {
+      saved = await makeBackup(tar, paths, 'restore', now, staged);
+      await assertStaged(staged);
+    } catch (error) {
+      throw await abandonStaging(staged, error);
+    }
     actions.say(`  the current 5.0 home is kept as ${saved}`);
-    await rm(paths.home, { recursive: true, force: true });
-    await rm(paths.user, { recursive: true, force: true });
-    await rename(join(stage, 'home'), paths.home);
-    if ((await lstat(join(stage, 'user')).catch(() => undefined)) !== undefined)
-      await rename(join(stage, 'user'), paths.user);
-    await mkdir(paths.user, { recursive: true, mode: 0o700 });
+    try {
+      // The extracted folders were made by this run under `stage`: look at them again, then move each into the (now empty) v5 folder of
+      // this slot, checking where it landed. A destination that exists is never replaced.
+      const now5 = await assertResetTree(paths);
+      for (const name of TAR_MEMBERS) {
+        const source = join(stage, name);
+        const found = await lstat(source).catch(() => undefined);
+        const target = join(now5.v5Real, name);
+        if (found === undefined) {
+          if (name === 'home') return refuse('the extracted home/ is gone');
+          await mkdir(target, { mode: 0o700 });
+        } else {
+          const identity = await plainFolder(source, join(await realpath(stage), name));
+          if ((await lstat(target).catch(() => undefined)) !== undefined) return refuse(`${target} exists again`);
+          await rename(source, target);
+          const landed = await plainFolder(target, target);
+          if (landed.ino !== identity.ino || landed.dev !== identity.dev)
+            return refuse(`${target} is not the folder that was extracted`);
+        }
+      }
+      await removeStaged(staged);
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      throw new ResetHalfway(
+        `the old home could not be put back safely (${why}). The home it replaces is in ${saved} and its staged copy is kept in ${staged.dir}; nothing outside this slot was touched`,
+      );
+    }
+    await assertResetTree(paths);
     await actions.start();
     return { saved };
   } finally {

@@ -113,6 +113,7 @@ import {
 } from './real-claude.ts';
 import {
   ResetRefusal,
+  assertResetTree,
   backupDirOf,
   resetV5,
   restoreV5,
@@ -2450,6 +2451,7 @@ async function startFreshV5Side(slot: Slot): Promise<void> {
   if (port === slot.v5Port)
     console.log(`  port pin: the daemon recorded ${String(port)} itself; the kit wrote nothing`);
   else {
+    await assertResetTree(resetPathsOf(slot)); // the pin is written only into a home that is still inside this slot
     await writeBindPin(slot.v5.home, slot.v5Port);
     console.log(
       `  port pin: the daemon recorded ${port === undefined ? 'none' : String(port)}; the kit wrote the bind pin ${String(slot.v5Port)} into config/daemon.json AFTER the first boot (the only file it wrote)`,
