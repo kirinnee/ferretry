@@ -1,34 +1,46 @@
 name: Deploy 5.0 preview PWA to Pages
 
-# THE 5.0 PREVIEW. Builds, signs and deploys the app from `rebuild/5.0` OR `rebuild/5.0-after` (those two refs and no
-# other), to its own Cloudflare Pages project (`ferretry-v5`, https://ferretry-v5.pages.dev), beside production. Nothing
-# here touches production: another workflow file (so its own run counter), another signing key and environment, another
-# Pages project. It is a copy of pwa-pages.yaml's three-job split; read that file's comments for why the jobs are
-# separate. A push to any other branch does not trigger it, and a dispatch from any other ref runs no job (every job
-# repeats the ref).
+# THE 5.0 PREVIEW. Builds, signs and deploys the app from ONE dedicated ref, `rebuild/preview` (and no other), to its own
+# Cloudflare Pages project (`ferretry-v5`, https://ferretry-v5.pages.dev), beside production. Nothing here touches
+# production: another workflow file (so its own run counter), another signing key and environment, another Pages
+# project. It is a copy of pwa-pages.yaml's three-job split; read that file's comments for why the jobs are separate. A
+# push to any other branch does not trigger it, and there is no manual trigger (no `workflow_dispatch`): the kit's push
+# is the only way in, and every job still repeats the ref.
 #
-# WHICH BRANCH FEEDS THE PREVIEW (the rule, and why it cannot go backwards). The owner tests the preview while the
-# next work lands on `rebuild/5.0-after`, so a push to either branch deploys it. Both deploy to the project's
-# PRODUCTION alias: `wrangler pages deploy --branch=` is always the project's production branch, `rebuild/5.0`,
-# whichever ref built the bundle. The signed list names the real built commit (GITHUB_SHA) and this run's number. THE
-# PREVIEW FOLLOWS `rebuild/5.0-after` WHILE THAT BRANCH EXISTS: a push to `rebuild/5.0` (a main sync, say) builds,
-# signs and deploys NOTHING when `refs/heads/rebuild/5.0-after` exists on origin, because it would put older app code
-# behind a newer run number. The check is the `gate` job's read-only `git ls-remote`; a skipped run is a green run
-# with no deploy, so a consumer must read the `deploy` job's own conclusion, not the run's.
+# WHAT MOVES THE PREVIEW (the rule, and why it cannot go backwards). THE PREVIEW APP FOLLOWS THE OWNER'S SLOT, NOT EVERY
+# MERGE. The app refuses a daemon whose plugin contracts differ ("Reload to get the new app"), so a deploy per merge to
+# `rebuild/5.0` / `rebuild/5.0-after` broke the owner's slot-8 daemon after any contract-changing merge, until the next
+# slot upgrade. Now a merge deploys nothing. The sweep kit's `upgrade-v5` / `reset-v5`
+# first fast-forward `refs/heads/rebuild/preview` to the exact commit the new daemon was built from, wait for THIS
+# workflow's `Deploy PWA` job to succeed for that commit, and only then swap the daemon. Nobody else pushes that ref.
+# The signed list names the real built commit (GITHUB_SHA) and this run's number. Every deploy goes to the project's
+# PRODUCTION alias: `wrangler pages deploy --branch=` is the Pages project's production branch (`rebuild/5.0`, a Pages
+# project setting that predates this ref and is not a git ref this workflow reads), whichever ref built the bundle.
 #
-# A STALE COMMIT NEVER DEPLOYS LAST. The concurrency group below serialises runs but does NOT order them: pushes A then
-# B can run B first, and re-running an older green run does the same, so A would then overwrite the production alias
-# with older app code. The `deploy` job therefore refuses a stale commit inside the serialised path, immediately before
-# `wrangler pages deploy`: it reads the CURRENT head of the run's own branch (read-only `git ls-remote`) and deploys only
-# when that head is this run's GITHUB_SHA. Otherwise the step logs "a newer commit <sha> is on <branch>; its own run
-# deploys it" and EXITS NON-ZERO, so the `deploy` job concludes `failure`, never `success` (a consumer that needs a
-# green "Deploy PWA" job for a commit must not read a refused deploy as a deployed one). A branch read that fails
-# fails the step too: never a guess, never a deploy.
+# NEVER BACKWARDS, in two layers (an installed copy refuses a release whose sequence is lower than the one it holds, so
+# an older commit behind a newer run number would be a stuck preview):
+#   1. The `gate` job refuses a push that is not the LIVE commit or a descendant of it. "Live" is read from the live site's
+#      own signed release record (`release-manifest.json` + `.sig`: its proved `commit`), not from run history (which
+#      misses a deploy made by the old per-merge trigger, a cancelled run and a failed re-run) and not from `event.before`
+#      (a refused force-rewind still moves the ref). The compare API must say the pushed commit is `ahead` or `identical`;
+#      `behind` or `diverged` builds, signs and deploys NOTHING. An unreadable, non-200 or unverifiable live record, or a
+#      failed compare, FAILS the job (closed). THAT IS ONLY A PRE-FILTER: GitHub can re-run the deploy job alone on a
+#      stale "allow", so the deploy job repeats the decision immediately before the upload from the project's CURRENT
+#      production deployment (the Cloudflare Pages API) and the signed record, on every attempt (below). A
+#      skipped run is a green run with no deploy, so a consumer must read the `deploy` job's own conclusion, not the run's.
+#   2. A STALE COMMIT NEVER DEPLOYS LAST. The concurrency group below serialises runs but does NOT order them: pushes A
+#      then B can run B first, and re-running an older green run does the same, so A would then overwrite the production
+#      alias with older app code. The `deploy` job therefore refuses a stale commit inside the serialised path,
+#      immediately before `wrangler pages deploy`: it reads the CURRENT head of the run's own branch (read-only
+#      `git ls-remote`) and deploys only when that head is this run's GITHUB_SHA. Otherwise the step logs "a newer
+#      commit <sha> is on <branch>; its own run deploys it" and EXITS NON-ZERO, so the `deploy` job concludes `failure`,
+#      never `success` (a consumer that needs a green "Deploy PWA" job for a commit must not read a refused deploy as a
+#      deployed one). A branch read that fails fails the step too: never a guess, never a deploy.
 #
-# Environments: `pwa-release-v5` and `pwa-deploy-v5` must allow BOTH branches (scripts/local/setup-pwa-release-v5.sh
-# sets that rule). Until they do, a `rebuild/5.0-after` run passes `gate` and `build`, then `sign` is rejected at the
-# environment gate ("Branch `rebuild/5.0-after` is not allowed to deploy to pwa-release-v5 due to environment
-# protection rules"), so nothing is signed or deployed and the run is red.
+# Environments: `pwa-release-v5` and `pwa-deploy-v5` must allow `rebuild/preview` (scripts/local/setup-pwa-release-v5.sh
+# sets that rule). Until they do, a `rebuild/preview` run passes `gate` and `build`, then `sign` is rejected at the
+# environment gate ("Branch `rebuild/preview` is not allowed to deploy to pwa-release-v5 due to environment protection
+# rules"), so nothing is signed or deployed and the run is red.
 #
 # The preview names its own app through ONE switch, `FY_HOSTED_APP_ORIGIN`, which `scripts/ci/hosted-app-origin.sh`
 # turns into the app's origin define, the release key file (`packages/app/release-signing-key.preview.pub`, committed
@@ -39,8 +51,7 @@ name: Deploy 5.0 preview PWA to Pages
 # rule, signing key). docs/pwa-release-signing.md is the contract.
 on:
   push:
-    branches: [rebuild/5.0, rebuild/5.0-after]
-  workflow_dispatch:
+    branches: [rebuild/preview]
 
 concurrency:
   group: pwa-pages-v5
@@ -68,46 +79,105 @@ jobs:
   gate:
     timeout-minutes: 5
     name: Does this ref feed the preview
-    # Every job opens with this exact two-ref guard (scripts/validate/release-guards.sh holds it): `push` is already
-    # filtered to these branches, and the guard stops a workflow_dispatch on any other ref from deploying.
-    if: (github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after')
+    # Every job opens with this exact one-ref guard (scripts/validate/release-guards.sh holds it): `push` is already
+    # filtered to this branch (and there is no manual trigger), so the guard is the second line, not the only one.
+    if: github.ref == 'refs/heads/rebuild/preview'
     permissions:
       contents: read
     runs-on: ubuntu-latest
     outputs:
       deploy: ${{ steps.rule.outputs.deploy }}
     steps:
-      # No checkout, no secret and no environment: `git ls-remote` reads the branch list and writes nothing. The
-      # token reaches git through GIT_CONFIG_* variables, never an argument, and is masked.
+      # Only for the committed release public key and scripts/ci/verify-pwa-release.sh; nothing is installed and no
+      # environment is entered, so the gate holds no secret.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      # THE REFERENCE IS WHAT THE LIVE SITE SAYS IT IS, NOT RUN HISTORY AND NOT `event.before`. The commit that is really
+      # live is in the site's own signed release record, the manifest the app itself verifies (`commit` and `sequence`).
+      # Run history misses a live deploy that came from the old per-merge trigger, one whose run was cancelled while
+      # finishing, and one whose later re-run failed; `event.before` moves with a refused force-rewind. So the gate
+      # downloads the live `release-manifest.json` and `.sig`, PROVES the signature with the same script the deploy uses
+      # (against this commit's committed preview key), and requires the pushed commit to be the live commit or a
+      # descendant of it (the compare API). Anything it cannot read, prove or relate FAILS CLOSED: the job fails, nothing
+      # is built, signed or deployed, except a 404 for the manifest, which this pre-filter passes on to the deploy job.
+      #
+      # THIS JOB IS ONLY A FAST PRE-FILTER, NOT THE AUTHORITY. GitHub can re-run the `deploy` job alone, reusing this
+      # job's stale "allow" after the live release moved on, so the check that counts is repeated INSIDE the deploy job,
+      # immediately before the upload ("Refuse a release that goes backwards"), on every attempt.
       - name: Apply the never-backwards rule
         id: rule
         env:
           GH_TOKEN: ${{ github.token }}
-          REF: ${{ github.ref }}
+          DELETED: ${{ github.event.deleted }}
+          AFTER: ${{ github.sha }}
           REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          if [[ ${REF} == refs/heads/rebuild/5.0-after ]]; then
+          if [[ ${DELETED} == true ]]; then
+            echo "the preview ref was deleted: there is nothing to deploy"
+            echo "deploy=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          origin="$(./scripts/ci/hosted-app-origin.sh)"
+          live_dir="$(mktemp -d)"
+          trap 'rm -rf "${live_dir}"' EXIT
+          # One fetch per file, no redirects followed, a cache-busting query and no-cache so a just-finished deploy is
+          # not read as the previous one. The status is read from the response, never guessed from the body.
+          fetch() {
+            curl --silent --show-error --max-time 30 --retry 2 --header 'Cache-Control: no-cache' \
+              --output "${live_dir}/$1" --write-out '%{http_code}' "${origin}/$1?gate=${RUN_ID}"
+          }
+          manifest_status="$(fetch release-manifest.json)" || {
+            echo "❌ could not read ${origin}/release-manifest.json; refusing to guess what is live" >&2
+            exit 1
+          }
+          if [[ ${manifest_status} == 404 ]]; then
+            # This job is only a FAST PRE-FILTER (it holds no Cloudflare credential, so it cannot tell a never-deployed
+            # project from a wrong origin). It lets a 404 through; the deploy job's own check, which reads the project's
+            # production deployment from the Cloudflare Pages API on EVERY attempt, is the authority and fails when that
+            # shows a deployment.
+            echo "${origin} has no release manifest (HTTP 404): the deploy job decides whether anything is live, so this pre-filter passes ${AFTER} on"
             echo "deploy=true" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
-          echo "::add-mask::${auth}"
-          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader "GIT_CONFIG_VALUE_0=AUTHORIZATION: basic ${auth}"
-          # --exit-code: 0 = the branch exists, 2 = it does not; anything else is an error and fails the job (never a guess).
-          status=0
-          git ls-remote --exit-code --heads "https://github.com/${REPOSITORY}" refs/heads/rebuild/5.0-after >/dev/null || status=$?
-          case "${status}" in
-            0)
-              echo "rebuild/5.0-after exists: the preview follows it, so this rebuild/5.0 push deploys nothing (it would go backwards)"
-              echo "deploy=false" >> "${GITHUB_OUTPUT}"
-              ;;
-            2)
-              echo "rebuild/5.0-after does not exist: the preview follows rebuild/5.0"
+          if [[ ${manifest_status} != 200 ]]; then
+            echo "❌ ${origin}/release-manifest.json answered HTTP ${manifest_status}; refusing to guess what is live" >&2
+            exit 1
+          fi
+          signature_status="$(fetch release-manifest.sig)" || {
+            echo "❌ could not read ${origin}/release-manifest.sig; refusing to guess what is live" >&2
+            exit 1
+          }
+          if [[ ${signature_status} != 200 ]]; then
+            echo "❌ ${origin}/release-manifest.sig answered HTTP ${signature_status}; refusing to guess what is live" >&2
+            exit 1
+          fi
+          # The live record must be signed by this commit's preview key; a record that does not verify is not evidence.
+          ./scripts/ci/verify-pwa-release.sh "${live_dir}" ||
+            {
+              echo "❌ the live release record at ${origin} does not verify; refusing to guess what is live" >&2
+              exit 1
+            }
+          live="$(jq -er '.commit' "${live_dir}/release-manifest.json")"
+          if [[ ! ${live} =~ ^[0-9a-f]{40}$ ]]; then
+            echo "❌ the live release record names '${live}', which is not a commit id; refusing to guess whether this would go backwards" >&2
+            exit 1
+          fi
+          # `status` is how AFTER relates to the live commit: ahead, identical, behind or diverged. A failed read fails the job (never a guess).
+          relation="$(gh api "repos/${REPOSITORY}/compare/${live}...${AFTER}" --jq .status)"
+          case "${relation}" in
+            ahead | identical)
+              echo "${AFTER} is ${relation} of the live ${live}: it is the live commit or a descendant, so the preview follows it"
               echo "deploy=true" >> "${GITHUB_OUTPUT}"
               ;;
+            behind | diverged)
+              echo "${AFTER} is ${relation} relative to the live ${live}: this push deploys nothing (it would go backwards)"
+              echo "deploy=false" >> "${GITHUB_OUTPUT}"
+              ;;
             *)
-              echo "❌ could not read the branch list (git ls-remote exit ${status}); refusing to guess whether this would go backwards" >&2
+              echo "❌ unexpected compare status '${relation}'; refusing to guess whether this would go backwards" >&2
               exit 1
               ;;
           esac
@@ -116,7 +186,7 @@ jobs:
     timeout-minutes: 15
     name: Build PWA release
     needs: gate
-    if: (github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after') && needs.gate.outputs.deploy == 'true'
+    if: github.ref == 'refs/heads/rebuild/preview' && needs.gate.outputs.deploy == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -148,9 +218,9 @@ jobs:
     timeout-minutes: 10
     name: Sign PWA release
     needs: [gate, build]
-    if: (github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after') && needs.gate.outputs.deploy == 'true'
+    if: github.ref == 'refs/heads/rebuild/preview' && needs.gate.outputs.deploy == 'true'
     # The preview's release signing key lives ONLY in this protected environment, whose deployment-branch rule allows
-    # `rebuild/5.0` and `rebuild/5.0-after` and nothing else (scripts/local/setup-pwa-release-v5.sh creates both), so no
+    # `rebuild/preview` and nothing else (scripts/local/setup-pwa-release-v5.sh creates them), so no
     # other workflow or ref can read it.
     environment: pwa-release-v5
     permissions:
@@ -193,8 +263,8 @@ jobs:
     timeout-minutes: 10
     name: Deploy PWA
     needs: [gate, build, sign]
-    if: (github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after') && needs.gate.outputs.deploy == 'true'
-    # The Cloudflare credentials live in this environment, which only `rebuild/5.0` and `rebuild/5.0-after` may deploy
+    if: github.ref == 'refs/heads/rebuild/preview' && needs.gate.outputs.deploy == 'true'
+    # The Cloudflare credentials live in this environment, which only `rebuild/preview` may deploy
     # to, so no other branch can reach them; it is not the signing key's environment, so the deploy job never holds that key. They are named
     # CLOUDFLARE_PAGES_V5_* and nothing at repository level has those names, so this job can NEVER fall back to
     # production's account token (the secrets setup script requires a Pages-only token for ferretry-v5).
@@ -207,6 +277,8 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+          # Whole history: "Refuse a release that goes backwards" asks git whether the live commit is an ancestor of this one.
+          fetch-depth: 0
       - uses: ./.github/actions/install-nix
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -291,13 +363,134 @@ jobs:
             exit 1
           fi
           echo "${GITHUB_SHA} is the head of ${BRANCH}: deploying it"
+      # THE AUTHORITATIVE NEVER-BACKWARDS CHECK, in two steps. It runs on every attempt of this job (GitHub can re-run
+      # this job alone, so nothing the gate decided earlier is trusted), right before the upload. What is live is the
+      # project's CURRENT PRODUCTION DEPLOYMENT, read from the Cloudflare Pages API (`canonical_deployment`: its id, its own
+      # URL and the commit hash every upload records: this workflow's `--commit-hash` and, before it, wrangler's own from
+      # the checkout).
+      #
+      # STEP 1 HOLDS THE TOKEN AND RUNS NOTHING FROM THE CHECKOUT: curl and jq, nothing else. The token is in this step's
+      # environment alone and reaches curl on stdin, never in an argument; the answer is left in a file for step 2.
+      - name: Read the production deployment
+        id: project
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_V5_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_PAGES_V5_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          fail() {
+            echo "❌ $*" >&2
+            exit 1
+          }
+          api_status="$(printf 'Authorization: Bearer %s\n' "${CLOUDFLARE_API_TOKEN}" |
+            curl --silent --show-error --max-time 30 --retry 2 --header @- --output "${RUNNER_TEMP}/pages-project.json" \
+              --write-out '%{http_code}' "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/ferretry-v5")" ||
+            fail "could not read the Pages project ferretry-v5; refusing to guess what is live"
+          [[ ${api_status} == 200 ]] || fail "the Pages API answered HTTP ${api_status} for ferretry-v5; refusing to guess what is live"
+          jq -e '.success == true and (.result | type == "object") and (.result | has("canonical_deployment"))' "${RUNNER_TEMP}/pages-project.json" >/dev/null ||
+            fail "the Pages API answer for ferretry-v5 is not a project with a production deployment field; refusing to guess what is live"
+      # STEP 2 HOLDS NO TOKEN, so the scripts it runs from the pushed commit (hosted-app-origin.sh, verify-pwa-release.sh)
+      # never see it. The signed record is read from the production deployment's OWN URL (https://<first 8 of its
+      # id>.<alias host>, checked against the id and the project), because the alias is mutable and not bound to that
+      # deployment; the alias's record must then agree with it. Then: the live commit must be an ancestor of the commit
+      # being deployed (git, on the full history); an identical commit is a no-op (the upload is skipped, the job is still
+      # green); otherwise this run's sequence must exceed the live signed sequence. Anything unreadable, unparseable,
+      # unverifiable, or disagreeing FAILS the job. "No production deployment" from the API is the one first-deploy signal.
+      - name: Refuse a release that goes backwards
+        id: live
+        env:
+          AFTER: ${{ github.sha }}
+          SEQUENCE: ${{ github.run_number }}
+          ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          fail() {
+            echo "❌ $*" >&2
+            exit 1
+          }
+          project_file="${RUNNER_TEMP}/pages-project.json"
+          work_dir="$(mktemp -d)"
+          trap 'rm -rf "${work_dir}"' EXIT
+          # 1. The production deployment.
+          jq -e '.success == true and .result.name == "ferretry-v5" and (.result | has("canonical_deployment"))' "${project_file}" >/dev/null ||
+            fail "the Pages API answer is not the ferretry-v5 project; refusing to guess what is live"
+          if [[ "$(jq -c '.result.canonical_deployment' "${project_file}")" == null ]]; then
+            echo "the Pages API shows no production deployment of ferretry-v5: this is the first deploy, so nothing is older"
+            echo "skip=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          jq -e '.result.canonical_deployment | (.project_name == "ferretry-v5")' "${project_file}" >/dev/null ||
+            fail "the production deployment is not a deployment of ferretry-v5; refusing to guess what is live"
+          deployment_id="$(jq -er '.result.canonical_deployment.id' "${project_file}")"
+          [[ ${deployment_id} =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] ||
+            fail "the production deployment id '${deployment_id}' is not a deployment id"
+          alias_origin="$(./scripts/ci/hosted-app-origin.sh)"
+          deployment_origin="https://${deployment_id:0:8}.${alias_origin#https://}"
+          [[ "$(jq -er '.result.canonical_deployment.url' "${project_file}")" == "${deployment_origin}" ]] ||
+            fail "the production deployment's URL is not ${deployment_origin} (its id's first 8 characters on the alias host); refusing to read a record from an unbound address"
+          # A recorded hash that is PRESENT must be a full commit id (anything else fails); only an ABSENT (or null) one falls back
+          # to the deployment's own signed record.
+          api_commit=""
+          if [[ "$(jq -r '(.result.canonical_deployment.deployment_trigger.metadata // {}) | (has("commit_hash") and .commit_hash != null)' "${project_file}")" == true ]]; then
+            api_commit="$(jq -er '.result.canonical_deployment.deployment_trigger.metadata.commit_hash | strings' "${project_file}")" ||
+              fail "the production deployment's recorded commit hash is not a string; refusing to guess what is live"
+            [[ ${api_commit} =~ ^[0-9a-f]{40}$ ]] ||
+              fail "the production deployment's recorded commit hash '${api_commit}' is not a full commit id; refusing to guess what is live"
+          fi
+          # 2. The signed record: the deployment's own, then the alias's, each proved against the committed key. A record
+          # that is missing or unverifiable while a deployment exists is a failure, never a first deploy.
+          nonce="${GITHUB_RUN_ID}-${ATTEMPT}-$(date +%s%N)"
+          read_record() { # <origin> <directory>
+            mkdir -p "$2"
+            for name in release-manifest.json release-manifest.sig; do
+              file_status="$(curl --silent --show-error --max-time 30 --retry 2 --header 'Cache-Control: no-cache' \
+                --output "$2/${name}" --write-out '%{http_code}' "$1/${name}?check=${nonce}")" ||
+                fail "could not read $1/${name} while a production deployment exists; refusing to guess what is live"
+              [[ ${file_status} == 200 ]] || fail "$1/${name} answered HTTP ${file_status} while a production deployment exists; refusing to guess what is live"
+            done
+            ./scripts/ci/verify-pwa-release.sh "$2" || fail "the release record at $1 does not verify; refusing to guess what is live"
+            jq -e '(.commit | type == "string" and test("^[0-9a-f]{40}$")) and (.sequence | type == "number" and . >= 0 and . == floor)' "$2/release-manifest.json" >/dev/null ||
+              fail "the release record at $1 has no full commit id and whole sequence"
+          }
+          read_record "${deployment_origin}" "${work_dir}/deployment"
+          read_record "${alias_origin}" "${work_dir}/alias"
+          record_commit="$(jq -er '.commit' "${work_dir}/deployment/release-manifest.json")"
+          live_sequence="$(jq -er '.sequence' "${work_dir}/deployment/release-manifest.json")"
+          if [[ -n ${api_commit} ]]; then
+            # The API's commit is the authority. A deployment's record that says otherwise is not evidence.
+            [[ ${api_commit} == "${record_commit}" ]] ||
+              fail "the production deployment is ${api_commit} but its own signed record says ${record_commit}; refusing to guess what is live"
+            live="${api_commit}"
+          else
+            echo "the production deployment records no commit hash: its own signed record's ${record_commit} decides"
+            live="${record_commit}"
+          fi
+          # The alias is what readers get: a stale or different copy there is not a release we can reason from.
+          [[ "$(jq -er '[.commit, .sequence] | @tsv' "${work_dir}/alias/release-manifest.json")" == "$(jq -er '[.commit, .sequence] | @tsv' "${work_dir}/deployment/release-manifest.json")" ]] ||
+            fail "the signed record at ${alias_origin} differs from the production deployment's own (stale copy or a deploy in flight); refusing to guess what is live"
+          # 3. The decision.
+          git cat-file -e "${live}^{commit}" 2>/dev/null || fail "the live commit ${live} is not in this checkout's history; refusing to guess whether ${AFTER} goes backwards"
+          if [[ ${live} == "${AFTER}" ]]; then
+            echo "${AFTER} is already the live production deployment: nothing to upload (this job stays green)"
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          git merge-base --is-ancestor "${live}" "${AFTER}" ||
+            fail "the live ${live} is not an ancestor of ${AFTER}: deploying it would go backwards or sideways"
+          if ((SEQUENCE <= live_sequence)); then
+            fail "this run's sequence ${SEQUENCE} does not exceed the live signed sequence ${live_sequence}; installed copies would refuse it"
+          fi
+          echo "${AFTER} descends from the live ${live} and its sequence ${SEQUENCE} exceeds ${live_sequence}: deploying it"
+          echo "skip=false" >> "${GITHUB_OUTPUT}"
       # `--branch` is the Pages project's PRODUCTION branch whatever ref built this bundle: a deploy of any other
-      # branch name would land on a preview alias and leave https://ferretry-v5.pages.dev on the old app.
+      # branch name would land on a preview alias and leave https://ferretry-v5.pages.dev on the old app. `--commit-hash`
+      # records the built commit on the deployment, which is what the check above reads next time.
       - name: Deploy production bundle
+        if: steps.live.outputs.skip != 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_V5_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_PAGES_V5_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           nix develop .#ci -c bunx wrangler pages deploy packages/app/dist \
-            --project-name=ferretry-v5 --branch=rebuild/5.0
+            --project-name=ferretry-v5 --branch=rebuild/5.0 --commit-hash="${GITHUB_SHA}"

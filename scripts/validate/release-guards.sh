@@ -16,7 +16,7 @@ set -euo pipefail
 #                                             AT THE TAGGED COMMIT: it covers commits made AFTER this merge only. A tag on
 #                                             an older 5.0 commit (or a branch cut from one) runs the old, unguarded file.
 #   everything else                          no tag trigger; every job that can write, use an environment or read a
-#                                             secret is gated on main (the preview's own workflow on rebuild/5.0).
+#                                             secret is gated on main (the preview's own workflow on rebuild/preview).
 #   WHAT STOPS A TAG FROM PUBLISHING is cd.yaml's main-only job: the tagged commit must be on main, and EVERY other job
 #   of cd.yaml (compile, the macOS smoke, GoReleaser publish, the Casks commit inside it, the signature) depends on it,
 #   directly or through another job. This script proves that dependency below. Declared gap: a v* tag on a 5.0 commit
@@ -33,8 +33,8 @@ set -euo pipefail
 #      WHEN CD ITSELF CARRIES THE GUARD, which is true only of commits after this change.
 #   3. Any other workflow with a job that can write (`contents: write`), use an environment or read a secret has every
 #      such job gated on `github.ref == 'refs/heads/main'`, and no `push.tags` trigger.
-#   4. The preview workflow (`pwa-pages-v5.yaml`) is triggered by pushes to `rebuild/5.0` and `rebuild/5.0-after` and
-#      no other branch, every job's `if` OPENS with exactly that two-ref guard (only `&&` may follow it, never a
+#   4. The preview workflow (`pwa-pages-v5.yaml`) is triggered by pushes to `rebuild/preview` and
+#      no other branch, every job's `if` OPENS with exactly that one-ref guard (only `&&` may follow it, never a
 #      top-level `||`), its signing and deploy jobs use environments of their own, and its deploy job refuses a stale
 #      commit (the run branch's head must equal GITHUB_SHA) in a step before `wrangler pages deploy`.
 #   5. Nothing but CD and the Release workflow's own steps names `Casks/` or semantic-release.
@@ -59,7 +59,7 @@ release=.github/workflows/release.yaml
 cd_workflow=.github/workflows/cd.yaml
 preview=.github/workflows/pwa-pages-v5.yaml
 main_ref="github.ref == 'refs/heads/main'"
-preview_ref_guard="(github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after')"
+preview_ref_guard="github.ref == 'refs/heads/rebuild/preview'"
 
 # 1. Release
 if [[ -f ${release} ]]; then
@@ -117,10 +117,10 @@ done
 
 # 4. The preview workflow
 if [[ -f ${preview} ]]; then
-  triggers "${preview}" | jq -e '.push.branches == ["rebuild/5.0", "rebuild/5.0-after"] and ((.push | has("tags")) | not) and ((.push | has("paths")) | not)' >/dev/null ||
-    fail "${preview} must be triggered by pushes to rebuild/5.0 and rebuild/5.0-after alone"
-  triggers "${preview}" | jq -e '(keys | sort) == ["push", "workflow_dispatch"]' >/dev/null ||
-    fail "${preview} may be triggered only by a push and a dispatch"
+  triggers "${preview}" | jq -e '.push.branches == ["rebuild/preview"] and ((.push | has("tags")) | not) and ((.push | has("paths")) | not)' >/dev/null ||
+    fail "${preview} must be triggered by pushes to rebuild/preview alone"
+  triggers "${preview}" | jq -e 'keys == ["push"]' >/dev/null ||
+    fail "${preview} may be triggered only by a push (no workflow_dispatch: a dispatch would skip the never-backwards comparison)"
   # The guard must OPEN the `if`, and only `&&` may follow it: a correctly parenthesised guard followed by a top-level
   # `|| <anything>` would let another condition (another ref, an event) ride along outside it. `||` inside parentheses
   # or a quoted string is fine; one at parenthesis depth 0 after the guard is refused.
@@ -149,6 +149,34 @@ if [[ -f ${preview} ]]; then
                   and ($r | contains("exit 1")))]
            | length > 0)' >/dev/null ||
     fail "${preview}: the deploy job must, before wrangler pages deploy, read the run branch head with git ls-remote --exit-code --heads, refuse (exit 1) unless it equals GITHUB_SHA (an older commit must not publish after a newer one)"
+  # THE DEPLOY JOB IS THE AUTHORITY ON "NEVER BACKWARDS". GitHub can re-run it alone on a stale gate result, so BEFORE
+  # `wrangler pages deploy` it must (1) in a step that holds the Cloudflare token and runs nothing from the checkout (no
+  # `./scripts/`), read the project's production deployment from the Pages API (canonical_deployment), and (2) in a LATER
+  # step that holds no Cloudflare credential at all (the pushed commit's scripts run there), prove the signed record and ask
+  # git whether the live commit is an ancestor (`merge-base --is-ancestor`).
+  json "${preview}" | jq -e '
+    .jobs.deploy.steps as $steps
+    | ([$steps | to_entries[] | select((.value.run // "") | contains("wrangler pages deploy")) | .key] | first) as $deploy_at
+    | ([$steps | to_entries[]
+            | select(.key < $deploy_at)
+            | select((.value.run // "") as $r
+                | ((.value.env // {}) | tostring | contains("secrets.CLOUDFLARE_PAGES_V5_API_TOKEN"))
+                  and ($r | contains("api.cloudflare.com/client/v4/accounts/"))
+                  and ($r | contains("canonical_deployment"))
+                  and (($r | contains("./scripts/")) | not))
+            | .key] | first) as $read_at
+    | $deploy_at != null
+      and $read_at != null
+      and ([$steps | to_entries[]
+            | select(.key > $read_at and .key < $deploy_at)
+            | select((.value.run // "") as $r
+                | (((.value.env // {}) | tostring | contains("secrets.")) | not)
+                  and (($r | contains("CLOUDFLARE")) | not)
+                  and ($r | contains("verify-pwa-release.sh"))
+                  and ($r | contains("merge-base --is-ancestor"))
+                  and ($r | contains("fail")))]
+           | length > 0)' >/dev/null ||
+    fail "${preview}: the deploy job must, before wrangler pages deploy, (1) read the production deployment from the Cloudflare Pages API in a step that runs nothing from the checkout, then (2) in a later step with no secret and no Cloudflare variable, verify the signed record and refuse (git merge-base --is-ancestor) a commit that is not a descendant of it (a re-run of the deploy job alone must not reuse a stale gate, and the token must not reach the pushed commit's scripts)"
   json "${preview}" | jq -e '(.jobs.sign.environment == "pwa-release-v5") and (.jobs.deploy.environment == "pwa-deploy-v5")' >/dev/null ||
     fail "${preview}: sign must use pwa-release-v5 and deploy pwa-deploy-v5"
   json "${preview}" | jq -e '[.jobs[] | .permissions // {} | .["contents"] // "none"] | all(. == "read")' >/dev/null ||
@@ -170,4 +198,4 @@ for workflow in "${workflows[@]}"; do
 done
 
 ((status == 0)) || exit 1
-echo "✅ every job of cd.yaml sits behind main-only, so a tag off main publishes nothing for commits made after this guard lands (a v* tag on a 5.0 commit made before this guard would still publish; no agent ever creates or pushes a tag); the preview deploys from rebuild/5.0 and rebuild/5.0-after alone"
+echo "✅ every job of cd.yaml sits behind main-only, so a tag off main publishes nothing for commits made after this guard lands (a v* tag on a 5.0 commit made before this guard would still publish; no agent ever creates or pushes a tag); the preview deploys from rebuild/preview alone"

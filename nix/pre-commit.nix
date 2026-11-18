@@ -166,7 +166,7 @@ pre-commit-lib.run {
     };
 
     # Only main can tag, publish a release, touch Casks/ or run semantic-release; the 5.0 preview deploys from
-    # rebuild/5.0 and rebuild/5.0-after alone. A tag is not a branch, so every link of the release chain is held to the ref.
+    # rebuild/preview alone. A tag is not a branch, so every link of the release chain is held to the ref.
     a-release-guards = {
       enable = true;
       name = "Release guards";

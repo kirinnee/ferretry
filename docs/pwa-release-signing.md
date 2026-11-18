@@ -328,16 +328,48 @@ update look like a bad deploy (a tampered cached copy is fetched again, not refu
 
 ## The 5.0 preview app
 
-`rebuild/5.0` and `rebuild/5.0-after` (those two branches and no other) deploy their own app to its own Pages project,
+`rebuild/preview` (that one branch and no other) deploys its own app to its own Pages project,
 `ferretry-v5` (https://ferretry-v5.pages.dev), from `.github/workflows/pwa-pages-v5.yaml`, beside production and
 touching none of it:
 
-- **The preview follows `rebuild/5.0-after` while that branch exists, and never goes backwards.** Both branches deploy
-  to the project's production alias (`wrangler pages deploy --branch=rebuild/5.0`, the project's production branch,
-  whichever ref built the bundle); the signed list names the real built commit and this run's number. A push to
-  `rebuild/5.0` builds, signs and deploys nothing when `refs/heads/rebuild/5.0-after` exists on origin (the `gate` job's
-  read-only `git ls-remote`), because it would put older app code behind a newer run number. A run skipped that way is
-  green with no deploy: read the `deploy` job's own conclusion, not the run's.
+- **The preview app follows the owner's slot, not every merge.** The app refuses a daemon whose plugin contracts differ
+  ("Reload to get the new app"), so deploying on every merge to `rebuild/5.0` / `rebuild/5.0-after` broke the slot-8
+  daemon after any contract-changing merge, until the next slot upgrade. A merge now deploys nothing. The workflow
+  triggers only on a push to `refs/heads/rebuild/preview`, a ref nobody pushes by hand: the sweep kit's `upgrade-v5` and
+  `reset-v5` (`migration/v4-to-v5/fixtures/sweep`), given a build stamped with commit X, fast-forward it to X, wait for
+  this workflow's `Deploy PWA` job to succeed for X, and only then stop and swap the daemon. Every deploy goes to the
+  project's production alias (`wrangler pages deploy --branch=rebuild/5.0`, the Pages project's production branch, a
+  project setting and not a git ref this workflow reads); the signed list names the real built commit and this run's
+  number.
+- **Never backwards, in two layers.** An installed copy refuses a release whose sequence is lower than the one it holds,
+  so an older commit behind a newer run number would strand the preview. (1) The `gate` job is a **fast pre-filter**:
+  it downloads the live site's `release-manifest.json` and `.sig`, proves the signature with
+  `scripts/ci/verify-pwa-release.sh` and requires the pushed commit to be the live commit or a descendant of it
+  (compare API), so an obviously older push builds nothing. It reads no run history (which misses a deploy made by the
+  old per-merge trigger, a cancelled run and a failed re-run) and not `event.before` (which moves with a refused
+  force-rewind), and it fails on anything it cannot read, prove or relate, except a 404 for the manifest, which it passes
+  on because it holds no Cloudflare credential and cannot tell a never-deployed project from a wrong origin. It is not the
+  authority: GitHub can re-run the `deploy` job alone, reusing a stale "allow" after the live release has moved on.
+  (2) The `deploy` job is the **authority**, in two steps immediately before the upload, on every attempt.
+  **`Read the production deployment`** holds the Pages-only token (in that step's environment alone, sent to `curl` on
+  stdin, never as an argument) and runs nothing from the checkout: it asks the Cloudflare Pages API for the project's
+  `canonical_deployment` and leaves the answer in a file. **`Refuse a release that goes backwards`** holds no secret, so
+  the scripts it runs from the pushed commit (`hosted-app-origin.sh`, `verify-pwa-release.sh`) never see the token. It
+  checks the deployment is of `ferretry-v5` and that its URL is `https://<first 8 characters of its id>.<alias host>`,
+  then reads and proves the signed record **from that deployment's own URL** (the alias is mutable and not bound to the
+  deployment, so the alias's record must additionally agree with it, commit and sequence, or the job fails). The live
+  commit is the API's recorded commit hash (this workflow passes `--commit-hash`; the old per-merge trigger's wrangler
+  inferred it from its checkout), which the deployment's own record must match; a deployment with no recorded hash is
+  decided by its own record. Then the live commit must be an ancestor of the commit being deployed
+  (`git merge-base --is-ancestor`, on a full-history checkout; a live commit missing from it is a failure); the **same**
+  commit is a no-op (the upload step is skipped and the job stays green, so the kit still sees a green `Deploy PWA`);
+  otherwise this run's sequence must **exceed** the live signed sequence. The API is the only first-deploy signal: **no
+  production deployment** (`canonical_deployment: null`) means nothing is older and the deploy proceeds; anything else
+  that is missing, malformed, unverifiable or disagreeing (an absent field, a missing record, a stale alias) **fails the
+  job**, as does any API error or answer it cannot parse. There is no bootstrap marker and no manual trigger
+  (`workflow_dispatch` is gone and `release-guards.sh` refuses it, and refuses a deploy job without these two steps or
+  with a secret in the second). A skipped run is green with no deploy: read the `deploy` job's own conclusion, not the
+  run's. (3) A stale commit never deploys last, below.
 - **A stale commit never deploys last.** The shared, non-cancelling concurrency group serialises the runs but does not
   order them: pushes A then B can run B first, and re-running an older green run does the same, so A would overwrite the
   production alias with older app code. So the `deploy` job's `Refuse a stale commit` step, the one right before
@@ -345,22 +377,21 @@ touching none of it:
   `git ls-remote --exit-code --heads origin refs/heads/<branch>`) and lets the deploy proceed only when it equals
   `GITHUB_SHA`. Otherwise it logs "a newer commit `<sha>` is on `<branch>`; its own run deploys it" and **exits
   non-zero, so the `deploy` job concludes `failure`, never `success`**: a consumer that needs a green "Deploy PWA" job
-  for an exact commit (the upgrade-v5 gate) correctly reads a refused deploy as not deployed. A branch read that fails,
-  or returns anything but one `<sha> refs/heads/<branch>` line, fails the step too: never a guess, never a deploy. The
-  never-backwards `gate` for `rebuild/5.0` is unchanged, and `scripts/validate/release-guards.sh` refuses a workflow
-  whose deploy job lacks the check before the deploy command (and any job `if` whose two-ref guard is followed by a
-  top-level `||`).
+  for an exact commit (the kit's upgrade gate) correctly reads a refused deploy as not deployed. A branch read that
+  fails, or returns anything but one `<sha> refs/heads/<branch>` line, fails the step too: never a guess, never a
+  deploy. `scripts/validate/release-guards.sh` refuses a workflow whose deploy job lacks the check before the deploy
+  command (and any job `if` whose one-ref guard is followed by a top-level `||`).
 
 - **Its own counter, key and environments.** A workflow file of its own has its own run number. It signs with a key of
   its own, kept in the `pwa-release-v5` environment (signing) while the Cloudflare credentials live in `pwa-deploy-v5`
   (deploying), so the job that signs never holds the token and the job that deploys never holds the key. Both
-  environments allow `rebuild/5.0` and `rebuild/5.0-after` and nothing else. `scripts/local/setup-pwa-release-v5.sh`
-  creates them and the key; the owner runs it once, before the first run, and commits the printed public key as
-  `packages/app/release-signing-key.preview.pub` on `rebuild/5.0`. An environment made when only `rebuild/5.0` was
-  allowed gains the second branch with `scripts/local/setup-pwa-release-v5.sh --rules-only`, which touches no secret.
-  Until it does, a `rebuild/5.0-after` run passes `gate` and `build`, and `sign` is rejected at the environment gate
-  ("Branch `rebuild/5.0-after` is not allowed to deploy to pwa-release-v5 due to environment protection rules"): nothing
-  is signed or deployed and the run is red.
+  environments allow `rebuild/preview` and nothing else. `scripts/local/setup-pwa-release-v5.sh` creates them and the
+  key; the owner runs it once, before the first run, and commits the printed public key as
+  `packages/app/release-signing-key.preview.pub` on the preview branches. An environment made for the old triggers
+  (`rebuild/5.0`, `rebuild/5.0-after`) gains `rebuild/preview` (and drops the others) with
+  `scripts/local/setup-pwa-release-v5.sh --rules-only`, which touches no secret. Until it does, a `rebuild/preview` run
+  passes `gate` and `build`, and `sign` is rejected at the environment gate ("Branch `rebuild/preview` is not allowed to
+  deploy to pwa-release-v5 due to environment protection rules"): nothing is signed or deployed and the run is red.
 - **One switch decides which app a build belongs to.** `FY_HOSTED_APP_ORIGIN` is read by `scripts/ci/hosted-app-origin.sh`
   and nothing else. Unset, every build is production's, with `packages/app/release-signing-key.pub`. Set (the preview
   workflow sets it), the script names the origin, the key file and the daemon's build defines, so the app's links, the
@@ -378,4 +409,4 @@ touching none of it:
 - **Its Cloudflare token is its own.** The deploy reads `CLOUDFLARE_PAGES_V5_API_TOKEN` and
   `CLOUDFLARE_PAGES_V5_ACCOUNT_ID` from `pwa-deploy-v5`, names no repository-level secret has, so it never falls back to
   production's token; the setup script requires a Pages-only token for `ferretry-v5`. The signing key is still only as
-  safe as push access to `rebuild/5.0` and `rebuild/5.0-after`: anyone who can push that branch can edit the workflow.
+  safe as push access to `rebuild/preview`: anyone who can push that branch can edit the workflow.

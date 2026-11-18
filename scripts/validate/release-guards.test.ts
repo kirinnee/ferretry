@@ -135,99 +135,82 @@ describe('scripts/validate/release-guards.sh', () => {
     expect(result.err).toContain('names Casks/');
   });
 
+  const triggerMessage = 'triggered by pushes to rebuild/preview alone';
+  const workflowPath = '.github/workflows/pwa-pages-v5.yaml';
+  const triggerEdit = (branches: string) =>
+    gate(checkout(p => edit(p(workflowPath), 'branches: [rebuild/preview]', `branches: [${branches}]`)));
+
+  test('the preview is triggered by rebuild/preview and no other branch', () => {
+    expect(readFileSync(join(repository, workflowPath), 'utf8')).toContain('    branches: [rebuild/preview]\n');
+  });
+
   test('the preview triggered by main is refused', () => {
-    const result = gate(
-      checkout(p =>
-        edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          'branches: [rebuild/5.0, rebuild/5.0-after]',
-          'branches: [main]',
-        ),
-      ),
-    );
+    const result = triggerEdit('main');
     expect(result.status).toBe(1);
-    expect(result.err).toContain('triggered by pushes to rebuild/5.0 and rebuild/5.0-after alone');
+    expect(result.err).toContain(triggerMessage);
   });
 
-  test('the preview triggered by a third branch is refused', () => {
-    const result = gate(
-      checkout(p =>
-        edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          'branches: [rebuild/5.0, rebuild/5.0-after]',
-          'branches: [rebuild/5.0, rebuild/5.0-after, rebuild/c58-00b]',
-        ),
-      ),
-    );
+  test('the preview triggered by a second branch is refused', () => {
+    const result = triggerEdit('rebuild/preview, rebuild/c58-00b');
     expect(result.status).toBe(1);
-    expect(result.err).toContain('triggered by pushes to rebuild/5.0 and rebuild/5.0-after alone');
+    expect(result.err).toContain(triggerMessage);
   });
 
-  test('the preview triggered by only one of the two branches is refused', () => {
-    for (const only of ['rebuild/5.0', 'rebuild/5.0-after']) {
-      const result = gate(
-        checkout(p =>
-          edit(
-            p('.github/workflows/pwa-pages-v5.yaml'),
-            'branches: [rebuild/5.0, rebuild/5.0-after]',
-            `branches: [${only}]`,
-          ),
-        ),
-      );
+  test('the old triggers, a push to rebuild/5.0 or rebuild/5.0-after, are refused (a merge must not move the preview)', () => {
+    for (const legacy of ['rebuild/5.0', 'rebuild/5.0-after', 'rebuild/preview, rebuild/5.0-after']) {
+      const result = triggerEdit(legacy);
       expect(result.status).toBe(1);
-      expect(result.err).toContain('triggered by pushes to rebuild/5.0 and rebuild/5.0-after alone');
+      expect(result.err).toContain(triggerMessage);
     }
   });
 
   test('a preview job that stops repeating the ref is refused', () => {
     const result = gate(
       checkout(p =>
-        edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          /    needs: \[gate, build\]\n    if: [^\n]*\n/,
-          '    needs: [gate, build]\n',
-        ),
+        edit(p(workflowPath), /    needs: \[gate, build\]\n    if: [^\n]*\n/, '    needs: [gate, build]\n'),
       ),
     );
     expect(result.status).toBe(1);
     expect(result.err).toContain('must open its if with');
   });
 
-  test('a preview job that guards only one of the two refs is refused', () => {
-    const result = gate(
-      checkout(p =>
-        edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          /    needs: \[gate, build\]\n    if: \([^\n]*\)/,
-          "    needs: [gate, build]\n    if: github.ref == 'refs/heads/rebuild/5.0'",
+  test('a preview job that guards the old refs instead of the preview ref is refused', () => {
+    for (const ref of ['rebuild/5.0', 'rebuild/5.0-after', 'main']) {
+      const result = gate(
+        checkout(p =>
+          edit(
+            p(workflowPath),
+            /    needs: \[gate, build\]\n    if: github\.ref == 'refs\/heads\/rebuild\/preview'/,
+            `    needs: [gate, build]\n    if: github.ref == 'refs/heads/${ref}'`,
+          ),
         ),
-      ),
-    );
-    expect(result.status).toBe(1);
-    expect(result.err).toContain('must open its if with');
+      );
+      expect(result.status).toBe(1);
+      expect(result.err).toContain('must open its if with');
+    }
   });
 
   test('a preview job whose guard lets another ref ride along is refused', () => {
     const result = gate(
       checkout(p =>
         edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          /    needs: \[gate, build\]\n    if: \(github\.ref == 'refs\/heads\/rebuild\/5\.0' \|\| github\.ref == 'refs\/heads\/rebuild\/5\.0-after'\)/,
-          "    needs: [gate, build]\n    if: github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after' || github.ref == 'refs/heads/main'",
+          p(workflowPath),
+          /    needs: \[gate, build\]\n    if: github\.ref == 'refs\/heads\/rebuild\/preview'/,
+          "    needs: [gate, build]\n    if: github.ref == 'refs/heads/rebuild/preview' || github.ref == 'refs/heads/main'",
         ),
       ),
     );
     expect(result.status).toBe(1);
-    expect(result.err).toContain('must open its if with');
+    expect(result.err).toContain('followed only by && conditions');
   });
 
-  test('a preview job whose exact parenthesised guard is followed by a top-level || is refused', () => {
+  test('a preview job whose exact guard is followed by a top-level || is refused', () => {
     const result = gate(
       checkout(p =>
         edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          /    needs: \[gate, build\]\n    if: \(github\.ref == 'refs\/heads\/rebuild\/5\.0' \|\| github\.ref == 'refs\/heads\/rebuild\/5\.0-after'\)/,
-          "    needs: [gate, build]\n    if: (github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after') || github.event_name == 'push'",
+          p(workflowPath),
+          /    needs: \[gate, build\]\n    if: github\.ref == 'refs\/heads\/rebuild\/preview'/,
+          "    needs: [gate, build]\n    if: github.ref == 'refs/heads/rebuild/preview' || github.event_name == 'push'",
         ),
       ),
     );
@@ -236,13 +219,13 @@ describe('scripts/validate/release-guards.sh', () => {
   });
 
   test('a top-level || hidden after an && condition is refused, but one inside parentheses or a string is not', () => {
-    const guard = "(github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after')";
+    const guard = "github.ref == 'refs/heads/rebuild/preview'";
     const withTail = (tail: string) =>
       gate(
         checkout(p =>
           edit(
-            p('.github/workflows/pwa-pages-v5.yaml'),
-            /    needs: \[gate, build\]\n    if: \([^\n]*\n/,
+            p(workflowPath),
+            /    needs: \[gate, build\]\n    if: [^\n]*\n/,
             `    needs: [gate, build]\n    if: ${guard}${tail}\n`,
           ),
         ),
@@ -253,30 +236,17 @@ describe('scripts/validate/release-guards.sh', () => {
     expect(withTail(" && needs.gate.outputs.deploy != '||'").status).toBe(0);
   });
 
-  test('a preview job guarded by a different ref is refused', () => {
-    const result = gate(
-      checkout(p =>
-        edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          /    needs: gate\n    if: \(github\.ref == 'refs\/heads\/rebuild\/5\.0' \|\| github\.ref == 'refs\/heads\/rebuild\/5\.0-after'\)/,
-          "    needs: gate\n    if: (github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/main')",
-        ),
-      ),
-    );
-    expect(result.status).toBe(1);
-    expect(result.err).toContain('must open its if with');
-  });
-
-  test('the preview keeps the never-backwards rule and deploys to the production branch whatever built it', () => {
-    const workflow = readFileSync(join(repository, '.github/workflows/pwa-pages-v5.yaml'), 'utf8');
-    // The rule: a rebuild/5.0 push deploys nothing while rebuild/5.0-after exists on origin (a read-only ls-remote).
-    expect(workflow).toContain('git ls-remote --exit-code --heads');
-    expect(workflow).toContain('refs/heads/rebuild/5.0-after');
+  test('the preview keeps the never-backwards gate and deploys to the production branch whatever built it', () => {
+    const workflow = readFileSync(join(repository, workflowPath), 'utf8');
+    // The gate refuses a push that is not a fast-forward of the LIVE commit, read from the site's signed record (a read-only compare), and fails on a read it cannot make.
+    expect(workflow).toContain('compare/${live}...${AFTER}');
+    expect(workflow).toContain('behind | diverged)');
+    expect(workflow).toContain('unexpected compare status');
     // build, sign and deploy all wait on that decision.
     expect(workflow.match(/needs\.gate\.outputs\.deploy == 'true'/gu)).toHaveLength(3);
-    // A deploy of a rebuild/5.0-after build still goes to the project's PRODUCTION alias.
+    // A deploy still goes to the Pages project's PRODUCTION alias.
     expect(workflow).toContain('--project-name=ferretry-v5 --branch=rebuild/5.0');
-    expect(workflow).not.toContain('--branch=rebuild/5.0-after');
+    expect(workflow).not.toContain('--branch=rebuild/preview');
     expect(workflow).not.toContain('--branch=${{');
   });
 
@@ -307,8 +277,8 @@ describe('scripts/validate/release-guards.sh', () => {
       expect(text).toContain('a newer commit ${current} is on ${BRANCH}; its own run deploys it');
       // The shared non-cancelling group stays: it serialises, the check above orders.
       expect(text).toContain('group: pwa-pages-v5\n  cancel-in-progress: false');
-      // The never-backwards gate for rebuild/5.0 is unchanged.
-      expect(text).toContain('refs/heads/rebuild/5.0-after >/dev/null');
+      // The never-backwards gate before it compares with the last deployed commit.
+      expect(text).toContain('compare/${live}...${AFTER}');
     });
 
     test('mutation: removing the stale-commit step is refused', () => {
@@ -369,5 +339,574 @@ describe('the honest wording about a 5.0 commit that can publish', () => {
       for (const match of text.matchAll(/cannot publish from a 5\.0 commit(?! made after this guard lands)/gu))
         throw new Error(`${file}: unqualified claim at ${match.index}`);
     }
+  });
+});
+
+describe('the preview gate compares the pushed commit with what the LIVE site says is live', () => {
+  const workflowFile = join(repository, '.github/workflows/pwa-pages-v5.yaml');
+  const text = readFileSync(workflowFile, 'utf8');
+  const section = text.slice(text.indexOf('      - name: Apply the never-backwards rule'), text.indexOf('\n  build:'));
+  const script = (section.split('        run: |\n')[1] ?? '')
+    .split('\n')
+    .map(line => (line.startsWith('          ') ? line.slice(10) : line))
+    .join('\n');
+  const [A, B, C] = ['1', '2', '3'].map(digit => digit.repeat(40)) as [string, string, string];
+
+  type Live = {
+    /** What the site answers for each file: a status and a body, or `unreachable` (curl fails). */
+    manifest?: { status: number; commit?: string } | 'unreachable';
+    signature?: { status: number } | 'unreachable';
+    /** Whether scripts/ci/verify-pwa-release.sh accepts the downloaded record. */
+    verifies?: boolean;
+  };
+
+  /**
+   * Runs the workflow's own gate script in a throwaway checkout whose `curl`, `gh` and scripts are fakes. The fake `gh`
+   * answers only `compare` (any other read, such as run history, fails the script); `compare` maps "<live>...<after>" to a
+   * status, and a pair not in it is an unreadable compare.
+   */
+  function runGate(spec: { live: Live; compare?: Record<string, string>; after: string; deleted?: boolean }) {
+    const directory = mkdtempSync(join(tmpdir(), 'preview-gate-'));
+    scratch.push(directory);
+    const bin = join(directory, 'bin');
+    mkdirSync(bin);
+    mkdirSync(join(directory, 'scripts/ci'), { recursive: true });
+    writeFileSync(join(directory, 'scripts/ci/hosted-app-origin.sh'), '#!/bin/sh\necho https://preview.example\n', {
+      mode: 0o755,
+    });
+    writeFileSync(
+      join(directory, 'scripts/ci/verify-pwa-release.sh'),
+      `#!/bin/sh\n[ -s "$1/release-manifest.json" ] && [ -s "$1/release-manifest.sig" ] && exit ${spec.live.verifies === false ? 1 : 0}\nexit 1\n`,
+      { mode: 0o755 },
+    );
+    const answers = {
+      'release-manifest.json': spec.live.manifest,
+      'release-manifest.sig': spec.live.signature ?? { status: 200 },
+    };
+    for (const [name, answer] of Object.entries(answers)) {
+      if (answer === undefined || answer === 'unreachable') continue;
+      const body =
+        name === 'release-manifest.json'
+          ? JSON.stringify({ commit: (answer as { commit?: string }).commit ?? C, sequence: 3 })
+          : 'signature-bytes';
+      writeFileSync(join(directory, `live-${name}`), body);
+      writeFileSync(join(directory, `live-${name}.status`), String((answer as { status: number }).status));
+    }
+    for (const [pair, status] of Object.entries(spec.compare ?? {})) {
+      writeFileSync(join(directory, `compare-${pair}.json`), JSON.stringify({ status }));
+    }
+    writeFileSync(
+      join(bin, 'curl'),
+      [
+        '#!/usr/bin/env bash',
+        'set -euo pipefail',
+        'out=""; url=""',
+        'while (($#)); do case "$1" in --output) shift; out="$1" ;; --write-out|--max-time|--retry|--header) shift ;; --*) ;; *) url="$1" ;; esac; shift; done',
+        `dir=${JSON.stringify(directory)}`,
+        'name="${url##*/}"; name="${name%%\\?*}"',
+        '[[ -f ${dir}/live-${name}.status ]] || exit 6',
+        'cp "${dir}/live-${name}" "${out}"',
+        'cat "${dir}/live-${name}.status"',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(bin, 'gh'),
+      [
+        '#!/usr/bin/env bash',
+        'set -euo pipefail',
+        'url=""; filter=""',
+        'while (($#)); do case "$1" in api|--paginate) ;; --jq) shift; filter="$1" ;; *) [[ -z $url ]] && url="$1" ;; esac; shift; done',
+        `dir=${JSON.stringify(directory)}`,
+        'case "$url" in',
+        '  */compare/*) file="${dir}/compare-${url#*/compare/}.json" ;;',
+        '  *) echo "the gate must not read anything but compare, got: ${url}" >&2; exit 2 ;;',
+        'esac',
+        '[[ -f ${file} ]] || { echo "no fixture for ${url}" >&2; exit 1; }',
+        'jq -r "${filter}" "${file}"',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    const output = join(directory, 'github-output');
+    writeFileSync(output, '');
+    const result = Bun.spawnSync(['bash', '-c', script], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH ?? ''}`,
+        GITHUB_OUTPUT: output,
+        GH_TOKEN: 'unused',
+        DELETED: spec.deleted === true ? 'true' : 'false',
+        AFTER: spec.after,
+        REPOSITORY: 'example/repo',
+        RUN_ID: '99',
+      },
+    });
+    return { status: result.exitCode, err: result.stderr.toString(), deploy: readFileSync(output, 'utf8').trim() };
+  }
+
+  const liveC: Live = { manifest: { status: 200, commit: C } };
+
+  test("what is live is the live record's commit: B (older than the live C) deploys nothing, whatever the run history says", () => {
+    // This one fixture stands for each history the old run-based lookup got wrong: C deployed by the legacy per-merge
+    // trigger on another branch, C's run cancelled while finishing, and C's run later re-run and failed. The gate reads
+    // no run history at all (its fake gh refuses everything but compare), so none of them can hide C.
+    const result = runGate({ live: liveC, compare: { [`${C}...${B}`]: 'behind' }, after: B });
+    expect(result).toMatchObject({ status: 0, deploy: 'deploy=false' });
+    expect(result.err).toBe('');
+  });
+
+  test('a descendant of the live commit deploys, and so does the live commit itself (the kit still needs its green run)', () => {
+    expect(runGate({ live: liveC, compare: { [`${C}...${A}`]: 'ahead' }, after: A })).toMatchObject({
+      status: 0,
+      deploy: 'deploy=true',
+    });
+    expect(runGate({ live: liveC, compare: { [`${C}...${C}`]: 'identical' }, after: C })).toMatchObject({
+      status: 0,
+      deploy: 'deploy=true',
+    });
+  });
+
+  test('a diverged commit deploys nothing', () => {
+    expect(runGate({ live: liveC, compare: { [`${C}...${B}`]: 'diverged' }, after: B }).deploy).toBe('deploy=false');
+  });
+
+  test('a 404 for the manifest passes the PRE-FILTER only (the deploy job reads the Pages API and is the authority)', () => {
+    expect(runGate({ live: { manifest: { status: 404 } }, after: A })).toMatchObject({
+      status: 0,
+      deploy: 'deploy=true',
+    });
+  });
+
+  test('the live record is read as unproven unless it is reachable, a 200, signed and names a commit: every other state fails the job', () => {
+    const cases: Array<[string, Live]> = [
+      ['manifest unreachable', { manifest: 'unreachable' }],
+      ['manifest HTTP 500', { manifest: { status: 500 } }],
+      ['manifest redirected', { manifest: { status: 301 } }],
+      ['signature unreachable', { manifest: { status: 200, commit: C }, signature: 'unreachable' }],
+      ['signature missing (404)', { manifest: { status: 200, commit: C }, signature: { status: 404 } }],
+      ['record does not verify', { manifest: { status: 200, commit: C }, verifies: false }],
+      ['commit is not a full id', { manifest: { status: 200, commit: 'abc123' } }],
+    ];
+    for (const [label, live] of cases) {
+      const result = runGate({ live, compare: { [`${C}...${B}`]: 'ahead' }, after: B });
+      expect({ label, status: result.status, deploy: result.deploy }).toEqual({ label, status: 1, deploy: '' });
+    }
+  });
+
+  test('a compare it cannot read, or a status it does not know, fails the job instead of guessing', () => {
+    const unreadable = runGate({ live: liveC, after: B });
+    expect(unreadable.status).not.toBe(0);
+    expect(unreadable.deploy).toBe('');
+    const unknown = runGate({ live: liveC, compare: { [`${C}...${B}`]: 'mystery' }, after: B });
+    expect(unknown.status).toBe(1);
+    expect(unknown.err).toContain('unexpected compare status');
+    expect(unknown.deploy).toBe('');
+  });
+
+  test('a deleted ref deploys nothing', () => {
+    expect(runGate({ live: liveC, after: A, deleted: true })).toMatchObject({ status: 0, deploy: 'deploy=false' });
+  });
+
+  test("the live record is proved with the deploy job's own script before its commit is read, and event.before is not read", () => {
+    expect(section.indexOf('./scripts/ci/verify-pwa-release.sh')).toBeGreaterThan(0);
+    expect(section.indexOf('./scripts/ci/verify-pwa-release.sh')).toBeLessThan(section.indexOf("jq -er '.commit'"));
+    expect(section).toContain('./scripts/ci/hosted-app-origin.sh');
+    expect(text).not.toContain('github.event.before }}');
+    expect(script).not.toContain('BEFORE');
+    expect(script).not.toContain('actions/runs');
+  });
+
+  test('there is no manual trigger, and the gate needs no more than contents: read', () => {
+    expect(text).not.toMatch(/^  workflow_dispatch:/mu);
+    expect(text).not.toContain('actions: read');
+  });
+
+  test('mutation: a workflow with a workflow_dispatch trigger is refused', () => {
+    const result = gate(
+      checkout(p =>
+        edit(
+          p('.github/workflows/pwa-pages-v5.yaml'),
+          '    branches: [rebuild/preview]\n',
+          '    branches: [rebuild/preview]\n  workflow_dispatch:\n',
+        ),
+      ),
+    );
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('only by a push');
+  });
+});
+
+describe('the deploy job re-checks, before the upload and on every attempt, against the Pages API and the signed record', () => {
+  const text = readFileSync(join(repository, '.github/workflows/pwa-pages-v5.yaml'), 'utf8');
+  const stepSource = (name: string, until: string) => {
+    const start = text.indexOf(`      - name: ${name}`);
+    const body = text.slice(start, text.indexOf(until, start + 1));
+    return {
+      body,
+      script: (body.split('        run: |\n')[1] ?? '')
+        .split('\n')
+        .map(line => (line.startsWith('          ') ? line.slice(10) : line))
+        .join('\n'),
+    };
+  };
+  const read = stepSource('Read the production deployment', '      # STEP 2');
+  const decide = stepSource('Refuse a release that goes backwards', '      # `--branch` is the Pages project');
+  const TOKEN = 'token-not-in-args';
+  const ID = 'abcd1234-0000-4000-8000-000000000000';
+  const ALIAS_HOST = 'ferretry-v5.pages.dev';
+  const DEPLOYMENT_HOST = `abcd1234.${ALIAS_HOST}`;
+
+  const git = (cwd: string, ...args: string[]) => {
+    const result = Bun.spawnSync(['git', ...args], {
+      cwd,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 't',
+        GIT_AUTHOR_EMAIL: 't@example.invalid',
+        GIT_COMMITTER_NAME: 't',
+        GIT_COMMITTER_EMAIL: 't@example.invalid',
+      },
+    });
+    if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+    return result.stdout.toString().trim();
+  };
+
+  /** c1 -> c2 -> c3 on main, and d off c1 (diverged from both). */
+  function repo() {
+    const directory = mkdtempSync(join(tmpdir(), 'preview-live-'));
+    scratch.push(directory);
+    git(directory, 'init', '-q', '-b', 'main');
+    const make = (message: string) => {
+      git(directory, 'commit', '-q', '--allow-empty', '-m', message);
+      return git(directory, 'rev-parse', 'HEAD');
+    };
+    const c1 = make('c1');
+    const c2 = make('c2');
+    const c3 = make('c3');
+    git(directory, 'checkout', '-q', '-b', 'side', c1);
+    const d = make('d');
+    return { directory, c1, c2, c3, d };
+  }
+
+  type Answer = { status: number; body?: unknown } | 'unreachable';
+  type Spec = {
+    /** The Pages API's answer for the project. */
+    api: Answer;
+    /** The signed record at the production deployment's own URL, and at the alias (default: the same). */
+    deployment?: Answer;
+    alias?: Answer;
+    signature?: { deployment?: Answer; alias?: Answer };
+    verifies?: boolean;
+    after: string;
+    sequence?: number;
+  };
+
+  /** Runs step 1 (with the token) and, if it passes, step 2 (without any), as GitHub would, with fake curl. */
+  function run(directory: string, spec: Spec) {
+    for (const dir of ['scripts/ci', '.bin', '.runner']) mkdirSync(join(directory, dir), { recursive: true });
+    writeFileSync(
+      join(directory, 'scripts/ci/hosted-app-origin.sh'),
+      `#!/bin/sh\nenv > .seen-by-origin\necho https://${ALIAS_HOST}\n`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(directory, 'scripts/ci/verify-pwa-release.sh'),
+      `#!/bin/sh\nenv > .seen-by-verify\n[ -s "$1/release-manifest.json" ] && [ -s "$1/release-manifest.sig" ] && exit ${spec.verifies === false ? 1 : 0}\nexit 1\n`,
+      { mode: 0o755 },
+    );
+    const put = (host: string, name: string, answer: Answer | undefined) => {
+      if (answer === undefined || answer === 'unreachable') return;
+      mkdirSync(join(directory, '.fake', host), { recursive: true });
+      const body = typeof answer.body === 'string' ? answer.body : JSON.stringify(answer.body ?? {});
+      writeFileSync(join(directory, '.fake', host, name), body);
+      writeFileSync(join(directory, '.fake', host, `${name}.status`), String(answer.status));
+    };
+    const ok: Answer = { status: 200, body: 'signature-bytes' };
+    put('api', 'project', spec.api);
+    put(DEPLOYMENT_HOST, 'release-manifest.json', spec.deployment);
+    put(DEPLOYMENT_HOST, 'release-manifest.sig', spec.signature?.deployment ?? ok);
+    put(ALIAS_HOST, 'release-manifest.json', spec.alias ?? spec.deployment);
+    put(ALIAS_HOST, 'release-manifest.sig', spec.signature?.alias ?? ok);
+    writeFileSync(
+      join(directory, '.bin/curl'),
+      [
+        '#!/usr/bin/env bash',
+        'set -euo pipefail',
+        'printf "%s\\n" "$*" >> .curl-args',
+        'out=""; url=""',
+        'while (($#)); do case "$1" in --output) shift; out="$1" ;; --header) shift; [[ $1 == @- ]] && cat >/dev/null ;; --write-out|--max-time|--retry) shift ;; --*) ;; *) url="$1" ;; esac; shift; done',
+        'case "$url" in',
+        '  https://api.cloudflare.com/client/v4/accounts/acct/pages/projects/ferretry-v5) host=api; name=project ;;',
+        '  https://*) rest="${url#https://}"; host="${rest%%/*}"; name="${rest#*/}"; name="${name%%\\?*}" ;;',
+        '  *) echo "unexpected url: ${url}" >&2; exit 2 ;;',
+        'esac',
+        '[[ -f ".fake/${host}/${name}.status" ]] || exit 6',
+        'cp ".fake/${host}/${name}" "${out}"',
+        'cat ".fake/${host}/${name}.status"',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    const output = join(directory, 'github-output');
+    writeFileSync(output, '');
+    const base: Record<string, string | undefined> = {
+      ...process.env,
+      PATH: `${join(directory, '.bin')}:${process.env.PATH ?? ''}`,
+      GITHUB_OUTPUT: output,
+      GITHUB_RUN_ID: '99',
+      RUNNER_TEMP: join(directory, '.runner'),
+    };
+    delete base.CLOUDFLARE_API_TOKEN;
+    delete base.CLOUDFLARE_ACCOUNT_ID;
+    const first = Bun.spawnSync(['bash', '-c', read.script], {
+      cwd: directory,
+      env: { ...base, CLOUDFLARE_API_TOKEN: TOKEN, CLOUDFLARE_ACCOUNT_ID: 'acct' },
+    });
+    if (first.exitCode !== 0) {
+      return { step: 1, status: first.exitCode, err: first.stderr.toString(), out: '' };
+    }
+    const second = Bun.spawnSync(['bash', '-c', decide.script], {
+      cwd: directory,
+      env: { ...base, AFTER: spec.after, SEQUENCE: String(spec.sequence ?? 10), ATTEMPT: '1' },
+    });
+    return {
+      step: 2,
+      status: second.exitCode,
+      err: second.stderr.toString(),
+      out: readFileSync(output, 'utf8').trim(),
+    };
+  }
+
+  const project = (deployment: unknown) => ({
+    status: 200,
+    body: { success: true, result: { name: 'ferretry-v5', canonical_deployment: deployment } },
+  });
+  const deployedAt = (commit: string | undefined, over: Record<string, unknown> = {}) => ({
+    id: ID,
+    url: `https://${DEPLOYMENT_HOST}`,
+    project_name: 'ferretry-v5',
+    deployment_trigger: { metadata: commit === undefined ? {} : { commit_hash: commit } },
+    ...over,
+  });
+  const record = (commit: string, sequence = 5) => ({ status: 200, body: { commit, sequence } });
+  const live = (commit: string, sequence = 5) => ({
+    api: project(deployedAt(commit)),
+    deployment: record(commit, sequence),
+  });
+
+  test('a stale gate "allow" cannot deploy once the live release has moved on: an older commit is refused', () => {
+    const r = repo();
+    const result = run(r.directory, { ...live(r.c3), after: r.c2 });
+    expect(result).toMatchObject({ step: 2, status: 1, out: '' });
+    expect(result.err).toContain('is not an ancestor');
+  });
+
+  test('a diverged commit is refused', () => {
+    const r = repo();
+    const result = run(r.directory, { ...live(r.c3), after: r.d });
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('is not an ancestor');
+  });
+
+  test('a descendant of the live commit with a higher sequence deploys; one that does not exceed the live sequence is refused', () => {
+    const r = repo();
+    expect(run(r.directory, { ...live(r.c2, 5), after: r.c3, sequence: 6 })).toMatchObject({
+      status: 0,
+      out: 'skip=false',
+    });
+    for (const sequence of [5, 4]) {
+      const result = run(r.directory, { ...live(r.c2, 5), after: r.c3, sequence });
+      expect(result.status).toBe(1);
+      expect(result.err).toContain('does not exceed the live signed sequence');
+    }
+  });
+
+  test('an identical commit is a no-op: nothing is uploaded and the job stays green', () => {
+    const r = repo();
+    expect(run(r.directory, { ...live(r.c3, 5), after: r.c3, sequence: 6 })).toMatchObject({
+      status: 0,
+      out: 'skip=true',
+    });
+  });
+
+  test('the first deploy ever (the API shows no production deployment) deploys, and needs no record', () => {
+    const r = repo();
+    expect(run(r.directory, { api: project(null), after: r.c1 })).toMatchObject({ status: 0, out: 'skip=false' });
+  });
+
+  test('step 1 fails on an API error, an unreadable or unparseable answer, or a project without the production field', () => {
+    const r = repo();
+    const cases: Array<[string, Answer]> = [
+      ['unreachable', 'unreachable'],
+      ['HTTP 500', { status: 500, body: {} }],
+      ['HTTP 403', { status: 403, body: { success: false } }],
+      ['not json', { status: 200, body: 'not json' }],
+      ['success false', { status: 200, body: { success: false, result: { canonical_deployment: null } } }],
+      ['no production field', { status: 200, body: { success: true, result: { name: 'ferretry-v5' } } }],
+    ];
+    for (const [label, api] of cases) {
+      const result = run(r.directory, { api, deployment: record(r.c3), after: r.c3 });
+      expect({ label, step: result.step, status: result.status }).toEqual({ label, step: 1, status: 1 });
+    }
+  });
+
+  test('a deployment that is not bound to this project and this address is refused: another project, a bad id, a foreign or alias URL', () => {
+    const r = repo();
+    const cases: Array<[string, unknown]> = [
+      [
+        'wrong project name on the result',
+        { ...project(deployedAt(r.c3)).body, result: { name: 'other', canonical_deployment: deployedAt(r.c3) } },
+      ],
+      ['wrong deployment project_name', project(deployedAt(r.c3, { project_name: 'other' })).body],
+      ['id is not a deployment id', project(deployedAt(r.c3, { id: 'abcd1234' })).body],
+      ['url of another deployment', project(deployedAt(r.c3, { url: `https://ffffffff.${ALIAS_HOST}` })).body],
+      ['url is the mutable alias', project(deployedAt(r.c3, { url: `https://${ALIAS_HOST}` })).body],
+      ['url on another host', project(deployedAt(r.c3, { url: `https://abcd1234.evil.example` })).body],
+    ];
+    for (const [label, body] of cases) {
+      const result = run(r.directory, { api: { status: 200, body }, deployment: record(r.c3), after: r.c3 });
+      expect({ label, step: result.step, status: result.status, out: result.out }).toEqual({
+        label,
+        step: 2,
+        status: 1,
+        out: '',
+      });
+    }
+  });
+
+  test("the deployment's own signed record must be there and verify; a missing one is never a first deploy", () => {
+    const r = repo();
+    const cases: Array<[string, Partial<Spec>]> = [
+      ['record 404', { deployment: { status: 404 } }],
+      ['record unreachable', { deployment: 'unreachable' }],
+      ['signature 404', { deployment: record(r.c3), signature: { deployment: { status: 404 } } }],
+      ['does not verify', { deployment: record(r.c3), verifies: false }],
+      ['commit is not an id', { deployment: record('abc') }],
+      ['sequence is not a number', { deployment: { status: 200, body: { commit: r.c3, sequence: 'x' } } }],
+    ];
+    for (const [label, partial] of cases) {
+      const result = run(r.directory, { api: project(deployedAt(r.c3)), after: r.c3, ...partial });
+      expect({ label, status: result.status, out: result.out }).toEqual({ label, status: 1, out: '' });
+    }
+  });
+
+  test('the deployment record must agree with the API commit, and the ALIAS record with the deployment record (a stale alias cannot authorise a rewind or a false skip)', () => {
+    const r = repo();
+    // The API says c3; the deployment's own record says c2.
+    expect(run(r.directory, { api: project(deployedAt(r.c3)), deployment: record(r.c2), after: r.c3 }).status).toBe(1);
+    // Everything about the deployment says c3, but the alias still serves c2: not a record we can reason from.
+    const staleAlias = run(r.directory, { ...live(r.c3), alias: record(r.c2), after: r.c3 });
+    expect(staleAlias.status).toBe(1);
+    expect(staleAlias.err).toContain('differs from the production deployment');
+    // A different sequence on the alias is a difference too; a missing alias record fails.
+    expect(run(r.directory, { ...live(r.c3, 5), alias: record(r.c3, 4), after: r.c3 }).status).toBe(1);
+    expect(run(r.directory, { ...live(r.c3), alias: { status: 404 }, after: r.c3 }).status).toBe(1);
+  });
+
+  test("with no recorded commit hash the deployment's OWN record decides (not the alias, which must then agree)", () => {
+    const r = repo();
+    const noHash = project(deployedAt(undefined));
+    expect(run(r.directory, { api: noHash, deployment: record(r.c2, 5), after: r.c3, sequence: 6 })).toMatchObject({
+      status: 0,
+      out: 'skip=false',
+    });
+    // An older record at the deployment's own URL refuses a rewind even though the alias would have allowed it.
+    expect(run(r.directory, { api: noHash, deployment: record(r.c3, 5), after: r.c2, sequence: 6 }).status).toBe(1);
+    // An alias that is newer or older than the deployment's own record fails closed.
+    expect(
+      run(r.directory, { api: noHash, deployment: record(r.c3), alias: record(r.c1), after: r.c3, sequence: 6 }).status,
+    ).toBe(1);
+  });
+
+  test("a recorded commit hash that is PRESENT but malformed fails; only an ABSENT hash falls back to the deployment's own record", () => {
+    const r = repo();
+    for (const hash of ['abc123', '', 'Z'.repeat(40), r.c2.toUpperCase(), `${r.c2}0`, 7, true, ['x']]) {
+      const result = run(r.directory, {
+        api: project(deployedAt(undefined, { deployment_trigger: { metadata: { commit_hash: hash } } })),
+        deployment: record(r.c2, 5),
+        after: r.c3,
+        sequence: 6,
+      });
+      expect({ hash, step: result.step, status: result.status, out: result.out }).toEqual({
+        hash,
+        step: 2,
+        status: 1,
+        out: '',
+      });
+    }
+    // Absent and null both fall back (the record decides).
+    for (const metadata of [{}, { commit_hash: null }]) {
+      const absent = run(r.directory, {
+        api: project(deployedAt(undefined, { deployment_trigger: { metadata } })),
+        deployment: record(r.c2, 5),
+        after: r.c3,
+        sequence: 6,
+      });
+      expect(absent).toMatchObject({ status: 0, out: 'skip=false' });
+    }
+  });
+
+  test('a live commit that is not in the checkout is refused, not assumed old', () => {
+    const r = repo();
+    const unknown = 'f'.repeat(40);
+    const result = run(r.directory, { ...live(unknown), after: r.c3 });
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('is not in this checkout');
+  });
+
+  test('the token reaches only step 1, never an argument, and never a script run from the checkout', () => {
+    const r = repo();
+    expect(run(r.directory, { ...live(r.c2, 5), after: r.c3, sequence: 6 }).status).toBe(0);
+    for (const seen of ['.seen-by-origin', '.seen-by-verify']) {
+      const env = readFileSync(join(r.directory, seen), 'utf8');
+      expect(env).not.toContain(TOKEN);
+      expect(env).not.toContain('CLOUDFLARE_');
+    }
+    expect(readFileSync(join(r.directory, '.curl-args'), 'utf8')).not.toContain(TOKEN);
+    // Step 1 runs no script from the checkout; step 2 holds no secret at all.
+    expect(read.script).not.toContain('./scripts/');
+    expect(read.body).toContain('secrets.CLOUDFLARE_PAGES_V5_API_TOKEN');
+    expect(decide.body).not.toContain('secrets.');
+    expect(decide.script).not.toContain('CLOUDFLARE');
+  });
+
+  test('the steps sit before the upload, the upload is skipped on a no-op, and it records the commit', () => {
+    const at = (needle: string) => text.indexOf(needle);
+    expect(at('- name: Read the production deployment')).toBeGreaterThan(at('name: Refuse a stale commit'));
+    expect(at('- name: Refuse a release that goes backwards')).toBeGreaterThan(
+      at('- name: Read the production deployment'),
+    );
+    expect(at('- name: Refuse a release that goes backwards')).toBeLessThan(at('name: Deploy production bundle'));
+    expect(text).toContain("if: steps.live.outputs.skip != 'true'");
+    expect(text).toContain('--commit-hash="${GITHUB_SHA}"');
+    expect(read.script).toContain('--header @-');
+  });
+
+  test('mutation: a deploy job without the live check, or with the token in the checking step, is refused', () => {
+    const withoutRead = gate(
+      checkout(p =>
+        edit(
+          p('.github/workflows/pwa-pages-v5.yaml'),
+          /      - name: Read the production deployment[\s\S]*?(?=      # STEP 2)/u,
+          '',
+        ),
+      ),
+    );
+    expect(withoutRead.status).toBe(1);
+    expect(withoutRead.err).toContain('Pages API');
+    const tokenInStep2 = gate(
+      checkout(p =>
+        edit(
+          p('.github/workflows/pwa-pages-v5.yaml'),
+          '          AFTER: ${{ github.sha }}\n          SEQUENCE:',
+          '          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_V5_API_TOKEN }}\n          AFTER: ${{ github.sha }}\n          SEQUENCE:',
+        ),
+      ),
+    );
+    expect(tokenInStep2.status).toBe(1);
+    expect(tokenInStep2.err).toContain('no secret');
   });
 });
