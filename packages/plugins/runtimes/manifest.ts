@@ -11,7 +11,7 @@ import {
   StartDecide,
 } from '@ferretry/core-ferrets/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
-import { ProfileSecrets } from '@ferretry/core-vault/contract';
+import { ProfileSecrets, VaultPort } from '@ferretry/core-vault/contract';
 import {
   FerretsPort,
   INSTRUCTION_ITEMS,
@@ -52,7 +52,8 @@ export default definePlugin({
   words: RUNTIMES_WORDS,
 
   // Logins is one plugin: reading it (`logins`) and changing it (`loginChanges`) are two ports, and only Runtimes holds the second.
-  needs: { ferrets: FerretsPort, logins: LoginsPort, loginChanges: LoginChangesPort },
+  // The Vault is needed for its NAME listing alone (the setup's import and copy ask which API keys exist); see `permissions.secretNamePicker`.
+  needs: { ferrets: FerretsPort, logins: LoginsPort, loginChanges: LoginChangesPort, vault: VaultPort },
   // Optional (§2.4): the account picker shows each runtime's quota from Usage's feed. Usage off = the picker without quota.
   uses: { usage: UsagePort },
   provides: { runtimes: RuntimesPort },
@@ -509,6 +510,9 @@ export default definePlugin({
     network: [],
     spawn: ['brew', 'apt-get', 'npm'],
     secrets: [],
+    // The setup lists the NAMES of this machine’s API keys (never a value): a copy says which a setup needs. The Vault lists every NAME to a
+    // plugin that declares this, and no value; it writes it nothing. The setup route is the person’s (operator) gate.
+    secretNamePicker: true,
     // Whether an MCP server's command and a harness are installed (`kernel.paths.which`: bounded, never executing).
     which: true,
     // Claude keeps its user-scope MCP servers in `~/.claude.json`, BESIDE `~/.claude`: one read-only file, no listing.

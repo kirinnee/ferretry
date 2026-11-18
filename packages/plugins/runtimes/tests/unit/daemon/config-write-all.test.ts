@@ -9,6 +9,7 @@ import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type { ConfigCollectionDef, KernelPorts } from '@ferretry/kernel/contract';
 import { testHost } from '@ferretry/kernel/testing';
+import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { fakeLoginChanges, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import should from 'should';
 import { PROFILE_ITEMS, RUNTIME_ITEMS } from '../../../contract/index.ts';
@@ -35,7 +36,12 @@ async function world(files: Record<string, unknown> = {}) {
         return unavailableAssembly(ctx);
       }),
     ] as never,
-    fakes: { ferrets: new FakeFerrets(), logins: fakeLogins([]), loginChanges: fakeLoginChanges() },
+    fakes: {
+      ferrets: new FakeFerrets(),
+      logins: fakeLogins([]),
+      loginChanges: fakeLoginChanges(),
+      vault: new FakeVault(),
+    },
     gate: new StandInAdmission(() => ownerStanding()),
     config: files,
   });

@@ -9,6 +9,7 @@ import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type { DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
+import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon } from '../../../daemon/index.ts';
 import { cleanupWorlds, fleetWorld } from '../support/fleet-world.ts';
@@ -34,6 +35,7 @@ async function compose(standing: () => ReturnType<typeof ownerStanding>): Promis
       ferrets: new FakeFerrets(),
       logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
       loginChanges: fakeLoginChanges(),
+      vault: new FakeVault(),
     },
     gate: new StandInAdmission(standing),
     config: CONFIG,

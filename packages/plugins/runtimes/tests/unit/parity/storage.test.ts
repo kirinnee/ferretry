@@ -5,6 +5,7 @@ import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { type DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
+import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { Log } from '@ferretry/kernel/contract';
 import { config as hostConfig, state as hostState } from '@ferretry/kernel/host';
@@ -170,7 +171,7 @@ describe('the fleet folder a real apply writes', () => {
           hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never),
         ) as DaemonImplementation<any>,
       ],
-      fakes: { ferrets: new FakeFerrets(), logins, loginChanges: fakeLoginChanges() },
+      fakes: { ferrets: new FakeFerrets(), logins, loginChanges: fakeLoginChanges(), vault: new FakeVault() },
       gate: new StandInAdmission(() => ownerStanding()),
       config: CONFIG,
       ownerHome: world.person,

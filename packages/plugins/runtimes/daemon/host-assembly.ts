@@ -19,6 +19,7 @@
  */
 import type { FerretsApi, FerretState } from '@ferretry/core-ferrets/contract';
 import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/kernel/contract';
+import type { VaultApi } from '@ferretry/core-vault/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { UsageApi } from '@ferretry/plugin-usage/contract';
 import { InstantSchema, milliseconds } from '@ferretry/std';
@@ -367,6 +368,11 @@ export function fileAssembly(
         Parameters<typeof fileFleetSetupDeps>[0]['logins'] &
         Pick<LoginsApi, 'environmentTemplates' | 'modelSources' | 'launchStores'>;
       readonly loginChanges: FleetCatalogServiceDeps['loginChanges'];
+      /**
+       * The Vault, through its NAME listing ONLY: `Pick<VaultApi, 'names'>` answers a name and two times, so no value can
+       * flow through it. Absent: the setup's secret read stays unavailable and says so (a store that cannot be read refuses).
+       */
+      readonly vault?: Pick<VaultApi, 'names'>;
       readonly ferrets: Pick<FerretsApi, 'lastAutoResume' | 'runtimeRecords' | 'repointRuntime'> & {
         list(): Promise<readonly { readonly state: FerretState }[]>;
       };
@@ -471,7 +477,11 @@ export function fileAssembly(
       logins: ctx.needs.logins,
       tools,
       daemonId: () => ctx.kernel.identity.daemonId,
-      secrets: { list: refusing.secrets.held, put: refusing.secrets.put },
+      // The NAME listing is the Vault's own (names and times, never a value); writing a key in stays unavailable here.
+      secrets: {
+        list: ctx.needs.vault === undefined ? refusing.secrets.held : secretNamesOver(ctx.needs.vault),
+        put: refusing.secrets.put,
+      },
     }),
   );
   return {
@@ -482,4 +492,20 @@ export function fileAssembly(
     // not Runtimes' to read: `config/` is no folder `host.files` mounts.)
     profileEtag: async profile => await ctx.kernel.config.etag(PROFILE_ITEMS as never, profile),
   };
+}
+
+/**
+ * The setup's read of which secrets this machine holds, over the Vault's NAME listing alone (a `Pick<VaultApi, 'names'>`:
+ * its answer carries a name and two instants, so there is nowhere for a value to travel). A Vault that cannot answer
+ * rejects, and the setup refuses in its sentence: an unreadable store is never read as an empty one.
+ */
+export function secretNamesOver(
+  vault: Pick<VaultApi, 'names'>,
+): () => Promise<readonly { readonly name: string; readonly createdAt: string; readonly updatedAt: string }[]> {
+  return async () =>
+    (await vault.names()).map(({ name, createdAt, updatedAt }) => ({
+      name: String(name),
+      createdAt: String(createdAt),
+      updatedAt: String(updatedAt),
+    }));
 }

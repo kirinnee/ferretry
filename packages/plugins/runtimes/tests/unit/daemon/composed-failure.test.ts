@@ -11,6 +11,7 @@ import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type { DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
+import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { renderChangeOutcome } from '../../../cli/lib/fleet/account-render.ts';
 import type { AccountChangeOutcome } from '../../../contract/index.ts';
@@ -42,6 +43,7 @@ async function composeWithBlockedBin(
       ferrets: new FakeFerrets(),
       logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
       loginChanges: fakeLoginChanges(),
+      vault: new FakeVault(),
     },
     gate: ownerConfirms
       ? Object.assign(new StandInAdmission(() => ownerStanding()), { judgeConfigWrite: () => 'apply' as const })
