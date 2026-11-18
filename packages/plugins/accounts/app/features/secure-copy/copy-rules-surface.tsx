@@ -16,7 +16,7 @@ import type {
   PasteRuleSettingsView,
   PasteRuleStaged,
 } from '../../../contract/routes/index.ts';
-import { ConfirmToSee } from '@ferretry/app/ui';
+import { ConfirmToSee, Loading } from '@ferretry/app/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { isStepUpRefusal } from '../../lib/step-up-refusal.ts';
 import {
@@ -176,12 +176,7 @@ export function CopyRulesSurface({
       </section>
     );
 
-  if (loaded === null)
-    return (
-      <section className="kt-panel p-panel" role="status" aria-label="Loading approved pastes">
-        <p className="m-0 text-ui text-faint">Reading this daemon’s paste rules…</p>
-      </section>
-    );
+  if (loaded === null) return <Loading kind="page" label="Reading this daemon’s paste rules…" />;
 
   return (
     <CopyRulesCard

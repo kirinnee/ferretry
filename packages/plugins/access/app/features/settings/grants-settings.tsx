@@ -52,6 +52,7 @@ import {
 } from '../../lib/grants.ts';
 import { CapabilityList, WeightMark } from './capability-list.tsx';
 import { changeGrants, type GrantClient, readGrants } from './grants-api.ts';
+import { Loading } from '@ferretry/app/ui';
 
 /** The tone each guidance level paints with, kept in one place so five rows cannot disagree. */
 const TONE_CLASS: Readonly<Record<GrantGuidance['tone'], string>> = {
@@ -543,9 +544,5 @@ export function GrantsSurface({
         </p>
       </section>
     );
-  return (
-    <section className="kt-panel p-panel" role="status" aria-label="Loading capability grants">
-      <p className="m-0 text-cell leading-base text-muted">Reading what this machine allows a paired device to do…</p>
-    </section>
-  );
+  return <Loading kind="page" label="Reading what this machine allows a paired device to do…" />;
 }

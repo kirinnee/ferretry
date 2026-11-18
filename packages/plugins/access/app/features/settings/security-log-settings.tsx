@@ -35,7 +35,7 @@
  * refused or failed read — so opening Security cannot make an attacker's pairing disappear unseen.
  */
 
-import { ConfirmToSee } from '@ferretry/app/ui';
+import { ConfirmToSee, Loading } from '@ferretry/app/ui';
 import type { AuditView } from '@ferretry/core-gate/contract';
 import { CircleAlert, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -378,11 +378,7 @@ export function SecurityLogSurface({
         </p>
       </section>
     );
-  return (
-    <section className="kt-panel p-panel" role="status" aria-label="Loading the security log">
-      <p className="m-0 text-cell leading-base text-muted">Reading this machine’s security log…</p>
-    </section>
-  );
+  return <Loading kind="page" label="Reading this machine’s security log…" />;
 }
 
 /** The Settings panel, for the composition root's `daemonSettingsTabs`, bound to the app's client pool. */

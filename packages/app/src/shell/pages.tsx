@@ -8,6 +8,7 @@ import { CachedDataSetting } from './device-cached-data.tsx';
 import { DeviceAppearance } from './device-appearance.tsx';
 import { DevicePanels } from './device-panels.tsx';
 import { groupSettingsTabs, resolveSettingsTab } from './settings-tab.ts';
+import { Loading } from '../ui/loading.tsx';
 import { PanelSlot, PluginView, ShellLine } from './views.tsx';
 import { useEffect, useRef, type MouseEvent } from 'react';
 
@@ -82,7 +83,7 @@ export function DaemonListPage() {
     if (sendTo !== undefined) router.navigate(sendTo, { replace: true });
   }, [sendTo, router]);
   if (sendTo !== undefined)
-    return <ShellLine>{entry.kind === 'fleet' ? 'Opening your machine…' : 'Opening setup…'}</ShellLine>;
+    return <Loading kind="page" label={entry.kind === 'fleet' ? 'Opening your machine…' : 'Opening setup…'} />;
   if (groups.length === 0) {
     return (
       <section className="fy-page">

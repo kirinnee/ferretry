@@ -26,6 +26,7 @@ export * from './pull-to-palette-region.tsx';
 export * from './route-link.tsx';
 export * from './setup-ui.tsx';
 export * from './sheet-tabs.tsx';
+export * from './loading.tsx';
 export * from './spinner.tsx';
 export * from './theme-toggle.tsx';
 export * from './underline-tabs.tsx';
