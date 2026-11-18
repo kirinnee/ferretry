@@ -9,6 +9,7 @@ import { bundledRelayDirectory, documentRelayDiscovery, relayReadFailed } from '
 import { ActiveCarrierCard } from './features/carrier/active-carrier-card.tsx';
 import { CarrierInUse } from './features/carrier/carrier-in-use.tsx';
 import { DeviceConnectionPanel } from './features/carrier/device-connection-panel.tsx';
+import { CarrierDropLog, browserCarrierDropEnvironment } from './lib/carrier-drops.ts';
 import { relayFallbackView } from './features/carrier/relay-fallback-notice.tsx';
 import { CarrierPreferenceSelector, tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
 import { CarrierPreferenceStore, settingOf } from './lib/carrier-preference.ts';
@@ -113,8 +114,11 @@ export function buildConnect(
     // Resolves true when the machine ANSWERED the read: it ends the outage even over a session already accepted.
     daemonId => introducers.read(daemonId),
   );
+  // Every held session this browser lost, kept across reloads: what the Connection panel's drops card lists.
+  const drops = new CarrierDropLog(browserCarrierDropEnvironment(ports.now));
   const router = new CarrierRouter({
     health,
+    drops,
     openSocket: ports.openSocket,
     after: ports.after,
     now: ports.now,
@@ -161,6 +165,7 @@ export function buildConnect(
   const pairing = pairingWalk({ openSocket: ports.openSocket, after: ports.after, hostedRelay: discovery.hostedRelay });
   return {
     router,
+    drops,
     preferences,
     discovery,
     pairing,
@@ -358,6 +363,7 @@ function DeviceConnection() {
     : createElement(DeviceConnectionPanel, {
         daemons: connect.daemons,
         preferences: connect.preferences,
+        drops: connect.drops,
         webrtc: connect.webrtc !== undefined,
       });
 }
