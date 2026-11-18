@@ -6,7 +6,7 @@
  * in (its `limitation` says so, last).
  */
 import { CircleAlert, CircleCheck, CircleMinus, Stethoscope } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { type DoctorReport, DoctorReportSchema, notBuiltCheck } from '../../contract/doctor.ts';
 import type { KernelClient } from '../lib/client.ts';
 
@@ -89,10 +89,15 @@ export function DoctorReportView({ report }: { readonly report: DoctorReport }) 
 export function DoctorSettings({ client }: { readonly client: KernelClient }) {
   const [held, setHeld] = useState<Held>({ status: 'loading' });
   const [reads, setReads] = useState(0);
+  // Set by the "Try again" press and spent by the read it causes: that read is the person's own, so it may ask for the
+  // passkey again after a Cancel; the page's own read never does (A555 r7).
+  const pressed = useRef(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` is the re-read trigger
   useEffect(() => {
     let current = true;
-    client.call('GET /v1/doctor').then(
+    const press = pressed.current;
+    pressed.current = false;
+    client.call('GET /v1/doctor', press ? { quiet: false } : {}).then(
       body => {
         const parsed = DoctorReportSchema.safeParse(body);
         if (current) setHeld(parsed.success ? { status: 'ready', report: parsed.data } : { status: 'unavailable' });
@@ -105,7 +110,10 @@ export function DoctorSettings({ client }: { readonly client: KernelClient }) {
       current = false;
     };
   }, [client, reads]);
-  const again = useCallback(() => setReads(count => count + 1), []);
+  const again = useCallback(() => {
+    pressed.current = true;
+    setReads(count => count + 1);
+  }, []);
   if (held.status === 'ready') return <DoctorReportView report={held.report} />;
   return (
     <section className="kt-panel p-panel" role="status" aria-label="Doctor report unavailable">

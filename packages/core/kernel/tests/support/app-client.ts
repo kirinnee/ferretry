@@ -7,7 +7,12 @@ import type { PluginClient } from '../../manifest/index.ts';
 
 interface RecordedCall {
   readonly route: string;
-  readonly init?: { readonly query?: Readonly<Record<string, string>>; readonly body?: unknown };
+  readonly init?: {
+    readonly query?: Readonly<Record<string, string>>;
+    readonly body?: unknown;
+    /** `false`: a read a person pressed for, which may ask for a passkey (A555 r7). */
+    readonly quiet?: boolean;
+  };
 }
 
 type Init = NonNullable<RecordedCall['init']>;

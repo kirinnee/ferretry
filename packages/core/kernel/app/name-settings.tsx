@@ -23,10 +23,10 @@ interface Reading {
 /** The text a name is saved as: a JSON string is a valid YAML scalar, so no character needs its own escaping. */
 export const hostFileText = (name: string): string => `name: ${JSON.stringify(name)}\n`;
 
-async function read(client: KernelClient): Promise<Reading> {
+async function read(client: KernelClient, pressed: boolean): Promise<Reading> {
   const [file, inventory] = await Promise.all([
-    readConfigFile(client, HOST_FILE),
-    client.call('GET /v1/plugins') as Promise<{ readonly daemonName?: string }>,
+    readConfigFile(client, HOST_FILE, pressed),
+    client.call('GET /v1/plugins', pressed ? { quiet: false } : {}) as Promise<{ readonly daemonName?: string }>,
   ]);
   return {
     name: inventory.daemonName ?? '',
@@ -150,9 +150,9 @@ export function NameSettings({ client }: { readonly client: KernelClient }) {
   const [refused, setRefused] = useState<string | undefined>(undefined);
 
   const load = useCallback(
-    async (initial: boolean) => {
+    async (initial: boolean, pressed = false) => {
       try {
-        const next = await read(client);
+        const next = await read(client, pressed);
         setReading(next);
         setRefused(undefined);
         setProblem(undefined);
@@ -211,7 +211,7 @@ export function NameSettings({ client }: { readonly client: KernelClient }) {
       reading={reading === undefined}
       saved={saved}
       {...(reading === undefined && refused !== undefined
-        ? { retry: { label: refused, onPress: () => void load(true) } }
+        ? { retry: { label: refused, onPress: () => void load(true, true) } }
         : {})}
       {...(problem === undefined ? {} : { problem })}
     />

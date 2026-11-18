@@ -24,7 +24,7 @@ import {
   PanelPath,
 } from '@ferretry/app/ui';
 import { CircleAlert, FileCode2 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KernelClient } from '../lib/client.ts';
 import {
   type ConfigFileState,
@@ -270,13 +270,18 @@ export function ConfigFilesSurface({
 }) {
   const [load, setLoad] = useState<StatusLoad>({ status: 'loading' });
   const [reads, setReads] = useState(0);
+  // Set by the "Try again" press and spent by the read it causes: that read is the person's, so it may ask for the
+  // passkey again after a Cancel; a read the page makes by itself never does.
+  const pressed = useRef(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<Readonly<Record<string, ConfirmState>>>({});
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` is the re-read trigger
   useEffect(() => {
     let current = true;
-    readConfigStatus(client).then(
+    const press = pressed.current;
+    pressed.current = false;
+    readConfigStatus(client, press).then(
       view => {
         if (current) setLoad({ status: 'ready', view });
       },
@@ -290,6 +295,10 @@ export function ConfigFilesSurface({
   }, [client, reads]);
 
   const reread = useCallback(() => setReads(count => count + 1), []);
+  const tryAgain = useCallback(() => {
+    pressed.current = true;
+    reread();
+  }, [reread]);
   // What is in effect, what is broken and what waits — read again whenever any file moved, from anywhere.
   useConfigChanges(client, reread);
 
@@ -320,7 +329,7 @@ export function ConfigFilesSurface({
             This machine’s configuration files could not be read
           </h3>
           <p className="mb-0 mt-1 text-cell leading-base text-muted">{load.sentence}</p>
-          <Button type="button" className="mt-2 min-h-[44px]" data-config-files-retry="" onClick={reread}>
+          <Button type="button" className="mt-2 min-h-[44px]" data-config-files-retry="" onClick={tryAgain}>
             Try again
           </Button>
         </section>
