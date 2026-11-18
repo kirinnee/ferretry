@@ -187,12 +187,37 @@ const waitFor = async (until: () => boolean) => {
   expect(until()).toBe(true);
 };
 
-/** A `fy stream` runs until a signal; this gives it the one a person's Ctrl-C gives, once it has said it is caught up. */
+/**
+ * A `fy stream` runs until a signal; this gives it the one a person's Ctrl-C gives, once it has said it is caught up.
+ *
+ * The verb listens on the real `process`, so the test takes the listener the verb registers for SIGINT/SIGTERM and calls it
+ * itself. It never emits a signal event on the shared test process: that would run every SIGINT listener any other file
+ * of the run left behind (a handler that exits the runner) and, under a newer Bun, can raise a real signal that ends it.
+ */
 async function streamUntilCaughtUp(world: ReturnType<typeof run>, args: readonly string[]) {
-  const ended = world.verb('stream [id]', args);
-  await waitFor(() => world.err.some(text => text.includes('caught up')));
-  process.emit('SIGINT');
-  return await ended;
+  const held = new Set<() => void>();
+  const once = process.once.bind(process);
+  const off = process.off.bind(process);
+  const isStop = (event: string | symbol): boolean => event === 'SIGINT' || event === 'SIGTERM';
+  process.once = ((event: string | symbol, listener: () => void) => {
+    if (!isStop(event)) return once(event as never, listener);
+    held.add(listener);
+    return process;
+  }) as typeof process.once;
+  process.off = ((event: string | symbol, listener: () => void) => {
+    if (!isStop(event)) return off(event as never, listener);
+    held.delete(listener);
+    return process;
+  }) as typeof process.off;
+  try {
+    const ended = world.verb('stream [id]', args);
+    await waitFor(() => world.err.some(text => text.includes('caught up')));
+    for (const listener of [...held]) listener();
+    return await ended;
+  } finally {
+    process.once = once as typeof process.once;
+    process.off = off as typeof process.off;
+  }
 }
 
 describe('V-0258 fy events against the real daemon', () => {

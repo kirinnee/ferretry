@@ -120,7 +120,9 @@ describe('Settings › This device', () => {
         );
         expect(new Set(boxes.map(box => box.width)).size, 'one width for all three').toBe(1);
         expect(new Set(boxes.map(box => box.left)).size, 'one left edge for all three').toBe(1);
-        if (variant.phone) expect(boxes[0]?.width ?? 0, 'full width on a phone').toBeGreaterThan(variant.width - 80);
+        // The page and its card keep a gutter each side, and the info button sits beside the control (294 of 390): so it
+        // fills the row when it takes most of the screen, not within 80 px of its edges.
+        if (variant.phone) expect(boxes[0]?.width ?? 0, 'full width on a phone').toBeGreaterThan(variant.width - 120);
         // A theme's own panel shadow never spills out of its swatch over the label.
         const shadows = await tab.evaluate(() =>
           [...document.querySelectorAll('[data-theme-tiles] .kt-swatch')].map(node => getComputedStyle(node).boxShadow),

@@ -262,7 +262,8 @@ describe('G162 a ferret’s transcript through the real Ferrets and the real Con
     const ferret = ferretId(w.id);
     w.harness.bytes.set(ferret, conversation());
 
-    // Act: many reads, each opens a handle through Ferrets.
+    // Act: many reads. The reader keeps a ferret's held handle for a moment (642b3b1f5f), so a burst opens FEW handles, not one
+    // per read; what must hold is that none is left open but the one held, and that stop closes it.
     for (let round = 0; round < 3; round += 1) {
       await get(w, 'logs');
       await get(w, 'log-page');
@@ -272,7 +273,7 @@ describe('G162 a ferret’s transcript through the real Ferrets and the real Con
     const closedWhileRunning = w.harness.bytesClosed.length;
 
     // Assert: one handle stays open for the ferret, the other opened ones are already closed.
-    expect(opened).toBeGreaterThanOrEqual(9);
+    expect(opened).toBeGreaterThanOrEqual(1);
     expect(opened - closedWhileRunning).toBe(1);
     await w.h.stop();
     expect(w.harness.bytesClosed).toHaveLength(opened);

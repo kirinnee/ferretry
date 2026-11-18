@@ -11,7 +11,7 @@ import { bootRealDaemon, type RealDaemon } from './support/real-daemon.ts';
  * board and a canned POST could never show — a verb that exited 0 having done nothing, one that committed to the wrong
  * item, and a clear that said 1 and cleared 0 — so each is read back from the board the daemon serves afterwards.
  *
- * A ferret is seeded as an idle record with its own bearer (no pane, no model). `f1`…`f7` are autonomous leads, each test
+ * A ferret is seeded as a 'starting' record with its own bearer (no pane, no model). `f1`…`f7` are autonomous leads, each test
  * group on its own (a session holds at most 10 open requests, and an owner's action on a ferret with no live agent comes
  * back to the owner as a card after a while, so groups must not share a board); `i1` is interactive; the owner is a run
  * with no session.

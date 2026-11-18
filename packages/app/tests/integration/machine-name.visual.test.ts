@@ -65,7 +65,9 @@ const VIEWPORTS = [
 ] as const;
 
 const VIEWS = [
-  { view: 'name', path: '/d/ws/settings/kernel/name', words: ['General', 'Name', 'Shown now: pebox'] },
+  // A phone shows the open panel alone (a master/detail drill-in with a back link), so the settings groups beside it
+  // (`General`) are named on the wide layouts only: `wide` words are expected where `viewport.phone` is false.
+  { view: 'name', path: '/d/ws/settings/kernel/name', words: ['Name', 'Shown now: pebox'], wide: ['General'] },
   { view: 'name-host', path: '/d/ws/settings/kernel/name', words: ['Using the host name (kirin-mbp.local)'] },
   { view: 'pair-name', path: '/d/ws', words: ['Name this machine', 'Machine name', 'Save name', 'Not now'] },
   { view: 'connecting', path: '/d/ws', words: ['pebox'] },
@@ -100,8 +102,9 @@ const open = async (viewport: (typeof VIEWPORTS)[number], scheme: 'light' | 'dar
 describe('the machine name on every screen that shows it', () => {
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const)
-      for (const { view, path, words, ...rest } of VIEWS)
+      for (const { view, path, words: always, ...rest } of VIEWS)
         it(`draws ${view} with its words and no sideways scroll (${viewport.name}, ${scheme})`, async () => {
+          const words = [...always, ...(viewport.phone || !('wide' in rest) ? [] : rest.wide)];
           const { tab, close } = await open(viewport, scheme, view, path);
           try {
             if ('viaPicker' in rest) {
