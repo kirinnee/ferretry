@@ -97,6 +97,23 @@ describe('loginRoutes', () => {
     should(bodyOf(await call(routes, 'GET /v1/logins/presets'))).eql({ presets: [] });
   });
 
+  it('should read the quotas that are due before it lists, so an environment login shows them at once', async () => {
+    const order: string[] = [];
+    const routes = loginRoutes(
+      subsystem({
+        list: async () => {
+          order.push('list');
+          return loginList(login());
+        },
+      }),
+      async () => {
+        order.push('watch');
+      },
+    );
+    await call(routes, 'GET /v1/logins');
+    should(order).eql(['watch', 'list']);
+  });
+
   it('should check a login by the id in the path, and test it with the consent only when it is given', async () => {
     asked.length = 0;
     const routes = loginRoutes(subsystem());

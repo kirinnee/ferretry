@@ -23,6 +23,7 @@ import {
   type EnvironmentLoginTemplate,
   type LocalModels,
   type LoginBudget,
+  type ProviderQuotaReading,
   type LoginFile,
   LoginFileSchema,
   LoginIdSchema,
@@ -206,6 +207,26 @@ export const LoginsBudget = defineHook('logins.budget', {
   mode: 'provide',
   key: z.literal('usage'),
   value: z.custom<LoginBudgets>(),
+  takers: ['usage'],
+});
+
+/** What Logins asks the plugin that reads provider quotas: an environment login's last reading, and a look at them now. */
+export interface LoginQuotas {
+  /** The last reading of one login, or `undefined` when nobody has watched it yet. A cache read: never asks a provider. */
+  peek(loginId: string): ProviderQuotaReading | undefined;
+  /** Reads the quotas that are due (at most once a minute each); resolves when they have been read. */
+  watch(): Promise<void>;
+}
+
+/**
+ * `logins.quota:<key>`: offered by Logins, provided by Usage (which reads provider quotas, docs/provider-quotas.md).
+ * Logins cannot see Usage (Usage needs Logins), so the login list asks here for an environment login's reading — the
+ * windows, the balance, or "Usage unknown" with its reason. With no provider a login shows no quota reading.
+ */
+export const LoginsQuota = defineHook('logins.quota', {
+  mode: 'provide',
+  key: z.literal('usage'),
+  value: z.custom<LoginQuotas>(),
   takers: ['usage'],
 });
 

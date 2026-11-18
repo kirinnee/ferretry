@@ -17,6 +17,7 @@ import {
   LOGINS_CONFIG,
   LoginChanged,
   LoginsBudget,
+  LoginsQuota,
   LoginsUsedBy,
   LoginSignedIn,
   ModelsChanged,
@@ -193,6 +194,13 @@ export function buildLoginsDaemon() {
           test: (subject, consent) => providerProbe.test(subject, consent),
         },
         listCache: { now: () => clock.nowMs(), freshMs: CREDENTIAL_LIST_FRESH_MS },
+        // Usage reads the provider quotas: an environment login's last reading rides on its row (none when it is off).
+        providerQuota: {
+          peek: id => {
+            const quotas = hooks.provider(LoginsQuota, 'usage');
+            return quotas === 'unavailable' ? undefined : quotas.peek(id);
+          },
+        },
         // Usage owns the budgets and meters the spend: the standing shown is the one it measures (none when it is off).
         budget: {
           view: id => {
@@ -431,7 +439,11 @@ export function buildLoginsDaemon() {
       return {
         routes: {
           ...signInRoutes(harnessLogin),
-          ...loginRoutes(credentials),
+          ...loginRoutes(credentials, async () => {
+            // Somebody is reading the list: the quotas that are due are read first, so the row shows them now.
+            const quotas = hooks.provider(LoginsQuota, 'usage');
+            if (quotas !== 'unavailable') await quotas.watch().catch(() => undefined);
+          }),
           ...changeRoutes(changes),
           ...modelRoutes({
             view: modelsView,

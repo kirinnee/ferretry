@@ -566,6 +566,9 @@ export default implementDaemon(manifest, {
         // Logins' list and check show each login's standing against its budget; Logins cannot see Usage (Usage
         // needs Logins), so it asks here, and gets the very standing `GET /v1/usage/budgets` answers.
         'logins.budget:usage': { view: login => budget.view(login) },
+        // The same for a login's provider quota: its last reading, and a look at the ones due, which a read of the
+        // Sign-ins list makes (docs/provider-quotas.md: "a screen being read").
+        'logins.quota:usage': { peek: login => quota.peek(login), watch: async () => await quota.watch() },
         // Ferrets' live readout estimates a running compaction from how long this daemon's finished ones took, and
         // keeps each finished one here: the history is Usage's file (RULING #27, Q6), the readout only asks.
         'ferrets.compaction-history:usage': compactionHistory,
