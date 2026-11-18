@@ -97,6 +97,61 @@ describe('ControlModeTmuxProcess over a real tmux', () => {
     should(spawned.commands.length).equal(before);
   }, 30_000);
 
+  it('should carry reads joined by ; in-band, and keep a list with any non-read on its own process', async () => {
+    // Arrange — the terminal poll's own command: the rows and the geometry of one pane, joined by tmux's `;`.
+    const { direct, spawned, subject } = await server();
+    await subject.execute(['new-session', '-d', '-s', 'work', '-x', '80', '-y', '8', HOSTILE]);
+    await waitFor(
+      async () => (await direct.execute(['capture-pane', '-p', '-t', 'work'])).stdout.includes('\n3000\n'),
+      'the pane to print its last line',
+    );
+    await subject.execute(['has-session', '-t', 'work']);
+    const joined = [
+      'capture-pane',
+      '-p',
+      '-e',
+      '-N',
+      '-S',
+      '-50',
+      '-t',
+      'work',
+      ';',
+      'display-message',
+      '-p',
+      '-t',
+      'work',
+      '#{cursor_x}|#{cursor_y}|#{pane_width}|#{pane_height}|#{history_size}',
+    ];
+    const before = spawned.commands.length;
+
+    // Act
+    const actual = await subject.execute(joined);
+    const expected = await direct.execute(joined);
+    const missing = await subject.execute(['capture-pane', '-p', '-t', 'nope', ';', 'display-message', '-p', 'x']);
+    const afterReads = spawned.commands.length;
+    await subject.execute([
+      'display-message',
+      '-p',
+      '-t',
+      'work',
+      'a',
+      ';',
+      'set-option',
+      '-t',
+      'work',
+      '@fy_probe',
+      'x',
+    ]);
+
+    // Assert
+    should(actual).deepEqual(expected);
+    should(actual.stdout.split('\n').at(-2)).match(/^\d+\|\d+\|80\|8\|\d+$/u);
+    should(missing.code).not.equal(0);
+    should(afterReads).equal(before);
+    // A list with a command that is not a read still runs whole, on its own process.
+    should(spawned.commands.length).equal(afterReads + 1);
+  }, 30_000);
+
   it('should keep every mutation and every stdin payload on its own process', async () => {
     // Arrange
     const { spawned, subject } = await server();

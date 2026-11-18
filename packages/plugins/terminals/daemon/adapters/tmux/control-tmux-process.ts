@@ -279,6 +279,16 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
     const line =
       stdin === undefined && arguments_[0]?.startsWith('-') === false ? controlCommandLine(arguments_) : undefined;
     if (line === undefined) {
+      // READS JOINED BY `;` (a terminal's rows and its cursor: `capture-pane ... ; display-message ...`) are each a read,
+      // so they go in-band too: written to the client back to back, answered in order, joined as tmux prints them. Any
+      // part that is not a read keeps the whole command on its own process, exactly as before.
+      const reads = stdin === undefined ? readsJoined(arguments_) : undefined;
+      if (reads !== undefined) {
+        const answers = await Promise.all(reads.map(async read => await this.execute(read)));
+        const failed = answers.find(answer => answer.code !== 0);
+        if (failed !== undefined) return { code: failed.code, stdout: '', stderr: failed.stderr };
+        return { code: 0, stdout: answers.map(answer => answer.stdout).join(''), stderr: '' };
+      }
       if (this.options.mutations === 'refuse')
         return {
           code: 1,
@@ -470,4 +480,21 @@ function matches(filter: TmuxEventFilter, notification: TmuxControlNotification)
     (filter.paneId === undefined || fields.paneId === filter.paneId) &&
     (filter.sessionId === undefined || fields.sessionId === filter.sessionId)
   );
+}
+
+/**
+ * The commands of a `;`-joined argv when every one of them is a read a control client carries ({@link controlCommandLine}),
+ * else `undefined`. A leading, trailing or doubled `;` (an empty command) is not a list of reads.
+ */
+function readsJoined(arguments_: readonly string[]): readonly (readonly string[])[] | undefined {
+  if (!arguments_.includes(';')) return undefined;
+  const parts: string[][] = [[]];
+  for (const argument of arguments_) {
+    if (argument === ';') parts.push([]);
+    else (parts.at(-1) as string[]).push(argument);
+  }
+  const reads = parts.every(
+    part => part[0] !== undefined && !part[0].startsWith('-') && controlCommandLine(part) !== undefined,
+  );
+  return reads ? parts : undefined;
 }
