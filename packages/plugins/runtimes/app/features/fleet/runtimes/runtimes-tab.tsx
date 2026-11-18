@@ -10,6 +10,7 @@
  * picked, so the person still chooses the folder and says what they want; it is a click, never a load.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import { daemonHomeHref } from '@ferretry/app';
 import type { MachineView, RuntimeView } from '../../../../contract/index.ts';
 import { ChevronLeft, ChevronRight, Lock, Plus, TriangleAlert } from 'lucide-react';
@@ -559,9 +560,7 @@ export function RuntimesTab({
         {state.sentence}
       </p>
     ) : (
-      <p role="status" className="m-0 text-cell text-muted" data-runtimes-loading="">
-        Reading the runtimes on {machineName}…
-      </p>
+      <Loading kind="page" label={`Reading the runtimes on ${machineName}…`} />
     );
 
   if (adding)

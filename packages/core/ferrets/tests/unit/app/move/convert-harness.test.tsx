@@ -186,7 +186,7 @@ describe('ConvertHarness — a ready preview', () => {
     await pick(root, 'codex-a');
     await interact(() => must(q(root, 'data-convert-confirm'), 'confirm').click());
     expect(text(root)).toContain('Checking that Codex can open the conversation…');
-    expect(q(root, 'data-convert-moving')?.getAttribute('role')).toBe('status');
+    expect(q(root, 'data-convert-moving')?.querySelector('[data-loading]')?.getAttribute('role')).toBe('status');
     expect(q(root, 'data-convert-confirm')).toBeNull();
     await interact(() => finish(summaryOf({ id: 's1' })));
     await settle();

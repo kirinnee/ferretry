@@ -9,6 +9,7 @@
  * The page is quiet by design: stats first, then flat one-line lists — no card per row.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type { WardenAgendaView, WardenLeaveDuration, WardenStatusView } from '../../wire.ts';
 import { AlertTriangle, LoaderCircle, RefreshCw, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 
@@ -177,13 +178,7 @@ function StatusSummary({
   readonly now: number;
   readonly machineName: string | undefined;
 }) {
-  if (status.status === 'loading')
-    return (
-      <p role="status" className="m-0 flex items-center gap-xs text-ui text-muted">
-        <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-        Reading the Warden’s status…
-      </p>
-    );
+  if (status.status === 'loading') return <Loading kind="page" label="Reading the Warden’s status…" />;
   if (status.status === 'error')
     return (
       <div role="alert" className="rounded-control border border-err-border bg-err-bg px-cell-x py-row-y">

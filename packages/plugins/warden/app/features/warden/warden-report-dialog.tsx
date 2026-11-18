@@ -1,5 +1,6 @@
 /** The complete evidence behind one concise Warden verdict. */
 
+import { Loading } from '@ferretry/app/ui';
 import { Gavel, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Markdown } from '@ferretry/app';
@@ -89,7 +90,7 @@ export function WardenReportDialog({
           </p>
         )}
         <div className="min-h-0 overflow-auto px-cell-x py-3 text-ui leading-base">
-          {body === null && !unavailable && <p className="m-0 text-muted">Loading report evidence…</p>}
+          {body === null && !unavailable && <Loading compact kind="page" label="Loading report evidence…" />}
           {unavailable && (
             <section className="rounded-control border border-warn-border bg-warn-bg p-3 text-warn" role="alert">
               <h3 className="m-0 text-ui font-semibold">Report evidence unavailable</h3>

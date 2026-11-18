@@ -5,7 +5,7 @@
  * owner answers in the Agenda; the ask renderer draws that answer row's one plain reference to the task.
  */
 
-import { RouteLink, useLayoutMode, useNow } from '@ferretry/app/ui';
+import { Loading, RouteLink, useLayoutMode, useNow } from '@ferretry/app/ui';
 import type {
   AppComponent,
   PanelProps,
@@ -205,8 +205,17 @@ const taskProgress = (runtime: BoardRuntime): AppComponent<PanelProps> =>
   function TaskProgress({ subject }: PanelProps): ReactNode {
     const id = (subject ?? '').toUpperCase();
     const state = useBoardTask(runtime.store, THIS_MACHINE, id);
-    if (state.task === null)
-      return state.missing ? <p role="status">No task {id}.</p> : <p role="status">Reading {id}…</p>;
+    if (state.task === null) {
+      if (state.missing) return <p role="status">No task {id}.</p>;
+      // A failed read is over: say so and let go of the top bar (a read that never answers must not run it forever).
+      if (state.status === 'error')
+        return (
+          <p role="alert">
+            {id} could not be read: {state.error ?? 'the machine did not answer'}.
+          </p>
+        );
+      return <Loading kind="bar" label={`Reading ${id}…`} />;
+    }
     const parts = writtenProgressParts(state.task.progress);
     if (parts.length === 0) return <p role="status">{formatTaskRef({ id })} has no progress yet.</p>;
     return (

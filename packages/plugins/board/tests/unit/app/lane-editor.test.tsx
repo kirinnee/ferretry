@@ -903,7 +903,7 @@ describe('S-0128 the lane editor page', () => {
 
     // Assert
     expect(view.container.textContent).toContain('Loading lanes…');
-    expect(view.container.querySelector('[aria-busy="true"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-loading="page"]')).not.toBeNull();
   });
 
   it('says so when the read failed', async () => {

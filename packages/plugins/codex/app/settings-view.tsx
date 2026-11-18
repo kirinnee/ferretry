@@ -1,5 +1,6 @@
 /** The current Agent CLIs panel, narrowed to Codex and bound to the plugin client. */
 import { Badge, Button, SettingGroup, SettingRow } from '@ferretry/app';
+import { Loading } from '@ferretry/app/ui';
 import { useEffect, useState } from 'react';
 import type { HarnessCliView } from '../contract/index.ts';
 import type { CodexSettings } from './codex-settings.ts';
@@ -73,11 +74,7 @@ export function CodexSettingsView({ settings }: { readonly settings: CodexSettin
   };
 
   if (loaded.kind === 'loading')
-    return (
-      <section aria-label="Codex" role="status">
-        Reading which Codex this machine runs, and checking for newer versions…
-      </section>
-    );
+    return <Loading kind="page" label="Reading which Codex this machine runs, and checking for newer versions…" />;
   if (loaded.kind === 'failed')
     return (
       <section aria-label="Codex">

@@ -40,7 +40,7 @@ import {
   type RuntimeModelChoice,
   runtimeModelCatalogErrorMessage,
 } from '../lib/runtime-models.ts';
-import { CUSTOM_MODEL_ID, contextWords, groupByTier } from '@ferretry/app/ui';
+import { CUSTOM_MODEL_ID, contextWords, groupByTier, Loading } from '@ferretry/app/ui';
 import { callFailure } from '../lib/client.ts';
 import type { RuntimeControlApi, RuntimeControlCommand } from '../lib/runtime-switch.ts';
 import {
@@ -668,12 +668,7 @@ export function RuntimeModelChoices({
     );
   }
   if (choices === null) {
-    return (
-      <div className="mt-2 flex min-h-[44px] items-center gap-sm text-muted text-ui" role="status">
-        <LoaderCircle aria-hidden="true" className="animate-spin" size={15} />
-        Loading account-aware model choices…
-      </div>
-    );
+    return <Loading kind="bar" label="Loading account-aware model choices…" />;
   }
   if (choices.length === 0) {
     return (
@@ -1116,10 +1111,7 @@ export function RuntimeEffortControls({
               Account-aware reasoning choices are unavailable: {runtimeModelCatalogErrorMessage(catalogError)}
             </p>
           ) : catalog === null ? (
-            <div className="flex min-h-[44px] items-center gap-sm text-muted text-ui" role="status">
-              <LoaderCircle aria-hidden="true" className="animate-spin" size={15} />
-              Loading account-aware reasoning choices…
-            </div>
+            <Loading kind="bar" label="Loading account-aware reasoning choices…" />
           ) : currentCodexModel ? (
             <RuntimeReasoningChoices
               currentEffort={state.observedReasoningEffort?.trim() || config.launchReasoningEffort}

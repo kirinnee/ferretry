@@ -4,6 +4,7 @@
  * an OPEN item opens here as the deck's card, like a tap on the Open list does.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import { agendaTitle } from '@ferretry/core-asks/contract';
 import { sessionsBarNames } from '../../lib/ferret-names.ts';
 import { Fragment } from 'react';
@@ -108,7 +109,7 @@ export function InboxFindResults({
       </ul>
       <p className="fy-attn-inbox__hint">
         {WHERE_WORDS}
-        {reading ? ' Reading more…' : ''}
+        {reading ? <Loading kind="bar" label="Reading more…" /> : null}
       </p>
     </div>
   );

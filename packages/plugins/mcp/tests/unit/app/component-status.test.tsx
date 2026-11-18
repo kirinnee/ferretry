@@ -94,7 +94,7 @@ describe('mcp#2 the status under an MCP server’s row in the Profiles library',
     const client = scriptedClient({ 'GET /v1/mcp': () => new Promise(() => undefined) });
     const Panel = createComponentStatusPanel(client as never) as unknown as FC<Record<string, unknown>>;
     mounted = await mountSettled(<Panel subject="linear" usedByRuntimes={1} />);
-    expect(text(mounted.container, '[data-component-mcp-status]')).toBe('Reading where linear stands…');
+    expect(text(mounted.container, '[data-loading="background"]')).toBe('Reading where linear stands…');
   });
 
   it('says a failed read in plain words and reads again, once for every row, on Try again', async () => {

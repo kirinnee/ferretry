@@ -123,6 +123,8 @@ describe('job ages and failures', () => {
     );
     await settle();
     expect(view.container.textContent).toContain('Could not read the log — log gone');
+    // The refusal ends the wait: no background load is held for a log that will not come.
+    expect(view.container.querySelector('[data-job-log] [data-loading="background"]')).toBeNull();
     failList = true;
     await settle();
     expect(view.container.textContent).toContain('Showing the last answer — daemon away');

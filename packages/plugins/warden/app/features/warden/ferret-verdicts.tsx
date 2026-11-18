@@ -5,6 +5,7 @@
  * each with what the Warden did and why. Pure over what it is handed: the panel (`views/warden-ferret.tsx`) reads.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import { relativeTime } from '@ferretry/app';
 import { Shield } from 'lucide-react';
 import type { WardenVerdict } from '../../wire.ts';
@@ -48,9 +49,7 @@ export function FerretVerdicts({
     <section className="flex min-w-0 flex-col gap-sm" data-ferret-warden="">
       <h3 className="m-0 text-cell font-semibold text-fg">Warden</h3>
       {verdicts.kind === 'loading' ? (
-        <p className="m-0 text-cell text-muted" role="status">
-          Reading the Warden’s verdicts…
-        </p>
+        <Loading kind="bar" label="Reading the Warden’s verdicts…" />
       ) : verdicts.kind === 'failed' ? (
         <p className="m-0 text-cell text-muted" data-ferret-warden-failed="" role="alert">
           Couldn’t read the Warden’s verdicts: {verdicts.reason}

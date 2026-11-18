@@ -6,6 +6,7 @@
  * change fold away under one line. The comparison itself is `agenda-diff.ts`'s; this only reads and draws.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type { AgendaItem, AgendaViewTab } from '@ferretry/core-asks/contract';
 import { ChevronRight } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
@@ -192,9 +193,7 @@ export function VersionDiffPanel({
         </div>
       </div>
       {loaded.state === 'loading' ? (
-        <p className="fy-diff__note m-0" role="status">
-          Reading both versions…
-        </p>
+        <Loading kind="bar" label="Reading both versions…" />
       ) : loaded.state === 'failed' ? (
         <p className="fy-diff__note m-0" role="alert">
           One of these versions could not be read. Try again in a moment.

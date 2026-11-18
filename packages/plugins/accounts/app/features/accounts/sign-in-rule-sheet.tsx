@@ -6,6 +6,7 @@
  * opened the sheet NOTHING is ticked, and the code needs its own red acknowledgement.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type {
   Place,
   SignInRuleEligibility,
@@ -211,10 +212,13 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
           </dl>
         </div>
       )}
-      {eligibility === undefined ? (
-        <p className="m-0 text-ui text-muted" data-rule-eligibility="reading" role="status">
-          Checking whether this sign-in can have a rule…
-        </p>
+      {/* Waiting only while the read is still pending: a rejected one is in `phase` (the error shows) and lets the bar go. */}
+      {eligibility === undefined && phase.kind !== 'failed' ? (
+        <Loading
+          kind="bar"
+          label="Checking whether this sign-in can have a rule…"
+          marks={{ 'data-rule-eligibility': 'reading' }}
+        />
       ) : null}
       {ineligible === undefined ? null : (
         <p className="m-0 text-ui text-warn" data-rule-ineligible={ineligible} role="status">

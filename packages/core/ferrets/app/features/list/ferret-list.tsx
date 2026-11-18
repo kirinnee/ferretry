@@ -15,6 +15,7 @@
  */
 
 import { useAppHook, useDeviceControls, useOptionalRouter } from '@ferretry/app';
+import { Loading } from '@ferretry/app/ui';
 import { type ReactNode, useEffect, useState } from 'react';
 import {
   FERRETS_LIST_SCOPE_HOOK,
@@ -106,12 +107,7 @@ export function FerretListBody({
   const onNavigate = router === null ? undefined : (to: string) => router.navigate(to);
   const navigation = onNavigate === undefined ? {} : { onNavigate };
 
-  if (read.kind === 'loading')
-    return (
-      <p className="fy-sbar__empty" role="status">
-        Reading ferrets…
-      </p>
-    );
+  if (read.kind === 'loading') return <Loading kind="bar" label="Reading ferrets…" />;
   if (read.kind === 'failed')
     return (
       <div className="fy-sbar__empty" role="alert">

@@ -267,7 +267,7 @@ describe('AgendaInboxPage counts what it lists', () => {
   it('says it is still reading beside a whole list, without the caveat', async () => {
     const { view, choose } = await mountPage({ parked: many.slice(0, 3), parkedWhole: true, resolvedReading: true });
     await choose('snoozed');
-    expect(view.container.querySelector('.fy-attn-inbox__hint')?.textContent).toBe('Reading more…');
+    expect(view.container.querySelector('[data-loading="background"]')?.textContent).toBe('Reading more…');
     await view.unmount();
   });
 

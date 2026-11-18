@@ -297,6 +297,88 @@ describe('QueuePanel', () => {
     }
   });
 
+  test('when reads outlast the poll, each answer newer than the last applied one is applied: the queue does not freeze', async () => {
+    const waitingAt = (id: string, minute: number, state = 'queued') => ({
+      ...queued(id, `words of ${id}`),
+      state,
+      enqueuedAt: at(minute),
+    });
+    const answers: Answers = {
+      '/v1/ferrets/s1/queue': { messages: [waitingAt('q0', 0), waitingAt('q1', 1)], nextCursor: null },
+    };
+    const beats: Array<() => void> = [];
+    const realSetInterval = globalThis.setInterval;
+    globalThis.setInterval = ((callback: () => void) => {
+      beats.push(callback);
+      return 0;
+    }) as unknown as typeof setInterval;
+    try {
+      open(daemon(answers));
+      await settleUntil(() => rowIds().length === 2, 'window shown', runAsync);
+
+      // Act — poll 2 starts, then poll 3 starts BEFORE poll 2 has answered (a read slower than the five-second poll).
+      const resolvers: Array<(value: unknown) => void> = [];
+      const hold = () => {
+        answers['/v1/ferrets/s1/queue'] = new Promise(resolve => resolvers.push(resolve));
+      };
+      const beat = beats.at(-1);
+      hold();
+      await runAsync(async () => beat?.());
+      hold();
+      await runAsync(async () => beat?.());
+      // Poll 2 answers while poll 3 is still in the air: q0 is cancelled, q1 still waits.
+      await runAsync(async () =>
+        resolvers[0]?.({ messages: [waitingAt('q0', 0, 'cancelled'), waitingAt('q1', 1)], nextCursor: null }),
+      );
+      await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 20)));
+      expect(rowIds()).toEqual(['q1']);
+
+      // Poll 3 answers later: q1 is cancelled too, and that is applied as well.
+      await runAsync(async () =>
+        resolvers[1]?.({
+          messages: [waitingAt('q0', 0, 'cancelled'), waitingAt('q1', 1, 'cancelled')],
+          nextCursor: null,
+        }),
+      );
+      await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 20)));
+      expect(rowIds()).toEqual([]);
+    } finally {
+      globalThis.setInterval = realSetInterval;
+    }
+  });
+
+  test('a first load slower than the poll still settles on the answer that lands, and lets the bar go', async () => {
+    const message = { ...queued('q0', 'words of q0'), enqueuedAt: at(0) };
+    const resolvers: Array<(value: unknown) => void> = [];
+    const answers: Answers = {
+      '/v1/ferrets/s1/queue': new Promise(resolve => resolvers.push(resolve)),
+    };
+    const beats: Array<() => void> = [];
+    const realSetInterval = globalThis.setInterval;
+    globalThis.setInterval = ((callback: () => void) => {
+      beats.push(callback);
+      return 0;
+    }) as unknown as typeof setInterval;
+    try {
+      open(daemon(answers));
+      await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 20)));
+      expect(page()).toContain('data-loading');
+
+      // Act — the poll starts again before the first read answered; then the FIRST read answers (the newer one is still out).
+      answers['/v1/ferrets/s1/queue'] = new Promise(resolve => resolvers.push(resolve));
+      await runAsync(async () => beats.at(-1)?.());
+      await runAsync(async () => resolvers[0]?.({ messages: [message], nextCursor: null }));
+      await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 20)));
+
+      // Assert — the answer is shown and no first-load bar is held, though a newer read is still in the air.
+      expect(resolvers).toHaveLength(2);
+      expect(rowIds()).toEqual(['q0']);
+      expect(page()).not.toContain('"data-loading":"background"');
+    } finally {
+      globalThis.setInterval = realSetInterval;
+    }
+  });
+
   test('keeps Show older messages when the newest window holds only cancelled messages', async () => {
     const second = (n: number) => new Date(Date.UTC(2026, 9, 30, 10, 5, n)).toISOString();
     const cancelled = Array.from({ length: 100 }, (_, n) => ({

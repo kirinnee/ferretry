@@ -28,6 +28,7 @@
  *   ledger does not hold is said out loud as no longer open.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type {
   AgendaId,
   AgendaItem,
@@ -640,7 +641,11 @@ export const useAgenda = ({
           aria-modal="true"
           aria-label={selectedItem.title ?? selectedItem.subject}
         >
-          <p role={detail.error === undefined ? 'status' : 'alert'}>{detail.error ?? 'Reading agenda item…'}</p>
+          {detail.error === undefined ? (
+            <Loading kind="page" label="Reading agenda item…" />
+          ) : (
+            <p role="alert">{detail.error}</p>
+          )}
           {detail.error === undefined ? null : (
             <button type="button" onClick={detail.retry}>
               Try again

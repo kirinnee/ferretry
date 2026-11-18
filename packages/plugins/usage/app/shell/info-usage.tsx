@@ -9,7 +9,7 @@
  * quota reading says "usage unknown".
  */
 import { useFerretWorkspace, useOptionalRouter } from '@ferretry/app';
-import { RouteLink } from '@ferretry/app/ui';
+import { Loading, RouteLink } from '@ferretry/app/ui';
 import { type FerretLiveRead, FerretLiveReadSchema } from '@ferretry/core-ferrets/contract';
 import { useEffect, useState } from 'react';
 import type { AnalyticsRawSession } from '../../contract/index.ts';
@@ -238,12 +238,12 @@ export function FerretUsageInfoPanel({
 
   return (
     <section aria-label="Usage" className="grid min-w-0 gap-sm px-panel py-3" data-info-usage={read.kind}>
-      {read.kind === 'loading' ? <Muted>Reading…</Muted> : null}
+      {read.kind === 'loading' ? <Loading kind="bar" label="Reading…" /> : null}
       {read.kind === 'failed' ? <Muted>Couldn’t read: {read.reason}</Muted> : null}
       {read.kind === 'ready' && row === null && liveTurns === 0 ? <Muted>No turns recorded yet</Muted> : null}
       <Row label="Context" {...(contextHint === null ? {} : { hint: contextHint })}>
         {figures.kind === 'pending' ? (
-          <Muted>Reading…</Muted>
+          <Loading kind="bar" label="Reading…" />
         ) : figures.contextPercent === null ? (
           <Muted>Not reported yet</Muted>
         ) : (
@@ -255,7 +255,7 @@ export function FerretUsageInfoPanel({
       </Row>
       <Row label="Turns">
         {figures.kind === 'pending' ? (
-          <Muted>Reading…</Muted>
+          <Loading kind="bar" label="Reading…" />
         ) : figures.turns === null ? (
           <Muted>unknown</Muted>
         ) : (

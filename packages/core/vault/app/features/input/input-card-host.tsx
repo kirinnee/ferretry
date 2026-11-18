@@ -12,6 +12,7 @@
  */
 import { AskOnScreenSchema } from '@ferretry/core-asks/contract';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Loading } from '@ferretry/app/ui';
 import { listInputRequests } from '../../lib/input-api.ts';
 import type { InputRequest } from '../../../contract/index.ts';
 import type { VaultClient } from '../../shell.tsx';
@@ -106,12 +107,7 @@ export function InputCardHost({ client, value, agentName, onDone, onHold }: Inpu
         This request is no longer open.
       </p>
     );
-  if (read.kind === 'loading')
-    return (
-      <p className="m-0 text-ui text-faint" role="status">
-        Reading the request…
-      </p>
-    );
+  if (read.kind === 'loading') return <Loading compact kind="page" label="Reading the request…" />;
   return (
     <InputCard
       client={client}

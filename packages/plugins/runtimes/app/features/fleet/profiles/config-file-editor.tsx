@@ -17,7 +17,7 @@
 
 import { CircleAlert, FileCode2, TriangleAlert } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
-import { PanelPath } from '@ferretry/app/ui';
+import { Loading, PanelPath } from '@ferretry/app/ui';
 import { useConfigFileChanges } from '../../../hooks/use-config-file-changes.ts';
 import { useMachineChanges } from '../../../hooks/use-machine-changes.ts';
 import type { LiveRuntimesClient } from '../../../lib/client.ts';
@@ -240,11 +240,7 @@ export function ConfigFileEditor({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-panel pb-4">
         <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-3 py-3">
-          {load.status === 'loading' ? (
-            <p role="status" className="m-0 text-cell text-muted">
-              Reading {path}…
-            </p>
-          ) : null}
+          {load.status === 'loading' ? <Loading kind="page" label={`Reading ${path}…`} /> : null}
           {load.status === 'failed' ? (
             <p role="alert" className="m-0 text-cell leading-base text-err" data-config-editor-failed="">
               {path} could not be read. {load.sentence}

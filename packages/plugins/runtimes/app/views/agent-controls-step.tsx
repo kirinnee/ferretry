@@ -4,6 +4,7 @@
  * changes nothing until Save; the Runtimes tab shows the same default-runtime control.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type { AppComponent, SettingsProps } from '@ferretry/kernel/manifest';
 import { useState } from 'react';
 import { AgentControlSection } from '../features/fleet/machine/agent-control-section.tsx';
@@ -19,9 +20,11 @@ function AgentControlsStep({ client, machine, machineName, checking, onRetry, on
   const { data, reload } = useMachineData(client);
   const [picked, setPicked] = useState<string | null>(null);
   if (machine === null)
-    return (
+    return checking ? (
+      <Loading kind="page" label={`Checking ${machineName}…`} />
+    ) : (
       <p role="status" className="m-0 text-cell text-muted" data-onboarding-reading="controls">
-        {checking ? `Checking ${machineName}…` : `${machineName}’s controls show once it answers.`}
+        {machineName}’s controls show once it answers.
       </p>
     );
   const refreshed = (): void => {

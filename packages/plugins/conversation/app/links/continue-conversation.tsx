@@ -13,7 +13,7 @@
  * taken at once — and the new ferret opens on its full history.
  */
 
-import { Button } from '@ferretry/app/ui';
+import { Button, Loading } from '@ferretry/app/ui';
 import type { FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { LinkableConversation, LinkPreview } from '../../contract/index.ts';
@@ -535,12 +535,7 @@ function ContinueRow({
 function PreviewMessages({ preview }: { readonly preview: Preview | undefined }) {
   if (preview === undefined)
     return <p className="m-0 text-meta text-muted">No preview of this ferret’s conversation is available.</p>;
-  if (preview.kind === 'reading')
-    return (
-      <p role="status" className="m-0 text-meta text-muted">
-        Reading the last messages…
-      </p>
-    );
+  if (preview.kind === 'reading') return <Loading kind="bar" label="Reading the last messages…" />;
   if (preview.kind === 'refused') return <p className="m-0 text-meta text-warn">{preview.sentence}</p>;
   const { messages } = preview.preview;
   if (messages.length === 0) return <p className="m-0 text-meta text-muted">Nothing was said in it yet.</p>;

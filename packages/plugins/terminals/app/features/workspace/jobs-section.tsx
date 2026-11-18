@@ -1,3 +1,4 @@
+import { Loading } from '@ferretry/app/ui';
 /**
  * BACKGROUND JOBS, under the Processes list (docs/jobs.md): the commands the keeper runs for this ferret — name, state, age, exit
  * code — and, opened, the tail of each one's log. A job is not a process of the agent's: it lives in the daemon-owned tmux
@@ -100,7 +101,14 @@ function JobLog({
           Could not read the log — {problem}
         </p>
       )}
-      <pre className="fy-proc-job-log__text">{text === null ? 'Loading…' : text === '' ? '(no output yet)' : text}</pre>
+      {text === null ? (
+        // Waiting only while no read has answered at all: a refusal ends the wait (the line above says why) and lets the bar go.
+        problem === null ? (
+          <Loading kind="bar" label="Loading…" />
+        ) : null
+      ) : (
+        <pre className="fy-proc-job-log__text">{text === '' ? '(no output yet)' : text}</pre>
+      )}
     </div>
   );
 }

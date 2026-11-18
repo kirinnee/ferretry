@@ -5,6 +5,7 @@
  * `GET /v1/links/history/:entryId` reads one, through the half's client.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useEffect, useState } from 'react';
 import type { z } from 'zod';
@@ -73,9 +74,7 @@ export function HistoryPage({ daemon, readHistory: read, readEntry }: HistoryPag
           {error}
         </p>
       ) : history === undefined ? (
-        <p className="mt-8 text-sm text-muted" role="status">
-          Reading local harness history…
-        </p>
+        <Loading kind="page" label="Reading local harness history…" />
       ) : (
         <>
           {history.entries.length === 0 ? (

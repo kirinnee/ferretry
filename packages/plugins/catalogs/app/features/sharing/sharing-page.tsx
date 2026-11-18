@@ -14,7 +14,7 @@ import type { InstallMachine } from '../shared/shared-item-sheet.tsx';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import { daemonSharingPath, SHARING_TABS, type SharingTab } from '../../lib/routes.ts';
 import { useDaemonClient } from '../../lib/client-context.tsx';
-import { PageThemeSwitch, UnderlineTabs } from '@ferretry/app/ui';
+import { Loading, PageThemeSwitch, UnderlineTabs } from '@ferretry/app/ui';
 import { CatalogMembersPanel } from '../catalogs/catalog-members.tsx';
 import { FailureLine, SharingOffPanel } from '../catalogs/catalog-parts.tsx';
 import type { CatalogClientFactory } from '../catalogs/catalogs-api.ts';
@@ -118,12 +118,7 @@ function People({
   readonly createClient: CatalogClientFactory | undefined;
 }) {
   const { read, reload } = useCatalogsFor(connection, createClient);
-  if (read.kind === 'loading')
-    return (
-      <p className="m-0 text-cell text-muted" role="status">
-        Reading people…
-      </p>
-    );
+  if (read.kind === 'loading') return <Loading kind="page" label="Reading people…" />;
   if (read.kind === 'failed')
     return read.refusal.sharingOff ? (
       <SharingOffPanel connection={connection} {...(createClient === undefined ? {} : { createClient })} />

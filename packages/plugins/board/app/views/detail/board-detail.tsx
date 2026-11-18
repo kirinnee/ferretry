@@ -23,6 +23,7 @@ import {
   parseTaskRef,
   writtenProgressParts,
 } from '../../../contract/index.ts';
+import { Loading } from '@ferretry/app/ui';
 import { ArrowLeft, Link, MessageSquare, X } from 'lucide-react';
 import { Component, type ErrorInfo, type ReactNode, useMemo, useState } from 'react';
 import { type BoardMachine, useBoardTask } from '../../hooks/use-board.ts';
@@ -179,11 +180,7 @@ function LoadedTask(props: BoardDetailProps & { readonly id: TaskId }) {
       </p>
     );
   }
-  return (
-    <p className="fy-board-detail__empty" role="status">
-      Reading {label}…
-    </p>
-  );
+  return <Loading kind="page" label={`Reading ${label}…`} />;
 }
 
 function DetailBody({

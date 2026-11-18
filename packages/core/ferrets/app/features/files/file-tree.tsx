@@ -1,4 +1,5 @@
-import { FileText, Folder, Link2Off, Loader2, Lock, RefreshCw, ChevronRight } from 'lucide-react';
+import { FileText, Folder, Link2Off, Lock, RefreshCw, ChevronRight } from 'lucide-react';
+import { Loading } from '@ferretry/app/ui';
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { describeFsError, fsApi, isAbort } from './files-api.ts';
 import { formatBytes } from './files-model.ts';
@@ -38,10 +39,7 @@ export const FileTreeRows = ({ rows, onToggle, onEnter, onOpenFile, onRetry }: F
               style={depthStyle(row.depth)}
             >
               {row.note === 'loading' ? (
-                <>
-                  <Loader2 size={13} className="animate-spin" aria-hidden="true" />
-                  Loading…
-                </>
+                <Loading kind="bar" label="Loading…" />
               ) : row.note === 'error' ? (
                 <>
                   <span>
@@ -192,6 +190,9 @@ export const FileTree = ({ scope, dir, refreshNonce = 0, hidden, onEnter, onOpen
   useEffect(
     () => () => {
       for (const controller of inflight.current.values()) controller.abort();
+      // Forget them too: a replayed setup (StrictMode, or any teardown that is followed by a setup) must start its own
+      // request, not find the aborted one still listed and skip, which would leave the node loading for good.
+      inflight.current.clear();
     },
     [],
   );

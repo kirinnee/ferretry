@@ -11,7 +11,7 @@
  */
 
 export { Markdown, useReferenceSurface } from '@ferretry/app';
-export { Badge, type BadgeTone, Button, cn, RouteLink } from '@ferretry/app/ui';
+export { Badge, type BadgeTone, Button, cn, Loading, RouteLink } from '@ferretry/app/ui';
 export { MessageFooter, PeerName, ToolGroup } from './components/card-parts.tsx';
 
 /** The clock and timers a view reads time with. `after` and `every` return the function that cancels them. */

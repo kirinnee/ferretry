@@ -116,7 +116,7 @@ describe('ProjectDetailPage', () => {
     const mounted = await mount(detail(client([], { [FERRETS]: () => pending })));
     await shown(mounted);
 
-    expect(mounted.container.querySelector('[data-project-agents="unread"]')).not.toBeNull();
+    expect(mounted.container.querySelector('[data-loading="background"]')).not.toBeNull();
     expect(mounted.container.querySelector('[data-project-files="unread"]')).not.toBeNull();
     expect(mounted.container.querySelector('[data-project-agents="empty"]')).toBeNull();
     await mounted.unmount();

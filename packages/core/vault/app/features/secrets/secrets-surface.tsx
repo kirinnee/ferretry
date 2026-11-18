@@ -8,7 +8,7 @@
  * secrets" — a person shown that over a store the browser simply could not reach will set every secret again, which is
  * the exact failure this project keeps finding.
  */
-import { ConfirmToSee, isStepUpRefusal } from '@ferretry/app/ui';
+import { ConfirmToSee, isStepUpRefusal, Loading } from '@ferretry/app/ui';
 import { useCallback, useEffect, useState } from 'react';
 import type { SecretList } from '../../../contract/index.ts';
 import type { VaultClient } from '../../shell.tsx';
@@ -89,12 +89,7 @@ export function SecretsSurface({ client }: { readonly client: VaultClient }) {
       </section>
     );
 
-  if (list === null)
-    return (
-      <section className="kt-panel p-panel" role="status" aria-label="Loading secrets">
-        <p className="m-0 text-ui text-faint">Reading this daemon’s secret store…</p>
-      </section>
-    );
+  if (list === null) return <Loading kind="page" label="Reading this daemon’s secret store…" />;
 
   return (
     <SecretsCard

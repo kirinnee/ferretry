@@ -5,6 +5,7 @@
  */
 
 import { Badge, Button, SettingGroup, SettingRow, SettingSwitch } from '@ferretry/app';
+import { Loading } from '@ferretry/app/ui';
 import type { AppComponent, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { useEffect, useState } from 'react';
 import {
@@ -68,7 +69,12 @@ export const createSettings = (client: PluginClient): AppComponent<SettingsProps
       }
     };
 
-    if (view === null) return <p role="status">{readError ?? 'Reading the update state…'}</p>;
+    if (view === null)
+      return readError === null ? (
+        <Loading kind="page" label="Reading the update state…" />
+      ) : (
+        <p role="status">{readError}</p>
+      );
     return (
       <UpdatesView
         view={view}

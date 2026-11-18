@@ -22,6 +22,7 @@
  * No status, code or error name reaches the screen; see `securityFailureSentence`.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import {
   isSecuritySwitch,
   SECURITY_SETTING_BOUNDS,
@@ -275,6 +276,14 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
     };
   }, [connection, createClient]);
 
+  if (loaded.kind === 'loading')
+    return (
+      <Loading
+        kind="page"
+        label="Reading this machine’s security settings…"
+        marks={{ 'data-security-settings-state': 'loading' }}
+      />
+    );
   if (loaded.kind !== 'ready')
     return (
       <section
@@ -283,9 +292,7 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
         aria-label="Security settings"
         data-security-settings-state={loaded.kind}
       >
-        <p className="m-0 text-cell leading-base text-muted">
-          {loaded.kind === 'loading' ? 'Reading this machine’s security settings…' : SECURITY_LOAD_FAILURE}
-        </p>
+        <p className="m-0 text-cell leading-base text-muted">{SECURITY_LOAD_FAILURE}</p>
       </section>
     );
 

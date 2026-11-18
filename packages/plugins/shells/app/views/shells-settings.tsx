@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { NixFacts, ShellName, ShellPreview, ShellSummary } from '../../contract/index.ts';
 import { type AddDraft, addRequestOf, BUILD_TONES, BUILD_WORDS, EMPTY_DRAFT, shellLine } from '../lib/shells-model.ts';
 import { type ShellsClient, shellsClient } from '../lib/shells-client.ts';
+import { Loading } from '@ferretry/app/ui';
 import { Badge, Button, SettingGroup, SettingRow } from '../ui.ts';
 
 const said = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -114,7 +115,7 @@ function ShellsTab({ shells }: { readonly shells: ShellsClient }) {
 
       <SettingGroup label="Shells">
         <>
-          {list === undefined && <SettingRow name="Loading shells…" />}
+          {list === undefined && error === undefined && <Loading kind="bar" label="Loading shells…" />}
           {list?.length === 0 && <SettingRow name="No shells yet." hint="Ferrets use the machine's tools." />}
           {list?.map(shell => (
             <SettingRow

@@ -7,6 +7,7 @@
  * ONE change the daemon previews and applies.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import { useState } from 'react';
 import type { AccountChange, ComponentKind, ComponentView } from '../../../../contract/index.ts';
 import { InstructionBody } from '../profiles/instruction-text.tsx';
@@ -91,12 +92,7 @@ export function ComponentKindPages({
     setPage(next);
   };
 
-  if (read.kind === 'loading')
-    return (
-      <p className="m-0 text-cell text-muted" role="status">
-        Reading {machineName}’s {KIND_PLURAL[kind]}…
-      </p>
-    );
+  if (read.kind === 'loading') return <Loading kind="page" label={`Reading ${machineName}’s ${KIND_PLURAL[kind]}…`} />;
   if (read.kind === 'failed') return <ReadFailed reason={read.reason} onRetry={() => void reload()} />;
   const catalog = read.catalog;
   const done = (message: string, next: Page) => {

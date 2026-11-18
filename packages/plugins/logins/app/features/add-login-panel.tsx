@@ -8,6 +8,7 @@
  * the key-only quick form first (`quick-key-form.tsx`); **More fields…** there opens the full form below.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import { useEffect, useState } from 'react';
 import type { ProviderPresetCatalog, ProviderPresetView } from '../../contract/index.ts';
 import { LoginScopeChip } from '../components/login-scope-chip.tsx';
@@ -339,11 +340,7 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
         </p>
       )}
       {catalog === null ? (
-        failure === null && (
-          <p role="status" className="m-0 text-cell text-muted">
-            Reading the providers…
-          </p>
-        )
+        failure === null && <Loading kind="bar" label="Reading the providers…" />
       ) : (
         <ProviderGrid presets={catalog.presets} onPick={setChoosing} onPaste={() => setChoosing('paste')} />
       )}

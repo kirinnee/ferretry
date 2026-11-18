@@ -20,7 +20,7 @@ import type {
 } from '../../contract/index.ts';
 import { Lightbulb, ScanSearch, X } from 'lucide-react';
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { cn } from '@ferretry/app/ui';
+import { cn, Loading } from '@ferretry/app/ui';
 import type { LessonsConnection } from './api.ts';
 import {
   actOnLessonsProposal,
@@ -234,9 +234,7 @@ function LessonsHub({
         />
         <div role="tabpanel" id="lessons-lessons" aria-labelledby={`lessons-tab-${tab}`}>
           {proposals === null && error === null ? (
-            <p role="status" className="m-0 py-4 text-ui text-muted">
-              Reading lessons…
-            </p>
+            <Loading kind="page" label="Reading lessons…" />
           ) : rows.length === 0 ? (
             <p className="kt-panel m-0 p-4 text-ui text-muted">{emptyTabSentence(tab, source)}</p>
           ) : (

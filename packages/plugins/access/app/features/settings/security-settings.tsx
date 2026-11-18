@@ -21,6 +21,7 @@
  * `passkeyFailureSentence`; no status or stack reaches the screen, and a browser's own error ends the sentence by name and message.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import type { PasskeysView } from '../../../contract/index.ts';
 import { Fingerprint, Plus } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
@@ -238,11 +239,12 @@ export function SecuritySurface({
           failure={failure}
           onAdd={() => void add()}
         />
+      ) : loaded.kind === 'loading' ? (
+        // Nothing is drawn in place while reading (an empty bordered panel would only flash): the shell's one bar says so.
+        <Loading kind="bar" label="Reading the passkeys this device holds…" />
       ) : (
         <section className="kt-panel p-panel" role="status" aria-label="Passkeys" data-security-state={loaded.kind}>
-          <p className="m-0 text-cell leading-base text-muted">
-            {loaded.kind === 'loading' ? 'Reading the passkeys this device holds…' : LOAD_FAILURE}
-          </p>
+          <p className="m-0 text-cell leading-base text-muted">{LOAD_FAILURE}</p>
         </section>
       )}
       <SecuritySettingsBlock connection={connection} createClient={createClient} />

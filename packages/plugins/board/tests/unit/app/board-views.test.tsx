@@ -373,7 +373,8 @@ describe('S-0032 ArchiveView', () => {
 
   it('says why it is empty', async () => {
     view = await mount(<ArchiveView {...(await props({ shown: [], total: 0, loading: true }))} />);
-    expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('Reading the archive…');
+    // Reading draws no empty-state line (it would be a lie while reading): the shell's one bar says so.
+    expect(view.container.querySelector('.fy-board-empty')).toBeNull();
     await view.render(<ArchiveView {...(await props({ shown: [], total: 0 }))} />);
     expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('Nothing closed yet.');
     await view.render(<ArchiveView {...(await props({ shown: [], total: 0, query: 'zzz' }))} />);

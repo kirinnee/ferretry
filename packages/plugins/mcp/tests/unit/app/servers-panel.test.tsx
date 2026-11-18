@@ -223,7 +223,7 @@ describe('DOM tests — the mcp-servers panel', () => {
 
   it('says it is reading until the machine answers', async () => {
     const { root } = await panel({ [SERVERS]: () => new Promise(() => undefined) });
-    expect(text(root, '[data-context-note]')).toBe('Reading MCP servers…');
+    expect(text(root, '[data-loading="page"]')).toBe('Reading MCP servers…');
   });
 
   it('S174 never draws a token or a secret value: a signed-in row names a status and nothing it is stored under', async () => {

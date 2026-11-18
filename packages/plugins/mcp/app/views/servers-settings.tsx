@@ -9,6 +9,7 @@ import {
   ContextFilterBar,
   contextEmptyCopy,
   ContextNote,
+  Loading,
   useChangeAuthority,
   useContextRead,
 } from '@ferretry/app/ui';
@@ -45,7 +46,7 @@ export function McpSettings({ client, now = Date.now, origin }: McpSettingsProps
     return (
       <ContextFailure machineName={MACHINE_NAME} what="read the MCP servers" reason={load.reason} onRetry={reload} />
     );
-  if (load.kind !== 'ready') return <ContextNote>Reading MCP servers…</ContextNote>;
+  if (load.kind !== 'ready') return <Loading kind="page" label="Reading MCP servers…" />;
 
   const nowMs = now();
   const servers = sortedMcpServers(load.value.servers);

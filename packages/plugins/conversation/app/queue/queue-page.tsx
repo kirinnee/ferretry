@@ -7,6 +7,7 @@
 import type { ReactNode } from 'react';
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { absoluteTime, ChatProse, clockOfInstant, useOptionalRouter, useScreenHref } from '@ferretry/app';
+import { Loading } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import { useConversationClient, useConversationDaemon } from '../client.ts';
@@ -306,7 +307,9 @@ export function QueuePageView({
       <div className="fy-queue-column">
         <header className="fy-queue-head">
           <h1 className="fy-queue-title">{title}</h1>
-          <span className="fy-queue-count">{loading ? 'Reading the queues…' : countLine}</span>
+          <span className="fy-queue-count">
+            {loading ? <Loading kind="bar" label="Reading the queues…" /> : countLine}
+          </span>
           {onShowAll === undefined ? null : (
             <button className="kt-btn kt-btn--sm" onClick={onShowAll} type="button">
               All queues
@@ -451,6 +454,8 @@ function QueuePage({
   const held = useRef<QueueHistory | undefined>(undefined);
   // The number of the newest window poll started; see `read`.
   const generation = useRef(0);
+  // The number of the newest poll whose answer was applied; an older answer never replaces a newer one.
+  const applied = useRef(0);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderFailed, setOlderFailed] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -482,7 +487,15 @@ function QueuePage({
       } catch {
         // An unreachable machine shows only what this device still holds for it.
       }
-      if (!live || mine !== generation.current) return;
+      if (!live) return;
+      // Any answer NEWER than the newest one already applied is applied, even while a still newer poll is in the air: when
+      // reads take longer than the poll, requiring "the latest started" would drop every answer and freeze the window at
+      // the first one. Only an answer older than one already applied is dropped, so it can never put the window back.
+      if (mine < applied.current) {
+        setLoading(false);
+        return;
+      }
+      applied.current = mine;
       // What is held is read NOW, after the answer: an older page the person loaded while this poll was in the air is
       // in it, and the window answered is applied over it rather than over what was held when the poll began.
       const next = page === undefined ? held.current : refreshQueueHistory(held.current, page);

@@ -4,6 +4,7 @@
  * says so instead of starting anything.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import { useCallback, useEffect, useState } from 'react';
 import type { LoginList } from '../../contract/index.ts';
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
@@ -44,12 +45,7 @@ export function LoginSignInPanel({ client, harness, subject, pollMs, onSignedIn 
         {failure}
       </p>
     );
-  if (list === null)
-    return (
-      <p role="status" className="m-0 text-cell text-muted">
-        Reading the logins on this machine…
-      </p>
-    );
+  if (list === null) return <Loading kind="page" label="Reading the logins on this machine…" />;
   const login = subject === undefined ? undefined : list.logins.find(item => item.id === subject);
   if (login === undefined || login.harness !== harness)
     return (
