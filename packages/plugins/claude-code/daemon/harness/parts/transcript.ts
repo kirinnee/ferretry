@@ -12,15 +12,67 @@ import type { FencedPath, FerretId, RootHandle, RootStat } from '@ferretry/kerne
 import { milliseconds } from '@ferretry/std';
 import { claudeTranscriptPath, isConversationId } from '../../lib/harness/claude-path.ts';
 import { HOME_FILES } from '../../lib/harness/launch.ts';
-import { markCutWindow, parseEntries, parseTail } from '../../lib/harness/transcript.ts';
+import { parseEntries } from '../../lib/harness/transcript.ts';
+import {
+  advanceCursor,
+  advanceFrom,
+  canAdvance,
+  openCursor,
+  type TailCursor,
+  windowRecords,
+} from '../../lib/harness/transcript-cursor.ts';
 import { type ClaudeCore, claudeHome, FIRST_RECORDS_BYTES, type Serves } from './core.ts';
 
 const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
 /** How much of the end of a transcript one tail read takes: a turn's records are near the end. */
 const TAIL_READ_BYTES = 512 * 1024;
+/** How many ferrets' tail cursors are kept (each holds at most one window's records). */
+const MAX_CURSORS = 256;
+
+/** Which transcript file a ferret's conversation names, kept for {@link BINDING_MS} so the proof is not redone on every look. */
+interface Binding {
+  readonly home: RootHandle;
+  readonly file: FencedPath;
+  readonly at: number;
+}
+const BINDINGS = new WeakMap<ClaudeCore, Map<FerretId, Binding>>();
+/** The most ferrets' bindings kept per core. */
+const MAX_BINDINGS = 512;
+/**
+ * How long the conversation a ferret's home names (the id and the folder it was started in: the proof of WHICH file is
+ * the ferret's) is taken as unchanged. The turn watch, the live readout and the conversation reader each ask for the
+ * transcript several times a tick, and every ask read the home's identity file and walked the root again. The file's own
+ * stat is NEVER taken from the memory: a transcript that was removed, or replaced by anything but a plain file, is
+ * answered afresh at once, so only a conversation CHANGE (a restart under another id) can be seen up to this late.
+ */
+const BINDING_MS = 2_000;
 
 /** The exact transcript of the assigned id in its encoded cwd, including after a daemon restart; never one found by guessing. */
 async function transcriptFile(
+  core: ClaudeCore,
+  ferret: FerretId,
+): Promise<{ readonly home: RootHandle; readonly file: FencedPath; readonly stat: RootStat } | undefined> {
+  const bindings = BINDINGS.get(core) ?? new Map<FerretId, Binding>();
+  BINDINGS.set(core, bindings);
+  const now = core.deps.clock.nowMs();
+  const bound = bindings.get(ferret);
+  if (bound !== undefined && now - bound.at >= 0 && now - bound.at < BINDING_MS) {
+    const stat = await bound.home.stat(bound.file).catch(() => undefined);
+    if (stat?.kind === 'file') return { home: bound.home, file: bound.file, stat };
+  }
+  bindings.delete(ferret);
+  const found = await resolveTranscriptFile(core, ferret);
+  if (found !== undefined) {
+    bindings.set(ferret, { home: found.home, file: found.file, at: now });
+    for (const oldest of bindings.keys()) {
+      if (bindings.size <= MAX_BINDINGS) break;
+      bindings.delete(oldest);
+    }
+  }
+  return found;
+}
+
+async function resolveTranscriptFile(
   core: ClaudeCore,
   ferret: FerretId,
 ): Promise<{ readonly home: RootHandle; readonly file: FencedPath; readonly stat: RootStat } | undefined> {
@@ -125,6 +177,16 @@ const sha256Hex = (text: string): string => createHash('sha256').update(text, 'u
 export const transcriptPart = (
   core: ClaudeCore,
 ): Serves<'transcript' | 'transcriptBytes' | 'transcriptStamp' | 'transcriptTail'> => {
+  /** One cursor per ferret, the newest looks only (a ferret that is gone is dropped when its transcript no longer resolves). */
+  const cursors = new Map<FerretId, TailCursor>();
+  const remember = (ferret: FerretId, cursor: TailCursor): void => {
+    cursors.delete(ferret);
+    cursors.set(ferret, cursor);
+    for (const oldest of cursors.keys()) {
+      if (cursors.size <= MAX_CURSORS) break;
+      cursors.delete(oldest);
+    }
+  };
   const transcript: TranscriptReader = {
     read: async (ferret, after, limit) => {
       const all = await entries(core, ferret);
@@ -174,20 +236,47 @@ export const transcriptPart = (
       }
     },
 
-    /** The newest `limit` records of that transcript, without their text (`Harness.transcriptTail`). */
+    /**
+     * The newest `limit` records of that transcript, without their text (`Harness.transcriptTail`). A transcript that
+     * only grew since the last look is read from where that look ended (only the new bytes are read and parsed); a first
+     * look, a smaller file or another file reads the last window whole. The answer is the same either way.
+     */
     async transcriptTail(ferret: FerretId, limit: number): Promise<HarnessTranscriptTail> {
       const found = await transcriptFile(core, ferret);
-      if (found === undefined) return { kind: 'unresolved' };
-      const tail = await found.home.readTail(found.file, TAIL_READ_BYTES).catch(() => undefined);
-      if (tail === undefined) return { kind: 'unreadable' };
-      const text = new TextDecoder().decode(tail.bytes);
-      const partial = tail.size > tail.bytes.length;
-      // A window that reads no message, work or turn boundary whole cannot say where the turn stands: the newest record is
-      // larger than it (or only bookkeeping and an unfinished line follow the cut one), which is a turn at work (never "no
-      // transcript", so the pane alone cannot end it). The window is never widened: one wider parse is a synchronous slice
-      // on the daemon's main thread (ruling #44).
-      const records = markCutWindow(parseTail(text, partial), partial);
-      return { kind: 'read', records: records.slice(-limit) };
+      if (found === undefined) {
+        cursors.delete(ferret);
+        return { kind: 'unresolved' };
+      }
+      const identity = await found.home
+        .fileIdentity(found.file)
+        .then(named => (named === undefined ? undefined : `${named.device}:${named.inode}`))
+        .catch(() => undefined);
+      const kept = cursors.get(ferret);
+      let cursor: TailCursor | undefined;
+      if (kept !== undefined && identity !== undefined && canAdvance(kept, identity, found.stat.size)) {
+        const from = advanceFrom(kept);
+        const length = found.stat.size - from;
+        const bytes =
+          length <= 0
+            ? new Uint8Array(0)
+            : await found.home.readBytes(found.file, { offset: from, length }).catch(() => undefined);
+        cursor = bytes === undefined ? undefined : advanceCursor(kept, bytes, found.stat.size);
+      }
+      if (cursor === undefined) {
+        const tail = await found.home.readTail(found.file, TAIL_READ_BYTES).catch(() => undefined);
+        if (tail === undefined) {
+          cursors.delete(ferret);
+          return { kind: 'unreadable' };
+        }
+        cursor = openCursor(identity ?? '', tail.bytes, tail.size, TAIL_READ_BYTES);
+      }
+      // A file with no identity is never advanced: the next look reads it whole again.
+      if (identity === undefined) cursors.delete(ferret);
+      else remember(ferret, cursor);
+      // A window that reads no message, work or turn boundary whole cannot say where the turn stands (see
+      // `markCutWindow`); the window is never widened: one wider parse is a synchronous slice on the daemon's main thread
+      // (ruling #44).
+      return { kind: 'read', records: windowRecords(cursor, limit) };
     },
   };
 };

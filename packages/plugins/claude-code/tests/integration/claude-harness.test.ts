@@ -24,7 +24,20 @@ import { CLAUDE_RUNTIME_SWITCH } from '../../daemon/lib/harness/runtime-switch.t
 import { PaneDirectory } from '../../daemon/adapters/tmux-pane.ts';
 import { ClaudeProjectApprovals } from '../../daemon/lib/project-approvals.ts';
 import { HarnessUpdateRefusal } from '../../daemon/lib/update/service.ts';
-import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import {
+  appendFile,
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  symlink,
+  truncate,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ensureInternalRootBases, rootsPortFor } from '../../../../core/kernel/host/roots.ts';
@@ -59,6 +72,8 @@ afterEach(async () => {
 });
 const T = '2026-11-01T10:00:00.000Z' as Instant;
 
+let elapsed = 0;
+
 function build(
   options: {
     located?: boolean;
@@ -77,6 +92,8 @@ function build(
     selected?: (runtime: string | undefined) => Promise<{ settings: ReadonlySet<string>; hooks: ReadonlySet<string> }>;
     /** Roots in place of the real ones (a stub that refuses or throws, for the doubt branches). */
     roots?: ReturnType<typeof rootsPortFor>;
+    /** The clock's milliseconds; default: every ask is a long time after the last (no memory of a conversation's file). */
+    nowMs?: () => number;
   } = {},
 ) {
   /** The roots the harness is built on; default: the kernel's own over the fixture home. */
@@ -119,7 +136,11 @@ function build(
         } as SpawnResult;
       },
     } as never,
-    clock: { sleep: async () => {}, after: () => () => {} } as never,
+    clock: {
+      sleep: async () => {},
+      after: () => () => {},
+      nowMs: options.nowMs ?? (() => (elapsed += 60_000)),
+    } as never,
     redaction: {
       read: async (fn: (scope: unknown) => unknown) =>
         await fn({
@@ -1059,6 +1080,64 @@ describe('ClaudeHarness', () => {
     if (tail.kind !== 'read') throw new Error('the tail reads');
     expect(tail.records.map(record => record.kind)).toEqual(['message', 'message', 'usage', 'turn']);
     expect(JSON.stringify(tail)).not.toContain('SECRET');
+  });
+
+  test('the tail follows a transcript that is appended to in place, and starts over for a cut or a swapped file', async () => {
+    const { harness, writeHome } = build();
+    await harness.start(spec(), runner({}), {} as never);
+    const file = join(HOME, 'projects/-work/conv-1.jsonl');
+    const message = (id: string) => JSON.stringify({ type: 'user', uuid: id, timestamp: T, message: { content: id } });
+    const work = JSON.stringify({
+      type: 'assistant',
+      timestamp: T,
+      message: { content: [{ type: 'tool_use', name: 'Bash' }] },
+    });
+    const done = JSON.stringify({
+      type: 'assistant',
+      timestamp: T,
+      message: { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' },
+    });
+    const kinds = async () => {
+      const tail = await harness.transcriptTail(FERRET, 50);
+      return tail.kind === 'read' ? tail.records.map(record => record.kind) : tail.kind;
+    };
+    await writeHome('projects/-work/conv-1.jsonl', `${message('u1')}\n`);
+    expect(await kinds()).toEqual(['message']);
+    // Appended in place (the same file): the new records come, the old ones stay.
+    await appendFile(file, `${work}\n`);
+    expect(await kinds()).toEqual(['message', 'work']);
+    // A line that is only half written is read as it stands (nothing yet) and finished by the next write.
+    await appendFile(file, done.slice(0, 30));
+    expect(await kinds()).toEqual(['message', 'work']);
+    await appendFile(file, `${done.slice(30)}\n`);
+    expect(await kinds()).toEqual(['message', 'work', 'message', 'turn']);
+    // Cut shorter in place: it starts over and says what the shorter file says.
+    await truncate(file, Buffer.byteLength(`${message('u1')}\n`));
+    expect(await kinds()).toEqual(['message']);
+    // Swapped for another file that is LARGER: the new file is what is read, not the old one grown.
+    await rm(file);
+    await writeFile(file, `${work}\n${work}\n${done}\n${message('u2')}\n`);
+    expect(await kinds()).toEqual(['work', 'work', 'message', 'turn', 'message']);
+  });
+
+  test('the conversation a home names is remembered briefly, but the transcript is looked at on every ask', async () => {
+    let at = 1_000;
+    const { harness, writeHome } = build({ nowMs: () => at });
+    await harness.start(spec(), runner({}), {} as never);
+    const message = (id: string) => JSON.stringify({ type: 'user', uuid: id, timestamp: T, message: { content: id } });
+    await writeHome('projects/-work/conv-1.jsonl', `${message('u1')}\n`);
+    const first = await harness.transcriptStamp(FERRET);
+    expect(first?.file).toEndWith('conv-1.jsonl');
+    // Inside the moment: a transcript that grew is stamped with its new size (the stat is never remembered)...
+    await appendFile(join(HOME, 'projects/-work/conv-1.jsonl'), `${message('u2')}\n`);
+    at += 500;
+    const grown = await harness.transcriptStamp(FERRET);
+    expect(grown?.size).toBeGreaterThan(first?.size ?? 0);
+    // ...and one that is removed is no transcript at once, not after the moment.
+    await rm(join(HOME, 'projects/-work/conv-1.jsonl'));
+    at += 100;
+    expect(await harness.transcriptStamp(FERRET)).toBeUndefined();
+    expect(await harness.transcriptTail(FERRET, 10)).toEqual({ kind: 'unresolved' });
   });
 
   test('the live runtime switch is the one Claude switch, handed to every ferret and held per none', () => {
