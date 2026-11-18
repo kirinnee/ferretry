@@ -370,6 +370,52 @@ describe('adding a passkey', () => {
   });
 });
 
+describe('A555 r7: every registration a device sends is said, whatever its outcome', () => {
+  it('should tell the log a registration that did not parse, one that was refused, and one that was registered', async () => {
+    const credential = new Uint8Array([10, 11, 12, 13]);
+    const world = machine({
+      registers: async () => ({
+        ok: true,
+        credentialId: credential,
+        algorithm: -7,
+        publicKeySpki: new Uint8Array([1, 2, 3, 4]),
+        signCount: 0,
+        origin: ORIGIN,
+      }),
+    });
+    const sent: unknown[] = [];
+    const routes = stepUpRoutes(world.service, undefined, undefined, undefined, undefined, undefined, undefined, note =>
+      sent.push(note),
+    );
+    const ask = (body: unknown) =>
+      respond(routes, 'POST /v1/passkeys', {
+        body: typeof body === 'string' ? body : JSON.stringify(body),
+        device: phone,
+      });
+    const registration = {
+      credentialId: toBase64Url(credential),
+      clientDataJSON: 'Y2xpZW50',
+      attestationObject: 'YXR0ZXN0',
+    };
+    await world.ask('POST /v1/passkeys/registration-window', { deviceId: phoneId }, { host: true });
+    const garbled = await ask('{"credentialId": 1');
+    // Sent before any options were issued: no challenge to answer.
+    const unchallenged = await ask(registration);
+    await respond(routes, 'POST /v1/passkeys/options', { body: JSON.stringify({ origin: ORIGIN }), device: phone });
+    const registered = await ask(registration);
+    should(garbled.status).equal(400);
+    refusedAs(unchallenged, 401, stepUpRefusalCode('not-verified'));
+    should(registered.status).equal(201);
+    should(sent).deepEqual([
+      { request: 'POST /v1/passkeys', deviceId: phoneId, outcome: 'unreadable' },
+      { request: 'POST /v1/passkeys', deviceId: phoneId, outcome: 'not-verified' },
+      { request: 'POST /v1/passkeys', deviceId: phoneId, outcome: 'registered' },
+    ]);
+    // Never the credential, the client data or the attestation.
+    should(JSON.stringify(sent)).not.containEql('Y2xpZW50').and.not.containEql('YXR0ZXN0');
+  });
+});
+
 describe('re-opening a passkey window', () => {
   it('P133 should never be done by a browser, its own window or another device’s, nor by the admin token off the machine', async () => {
     // Arrange

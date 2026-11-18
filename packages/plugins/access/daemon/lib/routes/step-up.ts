@@ -197,6 +197,13 @@ export function stepUpRoutes(
    * died in the browser left no trace. The same fields as a refusal note, never the options themselves.
    */
   onRegistrationAsked?: (note: Omit<PasskeyRefusalNote, 'reason'>) => void,
+  /**
+   * Told EVERY registration a device sent (`POST /v1/passkeys`), whatever became of it (A555 r7): `registered`, the
+   * refusal's reason, or `unreadable` for a body that did not parse. With {@link onRegistrationAsked} the log answers
+   * "did the browser send what it made?" — options issued and no attempt is a ceremony that died in the browser. Names
+   * and ids only: never the attestation, the client data or the credential id.
+   */
+  onRegistrationSent?: (note: Omit<PasskeyRefusalNote, 'reason'> & { readonly outcome: string }) => void,
 ): readonly ApiRoute[] {
   const answer = <T>(
     context: RouteContext,
@@ -253,13 +260,22 @@ export function stepUpRoutes(
       noStore: true,
       unlockExempt: true,
       handle: async context => {
-        const body = await parseBody(context.request, PasskeyRegistrationSchema);
-        return answer(
-          context,
-          await service.register(caller(context), body),
-          value => PasskeyViewSchema.parse(value),
-          201,
-        );
+        const sent = (outcome: string): void =>
+          onRegistrationSent?.({
+            request: `${context.request.method} ${context.request.path}`,
+            deviceId: sessionDevice(context)?.deviceId ?? undefined,
+            outcome,
+          });
+        let body: Parameters<StepUpService['register']>[1];
+        try {
+          body = await parseBody(context.request, PasskeyRegistrationSchema);
+        } catch (error) {
+          sent('unreadable');
+          throw error;
+        }
+        const outcome = await service.register(caller(context), body);
+        sent(outcome.ok ? 'registered' : outcome.refusal);
+        return answer(context, outcome, value => PasskeyViewSchema.parse(value), 201);
       },
     },
     {

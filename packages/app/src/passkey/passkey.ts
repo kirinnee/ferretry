@@ -18,7 +18,11 @@ import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
  *    then a step-up for the act, each at most once.
  *
  * A READ IS THE PAGE'S OWN WORK (G95): a `GET` or `HEAD` is `background`, and its prompt waits until its machine is
- * on screen ({@link PasskeyHandler.focus}); anything else is a press, `explicit`, and asks at once.
+ * on screen ({@link PasskeyHandler.focus}); anything else is a press, `explicit`, and asks at once. A READ NOBODY CAUSED
+ * never raises the step-up (A555 r7: a page polling a refused read re-raised it in a loop): a background view's call, or
+ * a read sent while no person is acting on the page (no transient user activation — a poll, an effect a re-render re-ran).
+ * Its refusal is its answer, the client answers the same read from it for a while instead of sending it again
+ * (`client/step-up-backoff.ts`), and the page offers its own "Confirm it's you" press. The unlock is unchanged.
  *
  * NOTHING HERE HOLDS A CREDENTIAL (G100). A verified step-up is a fact the DAEMON remembers about this device and this
  * copy of the app; no challenge, assertion or proof crosses this seam, and nothing here is logged.

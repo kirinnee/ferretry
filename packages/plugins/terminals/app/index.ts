@@ -27,6 +27,9 @@ export default provideToShell(
     build: ({ client }) => {
       const dependencies = pluginTerminalDeckDependencies(client, browserTerminalDeckHost());
       const slots = pluginTerminalSlotsClient(client);
+      // ONE function for the half's life: the panels read in an effect keyed on it, so a new arrow per render re-sent
+      // their read on every re-render of the app — and a refused read re-rendered the app (A555 r7).
+      const createSlotsClient = async () => slots;
       return {
         panels: {
           terminals: ({ subject, intent }) =>
@@ -45,9 +48,9 @@ export default provideToShell(
         },
         settings: {
           terminals: () =>
-            createElement(TerminalSlotsSettings, { connection: THIS_DAEMON, createClient: async () => slots }),
+            createElement(TerminalSlotsSettings, { connection: THIS_DAEMON, createClient: createSlotsClient }),
           // Read-only: limits change only through limits.yaml (docs/ferret-limits.md).
-          limits: () => createElement(LimitsSurface, { connection: THIS_DAEMON, createClient: async () => slots }),
+          limits: () => createElement(LimitsSurface, { connection: THIS_DAEMON, createClient: createSlotsClient }),
         },
         renderers: {
           'reference:%terminal': ({ value }) =>

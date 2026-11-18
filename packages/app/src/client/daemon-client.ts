@@ -9,6 +9,7 @@ import {
 import { z } from 'zod';
 import type { PairedDaemon } from '../daemons/daemon-list.ts';
 import { type PasskeyHandler, type PasskeyNeed, type PromptOrigin, requestOrigin } from '../passkey/passkey.ts';
+import { backoffKey, StepUpBackoff } from './step-up-backoff.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
 import { untilAborted } from './machine-deadline.ts';
 import { DEVICE_NOT_ACCEPTED_SENTENCE } from './sentences.ts';
@@ -107,12 +108,27 @@ export interface DaemonClientOptions {
   readonly passkey?: { readonly daemon: PairedDaemon; readonly handler: PasskeyHandler };
   /** Told what the daemon calls its machine, every time the plugin list is read: a rename reaches this device by it. */
   readonly learnName?: (name: string) => void;
+  /** The clock a background read's step-up backoff runs on ({@link StepUpBackoff}); the wall clock when absent. */
+  readonly now?: () => number;
+  /**
+   * Whether a person is acting on this page RIGHT NOW: the browser's own transient user activation
+   * (`navigator.userActivation.isActive`, a few seconds after a click or a key) when absent. A read sent while it holds
+   * is one the person caused (they opened the page, chose the machine) and may ask for its step-up; a read sent without
+   * it — a poll, an effect re-run by a re-render — never does (A555 r7).
+   */
+  readonly personActing?: () => boolean;
 }
+
+/** The browser's transient user activation; `false` where there is none to read (a test, a worker). */
+const browserActivation = (): boolean =>
+  (globalThis.navigator as { readonly userActivation?: { readonly isActive?: boolean } } | undefined)?.userActivation
+    ?.isActive === true;
 
 /**
  * Who a package client's calls are on behalf of, for the passkey (S2): `ordinary` asks as the request's method says
- * (a read waits for its machine to be on screen, a press asks at once); `background` makes EVERY call a background
- * read, whatever its method, so a background view never raises a prompt for a machine that is not on screen.
+ * (a read waits for its machine to be on screen, and asks for a step-up only while a person is acting; a press asks at
+ * once); `background` makes EVERY call a background read, whatever its method, so a background view never raises a
+ * step-up prompt.
  */
 export type ClientOrigin = 'ordinary' | 'background';
 
@@ -195,8 +211,13 @@ export class DaemonClient {
   /** Failed reads in a row, and the pending re-read's timer; both reset by an answered read. */
   #failedReads = 0;
   #rereadTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Background reads refused for a step-up, answered with that refusal for a while rather than sent again. */
+  readonly #backoff: StepUpBackoff;
+  readonly #personActing: () => boolean;
 
   constructor(options: DaemonClientOptions) {
+    this.#backoff = new StepUpBackoff(options.now);
+    this.#personActing = options.personActing ?? browserActivation;
     this.#transport = options.transport;
     this.#surfaces = options.surfaces;
     this.#rereadAfterMs = options.rereadAfterMs ?? DEFAULT_REREAD_AFTER_MS;
@@ -282,6 +303,7 @@ export class DaemonClient {
    * press's asked step-up): the generation moves on, and the grants are re-read.
    */
   noteConfirmed(): void {
+    this.#backoff.clear();
     this.#generation += 1;
     this.#signal({ kind: 'confirmed' });
   }
@@ -480,7 +502,14 @@ export class DaemonClient {
     // A read sent with `quiet: false` is one a person pressed for (a retry after a cancelled prompt): it is theirs, so it
     // asks wherever it came from and clears the machine's "cancel stays cancelled". Absent, a GET is the page's own read.
     const origin: PromptOrigin = background ? 'background' : init.quiet === false ? 'explicit' : requestOrigin(method);
-    return await this.#confirmed(
+    // A READ NOBODY CAUSED (A555 r7): a background view's call, or a read sent while no person is acting on the page (a
+    // poll, an effect a re-render re-ran). Its step-up refusal is its answer — no prompt — and the same read is answered
+    // from that refusal for a while rather than sent again (`step-up-backoff.ts`).
+    const unasked = origin === 'background' && (background || !this.#personActing());
+    const key = unasked ? backoffKey(request) : undefined;
+    const held = key === undefined ? undefined : this.#backoff.held(key);
+    if (held !== undefined) return held;
+    const answer = await this.#confirmed(
       origin,
       await this.#sent(request),
       async () => {
@@ -489,8 +518,13 @@ export class DaemonClient {
       },
       init.signal,
       // Only a read can be quiet: a press asks for its step-up at once, whatever the caller said.
-      init.quiet === true && requestOrigin(method) === 'background',
+      unasked || (init.quiet === true && requestOrigin(method) === 'background'),
     );
+    if (key !== undefined) {
+      if (answer.status === 403 && this.#need(answer)?.kind === 'step-up') this.#backoff.refused(key, answer);
+      else this.#backoff.forget(key);
+    }
+    return answer;
   }
 
   /**
@@ -507,7 +541,7 @@ export class DaemonClient {
     quiet = false,
   ): Promise<TransportAnswer> {
     const passkey = this.#passkey;
-    // G95: a read is the page's own work, so its prompt waits for its machine to be on screen; a press asks at once.
+    // G95: a read is the page's own work, so its unlock waits for its machine to be on screen; a press asks at once.
     if (passkey === undefined || first.status < 400) return first;
     let answer = first;
     let need = this.#need(answer);
@@ -518,8 +552,9 @@ export class DaemonClient {
       need = this.#need(answer);
     }
     if (need?.kind !== 'step-up') return answer;
-    // A quiet read (a panel mounting, a poll) is not the person acting: the refusal is the answer, and the prompt waits
-    // for a press. The daemon's refusal still stands, so nothing is read or done without the step-up.
+    // A quiet read (a panel mounting, a poll, a read nobody caused) is not the person acting: the refusal is the answer
+    // and no prompt opens — the page offers its own "Confirm it's you" press. The daemon's refusal still stands, so
+    // nothing is read or done without the step-up.
     if (quiet) return answer;
     // Today's step-up wait is NOT abortable (only the unlock is), so the step-up prompt takes no signal.
     if (!(await this.#confirm(need, origin))) return answer;
