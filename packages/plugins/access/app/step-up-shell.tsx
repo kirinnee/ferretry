@@ -41,6 +41,7 @@ import { stepUpAct } from './lib/grants.ts';
 import { ACCESS_ROUTE_KEYS } from './daemon-scope.tsx';
 import { routeRequestClient } from './lib/route-request.ts';
 import { PairPhoneHost } from './pair-phone-host.tsx';
+import { holdPasskeyReach } from './pair-passkey.ts';
 import {
   fetchSecuritySettings,
   stepUpStaysSentence,
@@ -108,6 +109,8 @@ const gateOrigin = (origin: PromptOrigin): GateOrigin => origin;
  * the two prompts. Copied from today's `createAppStore` (`stepUp`, `unlockGate`) and `App.tsx` (the two dialogs).
  */
 export function accessPasskey(ports: PasskeyPorts): PasskeyProvision {
+  // The daemon-less `/pair` page offers the first passkey over this same lookup (`pair-passkey.ts`).
+  holdPasskeyReach(ports.client);
   const client = async (daemon: DaemonConnection): Promise<StepUpClient> => {
     const routed = ports.client(daemon.daemonId);
     if (routed === undefined) throw new Error(PASSKEY_UNREACHABLE);
