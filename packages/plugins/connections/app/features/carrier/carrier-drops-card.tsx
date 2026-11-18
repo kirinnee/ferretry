@@ -8,18 +8,33 @@
  * the same text on the clipboard that the rows show.
  */
 
-import { useState, useSyncExternalStore } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 import { type CarrierDrop, carrierDropsReport, describeCarrierDrop } from '../../lib/carrier-drops.ts';
 import { Button } from '../../shell/primitives.tsx';
 
-/** The log as this card reads it: its snapshot and changes, nothing else. */
+/** The log as this card reads it: its snapshot and changes, and forgetting one machine's drops. */
 export interface CarrierDropsSource {
   readonly snapshot: () => readonly CarrierDrop[];
   readonly subscribe: (listener: () => void) => () => void;
+  readonly clearDaemon: (daemonId: string) => void;
 }
 
-/** The newest drops listed on screen; Copy report carries every one the log keeps. */
-const CARRIER_DROPS_SHOWN = 10;
+/** The newest drops listed on screen; Copy report carries every one of the machine's. */
+const CARRIER_DROPS_SHOWN = 20;
+
+/** "3 dropped · 1 while hidden · usually back in 4.0 s": v4's one-line summary of a machine's drops. */
+export function carrierDropsSummary(drops: readonly CarrierDrop[]): string {
+  const hidden = drops.filter(drop => drop.hidden).length;
+  const back = drops
+    .flatMap(drop => (drop.reconnectMs === undefined ? [] : [drop.reconnectMs]))
+    .toSorted((a, b) => a - b);
+  const middle = back[Math.floor(back.length / 2)];
+  return [
+    `${String(drops.length)} dropped`,
+    `${String(hidden)} while hidden`,
+    ...(middle === undefined ? [] : [`usually back in ${(middle / 1_000).toFixed(1)} s`]),
+  ].join(' · ');
+}
 
 export const NO_CARRIER_DROPS = 'No dropped connections recorded on this device.';
 
@@ -33,23 +48,33 @@ const browserClipboard = async (text: string): Promise<void> => {
   await clipboard.writeText(text);
 };
 
+/** One machine's drops: the log is device-wide, so each card names its machine and lists only that machine's. */
 export function CarrierDropsCard({
   log,
+  daemonId,
+  machine,
   copy = browserClipboard,
 }: {
   readonly log: CarrierDropsSource;
+  readonly daemonId: string;
+  readonly machine: string;
   readonly copy?: (text: string) => Promise<void>;
 }) {
-  const drops = useSyncExternalStore(log.subscribe, log.snapshot, log.snapshot);
+  const all = useSyncExternalStore(log.subscribe, log.snapshot, log.snapshot);
+  const drops = useMemo(() => all.filter(drop => drop.daemonId === daemonId), [all, daemonId]);
   const [note, setNote] = useState<string | null>(null);
   const newest = drops.toReversed().slice(0, CARRIER_DROPS_SHOWN);
   return (
-    <section className="flex flex-col gap-2" aria-labelledby="carrier-drops-heading" data-carrier-drops="">
-      <h3 id="carrier-drops-heading" className="m-0 text-row font-semibold text-fg">
-        Connection drops on this device
+    <section
+      className="flex flex-col gap-2"
+      aria-labelledby={`carrier-drops-${daemonId}`}
+      data-carrier-drops={daemonId}
+    >
+      <h3 id={`carrier-drops-${daemonId}`} className="m-0 text-row font-semibold text-fg">
+        Connection drops on this device · {machine}
       </h3>
       <p className="m-0 text-cell leading-base text-muted">
-        Every time a held connection to a machine was lost without this app asking. Kept on this device only.
+        Every time a held connection to {machine} was lost without this app asking. Kept on this device only.
       </p>
       {drops.length === 0 ? (
         <p className="m-0 text-cell text-muted" data-carrier-drops-empty="">
@@ -57,9 +82,15 @@ export function CarrierDropsCard({
         </p>
       ) : (
         <>
+          <p className="m-0 text-cell text-fg" data-carrier-drops-summary="">
+            {carrierDropsSummary(drops)}
+          </p>
           <ul className="m-0 flex list-none flex-col gap-1 p-0">
             {newest.map(drop => (
-              <li key={`${String(drop.at)}-${drop.daemonId}-${drop.purpose}`} className="mono text-meta text-fg-soft">
+              <li
+                key={`${String(drop.at)}-${drop.daemonId}-${drop.purpose}`}
+                className="mono break-words text-meta text-fg-soft"
+              >
                 {describeCarrierDrop(drop)}
               </li>
             ))}
@@ -80,6 +111,9 @@ export function CarrierDropsCard({
               }}
             >
               Copy report
+            </Button>
+            <Button size="sm" variant="ghost" data-carrier-drops-clear="" onClick={() => log.clearDaemon(daemonId)}>
+              Clear
             </Button>
             {note !== null && (
               <span role="status" className="text-meta text-muted">
