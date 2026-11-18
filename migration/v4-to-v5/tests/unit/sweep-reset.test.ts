@@ -24,9 +24,12 @@ import {
   installPrograms,
   keptDirOf,
   resetStamp,
+  repointRealClaude,
   resetV5,
   restoreV5,
+  touchSlotFile,
   writeBindPin,
+  writeSlotFile,
   type ResetActions,
   type ResetPaths,
 } from '../../fixtures/sweep/reset.ts';
@@ -673,7 +676,7 @@ describe('reset-v5 and restore-v5: links and swaps are refused or harmless', () 
     }
   });
 
-  test('the same window on the user folder, after home moved: home goes back, nothing of the other slot moves', async () => {
+  test('the same window on the user folder, after home moved: nothing of the other slot moves; home stays whole in kept/<stamp> with its record, and restore-v5 puts it back', async () => {
     const s = await scratch();
     const victim = await scratch(4);
     try {
@@ -691,11 +694,12 @@ describe('reset-v5 and restore-v5: links and swaps are refused or harmless', () 
             },
           }),
       );
-      expect(failed).toBeInstanceOf(ResetRefusal);
+      expect(failed).toBeInstanceOf(ResetHalfway);
+      expect(failed?.message).toContain(`restore-v5 ${STAMP}`);
       expect(await listing(victim.root)).toEqual(before);
       await marked(victim);
-      expect(await digest(s.paths.home)).toBe(homeDigest);
-      expect(await readdir(join(await realpath(s.root), 'kept'))).toEqual([]);
+      expect(await digest(join(keptOf(s), 'home'))).toBe(homeDigest);
+      expect(await exists(join(keptOf(s), PROVENANCE_FILE))).toBe(true);
     } finally {
       await rm(s.root, { recursive: true, force: true });
       await rm(victim.root, { recursive: true, force: true });
@@ -907,6 +911,369 @@ describe('installPrograms and writeBindPin: nothing is written through a link', 
       await expect(writeBindPin(s.paths, 7619)).rejects.toThrow(/not a plain folder/u);
       expect(await listing(victim.root)).toEqual(before);
       expect(await readFile(join(victim.paths.home, 'config', 'daemon.json'), 'utf8')).toContain('OLD');
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+      await rm(victim.root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('an interruption at any step never loses the old home, and restore-v5 always works after it', () => {
+  const KILL = new Error('killed');
+  const homes = async (s: Scratch): Promise<{ home: string; user: string }> => ({
+    home: await digest(s.paths.home),
+    user: await digest(s.paths.user),
+  });
+  const run = async (go: () => Promise<unknown>): Promise<Error | undefined> => {
+    try {
+      await go();
+      return undefined;
+    } catch (error) {
+      return error as Error;
+    }
+  };
+  const putBack = async (s: Scratch, stamp: string, when: Date): Promise<void> => {
+    await restoreV5(s.paths, actionsFor(s.paths).actions, stamp, when);
+  };
+
+  test('the record is on disk BEFORE the first rename: it names the plan (identity of each folder) while nothing has moved', async () => {
+    const s = await scratch();
+    try {
+      let seen = '';
+      const failed = await run(
+        async () =>
+          await resetV5(s.paths, s.real, actionsFor(s.paths).actions, {
+            ...options,
+            hooks: {
+              beforeMove: async name => {
+                if (name !== 'home') return;
+                seen = await readFile(join(keptOf(s), PROVENANCE_FILE), 'utf8');
+                expect(await mode(join(keptOf(s), PROVENANCE_FILE))).toBe('600');
+                throw KILL;
+              },
+            },
+          }),
+      );
+      expect(failed).toBe(KILL);
+      const record = JSON.parse(seen) as { status: string; members: { name: string }[]; moved: string[] };
+      expect(record.status).toBe('moving');
+      expect(record.members.map(member => member.name)).toEqual(['home', 'user']);
+      expect(record.moved).toEqual([]);
+      // Nothing moved, so the run took its own record and folder away again.
+      expect(await exists(keptOf(s))).toBe(false);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  for (const [label, hook] of [
+    ['after the home rename', 'afterMove:home'],
+    ['after the user rename (the last one, before the record is final)', 'afterMove:user'],
+  ] as const) {
+    test(`reset killed ${label}: restore-v5 gives back a byte-identical home and user folder`, async () => {
+      const s = await scratch();
+      try {
+        const before = await homes(s);
+        const [point, name] = hook.split(':') as ['beforeMove' | 'afterMove', string];
+        const failed = await run(
+          async () =>
+            await resetV5(s.paths, s.real, actionsFor(s.paths).actions, {
+              ...options,
+              hooks: {
+                [point]: async (moving: string) => {
+                  if (moving === name) throw KILL;
+                },
+              },
+            }),
+        );
+        expect(failed).toBeInstanceOf(Error);
+        // No new home was made (the run stopped), and every byte of the old one is in the kept folder or still in place.
+        const trace = actionsFor(s.paths);
+        await restoreV5(s.paths, trace.actions, STAMP, LATER);
+        expect(await homes(s)).toEqual(before);
+        expect(await exists(keptOf(s))).toBe(false);
+        expect(await readdir(join(await realpath(s.root), 'kept'))).toEqual([]);
+        await noTar(s.root);
+      } finally {
+        await rm(s.root, { recursive: true, force: true });
+      }
+    });
+  }
+
+  test('reset killed before the first rename (its record on disk, nothing moved): restore-v5 cleans the record up and the home is byte-identical', async () => {
+    const s = await scratch();
+    try {
+      const before = await homes(s);
+      let seen = '';
+      await run(
+        async () =>
+          await resetV5(s.paths, s.real, actionsFor(s.paths).actions, {
+            ...options,
+            hooks: {
+              beforeMove: async () => {
+                seen = await readFile(join(keptOf(s), PROVENANCE_FILE), 'utf8');
+                throw KILL;
+              },
+            },
+          }),
+      );
+      // A real kill leaves the folder and the record in place: put them back exactly as the dead run left them.
+      await mkdir(keptOf(s), { mode: 0o700 });
+      await writeFile(join(keptOf(s), PROVENANCE_FILE), seen, { mode: 0o600 });
+      await putBack(s, STAMP, LATER);
+      expect(await homes(s)).toEqual(before);
+      expect(await exists(keptOf(s))).toBe(false);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('reset killed after the new home was made (no start): restore-v5 puts the old home back and keeps the new one', async () => {
+    const s = await scratch();
+    try {
+      const before = await homes(s);
+      const dying: ResetActions = {
+        ...actionsFor(s.paths).actions,
+        start: async () => {
+          throw KILL;
+        },
+      };
+      expect(await run(async () => await resetV5(s.paths, s.real, dying, options))).toBe(KILL);
+      await putBack(s, STAMP, LATER);
+      expect(await homes(s)).toEqual(before);
+      expect(await homeFiles(join(keptOf(s, resetStamp(LATER)), 'home'))).toEqual([]);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  for (const point of ['beforeMove', 'afterMove'] as const) {
+    for (const cut of [1, 2, 3, 4]) {
+      test(`restore killed at its ${String(cut)}. ${point}: a second restore-v5 reconciles the split state and the home is byte-identical`, async () => {
+        const s = await scratch();
+        try {
+          const before = await homes(s);
+          await resetV5(s.paths, s.real, actionsFor(s.paths).actions, options);
+          let count = 0;
+          const failed = await run(
+            async () =>
+              await restoreV5(s.paths, actionsFor(s.paths).actions, STAMP, LATER, {
+                [point]: async () => {
+                  count += 1;
+                  if (count === cut) throw KILL;
+                },
+              }),
+          );
+          expect(failed).toBeInstanceOf(Error);
+          // Retried a few seconds later: whatever already moved is left, whatever did not is moved.
+          await restoreV5(s.paths, actionsFor(s.paths).actions, STAMP, new Date('2026-11-18T19:31:00Z'));
+          expect(await homes(s)).toEqual(before);
+          expect(await exists(keptOf(s))).toBe(false);
+          await noTar(s.root);
+        } finally {
+          await rm(s.root, { recursive: true, force: true });
+        }
+      });
+    }
+  }
+
+  test('a record that names folders found nowhere, or another folder in their place, is refused and nothing moves', async () => {
+    const s = await scratch();
+    try {
+      await resetV5(s.paths, s.real, actionsFor(s.paths).actions, options);
+      // Another folder (new inode) in the old user's place inside the kept folder.
+      await rename(join(keptOf(s), 'user'), join(s.root, 'user-away'));
+      await mkdir(join(keptOf(s), 'user'));
+      const trace = actionsFor(s.paths);
+      await expect(restoreV5(s.paths, trace.actions, STAMP, LATER)).rejects.toThrow(/not the folder that was moved/u);
+      expect(trace.steps).toEqual([]);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('installPrograms: an interruption leaves the old program or none, never a partial one', () => {
+  const libexecOf = async (s: Scratch): Promise<string> => {
+    const libexec = join(s.root, 'libexec');
+    await mkdir(libexec);
+    await writeFile(join(libexec, 'fyd'), 'NEW PROGRAM, complete\n');
+    await writeFile(join(libexec, 'BUILD.json'), '{"new":true}\n');
+    return libexec;
+  };
+
+  test('killed after the temp is complete, before the rename: the old program is still whole at its name and the temp is gone', async () => {
+    const s = await scratch();
+    try {
+      const libexec = await libexecOf(s);
+      let atKill = '';
+      await expect(
+        installPrograms(s.paths, libexec, ['fyd', 'BUILD.json'], 'BUILD.json', async name => {
+          atKill = await readFile(join(s.paths.bin, name), 'utf8');
+          throw new Error('killed');
+        }),
+      ).rejects.toThrow(/killed/u);
+      expect(atKill).toBe('program\n');
+      expect(await readFile(join(s.paths.bin, 'fyd'), 'utf8')).toBe('program\n');
+      expect((await readdir(s.paths.bin)).filter(name => name.includes('.tmp-'))).toEqual([]);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a program that did not exist yet is absent (never partial) while its temp is being written, and whole afterwards', async () => {
+    const s = await scratch();
+    try {
+      const libexec = await libexecOf(s);
+      await rm(join(s.paths.bin, 'fyd'));
+      let seen: boolean | undefined;
+      await installPrograms(s.paths, libexec, ['fyd'], 'BUILD.json', async name => {
+        seen = await exists(join(s.paths.bin, name));
+      });
+      expect(seen).toBe(false);
+      expect(await readFile(join(s.paths.bin, 'fyd'), 'utf8')).toBe('NEW PROGRAM, complete\n');
+      expect(await mode(join(s.paths.bin, 'fyd'))).toBe('755');
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('the old program stays reachable as <name>.prev (same bytes) and a kill before the rename leaves both names whole', async () => {
+    const s = await scratch();
+    try {
+      const libexec = await libexecOf(s);
+      await expect(
+        installPrograms(s.paths, libexec, ['fyd'], 'BUILD.json', async () => {
+          throw new Error('killed');
+        }),
+      ).rejects.toThrow(/killed/u);
+      expect(await readFile(join(s.paths.bin, 'fyd.prev'), 'utf8')).toBe('program\n');
+      expect(await readFile(join(s.paths.bin, 'fyd'), 'utf8')).toBe('program\n');
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('writeBindPin removes only a temp file it created itself', () => {
+  test("a temp name that is already there is someone else's: the pin refuses and the file stays untouched", async () => {
+    const s = await scratch();
+    try {
+      const mine = join(s.paths.home, 'config', `daemon.json.tmp-${String(process.pid)}`);
+      await writeFile(mine, 'NOT MINE');
+      await expect(writeBindPin(s.paths, 7619)).rejects.toThrow();
+      expect(await readFile(mine, 'utf8')).toBe('NOT MINE');
+      expect(await readFile(join(s.paths.home, 'config', 'daemon.json'), 'utf8')).toContain('OLD');
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a temp that is a link to an outside file: the pin refuses, the outside file is neither written nor removed', async () => {
+    const s = await scratch();
+    const victim = await scratch(4);
+    try {
+      const marker = join(victim.root, 'marker');
+      await writeFile(marker, 'EXTERNAL');
+      await symlink(marker, join(s.paths.home, 'config', `daemon.json.tmp-${String(process.pid)}`));
+      await expect(writeBindPin(s.paths, 7619)).rejects.toThrow();
+      expect(await readFile(marker, 'utf8')).toBe('EXTERNAL');
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+      await rm(victim.root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('links OUT of the slot: the env file, wrapper, log and real-claude writes never follow one', () => {
+  const marker = async (victim: Scratch): Promise<string> => {
+    const path = join(victim.root, 'outside-marker');
+    await writeFile(path, 'EXTERNAL', { mode: 0o644 });
+    return path;
+  };
+
+  test('writeSlotFile / touchSlotFile: a link at the file, or a swapped v5 folder, is refused and the outside marker is untouched', async () => {
+    const s = await scratch();
+    const victim = await scratch(4);
+    try {
+      const outside = await marker(victim);
+      for (const name of ['fyd.env', 'fyd-exec.sh']) {
+        await symlink(outside, join(s.paths.v5Dir, name));
+        await expect(writeSlotFile(s.root, s.paths.v5Dir, name, 'x\n', 0o600)).rejects.toThrow(/not a plain file/u);
+        await rm(join(s.paths.v5Dir, name));
+      }
+      await symlink(outside, join(s.paths.v5Dir, 'fyd.log'));
+      await expect(touchSlotFile(s.root, s.paths.v5Dir, 'fyd.log')).rejects.toThrow(/is a link/u);
+      await rm(join(s.paths.v5Dir, 'fyd.log'));
+      expect(await readFile(outside, 'utf8')).toBe('EXTERNAL');
+      expect(await mode(outside)).toBe('644');
+      // The whole v5 folder swapped for a link to the other slot's: nothing is written there.
+      await rename(s.paths.v5Dir, `${s.paths.v5Dir}.original`);
+      await symlink(victim.paths.v5Dir, s.paths.v5Dir);
+      const before = await listing(victim.root);
+      await expect(writeSlotFile(s.root, s.paths.v5Dir, 'fyd.env', 'x\n', 0o600)).rejects.toThrow(
+        /not a plain folder/u,
+      );
+      await expect(touchSlotFile(s.root, s.paths.v5Dir, 'fyd.log')).rejects.toThrow(/not a plain folder/u);
+      expect(await listing(victim.root)).toEqual(before);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+      await rm(victim.root, { recursive: true, force: true });
+    }
+  });
+
+  test('writeSlotFile writes a plain file through a temp and a rename (0600/0700), replacing the old one whole', async () => {
+    const s = await scratch();
+    try {
+      await writeSlotFile(s.root, s.paths.v5Dir, 'fyd.env', 'A=1\n', 0o600);
+      await writeSlotFile(s.root, s.paths.v5Dir, 'fyd.env', 'A=2\n', 0o600);
+      await writeSlotFile(s.root, s.paths.v5Dir, 'fyd-exec.sh', '#!/bin/sh\n', 0o700);
+      await touchSlotFile(s.root, s.paths.v5Dir, 'fyd.log');
+      expect(await readFile(join(s.paths.v5Dir, 'fyd.env'), 'utf8')).toBe('A=2\n');
+      expect(await mode(join(s.paths.v5Dir, 'fyd.env'))).toBe('600');
+      expect(await mode(join(s.paths.v5Dir, 'fyd-exec.sh'))).toBe('700');
+      expect(await mode(join(s.paths.v5Dir, 'fyd.log'))).toBe('600');
+      expect((await readdir(s.paths.v5Dir)).filter(name => name.includes('.tmp-'))).toEqual([]);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('repointRealClaude: the shim, the record or the harness folder swapped for a link out of the slot is refused; the outside marker is untouched', async () => {
+    const s = await scratch();
+    const victim = await scratch(4);
+    try {
+      const stub = join(s.root, 'stub-claude');
+      await writeFile(stub, '#!/bin/sh\necho REAL\n', { mode: 0o755 });
+      const store = storePathOf(s.real.fyHome, 'claude-real');
+      await writeFile(join(s.real.harness, FAKE_NAME), '#!/bin/sh\necho FAKE\n', { mode: 0o755 });
+      await writeFile(
+        join(s.real.v5Dir, 'real-claude.json'),
+        recordText({ login: 'claude-real', store, binary: stub, rootedAt: null }),
+      );
+      const v5Real = join(await realpath(s.root), 'v5');
+      const outside = await marker(victim);
+      // 1. the shim is a link
+      await rm(join(s.real.harness, 'claude'));
+      await symlink(outside, join(s.real.harness, 'claude'));
+      await expect(repointRealClaude(s.real, v5Real)).rejects.toThrow(/not a plain file/u);
+      await rm(join(s.real.harness, 'claude'));
+      // 2. the record is a link
+      const recordFile = join(s.real.v5Dir, 'real-claude.json');
+      const original = await readFile(recordFile, 'utf8');
+      await rm(recordFile);
+      await symlink(outside, recordFile);
+      await expect(repointRealClaude(s.real, v5Real)).rejects.toThrow();
+      await rm(recordFile);
+      await writeFile(recordFile, original);
+      // 3. the harness folder is a link out
+      await rename(s.real.harness, `${s.real.harness}.original`);
+      await symlink(victim.paths.harness, s.real.harness);
+      const before = await listing(victim.root);
+      await expect(repointRealClaude(s.real, v5Real)).rejects.toThrow(/not a plain folder/u);
+      expect(await listing(victim.root)).toEqual(before);
+      expect(await readFile(outside, 'utf8')).toBe('EXTERNAL');
+      expect((await readdir(s.real.v5Dir)).filter(name => name.includes('.tmp-'))).toEqual([]);
     } finally {
       await rm(s.root, { recursive: true, force: true });
       await rm(victim.root, { recursive: true, force: true });

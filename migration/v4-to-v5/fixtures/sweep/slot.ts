@@ -117,7 +117,9 @@ import {
   keptDirOf,
   resetV5,
   restoreV5,
+  touchSlotFile,
   writeBindPin,
+  writeSlotFile,
   type ResetPaths,
 } from './reset.ts';
 import {
@@ -752,10 +754,10 @@ function inScope(
  * The wrapper is COPIED next to the env file it reads (0700, in the slot folder), so a unit's restart never depends on the
  * checkout the kit ran from (a worktree can go away) and the slot folder holds everything a restart needs.
  */
-async function installWrapper(envFile: string): Promise<void> {
-  const wrapper = join(dirname(envFile), 'fyd-exec.sh');
-  await copyFile(WRAPPER_SOURCE, wrapper);
-  await chmod(wrapper, 0o700);
+async function installWrapper(slot: Slot, envFile: string): Promise<void> {
+  // Through a temp file and a rename in a folder just proven to be a real folder of THIS slot: a link at the name or in the folder's
+  // chain is refused, never written through.
+  await writeSlotFile(slot.real, dirname(envFile), 'fyd-exec.sh', await readFile(WRAPPER_SOURCE), 0o700);
 }
 
 /**
@@ -765,9 +767,8 @@ async function installWrapper(envFile: string): Promise<void> {
 async function writeEnvFile(slot: Slot, which: Which): Promise<void> {
   const env = daemonEnvironment(slot, which);
   const file = envFileOf(slot, which);
-  await writeFile(file, environmentFileText(env), { mode: 0o600 });
-  await chmod(file, 0o600);
-  await installWrapper(file);
+  await writeSlotFile(slot.real, dirname(file), basename(file), environmentFileText(env), 0o600);
+  await installWrapper(slot, file);
 }
 
 /**
@@ -869,7 +870,7 @@ async function startService(
     die(`refusing: ${name} is already ${info.active} (pid ${String(info.mainPid)}); stop it first`, 99);
   if (info.loaded) await systemctlUser(['reset-failed', name]);
   await writeEnvFile(slot, which);
-  await writeFile(physical(slot, logFile), '', { flag: 'a', mode: 0o600 });
+  await touchSlotFile(slot.real, dirname(physical(slot, logFile)), basename(logFile));
   if (slot.persisted) {
     // The enabled unit file already holds the command, the log and the directory; only the env file is rewritten above.
     const began = await systemctlUser(['start', name]);
@@ -986,7 +987,7 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
   const buildEnv = join(slot.dir, 'build.env');
   await writeFile(buildEnv, environmentFileText(baseEnvironment()), { mode: 0o600 });
   await chmod(buildEnv, 0o600);
-  await installWrapper(buildEnv);
+  await installWrapper(slot, buildEnv);
   const builder = inScope(slot, 'v4', buildEnv, [
     process.execPath,
     join(FIXTURES, 'build-v4-home.ts'),

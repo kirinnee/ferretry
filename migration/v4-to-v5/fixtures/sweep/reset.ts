@@ -7,6 +7,11 @@
  * anything the owner made, so there is no backup that could turn out not to be restorable: the data is simply where it was, one folder
  * over. A restore is the same rename the other way.
  *
+ * Crash safety: the plan (each folder's identity) is fsynced into `kept/<stamp>/provenance.json` BEFORE the first rename and updated after each,
+ * and every file the kit writes is a temp + fsync + rename, so an interruption at any step leaves the old home or program whole and
+ * `restore-v5` finishes or reverses the move. Threat model: see SWEEP.md (a same-user adversary inside the slot is out of scope; nothing outside
+ * the slot realpath is ever touched, a link inside it is refused).
+ *
  * Everything here takes its folders and its side effects as arguments, so a test drives it on a scratch folder with no systemd and no
  * daemon. Pure TypeScript with node: imports only: a persisted slot runs this from its own kit copy.
  *
@@ -18,20 +23,7 @@
  * What is NEVER written: a pairing code, a device, a login, a runtime, a profile, a project, an agenda or a board entry.
  */
 import { constants } from 'node:fs';
-import {
-  chmod,
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  readdir,
-  realpath,
-  rename,
-  rm,
-  rmdir,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, rmdir, stat } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import {
   FAKE_NAME,
@@ -106,6 +98,91 @@ async function plainFolder(path: string, expected: string): Promise<{ ino: numbe
   return { ino: info.ino, dev: info.dev };
 }
 
+// ─── writes: a temp file this run creates, made durable, then renamed over the name ─────────────────────────────────────
+
+/** Test seam: runs after the temp file is complete and durable, right before it is renamed over its final name. */
+export type BeforePublish = (name: string, temp: string) => Promise<void>;
+
+/**
+ * Writes `data` to `<folder>/<name>`: into a temp name in the SAME folder (exclusive, never through a link, mode set), fsync, then rename
+ * over the final name, so a crash or an interruption leaves the old file or none, never a half-written one. A final name that is a link,
+ * a folder or anything but a plain file is refused. A temp that could not be created exclusively belongs to someone else and is left
+ * alone; only one this run created is removed when anything goes wrong. The caller has just proven `folder` to be a real folder of its slot.
+ */
+export async function writeFileAtomic(
+  folder: string,
+  name: string,
+  data: string | Uint8Array,
+  mode: number,
+  beforePublish?: BeforePublish,
+): Promise<void> {
+  const target = join(folder, name);
+  const found = await lstat(target).catch(() => undefined);
+  if (found !== undefined && (found.isSymbolicLink() || !found.isFile()))
+    return refuse(`${target} is not a plain file (a link or a folder); nothing was written`);
+  const temp = `${target}.tmp-${String(process.pid)}`;
+  const handle = await open(
+    temp,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    mode,
+  );
+  try {
+    try {
+      await handle.writeFile(data);
+      await handle.chmod(mode);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await beforePublish?.(name, temp);
+    await rename(temp, target);
+  } catch (error) {
+    await rm(temp, { force: true });
+    throw error;
+  }
+}
+
+/**
+ * The slot's own folders: `folder` (a path built from `slotReal`) must be a real folder whose realpath is exactly where it belongs under
+ * the slot folder's own realpath, so a link anywhere in its chain (a swapped `v5`, `harness-bin`, ...) that leads out of the slot refuses.
+ */
+async function slotFolder(slotReal: string, folder: string): Promise<string> {
+  const slotInfo = await lstat(slotReal).catch(() => undefined);
+  if (slotInfo === undefined || slotInfo.isSymbolicLink() || !slotInfo.isDirectory())
+    return refuse(`${slotReal} is not a plain folder`);
+  const root = await realpath(slotReal);
+  const inside = relative(slotReal, folder);
+  if (inside === '..' || inside.startsWith('../')) return refuse(`${folder} is not inside ${slotReal}`);
+  const expected = inside === '' ? root : join(root, inside);
+  await plainFolder(folder, expected);
+  return expected;
+}
+
+/** Writes `<folder>/<name>` (atomically, see writeFileAtomic) after proving `folder` is a real folder inside the slot, right before. */
+export async function writeSlotFile(
+  slotReal: string,
+  folder: string,
+  name: string,
+  data: string | Uint8Array,
+  mode: number,
+): Promise<void> {
+  await writeFileAtomic(await slotFolder(slotReal, folder), name, data, mode);
+}
+
+/** Creates `<folder>/<name>` empty when it is not there (0600) and never writes through a link; the folder is proven first. */
+export async function touchSlotFile(slotReal: string, folder: string, name: string): Promise<void> {
+  const real = await slotFolder(slotReal, folder);
+  const handle = await open(
+    join(real, name),
+    constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW,
+    0o600,
+  ).catch(error => {
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP')
+      return refuse(`${join(real, name)} is a link; nothing was written`);
+    throw error;
+  });
+  await handle.close();
+}
 /**
  * The slot folder, `v5`, and (each when it exists) `v5/home`, `v5/user`, the harness folder, `v5/bin`, `home/config` and `kept` must
  * each be a real folder (lstat: not a link, not a file) whose realpath is EXACTLY where it belongs under the slot's own realpath, and
@@ -146,16 +223,18 @@ export async function assertResetTree(paths: ResetPaths): Promise<ResetTree> {
 // ─── the 5.0 programs: every write is looked at first, in a folder just proven to be this slot's own ────────────────────
 
 /**
- * Puts `names` (the programs and the build stamp) from `libexec` into `<slot>/v5/bin`: an existing one is renamed to `<name>.prev`, the
- * new one is created exclusively (never through a link left at the name) with mode 0755, or 0644 for `stampName`. Before EACH remove,
- * rename and create the slot's tree and `bin` are looked at again, so a `bin` swapped for a link at any point is refused before the
- * next write. A destination that is a link, a folder or anything but a file is refused.
+ * Puts `names` (the programs and the build stamp) from `libexec` into `<slot>/v5/bin`. Each one is written to a temp name in `bin`
+ * (exclusive, never through a link, fsync) and then renamed over its final name, so an interruption at any point leaves the old program
+ * or none at that name, never a partial one. An existing program is first kept as `<name>.prev` (a hard link to the old file, so the old
+ * program stays in place until the rename). Before EACH step the slot's tree and `bin` are looked at again, so a `bin` swapped for a link
+ * at any point is refused before the next write. A destination that is a link, a folder or anything but a file is refused.
  */
 export async function installPrograms(
   paths: ResetPaths,
   libexec: string,
   names: readonly string[],
   stampName: string,
+  beforePublish?: BeforePublish,
 ): Promise<void> {
   const checked = async (): Promise<string> => {
     const tree = await assertResetTree(paths);
@@ -165,7 +244,8 @@ export async function installPrograms(
   for (const name of names) {
     const mode = name === stampName ? 0o644 : 0o755;
     const data = await readFile(join(libexec, name));
-    const target = join(await checked(), name);
+    const bin = await checked();
+    const target = join(bin, name);
     const found = await lstat(target).catch(() => undefined);
     if (found !== undefined) {
       if (found.isSymbolicLink() || !found.isFile()) return refuse(`${target} is not a plain file`);
@@ -177,24 +257,13 @@ export async function installPrograms(
         await rm(prev, { force: true });
       }
       await checked();
-      await rename(target, prev);
+      await link(target, prev);
     }
-    const bin = await checked();
-    const handle = await open(
-      join(bin, name),
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-      mode,
-    );
-    try {
-      await handle.writeFile(data);
-      await handle.chmod(mode);
-    } finally {
-      await handle.close();
-    }
+    await writeFileAtomic(await checked(), name, data, mode, beforePublish);
   }
 }
 
-// ─── keeping: the old home is MOVED into <slot>/kept/<stamp>, and only moved ───────────────────────────────────────────
+// ─── keeping: the old home is MOVED into <slot>/kept/<stamp>, and only moved; the record is written FIRST ───────────────
 
 interface KeptMember {
   readonly name: string;
@@ -202,120 +271,173 @@ interface KeptMember {
   readonly dev: number;
 }
 
-/** What `<slot>/kept/<stamp>/provenance.json` holds: this slot, its realpath, the stamp, and the identity of every moved folder. */
+/**
+ * What `<slot>/kept/<stamp>/provenance.json` holds: this slot, its realpath, the stamp, and the identity of every folder the move is
+ * about. It is written (and fsynced) BEFORE the first rename, so a run that is interrupted at any step leaves a record that says what was
+ * meant to move: `members` is the plan (identity read right before), `moved` the names inside this folder as of the last update
+ * (advisory: the identities in `members` decide where each folder really is), `status` is 'moving' until every rename is done.
+ */
 export interface Provenance {
   readonly format: 1;
   readonly slot: number;
   readonly slotRealpath: string;
   readonly stamp: string;
-  /** UTC instant the folders were moved. */
+  /** UTC instant the move began. */
   readonly created: string;
+  readonly status: 'moving' | 'kept';
   readonly members: readonly KeptMember[];
+  readonly moved: readonly string[];
 }
+
+/** Where a planned folder is right now: inside the kept folder, or still (or again) at `v5/<name>`. */
+export type Place = 'kept' | 'v5';
 
 export interface Kept {
   readonly stamp: string;
   /** `<slot realpath>/kept/<stamp>` */
   readonly dir: string;
   readonly members: readonly KeptMember[];
+  /** Where each planned folder was found by identity. */
+  readonly places: ReadonlyMap<string, Place>;
+  /** The record as read (or, right after a move, as written). */
+  readonly record: Provenance;
 }
 
 export interface KeepHooks {
   /** Test seam: runs right after a source was looked at and right before it is renamed (where a swap would have to happen). */
   readonly beforeMove?: (name: string) => Promise<void>;
+  /** Test seam: runs right after a rename and its record update (where an interruption would leave a split state). */
+  readonly afterMove?: (name: string) => Promise<void>;
 }
 
-/** Moves `moved` back to where each came from, if that place is still free; returns the names that could not go back. */
-async function putBack(moved: readonly KeptMember[], tree: ResetTree, dir: string): Promise<string[]> {
-  const stuck: string[] = [];
-  for (const member of [...moved].reverse()) {
-    const from = join(dir, member.name);
-    const to = join(tree.v5Real, member.name);
+const RECORD_TEMP = `${PROVENANCE_FILE}.tmp`;
+
+/** Writes the record: a temp file in the kept folder (exclusive), fsync, rename over, fsync of the folder. */
+async function writeRecord(dir: string, record: Provenance): Promise<void> {
+  const temp = join(dir, RECORD_TEMP);
+  const handle = await open(
+    temp,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
     try {
-      if ((await lstat(to).catch(() => undefined)) !== undefined) throw new Error(`${to} exists again`);
-      await plainFolder(tree.v5Real, tree.v5Real);
-      const here = await plainFolder(from, from);
-      if (here.ino !== member.ino || here.dev !== member.dev) throw new Error(`${from} was replaced`);
-      await rename(from, to);
-    } catch {
-      stuck.push(member.name);
+      await handle.writeFile(`${JSON.stringify(record, null, 2)}\n`);
+      await handle.sync();
+    } finally {
+      await handle.close();
     }
+    await rename(temp, join(dir, PROVENANCE_FILE));
+  } catch (error) {
+    await rm(temp, { force: true });
+    throw error;
   }
-  return stuck;
+  const folder = await open(dir, constants.O_RDONLY | constants.O_DIRECTORY);
+  try {
+    await folder.sync();
+  } finally {
+    await folder.close();
+  }
 }
 
 /**
- * Moves `v5/home` (and `v5/user` when it exists) into a NEW folder `<slot realpath>/kept/<stamp>` this run makes: a rename within one
- * slot. Each source is looked at right before its rename and the moved folder right after (same identity, resolves under the kept
- * folder), so a source that was swapped for another slot's folder in between is caught and moved straight back. Writes the provenance
- * record last. Returns undefined when there was nothing to move and `needHome` is off; on any failure it puts back what it moved.
+ * Moves `names` of `v5` (`home`, and `user` when it exists) into a NEW folder `<slot realpath>/kept/<stamp>` this run makes: a rename
+ * within one slot. The plan (each source's identity) is written to `provenance.json` and fsynced BEFORE the first rename and updated after
+ * each, so an interruption at any step leaves a record that restore-v5 reconciles. Each source is looked at again right before its rename
+ * and the moved folder right after (same identity, resolves under the kept folder), so a source that was swapped for another slot's
+ * folder in between is caught and moved straight back. Returns undefined when there was nothing to move and `needHome` is off. A
+ * failure after something moved is NOT undone here (an interruption could not be either): it says where everything is and that
+ * restore-v5 <stamp> puts it back.
  */
 export async function keepAside(
   paths: ResetPaths,
   tree: ResetTree,
   now: Date,
-  options: { needHome: boolean; hooks?: KeepHooks },
+  options: { needHome: boolean; names?: readonly string[]; hooks?: KeepHooks },
 ): Promise<Kept | undefined> {
   const stamp = resetStamp(now);
   const root = join(tree.slotReal, 'kept');
+  const dir = join(root, stamp);
+  if ((await lstat(root).catch(() => undefined)) !== undefined) {
+    await plainFolder(root, root);
+    if ((await lstat(dir).catch(() => undefined)) !== undefined)
+      return refuse(`${dir} already exists; try again in a second`);
+  }
+  const plan: KeptMember[] = [];
+  for (const name of options.names ?? KEPT_MEMBERS) {
+    const source = join(tree.v5Real, name);
+    if ((await lstat(source).catch(() => undefined)) === undefined) {
+      if (name === 'home' && options.needHome) return refuse(`${source} does not exist; nothing to put aside`);
+      continue;
+    }
+    const found = await plainFolder(source, source);
+    plan.push({ name, ino: found.ino, dev: found.dev });
+  }
+  if (plan.length === 0) return undefined;
+  if (options.needHome && !plan.some(member => member.name === 'home')) return refuse('no home was moved aside');
   if ((await lstat(root).catch(() => undefined)) === undefined) await mkdir(root, { mode: 0o700 });
   await plainFolder(root, root);
-  const dir = join(root, stamp);
-  if ((await lstat(dir).catch(() => undefined)) !== undefined)
-    return refuse(`${dir} already exists; try again in a second`);
   await mkdir(dir, { mode: 0o700 });
   await plainFolder(dir, dir);
-  const moved: KeptMember[] = [];
+  const record = (status: 'moving' | 'kept', moved: readonly string[]): Provenance => ({
+    format: 1,
+    slot: paths.slot,
+    slotRealpath: tree.slotReal,
+    stamp,
+    created: now.toISOString(),
+    status,
+    members: plan,
+    moved,
+  });
+  await writeRecord(dir, record('moving', []));
+  const moved: string[] = [];
+  const where = `restore-v5 ${stamp} puts everything back (it needs no current home)`;
   try {
-    for (const name of KEPT_MEMBERS) {
-      const source = join(tree.v5Real, name);
-      if ((await lstat(source).catch(() => undefined)) === undefined) {
-        if (name === 'home' && options.needHome) return refuse(`${source} does not exist; nothing to put aside`);
-        continue;
-      }
+    for (const member of plan) {
+      const source = join(tree.v5Real, member.name);
       await plainFolder(tree.v5Real, tree.v5Real);
       const before = await plainFolder(source, source);
-      await options.hooks?.beforeMove?.(name);
-      const target = join(dir, name);
+      if (before.ino !== member.ino || before.dev !== member.dev)
+        return refuse(`${source} was replaced after it was looked at`);
+      await options.hooks?.beforeMove?.(member.name);
+      const target = join(dir, member.name);
       await rename(source, target);
       const after = await plainFolder(target, target).catch(() => undefined);
-      if (after === undefined || after.ino !== before.ino || after.dev !== before.dev) {
+      if (after === undefined || after.ino !== member.ino || after.dev !== member.dev) {
         // The source was swapped between the look and the move: what arrived is not this slot's folder. Put it straight back.
         await rename(target, source).catch(() => undefined);
         return refuse(`${source} was replaced while it was being moved aside`);
       }
-      moved.push({ name, ino: before.ino, dev: before.dev });
+      moved.push(member.name);
+      await writeRecord(dir, record('moving', moved));
+      await options.hooks?.afterMove?.(member.name);
     }
-    if (moved.length === 0) {
-      await rmdir(dir);
-      return undefined;
-    }
-    const record: Provenance = {
-      format: 1,
-      slot: paths.slot,
-      slotRealpath: tree.slotReal,
-      stamp,
-      created: now.toISOString(),
-      members: moved,
-    };
-    await writeFile(join(dir, PROVENANCE_FILE), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+    await writeRecord(dir, record('kept', moved));
   } catch (error) {
-    const stuck = await putBack(moved, tree, dir);
-    if (stuck.length === 0) {
+    if (moved.length === 0) {
+      // Nothing moved: the record and the folder are the kit's own and empty of anything the owner made; take them away again.
       await rm(join(dir, PROVENANCE_FILE), { force: true }).catch(() => undefined);
       await rmdir(dir).catch(() => undefined);
       throw error;
     }
     const why = error instanceof Error ? error.message : String(error);
     throw new ResetHalfway(
-      `${why}. ${stuck.join(' and ')} could not be moved back; kept in ${dir} (restore-v5 ${stamp} puts it back); nothing outside this slot was touched`,
+      `${why}. ${moved.length === 0 ? 'Nothing was moved' : `${moved.join(' and ')} ${moved.length === 1 ? 'is' : 'are'} in ${dir}`}; ${where}; nothing outside this slot was touched`,
     );
   }
-  if (options.needHome && !moved.some(member => member.name === 'home')) return refuse('no home was moved aside');
-  return { stamp, dir, members: moved };
+  return {
+    stamp,
+    dir,
+    members: plan,
+    places: new Map(plan.map(member => [member.name, 'kept' as const])),
+    record: record('kept', moved),
+  };
 }
 
-/** `kept/<stamp>` is a kept copy THIS slot made, and its folders are still the ones that were moved: same identity, real folders, under it. */
+/**
+ * `kept/<stamp>` is a kept copy THIS slot made (a complete record, or one an interrupted reset or restore left): every planned folder is
+ * found by identity, inside the kept folder or back at `v5/<name>`, and nothing else is in the kept folder.
+ */
 export async function checkKept(paths: ResetPaths, tree: ResetTree, stamp: string): Promise<Kept> {
   if (!STAMP_PATTERN.test(stamp)) return refuse(`"${stamp}" is not a stamp (like 20261118T191700Z)`);
   const dir = join(tree.slotReal, 'kept', stamp);
@@ -346,6 +468,8 @@ export async function checkKept(paths: ResetPaths, tree: ResetTree, stamp: strin
     typeof record.slotRealpath !== 'string' ||
     typeof record.stamp !== 'string' ||
     typeof record.created !== 'string' ||
+    (record.status !== 'moving' && record.status !== 'kept') ||
+    !Array.isArray(record.moved) ||
     !Array.isArray(members)
   )
     return refuse(`${path} is damaged`);
@@ -369,23 +493,35 @@ export async function checkKept(paths: ResetPaths, tree: ResetTree, stamp: strin
     checked.push({ name: item.name as string, ino: item.ino, dev: item.dev });
   }
   if (!checked.some(member => member.name === 'home')) return refuse(`${path} lists no home`);
-  const kept: Kept = { stamp, dir, members: checked };
-  await assertKept(kept);
-  return kept;
+  const kept = { stamp, dir, members: checked, record: record as unknown as Provenance };
+  return { ...kept, places: await placesOf(kept, tree) };
 }
 
-/** The kept folders are still exactly the moved ones, and nothing else is in the kept folder. */
-export async function assertKept(kept: Kept): Promise<void> {
+/**
+ * Finds each planned folder BY IDENTITY: inside the kept folder, or at `v5/<name>` (not moved yet, or already put back). Anything else
+ * (gone, another folder at its place, a link) is refused, and so is anything in the kept folder that is not the record, its temp or a
+ * planned folder.
+ */
+async function placesOf(kept: Omit<Kept, 'places'>, tree: ResetTree): Promise<ReadonlyMap<string, Place>> {
+  const places = new Map<string, Place>();
   await plainFolder(kept.dir, kept.dir);
-  const names = (await readdir(kept.dir)).sort();
-  const expected = [PROVENANCE_FILE, ...kept.members.map(member => member.name)].sort();
-  if (names.join('\n') !== expected.join('\n'))
-    return refuse(`${kept.dir} holds ${names.join(', ')}, not the ${expected.join(', ')} that were moved`);
+  const names = (await readdir(kept.dir)).filter(name => name !== RECORD_TEMP).sort();
+  const known = new Set<string>([PROVENANCE_FILE, ...kept.members.map(member => member.name)]);
+  const stray = names.filter(name => !known.has(name));
+  if (stray.length > 0) return refuse(`${kept.dir} holds ${stray.join(', ')}, which was never moved there`);
   for (const member of kept.members) {
-    const found = await plainFolder(join(kept.dir, member.name), join(kept.dir, member.name));
+    const inside = join(kept.dir, member.name);
+    const outside = join(tree.v5Real, member.name);
+    const here = (await lstat(inside).catch(() => undefined)) !== undefined;
+    const path = here ? inside : outside;
+    if (!here && (await lstat(outside).catch(() => undefined)) === undefined)
+      return refuse(`${member.name} is neither in ${kept.dir} nor at ${outside}`);
+    const found = await plainFolder(path, path);
     if (found.ino !== member.ino || found.dev !== member.dev)
-      return refuse(`${join(kept.dir, member.name)} is not the folder that was moved there`);
+      return refuse(`${path} is not the folder that was moved (another folder is there)`);
+    places.set(member.name, here ? 'kept' : 'v5');
   }
+  return places;
 }
 
 /**
@@ -453,21 +589,24 @@ export async function realClaudePreflight(
   return { login: record.login, binary: record.binary };
 }
 
-/** Writes the shim again for the NEW home's store path and updates the record's `store`. The login's own file and store are not made. */
-export async function repointRealClaude(paths: RealPaths): Promise<{ login: string; store: string }> {
+/**
+ * Writes the shim again for the NEW home's store path and updates the record's `store`. The login's own file and store are not made.
+ * `v5Real` is the slot's `v5` realpath from a tree check just made: the harness folder and `v5` are proven real folders of this slot right
+ * before each write, and each file goes through a temp this run creates and a rename (a link at the final name is refused, never followed).
+ */
+export async function repointRealClaude(paths: RealPaths, v5Real: string): Promise<{ login: string; store: string }> {
   const record = await readRecord(paths);
   if (record === undefined) return refuse('there is no real-claude record to re-point');
   const store = storePathOf(paths.fyHome, record.login);
-  const claude = join(paths.harness, 'claude');
-  const temp = `${claude}.tmp-${String(process.pid)}`;
-  await writeFile(temp, shimText({ fake: join(paths.harness, FAKE_NAME), real: record.binary, store }), {
-    mode: 0o755,
-  });
-  await chmod(temp, 0o755);
-  await rename(temp, claude);
-  const recordTemp = `${recordPathOf(paths)}.tmp-${String(process.pid)}`;
-  await writeFile(recordTemp, recordText({ ...record, store }), { mode: 0o644 });
-  await rename(recordTemp, recordPathOf(paths));
+  await plainFolder(paths.harness, join(v5Real, 'harness-bin'));
+  await writeFileAtomic(
+    join(v5Real, 'harness-bin'),
+    'claude',
+    shimText({ fake: join(paths.harness, FAKE_NAME), real: record.binary, store }),
+    0o755,
+  );
+  await plainFolder(paths.v5Dir, v5Real);
+  await writeFileAtomic(v5Real, basename(recordPathOf(paths)), recordText({ ...record, store }), 0o644);
   return { login: record.login, store };
 }
 
@@ -521,8 +660,8 @@ export async function resetV5(
     );
   }
   if (keep !== undefined) {
-    await assertResetTree(paths);
-    const done = await repointRealClaude(real);
+    const checked = await assertResetTree(paths);
+    const done = await repointRealClaude(real, checked.v5Real);
     actions.say(
       `  real claude: dispatcher kept for login ${done.login}, pointed at ${done.store} (missing until the owner signs in)`,
     );
@@ -533,9 +672,11 @@ export async function resetV5(
 }
 
 /**
- * Puts a kept home back (`<slot>/kept/<stamp>`, one this slot's reset or restore moved): stop, move the CURRENT home (if there is one; none
- * is fine) into `kept/<new stamp>`, move the kept folders back into `v5`, start. Renames only: nothing is read into memory, copied or removed
- * except the kept folder's own emptied provenance record and the then-empty folder.
+ * Puts a kept home back (`<slot>/kept/<stamp>`, one this slot's reset or restore moved, complete or left half way by an interruption):
+ * stop, move the CURRENT home (if there is one; none is fine) into `kept/<new stamp>`, move the kept folders back into `v5`, start.
+ * Renames only: nothing is read into memory, copied or removed except the kept folder's own emptied provenance record and the then-empty
+ * folder. Each folder is found by the identity the record holds, so a retry after an interruption (some folders already back, some not)
+ * reconciles the split state: a folder already at `v5/<name>` is left, one still in the kept folder is moved back.
  */
 export async function restoreV5(
   paths: ResetPaths,
@@ -545,35 +686,50 @@ export async function restoreV5(
   hooks?: KeepHooks,
 ): Promise<{ saved: string | undefined }> {
   const tree = await assertResetTree(paths);
-  const kept = await checkKept(paths, tree, stamp);
+  const planned = await checkKept(paths, tree, stamp);
+  // Folders already back where they belong are the kept ones; whatever else sits at `v5/<name>` is the current home.
+  const aside = KEPT_MEMBERS.filter(name => planned.places.get(name) !== 'v5');
   const nextDir = join(tree.slotReal, 'kept', resetStamp(now));
   if ((await lstat(nextDir).catch(() => undefined)) !== undefined)
     return refuse(`${nextDir} already exists; try again in a second`);
 
   await actions.stop();
   const live = await assertResetTree(paths);
-  const saved = await keepAside(paths, live, now, { needHome: false, hooks });
+  const saved = await keepAside(paths, live, now, { needHome: false, names: aside, hooks });
   if (saved !== undefined) actions.say(`  the current 5.0 home is kept in ${saved.dir}`);
+  let kept = planned;
   try {
     // The kept folders are looked at again, then each is moved into `v5` (a destination that exists is never replaced) and looked at there.
-    await assertKept(kept);
+    kept = await checkKept(paths, live, stamp);
     const now5 = await assertResetTree(paths);
+    let inside = kept.members.filter(member => kept.places.get(member.name) === 'kept').map(member => member.name);
     for (const member of kept.members) {
+      if (kept.places.get(member.name) !== 'kept') continue;
       const target = join(now5.v5Real, member.name);
       if ((await lstat(target).catch(() => undefined)) !== undefined) return refuse(`${target} exists again`);
+      await plainFolder(now5.v5Real, now5.v5Real);
+      await hooks?.beforeMove?.(member.name);
       await rename(join(kept.dir, member.name), target);
       const landed = await plainFolder(target, target);
       if (landed.ino !== member.ino || landed.dev !== member.dev)
         return refuse(`${target} is not the folder that was kept`);
+      inside = inside.filter(name => name !== member.name);
+      await writeRecord(kept.dir, { ...kept.record, status: 'moving', moved: inside });
+      await hooks?.afterMove?.(member.name);
     }
-    if (!kept.members.some(member => member.name === 'user')) await mkdir(join(now5.v5Real, 'user'), { mode: 0o700 });
+    if (
+      !kept.members.some(member => member.name === 'user') &&
+      (await lstat(join(now5.v5Real, 'user')).catch(() => undefined)) === undefined
+    )
+      await mkdir(join(now5.v5Real, 'user'), { mode: 0o700 });
     // Only the kit's own record and the now empty folder: both fail rather than remove anything else.
     await rm(join(kept.dir, PROVENANCE_FILE), { force: true });
+    await rm(join(kept.dir, RECORD_TEMP), { force: true });
     await rmdir(kept.dir);
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
     throw new ResetHalfway(
-      `the kept home could not be put back (${why}). It is in ${kept.dir}${saved === undefined ? '' : `; the home it replaces is in ${saved.dir}`}; nothing outside this slot was touched`,
+      `the kept home could not be put back (${why}). What is not back yet is in ${kept.dir}${saved === undefined ? '' : `; the home it replaces is in ${saved.dir}`}; run restore-v5 ${stamp} again to finish it; nothing outside this slot was touched`,
     );
   }
   await assertResetTree(paths);
@@ -612,15 +768,12 @@ export async function writeBindPin(paths: ResetPaths, port: number): Promise<voi
     entry => !(typeof entry === 'object' && entry !== null && (entry as { kind?: unknown }).kind === 'bind'),
   );
   document.carriers = [{ kind: 'bind', host: '127.0.0.1', port }, ...others];
-  const temp = join(config, `daemon.json.tmp-${String(process.pid)}`);
-  try {
-    await assertResetTree(paths);
-    await writeFile(temp, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+  // Written like every kit file: a temp this run creates exclusively (a temp that was already there is someone else's and stays), fsync,
+  // then renamed over `daemon.json` after the tree and the config folder are looked at again.
+  await assertResetTree(paths);
+  await plainFolder(config, config);
+  await writeFileAtomic(config, 'daemon.json', `${JSON.stringify(document, null, 2)}\n`, 0o600, async () => {
     await assertResetTree(paths);
     await plainFolder(config, config);
-    await rename(temp, file);
-  } catch (error) {
-    await rm(temp, { force: true });
-    throw error;
-  }
+  });
 }
