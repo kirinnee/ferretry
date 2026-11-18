@@ -24,6 +24,8 @@ export interface Point {
 
 const MIN_SCALE = 1;
 export const MAX_SCALE = 8;
+/** How far past one picture pixel per screen pixel the reader may zoom a picture that rests smaller than its pixels. */
+const NATURAL_HEADROOM = 2;
 export const DOUBLE_TAP_SCALE = 2.5;
 export const IDENTITY: ViewTransform = { scale: 1, x: 0, y: 0 };
 
@@ -41,9 +43,22 @@ export const fittedSize = (natural: Size, stage: Size): Size => {
   return { width: natural.width * ratio, height: natural.height * ratio };
 };
 
+/**
+ * The largest zoom for a picture resting at `rest` (resting width / natural width). Zoom multiplies the RESTING size,
+ * so a big picture on a small stage needs more than MAX_SCALE to reach one picture pixel per screen pixel (1 / rest):
+ * the cap is in natural terms too, never below 2 x natural.
+ */
+export const maxScaleFor = (rest: number): number =>
+  rest > 0 && Number.isFinite(rest) ? Math.max(MAX_SCALE, NATURAL_HEADROOM / rest) : MAX_SCALE;
+
 /** Keep the zoomed picture covering as much of the stage as it can: no gap opens beside it. */
-export const clampTransform = (view: ViewTransform, fitted: Size, stage: Size): ViewTransform => {
-  const scale = clamp(view.scale, MIN_SCALE, MAX_SCALE);
+export const clampTransform = (
+  view: ViewTransform,
+  fitted: Size,
+  stage: Size,
+  maxScale: number = MAX_SCALE,
+): ViewTransform => {
+  const scale = clamp(view.scale, MIN_SCALE, maxScale);
   const reachX = Math.max(0, (fitted.width * scale - stage.width) / 2);
   const reachY = Math.max(0, (fitted.height * scale - stage.height) / 2);
   return { scale, x: clamp(view.x, -reachX, reachX), y: clamp(view.y, -reachY, reachY) };
@@ -59,22 +74,35 @@ export const zoomAround = (
   focus: Point,
   fitted: Size,
   stage: Size,
+  maxScale: number = MAX_SCALE,
 ): ViewTransform => {
-  const next = clamp(scale, MIN_SCALE, MAX_SCALE);
+  const next = clamp(scale, MIN_SCALE, maxScale);
   const ratio = next / view.scale;
   return clampTransform(
     { scale: next, x: focus.x - (focus.x - view.x) * ratio, y: focus.y - (focus.y - view.y) * ratio },
     fitted,
     stage,
+    maxScale,
   );
 };
 
-export const panBy = (view: ViewTransform, dx: number, dy: number, fitted: Size, stage: Size): ViewTransform =>
-  clampTransform({ ...view, x: view.x + dx, y: view.y + dy }, fitted, stage);
+export const panBy = (
+  view: ViewTransform,
+  dx: number,
+  dy: number,
+  fitted: Size,
+  stage: Size,
+  maxScale: number = MAX_SCALE,
+): ViewTransform => clampTransform({ ...view, x: view.x + dx, y: view.y + dy }, fitted, stage, maxScale);
 
 /** Double tap / double click: fit when zoomed, otherwise zoom in on the tapped point. */
-export const toggleZoom = (view: ViewTransform, focus: Point, fitted: Size, stage: Size): ViewTransform =>
-  view.scale > 1.01 ? IDENTITY : zoomAround(view, DOUBLE_TAP_SCALE, focus, fitted, stage);
+export const toggleZoom = (
+  view: ViewTransform,
+  focus: Point,
+  fitted: Size,
+  stage: Size,
+  maxScale: number = MAX_SCALE,
+): ViewTransform => (view.scale > 1.01 ? IDENTITY : zoomAround(view, DOUBLE_TAP_SCALE, focus, fitted, stage, maxScale));
 
 /** The scale multiplier one wheel notch means. `ctrlKey` wheels are trackpad pinches and are finer. */
 export const wheelScale = (deltaY: number, ctrlKey: boolean): number => Math.exp(-deltaY * (ctrlKey ? 0.01 : 0.0015));
@@ -93,4 +121,14 @@ export const midpoint = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y:
 export const neighbour = (index: number, step: -1 | 1, count: number): number | null => {
   const next = index + step;
   return next < 0 || next >= count ? null : next;
+};
+
+/**
+ * Where the picture RESTS: the whole of it in the stage, but never enlarged past its own pixels (a small picture is
+ * drawn at its natural size, as the stage's `max-width`/`max-height` draw it). Zoom is a multiple of this, so
+ * "100%" — one picture pixel per screen pixel — is `1 / (resting width / natural width)` times it.
+ */
+export const restingSize = (natural: Size, stage: Size): Size => {
+  const fitted = fittedSize(natural, stage);
+  return fitted.width > natural.width ? natural : fitted;
 };

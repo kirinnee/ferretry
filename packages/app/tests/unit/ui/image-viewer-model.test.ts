@@ -6,9 +6,11 @@ import {
   fittedSize,
   IDENTITY,
   MAX_SCALE,
+  maxScaleFor,
   midpoint,
   neighbour,
   panBy,
+  restingSize,
   SWIPE_DISTANCE,
   swipeStep,
   toggleZoom,
@@ -116,5 +118,66 @@ describe('geometry and neighbours', () => {
     expect(neighbour(2, 1, 3)).toBeNull();
     expect(neighbour(1, 1, 3)).toBe(2);
     expect(neighbour(1, -1, 3)).toBe(0);
+  });
+});
+
+describe('restingSize', () => {
+  const square = { width: 400, height: 400 };
+  test('fits a large picture and never enlarges a small one past its own pixels', () => {
+    expect(restingSize({ width: 800, height: 400 }, square)).toEqual({ width: 400, height: 200 });
+    expect(restingSize({ width: 40, height: 80 }, square)).toEqual({ width: 40, height: 80 });
+    expect(restingSize({ width: 0, height: 10 }, square)).toEqual({ width: 0, height: 0 });
+  });
+});
+
+describe('reaching 100% on a big picture (owner: "i need picture that can zoom")', () => {
+  const cases = [
+    {
+      name: '3840x2160 on a 390x700 phone',
+      natural: { width: 3840, height: 2160 },
+      stage: { width: 390, height: 700 },
+    },
+    {
+      name: '1290x8000 on a 390x700 phone',
+      natural: { width: 1290, height: 8000 },
+      stage: { width: 390, height: 700 },
+    },
+    {
+      name: '1440x12000 on a 1280x800 desktop',
+      natural: { width: 1440, height: 12000 },
+      stage: { width: 1280, height: 800 },
+    },
+  ];
+  for (const { name, natural, stage: box } of cases) {
+    const fitted = restingSize(natural, box);
+    const rest = fitted.width / natural.width;
+    const max = maxScaleFor(rest);
+
+    test(`${name}: the cap lets one picture pixel fill one screen pixel, and then some`, () => {
+      expect(rest * MAX_SCALE).toBeLessThan(1); // the old cap stopped short of 100%
+      expect(max * rest).toBeGreaterThanOrEqual(2 - 1e-9);
+    });
+
+    test(`${name}: Actual size reads 100%`, () => {
+      const view = zoomAround(IDENTITY, 1 / rest, { x: 0, y: 0 }, fitted, box, max);
+      expect(view.scale * rest).toBeCloseTo(1, 6);
+    });
+
+    test(`${name}: wheel and pinch can reach 100%`, () => {
+      let wheel = IDENTITY;
+      for (let i = 0; i < 200 && wheel.scale * rest < 1; i += 1) {
+        wheel = zoomAround(wheel, wheel.scale * wheelScale(-100, false), { x: 0, y: 0 }, fitted, box, max);
+      }
+      expect(wheel.scale * rest).toBeGreaterThanOrEqual(1 - 1e-9);
+      const pinch = zoomAround(IDENTITY, 1 * 1000, { x: 10, y: 10 }, fitted, box, max);
+      expect(pinch.scale).toBe(max);
+      expect(panBy(pinch, 5, 5, fitted, box, max).scale).toBe(max);
+    });
+  }
+
+  test('a small picture keeps the old ceiling, and a nonsense rest falls back to it', () => {
+    expect(maxScaleFor(1)).toBe(MAX_SCALE);
+    expect(maxScaleFor(0)).toBe(MAX_SCALE);
+    expect(maxScaleFor(Number.NaN)).toBe(MAX_SCALE);
   });
 });

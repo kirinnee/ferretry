@@ -448,7 +448,7 @@ challenge is single-use and bound to one device and `appSession`).
   unlock at all.
 - The daemon checks, in order: the challenge is one it issued to this device and `appSession`,
   unexpired (2 minutes) and unspent, and it is spent now; `clientData.type` is `webauthn.create` /
-  `webauthn.get`; `clientData.origin` is one of the daemon's `corsOrigins`; `rpIdHash` equals
+  `webauthn.get`; `clientData.origin` is the hosted app's origin (`HOSTED_APP_ORIGIN`), the only one the daemon serves; `rpIdHash` equals
   SHA-256 of that origin's host; flags **UP and UV** are set; the credential belongs to this device;
   the signature verifies over `authenticatorData ‖ SHA-256(clientDataJSON)`; and, when either
   counter is non-zero, `signCount` increased. The counter is written by ONE compare-and-set inside the
@@ -477,9 +477,9 @@ cannot be used by a self-hosted copy (`ferretry.example.com`), a local developme
 - each app origin a person uses has **its own device key and its own passkey**. That is already true
   of the device key (IndexedDB is per origin), so an app at a second origin is simply a second paired
   device and registers its own passkey within its pairing window;
-- the daemon accepts an assertion only for an origin in `corsOrigins`, and checks `rpIdHash` against
-  **that** origin's host — a self-hosted app works once its origin is added there, exactly as its
-  requests already need;
+- the daemon accepts an assertion only for the hosted app's origin (`HOSTED_APP_ORIGIN`), and checks
+  `rpIdHash` against **that** origin's host — a copy of the app at any other origin is refused with
+  `origin-not-allowed` and a message that names the hosted app;
 - `localhost` is a valid relying-party id for development (browsers treat it as a secure context);
   a plain-HTTP LAN origin (`http://192.168.…`) is not, so WebAuthn is unavailable there and the app
   says so.
@@ -599,7 +599,7 @@ signature }`, the bytes exactly as verified, never the rotation, together with t
   none.
 - **The offline re-check skips only the counter.** `verifyStoredAssertion` (`passkeys/verifier.ts`)
   still requires `webauthn.get`, the challenge, an origin equal to the **passkey's own** origin (not
-  today's `corsOrigins`), the rpId hash, UP, UV and a valid signature. `StepUpService.verifyStoredProof`
+  today's allowed origin), the rpId hash, UP, UV and a valid signature. `StepUpService.verifyStoredProof`
   first asks whether the proof's device is **still paired**, then looks up the credential on that device
   in the registry as it stands now. So an unpaired device, a removed passkey or a forgotten device fails
   it, even when a revocation's passkey purge failed and left the passkeys on file. A passkey is never

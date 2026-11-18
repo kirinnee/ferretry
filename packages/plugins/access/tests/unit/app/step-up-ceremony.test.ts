@@ -18,6 +18,7 @@ import {
   unlockCeremony,
   stepUpCeremony,
 } from '../../../app/lib/step-up-ceremony.ts';
+import { HOSTED_APP_ORIGIN } from '../../../contract/index.ts';
 import type { StepUpClient } from '../../../app/lib/step-up-client.ts';
 
 const ORIGIN = 'https://ferretry.pages.dev';
@@ -221,10 +222,13 @@ describe('the sentence for a failed ceremony', () => {
     );
   });
 
-  it('should name the origin and corsOrigins for a copy of the app the machine does not serve', () => {
-    const sentence = describeAt(new FyHttpError('refused', 403, 'step_up_origin_not_allowed'));
-    should(sentence).containEql(ORIGIN);
-    should(sentence).containEql('corsOrigins');
+  it('should name this copy and the hosted address the machine does serve, and offer no setting that does not exist', () => {
+    const sentence = describeStepUpFailure('https://elsewhere.example.test')(
+      new FyHttpError('refused', 403, 'step_up_origin_not_allowed'),
+    );
+    should(sentence).containEql('https://elsewhere.example.test');
+    should(sentence).containEql(HOSTED_APP_ORIGIN);
+    should(sentence).not.containEql('corsOrigins');
   });
 
   it('should say a passkey answer that did not check out, without saying why', () => {

@@ -1,8 +1,9 @@
 import { describe, it } from 'bun:test';
 import { DEFAULT_SECURITY_SETTINGS } from '@ferretry/core-gate/contract';
 import should from 'should';
+import { HOSTED_APP_ORIGIN } from '../../../../contract/index.ts';
 import manifest from '../../../../manifest.ts';
-import { stepUpRoutes } from '../../../../daemon/lib/routes/step-up.ts';
+import { isExpectedRefusal, type PasskeyRefusalNote, stepUpRoutes } from '../../../../daemon/lib/routes/step-up.ts';
 import {
   ChallengeLedger,
   type PasskeyStore,
@@ -107,7 +108,8 @@ function machine(initial: Partial<SecuritySettings> = {}) {
     settings: () => settings.current,
     audit: { record: async () => {} },
   });
-  const routes = stepUpRoutes(service);
+  const refusals: PasskeyRefusalNote[] = [];
+  const routes = stepUpRoutes(service, undefined, undefined, undefined, undefined, note => refusals.push(note));
   const ask = (key: string, body?: string, overrides: CallOverrides = {}) =>
     respond(routes, key, { device: phone, ...(body === undefined ? {} : { body }), ...overrides });
   const unlock = async () => {
@@ -117,7 +119,7 @@ function machine(initial: Partial<SecuritySettings> = {}) {
     should(granted.status).equal(200);
     return jsonBody(granted);
   };
-  return { clock, settings, registry, service, routes, ask, unlock };
+  return { clock, settings, registry, service, routes, ask, unlock, refusals };
 }
 
 const refusedAs = (response: { status: number; body: string }, status: number, code: string) =>
@@ -277,5 +279,51 @@ describe('the unlock', () => {
     // Act / Assert — with the unlock off, every act asks for its own step-up instead
     should(world.service.unlockRequired(phone)).be.false();
     should(world.service.held(phone)).be.false();
+  });
+});
+
+describe('a refused passkey request', () => {
+  it('should be told to the log with its reason, request and device — and nothing a caller could replay', async () => {
+    // Arrange
+    const world = machine();
+
+    // Act — a copy of the app at an origin this machine does not answer for.
+    const response = await world.ask(
+      'POST /v1/unlock/options',
+      JSON.stringify({ origin: 'https://other.example.test' }),
+    );
+
+    // Assert
+    refusedAs(response, 403, stepUpRefusalCode('origin-not-allowed'));
+    should(world.refusals).eql([{ reason: 'origin-not-allowed', request: 'POST /v1/unlock/options', deviceId }]);
+    const said = JSON.stringify(world.refusals);
+    should(said).not.containEql('other.example.test');
+    should(said).not.containEql('challenge');
+  });
+
+  it('should say something true about the remedy: the hosted app, not a corsOrigins setting that does not exist', async () => {
+    // Arrange
+    const world = machine();
+
+    // Act
+    const response = await world.ask(
+      'POST /v1/unlock/options',
+      JSON.stringify({ origin: 'https://other.example.test' }),
+    );
+
+    // Assert
+    const { error } = JSON.parse(response.body) as { error?: string };
+    should(error).not.containEql('corsOrigins');
+    should(error).containEql(HOSTED_APP_ORIGIN);
+  });
+
+  it('should rank no-passkey, a closed window, a due rotation and a caller that is not a device as ordinary, and an origin or a failed check as not', () => {
+    should(
+      ['no-passkey', 'registration-closed', 'rotation-required', 'not-a-device'].every(r =>
+        isExpectedRefusal(r as never),
+      ),
+    ).be.true();
+    should(isExpectedRefusal('origin-not-allowed')).be.false();
+    should(isExpectedRefusal('not-verified')).be.false();
   });
 });

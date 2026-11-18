@@ -68,7 +68,7 @@ export interface StepUpServiceDeps {
   readonly random: StepUpRandom;
   readonly clock: StepUpClock;
   readonly devices: StepUpDeviceDirectory;
-  /** The app origins this daemon serves (`corsOrigins`), read per call so a config change applies. */
+  /** The app origins this daemon answers a passkey for (today the hosted app's, a build fact), read per call. */
   readonly allowedOrigins: () => readonly string[];
   /** What the authenticator shows as the relying party's name. */
   readonly relyingPartyName: string;
