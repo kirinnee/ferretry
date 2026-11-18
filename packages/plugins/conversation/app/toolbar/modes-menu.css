@@ -1,5 +1,5 @@
-/* The header's Modes menu: the button sits at the end of the main line; the modes it holds are one row each, so every
-   switch reads as a label with its On/Off beside it rather than as a loose chip. */
+/* The ferret's one menu: the button sits at the end of the main line; what it holds (Info, Actions, the modes) is one row
+   each, so every switch reads as a label with its On/Off beside it rather than as a loose chip. */
 .fy-modes {
   flex: 0 0 auto;
   display: flex;
@@ -112,4 +112,14 @@
 .fy-modes__sheet .fy-panel .kt-btn,
 .fy-modes__sheet .fy-panel label {
   font-size: var(--text-sm, 14px);
+}
+
+/* The menu's two parts: this ferret's own rows (Info, Actions), then the modes. */
+.fy-modes__section + .fy-modes__section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: var(--divider-width, 1px) solid var(--border-soft);
+}
+.fy-modes__popover[hidden] {
+  display: none;
 }

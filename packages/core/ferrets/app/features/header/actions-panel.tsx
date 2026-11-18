@@ -1,6 +1,8 @@
 /**
- * `ferret.toolbar` › `actions` — the header's one place for doing things to a ferret: the Actions ▾ menu, a Resume
- * button for a ferret that can come back, the toast a settled form leaves, and the paused-restart panel.
+ * `ferrets.menu` › `actions` — the ferret's one place for doing things to it, drawn in the header's one menu (off the
+ * main line, which is the name and the status): the Actions rows, a Resume row for a ferret that can come back, the toast
+ * a settled form leaves, and the paused-restart panel. What the person must SEE after the menu is put away (a failure, the
+ * toast, the paused restart) is drawn through {@link Floating}, so it is on the screen and not in the shut menu.
  *
  * It owns every Ferrets act on the header (stop, resume, rename, restart, pin, move), each through the half's own client
  * by route key (built once, in {@link useFerretActions}, which a list row's menu shares). WHO MAY DO THEM is the
@@ -14,7 +16,7 @@ import { useState } from 'react';
 import type { FerretSummary } from '../../../contract/index.ts';
 import type { LiveFerretsClient } from '../../lib/client.ts';
 import { useFerret } from '../../lib/ferret-read.ts';
-import { cn, useLayoutMode } from '../../ui.ts';
+import { cn, Floating, useLayoutMode } from '../../ui.ts';
 import { ActionToast } from './action-toast.tsx';
 import { ActionsMenu } from './actions-menu.tsx';
 import type { CoreActionContext } from './core-actions.ts';
@@ -73,8 +75,7 @@ function ActionsBar({
     >
       {resumable ? (
         <button
-          aria-label={compact ? 'Resume' : undefined}
-          className={cn(compact ? 'fy-ferret-bar__icon' : 'kt-btn kt-btn--sm')}
+          className="fy-actions-menu__row"
           data-ferret-resume=""
           onClick={() => {
             void context
@@ -86,8 +87,8 @@ function ActionsBar({
           title={reviveOffer(ferret, canControl).reason}
           type="button"
         >
-          <Play aria-hidden="true" size={compact ? 18 : 14} />
-          {compact ? null : <span>Resume</span>}
+          <Play aria-hidden="true" size={16} />
+          <span className="fy-actions-menu__label">Resume</span>
         </button>
       ) : null}
       {daemon === undefined ? null : (
@@ -106,19 +107,21 @@ function ActionsBar({
         onNotice={actions.setNotice}
         sections={actions.sections}
       />
-      {alert === null ? null : (
-        <p className="fy-action-form__failure" data-ferret-alert="" role="alert">
-          {alert.sentence}
-          {alert.detail === undefined ? null : (
-            <details>
-              <summary>Details</summary>
-              <pre>{alert.detail}</pre>
-            </details>
-          )}
-        </p>
-      )}
-      {actions.panel}
-      <ActionToast notice={actions.notice} onDismiss={() => actions.setNotice(null)} />
+      <Floating>
+        {alert === null ? null : (
+          <p className="fy-action-form__failure fy-action-form__failure--floating" data-ferret-alert="" role="alert">
+            {alert.sentence}
+            {alert.detail === undefined ? null : (
+              <details>
+                <summary>Details</summary>
+                <pre>{alert.detail}</pre>
+              </details>
+            )}
+          </p>
+        )}
+        {actions.panel}
+        <ActionToast notice={actions.notice} onDismiss={() => actions.setNotice(null)} />
+      </Floating>
     </div>
   );
 }

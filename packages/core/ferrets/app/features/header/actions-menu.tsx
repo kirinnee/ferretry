@@ -1,25 +1,19 @@
 /**
- * ACTIONS ▾ — the ferret header's one place for doing things to a ferret.
+ * THE FERRET'S ACTIONS — the header menu's DO half, drawn as plain rows in the ferret's one menu (Conversation's Modes
+ * button), not as a dropdown of their own.
  *
- * A dropdown on every width (rows grow to 44px on a phone), drawn from the registry's sections: a
- * small heading per group, an icon per row, the row's fact at its end. Three behaviours the shared
- * `ContextMenu` does not have, which is why this is its own component rather than a prop on that one:
+ * Drawn from the registry's sections: a small heading per group, an icon per row, the row's fact at its end. Two
+ * behaviours the shared `ContextMenu` does not have, which is why this is its own component:
  *
- *   - GROUPS, as `role="group"` with a visible label, because a flat list of eleven actions is a list
- *     nobody scans;
- *   - INLINE CONFIRM: a destructive row turns into its question and two buttons IN PLACE — no modal,
- *     no `confirm()` — and the menu stays open until one of them is chosen;
- *   - FORMS: a "…" row closes the menu and opens its form in a popover under the button (desktop) or
- *     the app's bottom sheet (phone), with the form's own focus and Escape.
- *
- * KEYBOARD, the menu-button pattern: focus lands on the first row, Up/Down/Home/End move, Enter and
- * Space choose, Escape and Tab close and give focus back to the button. Escape takes one layer at a
- * time through the app's escape stack, so an Escape in a confirm cancels the confirm first.
+ *   - GROUPS, as `role="group"` with a visible label, because a flat list of eleven actions is a list nobody scans;
+ *   - INLINE CONFIRM: a destructive row turns into its question and two buttons IN PLACE — no modal, no `confirm()`;
+ *   - FORMS: a "…" row puts the menu away and opens its form in a popover (desktop) or the app's bottom sheet (phone),
+ *     with the form's own focus and Escape. The form is drawn through {@link Floating}, so it is on the screen, not
+ *     boxed in the menu's sheet, and it outlives the menu being shut.
  */
 
-import { ChevronDown, LoaderCircle } from 'lucide-react';
-import { type ReactNode, useCallback, useId, useRef, useState } from 'react';
-import { BottomSheet, cn, useDialogFocus } from '../../ui.ts';
+import { type ReactNode, useRef } from 'react';
+import { BottomSheet, Floating, useDialogFocus, useDismissSurface } from '../../ui.ts';
 import {
   findFerretAction,
   type FerretActionEntry,
@@ -27,12 +21,13 @@ import {
   type FerretActionSection,
 } from './registry.ts';
 import { useActionMenu } from './use-action-menu.ts';
+import { LoaderCircle } from 'lucide-react';
 
 export interface ActionsMenuProps {
   readonly sections: readonly FerretActionSection[];
-  /** Phone layout: 44px rows, forms in a sheet, an icon-only trigger. */
+  /** Phone layout: 44px rows, forms in a sheet. */
   readonly compact: boolean;
-  /** Whose actions these are, for the menu's accessible name: "Hadi actions". */
+  /** Whose actions these are, for the list's accessible name: "Hadi actions". */
   readonly name: string;
   /** The open form's action id, or null. The page owns it so Info can open a form too. */
   readonly form: string | null;
@@ -43,52 +38,22 @@ export interface ActionsMenuProps {
   readonly onNotice?: (sentence: string) => void;
 }
 
-/** Where the dropdown and the popover hang: under the button, right edges aligned, never off screen. */
-interface Placement {
-  readonly top: number;
-  readonly right: number;
-}
-
-const placementUnder = (button: HTMLElement | null): Placement => {
-  const rect = button?.getBoundingClientRect();
-  const width = typeof window === 'undefined' ? 0 : window.innerWidth;
-  return {
-    top: Math.round((rect?.bottom ?? 0) + 6),
-    right: Math.max(8, Math.round(width - (rect?.right ?? width))),
-  };
-};
+/** Where a desktop form hangs: under the header, at the right edge, never off screen. */
+const FORM_PLACEMENT = { top: 56, right: 12 } as const;
 
 export function ActionsMenu({ sections, compact, name, form, onFormChange, onFailure, onNotice }: ActionsMenuProps) {
-  const menuId = useId();
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const [placement, setPlacement] = useState<Placement>({ top: 0, right: 8 });
-
-  const close = useCallback((restoreFocus: boolean): void => {
-    setOpen(false);
-    if (restoreFocus) buttonRef.current?.focus();
-  }, []);
-  const { menuRef, confirming, setConfirming, pending, choose, confirmRun, onMenuKey } = useActionMenu({
-    open,
-    close,
-    insideRef: buttonRef,
+  const dismissSurface = useDismissSurface();
+  const { confirming, setConfirming, pending, choose, confirmRun } = useActionMenu({
+    // The rows are always on the screen while the menu is, so nothing here opens or closes a dropdown: a chosen row
+    // puts the menu away and the act runs, a "…" row opens its form.
+    open: false,
+    close: dismissSurface,
     onFailure,
     openForm: id => {
-      close(false);
-      setPlacement(placementUnder(buttonRef.current));
+      dismissSurface();
       onFormChange(id);
     },
   });
-
-  const toggle = (): void => {
-    if (open) {
-      close(false);
-      return;
-    }
-    setPlacement(placementUnder(buttonRef.current));
-    setConfirming(null);
-    setOpen(true);
-  };
 
   const formEntry = form === null ? undefined : findFerretAction(sections, form);
   const shownForm = formEntry?.kind === 'form' ? formEntry : undefined;
@@ -101,59 +66,45 @@ export function ActionsMenu({ sections, compact, name, form, onFormChange, onFai
 
   return (
     <>
-      <button
-        aria-controls={open ? menuId : undefined}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={compact ? 'Actions' : undefined}
-        className={cn('fy-actions-trigger kt-btn kt-btn--sm', compact && 'fy-actions-trigger--compact')}
-        data-ferret-actions-trigger=""
-        onClick={toggle}
-        ref={buttonRef}
-        type="button"
+      {/* biome-ignore lint/a11y/useSemanticElements: a group of rows with a visible heading each; a fieldset is a form grouping and would be announced as one */}
+      <div
+        aria-label={`${name} actions`}
+        className="fy-actions-inline"
+        data-compact={compact ? '' : undefined}
+        data-ferret-actions-menu=""
+        role="group"
       >
-        {compact ? null : <span>Actions</span>}
-        <ChevronDown aria-hidden="true" size={14} />
-      </button>
-      {open ? (
-        <div
-          aria-label={`${name} actions`}
-          className="fy-actions-menu kt-panel"
-          data-compact={compact ? '' : undefined}
-          data-ferret-actions-menu=""
-          id={menuId}
-          onKeyDown={onMenuKey}
-          ref={menuRef}
-          role="menu"
-          style={{ top: placement.top, right: placement.right }}
-        >
-          <ActionSections
-            confirming={confirming}
-            onCancel={() => setConfirming(null)}
-            onChoose={choose}
-            onConfirm={confirmRun}
-            pending={pending}
-            sections={sections}
-          />
-        </div>
-      ) : null}
-      {shownForm === undefined ? null : compact ? (
-        <BottomSheet
-          ariaLabel={shownForm.title}
-          closeLabel={`Close ${shownForm.title}`}
-          id={`${menuId}-form`}
-          onClose={formHost.close}
-          open
-          panelClassName="bg-surface"
-        >
-          <div className="min-h-0 flex-1 overflow-y-auto" data-ferret-action-sheet="">
-            <ActionForm entry={shownForm} host={formHost} />
-          </div>
-        </BottomSheet>
-      ) : (
-        <ActionPopover onClose={formHost.close} placement={placement} title={shownForm.title}>
-          <ActionForm entry={shownForm} host={formHost} />
-        </ActionPopover>
+        <ActionSections
+          confirming={confirming}
+          onCancel={() => setConfirming(null)}
+          onChoose={choose}
+          onConfirm={confirmRun}
+          pending={pending}
+          sections={sections}
+          tabbable
+        />
+      </div>
+      {shownForm === undefined ? null : (
+        <Floating>
+          {compact ? (
+            <BottomSheet
+              ariaLabel={shownForm.title}
+              closeLabel={`Close ${shownForm.title}`}
+              id={`fy-form-${shownForm.id}`}
+              onClose={formHost.close}
+              open
+              panelClassName="bg-surface"
+            >
+              <div className="min-h-0 flex-1 overflow-y-auto" data-ferret-action-sheet="">
+                <ActionForm entry={shownForm} host={formHost} />
+              </div>
+            </BottomSheet>
+          ) : (
+            <ActionPopover onClose={formHost.close} placement={FORM_PLACEMENT} title={shownForm.title}>
+              <ActionForm entry={shownForm} host={formHost} />
+            </ActionPopover>
+          )}
+        </Floating>
       )}
     </>
   );
@@ -167,8 +118,11 @@ export function ActionSections({
   onChoose,
   onConfirm,
   onCancel,
+  tabbable = false,
 }: {
   readonly sections: readonly FerretActionSection[];
+  /** Rows that are plain buttons in the page's tab order (the header's menu), not the items of a roving-focus menu. */
+  readonly tabbable?: boolean;
   readonly confirming: string | null;
   readonly pending: string | null;
   readonly onChoose: (entry: FerretActionEntry) => void;
@@ -186,9 +140,21 @@ export function ActionSections({
           <div aria-label={section.label} role="group">
             {section.entries.map(entry =>
               entry.kind === 'confirm' && confirming === entry.id ? (
-                <ConfirmRow entry={entry} key={entry.id} onCancel={onCancel} onConfirm={() => onConfirm(entry)} />
+                <ConfirmRow
+                  entry={entry}
+                  key={entry.id}
+                  onCancel={onCancel}
+                  onConfirm={() => onConfirm(entry)}
+                  tabbable={tabbable}
+                />
               ) : (
-                <MenuRow entry={entry} key={entry.id} onChoose={() => onChoose(entry)} pending={pending === entry.id} />
+                <MenuRow
+                  entry={entry}
+                  key={entry.id}
+                  onChoose={() => onChoose(entry)}
+                  pending={pending === entry.id}
+                  tabbable={tabbable}
+                />
               ),
             )}
           </div>
@@ -202,10 +168,12 @@ function MenuRow({
   entry,
   onChoose,
   pending,
+  tabbable,
 }: {
   readonly entry: FerretActionEntry;
   readonly onChoose: () => void;
   readonly pending: boolean;
+  readonly tabbable: boolean;
 }) {
   const Icon = entry.icon;
   const unavailable = entry.unavailable !== undefined;
@@ -218,8 +186,8 @@ function MenuRow({
       data-menu-row=""
       data-ferret-action-item={entry.id}
       onClick={onChoose}
-      role={entry.kind === 'toggle' ? 'menuitemcheckbox' : 'menuitem'}
-      tabIndex={-1}
+      role={entry.kind === 'toggle' ? (tabbable ? 'switch' : 'menuitemcheckbox') : tabbable ? undefined : 'menuitem'}
+      tabIndex={tabbable ? 0 : -1}
       title={entry.unavailable}
       type="button"
     >
@@ -245,10 +213,12 @@ function ConfirmRow({
   entry,
   onConfirm,
   onCancel,
+  tabbable,
 }: {
   readonly entry: Extract<FerretActionEntry, { kind: 'confirm' }>;
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
+  readonly tabbable: boolean;
 }) {
   return (
     // biome-ignore lint/a11y/useSemanticElements: a confirm inside a menu is a group of menu items, not a form fieldset
@@ -262,13 +232,19 @@ function ConfirmRow({
           data-menu-confirm-yes=""
           data-variant={entry.danger ? 'danger' : 'primary'}
           onClick={onConfirm}
-          role="menuitem"
-          tabIndex={-1}
+          role={tabbable ? undefined : 'menuitem'}
+          tabIndex={tabbable ? 0 : -1}
           type="button"
         >
           {entry.confirmLabel}
         </button>
-        <button className="kt-btn kt-btn--sm" onClick={onCancel} role="menuitem" tabIndex={-1} type="button">
+        <button
+          className="kt-btn kt-btn--sm"
+          onClick={onCancel}
+          role={tabbable ? undefined : 'menuitem'}
+          tabIndex={tabbable ? 0 : -1}
+          type="button"
+        >
           Cancel
         </button>
       </div>
@@ -291,7 +267,7 @@ export function ActionForm({
   );
 }
 
-/** The desktop form frame: hangs under Actions, takes focus, closes on Escape — never on a stray click. */
+/** The desktop form frame: hangs under the header, takes focus, closes on Escape — never on a stray click. */
 function ActionPopover({
   title,
   placement,
@@ -299,7 +275,7 @@ function ActionPopover({
   children,
 }: {
   readonly title: string;
-  readonly placement: Placement;
+  readonly placement: { readonly top: number; readonly right: number };
   readonly onClose: () => void;
   readonly children: ReactNode;
 }) {

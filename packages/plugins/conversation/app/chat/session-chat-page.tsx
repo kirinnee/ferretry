@@ -4,8 +4,8 @@
  *
  * Today's session page drew the whole workspace: the top bar, Info, Actions, the terminal deck, the browser, the
  * agenda, the board, approvals, analytics. On 5.0 each of those is another plugin's panel, mounted here and never
- * imported: `ferret.toolbar` above the conversation (Ferrets' name, status, Info and Actions) with the Modes menu at its end
- * (`conversation.modes`: Agenda mode, Hypermedia, Passive lessons, Compact memory at, the lessons scan), `ferret.side` beside it (the queue, terminals, browser, cards, agenda, skills), and `composer.tools` inside
+ * imported: `ferret.toolbar` above the conversation (Ferrets' name and status) with the ferret's one menu at its end
+ * (Info and Actions from `ferrets.menu`, then `conversation.modes`: Agenda mode, Hypermedia, Passive lessons, Compact memory at, the lessons scan), `ferret.side` beside it (the queue, terminals, browser, cards, agenda, skills), and `composer.tools` inside
  * the composer (attachments, dictation, the runtime picker). What stays is the conversation, copied from the page's
  * `chat` column with its order of operations: the issue line, the search, the transcript, the question form or the
  * composer.
@@ -374,7 +374,7 @@ export function SessionChatPage({
     <>
       {embedded ? null : (
         // The toolbar's turn word is told of a compaction the page's live sample says is running.
-        // The main line is the name and the status; every mode is one click behind the Modes button at its end.
+        // The main line is the name and the status; Info, Actions and every mode are one click behind the one menu button at its end.
         <div className="flex min-w-0 items-center" data-ferret-header="">
           <div className="min-w-0 flex-1">
             <ChatTurnContext.Provider value={toolbarTurn}>

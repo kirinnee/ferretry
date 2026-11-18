@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { consumesOf, contributedSlots, slotsPlacedBy } from '@ferretry/app/testing';
-import { FERRET_SLOTS } from '../../../contract/index.ts';
+import { FERRET_MENU_SLOT, FERRET_SLOTS } from '../../../contract/index.ts';
 
 /**
  * The slots Ferrets offers are an agreement by name: its contract names them and the props they carry, and each
@@ -18,6 +18,9 @@ describe('the slots Ferrets offers', () => {
 
   test('Ferrets imports nothing of Runtimes: the offer is its contract, the contribution is Runtimes’ manifest', () => {
     expect(consumesOf('ferrets')).not.toContain('runtimes');
-    expect(slotsPlacedBy('ferrets').filter(slot => slot.startsWith('ferrets.'))).toEqual([]);
+    // The one slot Ferrets fills itself is the ferret's menu (Info and Actions), which Conversation's header mounts.
+    expect([...new Set(slotsPlacedBy('ferrets').filter(slot => slot.startsWith('ferrets.')))]).toEqual([
+      FERRET_MENU_SLOT,
+    ]);
   });
 });

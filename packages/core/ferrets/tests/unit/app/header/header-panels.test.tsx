@@ -121,9 +121,8 @@ describe('the actions panel', () => {
       </RouterProvider>,
     );
     await settle();
-    const root = mounted.container;
-    await click(root, '[data-ferret-actions-trigger]');
-    return root;
+    // The rows are in the ferret's one menu already: there is no button of the panel's own to open.
+    return mounted.container;
   };
   const writes = (h: Harness): string[] => h.calls.filter(call => call.route !== GET).map(call => call.route);
 
@@ -150,7 +149,7 @@ describe('the actions panel', () => {
     );
   });
 
-  it('offers Resume on a stopped ferret, in the bar and in the menu, and not Stop or Restart', async () => {
+  it('offers Resume on a stopped ferret, in the list and as the action, and not Stop or Restart', async () => {
     const h = harness(ferretSummary('a1', { state: 'stopped' }));
     const root = await open(h);
     expect(root.querySelector('[data-ferret-resume]')).not.toBeNull();
@@ -242,7 +241,7 @@ describe('the actions panel', () => {
   });
 });
 
-describe('the actions panel as ferret.toolbar mounts it', () => {
+describe('the actions panel as the ferret menu mounts it', () => {
   // The panel keeps the rows other plugins offered (each `run` closes over the ferret it was offered for), the open
   // form and the last alert in one state, and a slot hands the same mounted panel a new `subject` when the ferret
   // changes: keying the panel by the ferret is what drops all of it. An alert is the state this can show without a shell.
@@ -258,7 +257,6 @@ describe('the actions panel as ferret.toolbar mounts it', () => {
     mounted = await mount(view('a1'));
     await settle();
     const root = mounted.container;
-    await click(root, '[data-ferret-actions-trigger]');
     await click(root, '[data-ferret-action-item="stop"]');
     await click(root, '[data-menu-confirm-yes]');
     expect(root.querySelector('[data-ferret-alert]')).not.toBeNull();
@@ -268,6 +266,7 @@ describe('the actions panel as ferret.toolbar mounts it', () => {
     await mounted.render(view('a2'));
     await settle();
     expect(root.querySelector('[data-ferret-alert]')).toBeNull();
-    expect(root.querySelector('[data-ferret-actions-trigger]')).not.toBeNull();
+    expect(root.querySelector('[data-ferret-actions-menu]')).not.toBeNull();
+    expect(root.querySelector('[data-ferret-actions-trigger]')).toBeNull();
   });
 });

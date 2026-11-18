@@ -9,6 +9,7 @@
  */
 
 import { controlState, useViewPlace } from '@ferretry/app';
+import { Floating } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { Gauge, X } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
@@ -97,17 +98,19 @@ function CompactAtControl({
         </fieldset>
       ) : null}
       {note === null ? null : (
-        <div aria-live="polite" className="fy-toolbar-note" data-compact-at-note="" role="status">
-          <span className="min-w-0 flex-1">{note}</span>
-          <button
-            aria-label="Dismiss"
-            className="kt-btn h-11 w-11 shrink-0 p-0"
-            onClick={() => setNote(null)}
-            type="button"
-          >
-            <X aria-hidden="true" size={14} />
-          </button>
-        </div>
+        <Floating>
+          <div aria-live="polite" className="fy-toolbar-note" data-compact-at-note="" role="status">
+            <span className="min-w-0 flex-1">{note}</span>
+            <button
+              aria-label="Dismiss"
+              className="kt-btn h-11 w-11 shrink-0 p-0"
+              onClick={() => setNote(null)}
+              type="button"
+            >
+              <X aria-hidden="true" size={14} />
+            </button>
+          </div>
+        </Floating>
       )}
     </div>
   );

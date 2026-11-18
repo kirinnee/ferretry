@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { Floating } from '@ferretry/app/ui';
+import { FERRET_MENU_SLOT } from '@ferretry/core-ferrets/contract';
+import { useState } from 'react';
 import { interact, type Mounted, mount, must, pressKey, WithSlotPanels } from '@ferretry/app/testing';
 import { contributedSlots, panelsInSlot } from '@ferretry/app/testing';
 import { ModesMenu } from '../../../../app/toolbar/modes-menu.tsx';
@@ -20,9 +23,9 @@ const mode = (id: string, text: string) => ({
   ),
 });
 
-const draw = async (panels: ReturnType<typeof mode>[]) => {
+const draw = async (panels: ReturnType<typeof mode>[], ferretRows: ReturnType<typeof mode>[] = []) => {
   mounted = await mount(
-    <WithSlotPanels slots={{ [CONVERSATION_MODES_SLOT]: panels }}>
+    <WithSlotPanels slots={{ [CONVERSATION_MODES_SLOT]: panels, [FERRET_MENU_SLOT]: ferretRows }}>
       <ModesMenu daemon="d1" ferret="muriel" />
     </WithSlotPanels>,
   );
@@ -57,14 +60,75 @@ describe('the ferret header’s Modes menu', () => {
 
     await interact(() => pressKey(dialog, 'Escape'));
 
-    expect(root.querySelector('[data-modes-body]')).toBeNull();
+    // Put away, not gone: the panels stay mounted, hidden, so a note that arrives later is still said.
+    expect(root.querySelector<HTMLElement>('[data-modes-body]')?.hidden).toBe(true);
     expect(trigger(root)?.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('holds this ferret’s own rows (Info, Actions) beside the modes, in the one menu', async () => {
+    const root = await draw([mode('agenda', 'Agenda mode On')], [mode('info', 'Info'), mode('actions', 'Stop')]);
+
+    await interact(() => must(trigger(root), 'the Modes button').click());
+
+    const ferretRows = must(root.querySelector('[data-modes-section="ferret"]'), 'the ferret rows');
+    expect([...ferretRows.querySelectorAll('[data-mode]')].map(node => node.getAttribute('data-mode'))).toEqual([
+      'info',
+      'actions',
+    ]);
+    expect(root.querySelector('[data-modes-section="modes"] [data-mode="agenda"]')).not.toBeNull();
+    expect(root.querySelectorAll('[data-modes-trigger]').length).toBe(1);
+  });
+
+  it('draws the button where only the ferret’s own rows are contributed', async () => {
+    const root = await draw([], [mode('info', 'Info')]);
+
+    expect(trigger(root)).not.toBeNull();
   });
 
   it('draws no button at all where no mode is contributed', async () => {
     const root = await draw([]);
 
     expect(trigger(root)).toBeNull();
+  });
+});
+
+/** A mode whose save is refused after the person already shut the menu (what a slow daemon does). */
+const refusing = (settle: { reject: () => void }) => ({
+  plugin: 'probe',
+  id: 'slow',
+  view: () => {
+    const [note, setNote] = useState<string | null>(null);
+    settle.reject = () => setNote('Hypermedia could not be switched: refused');
+    return (
+      <span data-mode="slow">
+        slow
+        {note === null ? null : (
+          <Floating>
+            <div data-probe-note="" role="status">
+              {note}
+            </div>
+          </Floating>
+        )}
+      </span>
+    );
+  },
+});
+
+describe('a note that arrives after the menu was put away', () => {
+  it('is still shown: the panel stays mounted and draws it on the page, not in the shut menu', async () => {
+    const settle = { reject: () => undefined };
+    const root = await draw([refusing(settle)]);
+
+    await interact(() => must(trigger(root), 'the Modes button').click());
+    await interact(() => pressKey(must(root.querySelector('[data-modes-body]'), 'the open menu'), 'Escape'));
+    expect(root.querySelector<HTMLElement>('[data-modes-body]')?.hidden).toBe(true);
+
+    await interact(() => settle.reject());
+
+    const note = document.body.querySelector('[data-probe-note]');
+    expect(note?.textContent).toContain('refused');
+    // On the page's body, so neither the shut popover nor the phone sheet's transform can hide or box it in.
+    expect(root.querySelector('[data-modes-body]')?.contains(note ?? null)).toBe(false);
   });
 });
 
@@ -77,13 +141,9 @@ describe('where the modes are contributed', () => {
       'conversation.hypermedia',
       'lessons.ferret-lessons',
     ]);
-    // What stays on the main line: the name, the status, whose turn it is, Info and Actions — and no mode.
-    expect([...panelsInSlot('ferret.toolbar')].sort()).toEqual([
-      'conversation.turn',
-      'ferrets.actions',
-      'ferrets.info',
-      'ferrets.name',
-      'ferrets.status',
-    ]);
+    // The main line is the name and the status (and whose turn it is): no mode, no Info, no Actions.
+    expect([...panelsInSlot('ferret.toolbar')].sort()).toEqual(['conversation.turn', 'ferrets.name', 'ferrets.status']);
+    // Info and every Action are one click behind the same one menu.
+    expect([...panelsInSlot(FERRET_MENU_SLOT)].sort()).toEqual(['ferrets.actions', 'ferrets.info']);
   });
 });

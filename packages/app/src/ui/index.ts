@@ -70,3 +70,4 @@ export * from './local-models-note.tsx';
 export { ImageViewer, type ImageViewerProps, type ViewerImage } from './image-viewer.tsx';
 export * from './lib/reveal-hidden.ts';
 export * from './jump-to-latest.tsx';
+export * from './floating.tsx';

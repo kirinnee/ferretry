@@ -4,6 +4,7 @@ import {
   FERRET_ACCOUNT_SLOTS,
   FERRET_LIST_ROW_MARK_SLOT,
   FERRET_SLOTS,
+  FERRET_MENU_SLOT,
   FILES_SEARCH_SLOT,
   isActionsRowSlotProps,
   isFerretListRowMarkSlotProps,
@@ -18,10 +19,12 @@ describe('the ferret page’s slots', () => {
     expect(FILES_SEARCH_SLOT).toBe('ferrets.files-search');
     expect(NEW_FERRET_PROJECT_SLOT).toBe('ferrets.new-ferret-project');
     expect(FERRET_LIST_ROW_MARK_SLOT).toBe('ferrets.list-row-mark');
+    expect(FERRET_MENU_SLOT).toBe('ferrets.menu');
     expect([...FERRET_SLOTS]).toEqual([
       ...FERRET_ACCOUNT_SLOTS,
       ACTIONS_ROW_SLOT,
       FILES_SEARCH_SLOT,
+      FERRET_MENU_SLOT,
       NEW_FERRET_PROJECT_SLOT,
       FERRET_LIST_ROW_MARK_SLOT,
     ]);

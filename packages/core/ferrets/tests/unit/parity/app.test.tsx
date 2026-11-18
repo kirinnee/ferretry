@@ -172,7 +172,7 @@ describe('the ferret address a start, a move and a link land on', () => {
   });
 });
 
-describe('the Actions panel on ferret.toolbar', () => {
+describe('the Actions panel in the ferret menu', () => {
   const open = async (ferret = ferretSummary('a1', { name: 'hadi', runtime: 'nero' })): Promise<HTMLElement> => {
     window.history.pushState(null, '', '/d/dm1');
     const Panel = must(
@@ -184,15 +184,16 @@ describe('the Actions panel on ferret.toolbar', () => {
         <Panel subject="a1" />
       </RouterProvider>,
     );
-    await click(root, '[data-ferret-actions-trigger]');
     return root;
   };
 
-  it('S-0008 S-0323 an idle ferret: Actions ▾ opens its menu in Ferret, Move and Danger groups, one row per action', async () => {
-    expect(manifest.ui?.panels?.map(panel => `${panel.slot}/${panel.id}`)).toContain('ferret.toolbar/actions');
+  it('S-0008 S-0323 an idle ferret: Actions are rows in its menu, in Ferret, Move and Danger groups, one row per action', async () => {
+    expect(manifest.ui?.panels?.map(panel => `${panel.slot}/${panel.id}`)).toContain('ferrets.menu/actions');
+    // Never on the header's main line (the name and the status).
+    expect(manifest.ui?.panels?.map(panel => `${panel.slot}/${panel.id}`)).not.toContain('ferret.toolbar/actions');
     const root = await open();
     const menu = must(root.querySelector('[data-ferret-actions-menu]'), 'the menu');
-    expect(menu.getAttribute('role')).toBe('menu');
+    expect(menu.getAttribute('role')).toBe('group');
     expect(menu.getAttribute('aria-label')).toBe('Hadi actions');
     expect([...menu.querySelectorAll('[role="group"]')].map(group => group.getAttribute('aria-label'))).toEqual([
       'Ferret',
@@ -239,7 +240,6 @@ describe('a restart the daemon paused (Actions › Restart CLI)', () => {
         <Panel subject="a1" />
       </RouterProvider>,
     );
-    await click(root, '[data-ferret-actions-trigger]');
     await click(root, '[data-ferret-action-item="restart"]');
     await click(root, '[data-menu-confirm-yes]');
     return root;
@@ -381,9 +381,10 @@ describe('the move page, convert side (Actions › Move to Codex…)', () => {
   });
 });
 
-describe('Info, the ⓘ on ferret.toolbar', () => {
-  it('S-0119 S-0120 S-0324 InfoPanel and InfoSection: the ⓘ opens Info with Overview and Runtime tabs and a titled section of label rows', async () => {
-    expect(manifest.ui?.panels?.map(panel => `${panel.slot}/${panel.id}`)).toContain('ferret.toolbar/info');
+describe('Info, a row in the ferret menu', () => {
+  it('S-0119 S-0120 S-0324 InfoPanel and InfoSection: the Info row opens Info with Overview and Runtime tabs and a titled section of label rows', async () => {
+    expect(manifest.ui?.panels?.map(panel => `${panel.slot}/${panel.id}`)).toContain('ferrets.menu/info');
+    expect(manifest.ui?.panels?.map(panel => `${panel.slot}/${panel.id}`)).not.toContain('ferret.toolbar/info');
     const Panel = must(
       halfOver({
         'GET /v1/ferrets/:ferretId': ferretOf('f1', { name: 'hadi', title: 'Fix the login bug', runtime: 'nero' }),

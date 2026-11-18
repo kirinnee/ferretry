@@ -12,7 +12,7 @@
 import type { LessonsScanEstimate, LessonsScanRequest, LessonsScanScope, LessonsFerret } from '../../contract/index.ts';
 import { ScanSearch, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useDialogFocus } from '@ferretry/app/ui';
+import { Floating, useDialogFocus } from '@ferretry/app/ui';
 import { cn } from '@ferretry/app/ui';
 import type { LessonsConnection } from './api.ts';
 import { estimateLessonsScan, lessonsErrorMessage } from './api.ts';
@@ -87,44 +87,46 @@ export function ScanDialog(props: ScanDialogProps) {
     phase === 'progress' ? 'Scanning for lessons' : phase === 'finished' ? 'Scan finished' : 'Scan for lessons';
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-scrim sm:items-center sm:p-4"
-      role="presentation"
-    >
-      <button type="button" aria-label="Close" tabIndex={-1} className="absolute inset-0" onClick={onClose} />
+    <Floating>
       <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        onKeyDown={onKeyDown}
-        data-lessons-scan-dialog={phase}
-        className="kt-panel relative flex max-h-[min(92dvh,760px)] w-full max-w-[560px] flex-col overflow-hidden rounded-b-none p-0 shadow-popover focus:outline-none sm:rounded-b-[inherit]"
+        className="fixed inset-0 z-[60] flex items-end justify-center bg-scrim sm:items-center sm:p-4"
+        role="presentation"
       >
-        <header className="flex items-center gap-2 border-b border-border-soft px-4 py-2">
-          <ScanSearch size={16} aria-hidden="true" className="shrink-0 text-accent" />
-          <h2 id={titleId} className="m-0 min-w-0 flex-1 text-ui font-semibold">
-            {title}
-          </h2>
-          <button type="button" aria-label="Close" className="kt-btn h-11 w-11 shrink-0 p-0" onClick={onClose}>
-            <X size={16} aria-hidden="true" />
-          </button>
-        </header>
-        {phase === 'progress' && scan !== null ? (
-          <ScanProgressBody
-            percent={scanPercent(scan)}
-            sentence={scanReadingSentence(scan)}
-            onHide={onClose}
-            onCancel={control.cancel}
-          />
-        ) : phase === 'finished' && scan !== null ? (
-          <ScanFinishedBody sentence={scanResultSentence(scan)} onClose={onClose} onView={onView} />
-        ) : (
-          <ScanForm {...props} onStarted={setWatching} />
-        )}
+        <button type="button" aria-label="Close" tabIndex={-1} className="absolute inset-0" onClick={onClose} />
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabIndex={-1}
+          onKeyDown={onKeyDown}
+          data-lessons-scan-dialog={phase}
+          className="kt-panel relative flex max-h-[min(92dvh,760px)] w-full max-w-[560px] flex-col overflow-hidden rounded-b-none p-0 shadow-popover focus:outline-none sm:rounded-b-[inherit]"
+        >
+          <header className="flex items-center gap-2 border-b border-border-soft px-4 py-2">
+            <ScanSearch size={16} aria-hidden="true" className="shrink-0 text-accent" />
+            <h2 id={titleId} className="m-0 min-w-0 flex-1 text-ui font-semibold">
+              {title}
+            </h2>
+            <button type="button" aria-label="Close" className="kt-btn h-11 w-11 shrink-0 p-0" onClick={onClose}>
+              <X size={16} aria-hidden="true" />
+            </button>
+          </header>
+          {phase === 'progress' && scan !== null ? (
+            <ScanProgressBody
+              percent={scanPercent(scan)}
+              sentence={scanReadingSentence(scan)}
+              onHide={onClose}
+              onCancel={control.cancel}
+            />
+          ) : phase === 'finished' && scan !== null ? (
+            <ScanFinishedBody sentence={scanResultSentence(scan)} onClose={onClose} onView={onView} />
+          ) : (
+            <ScanForm {...props} onStarted={setWatching} />
+          )}
+        </div>
       </div>
-    </div>
+    </Floating>
   );
 }
 

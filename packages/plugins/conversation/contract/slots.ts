@@ -34,7 +34,8 @@ export const CONVERSATION_ABOVE_COMPOSER_SLOT = 'conversation.above-composer' as
 /**
  * The ferret's MODES menu, one click from its header: the switches that change what a ferret is told or may do (Agenda
  * mode, Hypermedia, Passive lessons, Compact memory at, the lessons scan). The header's main line stays the name and the
- * status; a plugin that adds a mode contributes its panel HERE, not to `ferret.toolbar`. The chat mounts every panel
+ * status; a plugin that adds a mode contributes its panel HERE, not to `ferret.toolbar`. The same menu opens with Ferrets' own
+ * rows (Info and Actions, `ferrets.menu`) ahead of the modes. The chat mounts every panel
  * contributed here, with the ferret as its `subject`, inside the menu's popover (a bottom sheet on a phone).
  */
 export const CONVERSATION_MODES_SLOT = 'conversation.modes' as const;

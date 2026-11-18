@@ -29,6 +29,7 @@ import {
   StartDecide,
   WorkFoldersPort,
   AgentControlPort,
+  FERRET_MENU_SLOT,
 } from './contract/index.ts';
 import actions from './manifest/generated/actions.ts';
 
@@ -70,8 +71,9 @@ export default definePlugin({
     panels: [
       panel('ferret.toolbar', { id: 'name', order: 10 }),
       panel('ferret.toolbar', { id: 'status', order: 20 }),
-      panel('ferret.toolbar', { id: 'info', order: 30 }),
-      panel('ferret.toolbar', { id: 'actions', order: 40 }),
+      // Everything else about a ferret is one click behind the header's one menu (Conversation's Modes button).
+      panel(FERRET_MENU_SLOT, { id: 'info', order: 10 }),
+      panel(FERRET_MENU_SLOT, { id: 'actions', order: 20 }),
       panel('ferret.side', { id: 'files', order: 40 }),
       // Settings › This device (S4): "Group Needs you at the top", before the conversation width.
       panel('device.settings', { id: 'needs-you', order: 15 }),

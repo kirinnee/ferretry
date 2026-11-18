@@ -9,7 +9,7 @@
 
 import { GraduationCap, ScanSearch, X } from 'lucide-react';
 import { useState } from 'react';
-import { Button } from '@ferretry/app/ui';
+import { Button, Floating } from '@ferretry/app/ui';
 import type { LessonsFerret, LessonsScanScope } from '../../contract/index.ts';
 import { type LessonsConnection, lessonsErrorMessage } from './api.ts';
 import { usePassiveLessons } from './passive.tsx';
@@ -75,22 +75,24 @@ export function FerretLessonsPanel({
         Scan this ferret for lessons…
       </Button>
       {note !== null && (
-        <div
-          role="status"
-          aria-live="polite"
-          data-lessons-action-note=""
-          className="flex items-center gap-2 rounded-control border border-accent-border bg-surface px-3 py-1 text-ui text-fg"
-        >
-          <span className="min-w-0 flex-1">{note}</span>
-          <button
-            type="button"
-            className="kt-btn h-11 w-11 shrink-0 p-0"
-            aria-label="Dismiss"
-            onClick={() => setNote(null)}
+        <Floating>
+          <div
+            role="status"
+            aria-live="polite"
+            data-lessons-action-note=""
+            className="fixed inset-x-4 top-[calc(env(safe-area-inset-top,0px)+3.5rem)] z-[55] mx-auto flex max-w-[480px] items-center gap-2 rounded-control border border-accent-border bg-surface px-3 py-1 text-ui text-fg shadow-popover"
           >
-            <X size={14} aria-hidden="true" />
-          </button>
-        </div>
+            <span className="min-w-0 flex-1">{note}</span>
+            <button
+              type="button"
+              className="kt-btn h-11 w-11 shrink-0 p-0"
+              aria-label="Dismiss"
+              onClick={() => setNote(null)}
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
+        </Floating>
       )}
       {scanScope !== null && (
         <FerretScanHost
