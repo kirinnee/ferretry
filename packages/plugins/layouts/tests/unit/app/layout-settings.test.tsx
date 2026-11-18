@@ -144,8 +144,11 @@ describe('the Layout tab', () => {
     expect(script.calls).toEqual(['set phone.nav.side top']);
     expect(device.calls).toEqual(['set phone.density compact']);
     const box = must(
+      // The phone holds the same six places as the wide bar, so the box is found by its name, not by what it reads.
       [...view.container.querySelectorAll<HTMLInputElement>('input[aria-labelledby]')].find(
-        input => input.value === 'ferrets, agenda, board',
+        input =>
+          document.getElementById(input.getAttribute('aria-labelledby') ?? '')?.textContent ===
+          'Phone navigation items',
       ),
       'the phone navigation box',
     );
