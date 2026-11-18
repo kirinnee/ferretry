@@ -207,8 +207,8 @@ describe('Name this machine', () => {
 
   test('the machine picker keeps the name it learned while the machine refuses its plugin list', async () => {
     open = await boot({ learned: 'pebox' });
-    const options = [...open.view.container.querySelectorAll('select.fy-daemon-picker option')].map(o => o.textContent);
-    expect(options).toContain('pebox');
-    expect(options).not.toContain(HOST);
+    const shown = open.view.container.querySelector('[data-daemon-picker] .fy-daemon-picker__name')?.textContent;
+    expect(shown).toBe('pebox');
+    expect(shown).not.toBe(HOST);
   });
 });

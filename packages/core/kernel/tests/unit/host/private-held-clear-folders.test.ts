@@ -131,4 +131,27 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
     expect(await privatelyHeld(other.fs, l.guard, l.file, l.base, clock)).toBe(false);
     expect(other.looks).toEqual([l.file, l.folder, `${l.base}/projects`, l.base]);
   });
+
+  test('deeper walks never extend an ancestor past its own moment', async () => {
+    const l = await layout();
+    const deeper = `${l.folder}/a/b`;
+    await mkdir(deeper, { recursive: true });
+    await writeFile(`${deeper}/c.jsonl`, 'x');
+    await writeFile(`${l.folder}/a/d.jsonl`, 'x');
+    const { fs, looks } = counting();
+    let at = 1_000;
+    const clock = (): number => at;
+    // The walk from the base's folders remembers them until 1_000 + the moment.
+    expect(await privatelyHeld(fs, l.guard, l.file, l.base, clock)).toBe(false);
+    // Just before they run out, a deeper walk stops at the remembered folder and remembers the new ones.
+    at = 1_000 + CLEAR_FOLDER_MS - 100;
+    looks.length = 0;
+    expect(await privatelyHeld(fs, l.guard, `${deeper}/c.jsonl`, l.base, clock)).toBe(false);
+    expect(looks).toEqual([`${deeper}/c.jsonl`, deeper, `${l.folder}/a`]);
+    // After the ancestor's own moment nothing below it is still remembered: the whole chain is walked again.
+    at = 1_000 + CLEAR_FOLDER_MS + 1;
+    looks.length = 0;
+    expect(await privatelyHeld(fs, l.guard, `${l.folder}/a/d.jsonl`, l.base, clock)).toBe(false);
+    expect(looks).toEqual([`${l.folder}/a/d.jsonl`, `${l.folder}/a`, l.folder, `${l.base}/projects`, l.base]);
+  });
 });

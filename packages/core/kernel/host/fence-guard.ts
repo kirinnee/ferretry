@@ -523,8 +523,13 @@ export async function privateGuardLookedAtNow(
  * same few folders above it every time (and a hundred ferrets' reads share most of them), so each walk past the entry
  * itself used to cost one `lstat` per folder per read. A folder is taken as clear for this long ONLY for the guard (the
  * snapshot of the private places) and the disk it was found clear against: a new snapshot, another disk or a folder that
- * was ever held starts from nothing. It is no longer than the places' own look interval (a kept snapshot may be that old),
- * so it is no looser than the guard already is about a folder it cannot see change.
+ * was ever held starts from nothing. It is no longer than the places' own look interval (a kept snapshot may be that old).
+ *
+ * It is LOOSER than the guard was before, within that 1 s window: a PRIVATE folder renamed or bind-mounted onto a path
+ * already remembered clear is not caught until the memory runs out (the old walk caught it by identity at once). That
+ * needs write access to the host's folders as the same uid, and lasts at most this long. A folder walked below a
+ * remembered one never outlives it: its memory ends no later than that ancestor's, so a deeper walk never stretches the
+ * window of a folder above it.
  */
 export const CLEAR_FOLDER_MS = 1_000;
 
@@ -558,10 +563,16 @@ export async function privatelyHeld(
   if (clear !== known) CLEAR.set(guard, clear);
   const at = now();
   const walked: string[] = [];
+  /** Until when the remembered folder this walk stopped at is clear; a folder walked below it is never remembered past it. */
+  let ceiling = Number.POSITIVE_INFINITY;
   const start = absolute(real, 'the path');
   for (let current = start; ; current = dirname(current)) {
     // A folder remembered clear was found clear together with every folder above it: nothing above it is walked.
-    if (current !== start && (clear.until.get(current) ?? 0) > at) break;
+    const remembered = current === start ? 0 : (clear.until.get(current) ?? 0);
+    if (remembered > at) {
+      ceiling = remembered;
+      break;
+    }
     const entry = await fs.identity(current).catch(() => undefined);
     if (entry === undefined) return true;
     if (guard.keys.has(identityKey(entry))) return true;
@@ -571,7 +582,8 @@ export async function privatelyHeld(
     if (current === base || dirname(current) === current || !within(base, dirname(current))) break;
   }
   if (clear.until.size + walked.length > MAX_CLEAR_FOLDERS) clear.until.clear();
-  for (const folder of walked) clear.until.set(folder, at + CLEAR_FOLDER_MS);
+  const until = Math.min(at + CLEAR_FOLDER_MS, ceiling);
+  for (const folder of walked) clear.until.set(folder, until);
   return false;
 }
 

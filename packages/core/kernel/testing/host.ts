@@ -77,7 +77,7 @@ import {
 import { undeclaredUpdateHost } from '../host/adapters/update-host.ts';
 import { PRODUCT_BINARIES } from '../host/binaries.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
-import type { DaemonTimings } from '../contract/ports.ts';
+import type { DaemonTimings, LoopPort } from '../contract/ports.ts';
 import { DEFAULT_DAEMON_TIMINGS } from '../host/session/timings.ts';
 import {
   addedSecretReferenceSentences,
@@ -348,6 +348,8 @@ export interface TestHostOptions {
   readonly timings?: DaemonTimings;
   /** What `kernel.loop.blockedMs()` answers. Default: 0 (the loop never blocked). */
   readonly loopBlockedMs?: () => number;
+  /** What `kernel.loop.observe` does with an observer. Default: nothing is ever heard (the test host runs no tick). */
+  readonly loopObserve?: LoopPort['observe'];
   /** The Vault stand-in for `kernel.secrets` (`resolve` and `send`): name to value. Absent, every declared and configured name is `unknown`. */
   readonly vault?: Readonly<Record<string, string>>;
   /** The contract hash per package, as `kernel.contract.hash()` answers its own plugin (`surface` is `'member'` for the member-surface hash). Default: `unhashed`. */
@@ -2717,7 +2719,10 @@ async function start(world: World): Promise<TestHost> {
         options.processes ?? NO_PROCESS_TABLE,
       ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
-      loop: { blockedMs: options.loopBlockedMs ?? (() => 0) },
+      loop: {
+        blockedMs: options.loopBlockedMs ?? (() => 0),
+        observe: options.loopObserve ?? ((): (() => void) => () => {}),
+      },
       // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in;
       // `send` places the value through this plugin's own fetch guard and `options.fetch`, as the real host does
       secrets: ownSecretsPort(
