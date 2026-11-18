@@ -123,6 +123,8 @@ export function accessPasskey(ports: PasskeyPorts): PasskeyProvision {
     describe: describeStepUpFailure(ports.origin),
     // A device with no passkey and no window is told the owner's exact command, whichever prompt it meets first.
     ownerCommand: ownerCommandOffer(client),
+    // A device with no passkey, inside its window, adds one in place and then confirms with it.
+    firstPasskey: firstPasskeyOffer(client),
     // The machine's own window, read once as the prompt opens; a failed read leaves the prompt's neutral words.
     scope: async daemon => {
       const view = await fetchSecuritySettings(await client(daemon));

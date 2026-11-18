@@ -88,8 +88,9 @@ export interface IoPressureSource {
 // ── the event-loop lag meter ────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * One period during which the loop could not run anything. `during`, `innermost` and `stacks` are the work that was
- * labelled in flight and the sampled stack (today's names): this kernel keeps neither, so they are always empty.
+ * One period during which the loop could not run anything. `during` and `innermost` are both the work in flight when the late
+ * tick finally ran (the boot step, or the jobs still running: the suspects, never a path or value); `stacks` is the
+ * sampled stack, which this kernel does not keep, so it is always empty.
  */
 export interface LoopStall {
   readonly at: Instant;
@@ -115,6 +116,12 @@ export interface EventLoopView {
   readonly io?: IoPressureView;
 }
 
+/**
+ * One tick as an observer hears it: how late it fired, when (epoch ms), and the labels of the work in flight, which are
+ * built only when asked. Shared by every tick, so hearing a tick allocates nothing.
+ */
+type LoopObserver = (lagMs: number, atMs: number, during: () => readonly string[]) => void;
+
 /** A tick every quarter second, and a stall at a quarter second late (the daemon's budget is no stall over 100 ms). */
 export const LOOP_INTERVAL_MS = 250;
 const LOOP_STALL_MS = 250;
@@ -122,6 +129,8 @@ const LOOP_STALL_MS = 250;
 export interface LoopMeter {
   /** One tick of the timer. */
   tick(): void;
+  /** Hears every tick's lateness until the function it returns is called. */
+  observe(observer: LoopObserver): () => void;
   /** Total ms the loop has been unable to run, through NOW (an unfired late tick counts). Never decreasing. */
   blockedMs(): number;
   view(): EventLoopView;
@@ -133,11 +142,14 @@ export function createLoopMeter(options: {
   readonly intervalMs?: number;
   readonly stallMs?: number;
   readonly onStall?: (stall: LoopStall) => void;
+  /** The labels of the work in flight (concurrent, so none is nested in another), read only when a stall is recorded. Default: none. */
+  readonly during?: () => readonly string[];
 }): LoopMeter {
   const { nowMs } = options;
   const intervalMs = options.intervalMs ?? LOOP_INTERVAL_MS;
   const stallMs = options.stallMs ?? LOOP_STALL_MS;
   const pressure = options.io ?? ((): undefined => undefined);
+  const during = options.during ?? ((): readonly string[] => []);
   let lastTickMs = nowMs();
   let lagMs = 0;
   let maxLagMs = 0;
@@ -145,22 +157,29 @@ export function createLoopMeter(options: {
   let stalls = 0;
   let lastStall: LoopStall | undefined;
   let worstStall: LoopStall | undefined;
+  const observers = new Set<LoopObserver>();
   return {
+    observe(observer) {
+      observers.add(observer);
+      return () => void observers.delete(observer);
+    },
     tick() {
       const now = nowMs();
       lagMs = Math.max(0, now - lastTickMs - intervalMs);
       lastTickMs = now;
       maxLagMs = Math.max(maxLagMs, lagMs);
       blockedMs += lagMs;
+      for (const observer of observers) observer(lagMs, now, during);
       if (lagMs < stallMs) return;
       const reading = pressure();
       const cause = classifyStallCause(reading);
+      const labels = during();
       stalls += 1;
       const stall: LoopStall = {
         at: instantFromEpochMs(now),
         durationMs: lagMs,
-        during: [],
-        innermost: [],
+        during: labels,
+        innermost: labels,
         stacks: [],
         ...(cause === undefined ? {} : { cause }),
         ...(reading === undefined ? {} : { io: ioPressureView(reading) }),
@@ -187,7 +206,8 @@ export function createLoopMeter(options: {
 /** The line a stall writes to the log: how long, and the disk's part in it. */
 export function describeLoopStall(stall: LoopStall): string {
   const disk = stall.cause === undefined ? '' : ' — the disk is saturated, so the daemon is slow, not dead';
-  return `event loop stalled for ${(stall.durationMs / 1_000).toFixed(1)}s${disk}`;
+  const during = stall.during.length === 0 ? '' : ` (during ${stall.during.join(', ')})`;
+  return `event loop stalled for ${(stall.durationMs / 1_000).toFixed(1)}s${during}${disk}`;
 }
 
 // ── the watchdog ────────────────────────────────────────────────────────────────────────────────────────────────────

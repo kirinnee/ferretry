@@ -126,6 +126,64 @@ describe('the event-loop lag meter', () => {
   });
 });
 
+describe('the event-loop lag meter, observed', () => {
+  test('every tick is heard with its lateness and time, also the ones too short to be a stall', () => {
+    const clock = hand();
+    const meter = createLoopMeter({ nowMs: clock.now });
+    const heard: [number, number][] = [];
+    meter.observe((lagMs, atMs) => heard.push([lagMs, atMs]));
+    clock.jump(250);
+    meter.tick();
+    clock.jump(250 + 40);
+    meter.tick();
+    expect(heard).toEqual([
+      [0, 1_250],
+      [40, 1_540],
+    ]);
+  });
+
+  test('a stopped observer hears nothing more, and the others still do', () => {
+    const clock = hand();
+    const meter = createLoopMeter({ nowMs: clock.now });
+    const first: number[] = [];
+    const second: number[] = [];
+    const stop = meter.observe(lag => first.push(lag));
+    meter.observe(lag => second.push(lag));
+    clock.jump(250);
+    meter.tick();
+    stop();
+    clock.jump(250 + 10);
+    meter.tick();
+    expect(first).toEqual([0]);
+    expect(second).toEqual([0, 10]);
+  });
+
+  test('a stall carries the labels of the work in flight, read only for the stall, and the log line names them', () => {
+    const clock = hand();
+    let asked = 0;
+    const meter = createLoopMeter({
+      nowMs: clock.now,
+      during: () => {
+        asked += 1;
+        return ['usage/usage-budget', 'ferrets/ferrets-health'];
+      },
+    });
+    clock.jump(250 + 10);
+    meter.tick();
+    expect(asked).toBe(0);
+    clock.jump(250 + 1_500);
+    meter.tick();
+    const stall = meter.view().lastStall;
+    expect(stall).toMatchObject({
+      during: ['usage/usage-budget', 'ferrets/ferrets-health'],
+      innermost: ['usage/usage-budget', 'ferrets/ferrets-health'],
+    });
+    expect(describeLoopStall(stall as never)).toBe(
+      'event loop stalled for 1.5s (during usage/usage-budget, ferrets/ferrets-health)',
+    );
+  });
+});
+
 describe('the watchdog', () => {
   test('fires at the limit, never below it, and never when the limit is 0', () => {
     expect(watchdogShouldFire(299_999, 300_000)).toBe(false);

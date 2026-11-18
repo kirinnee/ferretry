@@ -123,10 +123,10 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
   const listed = prompt.bound === true && stepUp;
   // A device with no passkey yet, inside its window: the way in is to set one up, so the prompt says so
   // first — the other remedies are for after the window has closed, and its failure sentence names them.
-  const setup = copy.kind === 'unlock' && prompt.firstPasskey === true;
+  const setup = prompt.firstPasskey === true;
   // No passkey and no window: the person cannot fix it here, so the prompt says the owner's exact command instead.
-  // Only the unlock prompt can add the passkey itself; a step-up prompt names the command in its failure line instead.
-  const ownerCommand = copy.kind === 'unlock' && !setup ? prompt.ownerCommand : undefined;
+  // Both prompts (the unlock and the step-up) say it the same way: a device with no passkey is never left at a dead end.
+  const ownerCommand = setup ? undefined : prompt.ownerCommand;
 
   return (
     <div
@@ -162,11 +162,12 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
               <span className="font-semibold text-fg" data-step-up-machine="">
                 {machine}
               </span>{' '}
-              yet, and it can add one now: Face ID, a fingerprint or this device&rsquo;s PIN. Then it unlocks.
+              yet, and it can add one now: Face ID, a fingerprint or this device&rsquo;s PIN.{' '}
+              {copy.kind === 'unlock' ? 'Then it unlocks.' : 'Then it confirms.'}
             </>
           ) : ownerCommand !== undefined ? (
             <>
-              This device has no passkey for{' '}
+              This device has no passkey yet for{' '}
               <span className="font-semibold text-fg" data-step-up-machine="">
                 {machine}
               </span>
