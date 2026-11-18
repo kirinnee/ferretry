@@ -8,16 +8,16 @@ set -euo pipefail
 #
 #   --dry-run  print every step and call nothing: no gh, no openssl, no key, no prompt.
 #   --repo     the repository; default: the one `gh repo view` reports for this checkout.
-#   --rules-only  do step 1 only: set the two deployment-branch rules and stop. No terminal prompt, no key, no secret.
-#              Idempotent: safe to repeat, and the way an already-set-up repository gains `rebuild/5.0-after`.
+#   --rules-only  do step 1 only: set the deployment-branch rule and stop. No terminal prompt, no key, no secret.
+#              Idempotent: safe to repeat, and the way an already-set-up repository gains `rebuild/preview`.
 #   --force    replace a signing key that is already set. Without it the script stops, because replacing the key
 #              strands every installed copy of the preview app until it is reinstalled (docs/pwa-release-signing.md).
 #
 # WHAT IT DOES (workflow: .github/workflows/pwa-pages-v5.yaml)
-#   1. Creates two GitHub environments, each with deployment-branch rules that allow `rebuild/5.0` and
-#      `rebuild/5.0-after` and NOTHING ELSE (the preview follows 5.0-after while it exists, see the workflow header),
-#      BEFORE the first run can ask for them. Re-running it is how an existing environment gains `rebuild/5.0-after`:
-#      the rules are only added or removed to match, never widened beyond those two, and no secret is touched
+#   1. Creates two GitHub environments, each with a deployment-branch rule that allows `rebuild/preview`
+#      and NOTHING ELSE (the preview app deploys only when the owner's slot moves that ref, see the workflow header),
+#      BEFORE the first run can ask for them. Re-running it is how an existing environment gains `rebuild/preview` and loses `rebuild/5.0` / `rebuild/5.0-after`:
+#      the rules are only added or removed to match, never widened beyond that one, and no secret is touched
 #      (`--rules-only`, below, stops after this step with no prompt, key or Cloudflare value): `pwa-release-v5` (the signing key) and `pwa-deploy-v5` (the Cloudflare credentials).
 #      They are two environments so the job that signs never holds the Cloudflare token and the job that deploys never
 #      holds the key (docs/pwa-release-signing.md).
@@ -56,7 +56,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-branches=(rebuild/5.0 rebuild/5.0-after)
+branches=(rebuild/preview)
 signing_env="pwa-release-v5"
 deploy_env="pwa-deploy-v5"
 key_secret="PWA_RELEASE_SIGNING_KEY"
@@ -99,7 +99,7 @@ else
   [[ -n ${cf_account} ]] || { echo "❌ CLOUDFLARE_PAGES_V5_ACCOUNT_ID is required" >&2 && exit 1; }
 fi
 
-# ─── 1. the environments, restricted to the two preview branches before anything can run ───────
+# ─── 1. the environments, restricted to the preview ref before anything can run ─────────────────
 for environment in "${signing_env}" "${deploy_env}"; do
   echo "⚙️  environment ${environment}: deployment branches limited to ${branches[*]}"
   if [[ ${dry_run} -eq 1 ]]; then
@@ -180,5 +180,5 @@ fi
 # ─── 4. the public key and the next step ───────────────────────────────────────────────────────
 echo "📝 the preview's PUBLIC release key:"
 echo "${public_key}"
-echo "📝 NEXT STEP: save it as packages/app/release-signing-key.preview.pub on rebuild/5.0, commit and push."
-echo "   The first push to rebuild/5.0 or rebuild/5.0-after after that builds, signs and deploys https://ferretry-v5.pages.dev."
+echo "📝 NEXT STEP: save it as packages/app/release-signing-key.preview.pub on rebuild/5.0-after, commit and push."
+echo "   The first push of the rebuild/preview ref after that (the sweep kit's upgrade-v5 / reset-v5 does it) builds, signs and deploys https://ferretry-v5.pages.dev."

@@ -135,99 +135,82 @@ describe('scripts/validate/release-guards.sh', () => {
     expect(result.err).toContain('names Casks/');
   });
 
+  const triggerMessage = 'triggered by pushes to rebuild/preview alone';
+  const workflowPath = '.github/workflows/pwa-pages-v5.yaml';
+  const triggerEdit = (branches: string) =>
+    gate(checkout(p => edit(p(workflowPath), 'branches: [rebuild/preview]', `branches: [${branches}]`)));
+
+  test('the preview is triggered by rebuild/preview and no other branch', () => {
+    expect(readFileSync(join(repository, workflowPath), 'utf8')).toContain('    branches: [rebuild/preview]\n');
+  });
+
   test('the preview triggered by main is refused', () => {
-    const result = gate(
-      checkout(p =>
-        edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          'branches: [rebuild/5.0, rebuild/5.0-after]',
-          'branches: [main]',
-        ),
-      ),
-    );
+    const result = triggerEdit('main');
     expect(result.status).toBe(1);
-    expect(result.err).toContain('triggered by pushes to rebuild/5.0 and rebuild/5.0-after alone');
+    expect(result.err).toContain(triggerMessage);
   });
 
-  test('the preview triggered by a third branch is refused', () => {
-    const result = gate(
-      checkout(p =>
-        edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          'branches: [rebuild/5.0, rebuild/5.0-after]',
-          'branches: [rebuild/5.0, rebuild/5.0-after, rebuild/c58-00b]',
-        ),
-      ),
-    );
+  test('the preview triggered by a second branch is refused', () => {
+    const result = triggerEdit('rebuild/preview, rebuild/c58-00b');
     expect(result.status).toBe(1);
-    expect(result.err).toContain('triggered by pushes to rebuild/5.0 and rebuild/5.0-after alone');
+    expect(result.err).toContain(triggerMessage);
   });
 
-  test('the preview triggered by only one of the two branches is refused', () => {
-    for (const only of ['rebuild/5.0', 'rebuild/5.0-after']) {
-      const result = gate(
-        checkout(p =>
-          edit(
-            p('.github/workflows/pwa-pages-v5.yaml'),
-            'branches: [rebuild/5.0, rebuild/5.0-after]',
-            `branches: [${only}]`,
-          ),
-        ),
-      );
+  test('the old triggers, a push to rebuild/5.0 or rebuild/5.0-after, are refused (a merge must not move the preview)', () => {
+    for (const legacy of ['rebuild/5.0', 'rebuild/5.0-after', 'rebuild/preview, rebuild/5.0-after']) {
+      const result = triggerEdit(legacy);
       expect(result.status).toBe(1);
-      expect(result.err).toContain('triggered by pushes to rebuild/5.0 and rebuild/5.0-after alone');
+      expect(result.err).toContain(triggerMessage);
     }
   });
 
   test('a preview job that stops repeating the ref is refused', () => {
     const result = gate(
       checkout(p =>
-        edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          /    needs: \[gate, build\]\n    if: [^\n]*\n/,
-          '    needs: [gate, build]\n',
-        ),
+        edit(p(workflowPath), /    needs: \[gate, build\]\n    if: [^\n]*\n/, '    needs: [gate, build]\n'),
       ),
     );
     expect(result.status).toBe(1);
     expect(result.err).toContain('must open its if with');
   });
 
-  test('a preview job that guards only one of the two refs is refused', () => {
-    const result = gate(
-      checkout(p =>
-        edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          /    needs: \[gate, build\]\n    if: \([^\n]*\)/,
-          "    needs: [gate, build]\n    if: github.ref == 'refs/heads/rebuild/5.0'",
+  test('a preview job that guards the old refs instead of the preview ref is refused', () => {
+    for (const ref of ['rebuild/5.0', 'rebuild/5.0-after', 'main']) {
+      const result = gate(
+        checkout(p =>
+          edit(
+            p(workflowPath),
+            /    needs: \[gate, build\]\n    if: github\.ref == 'refs\/heads\/rebuild\/preview'/,
+            `    needs: [gate, build]\n    if: github.ref == 'refs/heads/${ref}'`,
+          ),
         ),
-      ),
-    );
-    expect(result.status).toBe(1);
-    expect(result.err).toContain('must open its if with');
+      );
+      expect(result.status).toBe(1);
+      expect(result.err).toContain('must open its if with');
+    }
   });
 
   test('a preview job whose guard lets another ref ride along is refused', () => {
     const result = gate(
       checkout(p =>
         edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          /    needs: \[gate, build\]\n    if: \(github\.ref == 'refs\/heads\/rebuild\/5\.0' \|\| github\.ref == 'refs\/heads\/rebuild\/5\.0-after'\)/,
-          "    needs: [gate, build]\n    if: github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after' || github.ref == 'refs/heads/main'",
+          p(workflowPath),
+          /    needs: \[gate, build\]\n    if: github\.ref == 'refs\/heads\/rebuild\/preview'/,
+          "    needs: [gate, build]\n    if: github.ref == 'refs/heads/rebuild/preview' || github.ref == 'refs/heads/main'",
         ),
       ),
     );
     expect(result.status).toBe(1);
-    expect(result.err).toContain('must open its if with');
+    expect(result.err).toContain('followed only by && conditions');
   });
 
-  test('a preview job whose exact parenthesised guard is followed by a top-level || is refused', () => {
+  test('a preview job whose exact guard is followed by a top-level || is refused', () => {
     const result = gate(
       checkout(p =>
         edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          /    needs: \[gate, build\]\n    if: \(github\.ref == 'refs\/heads\/rebuild\/5\.0' \|\| github\.ref == 'refs\/heads\/rebuild\/5\.0-after'\)/,
-          "    needs: [gate, build]\n    if: (github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after') || github.event_name == 'push'",
+          p(workflowPath),
+          /    needs: \[gate, build\]\n    if: github\.ref == 'refs\/heads\/rebuild\/preview'/,
+          "    needs: [gate, build]\n    if: github.ref == 'refs/heads/rebuild/preview' || github.event_name == 'push'",
         ),
       ),
     );
@@ -236,13 +219,13 @@ describe('scripts/validate/release-guards.sh', () => {
   });
 
   test('a top-level || hidden after an && condition is refused, but one inside parentheses or a string is not', () => {
-    const guard = "(github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after')";
+    const guard = "github.ref == 'refs/heads/rebuild/preview'";
     const withTail = (tail: string) =>
       gate(
         checkout(p =>
           edit(
-            p('.github/workflows/pwa-pages-v5.yaml'),
-            /    needs: \[gate, build\]\n    if: \([^\n]*\n/,
+            p(workflowPath),
+            /    needs: \[gate, build\]\n    if: [^\n]*\n/,
             `    needs: [gate, build]\n    if: ${guard}${tail}\n`,
           ),
         ),
@@ -253,30 +236,17 @@ describe('scripts/validate/release-guards.sh', () => {
     expect(withTail(" && needs.gate.outputs.deploy != '||'").status).toBe(0);
   });
 
-  test('a preview job guarded by a different ref is refused', () => {
-    const result = gate(
-      checkout(p =>
-        edit(
-          p('.github/workflows/pwa-pages-v5.yaml'),
-          /    needs: gate\n    if: \(github\.ref == 'refs\/heads\/rebuild\/5\.0' \|\| github\.ref == 'refs\/heads\/rebuild\/5\.0-after'\)/,
-          "    needs: gate\n    if: (github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/main')",
-        ),
-      ),
-    );
-    expect(result.status).toBe(1);
-    expect(result.err).toContain('must open its if with');
-  });
-
-  test('the preview keeps the never-backwards rule and deploys to the production branch whatever built it', () => {
-    const workflow = readFileSync(join(repository, '.github/workflows/pwa-pages-v5.yaml'), 'utf8');
-    // The rule: a rebuild/5.0 push deploys nothing while rebuild/5.0-after exists on origin (a read-only ls-remote).
-    expect(workflow).toContain('git ls-remote --exit-code --heads');
-    expect(workflow).toContain('refs/heads/rebuild/5.0-after');
+  test('the preview keeps the never-backwards gate and deploys to the production branch whatever built it', () => {
+    const workflow = readFileSync(join(repository, workflowPath), 'utf8');
+    // The gate refuses a push that is not a fast-forward of what the ref held (a read-only compare), and fails on a read it cannot make.
+    expect(workflow).toContain('compare/${BEFORE}...${AFTER}');
+    expect(workflow).toContain('behind | diverged)');
+    expect(workflow).toContain('unexpected compare status');
     // build, sign and deploy all wait on that decision.
     expect(workflow.match(/needs\.gate\.outputs\.deploy == 'true'/gu)).toHaveLength(3);
-    // A deploy of a rebuild/5.0-after build still goes to the project's PRODUCTION alias.
+    // A deploy still goes to the Pages project's PRODUCTION alias.
     expect(workflow).toContain('--project-name=ferretry-v5 --branch=rebuild/5.0');
-    expect(workflow).not.toContain('--branch=rebuild/5.0-after');
+    expect(workflow).not.toContain('--branch=rebuild/preview');
     expect(workflow).not.toContain('--branch=${{');
   });
 
@@ -307,8 +277,8 @@ describe('scripts/validate/release-guards.sh', () => {
       expect(text).toContain('a newer commit ${current} is on ${BRANCH}; its own run deploys it');
       // The shared non-cancelling group stays: it serialises, the check above orders.
       expect(text).toContain('group: pwa-pages-v5\n  cancel-in-progress: false');
-      // The never-backwards gate for rebuild/5.0 is unchanged.
-      expect(text).toContain('refs/heads/rebuild/5.0-after >/dev/null');
+      // The never-backwards gate before it is the fast-forward compare.
+      expect(text).toContain('compare/${BEFORE}...${AFTER}');
     });
 
     test('mutation: removing the stale-commit step is refused', () => {

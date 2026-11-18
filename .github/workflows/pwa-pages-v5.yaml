@@ -1,34 +1,41 @@
 name: Deploy 5.0 preview PWA to Pages
 
-# THE 5.0 PREVIEW. Builds, signs and deploys the app from `rebuild/5.0` OR `rebuild/5.0-after` (those two refs and no
-# other), to its own Cloudflare Pages project (`ferretry-v5`, https://ferretry-v5.pages.dev), beside production. Nothing
-# here touches production: another workflow file (so its own run counter), another signing key and environment, another
-# Pages project. It is a copy of pwa-pages.yaml's three-job split; read that file's comments for why the jobs are
-# separate. A push to any other branch does not trigger it, and a dispatch from any other ref runs no job (every job
-# repeats the ref).
+# THE 5.0 PREVIEW. Builds, signs and deploys the app from ONE dedicated ref, `rebuild/preview` (and no other), to its own
+# Cloudflare Pages project (`ferretry-v5`, https://ferretry-v5.pages.dev), beside production. Nothing here touches
+# production: another workflow file (so its own run counter), another signing key and environment, another Pages
+# project. It is a copy of pwa-pages.yaml's three-job split; read that file's comments for why the jobs are separate. A
+# push to any other branch does not trigger it, and a dispatch from any other ref runs no job (every job repeats the
+# ref).
 #
-# WHICH BRANCH FEEDS THE PREVIEW (the rule, and why it cannot go backwards). The owner tests the preview while the
-# next work lands on `rebuild/5.0-after`, so a push to either branch deploys it. Both deploy to the project's
-# PRODUCTION alias: `wrangler pages deploy --branch=` is always the project's production branch, `rebuild/5.0`,
-# whichever ref built the bundle. The signed list names the real built commit (GITHUB_SHA) and this run's number. THE
-# PREVIEW FOLLOWS `rebuild/5.0-after` WHILE THAT BRANCH EXISTS: a push to `rebuild/5.0` (a main sync, say) builds,
-# signs and deploys NOTHING when `refs/heads/rebuild/5.0-after` exists on origin, because it would put older app code
-# behind a newer run number. The check is the `gate` job's read-only `git ls-remote`; a skipped run is a green run
-# with no deploy, so a consumer must read the `deploy` job's own conclusion, not the run's.
+# WHAT MOVES THE PREVIEW (the rule, and why it cannot go backwards). THE PREVIEW APP FOLLOWS THE OWNER'S SLOT, NOT EVERY
+# MERGE. The app refuses a daemon whose plugin contracts differ ("Reload to get the new app"), so a deploy per merge to
+# `rebuild/5.0` / `rebuild/5.0-after` broke the owner's slot-8 daemon after any contract-changing merge, until the next
+# slot upgrade. Now a merge deploys nothing. The sweep kit's `upgrade-v5` / `reset-v5`
+# first fast-forward `refs/heads/rebuild/preview` to the exact commit the new daemon was built from, wait for THIS
+# workflow's `Deploy PWA` job to succeed for that commit, and only then swap the daemon. Nobody else pushes that ref.
+# The signed list names the real built commit (GITHUB_SHA) and this run's number. Every deploy goes to the project's
+# PRODUCTION alias: `wrangler pages deploy --branch=` is the Pages project's production branch (`rebuild/5.0`, a Pages
+# project setting that predates this ref and is not a git ref this workflow reads), whichever ref built the bundle.
 #
-# A STALE COMMIT NEVER DEPLOYS LAST. The concurrency group below serialises runs but does NOT order them: pushes A then
-# B can run B first, and re-running an older green run does the same, so A would then overwrite the production alias
-# with older app code. The `deploy` job therefore refuses a stale commit inside the serialised path, immediately before
-# `wrangler pages deploy`: it reads the CURRENT head of the run's own branch (read-only `git ls-remote`) and deploys only
-# when that head is this run's GITHUB_SHA. Otherwise the step logs "a newer commit <sha> is on <branch>; its own run
-# deploys it" and EXITS NON-ZERO, so the `deploy` job concludes `failure`, never `success` (a consumer that needs a
-# green "Deploy PWA" job for a commit must not read a refused deploy as a deployed one). A branch read that fails
-# fails the step too: never a guess, never a deploy.
+# NEVER BACKWARDS, in two layers (an installed copy refuses a release whose sequence is lower than the one it holds, so
+# an older commit behind a newer run number would be a stuck preview):
+#   1. The `gate` job refuses a push that is not a fast-forward: it asks the compare API whether the pushed commit is
+#      ahead of (or the same as) the commit the ref held before the push. A force-push to an older or a diverged commit
+#      builds, signs and deploys NOTHING. A skipped run is a green run with no deploy, so a consumer must read the
+#      `deploy` job's own conclusion, not the run's. A failed read fails the job: never a guess.
+#   2. A STALE COMMIT NEVER DEPLOYS LAST. The concurrency group below serialises runs but does NOT order them: pushes A
+#      then B can run B first, and re-running an older green run does the same, so A would then overwrite the production
+#      alias with older app code. The `deploy` job therefore refuses a stale commit inside the serialised path,
+#      immediately before `wrangler pages deploy`: it reads the CURRENT head of the run's own branch (read-only
+#      `git ls-remote`) and deploys only when that head is this run's GITHUB_SHA. Otherwise the step logs "a newer
+#      commit <sha> is on <branch>; its own run deploys it" and EXITS NON-ZERO, so the `deploy` job concludes `failure`,
+#      never `success` (a consumer that needs a green "Deploy PWA" job for a commit must not read a refused deploy as a
+#      deployed one). A branch read that fails fails the step too: never a guess, never a deploy.
 #
-# Environments: `pwa-release-v5` and `pwa-deploy-v5` must allow BOTH branches (scripts/local/setup-pwa-release-v5.sh
-# sets that rule). Until they do, a `rebuild/5.0-after` run passes `gate` and `build`, then `sign` is rejected at the
-# environment gate ("Branch `rebuild/5.0-after` is not allowed to deploy to pwa-release-v5 due to environment
-# protection rules"), so nothing is signed or deployed and the run is red.
+# Environments: `pwa-release-v5` and `pwa-deploy-v5` must allow `rebuild/preview` (scripts/local/setup-pwa-release-v5.sh
+# sets that rule). Until they do, a `rebuild/preview` run passes `gate` and `build`, then `sign` is rejected at the
+# environment gate ("Branch `rebuild/preview` is not allowed to deploy to pwa-release-v5 due to environment protection
+# rules"), so nothing is signed or deployed and the run is red.
 #
 # The preview names its own app through ONE switch, `FY_HOSTED_APP_ORIGIN`, which `scripts/ci/hosted-app-origin.sh`
 # turns into the app's origin define, the release key file (`packages/app/release-signing-key.preview.pub`, committed
@@ -39,7 +46,7 @@ name: Deploy 5.0 preview PWA to Pages
 # rule, signing key). docs/pwa-release-signing.md is the contract.
 on:
   push:
-    branches: [rebuild/5.0, rebuild/5.0-after]
+    branches: [rebuild/preview]
   workflow_dispatch:
 
 concurrency:
@@ -68,46 +75,47 @@ jobs:
   gate:
     timeout-minutes: 5
     name: Does this ref feed the preview
-    # Every job opens with this exact two-ref guard (scripts/validate/release-guards.sh holds it): `push` is already
-    # filtered to these branches, and the guard stops a workflow_dispatch on any other ref from deploying.
-    if: (github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after')
+    # Every job opens with this exact one-ref guard (scripts/validate/release-guards.sh holds it): `push` is already
+    # filtered to this branch, and the guard stops a workflow_dispatch on any other ref from deploying.
+    if: github.ref == 'refs/heads/rebuild/preview'
     permissions:
       contents: read
     runs-on: ubuntu-latest
     outputs:
       deploy: ${{ steps.rule.outputs.deploy }}
     steps:
-      # No checkout, no secret and no environment: `git ls-remote` reads the branch list and writes nothing. The
-      # token reaches git through GIT_CONFIG_* variables, never an argument, and is masked.
+      # No checkout and no environment: the compare API reads two commits and writes nothing. The token is the run's
+      # read-only one and reaches `gh` through its environment, never an argument.
       - name: Apply the never-backwards rule
         id: rule
         env:
           GH_TOKEN: ${{ github.token }}
-          REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          if [[ ${REF} == refs/heads/rebuild/5.0-after ]]; then
+          # A dispatch has no "before" (it builds the ref's head, which the stale-commit step still checks), and the push
+          # that creates the ref has an all-zero one: nothing older exists to go backwards from.
+          if [[ ${EVENT_NAME} != push || ${BEFORE} =~ ^0+$ ]]; then
+            echo "no earlier commit on this ref to compare with: the preview follows it"
             echo "deploy=true" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
-          echo "::add-mask::${auth}"
-          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader "GIT_CONFIG_VALUE_0=AUTHORIZATION: basic ${auth}"
-          # --exit-code: 0 = the branch exists, 2 = it does not; anything else is an error and fails the job (never a guess).
-          status=0
-          git ls-remote --exit-code --heads "https://github.com/${REPOSITORY}" refs/heads/rebuild/5.0-after >/dev/null || status=$?
-          case "${status}" in
-            0)
-              echo "rebuild/5.0-after exists: the preview follows it, so this rebuild/5.0 push deploys nothing (it would go backwards)"
-              echo "deploy=false" >> "${GITHUB_OUTPUT}"
-              ;;
-            2)
-              echo "rebuild/5.0-after does not exist: the preview follows rebuild/5.0"
+          # `status` is how AFTER relates to BEFORE: ahead, identical, behind or diverged. A failed read fails the job (never a guess).
+          relation="$(gh api "repos/${REPOSITORY}/compare/${BEFORE}...${AFTER}" --jq .status)"
+          case "${relation}" in
+            ahead | identical)
+              echo "${AFTER} is ${relation} of the ${BEFORE} the preview ref held: a fast-forward, so the preview follows it"
               echo "deploy=true" >> "${GITHUB_OUTPUT}"
               ;;
+            behind | diverged)
+              echo "${AFTER} is ${relation} relative to the ${BEFORE} the preview ref held: this push deploys nothing (it would go backwards)"
+              echo "deploy=false" >> "${GITHUB_OUTPUT}"
+              ;;
             *)
-              echo "❌ could not read the branch list (git ls-remote exit ${status}); refusing to guess whether this would go backwards" >&2
+              echo "❌ unexpected compare status '${relation}'; refusing to guess whether this would go backwards" >&2
               exit 1
               ;;
           esac
@@ -116,7 +124,7 @@ jobs:
     timeout-minutes: 15
     name: Build PWA release
     needs: gate
-    if: (github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after') && needs.gate.outputs.deploy == 'true'
+    if: github.ref == 'refs/heads/rebuild/preview' && needs.gate.outputs.deploy == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -148,9 +156,9 @@ jobs:
     timeout-minutes: 10
     name: Sign PWA release
     needs: [gate, build]
-    if: (github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after') && needs.gate.outputs.deploy == 'true'
+    if: github.ref == 'refs/heads/rebuild/preview' && needs.gate.outputs.deploy == 'true'
     # The preview's release signing key lives ONLY in this protected environment, whose deployment-branch rule allows
-    # `rebuild/5.0` and `rebuild/5.0-after` and nothing else (scripts/local/setup-pwa-release-v5.sh creates both), so no
+    # `rebuild/preview` and nothing else (scripts/local/setup-pwa-release-v5.sh creates them), so no
     # other workflow or ref can read it.
     environment: pwa-release-v5
     permissions:
@@ -193,8 +201,8 @@ jobs:
     timeout-minutes: 10
     name: Deploy PWA
     needs: [gate, build, sign]
-    if: (github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after') && needs.gate.outputs.deploy == 'true'
-    # The Cloudflare credentials live in this environment, which only `rebuild/5.0` and `rebuild/5.0-after` may deploy
+    if: github.ref == 'refs/heads/rebuild/preview' && needs.gate.outputs.deploy == 'true'
+    # The Cloudflare credentials live in this environment, which only `rebuild/preview` may deploy
     # to, so no other branch can reach them; it is not the signing key's environment, so the deploy job never holds that key. They are named
     # CLOUDFLARE_PAGES_V5_* and nothing at repository level has those names, so this job can NEVER fall back to
     # production's account token (the secrets setup script requires a Pages-only token for ferretry-v5).
