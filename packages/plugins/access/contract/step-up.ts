@@ -218,6 +218,21 @@ export const PasskeysViewSchema = z.strictObject({
   registration: z.enum(['first-window', 'confirm-existing', 'reopened', 'closed']),
   registrationClosesAt: InstantSchema.optional(),
   stepUpUntil: InstantSchema.optional(),
+  /**
+   * What the machine calls THIS device, so a screen can print the exact `fy passkey window <this device>` command.
+   * Only the caller's own record, to the caller; absent from an older machine, which the screen says by device id.
+   */
+  deviceName: z.string().min(1).max(200).optional(),
+  /**
+   * The name of the client program ON THIS MACHINE (`fy`, or `fy5` for a preview), so the command a screen prints is the
+   * one that reaches THIS daemon. One shell-safe word; absent from an older machine, which the screen says as `fy`.
+   */
+  clientName: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u, 'not one shell-safe word')
+    .optional(),
 });
 export type PasskeysView = z.infer<typeof PasskeysViewSchema>;
 

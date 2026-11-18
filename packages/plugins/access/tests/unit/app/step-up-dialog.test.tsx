@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'bun:test';
 import { STEP_UP_ACTS } from '@ferretry/core-gate/contract';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { z } from 'zod';
 import {
   FIRST_PASSKEY_TITLE,
   STEP_UP_BOUND_SCOPE_NOTE,
@@ -15,6 +16,7 @@ import {
   UNLOCK_COPY,
 } from '../../../app/features/step-up/step-up-dialog.tsx';
 import { type DaemonConnection, daemonConnection } from '../../../app/shell-grants.ts';
+import { ownerCommandOffer } from '../../../app/lib/step-up-ceremony.ts';
 import { StepUpGate, type StepUpGateDependencies } from '../../../app/lib/step-up-gate.ts';
 import { interact, type Mounted, mount, must } from '../../support/app/dom.ts';
 
@@ -322,8 +324,94 @@ describe('the unlock prompt', () => {
         'no passkey for Name of daemon-studio yet, and it can add one now',
       );
       expect(dialog.textContent).not.toContain('fy passkey window');
-      expect(confirmButton(mounted.container).textContent).toContain('Set up passkey');
+      expect(confirmButton(mounted.container).textContent).toContain('Add a passkey');
       expect(confirmButton(mounted.container).hasAttribute('data-step-up-first-passkey')).toBe(true);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+});
+
+describe('the unlock prompt for a device with no passkey and no window (U-P)', () => {
+  const COMMAND = "fy passkey window 'Liftoff Browser'";
+  const mountUnlock = async (gate: StepUpGate) =>
+    await mount(<StepUpDialog gate={gate} copy={UNLOCK_COPY} machineName={id => `Name of ${id}`} />);
+  const gateWith = (ownerCommand: () => Promise<string | undefined>, ceremony = async () => undefined) =>
+    new StepUpGate({
+      ceremony,
+      describe: (_reason, hints) => (hints?.ownerCommand === undefined ? 'plain' : `closed: ${hints.ownerCommand}`),
+      firstPasskey: async () => false,
+      ownerCommand,
+    });
+
+  it('P-U1 should say the exact command for the owner, with a copy control, and offer Add a passkey', async () => {
+    const gate = gateWith(async () => COMMAND);
+    const mounted = await mountUnlock(gate);
+    try {
+      await interact(() => void gate.require(studio));
+      await interact(async () => await Promise.resolve());
+
+      const dialog = must(mounted.container.querySelector('[role="dialog"]'), 'the dialog');
+      expect(must(dialog.querySelector('h2'), 'the title').textContent).toBe(FIRST_PASSKEY_TITLE);
+      expect(dialog.textContent).toContain('No window is open to add one. On the machine itself, run this:');
+      expect(must(dialog.querySelector('[data-passkey-owner-command] code'), 'the command').textContent).toBe(COMMAND);
+      expect(dialog.querySelector('button[aria-label="Copy the command"]')).not.toBeNull();
+      expect(confirmButton(mounted.container).textContent).toContain('Add a passkey');
+      expect(dialog.textContent).not.toContain('<this device>');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it("P-U1b should print the machine's own client program: a daemon whose client is fy5 gets fy5 passkey window <name>", async () => {
+    const offer = ownerCommandOffer(async () => ({
+      request: async <T,>(_path: string, schema: z.ZodType<T>): Promise<T> =>
+        schema.parse({ passkeys: [], registration: 'closed', deviceName: 'Liftoff Browser', clientName: 'fy5' }),
+    }));
+    const gate = gateWith(async () => await offer(studio));
+    const mounted = await mountUnlock(gate);
+    try {
+      await interact(() => void gate.require(studio));
+      await interact(async () => await Promise.resolve());
+
+      const command = must(mounted.container.querySelector('[data-passkey-owner-command] code'), 'the command');
+      expect(command.textContent).toBe("fy5 passkey window 'Liftoff Browser'");
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('P-U2 should keep the command on screen and say the window is still closed when Add a passkey is pressed too early', async () => {
+    const gate = gateWith(
+      async () => COMMAND,
+      async () => {
+        throw new Error('registration-closed');
+      },
+    );
+    const mounted = await mountUnlock(gate);
+    try {
+      await interact(() => void gate.require(studio));
+      await interact(async () => await Promise.resolve());
+      await interact(() => confirmButton(mounted.container).click());
+      await interact(async () => await Promise.resolve());
+
+      const failure = must(mounted.container.querySelector('[data-step-up-failure]'), 'the failure').textContent;
+      expect(failure).toBe(`closed: ${COMMAND}`);
+      expect(mounted.container.querySelector('[data-passkey-owner-command]')).not.toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('P-U3 should show the ordinary unlock when the machine named no command (a window is open, a passkey is held, or the read failed)', async () => {
+    const gate = gateWith(async () => undefined);
+    const mounted = await mountUnlock(gate);
+    try {
+      await interact(() => void gate.require(studio));
+      await interact(async () => await Promise.resolve());
+
+      expect(mounted.container.querySelector('[data-passkey-owner-command]')).toBeNull();
+      expect(confirmButton(mounted.container).textContent).toContain('Unlock');
     } finally {
       await mounted.unmount();
     }
