@@ -34,6 +34,8 @@ const machine = (
   ferret: ReturnType<typeof agendaItem>[],
   ledger: ReturnType<typeof agendaItem>[],
   daemon: string = DAEMON,
+  /** While set, the machine's ferret list is not answered: the ledger is read, the conversations are not yet. */
+  hold: { release?: () => void; gate?: Promise<void> } = {},
 ) => {
   const routes: string[] = [];
   /** The transport events the machine's runtime listens to, by the event it asked for. */
@@ -41,7 +43,10 @@ const machine = (
   const client = {
     call: async (route: string) => {
       routes.push(route);
-      if (route === 'GET /v1/ferrets') return [{ id: 'zoe', name: 'zoe', title: 'Release train' }];
+      if (route === 'GET /v1/ferrets') {
+        await hold.gate;
+        return [{ id: 'zoe', name: 'zoe', title: 'Release train' }];
+      }
       if (route === 'GET /v1/agenda/open') return { sessions: [{ sessionId: 'zoe', items: ferret }] };
       if (route === 'GET /v1/sign-in-rules/suggestions') return { suggestions: [] };
       if (route === 'GET /v1/machine/agenda') return snapshot(MACHINE_AGENDA_ID, ledger);
@@ -156,7 +161,8 @@ describe('the Inbox count on the nav entry', () => {
     emit();
     stop();
     expect(listening()).toBe(0);
-    expect(badge.count()).toBe(0);
+    // The last COMPLETE count is kept (see "never drops to a partial value" below), not reset to 0.
+    expect(badge.count()).toBe(1);
     await new Promise(resolve => setTimeout(resolve, 1100));
     const quiet = routes.length;
     emit();
@@ -174,6 +180,37 @@ describe('the Inbox count on the nav entry', () => {
     expect(routes.length).toBeGreaterThan(resumed);
     again();
     expect(listening()).toBe(0);
+  });
+});
+
+describe('the Inbox count never drops to a partial value (E4b: 12 -> 2 -> 12 on opening an ask)', () => {
+  it('keeps the last complete count while a rebuilt badge has read only the machine ledger, not yet the conversations', async () => {
+    // The nav entry is unmounted and mounted again when an ask opens: the last unsubscribe tears the badge's runtime down and
+    // the next subscribe builds a fresh one, which reads the machine ledger before the conversations list.
+    const hold: { gate?: Promise<void>; release?: () => void } = {};
+    const { client, routes } = machine([ASK, NOTICE], [LEDGER], DAEMON, hold);
+    const badge = inboxBadgeOf(client, { local: new InboxLocal() });
+    const stop = badge.subscribe(() => undefined);
+    await until(() => badge.count() === 3);
+    expect(badge.count()).toBe(3);
+    stop();
+
+    hold.gate = new Promise<void>(resolve => {
+      hold.release = resolve;
+    });
+    const seen: number[] = [];
+    const again = badge.subscribe(() => seen.push(badge.count()));
+    seen.push(badge.count());
+    // The ledger (1 item) is read while the conversations (2 items) are still on the way.
+    await until(() => routes.filter(route => route === 'GET /v1/machine/agenda').length >= 2);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    seen.push(badge.count());
+    hold.release?.();
+    await until(() => badge.count() === 3);
+    seen.push(badge.count());
+
+    expect(seen.every(count => count === 3)).toBe(true);
+    again();
   });
 });
 

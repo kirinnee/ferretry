@@ -40,6 +40,16 @@ export const inboxBadgeOf = (client: RuntimeClient, seams: InboxBadgeSeams = {})
   const listeners = new Set<() => void>();
   let runtime: AgendaRuntime | undefined;
   let stop: (() => void) | undefined;
+  /**
+   * The last count taken when this machine's conversations were READ. The nav entry is unmounted and mounted again as
+   * the owner moves (opening an ask), which tears the runtime down and builds a fresh one; a fresh runtime reads the
+   * machine ledger before the conversations list, and counting that alone showed 12 -> 2 -> 12. Until the list is
+   * read the number is unknown, not smaller, so the last complete one stands.
+   */
+  let known = 0;
+
+  const listRead = (machine: AgendaRuntime): boolean =>
+    (machine.ferrets.getSnapshot().daemons.get(machine.connection.daemonId)?.sessions ?? null) !== null;
 
   const derive = (machine: AgendaRuntime) => {
     const boards = machine.agenda.store.getSnapshot().snapshots;
@@ -75,6 +85,7 @@ export const inboxBadgeOf = (client: RuntimeClient, seams: InboxBadgeSeams = {})
     let cancelSweep: (() => void) | undefined;
     const changed = (): void => {
       const derived = derive(machine);
+      if (listRead(machine)) known = derived.total;
       reads.sync(boardWants(derived.unread, connectionFor, machine.agenda));
       const key = suggestionsKey(derived.cards);
       if (key !== swept) {
@@ -102,7 +113,7 @@ export const inboxBadgeOf = (client: RuntimeClient, seams: InboxBadgeSeams = {})
   };
 
   return {
-    count: () => (runtime === undefined ? 0 : derive(runtime).total),
+    count: () => (runtime === undefined || !listRead(runtime) ? known : derive(runtime).total),
     subscribe: listener => {
       listeners.add(listener);
       if (listeners.size === 1) stop = start();
