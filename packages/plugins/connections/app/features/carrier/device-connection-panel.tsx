@@ -51,7 +51,11 @@ export function DeviceConnectionPanel({ daemons, preferences, drops, webrtc }: D
           availability: { webrtc },
         }),
       )}
-      {drops === undefined ? null : <CarrierDropsCard log={drops} />}
+      {drops === undefined
+        ? null
+        : list.daemons.map(daemon => (
+            <CarrierDropsCard key={daemon.daemon} log={drops} daemonId={daemon.daemon} machine={machineName(daemon)} />
+          ))}
     </section>
   );
 }

@@ -138,6 +138,33 @@ describe('usage parity · the app half', () => {
     await view.unmount();
   });
 
+  it('draws a login’s spend meter in the panel it contributes to the logins.login-meter slot', async () => {
+    const { half } = halfOver({});
+    const budget = {
+      timeZone: 'UTC',
+      timeZoneSet: true,
+      level: 'ok',
+      unpriced: 0,
+      measured: true,
+      daily: {
+        trigger: 10,
+        spentUsd: 0,
+        level: 'ok',
+        startsAt: '2026-11-18T00:00:00.000Z',
+        resetsAt: '2026-11-19T00:00:00.000Z',
+      },
+    };
+    const panel = half.panels['login-budget'] as unknown as (props: object) => ReactElement | null;
+    const view = await mount(asElement(panel({ subject: 'claude-personal', budget, machineName: 'studio-mac' })));
+    const meter = must(view.container.querySelector('[data-credential-budget]'), 'the meter');
+    expect(meter.textContent).toContain('$/day');
+    expect(meter.textContent).toContain('$0.00 of $10.00');
+    expect(meter.textContent).toContain('studio-mac');
+    await view.unmount();
+    // A card that hands no budget draws nothing.
+    expect(panel({ subject: 'claude-personal', machineName: 'studio-mac' })).toBeNull();
+  });
+
   it('S-0106 GlobalAnalyticsPage reads this machine through the daemon client and says so', async () => {
     const client = fakeClient({ [INSIGHTS]: (call: RecordedCall) => rawResponse([ROOT], call.query?.q) });
     const view = await mount(
