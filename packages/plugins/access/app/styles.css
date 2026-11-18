@@ -1,0 +1,488 @@
+/* Access's app-half stylesheet. The shell loads every plugin's `app/styles.css` through the generated
+   `packages/app/src/generated/plugin-styles.css`; nothing in the app half imports this.
+
+   THE PAIR PAGE'S WORLD: the mascot (`features/pairing/ferret-mascot.tsx`, `.fy-ferret`) and the night sky behind it
+   (`features/pairing/pairing-sky.tsx`, `.fy-sky`). Colour comes from the theme's own tokens; the fur is the one
+   small literal palette below (no theme token is a ferret).
+
+   MOTION RULES, for both:
+   - every animation and transition sits inside the ONE `no-preference` block at the end, gated again on the app's own
+     Motion setting (`:root[data-motion='reduced']`), so what is outside that block is the STILL picture: the sky at
+     rest, the mascot in the final pose of whatever stage it is on;
+   - only `transform` and `opacity` ever animate;
+   - `[data-paused]` (the tab is hidden) pauses every loop. */
+
+.fy-pair-scene {
+  --fy-ferret-fur: #a97c50;
+  --fy-ferret-cream: #f1e2cb;
+  --fy-ferret-cream-light: #fbf2e3;
+  --fy-ferret-mask: #5a4130;
+  --fy-ferret-ear: #e7b3a6;
+  --fy-ferret-nose: #c7767a;
+  --fy-ferret-eye: #1d1511;
+  --fy-ferret-blush: #e58f8f;
+  --fy-ferret-hole: #2b2336;
+  position: relative;
+  isolation: isolate;
+  min-height: 100%;
+  overflow-x: clip;
+}
+:root[data-theme$='-dark'] .fy-pair-scene,
+:root[data-theme='dark'] .fy-pair-scene {
+  --fy-ferret-fur: #c08d58;
+  --fy-ferret-cream: #e8d6bb;
+  --fy-ferret-cream-light: #f4e8d3;
+  --fy-ferret-mask: #4a3526;
+  --fy-ferret-hole: #050509;
+}
+
+/* READABLE OVER THE SKY. A star or a shooting star is a pale or dark speck on the page's own background, so a glyph that
+   happens to sit on one could lose contrast. Text on the sky therefore carries a halo in the page background colour:
+   whatever is behind a letter within a few pixels is erased, so a letter always reads as text on `--bg`. Panels and
+   controls draw their own surface, so they take no halo (it would glow around a button label). */
+.fy-pair-scene main {
+  text-shadow:
+    0 0 5px var(--bg),
+    0 0 10px var(--bg),
+    0 0 16px var(--bg);
+}
+.fy-pair-scene main :is(.kt-btn, .kt-panel, .kt-input, input, select, textarea) {
+  text-shadow: none;
+}
+
+/* The success moment owns the screen: centred, not stranded at the top of an empty page. */
+.fy-pair-scene main[data-pairing-stage='paired'] {
+  justify-content: center;
+  padding-bottom: 10vh;
+}
+
+/* ───────── the hero: the mascot, and the check badge on success ───────── */
+.fy-pair-hero {
+  position: relative;
+  width: min(100%, 260px);
+  margin: 0 auto -4px;
+}
+@media (min-width: 640px) {
+  .fy-pair-hero {
+    width: min(100%, 300px);
+  }
+}
+.fy-pair-badge {
+  position: absolute;
+  top: 2%;
+  right: 4%;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 3px solid var(--bg);
+  border-radius: 999px;
+  background: var(--ok);
+  color: var(--ok-bg);
+  box-shadow: 0 6px 14px -6px color-mix(in srgb, var(--ok) 70%, transparent);
+}
+
+/* ───────── the mascot ───────── */
+.fy-ferret {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.fy-ferret-halo {
+  fill: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.fy-ferret-hill,
+.fy-ferret-lip {
+  fill: color-mix(in srgb, var(--accent) 20%, var(--bg));
+}
+.fy-ferret-lip-edge {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 45%, transparent);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.fy-ferret-hole {
+  fill: var(--fy-ferret-hole);
+}
+.fy-ferret-fur {
+  fill: var(--fy-ferret-fur);
+}
+.fy-ferret-ear {
+  fill: var(--fy-ferret-ear);
+}
+.fy-ferret-cream {
+  fill: var(--fy-ferret-cream);
+}
+.fy-ferret-muzzle {
+  fill: var(--fy-ferret-cream-light);
+}
+.fy-ferret-mask {
+  fill: var(--fy-ferret-mask);
+}
+.fy-ferret-eye {
+  fill: var(--fy-ferret-eye);
+}
+.fy-ferret-glint {
+  fill: #fff;
+}
+.fy-ferret-blush {
+  fill: var(--fy-ferret-blush);
+  opacity: 0.4;
+}
+.fy-ferret-nose {
+  fill: var(--fy-ferret-nose);
+}
+.fy-ferret-mouth {
+  fill: none;
+  stroke: var(--fy-ferret-mask);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.fy-ferret-whiskers {
+  fill: none;
+  stroke: var(--fy-ferret-mask);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+.fy-ferret-paw {
+  fill: var(--fy-ferret-fur);
+  stroke: var(--fy-ferret-mask);
+  stroke-opacity: 0.35;
+  stroke-width: 1.2;
+}
+
+/* The still picture of each pose: how high the ferret stands, and whether the arm and the resting paw are out. */
+.fy-ferret-body {
+  transform: translateY(34px);
+}
+.fy-ferret[data-pose='curious'] .fy-ferret-body {
+  transform: translateY(18px);
+}
+.fy-ferret[data-pose='cheer'] .fy-ferret-body {
+  transform: translateY(0);
+}
+.fy-ferret-wave {
+  transform-box: view-box;
+  transform-origin: 149px 160px;
+  transform: rotate(22deg);
+  opacity: 0;
+}
+.fy-ferret-paw-rest {
+  opacity: 0;
+}
+.fy-ferret[data-pose='cheer'] .fy-ferret-wave,
+.fy-ferret[data-pose='cheer'] .fy-ferret-paw-rest {
+  opacity: 1;
+}
+.fy-ferret-head,
+.fy-ferret-eyes,
+.fy-ferret-nose {
+  transform-box: fill-box;
+}
+.fy-ferret-head {
+  transform-origin: 50% 100%;
+}
+.fy-ferret-eyes,
+.fy-ferret-nose {
+  transform-origin: 50% 50%;
+}
+
+/* ───────── the sky ───────── */
+.fy-sky {
+  --fy-star: color-mix(in srgb, var(--accent) 65%, var(--fg));
+  --fy-star-peak: 0.75;
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background: radial-gradient(130% 60% at 50% -8%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 72%);
+}
+.fy-sky[data-celebrating] {
+  --fy-star-peak: 0.95;
+}
+.fy-sky-grid {
+  position: absolute;
+  inset: 0;
+  color: var(--accent);
+  opacity: 0.1;
+  /* The grid fades out behind the card, so it is texture at the edges and never behind a line of text. */
+  -webkit-mask-image: radial-gradient(ellipse 60% 50% at 50% 45%, transparent 0 30%, #000 90%);
+  mask-image: radial-gradient(ellipse 60% 50% at 50% 45%, transparent 0 30%, #000 90%);
+}
+/* One element, many faint stars: a still layer that costs nothing to animate because it never does. */
+.fy-sky-dust {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1.5px;
+  height: 1.5px;
+  border-radius: 50%;
+  color: color-mix(in srgb, var(--fy-star) 42%, transparent);
+  box-shadow:
+    3vw 6vh 0 0 currentColor,
+    9vw 22vh 0 0 currentColor,
+    14vw 3vh 0 0 currentColor,
+    21vw 14vh 0 0 currentColor,
+    26vw 41vh 0 0 currentColor,
+    31vw 9vh 0 0 currentColor,
+    36vw 61vh 0 0 currentColor,
+    42vw 27vh 0 0 currentColor,
+    47vw 4vh 0 0 currentColor,
+    55vw 19vh 0 0 currentColor,
+    59vw 76vh 0 0 currentColor,
+    63vw 8vh 0 0 currentColor,
+    68vw 33vh 0 0 currentColor,
+    73vw 13vh 0 0 currentColor,
+    79vw 55vh 0 0 currentColor,
+    83vw 4vh 0 0 currentColor,
+    87vw 29vh 0 0 currentColor,
+    92vw 15vh 0 0 currentColor,
+    96vw 47vh 0 0 currentColor,
+    5vw 38vh 0 0 currentColor,
+    11vw 68vh 0 0 currentColor,
+    18vw 84vh 0 0 currentColor,
+    24vw 93vh 0 0 currentColor,
+    39vw 82vh 0 0 currentColor,
+    52vw 91vh 0 0 currentColor,
+    66vw 63vh 0 0 currentColor,
+    75vw 88vh 0 0 currentColor,
+    89vw 72vh 0 0 currentColor,
+    95vw 90vh 0 0 currentColor,
+    1vw 77vh 0 0 currentColor;
+}
+.fy-sky-stars {
+  position: absolute;
+  inset: 0;
+}
+.fy-sky-star {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--fy-star);
+  opacity: 0.4;
+}
+.fy-sky-shooter,
+.fy-sky-streak {
+  position: absolute;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--fy-star));
+  opacity: 0;
+  transform-origin: 100% 50%;
+}
+.fy-sky-shooter {
+  width: 110px;
+}
+.fy-sky-shooter-a {
+  top: 9%;
+  left: 12%;
+}
+.fy-sky-shooter-b {
+  top: 4%;
+  left: 58%;
+}
+.fy-sky-streak {
+  top: 14%;
+  left: -8%;
+  width: 220px;
+  height: 3px;
+}
+
+/* ───────── motion: everything that moves, in one place ───────── */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion='reduced']) .fy-ferret-body {
+    transition: transform 520ms cubic-bezier(0.3, 1.3, 0.4, 1);
+  }
+  :root:not([data-motion='reduced']) .fy-ferret[data-pose='peek'] .fy-ferret-head {
+    animation: fy-ferret-bob 4.2s ease-in-out infinite;
+  }
+  :root:not([data-motion='reduced']) .fy-ferret[data-pose='curious'] .fy-ferret-head {
+    animation: fy-ferret-curious 1.3s ease-in-out infinite;
+  }
+  :root:not([data-motion='reduced']) .fy-ferret[data-pose='curious'] .fy-ferret-nose {
+    animation: fy-ferret-sniff 0.5s ease-in-out infinite;
+  }
+  :root:not([data-motion='reduced']) .fy-ferret:not([data-pose='cheer']) .fy-ferret-eyes {
+    animation: fy-ferret-blink 5.5s infinite;
+  }
+  :root:not([data-motion='reduced']) .fy-ferret[data-pose='cheer'] .fy-ferret-body {
+    animation: fy-ferret-rise 760ms cubic-bezier(0.2, 1.35, 0.35, 1) both;
+  }
+  :root:not([data-motion='reduced']) .fy-ferret[data-pose='cheer'] .fy-ferret-head {
+    animation: fy-ferret-dook 1000ms 650ms ease-in-out both;
+  }
+  :root:not([data-motion='reduced']) .fy-ferret[data-pose='cheer'] .fy-ferret-paw-rest {
+    animation: fy-ferret-pop 380ms 420ms cubic-bezier(0.2, 1.6, 0.4, 1) both;
+  }
+  :root:not([data-motion='reduced']) .fy-ferret[data-pose='cheer'] .fy-ferret-wave {
+    animation: fy-ferret-wave 1300ms 700ms ease-in-out both;
+  }
+  :root:not([data-motion='reduced']) .fy-pair-badge {
+    animation: fy-pair-pop 520ms 780ms cubic-bezier(0.2, 1.7, 0.4, 1) both;
+  }
+  :root:not([data-motion='reduced']) .fy-pair-arrive {
+    animation: fy-pair-rise 560ms 350ms ease-out both;
+  }
+
+  :root:not([data-motion='reduced']) .fy-sky-stars {
+    transition: opacity 600ms ease;
+  }
+  :root:not([data-motion='reduced']) .fy-sky-star {
+    animation: fy-sky-twinkle 5s ease-in-out infinite;
+  }
+  :root:not([data-motion='reduced']) .fy-sky-shooter-a {
+    animation: fy-sky-shoot 13s 3s ease-in infinite;
+  }
+  :root:not([data-motion='reduced']) .fy-sky-shooter-b {
+    animation: fy-sky-shoot 19s 9s ease-in infinite;
+  }
+  :root:not([data-motion='reduced']) .fy-sky-streak {
+    animation: fy-sky-streak 1500ms 250ms cubic-bezier(0.3, 0.6, 0.4, 1) both;
+  }
+  /* A hidden tab keeps nothing running. */
+  :root:not([data-motion='reduced']) .fy-sky[data-paused] *,
+  :root:not([data-motion='reduced']) .fy-sky[data-paused] *::before {
+    animation-play-state: paused;
+  }
+}
+
+@keyframes fy-ferret-rise {
+  from {
+    transform: translateY(18px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes fy-ferret-bob {
+  50% {
+    transform: translateY(-2.5px);
+  }
+}
+@keyframes fy-ferret-curious {
+  0%,
+  100% {
+    transform: rotate(-5deg);
+  }
+  50% {
+    transform: rotate(5deg) translateY(-2px);
+  }
+}
+@keyframes fy-ferret-sniff {
+  50% {
+    transform: scale(1.18);
+  }
+}
+@keyframes fy-ferret-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.08);
+  }
+}
+@keyframes fy-ferret-dook {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  15% {
+    transform: rotate(-8deg);
+  }
+  30% {
+    transform: rotate(8deg);
+  }
+  45% {
+    transform: rotate(-7deg);
+  }
+  60% {
+    transform: rotate(7deg);
+  }
+  80% {
+    transform: rotate(-2deg);
+  }
+}
+@keyframes fy-ferret-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.6);
+  }
+}
+/* The arm comes up out of the hole, waves a few times, and settles raised. */
+@keyframes fy-ferret-wave {
+  0% {
+    opacity: 0;
+    transform: rotate(0);
+  }
+  15% {
+    opacity: 1;
+    transform: rotate(34deg);
+  }
+  35% {
+    transform: rotate(10deg);
+  }
+  55% {
+    transform: rotate(34deg);
+  }
+  75% {
+    transform: rotate(12deg);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(22deg);
+  }
+}
+@keyframes fy-pair-pop {
+  from {
+    opacity: 0;
+    transform: scale(0) rotate(-40deg);
+  }
+}
+@keyframes fy-pair-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes fy-sky-twinkle {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: var(--fy-star-peak);
+  }
+}
+/* Mostly idle: it streaks in the first few percent of a long loop, then waits. */
+@keyframes fy-sky-shoot {
+  0%,
+  92%,
+  100% {
+    opacity: 0;
+    transform: translate(0, 0) rotate(24deg);
+  }
+  93% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(240px, 108px) rotate(24deg);
+  }
+}
+@keyframes fy-sky-streak {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) rotate(7deg);
+  }
+  15% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(120vw, 15vw) rotate(7deg);
+  }
+}

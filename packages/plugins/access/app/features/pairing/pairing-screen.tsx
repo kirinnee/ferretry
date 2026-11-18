@@ -28,7 +28,7 @@
  */
 import { SecretInput, useSecretField } from '@ferretry/app/ui';
 import { Check, ChevronRight, Link2, ShieldCheck, Trash2 } from 'lucide-react';
-import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { type DaemonPath, describeDaemonPath, describeListedDaemon } from '@ferretry/plugin-connections/contract';
 import { PAIRING_DEVICE_NAME_MAX_LENGTH } from '../../../contract/index.ts';
 import {
@@ -43,7 +43,9 @@ import { type PairingArrival, pairingSeedFromUrl, type PairingSeed } from '../..
 import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
 import { browserDeviceName } from '@ferretry/app';
 import { normalizedDeviceName } from '../../lib/device-name.ts';
+import { FerretMascot, type FerretPose } from './ferret-mascot.tsx';
 import { PairScanner } from './pair-scanner.tsx';
+import { PairingSky } from './pairing-sky.tsx';
 
 /** What the exchange learned, so the screen can say how it got there. Both parts are optional: a host may know neither. */
 interface PairedAs {
@@ -105,6 +107,12 @@ export interface PairingScreenProps {
    * finishing itself), which is about the one thing that was working.
    */
   readonly onStatedFailure?: (stated: boolean) => void;
+  /**
+   * The SLOT under the success message ("Connected. Paired with …"): a host that wants to offer one more thing right
+   * after a pairing (a nudge to add a passkey, say) passes it here. It renders only on the success screen, below the
+   * words and inside the same centred column, so it never competes with the mascot. Absent: nothing is drawn.
+   */
+  readonly afterPaired?: ReactNode;
 }
 
 /**
@@ -178,6 +186,7 @@ export function PairingScreen({
   defaultName = browserDeviceName,
   onStatedFailure,
   sameMachine = pageIsLocal(),
+  afterPaired,
 }: PairingScreenProps) {
   const [stage, setStage] = useState<Stage>(() => initialStage(arrival));
   const statedFailure = stage.kind === 'failed' && stage.cause === 'stated';
@@ -263,6 +272,7 @@ export function PairingScreen({
         paired={connections.length > 0}
         embedded={embedded}
         sameMachine={sameMachine}
+        afterPaired={afterPaired}
       />
     );
   }
@@ -271,8 +281,8 @@ export function PairingScreen({
   return (
     <PairingFrame embedded={embedded} stage="browse">
       {!embedded && (
-        <header className="min-w-0">
-          <div className="flex items-center gap-2 text-accent">
+        <header className="min-w-0 text-center">
+          <div className="flex items-center justify-center gap-2 text-accent">
             <BrandMark size={20} />
             <span className="text-meta font-semibold uppercase tracking-label">Ferretry</span>
           </div>
@@ -413,8 +423,22 @@ interface PairingFrameProps {
    * attribute, one vocabulary, and it is the `Stage` union's own `kind` so the two cannot drift.
    */
   readonly stage: Stage['kind'];
+  /**
+   * What a screen reader should hear about the stage. ONE live region lives in the housing for the whole arc, because a
+   * region that is mounted together with its text is often not announced at all.
+   */
+  readonly announce?: string;
   readonly children: ReactNode;
 }
+
+/** The mascot's pose for each stage; a failed pairing has no mascot (nothing to cheer, and nothing to mock). */
+const POSE: Readonly<Record<Stage['kind'], FerretPose | undefined>> = {
+  browse: 'peek',
+  confirm: 'peek',
+  pairing: 'curious',
+  paired: 'cheer',
+  failed: undefined,
+};
 
 /** A line the walk numbered ("1. Check…"), and what follows the number. */
 const NUMBERED_LINE = /^\d+\.\s+(.*)$/;
@@ -466,18 +490,39 @@ function FailureMessage({ message, cause }: { readonly message: string; readonly
 }
 
 /** The housing, and the only thing the embedded seam actually changes. */
-function PairingFrame({ embedded, stage, children }: PairingFrameProps) {
+function PairingFrame({ embedded, stage, announce = '', children }: PairingFrameProps) {
+  const status = (
+    <p className="sr-only" role="status">
+      {announce}
+    </p>
+  );
   if (embedded) {
     return (
       <section className={EMBEDDED_SHELL} aria-label="Pair this device" data-pairing-stage={stage}>
         {children}
+        {status}
       </section>
     );
   }
+  const pose = POSE[stage];
   return (
-    <main className={SHELL} aria-labelledby="pairing-title" data-pairing-stage={stage}>
-      {children}
-    </main>
+    <div className="fy-pair-scene flex flex-col">
+      <PairingSky celebrating={stage === 'paired'} />
+      <main className={SHELL} aria-labelledby="pairing-title" data-pairing-stage={stage}>
+        {pose !== undefined && (
+          <div className="fy-pair-hero">
+            <FerretMascot pose={pose} />
+            {stage === 'paired' && (
+              <span className="fy-pair-badge" aria-hidden="true">
+                <Check size={22} strokeWidth={3} />
+              </span>
+            )}
+          </div>
+        )}
+        {children}
+        {status}
+      </main>
+    </div>
   );
 }
 
@@ -485,7 +530,7 @@ function PairingFrame({ embedded, stage, children }: PairingFrameProps) {
 const EMBEDDED_SHELL = 'flex min-w-0 flex-col gap-4';
 
 const SHELL =
-  'mx-auto flex min-h-full w-full max-w-[520px] flex-col gap-4 py-6 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-10';
+  'mx-auto flex min-h-full flex-1 w-full max-w-[520px] flex-col gap-4 py-6 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-10';
 
 /**
  * The security explanation, below the fold and behind one tap.
@@ -523,6 +568,7 @@ interface PairingFocusProps {
   readonly paired: boolean;
   readonly embedded: boolean;
   readonly sameMachine: boolean;
+  readonly afterPaired?: ReactNode;
 }
 
 /**
@@ -541,9 +587,17 @@ function PairingFocus({
   deviceName,
   onDeviceName,
   sameMachine,
+  afterPaired,
 }: PairingFocusProps) {
   // Whether the name is being edited. Above every early return: hooks run in the same order each render.
   const [renaming, setRenaming] = useState(false);
+  // After a success the heading takes focus: the button that was pressed is gone, and a keyboard or screen-reader
+  // reader would otherwise be left on nothing. It is the heading, not a control, so nothing becomes a tab stop.
+  const doneTitle = useRef<HTMLHeadingElement>(null);
+  const done = stage.kind === 'paired';
+  useEffect(() => {
+    if (done) doneTitle.current?.focus({ preventScroll: true });
+  }, [done]);
   /*
    * Headings step DOWN when embedded, they do not repeat.
    * The setup stepper's stage heading is the `<h2>` above this component, so a
@@ -557,20 +611,19 @@ function PairingFocus({
     : 'm-0 font-display text-display font-bold tracking-display text-fg';
   if (stage.kind === 'paired') {
     return (
-      <PairingFrame embedded={embedded} stage="paired">
-        <div className="flex flex-col items-center gap-3 py-8 text-center">
-          <span
-            className="flex h-16 w-16 items-center justify-center rounded-full border-heavy border-ok bg-ok-bg text-ok"
-            aria-hidden="true"
-          >
-            <Check size={34} strokeWidth={3} />
-          </span>
-          <Title id="pairing-title" className={titleClass}>
+      <PairingFrame
+        embedded={embedded}
+        stage="paired"
+        announce={`Connected. Paired with ${stage.path.title}, ${stage.path.path}.`}
+      >
+        <div className="fy-pair-arrive flex flex-col items-center gap-2 pb-8 text-center">
+          <Title id="pairing-title" ref={doneTitle} tabIndex={-1} className={`${titleClass} outline-none`}>
             Connected
           </Title>
-          <p className="m-0 text-ui leading-base text-muted" role="status">
+          <p className="m-0 text-ui leading-base text-muted">
             Paired with <span className="font-semibold text-fg">{stage.path.title}</span>, {stage.path.path}.
           </p>
+          {afterPaired}
         </div>
       </PairingFrame>
     );
@@ -621,10 +674,14 @@ function PairingFocus({
   const busy = stage.kind === 'pairing';
   const sendableName = normalizedDeviceName(deviceName);
   return (
-    <PairingFrame embedded={embedded} stage={stage.kind}>
-      <header className="min-w-0">
+    <PairingFrame
+      embedded={embedded}
+      stage={stage.kind}
+      announce={busy ? 'Exchanging the one-time code with this daemon…' : ''}
+    >
+      <header className={embedded ? 'min-w-0' : 'min-w-0 text-center'}>
         {!embedded && (
-          <div className="mb-2 flex items-center gap-2 text-accent">
+          <div className="mb-2 flex items-center justify-center gap-2 text-accent">
             <BrandMark size={20} />
             <span className="text-meta font-semibold uppercase tracking-label">Ferretry</span>
           </div>
@@ -709,9 +766,7 @@ function PairingFocus({
       >
         {busy ? 'Pairing…' : 'Pair this device'}
       </button>
-      <p className={busy ? 'm-0 text-center text-ui text-muted' : 'sr-only'} role="status">
-        {busy ? 'Exchanging the one-time code with this daemon…' : ''}
-      </p>
+      {busy && <p className="m-0 text-center text-ui text-muted">Exchanging the one-time code with this daemon…</p>}
       <button
         type="button"
         className="min-h-[44px] self-center text-ui font-medium text-muted underline hover:text-accent focus-visible:outline-focus focus-visible:outline-offset-focus"
