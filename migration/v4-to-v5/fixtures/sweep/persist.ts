@@ -360,7 +360,14 @@ export async function addStoreRoots(
  * graph by a unit test (tests/unit/sweep-persist.test.ts reads the sources and compares), so a new import cannot silently
  * leave a persisted slot with a kit that does not start.
  */
-export const KIT_FILES = ['deploy-gate.ts', 'fake-codex-auth.ts', 'persist.ts', 'service-guard.ts', 'slot.ts'] as const;
+export const KIT_FILES = [
+  'deploy-gate.ts',
+  'fake-codex-auth.ts',
+  'persist.ts',
+  'real-claude.ts',
+  'service-guard.ts',
+  'slot.ts',
+] as const;
 
 /** The sibling files a TypeScript source imports by a relative `./name.ts` specifier (static `import … from` and `export … from`). */
 export function relativeImportsOf(text: string): string[] {

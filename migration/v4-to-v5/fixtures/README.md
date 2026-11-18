@@ -68,6 +68,7 @@ kit persisted gets them): it stops and starts nothing, runs no `systemctl`, touc
 so it is safe against a slot in use. `unpersist` removes `bin/` and `kit/` with the rest of what `persist` added.
 The fixture's Codex login (`codex-main`) carries a fake `auth.json` (`sweep/fake-codex-auth.ts`: made-up markers, never a real token), so
 `codex-main-agent` counts as signed in and can resume.
+`slot.ts real-claude <N> on <login> | off` is the ONE exception to "no real model": one real Claude for one login on a persisted slot's 5.0 side (see [`sweep/SWEEP.md`](sweep/SWEEP.md)).
 It is a developer tool (it starts daemons); CI does not run it.
 
 ## Boot v5 on the converted home
