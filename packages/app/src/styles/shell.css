@@ -391,7 +391,7 @@
    column instead of along one long wrapped row. */
 .fy-tabs--grouped {
   flex-direction: column;
-  gap: var(--flow-4, 16px);
+  gap: var(--flow-3, 12px);
 }
 .fy-tab-group__title {
   margin: 0 0 4px;
