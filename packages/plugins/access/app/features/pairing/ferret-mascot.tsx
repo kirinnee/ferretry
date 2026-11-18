@@ -83,7 +83,7 @@ export function FerretMascot({ pose, className, look = DEFAULT_LOOK }: FerretMas
       </defs>
       <ellipse className="fy-ferret-halo" cx="120" cy="110" rx="104" ry="84" />
       <ellipse className="fy-ferret-hill" cx="120" cy="166" rx="112" ry="26" />
-      <ellipse className="fy-ferret-hole" cx="120" cy="150" rx="50" ry="15" />
+      <ellipse className="fy-ferret-hole" cx="120" cy="150" rx="44" ry="14" />
 
       <g clipPath={`url(#${clip})`}>
         <g className="fy-ferret-body">
@@ -114,30 +114,31 @@ export function FerretMascot({ pose, className, look = DEFAULT_LOOK }: FerretMas
 
 /** Shoulders only: a wide low dome, the head rests straight on it. */
 function HoodedBody() {
-  return <ellipse className="fy-ferret-fur" cx="120" cy="160" rx="50" ry="36" />;
+  return <ellipse className="fy-ferret-fur" cx="120" cy="160" rx="55" ry="36" />;
 }
 
 function GeometricBody() {
   return <rect style={bodyFill} x="72" y="126" width="96" height="76" rx="34" />;
 }
 
-/** Round head, small round ears, one dark mask band across the eyes, a pale chin and cheeks. */
+/** Wide oval head, small low ears, one dark mask band, a pale forehead blaze, pale chin and a long pale muzzle. */
 function HoodedHead() {
   return (
     <>
-      <circle className="fy-ferret-fur" cx="84" cy="76" r="10" />
-      <circle className="fy-ferret-fur" cx="156" cy="76" r="10" />
-      <circle className="fy-ferret-ear" cx="84" cy="77" r="4.8" />
-      <circle className="fy-ferret-ear" cx="156" cy="77" r="4.8" />
-      <ellipse className="fy-ferret-fur" cx="120" cy="100" rx="44" ry="33" />
-      <ellipse className="fy-ferret-cream" cx="120" cy="113" rx="29" ry="20" />
-      <rect className="fy-ferret-mask" x="87" y="86" width="66" height="21" rx="10.5" />
+      <ellipse className="fy-ferret-fur" cx="80" cy="82" rx="9" ry="10" />
+      <ellipse className="fy-ferret-fur" cx="160" cy="82" rx="9" ry="10" />
+      <ellipse className="fy-ferret-ear" cx="80" cy="83" rx="4" ry="5" />
+      <ellipse className="fy-ferret-ear" cx="160" cy="83" rx="4" ry="5" />
+      <ellipse className="fy-ferret-fur" cx="120" cy="101" rx="45" ry="32" />
+      <ellipse className="fy-ferret-cream" cx="120" cy="113" rx="31" ry="21" />
+      <ellipse className="fy-ferret-cream" cx="120" cy="83" rx="11" ry="7" />
+      <rect className="fy-ferret-mask" x="90" y="88" width="60" height="19" rx="9.5" />
       <Eyes y={96.5} dx={15} />
       <ellipse className="fy-ferret-blush" cx="93" cy="115" rx="6" ry="4" />
       <ellipse className="fy-ferret-blush" cx="147" cy="115" rx="6" ry="4" />
-      <ellipse className="fy-ferret-muzzle" cx="120" cy="116" rx="13" ry="9.5" />
-      <ellipse className="fy-ferret-nose" cx="120" cy="110" rx="5" ry="3.6" />
-      <path className="fy-ferret-mouth" d="M114 119 Q120 125.5 126 119" />
+      <ellipse className="fy-ferret-muzzle" cx="120" cy="117" rx="15" ry="10.5" />
+      <ellipse className="fy-ferret-nose" cx="120" cy="110" rx="5.5" ry="3.8" />
+      <path className="fy-ferret-mouth" d="M114 121 Q120 127 126 121" />
       <Whiskers y={113} />
     </>
   );
