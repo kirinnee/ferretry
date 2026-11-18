@@ -24,7 +24,7 @@ describe('useBrowserLogin', () => {
   it('without a store knows nothing and offers neither action', async () => {
     const into: { current: ReturnType<typeof useBrowserLogin> | null } = { current: null };
     const view = await mount(<Probe daemon={daemonConnection()} store={undefined} into={into} />);
-    expect(into.current).toEqual({ status: null, open: undefined, close: undefined });
+    expect(into.current).toEqual({ status: null, open: undefined, confirm: undefined, close: undefined });
     await view.unmount();
   });
 
@@ -47,6 +47,24 @@ describe('useBrowserLogin', () => {
       { action: 'start' },
       { action: 'stop', primed: false },
     ]);
+    await view.unmount();
+  });
+
+  it('confirm reads again as the reader’s own press (never quietly), so the daemon may ask for the passkey', async () => {
+    const { calls, client } = recordingClient(() => ({ state: 'closed', profilePrimed: false }));
+    const store = new DaemonBrowserLoginStore(bound => browserLoginPort(bound.client), { schedule: () => () => {} });
+    const into: { current: ReturnType<typeof useBrowserLogin> | null } = { current: null };
+    const view = await mount(<Probe daemon={daemonConnection({ client })} store={store} into={into} />);
+    await interact(async () => {
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    });
+    calls.length = 0;
+
+    await interact(async () => {
+      await into.current?.confirm?.();
+    });
+
+    expect(calls.map(call => call.init)).toEqual([{ quiet: false }]);
     await view.unmount();
   });
 });

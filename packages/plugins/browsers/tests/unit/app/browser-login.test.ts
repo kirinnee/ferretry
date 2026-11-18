@@ -30,7 +30,7 @@ const openOn = (password: string): Record<string, unknown> => ({
 });
 
 const statusOf = (snapshot: BrowserLoginSnapshot | null): BrowserLoginStatus | null =>
-  snapshot !== null && snapshot.state !== 'unknown' ? snapshot : null;
+  snapshot !== null && snapshot.state !== 'unknown' && snapshot.state !== 'step-up-required' ? snapshot : null;
 
 const passwordOf = (snapshot: BrowserLoginSnapshot | null): string | undefined => {
   const status = statusOf(snapshot);
@@ -138,6 +138,15 @@ describe('browserLoginPort', () => {
     should(start).deepEqual({ route: BROWSER_LOGIN_ROUTES.act, init: { body: { action: 'start', minutes: 5 } } });
   });
 
+  it('reads quietly unless the person pressed for it, and then may ask for the passkey', async () => {
+    const { client, calls } = recordingClient(() => closed);
+    const port = browserLoginPort(client);
+
+    await port.status({ explicit: true });
+
+    should(calls).deepEqual([{ route: BROWSER_LOGIN_ROUTES.status, init: { quiet: false } }]);
+  });
+
   it('refuses an intent the schema does not know before anything is sent', () => {
     const { client, calls } = recordingClient(() => closed);
     const port = browserLoginPort(client);
@@ -176,6 +185,57 @@ describe('DaemonBrowserLoginStore', () => {
     // is indistinguishable from a login window that is actually shut.
     should(await store.refresh(daemonA)).deepEqual({ state: 'unknown', error: 'offline' });
     should(store.getSnapshot(daemonA.daemonId)).deepEqual({ state: 'unknown', error: 'offline' });
+  });
+
+  it('says the passkey is wanted, not unknown, when the read-back after Open is refused for want of the step-up', async () => {
+    const refused = Object.assign(new Error('confirm it is you'), { status: 403, code: 'grant_step_up_required' });
+    const port = new FakeLoginPort(call => (call.kind === 'act' ? Promise.resolve(closed) : Promise.reject(refused)));
+    const store = new DaemonBrowserLoginStore(only(port));
+
+    const view = await store.act(daemonA, { action: 'start' });
+
+    // Not `unknown` ("something broke") and not `closed` (nothing drawn): the window was asked for and the result waits.
+    should(view).deepEqual({ state: 'step-up-required' });
+    should(store.getSnapshot(daemonA.daemonId)).deepEqual({ state: 'step-up-required' });
+    // Any other 403 is still a failure.
+    const other = new DaemonBrowserLoginStore(
+      only(new FakeLoginPort(() => Promise.reject(Object.assign(new Error('no'), { status: 403, code: 'denied' })))),
+    );
+    should(await other.refresh(daemonA)).deepEqual({ state: 'unknown', error: 'no' });
+  });
+
+  it("shows the window only from the answer to the person's own confirm, and a second refusal stays a refusal", async () => {
+    const refused = Object.assign(new Error('confirm it is you'), { status: 403, code: 'grant_step_up_required' });
+    const reads: (boolean | undefined)[] = [];
+    const port: BrowserLoginPort = {
+      status: options => {
+        reads.push(options?.explicit);
+        return options?.explicit === true && reads.length > 2
+          ? Promise.resolve(openOn('secret-a'))
+          : Promise.reject(refused);
+      },
+      act: () => Promise.resolve(closed),
+    };
+    const store = new DaemonBrowserLoginStore(only(port));
+
+    should(await store.refresh(daemonA)).deepEqual({ state: 'step-up-required' });
+    // The first confirm is dismissed (the daemon refuses again): nothing is shown.
+    should(await store.confirm(daemonA)).deepEqual({ state: 'step-up-required' });
+    // The second is answered: only now is the window known.
+    should(passwordOf(await store.confirm(daemonA))).equal('secret-a');
+    should(reads).deepEqual([undefined, true, true]);
+  });
+
+  it('polls a refused read like a closed window, not like something happening', async () => {
+    const refused = Object.assign(new Error('x'), { status: 403, code: 'grant_step_up_required' });
+    const scheduler = new ManualScheduler();
+    const store = new DaemonBrowserLoginStore(only(new FakeLoginPort(() => Promise.reject(refused))), {
+      schedule: scheduler.schedule,
+    });
+    store.subscribe(daemonA, () => undefined);
+    await store.refresh(daemonA);
+
+    should(scheduler.live.at(-1)?.delayMs).equal(BROWSER_LOGIN_CLOSED_POLL_MS);
   });
 
   it('describes a non-Error failure of both a read and an action', async () => {

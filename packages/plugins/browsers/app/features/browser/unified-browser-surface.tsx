@@ -136,6 +136,8 @@ export interface UnifiedBrowserSurfaceProps {
   readonly loginStatus?: BrowserLoginSnapshot | null;
   /** The banner's explicit close ("I signed in" / "not signed in"), bound by the host to the same daemon. */
   readonly onCloseLoginWindow?: (primed: boolean) => Promise<BrowserLoginSnapshot>;
+  /** The banner's "Confirm it's you to see the result" (a read that may ask for the passkey), bound to the same daemon. */
+  readonly onConfirmLoginWindow?: () => Promise<BrowserLoginSnapshot>;
   readonly dependencies?: UnifiedBrowserDependencies;
   /** What the session workspace knows that this surface cannot: the page's name, who drives it, its pages. */
   readonly host?: BrowserBarHost;
@@ -203,6 +205,7 @@ export function UnifiedBrowserSurface({
   onOpenLoginWindow,
   loginStatus = null,
   onCloseLoginWindow,
+  onConfirmLoginWindow,
   dependencies = DEFAULT_UNIFIED_BROWSER_DEPENDENCIES,
   host,
 }: UnifiedBrowserSurfaceProps) {
@@ -812,7 +815,13 @@ export function UnifiedBrowserSurface({
       <Heading id={titleId} className="sr-only">
         Browser
       </Heading>
-      {onCloseLoginWindow !== undefined && <BrowserLoginBanner status={loginStatus} onClose={onCloseLoginWindow} />}
+      {onCloseLoginWindow !== undefined && (
+        <BrowserLoginBanner
+          status={loginStatus}
+          onClose={onCloseLoginWindow}
+          {...(onConfirmLoginWindow === undefined ? {} : { onConfirm: onConfirmLoginWindow })}
+        />
+      )}
       <BrowserBar
         name={barName}
         address={address}

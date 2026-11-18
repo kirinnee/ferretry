@@ -50,6 +50,7 @@
  * public static bundle.
  */
 
+import { isStepUpRefusal } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
   type BrowserLoginAction,
@@ -76,6 +77,15 @@ interface BrowserLoginUnknown {
 }
 
 /**
+ * The daemon refused the quiet read for want of the passkey step-up (the machine keeps no step-up window, so the read
+ * straight after Open is refused). It is NOT a failure and NOT a closed window: the person asked for the window and the
+ * result is theirs to see once they confirm. Nothing about the window is known, so nothing about it is drawn.
+ */
+interface BrowserLoginStepUp {
+  readonly state: 'step-up-required';
+}
+
+/**
  * What one daemon's login window is doing, or `unknown` when the daemon could
  * not be asked. `null` (see `getSnapshot`) is the third case: not read yet.
  *
@@ -83,7 +93,7 @@ interface BrowserLoginUnknown {
  * which owns that name; the assignability is asserted by the unit test rather
  * than re-exported, so the barrel keeps one definition of each type.
  */
-export type BrowserLoginSnapshot = BrowserLoginStatus | BrowserLoginUnknown;
+export type BrowserLoginSnapshot = BrowserLoginStatus | BrowserLoginUnknown | BrowserLoginStepUp;
 
 /**
  * The read/act seam for exactly one paired daemon. It answers with the raw
@@ -91,7 +101,8 @@ export type BrowserLoginSnapshot = BrowserLoginStatus | BrowserLoginUnknown;
  * banner a status the schema never saw.
  */
 export interface BrowserLoginPort {
-  readonly status: () => Promise<unknown>;
+  /** `explicit`: the person pressed for this read, so the daemon may ask for the passkey step-up (otherwise it never does). */
+  readonly status: (options?: { readonly explicit?: boolean }) => Promise<unknown>;
   readonly act: (action: BrowserLoginAction) => Promise<unknown>;
 }
 
@@ -106,7 +117,7 @@ export type BrowserLoginPortFactory = (daemon: BrowserDaemon) => BrowserLoginPor
 export const browserLoginPort = (client: Pick<PluginClient, 'call'>): BrowserLoginPort => ({
   // A poll while the panel is mounted is not the person acting, so it is quiet: no passkey card on every load. The
   // daemon's refusal still stands (the banner shows `unknown`), and pressing Open asks at once, as a press always does.
-  status: () => client.call(BROWSER_LOGIN_ROUTES.status, { quiet: true }),
+  status: options => client.call(BROWSER_LOGIN_ROUTES.status, { quiet: options?.explicit !== true }),
   // Explicit intent on the wire, validated by the schema: the daemon is told what the human chose, never asked to infer it.
   act: action => client.call(BROWSER_LOGIN_ROUTES.act, { body: BrowserLoginActionSchema.parse(action) }),
 });
@@ -232,6 +243,19 @@ export class DaemonBrowserLoginStore {
     return this.#read(this.#login(daemon));
   }
 
+  /**
+   * The person's own "Confirm it's you to see the result": one read that may ask for the passkey step-up. It is fenced
+   * like an action (an older read can neither publish over it nor be handed back as its answer), and what it shows is
+   * only what the daemon answered after the person said yes — a refusal stays a refusal.
+   */
+  confirm(daemon: BrowserDaemon): Promise<BrowserLoginSnapshot> {
+    const login = this.#login(daemon);
+    login.generation += 1;
+    login.inFlight = null;
+    clearPoll(login);
+    return this.#read(login, true);
+  }
+
   /** Carries out one explicit human intent against one daemon. */
   async act(daemon: BrowserDaemon, action: BrowserLoginAction): Promise<BrowserLoginSnapshot> {
     const login = this.#login(daemon);
@@ -317,14 +341,21 @@ export class DaemonBrowserLoginStore {
    * only a public call reaches it, so no continuation held by an older
    * action, poll or listener can rebind the daemon it was started under.
    */
-  #read(login: DaemonLogin): Promise<BrowserLoginSnapshot> {
+  #read(login: DaemonLogin, explicit = false): Promise<BrowserLoginSnapshot> {
     const requestGeneration = login.generation;
     if (login.inFlight?.generation === requestGeneration) return login.inFlight.promise;
     const promise = login.port
-      .status()
+      .status(explicit ? { explicit } : undefined)
       .then(value => this.#settle(login, requestGeneration, readStatus(value)))
       .catch(caught =>
-        this.#settle(login, requestGeneration, unknownFrom(caught, 'Cannot reach the browser-login window.')),
+        this.#settle(
+          login,
+          requestGeneration,
+          // A step-up refusal is the daemon's yes withheld, not a broken read: it says so and offers the confirm.
+          isStepUpRefusal(caught)
+            ? { state: 'step-up-required' }
+            : unknownFrom(caught, 'Cannot reach the browser-login window.'),
+        ),
       )
       .finally(() => {
         if (login.inFlight?.promise === promise) login.inFlight = null;
@@ -350,7 +381,9 @@ export class DaemonBrowserLoginStore {
   #schedulePoll(login: DaemonLogin, snapshot: BrowserLoginSnapshot): void {
     clearPoll(login);
     if (login.listeners.size === 0) return;
-    const delayMs = snapshot.state === 'closed' ? this.#closedPollMs : this.#openPollMs;
+    // A refused read waits on a press, so it is polled like a closed window, not like something happening.
+    const delayMs =
+      snapshot.state === 'closed' || snapshot.state === 'step-up-required' ? this.#closedPollMs : this.#openPollMs;
     login.cancelPoll = this.#schedule(() => {
       void this.#read(login);
     }, delayMs);

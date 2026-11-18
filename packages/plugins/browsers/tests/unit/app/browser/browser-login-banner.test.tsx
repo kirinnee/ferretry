@@ -59,6 +59,29 @@ describe('BrowserLoginBanner', () => {
     await unknown.unmount();
   });
 
+  it('says the passkey is wanted after a refused read-back, with the shared confirm button, and shows no window', async () => {
+    const asked: string[] = [];
+    const view = await mount(
+      <BrowserLoginBanner
+        status={{ state: 'step-up-required' }}
+        onClose={async () => closed}
+        onConfirm={async () => {
+          asked.push('confirm');
+          return open;
+        }}
+      />,
+    );
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('Confirm it’s you to see the result');
+    expect(text).not.toContain('unknown');
+    // Nothing of the window, least of all its credential, is drawn before the daemon says yes.
+    expect(text).not.toContain('temporary-password');
+    expect(view.container.querySelector('[data-confirm-to-see]')).not.toBeNull();
+    await interact(() => button(view.container, 'Confirm it’s you to see this').click());
+    expect(asked).toEqual(['confirm']);
+    await view.unmount();
+  });
+
   it('says opening, closing and error states in words, and an error with its reason', async () => {
     const words = async (status: BrowserLoginSnapshot): Promise<string> => {
       const view = await mount(<BrowserLoginBanner status={status} onClose={async () => closed} />);

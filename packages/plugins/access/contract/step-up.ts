@@ -237,6 +237,15 @@ export const PasskeysViewSchema = z.strictObject({
 export type PasskeysView = z.infer<typeof PasskeysViewSchema>;
 
 /**
+ * How a BROWSER reads `PasskeysViewSchema`: the same fields, but a field it does not know is dropped instead of refused. The
+ * daemon's own output stays strict (it must say exactly the fields it means to), while an older cached app talking to a
+ * newer daemon must still show the passkeys it understands, not fail the whole read on one extra field.
+ */
+export const PasskeysViewReadSchema = PasskeysViewSchema.extend({
+  passkeys: z.array(PasskeyViewSchema.strip()).max(MAX_PASSKEYS_PER_DEVICE),
+}).strip();
+
+/**
  * The OWNER, at the machine, re-opens the passkey registration window for one paired device.
  *
  * The recovery path, and the only one: a browser is never "at the machine" (B4), so a device that missed
