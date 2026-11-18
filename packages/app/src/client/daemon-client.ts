@@ -106,6 +106,14 @@ export interface DaemonClientOptions {
    * ask and every refusal is returned as it came.
    */
   readonly passkey?: { readonly daemon: PairedDaemon; readonly handler: PasskeyHandler };
+  /**
+   * The plugin list this device remembered from the last LIVE read of this machine (`shell/shape-memory.ts`). It is only
+   * what to DRAW until the live read answers: no route, tool, subscription or socket is admitted on it, and the live
+   * answer replaces it whatever it says. Absent (or unusable by this build), the client starts unread as it always did.
+   */
+  readonly remembered?: Extract<Inventory, { kind: 'read' }>;
+  /** Told every LIVE plugin list, whatever it says, so the device can remember a good one and forget a bad one. */
+  readonly onRead?: (inventory: Inventory) => void;
   /** Told what the daemon calls its machine, every time the plugin list is read: a rename reaches this device by it. */
   readonly learnName?: (name: string) => void;
   /** The clock a background read's step-up backoff runs on ({@link StepUpBackoff}); the wall clock when absent. */
@@ -193,6 +201,9 @@ export class DaemonClient {
   readonly #sockets = new Set<OpenSocket>();
   readonly #changeListeners = new Set<() => void>();
   #inventory: Inventory | undefined;
+  /** The inventory above is the one this device REMEMBERED, to draw from; no call is admitted until a live read replaces it. */
+  #provisional = false;
+  readonly #onRead: DaemonClientOptions['onRead'];
   #standings: ReadonlyMap<string, Standing>;
   #daemonVersion: string | undefined;
   #ready: Promise<void>;
@@ -227,11 +238,26 @@ export class DaemonClient {
     this.#rereadAfterMs = options.rereadAfterMs ?? DEFAULT_REREAD_AFTER_MS;
     this.#passkey = options.passkey;
     this.#learnName = options.learnName;
+    this.#onRead = options.onRead;
     for (const entry of options.surfaces) {
       for (const route of entry.manifest.actions?.routes ?? []) this.#routeOwner.set(route.key, entry.id);
       for (const socket of entry.manifest.actions?.sockets ?? []) this.#socketOwner.set(socket.key, entry.id);
     }
     this.#standings = standings(undefined, this.#surfaces);
+    // A remembered list that this build can still use whole (no contract moved, nothing needs an update) is drawn from at
+    // once; anything else is not used (it would flash "needs an update" and then go).
+    const remembered = options.remembered;
+    if (remembered !== undefined) {
+      const drawn = standings(remembered, this.#surfaces);
+      const usable = [...drawn.values()].every(
+        s => s.state === 'allowed' || s.reason === 'off' || s.reason === 'missing',
+      );
+      if (usable) {
+        this.#inventory = remembered;
+        this.#standings = drawn;
+        this.#provisional = true;
+      }
+    }
     this.#ready = this.#pending();
   }
 
@@ -257,7 +283,7 @@ export class DaemonClient {
   /** Re-reads the inventory. Calls made meanwhile wait; nothing else is sent until it answers. */
   refresh(): Promise<void> {
     if (this.#reading !== undefined) return this.#reading;
-    if (this.#inventory !== undefined) {
+    if (this.#inventory !== undefined && !this.#provisional) {
       this.#inventory = undefined;
       this.#standings = standings(undefined, this.#surfaces);
       this.#ready = this.#pending();
@@ -424,7 +450,13 @@ export class DaemonClient {
       this.#daemonVersion = undefined;
     }
     if (this.#stopped) return;
+    this.#provisional = false;
     this.#inventory = inventory;
+    try {
+      this.#onRead?.(inventory);
+    } catch {
+      // what a device remembers is a convenience; its failure never costs the read
+    }
     if (inventory.kind === 'read' && inventory.daemonName !== undefined) this.#learnName?.(inventory.daemonName);
     this.#standings = standings(inventory, this.#surfaces);
     this.#closeBlockedSockets();
@@ -465,7 +497,7 @@ export class DaemonClient {
 
   /** Waits for the inventory, then checks the caller and the owner. Throws `plugin_paused` without sending. */
   async #admit(caller: string, owner: string): Promise<void> {
-    while (this.#inventory === undefined && !this.#stopped) await this.#ready;
+    while ((this.#inventory === undefined || this.#provisional) && !this.#stopped) await this.#ready;
     for (const id of new Set([caller, owner])) if (!this.#allowed(id)) throw paused(id, this.standing(id));
   }
 
@@ -725,7 +757,7 @@ export class DaemonClient {
 
   /** The event stream opens only after the bootstrap read, and only while something listens. */
   #ensureEvents(): void {
-    if (this.#stopEvents !== undefined || this.#inventory === undefined || this.#stopped) return;
+    if (this.#stopEvents !== undefined || this.#inventory === undefined || this.#provisional || this.#stopped) return;
     if (this.#subscriptions.size === 0) return;
     this.#stopEvents = this.#transport.events(
       raw => {
@@ -756,6 +788,7 @@ export class DaemonClient {
     const owner = this.#socketOwner.get(key);
     if (owner === undefined) throw new TypeError(`${caller} opened ${key}, which no compiled manifest declares`);
     // A socket is synchronous: it cannot wait for the inventory, so an unread inventory refuses like a block.
+    if (this.#provisional) throw paused(caller, { state: 'blocked', reason: 'unread' });
     for (const id of new Set([caller, owner])) if (!this.#allowed(id)) throw paused(id, this.standing(id));
     const { path } = parseRouteKey(key);
     const entry: { open?: OpenSocket } = {};

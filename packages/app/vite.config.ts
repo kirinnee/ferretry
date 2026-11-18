@@ -20,6 +20,7 @@ import { defineConfig } from 'vite';
 import tailwindConfig from './tailwind.config.ts';
 import { getStartedPagePlugin } from './scripts/get-started-page.ts';
 import { textScalePostcss } from './scripts/text-scale-postcss.ts';
+import { prefetchViewChunks } from './scripts/prefetch-view-chunks.ts';
 import { entityDecoderTrustedTypes, leafletTrustedTypes } from './scripts/trusted-types-plugins.ts';
 import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '../plugins/connections/contract/hosted-directory.ts';
 import { voiceBuild } from '../plugins/voice/app/vite-voice.ts';
@@ -86,6 +87,7 @@ export default defineConfig({
       },
     },
     getStartedPagePlugin({ version: release.version }),
+    prefetchViewChunks(),
   ],
   // POSTCSS IS CONFIGURED HERE, not in a sibling `postcss.config.js` (as today): the Tailwind config is a TypeScript
   // module, so the plugin and `tailwind.config.ts` cannot drift. The text scale runs AFTER Tailwind so its utilities

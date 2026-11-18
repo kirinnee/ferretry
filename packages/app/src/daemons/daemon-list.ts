@@ -202,6 +202,11 @@ export class DaemonList {
     return () => this.#unpaired.delete(listener);
   }
 
+  /** The store this list lives in, for the shell's other per-device memory (`shell/shape-memory.ts`); `null` where refused. */
+  get store(): KeyValueStore | null {
+    return this.#storage;
+  }
+
   registerCache(cache: DaemonScopedCache): () => void {
     this.#caches.add(cache);
     return () => this.#caches.delete(cache);

@@ -51,6 +51,8 @@ export class ViewBoundary extends Component<
     readonly fallback?: ReactNode;
     /** Whether this view is page-sized, which decides how it waits ({@link Waiting}). */
     readonly page?: boolean;
+    /** A panel of a slot: the SLOT holds one `Suspense` for all of them, so none draws before the rest (one readiness gate). */
+    readonly shared?: boolean;
   },
   { failed: boolean }
 > {
@@ -70,6 +72,8 @@ export class ViewBoundary extends Component<
       if (fallback !== undefined) return <>{fallback}</>;
       return <ShellLine tone="warn">{this.props.title} stopped working on this screen.</ShellLine>;
     }
+    // A panel of a slot is drawn under the slot's own Suspense: the slot is one readiness gate, so no panel draws before the rest.
+    if (this.props.shared === true) return this.props.children;
     return (
       <Suspense
         fallback={
@@ -99,9 +103,11 @@ interface PluginViewProps {
    * the shell's one line: for a view that REPLACES something the host can draw itself, which stays readable.
    */
   readonly fallback?: ReactNode;
+  /** Drawn as one of a slot's panels, under the slot's own single `Suspense` ({@link PanelSlot}). */
+  readonly shared?: boolean;
 }
 
-export function PluginView({ daemon, plugin, section, id, props, fallback }: PluginViewProps) {
+export function PluginView({ daemon, plugin, section, id, props, fallback, shared }: PluginViewProps) {
   const { runtime } = useShell();
   useRuntimeVersion(runtime);
   // Who is drawn here (§1.1): this plugin, on a daemon, with its own reach into every paired daemon (S2).
@@ -126,7 +132,7 @@ export function PluginView({ daemon, plugin, section, id, props, fallback }: Plu
   const Rendered = view;
   // Where the view is drawn (S1): ITS daemon's machine, feed and authority, never the selected daemon's.
   return (
-    <ViewBoundary title={title} fallback={fallback} page={page}>
+    <ViewBoundary title={title} fallback={fallback} page={page} shared={shared === true}>
       <WithPluginIdentity identity={identity}>
         <WithViewPlace place={runtime.place(daemon)}>
           <Rendered {...props} />
@@ -237,28 +243,33 @@ export function PanelSlot({
   if (panels.length === 0) return null;
   return (
     <div className="fy-slot" data-slot={slot} data-phone-active={phone?.active}>
-      {panels.map(panel => (
-        <div
-          key={`${panel.plugin}.${panel.id}`}
-          className="fy-panel"
-          data-panel={`${panel.plugin}.${panel.id}`}
-          {...(phone === undefined
-            ? {}
-            : {
-                role: 'tabpanel',
-                'aria-labelledby': phone.labelledBy(`${panel.plugin}.${panel.id}`),
-                'data-phone-shown': phone.active === `${panel.plugin}.${panel.id}` ? '' : undefined,
-              })}
-        >
-          <PluginView
-            daemon={daemon}
-            plugin={panel.plugin}
-            section="panels"
-            id={panel.id}
-            props={subject === undefined ? { ...props } : { ...props, subject }}
-          />
-        </div>
-      ))}
+      {/* ONE readiness gate for the whole slot: a panel whose view is still arriving holds the others back, so the slot
+          draws once, together, under the one bar — never panel by panel. */}
+      <Suspense fallback={<Loading kind="bar" label={`Loading ${slot}…`} />}>
+        {panels.map(panel => (
+          <div
+            key={`${panel.plugin}.${panel.id}`}
+            className="fy-panel"
+            data-panel={`${panel.plugin}.${panel.id}`}
+            {...(phone === undefined
+              ? {}
+              : {
+                  role: 'tabpanel',
+                  'aria-labelledby': phone.labelledBy(`${panel.plugin}.${panel.id}`),
+                  'data-phone-shown': phone.active === `${panel.plugin}.${panel.id}` ? '' : undefined,
+                })}
+          >
+            <PluginView
+              daemon={daemon}
+              plugin={panel.plugin}
+              section="panels"
+              id={panel.id}
+              props={subject === undefined ? { ...props } : { ...props, subject }}
+              shared
+            />
+          </div>
+        ))}
+      </Suspense>
     </div>
   );
 }

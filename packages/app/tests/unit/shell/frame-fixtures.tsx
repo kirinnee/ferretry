@@ -9,6 +9,7 @@ import { App } from '../../../src/shell/app.tsx';
 import type { ShellWindow } from '../../../src/shell/context.tsx';
 import type { InstallPromptHolder } from '../../../src/shell/device-context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
+import type { ShapeMemory } from '../../../src/shell/shape-memory.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
@@ -116,6 +117,8 @@ export interface BootOptions {
   readonly storage?: ReturnType<typeof memoryStore>;
   /** Every machine's plugin list is not answered until this settles: the "daemon has not said what it offers" wait. */
   readonly holdInventory?: Promise<unknown>;
+  /** What this device remembers of each machine's shape, when a test looks at it. */
+  readonly shape?: ShapeMemory;
   /** Machines are paired before the first render unless a test pairs them later. */
   readonly pairLater?: boolean;
 }
@@ -187,6 +190,7 @@ export async function bootApp(options: BootOptions) {
     appVersion: '5.0.0',
     surfaces,
     daemons: list,
+    ...(options.shape === undefined ? {} : { shape: options.shape }),
     connect: async paired => machines.get(paired.daemon)?.transport,
     passkey: () => provision,
     daemonless: {

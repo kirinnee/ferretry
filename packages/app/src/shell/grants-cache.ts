@@ -23,15 +23,16 @@ import type { Authority, Axis } from './view-place.tsx';
  * The grants body is capability names, booleans and refusal reasons only (Gate's guard); nothing secret is held.
  */
 
-const RowSchema = z.object({
+export const GrantRowSchema = z.object({
   capability: z.string(),
   use: z.boolean(),
   useRefusal: z.enum(CHANGE_REFUSALS),
   configure: z.boolean(),
   configureRefusal: z.enum(CHANGE_REFUSALS),
 });
-const GrantsBodySchema = z.object({ capabilities: z.array(RowSchema) });
-type Row = z.infer<typeof RowSchema>;
+const GrantsBodySchema = z.object({ capabilities: z.array(GrantRowSchema) });
+export type GrantRow = z.infer<typeof GrantRowSchema>;
+type Row = GrantRow;
 
 type State =
   | { readonly kind: 'unknown' }
@@ -67,11 +68,14 @@ const sameState = (a: State, b: State): boolean => {
 export type GrantsReader = Pick<DaemonClient, 'readGrants' | 'generation' | 'onAuthority'>;
 
 interface Entry {
+  readonly daemon: string;
   readonly client: GrantsReader;
   readonly stop: () => void;
   state: State;
   reading: boolean;
   again: boolean;
+  /** The state is the remembered one, not yet confirmed by a live answer. */
+  seeded: boolean;
   /** Bumped by every answer set: a read that was sent before a later set is older than it and is dropped. */
   sequence: number;
 }
@@ -83,18 +87,31 @@ export class GrantsCache {
   readonly #changed: () => void;
   #locked: readonly string[] = NOTHING_LOCKED;
 
-  constructor(changed: () => void) {
+  readonly #remember: ((daemon: string, rows: ReadonlyMap<string, GrantRow> | undefined) => void) | undefined;
+
+  /** `remember` is told every LIVE answer (its rows, or `undefined` for locked / unreadable) so a reload can start from it. */
+  constructor(
+    changed: () => void,
+    remember?: (daemon: string, rows: ReadonlyMap<string, GrantRow> | undefined) => void,
+  ) {
     this.#changed = changed;
+    this.#remember = remember;
   }
 
-  /** Starts listening to one daemon's client. A second attach for the same daemon replaces the first. */
-  attach(daemon: string, client: GrantsReader): void {
+  /**
+   * Starts listening to one daemon's client. A second attach for the same daemon replaces the first. `remembered` is the
+   * shape this device kept from the last live read: it is only what to DRAW until the live read answers (and replaces it);
+   * the daemon still decides every read and write.
+   */
+  attach(daemon: string, client: GrantsReader, remembered?: ReadonlyMap<string, GrantRow>): void {
     this.drop(daemon);
     const entry: Entry = {
+      daemon,
       client,
-      state: { kind: 'unknown' },
+      state: remembered === undefined ? { kind: 'unknown' } : { kind: 'read', rows: remembered },
       reading: false,
       again: false,
+      seeded: remembered !== undefined,
       sequence: 0,
       stop: client.onAuthority(signal => this.#heard(daemon, entry, signal)),
     };
@@ -209,6 +226,10 @@ export class GrantsCache {
    */
   #set(entry: Entry, state: State): void {
     entry.sequence += 1;
+    // A seeded (remembered) state that the live read confirms is already stored: only a CHANGE is written.
+    if (sameState(entry.state, state) && !entry.seeded) return;
+    entry.seeded = false;
+    this.#remember?.(entry.daemon, state.kind === 'read' ? state.rows : undefined);
     if (sameState(entry.state, state)) return;
     entry.state = state;
     this.#publish();

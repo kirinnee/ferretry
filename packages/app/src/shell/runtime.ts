@@ -14,6 +14,7 @@ import { type DaemonList, daemonTitle, type PairedDaemon } from '../daemons/daem
 import type { RouteDecl } from '@ferretry/kernel/manifest';
 import { DaemonReachCache } from './every-daemon.ts';
 import { GrantsCache } from './grants-cache.ts';
+import { ShapeMemory } from './shape-memory.ts';
 import type { PluginReach } from './plugin-identity.tsx';
 import type { Authority, Axis, CapabilityName, ViewPlace } from './view-place.tsx';
 import { type BuiltHalf, HalfCache } from '../surfaces/halves.ts';
@@ -100,6 +101,11 @@ export interface ShellRuntimeOptions {
   readonly now?: () => number;
   /** The notification-tap inbox the entry point made before React mounted (S6); absent, no tap is routed. */
   readonly notificationOpens?: NotificationOpenInbox;
+  /**
+   * What this device remembers of each machine's shape (plugin list and grants), so a reload draws at once and refreshes
+   * behind (`shell/shape-memory.ts` says what is and is never kept). Absent, it lives in the daemon list's own store.
+   */
+  readonly shape?: ShapeMemory;
 }
 
 const UNKNOWN: Authority = Object.freeze({ kind: 'unknown' });
@@ -138,7 +144,8 @@ export class ShellRuntime {
   readonly #halves: HalfCache;
   readonly #hooks = new AppHookCache();
   /** THE one per-daemon grants cache (S1): every authority answer reads it. */
-  readonly #grants = new GrantsCache(() => this.#changed());
+  readonly #grants: GrantsCache;
+  readonly #shape: ShapeMemory | undefined;
   /** Every route a compiled manifest declares, by key: what `authorityOf` reads a capability from. */
   readonly #routes: ReadonlyMap<string, RouteDecl>;
   readonly #places = new Map<string, { readonly version: number; readonly place: ViewPlace }>();
@@ -168,6 +175,14 @@ export class ShellRuntime {
   #version = 0;
 
   constructor(options: ShellRuntimeOptions) {
+    this.#shape = options.shape ?? new ShapeMemory(options.daemons.store);
+    this.#grants = new GrantsCache(
+      () => this.#changed(),
+      (daemon, rows) => {
+        const device = this.daemons.get(daemon)?.deviceId;
+        if (device !== undefined) this.#shape?.saveGrants(daemon, device, rows);
+      },
+    );
     this.appVersion = options.appVersion;
     this.surfaces = options.surfaces;
     this.byId = indexSurfaces(options.surfaces);
@@ -608,8 +623,11 @@ export class ShellRuntime {
       return;
     }
     const handler = this.#passkey()?.handler;
+    const remembered = this.#shape?.read(paired.daemon, paired.deviceId) ?? {};
     const client = new DaemonClient({
       transport,
+      ...(remembered.inventory === undefined ? {} : { remembered: remembered.inventory }),
+      onRead: inventory => this.#shape?.saveInventory(paired.daemon, paired.deviceId, inventory),
       surfaces: this.surfaces,
       ...(handler === undefined ? {} : { passkey: { daemon: paired, handler } }),
       learnName: name => this.daemons.learnMachine(paired.daemon, name),
@@ -619,7 +637,7 @@ export class ShellRuntime {
     // package's standing moved: a re-read that answered the same keeps them, so no view remounts (a rebuilt half is a
     // new component type to React). The clients stay either way. It is also a re-read trigger for the machine's
     // grants, the first read included.
-    this.#grants.attach(paired.daemon, client);
+    this.#grants.attach(paired.daemon, client, remembered.inventory === undefined ? undefined : remembered.grants);
     // A read nobody caused was refused for a passkey, or the confirm cleared it: the press the shell offers moves.
     client.onUnasked(() => this.#changed());
     let heldStandings: string | undefined;
@@ -668,6 +686,7 @@ export class ShellRuntime {
     held.client.stop();
     held.transport.close?.();
     this.#connections.set(daemon, { kind: 'refused' });
+    this.#shape?.clear(daemon);
     this.#grants.drop(daemon);
     this.#places.delete(daemon);
     this.#halves.dropDaemon(daemon);
@@ -689,6 +708,7 @@ export class ShellRuntime {
       connection.transport.close?.();
     }
     this.#connections.delete(daemon);
+    this.#shape?.clear(daemon);
     this.#grants.drop(daemon);
     this.#places.delete(daemon);
     // The only place a daemon's clients go: a re-pair opens a new connection, so its clients are new objects.
