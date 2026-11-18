@@ -270,18 +270,19 @@ export const openByDefault = (
   needing?: NeedingYou,
 ): boolean => descendantsOf(node).some(ferret => isOpen(ferret) || needsYou(ferret, needing));
 
-/** The kind segments in the order they are drawn (Interactive first: what a new device opens on), in the reader's words. */
+/** The kind segments in the order they are drawn (Mine first: what a new device opens on), in the reader's words. */
 export const MODE_SEGMENTS: readonly { readonly mode: ModeFilter; readonly label: string; readonly hint: string }[] = [
-  { mode: 'interactive', label: 'Interactive', hint: 'Interactive — a person drives them' },
+  { mode: 'interactive', label: 'Mine', hint: 'Mine — the ferrets you drive yourself' },
   { mode: 'all', label: 'All', hint: 'Every ferret' },
   { mode: 'auto', label: 'Agents', hint: 'Agents — autonomous ferrets that work unattended' },
 ];
 
 /** What an empty list says: which kind found nothing, and how many stopped ferrets the tick would add. */
 export const emptyMessage = (filter: FerretListFilter, hiddenStopped: number): string => {
-  const kind = filter.mode === 'all' ? '' : filter.mode === 'auto' ? 'agent ' : 'interactive ';
-  if (hiddenStopped > 0) return `No live ${kind}ferrets — ${hiddenStopped} stopped. Tick Show stopped.`;
-  return filter.mode === 'all' ? 'No ferrets are running.' : `No ${kind}ferrets.`;
+  const kind = filter.mode === 'auto' ? 'agent ' : '';
+  const of = filter.mode === 'interactive' ? ' of yours' : '';
+  if (hiddenStopped > 0) return `No live ${kind}ferrets${of} — ${hiddenStopped} stopped. Tick Show stopped.`;
+  return filter.mode === 'all' ? 'No ferrets are running.' : `No ${kind}ferrets${of}.`;
 };
 
 /** A home directory, written the way a shell prompt writes it. */

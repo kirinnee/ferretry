@@ -163,3 +163,26 @@ describe('a name the daemon gave is kept', () => {
     expect(list.namePending('d3')).toBe(false);
   });
 });
+
+describe('asking to name a machine again', () => {
+  test('askToName makes the step pending for a paired machine, and tells listeners', () => {
+    const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
+    list.add({ daemon: 'ws', machine: 'host', deviceId: 'dev', address: 'http://127.0.0.1:40245' });
+    let told = 0;
+    list.subscribe(() => (told += 1));
+    expect(list.namePending('ws')).toBe(false);
+    list.askToName('ws');
+    expect(list.namePending('ws')).toBe(true);
+    expect(told).toBe(1);
+    list.askToName('ws');
+    expect(told, 'asking twice is one change').toBe(1);
+    list.nameSettled('ws');
+    expect(list.namePending('ws')).toBe(false);
+  });
+
+  test('a machine that is not paired is never asked', () => {
+    const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
+    list.askToName('ghost');
+    expect(list.namePending('ghost')).toBe(false);
+  });
+});

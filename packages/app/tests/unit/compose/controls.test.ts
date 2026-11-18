@@ -111,7 +111,7 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       composerEnterKey: null,
       composerPhoneEnterKey: null,
       motion: 'system',
-      // Never chosen: the Sessions bar opens on Interactive.
+      // Never chosen: the Sessions bar opens on Mine.
       sessionsMode: null,
       groupNeedsYou: true,
       // A payload written before "Show stopped" was kept per device lists no stopped ferrets.

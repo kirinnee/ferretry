@@ -20,17 +20,25 @@ import { useRuntimeVersion, useShell } from './context.tsx';
 const HOST_FILE = 'host.yaml';
 const NAME_LINE = /^name:/mu;
 
+/** Whether the machine's owner has named it (a `name` in `host.yaml`); without one it goes by its host name. */
+export const hostFileIsNamed = (file: { readonly exists: boolean; readonly text: string }): boolean =>
+  file.exists && NAME_LINE.test(file.text);
+
 /** The text a name is saved as: a JSON string is a valid YAML scalar, so no character needs its own escaping. */
 const hostFileText = (name: string): string => `name: ${JSON.stringify(name)}\n`;
 
-interface HostFile {
+export interface HostFile {
   readonly exists: boolean;
   readonly text: string;
   readonly etag: string;
 }
 
-const readHostFile = async (client: ShellPluginClient): Promise<HostFile> => {
-  const answer = (await client.call('GET /v1/config/file', { query: { path: HOST_FILE } })) as Partial<HostFile> | null;
+export const readHostFile = async (client: ShellPluginClient, quiet = false): Promise<HostFile> => {
+  // `quiet`: a read the machine switcher makes by itself on a page load, which must never raise a passkey prompt; a refusal is the answer.
+  const answer = (await client.call('GET /v1/config/file', {
+    query: { path: HOST_FILE },
+    ...(quiet ? { quiet: true } : {}),
+  })) as Partial<HostFile> | null;
   if (answer === null || typeof answer.etag !== 'string') throw new Error('unreadable');
   return {
     exists: answer.exists === true,
@@ -141,7 +149,7 @@ export function NameThisMachine({ daemon }: { readonly daemon: string }) {
     if (client === undefined || asked.current) return;
     asked.current = true;
     void readHostFile(client).then(
-      read => (read.exists && NAME_LINE.test(read.text) ? runtime.daemons.nameSettled(daemon) : setFile(read)),
+      read => (hostFileIsNamed(read) ? runtime.daemons.nameSettled(daemon) : setFile(read)),
       () => runtime.daemons.nameSettled(daemon),
     );
   }, [client, daemon, runtime]);

@@ -199,10 +199,39 @@ describe('Name this machine', () => {
     expect(open.writes()).toEqual([]);
   });
 
-  test('a pairing that did not ask never shows the step and never reads the file', async () => {
+  test('a pairing that did not ask never shows the step and writes nothing', async () => {
     open = await boot();
     expect(open.step()).toBeNull();
-    expect(open.transport.requests.some(request => request.path.startsWith('/v1/config/file'))).toBe(false);
+    expect(open.writes()).toEqual([]);
+  });
+
+  test('a machine that goes by its host name shows a quiet "Name this machine" beside the switcher, which opens the step', async () => {
+    open = await boot();
+    const offer = (): HTMLElement | null => open?.view.container.querySelector('[data-name-machine-offer]') ?? null;
+    expect(offer()?.textContent).toBe('Name this machine');
+    expect(open.step()).toBeNull();
+    await open.press('[data-name-machine-offer]');
+    expect(open.step()?.textContent).toContain('Name this machine');
+    expect(offer(), 'the offer steps aside while the step is open').toBeNull();
+    await open.press('[data-name-machine-skip]');
+    expect(offer(), 'it is back once the step is put away').not.toBeNull();
+  });
+
+  test('a machine the owner named, or one that cannot say, shows no offer', async () => {
+    open = await boot({ hostFile: 'name: "pebox"\n' });
+    expect(open.view.container.querySelector('[data-name-machine-offer]')).toBeNull();
+    await open.view.unmount();
+    open = await boot({ readRefused: true });
+    expect(open.view.container.querySelector('[data-name-machine-offer]')).toBeNull();
+  });
+
+  test('saving through the offer names the machine everywhere', async () => {
+    open = await boot();
+    await open.press('[data-name-machine-offer]');
+    await open.typeName('Studio box');
+    await open.press('button[type="submit"]');
+    expect(open.list.get('ws')?.machine).toBe('Studio box');
+    expect(open.writes()).toHaveLength(1);
   });
 
   test('the machine picker keeps the name it learned while the machine refuses its plugin list', async () => {

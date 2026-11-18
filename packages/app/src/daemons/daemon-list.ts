@@ -274,6 +274,13 @@ export class DaemonList {
     return this.#naming.has(daemon);
   }
 
+  /** The person asked to name this machine (the machine switcher's "Name this machine"): the step is offered again. */
+  askToName(daemon: string): void {
+    if (this.get(daemon) === undefined || this.#naming.has(daemon)) return;
+    this.#naming.add(daemon);
+    for (const listener of this.#listeners) listener();
+  }
+
   /** The offer to name this machine was answered or skipped: it is not made again. */
   nameSettled(daemon: string): void {
     if (!this.#naming.delete(daemon)) return;

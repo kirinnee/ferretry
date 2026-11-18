@@ -2,26 +2,18 @@ import { BackgroundViews } from './background.tsx';
 import { DevicePanels, NavCount, type NavForm } from './device-panels.tsx';
 import { DeviceViews } from './device-views.tsx';
 import { PhoneTitleBar } from './phone-title-bar.tsx';
-import { ChevronDown, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_LAYOUT } from '../layout/layout.ts';
 import { CommandBar } from '../ui/command-bar.tsx';
-import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '../ui/context-menu.tsx';
-import { useInputModality } from '../ui/hooks/use-input-modality.ts';
 import { useAppViewport } from '../ui/hooks/use-app-viewport.ts';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../ui/palette-shortcut.ts';
 import { buildPluginCommandSources, deviceLayoutSource, placeSource, settingsSource } from './command-sources.ts';
 import { useScreenHref } from '../router/screen-href.ts';
-import { distinctDaemonName } from '../daemons/machine-names.ts';
-import type { NavEntry } from '../layout/engine.ts';
-import {
-  daemonHomeHref,
-  DEVICE_SETTINGS_HREF,
-  HOME_HREF,
-  needsSubject,
-  pairAgainHref,
-  type Route,
-} from '../router/routes.ts';
+import { ChatMenu } from './chat-menu.tsx';
+import { DaemonPicker } from './machine-switcher.tsx';
+import { isChatRoute, routeDaemon, useNavTargets } from './nav-targets.ts';
+import { DEVICE_SETTINGS_HREF, needsSubject, pairAgainHref, type Route } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import {
@@ -44,48 +36,9 @@ import { PanelSlot, ScreenView, ShellLine } from './views.tsx';
  * in the frame is a feature: every entry is a plugin's screen, or one of the shell's own items.
  */
 
-const ALL_DAEMONS = 'All daemons';
-const ALL_DAEMONS_KEY = '';
-const THIS_ONE = 'this one';
-
-const routeDaemon = (route: Route): string | undefined =>
-  'daemon' in route && typeof route.daemon === 'string' ? route.daemon : undefined;
-
-function navHref(
-  entry: NavEntry,
-  daemon: string | undefined,
-  href: (e: NavEntry) => string | undefined,
-): string | undefined {
-  if (entry.kind === 'shell') {
-    if (entry.item === 'settings')
-      return daemon === undefined ? DEVICE_SETTINGS_HREF : `${daemonHomeHref(daemon)}/settings`;
-    return HOME_HREF;
-  }
-  return href(entry);
-}
-
-/** A ferret's chat (`ferrets/:ferret/chat`) is a page of the Ferrets place even though Conversation draws it: both start at `ferrets`. */
-const sameSection = (path: string, entryPath: string): boolean => {
-  const first = path.split('/')[0];
-  return first !== undefined && first !== '' && first === entryPath.split('/')[0];
-};
-
 function Nav({ daemon }: { readonly daemon: string | undefined }) {
-  const { plan, routes } = useShell();
-  const { route } = useRouter();
-  // The entry whose page is on screen: a plugin's entry for any screen of that plugin (the ferret page is Ferrets'), Settings for either settings page.
-  const onScreen = (entry: NavEntry): boolean =>
-    entry.kind === 'screen'
-      ? route.kind === 'screen' &&
-        (route.screen.plugin === entry.screen.plugin || sameSection(route.screen.path, entry.screen.path))
-      : entry.item === 'settings' && (route.kind === 'device-settings' || route.kind === 'daemon-settings');
-  const href = (entry: NavEntry): string | undefined => {
-    if (entry.kind !== 'screen') return undefined;
-    const { screen } = entry;
-    if (needsSubject(screen.path)) return undefined; // a screen that needs a subject is not a nav destination
-    if (screen.path.startsWith('/')) return routes.href(screen, {});
-    return daemon === undefined ? undefined : routes.href(screen, {}, daemon);
-  };
+  const { plan } = useShell();
+  const targets = useNavTargets(daemon);
   const side = plan.nav.side;
   // A nav panel is drawn in a left or right nav of EVERY style (the default built-in is a list, compact is a rail), told which form it is
   // in; never on the top or bottom bar.
@@ -100,10 +53,7 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
       // rail or top row does not sit over the keyboard, and desktop never sets `data-keyboard`.
       data-kb-hide={side === 'bottom' ? '' : undefined}
     >
-      {plan.nav.entries.map(entry => {
-        const to = navHref(entry, daemon, href);
-        const label = entry.kind === 'screen' ? entry.screen.label : entry.item === 'settings' ? 'Settings' : 'Daemons';
-        const key = entry.kind === 'screen' ? `${entry.screen.plugin}.${entry.screen.id}` : entry.item;
+      {targets.map(({ entry, to, label, key, current }) => {
         // A plugin's count for its own entry, summed over every machine (S4), on every nav form.
         const badge =
           entry.kind === 'screen' ? (
@@ -115,7 +65,7 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
             {badge}
           </span>
         ) : (
-          <Link key={key} to={to} className="fy-nav__item" current={onScreen(entry)}>
+          <Link key={key} to={to} className="fy-nav__item" current={current}>
             {label}
             {badge}
           </Link>
@@ -125,73 +75,6 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
       form), never on the phone bar. */}
       {panelForm === undefined ? null : <DevicePanels slot="nav" form={panelForm} />}
     </nav>
-  );
-}
-
-/**
- * THE MACHINE SWITCHER, like v4's: a button that says which machine is on screen and opens a menu (the shared
- * ContextMenu — role=menu, arrows, Home/End, Escape back to the button, 44px rows on a touch screen). Every machine is
- * ONE row, in its own words, the one on screen marked "this one"; "All daemons" leads, marked the same way when the
- * list is what is showing.
- */
-function DaemonPicker({ daemon }: { readonly daemon: string | undefined }) {
-  const { runtime } = useShell();
-  const router = useRouter();
-  const trigger = useRef<HTMLButtonElement | null>(null);
-  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
-  const { touchAffected } = useInputModality();
-  const machines = runtime.daemons.groups().flatMap(group => group.daemons);
-  if (machines.length === 0) return null;
-  const current = machines.find(entry => entry.daemon === daemon);
-  // The chooser's own helper: a machine paired twice (after a daemon reset) reads differently per entry, never "pebox, pebox".
-  const everyone = runtime.daemons.snapshot().daemons;
-  const name = current === undefined ? ALL_DAEMONS : distinctDaemonName(current, everyone);
-  const items: readonly ContextMenuItem[] = [
-    {
-      key: ALL_DAEMONS_KEY,
-      label: ALL_DAEMONS,
-      ...(current === undefined ? { detail: THIS_ONE } : {}),
-      onSelect: () => router.navigate(HOME_HREF),
-    },
-    ...machines.map(entry => ({
-      key: entry.daemon,
-      label: distinctDaemonName(entry, everyone),
-      ...(entry.daemon === current?.daemon ? { detail: THIS_ONE } : {}),
-      separatorBefore: entry === machines[0],
-      onSelect: () => {
-        runtime.daemons.select(entry.daemon);
-        router.navigate(daemonHomeHref(entry.daemon));
-      },
-    })),
-  ];
-  return (
-    <>
-      <button
-        aria-expanded={anchor !== null}
-        aria-haspopup="menu"
-        aria-label={`Machine: ${name}. Switch machine`}
-        className="fy-daemon-picker"
-        data-daemon-picker=""
-        onClick={() => {
-          const rect = trigger.current?.getBoundingClientRect();
-          setAnchor({ x: rect?.left ?? 0, y: rect?.bottom ?? 0 });
-        }}
-        ref={trigger}
-        type="button"
-      >
-        <span className="fy-daemon-picker__name">{name}</span>
-        <ChevronDown aria-hidden="true" size={14} />
-      </button>
-      <ContextMenu
-        anchor={anchor ?? { x: 0, y: 0 }}
-        ariaLabel="Switch machine"
-        items={items}
-        onClose={() => setAnchor(null)}
-        open={anchor !== null}
-        touch={touchAffected}
-        triggerRef={trigger}
-      />
-    </>
   );
 }
 
@@ -386,6 +269,8 @@ export function Frame() {
   useRuntimeVersion(runtime);
   const { route, entryKey } = useRouter();
   const daemon = routeDaemon(route);
+  // A ferret's own page: the chat, whose top chrome is one slim row (shell.css `[data-chat-chrome]`, chat-menu.tsx).
+  const chat = isChatRoute(route);
   const whole = daemon === undefined ? undefined : runtime.wholeDaemonLine(daemon);
   const [bar, setBar] = useState({ open: false, signal: 0 });
   const openBar = useCallback(() => setBar(current => ({ open: true, signal: current.signal + 1 })), []);
@@ -397,7 +282,12 @@ export function Frame() {
   const [frameRoot, setFrameRoot] = useState<HTMLElement | null>(null);
   return (
     <FrameRootContext.Provider value={frameRoot}>
-      <div ref={setFrameRoot} className={`fy-frame fy-frame--nav-${plan.nav.side}`} data-layout={plan.layoutId}>
+      <div
+        ref={setFrameRoot}
+        className={`fy-frame fy-frame--nav-${plan.nav.side}`}
+        data-chat-chrome={chat ? '' : undefined}
+        data-layout={plan.layoutId}
+      >
         <Nav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
         <div className="fy-body">
           <PhoneTitleBar daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
@@ -421,6 +311,7 @@ export function Frame() {
             {/* The side column is drawn first when the layout puts it on the left, so the reading and the tab order match the eye. */}
             {whole === undefined && plan.side.at === 'left' ? <Side daemon={daemon} route={route} /> : null}
             <main className="fy-main" data-slot="main">
+              {chat ? <ChatMenu daemon={daemon} onSearch={openBar} /> : null}
               <PageScrollRegion entryKey={entryKey} memory={scroll}>
                 {whole === undefined ? <Main route={route} /> : <WholeLine daemon={daemon} line={whole} />}
               </PageScrollRegion>

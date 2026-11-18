@@ -129,7 +129,7 @@ export interface DeviceControls {
   readonly composerPhoneEnterKey: ComposerEnterKeyPreference | null;
   /** Reduced motion: follow the operating system, or always reduce it on this device. */
   readonly motion: MotionPreference;
-  /** The Sessions bar's kind filter. null = never chosen on this device, so the bar opens on Interactive. */
+  /** The Sessions bar's kind filter. null = never chosen on this device, so the bar opens on Mine. */
   readonly sessionsMode: ModeFilter | null;
   /**
    * The daemon ids in the order the reader dragged their machines into on THIS device. A preference

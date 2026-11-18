@@ -692,3 +692,85 @@
 .fy-settings-page:focus {
   outline: none;
 }
+
+/* ============================================================================
+   THE CHAT'S TOP CHROME IS ONE SLIM ROW (owner, 11-18: "the top bar (esp for the chat) needs to be as thin and as little as
+   possible so we can read and see as much of the chat as possible").
+
+   On a ferret's own page (`data-chat-chrome`, set by the frame from the route, so it is true on the first paint and nothing moves
+   when the page loads) the bar of places (`.fy-nav--top`) and the top bar (machine switcher + Find) are put away, and ONE
+   button (`.fy-chat-menu`, chat-menu.tsx) at the start of the ferret's own header row (name, status, Modes) opens a menu that
+   holds all of them. The header row is the first thing in the window: it is reserved one row high, so it does not change
+   height as its name arrives. The side list, the bottom bar of a phone and the nav of a rail layout are untouched.
+   ============================================================================ */
+.fy-main {
+  position: relative;
+}
+.fy-frame[data-chat-chrome] {
+  --chat-head-h: 36px;
+  --chat-menu-w: 36px;
+}
+@media (max-width: 767.98px) {
+  .fy-frame[data-chat-chrome] {
+    --chat-head-h: 44px;
+    --chat-menu-w: 44px;
+  }
+}
+.fy-frame[data-chat-chrome] .fy-nav--top,
+.fy-frame[data-chat-chrome] .fy-top {
+  display: none;
+}
+/* The chat page runs to the window's edges under the row: its own padding is the page's, not the frame's. */
+.fy-frame[data-chat-chrome] .fy-main {
+  padding: 0;
+}
+/* A zero-high anchor that stays at the top of the page column however the page scrolls; the button hangs from it. */
+.fy-chat-menu-anchor {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  height: 0;
+}
+.fy-chat-menu {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: var(--chat-menu-w, 36px);
+  height: var(--chat-head-h, 36px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.fy-chat-menu:hover,
+.fy-chat-menu[aria-expanded='true'] {
+  background: var(--nav-hover, var(--surface-2));
+  color: var(--fg);
+}
+/* The header row leaves room for the button and is one row high whatever it holds. */
+.fy-frame[data-chat-chrome] .fy-slot[data-slot='ferret.toolbar'] {
+  box-sizing: border-box;
+  min-height: var(--chat-head-h);
+  padding-block: 0;
+  padding-inline-start: var(--chat-menu-w);
+}
+
+/* "Name this machine" beside the machine switcher: a quiet word, not a button, for a machine that goes by its host name. */
+.fy-name-machine {
+  flex: none;
+  min-height: var(--control-h);
+  padding: 0 var(--pad-control-x);
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.fy-name-machine:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
