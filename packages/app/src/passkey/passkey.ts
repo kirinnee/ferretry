@@ -17,12 +17,12 @@ import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
  *    refusal of the same kind is the answer. The unlock comes first — while it is wanted nothing else can be read —
  *    then a step-up for the act, each at most once.
  *
- * A READ IS THE PAGE'S OWN WORK (G95): a `GET` or `HEAD` is `background`, and its prompt waits until its machine is
- * on screen ({@link PasskeyHandler.focus}); anything else is a press, `explicit`, and asks at once. A READ NOBODY CAUSED
- * never raises a step-up or unlock prompt (A555 r7: a page polling a refused read re-raised it in a loop): a background
- * view's call, or a read sent while no person is acting on the page (no transient user activation: a reload, a poll).
- * Its refusal is its answer, the client answers the same read from it for a while instead of sending it
- * again (`client/step-up-backoff.ts`), and the shell offers ONE press for it over the page the route names
+ * A READ NEVER OPENS THE PROMPT BY ITSELF; A PRESS DOES (G95, A555 r7). A write is a press, `explicit`, and asks at
+ * once; so is a read a person is pressing for (`quiet: false`, or sent while a person is pressing something and the
+ * page did not just change: a Retry, the machine they chose). Every other read is one NOBODY CAUSED — a page opening,
+ * a poll, a re-render, a background view — and never opens the prompt: its step-up refusal is its answer, its unlock
+ * waits silently (`unasked`), the client answers the same read from that refusal for a while instead of sending it
+ * again (`client/step-up-backoff.ts`), and the shell offers ONE press for it on the page the route names
  * (`shell/passkey-bar.tsx`), so no page is left with a refusal it cannot answer.
  *
  * NOTHING HERE HOLDS A CREDENTIAL (G100). A verified step-up is a fact the DAEMON remembers about this device and this

@@ -130,3 +130,58 @@ describe('Settings › General › Name', () => {
     await view.unmount();
   });
 });
+
+describe('A555 r7 kasen (a): a locked machine', () => {
+  const locked = () =>
+    Object.assign(new Error('this machine asks you to confirm it is you with a passkey before it shows anything'), {
+      status: 401,
+      code: 'unlock_required',
+    });
+
+  it('reads "Reading…" while the name is read, never "Saving…"', async () => {
+    const view = await mount(
+      createElement(NameSettings, { client: recordingClient(() => new Promise(() => undefined)).client }),
+    );
+    await settle();
+    const button = must(view.container.querySelector<HTMLButtonElement>('button[type="submit"]'), 'Save');
+    expect(button.textContent).toBe('Reading…');
+    expect(button.disabled).toBe(true);
+    await view.unmount();
+  });
+
+  it('offers "Unlock" for a refused read, and pressing it reads again (the person’s own read opens the prompt)', async () => {
+    let unlocked = false;
+    const daemon = namedDaemon();
+    const { client, calls } = recordingClient((route, init) =>
+      unlocked
+        ? daemon.client.call(route, init)
+        : route === 'GET /v1/config/file'
+          ? locked()
+          : daemon.client.call(route, init),
+    );
+    const view = await mount(createElement(NameSettings, { client }));
+    await settle();
+    expect(view.container.querySelector('[role="alert"]')?.textContent).toContain('confirm it is you with a passkey');
+    const retry = must(view.container.querySelector<HTMLButtonElement>('[data-machine-name-retry]'), 'the press');
+    expect(retry.textContent).toBe('Unlock');
+    expect(view.container.querySelector('button[type="submit"]')?.textContent).toBe('Reading…');
+    unlocked = true;
+    await interact(() => retry.click());
+    await settle();
+    expect(calls.filter(call => call.route === 'GET /v1/config/file')).toHaveLength(2);
+    expect(view.container.querySelector('[data-machine-name-retry]')).toBeNull();
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+    expect(view.container.querySelector('button[type="submit"]')?.textContent).toBe('Save');
+    await view.unmount();
+  });
+
+  it('says a plain "Try again" for a failure that is not a passkey', async () => {
+    const { client } = recordingClient(route =>
+      route === 'GET /v1/config/file' ? new Error('gone') : { plugins: [] },
+    );
+    const view = await mount(createElement(NameSettings, { client }));
+    await settle();
+    expect(view.container.querySelector('[data-machine-name-retry]')?.textContent).toBe('Try again');
+    await view.unmount();
+  });
+});

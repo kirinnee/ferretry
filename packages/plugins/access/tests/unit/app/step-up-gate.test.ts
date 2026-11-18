@@ -819,3 +819,45 @@ describe('A555 r7 kasen (c): a device with no passkey reads "Add a passkey" even
     should(await pressed).be.false();
   });
 });
+
+describe('A555 r7 kasen (c): the passkeys read is tried again only while its prompt is on screen', () => {
+  it('should give up after three failed reads, leaving the ordinary words', async () => {
+    let reads = 0;
+    const gate = new StepUpGate({
+      ceremony: async () => undefined,
+      describe: () => 'no',
+      retryMs: 1,
+      firstPasskey: async () => {
+        reads += 1;
+        throw new Error('out of reach');
+      },
+      ownerCommand: async () => undefined,
+    });
+    const pressed = gate.require(first, 'change the settings', 'explicit');
+    for (let i = 0; i < 30 && reads < 3; i += 1) await new Promise(resolve => setTimeout(resolve, 2));
+    await new Promise(resolve => setTimeout(resolve, 5));
+    should(reads).equal(3);
+    should(gate.snapshot()?.firstPasskey).be.undefined();
+    gate.dismiss();
+    should(await pressed).be.false();
+  });
+
+  it('should stop trying once the prompt is gone', async () => {
+    let reads = 0;
+    const gate = new StepUpGate({
+      ceremony: async () => undefined,
+      describe: () => 'no',
+      retryMs: 5,
+      firstPasskey: async () => {
+        reads += 1;
+        throw new Error('out of reach');
+      },
+    });
+    const pressed = gate.require(first, 'change the settings', 'explicit');
+    await flush();
+    gate.dismiss();
+    should(await pressed).be.false();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    should(reads).equal(1);
+  });
+});

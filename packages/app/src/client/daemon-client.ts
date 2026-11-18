@@ -111,16 +111,17 @@ export interface DaemonClientOptions {
   /** The clock a background read's step-up backoff runs on ({@link StepUpBackoff}); the wall clock when absent. */
   readonly now?: () => number;
   /**
-   * Whether a person is acting on this page RIGHT NOW: the browser's own transient user activation
-   * (`navigator.userActivation.isActive`, a few seconds after a click or a key) when absent. A read sent while it holds
-   * is one the person caused (they opened the page, chose the machine) and may ask for its step-up; a read sent without
-   * it — a poll, an effect re-run by a re-render — never does (A555 r7).
+   * Whether a person is PRESSING something on this page right now: the browser's own transient user activation
+   * (`navigator.userActivation.isActive`, a few seconds after a click or a key) when absent; the shell narrows it to "and
+   * the page did not just change" (`ShellRuntime`). A read sent while it holds is the person's own — a Retry, the
+   * machine they chose — and asks for its passkey at once like a press; a read sent without it — a page opening, a
+   * poll, an effect re-run by a re-render — never opens the prompt (A555 r7).
    */
   readonly personActing?: () => boolean;
 }
 
 /** The browser's transient user activation; `false` where there is none to read (a test, a worker). */
-const browserActivation = (): boolean =>
+export const browserActivation = (): boolean =>
   (globalThis.navigator as { readonly userActivation?: { readonly isActive?: boolean } } | undefined)?.userActivation
     ?.isActive === true;
 
@@ -528,13 +529,17 @@ export class DaemonClient {
       ...(init.signal === undefined ? {} : { signal: init.signal }),
     };
     // A resend is the same request, its request id included: the daemon sees one act asked twice, never two acts.
-    // A read sent with `quiet: false` is one a person pressed for (a retry after a cancelled prompt): it is theirs, so it
-    // asks wherever it came from and clears the machine's "cancel stays cancelled". Absent, a GET is the page's own read.
-    const origin: PromptOrigin = background ? 'background' : init.quiet === false ? 'explicit' : requestOrigin(method);
-    // A READ NOBODY CAUSED (A555 r7): a background view's call, or a read sent while no person is acting on the page (a
-    // poll, an effect a re-render re-ran). Its step-up or unlock refusal is its answer — no prompt — and the same read is
-    // answered from that refusal for a while rather than sent again (`step-up-backoff.ts`).
-    const unasked = origin === 'background' && (background || !this.#personActing());
+    // A read a person PRESSED for — sent with `quiet: false` (a retry after a cancelled prompt), or while a person is
+    // pressing something on the page and it is not quiet (a Retry, the machine they chose) — is theirs: it asks at once
+    // and clears the machine's "cancel stays cancelled", like any press.
+    const read = requestOrigin(method) === 'background';
+    const pressed = !background && read && (init.quiet === false || (init.quiet !== true && this.#personActing()));
+    const origin: PromptOrigin = background ? 'background' : pressed ? 'explicit' : requestOrigin(method);
+    // EVERY OTHER READ IS ONE NOBODY CAUSED (A555 r7): a page opening (a reload, a deep link, a navigation), a poll, an
+    // effect a re-render re-ran, a background view's call. It never opens the prompt — its step-up refusal is its answer
+    // and its unlock waits silently (`unasked`) while the shell offers one press — and the same read is answered from
+    // that refusal for a while rather than sent again (`step-up-backoff.ts`).
+    const unasked = origin === 'background';
     const key = unasked ? backoffKey(request) : undefined;
     const held = key === undefined ? undefined : this.#backoff.held(key);
     if (held !== undefined) return held;

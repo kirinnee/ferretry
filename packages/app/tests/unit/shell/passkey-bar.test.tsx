@@ -110,7 +110,11 @@ const settle = async (): Promise<void> => {
   for (let i = 0; i < 12; i += 1) await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
 };
 
-function setup(made: PasskeyProvision, refusal: TransportAnswer) {
+function setup(
+  made: PasskeyProvision,
+  refusal: TransportAnswer,
+  clock: { personActing?: () => boolean; now?: () => number } = {},
+) {
   const accessApp = provideToShell(implementApp(accessManifest, { build: () => ({}) }), { passkey: () => made });
   const surfaces: SurfaceEntry[] = [...CORE, entry(boardManifest, boardApp), entry(accessManifest, accessApp)];
   let confirmed = false;
@@ -136,6 +140,7 @@ function setup(made: PasskeyProvision, refusal: TransportAnswer) {
     daemons,
     connect: async () => transport,
     passkey: () => registered.passkey,
+    ...clock,
   });
   const app = (
     <App
@@ -211,6 +216,33 @@ describe('A555 r7 one press for a passkey nobody asked for', () => {
     // The confirm opens the feed again.
     await interact(() => transport.openFeed());
     expect(runtime.online('d1')).toBe(true);
+    await view.unmount();
+  });
+
+  test('kasen (4): a page opened by a click ("Not now", then Home) opens NO prompt; a Retry pressed later does', async () => {
+    go('/d/d1/board');
+    let now = 1_000_000;
+    const { made, asked } = provision();
+    // A person is pressing something the whole time: the click that navigated, then a Retry.
+    const { app, runtime } = setup(made, UNLOCK, { personActing: () => true, now: () => now });
+    const view = await mount(app);
+    await settle();
+    // The page's own reads, sent right after the navigation, are the page's: never the click's. They wait silently
+    // (`unasked`); none is `background`, which the real gate shows over the machine on screen.
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every(entry => entry.origin === 'unasked')).toBe(true);
+    expect(bar()?.dataset.passkeyBar).toBe('unlock');
+    // Later, a Retry on the page: the same read, pressed, is the person's and opens the one prompt at once.
+    now += 10_000;
+    const retried = runtime
+      .client('d1', 'board')
+      ?.call('GET /v1/board')
+      .catch(() => undefined);
+    await settle();
+    expect(asked.filter(entry => entry.origin === 'explicit')).toEqual([
+      { need: { kind: 'unlock' }, origin: 'explicit' },
+    ]);
+    await retried;
     await view.unmount();
   });
 });

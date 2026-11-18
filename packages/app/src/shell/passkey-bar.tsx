@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import type { PasskeyNeed } from '../passkey/passkey.ts';
 import { useOptionalRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
@@ -27,7 +27,14 @@ const WORDS: Readonly<Record<PasskeyNeed['kind'], { readonly line: string; reado
 export function PasskeyBar() {
   const { runtime } = useShell();
   useRuntimeVersion(runtime);
-  const route = useOptionalRouter()?.route;
+  const router = useOptionalRouter();
+  const route = router?.route;
+  const entry = router?.entryKey;
+  // Every navigation is told to the runtime BEFORE the new page's effects read (a layout effect runs first): those
+  // reads are the page's, never the click's, so none of them opens the prompt (`ShellRuntime.noteNavigation`).
+  useLayoutEffect(() => {
+    if (entry !== undefined) runtime.noteNavigation();
+  }, [runtime, entry]);
   const busy = useRef(false);
   const daemon = route === undefined ? undefined : routeDaemon(route);
   const need = daemon === undefined ? undefined : runtime.unaskedNeed(daemon);

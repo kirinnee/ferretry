@@ -237,12 +237,17 @@ describe('G105 one prompt, one retry', () => {
 });
 
 describe('G95 who started the request', () => {
-  test('G95 a background GET is asked as background for the unlock, so its prompt can wait for its machine', async () => {
-    const { fake, asked } = handler([true]);
-    const { client } = daemon([UNLOCK, OK], fake);
+  test('A555 r7 a GET a person is pressing for (a Retry) is theirs and asks at once; one nobody caused waits unasked', async () => {
+    const pressing = handler([true]);
+    const { client } = daemon([UNLOCK, OK], pressing.fake);
     await client.start();
     await client.forPackage('board').call('GET /v1/board');
-    expect(asked[0]?.origin).toBe('background');
+    expect(pressing.asked[0]?.origin).toBe('explicit');
+    const nobody = handler([true]);
+    const quiet = daemon([UNLOCK, OK], nobody.fake, { personActing: false });
+    await quiet.client.start();
+    await quiet.client.forPackage('board').call('GET /v1/board');
+    expect(nobody.asked[0]?.origin).toBe('unasked');
   });
 
   test('G95 anything a person pressed is explicit and asks at once', async () => {
@@ -290,7 +295,7 @@ describe('G95 a read that stops waiting leaves its parked prompt', () => {
       .call('GET /v1/board', { signal: caller.signal })
       .catch((error: unknown) => error);
     await Bun.sleep(0);
-    expect(asked).toEqual(['background']);
+    expect(asked).toEqual(['explicit']);
     caller.abort();
     const failure = await waiting;
     expect(failure).toBeInstanceOf(DaemonCallError);
@@ -511,7 +516,7 @@ describe('A555 r7: a request nobody pressed never opens the step-up prompt, and 
     expect(sends()).toHaveLength(1);
   });
 
-  test('a read sent while a person is acting (they just opened the page) still asks, as background', async () => {
+  test('a read sent while a person is pressing something (a Retry) asks at once, as theirs', async () => {
     const { fake, asked } = handler([true]);
     const transport = new FakeTransport(request => {
       if (request.path === '/v1/plugins') return json(inventoryOf(compiled));
@@ -526,7 +531,7 @@ describe('A555 r7: a request nobody pressed never opens the step-up prompt, and 
     });
     await client.start();
     expect(await client.forPackage('board').call('GET /v1/board')).toEqual({ cards: [] });
-    expect(asked.map(entry => entry.origin)).toEqual(['background']);
+    expect(asked.map(entry => entry.origin)).toEqual(['explicit']);
   });
 
   test('a background-origin client raises no step-up prompt, for a read or anything else, even while a person acts', async () => {

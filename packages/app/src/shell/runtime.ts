@@ -1,4 +1,4 @@
-import { type ClientOrigin, DaemonClient, type ShellPluginClient } from '../client/daemon-client.ts';
+import { browserActivation, type ClientOrigin, DaemonClient, type ShellPluginClient } from '../client/daemon-client.ts';
 import { type Standing, wholeDaemonWhy } from '../client/inventory.ts';
 import {
   blockedLine,
@@ -58,6 +58,9 @@ import type { View } from '../surfaces/halves.ts';
  */
 export type TransportFactory = (daemon: PairedDaemon) => Promise<DaemonTransport | undefined>;
 
+/** How long after a navigation the new page's reads are its own, never the click's (the activation lasts ~5 s). */
+const NAVIGATION_GRACE_MS = 5_000;
+
 export interface ShellRuntimeOptions {
   readonly appVersion: string;
   readonly surfaces: readonly SurfaceEntry[];
@@ -88,6 +91,13 @@ export interface ShellRuntimeOptions {
   readonly address?: AddressBrowser;
   /** The clock held fragments and hand-offs expire on; a test hands a fake one. */
   readonly clock?: HoldClock;
+  /**
+   * Whether a person is pressing something right now (the browser's transient user activation when absent): a read
+   * sent while it holds, and not just after a navigation, is the person's and may open the passkey prompt (A555 r7).
+   */
+  readonly personActing?: () => boolean;
+  /** The wall clock the navigation grace is measured on; a test hands a fake one. */
+  readonly now?: () => number;
   /** The notification-tap inbox the entry point made before React mounted (S6); absent, no tap is routed. */
   readonly notificationOpens?: NotificationOpenInbox;
 }
@@ -119,6 +129,9 @@ export class ShellRuntime {
   readonly byId: ReadonlyMap<string, SurfaceEntry>;
   readonly daemons: DaemonList;
   readonly #connect: TransportFactory;
+  readonly #activation: () => boolean;
+  readonly #now: () => number;
+  #navigatedAt = Number.NEGATIVE_INFINITY;
   readonly #passkey: () => PasskeyProvision | undefined;
   readonly #daemonless: NonNullable<ShellRuntimeOptions['daemonless']>;
   readonly #connections = new Map<string, Connection>();
@@ -160,6 +173,8 @@ export class ShellRuntime {
     this.byId = indexSurfaces(options.surfaces);
     this.daemons = options.daemons;
     this.#connect = options.connect;
+    this.#activation = options.personActing ?? browserActivation;
+    this.#now = options.now ?? Date.now;
     this.#passkey = options.passkey ?? (() => undefined);
     this.#daemonless = options.daemonless ?? { views: new Map(), location: () => '' };
     this.#halves = new HalfCache(
@@ -537,6 +552,19 @@ export class ShellRuntime {
     return true;
   }
 
+  /**
+   * The page just changed (`passkey-bar.tsx`, on every navigation): for a few seconds the reads the new page makes are
+   * the page's, not the click's, so none of them opens the passkey prompt — "Not now" on the pair screen, then Home.
+   */
+  noteNavigation(): void {
+    this.#navigatedAt = this.#now();
+  }
+
+  /** A person is pressing something, and it is not the navigation that just opened this page (A555 r7). */
+  #personActing(): boolean {
+    return this.#activation() && this.#now() - this.#navigatedAt > NAVIGATION_GRACE_MS;
+  }
+
   /** A confirm the shell forwarded for this machine outside a client's pause (`usePasskeyAsk`): re-read its grants. */
   noteConfirmed(daemon: string): void {
     const connection = this.#connections.get(daemon);
@@ -585,6 +613,7 @@ export class ShellRuntime {
       surfaces: this.surfaces,
       ...(handler === undefined ? {} : { passkey: { daemon: paired, handler } }),
       learnName: name => this.daemons.learnMachine(paired.daemon, name),
+      personActing: () => this.#personActing(),
     });
     // An inventory change (start, a reconnect, `kernel.plugins-changed`) rebuilds the halves and hooks ONLY when some
     // package's standing moved: a re-read that answered the same keeps them, so no view remounts (a rebuilt half is a
