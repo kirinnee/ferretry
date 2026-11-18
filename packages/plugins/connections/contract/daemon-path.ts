@@ -14,8 +14,8 @@ import { isLoopbackHost } from './wire.ts';
 export const DAEMON_PATH_WORDS = {
   relay: 'through the relay',
   direct: 'direct',
-  /** Stands in for a name nobody has told this device yet (a link carries no name; the pairing answer does). */
-  unnamed: 'Your Ferretry machine',
+  /** Stands in for a name nobody has told this device yet (a link carries no name; the pairing answer does): said plainly, never as a brand. */
+  unnamed: 'This machine',
 } as const;
 
 export type DaemonPathKind = 'relay' | 'direct';

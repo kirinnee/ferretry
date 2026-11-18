@@ -148,6 +148,7 @@ describe('PairingScreen arrival', () => {
     const screen = await screenWith({ arrival: PREFILLED, onArrivalTaken: () => (taken += 1) });
 
     expect(screen.container.textContent).toContain('Pair this device?');
+    expect(screen.container.textContent).toContain('Its name shows once paired.');
     expect(screen.container.textContent).toContain('daemon.example.test');
     expect(screen.container.textContent).toContain('daemon-a');
     // The one-time code is never rendered, and the address bar is emptied of it.
@@ -653,7 +654,7 @@ describe('PairingScreen never shows the loopback address of a relayed daemon', (
       sameMachine: false,
     });
 
-    expect(screen.container.textContent).toContain('Your Ferretry machine');
+    expect(screen.container.textContent).toContain('This machine');
     expect(screen.container.textContent).not.toContain('127.0.0.1');
     await screen.unmount();
   });
