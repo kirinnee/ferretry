@@ -53,6 +53,7 @@ export {
   useFerretWorkspace,
   useOptionalRouter,
   useQuoteMenu,
+  useSlotHasUsablePanels,
   useReferenceSurface,
   useRouter,
   useScreenHref,
