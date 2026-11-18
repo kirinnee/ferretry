@@ -223,9 +223,18 @@ describe('The pair page: mascot and night sky', () => {
           // The streak element exists, but nothing runs: no animation, and the picture is the finished one.
           expect(await runningAnimations(tab), `${how}: after pairing`).toEqual([]);
           expect(await tab.locator('svg.fy-ferret').getAttribute('data-pose')).toBe('cheer');
-          const arm = await tab.evaluate(
-            () => getComputedStyle(document.querySelector('.fy-ferret-wave') as Element).opacity,
-          );
+          // Reduced motion does not remove transitions, it shortens them to ~1 ms (the app's own reduced-motion block),
+          // so the arm's opacity change from 0 to 1 is still a running CSSTransition for a frame or two after the pose
+          // flips, and reading it at once under load sees the first value, "0". Let those finish, then read the picture.
+          const arm = await tab.evaluate(async () => {
+            await Promise.all(
+              document
+                .getAnimations()
+                .filter(animation => animation instanceof CSSTransition)
+                .map(animation => animation.finished),
+            );
+            return getComputedStyle(document.querySelector('.fy-ferret-wave') as Element).opacity;
+          });
           expect(arm, `${how}: the waving arm is out in the still picture`).toBe('1');
           if (how === 'os') await shot(tab, variant, 'success-reduced');
         } finally {
