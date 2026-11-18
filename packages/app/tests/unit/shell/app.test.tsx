@@ -392,7 +392,8 @@ describe('the app shell', () => {
       await settle();
       drawn[path] = view.container.querySelector('[data-testid="tab"]')?.textContent ?? '(nothing)';
       expect(drawn[path]).toBe(want);
-      const links = [...view.container.querySelectorAll('nav[aria-label="Plugin settings"] a')];
+      // (This device sits first in the list; only the plugin tabs are meant here.)
+      const links = [...view.container.querySelectorAll('nav[aria-label="Plugin settings"] .fy-tab-group a')];
       expect(links.map(link => link.getAttribute('href'))).toEqual([
         '/d/d1/settings/multi/first',
         '/d/d1/settings/multi/second',

@@ -113,7 +113,12 @@ export function TwoFactorSeedHost({ client: given, item, addKey: askKey, onDone 
         if (!current) return;
         // The page's own reads are quiet: a step-up the daemon wants waits for the owner's press, not for opening the chat.
         if (isStepUpRefusal(stage) || isStepUpRefusal(accountsRefusal)) {
+          // The unlock ran out while the card was on screen: what it showed is dropped, not just hidden.
           setLocked(true);
+          setAccounts(undefined);
+          setStaged(undefined);
+          setFlagged(false);
+          setSays(undefined);
           return;
         }
         setAccounts(list);

@@ -22,6 +22,8 @@ import {
   alwaysUseFor,
   alwaysUseSavedParts,
 } from '../../lib/always-use.ts';
+import { isStepUpRefusal } from '../../lib/step-up-refusal.ts';
+import { ConfirmToSee } from '../confirm-to-see.tsx';
 import { type AccountsClient, putAccountDefault, readAccounts } from './accounts-api.ts';
 
 export interface AlwaysUseLineProps {
@@ -66,27 +68,39 @@ export function AlwaysUseLine({ client, slot }: AlwaysUseLineProps) {
   const [list, setList] = useState<Awaited<ReturnType<typeof readAccounts>> | undefined>(undefined);
   const [phase, setPhase] = useState<Phase>('idle');
   const [failure, setFailure] = useState<string | null>(null);
+  /** The daemon wants the owner's step-up to list the accounts; the quiet read did not ask for it. */
+  const [locked, setLocked] = useState(false);
+  const [presses, setPresses] = useState(0);
+  /** Set by the owner's press on "Confirm it's you": the next read is theirs, so it may ask for the passkey. */
+  const pressed = useRef(false);
 
   // The card's hold callback rides in the props; it is called through a ref so a new function never re-runs the effects.
   const hold = useRef(props?.hold);
   hold.current = props?.hold;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `presses` re-runs the read when the owner confirms
   useEffect(() => {
     setList(undefined);
     setPhase('idle');
     setFailure(null);
+    setLocked(false);
     if (ferret === undefined || request === undefined) return;
     let current = true;
-    void readAccounts(client).then(
+    // Mounting under a settled card is the page's own work, not the owner acting: quiet unless they pressed for it.
+    const quiet = !pressed.current;
+    pressed.current = false;
+    void readAccounts(client, { quiet }).then(
       read => {
         if (current) setList(read);
       },
-      () => undefined,
+      (cause: unknown) => {
+        if (current && isStepUpRefusal(cause)) setLocked(true);
+      },
     );
     return () => {
       current = false;
     };
-  }, [client, ferret, request]);
+  }, [client, ferret, request, presses]);
 
   const always = useMemo(
     () => (props === undefined || list === undefined ? undefined : alwaysUseFor(props, list)),
@@ -101,6 +115,15 @@ export function AlwaysUseLine({ client, slot }: AlwaysUseLineProps) {
     return () => hold.current?.(false);
   }, [offering]);
 
+  if (locked)
+    return (
+      <ConfirmToSee
+        onConfirm={() => {
+          pressed.current = true;
+          setPresses(count => count + 1);
+        }}
+      />
+    );
   if (always === undefined) return null;
 
   const write = async (): Promise<void> => {

@@ -56,7 +56,8 @@ export function profileInstructions(
   });
 }
 
-function InstructionBody({ component }: { component: ComponentView }) {
+/** A text component's words, read only (also the hooks' text). */
+export function InstructionBody({ component }: { component: ComponentView }) {
   const content = component.content;
   if (content?.form !== 'text')
     return <Hint>The text of {component.name} could not be read, so there is nothing to show here.</Hint>;

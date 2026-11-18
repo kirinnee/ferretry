@@ -663,3 +663,49 @@ describe('ProfilesTab — delete (E21)', () => {
     expect(text(root, 'h3')).toBe('Unused');
   });
 });
+
+describe('ProfilesTab — Built from', () => {
+  it('lists the six kinds with what each is and how many are saved, below the profiles', async () => {
+    const root = await open();
+    const section = q(root, '[data-catalog-section="built-from"]');
+    expect(section.textContent).toContain('Instructions');
+    expect(section.textContent).toContain('Instructions description. · 1 item');
+    expect(section.textContent).toContain('MCP servers description. · 2 items');
+    expect(section.textContent).toContain('Hooks description. · 1 item');
+    expect(section.textContent).toContain('Model sets description. · 1 item');
+    expect(section.querySelectorAll('li')).toHaveLength(6);
+  });
+
+  it('sends MCP servers, skills and model sets to the tab that owns them, and opens the other kinds in place', async () => {
+    const root = await open();
+    const links = [...root.querySelectorAll('[data-catalog-section="built-from"] [data-catalog-link]')].map(link =>
+      link.getAttribute('data-catalog-link'),
+    );
+    expect(links).toHaveLength(3);
+    expect(links.some(href => href?.includes('/settings/mcp/mcp'))).toBe(true);
+    expect(links.some(href => href?.includes('/settings/skills/skills'))).toBe(true);
+    expect(links.some(href => href?.includes('/settings/runtimes/model-sets'))).toBe(true);
+    expect(root.querySelectorAll('[data-built-from]')).toHaveLength(3);
+  });
+
+  it('opens a kind with no tab of its own: its list, a component with its text, and back to the profiles', async () => {
+    const root = await open();
+    await click(root, '[data-built-from="instructions"]');
+    expect(root.querySelector('[data-profiles-page="components"]')).not.toBeNull();
+    expect(text(root, 'h3')).toBe('Instructions');
+    expect(root.querySelector('[data-component-new="instructions"]')).not.toBeNull();
+    await click(root, '[data-component-row="instructions/Main instructions"]');
+    expect(text(root, '[data-instruction-text]')).toContain('Small PRs.');
+    await click(root, '[data-catalog-back]');
+    await click(root, '[data-catalog-back]');
+    expect(root.querySelector('[data-profiles-page="list"]')).not.toBeNull();
+  });
+
+  it('reads settings as key and value rows', async () => {
+    const root = await open();
+    await click(root, '[data-built-from="settings"]');
+    await click(root, '[data-component-row="settings/Claude settings"]');
+    expect(root.textContent).toContain('permissions.defaultMode');
+    expect(root.textContent).toContain('plan');
+  });
+});
