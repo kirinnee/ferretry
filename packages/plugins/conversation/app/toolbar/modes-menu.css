@@ -50,3 +50,66 @@
 .fy-modes__sheet .fy-panel + .fy-panel {
   border-top: var(--divider-width, 1px) solid var(--border-soft);
 }
+
+/* ONE ROW STYLE for every mode, whoever draws it: a chip button, a switch with its label, a scan button all read as a
+   full-width row with the mode's name first and its state ("On", "Default") at the end, never truncated, so a mode's
+   on/off is where the eye lands in every row (v4's Actions menu draws its rows the same way). */
+.fy-modes [data-modes-body] .fy-panel .kt-btn,
+.fy-modes__sheet .fy-panel .kt-btn {
+  width: 100%;
+  min-height: 40px;
+  justify-content: flex-start;
+  gap: 8px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  max-width: none;
+}
+.fy-modes [data-modes-body] .fy-panel .kt-btn:hover:not(:disabled),
+.fy-modes__sheet .fy-panel .kt-btn:hover:not(:disabled) {
+  background: var(--surface-2, var(--border-soft));
+}
+.fy-modes [data-modes-body] .fy-panel .kt-btn > span,
+.fy-modes__sheet .fy-panel .kt-btn > span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  max-width: none;
+}
+.fy-modes [data-modes-body] .fy-panel .kt-btn > span:last-child:not(:first-of-type),
+.fy-modes__sheet .fy-panel .kt-btn > span:last-child:not(:first-of-type) {
+  margin-left: auto;
+}
+.fy-modes [data-modes-body] .fy-panel label,
+.fy-modes__sheet .fy-panel label {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 8px;
+  color: var(--fg);
+}
+.fy-modes [data-modes-body] .fy-panel label > span:last-child,
+.fy-modes__sheet .fy-panel label > span:last-child {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-modes [data-modes-body] input[type='checkbox'],
+.fy-modes__sheet input[type='checkbox'] {
+  accent-color: var(--accent);
+}
+.fy-modes [data-modes-body] .fy-panel,
+.fy-modes__sheet .fy-panel {
+  padding: 2px 0;
+}
+.fy-modes [data-modes-body] .fy-toolbar-panel,
+.fy-modes__sheet .fy-toolbar-panel {
+  display: block;
+  width: 100%;
+}
+/* One text size for every row, whatever size its own panel draws at. */
+.fy-modes [data-modes-body] .fy-panel .kt-btn,
+.fy-modes [data-modes-body] .fy-panel label,
+.fy-modes__sheet .fy-panel .kt-btn,
+.fy-modes__sheet .fy-panel label {
+  font-size: var(--text-sm, 14px);
+}

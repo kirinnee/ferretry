@@ -42,6 +42,7 @@ export function ModesMenu({ daemon, ferret }: { readonly daemon: string; readonl
         aria-controls={open ? id : undefined}
         aria-expanded={open}
         aria-haspopup="dialog"
+        aria-label={phone ? 'Modes' : undefined}
         className="kt-btn kt-btn--sm"
         data-modes-trigger=""
         onClick={() => {
@@ -52,7 +53,7 @@ export function ModesMenu({ daemon, ferret }: { readonly daemon: string; readonl
         type="button"
       >
         <SlidersHorizontal aria-hidden="true" size={14} />
-        <span>Modes</span>
+        {phone ? null : <span>Modes</span>}
         <ChevronDown aria-hidden="true" size={14} />
       </button>
       {open && !phone ? (
