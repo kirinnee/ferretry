@@ -97,6 +97,13 @@ export class JobRunner {
     return this.waiting.map(job => job.key);
   }
 
+  /** The jobs running now, as `plugin/id`: what a stall of the loop is most likely to have been inside. */
+  running(): readonly string[] {
+    const keys: string[] = [];
+    for (const [key, job] of this.jobs) if (job.running !== undefined) keys.push(key);
+    return keys;
+  }
+
   portFor(plugin: string): JobsPort {
     return {
       add: spec => this.add(plugin, spec),

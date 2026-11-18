@@ -539,6 +539,8 @@ async function bootLocked(
   const loop = createLoopMeter({
     nowMs: () => clock.nowMs(),
     ...(ioPressure === undefined ? {} : { io: () => ioPressure.current() }),
+    // The suspects of a stall: the boot step while starting, the jobs still running once serving.
+    during: () => (serving ? jobs.running() : [`boot: ${phases.current(knownIds)?.step ?? 'start'}`]),
     onStall: stall => log.warn(describeLoopStall(stall)),
   });
   let serving = false;
@@ -1050,7 +1052,10 @@ async function bootLocked(
       ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
       // Read-only and for every plugin: the same meter `/healthz` reports, never ticked (so 0) unless the root asked.
-      loop: { blockedMs: () => (adapters.loopHealth === undefined ? 0 : loop.blockedMs()) },
+      loop: {
+        blockedMs: () => (adapters.loopHealth === undefined ? 0 : loop.blockedMs()),
+        observe: observer => (adapters.loopHealth === undefined ? (): void => {} : loop.observe(observer)),
+      },
       // `send` goes through this plugin's OWN guarded fetch, to the exact hosts its manifest names (`./secrets.ts`).
       secrets: ownSecretsPort(
         manifest.permissions?.secrets ?? [],
