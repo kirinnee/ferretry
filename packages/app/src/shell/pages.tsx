@@ -259,11 +259,14 @@ export function DeviceSettingsPage() {
       <SettingGroup label="Storage">
         <CachedDataSetting onClear={async () => scroll.clear()} />
       </SettingGroup>
-      <p>
-        Layout: <code>{layout.layout.id}</code>
-        {layout.kind === 'refused'
-          ? ` (the layout "${layout.refused}" was refused: ${layout.issues[0]?.message ?? ''})`
-          : ''}
+      {/* Which layout is in use is a fact of its own, said quietly under the groups, not as a bare line of page text. */}
+      <p className="m-0 px-1 pt-3 text-meta text-muted" data-layout-in-use="">
+        Layout in use: <code>{layout.layout.id}</code>
+        {layout.kind === 'refused' ? (
+          <span className="text-warn" role="status">
+            {` — the layout "${layout.refused}" was refused: ${layout.issues[0]?.message ?? 'a name it holds is not installed'}`}
+          </span>
+        ) : null}
       </p>
     </section>
   );

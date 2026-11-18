@@ -77,3 +77,11 @@ describe('Settings › This device', () => {
     expect(document.documentElement.dataset.motion).toBeUndefined();
   });
 });
+
+describe('Settings › This device › the layout line', () => {
+  test('names the layout in use as a quiet line under the groups, not bare page text', async () => {
+    await boot();
+    const line = page().querySelector('[data-layout-in-use]');
+    expect(line?.textContent).toContain('Layout in use: default');
+  });
+});
