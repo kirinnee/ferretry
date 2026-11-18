@@ -150,14 +150,15 @@ function AxisControl({
           />
         </span>
       </button>
-      {/* A passkey is the same sentence on every row, and the panel above already says it once: a row shows the short
-          badge, and the sentence stays for a screen reader (it is what the switch is described by). */}
+      {/* The same few sentences repeat on every row (a passkey; fixed on the host; only at the machine), and the panels
+          above already say them once: a row shows the short badge, and the sentence stays for a screen reader (it is what
+          the switch is described by). A refusal that is a fault is the one row-specific thing, so it is shown whole. */}
       <p
         id={describedBy}
         className={cn('m-0 mt-1 rounded-control border px-2 py-1 text-meta leading-base', TONE_CLASS[reason.tone])}
         data-grant-axis-reason={`${entry.capability}.${axis}`}
       >
-        {reason.offersStepUp ? (
+        {reason.offersStepUp || reason.tone !== 'fault' ? (
           <>
             <span aria-hidden="true">{reason.badge}</span>
             <span className="sr-only">{reason.explanation}</span>
@@ -247,12 +248,12 @@ function CapabilityCard({
           a document read afterwards. It is shown while the capability is still ON, because that is the
           only moment the warning can change what somebody does. */}
       {oneWay && entry.granted.use ? (
-        <p
-          className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
-          data-grant-one-way={entry.capability}
-        >
-          {remoteRevokeWarning(entry.capability)}
-        </p>
+        <details className="text-meta leading-base text-warn" data-grant-one-way={entry.capability}>
+          <summary className="cursor-pointer">Switching this off cannot be undone from here</summary>
+          <p className="m-0 mt-1 rounded-control border border-warn-border bg-warn-bg px-2 py-1">
+            {remoteRevokeWarning(entry.capability)}
+          </p>
+        </details>
       ) : null}
     </section>
   );
