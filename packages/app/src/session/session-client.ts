@@ -96,6 +96,9 @@ import { RELAY_SESSION_CONCLUDED_CLOSE_CODE, relayDataByteBudget } from '@ferret
 import { z } from 'zod';
 import { decodeCompressedAnswer } from './compression.ts';
 import { outgoingRequest } from './outgoing-request.ts';
+import { neverSentCopy, RelaySessionError } from './session-error.ts';
+
+export { RelaySessionError };
 
 /**
  * A device key replacing the one that opened this session (`docs/design/zero-trust.md` B6): the NEW key's SPKI and
@@ -714,24 +717,6 @@ const streamFrame = (message: { readonly text: string } | { readonly bytes: stri
 };
 
 /**
- * Thrown for every refusal this side makes or is told about, carrying the close code.
- *
- * `endedWhileServing` is true only when the session had already accepted this device and was serving requests when it
- * ended. It is what lets the client layer tell a `4440` that raced another request's `endsSession` (no outcome for THIS
- * request: a carrier-style loss) from a `4440` before acceptance, which §14 calls a protocol violation.
- */
-export class RelaySessionError extends Error {
-  constructor(
-    message: string,
-    readonly code: number,
-    readonly endedWhileServing: boolean = false,
-  ) {
-    super(message);
-    this.name = 'RelaySessionError';
-  }
-}
-
-/**
  * One end-to-end conversation with one daemon, over one rendezvous socket.
  *
  * The instance is single-use and single-session, deliberately: §9 says a session
@@ -989,7 +974,8 @@ export class RelayClientSession {
     signal?: AbortSignal,
   ): Promise<RelayTunnelAnswer> {
     const message = outgoingRequest(asked, this.deps.attended);
-    if (this.#failure !== undefined) throw this.#failure;
+    // A session that had already ended carried nothing of this request: it is told so, sharing the first failure's words.
+    if (this.#failure !== undefined) throw neverSentCopy(this.#failure);
     signal?.throwIfAborted();
     if (this.#phase !== 'serving') {
       throw new RelaySessionError('this relay session is not serving requests', RELAY_CLOSE_CODES.protocolError);
@@ -1788,11 +1774,18 @@ export class RelayClientSession {
     this.#phase = 'ended';
     const failure = new RelaySessionError(reason, code, serving);
     this.#failure = failure;
+    // A request whose head is still queued (and not being sealed) never left: its failure says so. A head already sealed
+    // or sent may be in the daemon's hands, so it gets the plain failure.
+    const unsent = new Set(
+      this.#waiting
+        .filter(record => record.request !== undefined && !record.part && record !== this.#sealing)
+        .map(record => record.request),
+    );
     this.#waiting.length = 0;
     this.#waitingRequests = 0;
     for (const cancel of this.#queueTimers.values()) cancel();
     this.#queueTimers.clear();
-    for (const [, waiting] of this.#pending) waiting.reject(failure);
+    for (const [id, waiting] of this.#pending) waiting.reject(unsent.has(id) ? neverSentCopy(failure) : failure);
     this.#pending.clear();
     this.#refused?.(failure);
     // A pairing session's caller is waiting on `paired()`, not on `ready()`. Settling only the one

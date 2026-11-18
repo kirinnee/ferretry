@@ -12,12 +12,13 @@
  */
 
 import { connectionSocketUrl } from './connection.ts';
+import { RELAY_KEEPALIVE_DEADLINE_MS, RELAY_KEEPALIVE_INTERVAL_MS } from '../../../contract/index.ts';
 import { HEARTBEAT_GRACE_SECONDS, RELAY_FEATURES_PARAM } from '@ferretry/kernel/wire';
 import type { DaemonRelayConfig } from '../runtime/relay-config.ts';
 
 /**
  * How long silence is tolerated before the clock alone condemns a socket. This is the BACKSTOP, not
- * the detector: the ping/pong deadline below finds a dead path within 30 seconds, and this rule is
+ * the detector: the ping/pong deadline below finds a dead path within 10 seconds, and this rule is
  * what finds one when the timers themselves did not run — a laptop that slept through its own ping,
  * woken to a tick that fires late. Seeing 45 seconds of silence on that first tick drops the socket
  * at once instead of pinging a corpse and waiting another ten seconds.
@@ -29,7 +30,7 @@ export const RELAY_SILENCE_LIMIT_MS = HEARTBEAT_GRACE_SECONDS * 1_000;
  * cadence conforms, and the edge answers `fy-ping` without waking the Durable Object: it costs the
  * deployment nothing.
  */
-export const RELAY_KEEPALIVE_MS = 20_000;
+export const RELAY_KEEPALIVE_MS = RELAY_KEEPALIVE_INTERVAL_MS;
 
 /**
  * The address actually dialled: the rendezvous route, asking for `claim-probe` and `claim-handover` (§5).
@@ -48,7 +49,7 @@ export const RELAY_CONNECT_DEADLINE_MS = 15_000;
 
 /** After a ping, how long the socket may stay entirely silent before it is declared dead. ANY
  *  inbound message counts as an answer — a socket carrying traffic is not dead. */
-export const RELAY_PONG_DEADLINE_MS = 10_000;
+export const RELAY_PONG_DEADLINE_MS = RELAY_KEEPALIVE_DEADLINE_MS;
 
 /** The redial schedule: the first redial is immediate, then equal jitter on `BASE × 2^(attempt − 1)`. */
 const RELAY_REDIAL_BASE_MS = 500;

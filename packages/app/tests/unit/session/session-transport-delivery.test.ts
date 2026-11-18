@@ -72,7 +72,13 @@ async function scripted(script: readonly ('answer' | 'dead' | 'dies')[]) {
       close() {},
     };
   };
-  return new SessionTransport({ crypto: relayCrypto, daemonId: identity.daemonId, device: device.claim, dial });
+  const transport = new SessionTransport({
+    crypto: relayCrypto,
+    daemonId: identity.daemonId,
+    device: device.claim,
+    dial,
+  });
+  return Object.assign(transport, { dials: () => dials });
 }
 
 const failureOf = (transport: SessionTransport, id: string | undefined): Promise<unknown> =>
@@ -121,6 +127,88 @@ describe('u2-11 what a failed request says about whether it left', () => {
     const transport = await scripted(['dies', 'dead']);
     expect(carrierFateOf(await failureOf(transport, undefined))).toBe('unknown');
     expect(carrierFateOf(await failureOf(transport, undefined))).toBe('unsent');
+    transport.close();
+  });
+});
+
+const attempt = (transport: SessionTransport, method: string): Promise<{ answered: boolean; failure?: unknown }> =>
+  transport.request({ method, path: '/v1/thing', ...(method === 'GET' ? {} : { body: { x: 1 } }) }).then(
+    () => ({ answered: true }),
+    (failure: unknown) => ({ answered: false, failure }),
+  );
+
+describe('a request whose carrier died is sent again only when that is safe', () => {
+  test('a read that died after it was sent is sent again once, on a fresh session', async () => {
+    const transport = await scripted(['dies', 'answer']);
+    expect((await attempt(transport, 'GET')).answered).toBe(true);
+    expect(transport.dials()).toBe(2);
+    transport.close();
+  });
+
+  test('a HEAD is a read too', async () => {
+    const transport = await scripted(['dies', 'answer']);
+    expect((await attempt(transport, 'HEAD')).answered).toBe(true);
+    transport.close();
+  });
+
+  test('a press that died after it was sent is NEVER sent again: it is lost, and in doubt', async () => {
+    const transport = await scripted(['dies', 'answer']);
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      const fresh = await scripted(['dies', 'answer']);
+      const result = await attempt(fresh, method);
+      expect(result.answered).toBe(false);
+      expect(carrierFateOf(result.failure)).toBe('unknown');
+      expect(fresh.dials()).toBe(1);
+      fresh.close();
+    }
+    transport.close();
+  });
+
+  test('a read that dies a second time is lost: one resend, never two', async () => {
+    const transport = await scripted(['dies', 'dies', 'answer']);
+    const result = await attempt(transport, 'GET');
+    expect(result.answered).toBe(false);
+    expect(carrierFateOf(result.failure)).toBe('unknown');
+    expect(transport.dials()).toBe(2);
+    transport.close();
+  });
+
+  test('a press whose session never opened is proved unsent: sent again once, any method', async () => {
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      const transport = await scripted(['dead', 'answer']);
+      expect((await attempt(transport, method)).answered).toBe(true);
+      expect(transport.dials()).toBe(2);
+      transport.close();
+    }
+  });
+
+  test('a press whose session never opens twice is lost, and still proved unsent', async () => {
+    const transport = await scripted(['dead', 'dead', 'answer']);
+    const result = await attempt(transport, 'POST');
+    expect(result.answered).toBe(false);
+    expect(carrierFateOf(result.failure)).toBe('unsent');
+    expect(transport.dials()).toBe(2);
+    transport.close();
+  });
+
+  test('a read that was sent, then found its fresh session dead, stays in doubt', async () => {
+    const transport = await scripted(['dies', 'dead']);
+    const result = await attempt(transport, 'GET');
+    expect(result.answered).toBe(false);
+    expect(carrierFateOf(result.failure)).toBe('unknown');
+    transport.close();
+  });
+
+  test('a caller that gave up is not answered with a resend', async () => {
+    const transport = await scripted(['dies', 'answer']);
+    const controller = new AbortController();
+    controller.abort(new Error('gave up'));
+    const result = await transport.request({ method: 'GET', path: '/v1/thing', signal: controller.signal }).then(
+      () => 'answered',
+      () => 'failed',
+    );
+    expect(result).toBe('failed');
+    expect(transport.dials()).toBeLessThanOrEqual(1);
     transport.close();
   });
 });

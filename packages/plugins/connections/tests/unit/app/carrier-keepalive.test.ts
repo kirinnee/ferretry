@@ -17,6 +17,7 @@ import {
   type WalkObserver,
 } from '../../../app/carriers/carrier-socket.ts';
 import type { CarrierSessionEnd } from '../../../app/lib/carrier-drops.ts';
+import { RELAY_KEEPALIVE_MS, RELAY_PONG_DEADLINE_MS } from '../../../daemon/lib/relay/carrier.ts';
 
 class Socket implements RelayCarrierSocket {
   onOpen: (() => void) | null = null;
@@ -39,9 +40,13 @@ const timers = () => {
   const armed: { delay: number; run: () => void; ran: boolean }[] = [];
   return {
     after: (delay: number, run: () => void) => void armed.push({ delay, run, ran: false }),
-    /** Fires the NEWEST armed, not-yet-fired timer with this delay. */
-    fire: (delay: number): void => {
-      const entry = [...armed].reverse().find(item => item.delay === delay && !item.ran);
+    /**
+     * Fires the NEWEST armed, not-yet-fired timer with this delay. The keepalive interval and its deadline share a delay
+     * (5 s each), and a tick arms the deadline BEFORE it re-arms the interval, so `fireDeadline` takes the oldest.
+     */
+    fire: (delay: number, which: 'newest' | 'oldest' = 'newest'): void => {
+      const ordered = which === 'newest' ? [...armed].reverse() : armed;
+      const entry = ordered.find(item => item.delay === delay && !item.ran);
       if (entry === undefined) throw new Error(`no armed ${String(delay)} ms timer`);
       entry.ran = true;
       entry.run();
@@ -96,17 +101,24 @@ async function openSession(options: { readonly accepted?: boolean } = {}) {
 }
 
 describe('the browser keepalive', () => {
-  test('R88 this side pings every 20 s and closes 4408 when nothing arrives within 10 s', async () => {
+  test('both ends read ONE cadence: the daemon and the browser ping at the same interval and wait the same deadline', () => {
+    expect(KEEPALIVE_INTERVAL_MS).toBe(RELAY_KEEPALIVE_MS);
+    expect(KEEPALIVE_DEADLINE_MS).toBe(RELAY_PONG_DEADLINE_MS);
+  });
+
+  test('R88 this side pings every 5 s and closes 4408 when nothing arrives within 5 s', async () => {
     const { socket, hand, closes } = await openSession();
-    expect(KEEPALIVE_INTERVAL_MS).toBe(20_000);
-    expect(KEEPALIVE_DEADLINE_MS).toBe(10_000);
+    expect(KEEPALIVE_INTERVAL_MS).toBe(5_000);
+    expect(KEEPALIVE_DEADLINE_MS).toBe(5_000);
+    // A dead flow is found within one interval plus one deadline: inside 10 s.
+    expect(KEEPALIVE_INTERVAL_MS + KEEPALIVE_DEADLINE_MS).toBeLessThanOrEqual(10_000);
     expect(hand.pending(KEEPALIVE_INTERVAL_MS)).toBe(true);
 
     hand.fire(KEEPALIVE_INTERVAL_MS);
     expect(socket.texts).toEqual(['fy-ping']);
     expect(hand.pending(KEEPALIVE_DEADLINE_MS)).toBe(true);
     // Nothing arrives; the deadline runs on time.
-    hand.fire(KEEPALIVE_DEADLINE_MS);
+    hand.fire(KEEPALIVE_DEADLINE_MS, 'oldest');
     expect(socket.closed?.code).toBe(RELAY_CLOSE_CODES.heartbeatTimeout);
     expect(socket.closed?.code).toBe(4408);
     expect(closes.map(end => end.code)).toEqual([4408]);
@@ -116,7 +128,7 @@ describe('the browser keepalive', () => {
     const { socket, hand, closes } = await openSession();
     hand.fire(KEEPALIVE_INTERVAL_MS);
     socket.onText?.('fy-pong');
-    hand.fire(KEEPALIVE_DEADLINE_MS);
+    hand.fire(KEEPALIVE_DEADLINE_MS, 'oldest');
     expect(socket.closed).toBeNull();
     expect(closes).toEqual([]);
   });
@@ -152,9 +164,9 @@ describe('the browser keepalive', () => {
   test('R89 a deadline that fires more than 2 s late is forgiven once with a 4 s re-ping', async () => {
     const { socket, hand, clock, closes } = await openSession();
     hand.fire(KEEPALIVE_INTERVAL_MS);
-    // The page was frozen: the 10 s deadline runs a minute after its time.
+    // The page was frozen: the 5 s deadline runs a minute after its time.
     clock.at += KEEPALIVE_DEADLINE_MS + 60_000;
-    hand.fire(KEEPALIVE_DEADLINE_MS);
+    hand.fire(KEEPALIVE_DEADLINE_MS, 'oldest');
 
     expect(socket.closed).toBeNull();
     expect(closes).toEqual([]);
@@ -168,7 +180,7 @@ describe('the browser keepalive', () => {
     const { socket, hand, clock, closes } = await openSession();
     hand.fire(KEEPALIVE_INTERVAL_MS);
     clock.at += KEEPALIVE_DEADLINE_MS + 60_000;
-    hand.fire(KEEPALIVE_DEADLINE_MS);
+    hand.fire(KEEPALIVE_DEADLINE_MS, 'oldest');
     clock.at += LIVENESS_CHECK_DEADLINE_MS + 60_000;
     hand.fire(LIVENESS_CHECK_DEADLINE_MS);
 
@@ -180,7 +192,7 @@ describe('the browser keepalive', () => {
     const { socket, hand, clock } = await openSession();
     hand.fire(KEEPALIVE_INTERVAL_MS);
     clock.at += KEEPALIVE_DEADLINE_MS + HEARTBEAT_LATE_TOLERANCE_MS;
-    hand.fire(KEEPALIVE_DEADLINE_MS);
+    hand.fire(KEEPALIVE_DEADLINE_MS, 'oldest');
     expect(socket.closed?.code).toBe(4408);
   });
 
@@ -188,13 +200,13 @@ describe('the browser keepalive', () => {
     const { socket, hand, clock, closes } = await openSession();
     hand.fire(KEEPALIVE_INTERVAL_MS);
     clock.at += KEEPALIVE_DEADLINE_MS + 60_000;
-    hand.fire(KEEPALIVE_DEADLINE_MS);
+    hand.fire(KEEPALIVE_DEADLINE_MS, 'oldest');
     socket.onText?.('fy-pong');
 
     // The next ping's deadline is late as well: forgiven again, not closed.
     hand.fire(KEEPALIVE_INTERVAL_MS);
     clock.at += KEEPALIVE_DEADLINE_MS + 60_000;
-    hand.fire(KEEPALIVE_DEADLINE_MS);
+    hand.fire(KEEPALIVE_DEADLINE_MS, 'oldest');
     expect(socket.closed).toBeNull();
     expect(closes).toEqual([]);
     expect(hand.pending(LIVENESS_CHECK_DEADLINE_MS)).toBe(true);

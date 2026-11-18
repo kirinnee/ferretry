@@ -486,13 +486,14 @@ an idle rendezvous would stop being free. A socket with no evidence of life for
 #### Endpoint keepalive (non-normative)
 
 "At least every `heartbeatSeconds`" is a floor, not a cadence, and the reference endpoints ping more
-often. Both the daemon and the browser send `fy-ping` every **20 seconds** and treat a socket that has
-delivered nothing — no pong, no frame — within **10 seconds** of a ping as dead: they close it with
+often. Both the daemon and the browser send `fy-ping` every **5 seconds** and treat a socket that has
+delivered nothing — no pong, no frame — within **5 seconds** of a ping as dead, so a flow the path has
+reset is found in at most 10 seconds: they close it with
 `4408` and dial again. Two reasons. Mobile carriers and NAT devices can forget an idle mapping in well under
 a minute, and a mapping that is forgotten never sends a close, so an endpoint waiting for the
 rendezvous's own `× 1.5` eviction would sit on a dead socket for most of a minute. And because the
 auto-responder answers `fy-ping` without waking the Durable Object, the faster cadence costs the
-rendezvous nothing. A browser also runs an immediate check — one ping, a **4-second** deadline — on
+rendezvous nothing. The daemon's `claim-probe` question (§5) is a separate, slower cadence — every **20 seconds** — because it does wake the object. A browser also runs an immediate check — one ping, a **4-second** deadline — on
 every held session when the page comes back to the foreground, the device comes back online, or the
 network type changes, so a phone that wakes with a dead socket learns so in seconds. None of this
 changes the wire: a peer that pings only every thirty seconds is still conforming, and the
@@ -2136,6 +2137,19 @@ because one session is one queue, the reference client sends a body large enough
 **second request session** of its own, so the reads every panel polls never wait behind an upload: a
 poll that missed its deadline there would retire the session carrying the uploads. Nothing on the wire
 changed; it is one more session per device.
+
+**A request whose carrier died is sent again only when that is safe, and only once.** A reset flow is learned
+by using it, so a press can be the first thing to find a dead socket. The reference client resends, on a fresh
+session (opened by the next attempt itself, about a second):
+
+- **any method**, when it is proved the request never reached the daemon — no session opened, or the session
+  ended while the request was still queued (its head record never sealed or sent);
+- **a `GET` or `HEAD`** otherwise, because asking a read twice is harmless;
+- **never a `POST`, `PUT`, `PATCH` or `DELETE`** on a guess: it may have been done, so the person is told the
+  connection was lost before it answered and decides.
+
+The resend is a single one: a second failure always ends in the "lost" sentence, and a caller that has already
+given up is never answered with a resend. Nothing on the wire changed.
 
 **A daemon bounds its WHOLE answers, not their parts.** The reference daemon ends a session when more
 than one credit window of whole answers is waiting for the browser's credit, because answers pile up

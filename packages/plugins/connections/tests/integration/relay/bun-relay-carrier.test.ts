@@ -3,7 +3,7 @@
  *
  * What is real: the socket (Bun's WebSocket, redialled by the carrier's own factory), the server on `127.0.0.1:0`,
  * the relay link and every wire frame in both directions. What is a stand-in: the rendezvous's decisions (a scripted
- * server says what each connection is told), the signer, and the CLOCK — the carrier's keepalive is twenty seconds and
+ * server says what each connection is told), the signer, and the CLOCK — the carrier's keepalive is five seconds (its claim probe twenty) and
  * its connect deadline fifteen, so time is a fake the test advances while the sockets run on the real event loop.
  * Nothing here waits for time to pass: a test waits for an observable event, bounded by `waitFor`'s safety net.
  */
@@ -363,12 +363,18 @@ describe('the relay carrier over real sockets', () => {
     );
     should(h.carrier.status().detail).equal(undefined);
 
-    // Act — one keepalive round: the ping and the probe go out, the answers come back, the deadline passes.
-    const before = h.tapAt(0).messages;
-    h.clock.advance(20_000);
-    await waitFor(() => peer.pings === 1 && peer.probes === 1, 'the keepalive ping and the claim probe');
-    await h.delivered(0, before + 2);
-    h.clock.advance(10_000);
+    // Act — four five-second keepalive rounds, each answered before the next: a ping every round, the claim probe only on
+    // the fourth (20 s), because the probe wakes the rendezvous and the ping does not.
+    let seen = h.tapAt(0).messages;
+    for (let round = 1; round <= 4; round += 1) {
+      h.clock.advance(5_000);
+      await waitFor(() => peer.pings === round, `keepalive ping ${String(round)}`);
+      const answers = round === 4 ? 2 : 1;
+      await h.delivered(0, seen + answers);
+      seen += answers;
+      should(peer.probes).equal(round === 4 ? 1 : 0);
+    }
+    h.clock.advance(4_000);
 
     // Assert — the socket that was answered is kept.
     should(peer.closed).equal(undefined);
@@ -408,16 +414,16 @@ describe('the relay carrier over real sockets', () => {
     peer.behaviour.pong = false;
 
     // Act — the ping goes out and nothing comes back before the deadline.
-    h.clock.advance(20_000);
+    h.clock.advance(5_000);
     await waitFor(() => peer.pings === 1, 'the keepalive ping');
-    h.clock.advance(10_000);
+    h.clock.advance(5_000);
 
     // Assert — read BEFORE the event loop turns. The first redial is immediate, so the advance that fired the deadline
     // also ran it: dial 2 is already out, and once it claims, `carrying` rightly clears the detail. Nothing it does
     // can land until this test yields, so here the status still says why dial 1 was dropped.
     should(h.carrier.status().detail).match(/stopped answering/u);
     should(h.lines).containEql(
-      'relay https://relay.example: liveness: no reply within 10.0s of the ping — dropping the socket',
+      'relay https://relay.example: liveness: no reply within 5.0s of the ping — dropping the socket',
     );
     should(h.taps).have.length(2);
     await waitFor(() => peer.closed !== undefined, 'the rendezvous to see the daemon drop the socket');
@@ -458,10 +464,14 @@ describe('the relay carrier over real sockets', () => {
     peer.behaviour.held = false;
 
     // Act
-    const before = h.tapAt(0).messages;
-    h.clock.advance(20_000);
-    await waitFor(() => peer.pings === 1 && peer.probes === 1, 'the keepalive ping and the claim probe');
-    await h.delivered(0, before + 1);
+    let seen = h.tapAt(0).messages;
+    for (let round = 1; round <= 4; round += 1) {
+      h.clock.advance(5_000);
+      await waitFor(() => peer.pings === round, `keepalive ping ${String(round)}`);
+      await h.delivered(0, seen + 1);
+      seen += 1;
+    }
+    should(peer.probes).equal(1);
     h.clock.advance(10_000);
 
     // Assert — read before the event loop turns: the immediate redial already went out with this advance, and its
