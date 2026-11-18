@@ -69,17 +69,31 @@ const SIZES = [
   { name: '390', width: 390, height: 640, phone: true },
 ] as const;
 
-/** Resolve any CSS colour (rgb, color-mix, color()) to sRGB bytes through a canvas, in the page's own engine. */
-const channels = async (tab: Page, css: string): Promise<readonly [number, number, number]> =>
-  await tab.evaluate(value => {
-    const context = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
-    if (context === null) throw new Error('no canvas');
-    context.clearRect(0, 0, 1, 1);
-    context.fillStyle = value;
-    context.fillRect(0, 0, 1, 1);
-    const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
-    return [r ?? 0, g ?? 0, b ?? 0] as const;
-  }, css);
+/**
+ * Any CSS colour (rgb, color-mix, color()) as the sRGB bytes it shows, through a canvas in the page's own engine. A translucent one (the menu's selected row is a wash of ink, `--select-fill`) is
+ * laid over `backdrop` first: read alone, its RGB is the bare ink and says nothing about what a ring sits on.
+ */
+const channels = async (
+  tab: Page,
+  css: string,
+  backdrop?: readonly [number, number, number],
+): Promise<readonly [number, number, number]> =>
+  await tab.evaluate(
+    ([value, under]) => {
+      const context = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+      if (context === null) throw new Error('no canvas');
+      context.clearRect(0, 0, 1, 1);
+      if (under !== null) {
+        context.fillStyle = `rgb(${under.join(',')})`;
+        context.fillRect(0, 0, 1, 1);
+      }
+      context.fillStyle = value as string;
+      context.fillRect(0, 0, 1, 1);
+      const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+      return [r ?? 0, g ?? 0, b ?? 0] as const;
+    },
+    [css, backdrop ?? null] as const,
+  );
 
 const luminance = ([r, g, b]: readonly [number, number, number]): number => {
   const lin = (v: number) => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4);
@@ -259,7 +273,7 @@ describe('the shared menu in every theme', () => {
           return getComputedStyle(focused).backgroundColor;
         });
         expect(
-          contrast(ringColour, await channels(tab, checked)),
+          contrast(ringColour, await channels(tab, checked, surface)),
           `${theme}: the ring against a checked row`,
         ).toBeGreaterThanOrEqual(3);
         await tab.evaluate(() => document.activeElement?.removeAttribute('aria-checked'));

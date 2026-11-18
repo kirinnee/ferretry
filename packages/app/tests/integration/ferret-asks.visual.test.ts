@@ -168,10 +168,13 @@ describe('a ferret with a pending ask', () => {
 describe('the top nav touch target', () => {
   it('is 44px tall at phone width and 32px at a desk, when the layout puts the nav on top', async () => {
     for (const viewport of VIEWPORTS) {
-      const { tab, close } = await open(viewport, 'light', 'agenda=on', '.fy-nav');
+      const { tab, close } = await open(viewport, 'light', 'agenda=on', '[data-session-input]');
       try {
         // The default layout puts the nav on top at a desk; at phone width it is the bottom bar. Force the row either way.
+        // The chat page itself puts the bar of places away behind its one slim row (`data-chat-chrome`), so the frame is
+        // taken off the chat chrome first: it is the nav's own row that is measured, not the chat's.
         const height = await tab.evaluate(() => {
+          document.querySelector('.fy-frame')?.removeAttribute('data-chat-chrome');
           const nav = document.querySelector('.fy-nav');
           nav?.classList.add('fy-nav--top');
           nav?.classList.remove('fy-nav--bottom');
