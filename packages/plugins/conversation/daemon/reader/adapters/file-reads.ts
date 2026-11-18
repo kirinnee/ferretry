@@ -40,6 +40,16 @@ export type EntriesFallback = SessionTranscriptTail &
   SessionTranscriptSearch &
   MessageRowSource;
 
+/**
+ * How long a held handle stays proved to be the ferret's transcript without asking the harness again. The harness's
+ * proof (which file the ferret's conversation names) costs several fenced reads, and every read asked it again; a
+ * change of conversation inside this moment is the only thing the memory can miss, and the handle's own stat still
+ * refuses a file that was replaced or removed.
+ */
+const HELD_PROOF_MS = 2_000;
+/** The most ferrets whose proof is remembered. */
+const MAX_PROVED = 512;
+
 type Located =
   | { readonly kind: 'unresolved' }
   | { readonly kind: 'unreadable' }
@@ -75,10 +85,12 @@ export class FileTranscriptReads
   readonly #index: ConversationIndex;
   readonly #scanner: BytesRecordScanner;
   readonly #tails: TranscriptTailCache;
+  /** Per ferret, the token its held handle was proved under, when, and in which generation (see {@link HELD_PROOF_MS}). */
+  readonly #proved = new Map<string, { readonly token: string; readonly at: number; readonly generation: number }>();
 
   constructor(
     private readonly open: TranscriptOpener,
-    clock: TranscriptClock,
+    private readonly clock: TranscriptClock,
     private readonly fallback?: EntriesFallback,
   ) {
     const claude = new BytesTranscriptSource(new ClaudeTranscriptParser(), this.runtime, clock);
@@ -102,6 +114,8 @@ export class FileTranscriptReads
   async #located(ferret: string): Promise<Located> {
     // Captured BEFORE the harness is asked: a release (the ferret stopped) while it opens makes this handle a late one.
     const generation = this.runtime.generation(ferret);
+    const reused = await this.#reuse(ferret, generation);
+    if (reused !== undefined) return reused;
     const opened = await this.open(ferret as FerretId);
     if (opened === 'unsupported') return { kind: this.fallback === undefined ? 'unresolved' : 'unsupported' };
     if (opened === undefined) return { kind: 'unresolved' };
@@ -111,11 +125,57 @@ export class FileTranscriptReads
     const held = this.runtime.handle(token);
     const stat = await held?.stat().catch(() => undefined);
     // A release during the stat has already closed the handle: nothing of this read may go on through it.
-    if (held === undefined || stat === undefined || this.runtime.released(ferret, generation))
+    if (held === undefined || stat === undefined || this.runtime.released(ferret, generation)) {
+      this.#proved.delete(ferret);
       return { kind: 'unreadable' };
+    }
+    this.#remember(ferret, token, generation);
     return {
       kind: 'found',
       token,
+      format: held.format,
+      source: this.#sources[held.format],
+      handle: held,
+      size: stat.size,
+    };
+  }
+
+  #nowMs(): number {
+    return Date.parse(this.clock.now());
+  }
+
+  #remember(ferret: string, token: string, generation: number): void {
+    this.#proved.delete(ferret);
+    this.#proved.set(ferret, { token, at: this.#nowMs(), generation });
+    for (const oldest of this.#proved.keys()) {
+      if (this.#proved.size <= MAX_PROVED) break;
+      this.#proved.delete(oldest);
+    }
+  }
+
+  /**
+   * The handle already held for the ferret, when it was proved to be the ferret's transcript a moment ago: the handle's
+   * own stat proves the NAME still reaches the very file it holds on every ask (a replaced or removed file answers
+   * nothing and a fresh open follows), so only a ferret that switched to ANOTHER conversation is seen up to
+   * {@link HELD_PROOF_MS} late. Without this every ask opened a new handle, which the runtime then closed as a duplicate.
+   */
+  async #reuse(ferret: string, generation: number): Promise<Located | undefined> {
+    const proved = this.#proved.get(ferret);
+    if (proved === undefined) return undefined;
+    const age = this.#nowMs() - proved.at;
+    if (proved.generation !== generation || !(age >= 0 && age < HELD_PROOF_MS)) {
+      this.#proved.delete(ferret);
+      return undefined;
+    }
+    const held = this.runtime.handle(proved.token);
+    const stat = await held?.stat().catch(() => undefined);
+    if (held === undefined || stat === undefined || this.runtime.released(ferret, generation)) {
+      this.#proved.delete(ferret);
+      return undefined;
+    }
+    return {
+      kind: 'found',
+      token: proved.token,
       format: held.format,
       source: this.#sources[held.format],
       handle: held,

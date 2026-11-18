@@ -127,7 +127,7 @@ const entries: TranscriptEntry[] = [
   { id: 'e2', at: '2026-02-01T09:00:02.000Z' as Instant, role: 'assistant', text: 'entries only reply' },
 ];
 
-const reader = (disk: Disk) =>
+const reader = (disk: Disk, now: () => number = () => 0) =>
   registerReader({
     bytes: disk.open,
     transcripts: async () => ({
@@ -148,7 +148,7 @@ const reader = (disk: Disk) =>
       redact: async text => mask(text),
       batch: async work => work({ text: mask, data: value => JSON.parse(mask(JSON.stringify(value))) as unknown }),
     },
-    now: () => 0,
+    now,
   });
 
 const call = (query: Record<string, string> = {}, params: Record<string, string> = {}) =>
@@ -350,5 +350,41 @@ describe('a ferret’s transcript read from the harness bytes', () => {
 
     expect(before).not.toContain('deployed using');
     expect(after).toContain('deployed using [redacted]');
+  });
+
+  test('asks within a moment reuse the held handle; a replaced file, a removed one and a later moment open afresh', async () => {
+    const disk = new Disk();
+    disk.put(conversation().slice(0, 2));
+    let at = 0;
+    const { routes } = reader(disk, () => at);
+
+    await routes[LOGS](call());
+    at += 500;
+    await routes[LOGS](call());
+    at += 500;
+    await routes[LOGS](call());
+    // One open served three asks, and nothing was opened only to be closed as a duplicate.
+    expect(disk.handles).toHaveLength(1);
+    expect(disk.handles[0]?.closed).toBe(false);
+
+    // The file was replaced: the held handle answers nothing, so the next ask opens the new one and reads IT.
+    disk.put(conversation());
+    at += 100;
+    expect((await routes[LOGS](call())).body).toContain('deployed using [redacted]');
+    expect(disk.handles).toHaveLength(2);
+
+    // The file is gone: unresolved at once, not served from the handle held before.
+    disk.clear();
+    at += 100;
+    expect(await refusal(routes[LOGS](call()))).toBeDefined();
+
+    // After the moment the harness is asked again even when nothing changed.
+    disk.put(conversation());
+    at += 100;
+    await routes[LOGS](call());
+    const opened = disk.handles.length;
+    at += 5_000;
+    await routes[LOGS](call());
+    expect(disk.handles.length).toBe(opened + 1);
   });
 });

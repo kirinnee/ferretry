@@ -72,6 +72,8 @@ afterEach(async () => {
 });
 const T = '2026-11-01T10:00:00.000Z' as Instant;
 
+let elapsed = 0;
+
 function build(
   options: {
     located?: boolean;
@@ -90,6 +92,8 @@ function build(
     selected?: (runtime: string | undefined) => Promise<{ settings: ReadonlySet<string>; hooks: ReadonlySet<string> }>;
     /** Roots in place of the real ones (a stub that refuses or throws, for the doubt branches). */
     roots?: ReturnType<typeof rootsPortFor>;
+    /** The clock's milliseconds; default: every ask is a long time after the last (no memory of a conversation's file). */
+    nowMs?: () => number;
   } = {},
 ) {
   /** The roots the harness is built on; default: the kernel's own over the fixture home. */
@@ -132,7 +136,11 @@ function build(
         } as SpawnResult;
       },
     } as never,
-    clock: { sleep: async () => {}, after: () => () => {} } as never,
+    clock: {
+      sleep: async () => {},
+      after: () => () => {},
+      nowMs: options.nowMs ?? (() => (elapsed += 60_000)),
+    } as never,
     redaction: {
       read: async (fn: (scope: unknown) => unknown) =>
         await fn({
@@ -1110,6 +1118,26 @@ describe('ClaudeHarness', () => {
     await rm(file);
     await writeFile(file, `${work}\n${work}\n${done}\n${message('u2')}\n`);
     expect(await kinds()).toEqual(['work', 'work', 'message', 'turn', 'message']);
+  });
+
+  test('the conversation a home names is remembered briefly, but the transcript is looked at on every ask', async () => {
+    let at = 1_000;
+    const { harness, writeHome } = build({ nowMs: () => at });
+    await harness.start(spec(), runner({}), {} as never);
+    const message = (id: string) => JSON.stringify({ type: 'user', uuid: id, timestamp: T, message: { content: id } });
+    await writeHome('projects/-work/conv-1.jsonl', `${message('u1')}\n`);
+    const first = await harness.transcriptStamp(FERRET);
+    expect(first?.file).toEndWith('conv-1.jsonl');
+    // Inside the moment: a transcript that grew is stamped with its new size (the stat is never remembered)...
+    await appendFile(join(HOME, 'projects/-work/conv-1.jsonl'), `${message('u2')}\n`);
+    at += 500;
+    const grown = await harness.transcriptStamp(FERRET);
+    expect(grown?.size).toBeGreaterThan(first?.size ?? 0);
+    // ...and one that is removed is no transcript at once, not after the moment.
+    await rm(join(HOME, 'projects/-work/conv-1.jsonl'));
+    at += 100;
+    expect(await harness.transcriptStamp(FERRET)).toBeUndefined();
+    expect(await harness.transcriptTail(FERRET, 10)).toEqual({ kind: 'unresolved' });
   });
 
   test('the live runtime switch is the one Claude switch, handed to every ferret and held per none', () => {

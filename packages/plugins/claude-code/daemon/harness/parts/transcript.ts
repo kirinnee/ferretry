@@ -29,8 +29,50 @@ const TAIL_READ_BYTES = 512 * 1024;
 /** How many ferrets' tail cursors are kept (each holds at most one window's records). */
 const MAX_CURSORS = 256;
 
+/** Which transcript file a ferret's conversation names, kept for {@link BINDING_MS} so the proof is not redone on every look. */
+interface Binding {
+  readonly home: RootHandle;
+  readonly file: FencedPath;
+  readonly at: number;
+}
+const BINDINGS = new WeakMap<ClaudeCore, Map<FerretId, Binding>>();
+/** The most ferrets' bindings kept per core. */
+const MAX_BINDINGS = 512;
+/**
+ * How long the conversation a ferret's home names (the id and the folder it was started in: the proof of WHICH file is
+ * the ferret's) is taken as unchanged. The turn watch, the live readout and the conversation reader each ask for the
+ * transcript several times a tick, and every ask read the home's identity file and walked the root again. The file's own
+ * stat is NEVER taken from the memory: a transcript that was removed, or replaced by anything but a plain file, is
+ * answered afresh at once, so only a conversation CHANGE (a restart under another id) can be seen up to this late.
+ */
+const BINDING_MS = 2_000;
+
 /** The exact transcript of the assigned id in its encoded cwd, including after a daemon restart; never one found by guessing. */
 async function transcriptFile(
+  core: ClaudeCore,
+  ferret: FerretId,
+): Promise<{ readonly home: RootHandle; readonly file: FencedPath; readonly stat: RootStat } | undefined> {
+  const bindings = BINDINGS.get(core) ?? new Map<FerretId, Binding>();
+  BINDINGS.set(core, bindings);
+  const now = core.deps.clock.nowMs();
+  const bound = bindings.get(ferret);
+  if (bound !== undefined && now - bound.at >= 0 && now - bound.at < BINDING_MS) {
+    const stat = await bound.home.stat(bound.file).catch(() => undefined);
+    if (stat?.kind === 'file') return { home: bound.home, file: bound.file, stat };
+  }
+  bindings.delete(ferret);
+  const found = await resolveTranscriptFile(core, ferret);
+  if (found !== undefined) {
+    bindings.set(ferret, { home: found.home, file: found.file, at: now });
+    for (const oldest of bindings.keys()) {
+      if (bindings.size <= MAX_BINDINGS) break;
+      bindings.delete(oldest);
+    }
+  }
+  return found;
+}
+
+async function resolveTranscriptFile(
   core: ClaudeCore,
   ferret: FerretId,
 ): Promise<{ readonly home: RootHandle; readonly file: FencedPath; readonly stat: RootStat } | undefined> {
