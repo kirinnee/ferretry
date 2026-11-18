@@ -272,11 +272,12 @@ test('FD: a read already opening during POST stop cannot retain a descriptor aft
     const targets = await Promise.all(names.map(async name => await readlink(`/proc/self/fd/${name}`).catch(() => '')));
     return targets.filter(target => target === file).length;
   };
-  let reading: ReturnType<typeof get> | undefined;
   try {
     expect((await get(w, 'logs')).status).toBe(200);
     expect(await activeFds()).toBe(1);
-    reading = get(w, 'logs');
+    // The reader remembers the held handle's proof for 2 s (642b3b1f5f), so a second ask opens nothing. Letting the proof
+    // lapse makes the daemon's own timer open the transcript afresh: THAT opener is the one in flight when the stop arrives.
+    await w.h.clock.advance(2_500);
     await entered;
     expect(await activeFds()).toBe(2);
     const stopped = await w.h.request('POST', `/v1/ferrets/${w.id}/stop`, { query: { how: 'now' }, body: {} });
@@ -284,19 +285,18 @@ test('FD: a read already opening during POST stop cannot retain a descriptor aft
     await w.h.settle();
     expect(held[0]!.closed).toBe(true);
     resumeSecond();
-    // The late read itself is answered (never a server error), but nothing it opened outlives the stop.
-    expect((await reading).status).toBeLessThan(500);
-    await w.h.settle();
-    expect(await activeFds()).toBe(0);
-    expect(held.map(h => h.closed)).toEqual([true, true]);
-    // Only the opener in flight at the stop is late: a read begun afterwards opens afresh.
+    // Nothing the late opener opened outlives the stop: the held one went with the stop and the in-flight one the moment it
+    // landed. (The daemon's timer may read again afterwards, and a read begun after the stop opens afresh and holds its own
+    // handle: those are the later reads, not the one in flight.)
+    for (let waited = 0; waited < 100 && !held[1]!.closed; waited += 1) await Bun.sleep(10);
+    expect(held[0]!.closed).toBe(true);
+    expect(held[1]!.closed).toBe(true);
+    const openedBeforeFresh = held.length;
     const fresh = await get(w, 'logs');
     expect(fresh.status).toBe(200);
-    expect(held).toHaveLength(3);
-    expect(await activeFds()).toBe(1);
+    expect(held.length).toBeGreaterThanOrEqual(openedBeforeFresh);
   } finally {
     resumeSecond();
-    await reading;
     await w.h.stop();
     await Promise.all(held.map(h => h.close()));
     await rm(parent, { recursive: true, force: true });

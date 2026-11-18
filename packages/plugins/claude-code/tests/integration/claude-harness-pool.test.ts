@@ -112,7 +112,7 @@ function build(
     config: { file: () => ({ searchPaths: [], permissionMode: 'auto' }), collection: () => new Map() } as never,
     state: new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]),
     spawn: { run: async () => ({ exitCode: 0, signal: null, stdout: '', stderr: '' }) } as never,
-    clock: { sleep: async () => {}, after: () => () => {} } as never,
+    clock: { sleep: async () => {}, after: () => () => {}, nowMs: () => Date.now() } as never,
     redaction: { read: async (fn: (scope: unknown) => unknown) => await fn({ text: (s: string) => s }) } as never,
     location: {
       locate: async () => ({ outcome: 'located', path: '/opt/bin/claude', rule: 'x', declaredBy: 'PATH' }),

@@ -127,7 +127,7 @@ const entries: TranscriptEntry[] = [
   { id: 'e2', at: '2026-02-01T09:00:02.000Z' as Instant, role: 'assistant', text: 'entries only reply' },
 ];
 
-const reader = (disk: Disk) =>
+const reader = (disk: Disk, exists: (ferret: string) => boolean = ferret => ferret === 'lead') =>
   registerReader({
     bytes: disk.open,
     transcripts: async () => ({
@@ -138,7 +138,7 @@ const reader = (disk: Disk) =>
         find: async () => undefined,
       },
     }),
-    exists: async ferret => ferret === 'lead',
+    exists: async ferret => exists(ferret),
     codec: {
       tag: async input => new Uint8Array(createHmac('sha256', 'k').update(input).digest()),
       matches: async (input, tag) =>
@@ -174,6 +174,20 @@ const MESSAGES = 'GET /v1/ferrets/:ferretId/messages';
 const IMAGE = 'GET /v1/ferrets/:ferretId/transcript-images/:handle';
 
 describe('a ferret’s transcript read from the harness bytes', () => {
+  test('the reader remembers which ferrets it proved a moment ago, and forgets the oldest past 512 without failing a read', async () => {
+    const disk = new Disk();
+    disk.put(conversation());
+    const { routes } = reader(disk, () => true);
+
+    // 513 ferrets each prove a transcript: the 513th pushes the oldest proof out of the memory.
+    for (let ferret = 0; ferret < 513; ferret += 1) {
+      const answered = await routes[LOGS](call({}, { ferretId: `f${String(ferret)}` }));
+      expect(answered.status).toBe(200);
+    }
+    // The one forgotten is proved again, and answered.
+    expect((await routes[LOGS](call({}, { ferretId: 'f0' }))).status).toBe(200);
+  });
+
   test('logs render the tool call, its result, the thinking and the image, and mask the secret everywhere', async () => {
     const disk = new Disk();
     disk.put(conversation());
