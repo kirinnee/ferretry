@@ -2,10 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import type { EventDef } from '@ferretry/kernel/contract';
 import type { ShellPluginClient } from '../../../src/client/daemon-client.ts';
 import { DaemonLayouts, LAYOUTS_PLUGIN } from '../../../src/layout/daemon-layout.ts';
-import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
-import { DEFAULT_LAYOUT } from '../../../src/layout/layout.ts';
+import { DeviceLayoutStore, storedOverrides } from '../../../src/layout/device-layout.ts';
+import { DEFAULT_LAYOUT, layoutCandidates } from '../../../src/layout/layout.ts';
 import { APP_STORAGE } from '../../../src/storage/names.ts';
-import { memoryStore } from '../../../src/storage/records.ts';
+import { memoryStore, writeRecord } from '../../../src/storage/records.ts';
 
 const theme = { id: 'default', label: 'Default', base: 'studio' };
 const owner = { ...DEFAULT_LAYOUT, id: 'owner', density: 'compact' as const };
@@ -104,5 +104,40 @@ describe('this device’s layout store', () => {
     store.reset();
     expect(store.snapshot()).toEqual({});
     expect(storage.entries()[APP_STORAGE.layout]).toBeUndefined();
+  });
+
+  // The one-time move: a record saved before the v4-style default has no stamp.
+  const drawn = (store: DeviceLayoutStore) => layoutCandidates(undefined, store.snapshot())[0] ?? DEFAULT_LAYOUT;
+  const preV4 = { nav: { side: 'left', style: 'list' }, side: { at: 'right', holds: 'none' } };
+
+  test('a layout saved before the v4 default is replaced by the v4 layout', () => {
+    const storage = memoryStore();
+    // The old shape: the overrides themselves, no stamp.
+    writeRecord(storage, APP_STORAGE.layout, preV4);
+    const store = new DeviceLayoutStore(storage);
+    expect(store.snapshot()).toEqual({});
+    expect(drawn(store)).toMatchObject({ nav: { side: 'top', style: 'bar' }, side: { at: 'left', holds: 'ferrets' } });
+    expect(storage.entries()[APP_STORAGE.layout]).toBeUndefined();
+  });
+
+  test('a change made after the move is kept across a reload, and is not moved again', () => {
+    const storage = memoryStore();
+    writeRecord(storage, APP_STORAGE.layout, preV4);
+    const store = new DeviceLayoutStore(storage);
+    expect(store.set(DEFAULT_LAYOUT, 'side.at', 'right')).toBeUndefined();
+    for (let reload = 0; reload < 2; reload += 1) {
+      const again = new DeviceLayoutStore(storage);
+      expect(again.snapshot()).toEqual({ side: { at: 'right' } });
+      expect(drawn(again)).toMatchObject({ nav: { side: 'top' }, side: { at: 'right' } });
+    }
+  });
+
+  test('a stamped record is kept as it is, and a fresh browser draws the v4 default', () => {
+    const storage = memoryStore();
+    writeRecord(storage, APP_STORAGE.layout, storedOverrides({ nav: { side: 'right' } }));
+    expect(new DeviceLayoutStore(storage).snapshot()).toEqual({ nav: { side: 'right' } });
+    const fresh = new DeviceLayoutStore(memoryStore());
+    expect(fresh.snapshot()).toEqual({});
+    expect(drawn(fresh)).toMatchObject({ nav: { side: 'top', style: 'bar' }, side: { at: 'left' } });
   });
 });
