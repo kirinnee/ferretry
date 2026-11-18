@@ -400,6 +400,7 @@ class SealedSession implements CarrierLink {
   }
 
   refuseAtOpen(code: number, reason: string): void {
+    this.deps.log?.warn(`a session was refused at open (${code}): ${reason}`, { carrier: this.carrier });
     this.layer.lastRefusal = `session ${code}: ${reason}`;
     this.#phase = 'concluding';
     this.#end = { code, reason };
@@ -732,7 +733,17 @@ class SealedSession implements CarrierLink {
       kind === 'none' ||
       kind === undefined
     ) {
-      this.#refuseHolder(modeKey);
+      // Each way in is told the peer as ONE sentence; the daemon's own log says which door was shut.
+      const claimed = (proof.body as { readonly deviceId?: unknown } | undefined)?.deviceId;
+      this.#refuseHolder(
+        modeKey,
+        mode === undefined || kind === undefined || kind === 'none'
+          ? `the ${modeKey} mode is off or answers for no holder`
+          : holder === undefined
+            ? `no ${modeKey} holder answers for this credential (unknown, revoked, or idle too long)`
+            : `the ${modeKey} signature did not verify against the holder's key`,
+        typeof claimed === 'string' ? claimed : undefined,
+      );
       return false;
     }
     const sessionId = transcriptKey(transcript) as SessionId;
@@ -766,7 +777,7 @@ class SealedSession implements CarrierLink {
       return false;
     }
     if (release === undefined) {
-      this.#refuseHolder(modeKey);
+      this.#refuseHolder(modeKey, `the ${modeKey} mode could not watch this holder`, holder.holder);
       return false;
     }
     this.#release = release;
@@ -782,7 +793,19 @@ class SealedSession implements CarrierLink {
     return true;
   }
 
-  #refuseHolder(modeKey: 'device' | 'member'): void {
+  /**
+   * One `warn` for a session this daemon turned away, with the reason it keeps for itself (the peer is told the one
+   * uniform sentence). The holder is named by the id the credential CLAIMED, an identifier and never a key or a proof.
+   */
+  #warnRefused(why: string, holder?: string): void {
+    this.deps.log?.warn(`a session was refused: ${why}`, {
+      carrier: this.carrier,
+      ...(holder === undefined ? {} : { holder: holder.slice(0, 80) }),
+    });
+  }
+
+  #refuseHolder(modeKey: 'device' | 'member', why: string, claimed?: string): void {
+    this.#warnRefused(why, claimed);
     this.layer.lastRefusal = `a client presented a ${modeKey} this daemon does not accept`;
     this.#endSession(SESSION_CLOSE_CODES.authRejected, 'unknown device credential');
   }
@@ -853,6 +876,7 @@ class SealedSession implements CarrierLink {
       (await verifyDeviceProof(this.deps.crypto, holder.key, signature, message));
     if (!this.#live()) return;
     if (!verified) {
+      this.#warnRefused("a renewal was not signed by the holder's key", standing.principal.holder);
       this.#endSession(SESSION_CLOSE_CODES.authRejected, 'unknown device credential');
       return;
     }

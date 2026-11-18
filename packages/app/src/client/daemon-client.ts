@@ -15,7 +15,7 @@ import { DEVICE_NOT_ACCEPTED_SENTENCE } from './sentences.ts';
 import {
   eventOwner,
   type Inventory,
-  parseInventory,
+  inventoryFromAnswer,
   type Standing,
   standings,
   unreadableBecause,
@@ -359,7 +359,7 @@ export class DaemonClient {
     let inventory: Inventory;
     try {
       const answer = await this.#transport.request({ method: 'GET', path: parseRouteKey(INVENTORY_ROUTE).path });
-      inventory = answer.status === 200 ? parseInventory(answer.body) : { kind: 'unreadable' };
+      inventory = inventoryFromAnswer(answer);
     } catch (error) {
       if (isDeviceRefusal(error)) this.#refuse();
       inventory = unreadableBecause(error);

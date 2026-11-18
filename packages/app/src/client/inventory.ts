@@ -39,7 +39,17 @@ export type Inventory =
    * The answer was not an inventory, or never arrived. Damaged is not empty: everything stays blocked. `cause` is the
    * session's own sentence when the read failed on the way (which carrier could not carry it), capped, never a body.
    */
-  | { readonly kind: 'unreadable'; readonly cause?: string };
+  | { readonly kind: 'unreadable'; readonly cause?: string; readonly refusal?: InventoryRefusal };
+
+/**
+ * The daemon ANSWERED the plugin list with a refusal (`401` or `403`): which device it was, whether it was told it
+ * is unknown, locked out or not granted, is the daemon's own sentence and machine code, capped, never a body.
+ */
+interface InventoryRefusal {
+  readonly status: number;
+  readonly code?: string;
+  readonly reason?: string;
+}
 
 /** The longest cause kept: a sentence to read to someone, not a log line. */
 const CAUSE_MAX = 240;
@@ -47,19 +57,99 @@ const CAUSE_MAX = 240;
 /** An unreadable list because the read itself failed: the failure's sentence is kept, capped, so the screen can name it. */
 export function unreadableBecause(error: unknown): Inventory {
   const message = error instanceof Error ? error.message.trim().replace(/\s+/gu, ' ') : '';
-  return message === '' ? { kind: 'unreadable' } : { kind: 'unreadable', cause: message.slice(0, CAUSE_MAX) };
+  if (message !== '') return { kind: 'unreadable', cause: message.slice(0, CAUSE_MAX) };
+  // A failure with no sentence of its own (a bare browser event, a rejected string, an empty message) is still
+  // a failure ON THE WAY, and says so with its kind, rather than the sentence for a damaged list.
+  const kind = error instanceof Error ? error.name : error === null ? 'null' : typeof error;
+  return { kind: 'unreadable', cause: `the read failed before an answer came (${kind.slice(0, 40)})` };
 }
+
+/** The daemon's own sentence and code out of a refusal's `{ error, code }` body; anything else says nothing. Total. */
+function refusalBody(body: unknown): { readonly code?: string; readonly reason?: string } {
+  if (typeof body !== 'object' || body === null) return {};
+  const { error, code } = body as { readonly error?: unknown; readonly code?: unknown };
+  const reason = typeof error === 'string' ? error.trim().replace(/\s+/gu, ' ').slice(0, CAUSE_MAX) : '';
+  return {
+    ...(reason === '' ? {} : { reason }),
+    ...(typeof code === 'string' && code !== '' ? { code: code.slice(0, 64) } : {}),
+  };
+}
+
+/**
+ * What an answer to `GET /v1/plugins` is. A `200` is parsed; a `401`/`403` is a REFUSAL of this device, told with the
+ * daemon's own reason (so the screen can say "this device was refused: …" rather than that a list could not be read);
+ * any other status is named by number and code. Only a `200` that is not a plugin list stays "could not be read".
+ */
+export function inventoryFromAnswer(answer: { readonly status: number; readonly body: unknown }): Inventory {
+  if (answer.status === 200) return parseInventory(answer.body);
+  const { code, reason } = refusalBody(answer.body);
+  if (answer.status === 401 || answer.status === 403)
+    return {
+      kind: 'unreadable',
+      cause: `the daemon answered ${answer.status}${code === undefined ? '' : ` ${code}`}`,
+      refusal: {
+        status: answer.status,
+        ...(code === undefined ? {} : { code }),
+        ...(reason === undefined ? {} : { reason }),
+      },
+    };
+  return {
+    kind: 'unreadable',
+    cause:
+      `the daemon answered ${answer.status}${code === undefined ? '' : ` ${code}`}${reason === undefined ? '' : `: ${reason}`}`.slice(
+        0,
+        CAUSE_MAX,
+      ),
+  };
+}
+
+/** A damaged plugin list, with WHERE it did not fit (field paths and issue codes, never a value): what a person reads out. */
+const damaged = (detail: string): Inventory => ({
+  kind: 'unreadable',
+  cause: `the plugin list this daemon sent could not be read (${detail})`,
+});
+
+const KIND: Readonly<Record<string, string>> = {
+  invalid_type: 'wrong type',
+  too_big: 'too long',
+  too_small: 'too short',
+  invalid_value: 'not an allowed value',
+  unrecognized_keys: 'unexpected field',
+};
+
+/** `plugins[3].contract: too long`: where and what, from the schema's own issue; the value is never read. */
+function issueText(issue: {
+  readonly path: readonly PropertyKey[];
+  readonly code: string;
+  readonly keys?: unknown;
+}): string {
+  const where =
+    issue.path
+      .map((part, index) => (typeof part === 'number' ? `[${part}]` : `${index === 0 ? '' : '.'}${String(part)}`))
+      .join('') || 'the top level';
+  const keys = Array.isArray(issue.keys) ? ` (${issue.keys.slice(0, 3).map(String).join(', ')})` : '';
+  return `${where}: ${KIND[issue.code] ?? issue.code}${keys}`;
+}
+
+const typeName = (value: unknown): string =>
+  value === null
+    ? 'null'
+    : Array.isArray(value)
+      ? 'a list'
+      : typeof value === 'object'
+        ? 'an object'
+        : `a ${typeof value}`;
 
 export function parseInventory(body: unknown): Inventory {
   const envelope = InventoryEnvelopeSchema.safeParse(body);
-  if (!envelope.success) return { kind: 'unreadable' };
+  if (!envelope.success) return damaged(`the answer was ${typeName(body)} with no protocol number`);
   if (envelope.data.protocol !== PROTOCOL) return { kind: 'protocol-mismatch', daemonProtocol: envelope.data.protocol };
   const parsed = InventoryBodySchema.safeParse(body);
-  if (!parsed.success) return { kind: 'unreadable' };
+  if (!parsed.success) return damaged(`does not fit at ${parsed.error.issues.slice(0, 3).map(issueText).join(', ')}`);
   const entries = new Map<string, InventoryEntry>();
   for (const plugin of parsed.data.plugins) {
     // A duplicate id is a damaged inventory: refusing it is safer than picking one.
-    if (entries.has(plugin.id)) return { kind: 'unreadable' };
+    if (entries.has(plugin.id)) return damaged('two entries share one id');
     entries.set(plugin.id, { on: plugin.on, contract: plugin.contract });
   }
   return parsed.data.daemonName === undefined

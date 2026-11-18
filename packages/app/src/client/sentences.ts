@@ -35,6 +35,14 @@ export type Remedy = 'update-daemon' | 'reload-app';
  */
 export const UNREADABLE_INVENTORY_SENTENCE = `Could not read what this daemon offers. Trying again — if this stays, check that the machine is running and reachable.`;
 
+/**
+ * Said full-screen when the daemon ANSWERED the plugin list with a refusal (`401`/`403`): this device is not accepted
+ * as it is, and the daemon's own reason follows. Not "could not be read": nothing failed to be read, it was refused.
+ */
+export function deviceRefusedSentence(reason: string | undefined): string {
+  return `This device was refused: ${reason === undefined ? 'the daemon did not say why' : reason.replace(/[.\s]+$/u, '')}.`;
+}
+
 export function remedyFor(appVersion: string, daemonVersion: string | undefined): Remedy {
   if (daemonVersion === undefined) return 'reload-app';
   return compareVersions(appVersion, daemonVersion) > 0 ? 'update-daemon' : 'reload-app';

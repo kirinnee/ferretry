@@ -5,6 +5,7 @@ import {
   DEVICE_NOT_ACCEPTED_SENTENCE,
   remedyFor,
   type Remedy,
+  deviceRefusedSentence,
   UNREADABLE_INVENTORY_SENTENCE,
   wholeDaemonSentence,
 } from '../client/sentences.ts';
@@ -287,7 +288,10 @@ export class ShellRuntime {
     if (inventory.kind === 'read' && !(kernel.state === 'blocked' && kernel.reason === 'core')) return undefined;
     // A list that could not be read is its own sentence: "reload" is the remedy for a different build, and says nothing
     // true about a read that failed on the way.
-    if (inventory.kind === 'unreadable') return UNREADABLE_INVENTORY_SENTENCE;
+    if (inventory.kind === 'unreadable')
+      return inventory.refusal === undefined
+        ? UNREADABLE_INVENTORY_SENTENCE
+        : deviceRefusedSentence(inventory.refusal.reason);
     return wholeDaemonSentence(this.remedy(daemon));
   }
 
