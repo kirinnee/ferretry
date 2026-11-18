@@ -1009,6 +1009,35 @@ describe('a relay session carrying a body larger than one record', () => {
     await answer;
   });
 
+  it('should mark a request presence only while a person is at the device', async () => {
+    let attended = true;
+    const { session, socket, daemon } = await serving({ attended: () => attended });
+    // The daemon opens records in order: the first frame after the handshake is the device's `auth`.
+    await daemon.receive(socket.sent[1] as Uint8Array);
+    const sent = async (id: number, path: string): Promise<Record<string, unknown>> => {
+      const answer = session.request({ method: 'GET', path });
+      await drain();
+      const record = (await daemon.receive(socket.sent[id + 1] as Uint8Array)) as Record<string, unknown>;
+      await session.receiveBinary(await daemon.record({ t: 'res', id, status: 200 }));
+      await answer;
+      return record;
+    };
+    should((await sent(1, '/v1/seen')).presence).equal(true);
+    attended = false;
+    should((await sent(2, '/v1/background')).presence).equal(undefined);
+  });
+
+  it('should never mark presence when nothing says a person is there', async () => {
+    const { session, socket, daemon } = await serving();
+    const answer = session.request({ method: 'GET', path: '/v1/quiet' });
+    await drain();
+    await daemon.receive(socket.sent[1] as Uint8Array);
+    const record = (await daemon.receive(socket.sent[2] as Uint8Array)) as Record<string, unknown>;
+    should(record.presence).equal(undefined);
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 1, status: 200 }));
+    await answer;
+  });
+
   it('should refuse a request body over the session limit before sending any of it', async () => {
     const { session, socket } = await serving();
     const before = socket.sent.length;

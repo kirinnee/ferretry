@@ -490,6 +490,12 @@ export interface RelayClientSessionDependencies {
   readonly maxRequestId?: number;
   /** Timers for {@link REQUEST_QUEUE_WAIT_MS}. The real clock by default. */
   readonly schedule?: RelaySessionSchedule;
+  /**
+   * Asked once per request: is a person at this device right now? A yes marks the request `presence`, the ONE
+   * thing the daemon counts as use (its idle clock moves on a marked request and on nothing else, a renewal
+   * included). Absent, no request is marked. The browser's answer lives in the transport, not in this pure module.
+   */
+  readonly attended?: () => boolean;
   /** One arrived stream frame. Only a stream session ever calls it. */
   readonly onData?: (frame: RelayStreamFrame) => void;
   /** Observe a faulty close listener without coupling this pure domain module to browser IO. */
@@ -988,7 +994,10 @@ export class RelayClientSession {
     // A relayed answer is not a browser fetch, so this side asks for gzip itself and decodes it below.
     // Only a `GET` is ever answered compressed, so nothing else carries the header.
     const asking = asked.method === 'GET' ? acceptEncodingHeader() : {};
-    const message = Object.keys(asking).length === 0 ? asked : { ...asked, headers: { ...asking, ...asked.headers } };
+    const compressed =
+      Object.keys(asking).length === 0 ? asked : { ...asked, headers: { ...asking, ...asked.headers } };
+    // EVERY request of a session, direct or relayed, passes here, so this is the one place presence is decided.
+    const message = this.deps.attended?.() === true ? { ...compressed, presence: true as const } : compressed;
     if (this.#failure !== undefined) throw this.#failure;
     signal?.throwIfAborted();
     if (this.#phase !== 'serving') {
