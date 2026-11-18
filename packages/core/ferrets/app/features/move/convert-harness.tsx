@@ -12,10 +12,10 @@
  * run it. This page decides nothing about which those are.
  */
 
-import { AlertTriangle, LoaderCircle } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { ChosenFerretAccount, ConversionPreview, FerretSummary } from '../../../contract/index.ts';
-import { Button } from '../../ui.ts';
+import { Button, Loading } from '../../ui.ts';
 import { AccountSlot, type RenderAccountSlot } from './account-slot.tsx';
 import { moveCallFailure } from './call-failure.ts';
 import {
@@ -159,10 +159,8 @@ export function ConvertHarness({ summary, slot, readPreview, move, onCancel, onM
       <div
         className="flex min-h-[240px] flex-1 flex-col items-center justify-center gap-3 px-panel pb-6 text-center"
         data-convert-moving=""
-        role="status"
       >
-        <LoaderCircle aria-hidden="true" className="animate-spin text-accent" size={28} />
-        <p className="m-0 text-title font-semibold text-fg">Checking that {targetName} can open the conversation…</p>
+        <Loading kind="page" label={`Checking that ${targetName} can open the conversation…`} />
         <p className="m-0 max-w-xl text-ui leading-base text-muted">
           Keep this page open. This can take a couple of minutes for a long conversation.
         </p>
@@ -215,14 +213,7 @@ export function ConvertHarness({ summary, slot, readPreview, move, onCancel, onM
             Choose an account to see what will move.
           </p>
         ) : preview.status === 'loading' ? (
-          <p
-            className="m-0 flex items-center gap-sm text-ui leading-base text-muted"
-            data-convert-loading=""
-            role="status"
-          >
-            <LoaderCircle aria-hidden="true" className="animate-spin text-accent" size={16} />
-            Reading the conversation…
-          </p>
+          <Loading kind="bar" label="Reading the conversation…" />
         ) : preview.status === 'refused' ? (
           <section
             aria-labelledby={`${headingId}-refused`}

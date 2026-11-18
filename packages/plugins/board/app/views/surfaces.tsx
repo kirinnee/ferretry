@@ -5,7 +5,7 @@
  * owner answers in the Agenda; the ask renderer draws that answer row's one plain reference to the task.
  */
 
-import { RouteLink, useLayoutMode, useNow } from '@ferretry/app/ui';
+import { Loading, RouteLink, useLayoutMode, useNow } from '@ferretry/app/ui';
 import type {
   AppComponent,
   PanelProps,
@@ -206,7 +206,7 @@ const taskProgress = (runtime: BoardRuntime): AppComponent<PanelProps> =>
     const id = (subject ?? '').toUpperCase();
     const state = useBoardTask(runtime.store, THIS_MACHINE, id);
     if (state.task === null)
-      return state.missing ? <p role="status">No task {id}.</p> : <p role="status">Reading {id}…</p>;
+      return state.missing ? <p role="status">No task {id}.</p> : <Loading kind="bar" label={`Reading ${id}…`} />;
     const parts = writtenProgressParts(state.task.progress);
     if (parts.length === 0) return <p role="status">{formatTaskRef({ id })} has no progress yet.</p>;
     return (

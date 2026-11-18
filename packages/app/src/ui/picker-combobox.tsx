@@ -44,9 +44,10 @@
  * on its own, and not a pattern anything is forced into.
  */
 
-import { ChevronDown, LoaderCircle, SearchX, TriangleAlert } from 'lucide-react';
+import { ChevronDown, SearchX, TriangleAlert } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { cn } from './lib/class-names.ts';
+import { Loading } from './loading.tsx';
 import {
   clampPickerIndex,
   type PickerIds,
@@ -320,10 +321,7 @@ export function PickerCombobox<Option extends PickerOption>({
               ))}
             </div>
           ) : list.kind === 'loading' ? (
-            <p className={cn(NOTICE_CLASS, 'm-0 text-muted')}>
-              <LoaderCircle aria-hidden="true" className="shrink-0 animate-spin motion-reduce:animate-none" size={15} />
-              Reading the available choices…
-            </p>
+            <Loading kind="bar" label="Reading the available choices…" />
           ) : list.kind === 'failed' ? (
             // The daemon's own words, kept whole. A read that failed is a
             // different panel from an empty one, and it says so in colour, in

@@ -11,7 +11,7 @@
  */
 
 import type { SessionProcess } from '../../lib/protocol/session-processes.ts';
-import type { ClipboardWriter } from '@ferretry/app/ui';
+import { type ClipboardWriter, Loading } from '@ferretry/app/ui';
 import type { DaemonConnection, DaemonSessionScope } from '../../shell.ts';
 import { ArrowDown, ChevronDown, ChevronUp, Copy, Search, Square, X } from 'lucide-react';
 import {
@@ -369,7 +369,7 @@ function ProcessOutputPane({
           tabIndex={0}
         >
           {state.status === 'loading' ? (
-            <p className="fy-proc-empty text-muted">Loading output…</p>
+            <Loading kind="bar" label="Loading output…" />
           ) : state.status === 'forbidden' ? (
             <p className="fy-proc-empty text-err" role="alert">
               {state.reason}

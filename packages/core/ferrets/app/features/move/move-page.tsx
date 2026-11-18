@@ -9,11 +9,11 @@
  * the daemon's own sentence.
  */
 
-import { ArrowLeftRight, LoaderCircle, ServerCog } from 'lucide-react';
+import { ArrowLeftRight, ServerCog } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
 import type { FerretSummary } from '../../../contract/index.ts';
 import type { FerretsClient } from '../../lib/client.ts';
-import { Button } from '../../ui.ts';
+import { Button, Loading } from '../../ui.ts';
 import type { RenderAccountSlot } from './account-slot.tsx';
 import { ChangeAccount } from './change-account.tsx';
 import { moveCallFailure } from './call-failure.ts';
@@ -111,10 +111,7 @@ export function MovePage({ client, ferret, slot, onClose, initialMode = 'account
       </div>
 
       {load.status === 'loading' ? (
-        <p className="m-0 flex items-center gap-sm px-panel py-4 text-ui text-muted" data-move-loading="" role="status">
-          <LoaderCircle aria-hidden="true" className="animate-spin text-accent" size={16} />
-          Reading the ferret…
-        </p>
+        <Loading kind="bar" label="Reading the ferret…" />
       ) : load.status === 'failed' ? (
         <section className="m-4 rounded-control border border-err bg-surface-2 p-4" data-move-failed="" role="alert">
           <p className="m-0 break-words text-ui leading-base text-err">{load.message}</p>

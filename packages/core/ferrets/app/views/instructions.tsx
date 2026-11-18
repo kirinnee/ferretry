@@ -10,6 +10,7 @@ import {
   ContextFilterBar,
   ContextNote,
   contextEmptyCopy,
+  Loading,
   type ContextRead,
   useContextRead,
 } from '@ferretry/app/ui';
@@ -63,7 +64,7 @@ function DocsList({
         what="list this folder’s instructions"
       />
     );
-  if (load.kind !== 'ready') return <ContextNote>Reading instructions…</ContextNote>;
+  if (load.kind !== 'ready') return <Loading kind="page" label="Reading instructions…" />;
 
   const docs = load.value;
   const chips = docChips(docs, query);

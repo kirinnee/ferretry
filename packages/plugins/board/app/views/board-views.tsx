@@ -7,6 +7,7 @@
  */
 
 import { formatTaskRef } from '../../contract/index.ts';
+import { useBackgroundLoad } from '@ferretry/app/ui';
 import { type ReactNode, useMemo } from 'react';
 import type { BoardModel } from '../lib/board-model.ts';
 import type { FerretNames } from '../lib/board-present.ts';
@@ -214,6 +215,7 @@ export interface ArchiveViewProps {
 
 /** Closed and dropped work, newest first, a page at a time, searchable. */
 export function ArchiveView({ shown, remaining, total, query, onQuery, onMore, loading, env }: ArchiveViewProps) {
+  useBackgroundLoad(loading);
   return (
     <div className="fy-board-archive">
       <input
@@ -225,9 +227,9 @@ export function ArchiveView({ shown, remaining, total, query, onQuery, onMore, l
         value={query}
       />
       {shown.length === 0 ? (
-        <Empty>
-          {loading ? 'Reading the archive…' : query.trim() === '' ? 'Nothing closed yet.' : 'No archived task matches.'}
-        </Empty>
+        loading ? null : (
+          <Empty>{query.trim() === '' ? 'Nothing closed yet.' : 'No archived task matches.'}</Empty>
+        )
       ) : (
         <TableRows env={env} rows={archiveRowsOf(shown, env)} />
       )}

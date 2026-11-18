@@ -7,7 +7,7 @@
  * the routes are refused, which this states plainly instead of guessing a state.
  */
 
-import { cn } from '@ferretry/app/ui';
+import { cn, Loading } from '@ferretry/app/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { z } from 'zod';
 import type { ProjectsClient } from '../lib/client.ts';
@@ -52,12 +52,7 @@ export function BoardSwitchView({
   readonly refusal: string | null;
   readonly onChange: (on: boolean) => void;
 }) {
-  if (loaded.kind === 'loading')
-    return (
-      <p className="m-0 text-meta text-muted" aria-busy="true" data-project-board-switch="loading">
-        Reading whether this project uses the board…
-      </p>
-    );
+  if (loaded.kind === 'loading') return <Loading kind="bar" label="Reading whether this project uses the board…" />;
   if (loaded.kind === 'missing')
     return (
       <p className="m-0 text-meta text-muted" role="status" data-project-board-switch="missing">

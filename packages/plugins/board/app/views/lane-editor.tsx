@@ -13,6 +13,7 @@ import {
   MAX_GATE_OPTIONS,
   type Workflow,
 } from '../../contract/index.ts';
+import { Loading } from '@ferretry/app/ui';
 import { ArrowDown, ArrowLeft, ArrowUp, Check, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useBoardActions, useBoardProjects } from '../hooks/use-board.ts';
@@ -803,9 +804,7 @@ export function LaneEditorPage({
             Could not read this machine’s lanes: {state.error ?? 'the read failed'}
           </p>
         ) : (
-          <p className="m-0 text-ui text-muted" aria-busy="true">
-            Loading lanes…
-          </p>
+          <Loading kind="page" label="Loading lanes…" />
         )
       ) : project === undefined ? (
         <p className="m-0 text-ui text-muted" role="status" data-lane-page-missing="">

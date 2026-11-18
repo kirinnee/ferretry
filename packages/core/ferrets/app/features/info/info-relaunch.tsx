@@ -11,6 +11,7 @@
 import type { RelaunchDrift, RelaunchSettings } from './info-wire.ts';
 import { TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
+import { Loading } from '../../ui.ts';
 import { InfoChip, InfoRow } from './info-parts.tsx';
 
 /** The read behind the row: unread, read, or failed with a reason. */
@@ -58,7 +59,7 @@ export function InfoRelaunchRow({
   return (
     <InfoRow hint={INFO_RELAUNCH_HINT} label="Settings">
       {read.kind === 'loading' ? (
-        <span className="fy-info-muted">Checking…</span>
+        <Loading kind="bar" label="Checking…" />
       ) : read.kind === 'failed' ? (
         <span className="fy-info-muted">Couldn’t check: {read.reason}</span>
       ) : restart.kind === 'done' ? (

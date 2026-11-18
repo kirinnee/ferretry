@@ -14,9 +14,9 @@
  * sideways. The measurements live in `files.css`.
  */
 
-import { CornerLeftUp, FileText, Folder, Link2Off, Loader2, Lock, RefreshCw, X } from 'lucide-react';
+import { CornerLeftUp, FileText, Folder, Link2Off, Lock, RefreshCw, X } from 'lucide-react';
 import { useMemo, type ReactNode, type RefObject } from 'react';
-import { trustedHighlight } from '@ferretry/app/ui';
+import { Loading as LoadingMark, trustedHighlight } from '@ferretry/app/ui';
 import {
   baseName,
   entryRefusal,
@@ -54,13 +54,9 @@ export const Note = ({ tone = 'plain', role, children }: NoteProps) => (
   </div>
 );
 
-export const Loading = ({ what }: { what: string }) => (
-  <Note role="status">
-    <span className="inline-flex items-center gap-2">
-      <Loader2 size={14} className="animate-spin" aria-hidden="true" />
-      Loading {what}…
-    </span>
-  </Note>
+/** One loader for a files surface: `page` when it is the whole surface, `bar` when it is one part of it. */
+export const Loading = ({ what, kind }: { what: string; kind: 'page' | 'bar' }) => (
+  <LoadingMark kind={kind} label={`Loading ${what}…`} />
 );
 
 /**

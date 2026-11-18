@@ -16,7 +16,7 @@ import { Check, ChevronRight, FileText, Pencil, RotateCcw, X } from 'lucide-reac
 import { useEffect, useId, useRef, useState } from 'react';
 import { cn } from '@ferretry/app/ui';
 import { isApplyConflict, lessonsErrorMessage } from './api.ts';
-import { Badge, Button } from '@ferretry/app/ui';
+import { Badge, Button, Loading } from '@ferretry/app/ui';
 import { RouteLink } from '@ferretry/app/ui';
 import { ApplyDiff } from './apply-diff.tsx';
 import {
@@ -259,11 +259,7 @@ export function LessonRow({
               ))}
             </ul>
           </section>
-          {applyStep.step === 'loading' && (
-            <p role="status" className="m-0 text-meta text-muted">
-              Reading what Ferretry would write…
-            </p>
-          )}
+          {applyStep.step === 'loading' && <Loading kind="bar" label="Reading what Ferretry would write…" />}
           {shownPreview !== null && (
             <section aria-label="Apply preview" className="flex min-w-0 flex-col gap-2">
               <h3 className="m-0 text-meta font-semibold text-muted">Preview: what Ferretry will write</h3>

@@ -16,7 +16,6 @@ import {
   Download,
   ExternalLink as ExternalIcon,
   ImageOff,
-  Loader2,
   Minimize2,
   ScanLine,
   X,
@@ -34,6 +33,7 @@ import {
   useState,
 } from 'react';
 import { cn } from './lib/class-names.ts';
+import { Loading } from './loading.tsx';
 import { ExternalLink as ExternalAnchor } from './external-link.tsx';
 import { useDialogFocus } from './hooks/use-dialog-focus.ts';
 import {
@@ -436,10 +436,7 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
               }}
             />
           ) : (
-            <div className="flex items-center gap-2 text-muted text-sm" role="status">
-              <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={18} />
-              Loading image…
-            </div>
+            <Loading kind="page" label="Loading image…" />
           )}
         </div>
 

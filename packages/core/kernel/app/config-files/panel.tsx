@@ -21,6 +21,7 @@ import {
   Button,
   type ClipboardWriter,
   CopyButton,
+  Loading,
   PanelPath,
 } from '@ferretry/app/ui';
 import { CircleAlert, FileCode2 } from 'lucide-react';
@@ -334,11 +335,7 @@ export function ConfigFilesSurface({
           </Button>
         </section>
       ) : null}
-      {load.status === 'loading' ? (
-        <section className="kt-panel p-panel" role="status" aria-label="Reading the configuration files">
-          <p className="m-0 text-cell leading-base text-muted">Reading this machine’s configuration files…</p>
-        </section>
-      ) : null}
+      {load.status === 'loading' ? <Loading kind="bar" label="Reading this machine’s configuration files…" /> : null}
       {editing === null ? null : (
         <ConfigFileEditor
           key={editing}

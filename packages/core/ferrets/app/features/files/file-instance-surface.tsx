@@ -191,7 +191,7 @@ export const useFileInstanceSurface = ({
         // so there is no fourth state to describe.
         parsedDiff === null ? (
           diff.error === null ? (
-            <Loading what="the diff" />
+            <Loading what="the diff" kind="page" />
           ) : (
             <Failed what="the diff" error={diff.error} onRetry={diff.reload} />
           )
@@ -224,7 +224,7 @@ export const useFileInstanceSurface = ({
       ) : file.error ? (
         <Failed what={baseName(tab.path)} error={file.error} onRetry={file.reload} />
       ) : (
-        <Loading what={baseName(tab.path)} />
+        <Loading what={baseName(tab.path)} kind="page" />
       )}
     </>
   );

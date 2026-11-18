@@ -32,7 +32,7 @@ describe('the Files notes', () => {
         <Note tone="warn" role="status">
           warned
         </Note>
-        <Loading what="the ferret’s root" />
+        <Loading what="the ferret’s root" kind="bar" />
         <Failed what="the diff" error="offline" onRetry={() => {}} />
       </>,
     );

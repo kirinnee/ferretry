@@ -12,7 +12,7 @@
  */
 
 import type { SessionProcess } from '../../lib/protocol/session-processes.ts';
-import { browserClipboardWriter, type ClipboardWriter, useDialogFocus } from '@ferretry/app/ui';
+import { browserClipboardWriter, type ClipboardWriter, Loading, useDialogFocus } from '@ferretry/app/ui';
 import type { DaemonConnection, DaemonSessionScope } from '../../shell.ts';
 import './processes.css';
 import { ProcessToast } from './process-toast.tsx';
@@ -320,7 +320,7 @@ export function ProcessesSurface({
   };
 
   const body = (): React.ReactNode => {
-    if (state.status === 'loading') return <p className="fy-proc-empty text-muted">Loading processes…</p>;
+    if (state.status === 'loading') return <Loading kind="page" label="Loading processes…" />;
     if (state.status === 'forbidden')
       return (
         <p className="fy-proc-empty text-err" data-processes-forbidden="" role="alert">

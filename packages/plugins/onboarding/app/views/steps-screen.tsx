@@ -5,7 +5,7 @@
  */
 
 import { daemonHomeHref, daemonOfClient, daemonSettingsHref, PanelSlot, useOptionalRouter } from '@ferretry/app';
-import { Button } from '@ferretry/app/ui';
+import { Button, Loading } from '@ferretry/app/ui';
 import type { PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ONBOARDING_STEP_SLOT, type OnboardingView, stepSubject, type StepState } from '../../contract/index.ts';
@@ -166,11 +166,7 @@ export function createStepsScreen(client: PluginClient) {
       void screen.answer(plugin, step, { state }).catch(() => setUnsaved({ plugin, step, state }));
     }, []);
     if (daemon === undefined || reading.kind === 'loading')
-      return (
-        <p role="status" className="m-0 p-4 text-cell text-muted">
-          Loading the setup steps…
-        </p>
-      );
+      return <Loading kind="page" label="Loading the setup steps…" />;
     if (reading.kind === 'failed')
       return (
         <div className="flex flex-col items-start gap-2 p-4" data-onboarding-read-failed="">

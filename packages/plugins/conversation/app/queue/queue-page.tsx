@@ -7,6 +7,7 @@
 import type { ReactNode } from 'react';
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { absoluteTime, ChatProse, clockOfInstant, useOptionalRouter, useScreenHref } from '@ferretry/app';
+import { useBackgroundLoad } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import { useConversationClient, useConversationDaemon } from '../client.ts';
@@ -287,6 +288,7 @@ export function QueuePageView({
   onLoadOlder,
   error,
 }: QueuePageViewProps) {
+  useBackgroundLoad(loading);
   // A ferret with nothing in its queue has no card: the page says so once, whether it shows one ferret or all. One
   // whose newest window shows nothing (every message in it cancelled) but whose machine holds older messages keeps its
   // card, because "Show older messages" lives there and would otherwise be unreachable.
@@ -306,7 +308,7 @@ export function QueuePageView({
       <div className="fy-queue-column">
         <header className="fy-queue-head">
           <h1 className="fy-queue-title">{title}</h1>
-          <span className="fy-queue-count">{loading ? 'Reading the queues…' : countLine}</span>
+          <span className="fy-queue-count">{loading ? null : countLine}</span>
           {onShowAll === undefined ? null : (
             <button className="kt-btn kt-btn--sm" onClick={onShowAll} type="button">
               All queues

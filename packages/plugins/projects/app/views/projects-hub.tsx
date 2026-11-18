@@ -33,7 +33,7 @@ import type { ProjectsSlice } from '../lib/projects-store.ts';
 import { AddProjectForm } from './add-project-form.tsx';
 import { ProjectDiscoveries } from './project-discoveries.tsx';
 import { ProjectProvenance } from './project-provenance.tsx';
-import { RouteLink } from '@ferretry/app/ui';
+import { Loading, RouteLink } from '@ferretry/app/ui';
 import {
   confirmDiscoveryRequest,
   emptyProjectRegistrationDraft,
@@ -182,9 +182,7 @@ export function ProjectsHub({
       )}
 
       {unread && loading ? (
-        <p className="kt-panel m-0 p-panel text-ui text-muted" aria-busy="true">
-          Loading registered projects…
-        </p>
+        <Loading kind="page" label="Loading registered projects…" />
       ) : (
         <section className="kt-panel grid gap-sm p-panel" aria-labelledby="registered-projects-heading">
           <h2

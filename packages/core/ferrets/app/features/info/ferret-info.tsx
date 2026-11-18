@@ -18,6 +18,7 @@ import {
   browserClipboardWriter,
   type ClipboardWriter,
   Floating,
+  Loading,
   useDismissSurface,
   useLayoutMode,
 } from '../../ui.ts';
@@ -118,11 +119,11 @@ function FerretInfo({
           </button>
         </div>
         <div className="fy-info__body">
-          <InfoNote>
-            {ferret.read.kind === 'failed'
-              ? `Couldn’t read this ferret: ${ferret.read.reason}`
-              : 'Reading this ferret…'}
-          </InfoNote>
+          {ferret.read.kind === 'failed' ? (
+            <InfoNote>{`Couldn’t read this ferret: ${ferret.read.reason}`}</InfoNote>
+          ) : (
+            <Loading kind="page" label="Reading this ferret…" />
+          )}
         </div>
       </div>
     );

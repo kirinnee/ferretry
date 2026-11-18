@@ -21,7 +21,7 @@ import {
 import type { PacksClient } from '../../lib/client.ts';
 import type { ConfigFiles } from '../../lib/pack-config.ts';
 import type { PackConfigPatch } from '../../lib/pack/pack-files.ts';
-import { Button, cn } from '../../ui.ts';
+import { Button, cn, Loading } from '../../ui.ts';
 import { RoutingPromptCard } from './routing-prompt-card.tsx';
 import { type MachinePack, type PackSave, useMachinePack } from './use-machine-pack.ts';
 
@@ -319,7 +319,7 @@ function PackPanel({ view, state }: { readonly view: PackView; readonly state: M
 
 function PackSettingsView({ state }: { readonly state: MachinePack }) {
   const { read } = state;
-  if (read.kind === 'loading') return <p className="m-0 text-meta text-muted">Reading Pack mode…</p>;
+  if (read.kind === 'loading') return <Loading kind="bar" label="Reading Pack mode…" />;
   if (read.kind === 'failed')
     return (
       <p role="alert" className="m-0 text-meta text-err">

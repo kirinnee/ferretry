@@ -13,7 +13,7 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import { cn } from '@ferretry/app/ui';
 import type { LessonsConnection } from './api.ts';
 import { fetchLessonsConfig, lessonsErrorMessage, patchLessonsConfig } from './api.ts';
-import { Badge, Button } from '@ferretry/app/ui';
+import { Badge, Button, Loading } from '@ferretry/app/ui';
 import { basename, sessionName } from './model.ts';
 import { usePassiveLessons } from './passive.tsx';
 import { GlobalLessonsEditor } from './global-lessons.tsx';
@@ -146,7 +146,7 @@ export function LessonsSettingsSurface({ connection, ferrets = null }: LessonsSe
           </p>
         )}
         {lessons.records === null ? (
-          <p className="m-0 text-meta text-muted">Reading which ferrets learn…</p>
+          <Loading kind="bar" label="Reading which ferrets learn…" />
         ) : rows.length === 0 ? (
           <p className="m-0 text-meta text-muted">No ferrets on this machine yet.</p>
         ) : (
