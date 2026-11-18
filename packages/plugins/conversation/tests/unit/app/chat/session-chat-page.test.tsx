@@ -18,6 +18,7 @@ import { Transcript } from '../../../../app/chat/transcript.tsx';
 import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
 import { TranscriptUnboundNotice } from '../../../../app/chat/transcript-unbound-notice.tsx';
 import { Composer } from '../../../../app/composer/composer.tsx';
+import { QuestionDrawer } from '../../../../app/questions/question-drawer.tsx';
 import { QuestionForm } from '../../../../app/questions/question-form.tsx';
 import { type FakeClient, fakeClient } from '../../../support/app/fake-client.ts';
 import { withClient } from '../../../support/app/composer-host.tsx';
@@ -213,7 +214,7 @@ describe('SessionChatPage', () => {
 
     const column = page.root.findByProps({ className: 'fy-chat-input__column' });
     const drawn = column.children.filter((child): child is ReactTestInstance => typeof child !== 'string');
-    expect(drawn.map(child => child.type)).toEqual([PanelSlot, QuestionForm]);
+    expect(drawn.map(child => child.type)).toEqual([PanelSlot, QuestionDrawer]);
   });
 
   test('hands the composer this device’s Enter-key choices, Vim mode and suggestion families', () => {
@@ -449,7 +450,82 @@ describe('SessionChatPage', () => {
   });
 });
 
+/** The one line a pending question draws by default, and the press that opens it. */
+const drawerLine = (page: ReturnType<typeof draw>) => page.root.findByProps({ className: 'fy-question-drawer-line' });
+const openDrawer = (page: ReturnType<typeof draw>) => run(() => drawerLine(page).props.onClick());
+
 describe('the question the ferret is asking', () => {
+  test('is ONE collapsed line by default: no options, no Submit, and the composer still gives way', () => {
+    const page = draw({
+      question: QUESTION,
+      session: ferretView('shared', { state: { status: 'awaiting_question' } }),
+    });
+
+    const line = drawerLine(page);
+    expect(line.type).toBe('button');
+    expect(line.props['aria-expanded']).toBe(false);
+    expect(page.root.findAllByProps({ id: line.props['aria-controls'] }).length).toBeGreaterThan(0);
+    expect(textOf(line)).toContain('asked: Ship it?');
+    expect(page.root.findAllByType(QuestionForm)).toHaveLength(0);
+    expect(page.root.findAllByType('input')).toHaveLength(0);
+    expect(JSON.stringify(page.toJSON())).not.toContain('Submit answer');
+    expect(page.root.findAllByType(Composer)).toHaveLength(0);
+  });
+
+  test('a click opens the very same form, Escape folds it again, and the one line is back', () => {
+    const page = draw({
+      question: QUESTION,
+      session: ferretView('shared', { state: { status: 'awaiting_question' } }),
+    });
+
+    openDrawer(page);
+    expect(drawerLine(page).props['aria-expanded']).toBe(true);
+    expect(page.root.findAllByType(QuestionForm)).toHaveLength(1);
+    expect(page.root.findAllByType('input').length).toBeGreaterThan(0);
+
+    run(() =>
+      page.root.findByProps({ 'data-question-drawer': 'question' }).props.onKeyDown({
+        key: 'Escape',
+        nativeEvent: { isComposing: false },
+        stopPropagation() {},
+      }),
+    );
+    expect(drawerLine(page).props['aria-expanded']).toBe(false);
+    expect(page.root.findAllByType(QuestionForm)).toHaveLength(0);
+
+    // The same button toggles it closed too.
+    openDrawer(page);
+    run(() => drawerLine(page).props.onClick());
+    expect(page.root.findAllByType(QuestionForm)).toHaveLength(0);
+  });
+
+  test('Submit still answers once the form is open, and the pick survives a fold', async () => {
+    const answered: unknown[] = [];
+    const client = fakeClient({
+      [ANSWER]: call => {
+        answered.push(call.body);
+        return { ok: true };
+      },
+    });
+    const page = draw(
+      { question: QUESTION, session: ferretView('shared', { state: { status: 'awaiting_question' } }) },
+      client,
+    );
+    openDrawer(page);
+    run(() => page.root.findAllByType('input')[0]?.props.onChange());
+    // Fold and reopen: the unsent pick is kept by the form's own draft store.
+    run(() => drawerLine(page).props.onClick());
+    openDrawer(page);
+    expect(page.root.findAllByType('input')[0]?.props.checked).toBe(true);
+    await runAsync(async () => {
+      const submit = page.root.findAllByType('button').find(item => item.children.join('') === 'Submit answer');
+      await submit?.props.onClick();
+    });
+    expect(answered).toEqual([
+      { toolUseId: 'ask-1', labels: ['Yes'], answers: [{ kind: 'selection', labels: ['Yes'] }] },
+    ]);
+  });
+
   test('mounts the structured form in place of the composer and answers through the daemon, then refreshes', async () => {
     const answered: unknown[] = [];
     const client = fakeClient({
@@ -468,6 +544,7 @@ describe('the question the ferret is asking', () => {
       client,
     );
 
+    openDrawer(page);
     expect(page.root.findAllByType(QuestionForm)).toHaveLength(1);
     expect(page.root.findAllByType(Composer)).toHaveLength(0);
     expect(page.root.findAllByProps({ 'data-question-unavailable': '' })).toHaveLength(0);
@@ -580,6 +657,11 @@ describe('the question the ferret is asking', () => {
 
   test('a waiting status with no validated question is damaged evidence: no form, no composer, and no invented answer', () => {
     const page = draw({ question: null, session: ferretView('shared', { state: { status: 'awaiting_question' } }) });
+    // One line first; it opens to the recovery sentence.
+    expect(drawerLine(page).props['aria-expanded']).toBe(false);
+    expect(textOf(drawerLine(page))).toContain('has a question');
+    expect(page.root.findAllByProps({ 'data-question-unavailable': '' })).toHaveLength(0);
+    openDrawer(page);
     expect(page.root.findAllByProps({ 'data-question-unavailable': '' }).length).toBeGreaterThan(0);
     expect(page.root.findAllByType(QuestionForm)).toHaveLength(0);
     expect(page.root.findAllByType(Composer)).toHaveLength(0);
