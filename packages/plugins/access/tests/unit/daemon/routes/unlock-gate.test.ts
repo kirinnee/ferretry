@@ -317,9 +317,11 @@ describe('a refused passkey request', () => {
     should(error).containEql(HOSTED_APP_ORIGIN);
   });
 
-  it('should rank no-passkey, a closed window and a due rotation as ordinary, and an origin or a failed check as not', () => {
+  it('should rank no-passkey, a closed window, a due rotation and a caller that is not a device as ordinary, and an origin or a failed check as not', () => {
     should(
-      ['no-passkey', 'registration-closed', 'rotation-required'].every(r => isExpectedRefusal(r as never)),
+      ['no-passkey', 'registration-closed', 'rotation-required', 'not-a-device'].every(r =>
+        isExpectedRefusal(r as never),
+      ),
     ).be.true();
     should(isExpectedRefusal('origin-not-allowed')).be.false();
     should(isExpectedRefusal('not-verified')).be.false();

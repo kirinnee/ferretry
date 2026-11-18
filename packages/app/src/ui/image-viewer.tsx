@@ -40,7 +40,7 @@ import {
   clampTransform,
   distance,
   IDENTITY,
-  MAX_SCALE,
+  maxScaleFor,
   midpoint,
   neighbour,
   type Point,
@@ -140,6 +140,9 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
   // What the picture is drawn at when it rests: the whole of it, never enlarged past its own pixels.
   const fitted = restingSize(natural, stage);
   const rest = natural.width > 0 ? fitted.width / natural.width : 1;
+  const maxScale = maxScaleFor(rest);
+  const ceiling = useRef(maxScale);
+  ceiling.current = maxScale;
   const fit = useRef(fitted);
   fit.current = fitted;
   const stageSize = useRef(stage);
@@ -174,6 +177,7 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
           fromCentre(event.clientX, event.clientY),
           fit.current,
           stageSize.current,
+          ceiling.current,
         ),
       );
     };
@@ -222,15 +226,25 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
         start.focus,
         fit.current,
         stageSize.current,
+        ceiling.current,
       );
-      setView(panBy(zoomed, mid.x - start.mid.x, mid.y - start.mid.y, fit.current, stageSize.current));
+      setView(panBy(zoomed, mid.x - start.mid.x, mid.y - start.mid.y, fit.current, stageSize.current, ceiling.current));
       return;
     }
     const current = press.current;
     if (!current) return;
     if (Math.hypot(point.x - current.start.x, point.y - current.start.y) > 6) current.moved = true;
     if (viewRef.current.scale > 1.01) {
-      setView(panBy(viewRef.current, point.x - previous.x, point.y - previous.y, fit.current, stageSize.current));
+      setView(
+        panBy(
+          viewRef.current,
+          point.x - previous.x,
+          point.y - previous.y,
+          fit.current,
+          stageSize.current,
+          ceiling.current,
+        ),
+      );
     }
   };
 
@@ -258,15 +272,15 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
     const before = lastTap.current;
     if (before && now - before.at < TAP_MS && Math.hypot(end.x - before.point.x, end.y - before.point.y) < TAP_SLOP) {
       lastTap.current = null;
-      setView(toggleZoom(viewRef.current, fromCentre(end.x, end.y), fit.current, stageSize.current));
+      setView(toggleZoom(viewRef.current, fromCentre(end.x, end.y), fit.current, stageSize.current, ceiling.current));
     } else {
       lastTap.current = { at: now, point: end };
     }
   };
 
   const zoomBy = (factor: number): void =>
-    setView(zoomAround(view, view.scale * factor, { x: 0, y: 0 }, fitted, stage));
-  const actualSize = (): void => setView(zoomAround(view, 1 / rest, { x: 0, y: 0 }, fitted, stage));
+    setView(zoomAround(view, view.scale * factor, { x: 0, y: 0 }, fitted, stage, maxScale));
+  const actualSize = (): void => setView(zoomAround(view, 1 / rest, { x: 0, y: 0 }, fitted, stage, maxScale));
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDialogElement>): void => {
     // ESCAPE ENDS HERE. It closes the viewer and goes no further: a React ancestor (the message, a block's own
@@ -285,7 +299,8 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
     const centre = { x: 0, y: 0 };
     const pan = (dx: number, dy: number, direction: -1 | 1): void => {
       event.preventDefault();
-      if (viewRef.current.scale > 1.01) setView(panBy(viewRef.current, dx, dy, fit.current, stageSize.current));
+      if (viewRef.current.scale > 1.01)
+        setView(panBy(viewRef.current, dx, dy, fit.current, stageSize.current, ceiling.current));
       else step(direction);
     };
     switch (event.key) {
@@ -304,12 +319,12 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
       case '+':
       case '=':
         event.preventDefault();
-        setView(zoomAround(view, view.scale * BUTTON_STEP, centre, fitted, stage));
+        setView(zoomAround(view, view.scale * BUTTON_STEP, centre, fitted, stage, maxScale));
         break;
       case '-':
       case '_':
         event.preventDefault();
-        setView(zoomAround(view, view.scale / BUTTON_STEP, centre, fitted, stage));
+        setView(zoomAround(view, view.scale / BUTTON_STEP, centre, fitted, stage, maxScale));
         break;
       case '0':
         event.preventDefault();
@@ -320,7 +335,7 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
   };
 
   if (!image) return null;
-  const shown = clampTransform(view, fitted, stage);
+  const shown = clampTransform(view, fitted, stage, maxScale);
   const count = images.length;
   const zoomed = shown.scale > 1.01;
   const sized = natural.width > 0 && !image.failed && image.src !== null;
@@ -409,7 +424,7 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
           ) : image.src ? (
             <img
               alt={image.alt}
-              className="max-h-full max-w-full object-contain will-change-transform"
+              className="max-h-full max-w-full object-contain transition-transform duration-[120ms] ease-out will-change-transform motion-reduce:transition-none"
               draggable={false}
               onLoad={event =>
                 setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
@@ -417,7 +432,7 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
               src={image.src}
               style={{
                 transform: `translate3d(${shown.x}px, ${shown.y}px, 0) scale(${shown.scale})`,
-                transition: dragging ? 'none' : 'transform 120ms ease-out',
+                transition: dragging ? 'none' : undefined,
               }}
             />
           ) : (
@@ -446,7 +461,7 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
               <ZoomOut aria-hidden="true" size={18} />
             </button>
             <button
-              aria-disabled={shown.scale >= MAX_SCALE - 0.001}
+              aria-disabled={shown.scale >= maxScale - 0.001}
               aria-label="Zoom in"
               className={TOOL}
               onClick={() => zoomBy(BUTTON_STEP)}

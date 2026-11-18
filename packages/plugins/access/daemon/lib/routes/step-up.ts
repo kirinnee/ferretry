@@ -133,11 +133,15 @@ export interface PasskeyRefusalNote {
   readonly deviceId: string | undefined;
 }
 
-/** The refusals that are an ordinary state to be in (no passkey yet, the window closed, a key due for replacement). */
+/**
+ * The refusals that are an ordinary state to be in (no passkey yet, the window closed, a key due for replacement, a
+ * caller that is the host and not a paired device — the panel's every read from one).
+ */
 const EXPECTED_REFUSALS: ReadonlySet<StepUpRefusal> = new Set([
   'no-passkey',
   'registration-closed',
   'rotation-required',
+  'not-a-device',
 ]);
 
 /** Whether a refusal is the machine working as designed rather than something to look at. */
