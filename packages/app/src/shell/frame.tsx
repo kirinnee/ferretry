@@ -12,7 +12,7 @@ import { useAppViewport } from '../ui/hooks/use-app-viewport.ts';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../ui/palette-shortcut.ts';
 import { buildPluginCommandSources, deviceLayoutSource, placeSource, settingsSource } from './command-sources.ts';
 import { useScreenHref } from '../router/screen-href.ts';
-import { daemonTitle } from '../daemons/daemon-list.ts';
+import { distinctDaemonName } from '../daemons/machine-names.ts';
 import type { NavEntry } from '../layout/engine.ts';
 import {
   daemonHomeHref,
@@ -142,7 +142,9 @@ function DaemonPicker({ daemon }: { readonly daemon: string | undefined }) {
   const machines = runtime.daemons.groups().flatMap(group => group.daemons);
   if (machines.length === 0) return null;
   const current = machines.find(entry => entry.daemon === daemon);
-  const name = current === undefined ? ALL_DAEMONS : daemonTitle(current);
+  // The chooser's own helper: a machine paired twice (after a daemon reset) reads differently per entry, never "pebox, pebox".
+  const everyone = runtime.daemons.snapshot().daemons;
+  const name = current === undefined ? ALL_DAEMONS : distinctDaemonName(current, everyone);
   const items: readonly ContextMenuItem[] = [
     {
       key: ALL_DAEMONS_KEY,
@@ -152,7 +154,7 @@ function DaemonPicker({ daemon }: { readonly daemon: string | undefined }) {
     },
     ...machines.map(entry => ({
       key: entry.daemon,
-      label: daemonTitle(entry),
+      label: distinctDaemonName(entry, everyone),
       ...(entry.daemon === current?.daemon ? { detail: THIS_ONE } : {}),
       separatorBefore: entry === machines[0],
       onSelect: () => {

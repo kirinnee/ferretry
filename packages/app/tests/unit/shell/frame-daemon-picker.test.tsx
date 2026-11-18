@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { distinctDaemonName } from '../../../src/daemons/machine-names.ts';
 import { HOME_HREF } from '../../../src/router/routes.ts';
 import { interact, type Mounted, must, pressKey } from '../../support/dom.ts';
 import { bootApp, settle } from './frame-fixtures.tsx';
@@ -46,6 +47,26 @@ describe('the machine switcher', () => {
     view = app.view;
     await interact(() => trigger(app.view.container).click());
     expect(labels()).toEqual(['All daemons', 'd1-hostthis one']);
+  });
+
+  test('two pairings of one machine name read as DISTINCT rows and button, as the chooser names them', async () => {
+    const app = await bootApp({ surfaces: [], machines: ['d1', 'd2'], path: '/d/d2' });
+    view = app.view;
+    await interact(() => app.list.learnMachine('d2', 'd1-host'));
+    await settle();
+    await interact(() => trigger(app.view.container).click());
+    const rowLabels = labels();
+    expect(rowLabels).toHaveLength(3);
+    const twins = rowLabels.slice(1).map(label => label.replace('this one', ''));
+    expect(new Set(twins).size).toBe(2);
+    for (const twin of twins) expect(twin.startsWith('d1-host (')).toBe(true);
+    const snapshot = app.runtime.daemons.snapshot().daemons;
+    const second = must(
+      snapshot.find(entry => entry.daemon === 'd2'),
+      'the second pairing',
+    );
+    expect(trigger(app.view.container).textContent).toBe(distinctDaemonName(second, snapshot));
+    expect(trigger(app.view.container).textContent).not.toBe('d1-host');
   });
 
   test('on the list, "All daemons" is the marked row and the button says so', async () => {
