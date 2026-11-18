@@ -5,6 +5,7 @@
  * true by construction; an unreadable machine view leaves the tab to draw what it can and says so above it.
  */
 
+import { daemonOfClient, usePairedDaemons } from '@ferretry/app';
 import type { AppComponent, SettingsProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { MachineView } from '../../contract/index.ts';
@@ -44,11 +45,29 @@ export function useMachineView(client: LiveRuntimesClient) {
 
 export type MachineTab = (props: MachineTabProps) => ReactNode;
 
+/**
+ * The name this machine goes by on screen: the paired record's live name (what the shell's list holds, updated by a rename and by
+ * every plugin-list read), else the name this view last read, else "this machine". A machine named while its setup stays open
+ * therefore never keeps reading "No runtimes on <host name>".
+ */
+export const machineNameShown = (
+  paired: readonly { readonly daemon: string; readonly machine: string }[],
+  daemon: string | undefined,
+  read: string | undefined,
+): string => {
+  const live = paired.find(candidate => candidate.daemon === daemon)?.machine;
+  if (live !== undefined && live !== '') return live;
+  return read !== undefined && read !== '' ? read : 'this machine';
+};
+
 /** One Settings tab: the machine read, and the tab inside it. */
 export const machineSettingsView = (client: LiveRuntimesClient, Tab: MachineTab): AppComponent<SettingsProps> =>
   function MachineSettings() {
     const { read, reload } = useMachineView(client);
     const machine = read.kind === 'ready' ? read.machine : read.kind === 'checking' ? read.last : null;
+    // The name follows the machine's LIVE name (the paired record every rename and every plugin-list read updates), not the
+    // name this view last read: a machine renamed while its setup is open must not keep reading "No runtimes on <old name>".
+    const paired = usePairedDaemons();
     return (
       <div className="flex min-w-0 flex-col gap-4" data-machine-settings="">
         {read.kind === 'failed' ? (
@@ -63,7 +82,7 @@ export const machineSettingsView = (client: LiveRuntimesClient, Tab: MachineTab)
         ) : null}
         <Tab
           client={client}
-          machineName={machine?.name ?? 'this machine'}
+          machineName={machineNameShown(paired, daemonOfClient(client), machine?.name)}
           machine={machine}
           online
           checking={read.kind === 'checking'}

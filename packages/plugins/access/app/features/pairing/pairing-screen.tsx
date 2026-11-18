@@ -749,6 +749,10 @@ function PairingFocus({
           {target.address === undefined ? target.title : <span className="font-mono">{target.address}</span>}
         </p>
         <p className="m-0 mt-1 text-ui text-muted">{target.address === undefined ? target.path : 'direct'}</p>
+        {/* The link is a credential and carries no name: say so, instead of a stand-in that reads like a product name. */}
+        <p className="m-0 mt-1 text-meta text-faint" data-name-after-pairing="">
+          Its name shows once paired.
+        </p>
         <details className="mt-2" data-pair-details="">
           <summary className="min-h-[44px] cursor-pointer text-ui font-medium text-muted hover:text-accent">
             Details
