@@ -101,11 +101,26 @@ export interface DaemonClientOptions {
    */
   readonly rereadAfterMs?: readonly number[];
   /**
+   * How long (ms) each bootstrap read (the plugin list, then the health read) may wait for its answer. A carrier that is
+   * healthy but never answers one would otherwise leave every call and socket waiting on the list for ever. On timeout the
+   * plugin list is told as unreadable (and asked again by the same re-read plan as any failed read) and the health read as
+   * absent. Default 15 s.
+   */
+  readonly bootstrapDeadlineMs?: number;
+  /**
    * The daemon this client reaches and Access's passkey handler (`passkey/passkey.ts`): a refusal for want of an
    * unlock or a step-up is shown to it, and the call is sent again ONCE when the person confirmed. Absent, nothing can
    * ask and every refusal is returned as it came.
    */
   readonly passkey?: { readonly daemon: PairedDaemon; readonly handler: PasskeyHandler };
+  /**
+   * The plugin list this device remembered from the last LIVE read of this machine (`shell/shape-memory.ts`). It is only
+   * what to DRAW until the live read answers: no route, tool, subscription or socket is admitted on it, and the live
+   * answer replaces it whatever it says. Absent (or unusable by this build), the client starts unread as it always did.
+   */
+  readonly remembered?: Extract<Inventory, { kind: 'read' }>;
+  /** Told every LIVE plugin list, whatever it says, so the device can remember a good one and forget a bad one. */
+  readonly onRead?: (inventory: Inventory) => void;
   /** Told what the daemon calls its machine, every time the plugin list is read: a rename reaches this device by it. */
   readonly learnName?: (name: string) => void;
   /** The clock a background read's step-up backoff runs on ({@link StepUpBackoff}); the wall clock when absent. */
@@ -171,6 +186,10 @@ function paused(owner: string, standing: Standing): DaemonCallError {
   return new DaemonCallError(0, KERNEL_REFUSALS.pluginPaused.code, `${owner} is paused on this daemon (${reason}).`);
 }
 
+function stopped(): DaemonCallError {
+  return new DaemonCallError(0, KERNEL_REFUSALS.pluginPaused.code, 'This connection was closed.');
+}
+
 function refusal(answer: TransportAnswer): DaemonCallError {
   const body = typeof answer.body === 'object' && answer.body !== null ? (answer.body as Record<string, unknown>) : {};
   const code = typeof body.code === 'string' ? body.code : `http_${answer.status}`;
@@ -180,6 +199,20 @@ function refusal(answer: TransportAnswer): DaemonCallError {
 
 /** 1 s doubling to 30 s: a read that failed is asked again until it answers. */
 const DEFAULT_REREAD_AFTER_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
+const DEFAULT_BOOTSTRAP_DEADLINE_MS = 15_000;
+
+/** `work`, or a rejection once `ms` has passed without it: the bootstrap reads never wait for ever. */
+async function within<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`the daemon did not answer within ${Math.round(ms / 1000)} s`)), ms);
+  });
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export class DaemonClient {
   readonly #transport: DaemonTransport;
@@ -193,6 +226,9 @@ export class DaemonClient {
   readonly #sockets = new Set<OpenSocket>();
   readonly #changeListeners = new Set<() => void>();
   #inventory: Inventory | undefined;
+  /** The inventory above is the one this device REMEMBERED, to draw from; no call is admitted until a live read replaces it. */
+  #provisional = false;
+  readonly #onRead: DaemonClientOptions['onRead'];
   #standings: ReadonlyMap<string, Standing>;
   #daemonVersion: string | undefined;
   #ready: Promise<void>;
@@ -209,6 +245,9 @@ export class DaemonClient {
   readonly #refusedListeners = new Set<() => void>();
   #refused = false;
   readonly #rereadAfterMs: readonly number[];
+  readonly #bootstrapDeadlineMs: number;
+  /** Sockets handed out before the live list answered: each is told once if this client stops first. */
+  readonly #waitingSockets = new Set<() => void>();
   /** Failed reads in a row, and the pending re-read's timer; both reset by an answered read. */
   #failedReads = 0;
   #rereadTimer: ReturnType<typeof setTimeout> | undefined;
@@ -225,13 +264,29 @@ export class DaemonClient {
     this.#transport = options.transport;
     this.#surfaces = options.surfaces;
     this.#rereadAfterMs = options.rereadAfterMs ?? DEFAULT_REREAD_AFTER_MS;
+    this.#bootstrapDeadlineMs = options.bootstrapDeadlineMs ?? DEFAULT_BOOTSTRAP_DEADLINE_MS;
     this.#passkey = options.passkey;
     this.#learnName = options.learnName;
+    this.#onRead = options.onRead;
     for (const entry of options.surfaces) {
       for (const route of entry.manifest.actions?.routes ?? []) this.#routeOwner.set(route.key, entry.id);
       for (const socket of entry.manifest.actions?.sockets ?? []) this.#socketOwner.set(socket.key, entry.id);
     }
     this.#standings = standings(undefined, this.#surfaces);
+    // A remembered list that this build can still use whole (no contract moved, nothing needs an update) is drawn from at
+    // once; anything else is not used (it would flash "needs an update" and then go).
+    const remembered = options.remembered;
+    if (remembered !== undefined) {
+      const drawn = standings(remembered, this.#surfaces);
+      const usable = [...drawn.values()].every(
+        s => s.state === 'allowed' || s.reason === 'off' || s.reason === 'missing',
+      );
+      if (usable) {
+        this.#inventory = remembered;
+        this.#standings = drawn;
+        this.#provisional = true;
+      }
+    }
     this.#ready = this.#pending();
   }
 
@@ -244,6 +299,11 @@ export class DaemonClient {
 
   stop(): void {
     this.#stopped = true;
+    // Whatever waits for the inventory (an admission, a deferred socket) is woken to find the client stopped.
+    this.#settle();
+    // A socket still waiting for the live list is told once that it will never open.
+    for (const abandon of [...this.#waitingSockets]) abandon();
+    this.#waitingSockets.clear();
     this.#stopEvents?.();
     this.#stopEvents = undefined;
     this.#setFeedLive(false);
@@ -257,7 +317,7 @@ export class DaemonClient {
   /** Re-reads the inventory. Calls made meanwhile wait; nothing else is sent until it answers. */
   refresh(): Promise<void> {
     if (this.#reading !== undefined) return this.#reading;
-    if (this.#inventory !== undefined) {
+    if (this.#inventory !== undefined && !this.#provisional) {
       this.#inventory = undefined;
       this.#standings = standings(undefined, this.#surfaces);
       this.#ready = this.#pending();
@@ -410,21 +470,33 @@ export class DaemonClient {
   async #read(): Promise<void> {
     let inventory: Inventory;
     try {
-      const answer = await this.#transport.request({ method: 'GET', path: parseRouteKey(INVENTORY_ROUTE).path });
+      const answer = await within(
+        this.#transport.request({ method: 'GET', path: parseRouteKey(INVENTORY_ROUTE).path }),
+        this.#bootstrapDeadlineMs,
+      );
       inventory = inventoryFromAnswer(answer);
     } catch (error) {
       if (isDeviceRefusal(error)) this.#refuse();
       inventory = unreadableBecause(error);
     }
     try {
-      const health = await this.#transport.request({ method: 'GET', path: parseRouteKey(HEALTH_ROUTE).path });
+      const health = await within(
+        this.#transport.request({ method: 'GET', path: parseRouteKey(HEALTH_ROUTE).path }),
+        this.#bootstrapDeadlineMs,
+      );
       const parsed = HealthEnvelopeSchema.safeParse(health.body);
       this.#daemonVersion = parsed.success ? parsed.data.version : undefined;
     } catch {
       this.#daemonVersion = undefined;
     }
     if (this.#stopped) return;
+    this.#provisional = false;
     this.#inventory = inventory;
+    try {
+      this.#onRead?.(inventory);
+    } catch {
+      // what a device remembers is a convenience; its failure never costs the read
+    }
     if (inventory.kind === 'read' && inventory.daemonName !== undefined) this.#learnName?.(inventory.daemonName);
     this.#standings = standings(inventory, this.#surfaces);
     this.#closeBlockedSockets();
@@ -465,7 +537,9 @@ export class DaemonClient {
 
   /** Waits for the inventory, then checks the caller and the owner. Throws `plugin_paused` without sending. */
   async #admit(caller: string, owner: string): Promise<void> {
-    while (this.#inventory === undefined && !this.#stopped) await this.#ready;
+    while ((this.#inventory === undefined || this.#provisional) && !this.#stopped) await this.#ready;
+    // A stopped client admits nothing, whatever it remembers: a kept reference never reads from the cache alone.
+    if (this.#stopped) throw stopped();
     for (const id of new Set([caller, owner])) if (!this.#allowed(id)) throw paused(id, this.standing(id));
   }
 
@@ -725,7 +799,7 @@ export class DaemonClient {
 
   /** The event stream opens only after the bootstrap read, and only while something listens. */
   #ensureEvents(): void {
-    if (this.#stopEvents !== undefined || this.#inventory === undefined || this.#stopped) return;
+    if (this.#stopEvents !== undefined || this.#inventory === undefined || this.#provisional || this.#stopped) return;
     if (this.#subscriptions.size === 0) return;
     this.#stopEvents = this.#transport.events(
       raw => {
@@ -755,7 +829,67 @@ export class DaemonClient {
   ): TransportSocket {
     const owner = this.#socketOwner.get(key);
     if (owner === undefined) throw new TypeError(`${caller} opened ${key}, which no compiled manifest declares`);
-    // A socket is synchronous: it cannot wait for the inventory, so an unread inventory refuses like a block.
+    if (this.#stopped) throw stopped();
+    // A remembered list only DRAWS: no socket opens on it. The handle is returned at once and the socket opens only when
+    // the LIVE list has answered (or closes as paused if that list says no), so a view that opens its socket in an
+    // effect on a reload is never thrown at while the live read is still on its way.
+    if (this.#provisional || this.#inventory === undefined || this.#inventory.kind === 'unreadable')
+      return this.#deferSocket(caller, owner, key, params, listeners, query);
+    return this.#openSocket(caller, owner, key, params, listeners, query);
+  }
+
+  #deferSocket(
+    caller: string,
+    owner: string,
+    key: string,
+    params: Readonly<Record<string, string>>,
+    listeners: SocketListeners,
+    query?: Readonly<Record<string, string>>,
+  ): TransportSocket {
+    let inner: TransportSocket | undefined;
+    let closed = false;
+    const abandon = (): void => {
+      if (closed) return;
+      closed = true;
+      listeners.onClose('This connection was closed.', 1008);
+    };
+    this.#waitingSockets.add(abandon);
+    void (async () => {
+      while ((this.#inventory === undefined || this.#provisional) && !this.#stopped) await this.#ready;
+      this.#waitingSockets.delete(abandon);
+      if (closed || this.#stopped) return;
+      try {
+        inner = this.#openSocket(caller, owner, key, params, listeners, query);
+      } catch {
+        closed = true;
+        // A list that could not be read is no verdict: the close is retryable (no code), and the re-read plan answers by
+        // the time the view dials again. A live list that says no is a refusal (1008), which a view does not dial again.
+        if (this.#inventory?.kind === 'unreadable') listeners.onClose(KERNEL_REFUSALS.pluginPaused.code);
+        else listeners.onClose(KERNEL_REFUSALS.pluginPaused.code, 1008);
+      }
+    })();
+    return {
+      send: frame => {
+        if (closed) return;
+        // Before the live answer nothing is open: a frame sent now is dropped, as the transport drops one sent before open.
+        inner?.send(frame);
+      },
+      close: (code, reason) => {
+        if (closed) return;
+        closed = true;
+        inner?.close(code, reason);
+      },
+    };
+  }
+
+  #openSocket(
+    caller: string,
+    owner: string,
+    key: string,
+    params: Readonly<Record<string, string>>,
+    listeners: SocketListeners,
+    query?: Readonly<Record<string, string>>,
+  ): TransportSocket {
     for (const id of new Set([caller, owner])) if (!this.#allowed(id)) throw paused(id, this.standing(id));
     const { path } = parseRouteKey(key);
     const entry: { open?: OpenSocket } = {};

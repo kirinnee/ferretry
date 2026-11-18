@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { implementApp } from '@ferretry/kernel/manifest';
-import type { ReactNode } from 'react';
+import { type ReactNode, use } from 'react';
 import { provideToShell } from '../../../src/connect/provides.ts';
 import { storedOverrides } from '../../../src/layout/device-layout.ts';
 import type { LayoutOverrides } from '../../../src/layout/layout.ts';
@@ -42,6 +42,45 @@ const crowd = entryOf(
   ),
 );
 
+// ─── one readiness gate per slot: a panel still arriving holds the others back ───
+let release: () => void = () => {};
+const arrival = new Promise<void>(resolve => {
+  release = resolve;
+});
+const gateManifest = manifestOf('holdback', {
+  ui: {
+    screens: [{ id: 'page', path: 'page', nav: { label: 'Page', order: 1 } }],
+    panels: [
+      { id: 'quick', slot: 'side', order: 1 },
+      { id: 'late', slot: 'side', order: 2 },
+    ],
+  },
+});
+const gate = entryOf(
+  gateManifest,
+  provideToShell(
+    implementApp(gateManifest, {
+      build: () => ({
+        screens: {
+          page: (): ReactNode => (
+            <section data-testid="page">
+              <PanelSlot daemon="d1" slot="side" />
+            </section>
+          ),
+        },
+        panels: {
+          quick: () => <p data-testid="panel-quick">quick</p>,
+          late: () => {
+            use(arrival);
+            return <p data-testid="panel-late">late</p>;
+          },
+        },
+      }),
+    }),
+    {},
+  ),
+);
+
 const sideColumn = () => {
   const storage = memoryStore();
   writeRecord(
@@ -64,6 +103,22 @@ afterEach(async () => {
 const pause = (ms: number): Promise<void> => interact(() => new Promise(resolve => setTimeout(resolve, ms)));
 const count = (selector: string): number => view?.container.querySelectorAll(selector).length ?? 0;
 const text = (): string => view?.container.textContent ?? '';
+
+describe('a slot draws once, together', () => {
+  test('r7: a panel that is still arriving holds the ready one back; then both draw at the same time', async () => {
+    const app = await bootApp({ surfaces: [gate], machines: ['d1'], path: '/d/d1/page', storage: sideColumn() });
+    view = app.view;
+    await settle();
+    await pause(50);
+    expect(count('[data-testid="panel-quick"]')).toBe(0);
+    expect(count('[data-testid="panel-late"]')).toBe(0);
+    release();
+    await pause(700);
+    await settle();
+    expect(count('[data-testid="panel-quick"]')).toBeGreaterThanOrEqual(1);
+    expect(count('[data-testid="panel-late"]')).toBeGreaterThanOrEqual(1);
+  });
+});
 
 describe('while the daemon has not said what it offers', () => {
   test('r7: nine panels and the page are ONE loader and no sentence, then the content', async () => {
