@@ -388,12 +388,13 @@ function ThemeToggle({ theme }: { readonly theme: DeviceTheme }) {
 
 /**
  * The quick switch in a page's own top row, at the right end (today's `PageThemeSwitch`). A phone's bar carries the
- * theme in Settings, so there — and outside an app shell — this renders nothing. No page gets a bar just for it.
+ * theme in Settings, so there — and outside an app shell — this renders nothing. No page gets a bar just for it. The
+ * one exception is the shell's own phone title bar (E2 gap 31), which has the room for it and says so with `onPhone`.
  */
-export function PageThemeSwitch() {
+export function PageThemeSwitch({ onPhone = false }: { readonly onPhone?: boolean } = {}) {
   const theme = useDeviceTheme();
   const phone = useLayoutMode() === 'drawer';
-  if (phone || theme === null) return null;
+  if ((phone && !onPhone) || theme === null) return null;
   return (
     <div data-page-theme-switch="" className="shrink-0">
       <ThemeToggle theme={theme} />
