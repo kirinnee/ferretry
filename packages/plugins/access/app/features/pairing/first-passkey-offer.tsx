@@ -14,7 +14,7 @@
 import { Fingerprint } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { CredentialsPort } from '@ferretry/app';
+import { type CredentialsPort, type DeadlineSchedule, MACHINE_READ_DEADLINE_MS, withDeadline } from '@ferretry/app';
 import type { PasskeysView } from '../../../contract/index.ts';
 import { passkeyFailureSentence, registrationMinutesLeft, webAuthnSupported } from '../../lib/passkey-panel.ts';
 import { addPasskeyCeremony, browserCredentials } from '../../lib/step-up-ceremony.ts';
@@ -35,6 +35,10 @@ export interface FirstPasskeyOfferProps {
   readonly supported?: () => boolean;
   /** Test seam: the clock the minutes left are counted against. */
   readonly now?: () => number;
+  /** How long the read of the machine's view may take before the offer gives up (`none`); the app's machine deadline. */
+  readonly deadlineMs?: number;
+  /** Test seam: the timer that deadline runs on. */
+  readonly schedule?: DeadlineSchedule;
   /**
    * Told what the machine decided, once: `none` (nothing to offer: no window, a passkey held, no browser support, or a
    * read that failed), `offered` (the button is showing) and later `added`. A host that moves on by itself (the
@@ -61,6 +65,8 @@ export function FirstPasskeyOffer({
   origin = () => window.location.origin,
   supported = webAuthnSupported,
   now = Date.now,
+  deadlineMs = MACHINE_READ_DEADLINE_MS,
+  schedule,
   onSettled,
 }: FirstPasskeyOfferProps) {
   const [state, setState] = useState<State>({ kind: 'hidden' });
@@ -79,8 +85,12 @@ export function FirstPasskeyOffer({
       settled.current?.('none');
       return;
     }
-    void createClient(connection)
-      .then(async client => ({ client, view: await fetchPasskeys(client) }))
+    // A machine that never answers settles as `none` at the deadline, so a host waiting on this never waits for ever.
+    void withDeadline(
+      createClient(connection).then(async client => ({ client, view: await fetchPasskeys(client) })),
+      deadlineMs,
+      schedule,
+    )
       .then(({ client, view }) => {
         if (!current) return;
         if (firstWindowOpen(view)) {
@@ -95,7 +105,7 @@ export function FirstPasskeyOffer({
     return () => {
       current = false;
     };
-  }, [canRun, connection, createClient]);
+  }, [canRun, connection, createClient, deadlineMs, schedule]);
 
   const add = useCallback(async () => {
     if (state.kind !== 'offered') return;

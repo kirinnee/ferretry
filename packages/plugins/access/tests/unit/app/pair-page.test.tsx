@@ -544,6 +544,47 @@ describe('the /pair page offers the first passkey on its success screen', () => 
     expect(moves).toEqual([{ to: `/d/${DAEMON}`, replace: undefined }]);
   });
 
+  it('P-H6 should show "Not now" while the machine is still being asked, and navigate once a read that never answers hits its deadline', async () => {
+    const hung: StepUpClient = { request: async () => await new Promise<never>(() => {}) };
+    const timers: (() => void)[] = [];
+    const { Page } = setup(paired, [], {
+      passkeyClient: async () => hung,
+      passkeyOffer: {
+        origin: () => 'https://pwa.example.test',
+        supported: () => true,
+        now: () => NOW,
+        deadlineMs: 20_000,
+        schedule: run => {
+          timers.push(run);
+          return () => {};
+        },
+      },
+    });
+    const moves: Navigation[] = [];
+    await pairNow(Page, moves);
+    // Asked, not answered: the screen waits, but the way on is already there.
+    expect(must(view, 'the page').container.textContent).toContain('Connected');
+    expect(must(view, 'the page').container.querySelector('[data-first-passkey-offer]')).toBeNull();
+    expect(button('Not now')).toBeDefined();
+    expect(moves).toEqual([]);
+    expect(timers).toHaveLength(1);
+    // The deadline passes: the read settles as "nothing to offer" and the page moves on, as it did before the offer.
+    await interact(async () => {
+      timers[0]?.();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(moves).toEqual([{ to: `/d/${DAEMON}`, replace: undefined }]);
+  });
+
+  it('P-H7 should move on at once when "Not now" is pressed while the machine is still being asked', async () => {
+    const hung: StepUpClient = { request: async () => await new Promise<never>(() => {}) };
+    const { Page } = setup(paired, [], { passkeyClient: async () => hung, passkeyOffer: { supported: () => true } });
+    const moves: Navigation[] = [];
+    await pairNow(Page, moves);
+    await interact(() => button('Not now').click());
+    expect(moves).toEqual([{ to: `/d/${DAEMON}`, replace: undefined }]);
+  });
+
   it('P-H3 should show no button and navigate as before when the window is closed, a passkey is held or the machine cannot be reached', async () => {
     for (const environment of [
       environmentFor(machine({ passkeys: [], registration: 'closed' }).client),

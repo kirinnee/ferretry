@@ -24,7 +24,10 @@ export interface PairedNextProps {
   /** How the offer reaches that machine; absent, there is no offer and the page moves on. */
   readonly createClient: FirstPasskeyClientFactory | undefined;
   /** The offer's test seams (credentials, origin, browser support, clock). */
-  readonly offer?: Pick<FirstPasskeyOfferProps, 'credentials' | 'origin' | 'supported' | 'now'>;
+  readonly offer?: Pick<
+    FirstPasskeyOfferProps,
+    'credentials' | 'origin' | 'supported' | 'now' | 'deadlineMs' | 'schedule'
+  >;
   /** Moves on (the host's navigation). Called at most once. */
   readonly onContinue: () => void;
 }
@@ -56,11 +59,13 @@ export function PairedNext({ connection, createClient, offer, onContinue }: Pair
       {offerable ? (
         <FirstPasskeyOffer {...offer} connection={connection} createClient={createClient} onSettled={settled} />
       ) : null}
-      {phase === 'checking' ? null : phase === 'added' ? (
+      {phase === 'added' ? (
         <button type="button" className="kt-btn" data-variant="primary" data-paired-continue="" onClick={move}>
           Continue
         </button>
-      ) : (
+      ) : !offerable ? null : (
+        // Shown from the first moment, while the machine is still being asked: a machine that is slow to answer must
+        // never leave the person on this screen with no way on.
         <button
           type="button"
           className="min-h-[44px] text-ui font-medium text-muted underline hover:text-accent focus-visible:outline-focus focus-visible:outline-offset-focus"

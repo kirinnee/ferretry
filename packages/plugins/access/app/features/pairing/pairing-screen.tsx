@@ -122,7 +122,10 @@ export interface PairingScreenProps {
    */
   readonly passkeyClient?: FirstPasskeyClientFactory;
   /** Test seams of that offer (credentials, origin, browser support, clock); production reads the browser's own. */
-  readonly passkeyOffer?: Pick<FirstPasskeyOfferProps, 'credentials' | 'origin' | 'supported' | 'now'>;
+  readonly passkeyOffer?: Pick<
+    FirstPasskeyOfferProps,
+    'credentials' | 'origin' | 'supported' | 'now' | 'deadlineMs' | 'schedule'
+  >;
   /**
    * How a host that moves on by itself leaves the success screen (the daemon-less `/pair` page navigates to the machine's
    * home). With it, the screen waits for the passkey offer's answer before calling it: at once when there is nothing
