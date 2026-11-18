@@ -792,7 +792,8 @@ describe('RuntimeChoiceMenu', () => {
     expect(radios(screen.container)[2]!.textContent).toContain('Thinks the longest');
     expect(radios(screen.container)[2]!.getAttribute('title')).toBe('Thinks the longest');
     // A pointer-sized row in the popover, not the 44px thumb floor of the sheet.
-    expect(radios(screen.container)[0]!.className).toContain('min-h-[34px]');
+    expect(radios(screen.container)[0]!.className).toContain('kt-menu-item');
+    expect(radios(screen.container)[0]!.className).not.toContain('[--menu-item-h:44px]');
     await screen.unmount();
   });
 
@@ -800,7 +801,7 @@ describe('RuntimeChoiceMenu', () => {
     const chosen: string[] = [];
     const screen = await mount(<RuntimeChoiceMenu ariaLabel="Pick" disabled={false} items={items(chosen)} />);
     const [low, medium, high] = radios(screen.container) as [HTMLButtonElement, HTMLButtonElement, HTMLButtonElement];
-    expect(low.className).toContain('min-h-[44px]');
+    expect(low.className).toContain('[--menu-item-h:44px]');
 
     await interact(() => pressKey(medium, 'ArrowDown'));
     expect(document.activeElement).toBe(high);

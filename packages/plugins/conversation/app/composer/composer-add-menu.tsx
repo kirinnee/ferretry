@@ -221,10 +221,10 @@ export function ComposerAddMenu({ open, onClose, actions, anchorRef, variant }: 
     >
       <div
         className={cn(
-          'fy-add-menu absolute border border-border bg-surface shadow-popover',
+          'fy-add-menu absolute',
           sheet
-            ? 'fy-add-menu-sheet inset-x-0 bottom-0 rounded-t-panel border-x-0 border-b-0 pb-[max(0.5rem,var(--inset-bottom))]'
-            : 'rounded-panel',
+            ? 'fy-add-menu-sheet inset-x-0 bottom-0 rounded-t-panel border border-x-0 border-b-0 border-border-strong bg-surface pb-[max(0.5rem,var(--inset-bottom))] shadow-popover'
+            : 'kt-popover',
         )}
         style={
           sheet

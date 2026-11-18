@@ -266,7 +266,7 @@ export function ModelMentionField({
             role="listbox"
             aria-label={`Models for ${label}`}
             data-model-suggestions=""
-            className="absolute inset-x-0 top-[calc(100%+4px)] z-40 max-h-[264px] overflow-y-auto overscroll-contain rounded-panel border border-border-strong bg-surface shadow-popover"
+            className="kt-popover absolute inset-x-0 top-[calc(100%+4px)] z-40 max-h-[264px] overflow-y-auto overscroll-contain"
           >
             {suggestions.map((model, index) => (
               <SuggestionRow

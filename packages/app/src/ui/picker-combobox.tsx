@@ -135,8 +135,7 @@ export interface PickerComboboxProps<Option extends PickerOption> {
 }
 
 /** Shared panel chrome: the popover silhouette every state is drawn inside. */
-const PANEL_CLASS =
-  'absolute inset-x-0 top-[calc(100%+var(--gap-xs))] z-40 overflow-hidden rounded-panel border-panel border-border-strong bg-surface shadow-popover';
+const PANEL_CLASS = 'kt-popover absolute inset-x-0 top-[calc(100%+var(--gap-xs))] z-40 overflow-hidden';
 
 /** Shared notice chrome: one row's worth of height, so no state jumps the panel. */
 const NOTICE_CLASS = 'flex min-h-[44px] items-center gap-sm px-control-x py-row-y text-meta leading-base';
@@ -416,9 +415,8 @@ function PickerRow<Option extends PickerOption>({
       aria-disabled={enabled ? undefined : true}
       aria-selected={active}
       className={cn(
-        'flex min-h-[44px] w-full select-none items-start gap-sm px-control-x py-row-y text-left text-cell outline-none',
-        enabled ? 'cursor-pointer text-fg hover:bg-surface-2' : 'cursor-not-allowed text-muted',
-        active && 'bg-accent-soft shadow-active',
+        'kt-menu-item min-h-[44px] select-none items-start text-cell outline-none',
+        enabled ? 'cursor-pointer text-fg' : 'cursor-not-allowed text-muted',
       )}
       data-active={active ? 'true' : undefined}
       // Distinct from `aria-selected`, which ARIA reserves for the cursor in a

@@ -129,6 +129,14 @@
 .fy-search {
   flex: 1;
   max-width: 420px;
+  /* A control wears the control edge like every field (the machine picker beside it does). */
+  min-height: var(--control-h);
+  padding: 0 var(--pad-control-x);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: var(--radius-input);
+  background: var(--surface);
+  color: var(--fg);
+  text-align: left;
   /* One line, whatever the bar's width: the shortcut hint never wraps under the word, against the edge. */
   white-space: nowrap;
 }
@@ -383,7 +391,7 @@
    column instead of along one long wrapped row. */
 .fy-tabs--grouped {
   flex-direction: column;
-  gap: 12px;
+  gap: var(--flow-4, 16px);
 }
 .fy-tab-group__title {
   margin: 0 0 4px;
@@ -395,10 +403,15 @@
 .fy-tab-group__tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  /* A wrapped row is the same group: its rows sit closer than two groups do. */
+  gap: var(--flow-1, 4px) var(--flow-2, 8px);
 }
 .fy-settings-device {
   margin: 0 0 12px;
+}
+/* Setting groups on a page (a title over a grouped card) stand a whole step apart, so a title belongs to the card under it. */
+.fy-page [data-setting-group] {
+  margin-bottom: var(--flow-4, 16px);
 }
 .fy-settings-device__hint {
   color: var(--fg-soft);

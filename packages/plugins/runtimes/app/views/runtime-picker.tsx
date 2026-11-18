@@ -141,7 +141,7 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
           ? createPortal(
               <div
                 aria-label="Model and reasoning"
-                className="fixed z-50 overflow-y-auto rounded-control border border-border-strong bg-surface p-2 shadow-lg"
+                className="kt-popover fixed z-50 overflow-y-auto p-2"
                 data-runtime-popover=""
                 ref={panel}
                 role="dialog"

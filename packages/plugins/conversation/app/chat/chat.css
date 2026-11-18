@@ -1137,11 +1137,11 @@ button.fy-receipt {
 }
 /* THE AUTOCOMPLETE POPOVER: one small card above the caret — header, at most six rows, a key hint. */
 .fy-ac-pop {
-  background: var(--fy-surface);
-  border: var(--stroke-panel) solid var(--border-strong);
-  border-radius: var(--radius-panel, 10px);
+  background: var(--menu-bg);
+  border: var(--stroke-panel) solid var(--menu-edge);
+  border-radius: var(--menu-radius, 10px);
   bottom: calc(100% + 12px);
-  box-shadow: var(--shadow-popover);
+  box-shadow: var(--menu-shadow);
   color: var(--fy-fg);
   font-size: 13px;
   left: -40px;

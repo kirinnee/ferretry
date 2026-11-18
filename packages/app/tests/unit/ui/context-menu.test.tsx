@@ -454,25 +454,25 @@ describe('ContextMenu', () => {
 
   it('takes the 44px touch floor only on a coarse pointer', async () => {
     const fine = await openMenu();
-    expect(fine.rows()[0]?.className).toContain('min-h-[34px]');
+    // The row's height is the menu role's `--menu-item-h` (34px); only a coarse pointer raises it, to the touch floor.
+    expect(fine.rows()[0]?.className).toContain('kt-menu-item');
+    expect(fine.rows()[0]?.className).not.toContain('--menu-item-h');
     await fine.unmount();
 
     const coarse = await openMenu({ touch: true });
-    expect(coarse.rows()[0]?.className).toContain('min-h-[44px]');
+    expect(coarse.rows()[0]?.className).toContain('[--menu-item-h:44px]');
     await coarse.unmount();
   });
 
   it('marks a destructive row with tone as reinforcement, never as the only signal', async () => {
     const menu = await openMenu();
 
-    expect(menu.rows()[2]?.className).toContain('text-err');
+    // The tone is the row class's own `[data-danger]` rule (more specific than the plain row), so there is no second ink
+    // for the emitted-CSS order to pick between: the destructive tone cannot lose.
+    expect(menu.rows()[2]?.hasAttribute('data-danger')).toBe(true);
     expect(menu.rows()[2]?.textContent).toBe('Migrate');
-    expect(menu.rows()[0]?.className).not.toContain('text-err');
-
-    // Exclusive, not layered: carrying both inks let the emitted-CSS order
-    // decide the colour, and the destructive tone lost.
+    expect(menu.rows()[0]?.hasAttribute('data-danger')).toBe(false);
     expect(menu.rows()[2]?.className).not.toContain('text-fg-soft');
-    expect(menu.rows()[0]?.className).toContain('text-fg-soft');
     await menu.unmount();
   });
 
