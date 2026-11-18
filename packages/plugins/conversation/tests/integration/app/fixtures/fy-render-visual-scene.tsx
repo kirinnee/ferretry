@@ -26,7 +26,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FyRenderBlock } from '../../../../app/render/fy-render-block.tsx';
-import { isFyRenderEmbedBlock, parseFyRender } from '../../../../app/render/fy-render.ts';
+import { type FyRenderWorkspaceReader, isFyRenderEmbedBlock, parseFyRender } from '../../../../app/render/fy-render.ts';
 import { FY_RENDER_VISUAL_CASES } from './fy-render-visual-cases.ts';
 
 /** `?case=` selects a fixture. */
@@ -44,6 +44,24 @@ if (!parsed.ok) throw new Error(`fixture did not parse: ${parsed.reason}`);
 if (isFyRenderEmbedBlock(parsed.block)) throw new Error('fixture is an embed block');
 const block = parsed.block;
 
+/** A workspace read that answers `tall.png` with a 400x3000 picture drawn here, so no file or network is involved. */
+const readWorkspaceMedia: FyRenderWorkspaceReader = async path => {
+  if (path !== 'tall.png') return { ok: false, reason: 'missing' };
+  const canvas = document.createElement('canvas');
+  canvas.width = 400;
+  canvas.height = 3_000;
+  const context = canvas.getContext('2d');
+  if (context === null) return { ok: false, reason: 'unavailable' };
+  const gradient = context.createLinearGradient(0, 0, 0, 3_000);
+  gradient.addColorStop(0, '#6aa3d8');
+  gradient.addColorStop(1, '#d8a36a');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 400, 3_000);
+  const blob = await new Promise<Blob | null>(done => canvas.toBlob(done, 'image/png'));
+  if (blob === null) return { ok: false, reason: 'unavailable' };
+  return { ok: true, bytes: new Uint8Array(await blob.arrayBuffer()) };
+};
+
 const root = document.getElementById('root');
 if (root === null) throw new Error('the scene has no #root to mount into');
 
@@ -51,7 +69,7 @@ createRoot(root).render(
   <StrictMode>
     {/* An `.md` column, as in a transcript, so a fallback wears the ordinary fence's styling. */}
     <div className="scene-pad md">
-      <FyRenderBlock block={block} />
+      <FyRenderBlock block={block} readWorkspaceMedia={readWorkspaceMedia} />
     </div>
   </StrictMode>,
 );

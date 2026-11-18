@@ -197,7 +197,7 @@ interface Scene {
 
 const openScene = async (
   which: string,
-  viewport: (typeof VIEWPORTS)[number],
+  viewport: { readonly height: number; readonly name: string; readonly width: number },
   options: { reducedMotion?: 'reduce'; theme?: 'light' | 'dark'; themeName?: string } = {},
 ): Promise<Scene> => {
   if (!caseNames.has(which)) throw new Error(`no such fy-render fixture: ${which}`);
@@ -1582,4 +1582,51 @@ describe('fy-render component evidence — a diagram never traps the scroll', ()
       await scene.close();
     }
   }, 180_000);
+});
+
+describe('fy-render component evidence — a picture that opens full-size', () => {
+  test('should fit a tall picture to the stage in the block’s own fullscreen, and keep a small one off the full column', async () => {
+    // Arrange — a 400x3000 picture in an 800x600 window.
+    const scene = await openScene('image-tall', { height: 600, name: '800x600', width: 800 });
+    const { page } = scene;
+    try {
+      await page.waitForSelector('button[data-fy-render-zoom-trigger] img');
+      await page.waitForFunction(() => {
+        const img = document.querySelector<HTMLImageElement>('button[data-fy-render-zoom-trigger] img');
+        return img !== null && img.complete && img.naturalHeight === 3_000;
+      });
+
+      // Assert — inline, the button is as wide as the picture and no wider.
+      const inline = await page.evaluate(() => {
+        const button = document.querySelector<HTMLElement>('button[data-fy-render-zoom-trigger]');
+        const img = button?.querySelector('img');
+        return { button: button?.getBoundingClientRect().width ?? 0, img: img?.getBoundingClientRect().width ?? 0 };
+      });
+      should(Math.abs(inline.button - inline.img)).be.below(1);
+
+      // Act — the block's own Fullscreen.
+      await page.getByRole('button', { name: 'Fullscreen' }).click();
+      await page.waitForSelector('[data-fy-render-fullscreen="true"]');
+      await page.waitForFunction(
+        () => document.getAnimations().filter(each => each.playState === 'running').length === 0,
+      );
+
+      // Assert — the picture fits the stage: it was 3000px tall before the button took the stage's box.
+      const fitted = await page.evaluate(() => {
+        const stage = document.querySelector<HTMLElement>('[data-fy-render-fullscreen="true"] .fy-render-stage');
+        const img = document.querySelector<HTMLElement>(
+          '[data-fy-render-fullscreen="true"] button[data-fy-render-zoom-trigger] img',
+        );
+        return {
+          image: img?.getBoundingClientRect().height ?? Infinity,
+          stage: stage?.getBoundingClientRect().height ?? 0,
+        };
+      });
+      await scene.shot('image-tall-fullscreen', fitted);
+      should(fitted.stage).be.above(0);
+      should(fitted.image).be.belowOrEqual(fitted.stage + 1);
+    } finally {
+      await scene.close();
+    }
+  }, 120_000);
 });

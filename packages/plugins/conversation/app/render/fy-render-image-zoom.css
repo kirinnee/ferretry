@@ -4,6 +4,7 @@
    pixel size and moved and scaled by `transform` only, so zooming resamples the original bytes. */
 .fy-zoom-open {
   display: block;
+  width: fit-content;
   max-width: 100%;
   padding: 0;
   border: 0;
@@ -12,6 +13,17 @@
   color: inherit;
   cursor: zoom-in;
   font: inherit;
+}
+
+/* In the block's own fullscreen the picture is fitted to the stage with `max-height: 100%` (fy-render.css). That percentage
+   needs a box with a height, and the button around the picture is `height: auto`, so it resolved to none and a tall picture
+   overflowed. The button takes the stage's box and centres the picture in it. */
+.fy-render[data-fy-render-fullscreen='true'] .fy-zoom-open {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  max-height: 100%;
 }
 
 .fy-zoom-open:focus-visible {
