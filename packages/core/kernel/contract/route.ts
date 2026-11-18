@@ -19,6 +19,12 @@ export interface CapabilityDemand {
   readonly axis: CapabilityAxis;
   /** Only takes away: grant and unlock still asked, never a per-act passkey. */
   readonly narrowing?: true;
+  /**
+   * Asked as a `configure` grant, but a PASSKEY only where a plain `use` would be: with the per-act confirmation off the
+   * grant (daemon-wide and the device's own) still has to hold and nothing else is asked. Only the doors that START a
+   * ferret say so; it never takes the grant away.
+   */
+  readonly promptsAsUse?: true;
 }
 
 /** One of the two required additions (§7.1): what this route records in the audit log, or a reviewed reason not to. */

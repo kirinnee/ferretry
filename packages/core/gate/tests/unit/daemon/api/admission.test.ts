@@ -21,6 +21,7 @@ import {
   ADMIN,
   admit,
   carried,
+  declaredRoute,
   descriptor,
   FERRET,
   FERRET_TOKEN,
@@ -219,7 +220,12 @@ describe('the unlock and the step-up', () => {
     w.policy = perAct;
     expect(admit(w, fleetConfigure, { device: 'phone' }).outcome).toBe('403 grant_step_up_required');
     expect(admit(w, fleetUse, { device: 'phone' }).outcome).toBe('admitted');
+    // With the unlock off but the per-act switch off too, the owner asked for no prompt: a use asks nothing, a configure still does.
     w.policy = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_GATE_SECURITY, unlockOnOpen: false } };
+    expect(admit(w, terminalUse, { device: 'phone' }).outcome).toBe('admitted');
+    expect(admit(w, fleetConfigure, { device: 'phone' }).outcome).toBe('403 grant_step_up_required');
+    // Asking per act is the owner's switch, and it still asks for a use.
+    w.policy = { ...perAct, security: { ...perAct.security, unlockOnOpen: false } };
     expect(admit(w, terminalUse, { device: 'phone' }).outcome).toBe('403 grant_step_up_required');
   });
 
@@ -682,5 +688,59 @@ describe('S61 / R-0246 the agent tool door acts only for the ferret its own toke
     const w = world();
     const { outcome } = admit(w, fleetUse, { bearer: ADMIN, arrival: local(true), headers: naming });
     expect(outcome).toBe('admitted');
+  });
+});
+
+describe('R7 with the per-act switch off, no read asks for a passkey', () => {
+  const unlockOff = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_GATE_SECURITY, unlockOnOpen: false } };
+  const reads = ['GET /v1/terminals', 'GET /v1/pair/devices', 'GET /v1/ferrets/:ferretId/prompt'] as const;
+
+  for (const key of reads) {
+    test(`${key} is admitted for a device holding every grant when unlockOnOpen and stepUpOnActions are both off`, async () => {
+      const route = await declaredRoute(key);
+      const w = world({ policy: unlockOff });
+      w.enrol('phone');
+      expect(admit(w, route, { device: 'phone' }).outcome).toBe('admitted');
+    });
+
+    test(`${key} still asks when the owner turned the per-act confirmation on`, async () => {
+      const route = await declaredRoute(key);
+      const w = world({ policy: { ...perAct, security: { ...perAct.security, unlockOnOpen: false } } });
+      w.enrol('phone');
+      expect(admit(w, route, { device: 'phone' }).outcome).toBe('403 grant_step_up_required');
+    });
+  }
+
+  for (const key of [
+    'POST /v1/ferrets',
+    'POST /v1/board/tasks/:taskId/start',
+    'POST /v1/lessons/run',
+    'POST /v1/lessons/scan',
+    'POST /v1/pack/routing/clean-up',
+  ] as const) {
+    test(`${key} starts a ferret: the configure grant must hold, but with both switches off no passkey is asked`, async () => {
+      const route = await declaredRoute(key);
+      const w = world({ policy: unlockOff });
+      w.enrol('phone');
+      expect(admit(w, route, { device: 'phone' }).outcome).toBe('admitted');
+      w.enrol('limited', LIMITED_DEVICE_GRANTS);
+      expect(admit(w, route, { device: 'limited' }).outcome).toBe('403 grant_device_not_granted');
+      w.policy = { ...perAct, security: { ...perAct.security, unlockOnOpen: false } };
+      expect(admit(w, route, { device: 'phone' }).outcome).toBe('403 grant_step_up_required');
+    });
+  }
+
+  test('a write to configuration still asks for a step-up with both switches off, and a caller with no device gets no use', () => {
+    const w = world({ policy: unlockOff });
+    w.enrol('phone');
+    expect(admit(w, fleetConfigure, { device: 'phone' }).outcome).toBe('403 grant_step_up_required');
+    expect(admit(w, terminalUse, { bearer: ADMIN, arrival: carried() }).outcome).toBe('403 grant_step_up_required');
+  });
+
+  test('an undetermined policy asks the stricter way', () => {
+    const w = world();
+    w.enrol('phone');
+    w.policy = undefined;
+    expect(admit(w, terminalUse, { device: 'phone' }).outcome).not.toBe('admitted');
   });
 });

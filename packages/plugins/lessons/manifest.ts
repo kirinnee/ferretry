@@ -6,6 +6,7 @@ import { LESSONS_CONFIG, LESSONS_STATE, LessonsChanged, LessonsPort } from './co
 
 const fleetUse = cap('fleet', 'use');
 const fleetConfigure = cap('fleet', 'configure');
+const fleetStart = cap('fleet', 'configure', { promptsAsUse: true });
 const configured = audit('fleet.configured');
 
 /** Evidence is a verbatim quote of what the owner typed into a ferret; the board is owner-only text, no pane or vault text. */
@@ -126,7 +127,7 @@ export default definePlugin({
         minimum: 'operator',
         caller: 'any',
         // c58-sec3 r1: `{spawn: true}` starts a miner ferret, so it asks what `POST /v1/ferrets` asks.
-        capability: fleetConfigure,
+        capability: fleetStart,
         noStore: true,
         audit: NOT_RECORDED,
         guard: { none: 'counts and a sentence' },
@@ -180,7 +181,7 @@ export default definePlugin({
         minimum: 'operator',
         caller: 'person',
         // c58-sec3 r1: a scan starts a miner ferret per batch, so it asks what `POST /v1/ferrets` asks.
-        capability: fleetConfigure,
+        capability: fleetStart,
         noStore: true,
         audit: NOT_RECORDED,
         guard: { none: 'counts and a sentence' },

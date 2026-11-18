@@ -278,6 +278,7 @@ export class GateAdmission implements Admission {
       ...presentation,
       stepUp: this.deps.stepUps.held(subject),
       freshStepUp: this.deps.stepUps.freshlyHeld(subject),
+      useAsksStepUp: policy === undefined || policy.security.stepUpOnActions,
       deviceGrants: answer.standing.grants,
     };
     return { ...standing, presentation: live, governance: this.#guard.governance(live) };
@@ -528,6 +529,7 @@ export class GateAdmission implements Admission {
       actor,
       stepUp,
       freshStepUp: subject !== undefined && this.deps.stepUps.freshlyHeld(subject),
+      useAsksStepUp: policy === undefined || policy.security.stepUpOnActions,
       ...(device === undefined ? {} : { deviceGrants: device.grants }),
     };
 
