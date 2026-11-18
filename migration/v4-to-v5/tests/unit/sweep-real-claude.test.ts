@@ -178,7 +178,7 @@ describe('enableReal', () => {
     }
   });
 
-  test('refuses a missing login, a wrong login file, a missing / linked / file store; changes nothing', async () => {
+  test('refuses a missing login, a wrong login file, a linked / file store; changes nothing', async () => {
     const { root, paths, stub, store } = await scratch();
     const before = async (): Promise<string[]> => await readdir(paths.harness);
     try {
@@ -189,7 +189,6 @@ describe('enableReal', () => {
       await mkdir(storePathOf(paths.fyHome, 'host'), { recursive: true });
       await expect(enableReal(paths, 'host', stub, noRoot)).rejects.toThrow(/not ferretry/u);
       await writeFile(join(paths.fyHome, 'config', 'logins', 'nostore.yaml'), LOGIN_YAML);
-      await expect(enableReal(paths, 'nostore', stub, noRoot)).rejects.toThrow(/no store folder/u);
       await writeFile(join(paths.fyHome, 'config', 'logins', 'link.yaml'), LOGIN_YAML);
       await symlink(store, storePathOf(paths.fyHome, 'link'));
       await expect(enableReal(paths, 'link', stub, noRoot)).rejects.toThrow(/symbolic link/u);
@@ -198,6 +197,60 @@ describe('enableReal', () => {
       await expect(enableReal(paths, 'file', stub, noRoot)).rejects.toThrow(/not a folder/u);
       expect(await before()).toEqual(names);
       expect(await readRecord(paths)).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a login that was added but not signed in yet (no store folder) is accepted; no folder is made; the real binary runs once 5.0 makes the store', async () => {
+    const { root, paths, stub } = await scratch();
+    try {
+      await writeFile(join(paths.fyHome, 'config', 'logins', 'fresh.yaml'), LOGIN_YAML);
+      const store = storePathOf(paths.fyHome, 'fresh');
+      expect(await lstat(store).catch(() => undefined)).toBeUndefined();
+      const { record } = await enableReal(paths, 'fresh', stub, noRoot);
+      expect(record.store).toBe(store);
+      expect(await lstat(store).catch(() => undefined)).toBeUndefined();
+      expect(isShim(await readFile(join(paths.harness, 'claude'), 'utf8'))).toBe(true);
+      // sign-in: 5.0 creates the store, then runs claude with it
+      await mkdir(store, { recursive: true, mode: 0o700 });
+      expect(await runShim(join(paths.harness, 'claude'), ['hi'], { CLAUDE_SECURESTORAGE_CONFIG_DIR: store })).toBe(
+        'REAL auto=1 hi',
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses a real binary that is inside the harness folder even when the slot path goes through a link', async () => {
+    const { root, paths } = await scratch();
+    try {
+      const linked = join(root, 'linked-v5');
+      await symlink(paths.v5Dir, linked);
+      const viaLink: RealPaths = {
+        v5Dir: linked,
+        fyHome: join(linked, 'home'),
+        harness: join(linked, 'harness-bin'),
+      };
+      await expect(enableReal(viaLink, 'claude-real', join(paths.harness, 'claude'), noRoot)).rejects.toThrow(
+        /inside the slot's harness-bin/u,
+      );
+      expect(isShim(await readFile(join(paths.harness, 'claude'), 'utf8'))).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a shim marker is found in a large binary by its head only', async () => {
+    const { root, paths } = await scratch();
+    try {
+      const big = join(root, 'big-shim');
+      await writeFile(big, shimText({ fake: '/f', real: '/r', store: '/s' }) + 'x'.repeat(5_000_000), { mode: 0o755 });
+      await expect(enableReal(paths, 'claude-real', big, noRoot)).rejects.toThrow(/shim/u);
+      // a marker far past the head is not looked for (it is not a shim)
+      const late = join(root, 'late');
+      await writeFile(late, '#!/bin/sh\n' + 'x'.repeat(1000) + SHIM_MARKER + '\n', { mode: 0o755 });
+      await enableReal(paths, 'claude-real', late, noRoot);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -21,7 +21,8 @@ bun slot.ts status <1..9>            # prints "real claude: on for login … (<b
     PATH outside the sweep folders, or `--binary`). It is never looked up on PATH again, so the shim cannot call itself.
   - A nix store binary is rooted (`<slot folder>/gcroots`) so a GC cannot remove it. Re-run `on` after a claude update to re-point.
 - `on` **never reads inside the login's store**. It checks that `config/logins/<login>.yaml` says `harness: claude-code` and
-  `store: ferretry`, that `state/logins/credentials/<login>` is a real folder (a link is refused), and makes that folder mode `0700`.
+  `store: ferretry`, that `state/logins/credentials/<login>` is a real folder **if it exists** (a link or a file is refused), and makes an existing folder
+  mode `0700`. A login you have only added has no folder yet: 5.0 creates it (mode `0700`) at **Sign in**, so `on` leaves it for that.
 - `on` refuses: a missing login, a login that is not `claude-code` + `ferretry`, a link as the store, a second real login (one at a
   time), a slot that is not persisted. A refusal changes nothing. It stops and restarts **no** daemon.
 - The record `<slot>/v5/real-claude.json` holds names and paths only: `{ login, store, binary, rootedAt }`.

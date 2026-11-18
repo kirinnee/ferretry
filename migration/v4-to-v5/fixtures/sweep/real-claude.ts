@@ -11,7 +11,7 @@
  * unit-tested; `enableReal` / `disableReal` take their folders and ports as arguments so a test drives them on a scratch dir
  * with a stub "real" binary. Pure TypeScript with node: imports only, because a persisted slot runs this from its own kit copy.
  */
-import { chmod, copyFile, lstat, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, lstat, open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { shellQuote, storeRootOf } from './persist.ts';
 
@@ -170,6 +170,24 @@ async function writeExecutable(path: string, text: string): Promise<void> {
   await rename(temp, path);
 }
 
+/** How much of a binary is read to spot a shim: the marker sits on the shim's second line. */
+const HEAD_BYTES = 400;
+
+/** The first `count` bytes of a file as text; '' when it cannot be read. Never the whole file. */
+async function headOf(path: string, count: number): Promise<string> {
+  const handle = await open(path, 'r').catch(() => undefined);
+  if (handle === undefined) return '';
+  try {
+    const buffer = Buffer.alloc(count);
+    const { bytesRead } = await handle.read(buffer, 0, count, 0);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } catch {
+    return '';
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
 export async function enableReal(
   paths: RealPaths,
   login: string | undefined,
@@ -185,7 +203,8 @@ export async function enableReal(
       `real claude is already on for login ${existing.login}; one real login at a time. Run "real-claude <n> off" first (it never deletes that login)`,
     );
 
-  // The login: its file exists and is claude-code + ferretry; its store is a real folder (a link is refused, nothing inside it is read).
+  // The login: its file exists and is claude-code + ferretry; its store, when it exists, is a real folder (a link is refused, nothing
+  // inside it is read). 5.0 creates the store only at sign-in (mode 0700), so a login that was added but not signed in has none yet.
   const yaml = await readFile(loginFileOf(paths.fyHome, login), 'utf8').catch(() => undefined);
   if (yaml === undefined)
     return refuse(
@@ -195,10 +214,9 @@ export async function enableReal(
   if (problem !== undefined) return refuse(problem);
   const store = storePathOf(paths.fyHome, login);
   const found = await lstat(store).catch(() => undefined);
-  if (found === undefined)
-    return refuse(`login ${login} has no store folder yet (${store} is missing); nothing was changed`);
-  if (found.isSymbolicLink()) return refuse(`${store} is a symbolic link; refusing to point the real claude at it`);
-  if (!found.isDirectory()) return refuse(`${store} is not a folder`);
+  if (found?.isSymbolicLink() === true)
+    return refuse(`${store} is a symbolic link; refusing to point the real claude at it`);
+  if (found !== undefined && !found.isDirectory()) return refuse(`${store} is not a folder`);
 
   // The real binary: an absolute, executable file that is neither a shim nor inside the slot's harness folder.
   if (!isAbsolute(binary) || resolve(binary) !== binary)
@@ -207,17 +225,17 @@ export async function enableReal(
   if (real === undefined) return refuse(`the real claude ${binary} does not exist`);
   const info = await stat(real);
   if (!info.isFile() || (info.mode & 0o111) === 0) return refuse(`${real} is not an executable file`);
-  const inside = relative(paths.harness, real);
+  // Compare with the harness folder's REAL path: `real` is realpath'd, and a persisted slot's logical path may go through a link.
+  const harnessReal = await realpath(paths.harness).catch(() => resolve(paths.harness));
+  const inside = relative(harnessReal, real);
   if (!inside.startsWith('..') && !isAbsolute(inside))
     return refuse(`${real} is inside the slot's harness-bin: that is the fake, not a real claude`);
-  const head = await readFile(real, 'utf8').then(
-    text => text.slice(0, 400),
-    () => '',
-  );
-  if (head.includes(SHIM_MARKER)) return refuse(`${real} is a real-claude shim, not a real claude`);
+  if ((await headOf(real, HEAD_BYTES)).includes(SHIM_MARKER))
+    return refuse(`${real} is a real-claude shim, not a real claude`);
 
-  // The folder is private to its owner (a mode change only; its content is not opened).
-  await chmod(store, 0o700);
+  // An existing folder is made private to its owner (a mode change only; its content is not opened). A missing one is left for
+  // 5.0 to create at sign-in, already 0700.
+  if (found !== undefined) await chmod(store, 0o700);
 
   // The shim goes in. The fake is kept as claude.fake and never overwritten by a shim.
   const claude = join(paths.harness, 'claude');
