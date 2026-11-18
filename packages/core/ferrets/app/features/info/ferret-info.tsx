@@ -4,7 +4,8 @@
  * through the one client by route key (`info-wire.ts`), so this file never reaches a daemon and a test hands it
  * exactly the rows a reader sees.
  *
- * THE FRAME. A right-hand panel on a desktop, a half/full bottom sheet on a phone — the ⓘ in the header opens either.
+ * THE FRAME. A right-hand panel on a desktop, a half/full bottom sheet on a phone — the Info row in the ferret's menu
+ * opens either (drawn through {@link Floating}, so it is on the screen, not boxed in the menu or shut with it).
  */
 
 import { Info, X } from 'lucide-react';
@@ -12,7 +13,14 @@ import { type ReactNode, useCallback, useId } from 'react';
 import { endHasLastWords, lastWordsOf } from '../../../contract/index.ts';
 import { displayCallsign } from '../../lib/callsign.ts';
 import type { FerretsClient } from '../../lib/client.ts';
-import { BottomSheet, browserClipboardWriter, type ClipboardWriter, useLayoutMode } from '../../ui.ts';
+import {
+  BottomSheet,
+  browserClipboardWriter,
+  type ClipboardWriter,
+  Floating,
+  useDismissSurface,
+  useLayoutMode,
+} from '../../ui.ts';
 import { newRestartRequestId, restartWithResume } from '../header/ferret-operations.ts';
 import { useRestartRefusal } from '../header/restart-refusal.tsx';
 import { InfoNote } from './info-parts.tsx';
@@ -170,11 +178,12 @@ export interface InfoToggleProps extends Omit<FerretInfoProps, 'presentation' | 
   readonly write?: ClipboardWriter;
 }
 
-/** The header's ⓘ and, while open, the frame Info draws in: a right panel on a desktop, a sheet on a phone. */
+/** The menu's Info row and, while open, the frame Info draws in: a right panel on a desktop, a sheet on a phone. */
 export function InfoToggle({ initial, write, ...rest }: InfoToggleProps) {
   const placement = useInfoPlacement(initial);
   const mode = useLayoutMode();
   const sheet = mode === 'drawer';
+  const dismissSurface = useDismissSurface();
   const titleId = useId();
   const sheetId = `fy-info-sheet-${useId().replace(/:/gu, '')}`;
   const body = (
@@ -191,31 +200,37 @@ export function InfoToggle({ initial, write, ...rest }: InfoToggleProps) {
       <button
         aria-label="Info"
         aria-pressed={placement.open}
-        className="fy-session-bar__info fy-session-bar__icon"
+        className="fy-actions-menu__row"
         data-info-toggle=""
-        onClick={placement.toggle}
+        onClick={() => {
+          placement.toggle();
+          dismissSurface();
+        }}
         title="Info"
         type="button"
       >
-        <Info aria-hidden="true" size={18} />
+        <Info aria-hidden="true" size={16} />
+        <span className="fy-actions-menu__label">Info</span>
       </button>
-      {!placement.open ? null : sheet ? (
-        <BottomSheet
-          ariaLabel="Info"
-          closeLabel="Close Info"
-          height={placement.sheetSize === 'full' ? '100%' : '60%'}
-          id={sheetId}
-          labelledBy={titleId}
-          onClose={placement.close}
-          open
-        >
-          {body}
-        </BottomSheet>
-      ) : (
-        <aside aria-labelledby={titleId} className="fy-info-frame" data-info-frame="">
-          {body}
-        </aside>
-      )}
+      <Floating>
+        {!placement.open ? null : sheet ? (
+          <BottomSheet
+            ariaLabel="Info"
+            closeLabel="Close Info"
+            height={placement.sheetSize === 'full' ? '100%' : '60%'}
+            id={sheetId}
+            labelledBy={titleId}
+            onClose={placement.close}
+            open
+          >
+            {body}
+          </BottomSheet>
+        ) : (
+          <aside aria-labelledby={titleId} className="fy-info-frame" data-info-frame="">
+            {body}
+          </aside>
+        )}
+      </Floating>
     </>
   );
 }

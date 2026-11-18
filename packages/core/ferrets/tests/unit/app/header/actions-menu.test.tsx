@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { FloatingHost } from '@ferretry/app/ui';
 import { Copy, Plug, RotateCw, Server, Square } from 'lucide-react';
 import { useState } from 'react';
 import { ActionsMenu } from '../../../../app/features/header/actions-menu.tsx';
@@ -16,7 +17,11 @@ interface State {
   readonly failures: string[];
   readonly notices: string[];
   readonly toggles: boolean[];
+  /** How many times the surface the rows sit in (the ferret's menu) was asked to put itself away. */
+  dismissed: number;
   resolveToggle?: () => void;
+  /** Shuts or reopens the surface the rows sit in (the ferret's menu), which keeps the rows mounted. */
+  setSurfaceOpen?: (open: boolean) => void;
 }
 
 const formA = (host: FerretActionFormHost) => (
@@ -154,21 +159,31 @@ interface Harness {
 }
 
 const openMenu = async (options: { compact?: boolean } = {}): Promise<Harness> => {
-  const state: State = { ran: [], failures: [], notices: [], toggles: [] };
+  const state: State = { ran: [], failures: [], notices: [], toggles: [], dismissed: 0 };
 
   function Host() {
     const [form, setForm] = useState<string | null>(null);
     const [toggled, setToggled] = useState(false);
+    const [surfaceOpen, setSurfaceOpen] = useState(true);
+    state.setSurfaceOpen = setSurfaceOpen;
     return (
-      <ActionsMenu
-        compact={options.compact ?? false}
-        form={form}
-        name="Hadi"
-        onFailure={message => state.failures.push(message)}
-        onFormChange={setForm}
-        onNotice={message => state.notices.push(message)}
-        sections={buildSections(state, toggled, setToggled)}
-      />
+      <FloatingHost
+        dismiss={() => {
+          state.dismissed += 1;
+        }}
+        element={document.body}
+        open={surfaceOpen}
+      >
+        <ActionsMenu
+          compact={options.compact ?? false}
+          form={form}
+          name="Hadi"
+          onFailure={message => state.failures.push(message)}
+          onFormChange={setForm}
+          onNotice={message => state.notices.push(message)}
+          sections={buildSections(state, toggled, setToggled)}
+        />
+      </FloatingHost>
     );
   }
 
@@ -177,109 +192,85 @@ const openMenu = async (options: { compact?: boolean } = {}): Promise<Harness> =
   return { container: result.container, unmount: result.unmount, state };
 };
 
-const trigger = (root: HTMLElement): HTMLElement =>
-  must(root.querySelector('[data-ferret-actions-trigger]'), 'trigger');
-const menu = (root: HTMLElement): HTMLElement | null => root.querySelector('[role="menu"]');
+const list = (root: HTMLElement): HTMLElement =>
+  must(root.querySelector('[data-ferret-actions-menu]'), 'the actions list');
 const row = (root: HTMLElement, id: string): HTMLElement =>
   must(root.querySelector(`[data-ferret-action-item="${id}"]`), `row ${id}`);
-const openTrigger = async (root: HTMLElement): Promise<void> => interact(() => trigger(root).click());
+/** What a form drew: on the page's body (through Floating), never in the menu it was opened from. */
+const onPage = (selector: string): HTMLElement | null => document.body.querySelector(selector);
 
-describe('ActionsMenu — the trigger', () => {
-  it('shows a labelled button on a desktop and an icon-only one when compact', async () => {
-    const wide = await openMenu();
-    expect(trigger(wide.container).textContent).toContain('Actions');
-    expect(trigger(wide.container).getAttribute('aria-label')).toBeNull();
-    expect(trigger(wide.container).getAttribute('aria-haspopup')).toBe('menu');
-
-    const compact = await openMenu({ compact: true });
-    expect(trigger(compact.container).textContent).toBe('');
-    expect(trigger(compact.container).getAttribute('aria-label')).toBe('Actions');
+describe('ActionsMenu — the list', () => {
+  it('draws every action as a row in the menu itself, with no button of its own to open', async () => {
+    const h = await openMenu();
+    expect(h.container.querySelector('[data-ferret-actions-trigger]')).toBeNull();
+    expect(h.container.querySelector('[role="menu"]')).toBeNull();
+    expect(row(h.container, 'copy')).not.toBeNull();
+    expect(row(h.container, 'stop')).not.toBeNull();
   });
 
-  it('opens on click and toggles closed on a second click', async () => {
+  it('names the list after the ferret, and groups rows under a labelled role=group per section', async () => {
     const h = await openMenu();
-    expect(menu(h.container)).toBeNull();
-    expect(trigger(h.container).getAttribute('aria-expanded')).toBe('false');
-    await openTrigger(h.container);
-    expect(menu(h.container)).not.toBeNull();
-    expect(trigger(h.container).getAttribute('aria-expanded')).toBe('true');
-    await openTrigger(h.container);
-    expect(menu(h.container)).toBeNull();
-  });
-});
-
-describe('ActionsMenu — sections and rows', () => {
-  it('names the menu after the ferret, and groups rows under a labelled role=group per section', async () => {
-    const h = await openMenu();
-    await openTrigger(h.container);
-    expect(menu(h.container)?.getAttribute('aria-label')).toBe('Hadi actions');
-    const groups = [...h.container.querySelectorAll('[role="group"]')];
+    expect(list(h.container).getAttribute('aria-label')).toBe('Hadi actions');
+    const groups = [...list(h.container).querySelectorAll('[role="group"]')];
     expect(groups.map(group => group.getAttribute('aria-label'))).toEqual(['Ferret', 'Move', 'Tools', 'Danger']);
   });
 
-  it('draws a basic run row with no detail and no title', async () => {
+  it('puts every row in the tab order as a plain button, so the keyboard reaches all of them', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     const copy = row(h.container, 'copy');
-    expect(copy.getAttribute('role')).toBe('menuitem');
+    expect(copy.getAttribute('role')).toBeNull();
+    expect(copy.getAttribute('tabindex')).toBe('0');
     expect(copy.getAttribute('title')).toBeNull();
     expect(copy.querySelector('.fy-actions-menu__detail')).toBeNull();
   });
 
   it('shows a plain detail fact at the end of its row', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     expect(row(h.container, 'detailed').textContent).toContain('nero');
   });
 
   it('dims an unavailable row with its reason, disables it, and never runs it', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     const later = row(h.container, 'later');
     expect(later.getAttribute('aria-disabled')).toBe('true');
     expect(later.getAttribute('title')).toBe('later');
     expect(later.textContent).toContain('later');
     await interact(() => later.click());
     expect(h.state.ran).not.toContain('later');
-    expect(menu(h.container)).not.toBeNull();
+    expect(h.state.dismissed).toBe(0);
   });
 
-  it('draws a toggle as a menuitemcheckbox with its On/Off fact', async () => {
+  it('draws a toggle as a switch with its On/Off fact', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     const toggle = row(h.container, 'toggle');
-    expect(toggle.getAttribute('role')).toBe('menuitemcheckbox');
+    expect(toggle.getAttribute('role')).toBe('switch');
     expect(toggle.getAttribute('aria-checked')).toBe('false');
     expect(toggle.textContent).toContain('Off');
   });
 });
 
 describe('ActionsMenu — running an action', () => {
-  it('closes the menu, returns focus to the trigger, and runs the action', async () => {
+  it('runs the action and puts the menu away', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'copy').click());
-    expect(menu(h.container)).toBeNull();
-    expect(document.activeElement).toBe(trigger(h.container));
     expect(h.state.ran).toEqual(['copy']);
+    expect(h.state.dismissed).toBe(1);
   });
 
   it('surfaces a failed run through onFailure, with the daemon’s own sentence', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'boom').click());
     expect(h.state.failures).toEqual(['Boom failed: kaboom']);
   });
 
   it('blocks every other action while one is still pending, then releases once it settles', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'toggle').click());
     expect(h.state.toggles).toEqual([true]);
 
-    // The toggle is mid-flight: the menu stays open (toggles do not close it), and a second
-    // action anywhere in the menu must be ignored while `pending` is set.
-    expect(menu(h.container)).not.toBeNull();
+    // The toggle is mid-flight: it does not put the menu away, and a second action anywhere in the list must be
+    // ignored while `pending` is set.
+    expect(h.state.dismissed).toBe(0);
     await interact(() => row(h.container, 'copy').click());
     expect(h.state.ran).toEqual([]);
 
@@ -292,7 +283,6 @@ describe('ActionsMenu — running an action', () => {
 
   it('shows a spinner in place of the icon while a run is pending', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'toggle').click());
     expect(row(h.container, 'toggle').querySelector('.animate-spin')).not.toBeNull();
     await interact(() => h.state.resolveToggle?.());
@@ -300,29 +290,27 @@ describe('ActionsMenu — running an action', () => {
 });
 
 describe('ActionsMenu — inline confirm', () => {
-  it('turns a confirm row into its question in place, and focuses the confirm button', async () => {
+  it('turns a confirm row into its question in place', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'restart').click());
     const confirm = must(h.container.querySelector('[data-menu-confirm="restart"]'), 'confirm');
     expect(confirm.textContent).toContain('Restart Hadi’s CLI?');
     expect(confirm.textContent).toContain('It relaunches.');
     const yes = must(confirm.querySelector<HTMLElement>('[data-menu-confirm-yes]'), 'yes button');
-    expect(document.activeElement).toBe(yes);
     expect(yes.getAttribute('data-variant')).toBe('primary');
+    expect(yes.getAttribute('tabindex')).toBe('0');
+    expect(h.state.dismissed).toBe(0);
   });
 
   it('marks a danger confirm with the danger variant', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'stop').click());
     const yes = must(h.container.querySelector<HTMLElement>('[data-menu-confirm-yes]'), 'yes button');
     expect(yes.getAttribute('data-variant')).toBe('danger');
   });
 
-  it('cancels back to the plain row without running anything, and keeps the menu open', async () => {
+  it('cancels back to the plain row without running anything, and keeps the menu', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'restart').click());
     const cancel = must(
       [...h.container.querySelectorAll<HTMLElement>('[data-menu-confirm="restart"] button')].find(
@@ -333,161 +321,102 @@ describe('ActionsMenu — inline confirm', () => {
     await interact(() => cancel.click());
     expect(h.container.querySelector('[data-menu-confirm="restart"]')).toBeNull();
     expect(row(h.container, 'restart')).not.toBeNull();
-    expect(menu(h.container)).not.toBeNull();
     expect(h.state.ran).toEqual([]);
+    expect(h.state.dismissed).toBe(0);
   });
 
-  it('runs the action, closes and refocuses the trigger once the question is answered yes', async () => {
+  it('runs the action and puts the menu away once the question is answered yes', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'restart').click());
     await interact(() => must(h.container.querySelector<HTMLElement>('[data-menu-confirm-yes]'), 'yes').click());
-    expect(menu(h.container)).toBeNull();
-    expect(document.activeElement).toBe(trigger(h.container));
     expect(h.state.ran).toEqual(['restart']);
+    expect(h.state.dismissed).toBe(1);
   });
 
   it('strips the row’s trailing ellipsis from a confirm failure’s sentence', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'stop').click());
     await interact(() => must(h.container.querySelector<HTMLElement>('[data-menu-confirm-yes]'), 'yes').click());
     expect(h.state.failures).toEqual(['Stop ferret failed: refused']);
   });
 });
 
-describe('ActionsMenu — the escape stack', () => {
-  it('the first Escape cancels an open confirm, and the second closes the menu', async () => {
+describe('ActionsMenu — a menu put away with a confirm armed', () => {
+  it('reopens with the rows, not the armed question (the panel stays mounted while the menu is shut)', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'restart').click());
     expect(h.container.querySelector('[data-menu-confirm="restart"]')).not.toBeNull();
 
-    await interact(() => pressKey(document, 'Escape'));
-    expect(h.container.querySelector('[data-menu-confirm="restart"]')).toBeNull();
-    expect(menu(h.container)).not.toBeNull();
+    await interact(() => h.state.setSurfaceOpen?.(false));
+    await interact(() => h.state.setSurfaceOpen?.(true));
 
-    await interact(() => pressKey(document, 'Escape'));
-    expect(menu(h.container)).toBeNull();
-    expect(document.activeElement).toBe(trigger(h.container));
-  });
-});
-
-describe('ActionsMenu — dismissal', () => {
-  it('closes on an outside pointer, without returning focus to the trigger', async () => {
-    const h = await openMenu();
-    await openTrigger(h.container);
-    const outside = document.createElement('button');
-    document.body.appendChild(outside);
-    outside.focus();
-    await interact(() => outside.dispatchEvent(new Event('pointerdown', { bubbles: true })));
-    expect(menu(h.container)).toBeNull();
-    expect(document.activeElement).not.toBe(trigger(h.container));
-    outside.remove();
+    expect(h.container.querySelector('[data-menu-confirm]')).toBeNull();
+    expect(h.container.querySelector('[data-ferret-action-item="restart"]')).not.toBeNull();
   });
 
-  it('closes on a window resize', async () => {
+  it('keeps the confirm armed while the menu stays open', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
-    await interact(() => window.dispatchEvent(new Event('resize')));
-    expect(menu(h.container)).toBeNull();
-  });
+    await interact(() => row(h.container, 'restart').click());
 
-  it('closes on Tab without trapping it', async () => {
-    const h = await openMenu();
-    await openTrigger(h.container);
-    await interact(() => pressKey(must(menu(h.container), 'menu'), 'Tab'));
-    expect(menu(h.container)).toBeNull();
-  });
-});
+    await interact(() => h.state.setSurfaceOpen?.(true));
 
-describe('ActionsMenu — keyboard roving focus', () => {
-  it('lands on the first enabled row, skips the unavailable one, and wraps with Home/End/Up/Down', async () => {
-    const h = await openMenu();
-    await openTrigger(h.container);
-    const theMenu = must(menu(h.container), 'menu');
-    expect(document.activeElement).toBe(row(h.container, 'copy'));
-
-    await interact(() => pressKey(theMenu, 'ArrowDown'));
-    expect(document.activeElement).toBe(row(h.container, 'boom'));
-
-    await interact(() => pressKey(theMenu, 'End'));
-    expect(document.activeElement).toBe(row(h.container, 'stop'));
-
-    await interact(() => pressKey(theMenu, 'ArrowDown'));
-    expect(document.activeElement).toBe(row(h.container, 'copy'));
-
-    await interact(() => pressKey(theMenu, 'ArrowUp'));
-    expect(document.activeElement).toBe(row(h.container, 'stop'));
-
-    await interact(() => pressKey(theMenu, 'Home'));
-    expect(document.activeElement).toBe(row(h.container, 'copy'));
-  });
-
-  it('ignores a key it does not own', async () => {
-    const h = await openMenu();
-    await openTrigger(h.container);
-    const theMenu = must(menu(h.container), 'menu');
-    await interact(() => pressKey(theMenu, 'a'));
-    expect(document.activeElement).toBe(row(h.container, 'copy'));
+    expect(h.container.querySelector('[data-menu-confirm="restart"]')).not.toBeNull();
   });
 });
 
 describe('ActionsMenu — forms', () => {
-  it('opens a form in a desktop popover, closing the menu first', async () => {
+  it('opens a form in a desktop popover on the page, putting the menu away first', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'formA').click());
-    expect(menu(h.container)).toBeNull();
-    const popover = must(h.container.querySelector('[data-ferret-action-popover]'), 'popover');
+    expect(h.state.dismissed).toBe(1);
+    const popover = must(onPage('[data-ferret-action-popover]'), 'popover');
     expect(popover.getAttribute('role')).toBe('dialog');
     expect(popover.getAttribute('aria-label')).toBe('Form A');
     expect(popover.textContent).toContain('Compact: false');
+    // On the page, not boxed in the menu or hidden with it.
+    expect(h.container.contains(popover)).toBe(false);
   });
 
   it('lets a form re-open another one through the host, in place', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'formA').click());
-    await interact(() => must(h.container.querySelector<HTMLElement>('[data-switch-to-b]'), 'switch').click());
-    expect(h.container.querySelector('[data-form="A"]')).toBeNull();
-    expect(h.container.querySelector('[data-form="B"]')).not.toBeNull();
+    await interact(() => must(onPage('[data-switch-to-b]'), 'switch').click());
+    expect(onPage('[data-form="A"]')).toBeNull();
+    expect(onPage('[data-form="B"]')).not.toBeNull();
   });
 
   it('closes the form through the host’s close', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'formA').click());
-    await interact(() => must(h.container.querySelector<HTMLElement>('[data-switch-to-b]'), 'switch').click());
-    await interact(() => must(h.container.querySelector<HTMLElement>('[data-close-b]'), 'close').click());
-    expect(h.container.querySelector('[data-ferret-action-popover]')).toBeNull();
+    await interact(() => must(onPage('[data-switch-to-b]'), 'switch').click());
+    await interact(() => must(onPage('[data-close-b]'), 'close').click());
+    expect(onPage('[data-ferret-action-popover]')).toBeNull();
   });
 
   it('hands what a form settled to the page’s notice', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'formB').click());
-    await interact(() => must(h.container.querySelector<HTMLElement>('[data-notify-b]'), 'notify').click());
+    await interact(() => must(onPage('[data-notify-b]'), 'notify').click());
     expect(h.state.notices).toEqual(['B settled']);
   });
 
   it('closes the popover on Escape', async () => {
     const h = await openMenu();
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'formA').click());
     await interact(() => pressKey(document, 'Escape'));
-    expect(h.container.querySelector('[data-ferret-action-popover]')).toBeNull();
+    expect(onPage('[data-ferret-action-popover]')).toBeNull();
   });
 
   it('opens the same form in a bottom sheet when compact, with the host told it is compact', async () => {
     const h = await openMenu({ compact: true });
-    await openTrigger(h.container);
     await interact(() => row(h.container, 'formA').click());
-    expect(h.container.querySelector('[data-ferret-action-popover]')).toBeNull();
-    const sheet = must(h.container.querySelector('[data-ferret-action-sheet]'), 'sheet');
+    expect(onPage('[data-ferret-action-popover]')).toBeNull();
+    const sheet = must(onPage('[data-ferret-action-sheet]'), 'sheet');
     expect(sheet.textContent).toContain('Compact: true');
-    const dialog = must(h.container.querySelector('[role="dialog"]'), 'dialog');
+    const dialog = must(document.body.querySelector('[data-bottom-sheet] [role="dialog"]'), 'dialog');
     expect(dialog.getAttribute('aria-label')).toBe('Form A');
-    expect(h.container.querySelector('button[aria-label="Close Form A"]')).not.toBeNull();
+    expect(document.body.querySelector('button[aria-label="Close Form A"]')).not.toBeNull();
+    // The sheet is drawn on the body: the menu's own sheet (a transform) must not be its containing block.
+    expect(h.container.contains(sheet)).toBe(false);
   });
 });

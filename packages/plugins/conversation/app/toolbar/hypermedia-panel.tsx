@@ -1,5 +1,5 @@
 /**
- * HYPERMEDIA IN THE FERRET TOOLBAR (`panels.hypermedia`, slot `ferret.toolbar`; lead decision Q2): one "Hypermedia"
+ * HYPERMEDIA IN THE FERRET'S MODES MENU (`panels.hypermedia`, slot `conversation.modes`; lead decision Q2): one "Hypermedia"
  * switch for the ferret the toolbar is for, and the polite status line that says what the switch did
  * (docs/hypermedia.md). Today it was a menuitemcheckbox in the ferret's Actions menu, which is Ferrets'.
  *
@@ -14,6 +14,7 @@
 
 import { controlState, useViewPlace } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { Floating } from '@ferretry/app/ui';
 import { Shapes, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useConversationClient } from '../client.ts';
@@ -115,22 +116,24 @@ function HypermediaSwitch({
         <span className="text-muted">{on === undefined ? '…' : on ? 'On' : 'Off'}</span>
       </button>
       {note === null ? null : (
-        <div
-          aria-live="polite"
-          className="fixed inset-x-4 top-[calc(env(safe-area-inset-top,0px)+3.5rem)] z-[55] mx-auto flex max-w-[480px] items-center gap-2 rounded-control border border-accent-border bg-surface px-3 py-1 text-ui text-fg shadow-popover"
-          data-hypermedia-action-note=""
-          role="status"
-        >
-          <span className="min-w-0 flex-1">{note}</span>
-          <button
-            aria-label="Dismiss"
-            className="kt-btn h-11 w-11 shrink-0 p-0"
-            onClick={() => setNote(null)}
-            type="button"
+        <Floating>
+          <div
+            aria-live="polite"
+            className="fixed inset-x-4 top-[calc(env(safe-area-inset-top,0px)+3.5rem)] z-[55] mx-auto flex max-w-[480px] items-center gap-2 rounded-control border border-accent-border bg-surface px-3 py-1 text-ui text-fg shadow-popover"
+            data-hypermedia-action-note=""
+            role="status"
           >
-            <X aria-hidden="true" size={14} />
-          </button>
-        </div>
+            <span className="min-w-0 flex-1">{note}</span>
+            <button
+              aria-label="Dismiss"
+              className="kt-btn h-11 w-11 shrink-0 p-0"
+              onClick={() => setNote(null)}
+              type="button"
+            >
+              <X aria-hidden="true" size={14} />
+            </button>
+          </div>
+        </Floating>
       )}
     </div>
   );

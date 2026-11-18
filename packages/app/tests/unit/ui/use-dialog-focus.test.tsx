@@ -224,6 +224,23 @@ describe('useDialogFocus', () => {
     opener.remove();
   });
 
+  it('does not pull focus back from another surface that took it as this one closed', async () => {
+    const opener = document.createElement('button');
+    const other = document.createElement('input');
+    document.body.append(opener, other);
+    opener.focus();
+
+    const dialog = await mount(<Dialog open onClose={() => {}} />);
+    other.focus();
+
+    await dialog.render(<Dialog open={false} onClose={() => {}} />);
+
+    expect(document.activeElement).toBe(other);
+    await dialog.unmount();
+    opener.remove();
+    other.remove();
+  });
+
   it('does not restore focus to an opener that has left the document', async () => {
     const opener = document.createElement('button');
     document.body.appendChild(opener);

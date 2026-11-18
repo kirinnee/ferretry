@@ -215,7 +215,7 @@ describe('the row actions host', () => {
     };
     mounted = await mount(inRouter(<ActionsPanel client={headerClient} subject="a1" />));
     await settle();
-    await click(mounted.container, '[data-ferret-actions-trigger]');
+    // The header's actions are plain rows in the ferret's menu now: no trigger to open first.
     const headerIds = items(mounted.container);
     expect(headerIds.length).toBeGreaterThan(3);
     expect(headerIds).not.toContain('open');

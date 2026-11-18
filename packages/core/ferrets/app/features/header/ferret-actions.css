@@ -551,9 +551,25 @@
 }
 .fy-ferret-actions {
   display: flex;
-  align-items: center;
-  gap: var(--gap-xs);
-  flex-shrink: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+}
+/* The Actions rows inside the ferret's one menu: plain rows, not a floating dropdown of their own. */
+.fy-actions-inline {
+  min-width: 0;
+}
+/* A failure the person must see after the menu was put away: on the screen, under the header. */
+.fy-action-form__failure--floating {
+  position: fixed;
+  z-index: 55;
+  top: calc(env(safe-area-inset-top, 0px) + 3.5rem);
+  left: 16px;
+  right: 16px;
+  max-width: 480px;
+  margin-inline: auto;
+  box-shadow: var(--shadow-popover);
 }
 .fy-ferret-bar__icon {
   display: inline-grid;

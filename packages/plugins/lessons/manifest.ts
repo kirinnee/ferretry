@@ -1,6 +1,6 @@
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
-import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
+import { CONVERSATION_MODES_SLOT, ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import { definePlugin, panel, route, screen, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
 import { LESSONS_CONFIG, LESSONS_STATE, LessonsChanged, LessonsPort } from './contract/index.ts';
 
@@ -345,7 +345,7 @@ export default definePlugin({
   ui: {
     screens: [screen('lessons', { path: 'lessons', nav: { label: 'Lessons', icon: 'graduation-cap', order: 70 } })],
     panels: [
-      panel('ferret.toolbar', { id: 'ferret-lessons', order: 70 }),
+      panel(CONVERSATION_MODES_SLOT, { id: 'ferret-lessons', order: 70 }),
       // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
       panel('onboarding.step', { id: 'onboarding-step', order: 70 }),
     ],
