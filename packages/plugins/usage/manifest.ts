@@ -6,7 +6,13 @@ import {
 } from '@ferretry/core-ferrets/contract';
 import { definePlugin, panel, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
-import { LoginChanged, LoginsBudget, LoginsPort } from '@ferretry/plugin-logins/contract';
+import {
+  LOGIN_METER_SLOT,
+  LoginChanged,
+  LoginsBudget,
+  LoginsPort,
+  LoginsQuota,
+} from '@ferretry/plugin-logins/contract';
 import {
   BudgetReached,
   COMPACTION_HISTORY_STATE,
@@ -198,6 +204,8 @@ export default definePlugin({
       // Info › Usage (context, turns, tokens, cost and the login's quota), and the machine home's "Spend today" tile.
       panel('ferret.side', { id: 'usage', order: 65 }),
       panel('daemon.status', { id: 'spend-today', order: 70 }),
+      // Under a login's quota bars in Logins' Sign-ins tab: where it stands against its spend budget (`logins.login-meter`).
+      panel(LOGIN_METER_SLOT, { id: 'login-budget', order: 10 }),
       // The account's quota on the composer's context row.
       panel('composer.tools', { id: 'composer-quota', order: 90 }),
     ],
@@ -223,6 +231,7 @@ export default definePlugin({
       { hook: StartDecide },
       { hook: TurnEnded },
       { hook: LoginsBudget, key: 'usage' },
+      { hook: LoginsQuota, key: 'usage' },
       { hook: CompactionHistoryHook, key: COMPACTION_HISTORY_KEY },
     ],
   },

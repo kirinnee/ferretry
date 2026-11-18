@@ -8,9 +8,10 @@
  * changes the machine ends in a `ChangeApplyPanel`, so a caller that may not change it is told why before it clicks.
  */
 
+import { daemonOfClient, PanelSlot, useSlotHasUsablePanels } from '@ferretry/app';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import type { LoginView } from '../../contract/index.ts';
+import { LOGIN_METER_SLOT, type LoginView } from '../../contract/index.ts';
 import { AccountStatus, ProviderQuota } from '../components/account-status.tsx';
 import { LoginScopeChip } from '../components/login-scope-chip.tsx';
 import { type LoginsClient, refusalSentence } from '../lib/client.ts';
@@ -87,10 +88,56 @@ function UsageBars({ login, now }: { readonly login: LoginView; readonly now: nu
   );
 }
 
-/** What a login's quota shows: its provider's reading, or its two windows once it is ready. */
-function Quota({ login, now }: { readonly login: LoginView; readonly now: number }) {
-  if (login.usage.provider !== undefined) return <ProviderQuota reading={login.usage.provider} now={now} />;
-  return login.status.word === 'ready' ? <UsageBars login={login} now={now} /> : null;
+/**
+ * Where a login stands against its spend budget (v4's "$/day" and "$/week" bars): the panel Usage contributes to
+ * `logins.login-meter`, handed the budget the list carries. Nothing is drawn for a login with no budget, or where no
+ * panel is placed or usable on this machine.
+ */
+function BudgetMeter({
+  login,
+  daemon,
+  machineName,
+}: {
+  readonly login: LoginView;
+  readonly daemon: string | undefined;
+  readonly machineName: string;
+}) {
+  const usable = useSlotHasUsablePanels(daemon ?? '', LOGIN_METER_SLOT);
+  if (login.budget === undefined || daemon === undefined || !usable) return null;
+  return (
+    <PanelSlot
+      daemon={daemon}
+      slot={LOGIN_METER_SLOT}
+      subject={login.id}
+      props={{ budget: login.budget, machineName }}
+    />
+  );
+}
+
+/** What a login's quota shows: its provider's reading, or its two windows once it is ready, then its spend budget. */
+function Quota({
+  login,
+  now,
+  daemon,
+  machineName,
+}: {
+  readonly login: LoginView;
+  readonly now: number;
+  readonly daemon: string | undefined;
+  readonly machineName: string;
+}) {
+  const quota =
+    login.usage.provider !== undefined ? (
+      <ProviderQuota reading={login.usage.provider} now={now} />
+    ) : login.status.word === 'ready' ? (
+      <UsageBars login={login} now={now} />
+    ) : null;
+  return (
+    <>
+      {quota}
+      <BudgetMeter login={login} daemon={daemon} machineName={machineName} />
+    </>
+  );
 }
 
 /** The badges a login carries: its scope, an environment login's preset, its label, a copied slot, the terminal. */
@@ -129,6 +176,7 @@ interface LoginPageProps {
 }
 
 function LoginPage({ login, machineName, client, reload, onBack, now, clock, pollMs }: LoginPageProps) {
+  const daemon = daemonOfClient(client);
   const changes = useLoginChanges(client);
   const [notice, setNotice] = useState<string | null>(null);
   const [signedInFor, setSignedInFor] = useState<readonly string[] | null>(null);
@@ -186,7 +234,7 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
         <p className="m-0 text-cell leading-base text-muted">
           {checking ? `Checking with ${HARNESS_NAMES[login.harness]}…` : loginExplanation(login)}
         </p>
-        <Quota login={login} now={now} />
+        <Quota login={login} now={now} daemon={daemon} machineName={machineName} />
       </div>
 
       {login.environment === undefined ? null : (
@@ -288,6 +336,7 @@ type CardAct = 'disable' | 'remove';
  */
 function LoginRow({
   login,
+  daemon,
   now,
   clock,
   machineName,
@@ -310,6 +359,8 @@ function LoginRow({
   readonly changes: LoginChanges;
   readonly reload: () => Promise<void>;
   readonly onOpen: () => void;
+  /** The machine this card is on, which a contributed panel is addressed through. */
+  readonly daemon: string | undefined;
 }) {
   const [refused, setRefused] = useState<string | null>(null);
   const refusal = authorityRefusal(changes);
@@ -332,7 +383,7 @@ function LoginRow({
             <span className="text-cell text-muted">
               {login.status.label} · {loginUse(login)}
             </span>
-            <Quota login={login} now={now} />
+            <Quota login={login} now={now} daemon={daemon} machineName={machineName} />
           </span>
         </button>
         <CardSwitch
@@ -535,6 +586,7 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs, 
                   <li key={item.id}>
                     <LoginRow
                       login={item}
+                      daemon={daemonOfClient(client)}
                       now={now()}
                       clock={now}
                       machineName={list.machine}

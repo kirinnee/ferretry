@@ -41,11 +41,15 @@ const loginId = (params: ReadonlyMap<string, string>): string => {
   return id;
 };
 
-export function loginRoutes(subsystem: LoginsSubsystem) {
+export function loginRoutes(subsystem: LoginsSubsystem, watchQuotas: () => Promise<void> = async () => undefined) {
   return {
     'GET /v1/logins': (async () =>
       await answer(
-        () => subsystem.list(),
+        async () => {
+          // A screen is reading the list: the environment logins' quotas that are due are read first (once a minute each).
+          await watchQuotas();
+          return await subsystem.list();
+        },
         value => LoginListSchema.parse(value),
       )) satisfies RouteHandler,
     'POST /v1/logins/:loginId/check': (async call =>
