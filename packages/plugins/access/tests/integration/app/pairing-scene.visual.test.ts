@@ -24,6 +24,8 @@ setDefaultTimeout(60_000);
 
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_PAIRING_SCENE_SHOTS_DIR ?? '';
+/** `FY_PAIRING_SCENE_SCALE=2` keeps the desktop shots at 2x too (a phone is always 2x), so a picture holds up when zoomed. */
+const desktopScale = Number(process.env.FY_PAIRING_SCENE_SCALE ?? '1') || 1;
 
 let browser: Browser;
 let directory = '';
@@ -74,7 +76,7 @@ type Variant = (typeof VARIANTS)[number];
 const open = async (variant: Variant, query = '', reducedMotion: 'reduce' | 'no-preference' = 'no-preference') => {
   const context = await browser.newContext({
     viewport: { width: variant.width, height: variant.height },
-    deviceScaleFactor: variant.phone ? 2 : 1,
+    deviceScaleFactor: variant.phone ? 2 : desktopScale,
     hasTouch: variant.phone,
     isMobile: variant.phone,
     colorScheme: variant.scheme,

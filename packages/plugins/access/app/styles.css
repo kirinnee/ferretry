@@ -2,8 +2,9 @@
    `packages/app/src/generated/plugin-styles.css`; nothing in the app half imports this.
 
    THE PAIR PAGE'S WORLD: the mascot (`features/pairing/ferret-mascot.tsx`, `.fy-ferret`) and the night sky behind it
-   (`features/pairing/pairing-sky.tsx`, `.fy-sky`). Colour comes from the theme's own tokens; the fur is the one
-   small literal palette below (no theme token is a ferret).
+   (`features/pairing/pairing-sky.tsx`, `.fy-sky`). Colour comes from the theme's own tokens; the ferret is the Fleet
+   Grid logo's own colour (`--accent`, the hub of the mark) tinted toward white and shaded toward black, so it re-tints
+   with the theme. The one hue the logo has no token for is the pink of the nose and cheeks: pink mixed into `--accent`.
 
    MOTION RULES, for both:
    - every animation and transition sits inside the ONE `no-preference` block at the end, gated again on the app's own
@@ -13,27 +14,10 @@
    - `[data-paused]` (the tab is hidden) pauses every loop. */
 
 .fy-pair-scene {
-  --fy-ferret-fur: #a97c50;
-  --fy-ferret-cream: #f1e2cb;
-  --fy-ferret-cream-light: #fbf2e3;
-  --fy-ferret-mask: #5a4130;
-  --fy-ferret-ear: #e7b3a6;
-  --fy-ferret-nose: #c7767a;
-  --fy-ferret-eye: #1d1511;
-  --fy-ferret-blush: #e58f8f;
-  --fy-ferret-hole: #2b2336;
   position: relative;
   isolation: isolate;
   min-height: 100%;
   overflow-x: clip;
-}
-:root[data-theme$='-dark'] .fy-pair-scene,
-:root[data-theme='dark'] .fy-pair-scene {
-  --fy-ferret-fur: #c08d58;
-  --fy-ferret-cream: #e8d6bb;
-  --fy-ferret-cream-light: #f4e8d3;
-  --fy-ferret-mask: #4a3526;
-  --fy-ferret-hole: #050509;
 }
 
 /* READABLE OVER THE SKY. A star or a shooting star is a pale or dark speck on the page's own background, so a glyph that
@@ -85,6 +69,16 @@
 
 /* ───────── the mascot ───────── */
 .fy-ferret {
+  --fy-ferret-fur: var(--accent);
+  --fy-ferret-cream: color-mix(in srgb, var(--accent) 34%, white);
+  --fy-ferret-cream-light: color-mix(in srgb, var(--accent) 18%, white);
+  --fy-ferret-glow: color-mix(in srgb, var(--accent) 62%, white);
+  --fy-ferret-mask: color-mix(in srgb, var(--accent) 42%, black);
+  --fy-ferret-ear: color-mix(in srgb, var(--accent) 48%, white);
+  --fy-ferret-nose: color-mix(in srgb, pink 82%, var(--accent));
+  --fy-ferret-eye: color-mix(in srgb, var(--accent) 20%, black);
+  --fy-ferret-blush: color-mix(in srgb, pink 88%, var(--accent));
+  --fy-ferret-hole: color-mix(in srgb, var(--accent) 24%, black);
   display: block;
   width: 100%;
   height: auto;
@@ -129,7 +123,7 @@
 }
 .fy-ferret-blush {
   fill: var(--fy-ferret-blush);
-  opacity: 0.4;
+  opacity: 0.6;
 }
 .fy-ferret-nose {
   fill: var(--fy-ferret-nose);
