@@ -79,7 +79,6 @@ describe('the Actions menu', () => {
         await tab.goto(
           `${server?.url.origin ?? ''}/?theme=studio-${variant.scheme}${variant.phone ? '&compact=1' : ''}`,
         );
-        await tab.click('[data-ferret-actions-trigger]');
         await tab.waitForSelector('[data-ferret-actions-menu]');
         const icons = await tab.evaluate(() =>
           Object.fromEntries(
