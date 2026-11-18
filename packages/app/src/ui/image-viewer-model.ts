@@ -94,3 +94,13 @@ export const neighbour = (index: number, step: -1 | 1, count: number): number | 
   const next = index + step;
   return next < 0 || next >= count ? null : next;
 };
+
+/**
+ * Where the picture RESTS: the whole of it in the stage, but never enlarged past its own pixels (a small picture is
+ * drawn at its natural size, as the stage's `max-width`/`max-height` draw it). Zoom is a multiple of this, so
+ * "100%" — one picture pixel per screen pixel — is `1 / (resting width / natural width)` times it.
+ */
+export const restingSize = (natural: Size, stage: Size): Size => {
+  const fitted = fittedSize(natural, stage);
+  return fitted.width > natural.width ? natural : fitted;
+};

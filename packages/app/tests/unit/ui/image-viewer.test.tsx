@@ -269,3 +269,108 @@ describe('the image viewer’s gestures', () => {
     });
   });
 });
+
+const readout = (): string => dialog().querySelector('[data-testid="image-viewer-readout"]')?.textContent ?? '';
+const tool = (name: string): HTMLElement => label(dialog(), name);
+
+describe('the image viewer’s zoom controls', () => {
+  it('says the picture’s natural resolution and its zoom, from the fit to its own pixels', async () => {
+    // 800x600 into a 400x300 stage rests at half.
+    await withStage(pictures(1), async () => {
+      expect(readout()).toBe('50% · 800×600');
+      await interact(() => tool('Zoom in').click());
+      expect(readout()).toBe('75% · 800×600');
+      expect(transform()).toContain('scale(1.5)');
+      await interact(() => tool('Fit to screen').click());
+      expect(readout()).toBe('50% · 800×600');
+      expect(tool('Fit to screen').getAttribute('aria-disabled')).toBe('true');
+      await interact(() => tool('Actual size').click());
+      expect(readout()).toBe('100% · 800×600');
+      expect(tool('Actual size').getAttribute('aria-disabled')).toBe('true');
+    });
+  });
+
+  it('never zooms out past the fit, and stops zooming in at its ceiling', async () => {
+    await withStage(pictures(1), async () => {
+      await interact(() => tool('Zoom out').click());
+      expect(transform()).toContain('scale(1)');
+      expect(tool('Zoom out').getAttribute('aria-disabled')).toBe('true');
+      for (let press = 0; press < 12; press += 1) await interact(() => tool('Zoom in').click());
+      expect(transform()).toContain('scale(8)');
+      expect(tool('Zoom in').getAttribute('aria-disabled')).toBe('true');
+    });
+  });
+
+  it('draws a picture smaller than the stage at its own size, not enlarged', async () => {
+    const proto = HTMLElement.prototype;
+    Object.defineProperty(proto, 'clientWidth', { configurable: true, get: () => 400 });
+    Object.defineProperty(proto, 'clientHeight', { configurable: true, get: () => 300 });
+    const view = await mount(<Harness images={pictures(1)} />);
+    try {
+      const picture = must(dialog().querySelector('img'), 'the picture');
+      Object.defineProperty(picture, 'naturalWidth', { configurable: true, value: 100 });
+      Object.defineProperty(picture, 'naturalHeight', { configurable: true, value: 50 });
+      await interact(() => {
+        picture.dispatchEvent(new Event('load'));
+      });
+      expect(readout()).toBe('100% · 100×50');
+      expect(tool('Actual size').getAttribute('aria-disabled')).toBe('true');
+    } finally {
+      await view.unmount();
+      Reflect.deleteProperty(proto, 'clientWidth');
+      Reflect.deleteProperty(proto, 'clientHeight');
+    }
+  });
+
+  it('pans with the arrow keys once zoomed, and keeps them for the neighbouring picture while fitted', async () => {
+    await withStage(pictures(2), async () => {
+      await interact(() => pressKey(dialog(), 'ArrowRight'));
+      expect(shownSrc()).toBe('blob:viewer/1');
+      await interact(() => pressKey(dialog(), 'ArrowLeft'));
+      expect(shownSrc()).toBe('blob:viewer/0');
+      // A new picture is measured again when it loads.
+      await interact(() => {
+        must(dialog().querySelector('img'), 'the picture').dispatchEvent(new Event('load'));
+      });
+      await interact(() => pressKey(dialog(), '+'));
+      await interact(() => pressKey(dialog(), '+'));
+      const zoomed = transform();
+      await interact(() => pressKey(dialog(), 'ArrowLeft'));
+      expect(shownSrc()).toBe('blob:viewer/0');
+      expect(transform()).not.toBe(zoomed);
+    });
+  });
+});
+
+describe('the image viewer’s containment', () => {
+  it('closes on Escape without the key, or a press or click inside it, reaching the React tree around it', async () => {
+    const heard: string[] = [];
+    let closed = 0;
+    const view = await mount(
+      // biome-ignore lint/a11y/noStaticElementInteractions: a stand-in for the message the viewer was opened from
+      <div
+        onClick={() => heard.push('click')}
+        onKeyDown={event => heard.push(`key:${event.key}`)}
+        onPointerDown={() => heard.push('pointerdown')}
+      >
+        <Harness images={pictures(2)} onClose={() => (closed += 1)} />
+      </div>,
+    );
+    await interact(() => pressKey(dialog(), 'ArrowRight'));
+    await interact(() => label(dialog(), 'Previous image').click());
+    await interact(() => pointer('pointerdown', { x: 200, y: 150 }));
+    expect(heard).toEqual([]);
+    await interact(() => pressKey(dialog(), 'Escape'));
+    expect(closed).toBe(1);
+    expect(heard).toEqual([]);
+    await view.unmount();
+  });
+
+  it('offers no Open link for a picture marked not openable, but still offers Download', async () => {
+    const images = [{ ...pictures(1)[0], openable: false } as ViewerImage];
+    const view = await mount(<Harness images={images} />);
+    expect(dialog().querySelector('a[download]')).not.toBeNull();
+    expect(dialog().querySelector('[aria-label^="Open "]')).toBeNull();
+    await view.unmount();
+  });
+});

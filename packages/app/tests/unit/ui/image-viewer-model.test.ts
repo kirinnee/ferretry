@@ -9,6 +9,7 @@ import {
   midpoint,
   neighbour,
   panBy,
+  restingSize,
   SWIPE_DISTANCE,
   swipeStep,
   toggleZoom,
@@ -116,5 +117,14 @@ describe('geometry and neighbours', () => {
     expect(neighbour(2, 1, 3)).toBeNull();
     expect(neighbour(1, 1, 3)).toBe(2);
     expect(neighbour(1, -1, 3)).toBe(0);
+  });
+});
+
+describe('restingSize', () => {
+  const square = { width: 400, height: 400 };
+  test('fits a large picture and never enlarges a small one past its own pixels', () => {
+    expect(restingSize({ width: 800, height: 400 }, square)).toEqual({ width: 400, height: 200 });
+    expect(restingSize({ width: 40, height: 80 }, square)).toEqual({ width: 40, height: 80 });
+    expect(restingSize({ width: 0, height: 10 }, square)).toEqual({ width: 0, height: 0 });
   });
 });

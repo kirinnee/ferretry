@@ -12,10 +12,21 @@
  * carrier, and a picture that is still arriving or has failed is a state it draws, not a fetch it makes.
  */
 
-import { Download, ExternalLink as ExternalIcon, ImageOff, Loader2, X } from 'lucide-react';
+import {
+  Download,
+  ExternalLink as ExternalIcon,
+  ImageOff,
+  Loader2,
+  Minimize2,
+  ScanLine,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type SyntheticEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -28,12 +39,13 @@ import { useDialogFocus } from './hooks/use-dialog-focus.ts';
 import {
   clampTransform,
   distance,
-  fittedSize,
   IDENTITY,
+  MAX_SCALE,
   midpoint,
   neighbour,
   type Point,
   panBy,
+  restingSize,
   type Size,
   swipeStep,
   toggleZoom,
@@ -51,6 +63,8 @@ export interface ViewerImage {
   readonly filename: string;
   /** "246 KB" and the like, shown beside the name. */
   readonly meta?: string;
+  /** False for an address a browser will not open in a tab (a `data:` URL): the viewer then offers no Open link. */
+  readonly openable?: boolean;
 }
 
 export interface ImageViewerProps {
@@ -62,6 +76,14 @@ export interface ImageViewerProps {
 
 const BUTTON =
   'inline-flex min-h-[44px] min-w-[44px] items-center justify-center gap-1.5 rounded-control px-2 text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:hover:bg-transparent';
+
+/** One press of Zoom in / Zoom out, and one `+` / `-`. */
+const BUTTON_STEP = 1.5;
+/** One arrow key pans this far while the picture is zoomed. */
+const KEY_PAN_PX = 60;
+const TOOL = `${BUTTON} aria-disabled:opacity-40 aria-disabled:hover:bg-transparent`;
+
+const percentOf = (scale: number): string => `${Math.round(scale * 100)}%`;
 
 const TAP_MS = 300;
 const TAP_SLOP = 24;
@@ -115,7 +137,9 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
     return () => observer.disconnect();
   }, []);
 
-  const fitted = fittedSize(natural, stage);
+  // What the picture is drawn at when it rests: the whole of it, never enlarged past its own pixels.
+  const fitted = restingSize(natural, stage);
+  const rest = natural.width > 0 ? fitted.width / natural.width : 1;
   const fit = useRef(fitted);
   fit.current = fitted;
   const stageSize = useRef(stage);
@@ -240,28 +264,52 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
     }
   };
 
+  const zoomBy = (factor: number): void =>
+    setView(zoomAround(view, view.scale * factor, { x: 0, y: 0 }, fitted, stage));
+  const actualSize = (): void => setView(zoomAround(view, 1 / rest, { x: 0, y: 0 }, fitted, stage));
+
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDialogElement>): void => {
+    // ESCAPE ENDS HERE. It closes the viewer and goes no further: a React ancestor (the message, a block's own
+    // fullscreen) must not also hear it and close itself behind the picture. Stopping it here also keeps it from
+    // `document`, so this handler is the one that closes — focus is always inside a modal dialog.
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    // Nothing typed in here is the page behind's business.
+    event.stopPropagation();
     dialogFocus.onKeyDown(event);
     if (event.defaultPrevented) return;
     const centre = { x: 0, y: 0 };
+    const pan = (dx: number, dy: number, direction: -1 | 1): void => {
+      event.preventDefault();
+      if (viewRef.current.scale > 1.01) setView(panBy(viewRef.current, dx, dy, fit.current, stageSize.current));
+      else step(direction);
+    };
     switch (event.key) {
       case 'ArrowLeft':
-        event.preventDefault();
-        step(-1);
+        pan(KEY_PAN_PX, 0, -1);
         break;
       case 'ArrowRight':
-        event.preventDefault();
-        step(1);
+        pan(-KEY_PAN_PX, 0, 1);
+        break;
+      case 'ArrowUp':
+        if (viewRef.current.scale > 1.01) pan(0, KEY_PAN_PX, -1);
+        break;
+      case 'ArrowDown':
+        if (viewRef.current.scale > 1.01) pan(0, -KEY_PAN_PX, 1);
         break;
       case '+':
       case '=':
         event.preventDefault();
-        setView(zoomAround(view, view.scale * 1.5, centre, fitted, stage));
+        setView(zoomAround(view, view.scale * BUTTON_STEP, centre, fitted, stage));
         break;
       case '-':
       case '_':
         event.preventDefault();
-        setView(zoomAround(view, view.scale / 1.5, centre, fitted, stage));
+        setView(zoomAround(view, view.scale / BUTTON_STEP, centre, fitted, stage));
         break;
       case '0':
         event.preventDefault();
@@ -275,6 +323,8 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
   const shown = clampTransform(view, fitted, stage);
   const count = images.length;
   const zoomed = shown.scale > 1.01;
+  const sized = natural.width > 0 && !image.failed && image.src !== null;
+  const stop = (event: SyntheticEvent): void => event.stopPropagation();
 
   return (
     <dialog
@@ -284,7 +334,10 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
       aria-label={`Image viewer: ${image.alt}`}
       data-testid="image-viewer"
       className="fixed inset-0 z-50 m-0 flex h-dvh max-h-none w-dvw max-w-none flex-col overflow-hidden border-0 bg-bg p-0 text-fg backdrop:bg-scrim"
+      onClick={stop}
       onKeyDown={onKeyDown}
+      onPointerDown={stop}
+      onPointerUp={stop}
       onCancel={event => {
         event.preventDefault();
         onClose();
@@ -317,15 +370,17 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
               <Download aria-hidden="true" size={18} />
               <span className="hidden sm:inline">Download</span>
             </a>
-            <ExternalAnchor
-              aria-label={`Open ${image.filename} in a new tab`}
-              className={BUTTON}
-              href={image.src}
-              title="Open in a new tab"
-            >
-              <ExternalIcon aria-hidden="true" size={18} />
-              <span className="hidden sm:inline">Open</span>
-            </ExternalAnchor>
+            {image.openable === false ? null : (
+              <ExternalAnchor
+                aria-label={`Open ${image.filename} in a new tab`}
+                className={BUTTON}
+                href={image.src}
+                title="Open in a new tab"
+              >
+                <ExternalIcon aria-hidden="true" size={18} />
+                <span className="hidden sm:inline">Open</span>
+              </ExternalAnchor>
+            )}
           </>
         ) : null}
         <button aria-label="Close image viewer" className={BUTTON} onClick={onClose} type="button">
@@ -372,6 +427,53 @@ export function ImageViewer({ images, index, onIndexChange, onClose }: ImageView
             </div>
           )}
         </div>
+
+        {sized ? (
+          <div
+            className="absolute bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-1/2 flex max-w-[calc(100%-1rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-0.5 rounded-control border border-border bg-surface/90 px-1 shadow"
+            data-testid="image-viewer-toolbar"
+          >
+            <span className="px-2 text-fg-soft text-meta tabular-nums" data-testid="image-viewer-readout">
+              {percentOf(shown.scale * rest)} · {natural.width}×{natural.height}
+            </span>
+            <button
+              aria-disabled={shown.scale <= 1.001}
+              aria-label="Zoom out"
+              className={TOOL}
+              onClick={() => zoomBy(1 / BUTTON_STEP)}
+              type="button"
+            >
+              <ZoomOut aria-hidden="true" size={18} />
+            </button>
+            <button
+              aria-disabled={shown.scale >= MAX_SCALE - 0.001}
+              aria-label="Zoom in"
+              className={TOOL}
+              onClick={() => zoomBy(BUTTON_STEP)}
+              type="button"
+            >
+              <ZoomIn aria-hidden="true" size={18} />
+            </button>
+            <button
+              aria-disabled={shown.scale <= 1.001}
+              aria-label="Fit to screen"
+              className={TOOL}
+              onClick={() => setView(IDENTITY)}
+              type="button"
+            >
+              <Minimize2 aria-hidden="true" size={18} />
+            </button>
+            <button
+              aria-disabled={Math.abs(shown.scale * rest - 1) < 0.001}
+              aria-label="Actual size"
+              className={TOOL}
+              onClick={actualSize}
+              type="button"
+            >
+              <ScanLine aria-hidden="true" size={18} />
+            </button>
+          </div>
+        ) : null}
 
         {count > 1 ? (
           <>
