@@ -8,7 +8,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, mount, must } from '@ferretry/app/testing';
 import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
-import { createElement, type FunctionComponent, Suspense } from 'react';
+import { createElement, type FunctionComponent, Suspense, useState } from 'react';
 import app from '../../../app/index.ts';
 import manifest from '../../../manifest.ts';
 import { ALL_PROCESSES } from '../../support/app/session-processes.ts';
@@ -84,5 +84,38 @@ describe('the Terminals app half mounts the workspace surfaces today drew', () =
     const view = await shown('processes');
     expect(calls).toContain('GET /v1/ferrets/:ferretId/processes');
     expect(view.container.textContent).toContain('bun test --watch');
+  });
+});
+
+describe('A555 r7: Settings › Terminals reads once, however often the app re-renders', () => {
+  it('a step-up refusal and twenty re-renders send ONE read of the terminal holders, not one per render', async () => {
+    const sent: string[] = [];
+    const refusing = {
+      call: async (key: string): Promise<unknown> => {
+        sent.push(key);
+        throw Object.assign(new Error('using session terminals needs a passkey confirmation from this device.'), {
+          status: 403,
+          code: 'grant_step_up_required',
+          body: { error: 'x', code: 'grant_step_up_required' },
+        });
+      },
+    } as unknown as PluginClient;
+    const built = must(app.build?.({ manifest, client: refusing }), 'the built half');
+    const Settings = must(built.settings?.terminals, 'Settings › Terminals') as FunctionComponent<object>;
+    let rerender: () => void = () => {};
+    function Host() {
+      const [, setTick] = useState(0);
+      rerender = () => setTick(tick => tick + 1);
+      return createElement(Settings, {});
+    }
+    const view = await mount(createElement(Host));
+    open.push(view);
+    await settle();
+    for (let lap = 0; lap < 20; lap += 1) {
+      await interact(() => rerender());
+      await settle();
+    }
+    expect(sent.filter(key => key === 'GET /v1/terminals')).toHaveLength(1);
+    expect(view.container.textContent).toContain('passkey');
   });
 });

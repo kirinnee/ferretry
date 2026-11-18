@@ -48,6 +48,21 @@ const UNDETERMINED: Authority = Object.freeze({ kind: 'refused', refusal: 'undet
 const NOT_GRANTED: Authority = Object.freeze({ kind: 'refused', refusal: 'not-granted' });
 const DEVICE_NOT_GRANTED: Authority = Object.freeze({ kind: 'refused', refusal: 'device-not-granted' });
 
+const sameRow = (a: Row, b: Row | undefined): boolean =>
+  b !== undefined &&
+  a.capability === b.capability &&
+  a.use === b.use &&
+  a.useRefusal === b.useRefusal &&
+  a.configure === b.configure &&
+  a.configureRefusal === b.configureRefusal;
+
+/** Whether two answers say the same thing: a re-read that answered the same is not a change (A555 r7). */
+const sameState = (a: State, b: State): boolean => {
+  if (a.kind !== b.kind) return false;
+  if (a.kind !== 'read' || b.kind !== 'read') return true;
+  return a.rows.size === b.rows.size && [...a.rows].every(([name, row]) => sameRow(row, b.rows.get(name)));
+};
+
 /** The part of a daemon's client the cache reads through: the no-pause read, the generation and the signals. */
 export type GrantsReader = Pick<DaemonClient, 'readGrants' | 'generation' | 'onAuthority'>;
 
@@ -186,9 +201,16 @@ export class GrantsCache {
       });
   }
 
+  /**
+   * A NEW ANSWER IS PUBLISHED ONLY WHEN IT SAYS SOMETHING NEW (A555 r7). Every step-up refusal re-reads the grants, and
+   * publishing an answer that said the same re-rendered every view of the app — whose effects re-sent their reads, whose
+   * refusals re-read the grants: a loop of ~140 requests a minute and a page that flickered. The same answer keeps the
+   * held state object (its `stateOf` token too); the sequence still moves, so an older read in flight is still dropped.
+   */
   #set(entry: Entry, state: State): void {
-    entry.state = state;
     entry.sequence += 1;
+    if (sameState(entry.state, state)) return;
+    entry.state = state;
     this.#publish();
   }
 

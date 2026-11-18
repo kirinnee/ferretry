@@ -72,7 +72,10 @@ function Ask({ chooseDaemon }: DaemonlessScreenProps): ReactNode {
         void chooseDaemon('Install on which machine?').then(chosen => {
           answers.chosen.push(chosen);
           if (chosen !== undefined)
-            void chosen.client.call('GET /v1/asker/preview').then(r => answers.previews.push(r));
+            void chosen.client.call('GET /v1/asker/preview').then(
+              r => answers.previews.push(r),
+              (refused: unknown) => answers.previews.push({ refused: (refused as { code?: string }).code }),
+            );
         });
       }}
     >
@@ -94,7 +97,10 @@ function SheetAsk({ chooseDaemon }: DaemonlessScreenProps): ReactNode {
             void chooseDaemon('Install on which machine?').then(chosen => {
               answers.chosen.push(chosen);
               if (chosen !== undefined)
-                void chosen.client.call('GET /v1/asker/preview').then(r => answers.previews.push(r));
+                void chosen.client.call('GET /v1/asker/preview').then(
+                  r => answers.previews.push(r),
+                  (refused: unknown) => answers.previews.push({ refused: (refused as { code?: string }).code }),
+                );
             });
           }}
         >
@@ -430,6 +436,10 @@ describe('S10 a daemon-less screen may ask for a machine', () => {
 
   test('S10 after a choice of a locked machine the install preview’s GET runs once the passkey is confirmed', async () => {
     go('/ask');
+    // The person's click on the machine is the browser's transient user activation: the read it causes may ask
+    // (a read sent with none — a poll — never does, A555 r7).
+    const activation = Object.getOwnPropertyDescriptor(navigator, 'userActivation');
+    Object.defineProperty(navigator, 'userActivation', { value: { isActive: true }, configurable: true });
     const { made, asked } = provision();
     const { app, transportOf } = setup(made);
     const view = await mount(app);
@@ -446,6 +456,8 @@ describe('S10 a daemon-less screen may ask for a machine', () => {
     ).toHaveLength(2);
     expect(answers.previews).toEqual([{ ok: 'd2' }]);
     await view.unmount();
+    if (activation === undefined) Reflect.deleteProperty(navigator, 'userActivation');
+    else Object.defineProperty(navigator, 'userActivation', activation);
   });
 
   test('S10 only PasskeyMount calls focus: the chooser sets an override and the prompt follows it', async () => {
@@ -570,7 +582,8 @@ describe('S10 answerAloneWhenOne: the shell answers alone only when exactly one 
     await warm(view);
     const chosen = (await ask(ALONE)).value as ChosenDaemon;
     expect(chosen.daemon).toBe('d2');
-    await chosen.client.call('GET /v1/asker/preview');
+    // d2 refuses its first preview for a step-up, and nobody is pressing anything here: the refusal is the answer.
+    await chosen.client.call('GET /v1/asker/preview').catch(() => undefined);
     expect(transportOf('d2').paths()).toContain('GET /v1/asker/preview');
     expect(transportOf('d1').paths()).not.toContain('GET /v1/asker/preview');
     await view.unmount();

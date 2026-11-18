@@ -615,6 +615,35 @@ describe('the grants cache', () => {
     expect(changes).toBeGreaterThan(0);
   });
 
+  test('A555 r7: a capability refusal whose re-read answers the same publishes NOTHING, so no view re-renders', async () => {
+    let changes = 0;
+    const cache = new GrantsCache(() => {
+      changes += 1;
+    });
+    const fake = reader();
+    cache.attach('d1', fake.client);
+    cache.refresh('d1');
+    fake.pending[0]?.settle(open());
+    await flush();
+    expect(changes).toBe(1);
+    const token = cache.stateOf('d1');
+    // A background read refused for a step-up, over and over: each refusal re-reads the grants, which answer the same.
+    for (let lap = 1; lap <= 20; lap += 1) {
+      fake.signal({ kind: 'refused', generation: 0 });
+      fake.pending[lap]?.settle(open());
+      await flush();
+    }
+    expect(fake.pending).toHaveLength(21);
+    expect(changes).toBe(1);
+    expect(cache.stateOf('d1')).toBe(token);
+    // A re-read that DOES say something new is published.
+    fake.signal({ kind: 'refused', generation: 0 });
+    fake.pending[21]?.settle({ generation: 0, answer: json(grants(row('fleet', false))), need: undefined });
+    await flush();
+    expect(changes).toBe(2);
+    expect(cache.stateOf('d1')).not.toBe(token);
+  });
+
   test('a read that reached nothing keeps the last answer; an answer for a dropped daemon changes nothing', async () => {
     const cache = new GrantsCache(() => {});
     const fake = reader();

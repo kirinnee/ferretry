@@ -4,6 +4,7 @@
  */
 
 import { describe, it } from 'bun:test';
+import { runInNewContext } from 'node:vm';
 import should from 'should';
 import {
   type AssertionOptionsWire,
@@ -137,6 +138,94 @@ describe('createPasskey', () => {
     should(credentials.created).have.length(0);
   });
 
+  it('should read a passkey manager’s look-alike credential through its toJSON(), as 1Password returns it', async () => {
+    // 1Password resolves create() with a plain object that only mimics a PublicKeyCredential: its response holds no
+    // byte fields and the bytes are reached through toJSON() (base64url). Before, this was refused AFTER the manager
+    // saved the passkey, so no registration ever reached the machine.
+    const lookAlike = {
+      id: 'qrs',
+      type: 'public-key',
+      rawId: buffer(9, 9, 9),
+      response: {},
+      toJSON: () => ({
+        id: toBase64Url(Uint8Array.of(0xaa, 0xbb)),
+        rawId: toBase64Url(Uint8Array.of(0xaa, 0xbb)),
+        type: 'public-key',
+        response: {
+          clientDataJSON: toBase64Url(Uint8Array.of(0x7b, 0x7d)),
+          attestationObject: toBase64Url(Uint8Array.of(0xa0)),
+        },
+      }),
+    };
+    const wire = await createPasskey(
+      port(() => Promise.resolve(lookAlike)),
+      registrationOptions,
+      true,
+    );
+    // Every field from ONE reading (the JSON), never the object's own rawId beside the JSON's response.
+    should(wire).deepEqual({
+      credentialId: toBase64Url(Uint8Array.of(0xaa, 0xbb)),
+      clientDataJSON: toBase64Url(Uint8Array.of(0x7b, 0x7d)),
+      attestationObject: toBase64Url(Uint8Array.of(0xa0)),
+    });
+  });
+
+  it('should read byte fields given as typed arrays, or as ArrayBuffers from another realm', async () => {
+    // An ArrayBuffer made in another realm: not `instanceof` this one's, as a wrapper's frame can hand back.
+    const foreign = (...values: number[]): unknown =>
+      runInNewContext(`new Uint8Array(${JSON.stringify(values)}).buffer`) as unknown;
+    should(foreign(0xa0) instanceof ArrayBuffer).be.false();
+    const wire = await createPasskey(
+      port(() =>
+        Promise.resolve({
+          rawId: Uint8Array.of(0xaa, 0xbb),
+          response: { clientDataJSON: new DataView(buffer(0x7b, 0x7d)), attestationObject: foreign(0xa0) },
+        }),
+      ),
+      registrationOptions,
+      true,
+    );
+    should(wire.credentialId).equal(toBase64Url(Uint8Array.of(0xaa, 0xbb)));
+    should(wire.clientDataJSON).equal(toBase64Url(Uint8Array.of(0x7b, 0x7d)));
+    should(wire.attestationObject).equal(toBase64Url(Uint8Array.of(0xa0)));
+  });
+
+  it('should send only the base64url of bytes it decoded itself: a JSON field that is not base64url is refused', async () => {
+    const shape = {
+      rawId: buffer(1),
+      response: {},
+      toJSON: () => ({ rawId: 'AQ', response: { clientDataJSON: 'not base64url!', attestationObject: 'oA' } }),
+    };
+    should(
+      await kindOf(
+        createPasskey(
+          port(() => Promise.resolve(shape)),
+          registrationOptions,
+          true,
+        ),
+      ),
+    ).equal('unreadable');
+  });
+
+  it('should treat a toJSON() that throws (a wrapper’s "Illegal invocation") as nothing to read', async () => {
+    const shape = {
+      rawId: buffer(1),
+      response: {},
+      toJSON: () => {
+        throw new TypeError('Illegal invocation');
+      },
+    };
+    should(
+      await kindOf(
+        createPasskey(
+          port(() => Promise.resolve(shape)),
+          registrationOptions,
+          true,
+        ),
+      ),
+    ).equal('unreadable');
+  });
+
   it('should refuse a result that is not shaped like a registration credential', async () => {
     const shapes: unknown[] = [
       { rawId: 'aabb', response: {} },
@@ -153,7 +242,7 @@ describe('createPasskey', () => {
             true,
           ),
         ),
-      ).equal('unsupported');
+      ).equal('unreadable');
     }
   });
 });
@@ -223,7 +312,7 @@ describe('assertPasskey', () => {
             true,
           ),
         ),
-      ).equal('unsupported');
+      ).equal('unreadable');
     }
   });
 });
@@ -337,7 +426,7 @@ describe('passkeySentence', () => {
   });
 
   it('should write every kind as plain sentences naming the origin, never a DOMException name', () => {
-    for (const kind of ['no-passkey', 'cancelled', 'unsupported', 'insecure-origin', 'failed'] as const) {
+    for (const kind of ['no-passkey', 'cancelled', 'unsupported', 'insecure-origin', 'failed', 'unreadable'] as const) {
       const sentence = passkeySentence(kind, ORIGIN);
       should(sentence).containEql(ORIGIN);
       // The one command a person must run (`fy passkey window <this device>`) is the only code in any of them.

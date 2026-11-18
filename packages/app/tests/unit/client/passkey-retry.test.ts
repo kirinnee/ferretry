@@ -229,9 +229,9 @@ describe('G105 one prompt, one retry', () => {
 });
 
 describe('G95 who started the request', () => {
-  test('G95 a background GET is asked as background, so its prompt can wait for its machine', async () => {
+  test('G95 a background GET is asked as background for the unlock, so its prompt can wait for its machine', async () => {
     const { fake, asked } = handler([true]);
-    const { client } = daemon([STEP_UP, OK], fake);
+    const { client } = daemon([UNLOCK, OK], fake);
     await client.start();
     await client.forPackage('board').call('GET /v1/board');
     expect(asked[0]?.origin).toBe('background');
@@ -356,9 +356,10 @@ describe('G95 a read that stops waiting leaves its parked prompt', () => {
     await client.start();
     const caller = new AbortController();
     let done = false;
+    // A read the person pressed for (`quiet: false`): a background one raises no step-up prompt at all (A555 r7).
     const waiting = client
       .forPackage('board')
-      .call('GET /v1/board', { signal: caller.signal })
+      .call('GET /v1/board', { signal: caller.signal, quiet: false })
       .catch((error: unknown) => error)
       .finally(() => {
         done = true;
@@ -485,5 +486,129 @@ describe('a quiet read: the page asking for what a person has not yet pressed', 
     await client.start();
     await client.forPackage('board').call('POST /v1/board', { quiet: true });
     expect(asked.map(entry => entry.origin)).toEqual(['explicit']);
+  });
+});
+
+describe('A555 r7: a request nobody pressed never opens the step-up prompt, and is not sent again at once', () => {
+  test('a background GET refused for a step-up raises NO prompt; the refusal is the answer', async () => {
+    const { fake, asked } = handler([true]);
+    const { client, sends } = daemon([STEP_UP, OK], fake);
+    await client.start();
+    const failure = await client
+      .forPackage('board')
+      .call('GET /v1/board')
+      .catch((error: unknown) => error);
+    expect((failure as DaemonCallError).code).toBe('grant_step_up_required');
+    expect(asked).toEqual([]);
+    expect(sends()).toHaveLength(1);
+  });
+
+  test('a read sent while a person is acting (they just opened the page) still asks, as background', async () => {
+    const { fake, asked } = handler([true]);
+    const transport = new FakeTransport(request => {
+      if (request.path === '/v1/plugins') return json(inventoryOf(compiled));
+      if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
+      return transport.requests.filter(each => each.path === '/v1/board').length === 1 ? STEP_UP : OK;
+    });
+    const client = new DaemonClient({
+      transport,
+      surfaces: compiled,
+      passkey: { daemon: DAEMON, handler: fake },
+      personActing: () => true,
+    });
+    await client.start();
+    expect(await client.forPackage('board').call('GET /v1/board')).toEqual({ cards: [] });
+    expect(asked.map(entry => entry.origin)).toEqual(['background']);
+  });
+
+  test('a background-origin client raises no step-up prompt, for a read or anything else, even while a person acts', async () => {
+    const { fake, asked } = handler([true, true]);
+    const transport = new FakeTransport(request => {
+      if (request.path === '/v1/plugins') return json(inventoryOf(compiled));
+      if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
+      return STEP_UP;
+    });
+    const client = new DaemonClient({
+      transport,
+      surfaces: compiled,
+      passkey: { daemon: DAEMON, handler: fake },
+      personActing: () => true,
+    });
+    await client.start();
+    const background = client.forPackage('board', { origin: 'background' });
+    await background.call('GET /v1/board').catch(() => undefined);
+    await background.call('POST /v1/board').catch(() => undefined);
+    expect(asked).toEqual([]);
+  });
+
+  test('a poll refused for a step-up is answered from the refusal, unsent, for a wait that doubles to a minute', async () => {
+    let now = 0;
+    const board: TransportAnswer[] = [];
+    const transport = new FakeTransport(request => {
+      if (request.path === '/v1/plugins') return json(inventoryOf(compiled));
+      if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
+      return board.shift() ?? STEP_UP;
+    });
+    const { fake, asked } = handler([]);
+    const client = new DaemonClient({
+      transport,
+      surfaces: compiled,
+      passkey: { daemon: DAEMON, handler: fake },
+      now: () => now,
+    });
+    await client.start();
+    const sent = () => transport.requests.filter(request => request.path === '/v1/board').length;
+    const poll = async () =>
+      await client
+        .forPackage('board')
+        .call('GET /v1/board')
+        .catch((error: unknown) => (error as DaemonCallError).code);
+    // A poll every 400 ms for a minute: 150 reads, the rate the owner's panel sent.
+    const codes: unknown[] = [];
+    for (let tick = 0; tick < 150; tick += 1) {
+      codes.push(await poll());
+      now += 400;
+    }
+    expect(new Set(codes)).toEqual(new Set(['grant_step_up_required']));
+    // Sent at 0, 2, 6, 14, 30 s, then once a minute — not 150 times.
+    expect(sent()).toBe(5);
+    expect(asked).toEqual([]);
+  });
+
+  test('a confirmed passkey or a press forgets the backoff: the read is sent again at once', async () => {
+    const now = 0;
+    const { fake } = handler([true]);
+    const transport = new FakeTransport(request => {
+      if (request.path === '/v1/plugins') return json(inventoryOf(compiled));
+      if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
+      return request.method === 'GET' && transport.requests.filter(r => r.path === '/v1/board').length === 1
+        ? STEP_UP
+        : OK;
+    });
+    const client = new DaemonClient({
+      transport,
+      surfaces: compiled,
+      passkey: { daemon: DAEMON, handler: fake },
+      now: () => now,
+    });
+    await client.start();
+    const board = client.forPackage('board');
+    await board.call('GET /v1/board').catch(() => undefined);
+    client.noteConfirmed();
+    expect(await board.call('GET /v1/board')).toEqual({ cards: [] });
+    expect(transport.requests.filter(request => request.path === '/v1/board')).toHaveLength(2);
+  });
+
+  test('a read the person pressed for is never held back by the backoff', async () => {
+    const { fake, asked } = handler([true]);
+    const { client, sends } = daemon([STEP_UP, STEP_UP, OK], fake);
+    await client.start();
+    await client
+      .forPackage('board')
+      .call('GET /v1/board')
+      .catch(() => undefined);
+    expect(await client.forPackage('board').call('GET /v1/board', { quiet: false })).toEqual({ cards: [] });
+    expect(asked.map(entry => entry.origin)).toEqual(['explicit']);
+    expect(sends()).toHaveLength(3);
   });
 });

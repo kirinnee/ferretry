@@ -20,7 +20,8 @@
  * words about its own refusal and carry no challenge, credential or key.
  */
 
-import { fromBase64Url, toBase64Url } from '../session/session-transport.ts';
+import { fromBase64Url } from '../session/session-transport.ts';
+import { credentialFields } from './credential-bytes.ts';
 
 /** The slice of `navigator.credentials` a ceremony needs. */
 export interface CredentialsPort {
@@ -65,7 +66,7 @@ export interface AssertionWire {
   signature: string;
 }
 
-type CeremonyKind = 'no-passkey' | 'cancelled' | 'unsupported' | 'insecure-origin' | 'failed';
+type CeremonyKind = 'no-passkey' | 'cancelled' | 'unsupported' | 'insecure-origin' | 'failed' | 'unreadable';
 
 /** What the browser said when it threw: the error's name and message, as it gave them. */
 export interface BrowserSaid {
@@ -119,6 +120,8 @@ function kindSentence(kind: CeremonyKind, origin: string): string {
       return `The browser refused a passkey at ${origin}. Passkeys need a secure address (HTTPS or localhost) and work only at the address they were made on, so open the app at that address.`;
     case 'failed':
       return `The browser stopped the passkey at ${origin} before it finished.`;
+    case 'unreadable':
+      return `Your browser or passkey manager answered at ${origin}, but with a passkey this app cannot read, so it was never sent to the machine. If your passkey manager saved one for this site just now, delete it there, then try again.`;
   }
 }
 
@@ -142,15 +145,15 @@ export async function createPasskey(
     attestation: 'none',
     ...(options.timeout === undefined ? {} : { timeout: options.timeout }),
   };
-  const credential = await ceremony(() => port.create({ publicKey }));
-  const response = credential.response;
-  if (!isBuffer(response.clientDataJSON) || !isBuffer(response.attestationObject)) {
-    throw new PasskeyCeremonyError('unsupported');
-  }
+  const fields = credentialFields(await ceremony(() => port.create({ publicKey })), [
+    'clientDataJSON',
+    'attestationObject',
+  ]);
+  if (fields === undefined) throw new PasskeyCeremonyError('unreadable');
   return {
-    credentialId: text(credential.rawId),
-    clientDataJSON: text(response.clientDataJSON),
-    attestationObject: text(response.attestationObject),
+    credentialId: fields.rawId,
+    clientDataJSON: fields.clientDataJSON,
+    attestationObject: fields.attestationObject,
   };
 }
 
@@ -171,26 +174,25 @@ export async function assertPasskey(
     userVerification: 'required',
     ...(options.timeout === undefined ? {} : { timeout: options.timeout }),
   };
-  const credential = await ceremony(() => port.get({ publicKey }));
-  const response = credential.response;
-  if (!isBuffer(response.clientDataJSON) || !isBuffer(response.authenticatorData) || !isBuffer(response.signature)) {
-    throw new PasskeyCeremonyError('unsupported');
-  }
+  const fields = credentialFields(await ceremony(() => port.get({ publicKey })), [
+    'clientDataJSON',
+    'authenticatorData',
+    'signature',
+  ]);
+  if (fields === undefined) throw new PasskeyCeremonyError('unreadable');
   return {
-    credentialId: text(credential.rawId),
-    clientDataJSON: text(response.clientDataJSON),
-    authenticatorData: text(response.authenticatorData),
-    signature: text(response.signature),
+    credentialId: fields.rawId,
+    clientDataJSON: fields.clientDataJSON,
+    authenticatorData: fields.authenticatorData,
+    signature: fields.signature,
   };
 }
 
-/** The fields of a `PublicKeyCredential` this module reads; checked, never assumed. */
-interface CredentialShape {
-  readonly rawId: ArrayBuffer;
-  readonly response: Record<string, unknown>;
-}
-
-async function ceremony(run: () => Promise<Credential | null>): Promise<CredentialShape> {
+/**
+ * The credential the browser (or a passkey manager standing in for it) resolved with, or the error it threw as a
+ * {@link PasskeyCeremonyError}. Its SHAPE is read by `credential-bytes.ts`, never assumed here.
+ */
+async function ceremony(run: () => Promise<Credential | null>): Promise<unknown> {
   let credential: Credential | null;
   try {
     credential = await run();
@@ -199,11 +201,7 @@ async function ceremony(run: () => Promise<Credential | null>): Promise<Credenti
   }
   // A null result is the browser declining without an exception, which a person experiences as a dismissal.
   if (credential === null) throw new PasskeyCeremonyError('cancelled');
-  const shape = credential as unknown as Partial<CredentialShape>;
-  if (!isBuffer(shape.rawId) || typeof shape.response !== 'object' || shape.response === null) {
-    throw new PasskeyCeremonyError('unsupported');
-  }
-  return { rawId: shape.rawId, response: shape.response };
+  return credential;
 }
 
 /**
@@ -240,12 +238,4 @@ function binary(field: string): ArrayBuffer {
   // (a challenge or an id) is deliberately not repeated in the message.
   if (bytes === null) throw new TypeError('The machine sent passkey options this app cannot read.');
   return bytes.slice().buffer as ArrayBuffer;
-}
-
-function isBuffer(value: unknown): value is ArrayBuffer {
-  return value instanceof ArrayBuffer;
-}
-
-function text(buffer: ArrayBuffer): string {
-  return toBase64Url(new Uint8Array(buffer));
 }

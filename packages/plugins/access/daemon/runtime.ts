@@ -402,6 +402,15 @@ export class AccessRuntime {
           ...(note.deviceId === undefined ? {} : { deviceId: note.deviceId }),
         });
       },
+      // And each registration it SENT, whatever its outcome (A555 r7): options issued with no attempt after them is a
+      // ceremony that died in the browser, never a lost line. Names and ids only.
+      note => {
+        this.#deps.kernel.log.info(`a device sent a passkey registration: ${note.outcome}`, {
+          request: note.request,
+          outcome: note.outcome,
+          ...(note.deviceId === undefined ? {} : { deviceId: note.deviceId }),
+        });
+      },
     );
   }
 
