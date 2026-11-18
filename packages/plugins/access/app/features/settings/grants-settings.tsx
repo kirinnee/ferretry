@@ -36,6 +36,7 @@ import {
   axisQuestion,
   capabilityLabel,
   capabilityReach,
+  capabilityWeight,
   connectionPosture,
   deviceGrantNote,
   type GrantGuidance,
@@ -49,7 +50,7 @@ import {
   remoteRevokeWarning,
   STEP_UP_NOTE,
 } from '../../lib/grants.ts';
-import { CapabilityList } from './capability-list.tsx';
+import { CapabilityList, WeightMark } from './capability-list.tsx';
 import { changeGrants, type GrantClient, readGrants } from './grants-api.ts';
 
 /** The tone each guidance level paints with, kept in one place so five rows cannot disagree. */
@@ -149,12 +150,22 @@ function AxisControl({
           />
         </span>
       </button>
+      {/* The same few sentences repeat on every row (a passkey; fixed on the host; only at the machine), and the panels
+          above already say them once: a row shows the short badge, and the sentence stays for a screen reader (it is what
+          the switch is described by). A refusal that is a fault is the one row-specific thing, so it is shown whole. */}
       <p
         id={describedBy}
         className={cn('m-0 mt-1 rounded-control border px-2 py-1 text-meta leading-base', TONE_CLASS[reason.tone])}
         data-grant-axis-reason={`${entry.capability}.${axis}`}
       >
-        {reason.explanation}
+        {reason.offersStepUp || reason.tone !== 'fault' ? (
+          <>
+            <span aria-hidden="true">{reason.badge}</span>
+            <span className="sr-only">{reason.explanation}</span>
+          </>
+        ) : (
+          reason.explanation
+        )}
       </p>
     </div>
   );
@@ -205,6 +216,9 @@ function CapabilityCard({
         >
           {entry.origin === 'config file' ? 'set by the operator' : 'product default'}
         </span>
+        <span className="ml-auto">
+          <WeightMark weight={capabilityWeight(entry.capability)} />
+        </span>
       </div>
       <p className="m-0 text-meta leading-base text-muted">{capabilityReach(entry.capability)}</p>
       <p className="m-0 text-meta leading-base text-faint">{originNote(entry)}</p>
@@ -234,12 +248,12 @@ function CapabilityCard({
           a document read afterwards. It is shown while the capability is still ON, because that is the
           only moment the warning can change what somebody does. */}
       {oneWay && entry.granted.use ? (
-        <p
-          className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
-          data-grant-one-way={entry.capability}
-        >
-          {remoteRevokeWarning(entry.capability)}
-        </p>
+        <details className="text-meta leading-base text-warn" data-grant-one-way={entry.capability}>
+          <summary className="cursor-pointer">Switching this off cannot be undone from here</summary>
+          <p className="m-0 mt-1 rounded-control border border-warn-border bg-warn-bg px-2 py-1">
+            {remoteRevokeWarning(entry.capability)}
+          </p>
+        </details>
       ) : null}
     </section>
   );
@@ -345,7 +359,7 @@ export function GrantsCard({
           would be the second derivation of one fact, harmless while `mayGrant` is `!governed` and wrong the
           moment it is not. It is never inferred from this page's address, which would invert the answer
           over a relay. */}
-      <CapabilityList connection={connection} capabilities={view.capabilities} governed={view.governed} />
+      <CapabilityList connection={connection} capabilities={view.capabilities} governed={view.governed} rows={false} />
       <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
         <div className="flex flex-wrap items-center gap-2">
           <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">

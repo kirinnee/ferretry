@@ -161,9 +161,9 @@ describe('the routing prompt card', () => {
     await byHand(root);
     expect(action(root, 'write').disabled).toBe(true);
     expect(action(root, 'clean-up').disabled).toBe(true);
-    expect(textOf(must(root.querySelector('[data-routing-clean-up-blocked]'), 'reason'))).toBe(
-      'No agent runtime here is ready to run a clean-up.',
-    );
+    // The same reason is said once, not under both buttons.
+    expect(root.querySelector('[data-routing-clean-up-blocked]')).toBeNull();
+    expect(root.querySelectorAll('[data-routing-write-blocked]')).toHaveLength(1);
   });
 
   it('cleans up the text in the box now, shows the run, and polls it into a review', async () => {

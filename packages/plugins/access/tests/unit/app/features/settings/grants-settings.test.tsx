@@ -115,8 +115,13 @@ describe('GrantsCard', () => {
     const reason = marked(renderer, 'data-grant-axis-reason').find(
       node => node.props['data-grant-axis-reason'] === 'fleet.configure',
     );
-    expect(JSON.stringify(reason?.props.children)).toContain('needs your passkey');
-    expect(JSON.stringify(reason?.props.children)).not.toMatch(NO_WORDS);
+    // The sentence stays for a screen reader (the switch is described by it); sighted readers get the short badge.
+    const words = (node: { readonly children: readonly unknown[] }): string =>
+      node.children
+        .map(child => (typeof child === 'string' ? child : words(child as { readonly children: readonly unknown[] })))
+        .join('');
+    expect(words(reason as never)).toContain('needs your passkey');
+    expect(words(reason as never)).not.toMatch(NO_WORDS);
     // A step-up never makes a control unchangeable: it can be had on the spot.
     expect(axisSwitch(renderer, 'fleet.configure')?.props.disabled).toBe(false);
   });
@@ -581,5 +586,15 @@ describe('GrantsCard per-device grants', () => {
     expect(text(renderer)).toContain('fy device grant <device> terminal --use');
     // The refusal reads as a widen of this device, never as a passkey or the operator's decision.
     expect(text(renderer)).toContain('this device has not been given it');
+  });
+});
+
+describe('GrantsCard — each capability once', () => {
+  it('draws the posture and the key from the list, but every capability only as its card with switches', () => {
+    const renderer = render(<GrantsCard connection={connection()} view={view()} onChange={() => {}} />);
+    expect(marked(renderer, 'data-capability-posture')).toHaveLength(1);
+    expect(marked(renderer, 'data-capability-row')).toHaveLength(0);
+    expect(marked(renderer, 'data-grant-capability')).toHaveLength(CAPABILITY_NAMES.length);
+    expect(marked(renderer, 'data-capability-weight').length).toBeGreaterThan(0);
   });
 });

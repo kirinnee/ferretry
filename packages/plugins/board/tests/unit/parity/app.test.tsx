@@ -28,6 +28,8 @@ const TASKS = [
 ];
 
 /** A daemon that answers Board's reads from the tasks above; a route it does not know fails like an old daemon. */
+let configText = '# the watch\ngithub:\n  watch: true\n';
+const puts: { text: string; etag: string }[] = [];
 const daemon: PluginClient = {
   call: async (route: string, init?: { readonly params?: Readonly<Record<string, string>> }) => {
     switch (route) {
@@ -49,6 +51,11 @@ const daemon: PluginClient = {
         return [{ id: LEAD, name: 'denisha' }];
       case 'GET /v1/health':
         return { version: '5.0.0' };
+      case 'GET /v1/config/file':
+        return { path: 'board.yaml', exists: true, text: configText, etag: 'etag-1' };
+      case 'PUT /v1/config/file':
+        puts.push((init as { body: { text: string; etag: string } }).body);
+        return { path: 'board.yaml', etag: 'etag-2', outcome: 'applied' };
       default:
         throw new Error(`no route ${route}`);
     }
@@ -133,15 +140,25 @@ describe('the app half the shell builds', () => {
     expect(root.querySelector('[data-task="F1"]')).not.toBeNull();
   });
 
-  it('S-0298 feature board: the settings tab says where the GitHub watch is configured', async () => {
+  it('S-0298 feature board: the settings tab is a switch for the GitHub watch, saved in config/board.yaml', async () => {
     expect(Object.keys(half?.settings ?? {})).toEqual(['board']);
+    puts.length = 0;
+    configText = '# the watch\ngithub:\n  watch: true\n';
     const root = await draw<SettingsProps>(
       half?.settings.board,
       {},
-      node => node.querySelector('[data-settings="board"]') !== null,
-      'the Board settings tab',
+      node => node.querySelector('[data-settings="board"] [role="switch"]') !== null,
+      'the Board settings switch',
     );
-    expect(root.textContent).toContain('config/board.yaml');
+    const toggle = root.querySelector<HTMLElement>('[role="switch"]');
+    expect(toggle?.getAttribute('aria-checked')).toBe('true');
+    expect(root.textContent).not.toContain('edit github');
+    toggle?.click();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(puts).toHaveLength(1);
+    expect(puts[0]?.etag).toBe('etag-1');
+    expect(puts[0]?.text).toContain('# the watch');
+    expect(puts[0]?.text).toContain('watch: false');
   });
 
   it('S-0298 feature board: a &F12 reference links the card by its title, and the card ask names it with no button', async () => {

@@ -122,7 +122,7 @@ const refused = (message: string): PackCleanUpStart => ({ outcome: 'refused', me
 
 /** Why Clean up cannot start where no folder for its ferret is known. */
 export const NO_CLEAN_UP_FOLDER =
-  'Clean up has no folder to run its ferret in on this machine yet (the Ferretry home is not handed to Pack mode), so nothing was started. Edit config/packs.yaml by hand meanwhile.';
+  'Clean up and Write it for me cannot run on this machine yet: Pack mode has no folder to run its helper ferret in. Nothing was started. Meanwhile, write the prompt by hand.';
 
 export class CleanUpService {
   constructor(private readonly ports: CleanUpPorts) {}
