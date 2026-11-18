@@ -125,9 +125,14 @@
   --shadow-control: var(--shadow-sm);
   --shadow-panel: var(--shadow-md);
   --shadow-popover: var(--shadow-lg);
-  --shadow-active: 0 0 0 2px var(--ring);
+  --shadow-active: none;
   --press-translate: 0px;
-  --rail-active: inset 2px 0 0 var(--accent);
+  --rail-active: none;
+  /* ONE highlight cue per row, app-wide: a light NEUTRAL fill (ink-over-transparent, so it reads on any surface and in
+     every theme). Selected and hovered rows, chips, tabs and nav entries all take these two; none adds a rail, an accent
+     border, a ring or a weight change on top. Keyboard focus is the separate `--focus-*` ring. */
+  --hover-fill: color-mix(in srgb, var(--fg) 6%, transparent);
+  --select-fill: color-mix(in srgb, var(--fg) 11%, transparent);
 
   /* ---- menu roles: every dropdown, context menu, picker list and the Modes menu reads THESE ----
      One surface, one edge, one shadow, and the row states a keyboard or a pointer reaches. The edge is the
@@ -139,9 +144,9 @@
   --menu-shadow: var(--shadow-popover);
   --menu-radius: var(--radius-panel);
   --menu-item-h: 34px;
-  --menu-item-hover: color-mix(in srgb, var(--fg) 8%, var(--menu-bg));
-  --menu-item-active: color-mix(in srgb, var(--accent) 16%, var(--menu-bg));
-  --menu-item-active-fg: var(--accent-strong);
+  --menu-item-hover: var(--hover-fill);
+  --menu-item-active: var(--select-fill);
+  --menu-item-active-fg: var(--fg);
   --menu-sep: var(--border);
 
   /* ---- density ---- */
@@ -599,7 +604,7 @@
   --pad-row-y: 5px;
   --pad-panel: 12px;
 
-  --rail-active: inset 4px 0 0 var(--accent);
+  --rail-active: none;
   /* Flat surface — the diagonal accent-tint wash on panels was another decorative
      tell; the panel now reads its identity from the grid texture and the seated
      hairline, not a gradient sheen. */
@@ -610,7 +615,7 @@
     linear-gradient(90deg, rgb(var(--accent-rgb) / 0.05) 1px, transparent 1px),
     linear-gradient(180deg, rgb(var(--accent-rgb) / 0.05) 1px, transparent 1px);
   --panel-texture-size: 32px 32px;
-  --focus-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.16);
+  --focus-shadow: none;
   --rule-inset: inset 0 1px 0 rgb(var(--accent-rgb) / 0.08);
 
   --bubble-stroke: 1px;
@@ -961,9 +966,9 @@
   --shadow-control: 3px 3px 0 var(--shadow-ink);
   --shadow-panel: 4px 4px 0 var(--shadow-ink);
   --shadow-popover: 6px 6px 0 var(--shadow-ink);
-  --shadow-active: 1px 1px 0 var(--shadow-ink);
+  --shadow-active: none;
   --press-translate: 2px;
-  --rail-active: inset 4px 0 0 var(--accent);
+  --rail-active: none;
 
   --control-h-desktop: 32px;
   --control-h-sm-desktop: 28px;
@@ -1199,6 +1204,8 @@
 :root[data-theme^='contrast-'],
 [data-swatch^='contrast-'] {
   --ghost-edge: var(--border-strong);
+  --hover-fill: color-mix(in srgb, var(--fg) 10%, transparent); /* High Contrast: stronger washes, still one cue */
+  --select-fill: color-mix(in srgb, var(--fg) 20%, transparent);
   /* ═══ structural token layer ═══ */
 
   /* An UNDECORATED instrument, not monochrome Neo: no offset shadows, no display
@@ -1239,8 +1246,8 @@
   --shadow-control: none;
   --shadow-panel: none;
   --shadow-popover: 0 0 0 2px var(--border); /* a ring, not a shadow */
-  --shadow-active: 0 0 0 3px var(--focus-color);
-  --rail-active: inset 4px 0 0 var(--accent);
+  --shadow-active: none;
+  --rail-active: none;
 
   --control-h-desktop: 34px;
   --control-h-sm-desktop: 30px;
@@ -1256,7 +1263,7 @@
   /* Every control carries a permanent outline; every link is underlined at rest. */
   --outline-always: var(--stroke-control) solid var(--border-strong);
   --underline-links: underline;
-  --focus-shadow: 0 0 0 6px rgb(var(--accent-rgb) / 0.25);
+  --focus-shadow: none;
 
   --font-display: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -1627,7 +1634,7 @@
   --shadow-popover: var(--shadow-lg);
   --press-translate: 0px;
   --rule-inset: none;
-  --rail-active: inset 2px 0 0 var(--accent);
+  --rail-active: none;
   --divider-color: var(--border-soft);
 
   /* Airy: small controls, generous padding and gaps. Negative space is a
@@ -1658,7 +1665,7 @@
   /* Focus is a crisp 2px accent ring — no bloom. Precise, not luminous. Not a
      permanent outline, links not underlined — the calm end of the spectrum,
      unlike Contrast. */
-  --focus-shadow: 0 0 0 2px rgb(var(--accent-rgb) / 0.9);
+  --focus-shadow: none;
   --outline-always: none;
   --underline-links: none;
 
@@ -2001,7 +2008,7 @@
   --row-min-h-desktop: 48px;
   --pad-control-x: 16px;
   --pad-panel: 14px;
-  --rail-active: inset 8px 0 0 var(--accent);
+  --rail-active: none;
   --shadow-control: none;
   /* Signage emphasises with a SOLID PANEL: the selected row is the accent
      itself with reversed ink, like a lit wayfinding sign, and the selected tab

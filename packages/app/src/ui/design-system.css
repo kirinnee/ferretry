@@ -1396,14 +1396,12 @@ body {
     color 120ms ease;
 }
 .kt-tab:hover {
-  color: var(--fg);
+  background: var(--hover-fill);
 }
+/* ONE cue: the neutral fill. No accent border, ring or ink swap on top of it. */
 .kt-tab[aria-selected='true'],
 .kt-tab[aria-pressed='true'] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  box-shadow: var(--shadow-active);
-  color: var(--accent);
+  background: var(--select-fill);
 }
 
 /* A `.kt-tab` LABEL wrapping its own radio, which is how the fleet harness chooser is built.
@@ -1452,8 +1450,7 @@ body {
     background-color 120ms ease;
 }
 .kt-sheet-tabs .kt-tab:hover {
-  background: var(--surface-2);
-  color: var(--fg);
+  background: var(--hover-fill);
 }
 /* Beats `.kt-tab[aria-selected='true']` (the pill treatment) on specificity, so
    the sheet strip gets the tab treatment while ViewTabs keeps its segment. */
@@ -1461,7 +1458,6 @@ body {
   border-bottom-color: var(--accent);
   background: transparent;
   box-shadow: none;
-  color: var(--accent);
 }
 
 /* ============================================================================
@@ -1508,8 +1504,6 @@ body {
 }
 .kt-appnav__link[aria-current='page'] {
   border-bottom-color: var(--appnav-underline, var(--fg));
-  color: var(--appnav-sel-fg, var(--fg));
-  font-weight: var(--weight-strong);
 }
 
 /* The Find box: a search field in look, a button in behaviour (it opens the palette). */
@@ -1568,10 +1562,8 @@ body {
   font-weight: var(--weight-medium);
   text-transform: var(--control-transform, none);
 }
-.kt-tabbar__item[aria-current='page'],
 .kt-tabbar__item[aria-expanded='true'] {
-  color: var(--tab-sel-fg, var(--accent));
-  font-weight: var(--weight-strong);
+  background: var(--select-fill);
 }
 /* The same underline as every other "you are here", on the edge the bar shares with the page, so a
    family whose selected ink IS its body ink still marks the current place. */
@@ -1611,8 +1603,7 @@ body {
     border-color 120ms ease;
 }
 .kt-navpill:hover {
-  background: var(--nav-hover, var(--surface-2));
-  color: var(--fg);
+  background: var(--hover-fill);
 }
 .kt-navpill__sub {
   display: block;
@@ -1622,15 +1613,7 @@ body {
 }
 .kt-navpill[aria-current='page'],
 .kt-navpill[aria-current='step'] {
-  border-color: var(--nav-sel-edge, var(--accent-border));
-  background: var(--nav-sel-bg, var(--accent-soft));
-  box-shadow: var(--nav-sel-shadow, none);
-  color: var(--nav-sel-fg, var(--accent));
-  font-weight: var(--weight-strong);
-}
-.kt-navpill[aria-current='page'] .kt-navpill__sub,
-.kt-navpill[aria-current='step'] .kt-navpill__sub {
-  color: var(--nav-sel-sub, var(--nav-sel-fg, var(--accent)));
+  background: var(--select-fill);
 }
 .kt-navpill--add {
   color: var(--accent);
@@ -1755,13 +1738,12 @@ body {
     border-color 120ms ease;
 }
 .kt-utab:hover {
-  color: var(--fg);
+  background: var(--hover-fill);
 }
+/* ONE cue: the underline. No accent ink or bolder weight on top of it. */
 .kt-utab[aria-current='page'],
 .kt-utab[aria-selected='true'] {
   border-bottom-color: var(--tab-underline, var(--accent));
-  color: var(--tab-sel-fg, var(--accent));
-  font-weight: var(--weight-strong);
 }
 .kt-utab:focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
@@ -1985,12 +1967,17 @@ body {
 .kt-input::placeholder {
   color: var(--muted);
 }
+/* ONE ring. The field is a border colour change plus the shell's thin keyboard outline (index.css); the composer is
+   the focus context for the text field inside it, so it takes the border colour alone and that field draws nothing. */
 .kt-input:focus-visible,
 .kt-composer:focus-within {
-  border-color: var(--accent);
-  box-shadow:
-    0 0 0 var(--focus-width) var(--ring),
-    var(--focus-shadow);
+  border-color: var(--focus-color);
+}
+.kt-composer :is(input, textarea):focus,
+.kt-composer :is(input, textarea):focus-visible {
+  border-color: transparent;
+  outline: none;
+  box-shadow: none;
 }
 
 /* THE DICTATION "TRANSCRIBING" BAR. Indeterminate on purpose: the engine reports
@@ -2093,8 +2080,6 @@ body {
 .kt-menu-item[aria-checked='true'],
 .kt-menu-item[data-active='true'] {
   background: var(--menu-item-active);
-  box-shadow: var(--rail-active);
-  color: var(--menu-item-active-fg);
 }
 .kt-menu-item:focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
@@ -2228,7 +2213,7 @@ body {
   border-bottom: 0;
 }
 .kt-row:hover {
-  background: var(--surface-2);
+  background: var(--hover-fill);
 }
 .kt-row > td,
 .kt-row > th {
@@ -2237,8 +2222,7 @@ body {
   vertical-align: middle;
 }
 .kt-row[data-active='true'] {
-  background: var(--accent-soft);
-  box-shadow: var(--rail-active);
+  background: var(--select-fill);
 }
 
 /* ---- sidebar navigation row -------------------------------------------- */
@@ -2263,17 +2247,12 @@ body {
     color 120ms ease;
 }
 .kt-navrow:hover {
-  background: var(--surface-2);
-  color: var(--fg);
+  background: var(--hover-fill);
 }
-/* The active rail is the family's signature: 2px Studio, 4px glowing Mission,
-   4px hard Neo, 3px Ember, 4px Contrast. */
+/* ONE cue: the neutral fill. No rail, accent ink or bolder weight on top of it. */
 .kt-navrow[data-active='true'],
 .kt-navrow[aria-current='page'] {
-  background: var(--accent-soft);
-  box-shadow: var(--rail-active);
-  color: var(--accent);
-  font-weight: var(--weight-strong);
+  background: var(--select-fill);
 }
 
 /* ---- transcript message + tool chrome ---------------------------------- */
