@@ -12,7 +12,7 @@ import type {
   SignInRuleSuggestionView,
   SignInSummary,
 } from '../../../contract/routes/index.ts';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { readAccounts } from '../accounts/accounts-api.ts';
 import {
   codeKeyLabel,
@@ -24,7 +24,9 @@ import {
   RULE_NO_ACCOUNTS_DEVICE_WORDS,
   type RuleClient,
 } from '../../lib/sign-in-rules.ts';
+import { isStepUpRefusal } from '../../lib/step-up-refusal.ts';
 import { SignInRuleSheetHost } from '../accounts/sign-in-rule-panel.tsx';
+import { ConfirmToSee } from '../confirm-to-see.tsx';
 import type { RulesBinding } from '../accounts/use-sign-in-rules.ts';
 
 export interface SignInRuleSuggestionHostProps {
@@ -60,6 +62,7 @@ export function SignInRuleSuggestionHost({
     setProject(undefined);
     if (asking === undefined) return;
     let current = true;
+    // The ferret read is quiet and swallows every failure: the card is drawn without a project choice.
     void readFerretProject(client, asking).then(found => {
       if (current) setProject(found);
     });
@@ -80,16 +83,26 @@ export function SignInRuleSuggestionHost({
   const [sheet, setSheet] = useState(false);
   const [failure, setFailure] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  /** The daemon wants the owner's step-up to show this suggestion; the quiet read did not ask for it. */
+  const [locked, setLocked] = useState(false);
+  const [reads, setReads] = useState(0);
+  /** Set by the owner's press on "Confirm it's you": the next read is theirs, so it may ask for the passkey. */
+  const pressed = useRef(false);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` re-runs the read when the owner confirms
   useEffect(() => {
     let current = true;
     setForbidden(false);
-    void listSuggestions(client)
+    setLocked(false);
+    const owned = pressed.current;
+    pressed.current = false;
+    const mode = { quiet: !owned };
+    void listSuggestions(client, mode)
       .then(async ({ suggestions }) => {
         const suggestion = suggestions.find(each => each.id === suggestionId);
         // Not on the owner's list: answered (here or on another device) or expired: nothing to draw.
         if (suggestion === undefined) return undefined;
-        const accounts = await readAccounts(client);
+        const accounts = await readAccounts(client, mode);
         const signIn = accounts.signIns.find(each => each.id === suggestion.signIn);
         const account = signIn === undefined ? undefined : accounts.accounts.find(each => each.id === signIn.account);
         return { suggestion, signIn, account } satisfies Found;
@@ -101,15 +114,26 @@ export function SignInRuleSuggestionHost({
         cause => {
           // A device that can't see accounts is refused every time: say so once and stop asking.
           if (!current) return;
-          if (isForbidden(cause)) setForbidden(true);
+          // The page's own read is quiet: a step-up the daemon wants waits for the owner's press, not for opening the chat.
+          if (isStepUpRefusal(cause)) setLocked(true);
+          else if (isForbidden(cause)) setForbidden(true);
           else setFailure(failureWords(cause));
         },
       );
     return () => {
       current = false;
     };
-  }, [client, suggestionId]);
+  }, [client, suggestionId, reads]);
 
+  if (locked)
+    return (
+      <ConfirmToSee
+        onConfirm={() => {
+          pressed.current = true;
+          setReads(count => count + 1);
+        }}
+      />
+    );
   if (forbidden)
     return (
       <p className="m-0 text-ui text-warn" data-rule-suggestion-forbidden="" role="status">
