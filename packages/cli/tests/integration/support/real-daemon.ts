@@ -11,7 +11,7 @@ import { FerretTokensSchema } from '../../../../core/ferrets/contract/state.ts';
  * (its own session id and bearer) or as the owner (no session). Nothing here is a fixture of the daemon's answers: a verb
  * that did nothing, wrote to the wrong item, or closed fewer than it said shows in the board the daemon serves afterwards.
  *
- * Ferrets are seeded as schema-validated idle records with a bearer each, so no harness, model or pane is ever launched.
+ * Ferrets are seeded as schema-validated records with a bearer each, so no harness, model or pane is ever launched.
  * Fake values only; loopback only; nothing reads a real home or credential. The test file calls `dispose()` from its own
  * `afterAll` (a hook cannot be registered from inside `beforeAll`), which stops the daemon and removes the home.
  */
@@ -86,7 +86,9 @@ export async function bootRealDaemon(
       harness: 'codex',
       runner: 'tmux',
       folder: root,
-      state: 'idle',
+      // 'starting', never a live-looking 'working'/'idle': the boot pass and the 30 s sweep settle a live record whose
+      // pane the runner proves gone as stopped (terminal_gone) and a stopped ferret's bearer authenticates nobody.
+      state: 'starting',
       birth: 'person',
       createdAt: STAMP,
       stateAt: STAMP,
