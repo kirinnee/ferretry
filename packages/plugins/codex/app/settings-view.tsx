@@ -1,4 +1,5 @@
 /** The current Agent CLIs panel, narrowed to Codex and bound to the plugin client. */
+import { Badge, Button, SettingGroup, SettingRow } from '@ferretry/app';
 import { useEffect, useState } from 'react';
 import type { HarnessCliView } from '../contract/index.ts';
 import type { CodexSettings } from './codex-settings.ts';
@@ -82,76 +83,89 @@ export function CodexSettingsView({ settings }: { readonly settings: CodexSettin
   const badge = verificationBadge(view.verification);
   const install = installWords(view.method);
   const plan = view.plan;
+  const located = view.location.state === 'located';
   return (
-    <section aria-labelledby="codex-heading" className="kt-panel p-panel">
-      <h3 id="codex-heading">{headline(view)}</h3>
-      <p>
-        {view.location.state === 'located' ? badge.text : 'Not found'}
-        {view.available ? ' · Update available' : ''}
-      </p>
-      <dl>
-        <dt>Runs</dt>
-        <dd>
-          {view.location.state === 'absent' ? 'nothing' : view.location.path}
-          <small style={{ display: 'block' }}>{locationWords(view.location)}</small>
-        </dd>
-        {install === undefined ? null : (
-          <>
-            <dt>Installed with</dt>
-            <dd>{install}</dd>
-          </>
-        )}
-        {view.installed?.state === 'unreadable' ? (
-          <>
-            <dt>Version</dt>
-            <dd>{view.installed.reason}</dd>
-          </>
-        ) : null}
-        <dt>Verified</dt>
-        <dd>{view.verified.version}</dd>
-        <dt>Latest</dt>
-        <dd>
-          {view.check.state === 'never' ? (
-            'Not checked yet.'
-          ) : (
-            <>
-              {knownLatest(view.check) ?? 'Unknown'} · Checked {view.check.checkedAt}
-              {view.check.state === 'failed' ? ': ' + view.check.reason : ''}
-            </>
+    <section aria-labelledby="codex-heading" className="flex flex-col gap-4">
+      <SettingGroup label="Codex">
+        <SettingRow
+          name={headline(view)}
+          hint={
+            <span id="codex-heading">
+              {located ? badge.text : 'Not found'}
+              {view.available ? ' · Update available' : ''}
+            </span>
+          }
+          control={() => (
+            <Badge tone={!located ? 'err' : view.available ? 'warn' : badge.tone}>
+              {located ? (view.available ? 'Update' : 'Installed') : 'Not found'}
+            </Badge>
           )}
-        </dd>
-      </dl>
-      {view.job === null ? null : <p role="status">{jobWords(view.job).text}</p>}
+        />
+        <SettingRow
+          name="Runs"
+          hint={
+            <>
+              <span className="break-all">{view.location.state === 'absent' ? 'nothing' : view.location.path}</span>
+              <small className="block">{locationWords(view.location)}</small>
+            </>
+          }
+        />
+        {install === undefined ? null : (
+          <SettingRow name="Installed with" control={() => <span className="text-ui text-fg">{install}</span>} />
+        )}
+        {view.installed?.state === 'unreadable' ? <SettingRow name="Version" hint={view.installed.reason} /> : null}
+        <SettingRow name="Verified" control={() => <span className="text-ui text-fg">{view.verified.version}</span>} />
+        <SettingRow
+          name="Latest"
+          hint={
+            view.check.state === 'never' ? (
+              'Not checked yet.'
+            ) : (
+              <>
+                {knownLatest(view.check) ?? 'Unknown'} · Checked {view.check.checkedAt}
+                {view.check.state === 'failed' ? ': ' + view.check.reason : ''}
+              </>
+            )
+          }
+        />
+      </SettingGroup>
+      {view.job === null ? null : (
+        <p className="m-0 text-ui text-fg" role="status">
+          {jobWords(view.job).text}
+        </p>
+      )}
       {confirming === null ? (
         <>
           {plan?.kind === 'manual' ? (
-            <>
-              <p>{plan.explanation}</p>
-              <ol>
+            <div className="flex flex-col gap-2 text-ui text-fg">
+              <p className="m-0">{plan.explanation}</p>
+              <ol className="m-0 flex flex-col gap-1 pl-5">
                 {plan.steps.map(step => (
                   <li key={step.command}>
                     <code>{step.command}</code>
-                    {step.note === undefined ? null : <p>{step.note}</p>}
+                    {step.note === undefined ? null : <p className="m-0 text-meta text-muted">{step.note}</p>}
                   </li>
                 ))}
               </ol>
-            </>
+            </div>
           ) : null}
-          {updateChoices(view).map(choice => (
-            <button
-              type="button"
-              key={choice.key}
-              disabled={busy || polling}
-              onClick={() => {
-                if (choice.unverified) setConfirming({ target: choice.target });
-                else void send({ target: choice.target });
-              }}
-            >
-              {choice.label}
-            </button>
-          ))}
+          <div className="flex flex-wrap gap-2 max-md:[&>button]:w-full">
+            {updateChoices(view).map(choice => (
+              <Button
+                key={choice.key}
+                variant={choice.primary ? 'primary' : 'outline'}
+                disabled={busy || polling}
+                onClick={() => {
+                  if (choice.unverified) setConfirming({ target: choice.target });
+                  else void send({ target: choice.target });
+                }}
+              >
+                {choice.label}
+              </Button>
+            ))}
+          </div>
           {plan?.kind === 'self' ? (
-            <p>
+            <p className="m-0 text-meta text-muted">
               Runs {plan.steps.map(step => step.command).join(', then ')}.{' '}
               {plan.rollback === 'automatic'
                 ? 'If the new version does not start, the old one is put back.'
@@ -160,27 +174,36 @@ export function CodexSettingsView({ settings }: { readonly settings: CodexSettin
           ) : null}
         </>
       ) : (
-        <fieldset aria-label="Not yet verified by Ferretry">
-          <p>{unverifiedQuestion(view, confirming.target)}</p>
-          <a href={view.verified.url} target="_blank" rel="noreferrer noopener">
+        <fieldset
+          aria-label="Not yet verified by Ferretry"
+          className="m-0 flex flex-col gap-2 rounded-control border border-warn p-3 text-ui text-fg"
+        >
+          <p className="m-0">{unverifiedQuestion(view, confirming.target)}</p>
+          <a href={view.verified.url} target="_blank" rel="noreferrer noopener" className="text-accent">
             What Ferretry verifies, and the known risks
           </a>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              void send({ ...confirming, confirmUnverified: true });
-            }}
-          >
-            Update anyway
-          </button>
-          <button type="button" disabled={busy} onClick={() => setConfirming(null)}>
-            Cancel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              disabled={busy}
+              onClick={() => {
+                void send({ ...confirming, confirmUnverified: true });
+              }}
+            >
+              Update anyway
+            </Button>
+            <Button disabled={busy} onClick={() => setConfirming(null)}>
+              Cancel
+            </Button>
+          </div>
         </fieldset>
       )}
-      {refusal === null ? null : <p role="alert">{refusal}</p>}
-      <p>
+      {refusal === null ? null : (
+        <p className="m-0 text-meta text-err" role="alert">
+          {refusal}
+        </p>
+      )}
+      <p className="m-0 text-meta text-muted">
         Updating replaces Codex for new ferrets. Running ferrets keep their current version until they are restarted.
       </p>
     </section>

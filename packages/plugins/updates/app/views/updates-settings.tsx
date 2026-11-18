@@ -4,6 +4,7 @@
  * the daemon answers `202` with the sentence and the switch stays off until then.
  */
 
+import { Badge, Button, SettingGroup, SettingRow, SettingSwitch } from '@ferretry/app';
 import type { AppComponent, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { useEffect, useState } from 'react';
 import {
@@ -11,6 +12,7 @@ import {
   type DaemonUpdateView,
   DaemonUpdateViewSchema,
   describeInstallMethod,
+  knownLatestRelease,
 } from '../../contract/index.ts';
 import { headlineSentence, refusalSentence, updateOffer, updateRequest } from '../lib/behind.ts';
 import { pollUpdateStatus } from '../lib/poll-status.ts';
@@ -66,48 +68,124 @@ export const createSettings = (client: PluginClient): AppComponent<SettingsProps
       }
     };
 
-    if (view === null) return <p>{readError ?? 'Reading the update state…'}</p>;
-    const offer = updateOffer(view);
+    if (view === null) return <p role="status">{readError ?? 'Reading the update state…'}</p>;
     return (
-      <section aria-label="Updates">
-        <p>
-          Running {view.current}, installed via {describeInstallMethod(view.method)}.
-        </p>
-        <p>{headlineSentence(view)}</p>
-        {offer.kind === 'busy' ? <p>{offer.sentence}</p> : null}
+      <UpdatesView
+        view={view}
+        note={note}
+        readError={readError}
+        onStart={(target, when) => void start(target, when)}
+        onAutoInstall={next => void setAutoInstall(next)}
+      />
+    );
+  };
+
+export interface UpdatesViewProps {
+  readonly view: DaemonUpdateView;
+  readonly note: string | null;
+  readonly readError: string | null;
+  readonly onStart: (target: string, when: 'now' | 'when-idle') => void;
+  readonly onAutoInstall: (next: boolean) => void;
+}
+
+/** The status badge beside the version: behind, up to date, or honestly unknown. */
+function statusBadge(view: DaemonUpdateView): { readonly tone: 'ok' | 'warn' | 'pend'; readonly text: string } {
+  if (view.available) return { tone: 'warn', text: 'Update available' };
+  if (view.check.state === 'ok') return { tone: 'ok', text: 'Up to date' };
+  return { tone: 'pend', text: view.check.state === 'never' ? 'Not checked' : 'Check failed' };
+}
+
+/** When the last check ran, in the reader's own clock; a daemon that has never checked says so. */
+function lastCheckedWords(check: DaemonUpdateView['check']): string {
+  if (check.state === 'never') return 'Not checked yet';
+  const when = new Date(check.checkedAt);
+  const stamp = Number.isNaN(when.getTime()) ? check.checkedAt : when.toLocaleString();
+  return check.state === 'failed' ? `${stamp} — the check failed` : stamp;
+}
+
+/** Settings › Updates, drawn from the daemon's own view: what runs, how it was installed, what is newer, and the switch. */
+export function UpdatesView({ view, note, readError, onStart, onAutoInstall }: UpdatesViewProps) {
+  const offer = updateOffer(view);
+  const badge = statusBadge(view);
+  const latest = knownLatestRelease(view.check);
+  return (
+    <section aria-label="Updates" className="flex flex-col gap-4">
+      <SettingGroup label="This machine">
+        <SettingRow
+          name="Version"
+          hint={`Installed via ${describeInstallMethod(view.method)}`}
+          control={() => <span className="text-ui font-semibold text-fg">{view.current}</span>}
+        />
+        <SettingRow
+          name="Status"
+          hint={headlineSentence(view)}
+          control={() => <Badge tone={badge.tone}>{badge.text}</Badge>}
+        />
+        <SettingRow
+          name="Newest release"
+          hint={`Last checked: ${lastCheckedWords(view.check)}`}
+          control={() => <span className="text-ui text-fg">{latest === undefined ? 'Unknown' : latest.version}</span>}
+        />
+        {offer.kind === 'busy' ? <SettingRow name="Updating" hint={offer.sentence} /> : null}
         {offer.kind === 'update' ? (
-          <p>
-            <button type="button" onClick={() => void start(offer.target, 'now')}>
-              Update to {offer.target}
-            </button>{' '}
-            <button type="button" onClick={() => void start(offer.target, 'when-idle')}>
-              Update when no ferret is mid-turn
-            </button>
-            {offer.midTurn > 0 ? (
-              <span> {offer.midTurn} mid-turn now; they keep running through the restart.</span>
-            ) : null}
-          </p>
+          <SettingRow
+            name={`Update to ${offer.target}`}
+            hint={
+              offer.midTurn > 0
+                ? `${offer.midTurn} mid-turn now; they keep running through the restart.`
+                : 'Running ferrets keep running through the restart.'
+            }
+            wide
+            control={() => (
+              <span className="flex flex-wrap gap-2 max-md:[&>button]:w-full">
+                <Button variant="primary" onClick={() => onStart(offer.target, 'now')}>
+                  Update to {offer.target}
+                </Button>
+                <Button onClick={() => onStart(offer.target, 'when-idle')}>Update when no ferret is mid-turn</Button>
+              </span>
+            )}
+          />
         ) : null}
         {offer.kind === 'steps' ? (
-          <div>
-            <p>{offer.explanation}</p>
-            <ol>
+          <SettingRow name="To update" hint={offer.explanation}>
+            <ol className="m-0 flex flex-col gap-1 px-panel pb-3 pl-8 text-cell text-fg">
               {offer.steps.map(step => (
                 <li key={step.command}>
                   <code>{step.command}</code>
-                  {step.note === undefined ? null : <span> — {step.note}</span>}
+                  {step.note === undefined ? null : <span className="text-muted"> — {step.note}</span>}
                 </li>
               ))}
             </ol>
-          </div>
+          </SettingRow>
         ) : null}
-        <label>
-          <input type="checkbox" checked={view.autoInstall} onChange={() => void setAutoInstall(!view.autoInstall)} />{' '}
-          Install updates automatically when no ferret is mid-turn
-        </label>
-        {view.job?.state === 'finished' ? <p>{view.job.report.message}</p> : null}
-        {note === null ? null : <p role="status">{note}</p>}
-        {readError === null ? null : <p role="status">{readError}</p>}
-      </section>
-    );
-  };
+        {view.job?.state === 'finished' ? <SettingRow name="Last update" hint={view.job.report.message} /> : null}
+      </SettingGroup>
+      <SettingGroup label="Automatic updates">
+        <SettingRow
+          name="Install updates automatically"
+          hint="Only when no ferret is mid-turn"
+          explanation={
+            view.plan.kind === 'self'
+              ? view.plan.rollback === 'automatic'
+                ? 'If the new version does not come up, the old one is put back.'
+                : 'This install method keeps no previous version, so a failed update cannot be undone on its own.'
+              : 'This install is updated by hand, so there is nothing to install automatically.'
+          }
+          control={labelId => (
+            <SettingSwitch checked={view.autoInstall} labelledBy={labelId} onChange={onAutoInstall} />
+          )}
+        />
+      </SettingGroup>
+      {note === null ? null : (
+        <p className="m-0 text-ui text-fg" role="status">
+          {note}
+        </p>
+      )}
+      {readError === null ? null : (
+        <p className="m-0 text-ui text-fg" role="status">
+          {readError}
+        </p>
+      )}
+    </section>
+  );
+}
