@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { implementApp } from '@ferretry/kernel/manifest';
 import { provideToShell } from '../../../src/connect/provides.ts';
 import { interact, type Mounted } from '../../support/dom.ts';
@@ -108,6 +110,26 @@ describe('one h1 per phone page (2016)', () => {
     expect(view.container.querySelectorAll('h1').length).toBe(1);
     expect(q('[data-slot="phone-title"] h1')).toBeNull();
     expect(q('[data-slot="phone-title"] .fy-phone-title__text')?.textContent).toBe('Settings');
+  });
+
+  test('a settings PANEL keeps exactly one h1, and the stylesheet hides it visually, never with display:none', async () => {
+    const app = await bootApp({
+      surfaces: [demoEntry],
+      machines: ['d1'],
+      path: '/d/d1/settings/demo/one',
+      viewport: 'phone',
+    });
+    view = app.view;
+    expect(q('.fy-settings')?.getAttribute('data-settings-open')).toBe('panel');
+    expect(view.container.querySelectorAll('h1').length).toBe(1);
+    expect(q('.fy-settings-head h1')?.textContent).toBe('Settings');
+    // happy-dom applies no CSS, so pin the rule itself: the panel's h1 is clipped (sr-only), not removed from the a11y tree.
+    const css = readFileSync(fileURLToPath(new URL('../../../src/styles/shell.css', import.meta.url)), 'utf8');
+    const rule = /\[data-settings-open='panel'\] \.fy-settings-head h1\s*\{([^}]*)\}/.exec(css);
+    expect(rule).not.toBeNull();
+    expect(rule?.[1]).toContain('clip: rect(0 0 0 0)');
+    expect(rule?.[1]).not.toContain('display');
+    expect(/\[data-settings-open='panel'\] \.fy-settings-head h1,/.test(css)).toBe(false);
   });
 
   test('a page with no h1 of its own keeps the bar as its h1', async () => {
