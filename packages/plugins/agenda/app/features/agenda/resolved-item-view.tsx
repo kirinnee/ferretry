@@ -1,3 +1,4 @@
+import { Loading } from '@ferretry/app/ui';
 import { useMemo } from 'react';
 import type { InboxResolved } from '../../lib/agenda-inbox.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
@@ -27,7 +28,11 @@ export function ResolvedItemView({
   if (item === undefined)
     return (
       <div className="fy-inbox-open">
-        <p role={detail.error === undefined ? 'status' : 'alert'}>{detail.error ?? 'Reading agenda item…'}</p>
+        {detail.error === undefined ? (
+          <Loading kind="page" label="Reading agenda item…" />
+        ) : (
+          <p role="alert">{detail.error}</p>
+        )}
         {detail.error === undefined ? null : (
           <button type="button" onClick={detail.retry}>
             Try again

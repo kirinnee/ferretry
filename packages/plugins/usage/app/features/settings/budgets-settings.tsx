@@ -7,6 +7,7 @@
  * standing yet shows the editor without a meter: unknown is never a zero.
  */
 
+import { Loading } from '@ferretry/app/ui';
 import { type LoginList, LoginListSchema } from '@ferretry/plugin-logins/contract';
 import { useCallback, useEffect, useState } from 'react';
 import { type BudgetsView, BudgetsViewSchema } from '../../../contract/index.ts';
@@ -75,11 +76,7 @@ export function BudgetsSettings({ connection, client, deviceTimeZone }: BudgetsS
           its ferrets are stopped.
         </p>
       </div>
-      {state.status === 'loading' ? (
-        <p role="status" className="m-0 text-cell text-muted">
-          Reading budgets…
-        </p>
-      ) : null}
+      {state.status === 'loading' ? <Loading kind="bar" label="Reading budgets…" /> : null}
       {state.status === 'failed' ? (
         <p role="alert" className="m-0 text-cell text-err" data-budgets-failed="">
           Budgets could not load: {state.message}

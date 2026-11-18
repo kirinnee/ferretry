@@ -23,7 +23,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { cn, EYEBROW, PanelPath } from '@ferretry/app/ui';
+import { cn, EYEBROW, Loading, PanelPath } from '@ferretry/app/ui';
 import { type DaemonConnection, DaemonCallError } from '../../shell.ts';
 import {
   type AnalyticsPricingClient,
@@ -1420,9 +1420,7 @@ export function PricingSettings({
       ) : null}
 
       {state.status === 'loading' ? (
-        <section className="kt-panel p-panel" role="status" aria-live="polite" data-pricing-loading="">
-          <p className="m-0 text-ui text-muted">Loading model pricing…</p>
-        </section>
+        <Loading kind="page" label="Loading model pricing…" />
       ) : state.status === 'failed' ? (
         <section className="kt-panel border-err-border bg-err-bg p-panel" role="alert" data-pricing-error="">
           <h4 className="m-0 text-ui font-semibold text-err">Model pricing unavailable</h4>
@@ -1496,14 +1494,7 @@ export function PricingSettings({
             onSelect={setSourceId}
             onPreview={() => void requestPreview()}
           />
-          {previewBusy && preview === null ? (
-            <p
-              className="m-0 rounded-control border border-border bg-surface px-3 py-2 text-ui text-muted"
-              role="status"
-            >
-              Checking the configured feed…
-            </p>
-          ) : null}
+          {previewBusy && preview === null ? <Loading kind="bar" label="Checking the configured feed…" /> : null}
           {previewError && preview === null ? (
             <p
               className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-meta text-err"

@@ -28,7 +28,7 @@ import {
 import { BrowserProxySection } from './browser-proxy-section.tsx';
 import { BrowserStateLine } from './browser-state-line.tsx';
 import { useViewPlace } from '@ferretry/app';
-import { SetupNote, SetupSection, useChangeAuthority } from '@ferretry/app/ui';
+import { Loading, SetupNote, SetupSection, useChangeAuthority } from '@ferretry/app/ui';
 
 /** Honest about the one thing the browser changes about itself. */
 export const BROWSER_USER_AGENT_WORDS =
@@ -88,9 +88,7 @@ export function BrowserTab({ client }: { readonly client: CallClient }) {
         savedProxy={reading.kind === 'shown' && reading.document.config.proxy !== undefined}
       />
       {reading.kind === 'reading' ? (
-        <p role="status" className="m-0 text-cell text-muted" data-browser-tab-waiting="">
-          Checking this machine’s browser settings…
-        </p>
+        <Loading kind="page" label="Checking this machine’s browser settings…" />
       ) : reading.kind === 'unavailable' ? (
         <SetupNote tone="warn" name="browser-settings-unavailable" title="This machine’s browser settings did not load">
           <span data-browser-settings-reason="">{reading.sentence}</span>
