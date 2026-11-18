@@ -55,13 +55,20 @@ function navHref(
   return href(entry);
 }
 
+/** A ferret's chat (`ferrets/:ferret/chat`) is a page of the Ferrets place even though Conversation draws it: both start at `ferrets`. */
+const sameSection = (path: string, entryPath: string): boolean => {
+  const first = path.split('/')[0];
+  return first !== undefined && first !== '' && first === entryPath.split('/')[0];
+};
+
 function Nav({ daemon }: { readonly daemon: string | undefined }) {
   const { plan, routes } = useShell();
   const { route } = useRouter();
   // The entry whose page is on screen: a plugin's entry for any screen of that plugin (the ferret page is Ferrets'), Settings for either settings page.
   const onScreen = (entry: NavEntry): boolean =>
     entry.kind === 'screen'
-      ? route.kind === 'screen' && route.screen.plugin === entry.screen.plugin
+      ? route.kind === 'screen' &&
+        (route.screen.plugin === entry.screen.plugin || sameSection(route.screen.path, entry.screen.path))
       : entry.item === 'settings' && (route.kind === 'device-settings' || route.kind === 'daemon-settings');
   const href = (entry: NavEntry): string | undefined => {
     if (entry.kind !== 'screen') return undefined;

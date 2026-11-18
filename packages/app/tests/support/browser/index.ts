@@ -10,3 +10,6 @@ export { type WaitForOptions, waitFor } from './wait-for.ts';
 
 /** The scene builder a visual test spawns as a child (`build-scene.ts` says why it is a child, never in-process). */
 export const sceneBuilder: string = new URL('./build-scene.ts', import.meta.url).pathname;
+
+/** The real-app scene server a visual test spawns as a child (`serve-scene.ts` says why it is a child and what it serves). */
+export const sceneServer: string = new URL('./serve-scene.ts', import.meta.url).pathname;

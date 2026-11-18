@@ -139,7 +139,11 @@ describe('the layout item', () => {
   test('phone overrides apply only on a phone', () => {
     expect(resolveLayout(DEFAULT_LAYOUT, 'wide').nav.side).toBe('top');
     const phone = resolveLayout(DEFAULT_LAYOUT, 'phone');
-    expect(phone.nav).toEqual({ side: 'bottom', style: 'bar', items: ['ferrets', 'agenda', 'board'] });
+    expect(phone.nav).toEqual({
+      side: 'bottom',
+      style: 'bar',
+      items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'],
+    });
     // The ferret list is the first bottom-nav item on a phone (S-0231: no Ferrets drawer).
     const bottom = planFrame(phone, views).nav.entries[0];
     expect(bottom?.kind === 'screen' ? `${bottom.screen.plugin}.${bottom.screen.id}` : bottom?.item).toBe(
@@ -214,7 +218,10 @@ describe('the owner layout and this device (§5.3)', () => {
 
   test('applyOverrides lays phone fields over the phone overrides the layout has', () => {
     const laid = applyOverrides(DEFAULT_LAYOUT, { phone: { nav: { side: 'top' } } });
-    expect(laid?.phone?.nav).toEqual({ side: 'top', items: ['ferrets', 'agenda', 'board'] });
+    expect(laid?.phone?.nav).toEqual({
+      side: 'top',
+      items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'],
+    });
   });
 });
 

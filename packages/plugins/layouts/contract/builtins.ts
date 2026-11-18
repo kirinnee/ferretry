@@ -34,7 +34,8 @@ export const DEFAULT_LAYOUT = LayoutSchema.parse({
     ],
   },
   density: 'comfortable',
-  phone: { nav: { side: 'bottom', items: ['ferrets', 'agenda', 'board'] } },
+  // Every place the wide bar offers, so a phone can reach Projects, Insights and Settings too (v4's phone bar did).
+  phone: { nav: { side: 'bottom', items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'] } },
 });
 
 /** A denser layout: `fy layout use compact`. */
@@ -46,7 +47,8 @@ export const COMPACT_LAYOUT = LayoutSchema.parse({
   'composer.tools': ['attachments', 'dictation', 'runtime-picker', 'composer-quota'],
   panels: { 'ferret.side': ['queue'] },
   density: 'compact',
-  phone: { nav: { side: 'bottom', items: ['ferrets', 'agenda', 'board'] } },
+  // Every place the wide bar offers, so a phone can reach Projects, Insights and Settings too (v4's phone bar did).
+  phone: { nav: { side: 'bottom', items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'] } },
 });
 
 /** The built-in theme: the house family with no token laid over it. */

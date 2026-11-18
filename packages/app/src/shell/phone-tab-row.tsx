@@ -73,7 +73,7 @@ export function PhoneTabRow({ rowId, tabs, active, onSelect, choices, onChoose }
           <button
             aria-selected={tab.key === active}
             className={cn(
-              'flex h-7 max-w-[14rem] shrink-0 items-center rounded-control px-3 text-cell font-medium leading-none transition-colors',
+              'flex h-7 max-w-[14rem] shrink-0 max-md:h-11 items-center rounded-control px-3 text-cell font-medium leading-none transition-colors',
               tab.key === active
                 ? 'bg-surface text-fg shadow-[inset_0_0_0_1px_var(--border-strong)]'
                 : 'text-muted hover:text-fg',
@@ -101,7 +101,7 @@ export function PhoneTabRow({ rowId, tabs, active, onSelect, choices, onChoose }
           aria-expanded={anchor !== null}
           aria-haspopup="menu"
           aria-label="New tab"
-          className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-fg"
+          className="ml-auto flex h-7 w-7 shrink-0 max-md:h-11 max-md:w-11 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-fg"
           data-phone-new-tab=""
           onClick={() => {
             const box = plus.current?.getBoundingClientRect();

@@ -21,6 +21,7 @@
  */
 
 import { isCarrierOutage, useChatScrollSlot, useDaemonControls, useOptionalRouter } from '@ferretry/app';
+import { useLayoutMode } from '@ferretry/app/ui';
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -134,6 +135,8 @@ function ChatRoute({ ask, client, daemonId, embedded, ferretId }: ChatRouteProps
   const router = useOptionalRouter();
   const navigate = router?.navigate;
   const { controls } = useDaemonControls(daemonId);
+  // A phone gets the compact composer (its status line, its dock layout, its sheet) — the shell's own phone width.
+  const compact = useLayoutMode() === 'drawer';
   const scope = useMemo(() => daemonFerretScope(daemonConnection(daemonId), ferretId), [daemonId, ferretId]);
   // Per ferret, not per history entry: coming back to a conversation by any route finds the reading position.
   const readingPosition = useChatScrollSlot(daemonFerretKey(scope));
@@ -339,6 +342,7 @@ function ChatRoute({ ask, client, daemonId, embedded, ferretId }: ChatRouteProps
           <ChatTurnContext.Provider value={chatTurn}>
             <SessionChatPage
               chatWidth={controls.chatWidth}
+              compact={compact}
               client={client}
               conversationSearch={conversationSearch}
               daemonId={daemonId}
