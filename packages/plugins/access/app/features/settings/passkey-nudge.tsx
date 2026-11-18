@@ -55,7 +55,7 @@ export function PasskeyNudge({
     setDismissed(already);
     if (already) return;
     void createClient(connection)
-      .then(async client => await fetchPasskeys(client))
+      .then(async client => await fetchPasskeys(client, 'quiet'))
       .then(view => {
         if (!current) return;
         setWanted(view.passkeys.length === 0 && view.registration !== 'closed');

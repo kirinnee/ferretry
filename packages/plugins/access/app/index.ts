@@ -17,7 +17,7 @@ import {
   notificationsOffPanel,
   securityLogTab,
   securityTab,
-  UnlockPanel,
+  unlockPanel,
 } from './surfaces.tsx';
 
 /**
@@ -39,7 +39,7 @@ export default provideToShell(
       },
       panels: {
         'new-devices': newDevicesPanel(client),
-        unlock: UnlockPanel,
+        unlock: unlockPanel(client),
         // Drawn from `shell.deviceSettings` below (no machine), never from a machine's half.
         notifications: () => null,
         'notifications-off': notificationsOffPanel(client),

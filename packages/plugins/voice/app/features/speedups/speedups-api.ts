@@ -20,8 +20,17 @@ import {
 /** The only client capability the Speed-ups surface uses. */
 export type SpeedupClient = Pick<IFyApiClient, 'request'>;
 
-export async function readSpeedups(client: SpeedupClient, pressed = false): Promise<SpeedupsView> {
-  return await client.request(SPEEDUPS_PATH, SpeedupsViewSchema, pressed ? { pressed: true } : undefined);
+/**
+ * `read`: `'pressed'` (or `true`) when the person asked — "Confirm it's you to see this" — so a step-up may be asked for;
+ * `'quiet'` when the panel reads on its own (it mounted, or the machine said a key moved), so a step-up the machine
+ * wants is the answer and no prompt opens; neither, a read that follows the person's own press (a Save).
+ */
+export async function readSpeedups(
+  client: SpeedupClient,
+  read: boolean | 'pressed' | 'quiet' = false,
+): Promise<SpeedupsView> {
+  const init = read === true || read === 'pressed' ? { pressed: true } : read === 'quiet' ? { quiet: true } : undefined;
+  return await client.request(SPEEDUPS_PATH, SpeedupsViewSchema, init);
 }
 
 /** Spends the provider's key once, the cheapest way that provider allows. Never on a timer. */

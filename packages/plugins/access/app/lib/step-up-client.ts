@@ -38,8 +38,12 @@ const json = (body: unknown): RequestInit => ({
 });
 
 /** What this device holds, and whether it may add a passkey right now. */
-export async function fetchPasskeys(client: StepUpClient): Promise<PasskeysView> {
-  return await client.request('/v1/passkeys', PasskeysViewReadSchema, { method: 'GET' });
+export async function fetchPasskeys(client: StepUpClient, read?: 'quiet'): Promise<PasskeysView> {
+  // `quiet`: a page reading on its own (the passkey nudge mounting) asks nobody for a step-up; the refusal is its answer.
+  return await client.request('/v1/passkeys', PasskeysViewReadSchema, {
+    method: 'GET',
+    ...(read === 'quiet' ? { quiet: true } : {}),
+  });
 }
 
 export async function passkeyRegistrationOptions(

@@ -1,6 +1,14 @@
-import { controlState, daemonOfClient, type PairedDaemon, useEveryDaemon, usePairedDaemons } from '@ferretry/app';
-import { useMemo } from 'react';
-import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
+import {
+  controlState,
+  daemonOfClient,
+  daemonSettingsHref,
+  type PairedDaemon,
+  useEveryDaemon,
+  useOptionalRouter,
+  usePairedDaemons,
+} from '@ferretry/app';
+import { useCallback, useMemo } from 'react';
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
 import { AddDeviceSurface } from './features/settings/add-device-settings.tsx';
 import { pairingClientOf, useMachineOf } from './daemon-scope.tsx';
@@ -16,7 +24,7 @@ import {
 import type { MachineSource } from './hooks/use-machines-notifications.ts';
 import type { PushHost } from './lib/push-host.ts';
 import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
-import { useOpenSecurity, useSelectedDaemon } from './shell-grants.ts';
+import manifest from '../manifest.ts';
 
 /**
  * Settings › ‹machine› › Devices: add a device, and every paired device with its grants (today's Add Device). Built per
@@ -83,11 +91,23 @@ export function newDevicesPanel(client: PluginClient) {
 }
 
 /** `daemon.status` › unlock: the one dismissible line asking for a passkey on a machine with none (P130). */
-export function UnlockPanel({ subject }: PanelProps) {
-  const connection = useSelectedDaemon(subject);
-  const openSecurity = useOpenSecurity();
-  return connection === undefined ? null : <PasskeyNudge connection={connection} onOpenSecurity={openSecurity} />;
+export function unlockPanel(client: PluginClient, useMachine: typeof useMachineOf = useMachineOf) {
+  const clients = async () => pairingClientOf(client);
+  return function UnlockPanel() {
+    const connection = useMachine();
+    const router = useOptionalRouter();
+    const openSecurity = useCallback(() => {
+      if (connection !== undefined)
+        router?.navigate(daemonSettingsHref(connection.daemonId, SECURITY_TAB.plugin, SECURITY_TAB.tab));
+    }, [connection, router]);
+    return connection === undefined ? null : (
+      <PasskeyNudge connection={connection} onOpenSecurity={openSecurity} createClient={clients} />
+    );
+  };
 }
+
+/** Where Security lives in Settings: this plugin's `security` tab (see `settings` in the half built by `index.ts`). */
+const SECURITY_TAB = { plugin: manifest.id, tab: 'security' } as const;
 
 /**
  * `device.settings` › notifications: this browser's own permissions, then ONE Notifications block — the browser's

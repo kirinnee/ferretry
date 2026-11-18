@@ -8,6 +8,7 @@ import { daemonConnection } from '../../../app/lib/machine.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { FAKE_PROPOSAL, FAKE_VIEW } from '../../support/app/dialog-rules.ts';
 import { wardenConfig } from '../../support/app/warden.ts';
+import { readSpeedups } from '../../../app/lib/speedups.ts';
 
 describe('FormField', () => {
   it('should show the daemon’s error beside the field as an alert, and nothing when there is none', async () => {
@@ -166,5 +167,24 @@ describe('the Warden client factories', () => {
     const factory = homeClientFactory(answering(calls));
     await (await factory(daemonConnection({ daemonId: 'elsewhere', daemonName: 'x' }))).config();
     expect(calls).toEqual(['GET /v1/warden/config']);
+  });
+});
+
+describe('readSpeedups', () => {
+  it('reads quietly: the Warden card reads it on mount, so a step-up the machine wants must not open a prompt', async () => {
+    // Arrange
+    const seen: unknown[] = [];
+    const client = {
+      call: async (route: string, init?: unknown) => {
+        seen.push([route, init]);
+        return { providers: [], vault: 'ok' };
+      },
+    } as unknown as PluginClient;
+
+    // Act
+    await readSpeedups(client);
+
+    // Assert
+    expect(seen).toEqual([['GET /v1/speedups', { quiet: true }]]);
   });
 });

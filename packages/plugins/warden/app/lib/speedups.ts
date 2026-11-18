@@ -10,10 +10,14 @@ import type { PluginClient } from '@ferretry/kernel/manifest';
 
 export type { SpeedupsView };
 
-/** The Speed-ups description of a machine, or `off` when Voice is not running on it. */
+/**
+ * The Speed-ups description of a machine, or `off` when Voice is not running on it. QUIET: the Warden card reads this on
+ * its own when it mounts, so a step-up the machine wants is a refusal the card answers for (the key line stays unknown),
+ * never a "Confirm it's you" nobody asked for.
+ */
 export const readSpeedups = async (client: Pick<PluginClient, 'call'>): Promise<SpeedupsView | 'off'> => {
   try {
-    return SpeedupsViewSchema.parse(await client.call<unknown>('GET /v1/speedups'));
+    return SpeedupsViewSchema.parse(await client.call<unknown>('GET /v1/speedups', { quiet: true }));
   } catch (cause) {
     if (isPluginOff(cause)) return 'off';
     throw cause;
