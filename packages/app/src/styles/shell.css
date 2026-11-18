@@ -173,6 +173,54 @@
   /* One line, whatever the bar's width: the shortcut hint never wraps under the word, against the edge. */
   white-space: nowrap;
 }
+/* Find is a field to look at, like v4's: the magnifier first, the word, then the key hint pushed to the right edge. */
+.fy-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fy-search__icon {
+  flex: none;
+  color: var(--muted);
+}
+.fy-search kbd {
+  margin-left: auto;
+}
+/* THE PHONE'S TITLE BAR (E2 gap 31): the ferret list's button, the page's name, the theme's button, one 44px row. */
+.fy-phone-title {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 0 4px;
+  border-bottom: var(--border-width) solid var(--border);
+  background: var(--bar-bg);
+}
+.fy-phone-title__side {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  color: var(--chrome-fg);
+}
+.fy-phone-title__end {
+  justify-content: flex-end;
+}
+.fy-phone-title__text {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  overflow: hidden;
+  font-size: calc(var(--fy-text-scale, 1) * 1rem);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* A phone has no Ctrl or Cmd key: the shortcut hint is for a keyboard, so a touch screen or a phone-width window leaves it out. */
 @media (pointer: coarse), (max-width: 767px) {
   .fy-search kbd {

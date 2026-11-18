@@ -1,6 +1,8 @@
 import { BackgroundViews } from './background.tsx';
 import { DevicePanels, NavCount, type NavForm } from './device-panels.tsx';
 import { DeviceViews } from './device-views.tsx';
+import { PhoneTitleBar } from './phone-title-bar.tsx';
+import { Search } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_LAYOUT } from '../layout/layout.ts';
 import { CommandBar } from '../ui/command-bar.tsx';
@@ -160,7 +162,9 @@ function TopBar({ daemon, onSearch }: { readonly daemon: string | undefined; rea
               aria-keyshortcuts={PALETTE_KEYSHORTCUTS}
               onClick={onSearch}
             >
-              Search <kbd className="mono">{paletteShortcutLabel()}</kbd>
+              <Search aria-hidden="true" size={16} className="fy-search__icon" />
+              <span className="fy-search__label">Find</span>
+              <kbd className="mono">{paletteShortcutLabel()}</kbd>
             </button>
           );
         return null;
@@ -348,6 +352,7 @@ export function Frame() {
       <div ref={setFrameRoot} className={`fy-frame fy-frame--nav-${plan.nav.side}`} data-layout={plan.layoutId}>
         <Nav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
         <div className="fy-body">
+          <PhoneTitleBar daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
           <TopBar daemon={daemon} onSearch={openBar} />
           {/* THE STATUS STRIP: where the views mounted at the frame root draw what they draw IN FLOW — a line a watcher
       says ("Couldn't reach it through the relay…"), a banner. They sit here, a row under the top bar and above the
