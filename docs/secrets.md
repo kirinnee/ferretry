@@ -1590,7 +1590,7 @@ answers a SANITIZED reply, so the plugin never holds it.
 - **The reply is built inside the Vault**, the holder of what was sent, never a raw `Response`: the status, a
   `statusText`, an ALLOWLIST of headers (`content-type`, `mcp-session-id`, `mcp-protocol-version`, `www-authenticate`,
   `retry-after`; everything else stays in the Vault) and a body. **The Vault does not list spellings; it decodes, checks
-  and drops** (`daemon/lib/secrets/echo-mask.ts`), against the value AS SENT (and the whole header value it travelled in):
+  and drops** (`contract/echo-mask.ts`), against the value AS SENT (and the whole header value it travelled in):
   1. **Only a body the Vault can parse is returned**: JSON (`application/json`, `+json`, UTF-8), or an event stream whose
      `data` is parsed the same way. HTML, XML, plain text, NDJSON, binary and compressed bodies are DROPPED with
      "The server’s answer is not JSON, so the Vault could not check it for the sign-in and kept it." (or the compressed /
@@ -1975,3 +1975,81 @@ import-create`, `detail.plugin`, the secret's NAME as the subject; `refused` whe
   written does not undo the create.
 - **A broken host file reports where, not what.** A scan problem for a settings file that does not parse names the file and,
   for TOML, the line and column. The parser's own message quotes the host's line, which may be a key, so it is never shown.
+
+## A Git account's token (B1: `git-accounts`)
+
+A person connects a GitHub account to the machine with GitHub's **device flow** (Settings › GitHub accounts, or
+`fy git account add`): the screen shows a short code, the person types it at `github.com/login/device`, and the daemon
+polls GitHub until it is authorized. **There is no client secret anywhere**: the OAuth app's _client id_ (public) is
+a constant in the plugin's contract, overridable in `config/git-accounts.yaml` (`github.clientId`; changing it is held
+for the owner, because it names a different app to authorize).
+
+**This is a named holder, and it is deliberately NOT the shared secret list.** Every agent can `fy secret use` any shared
+secret ("Per-session scoping" above), and a GitHub token is too strong for that. So:
+
+- The token is sealed in the plugin's **own sealed document** (`state/git-accounts/tokens.json`, `0600`, the vault's
+  key), a document no route, `use` or `${secret:NAME}` reaches and a ferret's folder never holds (`privacy.private`).
+- Only the plugin's **daemon half** opens it, in `AccountBook.token`, and only to place it on a request to
+  `api.github.com` or in the environment of the one `gh` child described below (`permissions.network` names `github.com` and `api.github.com`, nothing else). The
+  port's `api` call forwards **any REST path** for `GET`, `POST` and `PATCH` and the one `/graphql` endpoint for `POST`
+  (`GITHUB_API_RULES`; no `..`, no `//`, a plain query string only); a `DELETE` is refused unless it is
+  `/user/keys/<id>` or `/user/ssh_signing_keys/<id>`, so nothing here deletes a repository or a branch. Whoever holds the seam
+  acts with the token's scopes on the GitHub API, `repo` among them.
+- **No route, CLI verb or port method returns the token**, and no wire shape has a field that could (every shape is strict;
+  a contract test reads each against `NO_SECRET_FIELDS`). The GitHub `device_code` is a bearer for the token too, so it
+  stays in the daemon: the page gets only OUR flow id and the user code.
+- The scopes are one constant (`GITHUB_SCOPES`): `read:user user:email write:public_key write:ssh_signing_key repo read:org`
+  (the owner's answer; no `workflow`). **`repo` is strong**: the token can read and write every repository the account
+  can reach, private ones included, so the consent text (`GITHUB_CONSENT`) says exactly that before anyone connects.
+  That is why the token lives in the sealed document and why nothing can read it.
+- **Use, never read, for a child.** Another plugin that needs `gh` as the account calls `GitAccountsApi.run`: the daemon
+  half starts `gh` (the one declared program) with `GH_TOKEN` in that child's own, sealed environment and returns its
+  output with the token masked. There is no getter. **The token in the child's environment is the design; what that
+  child can be asked to do is narrowed to GitHub API work.** Anything that starts `git` or reads or writes a local
+  file is out of the seam: ferrets clone and push with `git` and the account's SSH key, never through `gh`.
+  - the argv must pass a strict **allow-list of subcommand + flags**, not a deny-list: - `api` (REST or GraphQL on `api.github.com` only; one endpoint) takes only `-X/--method`, `-H/--header`,
+    `-f/--raw-field key=value` and `--paginate`. `-F/--field`, `--input`, any argument starting with `@` or
+    containing `=@`, and an endpoint that is not an `api.github.com` path are refused; - `pr` (`list view diff checks comment review create edit close reopen merge`), `issue` (`list view create comment edit
+close reopen`), `run` (`list view watch cancel rerun`), `workflow` (`list view`), `repo view`, `release`
+    (`list view`) and `search` (`repos issues prs code commits`) take no flag that names a file or directory
+    (`--body-file`, `-F`, `--notes-file`, `--input`) and no `--hostname`;
+  - **`--jq`, `-q`, `-t` and `--template` (`-T`) are refused on every command, in every spelling** (`--jq=x`, `-qx`):
+    gh's jq is gojq with the environment loader and Go templates are run by gh itself, so either can print the child's
+    environment (`env.GH_TOKEN`, `$ENV`) past the scrub. A caller post-processes the scrubbed `--json` output itself;
+  - **a repository is named `OWNER/REPO` or `github.com/OWNER/REPO` and nothing else** (`-R`/`--repo` and any repository
+    argument of `repo`; characters `A-Za-z0-9._-`): no `@`, no `:`, no SSH form, no other host. `github.localhost` and
+    `*.ghe.com` are refused anywhere in the argv, because gh sends `GH_TOKEN` to them (over plain http for the first); - `--` anywhere, any short-flag cluster (`-dF`, `-iFquery=@f`: a short flag is one letter, on its own), and any argument
+    that looks like a local path (`/…`, `~…`, `./…`, `../…`, `…/..`) are refused. The only values exempt from the path rule
+    are those of `-H` and `-f` (text, not files), and the `api` endpoint (an API path, checked as one); - everything else is refused because it is not named: `pr checkout`, `issue develop`, `repo clone|create|fork|sync|edit`,
+    `release upload|create|download`, `workflow run`, `run download`, `gist`, `extension`, `codespace`, `ssh-key`,
+    `gpg-key`, `secret`, `variable`, `auth`, `config`, `alias`, and any command a later `gh` adds;
+  - the child runs in an **empty private folder** that is also its `HOME`, `XDG_*` and `GH_CONFIG_DIR` (no host aliases,
+    extensions or config), removed after the run, with no prompt, pager, editor, askpass or browser (each is a binary that
+    exits 1) and no update check;
+  - both streams are scrubbed of the exact token **and** of anything shaped like a GitHub token (`gh[opsur]_…`,
+    `github_pat_…`).
+- **A provider's answer is sanitized.** A request that carried the token has its reply passed through the Vault's
+  outbound-reply check (`@ferretry/core-vault/contract` `echo-mask.ts`, moved there from the Vault daemon so a plugin may use it): only JSON is kept, every string (keys too) is decoded and checked,
+  a string holding the bearer in any form is replaced whole, the headers kept are checked the same way, and a reply too
+  complex to check is refused, never passed on.
+- **The device code lives only while a flow can use it**: it is dropped the moment a flow is done, denied or expired (a
+  timer at the expiry, and a check on every read), not at the next start.
+- **A connect that cannot write its record leaves nothing behind**: the sealed entry is rolled back (an old token is put
+  back), and removing an account also removes a sealed token that has no record.
+- Connect and remove are `secrets.configure` (passkey step-up from a paired device) and are audited (`git-account.added`,
+  `git-account.removed`: the account id only). The list is `secrets.use` and answers logins and key titles.
+- **Removing an account** deletes the keys this machine registered on it through the API (with the token) first, then the
+  sealed token, then the record; a key GitHub will not delete is named for the person to remove at
+  `github.com/settings/keys`. **Revoking the OAuth app's grant** needs the client secret, which Ferretry deliberately does
+  not have, so the person does that at `github.com/settings/applications`; the answer says so.
+
+**GAP.** An agent that can read the daemon's own memory or its state folder as the same OS user can reach the token, as
+for every secret here ([threat model](#threat-model)). The sealed document narrows who is _handed_ it; it is not a
+sandbox against a process running as the owner.
+
+**GAP — what `gh` can still do with the token.** The `gh` seam is GitHub API work only, and there is **no `git` child that can run a repository's hooks or config** (`pr merge --delete-branch` may run `git` in an empty scratch folder with an empty `HOME`: no hooks, no config, no repository), so a repository's own hooks or `.git/config` can never run with the token (the old `repo clone` and `pr checkout`
+route is gone). What an allowed command can still do is everything the token's scopes allow on the GitHub API: with `repo`
+that is reading and writing every repository the account can reach (opening, merging or closing pull requests, commenting,
+creating or editing issues, re-running workflows) and, through `api`, any REST or GraphQL call. The scrub catches the token
+only where it is printed back exactly or in a GitHub token's usual shape, not an encoded or split copy. Use an account only
+with agents and projects you would trust with those scopes.

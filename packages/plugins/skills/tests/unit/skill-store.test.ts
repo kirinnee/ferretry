@@ -17,6 +17,7 @@ import { skillParts } from '../../daemon/lib/launch-parts.ts';
 import {
   installRefusal,
   InstalledSkillConflict,
+  InstalledSkillExists,
   InstalledSkillRefused,
   MAX_INSTALLED_FILE_BYTES,
   SkillStore,
@@ -322,5 +323,92 @@ describe('one installed file is read back as bytes', () => {
     expect(await f.store.read('review', 'missing.md')).toBeUndefined();
     expect(await f.store.read('review', '../review/SKILL.md')).toBeUndefined();
     expect(await f.store.read('../x', 'SKILL.md')).toBeUndefined();
+  });
+});
+
+describe('a create-only install never replaces what is already there', () => {
+  type Fixture = Awaited<ReturnType<typeof fixture>>;
+  type Port = ConstructorParameters<typeof SkillStore>[0];
+  const noRoots = { share: () => Promise.reject(new Error('not shared here')) };
+  /** The real state port with some calls replaced, so a failure the disk will not make on demand can be made. */
+  const storeWith = (f: Fixture, over: Partial<Port>) => new SkillStore({ ...f.port, ...over } as Port, noRoots);
+
+  test('a folder that is not there is made, filled and remembered, so a later install can replace it', async () => {
+    const f = await fixture();
+    await f.store.install('review', SKILL, { createOnly: true });
+    expect(await readFile(join(f.installed, 'review', 'scripts', 'run.sh'), 'utf8')).toBe('run\n');
+    expect(await f.store.paths('review')).toEqual(['SKILL.md', 'scripts/run.sh']);
+    await f.store.install('review', [{ path: 'SKILL.md', content: 'v2\n' }]);
+    expect(await readFile(join(f.installed, 'review', 'SKILL.md'), 'utf8')).toBe('v2\n');
+  });
+
+  test('a folder that is already there is left exactly as it is and the install says so', async () => {
+    const f = await fixture();
+    await mkdir(join(f.installed, 'hand'), { recursive: true });
+    await writeFile(join(f.installed, 'hand', 'SKILL.md'), 'hand');
+    const refused = await f.store.install('hand', SKILL, { createOnly: true }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(InstalledSkillExists);
+    expect(refused).toBeInstanceOf(InstalledSkillRefused);
+    expect((refused as Error).name).toBe('InstalledSkillExists');
+    expect((refused as Error).message).toBe('hand is already installed here, so it was left as it is.');
+    expect(await readFile(join(f.installed, 'hand', 'SKILL.md'), 'utf8')).toBe('hand');
+    expect(await f.store.walk('hand')).toEqual([{ path: 'SKILL.md', kind: 'file' }]);
+    expect(await f.store.paths('hand')).toEqual([]);
+  });
+
+  test('a file or a link at the name is a thing there too, and is left alone', async () => {
+    const f = await fixture();
+    await mkdir(f.installed, { recursive: true });
+    await writeFile(join(f.installed, 'afile'), 'x');
+    await expect(f.store.install('afile', SKILL, { createOnly: true })).rejects.toBeInstanceOf(InstalledSkillExists);
+    expect(await readFile(join(f.installed, 'afile'), 'utf8')).toBe('x');
+  });
+
+  test('a make that fails for another reason is that failure, not "already installed"', async () => {
+    const f = await fixture();
+    const failure = new Error('disk is full');
+    const store = storeWith(f, { createPrivateDirectory: () => Promise.reject(failure) });
+    await expect(store.install('review', SKILL, { createOnly: true })).rejects.toBe(failure);
+    expect(await f.store.tree('review')).toBeUndefined();
+  });
+
+  test('a look at the folder that itself fails is not taken for "already installed" either', async () => {
+    const f = await fixture();
+    const failure = new Error('cannot make it');
+    const store = storeWith(f, {
+      createPrivateDirectory: () => Promise.reject(failure),
+      stat: () => Promise.reject(new Error('cannot look')),
+    });
+    await expect(store.install('review', SKILL, { createOnly: true })).rejects.toBe(failure);
+  });
+
+  test('a write that fails part-way removes what this install wrote and throws that failure', async () => {
+    const f = await fixture();
+    const failure = new Error('write failed');
+    let writes = 0;
+    const store = storeWith(f, {
+      write: async (...args) => {
+        writes += 1;
+        // The index lands, then the first file fails.
+        if (writes === 2) throw failure;
+        return await f.port.write(...args);
+      },
+    });
+    await expect(store.install('review', SKILL, { createOnly: true })).rejects.toBe(failure);
+    expect(await f.store.holds('review')).toBe(false);
+    expect(await f.store.paths('review')).toEqual([]);
+  });
+
+  test('a clean-up that fails too still throws the first failure', async () => {
+    const f = await fixture();
+    const failure = new Error('write failed');
+    const store = storeWith(f, {
+      write: () => Promise.reject(failure),
+      read: () => Promise.reject(new Error('read failed')),
+    });
+    await expect(store.install('review', SKILL, { createOnly: true })).rejects.toBe(failure);
   });
 });

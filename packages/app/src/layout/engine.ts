@@ -99,21 +99,78 @@ export interface FramePlan {
   panels(slot: string): readonly PanelRef[];
 }
 
+/** The shell item the catalog offers: Settings is a place every layout may keep, hide or move. */
+const CATALOG_SHELL: readonly (typeof SHELL_ITEMS.nav)[number][] = ['settings'];
+
+const keyOf = (entry: NavEntry): string =>
+  entry.kind === 'shell' ? entry.item : `${entry.screen.plugin}.${entry.screen.id}`;
+
+/**
+ * Every place a nav can show, in the order a nav with no opinion lists them: each installed screen that declares a nav
+ * entry, by its declared order, then the shell's own Settings. One entry per screen, however many names reach it.
+ */
+export function navCatalogEntries(views: Views): readonly NavEntry[] {
+  const seen = new Set<ScreenRef>();
+  const screens: ScreenRef[] = [];
+  for (const screen of views.screens.values()) {
+    if (screen.navOrder === undefined || seen.has(screen)) continue;
+    seen.add(screen);
+    screens.push(screen);
+  }
+  screens.sort(
+    (a, b) => (a.navOrder ?? 0) - (b.navOrder ?? 0) || `${a.plugin}.${a.id}`.localeCompare(`${b.plugin}.${b.id}`),
+  );
+  return [
+    ...screens.map((screen): NavEntry => ({ kind: 'screen', screen })),
+    ...CATALOG_SHELL.map((item): NavEntry => ({ kind: 'shell', item })),
+  ];
+}
+
+/**
+ * The nav's entries. A layout that never names `hidden` lists exactly its `items` (as layouts did before the field). One
+ * that names it (even empty) gives `items` as an ORDER: those places first, then every other installed nav place by its
+ * declared order, minus whatever is hidden, so a plugin installed later shows up without anyone editing the layout.
+ * A name that resolves to nothing installed is skipped. Settings is never hidden: naming it in `hidden` is ignored.
+ */
+function navEntries(nav: ResolvedLayout['nav'], views: Views): readonly NavEntry[] {
+  const shellNav: readonly string[] = SHELL_ITEMS.nav;
+  const listed: NavEntry[] = [];
+  for (const item of nav.items) {
+    if (shellNav.includes(item)) listed.push({ kind: 'shell', item: item as (typeof SHELL_ITEMS.nav)[number] });
+    else {
+      const screen = views.screens.get(item);
+      if (screen !== undefined) listed.push({ kind: 'screen', screen });
+    }
+  }
+  if (nav.hidden === undefined) return listed;
+  const hidden = new Set<string>();
+  for (const name of nav.hidden) {
+    // Settings is the way back to every other setting, so no layout can hide it.
+    if (name === 'settings') continue;
+    if (shellNav.includes(name)) hidden.add(name);
+    else {
+      const screen = views.screens.get(name);
+      if (screen !== undefined) hidden.add(`${screen.plugin}.${screen.id}`);
+    }
+  }
+  const placed = new Set<string>();
+  const out: NavEntry[] = [];
+  for (const entry of [...listed, ...navCatalogEntries(views)]) {
+    const key = keyOf(entry);
+    if (hidden.has(key) || placed.has(key)) continue;
+    placed.add(key);
+    out.push(entry);
+  }
+  return out;
+}
+
 /**
  * Places the views. A slot the layout lists shows exactly those panels in that order; a slot it does not list shows
  * every panel declared for it, by declared order. Names were checked by `checkLayout` before; any that still do not
  * resolve are skipped rather than drawn broken.
  */
 export function planFrame(layout: ResolvedLayout, views: Views): FramePlan {
-  const shellNav: readonly string[] = SHELL_ITEMS.nav;
-  const entries: NavEntry[] = [];
-  for (const item of layout.nav.items) {
-    if (shellNav.includes(item)) entries.push({ kind: 'shell', item: item as (typeof SHELL_ITEMS.nav)[number] });
-    else {
-      const screen = views.screens.get(item);
-      if (screen !== undefined) entries.push({ kind: 'screen', screen });
-    }
-  }
+  const entries = navEntries(layout.nav, views);
   const holds = layout.side.holds;
   const sideScreen = views.screens.get(holds);
   const side: SideHolds =

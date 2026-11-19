@@ -139,6 +139,8 @@ export {
 export type { OwnerLayout } from './layout/daemon-layout.ts';
 export { LAYOUTS_PLUGIN } from './layout/daemon-layout.ts';
 export type { NavEntry, PanelRef, ScreenRef, SideHolds } from './layout/engine.ts';
+/** @public Layouts' Settings tab lists the fixed set of nav places (label, icon, order) to reorder and hide (§5.3: a layout names places, it never types them). */
+export { type NavCatalogItem, useNavCatalog } from './layout/nav-catalog.ts';
 export {
   applyOverrides,
   checkLayout,

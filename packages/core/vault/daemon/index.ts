@@ -45,7 +45,7 @@ import { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
 import { InputRequestError } from './lib/inputs/errors.ts';
 import { secretRouteHandlers } from './lib/runtime/mounts/secrets.ts';
 import { OutboundProviderAuthorizer } from './lib/secrets/authorizer.ts';
-import { echoMask, maskReplyHeaders, maskText, sanitizeBody } from './lib/secrets/echo-mask.ts';
+import { echoMask, maskReplyHeaders, maskText, sanitizeBody } from '../contract/echo-mask.ts';
 import { MintLedger } from './lib/secrets/mint-ledger.ts';
 import {
   isCoreNeeder,

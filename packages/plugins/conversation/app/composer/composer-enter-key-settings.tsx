@@ -11,6 +11,7 @@ import { Check } from 'lucide-react';
 
 import { cn } from '@ferretry/app';
 import type { ComposerEnterKeyPreference } from '@ferretry/app';
+import { SendKeyPreview, type SendKeyDevice } from './previews/index.ts';
 
 export interface ComposerEnterKeySettingsProps {
   /** A keyboard's bare Enter. null = the default, Enter sends. */
@@ -40,12 +41,14 @@ const PHONE: readonly SendKeyOption[] = [
 ];
 
 function SendKeyGroup({
+  device,
   name,
   legend,
   options,
   selected,
   onSelect,
 }: {
+  readonly device: SendKeyDevice;
   readonly name: string;
   readonly legend: string;
   readonly options: readonly SendKeyOption[];
@@ -53,37 +56,40 @@ function SendKeyGroup({
   readonly onSelect: (id: ComposerEnterKeyPreference) => void;
 }) {
   return (
-    <fieldset className="m-0 grid grid-cols-1 gap-2 border-0 p-0 sm:grid-cols-2">
-      <legend className="mb-1 text-ui font-semibold text-fg">{legend}</legend>
-      {options.map(option => {
-        const checked = option.id === selected;
-        return (
-          <label
-            key={option.id}
-            className={cn(
-              'flex min-h-[52px] min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus',
-              checked
-                ? 'border-accent bg-accent-soft text-accent'
-                : 'border-border bg-surface-2 text-fg hover:border-accent',
-            )}
-          >
-            <input
-              type="radio"
-              name={name}
-              value={option.id}
-              checked={checked}
-              onChange={() => onSelect(option.id)}
-              className="sr-only"
-            />
-            <span className="flex w-full items-center gap-2 text-ui font-semibold">
-              {option.label}
-              {checked ? <Check size={14} className="ml-auto shrink-0" aria-hidden="true" /> : null}
-            </span>
-            <span className="text-meta leading-tight text-muted">{option.description}</span>
-          </label>
-        );
-      })}
-    </fieldset>
+    <div className="flex flex-wrap items-start gap-3">
+      <fieldset className="m-0 grid min-w-0 flex-1 basis-64 grid-cols-1 gap-2 border-0 p-0 sm:grid-cols-2">
+        <legend className="mb-1 text-ui font-semibold text-fg">{legend}</legend>
+        {options.map(option => {
+          const checked = option.id === selected;
+          return (
+            <label
+              key={option.id}
+              className={cn(
+                'flex min-h-[52px] min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus',
+                checked
+                  ? 'border-accent bg-accent-soft text-accent'
+                  : 'border-border bg-surface-2 text-fg hover:border-accent',
+              )}
+            >
+              <input
+                type="radio"
+                name={name}
+                value={option.id}
+                checked={checked}
+                onChange={() => onSelect(option.id)}
+                className="sr-only"
+              />
+              <span className="flex w-full items-center gap-2 text-ui font-semibold">
+                {option.label}
+                {checked ? <Check size={14} className="ml-auto shrink-0" aria-hidden="true" /> : null}
+              </span>
+              <span className="text-meta leading-tight text-muted">{option.description}</span>
+            </label>
+          );
+        })}
+      </fieldset>
+      <SendKeyPreview device={device} outcome={selected} />
+    </div>
   );
 }
 
@@ -91,6 +97,7 @@ export function ComposerEnterKeySettings({ preference, phonePreference, onChange
   return (
     <div className="space-y-3">
       <SendKeyGroup
+        device="keyboard"
         legend="On a keyboard"
         name="composer-enter-key"
         onSelect={id => onChange({ composerEnterKey: id })}
@@ -98,6 +105,7 @@ export function ComposerEnterKeySettings({ preference, phonePreference, onChange
         selected={preference ?? 'send'}
       />
       <SendKeyGroup
+        device="phone"
         legend="On a phone"
         name="composer-phone-enter-key"
         onSelect={id => onChange({ composerPhoneEnterKey: id })}

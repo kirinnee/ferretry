@@ -20,6 +20,7 @@ import {
   SettingRow,
   useDeviceControls,
 } from '@ferretry/app';
+import { ChatWidthPreview } from './composer/previews/index.ts';
 
 export interface ChatWidthOption {
   readonly id: ChatWidth;
@@ -49,12 +50,6 @@ const PREVIEW_LABEL: Readonly<Record<ChatWidth, string>> = {
   readable: 'Compact · 720px · default',
   balanced: '1200px · room for code',
   full: 'Full · the whole pane',
-};
-
-const PREVIEW_WIDTH_CLASS: Readonly<Record<ChatWidth, string>> = {
-  full: 'w-full',
-  balanced: 'w-3/4',
-  readable: 'w-5/12',
 };
 
 const ACTIVE_EXPLANATION: Readonly<Record<ChatWidth, string>> = {
@@ -108,21 +103,7 @@ export function ChatWidthControl({ value, onChange }: ChatWidthControlProps) {
           <span>Conversation preview</span>
           <span>{PREVIEW_LABEL[value]}</span>
         </div>
-        <div
-          aria-hidden="true"
-          className="mt-2 flex h-10 w-full items-center justify-center rounded-control bg-surface px-2"
-        >
-          <div
-            data-chat-width-preview={value}
-            className={cn(
-              'flex h-6 flex-col justify-center gap-1 rounded-sm border border-accent/50 bg-accent-soft px-2 transition-[width] duration-150',
-              PREVIEW_WIDTH_CLASS[value],
-            )}
-          >
-            <span className="block h-px w-4/5 bg-accent/50" />
-            <span className="block h-px w-3/5 bg-accent/30" />
-          </div>
-        </div>
+        <ChatWidthPreview value={value} />
       </div>
 
       <p id={explanationId} aria-live="polite" className="mt-2 text-meta leading-base text-faint">
