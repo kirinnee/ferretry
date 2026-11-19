@@ -464,3 +464,5 @@ route	GET /v1/git-accounts	added	new in 5.0 (r9 B1 git-accounts): lists connecte
 route	DELETE /v1/git-accounts/:id	added	new in 5.0 (r9 B1 git-accounts): disconnects a Git account, deleting the keys registered on it and its sealed token; secrets.configure from a person
 route	POST /v1/git-accounts/:id/keys	added	new in 5.0 (r9 B3 git-accounts): makes (or records) an account's SSH key and registers its public half at GitHub; secrets.configure from a person, answers only the public key and fingerprint
 route	DELETE /v1/git-accounts/:id/keys/:purpose	added	new in 5.0 (r9 B3 git-accounts): removes one registered key at GitHub, and the sealed private key with the last one; secrets.configure from a person
+route	GET /v1/pulls/:project/:repo/runs	added	new in r9 (E8 pulls): the CI runs of a pull request's or branch's head commit (jobs, steps, timing); filesystem use from a person, names, statuses and times only
+route	GET /v1/pulls/:project/:repo/runs/:runId	added	new in r9 (E8 pulls): one Actions run with its jobs, steps and timing (a chosen attempt on request); filesystem use from a person, names, statuses and times only
