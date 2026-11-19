@@ -91,6 +91,17 @@ export default definePlugin({
           none: 'GitHub text (a title, a description, comments) and counts; no pane, page or vault text, and no token',
         },
       }),
+      // E5: the files of a PR. Private code, so `filesystem.use`, never cached by anything shared.
+      route('GET /v1/pulls/:project/:repo/:number/files', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: PULLS_CAPS.read,
+        noStore: true,
+        audit: { skip: "a read of a pull request's changed files; nothing is changed" },
+        guard: {
+          none: 'file paths, counts and diff text of a repository the project holds; no pane, page or vault text',
+        },
+      }),
     ],
   },
 

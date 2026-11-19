@@ -31,6 +31,7 @@
     "@happy-dom/global-registrator": "^20.11.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "playwright-core": "^1.56.1",
     "react-dom": "^19.0.0"
   }
 }

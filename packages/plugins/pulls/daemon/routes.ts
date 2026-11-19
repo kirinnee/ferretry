@@ -5,6 +5,7 @@ import { ciRoutes } from './features/ci/index.ts';
 import { threadsRoute } from './features/threads/routes.ts';
 import { detailRoutes } from './features/detail/index.ts';
 import type { watchFeature } from './features/watch/index.ts';
+import { filesRoutes } from './features/files/index.ts';
 import type { PullsCache } from './lib/cache/store.ts';
 
 /** What every later unit's routes and jobs are built from: the one GitHub client (one budget) and the one cache. */
@@ -28,4 +29,5 @@ export const pullsRoutes = (services: PullsServices, watch: ReturnType<typeof wa
   }),
   ...detailRoutes(services), // E4: the PR page
   ...watch.routes, // E2: the watch status and settings
+  ...filesRoutes(services),
 });
