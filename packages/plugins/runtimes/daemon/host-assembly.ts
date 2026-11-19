@@ -29,7 +29,7 @@ import { applyClaimFor } from './adapters/apply-claim.ts';
 import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { CommandCache } from './adapters/command-cache.ts';
 import { HostPlatform } from './adapters/host-platform.ts';
-import { packageRunner } from './adapters/package-run.ts';
+import { toolInstaller } from './adapters/tool-installer.ts';
 import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
@@ -48,8 +48,6 @@ import { CodexAppServerSupervisor } from './lib/service/codex-runtime.ts';
 import type { FleetCatalogServiceDeps } from './lib/service/catalog-service.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import type { FleetSetupServiceDeps } from './lib/service/setup-service.ts';
-import { ToolInstallService } from './lib/service/tool-install.ts';
-import type { HarnessLocation } from './lib/service/foreign.ts';
 import { RuntimeSessionRecords, SESSION_STATUS_OF } from './adapters/runtime-session-records.ts';
 import type { RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
 
@@ -455,20 +453,11 @@ export function fileAssembly(
   const refusing = unavailableSetupDeps(catalog);
   // The tool installer: the plans say what is installed and the command a person would run; an explicit install runs that
   // command through the kernel's spawn (declared `brew` and `npm` only, an argv, never a shell or sudo).
-  const installer = new ToolInstallService({
-    // Runtimes declares no `hostFacts`: the system is asked once with `uname -s`, primed with the command lookups.
-    platform: () => platform.name(),
-    executables: { resolve: name => commands.which(name), runnable: () => false },
-    locate: (kind): HarnessLocation => {
-      const path = commands.which(kind);
-      return path === undefined ? { kind, outcome: 'absent', searched: [] } : { kind, outcome: 'located', path };
-    },
-    run: packageRunner(() => {
-      if (ctx.kernel.spawn === undefined) throw new Error('this daemon gives no way to start a program');
-      return ctx.kernel.spawn;
-    }, ctx.kernel.clock),
-    // The manager's own directory goes first (tool-install.ts); this is the system part a daemon with a minimal PATH lacks.
-    environment: { PATH: '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' },
+  const installer = toolInstaller({
+    commands,
+    platform,
+    spawn: () => ctx.kernel.spawn,
+    clock: ctx.kernel.clock,
   });
   const tools: FleetSetupServiceDeps['tools'] = {
     plans: harnesses => installer.plans(harnesses),

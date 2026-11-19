@@ -31,6 +31,7 @@ interface WorldOptions {
   readonly result?: RunResult | (() => Promise<RunResult>);
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly timeoutMinutes?: number;
+  readonly refresh?: () => Promise<void>;
 }
 
 function world(options: WorldOptions = {}) {
@@ -51,6 +52,7 @@ function world(options: WorldOptions = {}) {
     executables,
     locate,
     environment: options.environment ?? { PATH: '/usr/bin' },
+    ...(options.refresh === undefined ? {} : { refresh: options.refresh }),
     ...(options.timeoutMinutes === undefined ? {} : { timeoutMinutes: options.timeoutMinutes }),
     run: async run => {
       runs.push(run);
@@ -185,10 +187,12 @@ describe('ToolInstallService.install refusals', () => {
     const first = service.install({ harnesses: ['claude'] }, OWNER);
     const error = await service.install({ harnesses: ['codex'] }, OWNER).catch((e: unknown) => e);
     should((error as ToolInstallRefusal).code).equal('tool_install_in_progress');
+    await new Promise(resolve => setTimeout(resolve, 0));
     should(runs).have.length(1);
     release({ kind: 'exited', code: 0, tail: [] });
     await first;
     const second = service.install({ harnesses: ['codex'] }, OWNER);
+    await new Promise(resolve => setTimeout(resolve, 0));
     release({ kind: 'exited', code: 0, tail: [] });
     should((await second)[0]?.harness).equal('codex');
   });
@@ -409,5 +413,47 @@ describe('ToolInstallService.install: argv and output', () => {
     const outcome = failed((await bad.service.install({ harnesses: ['claude'] }, OWNER))[0]);
     should(outcome.output.join('\n')).not.containEql('npm_abcdef');
     should(outcome.output).have.length(3);
+  });
+
+  it('should quote only scrubbed text in the reason, on a failed exit and on a timeout', async () => {
+    const leaky = [
+      'fetching',
+      'using npm_abcdefghijklmnop1234 to log in',
+      '//registry.npmjs.org/:_authToken=hunter2hunter2',
+    ];
+    for (const result of [
+      { kind: 'exited', code: 1, tail: leaky.slice(0, 2) },
+      { kind: 'exited', code: 1, tail: leaky },
+      { kind: 'timed-out', tail: leaky.slice(0, 2) },
+      { kind: 'timed-out', tail: leaky },
+    ] as const) {
+      const { service } = world({ platform: 'linux', onPath: { npm: '/x/npm' }, result });
+      const outcome = failed((await service.install({ harnesses: ['claude'] }, OWNER))[0]);
+      for (const text of [outcome.reason, outcome.output.join('\n')]) {
+        should(text).not.containEql('npm_abcdef');
+        should(text).not.containEql('hunter2');
+        should(text).not.containEql('_authToken');
+      }
+      should(outcome.reason).match(/It said: /u);
+    }
+  });
+
+  it('should look the commands up afresh before it plans and again before it checks the result', async () => {
+    const events: string[] = [];
+    const { service } = world({
+      platform: 'linux',
+      onPath: { npm: '/x/npm' },
+      foundAfterRun: ['claude'],
+      refresh: async () => {
+        events.push('refresh');
+      },
+      result: async () => {
+        events.push('run');
+        return { kind: 'exited', code: 0, tail: [] };
+      },
+    });
+    const [outcome] = await service.install({ harnesses: ['claude'] }, OWNER);
+    should(outcome?.outcome).equal('installed');
+    should(events).deepEqual(['refresh', 'run', 'refresh']);
   });
 });

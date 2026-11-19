@@ -244,25 +244,10 @@ type ToolInstallProgress =
   | { readonly harness: HarnessKind; readonly stage: 'running'; readonly command: string }
   | { readonly harness: HarnessKind; readonly stage: 'finished'; readonly outcome: ToolInstallOutcome };
 
-/** The last thing a manager said, without colour, bounded so a sentence stays a sentence. */
-function lastLine(tail: readonly string[]): string | undefined {
-  const line = tail
-    .map(entry => stripTerminalEscapes(entry).trim())
-    .filter(entry => entry !== '')
-    .at(-1);
-  return line === undefined ? undefined : line.slice(0, 200);
-}
-
-/**
- * What a manager's last lines say: whether it needed admin rights it was not given, and the last thing
- * it said. Shared with the harness update (`harness-update/service.ts`), which reads the same managers.
- */
-function readManagerTail(tail: readonly string[]): {
-  readonly needsAdmin: boolean;
-  readonly said: string | undefined;
-} {
+/** Whether a manager's last lines say it needed admin rights it was not given. Matched, never shown. */
+function readManagerTail(tail: readonly string[]): { readonly needsAdmin: boolean } {
   const lines = tail.map(stripTerminalEscapes);
-  return { needsAdmin: lines.some(line => NEEDS_ADMIN.some(pattern => pattern.test(line))), said: lastLine(tail) };
+  return { needsAdmin: lines.some(line => NEEDS_ADMIN.some(pattern => pattern.test(line))) };
 }
 
 /** Read how a run ended into an outcome. Pure, so every failure's words are tested without a manager. */
@@ -283,7 +268,10 @@ function classifyInstallResult(
   const manager = MANAGER_NAME[plan.manager];
   if (result.kind === 'not-started')
     return failed('could-not-start', `${manager} could not be started here: ${result.reason}`);
-  const { needsAdmin, said } = readManagerTail(result.tail);
+  // Classified from the raw lines (a pattern match, never shown); QUOTED only from the scrubbed ones, so a reason can
+  // never carry what `output` was scrubbed of.
+  const { needsAdmin } = readManagerTail(result.tail);
+  const said = scrubInstallOutput(result.tail).at(-1);
   const quoted = said === undefined ? '' : ` It said: ${said}`;
   if (result.kind === 'timed-out')
     return failed(
@@ -344,6 +332,11 @@ interface ToolInstallServiceOptions {
   /** The daemon's one harness resolution rule (`locateHarnessCommand`, bound to its policy). */
   readonly locate: (harness: HarnessKind) => HarnessLocation;
   readonly run: PackageInstallPort;
+  /**
+   * Looks the commands up AFRESH (the managers and the harnesses), past any cached answer. Asked before an install plans
+   * and again after the manager ran, so a tool the install just put on this machine is found by the check that follows it.
+   */
+  readonly refresh?: () => Promise<void>;
   /** The daemon's environment, which a manager inherits with its own directory first on `PATH`. */
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly timeoutMinutes?: number;
@@ -399,6 +392,7 @@ export class ToolInstallService {
     this.#assertIdle();
     this.#running = true;
     try {
+      await this.options.refresh?.();
       const outcomes: ToolInstallOutcome[] = [];
       for (const harness of harnesses) {
         const outcome = await this.#installOne(harness, onProgress);
@@ -437,6 +431,7 @@ export class ToolInstallService {
     });
     const failure = classifyInstallResult(plan, result, timeoutMinutes);
     if (failure !== undefined) return failure;
+    await this.options.refresh?.();
     const after = this.options.locate(harness);
     if (after.outcome === 'located')
       return {

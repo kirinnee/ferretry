@@ -65,4 +65,17 @@ describe('the command cache', () => {
 
     expect(cache.which('claude')).toBeUndefined();
   });
+
+  it('refresh asks again inside the window, which prime would not', async () => {
+    let found: string | undefined;
+    const cache = new CommandCache({ which: async () => found }, () => 0);
+    await cache.prime(['claude']);
+    found = '/bin/claude';
+    await cache.prime(['claude']);
+    expect(cache.which('claude')).toBeUndefined();
+
+    await cache.refresh(['claude']);
+
+    expect(cache.which('claude')).toBe('/bin/claude');
+  });
 });

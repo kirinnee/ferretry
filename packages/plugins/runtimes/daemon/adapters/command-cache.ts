@@ -32,12 +32,26 @@ export class CommandCache {
   /** Looks every name up whose answer is older than the window. A lookup that throws counts as not found. */
   async prime(names: Iterable<string>): Promise<void> {
     const now = this.now();
-    const stale = [...new Set(names)].filter(name => {
-      const known = this.#found.get(name);
-      return known === undefined || now - known.at >= this.windowMs;
-    });
+    await this.#lookUp(
+      [...new Set(names)].filter(name => {
+        const known = this.#found.get(name);
+        return known === undefined || now - known.at >= this.windowMs;
+      }),
+    );
+  }
+
+  /**
+   * Looks every name up AGAIN, whatever the window says. For the moment a cached "not found" would be wrong: right after
+   * something installed a tool, and before an install plans against managers nobody has looked up yet.
+   */
+  async refresh(names: Iterable<string>): Promise<void> {
+    await this.#lookUp([...new Set(names)]);
+  }
+
+  async #lookUp(names: readonly string[]): Promise<void> {
+    const now = this.now();
     await Promise.all(
-      stale.map(async name => {
+      names.map(async name => {
         const path = await this.source.which(name).catch(() => undefined);
         this.#found.set(name, { path, at: now });
       }),

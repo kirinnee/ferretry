@@ -40,6 +40,28 @@ function manualClock() {
   };
 }
 
+/** A stream that reports being cancelled, so a test sees a reader stopped. */
+function watched(text: string, cancelled: { count: number }) {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (text !== '') controller.enqueue(new TextEncoder().encode(text));
+    },
+    cancel() {
+      cancelled.count += 1;
+    },
+  });
+}
+
+/** A stream of the given chunks, then its end. */
+function chunks(parts: readonly Uint8Array[]) {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const part of parts) controller.enqueue(part);
+      controller.close();
+    },
+  });
+}
+
 function fakeSpawn(child: Partial<ChildHandle> & { exited: Promise<number | null> }) {
   const started: { program: string; args: readonly string[]; options?: SpawnOptions }[] = [];
   const killed: (string | undefined)[] = [];
@@ -85,8 +107,28 @@ describe('packageRunner', () => {
     should(started[0]?.options).deepEqual({
       env: { PATH: '/opt/homebrew/bin:/usr/bin', NONINTERACTIVE: '1' },
       stdin: '',
+      ownGroup: true,
     });
     should(result).deepEqual({ kind: 'exited', code: 0, tail: ['==> Installed'] });
+  });
+
+  it('kills the whole group even when the manager exited by itself, then stops both readers', async () => {
+    const out = { count: 0 };
+    const err = { count: 0 };
+    const { port, killed } = fakeSpawn({
+      exited: Promise.resolve(0),
+      stdout: watched('done\n', out),
+      stderr: watched('', err),
+    });
+    const { clock, fire } = manualClock();
+    const pending = packageRunner(() => port, clock)(RUN);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    fire(1_000);
+    const result = await pending;
+    should(result).deepEqual({ kind: 'exited', code: 0, tail: ['done'] });
+    should(killed).deepEqual(['SIGKILL']);
+    should(out.count).equal(1);
+    should(err.count).equal(1);
   });
 
   it('never starts sudo or a shell: the manifest may start brew, npm and uname only', () => {
@@ -94,15 +136,47 @@ describe('packageRunner', () => {
     should([...spawn].sort()).deepEqual(['brew', 'npm', 'uname']);
   });
 
-  it('kills a child that outlives its deadline and says it timed out', async () => {
-    const { port, killed } = fakeSpawn({ exited: new Promise(() => undefined), stdout: silent(), stderr: silent() });
+  it('kills the group at the deadline and returns only after the manager is gone and the readers are stopped', async () => {
+    let end: (code: number | null) => void = () => undefined;
+    const exited = new Promise<number | null>(resolve => {
+      end = resolve;
+    });
+    const out = { count: 0 };
+    const { port, killed } = fakeSpawn({ exited, stdout: watched('', out), stderr: silent() });
+    const { clock, fire } = manualClock();
+    let settled = false;
+    const pending = packageRunner(
+      () => port,
+      clock,
+    )(RUN).then(result => {
+      settled = true;
+      return result;
+    });
+    await Promise.resolve();
+    fire(900_000);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    should(killed).deepEqual(['SIGKILL']);
+    // The manager has not exited yet: the run is not over, so the service's guard is not released.
+    should(settled).equal(false);
+    end(137);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    fire(1_000);
+    const result = await pending;
+    should(result.kind).equal('timed-out');
+    should(out.count).equal(1);
+  });
+
+  it('stops waiting for a manager that ignores the kill after a bounded grace', async () => {
+    const { port } = fakeSpawn({ exited: new Promise(() => undefined), stdout: silent(), stderr: silent() });
     const { clock, fire } = manualClock();
     const pending = packageRunner(() => port, clock)(RUN);
     await Promise.resolve();
     fire(900_000);
-    const result = await pending;
-    should(result.kind).equal('timed-out');
-    should(killed).deepEqual(['SIGKILL']);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    fire(5_000);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    fire(1_000);
+    should((await pending).kind).equal('timed-out');
   });
 
   it('reports a program that cannot be started, and a daemon with no spawn at all, as not started', async () => {
@@ -133,6 +207,54 @@ describe('packageRunner', () => {
     const { clock } = manualClock();
     const result = await packageRunner(() => port, clock)(RUN);
     should(result).deepEqual({ kind: 'exited', code: 243, tail: ['npm ERR! code EACCES'] });
+  });
+});
+
+describe('packageRunner output bounds', () => {
+  const run = async (parts: readonly Uint8Array[], code = 1) => {
+    const { port } = fakeSpawn({ exited: Promise.resolve(code), stdout: chunks(parts), stderr: encode('') });
+    const { clock, fire } = manualClock();
+    const pending = packageRunner(() => port, clock)(RUN);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    fire(1_000);
+    const result = await pending;
+    if (result.kind !== 'exited') throw new Error('expected an exit');
+    return result.tail;
+  };
+  const filler = (length: number, letter = 'a') => new TextEncoder().encode(letter.repeat(length));
+
+  it('cuts a long line split across chunks at the line limit, before it is decoded', async () => {
+    const tail = await run([filler(700), filler(700), filler(700), new TextEncoder().encode('\nnext\n')]);
+    should(tail).have.length(2);
+    should(new TextEncoder().encode(tail[0] ?? '').length).equal(1_024);
+    should(tail[1]).equal('next');
+  });
+
+  it('holds a fixed amount for a stream that never prints a newline', async () => {
+    const parts = Array.from({ length: 2_000 }, () => filler(4_096));
+    const tail = await run(parts);
+    should(tail).have.length(1);
+    should(new TextEncoder().encode(tail[0] ?? '').length).equal(1_024);
+  });
+
+  it('keeps at most forty lines and sixteen KiB when every line is long', async () => {
+    const line = new Uint8Array([...filler(1_000), 0x0a]);
+    const tail = await run(Array.from({ length: 100 }, () => line));
+    should(tail.length).be.belowOrEqual(16);
+    should(tail.reduce((total, entry) => total + new TextEncoder().encode(entry).length, 0)).be.belowOrEqual(16_384);
+    const short = await run(Array.from({ length: 100 }, (_, index) => new TextEncoder().encode(`l${index}\n`)));
+    should(short).have.length(40);
+    should(short.at(-1)).equal('l99');
+  });
+
+  it('keeps stdout and stderr in one tail', async () => {
+    const { port } = fakeSpawn({ exited: Promise.resolve(1), stdout: encode('out\n'), stderr: encode('err\n') });
+    const { clock, fire } = manualClock();
+    const pending = packageRunner(() => port, clock)(RUN);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    fire(1_000);
+    const result = await pending;
+    should(result.kind === 'exited' ? [...result.tail].sort() : []).deepEqual(['err', 'out']);
   });
 });
 

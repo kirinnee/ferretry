@@ -40,6 +40,13 @@ export interface SpawnOptions {
    * waits on it. The kernel logs the program's name and pid, never its arguments.
    */
   readonly detached?: true;
+  /**
+   * `start` only: the child leads its OWN process group (its stdio stays piped and the daemon still waits on it), and
+   * `ChildHandle.kill` signals the whole group, so a manager's descendants end with it. It does NOT outlive the
+   * daemon and needs no manifest entry: it only widens what `kill` reaches, to processes the child itself started.
+   * Refused with `run` / `runBytes`, which have no handle to kill through.
+   */
+  readonly ownGroup?: true;
 }
 
 /**
