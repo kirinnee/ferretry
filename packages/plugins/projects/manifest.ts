@@ -3,6 +3,7 @@ import { appAction, definePlugin, route, screen, verb } from '@ferretry/kernel/m
 import {
   filesystemConfigure,
   filesystemUse,
+  PROJECT_ACCOUNTS_AUDIT,
   PROJECT_FOLDER_CREATED_AUDIT,
   PROJECT_REGISTERED_AUDIT,
   PROJECT_REMOVED_AUDIT,
@@ -85,6 +86,25 @@ export default definePlugin({
         noStore: true,
         audit: { record: PROJECT_FOLDER_CREATED_AUDIT },
         guard: { none: 'answers the new folder path; no pane, page or vault text' },
+      }),
+      // NEW in r9 (B5): which git accounts a project uses, and the repositories found inside its folder. A person's act.
+      route('PUT /v1/projects/:id/accounts', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: filesystemConfigure,
+        noStore: true,
+        audit: { record: PROJECT_ACCOUNTS_AUDIT },
+        guard: { none: 'answers the project record: account ids and repository names; no pane, page or vault text' },
+      }),
+      route('GET /v1/projects/:id/repos', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: filesystemUse,
+        noStore: true,
+        audit: { skip: 'a read of repository folder names and remote addresses inside a registered project' },
+        guard: {
+          none: 'folder names and remote addresses (never with a password); no file content, no pane, page or vault text',
+        },
       }),
     ],
     cli: [

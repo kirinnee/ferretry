@@ -10,6 +10,8 @@ describe('projects manifest', () => {
       'DELETE /v1/projects/:id',
       'GET /v1/projects/folders',
       'POST /v1/projects/folders',
+      'PUT /v1/projects/:id/accounts',
+      'GET /v1/projects/:id/repos',
     ]);
     for (const route of routes) expect(route.minimum).toBe('operator');
     expect(routes[2]?.caller).toBe('person');

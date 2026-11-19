@@ -4,6 +4,8 @@ import manifest from '../manifest.ts';
 import { kernelFolders } from './adapters/folders.ts';
 import { kernelStore } from './adapters/store.ts';
 import { foldersRoutes } from './features/folders/index.ts';
+import { reposRoutes } from './features/repos/index.ts';
+import type { ScanDeps } from './features/repos/scan.ts';
 import type { ProjectFolders } from './lib/ports.ts';
 import { ProjectRegistry } from './lib/registry.ts';
 import { listRoute, registerRoute, removeRoute } from './lib/routes.ts';
@@ -13,9 +15,9 @@ import { listRoute, registerRoute, removeRoute } from './lib/routes.ts';
  * routes over it, and the `ProjectsPort` Board and the project pickers read. It grants nothing: the folder a ferret may
  * open is checked by the core (`WorkFolders`).
  *
- * `folders` is the one thing a test replaces (a map of folders instead of a machine).
+ * `folders` and `repoScan` are what a test replaces (a map of folders instead of a machine).
  */
-export const implementProjects = (folders?: ProjectFolders) =>
+export const implementProjects = (folders?: ProjectFolders, repoScan?: ScanDeps) =>
   implementDaemon(manifest, {
     build: ({ kernel }) => {
       const machine = folders ?? kernelFolders(kernel);
@@ -33,6 +35,7 @@ export const implementProjects = (folders?: ProjectFolders) =>
           'POST /v1/projects': registerRoute(registry),
           'DELETE /v1/projects/:id': removeRoute(registry),
           ...foldersRoutes(kernel, machine),
+          ...reposRoutes(kernel, registry, repoScan),
         },
         // The folders a governed device may start a ferret in as an ordinary act (Ferrets reads this, never the registry).
         hooks: { 'launch.roots:projects': { roots: async () => (await registry.list()).map(project => project.path) } },
