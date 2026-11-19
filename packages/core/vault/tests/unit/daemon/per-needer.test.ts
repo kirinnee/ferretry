@@ -17,6 +17,7 @@ import {
   ChildEnvironmentPort,
   type CredentialPlacement,
   type OutboundHttpRequest,
+  type PutNewOutcome,
   PHONE_APPROVAL_UNAVAILABLE,
   type SecretName,
   SecretUseRequestSchema,
@@ -151,9 +152,10 @@ async function world(
       },
     }),
   );
+  const gate = new FakeGate();
   const host = await testHost({
     plugins: [instrumented, ...plugins],
-    fakes: { asks: new FakeAsks(), gate: new FakeGate() },
+    fakes: { asks: new FakeAsks(), gate },
     fetch: url => {
       reached.push(url.host);
       return Response.json({ ok: true });
@@ -166,7 +168,7 @@ async function world(
   const core = host.provided(VaultPort);
   for (const name of [GROQ, OWNED, OTHER]) await core.put(name, VALUE);
   const of = (id: string) => host.provided(VaultPort, id);
-  return { host, core, of, programs, spawned, reached, seen };
+  return { host, core, of, programs, spawned, reached, seen, gate };
 }
 
 const TENANT: Permissions = { network: ['api.groq.test'], spawn: ['echo'], secrets: [GROQ] };
@@ -708,5 +710,109 @@ describe('secure copy’s reach through the Vault is by name', () => {
     // Four members; the only answer any gives is whether the scrollback may keep another copy, never a value.
     expect(Object.keys(registry).sort()).toEqual(['hold', 'holdScrollback', 'retime', 'scrollbackFull']);
     expect(typeof registry.scrollbackFull('ferret_1' as never, '[sealed:token]')).toBe('boolean');
+  });
+});
+
+/**
+ * CREATE-ONLY (`VaultApi.putNew`, r9 A2): a plugin that declares `permissions.createSecrets` may add a name the Vault does not
+ * hold, never replace, remove or read one. A plugin that does not declare it is handed no `putNew`.
+ */
+const IMPORTING: Permissions = { network: [], spawn: [], secrets: [], secretNamePicker: true, createSecrets: true };
+
+describe('a plugin that declares createSecrets may create a secret and never replace one', () => {
+  test('creates a name the Vault does not hold, and the owner can see it listed', async () => {
+    const { core, of } = await world({ runtimes: IMPORTING });
+    expect(await of('runtimes').putNew?.('ANTHROPIC_API_KEY' as SecretName, 'sk-ant-imported-0123')).toBe('stored');
+    expect(await core.has('ANTHROPIC_API_KEY' as SecretName)).toBe(true);
+  });
+
+  test('refuses a name already held (an owner’s value) and leaves that value alone', async () => {
+    const { core, of } = await world({ runtimes: IMPORTING });
+    await core.put(GITHUB, 'ghp-original');
+    const before = (await core.names()).find(secret => secret.name === GITHUB);
+    expect(await of('runtimes').putNew?.(GITHUB, 'ghp-attacker')).toBe('exists');
+    expect((await core.names()).find(secret => secret.name === GITHUB)).toEqual(before);
+    // (The value itself is shown to nobody; the directory-level test in secrets/vault.test.ts opens the ciphertext.)
+  });
+
+  test('refuses a second create of the name it created itself, keeping the first value', async () => {
+    const { of } = await world({ runtimes: IMPORTING });
+    const api = of('runtimes');
+    expect(await api.putNew?.('OPENAI_API_KEY' as SecretName, 'first-0123456789')).toBe('stored');
+    expect(await api.putNew?.('OPENAI_API_KEY' as SecretName, 'second-0123456789')).toBe('exists');
+  });
+
+  test('is create-only: it still may not replace (put) or remove a name that is not one it mints', async () => {
+    const { core, of } = await world({ runtimes: IMPORTING });
+    const api = of('runtimes');
+    await api.putNew?.('OPENAI_API_KEY' as SecretName, 'first-0123456789');
+    await expect(api.put('OPENAI_API_KEY' as SecretName, 'replaced-0123456789')).rejects.toThrow(/may not write/u);
+    await expect(api.remove('OPENAI_API_KEY' as SecretName)).rejects.toThrow(/may not remove/u);
+    expect(await core.has('OPENAI_API_KEY' as SecretName)).toBe(true);
+  });
+
+  test('records the write as this plugin’s in the mint ledger, so a later owner replacement is not its mint', async () => {
+    const { core, of, reached } = await world({ runtimes: { ...IMPORTING, network: ['api.groq.test'] } });
+    const name = 'MINTED_BY_IMPORT' as SecretName;
+    const exchange = { method: 'GET' as const, url: 'https://api.groq.test/v1', headers: {} };
+    expect(await of('runtimes').putNew?.(name, 'imported-0123456789')).toBe('stored');
+    // Its own write is one it may place on a request to a host it declares (and the reply carries no value).
+    expect((await of('runtimes').fetchMinted?.(name, exchange))?.kind).toBe('response');
+    expect(reached).toEqual(['api.groq.test']);
+    // The owner's replacement is another write: no longer the plugin's, nothing more is sent.
+    await core.put(name, 'owner-replaced-0123');
+    expect(await of('runtimes').fetchMinted?.(name, exchange)).toEqual({ kind: 'refused' });
+    expect(reached).toEqual(['api.groq.test']);
+  });
+
+  test('a plugin that does not declare it is handed no putNew, whatever else it may do', async () => {
+    const { of } = await world({
+      catalogs: { network: [], spawn: [], secrets: [], secretNamePicker: true },
+      mcp: MINTING,
+      plain: {},
+    });
+    for (const id of ['catalogs', 'mcp', 'plain']) expect(of(id).putNew).toBeUndefined();
+  });
+
+  test('a core caller keeps create-only too, and never replaces', async () => {
+    const { core } = await world({});
+    expect(await core.putNew?.('CORE_MADE_KEY' as SecretName, 'core-0123456789')).toBe('stored');
+    expect(await core.putNew?.('CORE_MADE_KEY' as SecretName, 'core-other-0123')).toBe('exists');
+  });
+
+  test('records each create in the security log by NAME and plugin, never a value, a digest or a write identity', async () => {
+    const { of, gate } = await world({ runtimes: IMPORTING });
+    const VALUE_A = 'sk-ant-AUDITCANARY-0123456789';
+    const VALUE_B = 'sk-ant-AUDITCANARY-other-9876';
+    const api = of('runtimes');
+    expect(await api.putNew?.('AUDITED_KEY' as SecretName, VALUE_A)).toBe('stored');
+    expect(await api.putNew?.('AUDITED_KEY' as SecretName, VALUE_B)).toBe('exists');
+    const entries = gate.audits.filter(draft => String(draft.event) === 'secrets.changed');
+    expect(entries.map(entry => [entry.subject, entry.outcome])).toEqual([
+      ['AUDITED_KEY', 'succeeded'],
+      ['AUDITED_KEY', 'refused'],
+    ]);
+    for (const entry of entries) expect(entry.detail).toEqual({ action: 'import-create', plugin: 'runtimes' });
+    // Nothing recorded anywhere carries a value or a piece of one (nor the write's identity the ledger holds).
+    const everything = JSON.stringify(gate.audits);
+    for (const secret of [VALUE_A, VALUE_B, 'AUDITCANARY']) expect(everything).not.toContain(secret);
+  });
+
+  test('a security log that cannot be written does not undo the create', async () => {
+    const { of, core, gate } = await world({ runtimes: IMPORTING });
+    const before = gate.audits.length;
+    gate.audit = async () => {
+      throw new Error('the log is full');
+    };
+    expect(await of('runtimes').putNew?.('LOGLESS_KEY' as SecretName, 'logless-0123456789')).toBe('stored');
+    expect(await core.has('LOGLESS_KEY' as SecretName)).toBe(true);
+    expect(gate.audits.length).toBe(before);
+  });
+
+  test('what putNew answers cannot carry a value (a type test)', () => {
+    const outcome: PutNewOutcome = 'stored';
+    // @ts-expect-error — the answer is `stored` or `exists`; a value is not an outcome.
+    const bad: PutNewOutcome = 'sk-ant-imported-0123';
+    expect([outcome, bad]).toHaveLength(2);
   });
 });

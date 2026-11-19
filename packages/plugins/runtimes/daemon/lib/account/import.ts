@@ -38,7 +38,13 @@ import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
 import { FLEET_STARTER_MODELS } from '../defaults.ts';
 import type { HarnessKind } from '../manifest.ts';
-import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
+import {
+  parseSettings,
+  SettingsParseError,
+  type SettingsFormat,
+  type SettingsObject,
+  serializeSettings,
+} from '../settings.ts';
 import { HARNESS_DISPLAY_NAMES, modelHarness } from './layering.ts';
 import { componentScope, scopeFits } from './scope.ts';
 import {
@@ -394,8 +400,6 @@ function importEnv(
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
-
 /** Why a document could not be used, or `undefined` when it is simply absent or was read. */
 function unreadableReason(read: HostDocumentRead, what: string): string | undefined {
   if (read.kind === 'too-large') return `${what} at ${read.source} is ${String(read.bytes)} bytes, too large to import`;
@@ -420,9 +424,20 @@ function parsedDocument(
   try {
     return parseSettings(read.text, format);
   } catch (error) {
-    problems.push(`${what} at ${read.source} is not valid ${format} (${errorText(error)}), so it was not imported`);
+    problems.push(`${what} at ${read.source} is not valid ${format}${parseLocation(error)}, so it was not imported`);
     return undefined;
   }
+}
+
+/**
+ * WHERE a settings document stopped parsing, as ` (line 3, column 7)`, or nothing. The parsers quote the offending line of the
+ * host's own file in their messages, and a host file holds API keys, so the parser's TEXT is never used: only the numbers
+ * TOML's error carries (`SettingsParseError.line`/`column`), which can hold no credential. JSON's engine message gives no
+ * place in the file, so a JSON file is named with the fixed sentence alone.
+ */
+function parseLocation(error: unknown): string {
+  if (!(error instanceof SettingsParseError) || error.line === undefined || error.column === undefined) return '';
+  return ` (line ${String(error.line)}, column ${String(error.column)})`;
 }
 
 // ── Models ───────────────────────────────────────────────────────────────────────────────────────

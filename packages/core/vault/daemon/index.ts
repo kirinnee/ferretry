@@ -1,5 +1,6 @@
 import type { ChildEnvironment, FerretId, SecretResolver } from '@ferretry/kernel/contract';
 import type { FerretState } from '@ferretry/core-ferrets/contract';
+import { auditKind } from '@ferretry/core-gate/contract';
 import { implementDaemon, type Needer, neederMayReach, perNeeder } from '@ferretry/kernel/manifest';
 import { err, ok, type Result } from '@ferretry/std';
 import manifest from '../manifest.ts';
@@ -168,6 +169,22 @@ export default implementDaemon(manifest, {
       generation += 1;
       kernel.events.publish(SecretsChanged, { generation });
     };
+    // A create-only write by a plugin (`permissions.createSecrets`) leaves a `secrets.changed` record in the security log: the
+    // secret's NAME and the plugin that filed it, never a value, a digest or a write identity. The route that carried the act
+    // (the fleet apply) records who asked; this records what was added. The log reports its own failures; the write is decided.
+    const auditCreate = async (plugin: string, name: string, outcome: 'succeeded' | 'refused'): Promise<void> => {
+      try {
+        await ctx.needs.gate.audit({
+          event: auditKind('secrets.changed'),
+          actor: { kind: 'host' },
+          subject: name,
+          outcome,
+          detail: { action: 'import-create', plugin },
+        });
+      } catch {
+        // see above
+      }
+    };
 
     const run = async (
       command: SecretUseCommand,
@@ -229,6 +246,12 @@ export default implementDaemon(manifest, {
       put: async (name, value) => {
         await directory.put(name, value);
         changed();
+      },
+      // A core caller's create-only write is not recorded: the ledger is for what a non-core plugin placed itself.
+      putNew: async (name, value) => {
+        const written = await directory.putNewIdentified(name, value);
+        if (written.kind === 'stored') changed();
+        return written.kind;
       },
       remove: async name => {
         const removed = await directory.remove(name);
@@ -419,6 +442,7 @@ export default implementDaemon(manifest, {
         maskCopy,
         pageTakenOver,
         inputOpen,
+        putNew,
         ...rest
       } = full;
       return {
@@ -447,6 +471,24 @@ export default implementDaemon(manifest, {
           );
           changed();
         },
+        // CREATE-ONLY, for the plugin whose manifest declares `permissions.createSecrets` (Runtimes' import): any name the Vault
+        // does not hold yet, recorded as this plugin's write; a held name answers `exists` and nothing is touched.
+        ...(needer.permissions.createSecrets === true && putNew !== undefined
+          ? {
+              putNew: async (name: SecretName, value: string) => {
+                const secret = String(name);
+                const written = await directory.putNewIdentified(secret as SecretName, value);
+                if (written.kind === 'exists') {
+                  await auditCreate(needer.id, secret, 'refused');
+                  return 'exists' as const;
+                }
+                await mints.record(needer.id, secret as SecretName, written.write);
+                changed();
+                await auditCreate(needer.id, secret, 'succeeded');
+                return 'stored' as const;
+              },
+            }
+          : {}),
         remove: async name => {
           const secret = String(name);
           if (!isMintedSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'remove');

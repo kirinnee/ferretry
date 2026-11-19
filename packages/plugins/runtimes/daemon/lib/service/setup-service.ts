@@ -135,6 +135,7 @@ import {
   type FleetCatalogServiceDeps,
   harnessCommandsOf,
 } from './catalog-service.ts';
+import { assertMayFileSecrets, fileSecrets, uniqueByName } from './setup-secrets.ts';
 import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } from './tool-install.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
@@ -592,8 +593,12 @@ export class FleetSetupService {
     readonly clone: AccountChangeExecutor<CloneChange>;
   } = {
     setup: {
-      describe: async change => await this.#describe(change, await this.#composeImport(change)),
-      execute: async change => await this.#execute(change, await this.#composeImport(change)),
+      describe: async (change, caller) => {
+        const composed = await this.#composeImport(change);
+        assertMayFileSecrets(composed.secrets, caller, 'describe');
+        return await this.#describe(change, composed);
+      },
+      execute: async (change, caller) => await this.#execute(change, await this.#composeImport(change), caller),
     },
     clone: {
       describe: async (change, caller) =>
@@ -615,16 +620,9 @@ export class FleetSetupService {
         'what this would add changed on this machine after it was previewed; review it again',
       );
     }
-    for (const secret of composed.secrets) {
-      try {
-        await this.deps.secrets.put(secret.name, secret.value);
-      } catch (error) {
-        throw new FleetCatalogRefusal(
-          'fleet_change_failed',
-          `the secret store could not take ${secret.name}, so nothing was changed: ${errorMessage(error)}`,
-        );
-      }
-    }
+    // The Vault is written first: the caller's right to write it is settled before the first write.
+    assertMayFileSecrets(composed.secrets, caller, 'apply');
+    await fileSecrets((name, value) => this.deps.secrets.put(name, value), composed.secrets);
     // Settings files go first, each through the owner's door and against the version it was compared with. The
     // record rides the batch after them, so it can only claim less than landed, never more. A write that loosens
     // is held unless the caller is at this machine (`governed: false`); a remote caller confirms it as for any
@@ -758,7 +756,7 @@ export class FleetSetupService {
     const documents = await this.#documents(reading, model, assets, [
       { path: this.#recordPath(), content: `${JSON.stringify(record, null, 2)}\n` },
     ]);
-    const secrets = [...plan.secrets, ...updates.flatMap(update => update.secrets)].map(secret => ({
+    const secrets = uniqueByName([...plan.secrets, ...updates.flatMap(update => update.secrets)]).map(secret => ({
       name: secret.name,
       value: secret.value,
     }));

@@ -19,7 +19,7 @@
  */
 import type { FerretsApi, FerretState } from '@ferretry/core-ferrets/contract';
 import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/kernel/contract';
-import type { VaultApi } from '@ferretry/core-vault/contract';
+import { SecretNameSchema, type VaultApi } from '@ferretry/core-vault/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { UsageApi } from '@ferretry/plugin-usage/contract';
 import { InstantSchema, milliseconds } from '@ferretry/std';
@@ -369,10 +369,11 @@ export function fileAssembly(
         Pick<LoginsApi, 'environmentTemplates' | 'modelSources' | 'launchStores'>;
       readonly loginChanges: FleetCatalogServiceDeps['loginChanges'];
       /**
-       * The Vault, through its NAME listing ONLY: `Pick<VaultApi, 'names'>` answers a name and two times, so no value can
-       * flow through it. Absent: the setup's secret read stays unavailable and says so (a store that cannot be read refuses).
+       * The Vault, through its NAME listing and its CREATE-ONLY write ONLY: `names` answers a name and two times, and `putNew`
+       * takes a value in and never hands one back, so no value can flow out through it. Absent: the setup's secret read stays
+       * unavailable and says so (a store that cannot be read refuses).
        */
-      readonly vault?: Pick<VaultApi, 'names'>;
+      readonly vault?: Pick<VaultApi, 'names' | 'putNew'>;
       readonly ferrets: Pick<FerretsApi, 'lastAutoResume' | 'runtimeRecords' | 'repointRuntime'> & {
         list(): Promise<readonly { readonly state: FerretState }[]>;
       };
@@ -480,7 +481,7 @@ export function fileAssembly(
       // The NAME listing is the Vault's own (names and times, never a value); writing a key in stays unavailable here.
       secrets: {
         list: ctx.needs.vault === undefined ? refusing.secrets.held : secretNamesOver(ctx.needs.vault),
-        put: refusing.secrets.put,
+        put: ctx.needs.vault === undefined ? refusing.secrets.put : putNewOver(ctx.needs.vault),
       },
     }),
   );
@@ -491,6 +492,23 @@ export function fileAssembly(
     // or the absent sentinel: the kernel's own answer for Runtimes' own declared file, read when asked. (The files are
     // not Runtimes' to read: `config/` is no folder `host.files` mounts.)
     profileEtag: async profile => await ctx.kernel.config.etag(PROFILE_ITEMS as never, profile),
+  };
+}
+
+/**
+ * The setup's write of one imported secret, over the Vault's CREATE-ONLY `putNew` alone (a `Pick<VaultApi, 'putNew'>`): a name
+ * the Vault already holds is refused in a sentence and keeps its value, so an import adds a key and never replaces one. A Vault
+ * that offers no `putNew` refuses too. The value reaches this function from the daemon's own re-read of the host file at apply
+ * time and goes nowhere but into the Vault; the sentences name the secret, never the value.
+ */
+export function putNewOver(vault: Pick<VaultApi, 'putNew'>): (name: string, value: string) => Promise<void> {
+  return async (name, value) => {
+    if (vault.putNew === undefined)
+      throw new Error(`the secret store does not take a new key from this setup, so ${name} was not stored`);
+    const parsed = SecretNameSchema.safeParse(name);
+    if (!parsed.success) throw new Error(`${name} is not a name the secret store accepts`);
+    if ((await vault.putNew(parsed.data, value)) === 'exists')
+      throw new Error(`the secret store already holds ${name} and an import never replaces one`);
   };
 }
 

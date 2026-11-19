@@ -303,6 +303,12 @@ export interface Permissions {
    */
   readonly secretNamePicker?: true;
   /**
+   * It may CREATE a secret under any name the Vault does not hold yet (`VaultApi.putNew`: Runtimes' import of a machine's
+   * own API keys). Create-only: it can never replace, remove or read a secret, and a name already held is refused with
+   * nothing changed. Only a non-core plugin that declares it is handed the method.
+   */
+  readonly createSecrets?: true;
+  /**
    * It starts a command for a RUNTIME (MCP's check) and may put into that one child exactly the secrets the runtime's
    * profile references (`VaultApi.childEnvironmentForRuntime`; Runtimes answers which). Not a general grant: no other name,
    * no value, only for the call, and only a non-core plugin that declares it is handed the method.
