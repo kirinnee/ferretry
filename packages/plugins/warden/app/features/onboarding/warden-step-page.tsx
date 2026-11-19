@@ -207,7 +207,7 @@ function JevNote({
     case 'not_named':
       return (
         <div className="wd-step__note" data-warden-jev="not_named">
-          <p>A Jev key is stored, but the Warden is not told to use it, so {fallback} until it is.</p>
+          <p>A Jev key is stored, but the Warden is not set to use it yet, so {fallback} until you press the button.</p>
           <Button onClick={onUseStoredKey} disabled={naming}>
             {naming ? 'Using it…' : 'Use the stored key'}
           </Button>

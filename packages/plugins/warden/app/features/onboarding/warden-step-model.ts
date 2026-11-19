@@ -26,7 +26,7 @@ export const WARDEN_CHOICES: readonly WardenChoiceCopy[] = [
   {
     id: 'jev',
     title: '+ Jev',
-    line: 'A cheap check clears the flags it is sure are fine. Needs a Jev key; up to $0.50 a day.',
+    line: 'Jev is a cheap AI check that clears the flags it is sure are fine. Needs a Jev key; up to $0.50 a day.',
   },
   {
     id: 'llm',
