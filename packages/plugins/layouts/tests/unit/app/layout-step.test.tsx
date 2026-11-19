@@ -4,6 +4,7 @@ import {
   type DeviceLayout,
   type LayoutOverrides,
   setDeviceOverride,
+  type Viewport,
 } from '@ferretry/app';
 import { interact, mount, must } from '@ferretry/app/testing';
 import { describe, expect, test } from 'bun:test';
@@ -20,10 +21,12 @@ function StatefulStep({
   step,
   writes,
   start = {},
+  viewport = 'wide',
 }: {
   readonly step: StepHost;
   readonly writes: string[];
   readonly start?: LayoutOverrides;
+  readonly viewport?: Viewport;
 }) {
   const [overrides, setOverrides] = useState<LayoutOverrides>(start);
   // The shell's store accumulates writes made in one handler; a state value alone would read the older one.
@@ -42,7 +45,7 @@ function StatefulStep({
     },
     reset: () => setOverrides({}),
   };
-  return <LayoutStep step={step} device={device} />;
+  return <LayoutStep step={step} device={device} viewport={viewport} />;
 }
 
 const group = (root: HTMLElement, label: string): HTMLElement =>
@@ -57,32 +60,59 @@ const pick = async (root: HTMLElement, label: string, word: string): Promise<voi
 describe('the Layout step', () => {
   test('outside a shell there is no device to write to: it skips as not needed and draws nothing', async () => {
     const harness = stepRecorder();
-    const view = await mount(<LayoutStep step={harness.host} device={undefined} />);
+    const view = await mount(<LayoutStep step={harness.host} device={undefined} viewport={undefined} />);
     expect(harness.decision).toBe('skipped');
     expect(harness.skippedWhy).toBe('not-needed');
     expect(view.container.textContent).toBe('');
     await view.unmount();
   });
 
-  test('it shows itself once, as two short choice rows holding what this device has today', async () => {
+  test('it shows itself once, as two short choice rows holding what this device shows today (no Left or Bottom on the built-in Top)', async () => {
     const harness = stepRecorder();
     const writes: string[] = [];
     const view = await mount(<StatefulStep step={harness.host} writes={writes} />);
     expect(harness.decision).toBe('shown');
     expect(harness.count('ready')).toBe(1);
     expect(harness.count('done')).toBe(0);
-    expect(checked(view.container, 'Navigation')).toBe('left');
+    expect(checked(view.container, 'Navigation')).toBe(undefined);
     expect(checked(view.container, 'Density')).toBe('comfortable');
     expect(view.container.textContent).toContain('Just this device');
     expect(writes).toEqual([]);
     await view.unmount();
   });
 
-  test('a layout already compact reads as Compact, and a side the step does not offer reads as Left', async () => {
-    const compact = { ...DEFAULT_LAYOUT, density: 'compact' as const };
+  test('answerOf reports what this device shows: Top on wide, Bottom on a phone, and an offered word as it is', () => {
     const [nav, density] = LAYOUT_QUESTIONS;
-    expect(answerOf(compact, density!)).toBe('compact');
-    expect(answerOf({ ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'right' } }, nav!)).toBe('left');
+    const compact = { ...DEFAULT_LAYOUT, density: 'compact' as const };
+    expect(answerOf(compact, density!, 'wide')).toBe('compact');
+    expect(answerOf(DEFAULT_LAYOUT, nav!, 'wide')).toBe('top');
+    expect(answerOf(DEFAULT_LAYOUT, nav!, 'phone')).toBe('bottom');
+    expect(answerOf({ ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'left' } }, nav!, 'wide')).toBe('left');
+    expect(answerOf({ ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'right' } }, nav!, 'wide')).toBe('right');
+  });
+
+  test('on the built-in layout the first Left press saves on a desktop and on a phone, and no card starts checked on a desktop', async () => {
+    for (const viewport of ['wide', 'phone'] as const) {
+      const harness = stepRecorder();
+      const writes: string[] = [];
+      const view = await mount(<StatefulStep step={harness.host} writes={writes} viewport={viewport} />);
+      expect(checked(view.container, 'Navigation')).toBe(viewport === 'wide' ? undefined : 'bottom');
+      await pick(view.container, 'Navigation', 'left');
+      expect(writes).toEqual(['nav.side=left', 'phone.nav.side=left']);
+      expect(checked(view.container, 'Navigation')).toBe('left');
+      expect(harness.count('done')).toBe(1);
+      await view.unmount();
+    }
+  });
+
+  test('on a phone the card already showing, Bottom, saves nothing when pressed', async () => {
+    const harness = stepRecorder();
+    const writes: string[] = [];
+    const view = await mount(<StatefulStep step={harness.host} writes={writes} viewport="phone" />);
+    await pick(view.container, 'Navigation', 'bottom');
+    expect(writes).toEqual([]);
+    expect(harness.count('done')).toBe(0);
+    await view.unmount();
   });
 
   test('picking Bottom writes nav.side to this device, with the phone key since the layout sets one, and answers done', async () => {
@@ -116,7 +146,7 @@ describe('the Layout step', () => {
       set: () => 'not a valid layout',
       reset: () => undefined,
     };
-    const view = await mount(<LayoutStep step={harness.host} device={device} />);
+    const view = await mount(<LayoutStep step={harness.host} device={device} viewport="wide" />);
     await pick(view.container, 'Density', 'compact');
     expect(view.container.querySelector('[role="alert"]')?.textContent).toBe('not a valid layout');
     expect(harness.count('done')).toBe(0);

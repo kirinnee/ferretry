@@ -6,6 +6,7 @@
  * every device is Settings › Layout's to change. A phone-only key is written too when the layout in force sets one,
  * because that key would otherwise hide the answer on a phone.
  */
+import { resolveLayout, type Viewport } from '@ferretry/app';
 import type { Layout } from '../../../contract/index.ts';
 
 type LayoutQuestionId = 'nav' | 'density';
@@ -46,11 +47,14 @@ export const LAYOUT_QUESTIONS: readonly LayoutQuestion[] = [
   },
 ];
 
-/** What the layout in force says for one question. A word the step does not offer (`right`, `top`) reads as `left`. */
-export function answerOf(layout: Layout, question: LayoutQuestion): string {
-  const word = question.path === 'nav.side' ? layout.nav.side : layout.density;
-  if (question.answers.some(answer => answer.id === word)) return word;
-  return question.answers[0]?.id ?? word;
+/**
+ * What THIS device shows for one question: the layout in force with its phone keys laid over it for this viewport, the
+ * way the shell draws it. A word the step does not offer (the built-in layout's `top` on a desktop) is returned as it
+ * is, so no card reads as already chosen and the first press of any card saves it.
+ */
+export function answerOf(layout: Layout, question: LayoutQuestion, viewport: Viewport): string {
+  const effective = resolveLayout(layout, viewport);
+  return question.path === 'nav.side' ? effective.nav.side : effective.density;
 }
 
 /** Every key one answer is written to: the wide key, and the phone key when the layout in force sets one. */

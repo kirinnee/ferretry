@@ -67,7 +67,7 @@ function Scene() {
           of: 3,
         }}
       >
-        <LayoutStep step={host} device={device} />
+        <LayoutStep step={host} device={device} viewport="wide" />
       </StepPageFrame>
     </div>
   );

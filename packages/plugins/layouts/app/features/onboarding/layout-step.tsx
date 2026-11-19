@@ -7,8 +7,7 @@
  * loading cover. Outside a shell there is no device to write to, so it skips as `not-needed` and draws nothing. Its
  * memory is the saved device layout itself: nothing is kept in step memory or in any storage by this page.
  */
-import type { DeviceLayout } from '@ferretry/app';
-import { ChoiceCards } from '@ferretry/app';
+import { ChoiceCards, type DeviceLayout, type Viewport } from '@ferretry/app';
 import type { StepHost } from '@ferretry/kernel/contract';
 import { useEffect, useState } from 'react';
 import { DensityDemo, NavDemo } from './layout-step-demos.tsx';
@@ -19,19 +18,21 @@ export interface LayoutStepProps {
   readonly step: StepHost | undefined;
   /** This device's layout choice; absent outside the shell. */
   readonly device: DeviceLayout | undefined;
+  /** Which width the shell draws this device for; absent outside the shell. */
+  readonly viewport: Viewport | undefined;
 }
 
 const demoOf = (question: LayoutQuestion, answer: string) =>
   question.id === 'nav' ? <NavDemo side={answer} /> : <DensityDemo density={answer} />;
 
-export function LayoutStep({ step, device }: LayoutStepProps) {
+export function LayoutStep({ step, device, viewport }: LayoutStepProps) {
   const [problem, setProblem] = useState<string | undefined>(undefined);
-  const absent = device === undefined;
+  const absent = device === undefined || viewport === undefined;
   useEffect(() => {
     if (absent) step?.skip('not-needed');
     else step?.ready();
   }, [absent, step]);
-  if (device === undefined) return null;
+  if (device === undefined || viewport === undefined) return null;
 
   const choose = (question: LayoutQuestion, answer: string): void => {
     for (const path of keysFor(device.inForce, question)) {
@@ -54,7 +55,7 @@ export function LayoutStep({ step, device }: LayoutStepProps) {
           </h2>
           <ChoiceCards
             label={question.name}
-            value={answerOf(device.inForce, question)}
+            value={answerOf(device.inForce, question, viewport)}
             onChange={answer => choose(question, answer)}
             options={question.answers.map(answer => ({
               id: answer.id,
