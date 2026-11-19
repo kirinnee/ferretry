@@ -3,13 +3,7 @@ import type { ApiRequest, CallContext } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import { MakeFolderRequestSchema } from '../../../contract/index.ts';
 import { FolderExplorer } from '../../../daemon/features/folders/browse.ts';
-import {
-  foldName,
-  holdsSignIn,
-  isPrivateFolder,
-  parsePath,
-  SIGN_IN_FILES,
-} from '../../../daemon/features/folders/fence.ts';
+import { foldName, holdsSignIn, isPrivateFolder, parsePath } from '../../../daemon/features/folders/fence.ts';
 import type {
   FolderBrowser,
   FolderOpenFailure,
@@ -50,14 +44,14 @@ function machine(tree: Tree, options: Machine = {}) {
     home: async () => HOME,
     holdsSignIn: async path => {
       calls.push(`holdsSignIn ${path}`);
-      return names(path).some(name => SIGN_IN_FILES.includes(name));
+      return holdsSignIn(names(path));
     },
     open: async (path, verdict) => {
       calls.push(`open ${path}`);
       const named = links[path] ?? path;
       if (named.startsWith('/dev')) return { ok: false, reason: 'refused' };
-      // A dangling link resolves to nothing, which the real machine cannot tell from a refusal.
-      if (!(named in tree)) return { ok: false, reason: path in links ? 'refused' : 'missing' };
+      // Nothing there (a missing name, a dangling link) is a refusal on the real machine: it says nothing it has not verified.
+      if (!(named in tree)) return { ok: false, reason: 'refused' };
       const first = await verdict(named);
       if (first !== undefined) return { ok: false, reason: first };
       const real = swapped[path] ?? named;
@@ -213,7 +207,7 @@ describe('FolderExplorer.list', () => {
     expect((await failure(() => explorer.list('~/.config/gh', true))).code).toBe('private_folder');
     expect((await failure(() => explorer.list('~/keys', false))).code).toBe('private_folder');
     expect((await failure(() => explorer.list('~/innocent', false))).code).toBe('private_folder');
-    expect((await failure(() => explorer.list('~/nope', false))).status).toBe(404);
+    expect((await failure(() => explorer.list('~/nope', false))).code).toBe('folder_refused');
     expect((await failure(() => explorer.list('code', false))).status).toBe(400);
     expect((await failure(() => explorer.list('~/../etc', false))).status).toBe(400);
   });
@@ -226,6 +220,36 @@ describe('FolderExplorer.list', () => {
     // A folder that holds one of its own marks in a different case is the same folder on a disk that folds case.
     const mixed = machine({ ...BASE, [`${HOME}/Docs`]: ['ID_ED25519'] });
     expect((await failure(() => mixed.explorer.list('~/Docs', false))).code).toBe('private_folder');
+  });
+
+  test('one fold for the marker check in every place: the listed folder, a listed child, an ancestor, the write parent, the destination', async () => {
+    const tree: Tree = {
+      ...BASE,
+      [`${HOME}/a`]: ['Auth.JSON'],
+      [`${HOME}/b`]: ['plain', 'marked'],
+      [`${HOME}/b/plain`]: [],
+      [`${HOME}/b/marked`]: ['ｉｄ_ｒｓａ'],
+      [`${HOME}/c`]: ['ID_Ed25519', 'inner'],
+      [`${HOME}/c/inner`]: [],
+      [`${HOME}/d`]: ['Hosts.YML'],
+      [`${HOME}/e`]: ['dest', 'fine'],
+      [`${HOME}/e/dest`]: ['.CREDENTIALS.json'],
+      [`${HOME}/e/fine`]: [],
+    };
+    const { explorer, made } = machine(tree);
+    // The listed folder.
+    expect((await failure(() => explorer.list('~/a', false))).code).toBe('private_folder');
+    // A listed child: shown by the parent only when it holds no marker in any spelling.
+    expect((await explorer.list('~/b', false)).entries.map(entry => entry.name)).toEqual(['plain']);
+    // An ancestor below the home.
+    expect((await failure(() => explorer.list('~/c/inner', false))).code).toBe('private_folder');
+    // The write parent.
+    expect((await failure(() => explorer.make({ parent: '~/d', name: 'x' }))).code).toBe('private_folder');
+    // The destination: an existing folder holding a marker is refused as the folder it is, before "already there".
+    const destination = await failure(() => explorer.make({ parent: '~/e', name: 'dest' }));
+    expect([destination.status, destination.code]).toEqual([403, 'folder_refused']);
+    expect((await failure(() => explorer.make({ parent: '~/e', name: 'fine' }))).code).toBe('folder_exists');
+    expect(made).toEqual([]);
   });
 
   test('a folder is listed from the object held, and a hold that is not the folder judged is refused unread', async () => {
@@ -287,7 +311,7 @@ describe('FolderExplorer.make', () => {
     expect((await failure(() => explorer.make({ parent: '~/.ssh', name: 'x' }))).code).toBe('private_folder');
     expect((await failure(() => explorer.make({ parent: '~/escape', name: 'x' }))).code).toBe('folder_refused');
     expect((await failure(() => explorer.make({ parent: '/etc', name: 'x' }))).code).toBe('folder_refused');
-    expect((await failure(() => explorer.make({ parent: '~/nope', name: 'x' }))).status).toBe(404);
+    expect((await failure(() => explorer.make({ parent: '~/nope', name: 'x' }))).code).toBe('folder_refused');
     await explorer.make({ parent: '~/Docs', name: 'a' });
     expect(made).toEqual([`${HOME}/Docs/a`]);
   });

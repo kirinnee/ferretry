@@ -178,6 +178,38 @@ describe('the explorer over the real imports root', () => {
     expect((await w.explorer.list('~/.config', true)).entries.map(entry => entry.name)).toEqual(['nvim']);
   });
 
+  test('a marker in any spelling is a marker: the listed folder, a listed child, an ancestor, the write parent and the destination', async () => {
+    const w = await world();
+    const marked = async (folder: string, marker: string) => {
+      await mkdir(join(w.user, folder), { recursive: true });
+      await writeFile(join(w.user, folder, marker), '{}');
+    };
+    await marked('spell-listed', 'AUTH.json');
+    await mkdir(join(w.user, 'spell-parent', 'child-ok'), { recursive: true });
+    await marked('spell-parent/child-marked', 'ID_RSA');
+    await marked('spell-ancestor', 'ｉｄ_ｅｄ25519');
+    await mkdir(join(w.user, 'spell-ancestor', 'inner'), { recursive: true });
+    await marked('spell-write', 'Hosts.YML');
+    await mkdir(join(w.user, 'spell-dest', 'taken'), { recursive: true });
+    await writeFile(join(w.user, 'spell-dest', 'taken', '.CREDENTIALS.JSON'), '{}');
+    await mkdir(join(w.user, 'spell-dest', 'plain-taken'), { recursive: true });
+    // The listed folder.
+    expect((await failure(() => w.explorer.list('~/spell-listed', false))).code).toBe('private_folder');
+    // A listed child.
+    expect((await w.explorer.list('~/spell-parent', false)).entries.map(entry => entry.name)).toEqual(['child-ok']);
+    // An ancestor below the home.
+    expect((await failure(() => w.explorer.list('~/spell-ancestor/inner', false))).code).toBe('private_folder');
+    // The write parent.
+    expect((await failure(() => w.explorer.make({ parent: '~/spell-write', name: 'x' }))).code).toBe('private_folder');
+    expect(await readdir(join(w.user, 'spell-write'))).toEqual(['Hosts.YML']);
+    // The destination: refused as the folder it is BEFORE "already there"; a plain taken name is still "already there".
+    const taken = await failure(() => w.explorer.make({ parent: '~/spell-dest', name: 'taken' }));
+    expect([taken.status, taken.code]).toEqual([403, 'folder_refused']);
+    expect((await failure(() => w.explorer.make({ parent: '~/spell-dest', name: 'plain-taken' }))).code).toBe(
+      'folder_exists',
+    );
+  });
+
   test('a link out of the home, a link to a file out there, a dangling link, an outside path: one answer', async () => {
     const w = await world();
     const paths = [
@@ -235,6 +267,30 @@ describe('the explorer over the real imports root', () => {
       }),
     );
     expect((await failure(() => racing.list('~/Documents', false))).code).toBe('folder_refused');
+  });
+
+  test('a folder swapped for a link to an outside file, or for nothing, after the check is the one refusal, never "not a folder"', async () => {
+    const w = await world();
+    const folder = join(w.user, 'Documents');
+    const asFile = w.explorerOver(
+      meddling(w.real, {
+        afterFirstJudgment: async () => {
+          await rename(folder, `${folder}-moved`);
+          await symlink(join(w.outside, 'file.txt'), folder);
+        },
+      }),
+    );
+    expect((await failure(() => asFile.list('~/Documents', false))).code).toBe('folder_refused');
+    const gone = w.explorerOver(
+      meddling(w.real, {
+        afterFirstJudgment: async () => {
+          await rm(join(w.user, 'code', 'plain'), { recursive: true });
+        },
+      }),
+    );
+    expect((await failure(() => gone.list('~/code/plain', false))).code).toBe('folder_refused');
+    // Verified first (a file inside the home), it is said to be a file.
+    expect((await failure(() => w.explorer.list('~/notes.txt', false))).code).toBe('not_a_folder');
   });
 
   test('a folder swapped for a link into a private folder after the check is refused as private', async () => {

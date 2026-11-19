@@ -97,6 +97,9 @@ export class FolderExplorer {
       if (isPrivateFolder([...below, request.name])) throw priv();
       const target = `${folder.real === '/' ? '' : folder.real}/${request.name}`;
       if (!(await folders.mayName(target))) throw refused();
+      // A destination that already exists and holds a sign-in marker (any spelling) is refused as the folder it is, BEFORE
+      // "already there" can say so.
+      if (await browser.holdsSignIn(target)) throw refused();
       const made = await folder.makeLeaf(request.name, this.verdict(home));
       switch (made.kind) {
         case 'made':
@@ -145,8 +148,6 @@ export class FolderExplorer {
       switch (opened.reason) {
         case 'private':
           throw priv();
-        case 'missing':
-          throw new ApiError(404, 'there is no such folder', 'folder_not_found');
         case 'not_folder':
           throw new ApiError(422, 'that is not a folder', 'not_a_folder');
         default:

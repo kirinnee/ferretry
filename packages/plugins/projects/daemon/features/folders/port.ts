@@ -8,10 +8,10 @@ export interface RawFolderEntry {
 }
 
 /**
- * Why a folder was not opened: the machine refused it (or the fence did), nothing is there, it is not a folder, or the
+ * Why a folder was not opened: the machine refused it (or the fence did, or nothing verified is there), it is a file, or the
  * explorer's own judgment of where it REALLY is said no (`outside` the home, `private`).
  */
-export type FolderOpenFailure = 'refused' | 'missing' | 'not_folder' | 'outside' | 'private';
+export type FolderOpenFailure = 'refused' | 'not_folder' | 'outside' | 'private';
 
 /** The explorer's verdict on a real folder path: `undefined` to accept it, or why not. Asked on the real path, never the spelling. */
 export type FolderVerdict = (real: string) => Promise<'outside' | 'private' | undefined>;
@@ -60,6 +60,10 @@ export interface FolderBrowser {
    * object really is; a folder that fails either is never returned. The caller closes it.
    */
   open(path: string, verdict: FolderVerdict): Promise<FolderOpen>;
-  /** Whether the real folder `path` directly holds a sign-in or key file (by name, a link counts, not followed). */
+  /**
+   * Whether the real folder `path` directly holds a sign-in or key file: every name it holds (a link counts, not
+   * followed) is judged by the one fold in `fence.ts`, so a differently spelled marker is a marker. A folder whose names
+   * cannot be read answers `true`; a file or a missing name, `false`.
+   */
   holdsSignIn(path: string): Promise<boolean>;
 }
