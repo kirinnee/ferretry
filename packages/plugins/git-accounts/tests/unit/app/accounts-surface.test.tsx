@@ -261,7 +261,7 @@ describe('a daemon that wants the passkey for every step (per-action confirmatio
     // Polling has stopped: no second unattended poll, however long the page waits, and no passkey dialog was asked.
     await settle(40);
     expect(polls(calls)).toHaveLength(1);
-    expect(polls(calls)[0]?.init?.quiet).toBeUndefined();
+    expect(polls(calls)[0]?.init?.quiet).toBe(true);
 
     await click(buttonNamed(root, 'Confirm with your passkey to finish'));
     await settleUntil(() => root.querySelector('[data-testid="git-done"]') !== null);

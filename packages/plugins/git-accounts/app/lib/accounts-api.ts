@@ -32,7 +32,7 @@ export async function startFlow(client: GitAccountsClient): Promise<GitDeviceFlo
   return GitDeviceFlowSchema.parse(await client.call(START_ROUTE));
 }
 
-/** `pressed`: the person pressed to confirm with their passkey, so this poll may ask for the step-up. */
+/** `pressed`: the person pressed to confirm with their passkey, so this poll may ask for the step-up; every other poll is a timer, so it is `quiet` and can never open a prompt. */
 export async function pollFlow(
   client: GitAccountsClient,
   flowId: string,
@@ -40,7 +40,9 @@ export async function pollFlow(
 ): Promise<GitDeviceFlowStatus> {
   const params = { flowId };
   return GitDeviceFlowStatusSchema.parse(
-    await (pressed ? client.call(POLL_ROUTE, { params, quiet: false }) : client.call(POLL_ROUTE, { params })),
+    await (pressed
+      ? client.call(POLL_ROUTE, { params, quiet: false })
+      : client.call(POLL_ROUTE, { params, quiet: true })),
   );
 }
 
