@@ -73,3 +73,6 @@ export { ImageViewer, type ImageViewerProps, type ViewerImage } from './image-vi
 export * from './lib/reveal-hidden.ts';
 export * from './jump-to-latest.tsx';
 export * from './floating.tsx';
+export * from './sortable-list.tsx';
+export * from './use-motion-allowed.ts';
+export * from './lib/sortable-order.ts';
