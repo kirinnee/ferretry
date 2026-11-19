@@ -1,6 +1,6 @@
 /* ============================================================================
    The setting preview — a ~160 x 100 mini-frame beside a setting row (compose/setting-preview.tsx).
-   The loop is one cross-fade of two stacked layers on `opacity`: no layout, no per-frame script. The RESTING style
+   The loop is two stacked layers taking turns on `opacity` (out, then in): no layout, no per-frame script. The RESTING style
    is the final state (`before` hidden, `after` shown), so with the animation removed — reduced motion, a
    stylesheet that never matches — the frame still shows the answer. Theme tokens only.
    ========================================================================== */
@@ -31,13 +31,16 @@
   opacity: 0;
 }
 
+/* The two layers take turns: `before` fades out, a beat of bare frame, then `after` fades in. They are never both
+   visible, so a label in one never lands on a label in the other. The scenes time their own movement from these marks
+   (the second layer is fully in at 54%, and fully out again at 94%). */
 @keyframes fy-sp-before {
   0%,
   36% {
     opacity: 1;
   }
-  48%,
-  88% {
+  42%,
+  94% {
     opacity: 0;
   }
   100% {
@@ -46,13 +49,14 @@
 }
 @keyframes fy-sp-after {
   0%,
-  36% {
+  48% {
     opacity: 0;
   }
-  48%,
+  54%,
   88% {
     opacity: 1;
   }
+  94%,
   100% {
     opacity: 0;
   }
@@ -70,6 +74,6 @@
   /* Hidden tab or scrolled off-screen: held where it is, and costing nothing. */
   .fy-sp[data-sp-state='paused'] .fy-sp__layer,
   .fy-sp[data-sp-state='paused'] .fy-sp__layer * {
-    animation-play-state: paused;
+    animation-play-state: paused !important; /* beats a scene's `animation` shorthand, which would restart it */
   }
 }

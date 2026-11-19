@@ -8,6 +8,7 @@
 
 import { Segmented, SettingGroup, SettingRow, SettingSwitch, useDeviceControls } from '@ferretry/app';
 import type { ReactNode } from 'react';
+import { DensityPreview, NeedsYouPreview } from './device-settings-previews.tsx';
 
 const DENSITY_OPTIONS = [
   { id: 'full', label: 'Full' },
@@ -22,6 +23,7 @@ function NeedsYouPanel(): ReactNode {
     <SettingGroup label="Ferret list">
       <SettingRow
         settingId="group-needs-you"
+        preview={<NeedsYouPreview grouped={device.groupNeedsYou} />}
         name="Group Needs you at the top"
         hint="Sessions with open Inbox items go first"
         explanation="Lift the ferrets with open Inbox items into a Needs you group at the top of the ferret list. Off keeps those ferrets in their project group, with just the Inbox badge. Applies to this device."
@@ -35,6 +37,7 @@ function NeedsYouPanel(): ReactNode {
       />
       <SettingRow
         settingId="density"
+        preview={<DensityPreview density={device.density ?? 'full'} />}
         name="Density"
         hint={`Device default: ${DENSITY_LABEL[device.density ?? 'full']}`}
         explanation="How much each ferret shows in the list. Full is the list as drawn; Compact drops the folder and the marks (the title, the ferret and what it asks stay); Minimal is one line, the title and its badge. Applies to this device."
