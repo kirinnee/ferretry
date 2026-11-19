@@ -29,9 +29,15 @@ const NAME_LINE = /^name:/mu;
 const isLockedRefusal = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 401;
 
-/** `404` is a plugin that is off: its routes are not served, so the question it answers has no answer to give. */
-const isAbsentPlugin = (error: unknown): boolean =>
-  typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 404;
+/**
+ * The plugin is not there: `404` is an `off` plugin's unrouted path, and `plugin_paused` (status 0) is how the generated
+ * client refuses, WITHOUT sending, a call to a paused plugin. Either way the question has no answer to give.
+ */
+const isAbsentPlugin = (error: unknown): boolean => {
+  if (typeof error !== 'object' || error === null) return false;
+  const { status, code } = error as { status?: unknown; code?: unknown };
+  return status === 404 || code === 'plugin_paused';
+};
 
 /** What one read says as a fact: its answer, `'locked'` for an unlock refusal, `undefined` for any other failure. */
 const settled = async (read: () => Promise<StepperFact>): Promise<StepperFact> => {

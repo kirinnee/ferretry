@@ -145,6 +145,13 @@ describe('reading the stepper facts', () => {
     ).toBe('locked');
   });
 
+  it('a Projects plugin that is paused (the client blocks the call: status 0, plugin_paused) rests on the conversations alone too', async () => {
+    const paused = { ...FRESH, 'GET /v1/projects': refusal(0, 'plugin_paused') };
+    expect((await batch(clientOf(paused).client)).project).toBe(false);
+    const used = { ...paused, 'GET /v1/ferrets': [{ id: 'f' }] };
+    expect((await batch(clientOf(used).client)).project).toBe(true);
+  });
+
   it('an unlock refusal makes THAT fact locked; any other failure is unknown; the rest still answer', async () => {
     const answers = {
       ...SET_UP,
