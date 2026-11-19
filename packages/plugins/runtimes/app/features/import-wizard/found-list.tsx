@@ -34,7 +34,7 @@ function Row({
       <label
         htmlFor={id}
         data-found-row={name}
-        className="kt-panel flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel hover:border-accent has-[:checked]:border-accent has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
+        className="kt-panel flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel hover:border-accent has-[:not(:checked)]:opacity-70 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
       >
         <input
           id={id}
@@ -47,7 +47,7 @@ function Row({
         <span className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="[overflow-wrap:anywhere] text-row font-semibold text-fg">{item.label}</span>
           <span className="text-cell text-muted" data-found-becomes="">
-            {item.becomes}
+            Becomes: {item.becomes}
             {item.id === null ? ' · comes in with the rest' : ''}
           </span>
           {children}
@@ -68,11 +68,11 @@ function Fixed({
 }) {
   return (
     <li
-      className="flex min-h-[44px] min-w-0 flex-col gap-1 rounded-md border border-dashed border-border p-panel opacity-80"
+      className="flex min-h-[44px] min-w-0 flex-col gap-1 rounded-md border border-dashed border-border-strong p-panel"
       data-found-fixed={name}
     >
-      <span className="text-row font-semibold text-muted">{title}</span>
-      <span className="text-cell text-muted">{children}</span>
+      <span className="text-row font-semibold text-fg">{title}</span>
+      <span className="text-cell text-fg">{children}</span>
     </li>
   );
 }

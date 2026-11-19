@@ -25,15 +25,19 @@ function Progress({
   readonly state: (harness: HarnessKey) => string;
 }) {
   return (
-    <ol className="m-0 flex list-none flex-wrap gap-2 p-0" aria-label="Tools to bring in" data-import-progress="">
+    <ol
+      className="m-0 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2"
+      aria-label="Tools to bring in"
+      data-import-progress=""
+    >
       {HARNESSES.map((harness, index) => (
-        <li key={harness}>
+        <li key={harness} className="min-w-0">
           <button
             type="button"
             aria-current={index === at ? 'step' : undefined}
             data-import-tab={harness}
             onClick={() => onPick(index)}
-            className="kt-panel flex min-h-[44px] cursor-pointer items-center gap-2 px-3 text-row font-semibold text-fg aria-[current=step]:border-accent aria-[current=step]:bg-accent-soft"
+            className="kt-panel flex min-h-[44px] w-full cursor-pointer items-center gap-2 px-3 text-row font-semibold text-fg aria-[current=step]:border-accent aria-[current=step]:bg-accent-soft"
           >
             <span className="text-muted">{index + 1}</span>
             {HARNESS_LABEL[harness]}

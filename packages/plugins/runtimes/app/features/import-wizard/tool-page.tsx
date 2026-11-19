@@ -12,15 +12,17 @@ import { counts, nameProblem, type ToolModel } from './model.ts';
 import { plural, toolHeadline } from './mapping-words.ts';
 import type { ImportWizard } from './use-import-wizard.ts';
 
-function Header({ model }: { readonly model: ToolModel }) {
+function Header({ model, hideState = false }: { readonly model: ToolModel; readonly hideState?: boolean }) {
   const signedInAs = !model.installed ? 'unknown' : model.stage === 'needs-sign-in' ? 'none' : { email: model.email };
   return (
     <header className="flex min-w-0 flex-col gap-1" data-tool-header={model.harness}>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <h3 className="m-0 text-row font-semibold text-fg">{model.label}</h3>
-        <Badge tone={!model.installed ? 'warn' : model.stage === 'ready' ? 'ok' : 'pend'}>
-          {!model.installed ? 'Not installed' : model.stage === 'ready' ? 'Ready' : 'Needs sign-in'}
-        </Badge>
+        {hideState ? null : (
+          <Badge tone={!model.installed || model.stage === 'needs-sign-in' ? 'warn' : 'ok'}>
+            {!model.installed ? 'Not installed' : model.stage === 'ready' ? 'Ready' : 'Needs sign-in'}
+          </Badge>
+        )}
       </div>
       <p className="m-0 text-cell text-muted" data-tool-headline="">
         {toolHeadline({ installed: model.installed, version: model.version, signedInAs })}
@@ -134,7 +136,7 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
   if (end !== undefined)
     return (
       <div className="flex min-w-0 flex-col gap-3" data-tool-page={harness} data-tool-end={end.kind}>
-        <Header model={model} />
+        <Header model={model} hideState />
         {end.kind === 'skipped' ? (
           <p className="m-0 text-cell text-muted">{`You left ${model.label} out. Nothing was changed.`}</p>
         ) : (
@@ -226,6 +228,11 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
           </p>
         )}
       </section>
+      {model.installed ? null : (
+        <p className="m-0 text-cell font-semibold text-warn" data-import-needs-install="">
+          {`Install ${model.label} first; the import needs it on this machine.`}
+        </p>
+      )}
       <ChangeApplyPanel
         machineName={machineName}
         authority={wizard.changes.authority}
@@ -245,12 +252,6 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
           ? `Bringing ${plural(taking.taken, 'item')}.`
           : `Bringing ${plural(taking.taken, 'item')}, leaving out ${String(taking.left)}.`}
       </p>
-      {model.installed ? null : (
-        <p
-          className="m-0 text-cell text-muted"
-          data-import-needs-install=""
-        >{`Install ${model.label} first; the import needs it on this machine.`}</p>
-      )}
     </div>
   );
 }
