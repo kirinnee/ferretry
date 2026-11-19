@@ -102,6 +102,12 @@ export const PALETTE_IDS = [
   'wayfinding',
   'ledger',
   'ma',
+  'vaporwave',
+  'cyberpunk',
+  'hacker',
+  'vintage',
+  'mesh',
+  'retrofuture',
 ] as const;
 export type PaletteId = (typeof PALETTE_IDS)[number];
 

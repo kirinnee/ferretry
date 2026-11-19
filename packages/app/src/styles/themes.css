@@ -11,6 +11,8 @@
    palette ∈ studio | mission | neo | contrast | geist      WHICH colours: the seed colours, the status/syntax/tool
            | phosphor | blueprint | broadsheet              hues, shadow COLOURS. NO non-colour token.
            | wayfinding | ledger | ma
+           | vaporwave | cyberpunk | hacker                (the last six each declare EVERY role in their own
+           | vintage | mesh | retrofuture                  file, so they need nothing from tokens/derived.css)
    mode    ∈ light | dark        (already resolved — never "system")
 
    The CATALOGUE — ids, labels, fonts, suggested pairings — is owned by `src/theme/catalog.ts`, not by this
@@ -57,6 +59,12 @@
 @import './palette/wayfinding.css';
 @import './palette/ledger.css';
 @import './palette/ma.css';
+@import './palette/vaporwave.css';
+@import './palette/cyberpunk.css';
+@import './palette/hacker.css';
+@import './palette/vintage.css';
+@import './palette/mesh.css';
+@import './palette/retrofuture.css';
 
 @import './tokens/derived.css';
 @import './tokens/floors.css';

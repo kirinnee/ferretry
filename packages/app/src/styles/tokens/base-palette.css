@@ -98,6 +98,8 @@
   --grid-ink-minor: rgb(var(--accent-rgb) / 0.05);
   --field-ground-top: transparent;
   --field-ground-bottom: transparent;
+  /* A palette's blended background (a gradient mesh); `none` unless it draws one. index.css paints it UNDER `--body-wash`, on the app background only. */
+  --surface-mesh: none;
   --scrim: rgba(24, 24, 27, 0.38);
   /* ---- focus + selection ---- */
   --ring: rgba(79, 82, 214, 0.38);

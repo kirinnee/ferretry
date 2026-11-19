@@ -27,6 +27,12 @@
     'wayfinding',
     'ledger',
     'ma',
+    'vaporwave',
+    'cyberpunk',
+    'hacker',
+    'vintage',
+    'mesh',
+    'retrofuture',
   ];
   /* The pre-split "family" a stored value may still carry: a palette id, with the style it was drawn for
      (`PaletteEntry.suggestedStyle`). */

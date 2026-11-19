@@ -76,6 +76,32 @@ export const PALETTES: readonly PaletteEntry[] = Object.freeze([
   { id: 'wayfinding', label: 'Wayfinding', blurb: 'Transit-signage blue and white.', suggestedStyle: 'neo' },
   { id: 'ledger', label: 'Ledger', blurb: 'Green-bar accounting paper, restrained ink.', suggestedStyle: 'geist' },
   { id: 'ma', label: 'Ma', blurb: 'Quiet paper, one rose accent.', suggestedStyle: 'geist' },
+  {
+    id: 'vaporwave',
+    label: 'Vaporwave',
+    blurb: 'Lilac haze, magenta and teal neon, night purple.',
+    suggestedStyle: 'studio',
+  },
+  {
+    id: 'cyberpunk',
+    label: 'Cyberpunk',
+    blurb: 'Neon yellow and hot pink on blue-black asphalt.',
+    suggestedStyle: 'mission',
+  },
+  { id: 'hacker', label: 'Hacker', blurb: 'Matrix green on pure graphite.', suggestedStyle: 'mission' },
+  { id: 'vintage', label: 'Vintage analog', blurb: 'Sepia paper, rust and mustard.', suggestedStyle: 'geist' },
+  {
+    id: 'mesh',
+    label: 'Gradient mesh',
+    blurb: 'Violet, rose and sky glows behind calm panels.',
+    suggestedStyle: 'studio',
+  },
+  {
+    id: 'retrofuture',
+    label: 'Retro futurism',
+    blurb: 'Space-age navy, sunset orange and teal.',
+    suggestedStyle: 'neo',
+  },
 ] as const);
 
 export const DEFAULT_STYLE: StyleId = 'studio';
