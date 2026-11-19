@@ -91,7 +91,7 @@ let secretStopped = false;
 
 const client: PullsClient = {
   call: (async (route: string, init?: { body?: Record<string, unknown> }) => {
-    if (route.endsWith('/poster')) return { login: 'octo-fake' };
+    if (route.endsWith('/poster')) return { id: 'gha_4242', login: 'octo-fake' };
     if (route.endsWith('/files'))
       return {
         files: [

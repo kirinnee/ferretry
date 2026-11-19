@@ -14,6 +14,8 @@ export interface ThreadsTarget {
   readonly number: number;
   /** The PR's `updatedAt`: a change reads the threads again. */
   readonly updatedAt: string;
+  /** Moves when something other than the PR needs the threads read again (a post that may have gone out). */
+  readonly reload?: number;
 }
 
 /** What was read, and for which client and PR: an answer is only ever shown for the PR it was read for. */
@@ -32,10 +34,10 @@ const LOADING: ThreadsState = { status: 'loading' };
  * `loading`, and a failed read of it shows no thread of the PR before.
  */
 export function useThreads(client: PullsClient, target: ThreadsTarget): ThreadsState {
-  const { project, owner, name, number, updatedAt } = target;
+  const { project, owner, name, number, updatedAt, reload } = target;
   const pr = JSON.stringify([project, owner, name, number]);
   const [held, setHeld] = useState<Held>({ client, pr, state: LOADING });
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `updatedAt` is read nowhere inside, on purpose: a PR that changed reads its threads again.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `updatedAt` and `reload` are read nowhere inside, on purpose: a PR that changed, or a post that may have gone out, reads its threads again.
   useEffect(() => {
     let live = true;
     setHeld(before =>
@@ -64,6 +66,6 @@ export function useThreads(client: PullsClient, target: ThreadsTarget): ThreadsS
     return () => {
       live = false;
     };
-  }, [client, pr, project, owner, name, number, updatedAt]);
+  }, [client, pr, project, owner, name, number, updatedAt, reload]);
   return held.client === client && held.pr === pr ? held.state : LOADING;
 }

@@ -6,6 +6,7 @@ import { usePullFiles } from '../diff/use-pull-files.ts';
 import { OutdatedThreads, placeThreads, ThreadCard, threadsAt, useThreads } from '../threads/index.ts';
 import type { DiffRows } from '../threads/index.ts';
 import type { PullAddress, PullsClient } from './api.ts';
+import { useMaybeCompose } from './context.tsx';
 import { DiffSelectionScope } from './scopes.tsx';
 import { ReplyBox } from './reply-box.tsx';
 
@@ -43,7 +44,12 @@ export function ReviewableFiles({
 }) {
   // A second, conditional read of the same files (a `304` for the daemon): the thread placement needs the hunks' rows.
   const files = usePullFiles(client, address.project, address, address.number).state;
-  const threads = useThreads(client, { ...address, updatedAt: pull.updatedAt });
+  const reload = useMaybeCompose()?.threadsReload;
+  const threads = useThreads(client, {
+    ...address,
+    updatedAt: pull.updatedAt,
+    ...(reload === undefined ? {} : { reload }),
+  });
   const placement = useMemo(() => {
     if (files.status !== 'ready') return undefined;
     const known =

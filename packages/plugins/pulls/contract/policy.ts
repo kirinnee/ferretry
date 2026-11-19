@@ -15,6 +15,8 @@ export const PULLS_CAPS = {
 /** Ids and counts only: never a title, a body or a comment's text. */
 export const PULLS_AUDIT = {
   commentPosted: 'pulls.comment.posted',
+  /** Written BEFORE a post is sent (ids only), so a post that went out can never be missing from the log. */
+  commentIntent: 'pulls.comment.intent',
   /** E2: a project's watch or notify choice changed. The project id and which keys only. */
   watchChanged: 'pulls.watch.changed',
 } as const;

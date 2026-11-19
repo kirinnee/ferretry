@@ -258,7 +258,7 @@ describe('quote and comment', () => {
         );
         await tab.locator('[data-compose-box]').fill('Is this still the plan?');
         await tab.locator('[data-compose] button[data-variant="primary"]').click();
-        await tab.waitForSelector('[data-compose-unknown]');
+        await tab.waitForSelector('[data-compose-unknown] button');
         await shot(tab, variant, '8-not-sure');
         expect(((await sent(tab)) as unknown[]).length).toBe(1);
         await noSideways(tab);

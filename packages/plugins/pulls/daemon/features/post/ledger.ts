@@ -5,6 +5,9 @@
  *
  * Only an answer that says something HAPPENED is kept (`posted`, `unknown`). A refusal that certainly sent nothing is
  * dropped at once, so the person can fix the text or the account and try again under the same id.
+ *
+ * A kept entry is NEVER evicted to make room, because the one a retry needs is exactly the one that must still be there:
+ * when the ledger is full of live entries a NEW id is refused (`busy`), and an id already held is still answered.
  */
 export const LEDGER_WINDOW_MS = 10 * 60_000;
 export const LEDGER_MAX_ENTRIES = 500;
@@ -24,7 +27,9 @@ interface Entry<Done, Refusal> {
 export type Ran<Done, Refusal> =
   | { readonly kind: 'ran'; readonly settled: Settled<Done, Refusal>; readonly replayed: boolean }
   /** The id was used for a different post. */
-  | { readonly kind: 'mismatch' };
+  | { readonly kind: 'mismatch' }
+  /** The ledger holds as many live entries as it may and this id is new: nothing was sent, try again later. */
+  | { readonly kind: 'busy' };
 
 export class PostLedger<Done, Refusal> {
   readonly #entries = new Map<string, Entry<Done, Refusal>>();
@@ -44,12 +49,14 @@ export class PostLedger<Done, Refusal> {
     fingerprint: string,
     work: () => Promise<Settled<Done, Refusal>>,
   ): Promise<Ran<Done, Refusal>> {
-    this.#sweep();
+    // The id is looked up BEFORE anything is dropped: a retry must find its own entry.
     const held = this.#entries.get(requestId);
-    if (held !== undefined) {
+    if (held !== undefined && !this.#expired(held)) {
       if (held.fingerprint !== fingerprint) return { kind: 'mismatch' };
       return { kind: 'ran', settled: await held.result, replayed: true };
     }
+    this.#sweep();
+    if (this.#entries.size >= this.max) return { kind: 'busy' };
     const entry: Entry<Done, Refusal> = {
       fingerprint,
       at: this.nowMs(),
@@ -68,14 +75,12 @@ export class PostLedger<Done, Refusal> {
     return this.#entries.size;
   }
 
-  /** Expired entries go; past the bound the oldest SETTLED ones go (an in-flight one is never dropped). */
+  #expired(entry: Entry<Done, Refusal>): boolean {
+    return entry.settled && this.nowMs() - entry.at > this.windowMs;
+  }
+
+  /** Only expired entries go. A live one (in flight, or settled inside the window) is never dropped for room. */
   #sweep(): void {
-    const now = this.nowMs();
-    for (const [id, entry] of this.#entries)
-      if (entry.settled && now - entry.at > this.windowMs) this.#entries.delete(id);
-    for (const [id, entry] of this.#entries) {
-      if (this.#entries.size < this.max) break;
-      if (entry.settled) this.#entries.delete(id);
-    }
+    for (const [id, entry] of this.#entries) if (this.#expired(entry)) this.#entries.delete(id);
   }
 }

@@ -11,7 +11,7 @@ const ADDRESS: PullAddress = {
   name: 'demo',
   number: 7,
 };
-const client: PullsClient = { call: (async () => ({ login: 'octo-fake' })) as PullsClient['call'] };
+const client: PullsClient = { call: (async () => ({ id: 'gha_4242', login: 'octo-fake' })) as PullsClient['call'] };
 
 /** Selects from the start of one node's text to the end of another's, as a person dragging would. */
 function select(from: Node, to: Node, toOffset?: number): void {

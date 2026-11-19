@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { LEDGER_MAX_ENTRIES, LEDGER_WINDOW_MS, PostLedger, type Settled } from '../../daemon/features/post/ledger.ts';
+import { LEDGER_WINDOW_MS, PostLedger, type Settled } from '../../daemon/features/post/ledger.ts';
 
 const done = (value: string): Settled<string, string> => ({ kind: 'done', value });
 
@@ -53,10 +53,49 @@ describe('the exactly-once ledger', () => {
     expect(ledger.size).toBe(2);
   });
 
-  test('the ledger is bounded: past its size the oldest settled entries go', async () => {
-    const ledger = new PostLedger<string, string>(() => 0);
-    for (let i = 0; i < LEDGER_MAX_ENTRIES + 50; i += 1)
-      await ledger.run(`id-${String(i)}`, 'f', async () => done('x'));
-    expect(ledger.size).toBeLessThanOrEqual(LEDGER_MAX_ENTRIES);
+  test('the ledger is bounded: when it holds as many live entries as it may, a NEW id is refused busy and nothing is evicted', async () => {
+    const ledger = new PostLedger<string, string>(() => 0, LEDGER_WINDOW_MS, 3);
+    let runs = 0;
+    const work = async () => done(`run-${String(++runs)}`);
+    for (const id of ['a', 'b', 'c']) await ledger.run(id, 'f', work);
+    expect(await ledger.run('d', 'f', work)).toEqual({ kind: 'busy' });
+    expect(runs).toBe(3);
+    expect(ledger.size).toBe(3);
+    // A retry of the OLDEST entry, at capacity, still finds it: it is answered, never run again.
+    expect(await ledger.run('a', 'f', work)).toEqual({ kind: 'ran', settled: done('run-1'), replayed: true });
+    expect(runs).toBe(3);
+  });
+
+  test('an in-flight entry holds its place too, and room comes back only as entries expire', async () => {
+    let now = 0;
+    const ledger = new PostLedger<string, string>(() => now, 1_000, 2);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>(resolve => (release = resolve));
+    const slow = ledger.run('slow', 'f', async () => {
+      await held;
+      return done('slow');
+    });
+    await ledger.run('b', 'f', async () => done('b'));
+    expect(await ledger.run('c', 'f', async () => done('c'))).toEqual({ kind: 'busy' });
+    now = 2_000;
+    // 'b' expired and is swept for the new id; the in-flight one is not expired (it has not settled).
+    expect(await ledger.run('c', 'f', async () => done('c'))).toEqual({
+      kind: 'ran',
+      settled: done('c'),
+      replayed: false,
+    });
+    expect(await ledger.run('d', 'f', async () => done('d'))).toEqual({ kind: 'busy' });
+    release();
+    expect((await slow).kind).toBe('ran');
+  });
+
+  test('an expired entry that is retried runs afresh, even at capacity', async () => {
+    let now = 0;
+    const ledger = new PostLedger<string, string>(() => now, 1_000, 1);
+    let runs = 0;
+    const work = async () => done(`run-${String(++runs)}`);
+    await ledger.run('a', 'f', work);
+    now = 5_000;
+    expect(await ledger.run('a', 'f', work)).toEqual({ kind: 'ran', settled: done('run-2'), replayed: false });
   });
 });

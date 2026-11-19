@@ -1,5 +1,6 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
+  type ExpectedAccount,
   POST_CODES,
   type PostAnswer,
   PostAnswerSchema,
@@ -53,7 +54,13 @@ export async function sendPost(
   client: PullsClient,
   address: PullAddress,
   payload: PostPayload,
-  request: { readonly requestId: string; readonly body: string; readonly postAnyway?: true },
+  request: {
+    readonly requestId: string;
+    readonly body: string;
+    /** The account the person was shown: the daemon refuses the post when the project posts as another by then. */
+    readonly account: ExpectedAccount;
+    readonly postAnyway?: true;
+  },
 ): Promise<PostAnswer> {
   const { kind, ...rest } = payload;
   return PostAnswerSchema.parse(
@@ -80,3 +87,6 @@ export function failureOf(cause: unknown): Failure {
 }
 
 export const isSecretStop = (failure: Failure): boolean => failure.code === POST_CODES.secretShaped;
+
+/** The daemon says the project posts as another account than the one on the button. Nothing was sent. */
+export const isAccountChanged = (failure: Failure): boolean => failure.code === POST_CODES.accountChanged;

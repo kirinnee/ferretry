@@ -70,6 +70,7 @@ export default implementDaemon(manifest, {
               return gate === undefined ? undefined : async draft => await gate.audit(draft);
             },
             ledger: newPostLedger(() => kernel.clock.nowMs()),
+            log: kernel.log,
           },
         },
         watch,

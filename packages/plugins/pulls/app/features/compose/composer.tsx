@@ -25,6 +25,7 @@ export function Composer({
   onPosted,
   onClose,
   closeLabel = 'Close',
+  blocked,
 }: {
   readonly payload: PostPayload;
   readonly value: string;
@@ -36,14 +37,22 @@ export function Composer({
   readonly onPosted?: () => void;
   readonly onClose?: () => void;
   readonly closeLabel?: string;
+  /** Why this cannot be posted as it stands (the lines were picked on an older commit): said, and the button is off. */
+  readonly blocked?: string | undefined;
 }) {
-  const { client, address, login, pullUrl, changed } = useCompose();
+  const { client, address, poster, recheckPoster, pullUrl, changed, reloadThreads } = useCompose();
+  const login = poster === undefined || poster === null ? poster : poster.login;
   const [preview, setPreview] = useState(false);
-  const { phase, post, postAgain, clear } = usePost(client, address, payload, changed, () => {
-    onChange('');
-    // The next thing to see is the empty box to write in, not an empty preview.
-    setPreview(false);
-    onPosted?.();
+  const { phase, post, postAgain, check, clear } = usePost(client, address, payload, poster, {
+    onChanged: changed,
+    onThreadsChanged: reloadThreads,
+    onAccountChanged: recheckPoster,
+    onPosted: () => {
+      onChange('');
+      // The next thing to see is the empty box to write in, not an empty preview.
+      setPreview(false);
+      onPosted?.();
+    },
   });
   const box = useRef<HTMLTextAreaElement>(null);
   // Opened by a person's press, so the box takes the cursor: they came here to type.
@@ -56,7 +65,7 @@ export function Composer({
   const over = length > MAX_POST_BODY;
   const blank = value.trim() === '';
   const busy = phase.status === 'posting';
-  const ready = login !== undefined && login !== null && !blank && !over && !busy;
+  const ready = login !== undefined && login !== null && !blank && !over && !busy && blocked === undefined;
   const posted = phase.status === 'posted' ? safeGithubUrl(phase.answer.url ?? '') : undefined;
 
   const change = (next: string): void => {
@@ -134,7 +143,13 @@ export function Composer({
             <Button onClick={() => box.current?.focus()} size="sm" type="button">
               Edit the text
             </Button>
-            <Button onClick={() => void post(value, true)} size="sm" type="button" variant="danger">
+            <Button
+              disabled={blocked !== undefined}
+              onClick={() => void post(value, true)}
+              size="sm"
+              type="button"
+              variant="danger"
+            >
               Post anyway
             </Button>
           </span>
@@ -149,16 +164,31 @@ export function Composer({
           <p className="m-0 flex items-start gap-xs font-semibold">
             <TriangleAlert aria-hidden="true" className="mt-0.5 shrink-0 text-warn" size={16} />
             <span>
-              Not sure this was posted: GitHub did not answer. The thread is being read again; if your comment is not
-              there, post it again.
+              {phase.check === 'reading'
+                ? 'Not sure this was posted: GitHub did not answer. Reading the thread again to see…'
+                : phase.check === 'read'
+                  ? 'Not sure this was posted: GitHub did not answer. The thread has been read again; if your comment is not there, post it again.'
+                  : 'Not sure this was posted: GitHub did not answer, and the thread could not be read again. Look on GitHub, or read it again.'}
             </span>
           </p>
-          <span>
-            <Button onClick={postAgain} size="sm" type="button">
-              It is not there: post again
-            </Button>
+          <span className="flex flex-wrap gap-xs">
+            {phase.check === 'read' && (
+              <Button disabled={blocked !== undefined} onClick={postAgain} size="sm" type="button">
+                It is not there: post again
+              </Button>
+            )}
+            {phase.check === 'unread' && (
+              <Button onClick={() => void check()} size="sm" type="button">
+                Read the thread again
+              </Button>
+            )}
           </span>
         </div>
+      )}
+      {blocked !== undefined && (
+        <p className="m-0 text-meta text-warn" data-compose-stale="" role="status">
+          {blocked}
+        </p>
       )}
       {/* One line is always kept for the result, so a post's answer does not push the button away. */}
       <div aria-live="polite" className="min-h-5 text-meta">

@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext } from 'react';
+import type { PosterAnswer } from '../../../contract/index.ts';
 import type { PullAddress, PullsClient } from './api.ts';
 import type { DiffRange } from './quote.ts';
 
@@ -8,12 +9,18 @@ export interface ComposeValue {
   readonly address: PullAddress;
   /** The PR's own address on GitHub: where the preview's "open on GitHub" links go. */
   readonly pullUrl: string;
-  /** The head commit a diff-line comment is made against. */
+  /** The head commit the page shows now (a diff-line comment is bound to the one it was selected on). */
   readonly headSha: string;
-  /** The GitHub login a post goes out as; `undefined` while it is being read, `null` when there is none to read. */
-  readonly login: string | null | undefined;
+  /** The account a post goes out as (id and login); `undefined` while it is being read, `null` when there is none. */
+  readonly poster: PosterAnswer | null | undefined;
+  /** Reads the account again (the daemon said it changed). */
+  readonly recheckPoster: () => void;
   /** The PR page reads itself again (a post changed it, or may have). */
   readonly changed: () => void;
+  /** The review threads are read again (the same reload `useThreads` takes through `reload`). */
+  readonly reloadThreads: () => void;
+  /** Counts the thread reloads asked for; `useThreads` reads again whenever it moves. */
+  readonly threadsReload: number;
   /** Adds a quote to the comment draft, opening it when it is closed. */
   readonly quote: (selected: string, range?: DiffRange) => void;
   /** Opens a comment on diff lines. `false` when another draft with text in it is open. */

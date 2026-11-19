@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { useState } from 'react';
 import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
-import type { ReviewThread } from '../../../contract/index.ts';
+import { PullPageAnswerSchema, type ReviewThread } from '../../../contract/index.ts';
 import type { PullAddress, PullsClient } from '../../../app/features/compose/api.ts';
 import { useCompose } from '../../../app/features/compose/context.tsx';
 import { ComposeDock, OpenComment } from '../../../app/features/compose/index.ts';
@@ -22,20 +23,64 @@ interface Call {
   readonly body: Record<string, unknown> | undefined;
 }
 
-/** A scripted client: the poster read answers a login, every post goes to `onPost` (which may hold, throw or answer). */
-function scripted(onPost: (call: Call, count: number) => unknown, login: string | Error = 'octo-fake') {
+const PAGE = PullPageAnswerSchema.parse({
+  kind: 'page',
+  pull: {
+    repo: { provider: 'github', owner: 'octo', name: 'demo' },
+    number: 7,
+    title: 'Add the thing',
+    author: { login: 'alice' },
+    state: 'open',
+    draft: false,
+    review: 'none',
+    ci: 'passing',
+    headSha: HEAD,
+    headRef: 'feature',
+    baseRef: 'main',
+    createdAt: '2026-02-01T10:00:00Z',
+    updatedAt: '2026-02-02T10:00:00Z',
+    url: 'https://github.com/octo/demo/pull/7',
+    body: '',
+    requestedReviewers: [],
+    commits: 1,
+    changedFiles: 1,
+    additions: 1,
+    deletions: 0,
+  },
+  comments: [],
+  reviews: [],
+  checks: { state: 'passing', total: 0, passed: 0, failed: 0, running: 0, queued: 0, items: [] },
+  truncated: false,
+  fromCache: false,
+});
+const THREADS = { threads: [], truncated: false, fetchedAt: '2026-11-19T00:00:00.000Z' };
+
+/**
+ * A scripted client: the poster read answers an account, every post goes to `onPost` (which may hold, throw or answer),
+ * and every other read (the page, the threads) goes to `read` and is listed in `reads`.
+ */
+function scripted(
+  onPost: (call: Call, count: number) => unknown,
+  login: string | Error | (() => string) = 'octo-fake',
+  read: (route: string, count: number) => unknown = route => (route.endsWith('/threads') ? THREADS : PAGE),
+) {
   const calls: Call[] = [];
+  const reads: string[] = [];
   const client: PullsClient = {
     call: (async (route: string, init?: { body?: Record<string, unknown> }) => {
       if (route.startsWith('GET') && route.endsWith('/poster')) {
         if (login instanceof Error) throw login;
-        return { login };
+        return { id: 'gha_4242', login: typeof login === 'function' ? login() : login };
+      }
+      if (route.startsWith('GET')) {
+        reads.push(route);
+        return await read(route, reads.length);
       }
       calls.push({ route, body: init?.body });
       return await onPost({ route, body: init?.body }, calls.length);
     }) as PullsClient['call'],
   };
-  return { client, calls };
+  return { client, calls, reads };
 }
 
 const refusal = (code: string, message: string, extra: object = {}) =>
@@ -57,6 +102,7 @@ function Probe() {
         type="button"
       />
       <OpenComment />
+      <span data-probe="reload">{compose.threadsReload}</span>
     </div>
   );
 }
@@ -144,7 +190,8 @@ describe('the comment box', () => {
     await settled(mounted, '[data-compose-posted]');
     expect(calls).toHaveLength(1);
     expect(calls[0]?.route).toBe('POST /v1/pulls/:project/:repo/:number/comment');
-    expect(Object.keys(calls[0]?.body ?? {}).sort()).toEqual(['body', 'requestId']);
+    expect(Object.keys(calls[0]?.body ?? {}).sort()).toEqual(['account', 'body', 'requestId']);
+    expect(calls[0]?.body?.account).toEqual({ id: 'gha_4242', login: 'octo-fake' });
     expect(calls[0]?.body?.body).toBe('Looks good to me.');
     expect(String(calls[0]?.body?.requestId)).toMatch(/^[A-Za-z0-9_-]{16,64}$/u);
     expect(mounted.container.querySelector<HTMLTextAreaElement>('[data-compose-box]')?.value).toBe('');
@@ -250,7 +297,7 @@ describe('the comment box', () => {
     await ready(mounted);
     await type(mounted, 'maybe');
     await tap(mounted);
-    await settled(mounted, '[data-compose-unknown]');
+    await settled(mounted, '[data-compose-unknown] button');
     expect(changed).toHaveLength(1);
     // Nothing was sent again on its own.
     expect(calls).toHaveLength(1);
@@ -275,7 +322,7 @@ describe('the comment box', () => {
     await ready(mounted);
     await type(mounted, 'hello');
     await tap(mounted);
-    await settled(mounted, '[data-compose-unknown]');
+    await settled(mounted, '[data-compose-unknown] button');
     await press(mounted, '[data-compose-unknown] button');
     await tap(mounted);
     await settled(mounted, '[data-compose-failed]');
@@ -441,6 +488,176 @@ describe('a reply under a thread', () => {
     await settled(mounted, '[data-compose-posted]');
     expect(calls[0]?.route).toBe('POST /v1/pulls/:project/:repo/:number/reply');
     expect(calls[0]?.body).toMatchObject({ body: 'thanks, fixed', threadId: 'PRRT_abc123' });
+    await mounted.unmount();
+  });
+});
+
+const lostAnswer = (_call: Call, count: number) => {
+  if (count === 1) throw refusal('carrier', 'the connection closed', { carrier: true });
+  return POSTED;
+};
+const unknownText = (mounted: Mounted) => mounted.container.querySelector('[data-compose-unknown]')?.textContent ?? '';
+
+describe('after an unknown answer', () => {
+  it('reads the thread again first, and offers "post again" only once it has been read', async () => {
+    let release: () => void = () => undefined;
+    const hold = new Promise<void>(resolve => (release = resolve));
+    const { client, reads } = scripted(lostAnswer, 'octo-fake', async route => {
+      await hold;
+      return route.endsWith('/threads') ? THREADS : PAGE;
+    });
+    const mounted = await open(client);
+    await press(mounted, '[data-compose-open]');
+    await ready(mounted);
+    await type(mounted, 'maybe');
+    await tap(mounted);
+    await settled(mounted, '[data-compose-unknown]');
+    // The read is in flight: there is nothing to decide on yet.
+    expect(unknownText(mounted)).toContain('Reading the thread again');
+    expect(mounted.container.querySelector('[data-compose-unknown] button')).toBeNull();
+    release();
+    await settled(mounted, '[data-compose-unknown] button');
+    expect(unknownText(mounted)).toContain('The thread has been read again');
+    // A PR comment's place is the page; the threads read is for replies and line comments.
+    expect(reads.every(route => route === 'GET /v1/pulls/:project/:repo/:number')).toBe(true);
+    expect(reads.length).toBeGreaterThan(0);
+    await mounted.unmount();
+  });
+
+  it("a reply reads the actual threads (not the page), and the page's thread list is told to reload", async () => {
+    const { client, reads, calls } = scripted(lostAnswer);
+    const mounted = await mount(
+      <ComposeDock
+        address={ADDRESS}
+        client={client}
+        headSha={HEAD}
+        onChanged={() => undefined}
+        pullUrl="https://github.com/octo/demo/pull/7"
+      >
+        <ReplyBox thread={THREAD} />
+        <Probe />
+      </ComposeDock>,
+    );
+    expect(mounted.container.querySelector('[data-probe="reload"]')?.textContent).toBe('0');
+    await press(mounted, '[data-reply-open]');
+    await ready(mounted);
+    await type(mounted, 'thanks');
+    await tap(mounted);
+    await settled(mounted, '[data-compose-unknown] button');
+    expect(reads).toEqual(['GET /v1/pulls/:project/:repo/:number/threads']);
+    expect(mounted.container.querySelector('[data-probe="reload"]')?.textContent).toBe('1');
+    expect(calls).toHaveLength(1);
+    await mounted.unmount();
+  });
+
+  it('when the thread cannot be read it says so, offers to read again, and "post again" waits for a read that worked', async () => {
+    const { client, reads } = scripted(lostAnswer, 'octo-fake', (_route, count) => {
+      if (count === 1) throw new Error('GitHub is not answering');
+      return PAGE;
+    });
+    const mounted = await open(client);
+    await press(mounted, '[data-compose-open]');
+    await ready(mounted);
+    await type(mounted, 'maybe');
+    await tap(mounted);
+    await settled(mounted, '[data-compose-unknown] button');
+    expect(unknownText(mounted)).toContain('could not be read again');
+    expect(unknownText(mounted)).toContain('Read the thread again');
+    expect(unknownText(mounted)).not.toContain('post again');
+    await press(mounted, '[data-compose-unknown] button');
+    await settleUntil(() => unknownText(mounted).includes('post again'), 'second read', interact);
+    expect(reads).toHaveLength(2);
+    await mounted.unmount();
+  });
+});
+
+describe('the account on the button', () => {
+  it('sends the account it showed; when the daemon says it changed, it is shown again and the next post is a new one', async () => {
+    let who = 'octo-fake';
+    const { client, calls } = scripted(
+      (_call, count) => {
+        if (count === 1) {
+          who = 'someone-else';
+          throw refusal(
+            'pulls_account_changed',
+            'the account for this project changed to @someone-else; check and post again',
+          );
+        }
+        return POSTED;
+      },
+      () => who,
+    );
+    const mounted = await open(client);
+    await press(mounted, '[data-compose-open]');
+    await ready(mounted);
+    await type(mounted, 'hello');
+    await tap(mounted);
+    await settled(mounted, '[data-compose-failed]');
+    expect(mounted.container.querySelector('[data-compose-failed]')?.textContent).toBe(
+      'the account for this project changed to @someone-else; check and post again',
+    );
+    // The label follows: the person sees who it would post as before tapping again.
+    await settleUntil(() => postButton(mounted).textContent?.includes('@someone-else') === true, 'new label', interact);
+    await tap(mounted);
+    await settled(mounted, '[data-compose-posted]');
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.body?.account).toEqual({ id: 'gha_4242', login: 'octo-fake' });
+    expect(calls[1]?.body?.account).toEqual({ id: 'gha_4242', login: 'someone-else' });
+    await mounted.unmount();
+  });
+});
+
+function Moving() {
+  const [head, setHead] = useState(HEAD);
+  return (
+    <>
+      <button data-probe="move" onClick={() => setHead('c'.repeat(40))} type="button" />
+      <ComposeDock
+        address={ADDRESS}
+        client={MOVING.client}
+        headSha={head}
+        onChanged={() => undefined}
+        pullUrl="https://github.com/octo/demo/pull/7"
+      >
+        <Probe />
+      </ComposeDock>
+    </>
+  );
+}
+let MOVING = scripted(() => POSTED);
+
+describe('lines picked on one commit', () => {
+  it('are posted against that commit; when the head moves the comment says so, will not post, and a new pick works', async () => {
+    MOVING = scripted(() => POSTED);
+    const mounted = await mount(<Moving />);
+    await press(mounted, '[data-probe="range"]');
+    await ready(mounted);
+    await type(mounted, 'rename this');
+    await press(mounted, '[data-probe="move"]');
+    expect(mounted.container.querySelector('[data-compose-stale]')?.textContent).toContain('select the lines again');
+    expect(postButton(mounted).disabled).toBe(true);
+    expect(MOVING.calls).toHaveLength(0);
+    // The words are kept; closing and picking again binds the lines to the commit the page shows now.
+    expect(mounted.container.querySelector<HTMLTextAreaElement>('[data-compose-box]')?.value).toBe('rename this');
+    await press(mounted, '[data-compose-dock] header button:last-child');
+    await press(mounted, '[data-probe="range"]');
+    expect(mounted.container.querySelector('[data-compose-stale]')).toBeNull();
+    await type(mounted, 'rename this');
+    await tap(mounted);
+    await settled(mounted, '[data-compose-posted]');
+    expect(MOVING.calls[0]?.body?.commitId).toBe('c'.repeat(40));
+    await mounted.unmount();
+  });
+
+  it('a comment on lines whose head has not moved posts against the commit it was picked on', async () => {
+    MOVING = scripted(() => POSTED);
+    const mounted = await mount(<Moving />);
+    await press(mounted, '[data-probe="range"]');
+    await ready(mounted);
+    await type(mounted, 'first');
+    await tap(mounted);
+    await settled(mounted, '[data-compose-posted]');
+    expect(MOVING.calls[0]?.body?.commitId).toBe(HEAD);
     await mounted.unmount();
   });
 });

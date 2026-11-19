@@ -5,6 +5,7 @@ import {
   type CallContext,
   decodeParameter,
   jsonResponse,
+  type Log,
   parseBody,
   type RouteHandler,
 } from '@ferretry/kernel/contract';
@@ -40,7 +41,12 @@ export interface PostServices {
   /** Gate's audit door, or nothing when Gate is not there: then no post is made, because none could be recorded. */
   readonly record: () => ((draft: AuditDraft) => Promise<void>) | undefined;
   readonly ledger: PostLedger<Posted, PostRefusal>;
+  /** Where a failed audit write is said, after the post it belongs to has gone out. */
+  readonly log: Pick<Log, 'error'>;
 }
+
+/** An outcome line is written again this many times before it is given up on (and said, loudly, in the log). */
+const OUTCOME_TRIES = 3;
 
 const param = (call: CallContext, name: string): string => decodeParameter(call.params.get(name) ?? '') ?? '';
 
@@ -65,8 +71,14 @@ async function addressOf(services: PostServices, call: CallContext) {
 }
 
 const sameAs = (job: PostJob, where: string): string => {
-  // What makes two taps the SAME post: where it goes and what it says. The request id and "post anyway" are not part.
-  const { requestId: _id, postAnyway: _anyway, ...rest } = job.request as typeof job.request & { postAnyway?: boolean };
+  // What makes two taps the SAME post: where it goes (the account included) and what it says. The request id, "post
+  // anyway" and the account the person was shown are not part.
+  const {
+    requestId: _id,
+    postAnyway: _anyway,
+    account: _shown,
+    ...rest
+  } = job.request as typeof job.request & { postAnyway?: boolean };
   return createHash('sha256')
     .update(JSON.stringify([job.kind, where, rest]))
     .digest('hex');
@@ -82,7 +94,14 @@ const sameAs = (job: PostJob, where: string): string => {
  */
 export function postRoutes(services: PostServices) {
   const post =
-    <S extends z.ZodType<{ requestId: string; body: string; postAnyway?: boolean | undefined }>>(
+    <
+      S extends z.ZodType<{
+        requestId: string;
+        body: string;
+        postAnyway?: boolean | undefined;
+        account: { id: string; login: string };
+      }>,
+    >(
       kind: PostJob['kind'],
       schema: S,
     ): RouteHandler =>
@@ -90,21 +109,54 @@ export function postRoutes(services: PostServices) {
       const request = (await parseBody(call.request, schema, BODY_LIMIT)) as z.output<S>;
       const { target, repo, number } = await addressOf(services, call);
       const record = services.record();
-      const where = `${target.project}/${repo.owner}/${repo.name}#${String(number)}`;
-      const audit = async (
-        outcome: 'succeeded' | 'refused' | 'failed',
-        detail: Record<string, string | number | boolean>,
-      ) =>
-        await record?.({
-          event: auditKind(PULLS_AUDIT.commentPosted),
-          actor: actorOf(call),
-          subject: target.project,
-          outcome,
-          detail: { repo: `${repo.owner}/${repo.name}`, number, kind, ...detail },
-        }).catch(() => undefined);
+      const where = `${target.project}/${target.account}/${repo.owner}/${repo.name}#${String(number)}`;
+      const detailOf = (extra: Record<string, string | number | boolean>) => ({
+        repo: `${repo.owner}/${repo.name}`,
+        number,
+        kind,
+        requestId: request.requestId,
+        account: target.account,
+        ...extra,
+      });
       // No post is made that could not be written down.
       if (record === undefined)
         throw new ApiError(503, 'this daemon cannot record a post yet, so it makes none', POST_CODES.notRecorded);
+      /** The line a post leaves once it is decided. A failed write is retried and then SAID: it is never silent. */
+      const audit = async (
+        outcome: 'succeeded' | 'refused' | 'failed',
+        detail: Record<string, string | number | boolean>,
+      ): Promise<void> => {
+        for (let attempt = 1; attempt <= OUTCOME_TRIES; attempt += 1) {
+          try {
+            await record({
+              event: auditKind(PULLS_AUDIT.commentPosted),
+              actor: actorOf(call),
+              subject: target.project,
+              outcome,
+              detail: detailOf(detail),
+            });
+            return;
+          } catch {
+            // tried again below
+          }
+        }
+        services.log.error('a post went out (or was refused) and its audit line could not be written', {
+          kind,
+          outcome,
+          requestId: request.requestId,
+          project: target.project,
+        });
+      };
+
+      // The account the person was shown is the one this post goes out as, or it does not go out.
+      if (request.account.id !== target.account || request.account.login !== target.login) {
+        await audit('refused', { reason: 'account-changed' });
+        throw new ApiError(
+          409,
+          `the account for this project changed to @${target.login}; check and post again`,
+          POST_CODES.accountChanged,
+        );
+      }
 
       if (request.postAnyway !== true && rawTextMayHold(request.body)) {
         await audit('refused', { reason: 'secret-shaped' });
@@ -113,8 +165,35 @@ export function postRoutes(services: PostServices) {
 
       const job = { kind, request } as PostJob;
       const ran = await services.ledger.run(request.requestId, sameAs(job, where), async () => {
+        // The intent is on the log BEFORE anything is sent; if it cannot be written nothing is sent (fail closed).
+        try {
+          await record({
+            event: auditKind(PULLS_AUDIT.commentIntent),
+            actor: actorOf(call),
+            subject: target.project,
+            outcome: 'succeeded',
+            detail: detailOf({}),
+          });
+        } catch {
+          return {
+            kind: 'refused',
+            refusal: {
+              status: 503,
+              code: POST_CODES.notRecorded,
+              message: 'this daemon could not record that post, so it was not made',
+            },
+          };
+        }
         return await sendPost(services.github, { account: target.account, repo, number }, job);
       });
+      if (ran.kind === 'busy') {
+        await audit('refused', { reason: 'busy' });
+        throw new ApiError(
+          503,
+          'too many posts are waiting to be confirmed; try again in a few minutes',
+          POST_CODES.busy,
+        );
+      }
       if (ran.kind === 'mismatch')
         throw new ApiError(409, 'that request was already used for a different comment', POST_CODES.requestReused);
       const { settled, replayed } = ran;
@@ -155,7 +234,7 @@ export function postRoutes(services: PostServices) {
       const account = (await services.accounts.list()).find(candidate => candidate.id === target.account);
       if (account === undefined)
         throw new ApiError(409, 'the GitHub account linked to this project was removed', PULLS_CODES.noAccount);
-      return jsonResponse(PosterAnswerSchema.parse({ login: account.login }));
+      return jsonResponse(PosterAnswerSchema.parse({ id: account.id, login: account.login }));
     }) satisfies RouteHandler,
   } satisfies Record<string, RouteHandler>;
 }

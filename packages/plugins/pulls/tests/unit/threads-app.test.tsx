@@ -200,12 +200,21 @@ describe('useThreads', () => {
     client,
     updatedAt,
     number = 7,
+    reload,
   }: {
     client: { call: () => Promise<unknown> };
     updatedAt: string;
     number?: number;
+    reload?: number;
   }) => {
-    const state = useThreads(client as never, { project: 'p1', owner: 'octo', name: 'demo', number, updatedAt });
+    const state = useThreads(client as never, {
+      project: 'p1',
+      owner: 'octo',
+      name: 'demo',
+      number,
+      updatedAt,
+      ...(reload === undefined ? {} : { reload }),
+    });
     const count = state.status === 'loading' ? 'loading' : String(state.answer?.threads.length ?? 'none');
     return (
       <p data-probe={state.status}>
@@ -243,6 +252,38 @@ describe('useThreads', () => {
       interact,
     );
     expect(text(mounted.container)).toBe('2');
+  });
+});
+
+describe('useThreads reload', () => {
+  it('reads again when a reload is asked for, though the PR has not changed', async () => {
+    let reads = 0;
+    const client = {
+      call: async () => {
+        reads += 1;
+        return {
+          threads: Array.from({ length: reads }, (_, i) => thread(`T${i}`)),
+          truncated: false,
+          fetchedAt: '2026-11-19T00:00:00.000Z',
+        };
+      },
+    };
+    const Probe = ({ reload }: { reload: number }) => {
+      const state = useThreads(client as never, {
+        project: 'p1',
+        owner: 'octo',
+        name: 'demo',
+        number: 7,
+        updatedAt: 'a',
+        reload,
+      });
+      return <p data-probe="">{state.status === 'ready' ? String(state.answer.threads.length) : state.status}</p>;
+    };
+    const mounted = await mount(<Probe reload={0} />);
+    await settleUntil(() => mounted.container.textContent === '1', 'the first read', interact);
+    await mounted.render(<Probe reload={1} />);
+    await settleUntil(() => mounted.container.textContent === '2', 'the read the reload asked for', interact);
+    expect(reads).toBe(2);
   });
 });
 

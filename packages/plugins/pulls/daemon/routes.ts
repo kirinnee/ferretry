@@ -18,7 +18,7 @@ export interface PullsServices {
   readonly accounts: Pick<GitAccountsApi, 'list'>;
   readonly nowMs: () => number;
   /** E7: what a post needs besides the client (Gate's audit door, the exactly-once ledger). */
-  readonly post: Pick<PostServices, 'record' | 'ledger'>;
+  readonly post: Pick<PostServices, 'record' | 'ledger' | 'log'>;
 }
 
 /** Each unit adds ONE line here, naming its routes. */

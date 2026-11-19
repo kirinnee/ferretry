@@ -42,7 +42,7 @@ function scene(threads: readonly ReviewThread[]) {
           fromCache: false,
         };
       if (route.endsWith('/threads')) return { threads, truncated: false, fetchedAt: '2026-11-01T10:00:00Z' };
-      if (route.endsWith('/poster')) return { login: 'octo-fake' };
+      if (route.endsWith('/poster')) return { id: 'gha_4242', login: 'octo-fake' };
       posts.push({ route, body: init?.body });
       return { kind: 'posted', id: 'PRRC_1', replayed: false };
     }) as PullsClient['call'],

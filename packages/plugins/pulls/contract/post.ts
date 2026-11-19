@@ -17,6 +17,10 @@ export const POST_CODES = {
   requestReused: 'pulls_request_reused',
   /** The post could not be recorded in the audit log, so it was not sent. */
   notRecorded: 'pulls_not_recorded',
+  /** The account this project posts as is not the one the person was shown. */
+  accountChanged: 'pulls_account_changed',
+  /** Too many posts are held at once; a new one waits (a repeat of one already held is still answered). */
+  busy: 'pulls_post_busy',
 } as const;
 
 /** The sentence a secret-shaped body is stopped with (the app shows the daemon's word as it is). */
@@ -31,7 +35,19 @@ const BodySchema = z
   .max(MAX_POST_BODY)
   .refine(text => text.trim() !== '', 'a comment needs some text');
 
-const Common = { requestId: RequestIdSchema, body: BodySchema, postAnyway: z.boolean().optional() } as const;
+/** The account the person was SHOWN ("Post as @login"): the post is refused when the project posts as another by then. */
+const ExpectedAccountSchema = z.strictObject({
+  id: z.string().regex(/^gha_[0-9]{1,20}$/u),
+  login: z.string().min(1).max(100),
+});
+export type ExpectedAccount = z.infer<typeof ExpectedAccountSchema>;
+
+const Common = {
+  requestId: RequestIdSchema,
+  body: BodySchema,
+  postAnyway: z.boolean().optional(),
+  account: ExpectedAccountSchema,
+} as const;
 
 /** A comment in the PR's conversation. */
 export const PostCommentRequestSchema = z.strictObject({ ...Common });
@@ -85,5 +101,5 @@ export const PostAnswerSchema = z.discriminatedUnion('kind', [PostedAnswerSchema
 export type PostAnswer = z.infer<typeof PostAnswerSchema>;
 
 /** Which account a post goes out as, so the button can say so before the person taps it. */
-export const PosterAnswerSchema = z.strictObject({ login: z.string().min(1).max(100) });
+export const PosterAnswerSchema = ExpectedAccountSchema;
 export type PosterAnswer = z.infer<typeof PosterAnswerSchema>;

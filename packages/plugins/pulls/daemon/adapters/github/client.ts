@@ -1,12 +1,23 @@
 import { ApiError, type Log } from '@ferretry/kernel/contract';
 import { err, ok, type Result } from '@ferretry/std';
-import type { GitAccountId, GitAccountsApi, GitApiAnswer } from '@ferretry/plugin-git-accounts/contract';
+import {
+  GIT_ACCOUNT_CODES,
+  type GitAccountId,
+  type GitAccountsApi,
+  type GitApiAnswer,
+} from '@ferretry/plugin-git-accounts/contract';
 import { GithubBodySchema, PULLS_CODES, type PullsCode, type RateResource } from '../../../contract/index.ts';
 import type { PullsCache } from '../../lib/cache/store.ts';
 import { RateBudget } from './budget.ts';
 import { nextPagePath } from './link.ts';
 
 /** What a read says when it did not answer. `message` is ours, never GitHub's text. */
+/** What the git-accounts seam says when it refuses a call before it sends anything. */
+const SEAM_REFUSALS: ReadonlySet<string | undefined> = new Set([
+  GIT_ACCOUNT_CODES.invalidRequest,
+  GIT_ACCOUNT_CODES.unknownAccount,
+]);
+
 export interface ReadFailure {
   readonly code: PullsCode;
   readonly status?: number;
@@ -181,9 +192,10 @@ export class GithubClient {
     try {
       answer = await this.accounts.api(account, { method: 'POST', path: call.path, body: call.body });
     } catch (error) {
-      // The seam refuses before it sends (a path it does not allow, a body too large, an account that is gone). A
-      // transport failure or timeout (a 502 from it) can come AFTER the request left, so that one stays unknown.
-      const sure = error instanceof TypeError || (error instanceof ApiError && error.status !== 502);
+      // Only the seam's OWN refusals, made before it opens a connection (a path it does not allow, a body too large, an
+      // account or token that is gone), prove nothing left. Anything else (a transport failure, a timeout, a reply that
+      // could not be read, a bug) can come AFTER the request reached GitHub, so it stays unknown.
+      const sure = error instanceof ApiError && SEAM_REFUSALS.has(error.code);
       this.log.warn('a GitHub write did not answer', { reason: error instanceof Error ? error.name : 'error' });
       return sure
         ? { kind: 'unsent', failure: { code: PULLS_CODES.refused, message: 'that GitHub call could not be made' } }
