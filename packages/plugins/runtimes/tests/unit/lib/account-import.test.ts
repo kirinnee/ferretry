@@ -337,10 +337,13 @@ describe('planImport — instructions and harness choices', () => {
       { digest },
     );
 
-    // Assert — a lone harness's things stay generic.
+    // Assert — a lone harness's things are its own, named and scoped to it.
     should(plan.imported).deepEqual(['claude']);
-    should(component(plan, 'instructions', 'main')).deepEqual({ text: 'claude words' });
-    should(component(plan, 'skills', 'skills')).deepEqual({ items: ['a'] });
+    should(component(plan, 'instructions', 'claude-instructions')).deepEqual({
+      text: 'claude words',
+      harness: 'claude',
+    });
+    should(component(plan, 'skills', 'claude-skills')).deepEqual({ items: ['a'], harness: 'claude' });
     should(Object.keys(plan.runtimes)).deepEqual(['claude-default']);
     should(plan.notes).containEql({ harness: 'codex', text: "Codex isn't installed · Install later in Settings." });
     should(plan.preview.harnesses[1]).deepEqual({
@@ -554,7 +557,7 @@ describe('planImport — documents it could not use', () => {
 
     // Assert
     should(plan.preview.harnesses[0]?.mcpServers).deepEqual(['withenv']);
-    should(component(plan, 'mcp', 'withenv')).deepEqual({ command: 'run' });
+    should(component(plan, 'mcp', 'withenv')).deepEqual({ command: 'run', harness: 'claude' });
     should(plan.warnings['mcp/withenv']).deepEqual([
       'Left out: withenv.env.bad-name (not an environment variable name).',
     ]);
@@ -687,7 +690,7 @@ describe('planImport — Import again (O6)', () => {
   });
 
   it('should take the next free name beside a component the person made themselves', () => {
-    // Arrange — the person's own "main" and "claude-settings", and a profile called default.
+    // Arrange — the person's own "claude-instructions" and "claude-settings", and a profile called default.
     const own = mergeImport(undefined, planImport([claude({ instructions: text('/o', 'mine') })], { digest }));
     const scans = [
       claude({
@@ -708,8 +711,8 @@ describe('planImport — Import again (O6)', () => {
     const plan = planImport(scans, { digest, existing: personal });
 
     // Assert
-    should(component(plan, 'instructions', 'main-2')).deepEqual({ text: 'theirs' });
-    should(plan.files.map(file => file.path)).not.containEql('components/instructions/main-2.md');
+    should(component(plan, 'instructions', 'claude-instructions-2')).deepEqual({ text: 'theirs', harness: 'claude' });
+    should(plan.files.map(file => file.path)).not.containEql('components/instructions/claude-instructions-2.md');
     should(component(plan, 'settings', 'claude-settings-2')).deepEqual({
       harness: 'claude',
       file: 'components/settings/claude-settings-2.json',
@@ -750,7 +753,9 @@ describe('planImport — Import again (O6)', () => {
 
     // Assert
     should(again.profiles).deepEqual({
-      'claude-default': { layers: ['instructions/main', 'modelSets/claude-models', 'skills/skills'] },
+      'claude-default': {
+        layers: ['instructions/claude-instructions', 'modelSets/claude-models', 'skills/claude-skills'],
+      },
     });
   });
 });
@@ -857,21 +862,19 @@ describe('secret names', () => {
 
 describe('planImport — one profile per harness (P7)', () => {
   it('should make a profile for a harness imported for the first time from what an earlier import made', () => {
-    // Arrange — Claude alone first, so its instructions are generic and its profile is Claude only.
+    // Arrange — Claude alone first: its instructions are Claude's own, so Codex's profile is not handed them.
     const first = planImport([claude({ instructions: text('/c', 'shared words') })], { digest });
     const existing = mergeImport(undefined, first);
 
     // Act
-    const again = planImport([claude({ instructions: text('/c', 'shared words') }), codex()], {
-      digest,
-      existing,
-      record: first.record,
-      include: ['codex'],
-    });
+    const again = planImport(
+      [claude({ instructions: text('/c', 'shared words') }), codex({ instructions: text('/x', 'codex words') })],
+      { digest, existing, record: first.record, include: ['codex'] },
+    );
 
-    // Assert — Codex gets the generic instructions the first import made, and its own model set.
+    // Assert — Codex gets its own instructions and model set, never Claude's instructions.
     should(again.profiles).deepEqual({
-      'codex-default': { layers: ['instructions/main', 'modelSets/codex-models'] },
+      'codex-default': { layers: ['instructions/codex-instructions', 'modelSets/codex-models'] },
     });
     should(again.runtimes).deepEqual({
       'codex-default': { credential: 'codex-you', profile: 'codex-default', agent: true },
@@ -928,5 +931,73 @@ describe('planImport — one profile per harness (P7)', () => {
     should(again.record.profile).equal('default');
     should(again.record.profiles).deepEqual({ claude: 'default', codex: 'default' });
     should(again.duplicates.map(duplicate => duplicate.existing)).deepEqual(['claude-default', 'codex-default']);
+  });
+});
+
+describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
+  const claudeScan = (body = 'claude words') =>
+    claude({ instructions: text('/c', body), skills: [{ item: 'x', source: '/x', digest: 'x' }] });
+  const codexScan = () =>
+    codex({ instructions: text('/a', 'codex words'), skills: [{ item: 'y', source: '/y', digest: 'y' }] });
+
+  it('should add the second tool its own instructions and skills, and leave the first tool its own', () => {
+    // Arrange — Claude applied alone: instructions A + skill x.
+    const first = planImport([claudeScan(), codex()], { digest, include: ['claude'] });
+    const afterClaude = mergeImport(undefined, first);
+
+    // Act — then a rescan, and Codex alone: instructions B + skill y.
+    const second = planImport([claudeScan(), codexScan()], {
+      digest,
+      existing: afterClaude,
+      record: mergeImportRecord(first),
+      include: ['codex'],
+    });
+    const afterCodex = mergeImport(afterClaude, second);
+
+    // Assert — new items, not updates of Claude's.
+    should(second.updates).deepEqual([]);
+    should(component(second, 'instructions', 'codex-instructions')).deepEqual({
+      text: 'codex words',
+      harness: 'codex',
+    });
+    should(component(second, 'skills', 'codex-skills')).deepEqual({ items: ['y'], harness: 'codex' });
+    should(afterCodex.components.instructions['claude-instructions']).deepEqual({
+      text: 'claude words',
+      harness: 'claude',
+    });
+    should(afterCodex.profiles['claude-default']?.layers).containEql('instructions/claude-instructions');
+    should(afterCodex.profiles['claude-default']?.layers).containEql('skills/claude-skills');
+    should(afterCodex.profiles['codex-default']?.layers).deepEqual([
+      'instructions/codex-instructions',
+      'skills/codex-skills',
+      'modelSets/codex-models',
+    ]);
+    should(second.files.map(file => file.path)).containEql('skills/y');
+    should(first.files.map(file => file.path)).containEql('skills/x');
+  });
+
+  it('should update the first tool its own item when it is imported again with changed text', () => {
+    // Arrange — both applied in turn.
+    const first = planImport([claudeScan(), codexScan()], { digest, include: ['claude'] });
+    const afterClaude = mergeImport(undefined, first);
+    const second = planImport([claudeScan(), codexScan()], {
+      digest,
+      existing: afterClaude,
+      record: mergeImportRecord(first),
+      include: ['codex'],
+    });
+    const afterCodex = mergeImport(afterClaude, second);
+
+    // Act — Claude's CLAUDE.md changed.
+    const again = planImport([claudeScan('claude words, edited'), codexScan()], {
+      digest,
+      existing: afterCodex,
+      record: mergeImportRecord(second),
+      include: ['claude'],
+    });
+
+    // Assert — only Claude's own instructions are offered as an update.
+    should(again.updates.map(update => update.reference)).deepEqual(['instructions/claude-instructions']);
+    should(again.updates[0]?.component.value).deepEqual({ text: 'claude words, edited', harness: 'claude' });
   });
 });

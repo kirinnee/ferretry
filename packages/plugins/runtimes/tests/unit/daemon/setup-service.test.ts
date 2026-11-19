@@ -514,7 +514,7 @@ describe('scan', () => {
     const scan = await service.scan();
 
     // Assert
-    should(scan.updates.map(update => update.reference)).deepEqual(['instructions/main']);
+    should(scan.updates.map(update => update.reference)).deepEqual(['instructions/claude-instructions']);
     should(scan.runtimes).deepEqual([]);
   });
 
@@ -1079,9 +1079,9 @@ describe('the setup.import executor', () => {
     ];
     const { description } = await importOnce(
       service,
-      IMPORT({ acceptedUpdates: ['instructions/main'], addDuplicates: true }),
+      IMPORT({ acceptedUpdates: ['instructions/claude-instructions'], addDuplicates: true }),
     );
-    should(description).containEql('Updates instructions/main from its changed source.');
+    should(description).containEql('Updates instructions/claude-instructions from its changed source.');
     const second = applied[1]?.documents ?? [];
     should(configTextOf(second)).containEql('Be kinder.');
     should(configTextOf(second)).containEql('claude-default-2');
@@ -1116,7 +1116,7 @@ describe('the setup.import executor', () => {
     ];
 
     // Act — the twin runtime is not added again, so only the update lands.
-    const { summary } = await importOnce(service, IMPORT({ acceptedUpdates: ['instructions/main'] }));
+    const { summary } = await importOnce(service, IMPORT({ acceptedUpdates: ['instructions/claude-instructions'] }));
 
     // Assert
     should(summary).equal('Imported into studio.');
@@ -2188,7 +2188,7 @@ describe('the import record, as a scan reads it', () => {
   };
 
   it('should offer the change when the record is intact', async () => {
-    should(await offeredWith(record => record)).deepEqual(['instructions/main']);
+    should(await offeredWith(record => record)).deepEqual(['instructions/claude-instructions']);
   });
 
   it('should treat a record it cannot read as no record, so nothing is offered as an update', async () => {
@@ -2209,7 +2209,7 @@ describe('the import record, as a scan reads it', () => {
         'mcp/nodigest': { sources: [], digest: 4 },
       },
     }));
-    should(offered).deepEqual(['instructions/main']);
+    should(offered).deepEqual(['instructions/claude-instructions']);
   });
 
   it('should read the profile each harness got, keeping only a name per known harness (P7)', async () => {
@@ -2219,11 +2219,13 @@ describe('the import record, as a scan reads it', () => {
         profile: 'default',
         profiles: { claude: 'claude-default', codex: 3, other: 'x' },
       })),
-    ).deepEqual(['instructions/main']);
+    ).deepEqual(['instructions/claude-instructions']);
     should(await offeredWith(record => ({ ...record, profile: 7, profiles: { codex: 1 } }))).deepEqual([
-      'instructions/main',
+      'instructions/claude-instructions',
     ]);
-    should(await offeredWith(record => ({ ...record, profiles: 'nope' }))).deepEqual(['instructions/main']);
+    should(await offeredWith(record => ({ ...record, profiles: 'nope' }))).deepEqual([
+      'instructions/claude-instructions',
+    ]);
   });
 });
 
@@ -3394,7 +3396,7 @@ describe('the setup.import executor, components another plugin owns', () => {
     should(door.calls.map(call => call.file).toSorted()).eql([
       'claude-code/settings/claude-settings.yaml',
       'mcp/github.yaml',
-      'skills/skills.yaml',
+      'skills/claude-skills.yaml',
     ]);
     should(description).containEql('Hands 3 parts to the parts of Ferretry that own them');
     should(summary).containEql('Written by the parts that own them:');
@@ -3440,14 +3442,14 @@ describe('the setup.import executor, components another plugin owns', () => {
     const { summary } = await importOnce(service);
 
     // Assert
-    should(summary).containEql('Written by the parts that own them: skills/skills.yaml.');
+    should(summary).containEql('Written by the parts that own them: skills/claude-skills.yaml.');
     should(summary).containEql('Held until you confirm: claude-code/settings/claude-settings.yaml.');
     should(summary).containEql('Not written: mcp/github.yaml (the server is not valid).');
     should(summary).not.containEql('settings file held');
     should(applied).have.length(1);
     const model = rawModelOf(applied[0]?.documents ?? []);
     for (const profile of Object.values(model.profiles)) should(profile.layers).not.containEql('mcp/github');
-    should(Object.values(model.profiles).some(profile => profile.layers.includes('skills/skills'))).be.true();
+    should(Object.values(model.profiles).some(profile => profile.layers.includes('skills/claude-skills'))).be.true();
   });
 
   it('should refuse a document the owner refuses for a raw secret, and never echo the value in the answer', async () => {
@@ -3964,11 +3966,11 @@ describe('the setup.import executor, a skill an owner serves', () => {
       }),
       codexScan(),
     ];
-    should((await service.scan()).updates.map(update => update.reference)).containEql('skills/skills');
+    should((await service.scan()).updates.map(update => update.reference)).containEql('skills/claude-skills');
     const before = door.calls.length;
 
     // Act
-    const change = IMPORT({ acceptedUpdates: ['skills/skills'] });
+    const change = IMPORT({ acceptedUpdates: ['skills/claude-skills'] });
     await service.executors.setup.describe(change, MACHINE);
     await service.executors.setup.execute(change, MACHINE);
 
