@@ -26,6 +26,8 @@ import { configurationLanded } from './failed-apply.ts';
 export interface NotInEffect {
   readonly refused: ReadonlySet<string>;
   readonly held: ReadonlySet<string>;
+  /** The owner's own items each reference's write created (by reference), for the import record to keep. */
+  readonly created?: ReadonlyMap<string, readonly string[]>;
 }
 
 const NOTHING_HELD: NotInEffect = { refused: new Set(), held: new Set() };
@@ -56,6 +58,8 @@ export async function composeOwned(input: {
   readonly documents: (model: AccountModel, outcome: NotInEffect) => Promise<readonly FleetDocumentWrite[]>;
   /** The references (`kind/name`) of accepted updates: handed over even when their model value did not move. */
   readonly touched?: readonly string[];
+  /** The owner's own items an earlier import created through a component, by reference (the import record's). */
+  readonly ownedOf?: (reference: string) => readonly string[];
 }): Promise<{ readonly documents: readonly FleetDocumentWrite[]; readonly owners?: OwnedComponents }> {
   const { before, model } = input;
   const owned = input.enabled ? ownerReferences(before, model, input.touched) : [];
@@ -63,7 +67,7 @@ export async function composeOwned(input: {
   return {
     documents: await input.documents(withComponentsOf(model, before, owned), NOTHING_HELD),
     owners: {
-      writes: ownerWrites(before, model, input.assetText, input.assetFiles, input.touched),
+      writes: ownerWrites(before, model, input.assetText, input.assetFiles, input.touched, input.ownedOf),
       rebuild: async outcome => {
         const left = owned.filter(({ kind, name }) => outcome.refused.has(`${kind}/${name}`));
         const kept = owned.filter(({ kind, name }) => !outcome.refused.has(`${kind}/${name}`));
@@ -111,6 +115,7 @@ export async function handOver(input: {
   const noted: string[] = [];
   const left = new Set<string>();
   const heldReferences = new Set<string>();
+  const created = new Map<string, readonly string[]>();
   for (const write of owners.writes) {
     const answer =
       write.text === undefined
@@ -119,6 +124,7 @@ export async function handOver(input: {
     if (answer.outcome !== 'refused') {
       (answer.outcome === 'written' ? written : held).push(write.file);
       if (answer.outcome === 'held') heldReferences.add(write.reference);
+      if (answer.created !== undefined && answer.created.length > 0) created.set(write.reference, answer.created);
       for (const warning of answer.warnings ?? []) noted.push(`${write.file} (${say(warning)})`);
       if (write.skipped !== undefined)
         noted.push(`${write.file} (hidden files not handed over: ${say(write.skipped.join(', '))})`);
@@ -128,9 +134,9 @@ export async function handOver(input: {
     }
   }
   const rebuilt =
-    left.size === 0 && heldReferences.size === 0
+    left.size === 0 && heldReferences.size === 0 && created.size === 0
       ? applied
-      : await owners.rebuild({ refused: left, held: heldReferences });
+      : await owners.rebuild({ refused: left, held: heldReferences, created });
   // The fleet is built from what the owners report in effect, never from what the import asked for: a held component
   // is not in effect yet, an owner may have written less than it was given, and a prior version stays active.
   const taken = owners.writes.filter(write => !left.has(write.reference));
@@ -168,6 +174,7 @@ export async function handOver(input: {
           await owners.rebuild({
             refused: new Set([...left, ...vanished.map(write => write.reference)]),
             held: heldReferences,
+            created,
           })
         ).documents;
   return {
@@ -200,10 +207,14 @@ export function recordText(
       .map(update => update.reference)
       .filter(reference => !outcome.refused.has(reference) && !outcome.held.has(reference)),
   );
+  // What the owners created is kept with the entry, beside what an earlier import created, so a later update replaces only those.
   const components = Object.fromEntries(
-    Object.entries(merged.components).filter(
-      ([reference]) => offered.has(reference) || !outcome.refused.has(reference),
-    ),
+    Object.entries(merged.components)
+      .filter(([reference]) => offered.has(reference) || !outcome.refused.has(reference))
+      .map(([reference, entry]) => {
+        const owned = [...new Set([...(entry.owned ?? []), ...(outcome.created?.get(reference) ?? [])])];
+        return [reference, owned.length === 0 ? entry : { ...entry, owned }];
+      }),
   );
   return `${JSON.stringify({ ...merged, components }, null, 2)}\n`;
 }

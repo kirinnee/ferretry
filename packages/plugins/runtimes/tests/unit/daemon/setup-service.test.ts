@@ -3976,6 +3976,41 @@ describe('the setup.import executor, a skill an owner serves', () => {
     should(skillLinks(applied)).eql(['/state/fleet/assets/skills/review']);
   });
 
+  it('should keep what an owner created in the import record and hand it back with an accepted update', async () => {
+    // Arrange — the Skills owner answers that it installed "review" for the first import.
+    const door = reportingOwners(write =>
+      write.kind === 'skills' ? { outcome: 'written', created: ['review'] } : { outcome: 'written' },
+    );
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    state.scans = ownedScans();
+    await importOnce(service);
+    const first = applied[0]?.documents ?? [];
+    for (const document of first) state.assets[document.path] = document.content;
+    state.reading = door.readingOf(first);
+    const recorded = JSON.parse(state.assets[RECORD_PATH] ?? '{}') as {
+      components: Record<string, { owned?: string[] }>;
+    };
+
+    // Act — the host's skill changes and the person accepts the update.
+    state.scans = [
+      claudeScan({
+        mcp: { kind: 'text', source: '/person/.claude.json', text: MCP_JSON, bytes: MCP_JSON.length },
+        skills: [{ item: 'review', source: '/person/.claude/skills/review', digest: 'skill-digest-3' }],
+      }),
+      codexScan(),
+    ];
+    const before = door.calls.length;
+    await importOnce(service, IMPORT({ acceptedUpdates: ['skills/claude-skills'] }));
+
+    // Assert
+    should(recorded.components['skills/claude-skills']?.owned).eql(['review']);
+    const handed = door.calls.slice(before).filter(call => call.kind === 'skills');
+    should(handed[0]?.replace).be.true();
+    should(handed[0]?.owned).eql(['review']);
+    should(door.calls.slice(0, before).every(call => call.owned === undefined)).be.true();
+  });
+
   it('should replace the skills item with a newly added skill when the person accepts it, leaving the unticked one out', async () => {
     // Arrange — "review" imported with "skip" unticked; the host then gains "claude-new".
     const door = reportingOwners();

@@ -11,7 +11,9 @@
  *
  * Create only: every file is written with `ifMatch: 'absent'`, so an import never replaces an item it did not make (a
  * name taken, even a moment ago, is refused in a sentence). The ONE exception is an update the person accepted
- * (`options.replace`): each item is then replaced, pinned to its current etag. The sentences name rules and keys, never a value.
+ * (`options.replace`): each item an import made (the component's own item, or one `options.owned` names) is then
+ * replaced, pinned to its current etag; an item that exists and was NOT brought in by an import is left exactly as it is,
+ * in a sentence. The sentences name rules and keys, never a value.
  */
 import type { ConfigCollectionDef, ConfigPort, ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import type { ComponentPutOptions, ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
@@ -55,10 +57,19 @@ export function codexSettingsPut(
     const existing = config.collection(CODEX_SETTINGS as ConfigCollectionDef<SettingsItem>);
     const warnings = [...made.warnings];
     const failures: string[] = [];
+    const wroteNames: string[] = [];
+    const kept: string[] = [];
     let wrote = 0;
     let held = false;
     for (const { name: itemName, item } of made.items) {
-      const replacing = options?.replace === true && existing.has(itemName);
+      const replacing =
+        options?.replace === true &&
+        existing.has(itemName) &&
+        (itemName === name || (options.owned ?? []).includes(itemName));
+      if (options?.replace === true && existing.has(itemName) && !replacing) {
+        kept.push(`${itemName} already exists and was not brought in by an import, so it was left as it is`);
+        continue;
+      }
       const answer =
         existing.has(itemName) && !replacing
           ? taken(itemName)
@@ -71,16 +82,18 @@ export function codexSettingsPut(
       if (!answer.wrote) failures.push(answer.reason);
       else {
         wrote += 1;
+        wroteNames.push(itemName);
         held ||= answer.held;
       }
     }
-    if (wrote === 0) return { ok: false, reason: failures.join('; ') };
+    if (wrote === 0) return { ok: false, reason: [...failures, ...kept].join('; ') };
     return {
       ok: true,
       ...(held ? { held: true as const } : {}),
-      ...(failures.length + warnings.length === 0
+      created: wroteNames,
+      ...(failures.length + warnings.length + kept.length === 0
         ? {}
-        : { warnings: [...warnings, ...failures.map(reason => `Not imported: ${reason}`)] }),
+        : { warnings: [...warnings, ...kept, ...failures.map(reason => `Not imported: ${reason}`)] }),
     };
   };
 }
