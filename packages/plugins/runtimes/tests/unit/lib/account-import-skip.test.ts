@@ -97,7 +97,10 @@ describe('planImport — items the person skipped', () => {
   it('should leave a skipped skill out of the plan, its folder copy included', () => {
     const plan = planImport([claude()], { digest, skip: [importNamedItemId('claude-code', 'skill', 'deploy')] });
 
-    should(plan.components.find(item => item.kind === 'skills')?.value).deepEqual({ items: ['review'] });
+    should(plan.components.find(item => item.kind === 'skills')?.value).deepEqual({
+      items: ['review'],
+      harness: 'claude',
+    });
     should(plan.files.map(file => file.path)).not.containEql('skills/deploy');
     should(plan.files.map(file => file.path)).containEql('skills/review');
   });

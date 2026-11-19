@@ -913,10 +913,12 @@ function instructionsCandidates(harvests: readonly HarnessHarvest[]): {
   };
   if (first === undefined) return { candidates: [] };
   if (second === undefined) {
-    // Only one harness has instructions: they stay that harness's, so the other is not handed them.
-    const narrowed = harvests.length > 1 ? first.harness : undefined;
-    const name = narrowed === undefined ? IMPORT_NAMES.sharedInstructions : harnessNamed(first.harness, 'instructions');
-    return { candidates: [make(name, first.text, [first.source], narrowed)] };
+    // Only one harness has instructions: they are that harness's own — named and scoped to it, even when it is the only
+    // harness this pass imports — so a later import of the other tool adds ITS items instead of reading as an update of
+    // these, and its profile is never handed them.
+    return {
+      candidates: [make(harnessNamed(first.harness, 'instructions'), first.text, [first.source], first.harness)],
+    };
   }
   if (sameText(first.text, second.text)) {
     return {
@@ -939,7 +941,6 @@ function mcpCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candi
     for (const server of entry.mcp)
       byName.set(server.name, [...(byName.get(server.name) ?? []), { harness: entry.harness, server }]);
   }
-  const both = harvests.length > 1;
   const candidates: Candidate[] = [];
   const make = (name: string, server: HarnessHarvest['mcp'][number], sources: string[], harness?: HarnessKind) => {
     const value: McpComponent = { ...server.value, ...(harness === undefined ? {} : { harness }) };
@@ -955,7 +956,7 @@ function mcpCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candi
     const [first, second] = holders;
     if (first === undefined) continue;
     if (second === undefined) {
-      make(name, first.server, [first.server.source], both ? first.harness : undefined);
+      make(name, first.server, [first.server.source], first.harness);
     } else if (sameJson(first.server.value, second.server.value)) {
       make(name, first.server, [first.server.source, second.server.source]);
     } else {
@@ -973,7 +974,6 @@ function mcpCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candi
 
 function skillsCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candidate[]; notes: ImportNote[] } {
   const notes: ImportNote[] = [];
-  const both = harvests.length > 1;
   const store = new Map<string, HostSkill>();
   const shared: string[] = [];
   const own = new Map<HarnessKind, string[]>();
@@ -998,7 +998,8 @@ function skillsCandidates(harvests: readonly HarnessHarvest[]): { candidates: Ca
     if (first === undefined) continue;
     if (second === undefined) {
       place(item, first.skill);
-      (both ? ownOf(first.harness) : shared).push(item);
+      // One tool's skill is that tool's own, even when it is the only one this pass imports (see the instructions above).
+      ownOf(first.harness).push(item);
       sources.set(item, [first.skill.source]);
     } else if (first.skill.digest === second.skill.digest) {
       place(item, first.skill);

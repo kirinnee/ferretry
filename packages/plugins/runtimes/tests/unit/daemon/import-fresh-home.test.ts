@@ -86,7 +86,10 @@ describe('the setup import on a fresh home', () => {
     expect([reloaded.status, reloaded.status === 200 ? '' : JSON.stringify(reloaded.json())]).toEqual([200, '']);
     const rescanned = await host.request('GET', '/v1/runtimes/setup/scan');
     expect(rescanned.status).toBe(200);
-    // The instructions live in the item Runtimes owns, so the profile that names them reads them back.
-    expect(JSON.stringify(reloaded.json())).toContain('instructions/main');
+    // Each tool's instructions are its own item, so the second import adds items instead of updating the first's.
+    const profiles = JSON.stringify(reloaded.json());
+    expect(profiles).toContain('instructions/claude-instructions');
+    expect(profiles).toContain('instructions/codex-instructions');
+    expect(profiles).not.toContain('instructions/main');
   });
 });
