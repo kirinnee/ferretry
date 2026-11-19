@@ -149,6 +149,7 @@ describe('create a project', () => {
           await tab.locator('[data-create-account="gha_202"] input').check();
           // Git accounts' connect card is theirs (mounted through the hook; here a stand-in for its idle button).
           await tab.waitForSelector('[data-fake-connect-card]');
+          await tab.waitForTimeout(300);
           await shot('flow-accounts');
           await tab.getByRole('button', { name: 'Link these accounts' }).click();
           await tab.waitForSelector('[data-create-step="keys"]');
