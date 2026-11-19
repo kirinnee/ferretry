@@ -206,6 +206,7 @@ export default implementDaemon(manifest, {
           put: skillsImportPut({
             has: name => items().has(name),
             create: createSkillsItem(kernel.config),
+            store,
           }),
         },
         // Skills' own installed skills (`installed/<name>/`) go to a launch only for an item the runtime's profile selects.

@@ -1,6 +1,7 @@
 /**
  * Skills' side of the setup import (r9 A5): the `put` Runtimes hands an imported `skills` component to
- * (`ProfileComponentSource.put`), so Skills writes its OWN `config/skills/<name>.yaml` and Runtimes never does.
+ * (`ProfileComponentSource.put`), so Skills lands the skills in its OWN store and writes its OWN `config/skills/<name>.yaml`;
+ * Runtimes does neither.
  *
  * What the owner decides here, before the kernel's config writer decides the rest (schema, raw-secret refusal, hold):
  *  - an item is CREATED, never replaced: a name that is taken is refused ("an import never replaces a component it did not
@@ -8,15 +9,21 @@
  *  - every skill folder the item names must be a folder name a harness can load and the installed store can hold
  *    (`usableSkillName`: never a dot-folder such as `.system`, never a path), and an item names at most
  *    {@link MAX_IMPORTED_SKILLS} folders;
- *  - the document is bounded ({@link MAX_DOCUMENT_BYTES}) and is a JSON mapping.
+ *  - the document is bounded ({@link MAX_DOCUMENT_BYTES}) and is a JSON mapping;
+ *  - **the skill folders land in this plugin's installed store**, the one place a launch reads them from
+ *    (`installed/<skill>/`), through the store's own install and its own bounds (200 files, 256 KiB a file, 2 MiB in all,
+ *    a `SKILL.md`, plain paths): everything is checked before anything is written, and a skill over a bound refuses the
+ *    whole item with the reason. A skill the store already holds is left exactly as it is and said so. Runtimes hands the
+ *    folders over as plain text files (`<skill>/<path>`); it reads no link and never `.system`, and nothing here follows one.
+ *  - **the harness id is this plugin's own.** Runtimes names a harness `claude` or `codex`; the item's `harness` is the
+ *    harness key (`claude-code`, `codex`). Runtimes' word (or the key) is accepted and the key written; any other is refused.
  *
- * The skill FOLDERS are not carried here: Runtimes' provisioner copies each into `<fleet>/assets/skills/<item>`, which is
- * this plugin's own `installed/<name>/` tree (links and non-text files are skipped there, `setup-files.ts`). This file
- * writes only the item that selects them, so it holds no file text and no value.
+ * Nothing here holds a value: a skill is text, and a refusal names a skill, a path and a rule, never a file's content.
  */
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import type { ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
 import { ITEM_NAME_PATTERN } from '@ferretry/std';
-import { usableSkillName } from '../../lib/skill-store.ts';
+import { type InstalledSkillFile, installRefusal, usableSkillName } from '../../lib/skill-store.ts';
 
 /** The most skill folders one imported item may name (the installed store's own file count bound). */
 export const MAX_IMPORTED_SKILLS = 200;
@@ -25,6 +32,16 @@ export const MAX_DOCUMENT_BYTES = 64 * 1024;
 /** The longest item name (the schema's safe-name bound for the folders it names). */
 const MAX_NAME_LENGTH = 64;
 
+/** Runtimes' word for a harness, and the harness key itself, to the key a skills item carries. */
+const HARNESS_KEY_OF: Readonly<Record<string, HarnessKey | undefined>> = Object.assign(Object.create(null), {
+  claude: 'claude-code',
+  'claude-code': 'claude-code',
+  codex: 'codex',
+});
+
+/** One file of an imported skill, as Runtimes hands it over: `<skill>/<path inside the skill>` and its text. */
+export type ImportedSkillFile = InstalledSkillFile;
+
 /** What `kernel.config.write` answers, as far as this module reads it (names and rules, never a value). */
 export type SkillsItemWrite =
   | { readonly kind: 'written' }
@@ -32,11 +49,23 @@ export type SkillsItemWrite =
   | { readonly kind: 'conflict' }
   | { readonly kind: 'refused'; readonly issues: readonly { readonly path: string; readonly message: string }[] };
 
+/** The installed store, as far as an import needs it (so a test fakes only these). */
+interface SkillsInstalledStore {
+  /** Whether `installed/<skill>/` is a plain folder here. */
+  holds(skill: string): Promise<boolean>;
+  /** Installs `files` (paths inside the skill) at `installed/<skill>/`; throws a refusal that names the rule. */
+  install(skill: string, files: readonly InstalledSkillFile[]): Promise<void>;
+  /** Removes what an install of ours wrote. */
+  uninstall(skill: string): Promise<void>;
+}
+
 export interface SkillsImportDeps {
   /** Whether an item of this name is in effect. */
   has(name: string): boolean;
   /** Writes `config/skills/<name>.yaml` as a NEW file (`ifMatch: 'absent'`) through the kernel's config writer. */
   create(name: string, text: string): Promise<SkillsItemWrite>;
+  /** Skills' own installed store: where the folders land. */
+  store: SkillsInstalledStore;
 }
 
 const refuse = (reason: string): ComponentPutResult => ({ ok: false, reason });
@@ -66,10 +95,16 @@ const sentence = (issues: SkillsItemWrite & { readonly kind: 'refused' }): strin
     : `the skills selection was refused: ${first.message}`;
 };
 
+/** The files of one skill out of what was handed over, with the skill's own folder taken off the front of each path. */
+const filesOf = (skill: string, files: readonly ImportedSkillFile[]): readonly InstalledSkillFile[] =>
+  files
+    .filter(file => file.path.startsWith(`${skill}/`))
+    .map(file => ({ path: file.path.slice(skill.length + 1), content: file.content }));
+
 export function skillsImportPut(
   deps: SkillsImportDeps,
-): (name: string, documentText: string) => Promise<ComponentPutResult> {
-  return async (name, documentText) => {
+): (name: string, documentText: string, files?: readonly ImportedSkillFile[]) => Promise<ComponentPutResult> {
+  return async (name, documentText, files = []) => {
     if (!ITEM_NAME_PATTERN.test(name) || name.length > MAX_NAME_LENGTH)
       return refuse('the name cannot be used for a skills selection');
     if (new TextEncoder().encode(documentText).byteLength > MAX_DOCUMENT_BYTES)
@@ -82,16 +117,59 @@ export function skillsImportPut(
     }
     const found = itemsOf(document);
     if ('reason' in found) return refuse(found.reason);
+    const harness = (document as { readonly harness?: unknown }).harness;
+    let text = documentText;
+    if (harness !== undefined) {
+      const key = typeof harness === 'string' ? HARNESS_KEY_OF[harness] : undefined;
+      if (key === undefined) return refuse('the skills selection names a harness Ferretry does not know');
+      text = `${JSON.stringify({ ...(document as object), harness: key }, null, 2)}\n`;
+    }
     if (deps.has(name)) return refuse(`a skills selection named "${name}" already exists, so it was not replaced`);
-    const answered = await deps.create(name, documentText);
+
+    // Everything is checked before anything is written: one skill over a bound refuses the item, with the reason.
+    const toInstall: { readonly skill: string; readonly files: readonly InstalledSkillFile[] }[] = [];
+    const kept: string[] = [];
+    for (const skill of found.items) {
+      if (await deps.store.holds(skill)) {
+        kept.push(`"${skill}" is already installed here, so it was left as it is`);
+        continue;
+      }
+      const own = filesOf(skill, files);
+      if (own.length === 0)
+        return refuse(`the files of the skill "${skill}" were not handed over, so it was not imported`);
+      const why = installRefusal(skill, own);
+      if (why !== undefined) return refuse(`the skill "${skill}" was not imported: ${why}`);
+      toInstall.push({ skill, files: own });
+    }
+
+    const landed: string[] = [];
+    const undo = async (): Promise<void> => {
+      for (const skill of landed) await deps.store.uninstall(skill).catch(() => undefined);
+    };
+    for (const { skill, files: own } of toInstall) {
+      try {
+        await deps.store.install(skill, own);
+        landed.push(skill);
+      } catch (error) {
+        await undo();
+        return refuse(
+          `the skill "${skill}" was not imported: ${error instanceof Error ? error.message : 'it could not be installed'}`,
+        );
+      }
+    }
+
+    const answered = await deps.create(name, text);
+    const warnings = kept.length === 0 ? {} : { warnings: kept };
     switch (answered.kind) {
       case 'written':
-        return { ok: true };
+        return { ok: true, ...warnings };
       case 'held':
-        return { ok: true, held: true };
+        return { ok: true, held: true, ...warnings };
       case 'conflict':
+        await undo();
         return refuse(`a skills selection named "${name}" appeared meanwhile, so it was not replaced`);
       case 'refused':
+        await undo();
         return refuse(sentence(answered));
     }
   };
