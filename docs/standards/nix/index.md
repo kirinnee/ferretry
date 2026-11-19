@@ -74,6 +74,17 @@ is deliberately **not** used for it — see
 `nix profile install github:kirinnee/ferretry` puts both commands on `PATH`. The named
 `packages.fy` and `packages.fyd` outputs and matching apps are available for one-binary use.
 
+**The 5.0 preview has its own output, `packages.preview`** (with `fy-preview` and `fyd-preview`):
+`nix profile install github:kirinnee/ferretry/rebuild/preview#preview` builds the same binaries linked to the
+preview's hosted app instead of production's. A nix build is pure (no environment from the caller), so the
+preview cannot be a switch on `default`, and `default` must stay what it was because this code lands on main.
+The preview's origin is the one the preview workflow (`.github/workflows/pwa-pages-v5.yaml`) already sets as
+`FY_HOSTED_APP_ORIGIN`; `nix/ferretry.nix` reads that line, never spells an origin, and the output exists only
+where that workflow does. Its build then asks `scripts/ci/hosted-app-origin.sh --defines` exactly as
+`scripts/release/compile.sh` does, so the daemon also carries the preview app's release key. The `default`
+build runs none of this and is unchanged. `scripts/validate/hosted-app-origin.sh` evaluates both build scripts
+and fails when `default` gains a define or `preview` loses one.
+
 ### nix/packages.nix — package aggregation
 
 **Purpose**: combine packages from every registry into one flat attribute set that `env.nix`

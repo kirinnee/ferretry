@@ -155,12 +155,13 @@ pre-commit-lib.run {
     };
 
     # The hosted app's origin has one owner (the kernel's hosted-app module) and every build route asks one script for
-    # it; a second literal would pair phones to one app and read the catalog from another.
+    # it; a second literal would pair phones to one app and read the catalog from another. It evaluates the nix
+    # build scripts (nix/ferretry.nix), so it needs `nix` from the devshell PATH: a bun-script entry keeps it.
     a-hosted-app-origin = {
       enable = true;
       name = "Hosted app origin";
-      entry = validator "scripts/validate/hosted-app-origin.sh";
-      files = "^(packages/.*|scripts/(ci/(hosted-app-origin|sign-pwa-release|verify-pwa-release|check-pwa-release)|release/compile|validate/hosted-app-origin)\\.sh|\\.github/workflows/.*\\.ya?ml)$";
+      entry = bun-script "scripts/validate/hosted-app-origin.sh";
+      files = "^(packages/.*|scripts/(ci/(hosted-app-origin|sign-pwa-release|verify-pwa-release|check-pwa-release)|release/compile|validate/hosted-app-origin)\\.sh|nix/ferretry\\.nix|\\.github/workflows/.*\\.ya?ml)$";
       pass_filenames = false;
       language = "system";
     };

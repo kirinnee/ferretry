@@ -158,17 +158,70 @@ let
     '';
   };
 
+  # WHICH hosted app a build links to. A nix build is pure (no environment from the caller), so the
+  # preview's origin cannot arrive as `FY_HOSTED_APP_ORIGIN` the way it does for compile.sh; it is read
+  # from the one committed file that already names it, the preview workflow's workflow-level env, which
+  # scripts/validate/hosted-app-origin.sh pins to exactly this line. The origin is never spelled here, and
+  # the switch itself stays scripts/ci/hosted-app-origin.sh's (nothing here parses or validates it).
+  # Absent where there is no preview workflow: then there is no `preview` output, only the production one.
+  previewWorkflow = "${src}/.github/workflows/pwa-pages-v5.yaml";
+  previewOriginLines =
+    if builtins.pathExists previewWorkflow then
+      map (lib.removePrefix "  FY_HOSTED_APP_ORIGIN: ") (
+        lib.filter (lib.hasPrefix "  FY_HOSTED_APP_ORIGIN: ") (
+          lib.splitString "\n" (builtins.readFile previewWorkflow)
+        )
+      )
+    else
+      [ ];
+  previewOrigin =
+    if previewOriginLines == [ ] then
+      null
+    else if builtins.length previewOriginLines == 1 then
+      lib.head previewOriginLines
+    else
+      throw "${previewWorkflow} must set FY_HOSTED_APP_ORIGIN exactly once at workflow level";
+
   # One derivation per shipped package, compiling EVERY executable it ships into the same bin/: a helper
   # a package runs from beside its own resolved path would be invisible to it in a different store path. Every executable goes through the release compile script so
   # the flake and the archives apply the same build-time fixes.
+  #
+  # `hostedAppOrigin` is null for the production app: the build is then exactly what it always was (no
+  # define, no extra step, the same derivation). A named origin builds a daemon that links to ITS app,
+  # the way scripts/release/compile.sh does: it asks scripts/ci/hosted-app-origin.sh --defines (which also
+  # carries the app's own release key) and passes each line as a --define.
   mkBinary =
     {
       pname,
       executables,
       postInstall ? "",
+      hostedAppOrigin ? null,
     }:
+    let
+      preview = hostedAppOrigin != null;
+      # Captured as an assignment, never through a process substitution: a failure inside `< <(...)` is
+      # ignored even under `set -e`, and the daemon would compile for the production app, silently. Both the
+      # origin and the release key must come out, or the build stops (a missing key file only warns).
+      definesStep = lib.optionalString preview ''
+        export FY_HOSTED_APP_ORIGIN=${lib.escapeShellArg hostedAppOrigin}
+        hosted_app_defines=()
+        hosted_app_output="$(bash ./scripts/ci/hosted-app-origin.sh --defines)"
+        while IFS= read -r define; do
+          [ -z "$define" ] && continue
+          hosted_app_defines+=(--define "$define")
+        done <<<"$hosted_app_output"
+        for required in __FY_HOSTED_APP_ORIGIN__= __FY_HOSTED_APP_RELEASE_KEY__=; do
+          case "$hosted_app_output" in
+            *"$required"*) ;;
+            *) echo "hosted-app-origin.sh --defines gave no $required define for $FY_HOSTED_APP_ORIGIN" >&2; exit 1 ;;
+          esac
+        done
+      '';
+      compileFlags = lib.optionalString preview " \"\${hosted_app_defines[@]}\"";
+    in
     pkgs.stdenvNoCC.mkDerivation {
-      inherit pname src postInstall;
+      inherit src postInstall;
+      pname = pname + lib.optionalString preview "-preview";
       version = releaseVersion;
       nativeBuildInputs = [
         bun
@@ -193,10 +246,12 @@ let
         # The hosts import the git-ignored generated registries; the source tree has none, so generate them
         # (scripts/local/gen.sh).
         bash scripts/local/gen.sh
-        ${lib.concatMapStringsSep "\n" (
-          executable:
-          "bun scripts/release/compile-executable.ts --entry ${executable.entry} --outfile ${executable.name}"
-        ) executables}
+        ${definesStep}${
+          lib.concatMapStringsSep "\n" (
+            executable:
+            "bun scripts/release/compile-executable.ts --entry ${executable.entry} --outfile ${executable.name}${compileFlags}"
+          ) executables
+        }
       '';
       # A custom installPhase runs no hooks of its own, so `postInstall` (fyd's cloudflared wrapper) is
       # run here explicitly.
@@ -209,48 +264,69 @@ let
       '';
     };
 
-  fy = mkBinary {
-    pname = "fy";
-    executables = [
-      {
-        name = "fy";
-        entry = "packages/cli/${(lib.importJSON "${src}/packages/cli/package.json").bin.fy}";
-      }
-    ];
-  };
-  fyd = mkBinary {
-    pname = "fyd";
-    # The hosted tunnel carrier runs `cloudflared` (docs/relay-protocol.md §15). It is a DEPENDENCY,
-    # never a download: this package names the store's own binary through FY_CLOUDFLARED, which the
-    # daemon reads before searching PATH. `--set-default` keeps an operator's own FY_CLOUDFLARED
-    # winning, and naming the binary rather than prefixing PATH keeps it off every agent's PATH.
-    postInstall = ''
-      wrapProgram "$out/bin/fyd" --set-default FY_CLOUDFLARED ${lib.getExe pkgs.cloudflared}
-    '';
-    # The daemon host is the kernel package's (docs/rebuild/spine.md D1): its first `bin` entry. Every
-    # `bin` entry of the Browsers package ships beside it: the browser worker the daemon runs from its
-    # own directory (the kernel never points into a plugin, so the worker's bin is the plugin's).
-    executables = [
-      {
-        name = "fyd";
-        entry = "packages/core/kernel/${(lib.importJSON "${src}/packages/core/kernel/package.json").bin.fyd}";
-      }
-    ]
-    ++ lib.mapAttrsToList (name: entry: {
-      inherit name;
-      entry = "packages/plugins/browsers/${entry}";
-    }) (lib.importJSON "${src}/packages/plugins/browsers/package.json").bin;
-  };
+  # The shipped binaries for one hosted app: null is production, an origin is that app (see mkBinary).
+  binariesFor =
+    hostedAppOrigin:
+    let
+      fy = mkBinary {
+        inherit hostedAppOrigin;
+        pname = "fy";
+        executables = [
+          {
+            name = "fy";
+            entry = "packages/cli/${(lib.importJSON "${src}/packages/cli/package.json").bin.fy}";
+          }
+        ];
+      };
+      fyd = mkBinary {
+        inherit hostedAppOrigin;
+        pname = "fyd";
+        # The hosted tunnel carrier runs `cloudflared` (docs/relay-protocol.md §15). It is a DEPENDENCY,
+        # never a download: this package names the store's own binary through FY_CLOUDFLARED, which the
+        # daemon reads before searching PATH. `--set-default` keeps an operator's own FY_CLOUDFLARED
+        # winning, and naming the binary rather than prefixing PATH keeps it off every agent's PATH.
+        postInstall = ''
+          wrapProgram "$out/bin/fyd" --set-default FY_CLOUDFLARED ${lib.getExe pkgs.cloudflared}
+        '';
+        # The daemon host is the kernel package's (docs/rebuild/spine.md D1): its first `bin` entry. Every
+        # `bin` entry of the Browsers package ships beside it: the browser worker the daemon runs from its
+        # own directory (the kernel never points into a plugin, so the worker's bin is the plugin's).
+        executables = [
+          {
+            name = "fyd";
+            entry = "packages/core/kernel/${(lib.importJSON "${src}/packages/core/kernel/package.json").bin.fyd}";
+          }
+        ]
+        ++ lib.mapAttrsToList (name: entry: {
+          inherit name;
+          entry = "packages/plugins/browsers/${entry}";
+        }) (lib.importJSON "${src}/packages/plugins/browsers/package.json").bin;
+      };
+    in
+    {
+      inherit fy fyd;
+      bundle = pkgs.symlinkJoin {
+        name = "ferretry" + lib.optionalString (hostedAppOrigin != null) "-preview";
+        paths = [
+          fy
+          fyd
+        ];
+      };
+    };
+  production = binariesFor null;
+  preview = binariesFor previewOrigin;
 in
 {
-  inherit fy fyd;
+  inherit (production) fy fyd;
   # The dependency derivation, exposed so scripts/validate/bun-deps-hash.sh can read its installDigest.
   inherit bunDeps;
-  default = pkgs.symlinkJoin {
-    name = "ferretry";
-    paths = [
-      fy
-      fyd
-    ];
-  };
+  default = production.bundle;
+}
+// lib.optionalAttrs (previewOrigin != null) {
+  # The same build for the 5.0 preview's own hosted app (nix profile install <flake>#preview). A separate
+  # output, never a switch on `default`: this branch lands on main, and main's default must keep linking
+  # to the production app.
+  fy-preview = preview.fy;
+  fyd-preview = preview.fyd;
+  preview = preview.bundle;
 }
