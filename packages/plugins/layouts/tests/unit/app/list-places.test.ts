@@ -3,6 +3,7 @@ import { DEFAULT_LAYOUT, LayoutSchema } from '../../../contract/index.ts';
 import {
   changesOf,
   humanize,
+  keepPhoneNav,
   listedPlaces,
   navPlaces,
   navSources,
@@ -38,6 +39,51 @@ describe('the list rows', () => {
       ['agenda.agenda', true],
       ['settings', false],
     ]);
+  });
+
+  test('a shell item the engine accepts (Daemons) is kept although the catalog does not offer it', () => {
+    const rows = navPlaces(['ferrets', 'daemons', 'settings'], undefined, sources);
+    expect(rows.map(row => [row.id, row.hidden])).toEqual([
+      ['ferrets.ferrets', false],
+      ['daemons', false],
+      ['settings', false],
+      ['agenda.agenda', true],
+      ['board.board', true],
+    ]);
+    expect(changesOf('nav.items', rows)[0]?.value).toContain('daemons');
+    expect(changesOf('nav.items', withHidden(rows, 'daemons', true))[1]?.value).toContain('daemons');
+  });
+
+  test('a wide edit writes the phone its own hidden list when the phone names items but no hidden', () => {
+    const legacy = LayoutSchema.parse({
+      ...DEFAULT_LAYOUT,
+      nav: { ...DEFAULT_LAYOUT.nav, items: ['ferrets', 'settings'] },
+      phone: { nav: { items: ['ferrets', 'board', 'settings'] } },
+    });
+    const wide = changesOf('nav.items', navPlaces(['ferrets', 'settings'], undefined, sources));
+    const kept = keepPhoneNav(legacy, 'nav.items', sources, wide);
+    expect(kept.at(-1)).toEqual({ path: 'phone.nav.hidden', value: 'agenda.agenda' });
+    // the phone still shows exactly Ferrets, Board and Settings
+    const phone = placesOf(
+      LayoutSchema.parse({
+        ...legacy,
+        nav: { ...legacy.nav, hidden: ['ferrets.ferrets'] },
+        phone: { nav: { items: ['ferrets', 'board', 'settings'], hidden: ['agenda.agenda'] } },
+      }),
+      'phone.nav.items',
+      sources,
+    );
+    expect(phone.filter(row => !row.hidden).map(row => row.id)).toEqual(['ferrets.ferrets', 'board.board', 'settings']);
+  });
+
+  test('nothing is added for a phone that names its own hidden, no items, or another key', () => {
+    const base = changesOf('nav.items', navPlaces(['ferrets'], undefined, sources));
+    const own = LayoutSchema.parse({ ...DEFAULT_LAYOUT, phone: { nav: { items: ['ferrets'], hidden: [] } } });
+    const none = LayoutSchema.parse({ ...DEFAULT_LAYOUT, phone: undefined });
+    const items = LayoutSchema.parse({ ...DEFAULT_LAYOUT, phone: { nav: { items: ['ferrets'] } } });
+    expect(keepPhoneNav(own, 'nav.items', sources, base)).toEqual(base);
+    expect(keepPhoneNav(none, 'nav.items', sources, base)).toEqual(base);
+    expect(keepPhoneNav(items, 'top', sources, base)).toEqual(base);
   });
 
   test('Settings is locked on, even when a layout names it hidden', () => {

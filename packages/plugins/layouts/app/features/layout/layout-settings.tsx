@@ -28,6 +28,7 @@ import {
   changesOf,
   hiddenOf,
   humanize,
+  keepPhoneNav,
   navSources,
   type Place,
   type PlaceSource,
@@ -43,9 +44,6 @@ type Apply = (changes: readonly Change[]) => Promise<string | undefined>;
 
 const INPUT_CLASS =
   'kt-input min-h-[44px] w-full min-w-0 rounded-control border border-border bg-surface-2 px-2 text-fg';
-
-/** Why a place cannot be switched: Settings is the way back to every other setting. */
-const LOCKED_HINT = 'Always shown';
 
 function ListRow({
   setting,
@@ -70,7 +68,7 @@ function ListRow({
   const rows = pending ?? held;
   const save = async (next: readonly Place[]): Promise<void> => {
     setPending(next);
-    const reason = await apply(changesOf(setting.path, next));
+    const reason = await apply(keepPhoneNav(layout, setting.path, sources, changesOf(setting.path, next)));
     setRefusal(reason);
     if (reason !== undefined) setPending(undefined);
   };
@@ -98,19 +96,21 @@ function ListRow({
               <span className={`min-w-0 flex-1 truncate text-ui ${row.hidden ? 'text-muted line-through' : 'text-fg'}`}>
                 {row.label}
               </span>
-              <button
-                type="button"
-                aria-pressed={!row.hidden}
-                aria-label={`${row.hidden ? 'Show' : 'Hide'} ${row.label}`}
-                title={row.locked ? LOCKED_HINT : row.hidden ? 'Hidden: press to show' : 'Shown: press to hide'}
-                aria-disabled={busy || row.locked ? true : undefined}
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
-                onClick={() => {
-                  if (!busy && !row.locked) void save(withHidden(rows, row.id, !row.hidden));
-                }}
-              >
-                <EyeIcon hidden={row.hidden} />
-              </button>
+              {row.locked ? null : (
+                <button
+                  type="button"
+                  aria-pressed={!row.hidden}
+                  aria-label={`${row.hidden ? 'Show' : 'Hide'} ${row.label}`}
+                  title={row.hidden ? 'Hidden: press to show' : 'Shown: press to hide'}
+                  aria-disabled={busy ? true : undefined}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+                  onClick={() => {
+                    if (!busy) void save(withHidden(rows, row.id, !row.hidden));
+                  }}
+                >
+                  <EyeIcon hidden={row.hidden} />
+                </button>
+              )}
             </span>
           )}
         />

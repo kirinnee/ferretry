@@ -180,7 +180,9 @@ describe('the Layout tab', () => {
     await settle();
     await interact(() => press(list(view.container, 'nav.items'), 'Move Ferrets down').click());
     await settle();
-    expect(script.calls).toEqual(['set nav.items agenda,ferrets,board,projects,insights,settings + set nav.hidden ']);
+    expect(script.calls).toEqual([
+      'set nav.items agenda,ferrets,board,projects,insights,settings + set nav.hidden  + set phone.nav.hidden ',
+    ]);
     await view.unmount();
   });
 
@@ -199,24 +201,48 @@ describe('the Layout tab', () => {
     expect(script.calls).toEqual([]);
     await key('Enter');
     await settle();
-    expect(script.calls).toEqual(['set nav.items board,ferrets,agenda,projects,insights,settings + set nav.hidden ']);
+    expect(script.calls).toEqual([
+      'set nav.items board,ferrets,agenda,projects,insights,settings + set nav.hidden  + set phone.nav.hidden ',
+    ]);
     await view.unmount();
   });
 
-  test('the eye hides a place and shows it again; Settings cannot be hidden', async () => {
+  test('the eye hides a place and shows it again; Settings has no eye at all', async () => {
     const script = scriptedLayouts();
     const view = await mount(<LayoutSettings client={script.client} />);
     await settle();
     await interact(() => press(list(view.container, 'nav.items'), 'Hide Board').click());
     await settle();
     expect(script.calls).toEqual([
-      'set nav.items ferrets,agenda,board,projects,insights,settings + set nav.hidden board',
+      'set nav.items ferrets,agenda,board,projects,insights,settings + set nav.hidden board + set phone.nav.hidden ',
     ]);
-    const settings = press(list(view.container, 'nav.items'), 'Hide Settings');
-    expect(settings.getAttribute('aria-disabled')).toBe('true');
-    await interact(() => settings.click());
+    const nav = list(view.container, 'nav.items');
+    expect(
+      [...nav.querySelectorAll('button')].some(
+        button =>
+          /Settings/.test(button.getAttribute('aria-label') ?? '') &&
+          /^(Hide|Show) /.test(button.getAttribute('aria-label') ?? ''),
+      ),
+    ).toBe(false);
+    expect(script.calls).toHaveLength(1);
+    await view.unmount();
+  });
+
+  test('editing the wide nav of a legacy layout keeps Daemons, and writes the phone bar its own hidden list', async () => {
+    const legacy = {
+      ...DEFAULT_LAYOUT,
+      nav: { ...DEFAULT_LAYOUT.nav, items: ['ferrets', 'daemons', 'settings'] },
+      phone: { nav: { items: ['ferrets', 'board', 'settings'] } },
+    };
+    const script = scriptedLayouts(readOf({ layout: legacy }));
+    const view = await mount(<LayoutSettings client={script.client} />);
+    await settle();
+    await interact(() => press(list(view.container, 'nav.items'), 'Hide Ferrets').click());
     await settle();
     expect(script.calls).toHaveLength(1);
+    expect(script.calls[0]).toContain('set nav.items ferrets,daemons,settings');
+    expect(script.calls[0]).toContain('set nav.hidden ferrets');
+    expect(script.calls[0]).toContain('set phone.nav.hidden');
     await view.unmount();
   });
 
@@ -230,7 +256,9 @@ describe('the Layout tab', () => {
     expect(row.textContent).toContain('Board');
     await interact(() => press(list(view.container, 'nav.items'), 'Show Board').click());
     await settle();
-    expect(script.calls).toEqual(['set nav.items ferrets,agenda,board,projects,insights,settings + set nav.hidden ']);
+    expect(script.calls).toEqual([
+      'set nav.items ferrets,agenda,board,projects,insights,settings + set nav.hidden  + set phone.nav.hidden board',
+    ]);
     await view.unmount();
   });
 

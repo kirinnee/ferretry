@@ -9,7 +9,7 @@
  *     from `items` is hidden; one that names it makes `items` an order and every place not hidden shows.
  *   - TOP BAR and SIDE PANELS: no hidden list; a place the list does not name is hidden.
  */
-import type { NavCatalogItem } from '@ferretry/app';
+import { type NavCatalogItem, SHELL_ITEMS } from '@ferretry/app';
 import type { Layout } from '../../contract/index.ts';
 import { listOf } from './layout-model.ts';
 
@@ -51,6 +51,10 @@ function resolve(name: string, sources: readonly PlaceSource[]): PlaceSource | u
   return byAlias.length === 1 ? byAlias[0] : undefined;
 }
 
+/** The shell's own nav items (Daemons): the layout engine accepts them although the nav catalog does not offer them. */
+const shellSource = (name: string): PlaceSource | undefined =>
+  (SHELL_ITEMS.nav as readonly string[]).includes(name) ? { id: name, label: humanize(name) } : undefined;
+
 const place = (source: PlaceSource, hidden: boolean): Place => ({
   id: source.id,
   label: source.label,
@@ -66,15 +70,15 @@ export function navPlaces(
 ): readonly Place[] {
   const listed: PlaceSource[] = [];
   for (const name of items) {
-    const source = resolve(name, sources);
-    if (source !== undefined && !listed.includes(source)) listed.push(source);
+    const source = resolve(name, sources) ?? shellSource(name);
+    if (source !== undefined && !listed.some(have => have.id === source.id)) listed.push(source);
   }
-  const rest = sources.filter(source => !listed.includes(source));
+  const rest = sources.filter(source => !listed.some(have => have.id === source.id));
   const hiddenIds = new Set(
     hidden === undefined
       ? rest.map(source => source.id)
       : hidden.flatMap(name => {
-          const source = resolve(name, sources);
+          const source = resolve(name, sources) ?? shellSource(name);
           return source === undefined ? [] : [source.id];
         }),
   );
@@ -129,6 +133,23 @@ export function changesOf(path: ListPath, rows: readonly Place[]): readonly Chan
       { path: hiddenPathOf(path), value: join(rows.filter(row => row.hidden)) },
     ];
   return [{ path, value: join(rows.filter(row => !row.hidden)) }];
+}
+
+/**
+ * What a wide-nav edit must also write so the phone bar keeps showing what it showed: a phone list that names its own
+ * items but no `hidden` inherits the wide `hidden`, so a new wide `hidden` would change the phone. Writes the phone's
+ * current hidden set beside its explicit items. Nothing is added for any other key or a phone that names its own.
+ */
+export function keepPhoneNav(
+  layout: Layout,
+  path: ListPath,
+  sources: readonly PlaceSource[],
+  changes: readonly Change[],
+): readonly Change[] {
+  const phone = layout.phone?.nav;
+  if (path !== 'nav.items' || phone?.items === undefined || phone.hidden !== undefined) return changes;
+  const keep = placesOf(layout, 'phone.nav.items', sources).filter(row => row.hidden);
+  return [...changes, { path: 'phone.nav.hidden', value: keep.map(row => row.id).join(',') }];
 }
 
 /** The rows with one place switched on or off; Settings stays on. */
