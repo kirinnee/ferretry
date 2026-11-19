@@ -92,15 +92,7 @@ export default definePlugin({
   },
 
   /** Never reached by a ferret, through any root: the sealed OAuth tokens. */
-  privacy: {
-    private: ['tokens.json'],
-    public: [
-      {
-        path: 'accounts.json',
-        reason: 'Who is connected: id, login, name, avatar address, granted scopes and key titles. No token, no key.',
-      },
-    ],
-  },
+  privacy: { private: ['tokens.json'] },
   data: {
     state: [GitAccountsState, GIT_ACCOUNT_TOKENS.state],
     config: [GitAccountsConfigDef],
