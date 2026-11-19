@@ -207,9 +207,11 @@ const IDLE: CardState = { busy: null, test: null, error: null };
 export interface SpeedupKeysSettingsProps {
   /** This device's keys; the app store's when omitted. `null` renders the explanation and no cards. */
   readonly keys?: DeviceSpeedupKeys | null;
+  /** Told once each time a key was saved and read back as saved; never on a failed save, a test or a removal. */
+  readonly onSaved?: (provider: SpeedupKeyProvider) => void;
 }
 
-export function SpeedupKeysSettings({ keys: injected }: SpeedupKeysSettingsProps) {
+export function SpeedupKeysSettings({ keys: injected, onSaved }: SpeedupKeysSettingsProps) {
   const ambient = useSpeedupKeys();
   const keys = injected === undefined ? ambient : injected;
   const panelId = useId();
@@ -241,13 +243,14 @@ export function SpeedupKeysSettings({ keys: injected }: SpeedupKeysSettingsProps
       try {
         await work(keys);
         await refresh(provider, keys);
+        if (busy === 'saving') onSaved?.(provider);
       } catch (cause) {
         patch(provider, { error: reason(cause) });
       } finally {
         patch(provider, { busy: null });
       }
     },
-    [keys, patch, refresh],
+    [keys, onSaved, patch, refresh],
   );
 
   const [open, setOpen] = useState(false);

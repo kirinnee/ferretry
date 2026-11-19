@@ -13,7 +13,8 @@ import { createRoot } from 'react-dom/client';
 import { EngineCatalogList } from '../../../../app/features/settings/engine-catalog-list.tsx';
 import { VoiceStep } from '../../../../app/features/onboarding/voice-step.tsx';
 import { browserRecognitionProvider } from '../../../../app/lib/stt/browser-recognition.ts';
-import { ON_DEVICE_MODELS } from '../../../../app/lib/stt/model-catalog.ts';
+import { modelDownloadBytes, ON_DEVICE_MODELS } from '../../../../app/lib/stt/model-catalog.ts';
+import type { DeviceClass } from '../../../../app/lib/stt/engine-defaults.ts';
 import type { ModelInstaller, ModelInstallOptions, ModelStoreStatus } from '../../../../app/lib/stt/model-store.ts';
 import { OnDeviceVoice } from '../../../../app/lib/stt/on-device-voice.ts';
 import { OnDeviceVoices } from '../../../../app/lib/stt/on-device-voices.ts';
@@ -46,7 +47,8 @@ class FakeStore implements ModelInstaller {
 
 const voices = new OnDeviceVoices(
   ON_DEVICE_MODELS.map(model => {
-    const bytes = model.files.reduce((sum, file) => sum + file.bytes, 0);
+    // The whole first download (files plus runtime), as the card's Install and Size both say it.
+    const bytes = modelDownloadBytes(model);
     const installed = model.id === 'sherpa-zipformer-en';
     const status: ModelStoreStatus = installed
       ? { state: 'installed', version: 'fake', bytes, installedAt: '2026-10-22T00:00:00.000Z' }
@@ -68,11 +70,14 @@ if (view === 'downloading') {
   void moonshine?.install();
 }
 
+// A phone-width window is a phone: the default engine and the short list follow it, as they do on a real phone.
+const deviceClass: DeviceClass = window.matchMedia('(max-width: 640px)').matches ? 'phone' : 'computer';
 const provider = browserRecognitionProvider();
 const settings = { ...DEFAULT_STT_SETTINGS, engine: 'sherpa-zipformer-en' as const };
 
 const root = document.getElementById('root') as HTMLElement;
-root.className = 'mx-auto max-w-[880px] p-4';
+// The first-run step column is a reading width, not the viewport: the cards wrap inside it, so a wide window is not one wide row.
+root.className = 'mx-auto max-w-[720px] p-4';
 root.dataset['scene'] = 'ready';
 createRoot(root).render(
   view === 'before' ? (
@@ -82,7 +87,7 @@ createRoot(root).render(
       voices={voices}
       browserSupport={{ available: true, availability: 'available', implementation: 'standard' }}
       browserProvider={provider}
-      deviceClass="computer"
+      deviceClass={deviceClass}
     />
   ) : (
     <VoiceStep
@@ -90,7 +95,7 @@ createRoot(root).render(
       update={() => undefined}
       voices={voices}
       browserSupport={{ available: true, availability: 'available', implementation: 'standard' }}
-      deviceClass="computer"
+      deviceClass={deviceClass}
     />
   ),
 );

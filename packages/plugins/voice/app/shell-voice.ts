@@ -43,7 +43,7 @@ export {
   useDocumentVisible,
   useSecretField,
 } from '@ferretry/app/ui';
-export { findReferences, parseReferenceToken, type Reference } from '@ferretry/app';
+export { findReferences, OptionBars, parseReferenceToken, type Reference } from '@ferretry/app';
 
 // ─── the daemon this half talks to ────────────────────────────────────────────────────────────────────────────────
 

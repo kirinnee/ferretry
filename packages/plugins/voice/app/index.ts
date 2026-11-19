@@ -1,5 +1,4 @@
 import { forSubject } from '@ferretry/app';
-import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { voiceSurfaces } from './surfaces.tsx';
@@ -21,8 +20,8 @@ export default implementApp(manifest, {
         dictation: DictationPanel,
         'read-aloud': ReadAloudPanel,
         'auto-read': AutoReadPanel,
-        'onboarding-speedups': forSubject('voice.speedups', SpeedupsStepPanel as AppComponent<PanelProps>),
-        'onboarding-voice': forSubject('voice.voice', VoiceStepPanel as AppComponent<PanelProps>),
+        'onboarding-speedups': forSubject('voice.speedups', SpeedupsStepPanel),
+        'onboarding-voice': forSubject('voice.voice', VoiceStepPanel),
       },
     };
   },

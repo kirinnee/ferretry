@@ -64,12 +64,18 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
-const open = async (view: string, viewport: (typeof VIEWPORTS)[number], mode: 'light' | 'dark') => {
+const open = async (
+  view: string,
+  viewport: (typeof VIEWPORTS)[number],
+  mode: 'light' | 'dark',
+  // A phone-emulated tab paints only its first screen, so a whole-catalog shot is taken in a plain 390-wide window as tall as the list.
+  height: number = viewport.height,
+) => {
   const context = await browser.newContext({
-    viewport: { width: viewport.width, height: viewport.height },
+    viewport: { width: viewport.width, height },
     colorScheme: mode,
     deviceScaleFactor: viewport.phone ? 2 : 1,
-    ...(viewport.phone ? { isMobile: true, hasTouch: true } : {}),
+    ...(viewport.phone ? { isMobile: height === viewport.height, hasTouch: true } : {}),
   });
   const origin = server?.url.origin ?? '';
   await context.route('**/*', async route =>
@@ -79,6 +85,12 @@ const open = async (view: string, viewport: (typeof VIEWPORTS)[number], mode: 'l
   await tab.goto(`${origin}/?view=${view}&theme=studio-${mode}`);
   await tab.waitForSelector('[data-scene="ready"]');
   return { context, tab };
+};
+
+/** A full-page shot of a phone-emulated tab clips to the first screen; growing the viewport to the page keeps all of it. */
+const shoot = async (tab: Awaited<ReturnType<typeof open>>['tab'], path: string): Promise<void> => {
+  await tab.mouse.move(0, 0);
+  await tab.screenshot({ path, fullPage: true });
 };
 
 describe('the engine cards', () => {
@@ -109,15 +121,27 @@ describe('the engine cards', () => {
         expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         // No bar label or value is cut short with an ellipsis.
         const clipped = await tab
-          .locator('.fy-engine-bar-label, .fy-engine-bar-text')
+          .locator('[data-option-bar] > span:not([data-option-bar-track])')
           .evaluateAll(nodes =>
             nodes.filter(node => node.scrollWidth > node.clientWidth).map(node => node.textContent),
           );
         expect(clipped).toEqual([]);
         // One tab stop for the whole group: the checked radio, and no other radio takes a Tab.
         expect(await tab.locator('input[type="radio"]:checked').count()).toBe(1);
+        // Install and Size say the same number on every card that offers an install (the fake sizes carry the runtime too).
+        const disagree = await tab.locator('.fy-engine-card').evaluateAll(nodes =>
+          nodes.flatMap(node => {
+            const install = /\(([^)]+)\)/u.exec(node.querySelector('[data-state="idle"]')?.textContent ?? '')?.[1];
+            const size = node.querySelector('[data-option-bar="size"] [data-option-bar-text]')?.textContent;
+            return install !== undefined && install !== size
+              ? [`${(node as HTMLElement).dataset.engine}: ${install} vs ${size}`]
+              : [];
+          }),
+        );
+        expect(disagree).toEqual([]);
         // The small buttons keep a 44 px press target (the ::after hit area), measured on the install button.
-        const hit = await tab.locator('.fy-engine-card[data-engine="parakeet"] .fy-engine-mini').evaluate(node => {
+        const first = viewport.phone ? 'parakeet-tdt-110m' : 'parakeet';
+        const hit = await tab.locator(`.fy-engine-card[data-engine="${first}"] .fy-engine-mini`).evaluate(node => {
           const after = getComputedStyle(node, '::after');
           return {
             top: parseFloat(after.top),
@@ -126,14 +150,13 @@ describe('the engine cards', () => {
           };
         });
         expect(hit.height - hit.top - hit.bottom).toBeGreaterThanOrEqual(43);
-        if (shotsDir !== '')
-          await tab.screenshot({ path: join(shotsDir, `after-short-${viewport.name}-${mode}.png`), fullPage: true });
+        if (shotsDir !== '') await shoot(tab, join(shotsDir, `after-short-${viewport.name}-${mode}.png`));
         await context.close();
       }, 60_000);
 
       it(`holds the height with every engine open and with one downloading (${viewport.name}, ${mode})`, async () => {
         for (const view of ['all', 'downloading'] as const) {
-          const { context, tab } = await open(view, viewport, mode);
+          const { context, tab } = await open(view, viewport, mode, viewport.phone ? 2_400 : viewport.height);
           await tab.waitForSelector('.fy-engine-card');
           if (view === 'all') await tab.getByRole('button', { name: 'Show every engine' }).click();
           if (view === 'downloading') await tab.waitForSelector('[role="progressbar"]');
@@ -142,20 +165,16 @@ describe('the engine cards', () => {
             .evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().height)));
           expect(new Set(heights)).toEqual(new Set([132]));
           if (view === 'all') expect(heights.length).toBe(10);
-          if (shotsDir !== '')
-            await tab.screenshot({
-              path: join(shotsDir, `after-${view}-${viewport.name}-${mode}.png`),
-              fullPage: true,
-            });
+          if (shotsDir !== '') await shoot(tab, join(shotsDir, `after-${view}-${viewport.name}-${mode}.png`));
           await context.close();
         }
       }, 60_000);
 
       it(`draws today's list for the before shot (${viewport.name}, ${mode})`, async () => {
         if (shotsDir === '') return;
-        const { context, tab } = await open('before', viewport, mode);
+        const { context, tab } = await open('before', viewport, mode, viewport.phone ? 2_400 : viewport.height);
         await tab.waitForSelector('li[data-engine]');
-        await tab.screenshot({ path: join(shotsDir, `before-${viewport.name}-${mode}.png`), fullPage: true });
+        await shoot(tab, join(shotsDir, `before-${viewport.name}-${mode}.png`));
         await context.close();
       }, 60_000);
     }

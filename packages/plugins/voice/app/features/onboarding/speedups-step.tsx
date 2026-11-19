@@ -6,13 +6,14 @@
  * chosen. A person who picked Off, the browser's voice or nothing has no use for them yet, so the page decides on its own
  * to stay out of the way (`skip('not-needed')`), and the shell draws nothing and moves on. The keys themselves are the same
  * write-only card Settings › Voice draws (`speedup-keys-settings.tsx`): pasted once, sealed in this browser, never shown
- * again and never sent to a machine.
+ * again and never sent to a machine. A saved key answers the step (`done()`), and nothing else does: a failed save, a Test, a
+ * Remove or merely looking leaves it open, so the shell asks again only until a key is really saved.
  */
 
 import { useEffect } from 'react';
 import { isOnDeviceEngine, type SttSettings } from '../../lib/stt/stt-settings.ts';
 import { SpeedupKeysSettings } from '../settings/speedup-keys-settings.tsx';
-import type { StepHost } from './step-host.ts';
+import type { StepHost } from '@ferretry/kernel/contract';
 import { useStepReady } from './use-step-ready.ts';
 
 export const SPEEDUPS_STEP_TITLE = 'Make clean-up faster';
@@ -40,7 +41,7 @@ export function SpeedupsStep({
         {SPEEDUPS_STEP_TITLE}
       </h2>
       <p className="fy-voice-step-line">{SPEEDUPS_STEP_LINE}</p>
-      <SpeedupKeysSettings />
+      <SpeedupKeysSettings onSaved={() => step?.done()} />
     </section>
   );
 }

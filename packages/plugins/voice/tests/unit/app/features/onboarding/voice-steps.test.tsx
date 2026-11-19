@@ -11,7 +11,7 @@ import {
   SPEEDUPS_STEP_TITLE,
   needsSpeedups,
 } from '../../../../../app/features/onboarding/speedups-step.tsx';
-import type { StepHost } from '../../../../../app/features/onboarding/step-host.ts';
+import type { StepHost } from '@ferretry/kernel/contract';
 import {
   choiceOf,
   patchFor,
@@ -34,6 +34,9 @@ const fakeHost = (): Heard => {
   const calls: string[] = [];
   const host: StepHost = {
     phase: 'client',
+    appliesTo: [],
+    segment: {},
+    remember: () => undefined,
     ready: () => void calls.push('ready'),
     skip: why => void calls.push(`skip:${why}`),
     done: () => void calls.push('done'),
@@ -79,12 +82,9 @@ describe('<VoiceStep>', () => {
     const patches: unknown[] = [];
     const view = await mount(<VoiceStep {...voiceProps({ step: host, update: patch => patches.push(patch) })} />);
     await interact(() =>
-      must(
-        view.container.querySelector<HTMLInputElement>('[data-engine="sherpa-zipformer-en"] input'),
-        'radio',
-      ).click(),
+      must(view.container.querySelector<HTMLInputElement>('[data-engine="browser"] input'), 'radio').click(),
     );
-    expect(patches).toEqual([{ enabled: true, engine: 'sherpa-zipformer-en' }]);
+    expect(patches).toEqual([{ enabled: true, engine: 'browser' }]);
     expect(calls).toEqual(['ready', 'done']);
     await view.unmount();
   });

@@ -103,3 +103,7 @@ export const BROWSER_BARS: readonly EngineBar[] = [
 
 /** A bar group's text equivalent for a screen reader: "Speed 0.4 s. Accuracy 52%. Size 86 MB." */
 export const barsText = (bars: readonly EngineBar[]): string => bars.map(bar => `${bar.label} ${bar.text}.`).join(' ');
+
+/** The bars as the shared `OptionBars` takes them: nothing measured draws an empty track, the words say why. */
+export const optionBarsOf = (bars: readonly EngineBar[]): readonly { label: string; value: number; text: string }[] =>
+  bars.map(bar => ({ label: bar.label, value: bar.value ?? 0, text: bar.text }));

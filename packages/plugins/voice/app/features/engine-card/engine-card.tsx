@@ -18,8 +18,8 @@
 
 import { Check, Download, Info, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
-import { EngineBars } from './engine-bars.tsx';
-import { barsText, type EngineBar } from './engine-numbers.ts';
+import { OptionBars } from '../../shell-voice.ts';
+import { barsText, type EngineBar, optionBarsOf } from './engine-numbers.ts';
 import './engine-card.css';
 
 /** What the install slot shows. `none` draws no slot (the browser's own voice and Off have nothing to download). */
@@ -54,7 +54,7 @@ export interface EngineCardProps {
   readonly badge?: string;
   /** The last install failure, said in place of the line (the card never grows). */
   readonly error?: string;
-  /** A card that cannot work here: it is drawn, and says why in its install slot, but cannot be chosen. */
+  /** Also blocks a card for a reason the install view does not carry. An `unavailable` install view always blocks. */
   readonly disabled?: boolean;
 }
 
@@ -163,7 +163,10 @@ export function EngineCard({
     wasOpen.current = open;
   }, [open]);
   const describedBy = useId();
-  const description = bars === null ? line : `${line} ${barsText(bars)}`;
+  // A card that cannot work here cannot be chosen: its radio is disabled, and the reason stays on the card and in its text.
+  const blocked = disabled || install.kind === 'unavailable';
+  const reason = install.kind === 'unavailable' ? ` Not available here: ${install.reason}` : '';
+  const description = `${bars === null ? line : `${line} ${barsText(bars)}`}${reason}`;
 
   return (
     <div
@@ -171,6 +174,7 @@ export function EngineCard({
       data-engine={id}
       data-selected={selected ? 'true' : 'false'}
       data-pop={justChosen ? 'true' : 'false'}
+      data-disabled={blocked ? 'true' : 'false'}
     >
       <input
         type="radio"
@@ -178,7 +182,7 @@ export function EngineCard({
         name={group}
         value={id}
         checked={selected}
-        disabled={disabled}
+        disabled={blocked}
         aria-label={name}
         aria-describedby={describedBy}
         onChange={() => onChoose(id)}
@@ -201,7 +205,11 @@ export function EngineCard({
             {error}
           </p>
         )}
-        {bars === null ? <p className="fy-engine-none">{details[0]}</p> : <EngineBars bars={bars} />}
+        {bars === null ? (
+          <p className="fy-engine-none">{details[0]}</p>
+        ) : (
+          <OptionBars bars={optionBarsOf(bars)} className="fy-engine-bars min-w-0" />
+        )}
         <div className="fy-engine-foot">
           <span className="fy-engine-chips">
             {chips.map(chip => (
@@ -226,7 +234,7 @@ export function EngineCard({
       </button>
       {open ? (
         <section id={detailsId} className="fy-engine-details" aria-label={`About ${name}`}>
-          {details.map(paragraph => (
+          {(install.kind === 'unavailable' ? [install.reason, ...details] : details).map(paragraph => (
             <p key={paragraph}>{paragraph}</p>
           ))}
           <button type="button" className="fy-engine-mini" onClick={() => setOpen(false)}>

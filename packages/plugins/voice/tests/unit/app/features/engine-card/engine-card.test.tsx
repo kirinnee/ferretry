@@ -101,7 +101,7 @@ describe('<EngineCard>', () => {
     expect(description).toContain('Fastest. Words appear as you speak.');
     expect(description).toContain('Speed 0.4 s. Accuracy 52%. Size 86 MB.');
     expect(view.container.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe(
-      'Speed 0.4 s. Accuracy 52%. Size 86 MB.',
+      'Speed 0.4 s, Accuracy 52%, Size 86 MB',
     );
     await view.unmount();
   });

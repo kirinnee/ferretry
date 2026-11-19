@@ -120,51 +120,26 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.fy-engine-bars {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  height: 43px;
+.fy-engine-bars[data-option-bars] {
+  height: 44px;
+  gap: 1px;
+  align-content: start;
 }
-.fy-engine-bar {
-  align-items: center;
-  display: grid;
-  gap: 6px;
-  grid-template-columns: 74px minmax(0, 1fr) 80px;
-  height: 13px;
-}
-.fy-engine-bar-label,
-.fy-engine-bar-text {
-  color: var(--muted);
+.fy-engine-bars [data-option-bar] {
   font-size: var(--text-xs);
-  line-height: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  height: 14px;
+  line-height: 14px;
+  grid-template-columns: 74px minmax(0, 1fr) 80px;
+  column-gap: 6px;
 }
-.fy-engine-bar-text {
-  color: var(--fg);
-  text-align: right;
+.fy-engine-bars [data-option-bar-track] {
+  min-width: 0;
 }
-.fy-engine-bar-track {
-  background: var(--surface-3, var(--border-soft));
-  border-radius: var(--radius-pill, 999px);
-  display: block;
-  height: 5px;
-  overflow: hidden;
-}
-.fy-engine-bar-track[data-measured='no'] {
-  background: transparent;
-  border: 1px dashed var(--border);
-}
-.fy-engine-bar[data-bar='size'] .fy-engine-bar-fill {
+.fy-engine-bars [data-option-bar='size'] [data-option-bar-fill] {
   background: var(--muted);
 }
-.fy-engine-bar-fill {
-  background: var(--accent);
-  border-radius: inherit;
-  display: block;
-  height: 100%;
+.fy-engine-card[data-selected='true'] .fy-engine-bars [data-option-bar] > :first-child {
+  color: var(--fg);
 }
 .fy-engine-foot {
   align-items: center;
@@ -336,6 +311,33 @@
 .fy-engine-card:has([data-state='installing']) .fy-engine-line {
   color: var(--accent);
 }
-.fy-engine-card[data-selected='true'] .fy-engine-bar-label {
+
+/* A card that cannot work here: drawn, quiet, not pressable. Its reason stays on the card ("Not available here"). */
+.fy-engine-card[data-disabled='true'] {
+  border-style: dashed;
+}
+.fy-engine-card[data-disabled='true']:hover {
+  border-color: var(--border);
+}
+.fy-engine-card[data-disabled='true'] .fy-engine-radio {
+  cursor: not-allowed;
+}
+.fy-engine-card[data-disabled='true'] .fy-engine-body {
+  opacity: 0.7;
+}
+.fy-engine-card[data-disabled='true'] .fy-engine-state[data-state='unavailable'] {
   color: var(--fg);
+  opacity: 1;
+}
+
+/* A touch screen's global `:root button { min-height/min-width: 44px }` would make both small buttons a 44 px BOX and push
+   the card's rows apart. They stay small to look at; the ::after hit area (`.fy-engine-hit`) is the 44 px to press. `:root`
+   outranks the global rule. */
+:root .fy-engine-mini {
+  min-height: 24px;
+  min-width: 0;
+}
+:root .fy-engine-info {
+  min-height: 24px;
+  min-width: 24px;
 }

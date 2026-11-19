@@ -153,6 +153,24 @@ describe('OptionBars', () => {
     expect(fills.map(f => f.style.width)).toEqual(['80%', '25%']);
   });
 
+  it('should speak and draw a bar’s own words in place of its percentage', async () => {
+    mounted = await mount(
+      <OptionBars
+        bars={[
+          { label: 'Speed', value: 0.9, text: '0.4 s' },
+          { label: 'Size', value: 0.1, text: '86 MB' },
+        ]}
+      />,
+    );
+    const root = must(mounted.container.querySelector('[data-option-bars]'), 'bars');
+    expect(root.getAttribute('aria-label')).toBe('Speed 0.4 s, Size 86 MB');
+    expect([...mounted.container.querySelectorAll('[data-option-bar-text]')].map(n => n.textContent)).toEqual([
+      '0.4 s',
+      '86 MB',
+    ]);
+    expect(mounted.container.querySelector('[data-option-bar="size"]')).not.toBeNull();
+  });
+
   it('should clamp a value outside 0..1 and read a non-number as empty', () => {
     expect([barFill(2), barFill(-1), barFill(Number.NaN), barFill(0.5)]).toEqual([1, 0, 0, 0.5]);
     expect(optionBarsText([{ label: 'Speed', value: 9 }])).toBe('Speed 100%');

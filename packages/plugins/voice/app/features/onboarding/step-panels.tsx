@@ -11,11 +11,8 @@ import { type DeviceClassGlobalLike, deviceClassOf } from '../../lib/stt/engine-
 import type { SttSettingsStore } from '../../lib/stt/stt-settings.ts';
 import { useOnDeviceVoices, useSttSettingsStore } from '../../lib/voice-store.tsx';
 import { SpeedupsStep } from './speedups-step.tsx';
-import type { StepHost } from './step-host.ts';
+import type { StepHost } from '@ferretry/kernel/contract';
 import { VoiceStep } from './voice-step.tsx';
-
-/** The host the shell put on the panel's props, if any. The shell's `PanelProps.step` is typed once O1 lands. */
-export const stepOf = (props: object): StepHost | undefined => (props as { readonly step?: StepHost }).step;
 
 function VoiceStepWithStore({
   store,

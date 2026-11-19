@@ -20,7 +20,7 @@ import { ON_DEVICE_MODELS, type OnDeviceModel, type OnDeviceModelId } from '../.
 import type { OnDeviceVoices } from '../../lib/stt/on-device-voices.ts';
 import { Button } from '../../shell-voice.ts';
 import { EngineCardGrid, type EngineChoice } from '../engine-card/engine-card-grid.tsx';
-import type { StepHost } from './step-host.ts';
+import type { StepHost } from '@ferretry/kernel/contract';
 import { useStepReady } from './use-step-ready.ts';
 import './voice-step.css';
 
