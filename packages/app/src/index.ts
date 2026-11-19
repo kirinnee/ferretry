@@ -393,6 +393,8 @@ export * from './compose/setting-row.tsx';
 export * from './compose/setting-preview.tsx';
 export * from './compose/choice-cards.tsx';
 export * from './compose/option-bars.tsx';
+export * from './compose/step-page-frame.tsx';
+export * from './compose/step-progress.tsx';
 export * from './compose/context-readout.ts';
 export * from './compose/context-ring.tsx';
 export * from './compose/use-location-share.ts';

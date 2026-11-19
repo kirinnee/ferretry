@@ -1,0 +1,154 @@
+/* ============================================================================
+   StepPageFrame + StepProgress (compose/step-page-frame.tsx, step-progress.tsx): the one page of a stepper.
+   Body max 880px, centred. A demo box sits on the right at >= 900px of the frame's own width and above the body (<=
+   120px tall) below it. The footer's buttons are AUTO width (never stretched), min-height 44px with 12-16px of
+   vertical padding, right aligned; on a phone (< 600px of the frame) the footer is sticky at the bottom, above the
+   safe area. Theme tokens only.
+   ========================================================================== */
+
+.fy-spf {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  min-width: 0;
+}
+.fy-spf__page {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 20px;
+  margin-inline: auto;
+  max-width: 880px;
+  min-width: 0;
+  padding: 24px 16px;
+  width: 100%;
+}
+.fy-spf__head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fy-spf__title {
+  color: var(--fg);
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 1.5rem;
+  font-weight: 650;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.fy-spf__line {
+  color: var(--muted);
+  font-size: var(--font-size-base);
+  line-height: 1.4;
+}
+.fy-spf__main {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.fy-spf__body {
+  min-width: 0;
+}
+/* On a phone the demo comes first and is short. */
+.fy-spf__demo {
+  align-items: center;
+  background: var(--surface-2);
+  border: var(--stroke-panel) solid var(--border);
+  border-radius: var(--radius-panel);
+  display: flex;
+  justify-content: center;
+  max-height: 120px;
+  min-width: 0;
+  order: -1;
+  overflow: hidden;
+}
+@container (min-width: 900px) {
+  .fy-spf__main {
+    align-items: flex-start;
+    flex-direction: row;
+    gap: 32px;
+  }
+  .fy-spf__body {
+    flex: 1 1 0;
+  }
+  .fy-spf__demo {
+    flex: 0 0 280px;
+    max-height: none;
+    min-height: 160px;
+    order: 0;
+  }
+}
+
+.fy-spf__footer {
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.fy-spf__actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-inline: auto;
+  max-width: 880px;
+  padding: 12px 16px;
+}
+/* Auto width, never stretched; 44px tall minimum with 12-16px vertical padding. */
+.fy-spf__footer .fy-spf__button {
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 44px;
+  padding-block: 12px;
+  width: auto;
+}
+@container (max-width: 599.98px) {
+  .fy-spf__footer {
+    bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    position: sticky;
+    z-index: 1;
+  }
+}
+
+/* ---- StepProgress ---- */
+.fy-sp-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fy-sp-progress__bar {
+  display: flex;
+  gap: 4px;
+}
+.fy-sp-progress__segment {
+  background: var(--border);
+  border-radius: var(--radius-dot);
+  flex: 1 1 0;
+  height: 6px;
+  min-width: 0;
+}
+.fy-sp-progress__segment[data-state='done'],
+.fy-sp-progress__segment[data-state='current'] {
+  background: var(--accent);
+}
+.fy-sp-progress__segment[data-state='done'] {
+  opacity: 0.55;
+}
+/* The words are the one text line under the bar; the per-segment labels are for a screen reader only. */
+.fy-sp-progress__label {
+  border: 0;
+  clip: rect(0 0 0 0);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+.fy-sp-progress__text {
+  color: var(--muted);
+  font-size: calc(var(--font-size-base) - 1.5px);
+}

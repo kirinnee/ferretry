@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { useState } from 'react';
 import { ChoiceCards, choiceAfterKey } from '../../../src/compose/choice-cards.tsx';
 import { barFill, OptionBars, optionBarsText } from '../../../src/compose/option-bars.tsx';
+import { StepPageFrame } from '../../../src/compose/step-page-frame.tsx';
+import { StepProgress, stepProgressText } from '../../../src/compose/step-progress.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 
 const OPTIONS = [
@@ -109,6 +111,22 @@ describe('ChoiceCards', () => {
     expect(choiceAfterKey(OPTIONS, 'a', 'End')?.id).toBe('d');
     expect(choiceAfterKey(OPTIONS, 'a', 'x')).toBeUndefined();
   });
+
+  it('should move the first arrow to the SECOND card while nothing is chosen (the first holds the tab stop)', async () => {
+    const log: string[] = [];
+    mounted = await mount(<Harness start={null} log={log} />);
+    const group = must(mounted.container.querySelector('[role="radiogroup"]'), 'group');
+    await interact(() => pressKey(group, 'ArrowRight'));
+    expect(log).toEqual(['b']);
+    expect(choiceAfterKey(OPTIONS, null, 'ArrowDown')?.id).toBe('b');
+    expect(choiceAfterKey(OPTIONS, null, 'End')?.id).toBe('d');
+  });
+
+  it('should tell the grid how many cards it holds, so two never stretch to the page', async () => {
+    mounted = await mount(<Harness start="a" log={[]} />);
+    const grid = must(mounted.container.querySelector<HTMLElement>('.fy-cc__grid'), 'grid');
+    expect(grid.style.getPropertyValue('--cc-n')).toBe('4');
+  });
 });
 
 describe('OptionBars', () => {
@@ -138,5 +156,92 @@ describe('OptionBars', () => {
   it('should clamp a value outside 0..1 and read a non-number as empty', () => {
     expect([barFill(2), barFill(-1), barFill(Number.NaN), barFill(0.5)]).toEqual([1, 0, 0, 0.5]);
     expect(optionBarsText([{ label: 'Speed', value: 9 }])).toBe('Speed 100%');
+  });
+});
+
+const SEGMENTS = [
+  { id: 'machine', label: 'Machine' },
+  { id: 'claude', label: 'Claude Code' },
+  { id: 'device', label: 'This device' },
+] as const;
+
+describe('StepProgress', () => {
+  let mounted: Mounted | undefined;
+  afterEach(async () => {
+    await mounted?.unmount();
+    mounted = undefined;
+  });
+
+  it('should light the current segment, fill the ones before it and say "X · n of m" once', async () => {
+    mounted = await mount(<StepProgress segments={SEGMENTS} current="claude" step={3} of={7} />);
+    const states = [...mounted.container.querySelectorAll('[data-segment]')].map(n => n.getAttribute('data-state'));
+    expect(states).toEqual(['done', 'current', 'ahead']);
+    const bar = must(mounted.container.querySelector('[role="progressbar"]'), 'bar');
+    expect(bar.getAttribute('aria-valuetext')).toBe('Claude Code · 3 of 7');
+    expect(bar.getAttribute('aria-valuenow')).toBe('3');
+    expect(mounted.container.querySelector('.fy-sp-progress__text')?.textContent).toBe('Claude Code · 3 of 7');
+  });
+
+  it('should read an unknown segment as just the count', () => {
+    expect(stepProgressText(SEGMENTS, 'nope', 2, 5)).toBe('2 of 5');
+  });
+});
+
+describe('StepPageFrame', () => {
+  let mounted: Mounted | undefined;
+  afterEach(async () => {
+    await mounted?.unmount();
+    mounted = undefined;
+  });
+  const button = (c: HTMLElement, which: 'back' | 'next') => c.querySelector<HTMLButtonElement>(`[data-step-${which}]`);
+
+  it('should draw the title, the line, the body, the demo and the progress', async () => {
+    mounted = await mount(
+      <StepPageFrame
+        title="Which side?"
+        line="Change it later."
+        demo={<i data-demo="" />}
+        progress={{ segments: SEGMENTS, current: 'machine', step: 1, of: 3 }}
+        next={{ label: 'Next', onClick: () => undefined }}
+      >
+        <p data-body="">body</p>
+      </StepPageFrame>,
+    );
+    const c = mounted.container;
+    expect(c.querySelector('h1')?.textContent).toBe('Which side?');
+    expect(c.querySelector('.fy-spf__line')?.textContent).toBe('Change it later.');
+    expect(c.querySelector('[data-body]')).not.toBeNull();
+    expect(c.querySelector('[data-step-demo] [data-demo]')).not.toBeNull();
+    expect(c.querySelector('[data-step-progress]')).not.toBeNull();
+    expect(button(c, 'back')).toBeNull();
+  });
+
+  it('should call Back and Next, label Back "Back" by default and lock Next when disabled or busy', async () => {
+    const calls: string[] = [];
+    mounted = await mount(
+      <StepPageFrame
+        title="T"
+        back={{ onClick: () => calls.push('back') }}
+        next={{ label: 'Continue', onClick: () => calls.push('next') }}
+      >
+        x
+      </StepPageFrame>,
+    );
+    const c = mounted.container;
+    expect(button(c, 'back')?.textContent).toBe('Back');
+    expect(button(c, 'next')?.textContent).toBe('Continue');
+    await interact(() => button(c, 'back')?.click());
+    await interact(() => button(c, 'next')?.click());
+    expect(calls).toEqual(['back', 'next']);
+    await mounted.unmount();
+    mounted = await mount(
+      <StepPageFrame title="T" next={{ label: 'Next', busy: true, onClick: () => calls.push('x') }}>
+        x
+      </StepPageFrame>,
+    );
+    const next = must(button(mounted.container, 'next'), 'next');
+    expect(next.disabled).toBe(true);
+    expect(mounted.container.querySelector('[data-spinner]')).not.toBeNull();
+    expect(mounted.container.querySelector('section')?.getAttribute('aria-busy')).toBe('true');
   });
 });

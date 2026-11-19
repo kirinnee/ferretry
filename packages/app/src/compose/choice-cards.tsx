@@ -15,7 +15,7 @@
  */
 
 import { Check } from 'lucide-react';
-import { type KeyboardEvent, type ReactNode, useId, useState } from 'react';
+import { type CSSProperties, type KeyboardEvent, type ReactNode, useId, useState } from 'react';
 import { useMotionAllowed } from '../ui/use-motion-allowed.ts';
 import './choice-cards.css';
 
@@ -49,7 +49,11 @@ export function choiceAfterKey(
   key: string,
 ): ChoiceOption | undefined {
   const usable = options.filter(option => option.disabled !== true);
-  const index = usable.findIndex(option => option.id === value);
+  // With nothing chosen the first usable card holds the tab stop, so it is where the arrow keys start from.
+  const index = Math.max(
+    0,
+    usable.findIndex(option => option.id === value),
+  );
   const last = usable.length - 1;
   if (key === 'Home') return usable[0];
   if (key === 'End') return usable[last];
@@ -83,7 +87,13 @@ export function ChoiceCards({ label, options, value, onChange, disabled = false 
   };
   return (
     <div className="fy-cc" data-choice-cards="">
-      <div role="radiogroup" aria-label={label} onKeyDown={onKeyDown} className="fy-cc__grid">
+      <div
+        role="radiogroup"
+        aria-label={label}
+        onKeyDown={onKeyDown}
+        className="fy-cc__grid"
+        style={{ '--cc-n': options.length } as CSSProperties}
+      >
         {options.map(option => {
           const checked = option.id === value;
           const off = disabled || option.disabled === true;
