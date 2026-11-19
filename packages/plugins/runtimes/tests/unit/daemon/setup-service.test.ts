@@ -584,7 +584,6 @@ describe('installTools', () => {
       ['tool_install_unauthorized', 'fleet_setup_unauthorized'],
       ['tool_install_in_progress', 'fleet_setup_busy'],
       ['tool_install_invalid', 'fleet_setup_refused'],
-      ['tool_install_plan_changed', 'fleet_setup_plan_changed'],
     ] as const;
     for (const [from, to] of cases) {
       state.install = async () => {

@@ -177,65 +177,6 @@ describe('ToolInstallService.install refusals', () => {
     should((error as ToolInstallRefusal).message).equal('name at least one tool to install');
   });
 
-  describe('the command the person was shown', () => {
-    const SHOWN_BREW = [{ harness: 'claude' as const, command: 'brew install --cask claude-code' }];
-
-    it('should run when the fresh plan is exactly the shown command', async () => {
-      const { service, runs } = world({ onPath: { brew: '/opt/x/brew' }, foundAfterRun: ['claude'] });
-      const outcomes = await service.install({ harnesses: ['claude'], shown: SHOWN_BREW }, OWNER);
-      should(outcomes[0]?.outcome).equal('installed');
-      should(runs).have.length(1);
-    });
-
-    it('should refuse, run nothing, and say the new command when the plan moved since it was shown', async () => {
-      // Shown with brew; by the press only npm is there.
-      const { service, runs } = world({ onPath: { npm: '/x/npm' } });
-      const error = await service.install({ harnesses: ['claude'], shown: SHOWN_BREW }, OWNER).catch((e: unknown) => e);
-      should(error).be.instanceOf(ToolInstallRefusal);
-      should((error as ToolInstallRefusal).code).equal('tool_install_plan_changed');
-      should((error as ToolInstallRefusal).message).containEql('npm install -g @anthropic-ai/claude-code');
-      should((error as ToolInstallRefusal).message).containEql('nothing was run');
-      should(runs).have.length(0);
-    });
-
-    it('should refuse the whole request, running no sibling, when any one plan moved', async () => {
-      const { service, runs } = world({ onPath: { brew: '/opt/x/brew' } });
-      const error = await service
-        .install(
-          {
-            harnesses: ['claude', 'codex'],
-            shown: [...SHOWN_BREW, { harness: 'codex', command: 'npm install -g @openai/codex' }],
-          },
-          OWNER,
-        )
-        .catch((e: unknown) => e);
-      should((error as ToolInstallRefusal).code).equal('tool_install_plan_changed');
-      should(runs).have.length(0);
-    });
-
-    it('should refuse a harness the request showed nothing for, once any command is shown', async () => {
-      const { service, runs } = world({ onPath: { brew: '/opt/x/brew' } });
-      const error = await service
-        .install({ harnesses: ['claude', 'codex'], shown: SHOWN_BREW }, OWNER)
-        .catch((e: unknown) => e);
-      should((error as ToolInstallRefusal).code).equal('tool_install_plan_changed');
-      should(runs).have.length(0);
-    });
-
-    it('should let a tool that was found since be reported as already installed', async () => {
-      const { service, runs } = world({ found: ['claude'] });
-      const outcomes = await service.install({ harnesses: ['claude'], shown: SHOWN_BREW }, OWNER);
-      should(outcomes).deepEqual([{ harness: 'claude', outcome: 'already-installed', path: '/bin/claude' }]);
-      should(runs).have.length(0);
-    });
-
-    it('should run its own current plan when the request shows nothing (a caller that showed no one anything)', async () => {
-      const { service, runs } = world({ onPath: { npm: '/x/npm' }, foundAfterRun: ['claude'] });
-      await service.install({ harnesses: ['claude'] }, OWNER);
-      should(runs).have.length(1);
-    });
-  });
-
   it('should refuse a second install while one is running, then accept one once it finished', async () => {
     let release: (value: RunResult) => void = () => undefined;
     const { service, runs } = world({

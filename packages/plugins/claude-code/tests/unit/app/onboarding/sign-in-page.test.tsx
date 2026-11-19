@@ -64,11 +64,17 @@ describe('the sign-in page', () => {
     expect(run.events).toEqual(['skip:not-needed']);
   });
 
-  it('lifts its loading cover when the panel says it has something to show, and is done when it signed in', async () => {
+  it('lifts its loading cover, holds Next while nobody is signed in, and is done (Next free) only once it signed in', async () => {
     const { view, run } = await open('nothing');
-    expect(run.events).toEqual(['ready']);
+    // ready, then the hold: the shell's Next is locked (it would record a default as done); Later and Skip are not.
+    expect(run.events).toEqual(['ready', 'busy:Sign in to Claude to continue']);
     await interact(() => (view.container.querySelector('[data-fake-sign-in]') as HTMLElement).click());
-    expect(run.events).toEqual(['ready', 'done']);
+    expect(run.events).toEqual(['ready', 'busy:Sign in to Claude to continue', 'busy:null', 'done']);
+  });
+
+  it('does not hold Next on a page that has no panel to sign in with (nothing here could free it)', async () => {
+    const { run } = await open(null);
+    expect(run.events).toEqual(['ready']);
   });
 
   it('shows itself, saying where to sign in, when no plugin fills the slot', async () => {

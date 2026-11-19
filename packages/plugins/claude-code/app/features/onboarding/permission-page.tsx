@@ -14,7 +14,7 @@
  * does not read), the page shows the mode as unknown, writes nothing, and says where to change it at the machine.
  */
 import { Button, ChoiceCards, type ChoiceOption } from '@ferretry/app';
-import { readConfigText, setConfigKey } from '@ferretry/std/yaml';
+import { editConfigText, readConfigText } from '@ferretry/std/yaml';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { PermissionModeSchema } from '../../../contract/index.ts';
@@ -75,7 +75,14 @@ export const permissionRead = (text: string, state?: string): PermissionRead => 
 };
 
 /** The file with `permissionMode` set and every other key and comment left exactly as it was. */
-export const withPermissionMode = (text: string, mode: Mode): string => setConfigKey(text, 'permissionMode', mode);
+export const withPermissionMode = (text: string, mode: Mode): string => {
+  const read = readConfigText(text);
+  if (!read.ok || permissionRead(text).kind === 'unknown') throw new Error('the file cannot be edited here');
+  const value = read.read.value;
+  const now = value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  // The shared editor sets a scalar in place, so a comment on its line stays; every other key and comment is kept.
+  return editConfigText(text, { ...now, permissionMode: mode }, now, undefined);
+};
 
 interface Loaded {
   readonly text: string;

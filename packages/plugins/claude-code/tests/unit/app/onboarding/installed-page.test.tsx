@@ -53,7 +53,8 @@ describe('the install page', () => {
       'GET /v1/claude-code/update': update(absent),
       'GET /v1/runtimes/setup/scan': RUNNABLE,
     });
-    expect(run.events).toEqual(['ready']);
+    // Shown, and Next is held: "not installed yet" must not be recorded as done by the shell's default on Next.
+    expect(run.events).toEqual(['ready', 'busy:Install Claude Code to continue']);
     expect(must(view.container.querySelector('[data-install-command]'), 'the command').textContent).toBe(
       'npm install -g @fake/claude',
     );
@@ -87,7 +88,14 @@ describe('the install page', () => {
       harnesses: ['claude-code'],
       shown: [{ harness: 'claude-code', command: 'npm install -g @fake/claude' }],
     });
-    expect(run.events).toEqual(['ready', 'busy:Installing Claude Code…', 'done', 'busy:null']);
+    // done() only on success, after the hold is released.
+    expect(run.events).toEqual([
+      'ready',
+      'busy:Install Claude Code to continue',
+      'busy:Installing Claude Code…',
+      'busy:null',
+      'done',
+    ]);
     expect(view.container.querySelector('[data-installed]')?.textContent).toContain('added 1 package');
   });
 
@@ -117,6 +125,8 @@ describe('the install page', () => {
       'It is now: brew install fake-claude',
     );
     expect(run.events).not.toContain('done');
+    // Failed: Next is locked again (held), never left free.
+    expect(run.events.at(-1)).toBe('busy:Install Claude Code to continue');
     expect(calls.filter(call => call.route === 'POST /v1/runtimes/machine/tools/install')).toHaveLength(1);
     // A new press sends the new command.
     const again = [...view.container.querySelectorAll('button')].find(b => b.textContent === 'Install Claude Code');
@@ -155,6 +165,8 @@ describe('the install page', () => {
       'The installer exited with 1. To do it yourself, run: npm i -g @fake/claude',
     );
     expect(run.events).not.toContain('done');
+    // Failed: Next is locked again (held), never left free.
+    expect(run.events.at(-1)).toBe('busy:Install Claude Code to continue');
   });
 
   it('offers only the manual command, and no install button, when no package manager is there', async () => {

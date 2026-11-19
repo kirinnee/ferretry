@@ -22,9 +22,12 @@ const UPDATE = 'GET /v1/claude-code/update' as const;
 const SCAN = 'GET /v1/runtimes/setup/scan' as const;
 const INSTALL = 'POST /v1/runtimes/machine/tools/install' as const;
 
-/** The daemon's refusal when the command it would run is no longer the one that was shown (Runtimes' `fleet_setup_plan_changed`). */
-const isPlanChanged = (error: unknown): boolean =>
-  typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'fleet_setup_plan_changed';
+/**
+ * While Claude Code is not installed this page holds `busy`, so the shell's Next stays locked (Later and Skip stay): the
+ * shell records the default on Next (O1 rule 5), and "not installed yet" must not be recorded as done. `done()` is called
+ * only once the install has succeeded.
+ */
+const HOLD = 'Install Claude Code to continue';
 
 type Read =
   | { readonly kind: 'reading' }
@@ -44,14 +47,19 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
   const [note, setNote] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const decided = useRef(false);
+  /** The page has told the shell to hold Next. */
+  const holding = useRef(false);
 
   /** Tell the shell once: show (ready) or move on (skip). */
   const decide = useCallback(
     (show: boolean): void => {
       if (decided.current) return;
       decided.current = true;
-      if (show) step?.ready();
-      else step?.skip('not-needed');
+      if (show) {
+        step?.ready();
+        step?.busy(HOLD);
+        holding.current = true;
+      } else step?.skip('not-needed');
     },
     [step],
   );
@@ -63,7 +71,12 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
         const tool = scan.tools.find(entry => entry.harness === 'claude-code');
         if (tool === undefined || tool.installed) {
           setRead({ kind: 'found' });
-          decide(false);
+          if (holding.current) {
+            // It turned up while the page was open (the install ran after all): that is the success this page waits for.
+            holding.current = false;
+            step?.busy(null);
+            step?.done();
+          } else decide(false);
         } else {
           setRead({ kind: 'plan', plan: tool.install });
           decide(true);
@@ -74,7 +87,7 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
         decide(true);
       }
     },
-    [client, decide],
+    [client, decide, step],
   );
 
   useEffect(() => {
@@ -102,6 +115,7 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
     setNote(null);
     setWorking(true);
     step?.busy('Installing Claude Code…');
+    let succeeded = false;
     try {
       // The request names the command the person is looking at: the daemon re-plans, and runs only that very command.
       const result = ToolInstallResultSchema.parse(
@@ -112,17 +126,22 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
       const outcome = result.outcomes.find(entry => entry.harness === 'claude-code');
       if (outcome?.outcome === 'installed' || outcome?.outcome === 'already-installed') {
         setRead({ kind: 'installed', lines: outcome.outcome === 'installed' ? outcome.output : [] });
-        step?.done();
+        succeeded = true;
       } else if (outcome?.outcome === 'failed')
         setNote(`${outcome.reason} To do it yourself, run: ${outcome.manualCommand}`);
       else setNote('Nothing was installed.');
     } catch (error) {
       setNote(sentenceOf(error));
-      // The plan moved since it was shown: nothing ran. Show the new command, for a new press.
-      if (isPlanChanged(error)) await readPlan(true);
+      // The daemon may have refused because its plan moved since it was shown (nothing ran): read it again and show the
+      // command it has now, for a new press.
+      await readPlan(true);
     } finally {
       setWorking(false);
-      step?.busy(null);
+      if (succeeded) {
+        holding.current = false;
+        step?.busy(null);
+        step?.done();
+      } else if (holding.current) step?.busy(HOLD);
     }
   };
 

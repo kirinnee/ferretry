@@ -435,9 +435,7 @@ export class FleetSetupService {
           ? 'fleet_setup_unauthorized'
           : error.code === 'tool_install_in_progress'
             ? 'fleet_setup_busy'
-            : error.code === 'tool_install_plan_changed'
-              ? 'fleet_setup_plan_changed'
-              : 'fleet_setup_refused';
+            : 'fleet_setup_refused';
       throw new FleetSetupRefusal(code, error.message);
     }
     return { outcomes: outcomes.map(toolOutcomeOnWire) };

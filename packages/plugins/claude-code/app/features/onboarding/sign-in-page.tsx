@@ -11,6 +11,8 @@ import { CLAUDE_CODE_SIGN_IN_SLOT } from '../../../contract/index.ts';
 import type { ClaudeCodeClient } from '../../lib/client.ts';
 import type { StepPageProps } from './props.ts';
 
+const HOLD = 'Sign in to Claude to continue';
+
 export function SignInPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
   const placed = useSlotHasPanels(CLAUDE_CODE_SIGN_IN_SLOT);
   const daemon = daemonOfClient(client);
@@ -34,9 +36,17 @@ export function SignInPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
           daemon={daemon}
           slot={CLAUDE_CODE_SIGN_IN_SLOT}
           props={{
-            onShown: () => step?.ready(),
+            // The panel is up and nobody is signed in: hold Next (the shell records the default on Next, O1 rule 5) until
+            // the sign-in has really succeeded. Later and Skip stay available.
+            onShown: () => {
+              step?.ready();
+              step?.busy(HOLD);
+            },
             onAlreadySignedIn: () => step?.skip('not-needed'),
-            onSignedIn: () => step?.done(),
+            onSignedIn: () => {
+              step?.busy(null);
+              step?.done();
+            },
           }}
         />
       ) : (
