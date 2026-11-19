@@ -74,7 +74,7 @@ describe('claude-code settings put (r9 A6)', () => {
     );
     expect(answer.ok).toBe(true);
     if (answer.ok)
-      expect(answer.warnings?.map(sentence => sentence.split(':')[0])).toEqual([
+      expect(answer.warnings?.map(sentence => sentence.split(' ')[2])).toEqual([
         'hooks',
         'env',
         'apiKeyHelper',
