@@ -43,6 +43,12 @@ export type ComponentPutResult =
   | { readonly ok: true; readonly held?: true; readonly warnings?: readonly string[] }
   | { readonly ok: false; readonly reason: string };
 
+/** One file an imported component brings with it, by its path under the component (`<item>/<rel>` for a skill). */
+export interface ComponentPutFile {
+  readonly path: string;
+  readonly content: string;
+}
+
 /** A view of one kind's component documents, read live from the owner's own configuration. */
 export interface ProfileComponentSource {
   /** Every component's name, in name order. */
@@ -63,8 +69,10 @@ export interface ProfileComponentSource {
    * value never travels: an `env` entry is a plain value or a `${secret:NAME}` reference, and a raw secret is the
    * owner's to refuse. Optional: an owner that offers none is refused in a sentence, and the rest of the import still lands.
    * A name that is taken is the owner's to judge (an import never replaces a component it did not make).
+   * `files` are the files the component brings (a skill's folders, as `<item>/<rel>`): only a skills component has
+   * any, and the owner installs them into its own store with its own bounds. Runtimes does not copy them anywhere.
    */
-  put?(name: string, documentText: string): Promise<ComponentPutResult>;
+  put?(name: string, documentText: string, files?: readonly ComponentPutFile[]): Promise<ComponentPutResult>;
 }
 
 /** The kinds whose components another plugin owns (`modelSets` are Runtimes' own). */

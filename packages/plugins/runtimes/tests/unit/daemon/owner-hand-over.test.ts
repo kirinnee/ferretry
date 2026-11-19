@@ -7,7 +7,7 @@ import should from 'should';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { ComponentWriter } from '../../../daemon/lib/account/owner-components.ts';
 import { FleetCatalogRefusal } from '../../../daemon/lib/service/catalog-service.ts';
-import { handOver, type OwnedComponents } from '../../../daemon/lib/service/owner-hand-over.ts';
+import { handOver, type OwnedComponents, withoutHandedBodies } from '../../../daemon/lib/service/owner-hand-over.ts';
 
 const MODEL = parseAccountModel({ version: 1 });
 const applied = { model: MODEL, documents: [] };
@@ -215,5 +215,31 @@ describe('handOver, what is in effect', () => {
 
     // Assert
     should(answer.applied).equal(applied);
+  });
+});
+
+describe('withoutHandedBodies', () => {
+  const before = parseAccountModel({ version: 1 });
+  const model = parseAccountModel({
+    version: 1,
+    components: {
+      skills: { mine: { items: ['review'] } },
+      settings: { s: { harness: 'claude', file: 'components/settings/s.json' } },
+    },
+  });
+  const assets = [
+    { path: 'skills/review/SKILL.md' },
+    { path: 'skills/review/lib/a.sh' },
+    { path: 'skills/reviewer/SKILL.md' },
+    { path: 'components/settings/s.json' },
+    { path: 'components/instructions/main.md' },
+  ];
+
+  it("should drop an owner's settings body and the files of each skill item, and keep every other asset", () => {
+    // Act
+    const kept = withoutHandedBodies(assets, before, model);
+
+    // Assert
+    should(kept.map(asset => asset.path)).eql(['skills/reviewer/SKILL.md', 'components/instructions/main.md']);
   });
 });

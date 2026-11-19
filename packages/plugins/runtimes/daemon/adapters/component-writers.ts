@@ -19,7 +19,7 @@ export function componentWriters(lookup: ComponentSourceLookup, within: Within):
       if (owner === 'unavailable') return refused('the part of Ferretry that owns them is not running');
       if (owner.put === undefined) return refused('the part of Ferretry that owns them cannot take an import yet');
       try {
-        const answered = await within(owner.put(write.name, write.text));
+        const answered = await within(owner.put(write.name, write.text, write.files));
         if (answered === TIMED_OUT) return refused('the part of Ferretry that owns them did not answer in time');
         if (!answered.ok) return refused(answered.reason);
         const warnings =

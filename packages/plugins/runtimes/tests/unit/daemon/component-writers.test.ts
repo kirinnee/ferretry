@@ -84,3 +84,44 @@ describe('componentWriters warnings', () => {
     should(await writers.put(WRITE)).eql({ outcome: 'written', warnings: ['command "x" is not on this machine'] });
   });
 });
+
+describe('componentWriters, the files a skill brings', () => {
+  it('should hand the owner the files of a skills component along with its document', async () => {
+    // Arrange
+    let seen: unknown;
+    const writers = componentWriters(
+      () =>
+        owner(async (_name, _text, files) => {
+          seen = files;
+          return { ok: true };
+        }),
+      direct,
+    );
+    const files = [{ path: 'review/SKILL.md', content: '# review\n' }];
+
+    // Act
+    await writers.put({ kind: 'skills', name: 's', reference: 'skills/s', file: 'skills/s.yaml', text: '{}\n', files });
+
+    // Assert
+    should(seen).eql(files);
+  });
+
+  it('should hand a component with none no files', async () => {
+    // Arrange
+    let seen: unknown = 'unset';
+    const writers = componentWriters(
+      () =>
+        owner(async (_name, _text, files) => {
+          seen = files;
+          return { ok: true };
+        }),
+      direct,
+    );
+
+    // Act
+    await writers.put(WRITE);
+
+    // Assert
+    should(seen).be.undefined();
+  });
+});

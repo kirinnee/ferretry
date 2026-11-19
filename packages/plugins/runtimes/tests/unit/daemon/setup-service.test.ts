@@ -3847,3 +3847,55 @@ describe('the setup.import executor, what an owner refuses', () => {
     should(Object.keys(record.components)).containEql('settings/claude-settings');
   });
 });
+
+describe('the setup.import executor, the files of a skill', () => {
+  it('should hand the skills owner the item files and write none of them under the fleet assets', async () => {
+    // Arrange
+    const door = owners();
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    state.scans = ownedScans();
+
+    // Act
+    await importOnce(service);
+
+    // Assert
+    const skills = door.calls.find(call => call.kind === 'skills');
+    should(skills?.files).eql([{ path: 'review/SKILL.md', content: '---\nname: review\n---\n' }]);
+    should(door.calls.find(call => call.kind === 'mcp')?.files).be.undefined();
+    const paths = (applied[0]?.documents ?? []).map(document => document.path);
+    should(paths.some(path => path.startsWith('/state/fleet/assets/skills/'))).be.false();
+  });
+
+  it('should keep copying the skill files itself when no owner takes components', async () => {
+    // Arrange
+    const { service, applied, state } = world();
+    state.scans = ownedScans();
+
+    // Act
+    await importOnce(service);
+
+    // Assert
+    const paths = (applied[0]?.documents ?? []).map(document => document.path);
+    should(paths).containEql('/state/fleet/assets/skills/review/SKILL.md');
+  });
+
+  it('should refuse an apply when a skill file changed after the review', async () => {
+    // Arrange
+    const door = owners();
+    const { service, state } = world({ overrides: { components: door.components } });
+    state.scans = ownedScans();
+    const change = IMPORT();
+    await service.executors.setup.describe(change);
+    state.folders['/person/.claude/skills/review'] = {
+      files: [{ path: 'SKILL.md', content: 'changed after the review' }],
+      skipped: [],
+    };
+
+    // Act
+    const error = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_stale');
+
+    // Assert
+    should(error.message).containEql('review it again');
+    should(door.calls).have.length(0);
+  });
+});

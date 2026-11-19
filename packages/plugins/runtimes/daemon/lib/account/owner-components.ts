@@ -34,22 +34,33 @@ export interface OwnerComponentWrite {
   /** The document the owner is given, or `undefined` when it could not be made (`problem` says why). */
   readonly text?: string;
   readonly problem?: string;
+  /** A skills component's files (`<item>/<rel>`), which its owner installs: Runtimes writes none of them itself. */
+  readonly files?: readonly { readonly path: string; readonly content: string }[];
 }
+
+/** What a write is, as one string, for the fingerprint of an import: the document, or why there is none, and the files. */
+export const handedText = (write: OwnerComponentWrite): string =>
+  `${write.file}\n${write.text ?? write.problem ?? ''}\n${JSON.stringify(write.files ?? [])}`;
 
 const SETTINGS_FORMAT = { claude: 'json', codex: 'toml' } as const satisfies Record<HarnessKind, 'json' | 'toml'>;
 const SETTINGS_DIRECTORY = { claude: 'claude-code', codex: 'codex' } as const satisfies Record<HarnessKind, string>;
+
+/** Where an item's files sit among the assets an import carries. */
+export const skillAssetPrefix = (item: string): string => `skills/${item}/`;
 
 const documentText = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
 /**
  * The components `next` adds or changes against `before` that an owner writes, each with the document it is handed.
  * `assetText` reads a text file the import carries (a settings component's `file`), which becomes the owner's document
- * itself: the owner's file stands alone, with no asset path behind it.
+ * itself: the owner's file stands alone, with no asset path behind it. `assetFiles` lists the files the import carries under
+ * a path prefix: a skills component is handed the files of each of its items.
  */
 export function ownerWrites(
   before: AccountModel,
   next: AccountModel,
   assetText: (file: string) => string | undefined,
+  assetFiles: (prefix: string) => readonly { readonly path: string; readonly content: string }[] = () => [],
 ): readonly OwnerComponentWrite[] {
   const writes: OwnerComponentWrite[] = [];
   for (const { kind, name } of foreignComponentRefs(before, next)) {
@@ -60,7 +71,21 @@ export function ownerWrites(
     if (value === undefined) continue;
     const reference = `${ownerKind}/${name}` as LayerReferenceText;
     if (ownerKind !== 'settings') {
-      writes.push({ kind: ownerKind, name, reference, file: `${ownerKind}/${name}.yaml`, text: documentText(value) });
+      const items = ownerKind === 'skills' ? (next.components.skills[name]?.items ?? []) : [];
+      const files = items.flatMap(item =>
+        assetFiles(skillAssetPrefix(item)).map(asset => ({
+          path: `${item}/${asset.path.slice(skillAssetPrefix(item).length)}`,
+          content: asset.content,
+        })),
+      );
+      writes.push({
+        kind: ownerKind,
+        name,
+        reference,
+        file: `${ownerKind}/${name}.yaml`,
+        text: documentText(value),
+        ...(ownerKind === 'skills' ? { files } : {}),
+      });
       continue;
     }
     const settings = value as { readonly harness: HarnessKind; readonly file?: string } & Record<string, unknown>;

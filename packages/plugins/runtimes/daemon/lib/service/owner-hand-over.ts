@@ -14,6 +14,7 @@ import {
   ownerReferences,
   ownerWrites,
   revertComponents,
+  skillAssetPrefix,
   withComponentsOf,
   withEffective,
 } from '../account/owner-components.ts';
@@ -51,6 +52,7 @@ export async function composeOwned(input: {
   readonly model: AccountModel;
   readonly enabled: boolean;
   readonly assetText: (file: string) => string | undefined;
+  readonly assetFiles?: (prefix: string) => readonly { readonly path: string; readonly content: string }[];
   readonly documents: (model: AccountModel, outcome: NotInEffect) => Promise<readonly FleetDocumentWrite[]>;
 }): Promise<{ readonly documents: readonly FleetDocumentWrite[]; readonly owners?: OwnedComponents }> {
   const { before, model } = input;
@@ -59,7 +61,7 @@ export async function composeOwned(input: {
   return {
     documents: await input.documents(withComponentsOf(model, before, owned), NOTHING_HELD),
     owners: {
-      writes: ownerWrites(before, model, input.assetText),
+      writes: ownerWrites(before, model, input.assetText, input.assetFiles),
       rebuild: async outcome => {
         const left = owned.filter(({ kind, name }) => outcome.refused.has(`${kind}/${name}`));
         const kept = owned.filter(({ kind, name }) => !outcome.refused.has(`${kind}/${name}`));
@@ -180,19 +182,24 @@ export function recordText(
 }
 
 /**
- * `assets` without the body a handed-over settings component was made from. That body only composes the owner's
- * document; written under the fleet it would outlive an owner's refusal, raw secrets included.
+ * `assets` without what an owner is handed: the body a settings component was made from (it only composes the owner's
+ * document; written under the fleet it would outlive an owner's refusal, raw secrets included) and the files of each
+ * skill item (the owner installs them into its own store, with its own bounds).
  */
 export function withoutHandedBodies<T extends { readonly path: string }>(
   assets: readonly T[],
   before: AccountModel,
   model: AccountModel,
 ): readonly T[] {
+  const handed = ownerReferences(before, model);
   const bodies = new Set<string>(
-    ownerReferences(before, model).flatMap(({ kind, name }) => {
+    handed.flatMap(({ kind, name }) => {
       const file = kind === 'settings' ? model.components.settings[name]?.file : undefined;
       return file === undefined ? [] : [file];
     }),
   );
-  return assets.filter(asset => !bodies.has(asset.path));
+  const folders = handed.flatMap(({ kind, name }) =>
+    kind === 'skills' ? (model.components.skills[name]?.items ?? []).map(skillAssetPrefix) : [],
+  );
+  return assets.filter(asset => !bodies.has(asset.path) && !folders.some(folder => asset.path.startsWith(folder)));
 }

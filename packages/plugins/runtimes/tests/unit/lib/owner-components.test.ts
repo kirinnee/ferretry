@@ -5,6 +5,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  handedText,
   ownerReferences,
   ownerWrites,
   revertComponents,
@@ -180,5 +181,44 @@ describe('withEffective', () => {
 
     // Assert
     should(model.profiles.default?.layers).eql(NEXT.profiles.default?.layers);
+  });
+});
+
+describe('ownerWrites, the files of a skill', () => {
+  const assets = [
+    { path: 'skills/review/SKILL.md', content: '# review\n' },
+    { path: 'skills/review/lib/run.sh', content: 'echo\n' },
+    { path: 'skills/other/SKILL.md', content: '# other\n' },
+  ];
+  const assetFiles = (prefix: string) => assets.filter(asset => asset.path.startsWith(prefix));
+
+  it("should carry each of a skills component's items as <item>/<rel>, and only its own items", () => {
+    // Act
+    const writes = ownerWrites(BEFORE, NEXT, () => undefined, assetFiles);
+
+    // Assert
+    should(writes.find(write => write.kind === 'skills')?.files).eql([
+      { path: 'review/SKILL.md', content: '# review\n' },
+      { path: 'review/lib/run.sh', content: 'echo\n' },
+    ]);
+    should(writes.find(write => write.kind === 'mcp')?.files).be.undefined();
+    should(writes.find(write => write.kind === 'settings')?.files).be.undefined();
+  });
+
+  it('should carry an empty list when the import has no files for the item', () => {
+    // Act
+    const writes = ownerWrites(BEFORE, NEXT, () => undefined);
+
+    // Assert
+    should(writes.find(write => write.kind === 'skills')?.files).eql([]);
+  });
+
+  it('should count the files in the text a review is fingerprinted with', () => {
+    // Act
+    const [a, b] = [ownerWrites(BEFORE, NEXT, () => undefined), ownerWrites(BEFORE, NEXT, () => undefined, assetFiles)];
+    const skills = (writes: typeof a) => writes.find(write => write.kind === 'skills');
+
+    // Assert
+    should(handedText(skills(a)!)).not.equal(handedText(skills(b)!));
   });
 });

@@ -93,7 +93,7 @@ import {
   planImport,
 } from '../account/import.ts';
 import { HARNESS_DISPLAY_NAMES } from '../account/layering.ts';
-import { type ComponentWriter, withoutHookChanges } from '../account/owner-components.ts';
+import { type ComponentWriter, handedText, withoutHookChanges } from '../account/owner-components.ts';
 import { composeOwned, handOver, type OwnedComponents, recordText, withoutHandedBodies } from './owner-hand-over.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
@@ -777,6 +777,7 @@ export class FleetSetupService {
       model,
       enabled: this.deps.components !== undefined,
       assetText: file => assets.find(asset => asset.path === file)?.content,
+      assetFiles: prefix => assets.filter(asset => asset.path.startsWith(prefix)),
       documents: async (next, outcome) =>
         await this.#documents(reading, next, written, [
           { path: this.#recordPath(), content: recordText(plan, updates, outcome) },
@@ -819,7 +820,7 @@ export class FleetSetupService {
         secrets.map(secret => this.deps.digest(`${secret.name}\n${secret.value}`)),
         [],
         [],
-        handed.map(write => this.deps.digest(`${write.file}\n${write.text ?? write.problem ?? ''}`)),
+        handed.map(write => this.deps.digest(handedText(write))),
       ),
       ...(owners === undefined ? {} : { owners }),
     };
