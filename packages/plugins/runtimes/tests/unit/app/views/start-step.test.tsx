@@ -5,22 +5,32 @@
  *
  * The Copy panel is stood in for by a button that reports a landed copy: its own behaviour is `copy-settings.test.tsx`'s.
  */
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterAll, afterEach, describe, expect, it, mock } from 'bun:test';
 import { noteClientDaemon, ShellContext } from '@ferretry/app/testing';
 import type { StepHost } from '@ferretry/kernel/contract';
 import type { PanelProps } from '@ferretry/kernel/manifest';
 import type { ComponentType } from 'react';
+import * as realCopy from '../../../../app/features/fleet/setup/copy-settings.tsx';
 import type { LiveRuntimesClient } from '../../../../app/lib/client.ts';
 import { type Call, machine } from '../features/fleet/account-support.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
-mock.module('../../../../app/features/fleet/setup/copy-settings.tsx', () => ({
+// `mock.module` is process-wide and `mock.restore()` does not undo it: the real module is put back after this file, or
+// every later file in the same run (the Copy panel's own parity tests) would draw this stand-in.
+const COPY_SETTINGS = '../../../../app/features/fleet/setup/copy-settings.tsx';
+const realCopySettings: object = { ...realCopy };
+
+mock.module(COPY_SETTINGS, () => ({
   CopySettings: ({ onCopied }: { readonly onCopied?: () => void }) => (
     <button type="button" data-fake-copied="" onClick={onCopied}>
       Copy landed
     </button>
   ),
 }));
+
+afterAll(() => {
+  mock.module(COPY_SETTINGS, () => realCopySettings);
+});
 
 const { createStartStep } = await import('../../../../app/views/setup-transfer.tsx');
 
