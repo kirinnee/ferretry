@@ -23,38 +23,14 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useDocumentVisible } from '../ui/hooks/use-document-visible.ts';
 import { cn } from '../ui/lib/class-names.ts';
+import { useMotionAllowed } from '../ui/use-motion-allowed.ts';
 import './setting-preview.css';
 
 /** The length of one loop, in milliseconds (also `--sp-loop` in the stylesheet). */
 export const SETTING_PREVIEW_LOOP_MS = 4200;
 
-const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
-
 /** `still` (final state only), `playing`, or `paused` (hidden tab or scrolled off-screen). */
 export type SettingPreviewState = 'still' | 'playing' | 'paused';
-
-/** The app's two motion switches, as one: the OS query and `<html data-motion="reduced">`. */
-const motionAllowedNow = (): boolean =>
-  typeof document !== 'undefined' &&
-  document.documentElement.dataset.motion !== 'reduced' &&
-  !(typeof window.matchMedia === 'function' && window.matchMedia(REDUCED_MOTION).matches);
-
-function useMotionAllowed(): boolean {
-  const [allowed, setAllowed] = useState(motionAllowedNow);
-  useEffect(() => {
-    const sync = (): void => setAllowed(motionAllowedNow());
-    sync();
-    const media = typeof window.matchMedia === 'function' ? window.matchMedia(REDUCED_MOTION) : undefined;
-    media?.addEventListener('change', sync);
-    const watcher = new MutationObserver(sync);
-    watcher.observe(document.documentElement, { attributes: true, attributeFilter: ['data-motion'] });
-    return () => {
-      media?.removeEventListener('change', sync);
-      watcher.disconnect();
-    };
-  }, []);
-  return allowed;
-}
 
 /** Is `element` in view? An environment with no observer counts as in view. */
 function useOnScreen(element: { current: Element | null }): boolean {

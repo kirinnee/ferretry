@@ -1,0 +1,117 @@
+/* ============================================================================
+   The ferret list previews (views/device-settings-previews.tsx): a mini ferret list in a 160 x 100 `.fy-sp` frame.
+   Theme tokens only; the lifted row's slide hangs off `.fy-sp[data-sp-state='playing']` and animates `transform` only.
+   ========================================================================== */
+
+.fy-dsp-frame {
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  inset: 0;
+  padding: 8px;
+  position: absolute;
+}
+.fy-dsp-group {
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.fy-dsp-group--needs {
+  color: var(--accent);
+}
+.fy-dsp-row {
+  align-items: center;
+  background: var(--surface-2);
+  border-radius: 4px;
+  display: flex;
+  gap: 6px;
+  min-height: 12px;
+  padding: 2px 6px;
+}
+.fy-dsp-row[data-asking] {
+  background: var(--accent-soft);
+}
+.fy-dsp-dot {
+  background: var(--muted);
+  border-radius: 999px;
+  flex: none;
+  height: 5px;
+  width: 5px;
+}
+.fy-dsp-row[data-asking] .fy-dsp-dot {
+  background: var(--accent);
+}
+.fy-dsp-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.fy-dsp-title {
+  background: var(--fg);
+  border-radius: 2px;
+  display: block;
+  height: 3px;
+  opacity: 0.8;
+  width: 60%;
+}
+.fy-dsp-sub {
+  background: var(--muted);
+  border-radius: 2px;
+  display: block;
+  height: 2px;
+  opacity: 0.6;
+  width: 35%;
+}
+.fy-dsp-sub[data-kind='ask'] {
+  width: 48%;
+}
+.fy-dsp-mark {
+  background: var(--muted);
+  border-radius: 2px;
+  flex: none;
+  height: 4px;
+  opacity: 0.5;
+  width: 14px;
+}
+.fy-dsp-badge {
+  background: var(--accent);
+  border-radius: 999px;
+  flex: none;
+  height: 6px;
+  width: 6px;
+}
+
+/* Full is the roomy row; Minimal keeps one line. */
+.fy-dsp-frame[data-dsp-density='full'] .fy-dsp-row {
+  min-height: 18px;
+}
+.fy-dsp-frame[data-dsp-density='compact'] .fy-dsp-row {
+  min-height: 14px;
+}
+.fy-dsp-frame[data-dsp-density='minimal'] .fy-dsp-row {
+  min-height: 10px;
+  padding-block: 1px;
+}
+
+@keyframes fy-dsp-lift {
+  0%,
+  40% {
+    transform: translateY(14px);
+  }
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-sp[data-sp-state='playing'] .fy-dsp-row[data-lifted] {
+    animation: fy-dsp-lift var(--sp-loop) ease-in-out infinite;
+  }
+}
