@@ -90,10 +90,11 @@ import {
   type ImportPlan,
   type ImportRecord,
   mergeImport,
-  mergeImportRecord,
   planImport,
 } from '../account/import.ts';
 import { HARNESS_DISPLAY_NAMES } from '../account/layering.ts';
+import { type ComponentWriter, handedText, withoutHookChanges } from '../account/owner-components.ts';
+import { composeOwned, handOver, type OwnedComponents, recordText, withoutHandedBodies } from './owner-hand-over.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
 import { parseSettings, type SettingsObject } from '../settings.ts';
@@ -253,6 +254,12 @@ export interface FleetSetupServiceDeps {
   readFolder(path: string): Promise<FolderReading>;
   /** The skill items the asset tree's store already holds. */
   skillItems(): Promise<readonly string[]>;
+  /**
+   * Where an imported MCP server, skill or settings component goes: to the plugin that owns that kind, which writes its own
+   * file. Absent on a machine wired without it: Runtimes then writes none of them (the catalogue refuses a change that
+   * carries one), exactly as before.
+   */
+  readonly components?: ComponentWriter;
   /** A content digest (sha256). */
   digest(text: string): string;
   /**
@@ -372,6 +379,8 @@ interface Composed {
   readonly fingerprint: string;
   /** Configuration files the copy writes through the owner's door, each against the version it was compared with. */
   readonly configWrites?: readonly ConfigWrite[];
+  /** The imported components another plugin owns, handed to their owners at the apply (`owner-hand-over.ts`). */
+  readonly owners?: OwnedComponents;
 }
 
 // ── The service ──────────────────────────────────────────────────────────────────────────────────
@@ -625,6 +634,17 @@ export class FleetSetupService {
     let held = 0;
     // The settings files that really landed (a held one did not): a later failure must say they are on disk.
     const landed: string[] = [];
+    // The imported components another plugin owns go to that plugin, each on its own: NOT all-or-none across owners.
+    const handed = await handOver({
+      writer: this.deps.components,
+      owners: composed.owners,
+      applied: { model: composed.model, documents: composed.documents },
+      secretValues: composed.secrets.map(secret => secret.value),
+      // The fleet is built from what the owners report in effect after they wrote, not from the import's own model.
+      inEffect: async () => (await this.#read()).model,
+    });
+    landed.push(...handed.landed);
+    const { model, documents } = handed.applied;
     for (const write of composed.configWrites ?? []) {
       try {
         const waiting = await this.#writeConfigFile(write, mayLoosen);
@@ -637,10 +657,11 @@ export class FleetSetupService {
         throw error;
       }
     }
-    await this.#applyModel(composed.model, composed.documents, landed);
-    return held === 0
-      ? composed.summary
-      : `${composed.summary} ${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`;
+    await this.#applyModel(model, documents, landed);
+    const sentences = [composed.summary, ...handed.sentences];
+    if (held > 0)
+      sentences.push(`${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`);
+    return sentences.join(' ');
   }
 
   /** One settings file through `PUT /v1/config/file`'s semantics. Answers 1 when the write was held. */
@@ -710,6 +731,7 @@ export class FleetSetupService {
       );
     }
     const updates = plan.updates.filter(update => accepted.includes(update.reference));
+    const touched = updates.map(update => update.reference);
     const adds =
       Object.keys(plan.credentials).length +
       plan.components.length +
@@ -724,19 +746,18 @@ export class FleetSetupService {
     }
     let model: AccountModel;
     try {
-      model = mergeImport(
-        existing,
-        plan,
-        updates.map(update => update.reference),
-      );
+      model = mergeImport(existing, plan, touched);
     } catch (error) {
       throw new FleetCatalogRefusal(
         'fleet_change_refused',
         `importing would leave ${catalog.machineName()} with a setup it cannot read: ${errorMessage(error)}`,
       );
     }
+    // No hook is imported: a second guard behind the planner, so a hooks component never reaches a file or a profile.
+    model = withoutHookChanges(reading.model, model);
     const assets: CloneFile[] = [];
     for (const file of [...plan.files, ...updates.flatMap(update => update.files)]) {
+      if (file.path.startsWith('components/hooks/')) continue;
       if (file.kind === 'write') {
         assets.push({ path: file.path, content: file.content });
         continue;
@@ -744,13 +765,24 @@ export class FleetSetupService {
       const folder = await this.deps.readFolder(file.from);
       for (const entry of folder.files) assets.push({ path: `${file.path}/${entry.path}`, content: entry.content });
     }
-    const record = mergeImportRecord(
-      plan,
-      updates.map(update => update.reference),
-    );
-    const documents = await this.#documents(reading, model, assets, [
-      { path: this.#recordPath(), content: `${JSON.stringify(record, null, 2)}\n` },
-    ]);
+    // The body a handed-over settings component was made from is never written under the fleet's assets.
+    const written =
+      this.deps.components === undefined ? assets : withoutHandedBodies(assets, reading.model, model, touched);
+    // MCP servers, skills and settings belong to other plugins: Runtimes' own files are composed WITHOUT them (each as it
+    // is now), and the owners are handed them at the apply.
+    const { documents, owners } = await composeOwned({
+      before: reading.model,
+      model,
+      enabled: this.deps.components !== undefined,
+      assetText: file => assets.find(asset => asset.path === file)?.content,
+      assetFiles: prefix => assets.filter(asset => asset.path.startsWith(prefix)),
+      touched,
+      documents: async (next, outcome) =>
+        await this.#documents(reading, next, written, [
+          { path: this.#recordPath(), content: recordText(plan, updates, outcome) },
+        ]),
+    });
+    const handed = owners?.writes ?? [];
     const secrets = uniqueByName([...plan.secrets, ...updates.flatMap(update => update.secrets)]).map(secret => ({
       name: secret.name,
       value: secret.value,
@@ -763,6 +795,11 @@ export class FleetSetupService {
           : `Login ${id}: a new ${HARNESS_DISPLAY_NAMES[credential.harness]} login that needs sign-in.`,
       ),
       ...(plan.components.length > 0 ? [`Adds ${plural(plan.components.length, 'part')} of your setup.`] : []),
+      ...(handed.length === 0
+        ? []
+        : [
+            `Hands ${plural(handed.length, 'part')} to the parts of Ferretry that own them (${handed.map(write => write.file).join(', ')}).`,
+          ]),
       ...updates.map(update => `Updates ${update.reference} from its changed source.`),
       ...Object.keys(plan.profiles).map(name => `Profile ${name}.`),
       ...(runtimes.length > 0 ? [`Runtimes: ${runtimes.join(', ')}.`] : []),
@@ -780,7 +817,11 @@ export class FleetSetupService {
       fingerprint: this.#fingerprint(
         documents,
         secrets.map(secret => this.deps.digest(`${secret.name}\n${secret.value}`)),
+        [],
+        [],
+        handed.map(write => this.deps.digest(handedText(write))),
       ),
+      ...(owners === undefined ? {} : { owners }),
     };
   }
 
@@ -1372,6 +1413,7 @@ export class FleetSetupService {
     secrets: readonly string[],
     timed: readonly string[] = [],
     writes: readonly Pick<ConfigWrite, 'path' | 'text' | 'etag'>[] = [],
+    owned: readonly string[] = [],
   ): string {
     return this.deps.digest(
       JSON.stringify({
@@ -1383,6 +1425,7 @@ export class FleetSetupService {
         ]),
         secrets,
         writes: writes.map(write => [write.path, this.deps.digest(write.text), write.etag]),
+        ...(owned.length === 0 ? {} : { owned }),
       }),
     );
   }

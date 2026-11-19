@@ -154,6 +154,17 @@ describe('adaptProfile — skills', () => {
     ]);
   });
 
+  it('should link only the items whose folder the asset tree holds, when it says which', () => {
+    // Act
+    const actual = adapt('codex', { skills: { mine: { items: ['review', 'served'] } } }, ['skills/mine'], {
+      bodies: { skillItems: new Set(['review']) },
+    });
+
+    // Assert
+    actual.entries.map(entry => entry.dest).should.deepEqual(['skills/review']);
+    actual.problems.should.deepEqual([]);
+  });
+
   it("should name Codex's own skills folder as harness-owned, and Claude's as nothing", () => {
     // Act
     const codex = adapt('codex', { skills: { mine: { items: ['review'] } } }, ['skills/mine']);

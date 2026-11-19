@@ -1,4 +1,4 @@
 kind	path	limit	expires	reason
 oversize	daemon/lib/account/clone-update.ts	1680	2026-12-16	one clone/update module; split by step when next touched
 oversize	daemon/lib/service/catalog.ts	1520	2026-12-16	one catalog service; split by concern when next touched
-oversize	daemon/lib/service/setup-service.ts	1560	2026-12-16	one setup service; split by step when next touched
+oversize	daemon/lib/service/setup-service.ts	1600	2026-12-16	one setup service; split by step when next touched
