@@ -43,7 +43,7 @@ beforeAll(async () => {
   const manifest = JSON.parse(stdout.trim().split('\n').at(-1) as string) as { css: string; js: string };
   const css = await readFile(manifest.css, 'utf8');
   const js = await readFile(manifest.js, 'utf8');
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style><style>html, body, #root { height: auto !important; min-height: 0 !important; overflow: visible !important; }</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
   server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
