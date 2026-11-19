@@ -29,10 +29,13 @@ describe('ComposerSuggestionsSettings', () => {
       ['symbols', false],
       ['both', false],
     ]);
-    // One group, one name: the browser gives it one tab stop and arrow-key selection.
-    expect(new Set(radios.map(radio => radio.props.name))).toEqual(new Set(['composer-suggestion-keys']));
+    // P1's ChoiceCards: ONE native radio group (one name), one tab stop on the chosen card, arrow keys move and select.
+    expect(new Set(radios.map(radio => radio.props.name)).size).toBe(1);
+    expect(radios.map(radio => radio.props.tabIndex)).toEqual([0, -1, -1]);
+    expect(view.root.findByProps({ role: 'radiogroup' }).props['aria-label']).toBe('Open suggestions with');
+    // Choosing the card that is already chosen is no change; the other two patch one field each.
     for (const radio of radios) run(() => radio.props.onChange());
-    expect(patches).toEqual([{ suggestionKeys: 'ladder' }, { suggestionKeys: 'symbols' }, { suggestionKeys: 'both' }]);
+    expect(patches).toEqual([{ suggestionKeys: 'symbols' }, { suggestionKeys: 'both' }]);
     run(() => view.unmount());
   });
 
@@ -72,7 +75,9 @@ describe('ComposerSuggestionsSettings', () => {
     const view = render(<ComposerSuggestionsSettings preferences={preferences()} onChange={() => {}} />);
     const tree = JSON.stringify(view.toJSON());
     for (const card of ['@ ladder', 'Symbols', 'Both']) expect(tree).toContain(card);
-    expect(tree).toContain('@ files · @@ agents · @@@ asks · @@@@ tasks');
+    expect(tree).toContain('@ files · @@ agents · @@@ asks · @@@@ tasks · % terminals');
+    // Every card lists its own keys, % included (it opens the terminals menu in every mode), Both with the whole ladder.
+    for (const keys of ['@ @@ @@@ @@@@ %', '@ : ! & %', '@ @@ @@@ @@@@ : ! & %']) expect(tree).toContain(keys);
     // The other modes' explanations are not drawn: only what is selected.
     expect(tree).not.toContain('@ files · : agents · ! asks · & tasks · % terminals');
     run(() => view.unmount());

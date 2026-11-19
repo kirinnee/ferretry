@@ -1,0 +1,14 @@
+/* The suggestion key cards (P1's ChoiceCards): the keys each card opens are a mono line, and on a phone, where the cards
+   stack, they stay short (under 64px) so three of them do not fill the screen. Theme tokens only. */
+.fy-cs-keys .fy-cc__line {
+  color: var(--fg);
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+@container (max-width: 479.98px) {
+  .fy-cs-keys .fy-cc__card {
+    gap: 0;
+    min-height: 0;
+    padding: 8px 14px;
+  }
+}

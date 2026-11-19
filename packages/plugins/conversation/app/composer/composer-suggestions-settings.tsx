@@ -15,12 +15,11 @@
  * change them. This surface holds no storage; the open/closed (i) is its only state.
  */
 
-import { cn } from '@ferretry/app';
-import { type DeviceControls, SUGGESTION_KEYS, type SuggestionKeys } from '@ferretry/app';
+import { ChoiceCards, cn, type DeviceControls, SUGGESTION_KEYS, type SuggestionKeys } from '@ferretry/app';
 import { Info } from 'lucide-react';
 import { useState } from 'react';
-import { ChoiceCards } from './choice-cards-stand-in.tsx';
 import { SuggestionsPreview } from './previews/index.ts';
+import './composer-suggestions-settings.css';
 
 type ComposerSuggestionPreferences = Pick<DeviceControls, 'suggestionKeys' | 'skillSuggestions'>;
 
@@ -45,15 +44,20 @@ interface KeysCopy {
 const KEYS_COPY = {
   ladder: {
     label: '@ ladder',
-    keys: '@  @@  @@@  @@@@',
-    detail: '@ files · @@ agents · @@@ asks · @@@@ tasks. Typing : ! or & in normal text never pops a menu.',
+    keys: '@ @@ @@@ @@@@ %',
+    detail:
+      '@ files · @@ agents · @@@ asks · @@@@ tasks · % terminals. Typing : ! or & in normal text never pops a menu.',
   },
   symbols: {
     label: 'Symbols',
-    keys: '@  :  !  &  %',
+    keys: '@ : ! & %',
     detail: '@ files · : agents · ! asks · & tasks · % terminals. Faster once you know them.',
   },
-  both: { label: 'Both', keys: '@  @@  :  !  &', detail: 'Either way works.' },
+  both: {
+    label: 'Both',
+    keys: '@ @@ @@@ @@@@ : ! & %',
+    detail: '@ files · @@ or : agents · @@@ or ! asks · @@@@ or & tasks · % terminals. Either way works.',
+  },
 } as const satisfies Record<SuggestionKeys, KeysCopy>;
 
 const OPTIONS = SUGGESTION_KEYS.map(id => ({
@@ -105,14 +109,14 @@ export function ComposerSuggestionsSettings({
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start gap-x-6 gap-y-4">
         <div className="flex min-w-0 flex-1 basis-[34rem] flex-col gap-3">
-          <ChoiceCards
-            legend="Open suggestions with"
-            mono
-            name="composer-suggestion-keys"
-            onChange={next => onChange({ suggestionKeys: next })}
-            options={OPTIONS}
-            value={preferences.suggestionKeys}
-          />
+          <div className="fy-cs-keys">
+            <ChoiceCards
+              label="Open suggestions with"
+              onChange={next => onChange({ suggestionKeys: next as SuggestionKeys })}
+              options={OPTIONS}
+              value={preferences.suggestionKeys}
+            />
+          </div>
           <p className="m-0 text-meta leading-base text-muted" data-suggestions-detail="">
             {lead}
             <span className="whitespace-nowrap">
