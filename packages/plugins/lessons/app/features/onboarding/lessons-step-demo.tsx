@@ -9,7 +9,7 @@ export function LessonDemo({ kept }: { readonly kept: boolean }) {
     <span className="fy-lsd" data-kept={kept}>
       <span className="fy-lsd__said">No — use bun</span>
       <span className="fy-lsd__arrow">→</span>
-      <span className="fy-lsd__rule">{kept ? '✓ Rule saved' : 'Nothing kept'}</span>
+      <span className="fy-lsd__rule">{kept ? '✓ Rule suggested' : 'No suggestion'}</span>
     </span>
   );
 }

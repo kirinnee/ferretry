@@ -78,6 +78,80 @@ describe('first-run › Lessons step', () => {
     await view.unmount();
   });
 
+  it('locks both cards while a save is pending, so one write is in flight and done follows the chosen card', async () => {
+    const daemon = fakeLessonsDaemon();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    daemon.once('PATCH /v1/lessons/config', async () => {
+      await gate;
+      return { body: config({ passiveDefault: true }) };
+    });
+    const harness = stepHarness();
+    const view = await mount(<LessonsStep connection={daemon.connection} step={harness.host} />);
+    await waitFor(() => harness.decision === 'shown', 'ready');
+    await click(card(view.container, 'on'));
+    await waitFor(() => patches(daemon).length === 1, 'the first write is sent');
+    // Both cards are locked while it is in flight, and a tap on the other card does nothing.
+    const radios = [...view.container.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(radios.length).toBe(2);
+    expect(radios.every(radio => radio.disabled)).toBe(true);
+    await click(card(view.container, 'off'));
+    await flush();
+    expect(patches(daemon)).toEqual([{ passiveDefault: true }]);
+    expect(harness.count('done')).toBe(0);
+    expect(card(view.container, 'on').dataset.selected).toBe('true');
+    release();
+    await waitFor(() => harness.count('done') === 1, 'done after the accepted write');
+    await flush();
+    expect(patches(daemon)).toEqual([{ passiveDefault: true }]);
+    expect(card(view.container, 'on').dataset.selected).toBe('true');
+    expect(daemon.state.config.passiveDefault).toBe(true);
+    expect(harness.calls.at(-1)).toEqual({ kind: 'done' });
+    expect(radios.every(radio => !radio.disabled)).toBe(true);
+    await view.unmount();
+  });
+
+  it('keeps the step unanswered and unlocks the cards when a delayed save is refused', async () => {
+    const daemon = fakeLessonsDaemon();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    daemon.once('PATCH /v1/lessons/config', async () => {
+      await gate;
+      return { refuse: { status: 403, code: 'grant_refused', message: 'fleet.configure is closed' } };
+    });
+    const harness = stepHarness();
+    const view = await mount(<LessonsStep connection={daemon.connection} step={harness.host} />);
+    await waitFor(() => harness.decision === 'shown', 'ready');
+    await click(card(view.container, 'on'));
+    await waitFor(() => patches(daemon).length === 1, 'sent');
+    release();
+    await waitForText(view.container, 'fleet.configure is closed');
+    expect(harness.count('done')).toBe(0);
+    expect(view.container.querySelectorAll('[data-selected="true"]').length).toBe(0);
+    // Free again: the person can answer the other way.
+    await click(card(view.container, 'off'));
+    await waitFor(() => harness.count('done') === 1, 'done');
+    expect(patches(daemon)).toEqual([{ passiveDefault: true }, { passiveDefault: false }]);
+    await view.unmount();
+  });
+
+  it('only promises what the setting does: automatic suggestions from new ferrets', async () => {
+    const daemon = fakeLessonsDaemon();
+    const view = await mount(<LessonsStep connection={daemon.connection} />);
+    await waitFor(() => view.container.querySelectorAll('[data-choice]').length === 2, 'cards');
+    const text = textOf(view.container);
+    expect(text).toContain('New ferrets won’t suggest rules.');
+    expect(text).toContain('No suggestion');
+    expect(text).toContain('Rule suggested');
+    expect(text).not.toContain('No rules are filed');
+    expect(text).not.toContain('Nothing kept');
+    await view.unmount();
+  });
+
   it('names what waits for the owner when the write was held, and still answers', async () => {
     const daemon = fakeLessonsDaemon();
     daemon.once('PATCH /v1/lessons/config', {
@@ -107,6 +181,8 @@ describe('first-run › Lessons step', () => {
     await waitFor(() => view.container.querySelectorAll('[data-choice]').length === 2, 'cards');
     expect(view.container.querySelector('[data-lessons-problem]')).toBeNull();
     expect(daemon.calls.filter(call => call.route === 'GET /v1/lessons/config').length).toBe(2);
+    // The cover lifted when the read failed; a good retry does not lift it a second time.
+    expect(harness.count('ready')).toBe(1);
     await view.unmount();
   });
 

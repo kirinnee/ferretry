@@ -9,8 +9,10 @@
  *     one draw and no pop-in. A read that fails still lifts the cover and says why, with a way to try again.
  *   - Neither card is chosen on arrival, even though the machine already has a default: the person answers, and only an
  *     answer records the step (`done()`).
- *   - A choice writes `passiveDefault` at once. Next waits while it saves (`busy`); a refusal is said in a sentence and
- *     the card goes back to what it was, and the step is NOT recorded as answered.
+ *   - A choice writes `passiveDefault` at once. Both cards are locked and Next waits while it saves (`busy`), so only one
+ *     write is ever in flight and the step is recorded (`done()`) only once the daemon accepted the write that matches the
+ *     card on screen; a refusal is said in a sentence and the card goes back to what it was, and the step is NOT recorded
+ *     as answered.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -38,21 +40,31 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [held, setHeld] = useState<readonly string[]>([]);
+  const [saving, setSaving] = useState(false);
+  // Set synchronously, so a second tap in the same frame cannot start a second write before the cards lock.
+  const writing = useRef(false);
+  // The loading cover lifts once, however many times the read is retried.
+  const lifted = useRef(false);
   // The host is read through a ref, so a shell that hands a new host object each render never re-reads the setting.
   const host = useRef(step);
   host.current = step;
 
   // The machine's current setting is read before the page shows, then the loading cover lifts, whatever the answer was.
   const load = useCallback(() => {
+    const lift = () => {
+      if (lifted.current) return;
+      lifted.current = true;
+      host.current?.ready();
+    };
     fetchLessonsConfig(connection).then(
       next => {
         setConfig(next);
         setProblem(null);
-        host.current?.ready();
+        lift();
       },
       (reason: unknown) => {
         setProblem(lessonsErrorMessage(reason));
-        host.current?.ready();
+        lift();
       },
     );
   }, [connection]);
@@ -60,6 +72,9 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
 
   const choose = useCallback(
     (next: string) => {
+      if (writing.current) return;
+      writing.current = true;
+      setSaving(true);
       const before = answer;
       const chosen: Answer = next === 'on' ? 'on' : 'off';
       setAnswer(chosen);
@@ -68,12 +83,16 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
       host.current?.busy('Saving…');
       patchLessonsConfig(connection, { passiveDefault: chosen === 'on' }).then(
         ({ held: waiting = [], ...inEffect }) => {
+          writing.current = false;
+          setSaving(false);
           host.current?.busy(null);
           setConfig(inEffect);
           setHeld(waiting);
           host.current?.done();
         },
         (reason: unknown) => {
+          writing.current = false;
+          setSaving(false);
           host.current?.busy(null);
           setAnswer(before);
           setProblem(lessonsErrorMessage(reason));
@@ -95,6 +114,7 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
           label="Learn from my corrections"
           value={answer}
           onChange={choose}
+          disabled={saving}
           options={[
             {
               id: 'on',
@@ -105,7 +125,7 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
             {
               id: 'off',
               title: 'Don’t learn',
-              line: 'No rules are filed. You can switch it on later in Settings › Lessons.',
+              line: 'New ferrets won’t suggest rules. Switch it on later in Settings › Lessons.',
               demo: <LessonDemo kept={false} />,
             },
           ]}
