@@ -646,6 +646,11 @@
 .fy-main {
   position: relative;
 }
+/* A chrome-less screen (`ScreenDecl.chrome: 'none'`, first-run setup) owns the whole frame: its main area has no gutter of its own. */
+.fy-frame[data-chrome='none'] .fy-main {
+  padding: 0;
+}
+
 .fy-frame[data-chat-chrome] {
   --chat-head-h: 36px;
   --chat-menu-w: 12px; /* the wide frame draws no menu button (the drawer is beside the chat): just a margin from its edge */
