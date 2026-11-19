@@ -165,22 +165,41 @@ let
   # the switch itself stays scripts/ci/hosted-app-origin.sh's (nothing here parses or validates it).
   # Absent where there is no preview workflow: then there is no `preview` output, only the production one.
   previewWorkflow = "${src}/.github/workflows/pwa-pages-v5.yaml";
-  previewOriginLines =
-    if builtins.pathExists previewWorkflow then
-      map (lib.removePrefix "  FY_HOSTED_APP_ORIGIN: ") (
-        lib.filter (lib.hasPrefix "  FY_HOSTED_APP_ORIGIN: ") (
-          lib.splitString "\n" (builtins.readFile previewWorkflow)
-        )
+  originPrefix = "  FY_HOSTED_APP_ORIGIN: ";
+  # Only the workflow-level `env:` block counts: the same line under another top-level key (`run-name`, a job's
+  # own env, ...) would leave `env.FY_HOSTED_APP_ORIGIN` null in the workflow while the preview still built. So
+  # the lines are walked with the top-level key they sit under; the line must sit under `env:` and nowhere else.
+  # scripts/validate/hosted-app-origin.sh applies the same rule to the same file.
+  previewOriginScan =
+    lines:
+    lib.foldl'
+      (
+        acc: line:
+        let
+          topLevel = builtins.match "([^ #\t][^:]*):.*" line;
+          key = if topLevel == null then acc.key else lib.head topLevel;
+          isOrigin = lib.hasPrefix originPrefix line;
+        in
+        {
+          inherit key;
+          inEnv = acc.inEnv ++ lib.optional (isOrigin && key == "env") (lib.removePrefix originPrefix line);
+          anywhere = acc.anywhere + (if isOrigin then 1 else 0);
+        }
       )
-    else
-      [ ];
+      {
+        key = "";
+        inEnv = [ ];
+        anywhere = 0;
+      }
+      lines;
+  previewScan = previewOriginScan (lib.splitString "\n" (builtins.readFile previewWorkflow));
   previewOrigin =
-    if previewOriginLines == [ ] then
+    if !builtins.pathExists previewWorkflow then
       null
-    else if builtins.length previewOriginLines == 1 then
-      lib.head previewOriginLines
+    else if builtins.length previewScan.inEnv == 1 && previewScan.anywhere == 1 then
+      lib.head previewScan.inEnv
     else
-      throw "${previewWorkflow} must set FY_HOSTED_APP_ORIGIN exactly once at workflow level";
+      throw "${previewWorkflow} must set FY_HOSTED_APP_ORIGIN exactly once, under the workflow-level `env:` block (found ${toString (builtins.length previewScan.inEnv)} there, ${toString previewScan.anywhere} in all)";
 
   # One derivation per shipped package, compiling EVERY executable it ships into the same bin/: a helper
   # a package runs from beside its own resolved path would be invisible to it in a different store path. Every executable goes through the release compile script so
