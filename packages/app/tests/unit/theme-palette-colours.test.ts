@@ -12,7 +12,7 @@ import { describe, expect, it } from 'bun:test';
 import { PALETTES, STYLE_IDS } from '../../src/theme/catalog.ts';
 import { readStyleFile } from '../../src/testing/theme-css.ts';
 
-const NEW_PALETTES = ['vaporwave', 'cyberpunk', 'hacker', 'vintage', 'mesh', 'retrofuture'] as const;
+const NEW_PALETTES = ['vaporwave', 'cyberpunk', 'hacker', 'vintage', 'mesh', 'retrofuture', 'briefing'] as const;
 const MODES = ['light', 'dark'] as const;
 
 const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//gu, '');

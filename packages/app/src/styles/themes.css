@@ -6,7 +6,7 @@
        <html data-style="studio" data-palette="geist" data-mode="dark">
 
    style   ∈ studio | mission | neo | contrast | geist | glass
-           | neumorphism | retro | lucid | hud | raw | swiss | pixel | antiposh  HOW things are drawn: type, weights, tracking, radii,
+           | neumorphism | retro | lucid | hud | raw | swiss | pixel | antiposh | briefing  HOW things are drawn: type, weights, tracking, radii,
                                                             stroke widths, shadow GEOMETRY, spacing, control heights,
                                                             focus width/offset, texture, motion. NO colour value.
    palette ∈ studio | mission | neo | contrast | geist      WHICH colours: the seed colours, the status/syntax/tool
@@ -14,6 +14,7 @@
            | wayfinding | ledger | ma
            | vaporwave | cyberpunk | hacker                (the last six each declare EVERY role in their own
            | vintage | mesh | retrofuture                  file, so they need nothing from tokens/derived.css)
+           | briefing
    mode    ∈ light | dark        (already resolved — never "system")
 
    The CATALOGUE — ids, labels, fonts, suggested pairings — is owned by `src/theme/catalog.ts`, not by this
@@ -57,6 +58,7 @@
 @import './style/swiss.css';
 @import './style/pixel.css';
 @import './style/antiposh.css';
+@import './style/briefing.css';
 
 @import './palette/studio.css';
 @import './palette/mission.css';
@@ -75,6 +77,7 @@
 @import './palette/vintage.css';
 @import './palette/mesh.css';
 @import './palette/retrofuture.css';
+@import './palette/briefing.css';
 
 @import './tokens/derived.css';
 @import './tokens/floors.css';
