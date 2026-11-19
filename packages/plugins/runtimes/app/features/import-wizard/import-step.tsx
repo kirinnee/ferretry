@@ -57,8 +57,24 @@ export function ImportStep({
   readonly machineName: string;
 }) {
   const wizard = useImportWizard(client);
-  const [at, setAt] = useState(0);
+  const at = wizard.tool;
+  const setAt = wizard.setTool;
   const [finished, setFinished] = useState(false);
+
+  if (wizard.read.kind === 'confirm')
+    return (
+      <div className="kt-panel flex min-w-0 flex-col gap-2 p-panel" data-import-confirm="" data-import-wizard="">
+        <p className="m-0 text-row font-semibold text-fg">Looking at your setup needs your OK</p>
+        <p className="m-0 text-cell text-muted">
+          {`${machineName} asks you to confirm with your passkey before it shows what Claude Code and Codex hold here. Nothing is read until you press the button.`}
+        </p>
+        <div>
+          <Button type="button" variant="primary" data-import-look="" onClick={() => void wizard.look()}>
+            Look at my setup
+          </Button>
+        </div>
+      </div>
+    );
 
   if (wizard.read.kind === 'reading' || wizard.models === null)
     return wizard.read.kind === 'failed' ? (
@@ -66,7 +82,7 @@ export function ImportStep({
         <p role="alert" className="m-0 text-cell leading-base text-warn">
           {wizard.read.sentence}
         </p>
-        <Button type="button" size="sm" onClick={() => void wizard.rescan()}>
+        <Button type="button" size="sm" onClick={() => void wizard.look()}>
           Try again
         </Button>
       </div>

@@ -256,3 +256,61 @@ describe('GitHub-token variables in the environment', () => {
     );
   });
 });
+
+describe('a machine that wants a passkey for the scan', () => {
+  const STEP_UP = { code: 'grant_step_up_required', message: 'confirm with your passkey' };
+
+  it('reads the scan and the versions quietly, and a step-up answer waits for a press instead of a prompt', async () => {
+    const calls: Call[] = [];
+    let pressed = false;
+    const view = await open(
+      routes(scanOf({ claude: CLAUDE_FULL }), {
+        'GET /v1/runtimes/setup/scan': (call: Call) =>
+          call.quiet === true && !pressed ? STEP_UP : scanOf({ claude: CLAUDE_FULL }),
+      }),
+      calls,
+    );
+    const root = view.container;
+    expect(root.querySelector('[data-import-confirm]')).not.toBeNull();
+    expect(
+      calls
+        .filter(call => call.route.includes('/update') || call.route.includes('setup/scan'))
+        .every(call => call.quiet === true),
+    ).toBe(true);
+    pressed = true;
+    await click(root, '[data-import-look]');
+    await settle();
+    expect(calls.filter(call => call.route === 'GET /v1/runtimes/setup/scan').at(-1)?.quiet).toBeUndefined();
+    expect(root.querySelector('[data-found-list]')).not.toBeNull();
+  });
+});
+
+describe('a reload', () => {
+  const ALL = scanOf({ claude: CLAUDE_FULL, codex: CODEX_FULL });
+
+  it('keeps the open tool, the name and what was left out', async () => {
+    const first = await open(routes(ALL));
+    await click(first.container, '[data-found-item="claude-code:mcp:issues"] input');
+    const name = must(first.container.querySelector<HTMLInputElement>('[data-runtime-name]'), 'name');
+    await interact(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(name, 'work-claude');
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(first.container, '[data-import-tab="codex"]');
+    await click(first.container, '[data-found-item="codex:skill:review"] input');
+    await first.unmount();
+    mounted.splice(0);
+
+    const second = await open(routes(ALL));
+    mounted.push(second);
+    const root = second.container;
+    expect(text(root, '[data-tool-headline]')).toContain('0.9.0');
+    expect(root.querySelector<HTMLInputElement>('[data-found-item="codex:skill:review"] input')?.checked).toBe(false);
+    await click(root, '[data-import-tab="claude-code"]');
+    expect(root.querySelector<HTMLInputElement>('[data-found-item="claude-code:mcp:issues"] input')?.checked).toBe(
+      false,
+    );
+    expect(root.querySelector<HTMLInputElement>('[data-found-item="claude-code:mcp:notes"] input')?.checked).toBe(true);
+    expect(must(root.querySelector<HTMLInputElement>('[data-runtime-name]'), 'name').value).toBe('work-claude');
+  });
+});

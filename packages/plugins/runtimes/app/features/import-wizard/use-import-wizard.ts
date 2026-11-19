@@ -5,6 +5,7 @@
  */
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { readMemory, rememberInAddress } from './wizard-memory.ts';
 import {
   type ImportItemId,
   type SetupScan,
@@ -36,6 +37,8 @@ const UPDATE_ROUTE: Readonly<Record<HarnessKey, string>> = {
 
 type Read =
   | { readonly kind: 'reading' }
+  /** The machine wants a passkey before it shows the setup; nothing asks until the person presses the button. */
+  | { readonly kind: 'confirm' }
   | { readonly kind: 'failed'; readonly sentence: string }
   | {
       readonly kind: 'ready';
@@ -58,44 +61,58 @@ const installSentence = (outcome: ToolInstallOutcome): string => {
 
 export function useImportWizard(client: RuntimesClient) {
   const [read, setRead] = useState<Read>({ kind: 'reading' });
-  const [left, setLeft] = useState<Readonly<Record<HarnessKey, ReadonlySet<ImportItemId>>>>({
-    'claude-code': new Set(),
-    codex: new Set(),
-  });
-  const [tickedEnv, setTickedEnv] = useState<Readonly<Record<HarnessKey, ReadonlySet<string>>>>({
-    'claude-code': new Set(),
-    codex: new Set(),
-  });
-  const [names, setNames] = useState<Partial<Record<HarnessKey, string>>>({});
+  // What a reload keeps (the address): the open tool, the names, what was left out, the ticked tokens.
+  const [remembered] = useState(() => readMemory(globalThis.location?.search ?? ''));
+  const [tool, setTool] = useState(remembered.tool);
+  const [left, setLeft] = useState<Readonly<Record<HarnessKey, ReadonlySet<ImportItemId>>>>(remembered.left);
+  const [tickedEnv, setTickedEnv] = useState<Readonly<Record<HarnessKey, ReadonlySet<string>>>>(remembered.ticked);
+  const [names, setNames] = useState<Partial<Record<HarnessKey, string>>>(remembered.names);
   const [ends, setEnds] = useState<Partial<Record<HarnessKey, ToolEnd>>>({});
   const [installing, setInstalling] = useState<HarnessKey | null>(null);
   const [installNote, setInstallNote] = useState<Partial<Record<HarnessKey, string>>>({});
   const changes = useAccountChanges({ client });
   const generation = useRef(0);
 
-  const scan = useCallback(async (): Promise<void> => {
-    generation.current += 1;
-    const mine = generation.current;
-    try {
-      const [answer, claude, codex] = await Promise.all([
-        client.call(SCAN_ROUTE),
-        client.call(UPDATE_ROUTE['claude-code']).catch(() => null),
-        client.call(UPDATE_ROUTE.codex).catch(() => null),
-      ]);
-      if (mine !== generation.current) return;
-      setRead({
-        kind: 'ready',
-        scan: SetupScanSchema.parse(answer),
-        versions: { 'claude-code': versionOf(claude), codex: versionOf(codex) },
-      });
-    } catch (error) {
-      if (mine === generation.current) setRead({ kind: 'failed', sentence: changeRefusalSentence(error) });
-    }
-  }, [client]);
+  /**
+   * Reads the scan and each tool's version. `quiet` is a read nobody asked for (the step opening, a re-read after an
+   * install): it never raises a passkey prompt, and a machine that wants one is answered with the button below. A press
+   * (`quiet` false) is the person's own act and may ask.
+   */
+  const scan = useCallback(
+    async (quiet = true): Promise<void> => {
+      generation.current += 1;
+      const mine = generation.current;
+      try {
+        const [answer, claude, codex] = await Promise.all([
+          client.call(SCAN_ROUTE, quiet ? { quiet: true } : undefined),
+          client.call(UPDATE_ROUTE['claude-code'], { quiet: true }).catch(() => null),
+          client.call(UPDATE_ROUTE.codex, { quiet: true }).catch(() => null),
+        ]);
+        if (mine !== generation.current) return;
+        const parsed = SetupScanSchema.safeParse(answer);
+        if (!parsed.success && quiet) {
+          setRead({ kind: 'confirm' });
+          return;
+        }
+        setRead({
+          kind: 'ready',
+          scan: SetupScanSchema.parse(answer),
+          versions: { 'claude-code': versionOf(claude), codex: versionOf(codex) },
+        });
+      } catch (error) {
+        if (mine === generation.current) setRead({ kind: 'failed', sentence: changeRefusalSentence(error) });
+      }
+    },
+    [client],
+  );
 
   useEffect(() => {
     void scan();
   }, [scan]);
+
+  useEffect(() => {
+    rememberInAddress({ tool, names, left, ticked: tickedEnv });
+  }, [tool, names, left, tickedEnv]);
 
   const models = useMemo<Readonly<Record<HarnessKey, ToolModel>> | null>(
     () =>
@@ -143,7 +160,8 @@ export function useImportWizard(client: RuntimesClient) {
           ...current,
           [harness]: outcome === undefined ? 'Nothing was installed.' : installSentence(outcome),
         }));
-        await scan();
+        // The person just pressed Install: this re-read is theirs too, and may ask for the passkey.
+        await scan(false);
       } catch (error) {
         setInstallNote(current => ({ ...current, [harness]: changeRefusalSentence(error) }));
       } finally {
@@ -205,6 +223,8 @@ export function useImportWizard(client: RuntimesClient) {
     models,
     harnesses: HARNESSES,
     left,
+    tool,
+    setTool,
     toggle,
     tickedEnv,
     tickEnv,
@@ -218,6 +238,8 @@ export function useImportWizard(client: RuntimesClient) {
     skip,
     reopen,
     rescan: scan,
+    /** The person's own press: may ask for the passkey. */
+    look: () => scan(false),
     changes,
   };
 }

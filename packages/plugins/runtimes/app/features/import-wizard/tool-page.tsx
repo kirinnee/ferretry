@@ -82,7 +82,7 @@ function InstallBlock({ model, wizard }: { readonly model: ToolModel; readonly w
         </p>
       )}
       <div>
-        <Button type="button" size="sm" data-install-recheck={model.harness} onClick={() => void wizard.rescan()}>
+        <Button type="button" size="sm" data-install-recheck={model.harness} onClick={() => void wizard.look()}>
           Check again
         </Button>
       </div>
@@ -181,7 +181,7 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
           machineName={machineName}
           onSignedIn={() => {
             setSignedHere(true);
-            void wizard.rescan();
+            void wizard.look();
           }}
         />
       ) : null}

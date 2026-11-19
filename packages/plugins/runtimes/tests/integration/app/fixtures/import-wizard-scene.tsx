@@ -7,6 +7,7 @@
  *   ?view=codex-off  Claude Code installed and brought in; Codex not installed (open on the Codex tab)
  *   ?view=secrets    only a secret-looking environment to bring
  *   ?view=hooks      hooks and project instructions present (the greyed lines)
+ *   ?view=confirm    the machine wants a passkey before it shows the setup (a quiet read is refused, nothing prompts)
  *   ?view=signin     installed, not signed in
  *   ?theme=<family>-<mode>
  */
@@ -46,7 +47,10 @@ const scans: Readonly<Record<string, SetupScan>> = {
 };
 
 const client = scripted({
-  'GET /v1/runtimes/setup/scan': scans[view] ?? scans['claude'],
+  'GET /v1/runtimes/setup/scan': (call: Call) =>
+    view === 'confirm' && call.quiet === true
+      ? { code: 'grant_step_up_required', message: 'confirm with your passkey' }
+      : (scans[view] ?? scans['claude']),
   'GET /v1/claude-code/update': UPDATE_OK('2.1.0'),
   'GET /v1/codex/update': UPDATE_OK('0.9.0'),
   'GET /v1/runtimes/machine': machine(),

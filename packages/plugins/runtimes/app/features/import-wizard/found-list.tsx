@@ -15,6 +15,7 @@ import {
   plural,
   PROJECT_INSTRUCTIONS_STAY,
   SECRET_KEPT,
+  VAULT_VS_ENVIRONMENT,
 } from './mapping-words.ts';
 
 function Row({
@@ -93,7 +94,7 @@ function TokenRow({
           </span>
           <span className="text-cell text-fg">{`Becomes: ${becomes('claude-code', 'env')} (${SECRET_KEPT})`}</span>
           <span className="text-cell text-fg" data-found-token-note="">
-            {GITHUB_TOKEN_SENTENCE}
+            {GITHUB_TOKEN_SENTENCE} {VAULT_VS_ENVIRONMENT}
           </span>
         </span>
       </label>
@@ -162,7 +163,7 @@ export function FoundList({ harness, groups, left, leftAlone, onToggle, tickedEn
                         </span>
                       ))}
                     </span>
-                    <span className="text-cell text-fg">{`Secret-looking keys are ${SECRET_KEPT}.`}</span>
+                    <span className="text-cell text-fg">{`Secret-looking keys are ${SECRET_KEPT}. ${VAULT_VS_ENVIRONMENT}`}</span>
                   </span>
                 )}
               </Row>

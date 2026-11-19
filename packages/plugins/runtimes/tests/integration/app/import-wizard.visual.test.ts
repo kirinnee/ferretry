@@ -82,7 +82,7 @@ const newContext = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 
 const open = async (context: BrowserContext, view: string, mode: 'light' | 'dark'): Promise<Page> => {
   const tab = await context.newPage();
   await tab.goto(`${server?.url.origin ?? ''}/?view=${view}&theme=studio-${mode}`);
-  await tab.waitForSelector('[data-tool-page]');
+  await tab.waitForSelector('[data-tool-page], [data-import-confirm]');
   return tab;
 };
 
@@ -165,7 +165,7 @@ const CASES: readonly Case[] = [
   {
     name: 'secret-env',
     view: 'secrets',
-    expectText: ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'kept in the Vault'],
+    expectText: ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'kept in the Vault', 'receives it in its environment'],
   },
   {
     name: 'hooks-present',
@@ -177,6 +177,15 @@ const CASES: readonly Case[] = [
     name: 'signed-out',
     view: 'signin',
     expectText: ['not signed in', 'Sign in now, or import first and sign in after.'],
+  },
+  {
+    name: 'needs-passkey-ok',
+    view: 'confirm',
+    expectText: [
+      'Looking at your setup needs your OK',
+      'Look at my setup',
+      'Nothing is read until you press the button.',
+    ],
   },
   {
     name: 'done',
