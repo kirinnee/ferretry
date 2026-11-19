@@ -21,7 +21,7 @@
  * Nothing here holds a value: a skill is text, and a refusal names a skill, a path and a rule, never a file's content.
  */
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
-import type { ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
+import type { ComponentPutFile, ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
 import { ITEM_NAME_PATTERN } from '@ferretry/std';
 import { type InstalledSkillFile, installRefusal, usableSkillName } from '../../lib/skill-store.ts';
 
@@ -40,7 +40,7 @@ const HARNESS_KEY_OF: Readonly<Record<string, HarnessKey | undefined>> = Object.
 });
 
 /** One file of an imported skill, as Runtimes hands it over: `<skill>/<path inside the skill>` and its text. */
-export type ImportedSkillFile = InstalledSkillFile;
+export type ImportedSkillFile = ComponentPutFile;
 
 /** What `kernel.config.write` answers, as far as this module reads it (names and rules, never a value). */
 export type SkillsItemWrite =
