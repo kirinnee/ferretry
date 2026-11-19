@@ -1048,8 +1048,8 @@ export default definePlugin({
 
   ui: {
     settings: [
-      settingsTab('accounts', { group: 'sites', label: 'Accounts', order: 40 }),
-      settingsTab('secure-copy', { group: 'sites', label: 'Secure copy', order: 41 }),
+      settingsTab('accounts', { icon: 'user-round', group: 'sites', label: 'Accounts', order: 40 }),
+      settingsTab('secure-copy', { icon: 'copy', group: 'sites', label: 'Secure copy', order: 41 }),
     ],
     renderers: [renderer('ask', { source: 'sign-in-approval' })],
     // Access's Add device page offers this slot under each paired device's Revoke (its app half's device-note-slot.ts):

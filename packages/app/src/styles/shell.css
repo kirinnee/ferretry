@@ -594,7 +594,9 @@
   padding: 0 0 6px 8px;
 }
 .fy-settings-nav .fy-tab {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 5px 8px;
   border-radius: 6px;
   text-decoration: none;
@@ -774,4 +776,14 @@
 .fy-name-machine:hover {
   color: var(--fg);
   text-decoration: underline;
+}
+
+/* THE ONE ICON (`shell/icons.tsx`): the same 16px, the same stroke, beside every Settings item and destination; it never
+   shrinks, so a long label wraps instead of squeezing it, and it is a shade softer than the label until its item is the page on screen. */
+.fy-icon {
+  flex: none;
+  color: var(--fg-soft);
+}
+.fy-settings-nav .fy-tab--active .fy-icon {
+  color: inherit;
 }

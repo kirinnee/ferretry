@@ -216,7 +216,7 @@ export default definePlugin({
     ],
   },
   ui: {
-    settings: [settingsTab('secrets', { group: 'sites', label: 'Secrets', order: 42 })],
+    settings: [settingsTab('secrets', { icon: 'key-round', group: 'sites', label: 'Secrets', order: 42 })],
     renderers: [renderer('ask', { source: 'input' })],
   },
   provides: {
