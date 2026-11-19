@@ -16,12 +16,13 @@ const demo = manifestOf('demo', {
       { id: 'one', label: 'Tab one', order: 10, group: 'supervision' },
       { id: 'mine', label: 'Mine only', order: 11, group: 'behaviour', scope: 'device' },
       { id: 'two', label: 'Tab two', order: 12, group: 'health' },
+      { id: 'own', label: 'Own switch', order: 13, group: 'behaviour', scope: 'device', scopeChip: false },
     ],
   },
 });
 const demoEntry = entryOf(demo, {
   screens: {},
-  settings: { one: () => <p>one</p>, mine: () => <p>mine</p>, two: () => <p>two</p> },
+  settings: { one: () => <p>one</p>, mine: () => <p>mine</p>, two: () => <p>two</p>, own: () => <p>own</p> },
 } as never);
 
 let view: Mounted | null = null;
@@ -57,7 +58,7 @@ describe('the Settings list is split by where a setting is kept', () => {
     }));
     expect(blocks).toHaveLength(2);
     expect(blocks[0]?.heading).toBe(DEVICE_BLOCK_HEADING);
-    expect(blocks[0]?.links).toEqual(['This device', 'Mine only']);
+    expect(blocks[0]?.links).toEqual(['This device', 'Mine only', 'Own switch']);
     expect(blocks[1]?.heading).toMatch(/ · every device$/);
     expect(blocks[1]?.links).toEqual(['Tab one', 'Tab two']);
   });
@@ -86,6 +87,13 @@ describe('the scope chip follows the tab on screen', () => {
     await settle();
     expect(q('.fy-settings-machine__scope')?.textContent).toBe('Only this browser');
     expect(q('.fy-settings-machine__scope')?.getAttribute('data-scope')).toBe('device');
+  });
+
+  test('a tab that says where it saves itself (scopeChip: false) shows no fixed chip', async () => {
+    const app = await bootApp({ surfaces: [demoEntry], machines: ['d1'], path: '/d/d1/settings/demo/own' });
+    view = app.view;
+    await settle();
+    expect(q('.fy-settings-machine__scope')).toBeNull();
   });
 
   test('a phone’s list (no tab open) claims no scope', async () => {

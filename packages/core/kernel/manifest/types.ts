@@ -172,6 +172,11 @@ export interface SettingsTabDecl<Id extends string = string> {
    * browser only. The Settings page lists each in its own block and says so on the tab.
    */
   readonly scope?: 'device' | 'machine';
+  /**
+   * `false`: the tab says where each change is saved ITSELF (a switch on the page), so the shell shows no scope chip for it
+   * rather than a fixed word the switch can contradict (Layout: "Same on all my devices" / "Just this device"). Default: shown.
+   */
+  readonly scopeChip?: boolean;
 }
 
 /** Renderers are provide hooks of the app (§5.2): one per ask source, one per reference prefix. */

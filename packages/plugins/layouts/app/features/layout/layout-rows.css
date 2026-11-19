@@ -1,0 +1,116 @@
+/* Settings › Layout rows (layout-row.tsx): a label with its control beside it and the preview next, never the control
+   at the far edge of a 1,500 px row. The page is at most 1,100 px; from 1,200 px the short rows sit two to a line. */
+.fy-lr-page {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  max-width: 1100px;
+  min-width: 0;
+}
+.fy-lr-group {
+  min-width: 0;
+}
+.fy-lr-heading {
+  color: var(--muted);
+  font-size: var(--text-meta, 0.75rem);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+.fy-lr-rows {
+  display: grid;
+  gap: 0 40px;
+  grid-template-columns: minmax(0, 1fr);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+@media (min-width: 1200px) {
+  .fy-lr-rows {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .fy-lr-row[data-span='full'] {
+    grid-column: 1 / -1;
+  }
+}
+.fy-lr-row {
+  border-top: 1px solid var(--border-soft);
+  min-width: 0;
+  padding: 14px 0;
+}
+.fy-lr-body {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  min-width: 0;
+}
+.fy-lr-label {
+  display: flex;
+  flex: 0 0 11rem;
+  flex-direction: column;
+  min-width: 0;
+}
+.fy-lr-name {
+  color: var(--fg);
+  font-size: var(--text-ui, 0.875rem);
+  font-weight: 600;
+}
+.fy-lr-hint {
+  color: var(--muted);
+  font-size: var(--text-meta, 0.75rem);
+  line-height: 1.35;
+}
+.fy-lr-control {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.fy-lr-caption {
+  color: var(--muted);
+  font-size: var(--text-meta, 0.75rem);
+  line-height: 1.35;
+  margin: 0;
+  max-width: 28rem;
+}
+.fy-lr-preview {
+  display: flex;
+  flex: none;
+}
+/* Two to a line: the label sits over its control, so a row stays about 520 px wide. */
+@media (min-width: 1200px) {
+  .fy-lr-row:not([data-span='full']) .fy-lr-label {
+    flex-basis: 100%;
+  }
+}
+/* A phone: label, control, preview, one under the other, the control the full width. */
+@media (max-width: 767px) {
+  .fy-lr-label {
+    flex-basis: 100%;
+  }
+  .fy-lr-control {
+    flex: 1 1 100%;
+  }
+}
+/* The wide row (a list of chips) puts its chips under the label, the full width. */
+.fy-lr-row[data-span='full'] .fy-lr-label {
+  flex-basis: 100%;
+}
+.fy-lr-row[data-span='full'] .fy-lr-control {
+  flex: 1 1 24rem;
+}
+@media (max-width: 767px) {
+  .fy-lr-row[data-span='full'] .fy-lr-control {
+    flex-basis: 100%;
+  }
+}
+
+.fy-lr-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 34rem;
+}

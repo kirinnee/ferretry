@@ -183,7 +183,16 @@ export default definePlugin({
   },
 
   ui: {
-    settings: [settingsTab('layout', { icon: 'layout-dashboard', group: 'behaviour', label: 'Layout', order: 15 })],
+    settings: [
+      settingsTab('layout', {
+        icon: 'layout-dashboard',
+        group: 'behaviour',
+        label: 'Layout',
+        order: 15,
+        scope: 'device',
+        scopeChip: false,
+      }),
+    ],
     layouts: [
       { id: 'default', file: 'layouts/default.yaml' },
       { id: 'compact', file: 'layouts/compact.yaml' },
