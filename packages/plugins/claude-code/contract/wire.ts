@@ -337,7 +337,7 @@ export const HarnessConfigSchema = z.strictObject({
    * Whether Ferretry READS the conversations Claude holds in the person's own `~/.claude` on this machine (the host
    * history). Default ON. OFF, the history part lists nothing from the host home and copies nothing from it. One way
    * either way: Ferretry never changes or deletes anything in `~/.claude`; ferrets' own homes and the shared pool are
-   * Ferretry's own and are not affected. Read per request, so a change takes effect without a restart. Turning it ON again is a loosening (an agent's edit is held for the owner); turning it off is not.
+   * Ferretry's own and are not affected. Read per request, so a change takes effect without a restart. Turning it ON again is a loosening (an agent's edit is held for the owner); turning it off is not. A file that is invalid or unreadable reads as OFF (fail closed), whatever its last good version said.
    */
   hostHistory: z.boolean().default(true),
 });

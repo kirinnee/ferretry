@@ -15,8 +15,20 @@ import { type ClaudeCore, claudeHome, FIRST_RECORDS_BYTES, type Serves } from '.
 
 const configFile = CLAUDE_CODE_CONFIG as unknown as ConfigFileDef<HarnessConfig>;
 
-/** Whether the person's own `~/.claude` history may be read (`hostHistory`, default on); read at each call. */
-const hostHistoryOn = (core: ClaudeCore): boolean => core.deps.config.file(configFile)?.hostHistory ?? true;
+/**
+ * Whether the person's own `~/.claude` history may be read (`hostHistory`, default on); read at each call, and FAIL
+ * CLOSED. The config port answers a file it cannot read with the last accepted value (or nothing, which reads as the
+ * default on), so the value alone would let a broken file keep reading; the file's STATE is asked as well, and an
+ * invalid or unreadable file, or a state that cannot be asked, is OFF.
+ */
+const hostHistoryOn = (core: ClaudeCore): boolean => {
+  try {
+    if (core.deps.config.fileState(configFile).state === 'invalid') return false;
+    return core.deps.config.file(configFile)?.hostHistory ?? true;
+  } catch {
+    return false;
+  }
+};
 
 /**
  * The owner's host history, behind the switch for EVERY operation. Conversation caches an issued source and reads through

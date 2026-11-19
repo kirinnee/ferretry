@@ -6,10 +6,13 @@ import {
   type TranscriptEntry,
 } from '@ferretry/core-ferrets/contract';
 import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/testing';
-import type { FerretId, SpawnResult, StatePort } from '@ferretry/kernel/contract';
+import type { FerretId, Log, SpawnResult, StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import { createConfigFiles } from '../../../../core/kernel/host/config/service.ts';
+import { createMemoryHostFs } from '../../../../core/kernel/host/state/memory-fs.ts';
 import { state as kernelState } from '@ferretry/kernel/host';
 import {
+  CLAUDE_CODE_CONFIG,
   CLAUDE_CODE_HOOKS,
   CLAUDE_CODE_LAUNCH_SETTINGS,
   CLAUDE_CODE_SETTINGS,
@@ -71,6 +74,13 @@ afterEach(async () => {
   await rm(fixture, { recursive: true, force: true });
 });
 const T = '2026-11-01T10:00:00.000Z' as Instant;
+const quietLog: Log = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  child: () => quietLog,
+};
 
 let elapsed = 0;
 
@@ -79,7 +89,7 @@ function build(
     located?: boolean;
     tmux?: (args: readonly string[]) => number;
     state?: StatePort;
-    config?: { file: () => unknown; collection: (definition: unknown) => unknown };
+    config?: { file: () => unknown; collection: (definition: unknown) => unknown; fileState?: () => unknown };
     /** What `tmux capture-pane` prints: the frame of the ferret's pane. */
     frame?: string;
     /** A machine with no tmux to start: every call fails to launch. */
@@ -119,10 +129,13 @@ function build(
   const harness = new ClaudeHarness({
     selected: options.selected ?? (async () => ({ settings: EVERYTHING, hooks: EVERYTHING })),
     roots,
-    config: (options.config ?? {
-      file: () => ({ searchPaths: [], permissionMode: 'auto' }),
-      collection: () => new Map(),
-    }) as never,
+    config: {
+      fileState: () => ({ state: 'valid', inEffect: true, sentences: [] }),
+      ...(options.config ?? {
+        file: () => ({ searchPaths: [], permissionMode: 'auto' }),
+        collection: () => new Map(),
+      }),
+    } as never,
     state: options.state ?? new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]),
     spawn: {
       run: async (_program: string, args: readonly string[]): Promise<SpawnResult> => {
@@ -584,6 +597,83 @@ describe('ClaudeHarness', () => {
       expect((await harness.conversations.list(undefined)).length).toBe(1);
       on = false;
       expect(await harness.conversations.list(undefined)).toEqual([]);
+    });
+
+    describe('fails closed on a file that cannot be read (the live config port)', () => {
+      const home = '/home/fy-claude-history';
+      const live = async (initial: string) => {
+        const fs = createMemoryHostFs();
+        const files = createConfigFiles({
+          home,
+          fs,
+          clock: { nowMs: () => 1_000_000, after: () => () => undefined, every: () => () => undefined },
+          log: quietLog,
+          binary: 'fy',
+          defs: [{ plugin: 'claude-code', def: CLAUDE_CODE_CONFIG }],
+        });
+        const path = `${home}/config/harness-claude-code.yaml`;
+        fs.seed(path, initial);
+        await files.reload();
+        return { fs, files, path, port: files.port('claude-code') };
+      };
+
+      test('a file that turns invalid after hostHistory was on: new and already-issued sources read nothing', async () => {
+        const service = await live('hostHistory: true\n');
+        const { harness } = build({ config: service.port as never });
+        await seedHost();
+        const issued = (await harness.historySources()).find(source => source.kind === 'computer')!.files;
+        expect((await issued.entries('projects/p')).length).toBe(1);
+        expect((await harness.conversations.list(undefined)).length).toBe(1);
+        // A key the schema refuses: the file is invalid, and the port still hands back the last accepted `true`.
+        service.fs.seed(service.path, 'hostHistory: true\nbogusKey: 1\n');
+        await service.files.reload();
+        expect(service.port.fileState(CLAUDE_CODE_CONFIG).state).toBe('invalid');
+        expect(service.port.file(CLAUDE_CODE_CONFIG as never)).toMatchObject({ hostHistory: true });
+        expect(await issued.entries('projects/p')).toEqual([]);
+        expect(await issued.stat('projects/p/c-1.jsonl')).toBeUndefined();
+        expect(await issued.read('projects/p/c-1.jsonl', 0, 64)).toBeUndefined();
+        expect(await harness.conversations.list(undefined)).toEqual([]);
+        expect((await harness.historySources()).some(source => source.kind === 'computer')).toBe(false);
+        expect((await harness.importConversation({ id: 'c-1', source: 'projects/p/c-1.jsonl' } as never)).ok).toBe(
+          false,
+        );
+      });
+
+      test('a file that is unreadable (oversized), with no accepted version, reads nothing', async () => {
+        const service = await live('');
+        const { harness } = build({ config: service.port as never });
+        await seedHost();
+        expect((await harness.conversations.list(undefined)).length).toBe(1);
+        service.fs.seed(service.path, '#'.repeat(300_000));
+        await service.files.reload();
+        expect(service.port.fileState(CLAUDE_CODE_CONFIG).state).toBe('invalid');
+        expect(await harness.conversations.list(undefined)).toEqual([]);
+        expect((await harness.historySources()).some(source => source.kind === 'computer')).toBe(false);
+      });
+
+      test('repairing the file turns it back on; an absent file is the default (on)', async () => {
+        const service = await live('hostHistory: true\nbogusKey: 1\n');
+        const { harness } = build({ config: service.port as never });
+        await seedHost();
+        expect(await harness.conversations.list(undefined)).toEqual([]);
+        service.fs.seed(service.path, 'hostHistory: true\n');
+        await service.files.reload();
+        expect((await harness.conversations.list(undefined)).length).toBe(1);
+      });
+
+      test('a state that cannot be asked is off', async () => {
+        const { harness } = build({
+          config: {
+            fileState: () => {
+              throw new Error('no state');
+            },
+            file: () => ({ searchPaths: [], permissionMode: 'auto', hostHistory: true }),
+            collection: () => new Map(),
+          },
+        });
+        await seedHost();
+        expect(await harness.conversations.list(undefined)).toEqual([]);
+      });
     });
 
     test('an owner source issued while hostHistory was on refuses list, stat and read once it is turned off', async () => {
