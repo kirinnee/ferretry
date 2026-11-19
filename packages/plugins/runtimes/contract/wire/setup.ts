@@ -44,7 +44,13 @@ export type ToolInstallRequest = z.infer<typeof ToolInstallRequestSchema>;
 /** How installing one tool ended (E1, E2). A failure always carries the command to run by hand. */
 export const ToolInstallOutcomeSchema = z.discriminatedUnion('outcome', [
   z.strictObject({ harness: HarnessKeySchema, outcome: z.literal('already-installed') }),
-  z.strictObject({ harness: HarnessKeySchema, outcome: z.literal('installed'), command: NonEmptyStringSchema }),
+  z.strictObject({
+    harness: HarnessKeySchema,
+    outcome: z.literal('installed'),
+    command: NonEmptyStringSchema,
+    // The manager's last lines, scrubbed daemon-side (no token, no credential line); bounded.
+    output: z.array(z.string().max(200)).max(20).readonly().default([]),
+  }),
   z.strictObject({
     harness: HarnessKeySchema,
     outcome: z.literal('failed'),
@@ -58,6 +64,7 @@ export const ToolInstallOutcomeSchema = z.discriminatedUnion('outcome', [
     ]),
     reason: NonEmptyStringSchema,
     manualCommand: NonEmptyStringSchema,
+    output: z.array(z.string().max(200)).max(20).readonly().default([]),
   }),
 ]);
 export type ToolInstallOutcome = z.infer<typeof ToolInstallOutcomeSchema>;

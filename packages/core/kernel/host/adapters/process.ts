@@ -245,6 +245,7 @@ export function bunSpawn(
           : { stdio: ['pipe', 'pipe', 'pipe', ...Array.from({ length: extra }, () => 'pipe' as const)] }),
         ...(options?.signal === undefined ? {} : { signal: options.signal }),
         ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
+        ...(options?.ownGroup === true ? { detached: true } : {}),
       });
     } finally {
       release?.();
@@ -269,7 +270,16 @@ export function bunSpawn(
       write: chunk => {
         child.stdin.write(chunk);
       },
-      kill: signal => child.kill((signal ?? 'SIGTERM') as NodeJS.Signals),
+      kill: signal => {
+        const name = (signal ?? 'SIGTERM') as NodeJS.Signals;
+        if (options?.ownGroup !== true) return child.kill(name);
+        // The child leads its own group (`ownGroup`): signal every member, then the child itself if the group is gone.
+        try {
+          process.kill(-child.pid, name);
+        } catch {
+          child.kill(name);
+        }
+      },
       exited: child.exited.then(code => code),
     };
     return { handle, signalCode: () => signalName(child.signalCode) };

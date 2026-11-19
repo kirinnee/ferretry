@@ -40,6 +40,14 @@ export interface SpawnOptions {
    * waits on it. The kernel logs the program's name and pid, never its arguments.
    */
   readonly detached?: true;
+  /**
+   * `start` only: the child leads its OWN process group (its stdio stays piped and the daemon still waits on it), and
+   * `ChildHandle.kill` signals the whole group, so a manager's descendants end with it. It needs no manifest
+   * entry: it only widens what `kill` reaches, to processes the child itself started. GAPS: Bun's `detached` is setsid,
+   * so the group is its own session and on macOS (launchd stop, a terminal Ctrl-C) the manager can OUTLIVE the daemon,
+   * which no longer signals it; and a descendant that calls setsid() itself leaves the group and escapes the group kill.
+   */
+  readonly ownGroup?: true;
 }
 
 /**

@@ -31,6 +31,7 @@ interface WorldOptions {
   readonly result?: RunResult | (() => Promise<RunResult>);
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly timeoutMinutes?: number;
+  readonly refresh?: () => Promise<void>;
 }
 
 function world(options: WorldOptions = {}) {
@@ -51,6 +52,7 @@ function world(options: WorldOptions = {}) {
     executables,
     locate,
     environment: options.environment ?? { PATH: '/usr/bin' },
+    ...(options.refresh === undefined ? {} : { refresh: options.refresh }),
     ...(options.timeoutMinutes === undefined ? {} : { timeoutMinutes: options.timeoutMinutes }),
     run: async run => {
       runs.push(run);
@@ -185,10 +187,12 @@ describe('ToolInstallService.install refusals', () => {
     const first = service.install({ harnesses: ['claude'] }, OWNER);
     const error = await service.install({ harnesses: ['codex'] }, OWNER).catch((e: unknown) => e);
     should((error as ToolInstallRefusal).code).equal('tool_install_in_progress');
+    await new Promise(resolve => setTimeout(resolve, 0));
     should(runs).have.length(1);
     release({ kind: 'exited', code: 0, tail: [] });
     await first;
     const second = service.install({ harnesses: ['codex'] }, OWNER);
+    await new Promise(resolve => setTimeout(resolve, 0));
     release({ kind: 'exited', code: 0, tail: [] });
     should((await second)[0]?.harness).equal('codex');
   });
@@ -234,8 +238,14 @@ describe('ToolInstallService.install outcomes', () => {
       steps.push(step.stage === 'running' ? `running ${step.command}` : `finished ${step.outcome.outcome}`),
     );
     should(outcomes).deepEqual([
-      { harness: 'claude', outcome: 'installed', command: 'brew install --cask claude-code', path: '/bin/claude' },
-      { harness: 'codex', outcome: 'installed', command: 'brew install --cask codex', path: '/bin/codex' },
+      {
+        harness: 'claude',
+        outcome: 'installed',
+        command: 'brew install --cask claude-code',
+        path: '/bin/claude',
+        output: [],
+      },
+      { harness: 'codex', outcome: 'installed', command: 'brew install --cask codex', path: '/bin/codex', output: [] },
     ]);
     should(steps).deepEqual([
       'running brew install --cask claude-code',
@@ -364,5 +374,90 @@ describe('ToolInstallService.install outcomes', () => {
     should(outcome.cause).equal('not-found-after-install');
     should(outcome.manualCommand).equal('npm install -g @openai/codex');
     should(outcome.reason).containEql('FY_CODEX_BIN');
+  });
+});
+
+describe('ToolInstallService.install: argv and output', () => {
+  it('should never put user text or sudo in the argv, whatever the machine, platform or failure', async () => {
+    for (const platform of ['darwin', 'linux', 'win32']) {
+      const { service, runs } = world({
+        platform,
+        onPath: { brew: '/opt/homebrew/bin/brew', npm: '/usr/bin/npm' },
+        result: { kind: 'exited', code: 1, tail: ['npm ERR! code EACCES'] },
+      });
+      const [outcome] = await service.install({ harnesses: ['claude', 'codex'] }, OWNER);
+      for (const run of runs) {
+        should(run.executable).not.match(/sudo/u);
+        should(['brew', 'npm']).containEql(run.executable.split('/').at(-1));
+        should(run.args.slice(0, 2).join(' ')).match(/^install (--cask|-g)$/u);
+      }
+      // The failure hands back a sudo command to a PERSON; it is never what ran.
+      should(failed(outcome).manualCommand).be.a.String();
+    }
+  });
+
+  it('should carry the manager output, scrubbed, on a success and on a failure', async () => {
+    const tail = ['==> Downloading', 'token npm_abcdefghijklmnop1234 used', '\u001b[31mcolour\u001b[0m'];
+    const ok = world({
+      onPath: { brew: '/b/brew' },
+      foundAfterRun: ['claude'],
+      result: { kind: 'exited', code: 0, tail },
+    });
+    const [installed] = await ok.service.install({ harnesses: ['claude'] }, OWNER);
+    const shown = installed?.outcome === 'installed' ? installed.output : [];
+    should(shown).have.length(3);
+    should(shown[0]).equal('==> Downloading');
+    should(shown[1]).not.containEql('npm_abcdef');
+    should(shown[2]).equal('colour');
+    const bad = world({ onPath: { brew: '/b/brew' }, result: { kind: 'exited', code: 1, tail } });
+    const outcome = failed((await bad.service.install({ harnesses: ['claude'] }, OWNER))[0]);
+    should(outcome.output.join('\n')).not.containEql('npm_abcdef');
+    should(outcome.output).have.length(3);
+  });
+
+  it('should quote only scrubbed text in the reason, on a failed exit and on a timeout', async () => {
+    const leaky = [
+      'fetching',
+      'using npm_abcdefghijklmnop1234 to log in',
+      '//registry.npmjs.org/:_authToken=hunter2hunter2',
+      'npm error 404 https://alice:hunter2pass99xyz@registry.example.com/pkg/-/pkg.tgz',
+    ];
+    for (const result of [
+      { kind: 'exited', code: 1, tail: leaky.slice(0, 2) },
+      { kind: 'exited', code: 1, tail: leaky },
+      { kind: 'exited', code: 1, tail: leaky.slice(3) },
+      { kind: 'timed-out', tail: leaky.slice(3) },
+      { kind: 'timed-out', tail: leaky.slice(0, 2) },
+      { kind: 'timed-out', tail: leaky },
+    ] as const) {
+      const { service } = world({ platform: 'linux', onPath: { npm: '/x/npm' }, result });
+      const outcome = failed((await service.install({ harnesses: ['claude'] }, OWNER))[0]);
+      for (const text of [outcome.reason, outcome.output.join('\n')]) {
+        should(text).not.containEql('npm_abcdef');
+        should(text).not.containEql('hunter2');
+        should(text).not.containEql('_authToken');
+        should(text).not.containEql('hunter2pass99xyz');
+      }
+      should(outcome.reason).match(/It said: /u);
+    }
+  });
+
+  it('should look the commands up afresh before it plans and again before it checks the result', async () => {
+    const events: string[] = [];
+    const { service } = world({
+      platform: 'linux',
+      onPath: { npm: '/x/npm' },
+      foundAfterRun: ['claude'],
+      refresh: async () => {
+        events.push('refresh');
+      },
+      result: async () => {
+        events.push('run');
+        return { kind: 'exited', code: 0, tail: [] };
+      },
+    });
+    const [outcome] = await service.install({ harnesses: ['claude'] }, OWNER);
+    should(outcome?.outcome).equal('installed');
+    should(events).deepEqual(['refresh', 'run', 'refresh']);
   });
 });
