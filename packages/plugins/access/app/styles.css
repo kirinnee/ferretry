@@ -188,6 +188,8 @@
 .fy-sky {
   --fy-star: color-mix(in srgb, var(--accent) 88%, var(--bg));
   --fy-star-peak: 0.75;
+  --fy-grid-rest: 0.04;
+  --fy-grid-peak: 0.11;
   position: absolute;
   inset: 0;
   z-index: -1;
@@ -201,11 +203,13 @@
 }
 .fy-sky[data-celebrating] {
   --fy-star-peak: 0.95;
+  --fy-grid-peak: 0.14;
 }
 .fy-sky-grid {
   position: absolute;
   inset: 0;
   color: var(--accent);
+  /* Still, it rests at the middle of its breath (0.07); the motion block below swings it between rest and peak. */
   opacity: 0.07;
   /* The grid fades out behind the card, so it is texture at the edges and never behind a line of text. */
   -webkit-mask-image: radial-gradient(ellipse 60% 50% at 50% 45%, transparent 0 30%, #000 90%);
@@ -329,6 +333,12 @@
     animation: fy-pair-rise 560ms 350ms ease-out both;
   }
 
+  /* The Fleet Grid breathes: opacity and a hair of scale on one layer, slow enough to read as calm, never as a blink. */
+  :root:not([data-motion='reduced']) .fy-sky-grid {
+    transform-origin: 50% 45%;
+    will-change: transform, opacity;
+    animation: fy-sky-breathe 7s ease-in-out infinite;
+  }
   :root:not([data-motion='reduced']) .fy-sky-dust {
     transition: opacity 600ms ease;
   }
@@ -450,6 +460,17 @@
   from {
     opacity: 0;
     transform: translateY(10px);
+  }
+}
+@keyframes fy-sky-breathe {
+  0%,
+  100% {
+    opacity: var(--fy-grid-rest);
+    transform: scale(1);
+  }
+  50% {
+    opacity: var(--fy-grid-peak);
+    transform: scale(1.03);
   }
 }
 @keyframes fy-sky-twinkle {

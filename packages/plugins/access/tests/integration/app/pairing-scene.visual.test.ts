@@ -5,6 +5,8 @@
  *  - ONE primary action, "Pair this device", and the "Name this device" control, with the mascot and the sky around them;
  *  - the sky is there and moving (twinkle, shooting star) — and STILL under reduced motion, whether the OS asks for it
  *    or the app's Motion = Reduced does: no animation is running, and the final picture is whole;
+ *  - the Fleet Grid breathes: its opacity differs between the rest and the peak of the breath, and it is a still, whole
+ *    grid under reduced motion;
  *  - a hidden tab pauses every sky animation;
  *  - success: "Connected" takes focus, the mascot cheers, one streak crosses the sky, and the sky's stars brighten;
  *  - text on the sky keeps >= 4.5:1: muted text on the page background, and the halo that erases a star behind a glyph.
@@ -160,6 +162,7 @@ describe('The pair page: mascot and night sky', () => {
         const names = await tab.evaluate(() => document.getAnimations().map(a => (a as CSSAnimation).animationName));
         expect(names.includes('fy-sky-twinkle'), 'the stars twinkle').toBe(true);
         expect(names.includes('fy-sky-shoot'), 'the shooting stars are scheduled').toBe(true);
+        expect(names.includes('fy-sky-breathe'), 'the grid breathes').toBe(true);
         // Only transform and opacity ever animate, so nothing here re-lays-out or repaints a phone.
         const properties = await tab.evaluate(() => {
           const found = new Set<string>();
@@ -275,6 +278,67 @@ describe('The pair page: mascot and night sky', () => {
       }
     });
   }
+
+  it('the Fleet Grid breathes: rest and peak differ, the stars stay, and a still grid is whole', async () => {
+    for (const variant of VARIANTS) {
+      const { tab, close } = await open(variant);
+      try {
+        const grid = tab.locator('.fy-sky-grid');
+        expect(await grid.count()).toBe(1);
+        const read = async (at: number) => {
+          await seek(tab, at);
+          return await grid.evaluate(node => {
+            const style = getComputedStyle(node);
+            return { opacity: Number(style.opacity), transform: style.transform };
+          });
+        };
+        const rest = await read(0);
+        const peak = await read(3_500);
+        expect(peak.opacity, 'the grid is brighter at the peak of its breath').toBeGreaterThan(rest.opacity);
+        expect(peak.transform, 'and a hair larger').not.toBe(rest.transform);
+        // Subtle: it never goes dark and never gets loud over the card's text.
+        expect(rest.opacity).toBeGreaterThan(0.02);
+        expect(peak.opacity).toBeLessThan(0.13);
+        await seek(tab, 0);
+        await shot(tab, variant, 'grid-rest');
+        await seek(tab, 3_500);
+        await shot(tab, variant, 'grid-peak');
+        // On success the grid swells a little more, like the stars.
+        await tab.evaluate(() => {
+          for (const animation of document.getAnimations()) animation.cancel();
+        });
+        const peakNormal = await grid.evaluate(node =>
+          getComputedStyle(node).getPropertyValue('--fy-grid-peak').trim(),
+        );
+        await pair(tab);
+        const peakCelebrating = await grid.evaluate(node =>
+          getComputedStyle(node).getPropertyValue('--fy-grid-peak').trim(),
+        );
+        expect(Number(peakCelebrating)).toBeGreaterThan(Number(peakNormal));
+        // The twinkling stars are still there beside it.
+        expect(await tab.locator('[data-sky] .fy-sky-star').count()).toBeGreaterThan(8);
+      } finally {
+        await close();
+      }
+    }
+    for (const how of ['os', 'app'] as const) {
+      const { tab, close } = await open(
+        VARIANTS[0],
+        how === 'app' ? '&motion=reduced' : '',
+        how === 'os' ? 'reduce' : 'no-preference',
+      );
+      try {
+        const still = await tab.locator('.fy-sky-grid').evaluate(node => ({
+          animation: getComputedStyle(node).animationName,
+          opacity: getComputedStyle(node).opacity,
+        }));
+        expect(still.animation, `${how}: no breathing`).toBe('none');
+        expect(Number(still.opacity), `${how}: the still grid is the resting texture`).toBeCloseTo(0.07, 2);
+      } finally {
+        await close();
+      }
+    }
+  });
 
   it('a hidden tab pauses every animation, and a visible one resumes them', async () => {
     const { tab, close } = await open(VARIANTS[2]);
