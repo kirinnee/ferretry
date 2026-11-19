@@ -1,0 +1,401 @@
+/* ============================================================================
+   The layout previews (previews/*.tsx) — little apps drawn from divs inside a SettingPreview frame (~158 x 98).
+   Theme tokens only; geometry is flex and percentages, so one set of rules draws a left column, a right column, a top row
+   or a bottom row. The RESTING style is always the final state: with the animation removed (reduced motion, a stylesheet
+   that never matches) the frame still shows the answer.
+
+   Two ways to move, both on opacity/transform only:
+     .fy-ls       choice scenes. The `before` layer stays put and the `after` layer (opaque) fades in over it, so what the
+                  two share does not dip while the part that differs cross-fades.
+     .fy-ls--own  list scenes. One layer, whose rows slide on the loop SettingPreview owns (`--sp-loop`).
+   ========================================================================== */
+
+.fy-ls {
+  --ls-ink: color-mix(in srgb, var(--muted) 62%, var(--surface));
+  --ls-ink-soft: color-mix(in srgb, var(--muted) 40%, var(--surface));
+  --ls-gap: 4px;
+}
+
+.fy-ls-scene {
+  background: var(--surface-2);
+  inset: 0;
+  position: absolute;
+}
+
+/* ---- a window or a phone -------------------------------------------------- */
+.fy-ls-frame {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  bottom: 6px;
+  display: flex;
+  flex-direction: row;
+  left: 6px;
+  overflow: hidden;
+  position: absolute;
+  right: 6px;
+  top: 6px;
+}
+.fy-ls-frame[data-side='right'] {
+  flex-direction: row-reverse;
+}
+.fy-ls-frame[data-side='top'] {
+  flex-direction: column;
+}
+.fy-ls-frame[data-side='bottom'] {
+  flex-direction: column-reverse;
+}
+/* A phone: a narrow, tall frame in the middle. */
+.fy-ls-frame[data-device='phone'] {
+  border-radius: 10px;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  width: 46%;
+}
+/* A pair: the wide frame and a narrow one beside it. */
+.fy-ls-scene[data-pair] .fy-ls-frame[data-device='wide'] {
+  right: auto;
+  width: 64%;
+}
+.fy-ls-frame[data-device='narrow'] {
+  border-radius: 5px;
+  left: auto;
+  width: 26%;
+}
+
+/* ---- the menu ------------------------------------------------------------- */
+.fy-ls-nav {
+  background: var(--surface-2);
+  border: 0 solid var(--border);
+  display: flex;
+  flex: none;
+  gap: var(--ls-gap);
+  padding: 4px;
+}
+.fy-ls-nav[data-side='left'],
+.fy-ls-nav[data-side='right'] {
+  flex-direction: column;
+  width: 18%;
+}
+.fy-ls-nav[data-side='left'][data-style='bar'],
+.fy-ls-nav[data-side='right'][data-style='bar'],
+.fy-ls-nav[data-side='left'][data-style='list'],
+.fy-ls-nav[data-side='right'][data-style='list'] {
+  width: 34%;
+}
+.fy-ls-nav[data-side='left'] {
+  border-right-width: 1px;
+}
+.fy-ls-nav[data-side='right'] {
+  border-left-width: 1px;
+}
+.fy-ls-nav[data-side='top'],
+.fy-ls-nav[data-side='bottom'] {
+  align-items: center;
+  flex-direction: row;
+  height: 17px;
+  padding-block: 3px;
+}
+.fy-ls-nav[data-side='top'] {
+  border-bottom-width: 1px;
+}
+.fy-ls-nav[data-side='bottom'] {
+  border-top-width: 1px;
+}
+.fy-ls-nav[data-lit] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.fy-ls-item {
+  align-items: center;
+  border-radius: 3px;
+  display: flex;
+  gap: 3px;
+  min-height: 7px;
+  min-width: 0;
+  padding: 1px 2px;
+}
+.fy-ls-nav[data-side='left'] .fy-ls-item,
+.fy-ls-nav[data-side='right'] .fy-ls-item {
+  min-height: 9px;
+}
+.fy-ls-nav[data-side='top'] .fy-ls-item,
+.fy-ls-nav[data-side='bottom'] .fy-ls-item {
+  flex: none;
+  width: 8px;
+}
+.fy-ls-nav[data-side='top'][data-style='bar'] .fy-ls-item,
+.fy-ls-nav[data-side='bottom'][data-style='bar'] .fy-ls-item,
+.fy-ls-nav[data-side='top'][data-style='list'] .fy-ls-item,
+.fy-ls-nav[data-side='bottom'][data-style='list'] .fy-ls-item {
+  width: 22px;
+}
+.fy-ls-item[data-on] {
+  background: color-mix(in srgb, var(--ls-ink) 55%, transparent);
+}
+.fy-ls-nav[data-lit] .fy-ls-item[data-on] {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.fy-ls-ico {
+  background: var(--ls-ink);
+  border-radius: 2px;
+  flex: none;
+  height: 5px;
+  width: 5px;
+}
+.fy-ls-lbl {
+  background: var(--ls-ink-soft);
+  border-radius: 2px;
+  flex: 1;
+  height: 3px;
+  min-width: 0;
+}
+.fy-ls-nav[data-lit] .fy-ls-ico {
+  background: var(--accent);
+}
+/* A rail is icons only; a list is names only; a bar is both. */
+.fy-ls-nav[data-style='rail'] .fy-ls-lbl,
+.fy-ls-nav[data-style='list'] .fy-ls-ico {
+  display: none;
+}
+.fy-ls-nav[data-style='rail'] .fy-ls-item {
+  justify-content: center;
+}
+
+/* A phone frame is ~70px wide and the narrow one of a pair ~38px: the menu gives up padding and the icon a pixel, so a rail
+   is wide enough to hold its icon whole. */
+.fy-ls-frame[data-device='phone'] .fy-ls-nav,
+.fy-ls-frame[data-device='narrow'] .fy-ls-nav {
+  padding: 4px 2px;
+}
+.fy-ls-frame[data-device='phone'] .fy-ls-nav[data-side='left'][data-style='rail'],
+.fy-ls-frame[data-device='phone'] .fy-ls-nav[data-side='right'][data-style='rail'] {
+  width: 24%;
+}
+.fy-ls-frame[data-device='narrow'] .fy-ls-nav[data-side='left'],
+.fy-ls-frame[data-device='narrow'] .fy-ls-nav[data-side='right'] {
+  width: 30%;
+}
+.fy-ls-frame[data-device='phone'] .fy-ls-item,
+.fy-ls-frame[data-device='narrow'] .fy-ls-item {
+  padding: 1px 0;
+}
+.fy-ls-frame[data-device='phone'] .fy-ls-ico,
+.fy-ls-frame[data-device='narrow'] .fy-ls-ico {
+  height: 4px;
+  width: 4px;
+}
+
+/* ---- the page ------------------------------------------------------------- */
+.fy-ls-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.fy-ls-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 5px;
+}
+.fy-ls-main[data-density='compact'] {
+  gap: 2px;
+}
+.fy-ls-row {
+  background: var(--ls-ink-soft);
+  border-radius: 2px;
+  display: block;
+  flex: none;
+  height: 8px;
+}
+.fy-ls-main[data-density='compact'] .fy-ls-row {
+  height: 5px;
+}
+.fy-ls-row:nth-child(2) {
+  width: 84%;
+}
+.fy-ls-row:nth-child(3) {
+  width: 92%;
+}
+.fy-ls-row:nth-child(4) {
+  width: 70%;
+}
+/* The one lit part of a density frame is the page the rows sit on; the rows stay neutral. */
+.fy-ls-main[data-lit] {
+  background: var(--accent-soft);
+}
+.fy-ls-col {
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 4px;
+  width: 30%;
+}
+.fy-ls-col > span {
+  background: var(--ls-ink-soft);
+  border-radius: 2px;
+  display: block;
+  height: 5px;
+}
+.fy-ls-col[data-lit] {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+.fy-ls-col[data-lit] > span {
+  background: color-mix(in srgb, var(--accent) 45%, var(--surface));
+}
+
+/* ---- the navigation list: rows that lift, slide aside and dim ------------- */
+.fy-ls-nlist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ls-gap);
+  inset: 8px 14px;
+  position: absolute;
+}
+.fy-ls-nrow {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: flex;
+  flex: none;
+  gap: 5px;
+  height: 13px;
+  padding: 0 5px;
+  position: relative;
+}
+.fy-ls-nrow .fy-ls-lbl {
+  flex: none;
+}
+/* The one lit row: an accent wash laid over the row, so only its opacity ever changes. */
+.fy-ls-nrow[data-role='lift']::after {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  content: '';
+  inset: -1px;
+  position: absolute;
+}
+.fy-ls-nrow[data-role='lift'] .fy-ls-ico {
+  background: var(--accent);
+  position: relative;
+  z-index: 1;
+}
+.fy-ls-nrow[data-role='lift'] .fy-ls-lbl {
+  position: relative;
+  z-index: 1;
+}
+.fy-ls-nrow[data-role='hide'] {
+  opacity: 0.38;
+}
+
+/* ---- the loops ------------------------------------------------------------ */
+/* A choice scene keeps the `before` layer underneath, and the opaque `after` layer fades in over it. */
+.fy-sp.fy-ls[data-sp-state] .fy-sp__layer--before {
+  animation: none;
+  opacity: 1;
+}
+/* A list scene draws one layer and moves its own rows. */
+.fy-sp.fy-ls--own[data-sp-state] .fy-sp__layer--before {
+  display: none;
+}
+.fy-sp.fy-ls--own[data-sp-state] .fy-sp__layer--after {
+  animation: none;
+  opacity: 1;
+}
+
+@keyframes fy-ls-lift {
+  0%,
+  18% {
+    transform: translateY(calc(-2 * (100% + var(--ls-gap))));
+  }
+  42%,
+  74% {
+    transform: translateY(0);
+  }
+  96%,
+  100% {
+    transform: translateY(calc(-2 * (100% + var(--ls-gap))));
+  }
+}
+@keyframes fy-ls-shift {
+  0%,
+  18% {
+    transform: translateY(calc(100% + var(--ls-gap)));
+  }
+  42%,
+  74% {
+    transform: translateY(0);
+  }
+  96%,
+  100% {
+    transform: translateY(calc(100% + var(--ls-gap)));
+  }
+}
+@keyframes fy-ls-hide {
+  0%,
+  18% {
+    opacity: 1;
+  }
+  42%,
+  74% {
+    opacity: 0.38;
+  }
+  96%,
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes fy-ls-glow {
+  0%,
+  18% {
+    opacity: 0;
+  }
+  34%,
+  80% {
+    opacity: 1;
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Longhands only: the primitive's `paused` rule sets `animation-play-state`, and a shorthand here would undo it. */
+@media (prefers-reduced-motion: no-preference) {
+  .fy-sp:not([data-sp-state='still']) .fy-ls-nrow {
+    animation-duration: var(--sp-loop);
+    animation-iteration-count: infinite;
+    animation-timing-function: ease-in-out;
+  }
+  .fy-sp:not([data-sp-state='still']) .fy-ls-nrow[data-role='lift'] {
+    animation-name: fy-ls-lift;
+    will-change: transform;
+  }
+  .fy-sp:not([data-sp-state='still']) .fy-ls-nrow[data-role='shift'] {
+    animation-name: fy-ls-shift;
+    will-change: transform;
+  }
+  .fy-sp:not([data-sp-state='still']) .fy-ls-nrow[data-role='hide'] {
+    animation-name: fy-ls-hide;
+    will-change: opacity;
+  }
+  .fy-sp:not([data-sp-state='still']) .fy-ls-nrow[data-role='lift']::after {
+    animation-duration: var(--sp-loop);
+    animation-iteration-count: infinite;
+    animation-name: fy-ls-glow;
+    animation-timing-function: ease-in-out;
+  }
+  .fy-sp[data-sp-state='paused'] .fy-ls-nrow,
+  .fy-sp[data-sp-state='paused'] .fy-ls-nrow::after {
+    animation-play-state: paused;
+  }
+}
