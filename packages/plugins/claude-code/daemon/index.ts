@@ -25,6 +25,7 @@ import { PermissionAnswerService } from './lib/permission/service.ts';
 import { isConversationId } from './lib/harness/claude-path.ts';
 import { fastStartDecision } from './lib/harness/fast-mode.ts';
 import { claudeCodeDoctor } from './lib/harness/doctor.ts';
+import { claudeSettingsPut } from './features/host-import/put.ts';
 import { claudeHooksSource, claudeSettingsSource } from './lib/profile-components.ts';
 import { ClaudeProjectApprovals } from './lib/project-approvals.ts';
 import { dialogRoute, permissionRoute, promptRoute, updateStartRoute, updateViewRoute } from './lib/routes.ts';
@@ -150,10 +151,17 @@ export default implementDaemon(manifest, {
         'harnesses:claude-code': harness,
         // Runtimes' read of the `settings` and `hooks` components a profile names for Claude: this plugin's own items,
         // live, no cache.
-        'runtimes.components.settings.claude:components': claudeSettingsSource(
-          () => kernel.config.collection(CLAUDE_CODE_SETTINGS as ConfigCollectionDef<SettingsItem>),
-          listener => kernel.config.watch(CLAUDE_CODE_SETTINGS, listener),
-        ),
+        'runtimes.components.settings.claude:components': {
+          ...claudeSettingsSource(
+            () => kernel.config.collection(CLAUDE_CODE_SETTINGS as ConfigCollectionDef<SettingsItem>),
+            listener => kernel.config.watch(CLAUDE_CODE_SETTINGS, listener),
+          ),
+          // The setup import's write of a settings item (r9 A6): this plugin writes its own file.
+          put: claudeSettingsPut({
+            def: CLAUDE_CODE_SETTINGS as ConfigCollectionDef<SettingsItem>,
+            config: kernel.config,
+          }),
+        },
         'runtimes.components.hooks.claude:components': claudeHooksSource(
           () => kernel.config.collection(CLAUDE_CODE_HOOKS as ConfigCollectionDef<HooksItem>),
           listener => kernel.config.watch(CLAUDE_CODE_HOOKS, listener),
