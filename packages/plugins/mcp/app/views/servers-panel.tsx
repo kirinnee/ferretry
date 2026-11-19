@@ -69,8 +69,8 @@ export function McpServersPanel({
     [client, ferretId],
   );
   const read = useContextRead(loader, true);
-  const { load, reload } = read;
-  const actions = useMcpServerActions({ client, machineName: MACHINE_NAME, ferretId, now }, reload);
+  const { load, reload, refresh } = read;
+  const actions = useMcpServerActions({ client, machineName: MACHINE_NAME, ferretId, now }, refresh);
   const daemon = daemonOfClient(client);
   const [query, setQuery] = useState('');
   const [chip, setChip] = useState<McpChip>('all');
@@ -194,7 +194,7 @@ export function McpServersPanel({
           ferretId={ferretId}
           onClose={() => {
             setAdding(false);
-            reload();
+            refresh();
           }}
         />
       ) : null}

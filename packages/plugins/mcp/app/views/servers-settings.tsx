@@ -35,10 +35,10 @@ export function McpSettings({ client, now = Date.now, origin }: McpSettingsProps
     async (_signal: AbortSignal, press: ReadPress) => await readMachineMcpServers(client, press),
     [client],
   );
-  const { load, reload } = useContextRead(loader, true);
+  const { load, reload, refresh } = useContextRead(loader, true);
   const actions = useMcpServerActions(
     { client, machineName: MACHINE_NAME, now, ...(origin === undefined ? {} : { origin }) },
-    reload,
+    refresh,
   );
   // One read of each answer every server's sign-in section needs, however many servers sign in.
   const signIns = useMcpSignIns(client);

@@ -29,7 +29,7 @@ export type Reading =
 
 const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
-export function useOverview(client: ListClient): { reading: Reading; reload: () => void } {
+export function useOverview(client: ListClient): { reading: Reading; reload: () => void; refresh: () => void } {
   const [reading, setReading] = useState<Reading>({ status: 'loading' });
   const [round, setRound] = useState(0);
   // Set by Try again, spent by the very next read: only that one is the person's press.
@@ -82,5 +82,7 @@ export function useOverview(client: ListClient): { reading: Reading; reload: () 
     pressed.current = true;
     setRound(value => value + 1);
   }, []);
-  return { reading, reload };
+  // The page's own re-read (a watch just saved): never a press, so it never opens the prompt by itself.
+  const refresh = useCallback(() => setRound(value => value + 1), []);
+  return { reading, reload, refresh };
 }

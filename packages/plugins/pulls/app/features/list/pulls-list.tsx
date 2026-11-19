@@ -23,7 +23,7 @@ export interface PullsListProps {
 const shortId = (id: string): string => id.slice(0, 8);
 
 export function PullsList({ client, daemon, onNavigate, nowMs }: PullsListProps) {
-  const { reading, reload } = useOverview(client);
+  const { reading, reload, refresh } = useOverview(client);
   const now = useNow(nowMs);
   const [filter, setFilter] = useState<Filter>('mine');
   const [limit, setLimit] = useState(PROJECT_PAGE);
@@ -49,6 +49,7 @@ export function PullsList({ client, daemon, onNavigate, nowMs }: PullsListProps)
         onOpen={onNavigate}
         reading={reading}
         reload={reload}
+        refresh={refresh}
       />
     </main>
   );
@@ -65,9 +66,10 @@ interface BodyProps {
   readonly onOpen: (to: string) => void;
   readonly more: () => void;
   readonly reload: () => void;
+  readonly refresh: () => void;
 }
 
-function Body({ client, daemon, reading, filter, limit, nowMs, onFilter, onOpen, more, reload }: BodyProps) {
+function Body({ client, daemon, reading, filter, limit, nowMs, onFilter, onOpen, more, reload, refresh }: BodyProps) {
   if (reading.status === 'loading') return <Loading kind="page" compact label="Reading your pull requests…" />;
   if (reading.status === 'failed')
     return (
@@ -126,7 +128,7 @@ function Body({ client, daemon, reading, filter, limit, nowMs, onFilter, onOpen,
             filter={filter}
             noRepo={projects.get(view.project)?.noRepo === true}
             nowMs={nowMs}
-            onChanged={reload}
+            onChanged={refresh}
             onOpen={onOpen}
             view={view}
           />

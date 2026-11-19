@@ -51,7 +51,10 @@ export type ContextLoad<T> =
 
 export interface ContextRead<T> {
   readonly load: ContextLoad<T>;
+  /** Try again: a read the person pressed for (`quiet: false`), so the passkey prompt can open. Only a button calls it. */
   readonly reload: () => void;
+  /** The page's own re-read (after a write, a sign-in, a dialog closing): never a press, so it never opens the prompt. */
+  readonly refresh: () => void;
 }
 
 /**
@@ -103,7 +106,8 @@ export function useContextRead<T>(loader: ContextLoader<T>, wanted: boolean): Co
     pressed.current = true;
     setAttempt(value => value + 1);
   }, []);
-  return { load, reload };
+  const refresh = useCallback(() => setAttempt(value => value + 1), []);
+  return { load, reload, refresh };
 }
 
 // ── The header every list has ──────────────────────────────────────────────────────────────────────────────────────

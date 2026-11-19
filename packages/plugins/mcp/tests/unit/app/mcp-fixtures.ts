@@ -106,6 +106,8 @@ export interface Call {
   readonly params: Readonly<Record<string, string>> | undefined;
   readonly body: unknown;
   readonly headers?: Readonly<Record<string, string>> | undefined;
+  /** `false` when the read was a person's press (Try again); absent for the page's own. */
+  readonly quiet?: boolean | undefined;
 }
 
 /** One answer per route key: a value, an Error to throw, or a function of the call. */
@@ -121,9 +123,10 @@ export const scriptedClient = (answers: Answers, calls: Call[] = []): ScriptedCl
       readonly params?: Readonly<Record<string, string>>;
       readonly body?: unknown;
       readonly headers?: Readonly<Record<string, string>>;
+      readonly quiet?: boolean;
     },
   ): Promise<Answer> => {
-    const call: Call = { route, params: init?.params, body: init?.body, headers: init?.headers };
+    const call: Call = { route, params: init?.params, body: init?.body, headers: init?.headers, quiet: init?.quiet };
     calls.push(call);
     if (!(route in answers)) throw new Error(`no route ${route}`);
     const answer = answers[route];

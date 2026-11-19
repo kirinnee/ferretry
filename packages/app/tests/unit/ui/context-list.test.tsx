@@ -99,11 +99,12 @@ describe('a lazy read', () => {
     readonly loader: (signal: AbortSignal, press: ReadPress) => Promise<string>;
     readonly wanted: boolean;
   }) {
-    const { load, reload } = useContextRead(loader, wanted);
+    const { load, reload, refresh } = useContextRead(loader, wanted);
     return (
       <div>
         <span data-state>{load.kind === 'ready' ? `ready:${load.value}` : load.kind}</span>
         <button type="button" data-reload onClick={reload} />
+        <button type="button" data-refresh onClick={refresh} />
       </div>
     );
   }
@@ -169,6 +170,24 @@ describe('a lazy read', () => {
     await open.render(<Probe loader={other} wanted />);
     await wait('ready:other');
     expect(seen).toEqual([{}, { quiet: false }, {}]);
+  });
+
+  it('re-reads quietly for the page’s own refresh (after a write, a sign-in, a dialog closing), never as a press', async () => {
+    const seen: ReadPress[] = [];
+    const loader = async (_signal: AbortSignal, press: ReadPress) => {
+      seen.push(press);
+      return `v${seen.length}`;
+    };
+    open = await mount(<Probe loader={loader} wanted />);
+    await wait('ready:v1');
+    await interact(() => open?.container.querySelector<HTMLButtonElement>('[data-refresh]')?.click());
+    await wait('ready:v2');
+    // A refresh leaves no press behind, and Try again after it is still the person's own.
+    await interact(() => open?.container.querySelector<HTMLButtonElement>('[data-reload]')?.click());
+    await wait('ready:v3');
+    await interact(() => open?.container.querySelector<HTMLButtonElement>('[data-refresh]')?.click());
+    await wait('ready:v4');
+    expect(seen).toEqual([{}, {}, { quiet: false }, {}]);
   });
 });
 

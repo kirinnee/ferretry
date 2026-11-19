@@ -330,3 +330,27 @@ describe('DOM tests — the slots the panel offers', () => {
     expect(rows(root, 'data-context-mcp')).toHaveLength(6);
   });
 });
+
+describe('DOM tests — which re-reads are a person’s press', () => {
+  const serverReads = (calls: Call[]): Array<boolean | undefined> =>
+    calls.filter(call => call.route === SERVERS).map(call => call.quiet);
+
+  it('marks only Try again as a press; closing Add… re-reads as the page’s own and opens no passkey prompt', async () => {
+    let fail = true;
+    const calls: Call[] = [];
+    const { root } = await panel(
+      {
+        [SERVERS]: (): McpInventory => {
+          if (fail) throw new Error('the machine is offline');
+          return MCP;
+        },
+      },
+      calls,
+    );
+    fail = false;
+    await click(root, '[data-context-retry]');
+    await click(root, '[data-mcp-add]');
+    await click(document.body, 'button[aria-label="Close"]');
+    expect(serverReads(calls)).toEqual([undefined, false, undefined]);
+  });
+});

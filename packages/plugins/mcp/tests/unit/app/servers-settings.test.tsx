@@ -108,16 +108,22 @@ describe('DOM tests — Settings › MCP servers', () => {
   });
 
   it('says a failed read in plain words and reads again on Try again', async () => {
+    const calls: Call[] = [];
     let fail = true;
-    const { root } = await settings({
-      'GET /v1/mcp': () => {
-        if (fail) throw new Error('the machine is offline');
-        return MCP;
+    const { root } = await settings(
+      {
+        'GET /v1/mcp': () => {
+          if (fail) throw new Error('the machine is offline');
+          return MCP;
+        },
       },
-    });
+      calls,
+    );
     expect(root.querySelector('[data-context-failed] p')?.textContent).toBe('This machine isn’t reachable right now');
     fail = false;
     await click(root, '[data-context-retry]');
     expect(root.querySelectorAll('[data-context-mcp]')).toHaveLength(6);
+    // The opening read is the page's own; only Try again is a person's press.
+    expect(calls.filter(call => call.route === 'GET /v1/mcp').map(call => call.quiet)).toEqual([undefined, false]);
   });
 });
