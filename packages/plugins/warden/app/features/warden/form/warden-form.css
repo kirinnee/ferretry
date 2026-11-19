@@ -1,0 +1,296 @@
+/*
+ * The Warden settings form's own layout (r10 S6). One level of surface: a section is a heading and rows split by hairlines,
+ * and the only boxes are the three layer cards. Selectors that style a <label> are doubled (`.x.x`) so the page-wide
+ * `.fy-page label { display: block; margin: 8px 0 }` rule can never turn a flex label back into a block.
+ */
+.fy-wf {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 32px;
+}
+.fy-wf-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+}
+.fy-wf-section > h3 {
+  margin: 0;
+  font-size: var(--text-row, 15px);
+  font-weight: 600;
+  color: var(--fg);
+}
+.fy-wf-note {
+  margin: 0;
+  font-size: var(--text-meta, 12px);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* Rows divided by hairlines, never boxed. */
+.fy-wf-rows {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.fy-wf .fy-wf-rows > * {
+  padding: 12px 0;
+  box-shadow: inset 0 var(--stroke, 1px) 0 var(--border);
+}
+.fy-wf .fy-wf-rows > :first-child {
+  box-shadow: none;
+  padding-top: 0;
+}
+
+/* The three layers: cards in a row from 720px, stacked below. */
+.fy-wf-layers {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+@media (min-width: 720px) {
+  .fy-wf-layers {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.fy-wf-layer {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  border: var(--stroke, 1px) solid var(--border-strong);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-2);
+}
+.fy-wf-layer[data-on='true'] {
+  border-color: var(--accent-border, var(--accent));
+  background: var(--accent-soft);
+}
+.fy-wf-layer__top {
+  display: flex;
+  min-height: 44px;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fy-wf-layer__title {
+  font-size: var(--text-ui, 14px);
+  font-weight: 600;
+  color: var(--fg);
+}
+.fy-wf-layer__line {
+  font-size: var(--text-meta, 12px);
+  line-height: 1.5;
+  color: var(--muted);
+}
+.fy-wf-layer__state {
+  display: flex;
+  min-height: 24px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding-top: 4px;
+  font-size: var(--text-meta, 12px);
+  color: var(--muted);
+}
+
+/* A choice or a toggle with its box at the LEFT of its words. */
+label.fy-wf-check.fy-wf-check {
+  display: flex;
+  min-height: 44px;
+  margin: 0;
+  cursor: pointer;
+  align-items: center;
+  gap: 12px;
+}
+.fy-wf-check input {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.fy-wf-check__words {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.fy-wf-check__label {
+  font-size: var(--text-ui, 14px);
+  font-weight: 500;
+  color: var(--fg);
+}
+.fy-wf-check__detail {
+  font-size: var(--text-meta, 12px);
+  line-height: 1.5;
+  color: var(--muted);
+}
+.fy-wf-checks {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 0 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* Segmented: the radio dot is never drawn; the chosen segment carries the accent. */
+.fy-wf-seg {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.fy-wf-seg__group {
+  display: inline-flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+label.fy-wf-seg__opt.fy-wf-seg__opt {
+  position: relative;
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  margin: 0;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  border: var(--stroke, 1px) solid var(--border);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-2);
+  font-size: var(--text-ui, 14px);
+  color: var(--fg);
+}
+label.fy-wf-seg__opt.fy-wf-seg__opt[data-selected='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  font-weight: 600;
+}
+.fy-wf-seg__opt input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.fy-wf-seg__opt:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Number fields: `label ... [input 6rem]`, every input on one right edge. */
+.fy-wf-fields {
+  display: flex;
+  flex-direction: column;
+}
+label.fy-wf-num.fy-wf-num {
+  display: grid;
+  max-width: 34rem;
+  min-width: 0;
+  margin: 0;
+  grid-template-columns: minmax(0, 1fr) 6rem;
+  align-items: center;
+  gap: 4px 16px;
+  font-size: var(--text-cell, 13px);
+  font-weight: 500;
+  color: var(--fg);
+}
+.fy-wf-num > input {
+  width: 6rem;
+  min-height: 44px;
+  padding: 0 8px;
+  border: var(--stroke, 1px) solid var(--border);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.fy-wf-num > .fy-wf-num__error {
+  grid-column: 1 / -1;
+  font-size: var(--text-meta, 12px);
+  font-weight: 400;
+  color: var(--err);
+}
+
+/* A slider row: its words, the slider beside them, the hint under both. */
+label.fy-wf-slider.fy-wf-slider {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 16px;
+  font-size: var(--text-cell, 13px);
+  font-weight: 500;
+  color: var(--fg);
+}
+@media (min-width: 720px) {
+  label.fy-wf-slider.fy-wf-slider {
+    grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem);
+  }
+  .fy-wf-slider > .fy-wf-note {
+    grid-column: 1 / -1;
+  }
+}
+.fy-wf-slider__control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A callout is one box on a plain row, so it never sits inside another. */
+.fy-wf-callout {
+  padding: 8px 12px;
+  border: var(--stroke, 1px) solid var(--warn-border);
+  border-radius: var(--radius-control, 8px);
+  background: var(--warn-bg);
+  font-size: var(--text-meta, 12px);
+  line-height: 1.5;
+  color: var(--warn);
+}
+.fy-wf-fields {
+  gap: 8px;
+}
+.fy-wf-list > li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.fy-wf-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.fy-wf-legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: var(--text-cell, 13px);
+  font-weight: 500;
+  color: var(--fg);
+}
+
+/* From 720px a number field's input sits in the same control column as the sliders. */
+@media (min-width: 720px) {
+  label.fy-wf-num.fy-wf-num {
+    max-width: none;
+    grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem);
+  }
+}
+.fy-wf-layer {
+  padding: 8px 14px 12px;
+}
+.fy-wf-legend + * {
+  clear: both;
+}
