@@ -113,6 +113,7 @@ describe('PR page', () => {
           if (kind === 'long')
             for (const label of ['ci', 'files']) {
               await tab.locator(`[data-pull-tab="${label}"]`).click();
+              await tab.waitForTimeout(400); // the underline eases to the new tab
               await tab.screenshot({ path: join(shotsDir, `${variant.name}-${kind}-${label}.png`) });
             }
         }
