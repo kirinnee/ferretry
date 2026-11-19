@@ -11,6 +11,7 @@ import {
   type Progress,
   type StepAnswerRequest,
   type StepView,
+  sideOf,
 } from '../../contract/index.ts';
 import { answeredKeys, EMPTY_PROGRESS, findEntry, joinProgress, splitStepKey, viewOf, withAnswer } from './steps.ts';
 
@@ -41,7 +42,9 @@ export class OnboardingService implements OnboardingApi {
 
   async answer(plugin: string, step: string, answer: StepAnswerRequest): Promise<StepView | undefined> {
     const entries = this.deps.entries();
-    if (findEntry(entries, plugin, step) === undefined) return undefined;
+    const entry = findEntry(entries, plugin, step);
+    // A client step is answered on the device's ledger; the daemon records nothing for it (it is "unknown" here).
+    if (entry === undefined || sideOf(entry) === 'client') return undefined;
     const at = this.deps.clock.now();
     const written = await this.deps.state.update(ONBOARDING_PROGRESS, current =>
       withAnswer(current, plugin, step, answer, at),

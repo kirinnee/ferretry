@@ -4,7 +4,14 @@
  */
 import type { OnboardingEntry } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
-import type { OnboardingView, Progress, StepAnswerRequest, StepState, StepView } from '../../contract/index.ts';
+import {
+  type OnboardingView,
+  type Progress,
+  type StepAnswerRequest,
+  type StepState,
+  type StepView,
+  sideOf,
+} from '../../contract/index.ts';
 
 /** A step is stored as `<plugin>:<id>`. */
 export const stepKey = (plugin: string, id: string): string => `${plugin}:${id}`;
@@ -26,6 +33,9 @@ export function joinProgress(entries: readonly OnboardingEntry[], progress: Prog
       id: entry.id,
       title: entry.title,
       order: entry.order,
+      // The daemon default and an undeclared group stay off the wire: a reader defaults a missing side to daemon.
+      ...(sideOf(entry) === 'daemon' ? {} : { side: sideOf(entry) }),
+      ...(entry.group === undefined ? {} : { group: entry.group }),
       state: known?.state ?? 'pending',
       ...(known === undefined ? {} : { at: known.at }),
       ...(known?.state === 'found' && known.linked === true ? { linked: true as const } : {}),
@@ -33,8 +43,12 @@ export function joinProgress(entries: readonly OnboardingEntry[], progress: Prog
   });
 }
 
-/** Complete = none pending. No steps at all is complete: there is nothing left to ask. */
-export const isComplete = (steps: readonly StepView[]): boolean => steps.every(step => step.state !== 'pending');
+/**
+ * Complete = no daemon step pending. No steps at all is complete: there is nothing left to ask. A client step is
+ * answered on the device, never here, so it is always 'pending' to the daemon and never holds the run open.
+ */
+export const isComplete = (steps: readonly StepView[]): boolean =>
+  steps.every(step => sideOf(step) === 'client' || step.state !== 'pending');
 
 export function viewOf(
   entries: readonly OnboardingEntry[],

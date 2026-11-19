@@ -52,3 +52,5 @@ export async function onboardingConformance(make: () => OnboardingApi): Promise<
     failures.push('answer() of an unknown step is undefined');
   return failures.length === 0 ? ok(true) : err(failures);
 }
+
+export * from './step-harness.ts';
