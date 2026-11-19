@@ -9,6 +9,9 @@ import { bootApp, settle } from './frame-fixtures.tsx';
  * the drawer collapses to a rail and remembers that on this device; the machine item is drawn only with two machines.
  */
 
+/** What the drawer's Tab trap counts as a stop (the same list the dialog hook uses, in the parts a drawer holds). */
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 let view: Mounted | undefined;
 beforeEach(() => {
   // The state is one shared object: start every test with nothing chosen.
@@ -146,5 +149,34 @@ describe('the left drawer', () => {
     expect(order).toEqual(['fy-drawer__machine', 'fy-search', 'fy-nav']);
     await interact(() => pressKey(drawer, 'Escape'));
     expect(root.querySelector('.fy-drawer')).toBeNull();
+  });
+
+  test('on a phone the keyboard goes into the drawer, Tab stays inside it, and Escape shuts it with focus back on Menu', async () => {
+    const app = await bootApp({ surfaces: [], machines: ['d1'], path: '/d/d1/settings', viewport: 'phone' });
+    view = app.view;
+    const root = app.view.container;
+    const menu = must(root.querySelector<HTMLElement>('button[aria-label="Menu"]'), 'the menu button');
+    menu.focus();
+    expect(document.activeElement).toBe(menu);
+    await interact(() => menu.click());
+    const drawer = must(root.querySelector<HTMLElement>('.fy-drawer--overlay'), 'the overlay');
+    // Focus moves INTO the drawer (the dialog element is focusable by script), not left on Menu behind it.
+    expect(drawer.getAttribute('tabindex')).toBe('-1');
+    expect(document.activeElement).toBe(drawer);
+    // Tab cycles inside: from the last control it wraps to the first, from the dialog itself Shift+Tab wraps to the last.
+    const controls = [...drawer.querySelectorAll<HTMLElement>(FOCUSABLE)];
+    const first = must(controls[0], 'the first control');
+    const last = must(controls[controls.length - 1], 'the last control');
+    last.focus();
+    await interact(() => pressKey(last, 'Tab'));
+    expect(document.activeElement).toBe(first);
+    drawer.focus();
+    await interact(() => pressKey(drawer, 'Tab', { shiftKey: true }));
+    expect(document.activeElement).toBe(last);
+    expect(drawer.contains(document.activeElement)).toBe(true);
+    // Escape shuts it and gives focus back to Menu.
+    await interact(() => pressKey(document.activeElement ?? drawer, 'Escape'));
+    expect(root.querySelector('.fy-drawer')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('button[aria-label="Menu"]'));
   });
 });

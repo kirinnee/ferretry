@@ -90,7 +90,7 @@ export function Drawer({
         data-slot="drawer"
         data-collapsed={rail ? '' : undefined}
         aria-label="Menu"
-        {...(phone ? { role: 'dialog', 'aria-modal': true, onKeyDown } : {})}
+        {...(phone ? { role: 'dialog', 'aria-modal': true, tabIndex: -1, onKeyDown } : {})}
       >
         <MachineItem daemon={daemon} rail={rail} />
         <div className="fy-drawer__bar">
