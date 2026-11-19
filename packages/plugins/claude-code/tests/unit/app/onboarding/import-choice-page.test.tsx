@@ -21,7 +21,7 @@ describe('the import pre-screen', () => {
     expect(run.events).toEqual(['remember', 'ready']);
   });
 
-  it('is one tab stop (a native radio group), and a pick is written to the segment and counts as the answer', async () => {
+  it('is one tab stop (a native radio group), and a pick is only remembered: the shell records the default on Next', async () => {
     const run = stepHarness();
     const view = await mount(<ImportChoicePage client={scripted({})} step={run.step} />);
     mounted.push(view);
@@ -31,7 +31,7 @@ describe('the import pre-screen', () => {
       must(view.container.querySelector<HTMLInputElement>('input[value="choose"]'), 'choose').click(),
     );
     expect(importModeOf(run.step.segment)).toBe('choose');
-    expect(run.events).toEqual(['remember', 'ready', 'remember', 'done']);
+    expect(run.events).toEqual(['remember', 'ready', 'remember']);
   });
 
   it('keeps an earlier answer when the person comes back', async () => {

@@ -57,8 +57,8 @@ export function ImportChoicePage({ step }: StepPageProps<ClaudeCodeClient>) {
   const pick = (next: string): void => {
     if (!isMode(next)) return;
     setMode(next);
+    // Remembered only. A pick is not a save: the shell records the default answer when the person presses Next (O1 rule 5).
     step?.remember({ importMode: next });
-    step?.done();
   };
 
   return (
