@@ -1,4 +1,4 @@
-import { provideToShell } from '@ferretry/app';
+import { forSubject, provideToShell } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { ACCESS_HOW_TO_ENABLE_LOCATION_HOOK } from '../contract/index.ts';
@@ -6,6 +6,7 @@ import { accessClaims, accessForget } from './connect.ts';
 import { agendaItemOpenedHook, pageRegistration } from './lib/item-opened-hook.ts';
 import { howToEnableLocationHook } from './lib/location-steps-hook.ts';
 import { accessPasskey } from './step-up-shell.tsx';
+import { passkeyStepPanel } from './features/onboarding/passkey-step-panel.tsx';
 import { daemonlessPlaceholder, PAIR_SCREEN_ID, pairPage } from './pair-page.tsx';
 import { pairPhoneCommands } from './pair-phone-host.tsx';
 import {
@@ -44,6 +45,8 @@ export default provideToShell(
         notifications: () => null,
         'notifications-off': notificationsOffPanel(client),
         'agenda-notifications-off': agendaNotificationsOffPanel(client),
+        // Draws only for its own step (`access.passkey`); any other step's subject is nothing.
+        'onboarding-passkey': forSubject('access.passkey', passkeyStepPanel(client)),
       },
     }),
   }),

@@ -58,7 +58,7 @@ type State =
   | { readonly kind: 'added' };
 
 /** Whether this view is the one situation the offer is for: no passkey held, and a window to add the first one open. */
-const firstWindowOpen = (view: PasskeysView): boolean =>
+export const firstWindowOpen = (view: PasskeysView): boolean =>
   view.passkeys.length === 0 && (view.registration === 'first-window' || view.registration === 'reopened');
 
 export function FirstPasskeyOffer({

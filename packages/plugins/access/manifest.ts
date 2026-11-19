@@ -270,6 +270,8 @@ export default definePlugin({
       // The same line under the Agenda header (`agenda.banner`, which Agenda offers): the page people open to be told.
       panel('agenda.banner', { id: 'agenda-notifications-off', order: 10 }),
       panel('device.settings', { id: 'notifications', order: 30 }),
+      // The first-run step that offers this device a passkey (side client; skips when it holds one): `onboarding` below.
+      panel('onboarding.step', { id: 'onboarding-passkey', order: 2 }),
     ],
   },
 
@@ -304,6 +306,9 @@ export default definePlugin({
   },
 
   doctor: ['notifications'],
+
+  // r10 O6b: the roomier passkey offer, as a client step of the setup flow (O1's contract).
+  onboarding: [{ id: 'passkey', title: 'Passkey', order: 2, side: 'client' }],
 
   permissions: { network: [...PUSH_SERVICE_HOSTS, '*.push.apple.com', '*.notify.windows.com'] },
 });
