@@ -4,6 +4,7 @@
  * Names only: the scan carries no value, so this draws none.
  */
 import { Lock } from 'lucide-react';
+import { Badge } from '../../ui.ts';
 import { useId } from 'react';
 import type { ImportItemId } from '../../../contract/index.ts';
 import type { FoundGroup, FoundItem, LeftAlone, UpdateItem } from './model.ts';
@@ -158,6 +159,9 @@ export function FoundList({
           <h4 className="m-0 text-meta font-semibold uppercase text-muted">
             Changed since you last brought it in{updates.length > 1 ? ` · ${String(updates.length)}` : ''}
           </h4>
+          <p className="m-0 text-cell text-muted" data-found-updates-note="">
+            These are already in Ferretry. Ticked, each is refreshed from where it is read; none is added twice.
+          </p>
           <ul className="m-0 flex list-none flex-col gap-2 p-0">
             {updates.map(update => (
               <Row
@@ -166,12 +170,14 @@ export function FoundList({
                 item={{
                   id: null,
                   label: update.reference,
-                  becomes: `Updated from ${update.sources.join(', ')}. Unticked, it is kept as it was`,
+                  becomes: `Will be updated from ${update.sources.join(', ')}. Unticked, it stays as it was.`,
                 }}
                 on={!declined.has(update.reference)}
                 onChange={on => onTakeUpdate(update.reference, on)}
                 plain
-              />
+              >
+                <Badge tone="accent">Update</Badge>
+              </Row>
             ))}
           </ul>
         </section>

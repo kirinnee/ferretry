@@ -181,7 +181,7 @@ const CASES: readonly Case[] = [
   {
     name: 'changed-since',
     view: 'changed',
-    expectText: ['Changed since you last brought it in', 'instructions/claude', 'it is kept as it was'],
+    expectText: ['Changed since you last brought it in', 'instructions/claude', 'it stays as it was'],
   },
   {
     name: 'needs-passkey-ok',
