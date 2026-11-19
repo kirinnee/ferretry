@@ -494,9 +494,7 @@ describe('planImport — documents it could not use', () => {
       'config.toml at /t is not valid toml (line 2, column 11), so it was not imported',
     );
     const claudeProblem = claudePreview?.problems.find(problem => problem.startsWith('settings.json at /s')) ?? '';
-    should(claudeProblem).match(
-      /^settings\.json at \/s is not valid json( \(line \d+(, column \d+)?\))?, so it was not imported$/u,
-    );
+    should(claudeProblem).equal('settings.json at /s is not valid json, so it was not imported');
     const everything = JSON.stringify(plan);
     should(everything).not.containEql('LEAKCANARY');
     should(everything).not.containEql('api_key');

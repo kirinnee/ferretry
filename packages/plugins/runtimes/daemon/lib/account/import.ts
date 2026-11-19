@@ -424,39 +424,22 @@ function parsedDocument(
   try {
     return parseSettings(read.text, format);
   } catch (error) {
-    problems.push(
-      `${what} at ${read.source} is not valid ${format}${parseLocation(error, read.text)}, so it was not imported`,
-    );
+    problems.push(`${what} at ${read.source} is not valid ${format}${parseLocation(error)}, so it was not imported`);
     return undefined;
   }
 }
 
 /**
  * WHERE a settings document stopped parsing, as ` (line 3, column 7)`, or nothing. The parsers quote the offending line of the
- * host's own file in their messages, and a host file holds API keys, so the parser's TEXT is never used: only numbers read
- * off the error (TOML carries `line`/`column`; JSON names a character `position` or a `line N column M`), which can hold no
- * credential. A parser that says nothing numeric leaves the file alone and the fixed sentence.
+ * host's own file in their messages, and a host file holds API keys, so the parser's TEXT is never used: only the numbers
+ * TOML's error carries (`SettingsParseError.line`/`column`), which can hold no credential. JSON's engine message gives no
+ * place in the file, so a JSON file is named with the fixed sentence alone.
  */
-function parseLocation(error: unknown, text: string): string {
-  const positive = (value: number | undefined): number | undefined =>
-    value !== undefined && Number.isSafeInteger(value) && value > 0 ? value : undefined;
-  let line = error instanceof SettingsParseError ? positive(error.line) : undefined;
-  let column = error instanceof SettingsParseError ? positive(error.column) : undefined;
-  if (line === undefined) {
-    const message = error instanceof Error ? error.message : '';
-    const spelled = /\bline (\d{1,9}),? column (\d{1,9})\b/iu.exec(message);
-    const position = /\bposition (\d{1,9})\b/iu.exec(message);
-    if (spelled?.[1] !== undefined && spelled[2] !== undefined) {
-      line = Number(spelled[1]);
-      column = Number(spelled[2]);
-    } else if (position?.[1] !== undefined) {
-      const before = text.slice(0, Number(position[1]));
-      line = before.split('\n').length;
-      column = before.length - before.lastIndexOf('\n');
-    }
-  }
-  if (line === undefined) return '';
-  return column === undefined ? ` (line ${String(line)})` : ` (line ${String(line)}, column ${String(column)})`;
+function parseLocation(error: unknown): string {
+  if (!(error instanceof SettingsParseError) || error.line === undefined) return '';
+  return error.column === undefined
+    ? ` (line ${String(error.line)})`
+    : ` (line ${String(error.line)}, column ${String(error.column)})`;
 }
 
 // ── Models ───────────────────────────────────────────────────────────────────────────────────────

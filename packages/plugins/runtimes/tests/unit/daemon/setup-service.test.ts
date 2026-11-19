@@ -1140,6 +1140,8 @@ describe('the setup.import executor', () => {
     );
     should(stepUp.message).containEql('passkey');
     should(secrets.size).equal(0);
+    // At the preview that passkey is still to come, so the preview is shown.
+    should(await service.executors.setup.describe(change, remoteWith('step-up-required'))).be.a.String();
     void state;
   });
 
