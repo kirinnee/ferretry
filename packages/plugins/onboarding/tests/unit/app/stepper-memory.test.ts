@@ -10,7 +10,7 @@ const memoryStore = (): StepperStorage & { readonly map: Map<string, string> } =
   const map = new Map<string, string>();
   return { map, getItem: key => map.get(key) ?? null, setItem: (key, value) => void map.set(key, value) };
 };
-const FACTS = { passkey: true, name: false, claude: undefined, codex: false, project: false } as const;
+const FACTS = { passkey: true, name: false, setup: undefined, project: false } as const;
 
 describe('what the device remembers of the stepper', () => {
   it('keys it per machine under the onboarding owner', () => {
@@ -29,17 +29,18 @@ describe('what the device remembers of the stepper', () => {
     const store = memoryStore();
     writeStepperMemory(store, 'd1', { facts: { ...FACTS, name: 'locked' }, dismissed: false, seenOpen: false });
     expect(readStepperMemory(store, 'd1')?.facts.name).toBeUndefined();
-    store.map.set(stepperKey('d2'), '{"format":2,"facts":{"passkey":true},"dismissed":false}');
+    store.map.set(stepperKey('d2'), '{"format":3,"facts":{"passkey":true},"dismissed":false}');
     expect(readStepperMemory(store, 'd2')?.seenOpen).toBe(false);
   });
 
-  it('reads damaged, foreign or wrong-format (including the six-step format 1) storage as nothing remembered', () => {
+  it('reads damaged, foreign or wrong-format (including the older two-tool format 2) storage as nothing remembered', () => {
     for (const raw of [
       '{',
       'null',
       '[]',
-      '{"format":3,"facts":{}}',
-      '{"format":2,"facts":{"name":"yes"}}',
+      '{"format":4,"facts":{}}',
+      '{"format":3,"facts":{"name":"yes"}}',
+      '{"format":2,"facts":{"claude":true,"codex":true}}',
       '{"format":1,"facts":{"login":true}}',
     ]) {
       const store = memoryStore();

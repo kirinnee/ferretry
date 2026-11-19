@@ -4,12 +4,12 @@
  * which is the way back to it for a machine that still has steps to look at.
  */
 
-import { daemonHomeHref, daemonOfClient, daemonSettingsHref, PanelSlot, useOptionalRouter } from '@ferretry/app';
+import { daemonOfClient, daemonSettingsHref, useOptionalRouter } from '@ferretry/app';
 import { Button, Loading, type ReadPress, readPress } from '@ferretry/app/ui';
 import type { PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ONBOARDING_STEP_SLOT, type OnboardingView, stepSubject, type StepState } from '../../contract/index.ts';
-import { LINK_COSTS } from '../link-costs.ts';
+import { type OnboardingView, sideOf, type StepState } from '../../contract/index.ts';
+import { setupFlowHref } from '../features/setup-flow/flow-href.ts';
 import { onboardingScreen } from '../onboarding-screen.ts';
 
 const STATE_LABEL: Readonly<Record<StepState, string>> = {
@@ -19,13 +19,6 @@ const STATE_LABEL: Readonly<Record<StepState, string>> = {
   done: 'Done',
   skipped: 'Skipped',
 };
-
-/**
- * Whether to say what linking the terminal's own sign-in costs under this step: when the check that found it said it is
- * the terminal's own (`linked`). The fact is the step's, recorded with its answer, so no plugin id is named here.
- */
-const sayLinkCosts = (step: { readonly state: StepState; readonly linked?: true | undefined }): boolean =>
-  step.state === 'found' && step.linked === true;
 
 type Reading =
   | { readonly kind: 'loading' }
@@ -147,115 +140,25 @@ export function SetupSummary({
   );
 }
 
-/** Where a machine's steps page is. */
-export const stepsHref = (daemon: string): string => `${daemonHomeHref(daemon)}/onboarding/steps`;
+/** Where a machine's setup is: the flow, which resumes at the first page still to answer. */
+export const stepsHref = (daemon: string): string => setupFlowHref(daemon);
 
-/** `/d/<machine>/onboarding/steps`: every declared step, with the panels the plugins contributed to it. */
+/**
+ * `/d/<machine>/onboarding/steps` (and v4's `/d/<machine>/setup`): the old scrolling list of every step, now a way into the
+ * setup flow (`onboarding/setup`), which draws the same steps one page at a time. A bookmark or an old link lands there.
+ */
 export function createStepsScreen(client: PluginClient) {
-  const screen = onboardingScreen(client);
   return function StepsScreen(_props: ScreenProps): ReactNode {
     const daemon = daemonOfClient(client);
-    const { reading, retry } = useOnboardingView(client);
-    const [unsaved, setUnsaved] = useState<{
-      readonly plugin: string;
-      readonly step: string;
-      readonly state: Exclude<StepState, 'pending'>;
-    } | null>(null);
-    const answer = useCallback((plugin: string, step: string, state: Exclude<StepState, 'pending'>) => {
-      setUnsaved(null);
-      void screen.answer(plugin, step, { state }).catch(() => setUnsaved({ plugin, step, state }));
-    }, []);
-    if (daemon === undefined || reading.kind === 'loading')
-      return <Loading kind="page" label="Loading the setup steps…" />;
-    if (reading.kind === 'failed')
-      return (
-        <div className="flex flex-col items-start gap-2 p-4" data-onboarding-read-failed="">
-          <p role="alert" className="m-0 text-cell text-muted">
-            Could not read the setup steps from this machine.
-          </p>
-          <Button type="button" size="sm" onClick={retry} data-onboarding-retry="">
-            Try again
-          </Button>
-        </div>
-      );
-    const { view } = reading;
-    return (
-      <section className="mx-auto flex w-full max-w-[560px] flex-col gap-3 p-3" data-onboarding-steps="">
-        <h1 className="m-0 text-title font-semibold">Set up this machine</h1>
-        {unsaved === null ? null : (
-          <div className="flex flex-wrap items-center gap-2" data-onboarding-unsaved="">
-            <p role="alert" className="m-0 text-cell text-muted">
-              That answer was not saved.
-            </p>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => answer(unsaved.plugin, unsaved.step, unsaved.state)}
-              data-onboarding-retry-answer=""
-            >
-              Try again
-            </Button>
-          </div>
-        )}
-        {view.steps.length === 0 ? (
-          <p className="m-0 text-cell text-muted" data-onboarding-no-steps="">
-            Nothing needs setting up here.
-          </p>
-        ) : (
-          <ol className="m-0 flex list-none flex-col gap-3 p-0">
-            {view.steps.map(step => (
-              <li
-                key={`${step.plugin}.${step.id}`}
-                className="kt-panel flex flex-col gap-2 p-3"
-                data-step={stepSubject(step.plugin, step.id)}
-              >
-                <h2 className="m-0 text-cell font-semibold">
-                  {step.title} <span className="text-meta font-normal text-muted">{STATE_LABEL[step.state]}</span>
-                </h2>
-                {sayLinkCosts(step) ? (
-                  <p className="m-0 text-meta text-muted" data-link-costs="">
-                    {LINK_COSTS}
-                  </p>
-                ) : null}
-                <PanelSlot daemon={daemon} slot={ONBOARDING_STEP_SLOT} subject={stepSubject(step.plugin, step.id)} />
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => answer(step.plugin, step.id, 'done')}
-                    data-step-done=""
-                  >
-                    Done
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => answer(step.plugin, step.id, 'later')}
-                    data-step-later=""
-                  >
-                    Later
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => answer(step.plugin, step.id, 'skipped')}
-                    data-step-skip=""
-                  >
-                    Skip
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-        <SetupSummary daemon={daemon} steps={view.steps} />
-        <RouterLink href={daemonHomeHref(daemon)} data-onboarding-open-machine="">
-          Open this machine
-        </RouterLink>
-      </section>
-    );
+    const router = useOptionalRouter();
+    // Once: the router object changes with every route, and a second navigate would loop while this screen is still mounted.
+    const sent = useRef(false);
+    useEffect(() => {
+      if (daemon === undefined || router === null || sent.current) return;
+      sent.current = true;
+      router.navigate(setupFlowHref(daemon), { replace: true });
+    }, [daemon, router]);
+    return <Loading kind="page" label="Opening the setup…" />;
   };
 }
 
@@ -285,7 +188,7 @@ export function createSetupTab(client: PluginClient) {
           </Button>
         </div>
       );
-    const waiting = reading.view.steps.filter(step => step.state === 'pending').length;
+    const waiting = reading.view.steps.filter(step => sideOf(step) === 'daemon' && step.state === 'pending').length;
     return (
       <section className="flex flex-col items-start gap-2" data-onboarding-setup-tab={waiting}>
         <p className="m-0 text-cell text-muted">

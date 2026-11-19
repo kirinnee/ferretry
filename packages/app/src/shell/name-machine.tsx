@@ -22,6 +22,9 @@ export { hostFileIsNamed, readHostFile } from './machine-name-file.ts';
  * stays out of the way when it cannot tell whether the machine is named (the read was refused or failed).
  */
 
+/** What the step decided, for a host that draws it as one page of a flow: it is asking, the machine already has a name of its own, or the person answered (saved or skipped). */
+export type NameDecision = 'asking' | 'named' | 'settled';
+
 interface NameThisMachineViewProps {
   /** The host name the field starts with. */
   readonly initial: string;
@@ -107,7 +110,13 @@ function NameThisMachineView({ initial, busy, refusal, problem, onSave, onSkip }
  * name typed on the pair screen is saved by {@link ChosenNameSaver}, not here: while that save is waiting or running
  * this draws nothing, and only when it failed does the step come back, with the typed name and the reason.
  */
-export function NameThisMachine({ daemon }: { readonly daemon: string }) {
+export function NameThisMachine({
+  daemon,
+  onDecided,
+}: {
+  readonly daemon: string;
+  readonly onDecided?: (decision: NameDecision) => void;
+}) {
   const { runtime } = useShell();
   useRuntimeVersion(runtime);
   const client = runtime.client(daemon, 'kernel');
@@ -117,7 +126,13 @@ export function NameThisMachine({ daemon }: { readonly daemon: string }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [refusal, setRefusal] = useState<string | undefined>(undefined);
-  const settle = (): void => runtime.daemons.nameSettled(daemon);
+  // The host's callback is read when it is called, so a new function each render never restarts the look below.
+  const decided = useRef(onDecided);
+  decided.current = onDecided;
+  const settle = (): void => {
+    runtime.daemons.nameSettled(daemon);
+    decided.current?.('settled');
+  };
   const asked = useRef(false);
   const chosenAtPairing = chosen !== undefined;
   useEffect(() => {
@@ -125,10 +140,22 @@ export function NameThisMachine({ daemon }: { readonly daemon: string }) {
     if (client === undefined || asked.current || chosenAtPairing) return;
     asked.current = true;
     void readHostFile(client).then(
-      read => (hostFileIsNamed(read) ? runtime.daemons.nameSettled(daemon) : setReady(true)),
-      () => runtime.daemons.nameSettled(daemon),
+      read => {
+        if (!hostFileIsNamed(read)) return setReady(true);
+        runtime.daemons.nameSettled(daemon);
+        decided.current?.('named');
+      },
+      () => {
+        runtime.daemons.nameSettled(daemon);
+        decided.current?.('named');
+      },
     );
   }, [client, daemon, runtime, chosenAtPairing]);
+  const shown =
+    client !== undefined && paired !== undefined && (chosen === undefined ? ready : chosen.state === 'failed');
+  useEffect(() => {
+    if (shown) decided.current?.('asking');
+  }, [shown]);
   if (client === undefined || paired === undefined) return null;
   if (chosen === undefined ? !ready : chosen.state !== 'failed') return null;
   const save = async (typed: string): Promise<void> => {

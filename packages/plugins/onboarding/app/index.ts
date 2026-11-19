@@ -3,6 +3,7 @@ import {
   type DaemonlessScreenProps,
   type DaemonlessViews,
   type DeviceViewProps,
+  forSubject,
   provideToShell,
   type ShellProvides,
 } from '@ferretry/app';
@@ -21,6 +22,18 @@ const stepsScreen = (client: PluginClient): AppComponent<ScreenProps> =>
   lazyComponent<ScreenProps>(async () =>
     ((await loadViews()).createStepsScreen as (client: PluginClient) => AppComponent<ScreenProps>)(client),
   );
+
+const flowScreen = (client: PluginClient): AppComponent<ScreenProps> =>
+  lazyComponent<ScreenProps>(async () =>
+    ((await loadViews()).createSetupFlow as (client: PluginClient) => AppComponent<ScreenProps>)(client),
+  );
+
+const shellPanel =
+  (name: 'createNamePanel' | 'createAppearancePanel') =>
+  (client: PluginClient): AppComponent<PanelProps> =>
+    lazyComponent<PanelProps>(async () =>
+      ((await loadViews())[name] as (client: PluginClient) => AppComponent<PanelProps>)(client),
+    );
 
 const stepperPanel = (client: PluginClient): AppComponent<PanelProps> =>
   lazyComponent<PanelProps>(async () =>
@@ -46,8 +59,18 @@ export default provideToShell(
     build: ({ client }) => {
       const steps = stepsScreen(client);
       return {
-        screens: { onboarding: daemonlessPlaceholder, handoff: daemonlessPlaceholder, steps, setup: steps },
-        panels: { 'first-run-stepper': stepperPanel(client) },
+        screens: {
+          onboarding: daemonlessPlaceholder,
+          handoff: daemonlessPlaceholder,
+          steps,
+          setup: steps,
+          flow: flowScreen(client),
+        },
+        panels: {
+          'first-run-stepper': stepperPanel(client),
+          'name-step': forSubject('onboarding.name', shellPanel('createNamePanel')(client)),
+          'appearance-step': forSubject('onboarding.appearance', shellPanel('createAppearancePanel')(client)),
+        },
         settings: { setup: setupTab(client) },
         renderers: {},
       };

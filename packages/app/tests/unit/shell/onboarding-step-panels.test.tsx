@@ -26,9 +26,9 @@ describe('S14 forSubject', () => {
 const contributors = generated.surfaces.filter(entry => (entry.manifest.onboarding ?? []).length > 0);
 
 describe('S14 every plugin that declares a first-run step contributes its panels', () => {
-  test('S14 the contributors are the eight that declare a per-machine step', () => {
+  test('S14 the contributors are the nine that declare a step (Onboarding’s own two pages included)', () => {
     expect(contributors.map(entry => entry.id).toSorted()).toEqual(
-      ['claude-code', 'codex', 'lessons', 'logins', 'runtimes', 'shells', 'voice', 'warden'].toSorted(),
+      ['claude-code', 'codex', 'lessons', 'logins', 'onboarding', 'runtimes', 'shells', 'voice', 'warden'].toSorted(),
     );
   });
 

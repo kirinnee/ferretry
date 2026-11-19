@@ -1,4 +1,4 @@
-/** A fake machine and storage for the stepper hook: answers the five reads from a facts table, tells when a step changed. */
+/** A fake machine and storage for the stepper hook: answers the reads from a facts table, tells when a step changed. */
 import { act } from 'react';
 import { StepperView } from '../../../app/features/stepper/stepper-view.tsx';
 import type { StepperStorage } from '../../../app/features/stepper/stepper-memory.ts';
@@ -7,9 +7,8 @@ import { useStepper } from '../../../app/features/stepper/use-stepper.ts';
 type Held = {
   passkey?: boolean;
   name?: boolean;
-  /** Claude Code's and Codex's own onboarding steps have been looked at. */
-  claude?: boolean;
-  codex?: boolean;
+  /** Every harness step of the onboarding (Claude Code, Codex) has been answered, not left pending. */
+  setup?: boolean;
   /** A project is registered. */
   project?: boolean;
   /** A conversation was ever made (a project is not needed: the person works projectless). Off unless stated. */
@@ -25,8 +24,8 @@ const answersFor = (held: Held): Record<string, unknown> => {
     'GET /v1/config/file': { exists: has('name'), text: has('name') ? 'name: "Studio"\n' : '' },
     'GET /v1/onboarding': {
       steps: [
-        { plugin: 'claude-code', id: 'harness', state: has('claude') ? 'done' : 'pending' },
-        { plugin: 'codex', id: 'harness', state: has('codex') ? 'found' : 'pending' },
+        { plugin: 'claude-code', id: 'harness', state: has('setup') ? 'done' : 'pending' },
+        { plugin: 'codex', id: 'harness', state: has('setup') ? 'found' : 'pending' },
       ],
     },
     'GET /v1/projects': has('project') ? [{ id: 'p' }] : [],

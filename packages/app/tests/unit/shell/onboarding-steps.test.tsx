@@ -44,6 +44,7 @@ const declaredSteps = real.flatMap(entry =>
     id: step.id,
     title: step.title,
     order: step.order,
+    ...(step.side === undefined ? {} : { side: step.side }),
     state: 'pending' as const,
   })),
 );
@@ -147,60 +148,69 @@ describe('S14 the first run is Onboarding’s daemon-less screen', () => {
 });
 
 describe('S14 the steps come from the plugins', () => {
-  test('S14 a step panel reaches Onboarding’s page through the generated registry', async () => {
-    go('/d/d1/onboarding/steps');
+  test('S14 the flow is drawn alone, and its first page is one a plugin declared, through the generated registry', async () => {
+    go('/d/d1/onboarding/setup');
     const { app } = boot({ paired: true });
     const view = await mount(app);
-    await until(() => view.container.querySelectorAll('[data-step]').length >= declaredSteps.length);
-    // Every declared step has its box, and each box mounts the slot once.
-    const boxes = [...view.container.querySelectorAll('[data-step]')].map(node => node.getAttribute('data-step'));
-    expect(boxes.toSorted()).toEqual(declaredSteps.map(step => `${step.plugin}.${step.id}`).toSorted());
+    await until(() => view.container.querySelector('[data-flow-page]') !== null);
+    expect(view.container.querySelector('[data-setup-flow]')).not.toBeNull();
+    // No drawer, bottom nav or side column around first-run setup.
+    expect(view.container.querySelector('[data-chrome="none"]')).not.toBeNull();
+    expect(view.container.querySelector('nav')).toBeNull();
+    const shown = view.container.querySelector('[data-flow-page]')?.getAttribute('data-flow-page');
+    expect(declaredSteps.map(step => `${step.plugin}.${step.id}`)).toContain(shown ?? '');
     expect([...new Set(declaredSteps.map(step => step.plugin))].toSorted()).toEqual(
-      ['claude-code', 'codex', 'logins', 'runtimes', 'shells'].toSorted(),
+      ['claude-code', 'codex', 'logins', 'onboarding', 'runtimes', 'shells'].toSorted(),
     );
     await view.unmount();
   });
 
-  test('S14 M2 a machine with steps still pending reaches its steps page from its Settings › Setup tab', async () => {
+  test('S14 the old steps address opens the flow, replacing its own entry', async () => {
+    go('/d/d1/onboarding/steps');
+    const { app } = boot({ paired: true });
+    const view = await mount(app);
+    await until(() => view.container.querySelector('[data-setup-flow]') !== null);
+    expect(window.location.pathname).toBe('/d/d1/onboarding/setup');
+    await view.unmount();
+  });
+
+  test('S14 M2 a machine with steps still pending reaches its setup from its Settings › Setup tab', async () => {
     go('/d/d1/settings/onboarding');
     const { app } = boot({ paired: true });
     const view = await mount(app);
     await until(() => view.container.querySelector('[data-onboarding-open-steps]') !== null);
+    // Only the machine's own steps are counted: a client step is answered on the device, never on the machine.
     expect(view.container.querySelector('[data-onboarding-setup-tab]')?.getAttribute('data-onboarding-setup-tab')).toBe(
-      String(declaredSteps.length),
+      String(declaredSteps.filter(step => step.side !== 'client').length),
     );
     const open = view.container.querySelector<HTMLElement>('[data-onboarding-open-steps]');
-    expect(open?.getAttribute('href')).toBe('/d/d1/onboarding/steps');
+    expect(open?.getAttribute('href')).toBe('/d/d1/onboarding/setup');
     await interact(() => {
       open?.click();
     });
-    await until(() => view.container.querySelector('[data-onboarding-steps]') !== null);
-    expect(window.location.pathname).toBe('/d/d1/onboarding/steps');
+    await until(() => view.container.querySelector('[data-setup-flow]') !== null);
+    expect(window.location.pathname).toBe('/d/d1/onboarding/setup');
     await view.unmount();
   });
 
-  test('S14 a step with no panel from its plugin still has its box and its answers', async () => {
-    go('/d/d1/onboarding/steps');
+  test('S14 a step with no panel from its plugin is skipped as not needed, recorded, and the flow goes on', async () => {
+    go('/d/d1/onboarding/setup');
     const { app, answered } = boot({
       paired: true,
       steps: [{ plugin: 'nobody', id: 'nothing', title: 'No panel', order: 1, state: 'pending' }],
     });
     const view = await mount(app);
-    await until(() => view.container.querySelector('[data-step-done]') !== null);
-    await interact(() => {
-      view.container.querySelector<HTMLElement>('[data-step-done]')?.click();
-    });
-    await until(() => answered.length > 0);
-    expect(answered).toEqual(['POST /v1/onboarding/steps/nobody/nothing {"state":"done"}']);
+    await until(() => view.container.querySelector('[data-flow-end]') !== null);
+    expect(answered).toEqual(['POST /v1/onboarding/steps/nobody/nothing {"state":"skipped"}']);
     await view.unmount();
   });
 
-  test('S14 a machine with nothing to set up says so and still opens the machine', async () => {
-    go('/d/d1/onboarding/steps');
+  test('S14 a machine with nothing to set up goes straight to the last page, which opens the machine', async () => {
+    go('/d/d1/onboarding/setup');
     const { app } = boot({ paired: true, steps: [] });
     const view = await mount(app);
-    await until(() => view.container.querySelector('[data-onboarding-no-steps]') !== null);
-    expect(view.container.querySelector('[data-onboarding-open-machine]')?.getAttribute('href')).toBe('/d/d1');
+    await until(() => view.container.querySelector('[data-flow-end]') !== null);
+    expect(view.container.querySelector('[data-step-next]')?.textContent).toContain('Open this machine');
     await view.unmount();
   });
 });

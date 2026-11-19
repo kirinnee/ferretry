@@ -74,7 +74,7 @@ describe('the first-run stepper', () => {
         );
         const tab = await context.newPage();
         try {
-          for (const scene of ['none', 'fresh', 'claude', 'codex', 'project', 'paused', 'resumed', 'done'] as const) {
+          for (const scene of ['none', 'fresh', 'setup', 'project', 'paused', 'resumed', 'done'] as const) {
             await tab.goto(`${origin}/?theme=studio-${scheme}&case=${scene}`);
             await tab.waitForSelector('[data-scene-ready]');
             const stepper = await tab.$$('[data-first-run-stepper]');

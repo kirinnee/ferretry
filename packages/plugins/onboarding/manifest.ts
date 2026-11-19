@@ -100,16 +100,28 @@ export default definePlugin({
       // The address a hand-off link carries to the OTHER device (`/setup#fy-setup=…`, v4's `setupPath`): the SAME first-run page,
       // drawn by the same view, with the place the link carries read from its fragment. One page, two addresses.
       screen('handoff', { path: '/setup', daemonless: true }),
-      // The steps every plugin declared, on one machine: it OFFERS the `onboarding.step` slot (contract/slots.ts).
+      // The setup flow: every plugin's declared steps as ONE multi-page stepper, drawn alone (no drawer, bars or side
+      // column); it OFFERS the `onboarding.step` slot (contract/slots.ts), one panel mounted per page.
+      screen('flow', { path: 'onboarding/setup', chrome: 'none' }),
+      // The old steps list's address (and v4's `/d/<machine>/setup`): a bookmark or an old link lands in the flow.
       screen('steps', { path: 'onboarding/steps' }),
-      // v4's address for the same first run (`/d/<machine>/setup`): a bookmark or an old link still lands on the steps.
       screen('setup', { path: 'setup' }),
     ],
     // The way back to the steps screen for a machine that was paired but not set up: nothing else links to it.
     settings: [settingsTab('setup', { icon: 'rocket', group: 'agents', label: 'Setup', order: 60 })],
     // Home: the first-run stepper (Pair > Passkey > Name > Claude Code > Codex > Project) while any step is open.
-    panels: [panel('daemon.status', { id: 'first-run-stepper', order: 1 })],
+    panels: [
+      panel('daemon.status', { id: 'first-run-stepper', order: 1 }),
+      // Onboarding's own two pages: name this machine (the machine's) and appearance (this device's).
+      panel('onboarding.step', { id: 'name-step', order: 5 }),
+      panel('onboarding.step', { id: 'appearance-step', order: 1 }),
+    ],
   },
+
+  onboarding: [
+    { id: 'name', title: 'Name this machine', order: 5, group: 'This machine' },
+    { id: 'appearance', title: 'Appearance', order: 1, side: 'client', group: 'This device' },
+  ],
 
   data: {
     state: [ONBOARDING_PROGRESS],

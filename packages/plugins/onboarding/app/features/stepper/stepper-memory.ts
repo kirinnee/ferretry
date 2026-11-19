@@ -21,7 +21,7 @@ export interface StepperRemembered {
   readonly seenOpen: boolean;
 }
 
-const FORMAT = 2; // 2: the steps are Claude Code, Codex and Project (1 held login, runtime and ferret)
+const FORMAT = 3; // 3: the steps are Passkey, Name, Setup and Project (2 had Claude Code and Codex as two steps of their own)
 export const stepperKey = (daemon: string): string => localKey('onboarding', 'stepper', daemon);
 
 /** `localStorage`, or nothing: private modes throw on the property itself. */

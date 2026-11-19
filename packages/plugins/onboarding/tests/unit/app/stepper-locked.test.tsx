@@ -118,7 +118,7 @@ const memoryStore = (): StepperStorage => {
 };
 
 describe('the stepper facts on a locked machine (the real client)', () => {
-  it('the passkey fact settles by itself while the four parked reads are still waiting (no all-or-nothing)', async () => {
+  it('the passkey fact settles by itself while the three parked reads are still waiting (no all-or-nothing)', async () => {
     const world = machine({ passkeys: 0 });
     await world.client.start();
     const controller = new AbortController();
@@ -127,22 +127,22 @@ describe('the stepper facts on a locked machine (the real client)', () => {
       heard[key] = fact;
     });
     await wait(40);
-    expect(heard).toEqual({ passkey: false }); // the other four are parked behind the unlock, not answered, not guessed
+    expect(heard).toEqual({ passkey: false }); // the other three are parked behind the unlock, not answered, not guessed
     expect(world.prompts.every(origin => origin === 'unasked')).toBe(true); // a background read never raises a prompt
     controller.abort();
   });
 
-  it('on a machine known to be locked the other four are locked at once, from one passkey read', async () => {
+  it('on a machine known to be locked the other three are locked at once, from one passkey read', async () => {
     const world = machine({ passkeys: 1 });
     await world.client.start();
     const heard: Partial<Record<FactKey, StepperFact>> = {};
     await readStepperFacts(world.stepperClient, true, new AbortController().signal, (key, fact) => {
       heard[key] = fact;
     });
-    expect(heard).toEqual({ passkey: 'locked', name: 'locked', claude: 'locked', codex: 'locked', project: 'locked' });
+    expect(heard).toEqual({ passkey: 'locked', name: 'locked', setup: 'locked', project: 'locked' });
   });
 
-  it('the stepper draws once the shell knows it is locked, the first still-unknown step the one to do, though four reads never answered', async () => {
+  it('the stepper draws once the shell knows it is locked, the first still-unknown step the one to do, though three reads never answered', async () => {
     const world = machine({ passkeys: 1 });
     await world.client.start();
     const Probe = ({ locked }: { readonly locked: boolean }) => {
@@ -155,7 +155,7 @@ describe('the stepper facts on a locked machine (the real client)', () => {
         />
       ) : null;
     };
-    // A cold cache: nothing says "locked" yet, so the four reads park and only the passkey answers (it holds: nothing open).
+    // A cold cache: nothing says "locked" yet, so the three reads park and only the passkey answers (it holds: nothing open).
     const view = await mount(<Probe locked={false} />);
     await wait(40);
     expect(view.container.querySelector('[data-first-run-stepper]')).toBeNull();
@@ -165,7 +165,7 @@ describe('the stepper facts on a locked machine (the real client)', () => {
     const states = [...view.container.querySelectorAll('[data-step]')].map(
       item => `${item.getAttribute('data-step')}:${item.getAttribute('data-state')}`,
     );
-    expect(states).toEqual(['pair:done', 'passkey:done', 'name:current', 'claude:next', 'codex:next', 'project:next']);
+    expect(states).toEqual(['pair:done', 'passkey:done', 'name:current', 'setup:next', 'project:next']);
     expect(view.container.querySelector('[data-first-run-stepper-action="name"]')?.textContent).toBe('Unlock');
     await view.unmount();
   });

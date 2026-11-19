@@ -2,10 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import type { EventDef } from '@ferretry/kernel/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import app from '../../../app/index.ts';
-import { LINK_COSTS } from '../../../app/link-costs.ts';
 import { onboardingScreen } from '../../../app/onboarding-screen.ts';
 import { ONBOARDING_CODES, OnboardingChanged } from '../../../contract/index.ts';
-import { linkCosts } from '../../../cli/lib/words.ts';
 
 interface Sent {
   readonly route: string;
@@ -85,10 +83,10 @@ describe('the onboarding screen', () => {
     expect(fake.listeners).toHaveLength(0);
   });
 
-  it('the half declares exactly the manifest screens: the daemon-less first run and hand-off, and the per-machine steps', () => {
+  it('the half declares exactly the manifest screens: the daemon-less first run and hand-off, the per-machine flow and the old steps address', () => {
     const fake = fakeClient({ 'GET /v1/onboarding': VIEW });
     const half = app.build?.({ manifest: app.manifest, client: fake.client });
-    expect(Object.keys(half?.screens ?? {}).sort()).toEqual(['handoff', 'onboarding', 'setup', 'steps']);
+    expect(Object.keys(half?.screens ?? {}).sort()).toEqual(['flow', 'handoff', 'onboarding', 'setup', 'steps']);
     // `onboarding` is daemon-less: the shell draws it from `shell.daemonless`, never from a machine's half.
     expect(half?.screens.onboarding({ params: {} })).toBeNull();
     expect(app.manifest.ui?.screens?.filter(screen => screen.daemonless === true).map(screen => screen.id)).toEqual([
@@ -98,10 +96,5 @@ describe('the onboarding screen', () => {
     const make = (app as unknown as { shell: { daemonless: (ports: unknown) => Record<string, unknown> } }).shell
       .daemonless;
     expect(Object.keys(make({}))).toEqual(['onboarding', 'handoff']);
-  });
-
-  it('says the linked sign-in costs in one line, the same words as the terminal', () => {
-    expect(LINK_COSTS).toBe(linkCosts('fy'));
-    expect(LINK_COSTS).not.toContain('\n');
   });
 });

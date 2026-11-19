@@ -10,6 +10,11 @@
  *   2. Conditions belong to the page: it reads its own plugin's routes and its `segment`, then `skip('not-needed')`.
  *   3. A client step already on the device's ledger is skipped before it mounts (`already-set`).
  *   4. `done()` on a daemon step POSTs `done`; on a client step it writes the device ledger. Nothing else does.
+ *   5. NEXT IS THE ANSWER (O4's one rule): when the person presses the shell's Next on a page that reported `ready()` but never
+ *      called `done()`, the shell records the page's defaults as done (once; a page that already called `done()` is not
+ *      recorded twice). A page therefore never has to call `done()` just to let Next work, and Next is never held back for
+ *      want of a `done()`: only `ready()` (and a `busy()` act in flight) lock it. A page that must not be answered by
+ *      default calls `skip()` instead, or holds the person with `busy()`. `Later` records `later` instead of `done`.
  */
 export type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
 

@@ -34,15 +34,10 @@ export function createStepperPanel(client: PluginClient) {
           const run = go(daemonSettingsHref(daemon, 'kernel', 'name'));
           return run === undefined ? undefined : { label: 'Name this machine', run };
         }
-        // Both tool steps go to the setup steps page, where the import wizard (`runtimes.import`) finds what the tool
-        // has, installs or signs in what is missing, and imports what the person picks. Until that step is on the page
-        // the same page still holds each tool's own step.
-        case 'claude':
-        case 'codex': {
+        // Every plugin's own steps (Claude Code, Codex, Warden, …) are one setup flow, opened at the first page still to answer.
+        case 'setup': {
           const run = go(stepsHref(daemon));
-          return run === undefined
-            ? undefined
-            : { label: current.id === 'claude' ? 'Set up Claude Code' : 'Set up Codex', run };
+          return run === undefined ? undefined : { label: 'Continue setup', run };
         }
         // The last step: a project (the registry with its add form already open, until the create-a-project flow lands),
         // or no project at all. Each button depends on its own plugin alone: Projects off leaves Continue a conversation

@@ -68,8 +68,8 @@ const FRESH = {
   'GET /v1/ferrets': [],
   'GET /v1/archived-sessions': { count: 0, sessions: [] },
 };
-const ALL_TRUE: StepperFacts = { passkey: true, name: true, claude: true, codex: true, project: true };
-const ALL_FALSE: StepperFacts = { passkey: false, name: false, claude: false, codex: false, project: false };
+const ALL_TRUE: StepperFacts = { passkey: true, name: true, setup: true, project: true };
+const ALL_FALSE: StepperFacts = { passkey: false, name: false, setup: false, project: false };
 
 describe('reading the stepper facts', () => {
   it('a fully set-up machine holds every fact', async () => {
@@ -91,7 +91,7 @@ describe('reading the stepper facts', () => {
 
   it('a machine whose live list is empty but whose archive holds a ferret HAS made a conversation', async () => {
     const answers = { ...FRESH, 'GET /v1/archived-sessions': { count: 3, sessions: [{}] } };
-    expect(await batch(clientOf(answers).client)).toMatchObject({ claude: true, codex: true, project: true });
+    expect(await batch(clientOf(answers).client)).toMatchObject({ setup: true, project: true });
   });
 
   it('a machine with no project and no conversation, ever, has the Project step open', async () => {
@@ -106,12 +106,12 @@ describe('reading the stepper facts', () => {
 
   it('a live ferret settles the facts without asking the archive, and the conversation is read once', async () => {
     const { client, calls } = clientOf({ ...FRESH, 'GET /v1/ferrets': [{ id: 'f' }] });
-    expect(await batch(client)).toMatchObject({ claude: true, codex: true, project: true });
+    expect(await batch(client)).toMatchObject({ setup: true, project: true });
     expect(calls.map(call => call.route)).not.toContain('GET /v1/archived-sessions');
     expect(calls.filter(call => call.route === 'GET /v1/ferrets')).toHaveLength(1);
   });
 
-  it('each tool holds when its own step was looked at (found, done, later, skipped) and is open while it is pending', async () => {
+  it('setup holds when no step the plugins declared is pending (found, done, later, skipped) and is open while any is pending', async () => {
     const tools = (claude: string, codex: string) => ({
       ...FRESH,
       'GET /v1/onboarding': {
@@ -121,14 +121,36 @@ describe('reading the stepper facts', () => {
         ],
       },
     });
-    expect(await batch(clientOf(tools('done', 'pending')).client)).toMatchObject({ claude: true, codex: false });
-    expect(await batch(clientOf(tools('pending', 'skipped')).client)).toMatchObject({ claude: false, codex: true });
-    expect(await batch(clientOf(tools('later', 'found')).client)).toMatchObject({ claude: true, codex: true });
+    expect(await batch(clientOf(tools('done', 'pending')).client)).toMatchObject({ setup: false });
+    expect(await batch(clientOf(tools('pending', 'skipped')).client)).toMatchObject({ setup: false });
+    expect(await batch(clientOf(tools('later', 'found')).client)).toMatchObject({ setup: true });
+    expect(await batch(clientOf(tools('skipped', 'done')).client)).toMatchObject({ setup: true });
   });
 
-  it('a tool whose plugin declares no step has nothing to ask here, so it holds', async () => {
+  it('a pending step the person answers on their own device (side client) is ignored: it never holds setup open', async () => {
+    const answers = {
+      ...FRESH,
+      'GET /v1/onboarding': {
+        steps: [
+          { plugin: 'claude-code', id: 'harness', state: 'done', side: 'machine' },
+          { plugin: 'notifications', id: 'push', state: 'pending', side: 'client' },
+        ],
+      },
+    };
+    expect(await batch(clientOf(answers).client)).toMatchObject({ setup: true });
+    // The same pending step on the machine's side still holds setup open.
+    const machineSide = {
+      ...answers,
+      'GET /v1/onboarding': {
+        steps: [{ plugin: 'notifications', id: 'push', state: 'pending', side: 'machine' }],
+      },
+    };
+    expect(await batch(clientOf(machineSide).client)).toMatchObject({ setup: false });
+  });
+
+  it('a machine whose plugins declare no step has nothing to ask here, so setup holds', async () => {
     const answers = { ...FRESH, 'GET /v1/onboarding': { steps: [] } };
-    expect(await batch(clientOf(answers).client)).toMatchObject({ claude: true, codex: true, project: false });
+    expect(await batch(clientOf(answers).client)).toMatchObject({ setup: true, project: false });
   });
 
   it('a Projects plugin that is off (404) does not make the Project step unknown: it rests on the conversations alone', async () => {
@@ -161,15 +183,14 @@ describe('reading the stepper facts', () => {
     expect(await batch(clientOf(answers).client)).toEqual({
       passkey: true,
       name: true,
-      claude: undefined,
-      codex: undefined,
+      setup: undefined,
       project: 'locked',
     });
   });
 
   it('a live list refused for the unlock is locked, and the archive is not asked behind it', async () => {
     const { client, calls } = clientOf({ ...FRESH, 'GET /v1/ferrets': refusal(401, 'unlock_required') });
-    expect(await batch(client)).toMatchObject({ claude: 'locked', codex: 'locked', project: 'locked' });
+    expect(await batch(client)).toMatchObject({ setup: 'locked', project: 'locked' });
     expect(calls.map(call => call.route)).not.toContain('GET /v1/archived-sessions');
   });
 
@@ -184,13 +205,12 @@ describe('reading the stepper facts', () => {
     }
   });
 
-  it('a machine known to be locked reads only the passkey (the one read it answers) and says the other four are locked', async () => {
+  it('a machine known to be locked reads only the passkey (the one read it answers) and says the other three are locked', async () => {
     const { client, calls } = clientOf(SET_UP);
     expect(await batch(client, true)).toEqual({
       passkey: 'locked',
       name: 'locked',
-      claude: 'locked',
-      codex: 'locked',
+      setup: 'locked',
       project: 'locked',
     });
     expect(calls.map(call => call.route)).toEqual(['GET /v1/passkeys']);

@@ -42,6 +42,9 @@ export function WithSlotPanels({
         ),
       }),
     },
+    // No installed screens: a page that also asks for another plugin's screen address (`useScreenHref`) is answered `undefined`.
+    views: { screens: new Map() },
+    routes: { href: () => undefined },
     plan: {
       panels: (slot: string) =>
         (slots[slot] ?? []).map((panel, order) => ({ plugin: panel.plugin, id: panel.id, slot, order })),
