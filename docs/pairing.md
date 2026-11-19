@@ -647,8 +647,9 @@ is added); with nothing to offer (window closed, a passkey held, no browser supp
   use `jsqr`, a software decoder fetched only when somebody taps Scan or picks a picture (a Chromium visitor who
   only pastes never downloads it). An uploaded picture is drawn into an off-screen canvas, decoded in this tab and
   let go: it is never uploaded, stored, logged or put in React state, its object URL is revoked as soon as it is
-  read, the file input is emptied, and the decoded text is handed on exactly like a pasted link (read on submit,
-  never rendered). A picture with no code says "No QR code found in that image." and nothing else about it.
+  read, the file input is emptied, and the decoded text takes the scan path: it goes straight to the confirm screen, with no
+  submit step, and is never rendered. A read that finishes after the person has moved on (another link pasted, the
+  paste field opened, the screen gone) is discarded and changes nothing. A picture with no code says "No QR code found in that image." and nothing else about it.
 - **`pairing.configure` governs no route.** Like `terminal` and `browser`, its configure
   axis governs exactly one thing: whether a remote caller may re-grant the capability. See
   [grants.md](grants.md).

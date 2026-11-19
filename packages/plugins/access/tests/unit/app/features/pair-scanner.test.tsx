@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { StrictMode } from 'react';
 
 import { PairScanner } from '../../../../app/features/pairing/pair-scanner.tsx';
 import { DevicePermissionsContext } from '../../../../app/hooks/use-device-permissions.ts';
@@ -356,6 +357,88 @@ describe('PairScanner: the three equal ways', () => {
     );
     expect(decoded).toEqual([]);
     expect(input.value).toBe('');
+    await screen.unmount();
+  });
+
+  it('lets go of a read that finishes after this way is gone: nothing is handed up', async () => {
+    const decoded: string[] = [];
+    let finish: (text: string) => void = () => {};
+    const screen = await mount(
+      <PairScanner
+        host={never}
+        pasteOpen={false}
+        onPaste={() => {}}
+        readImage={async () => await new Promise<string>(resolve => (finish = resolve))}
+        onText={text => decoded.push(text)}
+        onFailed={() => {}}
+      />,
+    );
+    await choose(screen.container);
+    expect(buttonNamed(screen.container, 'Reading…').getAttribute('aria-busy')).toBe('true');
+
+    await screen.unmount();
+    await interact(() => finish(FAKE_LINK));
+
+    expect(decoded).toEqual([]);
+  });
+
+  it('lets go of a read still in flight when the paste field is opened', async () => {
+    const decoded: string[] = [];
+    let finish: (text: string) => void = () => {};
+    const element = (pasteOpen: boolean) => (
+      <PairScanner
+        host={never}
+        pasteOpen={pasteOpen}
+        onPaste={() => {}}
+        readImage={async () => await new Promise<string>(resolve => (finish = resolve))}
+        onText={text => decoded.push(text)}
+        onFailed={() => {}}
+      />
+    );
+    const screen = await mount(element(false));
+    await choose(screen.container);
+
+    await screen.render(element(true));
+    expect(buttonNamed(screen.container, 'Upload a QR image').getAttribute('aria-busy')).toBeNull();
+    await interact(() => finish(FAKE_LINK));
+
+    expect(decoded).toEqual([]);
+    expect(screen.container.querySelector('[data-pair-upload-problem]')).toBeNull();
+    await screen.unmount();
+  });
+
+  it('under StrictMode shows the error for a bad image, frees the button, and a retry works', async () => {
+    const decoded: string[] = [];
+    let attempt = 0;
+    const screen = await mount(
+      <StrictMode>
+        <PairScanner
+          host={never}
+          pasteOpen={false}
+          onPaste={() => {}}
+          readImage={async () => {
+            attempt += 1;
+            if (attempt === 1) throw new QrImageError('no-qr', NO_QR_IN_IMAGE);
+            return FAKE_LINK;
+          }}
+          onText={text => decoded.push(text)}
+          onFailed={() => {}}
+        />
+      </StrictMode>,
+    );
+
+    await choose(screen.container);
+
+    expect(must(screen.container.querySelector('[data-pair-upload-problem]'), 'the problem').textContent).toBe(
+      'No QR code found in that image.',
+    );
+    expect(buttonNamed(screen.container, 'Upload a QR image').getAttribute('aria-busy')).toBeNull();
+    expect(decoded).toEqual([]);
+
+    await choose(screen.container);
+
+    expect(decoded).toEqual([FAKE_LINK]);
+    expect(screen.container.querySelector('[data-pair-upload-problem]')).toBeNull();
     await screen.unmount();
   });
 

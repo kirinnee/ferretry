@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
+import { StrictMode } from 'react';
 
 import { PairingScreen } from '../../../../app/features/pairing/pairing-screen.tsx';
 import { DeviceKeyUnsupportedError, UNSUPPORTED_DEVICE_KEY_SENTENCE } from '../../../../app/lib/device-keys.ts';
@@ -609,6 +610,104 @@ describe('PairingScreen pasted link', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]?.code).toBe('7F3K-Q2ND');
     await screen.unmount();
+  });
+});
+
+describe('PairingScreen uploaded QR image', () => {
+  const FAKE_UPLOAD_LINK =
+    'https://pwa.example.test/pair#v1;url=https%3A%2F%2Fuploaded.example.test;code=FAKE-2222;fp=fy_daemon_ddddddddddddddddddddddddddddddddddddddddddd';
+  const FAKE_PASTED_LINK =
+    'https://pwa.example.test/pair#v1;url=https%3A%2F%2Fpasted.example.test;code=FAKE-3333;fp=fy_daemon_ddddddddddddddddddddddddddddddddddddddddddd';
+
+  const chooseImage = async (container: HTMLElement): Promise<void> => {
+    const input = must(container.querySelector('input[data-pair-upload]'), 'the upload input') as HTMLInputElement;
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: [new File(['pixels'], 'code.png', { type: 'image/png' })],
+    });
+    await interact(() => input.dispatchEvent(new Event('change', { bubbles: true })));
+  };
+
+  it('does not switch the confirm screen when a slow upload finishes after another link was pasted', async () => {
+    let finish: (text: string) => void = () => {};
+    const screen = await screenWith({
+      readImage: async () => await new Promise<string>(resolve => (finish = resolve)),
+    });
+
+    await chooseImage(screen.container);
+    await interact(() => buttonNamed(screen.container, 'Paste a link').click());
+    await typeLink(screen.container, FAKE_PASTED_LINK);
+    await submitForm(screen.container);
+    expect(screen.container.textContent).toContain('pasted.example.test');
+
+    await interact(() => finish(FAKE_UPLOAD_LINK));
+
+    expect(screen.container.textContent).toContain('Pair this device?');
+    expect(screen.container.textContent).toContain('pasted.example.test');
+    expect(screen.container.textContent).not.toContain('uploaded.example.test');
+    await screen.unmount();
+  });
+
+  it('confirms the uploaded link when nothing else was chosen meanwhile', async () => {
+    const screen = await screenWith({ readImage: async () => FAKE_UPLOAD_LINK });
+
+    await chooseImage(screen.container);
+
+    expect(screen.container.textContent).toContain('Pair this device?');
+    expect(screen.container.textContent).toContain('uploaded.example.test');
+    await screen.unmount();
+  });
+
+  it('shows the error for an unreadable image under StrictMode', async () => {
+    const screen = await mount(
+      <StrictMode>
+        <PairingScreen
+          connections={[]}
+          selectedDaemonId={null}
+          scanHost={idleHost}
+          readImage={async () => {
+            throw new Error('not an image');
+          }}
+          onPair={async () => {}}
+          onRemove={() => {}}
+          onSelect={() => {}}
+        />
+      </StrictMode>,
+    );
+
+    await chooseImage(screen.container);
+
+    expect(must(screen.container.querySelector('[data-pair-upload-problem]'), 'the problem').textContent).toBe(
+      'That image could not be read.',
+    );
+    expect(buttonNamed(screen.container, 'Upload a QR image').getAttribute('aria-busy')).toBeNull();
+    await screen.unmount();
+  });
+
+  it('never writes a pairing code to the console, whichever way it was read', async () => {
+    const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map(method =>
+      spyOn(console, method).mockImplementation(() => {}),
+    );
+    try {
+      const uploaded = await screenWith({ readImage: async () => FAKE_UPLOAD_LINK });
+      await chooseImage(uploaded.container);
+      await uploaded.unmount();
+
+      const scanned = await screenWith({ scanHost: scanningHost(FAKE_UPLOAD_LINK) });
+      await interact(() => buttonNamed(scanned.container, 'Scan QR code').click());
+      await scanned.unmount();
+
+      const pasted = await screenWith({ scanHost: null });
+      await typeLink(pasted.container, FAKE_PASTED_LINK);
+      await submitForm(pasted.container);
+      await pasted.unmount();
+
+      const printed = spies.flatMap(spy => spy.mock.calls.map(call => call.map(String).join(' '))).join('\n');
+      expect(printed).not.toContain('FAKE-2222');
+      expect(printed).not.toContain('FAKE-3333');
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
   });
 });
 

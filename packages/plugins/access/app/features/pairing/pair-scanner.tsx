@@ -126,7 +126,7 @@ export function PairScanner({
           <WayCard icon={<QrCode size={22} aria-hidden="true" />} onClick={scan.start} disabled={host === null}>
             Scan QR code
           </WayCard>
-          <UploadWay readImage={readImage} onText={onText} />
+          <UploadWay readImage={readImage} onText={onText} pasteOpen={pasteOpen} />
           <WayCard icon={<Link2 size={22} aria-hidden="true" />} onClick={onPaste} pressed={pasteOpen}>
             Paste a link
           </WayCard>
@@ -196,6 +196,8 @@ function WayCard({ icon, children, onClick, disabled = false, busy = false, pres
 interface UploadWayProps {
   readonly readImage: (file: Blob) => Promise<string>;
   readonly onText: (text: string) => void;
+  /** Opening the paste field is choosing another way: a read still in flight is let go. */
+  readonly pasteOpen: boolean;
 }
 
 /**
@@ -205,36 +207,48 @@ interface UploadWayProps {
  * picture can be chosen again, and nothing keeps the file), and what is shown is a sentence about the picture, never
  * its content.
  */
-function UploadWay({ readImage, onText }: UploadWayProps) {
+function UploadWay({ readImage, onText, pasteOpen }: UploadWayProps) {
   const input = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  // A read that finishes after the screen has gone must not speak.
-  const mounted = useRef(true);
+  // Which read is the live one. A read that finishes after the person has moved on — this way unmounted (the screen went
+  // on to confirm a pasted link, or the camera started), the paste field opened, or a newer picture chosen — is stale
+  // and must neither speak nor hand its text up. A counter, not a mounted flag: a flag set false in cleanup stays false
+  // when StrictMode replays the effect, and would leave the button on "Reading…" with no error.
+  const run = useRef(0);
   useEffect(
     () => () => {
-      mounted.current = false;
+      run.current += 1;
     },
     [],
   );
+  const firstPaste = useRef(pasteOpen);
+  useEffect(() => {
+    if (firstPaste.current === pasteOpen) return;
+    firstPaste.current = pasteOpen;
+    run.current += 1;
+    setBusy(false);
+  }, [pasteOpen]);
 
   const read = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const element = event.currentTarget;
     const file = element.files?.[0];
     if (file === undefined) return;
+    run.current += 1;
+    const mine = run.current;
     setProblem(null);
     setBusy(true);
     let text: string | undefined;
     try {
       text = await readImage(file);
     } catch (reason) {
-      if (mounted.current)
+      if (run.current === mine)
         setProblem(reason instanceof QrImageError ? reason.message : 'That image could not be read.');
     } finally {
       element.value = '';
-      if (mounted.current) setBusy(false);
+      if (run.current === mine) setBusy(false);
     }
-    if (text !== undefined) onText(text);
+    if (text !== undefined && run.current === mine) onText(text);
   };
 
   return (
