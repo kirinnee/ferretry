@@ -1,0 +1,162 @@
+/* ============================================================================
+   FAMILY 2 — MISSION CONTROL. Reworked from an effects-led "ops console" (CRT
+   scanlines, chamfered sci-fi bevels, a radial glow wash) into a precision
+   INSTRUMENT: a ruled measurement grid, honest square controls in mono-
+   uppercase, hairline registers and corner brackets. What carries the family in
+   greyscale is now STRUCTURE — the grid + square corners + mono-uppercase + the
+   hairline rules — not an effect.
+
+   REMOVED, and why: the scanline overlay (a CRT novelty that wears off fast on a
+   tool you stare at for hours — pure costume); the corner chamfer (every button,
+   badge and tab wore a diagonal bevel that read as game HUD, not equipment); and
+   the cyan glow on shadows (an effect, not a signal). Both modes now share the
+   same ruled-grid chassis and seated (not floating) elevation — dark keeps the
+   cyan signal on near-black, light the deep teal on white. Restraint reads as
+   cool; the leftover signal language is the instrument, not the film prop.
+   ============================================================================ */
+:root[data-style='mission'],
+[data-swatch][data-style='mission'] {
+  /* ═══ structural token layer ═══ */
+  /* The single most important line in this block: uppercase Cascadia mono on
+   EVERY control, badge, tab and table cell. Does more for grayscale
+   recognisability than the entire cyan palette. */
+  --font-ui: var(--font-mono);
+  --text-display: 1.05rem;
+  --leading-base: 1.5;
+  --leading-tight: 1.2;
+  --tracking-label: 0.14em;
+  --tracking-body: 0.005em;
+  --label-weight: 700;
+  --display-transform: uppercase;
+  --weight-medium: 600;
+  --weight-strong: 700;
+  --weight-display: 700;
+  /* SQUARE, not merely small. 3px/6px read as "a slightly tighter Studio" in a
+   grayscale capture — measured, not guessed: the achromatopsia dashboards for
+   mission-light and studio-light were near-indistinguishable at 1440. An
+   instrument has corners; zero radius plus the chamfer below is the silhouette
+   doing the work that colour cannot. */
+  --radius-control: 0px;
+  --radius-panel: 0px;
+  --radius-badge: 0px;
+  --radius-tab: 0px;
+  --radius-input: 0px;
+  /* NO chamfer. The old notched/chamfered corners on every control were the
+   family's costume tell — a diagonal sci-fi bevel top-right/bottom-left that
+   read as game HUD, not measurement equipment, and it aged into a novelty. It
+   is gone: controls are honest squares. The silhouette work it did is carried
+   instead by zero radius + mono-uppercase labels + the ruled grid + the corner
+   registration brackets, every one of which survives a greyscale capture. */
+  --notch: 0px;
+  --clip-control: none;
+  --clip-panel: none;
+  /* Corner registration brackets on `[data-hud]` panels — a real measurement-
+   equipment detail (index.css draws two accent L-marks at opposite corners).
+   Kept because it reads as precision, not as costume, unlike the chamfer. */
+  --bracket-size: 10px;
+  --divider-color: var(--border);
+  --control-h-desktop: 26px;
+  --control-h-sm-desktop: 24px;
+  --row-min-h-desktop: 32px;
+  --pad-row-y: 5px;
+  --pad-panel: 12px;
+  --rail-active: none;
+  /* Flat surface — the diagonal accent-tint wash on panels was another decorative
+   tell; the panel now reads its identity from the grid texture and the seated
+   hairline, not a gradient sheen. */
+  --panel-bg: var(--surface);
+  /* THE TELEMETRY FIELD. The page itself is a ruled grid — a 96px major / 32px minor module — not a flat sheet with two
+   faint radial tints that vanish the moment hue is removed. `--body-wash` paints `body`, so it covers the whole
+   viewport including the regions no panel occupies (the gutters, the shell behind the sidebar, the area below a short
+   table), which is what makes the style read as an instrument. The GEOMETRY is this style's, so any palette can wear it;
+   the palette supplies only the inks (`--grid-ink-*`) and the ground's two stops (`--field-ground-*`, transparent unless
+   the palette grades its ground). `repeating-linear-gradient` on purpose rather than `linear-gradient` plus a
+   `background-size`: it tiles itself, and `body` already carries `background-attachment: fixed`. */
+  --body-wash:
+    repeating-linear-gradient(90deg, var(--grid-ink-major) 0 1px, transparent 1px 96px),
+    repeating-linear-gradient(180deg, var(--grid-ink-major) 0 1px, transparent 1px 96px),
+    repeating-linear-gradient(90deg, var(--grid-ink-minor) 0 1px, transparent 1px 32px),
+    repeating-linear-gradient(180deg, var(--grid-ink-minor) 0 1px, transparent 1px 32px),
+    linear-gradient(180deg, var(--field-ground-top) 0%, var(--field-ground-bottom) 100%);
+  /* 32px instrument grid on panels, aligned to the same module as the page grid
+   so a panel is a continuous piece of the ruled field, not a textured card. */
+  --panel-texture:
+    linear-gradient(90deg, var(--texture-ink) 1px, transparent 1px),
+    linear-gradient(180deg, var(--texture-ink) 1px, transparent 1px);
+  --panel-texture-size: 32px 32px;
+  --focus-shadow: none;
+  --rule-inset: inset 0 1px 0 rgb(var(--accent-rgb) / 0.08);
+  --bubble-stroke: 1px;
+  --bubble-radius: 0px;
+  --bubble-shadow: var(--shadow-sm);
+  /* Aptos is Microsoft's and not freely licensed, so it is named first and NOT shipped: where it is
+   installed it wins, everywhere else the bundled Public Sans (OFL) is the look-alike. */
+  --font-display: 'Aptos Display', 'Public Sans', system-ui, sans-serif;
+  --font-body: 'Aptos', 'Public Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Cascadia Code', 'Cascadia Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', ui-monospace, monospace;
+  --tracking-display: 0.01em;
+  --chrome-font-size: 11px;
+  /* Full opacity, unlike Studio: --faint here is already a real tonal step
+   below --muted, and dimming it further put the chrome tier under 4.5:1. The
+   size drop does the receding. */
+  /* The RAW ramp is squared too, not just the roles. Remaining utility-shaped
+   call sites still reach for `rounded-lg` / `rounded-md` / `rounded`
+   directly. Leaving the ramp rounded while the roles went square would
+   produce exactly the half-themed result this refactor exists to prevent —
+   square buttons inside rounded local chrome. */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --border-width: 1px;
+  --border-width-heavy: 1px;
+  /* The mono face stays; the casing does not. Navigation and buttons are
+   sentence case by owner ruling — labels and badges keep the uppercase. The
+   selected row is a square instrument register: a tinted cell boxed by a
+   hairline in the signal colour, read out in that same signal. */
+  --control-transform: none;
+  /* An instrument settles evenly: linear, no overshoot. */
+  --ease-standard: linear;
+  --ease-emphasis: linear;
+  --select-pop: 1;
+  --bubble-fg: var(--fg);
+  --bubble-border: var(--user-border);
+  --glow-alpha: 0;
+  /* Scanlines removed — the CRT overlay was the family's loudest costume tell and
+   added nothing but novelty on a tool stared at for hours. The ruled grid and
+   the seated hairlines carry the instrument read now. */
+  --overlay: none;
+  --overlay-opacity: 0;
+  --overlay-blend: normal;
+}
+
+:root[data-style='mission'][data-mode='light'],
+[data-swatch][data-style='mission'][data-mode='light'] {
+  /* INSET STRUCTURE, not float. An instrument panel is seated in its chassis, so
+   the soft blur is a hard 1px ring plus an inset top-light — the seated read
+   that dark now mirrors with its own hairline ring. The role shadows and any
+   remaining utility consumers both resolve through this treatment. */
+  --shadow-sm: 0 0 0 1px var(--shadow-sm-1), inset 0 1px 0 var(--shadow-sm-2);
+  --shadow-md: 0 0 0 1px var(--shadow-md-1), inset 0 1px 0 var(--shadow-md-2), 0 10px 24px var(--shadow-md-3);
+  --shadow-lg: 0 2px 4px var(--shadow-lg-1), 0 20px 46px var(--shadow-lg-2);
+}
+
+:root[data-style='mission'][data-mode='dark'],
+[data-swatch][data-style='mission'][data-mode='dark'] {
+  --shadow-sm: 0 0 0 1px var(--shadow-sm-1);
+  --shadow-md: 0 0 0 1px var(--shadow-md-1), 0 12px 30px var(--shadow-md-2);
+  --shadow-lg: 0 0 0 1px var(--shadow-lg-1), 0 22px 54px var(--shadow-lg-2);
+}
+
+@media (max-width: 640px) {
+  :root[data-style='mission'] {
+    --text-2xs: 12.5px;
+    --text-xs: 13.5px;
+    --text-sm: 14.5px;
+    --text-base: 15.5px;
+    --text-md: 16.5px;
+    --text-lg: 18.5px;
+    --text-display: 1.3rem;
+    --label-size: 12.5px;
+  }
+}

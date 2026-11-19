@@ -23,6 +23,7 @@ import {
   useState,
 } from 'react';
 import { type DeviceTheme, useDeviceTheme } from '../shell/device-context.tsx';
+import { swatchAttributes } from '../theme/catalog.ts';
 import type { ResolvedMode, ThemeMode } from '../theme/preferences.ts';
 import { useBackDismiss } from './hooks/use-back-dismiss.ts';
 import { isTopEscapeLayer, pushEscapeLayer } from './hooks/use-dialog-focus.ts';
@@ -67,7 +68,7 @@ export function Swatch({ theme, current }: { readonly theme: string; readonly cu
         current && 'ring-2 ring-accent ring-offset-1 ring-offset-surface',
       )}
     >
-      <span className="kt-swatch" data-swatch={theme} aria-hidden="true">
+      <span className="kt-swatch" {...swatchAttributes(theme)} aria-hidden="true">
         <span className="kt-swatch-mini">
           <span className="kt-swatch-header">Aa</span>
           <span className="kt-swatch-row">

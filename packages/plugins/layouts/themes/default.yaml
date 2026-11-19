@@ -1,6 +1,5 @@
-# The built-in theme: the house family (studio) with no token laid over it (design §5.3).
+# The built-in theme: it names no style or palette and lays no token over them, so the device's own axes apply (design §5.3).
 id: default
 label: Default
-base: studio
 light: {}
 dark: {}

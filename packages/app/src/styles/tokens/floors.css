@@ -1,0 +1,34 @@
+/* ============================================================================
+   MOBILE ACCESSIBILITY FLOOR — imported LAST (`themes.css`), after every style.
+
+   Specificity note, and it is load-bearing: bare `:root` is (0,1,0) and would
+   LOSE to the attribute-qualified style blocks, so a bare-:root floor would be
+   silently ignored under every style. `:root[data-style]` is (0,2,0) — equal to
+   `:root[data-style='x']` — so equal specificity plus later source order wins
+   deterministically. Same fix as the reduced-motion block.
+
+   Components never test for a pointer type: they consume --control-h /
+   --row-min-h / --text-input, which `tokens/base-style.css` already composed with max().
+   ============================================================================ */
+@media (pointer: coarse) {
+  :root,
+  :root[data-style] {
+    /* WCAG 2.5.5 target minimum. No style may go below it. */
+    --target-floor: 44px;
+  }
+}
+
+/* `(pointer: coarse)` is in here as well as `(max-width: 640px)` on purpose, and
+   it MUST match the condition on the `:root input` rule in index.css that
+   consumes this. A coarse-pointer tablet wider than 640px still focus-zooms, so
+   the consuming rule fires there — and if this token were still 0px at that
+   width, `font-size: var(--text-input)` would resolve to the desktop size on a
+   device that zooms. Same condition on both ends, no gap. */
+@media (pointer: coarse), (max-width: 640px) {
+  :root,
+  :root[data-style] {
+    /* iOS auto-zooms any input under 16px, and the fix must NOT be
+       maximum-scale=1 (that breaks pinch-zoom, WCAG 1.4.4). */
+    --input-font-floor: 16px;
+  }
+}

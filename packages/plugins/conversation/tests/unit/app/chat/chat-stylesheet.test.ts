@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readThemeCss } from '@ferretry/app/testing';
 
 /**
  * THE CHAT'S OWN RULES REACH THE PAGE. The transcript, its rows, the Jump pill's row and the composer were drawn
@@ -56,7 +57,7 @@ describe("the chat's own stylesheet", () => {
     expect(note).toContain('font-size: var(--text-sm);');
     expect(note).toContain('color: var(--warn);');
     expect(note).toContain('background: var(--warn-bg);');
-    const themes = readFileSync(join(import.meta.dir, '../../../../../../app/src/styles/themes.css'), 'utf8');
+    const themes = readThemeCss();
     const linear = (channel: number): number => {
       const unit = channel / 255;
       return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
@@ -86,7 +87,7 @@ describe("the chat's own stylesheet", () => {
     // `--faint` measured 4.34:1 (light) and 4.37:1 (dark) on the bubble: under AA for this small text.
     expect(rule(css, '.fy-receipt-line .fy-receipt')).toContain('color: var(--fy-muted);');
     expect(rule(css, '.fy-receipt-line .fy-handoff-via-button')).toContain('color: var(--fy-muted);');
-    const themes = readFileSync(join(import.meta.dir, '../../../../../../app/src/styles/themes.css'), 'utf8');
+    const themes = readThemeCss();
     const linear = (channel: number): number => {
       const unit = channel / 255;
       return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
@@ -105,8 +106,8 @@ describe("the chat's own stylesheet", () => {
       expect(start).toBeGreaterThan(-1);
       return themes.slice(start, themes.indexOf('\n}', start));
     };
-    const light = blockOf(":root[data-theme='studio-light']");
-    const dark = blockOf(":root[data-theme='studio-dark']");
+    const light = blockOf(":root[data-palette='studio'][data-mode='light']");
+    const dark = blockOf(":root[data-palette='studio'][data-mode='dark']");
     // Light's muted is the `:root` default (the first one the file declares); dark redeclares its own.
     const pairs = [
       ['studio-light', token(themes, 'muted'), token(light, 'bubble-bg')],

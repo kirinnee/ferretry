@@ -32,6 +32,7 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import postcss from 'postcss';
 import tailwindcss from 'tailwindcss';
 import { cachedText, cacheRootFor, hashFixtureInputs, sceneInputEnv, sceneInputPatterns } from './fixture-inputs.ts';
+import { legacyThemeBanner } from './legacy-theme-shim.ts';
 import { sceneTailwindConfig } from './scene-tailwind.ts';
 
 const packageRoot = resolve(import.meta.dir, '../../..');
@@ -90,6 +91,7 @@ const bundleOf = async (entry: string, label: string): Promise<{ readonly js: st
     target: 'browser',
     throw: false,
     plugins: [viteAssetUrls, viteDynamicImports],
+    banner: legacyThemeBanner,
   });
   if (!result.success) throw new Error(`❌ ${label} did not build:\n${result.logs.join('\n')}`);
   const sheets = result.outputs.filter(output => output.path.endsWith('.css'));

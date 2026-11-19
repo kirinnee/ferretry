@@ -203,6 +203,17 @@ export {
   TYPE_TOKENS,
   themeProperties,
 } from './theme/tokens.ts';
+export {
+  DEFAULT_PALETTE,
+  DEFAULT_STYLE,
+  PALETTES,
+  type PaletteEntry,
+  type PaletteId,
+  STYLES,
+  type StyleEntry,
+  type StyleId,
+  swatchAttributes,
+} from './theme/catalog.ts';
 export { CODE_FACE_URLS } from './theme/fonts.ts';
 export {
   DEFAULT_THEME_PREFERENCE,

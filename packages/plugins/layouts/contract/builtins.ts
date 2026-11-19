@@ -51,8 +51,8 @@ export const COMPACT_LAYOUT = LayoutSchema.parse({
   phone: { nav: { side: 'bottom', items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'] } },
 });
 
-/** The built-in theme: the house family with no token laid over it. */
-export const DEFAULT_THEME = ThemeSchema.parse({ id: 'default', label: 'Default', base: 'studio' });
+/** The stock theme names no style, palette or `base`: this device's own axes apply and no token is laid over them. */
+export const DEFAULT_THEME = ThemeSchema.parse({ id: 'default', label: 'Default' });
 
 export const BUILT_IN_LAYOUTS: readonly (typeof DEFAULT_LAYOUT)[] = [DEFAULT_LAYOUT, COMPACT_LAYOUT];
 export const BUILT_IN_THEMES: readonly (typeof DEFAULT_THEME)[] = [DEFAULT_THEME];

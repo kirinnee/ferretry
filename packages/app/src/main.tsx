@@ -135,9 +135,9 @@ window.addEventListener('storage', () => {
   themes.adopt();
   layouts.adopt();
 });
-preloadThemeFonts(themes.snapshot().family);
+preloadThemeFonts(themes.snapshot().style);
 installPortraitLock(window, document); // a phone held sideways gets today's portrait gate
-themes.subscribe(() => preloadThemeFonts(themes.snapshot().family));
+themes.subscribe(() => preloadThemeFonts(themes.snapshot().style));
 // The signed-release service worker (docs/pwa-release-signing.md; absent in `vite dev`), URL via the `fy-worker` policy.
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   void navigator.serviceWorker.register(trustedWorkerUrl('/sw.verified.js'), { scope: '/' }).catch(() => {});

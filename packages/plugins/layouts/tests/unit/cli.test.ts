@@ -130,3 +130,21 @@ describe('fy layout and fy theme', () => {
     expect(err.every(line => line === DEVICE_SENTENCE)).toBe(true);
   });
 });
+
+describe('fy layout show names the LIVE theme axes', () => {
+  test('the stock theme ships no base and reads as this device’s own axes', async () => {
+    expect(Object.keys(DEFAULT_THEME)).not.toContain('base');
+    const { run, out } = harness({ 'GET /v1/layouts/current': current });
+    await run('layout show');
+    expect(out.join('\n')).toContain('theme    default (Default, style this device, palette this device)');
+  });
+
+  test('a theme item that names an axis says so, and a legacy base is not reported as applied', async () => {
+    const theme = { id: 'dusk', label: 'Dusk', base: 'neo', style: 'mission', light: {}, dark: {} };
+    const { run, out } = harness({ 'GET /v1/layouts/current': { layout: DEFAULT_LAYOUT, theme } });
+    await run('layout show');
+    const line = out.join('\n');
+    expect(line).toContain('style mission, palette this device');
+    expect(line).not.toContain('neo');
+  });
+});

@@ -142,13 +142,13 @@ pre,
 
 /* Themes with an overlay or a glow are the ones that lean on effects; a reader
    who asked for less motion/effect gets the flat version. */
-/* `:root[data-theme]` (not bare `:root`) on purpose: the per-theme blocks above
+/* `:root[data-style]` (not bare `:root`) on purpose: the per-theme blocks above
    are attribute-qualified, so a bare `:root` override here would lose on
    specificity and silently leave Mission Control's scanlines running. Equal
    specificity + later source order wins. */
 @media (prefers-reduced-motion: reduce) {
   :root,
-  :root[data-theme] {
+  :root[data-style] {
     --overlay-opacity: 0;
     --glow-alpha: 0;
   }
@@ -158,7 +158,7 @@ pre,
    animation and transition stilled — spinners included. `<html data-motion="reduced">` is set by
    the shell. */
 :root[data-motion='reduced'],
-:root[data-motion='reduced'][data-theme] {
+:root[data-motion='reduced'][data-style] {
   --overlay-opacity: 0;
   --glow-alpha: 0;
 }

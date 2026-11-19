@@ -164,16 +164,16 @@
    track that is a LIGHTENED accent (not a tint of it, so the page cannot swallow it), a head that is nearly the
    foreground colour with a firm edge (the brightest thing on the strip, readable even at phone width), and a glow that
    reaches below the strip. Kept at 4px: thin, not heavy. */
-:root[data-theme$='-dark'] .fy-loading-bar,
-[data-swatch$='-dark'] .fy-loading-bar {
+:root[data-mode='dark'] .fy-loading-bar,
+[data-swatch][data-mode='dark'] .fy-loading-bar {
   background: color-mix(in srgb, var(--accent) 65%, var(--fg));
   box-shadow:
     0 1px 14px color-mix(in srgb, var(--accent) 90%, transparent),
     0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
   height: 4px;
 }
-:root[data-theme$='-dark'] .fy-loading-bar__run,
-[data-swatch$='-dark'] .fy-loading-bar__run {
+:root[data-mode='dark'] .fy-loading-bar__run,
+[data-swatch][data-mode='dark'] .fy-loading-bar__run {
   background: linear-gradient(
     90deg,
     color-mix(in srgb, var(--accent) 80%, var(--bg)) 0%,

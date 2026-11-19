@@ -20,6 +20,7 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { PALETTES, STYLES } from '../../src/theme/catalog.ts';
 import { memoryStore } from '../../src/storage/records.ts';
 import {
   resolveThemeMode,
@@ -84,7 +85,7 @@ const runBootstrap = (
 /** What `theme-preferences.ts` — the definition — says the same input resolves to. */
 const expectedAttribute = (raw: string | null, systemDark: boolean): string => {
   const preference = parseThemePreference(raw);
-  return themeAttribute(preference.family, resolveThemeMode(preference.mode, systemDark));
+  return themeAttribute(preference.palette, resolveThemeMode(preference.mode, systemDark));
 };
 
 const STORED_VALUES: readonly (string | null)[] = [
@@ -92,7 +93,15 @@ const STORED_VALUES: readonly (string | null)[] = [
   null,
   '',
   '   ',
-  // The record shape, including per-field fallback for bad fields.
+  // The record shape (style + palette), including per-field fallback for bad fields.
+  record({ style: 'neo', palette: 'geist', mode: 'dark', textScale: 'large' }),
+  record({ style: 'geist', palette: 'phosphor', mode: 'light', textScale: 'default' }),
+  record({ style: 'nope', palette: 'ledger', mode: 'dark', textScale: 'default' }),
+  record({ style: 'mission', palette: 'nope', mode: 'system', textScale: 'larger' }),
+  // The pre-split record shape: a family is a palette with the style it was drawn for; an explicit axis beside it wins.
+  record({ family: 'phosphor', mode: 'dark', textScale: 'default' }),
+  record({ family: 'ma', mode: 'light', textScale: 'default' }),
+  record({ family: 'neo', style: 'studio', mode: 'light', textScale: 'default' }),
   record({ family: 'mission', mode: 'dark', textScale: 'large' }),
   record({ family: 'notebook', mode: 'system', textScale: 'larger' }),
   record({ family: 'geist', mode: 'light', textScale: 'default' }),
@@ -116,6 +125,42 @@ describe('the pre-paint bootstrap and the theme module resolve identically', () 
         const { attributes } = runBootstrap(raw, systemDark);
         expect(attributes['data-theme']).toBe(expectedAttribute(raw, systemDark));
       }
+    }
+  });
+
+  it('publishes the same style, palette and resolved mode for every stored value', () => {
+    for (const raw of STORED_VALUES) {
+      for (const systemDark of [true, false]) {
+        const { attributes } = runBootstrap(raw, systemDark);
+        const preference = parseThemePreference(raw);
+        expect(attributes['data-style']).toBe(preference.style);
+        expect(attributes['data-palette']).toBe(preference.palette);
+        expect(attributes['data-mode']).toBe(resolveThemeMode(preference.mode, systemDark));
+      }
+    }
+  });
+
+  it('accepts exactly the styles and palettes the catalogue lists', () => {
+    const ids = (list: { readonly id: string }[]) => list.map(entry => entry.id);
+    expect(source).toContain(
+      `var STYLES = [${ids([...STYLES])
+        .map(id => `'${id}'`)
+        .join(', ')}];`,
+    );
+    for (const palette of ids([...PALETTES])) expect(source).toContain(`'${palette}',`);
+    for (const style of ids([...STYLES])) {
+      const { attributes } = runBootstrap(
+        record({ style, palette: 'studio', mode: 'light', textScale: 'default' }),
+        false,
+      );
+      expect(attributes['data-style']).toBe(style);
+    }
+    for (const palette of ids([...PALETTES])) {
+      const { attributes } = runBootstrap(
+        record({ style: 'studio', palette, mode: 'light', textScale: 'default' }),
+        false,
+      );
+      expect(attributes['data-palette']).toBe(palette);
     }
   });
 
