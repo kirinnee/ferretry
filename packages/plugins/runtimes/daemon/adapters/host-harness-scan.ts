@@ -33,6 +33,8 @@ import {
   type HostHarnessScan,
   type HostLogin,
   type HostSkill,
+  claudeProjectFolders,
+  type ProjectInstructionHint,
   scannedMcpServers,
 } from '../lib/account/import.ts';
 import { isHarnessOwnedSkillEntry } from '../lib/assets.ts';
@@ -91,12 +93,14 @@ export class HostHarnessScanner {
       this.#skills('claude', home, join(home, 'skills')),
     ]);
     const login = await this.#login('claude');
+    const projectInstructions = await this.#projectInstructions({ harness: 'claude', mcp } as HostHarnessScan);
     return await this.#complete({
       harness: 'claude',
       login,
       instructions,
       settings,
       mcp,
+      projectInstructions,
       skills: skills.found,
       problems: [
         ...(named !== '' && configured === undefined
@@ -138,6 +142,25 @@ export class HostHarnessScanner {
       skills: skills.found,
       problems: skills.problems,
     });
+  }
+
+  /**
+   * The project folders Claude keeps state for, each with the instructions file it would read there. The folder is
+   * never opened beyond one `lstat` of that file, and where the kernel does not serve it the hint is kept unverified.
+   */
+  async #projectInstructions(scan: HostHarnessScan): Promise<ProjectInstructionHint[]> {
+    const file = 'CLAUDE.md';
+    const hints: ProjectInstructionHint[] = [];
+    for (const path of claudeProjectFolders(scan)) {
+      try {
+        const info = await this.deps.files.lstat(join(path, file));
+        if (info === undefined) continue;
+        if (info.kind === 'file') hints.push({ path, file, verified: true });
+      } catch {
+        hints.push({ path, file, verified: false });
+      }
+    }
+    return hints;
   }
 
   /** The located command and the MCP commands this machine lacks, added to what was read. */

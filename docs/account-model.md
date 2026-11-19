@@ -73,6 +73,12 @@ change, like every other. There are three ways to choose, and they ask the same 
 - **`fy daemon import claude|codex`** imports one tool with no questions, for scripts, under
   `--name <runtime>` or the suggested name (`claude-default`).
 
+A `setup.import` may carry `skip`: item ids (`claude-code:mcp:notes`, `codex:skill:review`,
+`claude-code:instructions`, `:settings`, `:env`) for what the person chose not to bring in. A skipped item brings no
+component, no file and no secret. **Hooks are never imported**: the scan counts them ("found N, not imported") and
+nothing else. The scan also lists Claude's project folders and Codex's `[profiles.*]` (name, model, effort) as hints;
+project instructions stay in their projects and nothing inside a project folder is read.
+
 `fy daemon start` at a terminal on a machine that is not set up ends with one line naming the app and
 `fy daemon setup`. The top-level `fy setup` is a different verb: it finishes an install (the daemon as a
 user service, a wait until it answers, the pairing QR, then `fy onboard`), and it does not set a machine up.

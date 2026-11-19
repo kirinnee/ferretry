@@ -404,6 +404,8 @@ export class FleetSetupService {
         ...(harness.settings === undefined ? {} : { settings: { ...harness.settings } }),
         mcpServers: [...harness.mcpServers],
         skills: [...harness.skills],
+        codexProfiles: harness.codexProfiles.map(profile => ({ ...profile })),
+        projectInstructions: harness.projectInstructions.map(hint => ({ ...hint })),
         secretKeys: [...harness.secretKeys],
         missingCommands: [...harness.missingCommands],
         problems: [...harness.problems],
@@ -689,6 +691,7 @@ export class FleetSetupService {
     }
     const raw = planImport(scans, {
       ...(change.include === undefined ? {} : { include: change.include.map(harnessKind) }),
+      ...(change.skip === undefined ? {} : { skip: change.skip }),
       ...(existing === undefined ? {} : { existing }),
       ...(await this.#recordOption()),
       existingSecrets,

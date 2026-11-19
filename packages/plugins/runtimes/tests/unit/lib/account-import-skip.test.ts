@@ -1,0 +1,277 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import { ImportItemIdSchema, importItemId, importNamedItemId } from '../../../contract/index.ts';
+import { SetupScanSchema } from '../../../contract/wire/setup.ts';
+import {
+  claudeProjectFolders,
+  type HostDocumentRead,
+  type HostHarnessScan,
+  type ImportPlan,
+  planImport,
+} from '../../../daemon/lib/account/import.ts';
+
+/** Placeholder secret values: shaped like real ones so detection fires, worthless as credentials. */
+const FAKE_KEY = 'sk-placeholder-not-a-real-key-0000';
+
+const digest = (text: string): string => String(Bun.hash(text));
+const text = (source: string, body: string): HostDocumentRead => ({
+  kind: 'text',
+  source,
+  text: body,
+  bytes: body.length,
+});
+const absent = (source: string): HostDocumentRead => ({ kind: 'absent', source });
+
+const claude = (patch: Partial<HostHarnessScan> = {}): HostHarnessScan => ({
+  harness: 'claude',
+  command: '/bin/claude',
+  login: { state: 'signed-in' },
+  instructions: text('/h/.claude/CLAUDE.md', '# Claude words\n'),
+  settings: text(
+    '/h/.claude/settings.json',
+    JSON.stringify({
+      model: 'claude-opus-5',
+      env: { ANTHROPIC_API_KEY: FAKE_KEY, LOG_LEVEL: 'debug' },
+      hooks: { PostToolUse: [{ matcher: 'Edit', hooks: [{ type: 'command', command: 'fmt' }] }] },
+    }),
+  ),
+  mcp: text(
+    '/h/.claude.json',
+    JSON.stringify({
+      mcpServers: {
+        notes: { command: 'uvx', args: ['notes'] },
+        docs: { type: 'http', url: 'https://mcp.example.test/' },
+      },
+      projects: { '/work/app': { allowedTools: [] }, '/work/lib': {}, relative: {}, '/bad\npath': {} },
+    }),
+  ),
+  skills: [
+    { item: 'review', source: '/h/.claude/skills/review', digest: 'a' },
+    { item: 'deploy', source: '/h/.claude/skills/deploy', digest: 'b' },
+  ],
+  missingCommands: [],
+  problems: [],
+  ...patch,
+});
+
+const codex = (patch: Partial<HostHarnessScan> = {}): HostHarnessScan => ({
+  harness: 'codex',
+  command: '/bin/codex',
+  login: { state: 'signed-in' },
+  instructions: text('/h/.codex/AGENTS.md', '# Codex words\n'),
+  settings: text(
+    '/h/.codex/config.toml',
+    [
+      'model = "gpt-5.6"',
+      '[shell_environment_policy.set]',
+      `OPENAI_API_KEY = "${FAKE_KEY}"`,
+      '[profiles.fast]',
+      'model = "gpt-5.6-mini"',
+      'model_reasoning_effort = "low"',
+      'approval_policy = "never"',
+      '[profiles.deep]',
+      'model_reasoning_effort = "high"',
+      '[mcp_servers.linear]',
+      'command = "npx"',
+    ].join('\n'),
+  ),
+  hooks: text('/h/.codex/hooks.json', JSON.stringify({ hooks: { Stop: [{ command: 'bell' }, { command: 'ding' }] } })),
+  skills: [{ item: 'review', source: '/h/.codex/skills/review', digest: 'c' }],
+  missingCommands: [],
+  problems: [],
+  ...patch,
+});
+
+const kinds = (plan: ImportPlan): string[] => plan.components.map(item => `${item.kind}/${item.name}`);
+const everything = (plan: ImportPlan): string => JSON.stringify(plan);
+
+describe('planImport — items the person skipped', () => {
+  it('should leave a skipped MCP server out of the plan', () => {
+    const plan = planImport([claude()], { digest, skip: [importNamedItemId('claude-code', 'mcp', 'notes')] });
+
+    should(kinds(plan)).containEql('mcp/docs');
+    should(kinds(plan)).not.containEql('mcp/notes');
+    should(plan.preview.harnesses[0]?.mcpServers).deepEqual(['docs']);
+  });
+
+  it('should leave a skipped skill out of the plan, its folder copy included', () => {
+    const plan = planImport([claude()], { digest, skip: [importNamedItemId('claude-code', 'skill', 'deploy')] });
+
+    should(plan.components.find(item => item.kind === 'skills')?.value).deepEqual({ items: ['review'] });
+    should(plan.files.map(file => file.path)).not.containEql('skills/deploy');
+    should(plan.files.map(file => file.path)).containEql('skills/review');
+  });
+
+  it('should leave skipped instructions out of the plan', () => {
+    const plan = planImport([claude()], { digest, skip: [importItemId('claude-code', 'instructions')] });
+
+    should(kinds(plan).some(reference => reference.startsWith('instructions/'))).be.false();
+    should(plan.files.some(file => file.path.startsWith('components/instructions/'))).be.false();
+    should(plan.preview.harnesses[0]?.instructions).be.undefined();
+  });
+
+  it('should leave skipped settings out but still import the env, and the reverse', () => {
+    const noSettings = planImport([claude()], { digest, skip: [importItemId('claude-code', 'settings')] });
+    const settings = noSettings.components.find(item => item.kind === 'settings')?.value as {
+      file?: string;
+      env?: unknown;
+    };
+    should(settings.file).be.undefined();
+    should(settings.env).deepEqual({ LOG_LEVEL: 'debug', ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}' });
+
+    const noEnv = planImport([claude()], { digest, skip: [importItemId('claude-code', 'env')] });
+    const kept = noEnv.components.find(item => item.kind === 'settings')?.value as { file?: string; env?: unknown };
+    should(kept.file).be.a.String();
+    should(kept.env).be.undefined();
+  });
+
+  it('should move no secret when the env that held it is skipped', () => {
+    const claudeSkipped = planImport([claude()], { digest, skip: [importItemId('claude-code', 'env')] });
+    should(claudeSkipped.secrets).deepEqual([]);
+    should(claudeSkipped.preview.harnesses[0]?.secretKeys).deepEqual([]);
+    should(everything(claudeSkipped)).not.containEql(FAKE_KEY);
+
+    const codexSkipped = planImport([codex()], { digest, skip: [importItemId('codex', 'env')] });
+    should(codexSkipped.secrets).deepEqual([]);
+    should(everything(codexSkipped)).not.containEql(FAKE_KEY);
+
+    const kept = planImport([claude(), codex()], { digest });
+    should(kept.secrets.length).be.above(0);
+  });
+
+  it('should leave the other harness alone when one harness item is skipped', () => {
+    const plan = planImport([claude(), codex()], { digest, skip: [importNamedItemId('codex', 'skill', 'review')] });
+
+    should(plan.components.find(item => item.kind === 'skills')?.value).deepEqual({
+      items: ['review', 'deploy'],
+      harness: 'claude',
+    });
+  });
+
+  it('should ignore an item that is not there', () => {
+    const base = planImport([claude()], { digest });
+    const same = planImport([claude()], { digest, skip: [importNamedItemId('claude-code', 'mcp', 'nothing')] });
+
+    should(kinds(same)).deepEqual(kinds(base));
+  });
+});
+
+describe('planImport — hooks are never imported', () => {
+  it('should make no hooks component and no profile layer, for either harness', () => {
+    const plan = planImport([claude(), codex()], { digest });
+
+    should(kinds(plan).some(reference => reference.startsWith('hooks/'))).be.false();
+    should(plan.files.some(file => file.path.includes('hooks'))).be.false();
+    for (const profile of Object.values(plan.profiles)) {
+      should(profile.layers.some(layer => layer.startsWith('hooks/'))).be.false();
+    }
+    should(everything(plan)).not.containEql('fmt');
+    should(everything(plan)).not.containEql('bell');
+  });
+
+  it('should still count them for the screen, by where they are', () => {
+    const plan = planImport([claude(), codex()], { digest });
+
+    should(plan.preview.harnesses[0]?.settings?.hooks).equal(1);
+    should(plan.preview.harnesses[1]?.settings?.hooks).equal(2);
+  });
+
+  it('should treat hooks alone as nothing found: a Starter profile, not a Default', () => {
+    const plan = planImport(
+      [
+        codex({
+          instructions: absent('/h/.codex/AGENTS.md'),
+          settings: absent('/h/.codex/config.toml'),
+          skills: [],
+        }),
+      ],
+      { digest },
+    );
+
+    should(Object.keys(plan.profiles)).deepEqual(['codex-starter']);
+    should(plan.preview.harnesses[0]?.settings?.hooks).equal(2);
+  });
+});
+
+describe('planImport — hints that are listed, not imported', () => {
+  it('should list the Codex profiles with only their name, model and effort', () => {
+    const plan = planImport([codex()], { digest });
+
+    should(plan.preview.harnesses[0]?.codexProfiles).deepEqual([
+      { name: 'fast', model: 'gpt-5.6-mini', effort: 'low' },
+      { name: 'deep', effort: 'high' },
+    ]);
+    should(JSON.stringify(plan.preview.harnesses[0]?.codexProfiles)).not.containEql('approval_policy');
+  });
+
+  it('should list no Codex profiles for Claude', () => {
+    should(planImport([claude()], { digest }).preview.harnesses[0]?.codexProfiles).deepEqual([]);
+  });
+
+  it('should name the project folders Claude keeps, absolute and printable only, and read nothing in them', () => {
+    should(claudeProjectFolders(claude())).deepEqual(['/work/app', '/work/lib']);
+    should(claudeProjectFolders(codex())).deepEqual([]);
+    should(claudeProjectFolders(claude({ mcp: absent('/h/.claude.json') }))).deepEqual([]);
+    should(claudeProjectFolders(claude({ mcp: text('/h/.claude.json', 'not json') }))).deepEqual([]);
+  });
+
+  it('should carry the hints a scan was given into the preview, and make nothing of them', () => {
+    const hints = [{ path: '/work/app', file: 'CLAUDE.md', verified: false }];
+    const plan = planImport([claude({ projectInstructions: hints })], { digest });
+
+    should(plan.preview.harnesses[0]?.projectInstructions).deepEqual(hints);
+    should(kinds(plan).some(reference => reference.includes('work'))).be.false();
+    should(plan.files.some(file => file.path.includes('work'))).be.false();
+  });
+});
+
+describe('the wire contract for skip and the scan', () => {
+  it('should accept the item grammar and refuse anything else', () => {
+    for (const id of [
+      'claude-code:instructions',
+      'claude-code:env',
+      'codex:settings',
+      'claude-code:mcp:notes',
+      'codex:skill:review',
+      'codex:profile:fast',
+    ]) {
+      should(ImportItemIdSchema.safeParse(id).success).be.true();
+    }
+    for (const id of [
+      '',
+      'claude:instructions',
+      'codex:hooks',
+      'codex:mcp',
+      'codex:mcp:',
+      'codex:instructions:extra',
+      'codex:skill:a:b',
+      `codex:skill:${'x'.repeat(201)}`,
+    ]) {
+      should(ImportItemIdSchema.safeParse(id).success).be.false();
+    }
+  });
+
+  it('should round-trip a plan preview through the scan schema without a value', () => {
+    const plan = planImport(
+      [claude({ projectInstructions: [{ path: '/work/app', file: 'CLAUDE.md', verified: true }] }), codex()],
+      { digest },
+    );
+    const body = {
+      machine: 'm',
+      format: 'none',
+      tools: [],
+      harnesses: plan.preview.harnesses.map(harness => ({
+        ...harness,
+        harness: harness.harness === 'claude' ? 'claude-code' : 'codex',
+      })),
+      runtimes: [],
+      updates: [],
+      duplicates: [],
+      notes: [],
+      importing: { available: true },
+    };
+
+    should(SetupScanSchema.safeParse(body).success).be.true();
+    should(JSON.stringify(body)).not.containEql(FAKE_KEY);
+  });
+});
