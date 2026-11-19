@@ -40,4 +40,19 @@ describe('pulls daemon', () => {
     await host.settle();
     expect(folder.rawBytes(PULLS_CACHE, `${P1}/gha_4242-aaaa.json`)).toBeUndefined();
   });
+
+  test('the sweep job drops a project that is gone and an account that is gone, and keeps the rest', async () => {
+    const host = await boot(new FakeGithub(), [{ id: P1 }]);
+    const { PULLS_CACHE } = await import('../../contract/index.ts');
+    const folder = host.state('pulls');
+    const plant = (name: string) => folder.plantBytes(PULLS_CACHE, new TextEncoder().encode('{}'), name);
+    const P2 = '22222222-2222-4222-8222-222222222222';
+    plant(`${P1}/gha_4242-keep.json`); // a known project and account
+    plant(`${P1}/gha_7-gone.json`); // the account was removed
+    plant(`${P2}/gha_4242-gone.json`); // the project was removed
+    await host.runJob('cache-reconcile');
+    expect(folder.rawBytes(PULLS_CACHE, `${P1}/gha_4242-keep.json`)).toBeDefined();
+    expect(folder.rawBytes(PULLS_CACHE, `${P1}/gha_7-gone.json`)).toBeUndefined();
+    expect(folder.rawBytes(PULLS_CACHE, `${P2}/gha_4242-gone.json`)).toBeUndefined();
+  });
 });

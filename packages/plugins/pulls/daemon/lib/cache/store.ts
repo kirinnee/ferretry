@@ -89,14 +89,20 @@ export class PullsCache {
     });
   }
 
-  /** Deletes everything kept for a project, and its folder. */
+  /** Deletes everything kept for a project, and its folder. A file that will not go is logged; the next sweep retries. */
   async purgeProject(project: string): Promise<void> {
     if (!PROJECT_DIR.test(project)) return;
     await this.#serial(async () => {
-      for (const file of await this.state.entries(PULLS_CACHE, project))
-        if (file.kind === 'file') await this.state.remove(PULLS_CACHE, `${project}/${file.name}`);
-      await this.state.removeEmptyDirectory(PULLS_CACHE, project).catch(() => undefined);
-      this.#index.delete(project);
+      try {
+        for (const file of await this.state.entries(PULLS_CACHE, project))
+          if (file.kind === 'file') await this.state.remove(PULLS_CACHE, `${project}/${file.name}`);
+        await this.state.removeEmptyDirectory(PULLS_CACHE, project).catch(() => undefined);
+        this.#index.delete(project);
+      } catch (error) {
+        this.log.warn("a removed project's cache could not be deleted; the next sweep retries", {
+          reason: error instanceof Error ? error.name : 'error',
+        });
+      }
     });
   }
 

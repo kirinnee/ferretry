@@ -3,6 +3,7 @@ import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import type { Log } from '@ferretry/kernel/contract';
 import type { GitAccountId } from '@ferretry/plugin-git-accounts/contract';
 import { PULLS_CACHE, PULLS_CODES } from '../../contract/index.ts';
+import { RateBudget } from '../../daemon/adapters/github/budget.ts';
 import { GithubClient } from '../../daemon/adapters/github/client.ts';
 import { nextPagePath } from '../../daemon/adapters/github/link.ts';
 import { PullsCache } from '../../daemon/lib/cache/store.ts';
@@ -78,6 +79,29 @@ describe('conditional reads', () => {
   });
 });
 
+describe('answers that are not a body', () => {
+  test('a refusal is denied, a server error is a GitHub error, a 304 with nothing cached is an error; none carries GitHub’s text', async () => {
+    const w = world();
+    w.github.fail('/repos/o/r/forbidden', 403);
+    w.github.fail('/repos/o/r/broken', 500);
+    w.github.on('GET', '/repos/o/r/odd', () => ({ status: 304 }));
+    const denied = await w.client.get(w.reading('/repos/o/r/forbidden'));
+    const broken = await w.client.get(w.reading('/repos/o/r/broken'));
+    const odd = await w.client.get(w.reading('/repos/o/r/odd'));
+    expect(!denied.ok && denied.error).toMatchObject({ code: PULLS_CODES.denied, status: 403 });
+    expect(!broken.ok && broken.error).toMatchObject({ code: PULLS_CODES.github, status: 500 });
+    expect(!odd.ok && odd.error).toMatchObject({ code: PULLS_CODES.github, status: 304 });
+    expect(JSON.stringify([denied, broken, odd])).not.toContain('fake failure');
+  });
+
+  test('a list read that gets an object says so', async () => {
+    const w = world();
+    w.github.set('/repos/o/r/object', { a: 1 });
+    const read = await w.client.getAll(w.reading('/repos/o/r/object'));
+    expect(!read.ok && read.error.code).toBe(PULLS_CODES.github);
+  });
+});
+
 describe('paging', () => {
   const items = Array.from({ length: 5 }, (_, i) => ({ n: i + 1 }));
 
@@ -113,6 +137,7 @@ describe('paging', () => {
     expect(nextPagePath('<http://api.github.com/x?page=2>; rel="next"')).toBeUndefined();
     expect(nextPagePath('<https://user:pw@api.github.com/x>; rel="next"')).toBeUndefined();
     expect(nextPagePath('<https://api.github.com/x?page=1>; rel="prev"')).toBeUndefined();
+    expect(nextPagePath('<not a url>; rel="next"')).toBeUndefined();
     expect(nextPagePath(undefined)).toBeUndefined();
   });
 });
@@ -176,15 +201,27 @@ describe('the rate budget', () => {
     expect(w.client.budget.pausedUntil(FAKE_ACCOUNT, 'rest')).toBe(NOW_SEC * 1000 + 3_600_000);
   });
 
-  test('REST and GraphQL are separate buckets; a removed account is forgotten', async () => {
+  test('REST and GraphQL are separate buckets', async () => {
     const w = world();
     w.github.set('/repos/o/r', { id: 1 });
     w.github.rate(100, NOW_SEC + 600);
     await w.client.get(w.reading('/repos/o/r'));
     expect(w.client.budget.pausedUntil(FAKE_ACCOUNT, 'rest')).toBeDefined();
     expect(w.client.budget.pausedUntil(FAKE_ACCOUNT, 'graphql')).toBeUndefined();
-    w.client.budget.forget(FAKE_ACCOUNT);
-    expect(w.client.budget.snapshot()).toEqual([]);
+  });
+});
+
+describe('the budget with nothing to read', () => {
+  test('a 429 or 403 with no usable headers pauses for a minute; other answers with none change nothing', () => {
+    let now = 5_000_000;
+    const budget = new RateBudget(() => now);
+    budget.observe(FAKE_ACCOUNT, 'rest', {}, 200);
+    budget.observe(FAKE_ACCOUNT, 'rest', { rateLimitRemaining: 'many', rateLimitReset: 'soon' }, 500);
+    expect(budget.snapshot()).toEqual([]);
+    budget.observe(FAKE_ACCOUNT, 'rest', {}, 429);
+    expect(budget.pausedUntil(FAKE_ACCOUNT, 'rest')).toBe(now + 60_000);
+    now += 60_001;
+    expect(budget.pausedUntil(FAKE_ACCOUNT, 'rest')).toBeUndefined();
   });
 });
 

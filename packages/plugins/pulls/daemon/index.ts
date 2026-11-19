@@ -3,6 +3,7 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { GithubClient } from './adapters/github/client.ts';
 import { PullsCache } from './lib/cache/store.ts';
+import { pullsRoutes } from './routes.ts';
 
 const RECONCILE_EVERY = milliseconds(10 * 60_000);
 
@@ -17,12 +18,10 @@ export default implementDaemon(manifest, {
     const github = new GithubClient(needs.gitAccounts, cache, () => kernel.clock.nowMs(), kernel.log);
 
     // A removed project and a removed account take their cached private code with them. A project's removal says so
-    // by event; an account's does not, so the same sweep also runs at boot and on a timer.
+    // by event; an account's does not, so a sweep also runs on a timer.
     const reconcile = async (): Promise<void> => {
       const [projects, accounts] = await Promise.all([needs.projects.list(), needs.gitAccounts.list()]);
       await cache.reconcile(new Set(projects.map(project => project.id)), new Set(accounts.map(account => account.id)));
-      for (const known of github.budget.snapshot())
-        if (!accounts.some(account => account.id === known.account)) github.budget.forget(known.account);
     };
     kernel.jobs.add({
       id: 'cache-reconcile',
@@ -32,15 +31,10 @@ export default implementDaemon(manifest, {
     });
 
     return {
-      routes: [],
+      routes: pullsRoutes({ github, cache }),
       subscribers: {
-        'projects.removed': payload => {
-          void cache.purgeProject((payload as { id: string }).id).catch(() => {
-            kernel.log.warn("a removed project's cache could not be deleted; the next sweep retries");
-          });
-        },
+        'projects.removed': payload => void cache.purgeProject((payload as { id: string }).id),
       },
-      // E1 files no route and offers no port; the plugin's data is read by its own later units.
     };
   },
 });

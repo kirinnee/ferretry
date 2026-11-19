@@ -84,9 +84,4 @@ export class RateBudget {
     }
     return out;
   }
-
-  /** Forgets an account (it was removed). */
-  forget(account: GitAccountId): void {
-    for (const key of [...this.#buckets.keys()]) if (key.startsWith(`${account}:`)) this.#buckets.delete(key);
-  }
 }

@@ -20,6 +20,36 @@ function world() {
 const big = (megabytes: number): string => 'x'.repeat(megabytes * 1024 * 1024);
 
 describe('the per-project cache', () => {
+  test('a fresh process reads what an earlier one kept (its index is rebuilt from the folder)', async () => {
+    const w = world();
+    await w.cache.put(P1, A1, '/a', { etag: 'e', body: 'first' });
+    const later = new PullsCache(w.folder.port([PULLS_CACHE]), () => 5_000, quiet);
+    const before = await later.usage(P1);
+    expect(before.files).toBe(1);
+    expect(before.bytes).toBeGreaterThan(0);
+    await later.put(P1, A1, '/b', { etag: 'e', body: 'second' });
+    expect(await later.usage(P1)).toMatchObject({ files: 2 });
+  });
+
+  test('a file that cannot be removed while fitting is warned about, and the write still stands', async () => {
+    const w = world();
+    const warned: string[] = [];
+    const port = w.folder.port([PULLS_CACHE]);
+    const stuck = new PullsCache({ ...port, remove: async () => Promise.reject(new Error('read-only')) }, () => 1_000, {
+      ...quiet,
+      warn: message => void warned.push(message),
+    });
+    for (const n of [1, 2, 3, 4, 5]) await stuck.put(P1, A1, `/p${n}`, { etag: 'e', body: big(7) });
+    expect(warned).toEqual(['a cache file could not be removed']);
+    expect(await stuck.get(P1, A1, '/p5')).toBeDefined();
+    // A purge that cannot remove a file says so and leaves the retry to the sweep.
+    await stuck.purgeProject(P1);
+    expect(warned).toEqual([
+      'a cache file could not be removed',
+      "a removed project's cache could not be deleted; the next sweep retries",
+    ]);
+  });
+
   test('keeps an answer, its validator and its Link, per account', async () => {
     const w = world();
     await w.cache.put(P1, A1, '/p', {
