@@ -75,3 +75,146 @@
     transform: translate3d(14%, 18%, 0);
   }
 }
+
+/* ───────── stars (r10 O3): a still sky and three shooting streaks, `stars` on ───────── */
+.fy-lb-sky {
+  --fy-lb-star: color-mix(in srgb, var(--accent) 60%, var(--fg));
+  color: var(--fy-lb-star);
+  inset: 0;
+  position: absolute;
+  /* Like the grid, the sky thins out behind the content: texture at the edges, never behind a line of text. */
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 42%, transparent 0 30%, #000 92%);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 42%, transparent 0 30%, #000 92%);
+}
+/* ONE element, 17 faint stars as shadows (12 here, 5 larger on ::after): a still layer that never animates. */
+.fy-lb-stars,
+.fy-lb-stars::after {
+  border-radius: 50%;
+  content: '';
+  height: 1.5px;
+  left: 0;
+  opacity: 0.55;
+  position: absolute;
+  top: 0;
+  width: 1.5px;
+}
+.fy-lb-stars {
+  box-shadow:
+    4vw 7vh 0 0 currentColor,
+    13vw 3vh 0 0 currentColor,
+    22vw 16vh 0 0 currentColor,
+    35vw 6vh 0 0 currentColor,
+    61vw 9vh 0 0 currentColor,
+    74vw 4vh 0 0 currentColor,
+    93vw 12vh 0 0 currentColor,
+    6vw 46vh 0 0 currentColor,
+    95vw 51vh 0 0 currentColor,
+    9vw 84vh 0 0 currentColor,
+    47vw 93vh 0 0 currentColor,
+    88vw 88vh 0 0 currentColor;
+}
+.fy-lb-stars::after {
+  box-shadow:
+    18vw 27vh 0 0 currentColor,
+    83vw 24vh 0 0 currentColor,
+    27vw 72vh 0 0 currentColor,
+    69vw 79vh 0 0 currentColor,
+    55vw 18vh 0 0 currentColor;
+  height: 2.5px;
+  opacity: 0.7;
+  width: 2.5px;
+}
+/* A streak rests invisible: with motion off it is never drawn, and nothing here is in the layout flow. */
+.fy-lb-streak {
+  background: linear-gradient(90deg, transparent, currentColor);
+  border-radius: 2px;
+  height: 2px;
+  opacity: 0;
+  position: absolute;
+  transform: rotate(var(--fy-lb-angle)) translate3d(0, 0, 0);
+  transform-origin: 100% 50%;
+  width: 120px;
+}
+.fy-lb-streak-a {
+  --fy-lb-angle: 24deg;
+  left: 14%;
+  top: 8%;
+}
+.fy-lb-streak-b {
+  --fy-lb-angle: 30deg;
+  left: 62%;
+  top: 5%;
+}
+.fy-lb-streak-c {
+  --fy-lb-angle: 20deg;
+  left: 4%;
+  top: 56%;
+}
+/* One 28 s loop each; a streak is on screen for 2 s of it. Starts at 4, 13 and 21 s: a streak every 9, 8 or 11 s. */
+.fy-lb[data-live] .fy-lb-streak {
+  animation: fy-lb-shoot 28s ease-in infinite;
+  will-change: transform, opacity;
+}
+.fy-lb[data-live] .fy-lb-streak-a {
+  animation-delay: 4s;
+}
+.fy-lb[data-live] .fy-lb-streak-b {
+  animation-delay: 13s;
+}
+.fy-lb[data-live] .fy-lb-streak-c {
+  animation-delay: 21s;
+}
+.fy-lb[data-live][data-paused] .fy-lb-streak {
+  animation-play-state: paused;
+}
+/* A phone's copy runs edge to edge, so the radial thinning above leaves stars and streaks right behind the muted lines
+   (4.40:1 measured, below 4.5). On a narrow screen the sky lives only in the band under where the page's content ends, and the
+   streaks are moved into that band. A page tall enough to scroll can still carry a line through the band for a moment. */
+@media (max-width: 640px) {
+  /* The same goes for the grid: a dot under a muted glyph took the copy under 4.5:1 at the top of a breath, so on a phone
+     the breath is softer (same name, same movement, a fainter peak). */
+  @keyframes fy-lb-breathe {
+    0%,
+    100% {
+      opacity: 0.04;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.1;
+      transform: scale(1.04);
+    }
+  }
+  .fy-lb-sky {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0 74%, #000 88%);
+    mask-image: linear-gradient(to bottom, transparent 0 74%, #000 88%);
+  }
+  .fy-lb-streak-a {
+    left: 6%;
+    top: 82%;
+  }
+  .fy-lb-streak-b {
+    left: 52%;
+    top: 86%;
+  }
+  .fy-lb-streak-c {
+    left: 28%;
+    top: 84%;
+  }
+}
+@keyframes fy-lb-shoot {
+  0% {
+    opacity: 0;
+    transform: rotate(var(--fy-lb-angle)) translate3d(0, 0, 0);
+  }
+  1.5% {
+    opacity: 0.2;
+  }
+  7% {
+    opacity: 0;
+    transform: rotate(var(--fy-lb-angle)) translate3d(320px, 0, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--fy-lb-angle)) translate3d(320px, 0, 0);
+  }
+}
