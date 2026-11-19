@@ -30,7 +30,7 @@ const SYSTEM_PATH = '/usr/local/bin:/usr/bin:/bin';
 /** The merged pairs of every `pane-env` part (and a composed `PATH` when one asks to prepend), or the sentence that refuses the launch. */
 export function paneEnvironment(
   parts: readonly LaunchPart[],
-  daemonPath?: string,
+  daemonPath?: () => string | undefined,
 ): Result<Readonly<Record<string, string>>, string> {
   const merged: Record<string, string> = {};
   const prepend: string[] = [];
@@ -54,7 +54,8 @@ export function paneEnvironment(
     }
   }
   if (prepend.length > 0) {
-    const base = daemonPath === undefined || daemonPath === '' ? SYSTEM_PATH : daemonPath;
+    const known = daemonPath?.();
+    const base = known === undefined || known === '' ? SYSTEM_PATH : known;
     merged.PATH = [...prepend, base].join(':');
   }
   return ok(merged);

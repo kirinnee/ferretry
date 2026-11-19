@@ -137,6 +137,14 @@ describe('a pane-env launch part', () => {
     expect(f.asked[0]?.PATH).toBe('/fy/shims:/fy/other:/usr/bin:/bin');
   });
 
+  test('the daemon’s PATH is asked only when a part prepends (a daemon that cannot answer still starts ferrets)', () => {
+    const unaskable = () => {
+      throw new Error('not asked');
+    };
+    expect(paneEnvironment([pane({ A: '1' })], unaskable)).toEqual({ ok: true, value: { A: '1' } });
+    expect(paneEnvironment([], unaskable)).toEqual({ ok: true, value: {} });
+  });
+
   test('no pathPrepend leaves PATH alone (the kernel adds the daemon’s at spawn)', async () => {
     const f = fixture([answering([pane({ A: '1' })])], '/usr/bin');
     await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
@@ -148,7 +156,7 @@ describe('a pane-env launch part', () => {
       ok: true,
       value: { PATH: '/fy/shims:/usr/local/bin:/usr/bin:/bin' },
     });
-    expect(paneEnvironment([pane({}, 'p', ['/fy/shims'])], '')).toEqual({
+    expect(paneEnvironment([pane({}, 'p', ['/fy/shims'])], () => '')).toEqual({
       ok: true,
       value: { PATH: '/fy/shims:/usr/local/bin:/usr/bin:/bin' },
     });
