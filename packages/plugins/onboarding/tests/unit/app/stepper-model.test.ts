@@ -6,6 +6,7 @@ import {
   STEP_IDS,
   type StepperFacts,
   UNKNOWN_FACTS,
+  hasKnownOpenStep,
   withFact,
 } from '../../../app/features/stepper/stepper-model.ts';
 
@@ -67,11 +68,11 @@ describe('the first-run stepper derivation', () => {
     ]);
   });
 
-  it('a fact the machine could not say is unknown, never guessed open or done, and never the current step', () => {
+  it('a fact the machine could not say is unknown, never guessed open or done, and nothing after it is the current step', () => {
     expect(states({ ...UNKNOWN_FACTS, name: false })).toEqual([
       'pair:done',
       'passkey:unknown',
-      'name:current',
+      'name:next',
       'login:unknown',
       'runtime:unknown',
       'ferret:unknown',
@@ -82,6 +83,8 @@ describe('the first-run stepper derivation', () => {
     expect(hasOpenStep(deriveSteps(facts({})))).toBe(false);
     expect(hasOpenStep(deriveSteps(UNKNOWN_FACTS))).toBe(false);
     expect(hasOpenStep(deriveSteps(facts({ ferret: false })))).toBe(true);
+    // An open step behind an unread one is not drawn yet: it would be the wrong button once the earlier one answers.
+    expect(hasOpenStep(deriveSteps({ ...UNKNOWN_FACTS, login: false }))).toBe(false);
   });
 
   it('is finished only when every step is known and done', () => {
@@ -108,5 +111,11 @@ describe('the first-run stepper derivation', () => {
     expect(withFact(facts({ login: false }), 'login', 'locked').login).toBe(false);
     expect(withFact(UNKNOWN_FACTS, 'login', 'locked').login).toBe('locked');
     expect(withFact(facts({ login: 'locked' }), 'login', true).login).toBe(true);
+  });
+
+  it('only a step the machine said is not done counts as known open (an Unlock wait does not)', () => {
+    expect(hasKnownOpenStep(deriveSteps(facts({ passkey: 'locked', login: 'locked' })))).toBe(false);
+    expect(hasKnownOpenStep(deriveSteps(facts({ passkey: 'locked', login: false })))).toBe(true);
+    expect(hasKnownOpenStep(deriveSteps(facts({})))).toBe(false);
   });
 });

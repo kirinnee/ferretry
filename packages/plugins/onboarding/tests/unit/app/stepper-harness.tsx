@@ -32,6 +32,8 @@ export class StepperHarness {
   #calls = 0;
   readonly #listeners = new Set<() => void>();
   readonly #silent: boolean;
+  #holdPasskey: Promise<void> | undefined;
+  #releasePasskey: () => void = () => undefined;
 
   private constructor(held: Held, storage: StepperStorage | undefined, silent: boolean) {
     this.#held = held;
@@ -54,6 +56,18 @@ export class StepperHarness {
 
   calls = (): number => this.#calls;
 
+  /** The passkey read answers only once `releasePasskey` is called (the others answer at once): a slow read among quick ones. */
+  holdPasskey(): this {
+    this.#holdPasskey = new Promise(resolve => {
+      this.#releasePasskey = resolve;
+    });
+    return this;
+  }
+
+  releasePasskey(): void {
+    this.#releasePasskey();
+  }
+
   change(held: Held): void {
     this.#held = held;
     for (const listener of this.#listeners) listener();
@@ -75,6 +89,7 @@ export class StepperHarness {
     call: (async (route: string) => {
       this.#calls += 1;
       if (this.#silent) return await new Promise(() => undefined);
+      if (route === 'GET /v1/passkeys') await this.#holdPasskey;
       return answersFor(this.#held)[route];
     }) as never,
     subscribe: ((_event: unknown, listener: () => void) => {

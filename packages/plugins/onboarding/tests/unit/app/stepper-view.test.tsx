@@ -136,3 +136,48 @@ describe('the stepper on a machine', () => {
     await view.unmount();
   });
 });
+
+describe('the stepper through a lock and a slow read', () => {
+  it('an already set-up machine that was LOCKED shows the Unlock card, and after the unlock shows NOTHING (no false "set up" card)', async () => {
+    const harness = StepperHarness.answering({});
+    const view = await mount(<harness.Component locked />);
+    await harness.settle();
+    expect(view.container.querySelector('[data-first-run-stepper="open"]')).not.toBeNull();
+    await view.render(<harness.Component locked={false} />);
+    await harness.settle();
+    expect(view.container.querySelector('[data-first-run-stepper]')).toBeNull();
+    await view.unmount();
+    // ...and after a reload on the same storage too.
+    const again = StepperHarness.answering({}, harness.storage);
+    const reloaded = await mount(<again.Component />);
+    await again.settle();
+    expect(reloaded.container.querySelector('[data-first-run-stepper]')).toBeNull();
+    await reloaded.unmount();
+  });
+
+  it('with no passkey and no login, a slow passkey read draws nothing, then Passkey as the current step (never Login first)', async () => {
+    const harness = StepperHarness.answering({ passkey: false, login: false }).holdPasskey();
+    const view = await mount(<harness.Component />);
+    await harness.settle(); // every other read has answered; the passkey one has not
+    expect(view.container.querySelector('[data-first-run-stepper]')).toBeNull();
+    harness.releasePasskey();
+    await harness.settle();
+    const current = [...view.container.querySelectorAll('[data-state="current"]')].map(item =>
+      item.getAttribute('data-step'),
+    );
+    expect(current).toEqual(['passkey']);
+    await view.unmount();
+  });
+
+  it('a slow passkey read behind remembered steps keeps the remembered current step, not a different one', async () => {
+    const first = StepperHarness.answering({ passkey: false, login: false });
+    const before = await mount(<first.Component />);
+    await first.settle();
+    await before.unmount();
+    const reloaded = StepperHarness.answering({ passkey: false, login: false }, first.storage).holdPasskey();
+    const after = await mount(<reloaded.Component />);
+    await reloaded.settle();
+    expect(after.container.querySelector('[data-state="current"]')?.getAttribute('data-step')).toBe('passkey');
+    await after.unmount();
+  });
+});

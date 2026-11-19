@@ -16,6 +16,7 @@ import { readStepperFacts } from './stepper-facts.ts';
 import {
   allDone,
   deriveSteps,
+  hasKnownOpenStep,
   hasOpenStep,
   type StepperFacts,
   type StepperStep,
@@ -69,13 +70,16 @@ export function useStepper(
   const steps = useMemo(() => (facts === undefined ? undefined : deriveSteps(facts)), [facts]);
   // A step opening again ends an old dismissal: the stepper has something to say.
   const open = steps !== undefined && hasOpenStep(steps);
+  // "Seen open" is earned by work the machine said is not done; an Unlock card alone is not work (after the unlock a
+  // machine that was already set up must show nothing, not a "set up" card for something this device never saw).
+  const knownOpen = steps !== undefined && hasKnownOpenStep(steps);
   useEffect(() => {
     if (facts === undefined) return;
     const effective = open ? false : dismissed;
     if (open && dismissed) setDismissed(false);
-    if (open && !seenOpen) setSeenOpen(true);
-    writeStepperMemory(storage(), daemon, { facts, dismissed: effective, seenOpen: seenOpen || open });
-  }, [facts, dismissed, open, seenOpen, storage, daemon]);
+    if (knownOpen && !seenOpen) setSeenOpen(true);
+    writeStepperMemory(storage(), daemon, { facts, dismissed: effective, seenOpen: seenOpen || knownOpen });
+  }, [facts, dismissed, open, knownOpen, seenOpen, storage, daemon]);
 
   const dismiss = useCallback(() => setDismissed(true), []);
   const visible = steps !== undefined && (open || (allDone(steps) && seenOpen && !dismissed));

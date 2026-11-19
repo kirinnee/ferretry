@@ -44,14 +44,21 @@ export const UNKNOWN_FACTS: StepperFacts = Object.freeze({
   ferret: undefined,
 });
 
-/** The six steps in order, each with its state. Exactly one step is `current` while any step is open. */
+/**
+ * The six steps in order, each with its state. Exactly one step is `current` while an open step is known. The current
+ * step is never chosen past a step that could not be read: a later step picked first would jump back to the earlier one
+ * when it answers (a button that moves), so while an EARLIER step is unknown no step is current and nothing is drawn.
+ */
 export const deriveSteps = (facts: StepperFacts): readonly StepperStep[] => {
   let currentTaken = false;
   return STEP_IDS.map((id): StepperStep => {
     const held = id === 'pair' ? true : facts[id];
     const title = STEP_TITLES[id];
     if (held === true) return { id, title, state: 'done' };
-    if (held === undefined) return { id, title, state: 'unknown' };
+    if (held === undefined) {
+      currentTaken = true; // nothing after an unknown step may be the one to do yet
+      return { id, title, state: 'unknown' };
+    }
     const lock = held === 'locked' ? ({ locked: true } as const) : {};
     if (currentTaken) return { id, title, state: 'next', ...lock };
     currentTaken = true;
@@ -59,9 +66,15 @@ export const deriveSteps = (facts: StepperFacts): readonly StepperStep[] => {
   });
 };
 
-/** Whether any step is known to be open: the only thing that shows the stepper. All done, or all unreadable, shows nothing. */
-export const hasOpenStep = (steps: readonly StepperStep[]): boolean =>
-  steps.some(step => step.state === 'current' || step.state === 'next');
+/** Whether a step is known to be the one to do: the only thing that shows the stepper. All done, or an unread step before the open one, shows nothing. */
+export const hasOpenStep = (steps: readonly StepperStep[]): boolean => steps.some(step => step.state === 'current');
+
+/**
+ * Whether a step the machine SAID is not done is open (a `false` fact), as opposed to one that is only waiting for an
+ * unlock: only the former means the person was ever shown work to do, so only it earns a "set up" card later.
+ */
+export const hasKnownOpenStep = (steps: readonly StepperStep[]): boolean =>
+  steps.some(step => (step.state === 'current' || step.state === 'next') && step.locked !== true);
 
 /** Every step is known and done: the moment the stepper may be dismissed (or goes away by itself). */
 export const allDone = (steps: readonly StepperStep[]): boolean => steps.every(step => step.state === 'done');
