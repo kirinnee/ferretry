@@ -63,7 +63,7 @@ export function BudgetsSettings({ connection, client, deviceTimeZone }: BudgetsS
 
   return (
     <section
-      className="flex min-w-0 flex-col gap-3"
+      className="flex min-w-0 flex-col gap-8"
       aria-labelledby="budgets-settings-heading"
       data-budgets-daemon={connection.daemonId}
     >
@@ -87,11 +87,12 @@ export function BudgetsSettings({ connection, client, deviceTimeZone }: BudgetsS
           No logins yet, so nothing to cap.
         </p>
       ) : null}
-      {state.status === 'ready'
-        ? state.logins.logins.map(login => (
-            <div key={login.id} className="flex min-w-0 flex-col gap-1" data-budgets-login={login.id}>
-              <h4 className="m-0 text-ui font-semibold text-fg">{login.label ?? login.email ?? login.id}</h4>
+      {state.status === 'ready' && state.logins.logins.length > 0 ? (
+        <div className="grid min-w-0 grid-cols-1 gap-8">
+          {state.logins.logins.map(login => (
+            <div key={login.id} className="min-w-0" data-budgets-login={login.id}>
               <BudgetEditor
+                label={login.label ?? login.email ?? login.id}
                 credential={{
                   id: login.id,
                   budget: state.standing.budgets.find(entry => entry.login === login.id)?.budget ?? login.budget,
@@ -103,8 +104,9 @@ export function BudgetsSettings({ connection, client, deviceTimeZone }: BudgetsS
                 {...(deviceTimeZone === undefined ? {} : { deviceTimeZone })}
               />
             </div>
-          ))
-        : null}
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

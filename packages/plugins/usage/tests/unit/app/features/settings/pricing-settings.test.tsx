@@ -231,6 +231,15 @@ const change = (renderer: ReactTestRenderer, attribute: string, value: string, n
   run(() => target.props.onChange({ currentTarget: { value: next } }));
 };
 
+/** The feed cards are one radio group: choosing a feed is selecting its radio. */
+const feedRadios = (renderer: ReactTestRenderer): ReactTestInstance[] =>
+  renderer.root.findAll(node => node.type === 'input' && node.props.type === 'radio');
+
+const chooseFeed = (renderer: ReactTestRenderer, id: string): void => {
+  const target = feedRadios(renderer).find(radio => radio.props.value === id);
+  if (target === undefined) throw new Error(`missing feed ${id}`);
+  run(() => target.props.onChange({ currentTarget: { value: id } }));
+};
 const toggle = (renderer: ReactTestRenderer, pricingKey: string, checked: boolean): void => {
   const target = marked(renderer, 'data-pricing-select', pricingKey)[0];
   if (target === undefined) throw new Error(`missing selection ${pricingKey}`);
@@ -277,14 +286,13 @@ describe('PricingSettings', () => {
 
     expect(marked(renderer, 'data-pricing-loading')).toHaveLength(0);
     expect(marked(renderer, 'data-pricing-row', 'openai:gpt-5:2026-08')).toHaveLength(1);
-    expect(marked(renderer, 'data-pricing-ledger', 'desktop')).toHaveLength(1);
-    expect(marked(renderer, 'data-pricing-ledger', 'mobile')).toHaveLength(1);
+    expect(marked(renderer, 'data-pricing-ledger')).toHaveLength(1);
     expect(rendered).toContain('gpt-5-2026-08-01');
     expect(rendered).toContain('$1.25 USD / million tokens');
     expect(rendered).toContain('Provider sync · ');
     expect(rendered).toContain('Last sync:');
-    expect(rendered).toContain('Image and tool rates can be recorded');
-    expect(rendered).toContain('Reasoning rates are applied when transcript evidence exists');
+    expect(rendered).toContain('Recorded, not applied: there is no reliable billable evidence.');
+    expect(rendered).toContain('Applied when transcript evidence exists');
     expect(rendered).toContain('do not provide a machine-readable first-party pricing API');
     expect(marked(renderer, 'data-pricing-daemon', 'alpha')).toHaveLength(1);
     expect(api.calls.map(call => call.connectionId)).toEqual(['alpha']);
@@ -449,16 +457,16 @@ describe('PricingSettings', () => {
     const api = pricingApi(pricingView(), preview(), applied);
     const renderer = await renderPricing(api);
 
-    const sourceSelect = marked(renderer, 'data-pricing-source-select')[0];
     const previewButton = marked(renderer, 'data-pricing-preview')[0];
-    expect(sourceSelect?.props.value).toBe('');
+    // The feeds are cards in one radio group: none is chosen yet, and a disabled feed cannot be.
+    expect(feedRadios(renderer).map(radio => radio.props.value)).toEqual(['openai-feed', 'anthropic-disabled']);
+    expect(feedRadios(renderer).some(radio => radio.props.checked === true)).toBe(false);
     expect(previewButton?.props.disabled).toBe(true);
-    const disabledOption = sourceSelect?.findAll(
-      node => node.type === 'option' && node.props.value === 'anthropic-disabled',
-    )[0];
-    expect(disabledOption?.props.disabled).toBe(true);
+    expect(feedRadios(renderer).find(radio => radio.props.value === 'anthropic-disabled')?.props.disabled).toBe(true);
 
-    run(() => sourceSelect?.props.onChange({ currentTarget: { value: 'openai-feed' } }));
+    chooseFeed(renderer, 'openai-feed');
+    expect(feedRadios(renderer).find(radio => radio.props.value === 'openai-feed')?.props.checked).toBe(true);
+    expect(marked(renderer, 'data-pricing-preview')[0]?.props.disabled).toBe(false);
     press(renderer, 'data-pricing-preview');
     await settle();
 
@@ -500,7 +508,7 @@ describe('PricingSettings', () => {
     );
     const renderer = await renderPricing(api);
 
-    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    chooseFeed(renderer, 'openai-feed');
     press(renderer, 'data-pricing-preview');
     await settle();
     toggle(renderer, manualRate().pricingKey, true);
@@ -632,13 +640,13 @@ describe('PricingSettings', () => {
     });
     const renderer = await renderPricing(api, connection('alpha'));
 
-    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    chooseFeed(renderer, 'openai-feed');
     press(renderer, 'data-pricing-preview');
     await settle();
 
     run(() => renderer.update(<ScopedPricing connection={connection('beta')} clientFor={api.clientFor} />));
     await settle();
-    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    chooseFeed(renderer, 'openai-feed');
     press(renderer, 'data-pricing-preview');
     await settle();
 
@@ -700,7 +708,7 @@ describe('PricingSettings', () => {
     });
     const renderer = await renderPricing(api, connection('alpha'));
 
-    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    chooseFeed(renderer, 'openai-feed');
     press(renderer, 'data-pricing-preview');
     await settle();
     toggle(renderer, manualRate().pricingKey, true);
@@ -709,7 +717,7 @@ describe('PricingSettings', () => {
 
     run(() => renderer.update(<ScopedPricing connection={connection('beta')} clientFor={api.clientFor} />));
     await settle();
-    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    chooseFeed(renderer, 'openai-feed');
     press(renderer, 'data-pricing-preview');
     await settle();
     toggle(renderer, manualRate().pricingKey, true);
@@ -816,7 +824,7 @@ describe('PricingSettings', () => {
     const api = pricingApi(pricingView(), new FyHttpError('sources moved', 409, 'pricing_stale_sources'));
     const renderer = await renderPricing(api);
 
-    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    chooseFeed(renderer, 'openai-feed');
     press(renderer, 'data-pricing-preview');
     await settle();
 
@@ -834,7 +842,7 @@ describe('PricingSettings', () => {
     const api = pricingApi(pricingView(), preview(), new Error('the daemon refused the write'));
     const renderer = await renderPricing(api);
 
-    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    chooseFeed(renderer, 'openai-feed');
     press(renderer, 'data-pricing-preview');
     await settle();
     toggle(renderer, manualRate().pricingKey, true);
@@ -854,7 +862,7 @@ describe('PricingSettings', () => {
     const api = pricingApi(pricingView(), preview({ changes: [] }));
     const renderer = await renderPricing(api);
 
-    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    chooseFeed(renderer, 'openai-feed');
     press(renderer, 'data-pricing-preview');
     await settle();
 
@@ -907,10 +915,10 @@ describe('PricingSettings — what the daemon says and what goes wrong', () => {
     const renderer = await renderPricing(api);
 
     const rendered = text(renderer);
-    expect(rendered).toContain('Image and tool applicability follows the daemon record shown for this catalog.');
-    expect(rendered).not.toContain('Image and tool rates can be recorded');
-    expect(rendered).toContain('Reasoning rates are recorded but this daemon does not currently apply them.');
-    expect(rendered).not.toContain('Reasoning rates are applied when transcript evidence exists.');
+    expect(rendered).toContain('Follows the daemon record shown for this catalog.');
+    expect(rendered).not.toContain('Recorded, not applied: there is no reliable billable evidence.');
+    expect(rendered).toContain('Recorded; this daemon does not currently apply them.');
+    expect(rendered).not.toContain('Applied when transcript evidence exists.');
     expect(marked(renderer, 'data-reasoning-applicability')[0]?.props['data-reasoning-applicability']).toBe(
       'stored_not_applied',
     );
@@ -935,7 +943,7 @@ describe('PricingSettings — what the daemon says and what goes wrong', () => {
     const api = pricingApi(pricingView(), new Error('the feed timed out'));
     const renderer = await renderPricing(api);
 
-    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    chooseFeed(renderer, 'openai-feed');
     press(renderer, 'data-pricing-preview');
     await settle();
 
@@ -950,7 +958,7 @@ describe('PricingSettings — what the daemon says and what goes wrong', () => {
     const api = pricingApi(pricingView(), preview());
     const renderer = await renderPricing(api);
 
-    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    chooseFeed(renderer, 'openai-feed');
     press(renderer, 'data-pricing-preview');
     await settle();
     toggle(renderer, manualRate().pricingKey, true);

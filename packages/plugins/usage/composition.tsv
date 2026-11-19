@@ -1,2 +1,1 @@
 kind	path	limit	expires	reason
-oversize	app/features/settings/pricing-settings.tsx	1539	2026-12-16	the pricing settings page; split components when next touched

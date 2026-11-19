@@ -11,6 +11,7 @@
  * first one set unconfirmed could reset a day already over budget.
  */
 
+import { SettingGroup, SettingRow } from '@ferretry/app';
 import { Button } from '@ferretry/app/ui';
 import type { LoginBudget } from '@ferretry/plugin-logins/contract';
 import { useState } from 'react';
@@ -74,16 +75,21 @@ const CONFLICT_WORDS = 'The budgets file changed on the machine while it was bei
 
 const FIELD_HINT = 'Dollars, above 0. Leave a field empty for no limit; the hard limit is never below the trigger.';
 
-/** One period's two fields. */
-function BudgetPeriodFields({
+/**
+ * One period's row: its name on the left, its two limits side by side as the control (Trigger, then Hard limit), the
+ * way every other setting puts its control beside its label. On a phone the two fields wrap under the name.
+ */
+function BudgetPeriodRow({
   period,
   legend,
+  hint,
   draft,
   disabled,
   onField,
 }: {
   readonly period: 'daily' | 'weekly';
   readonly legend: string;
+  readonly hint: string;
   readonly draft: BudgetDraft;
   readonly disabled: boolean;
   readonly onField: (key: keyof BudgetDraft, value: string) => void;
@@ -99,27 +105,34 @@ function BudgetPeriodFields({
           ['weeklyHard', 'Hard limit'],
         ];
   return (
-    <fieldset className="m-0 flex min-w-0 flex-1 flex-col gap-1" data-budget-period={period}>
-      <legend className="px-0 text-meta font-semibold uppercase text-muted">{legend}</legend>
-      {fields.map(([key, label]) => (
-        <label key={key} className="flex min-w-0 items-center gap-2">
-          <span className="w-16 shrink-0 text-meta text-muted">{label}</span>
-          <input
-            className="kt-input min-w-0"
-            type="text"
-            inputMode="decimal"
-            autoComplete="off"
-            spellCheck={false}
-            aria-label={`${legend} ${label}, in dollars`}
-            placeholder="none"
-            disabled={disabled}
-            value={draft[key]}
-            data-budget-input={key}
-            onChange={event => onField(key, event.target.value)}
-          />
-        </label>
-      ))}
-    </fieldset>
+    <SettingRow
+      name={legend}
+      hint={hint}
+      wide
+      dataAttributes={{ 'data-budget-period': period }}
+      control={() => (
+        <span className="grid min-w-0 grid-cols-2 gap-x-3">
+          {fields.map(([key, label]) => (
+            <label key={key} className="flex min-w-0 flex-col gap-1">
+              <span className="text-meta text-muted">{label}</span>
+              <input
+                className="kt-input w-28 min-w-0"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                spellCheck={false}
+                aria-label={`${legend} ${label}, in dollars`}
+                placeholder="none"
+                disabled={disabled}
+                value={draft[key]}
+                data-budget-input={key}
+                onChange={event => onField(key, event.target.value)}
+              />
+            </label>
+          ))}
+        </span>
+      )}
+    />
   );
 }
 
@@ -168,6 +181,7 @@ function SaveRow({
 /** One login's budget editor (the Budgets tab lists one per login). */
 export function BudgetEditor({
   credential,
+  label = 'Spend budget',
   machineName,
   online,
   client,
@@ -175,6 +189,8 @@ export function BudgetEditor({
   deviceTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
 }: {
   readonly credential: BudgetLogin;
+  /** The group's heading: the login's name where the Budgets tab lists several. */
+  readonly label?: string;
   readonly machineName: string;
   readonly online: boolean;
   /** This daemon's client; the file is read and written through it. */
@@ -260,122 +276,139 @@ export function BudgetEditor({
     await onChanged();
   };
 
+  const pending = heldOf(save);
+  const notes =
+    problem !== null ||
+    save.status === 'invalid' ||
+    save.status === 'conflict' ||
+    save.status === 'failed' ||
+    save.status === 'applied';
   return (
-    <section className="kt-panel flex min-w-0 flex-col gap-3 p-panel" data-budget-editor={credential.id}>
-      <div className="flex min-w-0 flex-col gap-1">
-        <h4 className="m-0 text-meta font-semibold uppercase text-muted">Spend budget</h4>
-        <p className="m-0 text-cell leading-base text-muted">
-          Past its trigger nothing new starts on this login; past its hard limit its ferrets are stopped.
-        </p>
-        {held === null ? null : (
-          <p
-            role="status"
-            className={
-              held.tone === 'err'
-                ? 'm-0 text-cell font-semibold leading-base text-err'
-                : 'm-0 text-cell font-semibold leading-base text-warn'
-            }
-            data-budget-held=""
-          >
-            {held.label}
-          </p>
-        )}
-        {budget === undefined ? null : <BudgetMeter budget={budget} machineName={machineName} />}
-      </div>
-
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row">
-        <BudgetPeriodFields period="daily" legend="Daily" draft={current} disabled={saving} onField={setField} />
-        <BudgetPeriodFields period="weekly" legend="Weekly" draft={current} disabled={saving} onField={setField} />
-      </div>
-
-      <p className="m-0 text-meta leading-base text-muted" data-budget-hint="">
-        {FIELD_HINT}
-      </p>
-      {problem === null ? null : (
-        <p role="alert" className="m-0 text-cell leading-base text-err" data-budget-problem="">
-          {problem}
-        </p>
-      )}
-      <p className="m-0 text-meta leading-base text-muted" data-budget-zone="">
-        {budgetZoneWords(budget, deviceTimeZone)}
-      </p>
-
-      {save.status === 'invalid' ? (
-        <p role="alert" className="m-0 text-cell leading-base text-err" data-budget-save="invalid">
-          {save.sentence}
-        </p>
-      ) : null}
-      {save.status === 'conflict' ? (
-        <p role="alert" className="m-0 text-cell leading-base text-warn" data-budget-save="conflict">
-          {CONFLICT_WORDS}
-        </p>
-      ) : null}
-      {save.status === 'failed' ? (
-        <p role="alert" className="m-0 text-cell leading-base text-err" data-budget-save="failed">
-          {save.held.length === 0 ? 'Nothing was saved.' : 'The budget was not saved.'} {save.sentence}
-        </p>
-      ) : null}
-      {save.status === 'applied' ? (
-        <p role="status" className="m-0 text-ui font-semibold leading-base text-ok" data-budget-save="applied">
-          In effect
-        </p>
-      ) : null}
-      {heldOf(save).length > 0 ? (
-        <div
-          role="status"
-          className="flex min-w-0 flex-col gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2"
-          data-budget-save="pending"
-        >
-          <span className="text-ui leading-base text-fg">
-            {save.status === 'pending' ? 'Saved' : 'Written'} — waiting for your confirmation:{' '}
-            {heldOf(save)
-              .flatMap(edit => edit.changes)
-              .join('; ')}
-          </span>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="primary"
-              className="min-h-[44px]"
-              data-budget-confirm=""
-              disabled={confirming === 'busy'}
-              onClick={() => void confirmPending()}
-            >
-              {confirming === 'busy' ? 'Confirming…' : 'Confirm'}
-            </Button>
-            {typeof confirming === 'object' ? (
-              <span
-                role="alert"
-                className="min-w-0 break-words text-cell leading-base text-err"
-                data-budget-confirm-failed=""
+    <div className="min-w-0" data-budget-editor={credential.id}>
+      <SettingGroup label={label}>
+        {held === null && budget === undefined ? null : (
+          <li className="flex min-w-0 flex-col gap-2 px-panel py-3">
+            {held === null ? null : (
+              <p
+                role="status"
+                className={
+                  held.tone === 'err'
+                    ? 'm-0 text-cell font-semibold leading-base text-err'
+                    : 'm-0 text-cell font-semibold leading-base text-warn'
+                }
+                data-budget-held=""
               >
-                {confirming.failed}
-              </span>
+                {held.label}
+              </p>
+            )}
+            {budget === undefined ? null : <BudgetMeter budget={budget} machineName={machineName} />}
+          </li>
+        )}
+        <BudgetPeriodRow
+          period="daily"
+          legend="Daily"
+          hint="Dollars spent per day"
+          draft={current}
+          disabled={saving}
+          onField={setField}
+        />
+        <BudgetPeriodRow
+          period="weekly"
+          legend="Weekly"
+          hint="Dollars spent per week"
+          draft={current}
+          disabled={saving}
+          onField={setField}
+        />
+        <li className="flex min-w-0 flex-col gap-1 px-panel py-3">
+          <p className="m-0 text-meta leading-base text-muted" data-budget-hint="">
+            {FIELD_HINT}
+          </p>
+          <p className="m-0 text-meta leading-base text-muted" data-budget-zone="">
+            {budgetZoneWords(budget, deviceTimeZone)}
+          </p>
+        </li>
+        {notes ? (
+          <li className="flex min-w-0 flex-col gap-1 px-panel py-3">
+            {problem === null ? null : (
+              <p role="alert" className="m-0 text-cell leading-base text-err" data-budget-problem="">
+                {problem}
+              </p>
+            )}
+            {save.status === 'invalid' ? (
+              <p role="alert" className="m-0 text-cell leading-base text-err" data-budget-save="invalid">
+                {save.sentence}
+              </p>
             ) : null}
-          </div>
-        </div>
-      ) : null}
-
-      {save.status === 'pending' ? null : changed ? (
-        <SaveRow
-          busy={saving}
-          submitLabel={removing ? 'Remove budget' : 'Save budget'}
-          disabled={!online || problem !== null}
-          onSubmit={() => void saveBudget()}
-        >
-          <Button
-            type="button"
-            data-budget-undo=""
-            onClick={() => {
-              setDraft(null);
-              setSave(IDLE);
-              setConfirming('idle');
-            }}
-          >
-            Undo
-          </Button>
-        </SaveRow>
-      ) : null}
-    </section>
+            {save.status === 'conflict' ? (
+              <p role="alert" className="m-0 text-cell leading-base text-warn" data-budget-save="conflict">
+                {CONFLICT_WORDS}
+              </p>
+            ) : null}
+            {save.status === 'failed' ? (
+              <p role="alert" className="m-0 text-cell leading-base text-err" data-budget-save="failed">
+                {save.held.length === 0 ? 'Nothing was saved.' : 'The budget was not saved.'} {save.sentence}
+              </p>
+            ) : null}
+            {save.status === 'applied' ? (
+              <p role="status" className="m-0 text-ui font-semibold leading-base text-ok" data-budget-save="applied">
+                In effect
+              </p>
+            ) : null}
+          </li>
+        ) : null}
+        {pending.length > 0 ? (
+          <li role="status" className="flex min-w-0 flex-col gap-2 bg-warn-bg px-panel py-3" data-budget-save="pending">
+            <span className="text-ui leading-base text-fg">
+              {save.status === 'pending' ? 'Saved' : 'Written'} — waiting for your confirmation:{' '}
+              {pending.flatMap(edit => edit.changes).join('; ')}
+            </span>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="primary"
+                className="min-h-[44px]"
+                data-budget-confirm=""
+                disabled={confirming === 'busy'}
+                onClick={() => void confirmPending()}
+              >
+                {confirming === 'busy' ? 'Confirming…' : 'Confirm'}
+              </Button>
+              {typeof confirming === 'object' ? (
+                <span
+                  role="alert"
+                  className="min-w-0 break-words text-cell leading-base text-err"
+                  data-budget-confirm-failed=""
+                >
+                  {confirming.failed}
+                </span>
+              ) : null}
+            </div>
+          </li>
+        ) : null}
+        {save.status === 'pending' ? null : changed ? (
+          <li className="min-w-0 px-panel py-3">
+            <SaveRow
+              busy={saving}
+              submitLabel={removing ? 'Remove budget' : 'Save budget'}
+              disabled={!online || problem !== null}
+              onSubmit={() => void saveBudget()}
+            >
+              <Button
+                type="button"
+                data-budget-undo=""
+                onClick={() => {
+                  setDraft(null);
+                  setSave(IDLE);
+                  setConfirming('idle');
+                }}
+              >
+                Undo
+              </Button>
+            </SaveRow>
+          </li>
+        ) : null}
+      </SettingGroup>
+    </div>
   );
 }
