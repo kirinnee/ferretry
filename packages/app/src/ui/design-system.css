@@ -120,7 +120,7 @@
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-panel);
   background-color: var(--bg);
-  background-image: var(--body-wash), var(--surface-mesh);
+  background-image: var(--body-wash);
   box-shadow: var(--shadow-panel);
 }
 /* A preview tile in Settings › This device sits close to its label and its neighbour: a theme's own panel shadow (Neo-Brutalism's
