@@ -13,6 +13,7 @@ import { DictationDebugSettings } from './features/settings/dictation-debug-sett
 import { DictationSettings } from './features/settings/dictation-settings.tsx';
 import { SpeedupKeysSettings } from './features/settings/speedup-keys-settings.tsx';
 import { TranscriptionLogSettings } from './features/settings/transcription-log-settings.tsx';
+import { SpeedupsStepContainer, VoiceStepContainer, stepOf } from './features/onboarding/step-panels.tsx';
 import { SpeedupsSurface } from './features/speedups/speedups-surface.tsx';
 import { useAutoRead } from './hooks/use-auto-read.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
@@ -151,6 +152,18 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
     );
   }
 
+  // First run's two client steps (Onboarding's steps screen hands each its host as `props.step`).
+  const VoiceStepPanel = (props: object) => (
+    <Boundary>
+      <VoiceStepContainer step={stepOf(props)} />
+    </Boundary>
+  );
+  const SpeedupsStepPanel = (props: object) => (
+    <Boundary>
+      <SpeedupsStepContainer step={stepOf(props)} />
+    </Boundary>
+  );
+
   const DictationPanel = (props: { readonly subject?: string }) => (
     <Boundary>
       <DictationPanelBody {...props} />
@@ -209,5 +222,5 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
       </Boundary>
     );
 
-  return { VoiceTab, SpeedupsTab, DictationPanel, ReadAloudPanel, AutoReadPanel };
+  return { VoiceTab, SpeedupsTab, DictationPanel, ReadAloudPanel, AutoReadPanel, VoiceStepPanel, SpeedupsStepPanel };
 }

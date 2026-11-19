@@ -17,6 +17,17 @@ import {
 import { LoginsPort } from '@ferretry/plugin-logins/contract';
 
 /**
+ * A first-run step that configures THIS browser, not the machine (r10 plan §2.1: `side: 'client'`, so it is asked once per
+ * device and recorded in the device ledger). O1 adds `side` to the kernel's `OnboardingDecl`; it had not landed when this was
+ * written, so the field rides through this one-line helper (the snapshot spreads every field of a declaration, so `side`
+ * reaches the steps route unchanged). TODO(r10-o1): once `OnboardingDecl.side` exists, write `side: 'client'` in the two
+ * literals below and delete this helper.
+ */
+const clientStep = <S extends { readonly id: string; readonly title: string; readonly order: number }>(
+  step: S,
+): S & { readonly side: 'client' } => ({ ...step, side: 'client' });
+
+/**
  * Voice (§2.3): talk instead of type. Recognition runs in the browser; the daemon's part is the one JSON exchange a
  * browser cannot perform (`POST /v1/stt/enhance`: a transcript repaired by a hosted chat model, spending a key only the
  * daemon holds, R626: no audio crosses the daemon; a person's act, since a ferret may not trigger a paid call unattended) and the speed-up keys' status and Test. Routes are today's mounts
@@ -98,9 +109,9 @@ export default definePlugin({
       panel(CONVERSATION_ROW_ACTIONS_SLOT, { id: 'read-aloud', order: 10 }),
       // "Read replies aloud": reads a finished reply (or a question) while the device setting is on (Conversation's `conversation.above-composer` slot).
       panel(CONVERSATION_ABOVE_COMPOSER_SLOT, { id: 'auto-read', order: 40 }),
-      // First-run steps (Onboarding's steps screen offers this slot): the same views as the two Settings tabs.
-      panel('onboarding.step', { id: 'onboarding-speedups', order: 50 }),
-      panel('onboarding.step', { id: 'onboarding-voice', order: 51 }),
+      // First-run steps (Onboarding's steps screen offers this slot): this device's two client steps, Voice then Speed-ups.
+      panel('onboarding.step', { id: 'onboarding-voice', order: 3 }),
+      panel('onboarding.step', { id: 'onboarding-speedups', order: 4 }),
     ],
     settings: [
       settingsTab('voice', { icon: 'mic', group: 'behaviour', label: 'Voice', order: 60 }),
@@ -114,10 +125,11 @@ export default definePlugin({
     readModels: [...VOICE_READ_MODELS],
   },
 
-  // v4's New machine setup: Speed-ups (the provider keys), then Voice (this device's dictation).
+  // First run, this DEVICE's half (r10 O15): Voice (the engine cards), then Speed-ups (the keys this browser holds), which
+  // draws only after a local engine was picked. Both configure the browser, so each is asked once per device.
   onboarding: [
-    { id: 'speedups', title: 'Speed-ups', order: 50 },
-    { id: 'voice', title: 'Voice', order: 51 },
+    clientStep({ id: 'voice', title: 'Voice', order: 3 }),
+    clientStep({ id: 'speedups', title: 'Speed-ups', order: 4 }),
   ],
 
   permissions: {
