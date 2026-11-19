@@ -94,6 +94,7 @@ import {
 } from '../account/import.ts';
 import { HARNESS_DISPLAY_NAMES } from '../account/layering.ts';
 import { type ComponentWriter, handedText, withoutHookChanges } from '../account/owner-components.ts';
+import { parseImportRecord } from '../account/import-record.ts';
 import { composeOwned, handOver, type OwnedComponents, recordText, withoutHandedBodies } from './owner-hand-over.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
@@ -324,49 +325,6 @@ const errorMessage = (error: unknown): string =>
 const bytesOf = (text: string): number => new TextEncoder().encode(text).length;
 
 const plural = (count: number, one: string, many = `${one}s`): string => `${String(count)} ${count === 1 ? one : many}`;
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/** The import record, or none when what is stored cannot be read: then nothing is ever offered as an update. */
-function parseImportRecord(text: string | undefined): ImportRecord | undefined {
-  if (text === undefined) return undefined;
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-  if (!isRecord(raw) || raw.version !== 1 || !isRecord(raw.components)) return undefined;
-  const components: Record<string, { sources: string[]; digest: string; left?: string[]; owned?: string[] }> = {};
-  for (const [reference, entry] of Object.entries(raw.components)) {
-    if (!isRecord(entry) || typeof entry.digest !== 'string' || !Array.isArray(entry.sources)) continue;
-    components[reference] = {
-      sources: entry.sources.filter(source => typeof source === 'string'),
-      digest: entry.digest,
-      ...(Array.isArray(entry.left) && entry.left.some(item => typeof item === 'string')
-        ? { left: entry.left.filter((item): item is string => typeof item === 'string') }
-        : {}),
-      ...(Array.isArray(entry.owned) && entry.owned.some(item => typeof item === 'string')
-        ? { owned: entry.owned.filter((item): item is string => typeof item === 'string') }
-        : {}),
-    };
-  }
-  const profiles = isRecord(raw.profiles)
-    ? Object.fromEntries(
-        (['claude', 'codex'] as const).flatMap(harness => {
-          const name = (raw.profiles as Readonly<Record<string, unknown>>)[harness];
-          return typeof name === 'string' ? [[harness, name]] : [];
-        }),
-      )
-    : {};
-  return {
-    version: 1,
-    components,
-    ...(typeof raw.profile === 'string' ? { profile: raw.profile } : {}),
-    ...(Object.keys(profiles).length === 0 ? {} : { profiles }),
-  };
-}
 
 // ── What a staged import or clone holds ──────────────────────────────────────────────────────────
 

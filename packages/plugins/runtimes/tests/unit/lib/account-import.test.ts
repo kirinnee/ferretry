@@ -1081,6 +1081,21 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
     should(codexAgain.components).deepEqual([]);
   });
 
+  it('should keep a server shared by both tools shared when its update is offered', () => {
+    // Arrange — one pass imports both tools with the identical github server: one shared item.
+    const both = (claudeArgs: string[]) => [claudeWithGithub(claudeArgs), codexWithGithub(['a'])];
+    const first = planImport(both(['a']), { digest });
+    const shared = mergeImport(undefined, first);
+
+    // Act — Claude's copy of the server changes; the next import offers its update.
+    const again = planImport(both(['b']), { digest, existing: shared, record: mergeImportRecord(first) });
+
+    // Assert — the update keeps the item's scope (shared: no harness), rather than narrowing it to Claude.
+    const update = again.updates.find(each => each.reference === 'mcp/github');
+    should(shared.components.mcp.github).deepEqual({ command: 'gh-mcp', args: ['a'] });
+    should(update?.component.value).deepEqual({ command: 'gh-mcp', args: ['b'] });
+  });
+
   it('should update the first tool its own item when it is imported again with changed text', () => {
     // Arrange — both applied in turn.
     const first = planImport([claudeScan(), codexScan()], { digest, include: ['claude'] });

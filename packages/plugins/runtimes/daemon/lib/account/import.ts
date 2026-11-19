@@ -36,6 +36,7 @@ import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contra
 import { looksSecret } from '@ferretry/std/credential-words';
 import { GITHUB_TOKEN_NAMES, maskedVariableName, nameLooksLikeKey } from '@ferretry/plugin-logins/contract';
 import { importItemId, importNamedItemId } from '../../../contract/index.ts';
+import { harnessNamed, keepScope, ownMcpItem } from './import-scope.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
 import { FLEET_STARTER_MODELS } from '../defaults.ts';
@@ -227,7 +228,7 @@ interface ImportDuplicate {
 }
 
 /** One component of any kind, as the plan carries it. */
-type ImportedComponent =
+export type ImportedComponent =
   | { readonly kind: 'instructions'; readonly name: string; readonly value: InstructionsComponent }
   | { readonly kind: 'mcp'; readonly name: string; readonly value: McpComponent }
   | { readonly kind: 'skills'; readonly name: string; readonly value: SkillsComponent }
@@ -331,8 +332,6 @@ const IMPORT_NAMES = {
   /** The generic skills component, for items both harnesses hold identically. */
   sharedSkills: 'skills',
 } as const;
-
-const harnessNamed = (harness: HarnessKind, what: string): string => `${harness}-${what}`;
 
 /**
  * The runtime an import makes for one harness on one profile — `claude-default` on a machine whose
@@ -885,7 +884,7 @@ function harvest(
 // ── The plan ─────────────────────────────────────────────────────────────────────────────────────
 
 /** One component the import wants, before Import again decides whether it is new. */
-interface Candidate {
+export interface Candidate {
   readonly component: ImportedComponent;
   readonly files: readonly ImportFile[];
   readonly sources: readonly string[];
@@ -904,11 +903,6 @@ const sameText = (left: string, right: string): boolean =>
   left.replace(/\r\n/gu, '\n').trimEnd() === right.replace(/\r\n/gu, '\n').trimEnd();
 
 const sameJson = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
-
-const withoutScope = (server: McpComponent): Omit<McpComponent, 'harness'> => {
-  const { harness: _harness, ...rest } = server;
-  return rest;
-};
 
 /** The layer order a Default profile reads in, as §5.2 shows it. */
 const LAYER_ORDER: readonly ComponentKind[] = ['instructions', 'mcp', 'skills', 'settings', 'modelSets'];
@@ -1249,20 +1243,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     return secrets.filter(secret => referenced.has(secret.name));
   };
   for (const original of candidates) {
-    let candidate = original;
-    // A server another tool's import already made under this name: this tool's is its OWN item, `<tool>-<name>`, created
-    // new — whether or not the two are identical. The existing item is never widened or changed (its owner only creates),
-    // and the same tool imported again finds its own item by the same rule and updates it.
-    if (original.component.kind === 'mcp') {
-      const mine = original.component.value;
-      const heldBy = existing?.components.mcp[original.component.name]?.harness;
-      if (mine.harness !== undefined && heldBy !== undefined && heldBy !== mine.harness) {
-        candidate = {
-          ...original,
-          component: { kind: 'mcp', name: harnessNamed(mine.harness, original.component.name), value: mine },
-        };
-      }
-    }
+    const candidate = ownMcpItem(original, existing);
     const { kind, name } = candidate.component;
     const reference = referenceOf(kind, name);
     const previous = record.components[reference];
@@ -1279,19 +1260,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
           reference,
           ...(left.length === 0 ? {} : { left }),
           sources: comparable.sources,
-          // An update never changes which tools a server serves: the item keeps the scope it has.
-          component:
-            comparable.component.kind === 'mcp'
-              ? {
-                  ...comparable.component,
-                  value: {
-                    ...withoutScope(comparable.component.value),
-                    ...(existing?.components.mcp[name]?.harness === undefined
-                      ? {}
-                      : { harness: existing.components.mcp[name].harness }),
-                  },
-                }
-              : comparable.component,
+          component: keepScope(comparable.component, existing),
           files: comparable.files,
           secrets: secretsOf(comparable),
           digest,
