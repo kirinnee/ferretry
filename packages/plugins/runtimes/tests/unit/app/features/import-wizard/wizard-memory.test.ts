@@ -13,6 +13,8 @@ describe('what the wizard remembers in the address', () => {
       names: { codex: 'work-codex' },
       left: { 'claude-code': new Set(['claude-code:mcp:issues' as const]), codex: new Set<never>() },
       ticked: { 'claude-code': new Set(['GITHUB_TOKEN']), codex: new Set<string>() },
+      ends: {},
+      finished: false,
     };
     const search = withMemory('?a=1', memory) ?? '';
     expect(search).toContain('a=1');
@@ -36,5 +38,15 @@ describe('what the wizard remembers in the address', () => {
   it('an address that would be too long is not written', () => {
     const many = new Set(Array.from({ length: 300 }, (_, at) => `codex:skill:${'s'.repeat(40)}${String(at)}` as const));
     expect(withMemory('', { ...emptyMemory(), left: { 'claude-code': new Set(), codex: many } })).toBeNull();
+  });
+});
+
+describe('how far the person got', () => {
+  it('round-trips which tools ended and whether Finish was pressed', () => {
+    const search =
+      withMemory('', { ...emptyMemory(), ends: { 'claude-code': 'skipped', codex: 'imported' }, finished: true }) ?? '';
+    const read = readMemory(search);
+    expect(read.ends).toEqual({ 'claude-code': 'skipped', codex: 'imported' });
+    expect(read.finished).toBe(true);
   });
 });

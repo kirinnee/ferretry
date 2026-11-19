@@ -18,11 +18,16 @@ const Names = z.strictObject({
 const Lists = <T extends z.ZodType<string>>(item: T) =>
   z.strictObject({ 'claude-code': z.array(item).max(512).optional(), codex: z.array(item).max(512).optional() });
 
+const End = z.enum(['imported', 'skipped']);
+
 const MemorySchema = z.strictObject({
   tool: z.number().int().min(0).max(1).optional(),
   names: Names.optional(),
   left: Lists(ImportItemIdSchema).optional(),
   ticked: Lists(z.string().min(1).max(100)).optional(),
+  /** How each finished tool ended, and whether the person pressed Finish: which step they were on. */
+  ends: z.strictObject({ 'claude-code': End.optional(), codex: End.optional() }).optional(),
+  finished: z.boolean().optional(),
 });
 
 export interface Memory {
@@ -30,6 +35,8 @@ export interface Memory {
   readonly names: Partial<Record<HarnessKey, string>>;
   readonly left: Readonly<Record<HarnessKey, ReadonlySet<ImportItemId>>>;
   readonly ticked: Readonly<Record<HarnessKey, ReadonlySet<string>>>;
+  readonly ends: Partial<Record<HarnessKey, 'imported' | 'skipped'>>;
+  readonly finished: boolean;
 }
 
 export const emptyMemory = (): Memory => ({
@@ -37,6 +44,8 @@ export const emptyMemory = (): Memory => ({
   names: {},
   left: { 'claude-code': new Set(), codex: new Set() },
   ticked: { 'claude-code': new Set(), codex: new Set() },
+  ends: {},
+  finished: false,
 });
 
 /** The memory an address carries; a missing or damaged one reads as nothing remembered. */
@@ -46,12 +55,14 @@ export const readMemory = (search: string): Memory => {
   try {
     const parsed = MemorySchema.safeParse(JSON.parse(raw));
     if (!parsed.success) return emptyMemory();
-    const { tool = 0, names = {}, left = {}, ticked = {} } = parsed.data;
+    const { tool = 0, names = {}, left = {}, ticked = {}, ends = {}, finished = false } = parsed.data;
     return {
       tool,
       names,
       left: { 'claude-code': new Set(left['claude-code']), codex: new Set(left.codex) },
       ticked: { 'claude-code': new Set(ticked['claude-code']), codex: new Set(ticked.codex) },
+      ends,
+      finished,
     };
   } catch {
     return emptyMemory();
@@ -61,6 +72,8 @@ export const readMemory = (search: string): Memory => {
 const nothingRemembered = (memory: Memory): boolean =>
   memory.tool === 0 &&
   Object.keys(memory.names).length === 0 &&
+  Object.keys(memory.ends).length === 0 &&
+  !memory.finished &&
   memory.left['claude-code'].size +
     memory.left.codex.size +
     memory.ticked['claude-code'].size +
@@ -79,6 +92,8 @@ export const withMemory = (search: string, memory: Memory): string | null => {
         names: memory.names,
         left: { 'claude-code': [...memory.left['claude-code']], codex: [...memory.left.codex] },
         ticked: { 'claude-code': [...memory.ticked['claude-code']], codex: [...memory.ticked.codex] },
+        ends: memory.ends,
+        finished: memory.finished,
       }),
     );
   const text = query.toString();

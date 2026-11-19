@@ -146,13 +146,19 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
         ) : (
           <div className="kt-panel flex min-w-0 flex-col gap-2 border-ok p-panel" role="status" data-import-answer="">
             <p className="m-0 text-row font-semibold text-fg">{`${model.label} is set up`}</p>
-            <ul className="m-0 flex list-disc flex-col gap-1 pl-5 text-cell text-muted">
-              {end.sentences.map(sentence => (
-                <li key={sentence} className="[overflow-wrap:anywhere]">
-                  {sentence}
-                </li>
-              ))}
-            </ul>
+            {end.sentences.length === 0 ? (
+              <p className="m-0 text-cell text-muted" data-import-answer-earlier="">
+                It was brought in before this page was reloaded. What it wrote stays on this machine.
+              </p>
+            ) : (
+              <ul className="m-0 flex list-disc flex-col gap-1 pl-5 text-cell text-muted">
+                {end.sentences.map(sentence => (
+                  <li key={sentence} className="[overflow-wrap:anywhere]">
+                    {sentence}
+                  </li>
+                ))}
+              </ul>
+            )}
             {end.unmarked ? (
               <p role="alert" className="m-0 text-cell text-warn" data-import-unmarked="">
                 The import landed, but some first-run steps could not be marked done. Press Done on them in Setup.

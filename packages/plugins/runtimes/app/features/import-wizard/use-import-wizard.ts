@@ -3,6 +3,7 @@
  * left out and named, what an install or an import answered. Everything reaches the daemon through the client the shell
  * handed over; nothing here holds a value, a token or a path.
  */
+import { isStepUpRefusal } from '@ferretry/app/ui';
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { readMemory, rememberInAddress } from './wizard-memory.ts';
@@ -67,7 +68,16 @@ export function useImportWizard(client: RuntimesClient) {
   const [left, setLeft] = useState<Readonly<Record<HarnessKey, ReadonlySet<ImportItemId>>>>(remembered.left);
   const [tickedEnv, setTickedEnv] = useState<Readonly<Record<HarnessKey, ReadonlySet<string>>>>(remembered.ticked);
   const [names, setNames] = useState<Partial<Record<HarnessKey, string>>>(remembered.names);
-  const [ends, setEnds] = useState<Partial<Record<HarnessKey, ToolEnd>>>({});
+  // A tool that ended before the reload is shown as ended; the daemon's own sentences are not kept in the address.
+  const [ends, setEnds] = useState<Partial<Record<HarnessKey, ToolEnd>>>(() =>
+    Object.fromEntries(
+      Object.entries(remembered.ends).map(([harness, how]) => [
+        harness,
+        how === 'imported' ? { kind: 'imported', sentences: [], unmarked: false } : { kind: 'skipped' },
+      ]),
+    ),
+  );
+  const [finished, setFinished] = useState(remembered.finished);
   const [installing, setInstalling] = useState<HarnessKey | null>(null);
   const [installNote, setInstallNote] = useState<Partial<Record<HarnessKey, string>>>({});
   const changes = useAccountChanges({ client });
@@ -84,7 +94,8 @@ export function useImportWizard(client: RuntimesClient) {
       const mine = generation.current;
       try {
         const [answer, claude, codex] = await Promise.all([
-          client.call(SCAN_ROUTE, quiet ? { quiet: true } : undefined),
+          // A press (`quiet: false`) is the person's own act and opens the shell's passkey prompt; a read nobody asked for never does.
+          client.call(SCAN_ROUTE, { quiet }),
           client.call(UPDATE_ROUTE['claude-code'], { quiet: true }).catch(() => null),
           client.call(UPDATE_ROUTE.codex, { quiet: true }).catch(() => null),
         ]);
@@ -100,7 +111,10 @@ export function useImportWizard(client: RuntimesClient) {
           versions: { 'claude-code': versionOf(claude), codex: versionOf(codex) },
         });
       } catch (error) {
-        if (mine === generation.current) setRead({ kind: 'failed', sentence: changeRefusalSentence(error) });
+        if (mine !== generation.current) return;
+        // The real shape of "this machine wants a passkey for that": a 403 `grant_step_up_required`. Read quietly, it waits for a press.
+        if (quiet && isStepUpRefusal(error)) setRead({ kind: 'confirm' });
+        else setRead({ kind: 'failed', sentence: changeRefusalSentence(error) });
       }
     },
     [client],
@@ -111,8 +125,15 @@ export function useImportWizard(client: RuntimesClient) {
   }, [scan]);
 
   useEffect(() => {
-    rememberInAddress({ tool, names, left, ticked: tickedEnv });
-  }, [tool, names, left, tickedEnv]);
+    rememberInAddress({
+      tool,
+      names,
+      left,
+      ticked: tickedEnv,
+      ends: Object.fromEntries(Object.entries(ends).map(([harness, end]) => [harness, end.kind])),
+      finished,
+    });
+  }, [tool, names, left, tickedEnv, ends, finished]);
 
   const models = useMemo<Readonly<Record<HarnessKey, ToolModel>> | null>(
     () =>
@@ -225,6 +246,8 @@ export function useImportWizard(client: RuntimesClient) {
     left,
     tool,
     setTool,
+    finished,
+    setFinished,
     toggle,
     tickedEnv,
     tickEnv,

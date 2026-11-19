@@ -249,6 +249,7 @@ describe('GitHub-token variables in the environment', () => {
     expect(calls.find(call => call.route === 'POST /v1/runtimes/proposals')?.body).toMatchObject({
       change: { tickedEnv: ['GH_TOKEN'] },
     });
+    window.history.replaceState(null, '', '/');
     const second = await open(routes(scan));
     await click(second.container, '[data-found-item="claude-code:env"] input');
     expect(second.container.querySelector<HTMLInputElement>('[data-found-token="GH_TOKEN"] input')?.disabled).toBe(
@@ -280,7 +281,7 @@ describe('a machine that wants a passkey for the scan', () => {
     pressed = true;
     await click(root, '[data-import-look]');
     await settle();
-    expect(calls.filter(call => call.route === 'GET /v1/runtimes/setup/scan').at(-1)?.quiet).toBeUndefined();
+    expect(calls.filter(call => call.route === 'GET /v1/runtimes/setup/scan').at(-1)?.quiet).toBe(false);
     expect(root.querySelector('[data-found-list]')).not.toBeNull();
   });
 });
@@ -312,5 +313,76 @@ describe('a reload', () => {
     );
     expect(root.querySelector<HTMLInputElement>('[data-found-item="claude-code:mcp:notes"] input')?.checked).toBe(true);
     expect(must(root.querySelector<HTMLInputElement>('[data-runtime-name]'), 'name').value).toBe('work-claude');
+  });
+});
+
+describe('the real refusal: a 403 grant_step_up_required thrown by the shell client', () => {
+  const refusal = (): Error =>
+    Object.assign(
+      new Error('changing the settings for the agent fleet needs a passkey confirmation from this device.'),
+      {
+        status: 403,
+        code: 'grant_step_up_required',
+      },
+    );
+
+  it('shows the needs-your-OK state, not Try again, and its button presses a read that may open the prompt', async () => {
+    const calls: Call[] = [];
+    let confirmed = false;
+    const view = await open(
+      routes(scanOf({ claude: CLAUDE_FULL }), {
+        'GET /v1/runtimes/setup/scan': (call: Call) => {
+          if (call.quiet !== false && !confirmed) throw refusal();
+          confirmed = true;
+          return scanOf({ claude: CLAUDE_FULL });
+        },
+      }),
+      calls,
+    );
+    const root = view.container;
+    expect(root.querySelector('[data-import-confirm]')).not.toBeNull();
+    expect(root.querySelector('[data-import-unreadable]')).toBeNull();
+    await click(root, '[data-import-look]');
+    await settle();
+    expect(calls.filter(call => call.route === 'GET /v1/runtimes/setup/scan').map(call => call.quiet)).toEqual([
+      true,
+      false,
+    ]);
+    expect(root.querySelector('[data-found-list]')).not.toBeNull();
+  });
+
+  it('any other refusal is still a failure with Try again, and its press is a press too', async () => {
+    const calls: Call[] = [];
+    const view = await open(
+      routes(scanOf({ claude: CLAUDE_FULL }), {
+        'GET /v1/runtimes/setup/scan': Object.assign(new Error('nope'), { status: 403, code: 'grant_not_granted' }),
+      }),
+      calls,
+    );
+    expect(view.container.querySelector('[data-import-unreadable]')).not.toBeNull();
+    await click(view.container, '[data-import-unreadable] button');
+    await settle();
+    expect(calls.filter(call => call.route === 'GET /v1/runtimes/setup/scan').at(-1)?.quiet).toBe(false);
+  });
+});
+
+describe('a reload on a later step', () => {
+  it('keeps which tools ended and that Finish was pressed, and says the files were written earlier', async () => {
+    const ALL = scanOf({ claude: CLAUDE_FULL, codex: CODEX_FULL });
+    const first = await open(routes(ALL));
+    await click(first.container, '[data-tool-skip="claude-code"]');
+    await click(first.container, '[data-tool-next="claude-code"]');
+    await click(first.container, '[data-change-submit]');
+    await settle();
+    await click(first.container, '[data-tool-next="codex"]');
+    expect(first.container.querySelector('[data-import-finished]')).not.toBeNull();
+    await first.unmount();
+    mounted.splice(0);
+    const second = await open(routes(ALL));
+    mounted.push(second);
+    expect(second.container.querySelector('[data-import-finished]')).not.toBeNull();
+    expect(text(second.container, '[data-import-finished]')).toContain('Claude Code: left out · Codex: done');
+    await click(second.container, '[data-import-tab="codex"]');
+    expect(text(second.container, '[data-import-answer-earlier]')).toContain('before this page was reloaded');
   });
 });

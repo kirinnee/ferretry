@@ -5,7 +5,6 @@
  */
 import { Loading } from '@ferretry/app/ui';
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
-import { useState } from 'react';
 import type { AppComponent, SettingsProps } from '@ferretry/kernel/manifest';
 import type { LiveRuntimesClient } from '../../lib/client.ts';
 import { machineSettingsView } from '../../views/machine-settings-host.tsx';
@@ -59,7 +58,7 @@ export function ImportStep({
   const wizard = useImportWizard(client);
   const at = wizard.tool;
   const setAt = wizard.setTool;
-  const [finished, setFinished] = useState(false);
+  const { finished, setFinished } = wizard;
 
   if (wizard.read.kind === 'confirm')
     return (
