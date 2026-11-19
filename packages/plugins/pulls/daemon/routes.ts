@@ -2,6 +2,7 @@ import type { GitAccountsApi } from '@ferretry/plugin-git-accounts/contract';
 import type { ProjectsApi } from '@ferretry/plugin-projects/contract';
 import type { GithubClient } from './adapters/github/client.ts';
 import { ciRoutes } from './features/ci/index.ts';
+import { threadsRoute } from './features/threads/routes.ts';
 import type { PullsCache } from './lib/cache/store.ts';
 
 /** What every later unit's routes and jobs are built from: the one GitHub client (one budget) and the one cache. */
@@ -17,4 +18,10 @@ export interface PullsServices {
 /** Each unit adds ONE line here, naming its routes and handing them `services`. */
 export const pullsRoutes = (services: PullsServices) => ({
   ...ciRoutes(services), // E8: CI runs, jobs, steps and timing
+  // E6 · review threads
+  'GET /v1/pulls/:project/:repo/:number/threads': threadsRoute({
+    github: services.github,
+    projects: services.projects,
+    nowIso: () => new Date(services.nowMs()).toISOString(),
+  }),
 });

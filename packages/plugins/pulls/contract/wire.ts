@@ -135,8 +135,22 @@ export const ReviewThreadSchema = z.strictObject({
   startLine: z.number().int().positive().optional(),
   side: z.enum(DIFF_SIDES),
   comments: z.array(PullCommentSchema).min(1).max(250),
+  /** Replies GitHub holds that this read left out (a page is bounded): the card says so and links to GitHub for them. */
+  omittedReplies: z.number().int().positive().optional(),
 });
 export type ReviewThread = z.infer<typeof ReviewThreadSchema>;
+
+/** Most threads one answer carries (twenty-five pages of twenty). A PR with more says `truncated`. */
+export const MAX_REVIEW_THREADS = 500;
+
+/** `GET /v1/pulls/:project/:repo/:number/threads` (E6): every review thread of one PR, read from GitHub's GraphQL. */
+export const ReviewThreadsAnswerSchema = z.strictObject({
+  threads: z.array(ReviewThreadSchema).max(MAX_REVIEW_THREADS),
+  /** GitHub has more threads than were read (the page bound or the text budget), or some thread could not be shown. */
+  truncated: z.boolean(),
+  fetchedAt: Instant,
+});
+export type ReviewThreadsAnswer = z.infer<typeof ReviewThreadsAnswerSchema>;
 
 // ─── CI: runs, jobs, steps and timing ─────────────────────────────────────────────────────────────────────────────
 

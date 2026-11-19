@@ -1,0 +1,7 @@
+{
+  "entry": ["app/features/threads/index.ts"],
+  "project": ["**/*.{ts,tsx}", "!tests/**"],
+  "allowed": {
+    "entry:app/features/threads/index.ts": "E6 review threads: E4's PR page and E5's diff viewer import this barrel; neither has merged yet"
+  }
+}
