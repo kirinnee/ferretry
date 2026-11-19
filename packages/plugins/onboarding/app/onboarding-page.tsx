@@ -55,7 +55,7 @@
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
-import { useKeyboardOpen } from '@ferretry/app/ui';
+import { LivingBackground, useKeyboardOpen } from '@ferretry/app/ui';
 import type { ClipboardWriter } from '@ferretry/app/ui';
 import type { HostedRelayFallback } from './hosted-relay-state.ts';
 import { activeCarrierStatus, carrierDisclosure } from './connection-disclosure.ts';
@@ -241,6 +241,7 @@ export function OnboardingPage({
       data-onboarding-route={at.stage === 'walk' ? at.route : 'none'}
       data-onboarding-device={device}
     >
+      <LivingBackground />
       {/*
         `data-kb-hide` is legal here and nowhere else on this screen: the brand
         and the diagram are stateless chrome with no focus, no overlay and no

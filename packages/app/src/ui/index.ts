@@ -76,3 +76,4 @@ export * from './floating.tsx';
 export * from './sortable-list.tsx';
 export * from './use-motion-allowed.ts';
 export * from './lib/sortable-order.ts';
+export * from './living-background.tsx';
