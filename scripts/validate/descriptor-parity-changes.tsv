@@ -471,3 +471,4 @@ route	GET /v1/pulls/:project/:repo/:number/threads	added	new in 5.0 (r9 E6 pulls
 route	GET /v1/pulls/:project/:repo/:number	added	new in r9 (E4 pulls): one pull request with its conversation and head-commit checks, read through the connected GitHub account; filesystem.use, no token or body_html is returned
 route	GET /v1/pulls/watch	added	new in r9 (E2 pulls): the watch status of every project (open PRs, CI words, the notify choices); filesystem use, a read; PR titles only, no token
 route	PATCH /v1/pulls/watch/:project	added	new in r9 (E2 pulls): turns a project watch on or off and chooses which events notify, in config/pulls.yaml; filesystem configure from a person
+route	GET /v1/pulls/:project/:repo/:number/files	added	new in 5.0 (r9 E5 pulls): the changed files and diff hunks of a PR a project holds, read through the linked GitHub account; filesystem.use from a person, no token is returned
