@@ -7,6 +7,7 @@
  *   &arrival=link|cold|broken   a pairing link (default), a cold open, or a link whose redemption fails
  *   &offer=open                the machine says the first-passkey window is open (7 minutes left): the success screen offers
  *                              "Add a passkey now" and waits for "Not now"
+ *   &scan=camera               a browser that can scan (an idle camera), so the cold page shows all three ways in
  *   &motion=reduced             the app's own Motion = Reduced (`<html data-motion="reduced">`)
  */
 
@@ -38,6 +39,9 @@ createRoot(root).render(
     selectedDaemonId={null}
     arrival={arrival === 'cold' ? { kind: 'none' } : { kind: 'seed', seed: SEED }}
     sameMachine={false}
+    {...(params.get('scan') === 'camera'
+      ? { scanHost: { supported: true, scan: async () => await new Promise<string>(() => {}) } }
+      : {})}
     defaultName={() => 'Chrome on Linux · 4f2a'}
     onPair={async () => {
       await new Promise(resolve => setTimeout(resolve, 300));

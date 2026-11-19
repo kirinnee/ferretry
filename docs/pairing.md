@@ -642,10 +642,13 @@ provision (the same guarded client the unlock prompt uses), so the owner who pai
 shows, that page stays on "Connected" and moves on only when the person presses **Not now** (or **Continue** once the passkey
 is added); with nothing to offer (window closed, a passkey held, no browser support, or no way to reach the machine) it moves on at once, as before.
 
-- **The browser cannot scan on WebKit.** `BarcodeDetector` is Chromium-only, so the in-app scanner is
-  absent there. This is not the blocked path it looks like — the intended carrier is the phone's own
-  camera app, which opens the PWA pre-filled on every platform — but a reader who opened the app first
-  gets the paste field rather than a bundled decoder every visitor would have to download.
+- **Three equal ways to read the code.** The cold `/pair` page offers **Scan QR code** (the camera), **Upload a QR
+  image** and **Paste a link**. `BarcodeDetector` is Chromium-only, so on WebKit the camera and the upload both
+  use `jsqr`, a software decoder fetched only when somebody taps Scan or picks a picture (a Chromium visitor who
+  only pastes never downloads it). An uploaded picture is drawn into an off-screen canvas, decoded in this tab and
+  let go: it is never uploaded, stored, logged or put in React state, its object URL is revoked as soon as it is
+  read, the file input is emptied, and the decoded text is handed on exactly like a pasted link (read on submit,
+  never rendered). A picture with no code says "No QR code found in that image." and nothing else about it.
 - **`pairing.configure` governs no route.** Like `terminal` and `browser`, its configure
   axis governs exactly one thing: whether a remote caller may re-grant the capability. See
   [grants.md](grants.md).

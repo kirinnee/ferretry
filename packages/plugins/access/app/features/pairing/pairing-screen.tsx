@@ -85,6 +85,8 @@ export interface PairingScreenProps {
   readonly arrival?: PairingArrival;
   /** The camera, or `null` where this browser has none to offer. */
   readonly scanHost?: QrScanHost | null;
+  /** Reads a QR picture to its text; the page's own decoder unless a suite hands another. */
+  readonly readImage?: (file: Blob) => Promise<string>;
   /** Exchanges the one-time code and adds the resulting connection. */
   readonly onPair: PairingExchange;
   /** Whether this page runs on the daemon's own machine. Defaults to reading the page's address. */
@@ -207,6 +209,7 @@ export function PairingScreen({
   selectedDaemonId,
   arrival = NO_ARRIVAL,
   scanHost = null,
+  readImage,
   onPair,
   onSelect,
   onRemove,
@@ -332,7 +335,8 @@ export function PairingScreen({
           <p className="m-0 text-ui leading-base text-muted">
             {first ? (
               <>
-                Run <code className="font-mono text-fg">fy pair</code> on your computer, then scan the code.
+                Run <code className="font-mono text-fg">fy pair</code> on your computer, then scan its code, upload a
+                picture of it, or paste its link.
               </>
             ) : (
               'Choose where this tab works. Each daemon keeps separate data.'
@@ -393,7 +397,9 @@ export function PairingScreen({
 
       <PairScanner
         host={scanHost}
-        label={first ? 'Scan QR code' : 'Pair another daemon'}
+        pasteOpen={pasting || scanHost === null}
+        onPaste={revealPaste}
+        {...(readImage === undefined ? {} : { readImage })}
         onText={readText}
         onFailed={revealPaste}
       />
@@ -407,7 +413,7 @@ export function PairingScreen({
               id="pairing-link"
               aria-label="Pairing link"
               aria-describedby="pairing-link-error"
-              className="h-control w-full rounded-control border border-border bg-surface-2 px-control-x font-mono text-meta text-fg placeholder:text-faint focus:border-accent"
+              className="h-control min-h-[44px] w-full rounded-control border border-border bg-surface-2 px-control-x font-mono text-meta text-fg placeholder:text-faint focus:border-accent"
               placeholder="https://…/pair#…"
             />
           </label>
@@ -416,20 +422,12 @@ export function PairingScreen({
               {linkError}
             </p>
           )}
-          <button type="submit" className="kt-btn min-h-[44px]" disabled={!link.filled}>
+          <button type="submit" className="kt-btn min-h-[44px] self-start px-6 py-3" disabled={!link.filled}>
             <Link2 size={16} aria-hidden="true" />
             Use this link
           </button>
         </form>
-      ) : (
-        <button
-          type="button"
-          className="min-h-[44px] self-center text-ui font-medium text-muted underline hover:text-accent focus-visible:outline-focus focus-visible:outline-offset-focus"
-          onClick={revealPaste}
-        >
-          Paste a link instead
-        </button>
-      )}
+      ) : null}
 
       {/*
         Quiet on purpose. Someone with a working pairing is here to choose a

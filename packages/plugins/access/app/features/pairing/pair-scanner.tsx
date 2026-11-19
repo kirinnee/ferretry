@@ -15,26 +15,38 @@
  * pairing code is single-use and short-lived; this component hands the raw
  * string straight to its caller and holds nothing.
  */
-import { Camera, QrCode, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Camera, ImageUp, Link2, QrCode, X } from 'lucide-react';
+import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useDeviceFacts } from '../../hooks/use-device-permissions.ts';
 import { useQrScan } from '../../hooks/use-qr-scan.ts';
 import { howToEnable } from '../../lib/device-permissions.ts';
 import type { QrPreview, QrScanHost } from '../../lib/pair-scan.ts';
+import { QrImageError, readQrImageInBrowser } from './qr-image.ts';
 
 export interface PairScannerProps {
   /** `null` where this browser cannot scan; the caller shows paste instead. */
   readonly host: QrScanHost | null;
-  /** The wording of the resting control — the first daemon reads differently from the fourth. */
-  readonly label: string;
+  /** Whether the pasted-link field is open, so its way reads as the chosen one. */
+  readonly pasteOpen: boolean;
+  /** Open the pasted-link field (the third way; the form itself is the caller's). */
+  readonly onPaste: () => void;
+  /** Reads one picture to its QR text; the page's own decoder unless a suite hands another. Never rendered or kept. */
+  readonly readImage?: (file: Blob) => Promise<string>;
   /** The raw decoded text of the first QR code seen. */
   readonly onText: (text: string) => void;
   /** A scan that ended in a refusal, so the caller can reveal its fallback. */
   readonly onFailed: () => void;
 }
 
-export function PairScanner({ host, label, onText, onFailed }: PairScannerProps) {
+export function PairScanner({
+  host,
+  pasteOpen,
+  onPaste,
+  readImage = readQrImageInBrowser,
+  onText,
+  onFailed,
+}: PairScannerProps) {
   const video = useRef<HTMLVideoElement | null>(null);
   // True once frames are actually arriving. Permission prompts and camera
   // warm-up take a visible moment on a phone, and a black rectangle with no
@@ -104,21 +116,21 @@ export function PairScanner({ host, label, onText, onFailed }: PairScannerProps)
       </section>
 
       {scanning ? (
-        <button type="button" className="kt-btn min-h-[44px] w-full" onClick={scan.stop}>
+        <button type="button" className="kt-btn min-h-[44px] self-center px-6 py-3" onClick={scan.stop}>
           <X size={16} aria-hidden="true" />
           Stop scanning
         </button>
       ) : (
-        <button
-          type="button"
-          className="kt-btn min-h-[64px] w-full text-title"
-          data-variant="primary"
-          onClick={scan.start}
-          disabled={host === null}
-        >
-          <QrCode size={22} aria-hidden="true" />
-          {label}
-        </button>
+        // Three equal ways in, none of them the "real" one: a card each, never a full-width bar.
+        <section className="grid grid-cols-3 gap-3" aria-label="Ways to read the pairing code" data-pair-ways="">
+          <WayCard icon={<QrCode size={22} aria-hidden="true" />} onClick={scan.start} disabled={host === null}>
+            Scan QR code
+          </WayCard>
+          <UploadWay readImage={readImage} onText={onText} />
+          <WayCard icon={<Link2 size={22} aria-hidden="true" />} onClick={onPaste} pressed={pasteOpen}>
+            Paste a link
+          </WayCard>
+        </section>
       )}
 
       {scan.phase === 'failed' && scan.message !== null && (
@@ -151,5 +163,100 @@ export function PairScanner({ host, label, onText, onFailed }: PairScannerProps)
         </p>
       ) : null}
     </div>
+  );
+}
+
+interface WayCardProps {
+  readonly icon: ReactNode;
+  readonly children: ReactNode;
+  readonly onClick: () => void;
+  readonly disabled?: boolean;
+  readonly busy?: boolean;
+  /** Set only for a way that stays open (the pasted-link field). */
+  readonly pressed?: boolean;
+}
+
+/** One of the equal ways in: an icon over a short label, at least 44 px tall, selection shown by the border. */
+function WayCard({ icon, children, onClick, disabled = false, busy = false, pressed }: WayCardProps) {
+  return (
+    <button
+      type="button"
+      className={`flex min-h-[88px] min-w-0 flex-col items-center justify-start gap-2 rounded-control border px-2 py-4 text-center text-ui font-medium leading-base text-fg transition-colors hover:border-accent focus-visible:outline-focus focus-visible:outline-offset-focus disabled:cursor-not-allowed disabled:opacity-60 ${pressed === true ? 'border-accent bg-surface-3' : 'border-border-strong bg-surface-2'}`}
+      onClick={onClick}
+      disabled={disabled || busy}
+      aria-pressed={pressed}
+      aria-busy={busy ? 'true' : undefined}
+    >
+      <span className={busy ? 'animate-pulse' : undefined}>{icon}</span>
+      {children}
+    </button>
+  );
+}
+
+interface UploadWayProps {
+  readonly readImage: (file: Blob) => Promise<string>;
+  readonly onText: (text: string) => void;
+}
+
+/**
+ * The upload way: pick a picture, read its QR in this tab, hand the text up.
+ *
+ * The picture and the text live in the handler only. The input is emptied as soon as the read ends (so the same
+ * picture can be chosen again, and nothing keeps the file), and what is shown is a sentence about the picture, never
+ * its content.
+ */
+function UploadWay({ readImage, onText }: UploadWayProps) {
+  const input = useRef<HTMLInputElement | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  // A read that finishes after the screen has gone must not speak.
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
+
+  const read = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const element = event.currentTarget;
+    const file = element.files?.[0];
+    if (file === undefined) return;
+    setProblem(null);
+    setBusy(true);
+    let text: string | undefined;
+    try {
+      text = await readImage(file);
+    } catch (reason) {
+      if (mounted.current)
+        setProblem(reason instanceof QrImageError ? reason.message : 'That image could not be read.');
+    } finally {
+      element.value = '';
+      if (mounted.current) setBusy(false);
+    }
+    if (text !== undefined) onText(text);
+  };
+
+  return (
+    <>
+      <WayCard icon={<ImageUp size={22} aria-hidden="true" />} onClick={() => input.current?.click()} busy={busy}>
+        {busy ? 'Reading…' : 'Upload a QR image'}
+      </WayCard>
+      <input
+        ref={input}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        tabIndex={-1}
+        aria-label="QR code image"
+        data-pair-upload=""
+        onChange={event => void read(event)}
+      />
+      {problem === null ? null : (
+        <p className="col-span-3 m-0 text-ui leading-base text-err" role="alert" data-pair-upload-problem="">
+          {problem}
+        </p>
+      )}
+    </>
   );
 }

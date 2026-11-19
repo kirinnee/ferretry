@@ -82,7 +82,7 @@ describe('PairingScreen cold open', () => {
     expect(screen.container.querySelector('ul[aria-label="Paired daemons"]')).toBeNull();
     // Paste is present but quiet: a link to reveal, not the hero control.
     expect(screen.container.querySelector('input[aria-label="Pairing link"]')).toBeNull();
-    expect(screen.container.textContent).toContain('Paste a link instead');
+    expect(screen.container.textContent).toContain('Paste a link');
     await screen.unmount();
   });
 
@@ -98,13 +98,13 @@ describe('PairingScreen cold open', () => {
 
   it('reveals the paste field on request, and permanently when there is no camera', async () => {
     const screen = await screenWith();
-    await interact(() => buttonNamed(screen.container, 'Paste a link instead').click());
+    await interact(() => buttonNamed(screen.container, 'Paste a link').click());
     expect(screen.container.querySelector('input[aria-label="Pairing link"]')).not.toBeNull();
     await screen.unmount();
 
     const noCamera = await screenWith({ scanHost: null });
     expect(noCamera.container.querySelector('input[aria-label="Pairing link"]')).not.toBeNull();
-    expect(noCamera.container.textContent).not.toContain('Paste a link instead');
+    expect(buttonNamed(noCamera.container, 'Scan QR code').disabled).toBe(true);
     await noCamera.unmount();
   });
 });
@@ -130,7 +130,7 @@ describe('PairingScreen with daemons already paired', () => {
     expect(screen.container.textContent?.split('https://gamma.example.test')).toHaveLength(2);
     expect(screen.container.textContent).not.toContain('alpha-secret');
     expect(screen.container.textContent).not.toContain('beta-secret');
-    expect(buttonNamed(screen.container, 'Pair another daemon')).toBeDefined();
+    expect(buttonNamed(screen.container, 'Scan QR code')).toBeDefined();
 
     const chosen = must(screen.container.querySelector('button[aria-current="true"]'), 'the selected daemon');
     const forget = must(screen.container.querySelector('button[aria-label="Forget beta-host"]'), 'the forget control');
@@ -378,7 +378,7 @@ describe('PairingScreen scanned and pasted links', () => {
       },
     });
 
-    await interact(() => buttonNamed(screen.container, 'Paste a link instead').click());
+    await interact(() => buttonNamed(screen.container, 'Paste a link').click());
     await typeLink(screen.container, 'not a link');
     await submitForm(screen.container);
 
@@ -391,13 +391,19 @@ describe('PairingScreen scanned and pasted links', () => {
     const screen = await screenWith({ scanHost: null });
 
     await typeLink(screen.container, LINK);
-    const input = must(screen.container.querySelector('input'), 'the paste field') as HTMLInputElement;
+    const input = must(
+      screen.container.querySelector('input[aria-label="Pairing link"]'),
+      'the paste field',
+    ) as HTMLInputElement;
     expect(input.value).toBe(LINK);
     await submitForm(screen.container);
 
     expect(screen.container.textContent).toContain('Pair this device?');
     await interact(() => buttonNamed(screen.container, 'Not now').click());
-    expect((must(screen.container.querySelector('input'), 'the paste field') as HTMLInputElement).value).toBe('');
+    expect(
+      (must(screen.container.querySelector('input[aria-label="Pairing link"]'), 'the paste field') as HTMLInputElement)
+        .value,
+    ).toBe('');
     await screen.unmount();
   });
 });

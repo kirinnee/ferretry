@@ -6,6 +6,7 @@ import { describe, expect, it } from 'bun:test';
 import type { z } from 'zod';
 import type { CredentialsPort } from '@ferretry/app';
 import { PairingScreen } from '../../../../app/features/pairing/pairing-screen.tsx';
+import { PairedNext } from '../../../../app/features/pairing/paired-next.tsx';
 import type { StepUpClient } from '../../../../app/lib/step-up-client.ts';
 import type { PairingArrival, PairingSeed } from '../../../../app/lib/pairing.ts';
 import { toBase64Url } from '../../../../app/shell-grants.ts';
@@ -184,6 +185,46 @@ describe('the first-passkey offer on the pairing-success screen', () => {
       expect(refused.container.querySelector('[data-first-passkey-offer]')).not.toBeNull();
     } finally {
       await refused.unmount();
+    }
+  });
+});
+
+describe('the passkey offer as a page (A565 shot 01 spacing)', () => {
+  it('draws one row of auto-width buttons, each at least 44 px tall with real padding, "Not now" beside the add button', async () => {
+    const { client } = machine(OPEN);
+    let moved = 0;
+    const screen = await mount(
+      <PairedNext
+        connection={connection}
+        createClient={async () => client}
+        offer={{ credentials: () => credentials(), origin: () => ORIGIN, supported: () => true, now: () => NOW }}
+        onContinue={() => (moved += 1)}
+      />,
+    );
+    try {
+      await interact(async () => await Promise.resolve());
+      const offer = must(screen.container.querySelector('[data-first-passkey-offer]'), 'the offer');
+      const add = must(offer.querySelector('[data-first-passkey-add]'), 'the add button') as HTMLElement;
+      const notNow = must(offer.querySelector('[data-paired-continue]'), '"Not now" beside it') as HTMLElement;
+
+      expect(notNow.parentElement).toBe(add.parentElement);
+      expect(notNow.textContent).toBe('Not now');
+      expect(notNow.getAttribute('data-variant')).toBe('ghost');
+      for (const button of [add, notNow]) {
+        expect(button.className).toContain('min-h-[44px]');
+        expect(button.className).toContain('px-6');
+        expect(button.className).toContain('py-3');
+        expect(button.className).not.toContain('w-full');
+      }
+      expect(offer.className).toContain('px-6');
+      expect(offer.className).toContain('py-5');
+      // One "Not now" only: the quiet one that stands alone is gone while the offer shows.
+      expect(screen.container.querySelectorAll('[data-paired-continue]')).toHaveLength(1);
+
+      await interact(() => notNow.click());
+      expect(moved).toBe(1);
+    } finally {
+      await screen.unmount();
     }
   });
 });

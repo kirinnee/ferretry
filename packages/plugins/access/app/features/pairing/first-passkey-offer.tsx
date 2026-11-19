@@ -12,7 +12,7 @@
  */
 
 import { Fingerprint } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 
 import { type CredentialsPort, type DeadlineSchedule, MACHINE_READ_DEADLINE_MS, withDeadline } from '@ferretry/app';
 import type { PasskeysView } from '../../../contract/index.ts';
@@ -46,6 +46,8 @@ export interface FirstPasskeyOfferProps {
    * daemon-less `/pair` page) waits for this so it never navigates away from a button the person could still press.
    */
   readonly onSettled?: (outcome: FirstPasskeyOutcome) => void;
+  /** Drawn beside the add button while the offer shows (the host's "Not now"), so the two answers sit in one row. */
+  readonly actions?: ReactNode;
 }
 
 export type FirstPasskeyOutcome = 'none' | 'offered' | 'added';
@@ -69,6 +71,7 @@ export function FirstPasskeyOffer({
   deadlineMs = MACHINE_READ_DEADLINE_MS,
   schedule,
   onSettled,
+  actions,
 }: FirstPasskeyOfferProps) {
   const [state, setState] = useState<State>({ kind: 'hidden' });
   const [busy, setBusy] = useState(false);
@@ -140,22 +143,27 @@ export function FirstPasskeyOffer({
   return (
     <div
       data-first-passkey-offer=""
-      className="flex w-full min-w-0 flex-col items-center gap-2 rounded-control border border-border-strong bg-surface-2 px-3 py-2"
+      className="flex w-full max-w-md min-w-0 flex-col items-center gap-4 rounded-panel border border-border-strong bg-surface-2 px-6 py-5"
     >
-      <p className="m-0 text-balance text-cell leading-base text-fg">
+      <p className="m-0 text-balance text-ui leading-base text-fg">
         You can add a passkey for this device now{left === null ? '' : ` — ${left}`}.
       </p>
-      <button
-        type="button"
-        disabled={busy}
-        data-first-passkey-add=""
-        onClick={() => void add()}
-        data-variant="primary"
-        className="kt-btn disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <Fingerprint size={15} aria-hidden="true" />
-        Add a passkey now
-      </button>
+      {/* One row, auto-width buttons, each at least 44 px tall with room around the label: never a full-width bar. */}
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        <button
+          type="button"
+          disabled={busy}
+          data-first-passkey-add=""
+          onClick={() => void add()}
+          data-variant="primary"
+          className="kt-btn min-h-[44px] px-6 py-3 disabled:cursor-not-allowed disabled:opacity-60"
+          style={{ height: 'auto' }}
+        >
+          <Fingerprint size={16} aria-hidden="true" />
+          Add a passkey now
+        </button>
+        {actions}
+      </div>
       {failure === null ? null : (
         <p role="alert" data-first-passkey-failure="" className="m-0 text-meta leading-base text-err">
           {failure}

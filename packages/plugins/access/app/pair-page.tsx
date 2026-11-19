@@ -30,6 +30,7 @@ import { PairingScreen, type PairingScreenProps } from './features/pairing/pairi
 import { pairedPasskeyClient } from './pair-passkey.ts';
 import { exchangePairing } from './lib/pair-exchange.ts';
 import { type QrScanHost, browserQrScanHost, type QrDetectorLike } from './lib/pair-scan.ts';
+import { loadSoftwareDecoder } from './features/pairing/qr-image.ts';
 import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
 import { type DecodePixels, frameQrDetector } from './lib/qr-frame-decoder.ts';
 import type { DeviceKeyStore } from './lib/device-keys.ts';
@@ -41,10 +42,11 @@ export interface PairPageEnvironment {
   readonly scanHost?: () => QrScanHost | null;
   /**
    * The software QR decoder for a browser with no `BarcodeDetector` (WebKit), fetched only when somebody taps Scan.
-   * GAP(access-qr-software-decoder): the decoder library (`jsqr`) is not a dependency of this build yet, so none is
-   * supplied and such a browser gets the paste path only.
+   * `jsqr` (`loadSoftwareDecoder`) unless a suite hands another.
    */
   readonly loadDecoder?: () => Promise<DecodePixels>;
+  /** Reads a QR picture to its text (the upload way); the page's own decoder unless a suite hands another. */
+  readonly readImage?: (file: Blob) => Promise<string>;
   readonly defaultName?: () => string;
   /** Where the device keys live; the page's IndexedDB unless a suite hands one in. */
   readonly store?: DeviceKeyStore;
@@ -58,11 +60,10 @@ export interface PairPageEnvironment {
 }
 
 /** The camera, or `null` where this browser has no QR decoder of its own to offer (the paste path stays). */
-function browserQrScan(loadDecoder?: () => Promise<DecodePixels>): QrScanHost | null {
+function browserQrScan(loadDecoder: () => Promise<DecodePixels> = loadSoftwareDecoder): QrScanHost | null {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return null;
   const native = (window as { BarcodeDetector?: new (options: { formats: string[] }) => QrDetectorLike })
     .BarcodeDetector;
-  if (native === undefined && loadDecoder === undefined) return null;
   const host = browserQrScanHost({
     media: navigator.mediaDevices,
     detector:
@@ -70,7 +71,7 @@ function browserQrScan(loadDecoder?: () => Promise<DecodePixels>): QrScanHost | 
         ? () =>
             frameQrDetector({
               createCanvas: () => document.createElement('canvas'),
-              loadDecoder: loadDecoder as () => Promise<DecodePixels>,
+              loadDecoder,
             })
         : () => new native({ formats: ['qr_code'] }),
     delay: async milliseconds => await new Promise(resolve => setTimeout(resolve, milliseconds)),
@@ -165,6 +166,7 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
           key={link?.nonce ?? 0}
           arrival={link?.arrival ?? NO_LINK}
           scanHost={scanHost}
+          {...(environment.readImage === undefined ? {} : { readImage: environment.readImage })}
           connections={connections}
           selectedDaemonId={snapshot.selected === null ? null : daemonId(snapshot.selected)}
           {...(environment.defaultName === undefined ? {} : { defaultName: environment.defaultName })}
