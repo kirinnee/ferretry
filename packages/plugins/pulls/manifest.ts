@@ -2,13 +2,14 @@ import { definePlugin, route, screen } from '@ferretry/kernel/manifest';
 import { GitAccountDisconnected, GitAccountsPort } from '@ferretry/plugin-git-accounts/contract';
 import { ProjectsPort, ProjectRemoved } from '@ferretry/plugin-projects/contract';
 import { AccessPort } from './contract/others.ts';
-import { audit } from '@ferretry/core-gate/contract';
+import { audit, GatePort } from '@ferretry/core-gate/contract';
 import {
   PULLS_AUDIT,
   PULLS_AUDIT_SKIP,
   PULLS_CACHE,
   PULLS_CAPS,
   PULLS_GUARD,
+  PULLS_GUARD_POST,
   PULLS_WORDS,
   PullsChanged,
   PullsConfigDef,
@@ -23,6 +24,16 @@ import {
  * NO TOKEN. This plugin names an account by id and `git-accounts` places the token on the request; nothing here can
  * read one. It needs no network permission of its own for the same reason: it never makes the request.
  */
+/** E7: the one shape of a post route. */
+const POST_ROUTE = {
+  minimum: 'operator',
+  caller: 'person',
+  capability: PULLS_CAPS.post,
+  noStore: true,
+  audit: PULLS_AUDIT_SKIP.post,
+  guard: PULLS_GUARD_POST,
+} as const;
+
 export default definePlugin({
   id: 'pulls',
   title: 'PRs & CI',
@@ -34,7 +45,8 @@ export default definePlugin({
 
   needs: { gitAccounts: GitAccountsPort, projects: ProjectsPort },
   // E2 buzzes the phone through Access when it is there; without it the watch still keeps and shows PRs.
-  uses: { access: AccessPort },
+  // E7 records every post through Gate's audit door; with no Gate no post is made.
+  uses: { access: AccessPort, gate: GatePort },
 
   actions: {
     routes: [
@@ -101,6 +113,19 @@ export default definePlugin({
         guard: {
           none: 'file paths, counts and diff text of a repository the project holds; no pane, page or vault text',
         },
+      }),
+      // E7: posts to GitHub AS THE PERSON (their connected account). Person only: a ferret is refused `owner_only`.
+      // Each records its own audit line through Gate (ids only, never the body), so the declarative record is skipped.
+      route('POST /v1/pulls/:project/:repo/:number/comment', POST_ROUTE),
+      route('POST /v1/pulls/:project/:repo/:number/reply', POST_ROUTE),
+      route('POST /v1/pulls/:project/:repo/:number/line-comment', POST_ROUTE),
+      route('GET /v1/pulls/:project/:repo/:number/poster', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: PULLS_CAPS.read,
+        noStore: true,
+        audit: PULLS_AUDIT_SKIP.read,
+        guard: PULLS_GUARD_POST,
       }),
     ],
   },

@@ -6,6 +6,7 @@ import manifest from '../manifest.ts';
 import { GithubClient } from './adapters/github/client.ts';
 import { configDoorOf } from './features/watch/config-door.ts';
 import { watchFeature } from './features/watch/index.ts';
+import { newPostLedger } from './features/post/index.ts';
 import { PullsCache } from './lib/cache/store.ts';
 import { WatchStore } from './features/watch/store.ts';
 import { pullsRoutes } from './routes.ts';
@@ -62,6 +63,14 @@ export default implementDaemon(manifest, {
           projects: needs.projects,
           accounts: needs.gitAccounts,
           nowMs: () => kernel.clock.nowMs(),
+          // E7: a post is recorded through Gate, or it is not made.
+          post: {
+            record: () => {
+              const gate = uses.gate.current();
+              return gate === undefined ? undefined : async draft => await gate.audit(draft);
+            },
+            ledger: newPostLedger(() => kernel.clock.nowMs()),
+          },
         },
         watch,
       ),

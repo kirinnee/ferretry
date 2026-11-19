@@ -1,4 +1,4 @@
-import type { Log } from '@ferretry/kernel/contract';
+import { ApiError, type Log } from '@ferretry/kernel/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import type { GitAccountId, GitAccountsApi, GitApiAnswer } from '@ferretry/plugin-git-accounts/contract';
 import { GithubBodySchema, PULLS_CODES, type PullsCode, type RateResource } from '../../../contract/index.ts';
@@ -31,6 +31,20 @@ export interface PagedAnswer {
   /** Stopped at `maxPages` with more pages still linked. */
   readonly truncated: boolean;
 }
+
+/**
+ * What a write came to. `unsent`: it certainly did not leave. `answered`: GitHub said a status (`paused` is set when that
+ * answer used up the allowance). `unknown`: it may have reached GitHub and no usable answer came back.
+ */
+export type WriteOutcome =
+  | { readonly kind: 'unsent'; readonly failure: ReadFailure }
+  | {
+      readonly kind: 'answered';
+      readonly status: number;
+      readonly body: unknown;
+      readonly paused: ReadFailure | undefined;
+    }
+  | { readonly kind: 'unknown' };
 
 export interface Reading {
   /** Whose cache the answer is kept in. */
@@ -149,6 +163,36 @@ export class GithubClient {
     )
       return err({ code: PULLS_CODES.github, message: 'GitHub could not answer that query' });
     return ok(body.data);
+  }
+
+  /**
+   * A WRITE (a comment): one `POST`, never cached and NEVER retried, here or by any caller. It does not say "failed" when
+   * it cannot know: a call that may have reached GitHub and got no answer is `unknown`, and only `unsent` is certain.
+   * GitHub's text is read for nothing and passed on to nobody; a status is all a caller gets.
+   */
+  async write(
+    account: GitAccountId,
+    resource: RateResource,
+    call: { readonly path: string; readonly body: unknown },
+  ): Promise<WriteOutcome> {
+    const paused = this.#paused(account, resource);
+    if (paused !== undefined) return { kind: 'unsent', failure: paused };
+    let answer: GitApiAnswer;
+    try {
+      answer = await this.accounts.api(account, { method: 'POST', path: call.path, body: call.body });
+    } catch (error) {
+      // The seam refuses before it sends (a path it does not allow, a body too large, an account that is gone). A
+      // transport failure or timeout (a 502 from it) can come AFTER the request left, so that one stays unknown.
+      const sure = error instanceof TypeError || (error instanceof ApiError && error.status !== 502);
+      this.log.warn('a GitHub write did not answer', { reason: error instanceof Error ? error.name : 'error' });
+      return sure
+        ? { kind: 'unsent', failure: { code: PULLS_CODES.refused, message: 'that GitHub call could not be made' } }
+        : { kind: 'unknown' };
+    }
+    this.budget.observe(account, resource, answer.headers, answer.status, saysLimited(answer.body));
+    // A server error may have been acted on before it failed: it is not "did not post".
+    if (answer.status >= 500) return { kind: 'unknown' };
+    return { kind: 'answered', status: answer.status, body: answer.body, paused: this.#paused(account, resource) };
   }
 
   #paused(account: GitAccountId, resource: RateResource): ReadFailure | undefined {

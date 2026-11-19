@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { budgetSentence, type PullPage } from '../../../contract/index.ts';
 import { type PullAddress, type PullsClient, readPullPage, reasonOf } from '../../lib/client.ts';
 import { projectPagePath } from '../../lib/paths.ts';
+import { ComposeDock } from '../compose/index.ts';
 import { CiTab } from './ci-tab.tsx';
 import { Conversation } from './conversation.tsx';
 import { FilesTab } from './files-tab.tsx';
@@ -64,11 +65,23 @@ function Pause({ until }: { readonly until: string }) {
   );
 }
 
-function Body({ page }: { readonly page: PullPage }) {
+function Body({
+  page,
+  client,
+  daemon,
+  address,
+  refresh,
+}: {
+  readonly page: PullPage;
+  readonly client: PullsClient;
+  readonly daemon: string;
+  readonly address: PullAddress;
+  readonly refresh: () => void;
+}) {
   const [tab, setTab] = useState<TabId>('conversation');
   const { pull } = page;
   return (
-    <>
+    <ComposeDock address={address} client={client} headSha={pull.headSha} onChanged={refresh} pullUrl={pull.url}>
       <PullHeader pull={pull} />
       <UnderlineTabs
         current={tab}
@@ -82,9 +95,9 @@ function Body({ page }: { readonly page: PullPage }) {
         ]}
       />
       {tab === 'conversation' && <Conversation page={page} />}
-      {tab === 'files' && <FilesTab pull={pull} />}
+      {tab === 'files' && <FilesTab address={address} client={client} daemon={daemon} pull={pull} />}
       {tab === 'ci' && <CiTab checks={page.checks} pull={pull} />}
-    </>
+    </ComposeDock>
   );
 }
 
@@ -132,7 +145,7 @@ export function PullPageView({
             This is the last page read; refreshing failed: {reading.stale}
           </p>
         )}
-        {page !== undefined && <Body page={page} />}
+        {page !== undefined && <Body address={address} client={client} daemon={daemon} page={page} refresh={refresh} />}
       </div>
     </main>
   );
