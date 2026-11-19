@@ -79,32 +79,71 @@ describe('the Shells step', () => {
   it('shows what ferrets use without nix, with the daemon’s own words, and is ready', async () => {
     const { harness, view } = await open(async () => ABSENT);
     expect(harness.decision).toBe('shown');
-    expect(view.container.textContent).toContain('Ferrets can use per-project shells with nix');
+    expect(view.container.textContent).toContain('Nix is not on this machine');
     const body = must(view.container.querySelector('[data-testid="shells-step"]'), 'the step body').textContent;
     expect(body).toContain('Ferrets use the machine’s own tools.');
     expect(body).toContain('Install nix, then look again.');
   });
 
-  it('Later moves on without recording an answer, and Back goes back', async () => {
+  it('draws only its body: no frame, title, progress, Back, Next or Later, and never moves the flow', async () => {
     const { harness, view } = await open(async () => ABSENT);
-    await interact(() => must(view.container.querySelector<HTMLElement>('[data-step-next]'), 'Later').click());
-    await interact(() => must(view.container.querySelector<HTMLElement>('[data-step-back]'), 'Back').click());
-    expect(harness.count('next')).toBe(1);
-    expect(harness.count('back')).toBe(1);
+    expect(view.container.querySelector('[data-step-page]')).toBeNull();
+    expect(view.container.querySelector('h1')).toBeNull();
+    expect(view.container.querySelector('[data-step-next]')).toBeNull();
+    expect(view.container.querySelector('[data-step-back]')).toBeNull();
+    expect(view.container.querySelector('[data-step-later]')).toBeNull();
+    expect(view.container.textContent).not.toContain('Later');
+    expect(harness.count('next')).toBe(0);
+    expect(harness.count('back')).toBe(0);
     expect(harness.count('done')).toBe(0);
     expect(harness.count('remember')).toBe(0);
   });
 
-  it('a failed check still shows the page: it says it could not look, and never blocks', async () => {
+  it('a failed check shows "Couldn’t check", does not claim ferrets use host tools, and never blocks', async () => {
     const { harness, view } = await open(async () => {
       throw new Error('offline');
     });
     expect(harness.decision).toBe('shown');
-    expect(view.container.textContent).toContain('could not check whether nix is on this machine');
+    const body = must(view.container.querySelector('[data-testid="shells-step"]'), 'the step body');
+    expect(body.getAttribute('data-outcome')).toBe('unreadable');
+    expect(body.textContent).toContain('Couldn’t check');
+    expect(body.textContent).not.toContain('machine’s own tools');
+    expect(harness.count('next')).toBe(0);
+  });
+
+  it('"Check again" looks again: nix found now skips the step as not-needed', async () => {
+    let asked = 0;
+    const { harness, view } = await open(async () => {
+      asked += 1;
+      if (asked === 1) throw new Error('offline');
+      return PRESENT;
+    });
+    expect(harness.decision).toBe('shown');
+    await interact(() => must(view.container.querySelector<HTMLElement>('[data-shells-step-retry]'), 'retry').click());
+    await settle();
+    expect(asked).toBe(2);
+    expect(harness.skippedWhy).toBe('not-needed');
+    expect(view.container.textContent).toBe('');
+  });
+
+  it('"Check again" that fails again stays on the page, still never claiming anything', async () => {
+    let asked = 0;
+    const { view } = await open(async () => {
+      asked += 1;
+      throw new Error('offline');
+    });
+    await interact(() => must(view.container.querySelector<HTMLElement>('[data-shells-step-retry]'), 'retry').click());
+    await settle();
+    expect(asked).toBe(2);
+    expect(view.container.textContent).toContain('Couldn’t check');
   });
 
   it('the words come from one pure function', () => {
     expect(shellsStepView(PRESENT)).toEqual({ kind: 'hide' });
-    expect(shellsStepView({ kind: 'unreadable' })).toMatchObject({ kind: 'show', consequence: '' });
+    expect(shellsStepView({ kind: 'unreadable' })).toMatchObject({
+      kind: 'show',
+      outcome: 'unreadable',
+      consequence: '',
+    });
   });
 });
