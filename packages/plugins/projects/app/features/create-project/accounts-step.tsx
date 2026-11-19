@@ -2,17 +2,20 @@
  * STEP 3: CONNECT GITHUB ACCOUNTS. Pick from the connected ones (as many as you like, the first is the default) or
  * connect another by device flow. Skipping is fine: a project without an account still works.
  */
+import { ConfirmToSee } from '@ferretry/app/ui';
 import { LoaderCircle, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
+import type { ProjectsConnectAccount } from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../lib/client.ts';
 import { reasonOf } from '../../lib/client.ts';
 import { setProjectAccounts } from './accounts-api.ts';
-import { ConnectAccount } from './connect-account.tsx';
+import { ConnectCard } from './connect-card.tsx';
 import type { GitAccountsState } from './use-git-accounts.ts';
-import { useDeviceFlow } from './use-device-flow.ts';
 
 export interface AccountsStepProps {
   readonly client: ProjectsClient;
+  /** Git accounts' connect card, when this machine has it. */
+  readonly connectAccount: ProjectsConnectAccount | undefined;
   readonly projectId: string;
   readonly accounts: GitAccountsState;
   readonly selected: readonly string[];
@@ -24,6 +27,7 @@ export interface AccountsStepProps {
 
 export function AccountsStep({
   client,
+  connectAccount,
   projectId,
   accounts,
   selected,
@@ -33,11 +37,11 @@ export function AccountsStep({
 }: AccountsStepProps) {
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
-  const flow = useDeviceFlow(client, (accountId: string) => {
+  const connected = (accountId: string): void => {
     accounts.reload();
     // A freshly connected account is the one meant to be used: link it without a second press.
     onSelectedChange(selected.includes(accountId) ? selected : [...selected, accountId]);
-  });
+  };
   const toggle = (id: string, on: boolean): void =>
     onSelectedChange(
       on ? (selected.includes(id) ? selected : [...selected, id]) : selected.filter(each => each !== id),
@@ -62,11 +66,20 @@ export function AccountsStep({
         Link the GitHub accounts this project uses. Ferrets working here push and sign as the first one. You can connect
         as many as you like, and change this later.
       </p>
-      {accounts.error !== null && (
-        <p className="m-0 flex items-start gap-xs text-meta text-warn" role="status" data-create-accounts-error="">
-          <TriangleAlert className="mt-0.5 shrink-0" size={14} aria-hidden="true" />
-          Could not read the connected accounts: {accounts.error}
-        </p>
+      {accounts.stepUp ? (
+        <div data-create-accounts-step-up="">
+          <ConfirmToSee
+            line="This machine wants your passkey before it shows its GitHub accounts."
+            onConfirm={accounts.confirm}
+          />
+        </div>
+      ) : (
+        accounts.error !== null && (
+          <p className="m-0 flex items-start gap-xs text-meta text-warn" role="status" data-create-accounts-error="">
+            <TriangleAlert className="mt-0.5 shrink-0" size={14} aria-hidden="true" />
+            Could not read the connected accounts: {accounts.error}
+          </p>
+        )
       )}
       {accounts.accounts === null ? (
         accounts.error === null && <p className="m-0 text-meta text-muted">Reading the connected accounts…</p>
@@ -97,7 +110,7 @@ export function AccountsStep({
           ))}
         </ul>
       )}
-      <ConnectAccount controls={flow} />
+      <ConnectCard provided={connectAccount} connected={accounts.accounts?.length ?? 0} onConnected={connected} />
       {refused !== null && (
         <p className="m-0 flex items-start gap-xs text-meta text-err" role="alert">
           <TriangleAlert className="mt-0.5 shrink-0" size={14} aria-hidden="true" />

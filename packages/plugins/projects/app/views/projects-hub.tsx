@@ -25,7 +25,7 @@
  * refusal, and that is the whole protocol between this component and its caller.
  */
 
-import type { RegisterProjectRequest } from '../../contract/index.ts';
+import type { ProjectsConnectAccount, RegisterProjectRequest } from '../../contract/index.ts';
 import { FolderOpen, Plus, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import type { RecentProjectOption } from '../lib/discoveries.ts';
@@ -73,6 +73,8 @@ interface ProjectsHubProps {
    * it the plain form below is drawn, which is what the suites and harness frames that have no daemon mount.
    */
   readonly client?: ProjectsClient;
+  /** Git accounts' connect card for the flow, when this machine has it. */
+  readonly connectAccount?: ProjectsConnectAccount;
   /** Whether the add form starts open (a caller that came to add a project: the first-run stepper's "Create a project"). */
   readonly initiallyOpen?: boolean;
 }
@@ -123,6 +125,7 @@ export function ProjectsHub({
   onNavigate,
   now,
   client,
+  connectAccount,
   initiallyOpen = false,
 }: ProjectsHubProps) {
   const [draft, setDraft] = useState<ProjectRegistrationDraft>(emptyProjectRegistrationDraft);
@@ -183,6 +186,7 @@ export function ProjectsHub({
             ) : (
               <CreateProjectFlow
                 client={client}
+                {...(connectAccount === undefined ? {} : { connectAccount })}
                 status={status}
                 onRegister={onRegister}
                 onClose={() => setOpen(false)}

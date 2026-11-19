@@ -17,7 +17,11 @@ import {
   type ProjectRegistrationStatus,
 } from '../../../../app/lib/registration-model.ts';
 import { AddProjectForm } from '../../../../app/views/add-project-form.tsx';
-import { ProjectInfoSchema, type RegisterProjectRequest } from '../../../../contract/index.ts';
+import {
+  type ProjectsConnectAccountProps,
+  ProjectInfoSchema,
+  type RegisterProjectRequest,
+} from '../../../../contract/index.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
@@ -73,6 +77,21 @@ const ACCOUNTS = [
   { id: 'gha_202', login: 'sam-at-work', keys: { ssh: { githubKeyId: '1', title: 'Ferretry' } } },
 ];
 
+/**
+ * A STAND-IN for Git accounts' connect card, which a plugin's suite cannot import (another package is reached only through
+ * its contract). The flow mounts whatever provides `projects.connect-account`; the real card's own shots (consent words,
+ * code, countdown) are Git accounts', so here it is only its idle button, in the position and size the real one has.
+ */
+const connectProvider = {
+  panel: ({ connected }: ProjectsConnectAccountProps) => (
+    <div>
+      <button type="button" className="kt-btn min-h-[44px]" data-fake-connect-card="">
+        {connected === 0 ? 'Connect a GitHub account' : 'Connect another GitHub account'}
+      </button>
+    </div>
+  ),
+};
+
 const client: ProjectsClient = {
   call: async <Answer,>(route: string, init?: { query?: Record<string, string>; body?: unknown }): Promise<Answer> => {
     if (route === 'GET /v1/projects/folders') {
@@ -83,7 +102,10 @@ const client: ProjectsClient = {
     if (route === 'PUT /v1/projects/:id/accounts')
       return { ...project, accounts: (init?.body as { accounts: string[] } | undefined)?.accounts ?? [] } as Answer;
     if (route === 'POST /v1/git-accounts/:id/keys')
-      return { fingerprint: 'SHA256:Zq1kF0x2VdRk8n5mJc3oYwB7sLpA4tHeU9iGvNyXr6E', registered: true } as Answer;
+      return {
+        fingerprint: 'SHA256:Zq1kF0x2VdRk8n5mJc3oYwB7sLpA4tHeU9iGvNyXr6E',
+        registered: ['auth', 'signing'],
+      } as Answer;
     throw new Error(`no route ${route}`);
   },
 };
@@ -97,6 +119,7 @@ function Flow() {
   return (
     <CreateProjectFlow
       client={client}
+      connectAccount={connectProvider}
       status={status}
       onRegister={onRegister}
       onClose={() => {}}

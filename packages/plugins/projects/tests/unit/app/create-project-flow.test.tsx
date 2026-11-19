@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { interact, type Mounted, mount, must, RouterProvider, settleUntil } from '@ferretry/app/testing';
+import { interact, type Mounted, mount, must, RouterProvider, settleUntil, WithAppHooks } from '@ferretry/app/testing';
+import { PROJECTS_CONNECT_ACCOUNT_HOOK } from '../../../contract/index.ts';
+import type { ProjectsClient } from '../../../app/lib/client.ts';
 import { ProjectsPage } from '../../../app/views/projects-page.tsx';
 import { ANSWERED, type Call, clickEvent, refusal, scripted, typeInto } from './support/client.ts';
 
@@ -10,8 +12,8 @@ const REGISTER = 'POST /v1/projects';
 const ACCOUNTS = 'GET /v1/git-accounts';
 const SET_ACCOUNTS = 'PUT /v1/projects/:id/accounts';
 const KEYS = 'POST /v1/git-accounts/:id/keys';
-const DEVICE = 'POST /v1/git-accounts/github/device';
-const POLL = 'GET /v1/git-accounts/github/device/:flowId';
+/** B3's own sentence for a 422 from GitHub (`git-accounts/daemon/features/ssh-keys/service.ts`): shown as the daemon worded it. */
+const KEY_REFUSED = 'GitHub refused the key (it may already be used by another account)';
 
 const listing = (path: string) => ({
   path,
@@ -67,7 +69,7 @@ describe('Create a project', () => {
     const calls: Call[] = [];
     const client = base(calls, {
       [SET_ACCOUNTS]: { ...ANSWERED, accounts: ['gha_2', 'gha_1'] },
-      [KEYS]: { fingerprint: 'SHA256:abc', registered: true },
+      [KEYS]: { fingerprint: 'SHA256:abc', registered: ['auth', 'signing'] },
     });
     const mounted = await mount(page(client));
     await createAt(mounted);
@@ -124,7 +126,7 @@ describe('Create a project', () => {
   it("states the daemon's refusal of the link and of a key as worded, and keeps the step", async () => {
     const client = base([], {
       [SET_ACCOUNTS]: refusal(403, 'this needs a passkey first'),
-      [KEYS]: refusal(404, 'no route POST /v1/git-accounts/:id/keys'),
+      [KEYS]: refusal(409, KEY_REFUSED, 'key_refused'),
     });
     const mounted = await mount(page(client));
     await createAt(mounted);
@@ -137,7 +139,7 @@ describe('Create a project', () => {
 
     const keyed = base([], {
       [SET_ACCOUNTS]: ANSWERED,
-      [KEYS]: refusal(404, 'no route POST /v1/git-accounts/:id/keys'),
+      [KEYS]: refusal(409, KEY_REFUSED, 'key_refused'),
     });
     const second = await mount(page(keyed));
     await createAt(second);
@@ -146,45 +148,39 @@ describe('Create a project', () => {
     await press(button(second, 'Link this account'));
     await step(second, 'keys');
     await press(button(second, 'Set up push and signing for this account'));
-    await settled(
-      second,
-      c => (c.textContent ?? '').includes('no route POST /v1/git-accounts/:id/keys'),
-      'the key refusal',
-    );
+    await settled(second, c => (c.textContent ?? '').includes(KEY_REFUSED), 'the key refusal');
     await second.unmount();
   });
 
-  it('connects a new account by device flow: the code, then the account appears and is picked', async () => {
-    let polls = 0;
+  it("mounts Git accounts' own connect card: the account it reports is listed and picked, with no copy of the flow here", async () => {
     let connected = false;
+    const shown: number[] = [];
+    // What Git accounts provides: a component given how many are connected and told which account was approved.
+    const panel = ({ connected: count, onConnected }: { connected: number; onConnected: (id: string) => void }) => {
+      shown.push(count);
+      return (
+        <button
+          type="button"
+          data-fake-connect=""
+          onClick={() => {
+            connected = true;
+            onConnected('gha_3');
+          }}
+        >
+          Connect
+        </button>
+      );
+    };
     const client = base([], {
       [ACCOUNTS]: () => [account('gha_1', 'octocat'), ...(connected ? [account('gha_3', 'newcomer')] : [])],
-      [DEVICE]: {
-        flowId: 'flow_aaaaaaaaaaaaaaaa',
-        userCode: 'ABCD-1234',
-        verificationUri: 'https://github.com/login/device',
-        expiresAt: new Date(Date.now() + 600_000).toISOString(),
-        interval: 1,
-      },
-      [POLL]: () => {
-        polls += 1;
-        if (polls < 2) return { status: 'pending', interval: 1 };
-        connected = true;
-        return { status: 'done', accountId: 'gha_3', login: 'newcomer' };
-      },
     });
-    const mounted = await mount(page(client));
-    await createAt(mounted);
-    // What is asked of GitHub is said before the code is shown.
-    await press(button(mounted, 'Connect a GitHub account'));
-    expect(must(mounted.container.querySelector('[data-connect-consent]'), 'the consent').textContent).toContain(
-      'read:org',
+    const mounted = await mount(
+      <WithAppHooks provided={{ [PROJECTS_CONNECT_ACCOUNT_HOOK]: { panel } }}>{page(client)}</WithAppHooks>,
     );
-    await press(button(mounted, 'Continue to GitHub'));
-    await settled(mounted, c => c.querySelector('[data-connect-code]') !== null, 'the code');
-    expect(must(mounted.container.querySelector('[data-connect-code]'), 'the code').textContent).toBe('ABCD-1234');
-    await interact(() => new Promise<void>(resolve => setTimeout(resolve, 2300)));
-    await settled(mounted, c => c.querySelector('[data-connect-account="connected"]') !== null, 'connected');
+    await createAt(mounted);
+    await settled(mounted, c => c.querySelector('[data-create-account="gha_1"]') !== null, 'the accounts');
+    expect(shown.at(-1)).toBe(1);
+    await press(must(mounted.container.querySelector('[data-fake-connect]'), 'the connect card'));
     await settled(mounted, c => c.querySelector('[data-create-account="gha_3"]') !== null, 'the new account listed');
     expect(
       must(mounted.container.querySelector<HTMLInputElement>('[data-create-account="gha_3"] input'), 'newcomer')
@@ -193,24 +189,44 @@ describe('Create a project', () => {
     await mounted.unmount();
   });
 
-  it('says when a code ran out and offers another', async () => {
-    const client = base([], {
-      [DEVICE]: {
-        flowId: 'flow_aaaaaaaaaaaaaaaa',
-        userCode: 'ABCD-1234',
-        verificationUri: 'https://github.com/login/device',
-        expiresAt: new Date(Date.now() + 600_000).toISOString(),
-        interval: 1,
-      },
-      [POLL]: { status: 'expired' },
-    });
-    const mounted = await mount(page(client));
+  it('says connecting is not available when no plugin provides the card, and the rest of the step still works', async () => {
+    const mounted = await mount(page(base([])));
     await createAt(mounted);
-    await press(button(mounted, 'Connect a GitHub account'));
-    await press(button(mounted, 'Continue to GitHub'));
-    await interact(() => new Promise<void>(resolve => setTimeout(resolve, 1300)));
-    await settled(mounted, c => c.querySelector('[data-connect-account="expired"]') !== null, 'expired');
-    expect(button(mounted, 'Try again')).toBeDefined();
+    await settled(mounted, c => c.querySelector('[data-connect-account="unavailable"]') !== null, 'the note');
+    expect(mounted.container.querySelector('[data-create-account="gha_1"]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
+  it('says a failed read of the accounts in the daemon\u2019s words, and says when none are connected yet', async () => {
+    const failed = await mount(page(base([], { [ACCOUNTS]: refusal(500, 'the vault is locked') })));
+    await createAt(failed);
+    await settled(failed, c => c.querySelector('[data-create-accounts-error]') !== null, 'the error');
+    expect(must(failed.container.querySelector('[data-create-accounts-error]'), 'the error').textContent).toContain(
+      'the vault is locked',
+    );
+    await failed.unmount();
+    const empty = await mount(page(base([], { [ACCOUNTS]: [] })));
+    await createAt(empty);
+    await settled(empty, c => c.querySelector('[data-create-accounts-empty]') !== null, 'the empty note');
+    await empty.unmount();
+  });
+
+  it('offers one passkey press when the account list was refused for want of the step-up, then lists them', async () => {
+    const inner = base([]);
+    // A read the page makes on its own is refused; only the person's press (`quiet: false`) is answered.
+    const asking: ProjectsClient = {
+      call: <Answer,>(route: string, init?: { readonly quiet?: boolean }) =>
+        route === ACCOUNTS && init?.quiet !== false
+          ? Promise.reject(refusal(403, 'passkey first', 'grant_step_up_required'))
+          : inner.call<Answer>(route, init as never),
+    } as ProjectsClient;
+    const mounted = await mount(page(asking));
+    await createAt(mounted);
+    await settled(mounted, c => c.querySelector('[data-create-accounts-step-up]') !== null, 'the press');
+    expect(mounted.container.querySelector('[data-create-accounts-error]')).toBeNull();
+    await press(button(mounted, 'Confirm it’s you to see this'));
+    await settled(mounted, c => c.querySelector('[data-create-account="gha_1"]') !== null, 'the accounts');
+    expect(mounted.container.querySelector('[data-create-accounts-step-up]')).toBeNull();
     await mounted.unmount();
   });
 

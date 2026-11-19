@@ -10,7 +10,7 @@
  */
 import { Check } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import type { ProjectInfo, RegisterProjectRequest } from '../../../contract/index.ts';
+import type { ProjectInfo, ProjectsConnectAccount, RegisterProjectRequest } from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../lib/client.ts';
 import type { ProjectRegistrationStatus } from '../../lib/registration-model.ts';
 import { AccountsStep } from './accounts-step.tsx';
@@ -30,6 +30,8 @@ import { useGitAccounts } from './use-git-accounts.ts';
 
 export interface CreateProjectFlowProps {
   readonly client: ProjectsClient;
+  /** Git accounts' connect card, when this machine has it (the page reads the hook). */
+  readonly connectAccount?: ProjectsConnectAccount;
   readonly status: ProjectRegistrationStatus | null;
   /** Sends the registration; `false` is a refusal (the status says why). */
   readonly onRegister: (request: RegisterProjectRequest) => Promise<boolean>;
@@ -61,6 +63,7 @@ function StepList({ step }: { readonly step: CreateStep }) {
 
 export function CreateProjectFlow({
   client,
+  connectAccount,
   status,
   onRegister,
   onClose,
@@ -116,6 +119,7 @@ export function CreateProjectFlow({
       {step === 'accounts' && project !== null && (
         <AccountsStep
           client={client}
+          connectAccount={connectAccount}
           projectId={project.id}
           accounts={accounts}
           selected={selected}
