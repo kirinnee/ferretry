@@ -6,6 +6,7 @@ import manifest from '../manifest.ts';
 import type { CiClient } from './features/ci-run/ci-api.ts';
 import type { ListClient } from './features/list/api.ts';
 import type { PullsClient } from './lib/client.ts';
+import { pullsCommands } from './command-bar.ts';
 import { lazyComponent } from './lazy.ts';
 
 /**
@@ -64,5 +65,5 @@ export default provideToShell(
       },
     }),
   }),
-  { hooks: { [INSIGHTS_HOOK]: ({ client }) => projectSection(client) } },
+  { commands: pullsCommands, hooks: { [INSIGHTS_HOOK]: ({ client }) => projectSection(client) } },
 );

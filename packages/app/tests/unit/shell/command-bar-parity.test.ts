@@ -104,6 +104,7 @@ describe('Ctrl+K at rest', () => {
       'Conversations',
       'Board',
       'Projects',
+      'PRs & CI',
       'Sharing',
       'Subscriptions',
       'Publish skills…',
