@@ -34,7 +34,7 @@ function Row({
       <label
         htmlFor={id}
         data-found-row={name}
-        className="kt-panel flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel hover:border-accent has-[:not(:checked)]:opacity-70 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
+        className="kt-panel flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel hover:border-accent has-[input:not(:checked)]:opacity-70 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
       >
         <input
           id={id}
@@ -46,7 +46,7 @@ function Row({
         />
         <span className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="[overflow-wrap:anywhere] text-row font-semibold text-fg">{item.label}</span>
-          <span className="text-cell text-muted" data-found-becomes="">
+          <span className="text-cell text-fg" data-found-becomes="">
             Becomes: {item.becomes}
             {item.id === null ? ' · comes in with the rest' : ''}
           </span>
@@ -71,8 +71,8 @@ function Fixed({
       className="flex min-h-[44px] min-w-0 flex-col gap-1 rounded-md border border-dashed border-border-strong p-panel"
       data-found-fixed={name}
     >
-      <span className="text-row font-semibold text-fg">{title}</span>
-      <span className="text-cell text-fg">{children}</span>
+      <span className="text-row font-semibold text-muted">{title}</span>
+      <span className="text-cell text-muted">{children}</span>
     </li>
   );
 }
@@ -115,7 +115,7 @@ export function FoundList({ harness, groups, left, leftAlone, onToggle }: FoundL
                         </span>
                       ))}
                     </span>
-                    <span className="text-cell text-muted">{`Secret-looking keys are ${SECRET_KEPT}.`}</span>
+                    <span className="text-cell text-fg">{`Secret-looking keys are ${SECRET_KEPT}.`}</span>
                   </span>
                 )}
               </Row>
