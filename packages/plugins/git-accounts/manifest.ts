@@ -1,8 +1,8 @@
 import { LaunchParts } from '@ferretry/core-ferrets/contract';
 import { audit, GatePort } from '@ferretry/core-gate/contract';
 import { SealedDocumentsPort } from '@ferretry/core-vault/contract';
+import { definePlugin, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
-import { definePlugin, route, verb } from '@ferretry/kernel/manifest';
 import {
   GIT_ACCOUNT_AUDIT,
   GIT_ACCOUNT_AUDIT_SKIP,
@@ -118,6 +118,9 @@ export default definePlugin({
     ],
   },
 
+  ui: {
+    settings: [settingsTab('accounts', { icon: 'key-round', group: 'sites', label: 'GitHub accounts', order: 43 })],
+  },
   // A launch inside a project linked to an account gets that account's agent and git settings (B4).
   hooks: { takes: [{ hook: LaunchParts }] },
 
