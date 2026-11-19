@@ -1,7 +1,7 @@
 import { definePlugin, route, screen } from '@ferretry/kernel/manifest';
 import { GitAccountDisconnected, GitAccountsPort } from '@ferretry/plugin-git-accounts/contract';
 import { ProjectsPort, ProjectRemoved } from '@ferretry/plugin-projects/contract';
-import { AccessPort } from '@ferretry/plugin-access/contract';
+import { AccessPort } from './contract/others.ts';
 import { audit } from '@ferretry/core-gate/contract';
 import {
   PULLS_AUDIT,

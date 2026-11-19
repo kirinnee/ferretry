@@ -19,7 +19,6 @@
     "@ferretry/app": "workspace:*",
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/kernel": "workspace:*",
-    "@ferretry/plugin-access": "workspace:*",
     "@ferretry/plugin-git-accounts": "workspace:*",
     "@ferretry/plugin-projects": "workspace:*",
     "@ferretry/std": "workspace:*",
