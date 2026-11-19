@@ -219,3 +219,36 @@ describe('the ruled page field is the Mission styleâ€™s geometry and a paletteâ€
     expect(own.replace(/rgba?\([^)]*\)/gu, 'C')).toBe(swapped.replace(/rgba?\([^)]*\)/gu, 'C'));
   });
 });
+
+describe('the shell page heading takes its weight from the style, and only Briefing moves it', () => {
+  // `.fy-page h1` used to set no weight, so every style drew the initial 400 (Tailwind's reset makes an h1 inherit it).
+  const headingWeight = async (style: string) =>
+    await page.evaluate(
+      ([styleId]) => {
+        const root = document.documentElement;
+        root.setAttribute('data-style', styleId as string);
+        const heading = document.getElementById('shell-heading') as HTMLElement;
+        return getComputedStyle(heading).fontWeight;
+      },
+      [style] as const,
+    );
+
+  beforeAll(async () => {
+    await page.addStyleTag({ content: `h1 { font-weight: inherit; }\n${readStyleFile('shell.css')}` });
+    await page.evaluate(() => {
+      document.body.insertAdjacentHTML(
+        'beforeend',
+        '<section class="fy-page"><h1 id="shell-heading">Heading</h1></section>',
+      );
+    });
+  });
+
+  for (const style of STYLE_IDS.filter(id => id !== 'briefing'))
+    it(`${style} keeps the heading weight it always had (400)`, async () => {
+      expect(await headingWeight(style)).toBe('400');
+    });
+
+  it('Briefing draws it in its display weight (600), not the 400 that falls to the 300 face', async () => {
+    expect(await headingWeight('briefing')).toBe('600');
+  });
+});

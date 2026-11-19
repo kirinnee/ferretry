@@ -25,6 +25,7 @@
   --weight-medium: 600;
   --weight-strong: 600;
   --weight-display: 600;
+  --weight-heading: var(--weight-display);
   --text-2xs: 11px;
   --text-xs: 12px;
   --text-sm: 13px;
