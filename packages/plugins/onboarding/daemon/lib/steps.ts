@@ -33,7 +33,8 @@ export function joinProgress(entries: readonly OnboardingEntry[], progress: Prog
       id: entry.id,
       title: entry.title,
       order: entry.order,
-      side: sideOf(entry),
+      // The daemon default and an undeclared group stay off the wire: a reader defaults a missing side to daemon.
+      ...(sideOf(entry) === 'daemon' ? {} : { side: sideOf(entry) }),
       ...(entry.group === undefined ? {} : { group: entry.group }),
       state: known?.state ?? 'pending',
       ...(known === undefined ? {} : { at: known.at }),

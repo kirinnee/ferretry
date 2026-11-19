@@ -67,7 +67,10 @@ export interface StepHost {
   /** More than one daemon, or a subset of the paired ones, makes the shell highlight the step. */
   readonly appliesTo: readonly { readonly daemon: string; readonly name: string }[];
   readonly segment: StepSegmentMemory;
-  /** Adds to this plugin's segment memory for its later pages (this run only). */
+  /**
+   * Adds to this plugin's segment memory for its later pages: held in memory for this run only; never stored, never a
+   * secret.
+   */
   remember(patch: StepSegmentMemory): void;
   ready(): void;
   skip(why: 'not-needed' | 'already-set'): void;

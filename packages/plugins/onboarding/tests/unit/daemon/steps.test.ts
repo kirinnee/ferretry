@@ -61,7 +61,6 @@ describe('joining steps with progress', () => {
       id: 'harness',
       title: 'Claude Code',
       order: 20,
-      side: 'daemon',
       state: 'pending',
     });
     expect('at' in (first ?? {})).toBe(false);
