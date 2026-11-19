@@ -530,13 +530,22 @@ A ferret started on a login launches with that login's environment, and an agent
   repository's own Claude settings"): the login's values are in the child's environment only, and the `launch-settings.json` the harness
   writes into the agent home carries no `env`.
 - **An import puts the host's own `env` here, as references.** The setup import moves a secret-looking value of a harness's own
-  `env` into the Vault (create-only, "A key an import files"); Logins then adds the variable to the imported runtime's login
-  file as `${secret:NAME}` (`daemon/features/host-import`), through its own config write, so a `${secret:}` is resolved at
-  launch instead of landing literally in a Codex settings item. It only adds: a variable the login already has is kept. It is
-  handed references and plain text only, so it never holds a value; one that still looks like a key is left out and named.
-  A reserved variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …) is skipped, and `GH_TOKEN`, `GITHUB_TOKEN` and
-  `GH_ENTERPRISE_TOKEN` come in only when the person ticks them: a token in a login's environment can be read by every ferret on
-  that login.
+  `env` into the Vault (create-only, "A key an import files"); Logins then adds the variable to the login that apply selected
+  or created, as `${secret:NAME}`, through its own config write (`daemon/features/host-import`), so a `${secret:}` is resolved at
+  launch instead of landing literally in a Codex settings item. The door is narrow on purpose:
+  - **Only Runtimes' apply may use it.** The port is handed to Runtimes alone (any other plugin gets one that refuses), it takes
+    the caller, and it asks that caller's live `fleet.configure` at the write, plus `secrets.configure` when a Vault reference is
+    bound; activating a new reference keeps Gate's `fleet.use` and owner/step-up policy (held for anyone but the owner).
+  - **Two lists, so a reference has a source.** `plain` is host text; any `${secret…}` in it (the optional form too) is refused with a
+    sentence. `minted` is `{ name, secretName }` built only from the apply's own successful create-only puts, and Logins writes
+    the reference text itself.
+  - **It only adds, and never replaces.** The file's etag is read before the version in effect and the write is pinned to it
+    (`ifMatch`); a login with an edit held for the owner, or one that moved meanwhile, is refused rather than rewritten, so a
+    held-only key is never dropped. A variable the login already has is kept.
+  - **Names that look like a key are not repeated** in a skipped or refused sentence.
+    A reserved variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …) is skipped, and `GH_TOKEN`, `GITHUB_TOKEN` and
+    `GH_ENTERPRISE_TOKEN` come in only when the person ticks them: a token in a login's environment can be read by every ferret on
+    that login.
 - **A `${secret:NAME}` in a Claude settings item, MCP config or instruction** reaches its file in the agent home as that literal reference,
   which nothing resolves (the Vault resolves a reference only into a child's environment): a reference is a name, not a value.
 
