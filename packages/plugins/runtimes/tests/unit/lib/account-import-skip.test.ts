@@ -1,16 +1,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { ImportItemIdSchema, importItemId, importNamedItemId } from '../../../contract/index.ts';
+import { type ImportItemId, ImportItemIdSchema, importItemId, importNamedItemId } from '../../../contract/index.ts';
 import { SetupScanSchema } from '../../../contract/wire/setup.ts';
 import {
   claudeProjectFolders,
   type HostDocumentRead,
   type HostHarnessScan,
   type ImportPlan,
-  mergeImport,
-  mergeImportRecord,
-  planImport,
 } from '../../../daemon/lib/account/import.ts';
+import { mergeImport, mergeImportRecord, planImport } from '../../../daemon/lib/account/import-plan.ts';
 
 /** Placeholder secret values: shaped like real ones so detection fires, worthless as credentials. */
 const FAKE_KEY = 'sk-placeholder-not-a-real-key-0000';
@@ -315,8 +313,15 @@ describe('planImport — a skip is applied before models and settings are derive
   const settingsFileOf = (plan: ImportPlan): string =>
     plan.files.map(file => (file.kind === 'write' ? file.content : '')).join('\n');
 
+  // The r9 wizard has no model-set tick: leaving its Settings out sends the model set out with them (`wizardSkip`).
+  const wizardSkip = (harness: 'claude-code' | 'codex', ...rest: ImportItemId[]): ImportItemId[] => [
+    importItemId(harness, 'settings'),
+    importItemId(harness, 'model-set'),
+    ...rest,
+  ];
+
   it('should not take the default model from skipped Codex settings', () => {
-    const plan = planImport([hostCodex()], { digest, skip: [importItemId('codex', 'settings')] });
+    const plan = planImport([hostCodex()], { digest, skip: wizardSkip('codex') });
 
     const set = modelsOf(plan, 'codex');
     should(set.models).not.containEql('gpt-host-1');
@@ -327,7 +332,7 @@ describe('planImport — a skip is applied before models and settings are derive
   it('should keep the profiles still selected when Codex settings are skipped, and drop the skipped ones', () => {
     const plan = planImport([hostCodex()], {
       digest,
-      skip: [importItemId('codex', 'settings'), importNamedItemId('codex', 'profile', 'deep')],
+      skip: wizardSkip('codex', importNamedItemId('codex', 'profile', 'deep')),
     });
 
     const written = settingsFileOf(plan);
@@ -393,7 +398,7 @@ describe('planImport — a skip is applied before models and settings are derive
     should(base.models).containEql('claude-sonnet-5');
 
     const noSettings = modelsOf(
-      planImport([claude({ settings })], { digest, skip: [importItemId('claude-code', 'settings')] }),
+      planImport([claude({ settings })], { digest, skip: wizardSkip('claude-code') }),
       'claude',
     );
     should(noSettings.models).not.containEql('claude-host-1');
@@ -480,6 +485,32 @@ describe('planImport — the model set can be left out on its own (r10 O8)', () 
     should(modelSet(plan, 'claude-models')).deepEqual({ models: ['claude-opus-5'], default: 'claude-opus-5' });
     should(plan.components.some(item => item.kind === 'settings')).be.true();
     should(plan.components.some(item => item.kind === 'instructions')).be.true();
+  });
+
+  it('should keep the models the settings name when only Settings is skipped (the onboarding choices are independent)', () => {
+    const plan = planImport([claude({ settings: text('/h/.claude/settings.json', NAMED) })], {
+      digest,
+      skip: [importItemId('claude-code', 'settings')],
+    });
+    should(modelSet(plan, 'claude-models')).deepEqual({ models: ['claude-sonnet-5'], default: 'claude-sonnet-5' });
+    // Settings themselves are still left out: only the environment (and nothing from the file) remains.
+    const settings = plan.components.find(item => item.kind === 'settings')?.value as { file?: string } | undefined;
+    should(settings?.file).be.undefined();
+  });
+
+  it('should keep a Codex model set when only Settings is skipped, and give the starter when both are skipped', () => {
+    const only = planImport([codex()], { digest, skip: [importItemId('codex', 'settings')] });
+    should(modelSet(only, 'codex-models')).deepEqual({ models: ['gpt-5.6', 'gpt-5.6-mini'], default: 'gpt-5.6' });
+    const both = planImport([claude({ settings: text('/h/.claude/settings.json', NAMED) })], {
+      digest,
+      skip: [importItemId('claude-code', 'settings'), importItemId('claude-code', 'model-set')],
+    });
+    should(modelSet(both, 'claude-models')).deepEqual({ models: ['claude-opus-5'], default: 'claude-opus-5' });
+  });
+
+  it('should leave a Codex profile its own model when only the model set is skipped', () => {
+    const plan = planImport([codex()], { digest, skip: [importItemId('codex', 'model-set')] });
+    should(modelSet(plan, 'codex-models')).deepEqual({ models: ['gpt-5.6-mini'], default: 'gpt-5.6-mini' });
   });
 
   it('should skip only the named harness’s model set', () => {

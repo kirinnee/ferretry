@@ -8,6 +8,7 @@ import type { ImportItemId } from '../../../contract/index.ts';
 import { AddLoginSlot } from '../fleet/runtimes/add-runtime-login-slots.tsx';
 import { ChangeApplyPanel } from '../fleet/shell/apply-change-panel.tsx';
 import { FoundList } from '../import-kit/found-list.tsx';
+import { ImportResultList } from '../import-kit/import-results.tsx';
 import { counts, nameProblem, type ToolModel } from '../import-kit/model.ts';
 import { plural, toolHeadline } from '../import-kit/mapping-words.ts';
 import type { ImportWizard } from './use-import-wizard.ts';
@@ -132,7 +133,8 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
   const harness = model.harness;
   const left: ReadonlySet<ImportItemId> = wizard.left[harness];
   const name = wizard.nameOf(harness);
-  const invalid = nameProblem(name);
+  // A runtime this setup already made is carried through a retry: no new name is asked for, so none is checked.
+  const invalid = model.duplicateOf === null ? nameProblem(name) : null;
   const end = wizard.ends[harness];
   const taking = counts(model, left);
   const refreshing = model.updates.filter(update => !wizard.declined[harness].has(update.reference)).length;
@@ -152,13 +154,7 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
                 It was brought in before this page was reloaded. What it wrote stays on this machine.
               </p>
             ) : (
-              <ul className="m-0 flex list-disc flex-col gap-1 pl-5 text-cell text-muted">
-                {end.sentences.map(sentence => (
-                  <li key={sentence} className="[overflow-wrap:anywhere]">
-                    {sentence}
-                  </li>
-                ))}
-              </ul>
+              <ImportResultList sentences={end.sentences} />
             )}
             {end.unmarked ? (
               <p role="alert" className="m-0 text-cell text-warn" data-import-unmarked="">
@@ -222,17 +218,19 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
         />
       </section>
       <section className="flex min-w-0 flex-col gap-2" data-tool-name="">
-        <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-          Runtime name
-          <input
-            type="text"
-            className="min-h-control w-full min-w-0 rounded-md border border-border bg-surface px-3 text-row text-fg"
-            value={name}
-            aria-invalid={invalid !== null}
-            data-runtime-name={harness}
-            onChange={event => wizard.setName(harness, event.currentTarget.value)}
-          />
-        </label>
+        {model.duplicateOf === null ? (
+          <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+            Runtime name
+            <input
+              type="text"
+              className="min-h-control w-full min-w-0 rounded-md border border-border bg-surface px-3 text-row text-fg"
+              value={name}
+              aria-invalid={invalid !== null}
+              data-runtime-name={harness}
+              onChange={event => wizard.setName(harness, event.currentTarget.value)}
+            />
+          </label>
+        ) : null}
         {invalid === null ? null : (
           <p role="alert" className="m-0 text-cell text-warn">
             {invalid}

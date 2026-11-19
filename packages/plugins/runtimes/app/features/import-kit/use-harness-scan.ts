@@ -1,7 +1,8 @@
 /**
- * The first-run scan (`GET /v1/runtimes/setup/scan`) and each tool's installed version, read ONCE per client and shared by
- * every page that asks: Claude Code's pages and Codex's pages all draw from the same read, so a back-step or a second
- * page never reads the machine again. `scan()` is the one way to read again (after an install or a sign-in).
+ * The first-run scan (`GET /v1/runtimes/setup/scan`) and each tool's installed version, read ONCE per onboarding RUN and
+ * shared by every page of that run that asks: Claude Code's pages and Codex's pages all draw from the same read, so a
+ * back-step or a second page never reads the machine again. A new run (another `run` key on the same client) reads the
+ * machine afresh, so neither an answer nor a failure outlives the run it was read for. `scan()` is the one way to read again (after an install or a sign-in).
  *
  * A read nobody asked for is quiet and never raises a passkey prompt; a machine that wants one is answered with `confirm`,
  * and the person's own press (`quiet: false`) may ask. Holds names only: the scan carries no value.
@@ -82,13 +83,16 @@ export function createScanStore(client: RuntimesClient): ScanStore {
   };
 }
 
-/** One store per client: a client is per daemon, so another machine is another store and nothing crosses machines. */
-const STORES = new WeakMap<RuntimesClient, ScanStore>();
-export const scanStoreFor = (client: RuntimesClient): ScanStore => {
+/**
+ * One store per client and run: a client is per daemon, so another machine is another store and nothing crosses machines.
+ * Only the latest run of a client is kept: asking for another `run` drops the old store, so the next page reads again.
+ */
+const STORES = new WeakMap<RuntimesClient, { readonly run: string; readonly store: ScanStore }>();
+export const scanStoreFor = (client: RuntimesClient, run: string): ScanStore => {
   const known = STORES.get(client);
-  if (known !== undefined) return known;
+  if (known?.run === run) return known.store;
   const made = createScanStore(client);
-  STORES.set(client, made);
+  STORES.set(client, { run, store: made });
   return made;
 };
 
@@ -103,11 +107,15 @@ export interface HarnessScan {
 }
 
 /**
- * The shared scan. `refresh` reads again when the hook mounts even if a read exists (the Settings re-import wants the
- * machine as it is now); the default reads only when nothing has been read yet.
+ * The shared scan of one run. `run` names the onboarding run (or the Settings re-import) the pages belong to. `refresh`
+ * reads again when the hook mounts even if a read exists (the Settings re-import wants the machine as it is now); the
+ * default reads only when nothing has been read yet in this run.
  */
-export function useScan(client: RuntimesClient, options: { readonly refresh?: boolean } = {}): HarnessScan {
-  const store = scanStoreFor(client);
+export function useScan(
+  client: RuntimesClient,
+  options: { readonly run: string; readonly refresh?: boolean },
+): HarnessScan {
+  const store = scanStoreFor(client, options.run);
   const read = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
   useEffect(() => {
     if (options.refresh === true || store.snapshot().kind === 'idle') void store.scan();
@@ -124,11 +132,12 @@ export function useScan(client: RuntimesClient, options: { readonly refresh?: bo
   return { read, models, look: () => store.scan(false), rescan: store.scan };
 }
 
-/** One tool's page: the shared scan and that tool's model (null until read). */
+/** One tool's page: the shared scan of this `run` and that tool's model (null until read). */
 export function useHarnessScan(
   client: RuntimesClient,
   harness: HarnessKey,
+  run: string,
 ): HarnessScan & { readonly model: ToolModel | null } {
-  const shared = useScan(client);
+  const shared = useScan(client, { run });
   return { ...shared, model: shared.models?.[harness] ?? null };
 }

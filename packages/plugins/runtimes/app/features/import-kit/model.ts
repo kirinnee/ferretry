@@ -260,7 +260,11 @@ export function importChange(
 ): AccountChange {
   // Every changed source is taken again unless the person unticked it.
   const acceptedUpdates = model.updates.map(update => update.reference).filter(reference => !declined.has(reference));
-  const skip = skipList(model, left);
+  // The r9 wizard has no model-set tick: leaving its Settings out also leaves the models those settings name (a kept Codex profile keeps its own), as it always did.
+  const modelSetGone: readonly ImportItemId[] = left.has(importItemId(model.harness, 'settings'))
+    ? [importItemId(model.harness, 'model-set')]
+    : [];
+  const skip = [...skipList(model, left), ...modelSetGone];
   const env = model.groups.find(group => group.key === 'env');
   // Only a token variable this scan lists, and only while the environment itself is being brought.
   const tickedEnv = (env?.githubTokens ?? []).filter(token => ticked.has(token) && !left.has(`${model.harness}:env`));

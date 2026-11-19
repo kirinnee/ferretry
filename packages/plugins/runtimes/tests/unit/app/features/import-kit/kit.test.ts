@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { createElement } from 'react';
 import { buildImportChange } from '../../../../../app/features/import-kit/change.ts';
 import {
   IMPORT_KINDS,
@@ -8,10 +9,15 @@ import {
   kindSkips,
 } from '../../../../../app/features/import-kit/kinds.ts';
 import { importChange, itemIds, skipList, toolModel } from '../../../../../app/features/import-kit/model.ts';
-import { createScanStore, scanStoreFor } from '../../../../../app/features/import-kit/use-harness-scan.ts';
+import {
+  createScanStore,
+  scanStoreFor,
+  useHarnessScan,
+} from '../../../../../app/features/import-kit/use-harness-scan.ts';
 import type { RuntimesClient } from '../../../../../app/lib/client.ts';
 import { type ImportItemId, ImportItemIdSchema } from '../../../../../contract/index.ts';
 import { CLAUDE_FULL, CODEX_FULL, scanOf } from '../import-wizard/scans.ts';
+import { interact, mount } from '../../../support/dom.ts';
 
 const claude = toolModel('claude-code', scanOf({ claude: CLAUDE_FULL }), '2.1.0');
 const codex = toolModel('codex', scanOf({ codex: CODEX_FULL }), '0.9.0');
@@ -147,8 +153,8 @@ describe('the scan is read once per client and shared', () => {
   it('one store per client: two pages share it, another client has its own', () => {
     const one = clientOf([], scanOf({ claude: CLAUDE_FULL }));
     const other = clientOf([], scanOf({ claude: CLAUDE_FULL }));
-    expect(scanStoreFor(one)).toBe(scanStoreFor(one));
-    expect(scanStoreFor(other)).not.toBe(scanStoreFor(one));
+    expect(scanStoreFor(one, 'run-1')).toBe(scanStoreFor(one, 'run-1'));
+    expect(scanStoreFor(other, 'run-1')).not.toBe(scanStoreFor(one, 'run-1'));
   });
 
   it('reads the scan and both versions, and a re-read keeps what was read on screen', async () => {
@@ -172,5 +178,101 @@ describe('the scan is read once per client and shared', () => {
     const store = createScanStore(clientOf([], { needs: 'passkey' }));
     await store.scan(true);
     expect(store.snapshot().kind).toBe('confirm');
+  });
+});
+
+describe('the model set is its own choice (r10 O8)', () => {
+  it('the onboarding pages are independent: leaving Settings out does not leave the model set out', () => {
+    const settingsPageSkips = kindSkips(claude, 'settings', new Set());
+    expect(settingsPageSkips).toEqual(['claude-code:settings', 'claude-code:env']);
+    const change = buildImportChange('claude-code', ['claude-code'], settingsPageSkips, 'work-claude');
+    expect(change).toMatchObject({ skip: ['claude-code:settings', 'claude-code:env'] });
+    expect((change as { skip: string[] }).skip).not.toContain('claude-code:model-set');
+  });
+
+  it('leaving the model set out on its own page skips only it', () => {
+    const modelPageSkips = kindSkips(claude, 'model-set', new Set());
+    expect(buildImportChange('claude-code', ['claude-code'], modelPageSkips, 'w')).toMatchObject({
+      skip: ['claude-code:model-set'],
+    });
+  });
+
+  it('the r9 wizard is unchanged: Settings left out takes the models those settings name with it, and only then', () => {
+    expect(importChange(claude, new Set(['claude-code:settings']), 'w')).toMatchObject({
+      skip: ['claude-code:settings', 'claude-code:model-set'],
+    });
+    expect(importChange(claude, new Set(['claude-code:mcp:notes']), 'w')).toMatchObject({
+      skip: ['claude-code:mcp:notes'],
+    });
+    expect(importChange(codex, new Set(['codex:settings']), 'w')).toMatchObject({
+      skip: ['codex:settings', 'codex:model-set'],
+    });
+  });
+});
+
+describe('the scan belongs to one run', () => {
+  const countingClient = (calls: string[]): RuntimesClient =>
+    ({
+      call: async (route: string) => {
+        calls.push(route);
+        if (route === 'GET /v1/runtimes/setup/scan') return scanOf({ claude: CLAUDE_FULL });
+        return { installed: { state: 'ok', version: '1.2.3' } };
+      },
+    }) as unknown as RuntimesClient;
+  const scans = (calls: string[]): number => calls.filter(route => route === 'GET /v1/runtimes/setup/scan').length;
+
+  it('a second run on the same client has its own store, which reads the machine again', async () => {
+    const calls: string[] = [];
+    const client = countingClient(calls);
+    const first = scanStoreFor(client, 'run-1');
+    await first.scan();
+    expect(scans(calls)).toBe(1);
+    // Same run: the same store, already read.
+    expect(scanStoreFor(client, 'run-1')).toBe(first);
+    expect(scanStoreFor(client, 'run-1').snapshot().kind).toBe('ready');
+    // Next run: a fresh store that has read nothing, so its first page reads again.
+    const second = scanStoreFor(client, 'run-2');
+    expect(second).not.toBe(first);
+    expect(second.snapshot().kind).toBe('idle');
+    await second.scan();
+    expect(scans(calls)).toBe(2);
+  });
+
+  it('a failure does not outlive its run', async () => {
+    let failing = true;
+    const client = {
+      call: async (route: string) => {
+        if (failing && route === 'GET /v1/runtimes/setup/scan') throw new Error('the daemon is down');
+        if (route === 'GET /v1/runtimes/setup/scan') return scanOf({ claude: CLAUDE_FULL });
+        return { installed: { state: 'ok', version: '1.2.3' } };
+      },
+    } as unknown as RuntimesClient;
+    await scanStoreFor(client, 'run-1').scan();
+    expect(scanStoreFor(client, 'run-1').snapshot().kind).toBe('failed');
+    failing = false;
+    const next = scanStoreFor(client, 'run-2');
+    await next.scan();
+    expect(next.snapshot().kind).toBe('ready');
+  });
+
+  it('useHarnessScan reads once for a run and again for the next', async () => {
+    const calls: string[] = [];
+    const client = countingClient(calls);
+    const Probe = ({ run }: { readonly run: string }) => {
+      const { model } = useHarnessScan(client, 'claude-code', run);
+      return createElement('span', { 'data-model': model === null ? 'none' : model.harness });
+    };
+    const view = await mount(createElement(Probe, { run: 'run-1' }));
+    await interact(() => new Promise(resolve => setTimeout(resolve, 20)));
+    expect(view.container.querySelector('[data-model]')?.getAttribute('data-model')).toBe('claude-code');
+    expect(scans(calls)).toBe(1);
+    // A re-render in the same run reads nothing.
+    await view.render(createElement(Probe, { run: 'run-1' }));
+    expect(scans(calls)).toBe(1);
+    // The next run, same client: it reads again.
+    await view.render(createElement(Probe, { run: 'run-2' }));
+    await interact(() => new Promise(resolve => setTimeout(resolve, 20)));
+    expect(scans(calls)).toBe(2);
+    await view.unmount();
   });
 });

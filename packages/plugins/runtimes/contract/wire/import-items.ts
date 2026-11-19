@@ -4,7 +4,7 @@
  *
  * `<harness>:<kind>` for the things a harness has one of (`claude-code:instructions`, `claude-code:settings`,
  * `claude-code:env`, `claude-code:model-set`: leaving the model set out gives the starter model set instead of the
- * models the settings name), `<harness>:<kind>:<name>` for the ones it has many of (`claude-code:mcp:notes`,
+ * models the settings name; a Codex profile is its own item and keeps its model), `<harness>:<kind>:<name>` for the ones it has many of (`claude-code:mcp:notes`,
  * `codex:skill:review`, `codex:profile:fast`). The harness is the wire key (`claude-code`, `codex`). A name
  * is what the host calls the thing — a server, a skill folder, a profile — and is never a value.
  *

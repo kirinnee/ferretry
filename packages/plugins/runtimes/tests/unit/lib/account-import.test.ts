@@ -7,11 +7,9 @@ import {
   type HostDocumentRead,
   type HostHarnessScan,
   type ImportPlan,
-  mergeImport,
-  mergeImportRecord,
-  planImport,
   scannedMcpServers,
 } from '../../../daemon/lib/account/import.ts';
+import { mergeImport, mergeImportRecord, planImport } from '../../../daemon/lib/account/import-plan.ts';
 import { looksSecret } from '@ferretry/std/credential-words';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { profileScope } from '../../../daemon/lib/account/scope.ts';

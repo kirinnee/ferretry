@@ -1,4 +1,6 @@
 kind	path	limit	expires	reason
 oversize	daemon/lib/account/clone-update.ts	1680	2026-12-16	one clone/update module; split by step when next touched
+oversize	daemon/lib/account/import.ts	1200	2026-12-31	r10 O8 model-set choice; the planner moved to import-plan.ts, this file keeps the scan words and the harvest
 oversize	daemon/lib/service/catalog.ts	1520	2026-12-16	one catalog service; split by concern when next touched
 oversize	daemon/lib/service/setup-service.ts	1600	2026-12-16	one setup service; split by step when next touched
+oversize	manifest.ts	600	2026-12-31	r10 onboarding lines: the plugin manifest is edited by every onboarding unit; split the onboarding block into a fragment when next touched

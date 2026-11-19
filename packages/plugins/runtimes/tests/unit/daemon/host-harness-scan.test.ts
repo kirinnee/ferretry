@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { LoginsApi, LoginView } from '@ferretry/plugin-logins/contract';
 import { HostHarnessScanner } from '../../../daemon/adapters/host-harness-scan.ts';
-import { planImport } from '../../../daemon/lib/account/import.ts';
+import { planImport } from '../../../daemon/lib/account/import-plan.ts';
 import type { HostEntry, HostFiles } from '../../../daemon/adapters/ports.ts';
 
 type FixtureEntry =

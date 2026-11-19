@@ -6,7 +6,8 @@
  * never stops Runtimes' own files, which still land together. A refused component is reverted out of the model Runtimes
  * then applies, and out of every profile that named it.
  */
-import { type ImportPlan, mergeImportRecord } from '../account/import.ts';
+import { type ImportPlan } from '../account/import.ts';
+import { mergeImportRecord } from '../account/import-plan.ts';
 import type { AccountModel, LayerReferenceText } from '../account/schema.ts';
 import {
   type ComponentWriter,

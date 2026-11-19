@@ -31,7 +31,7 @@ const installSentence = (outcome: ToolInstallOutcome): string => {
 
 export function useImportWizard(client: RuntimesClient) {
   // The scan is the kit's: read once per client and shared, read again here on opening (the machine as it is now).
-  const { read, models, look, rescan } = useScan(client, { refresh: true });
+  const { read, models, look, rescan } = useScan(client, { run: 'settings-import', refresh: true });
   // What a reload keeps (the address): the open tool, the names, what was left out, the ticked tokens.
   const [remembered] = useState(() => readMemory(globalThis.location?.search ?? ''));
   const [tool, setTool] = useState(remembered.tool);
@@ -143,7 +143,8 @@ export function useImportWizard(client: RuntimesClient) {
     async (harness: HarnessKey): Promise<void> => {
       if (models === null) return;
       const model = models[harness];
-      if (nameProblem(nameOf(harness)) !== null) return;
+      // A retry on the same import has its runtime already: the name is not asked for again.
+      if (model.duplicateOf === null && nameProblem(nameOf(harness)) !== null) return;
       const applied = await apply(
         importChange(model, left[harness], nameOf(harness), tickedEnv[harness], declined[harness]),
         model.label,

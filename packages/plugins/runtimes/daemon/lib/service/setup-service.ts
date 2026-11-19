@@ -90,9 +90,8 @@ import {
   type ImportOptions,
   type ImportPlan,
   type ImportRecord,
-  mergeImport,
-  planImport,
 } from '../account/import.ts';
+import { mergeImport, planImport } from '../account/import-plan.ts';
 import { HARNESS_DISPLAY_NAMES } from '../account/layering.ts';
 import { type ComponentWriter, handedText, withoutHookChanges } from '../account/owner-components.ts';
 import { parseImportRecord } from '../account/import-record.ts';

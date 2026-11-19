@@ -149,6 +149,31 @@ describe('everything found', () => {
     ).toEqual(['claude-code.harness:found', 'logins.login:found']);
   });
 
+  it('a retry on an import that already made its runtime asks for no new name and imports on that runtime', async () => {
+    const calls: Call[] = [];
+    const view = await open(
+      routes(
+        scanOf({
+          claude: CLAUDE_FULL,
+          duplicates: [{ harness: 'claude-code', existing: 'claude-default', suggested: 'claude-default-2' }],
+        }),
+      ),
+      calls,
+    );
+    const root = view.container;
+    expect(root.querySelector('[data-runtime-name]')).toBeNull();
+    expect(text(root, '[data-duplicate-note]')).toBe(
+      'A runtime named claude-default already uses this setup, so no second one is added.',
+    );
+    expect(root.querySelector<HTMLButtonElement>('[data-change-submit]')?.disabled).toBe(false);
+    await click(root, '[data-change-submit]');
+    await settle();
+    expect(calls.find(call => call.route === 'POST /v1/runtimes/proposals')?.body).toMatchObject({
+      change: { kind: 'setup.import', include: ['claude-code'] },
+    });
+    expect(text(root, '[data-import-answer]')).toContain('Claude Code is set up');
+  });
+
   it('Next goes to Codex; its profiles are choices; Finish says where each ended', async () => {
     const view = await open(routes(scanOf({ claude: CLAUDE_FULL, codex: CODEX_FULL })));
     const root = view.container;
