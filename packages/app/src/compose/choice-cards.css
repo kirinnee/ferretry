@@ -1,0 +1,138 @@
+/* ============================================================================
+   ChoiceCards (compose/choice-cards.tsx): a row of cards that is one native radio group.
+   Cards share a row and are never wider than 320px, so 2-3 options never stretch to the page's width. Tracks may
+   shrink to 180px, and at most 4 sit in a row (an 832px group holds 3 in one row; 5 options at 1280px wrap 4 + 1).
+   Below 480px of the GROUP's own width (a phone, or a narrow pane) they stack.
+   Selected = the accent border + soft fill + a check badge. On select the card scales 0.98 -> 1 over 160ms and the
+   border/fill fade; the initial value never plays it, and motion off (OS or Settings) draws the end state at once.
+   Theme tokens only.
+   ========================================================================== */
+
+.fy-cc {
+  --cc-gap: 12px;
+  container-type: inline-size;
+  min-width: 0;
+}
+/* `--cc-n` (the option count, set by the component) caps the grid at n cards of 320px, so 2 options never stretch.
+   The track minimum is the larger of 180px and a quarter of the row, so counting tracks (which uses the minimum when
+   the maximum is `1fr`) never fits more than 4 to a row, and a track never exceeds 320px (4 x 320 + gaps is the
+   widest group). `auto-fit` collapses the tracks no option fills. */
+.fy-cc__grid {
+  display: grid;
+  gap: var(--cc-gap);
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, calc((100% - 3 * var(--cc-gap)) / 4)), 1fr));
+  max-width: min(100%, calc(var(--cc-n, 4) * 320px + (var(--cc-n, 4) - 1) * var(--cc-gap)));
+  position: relative; /* the native radios are sr-only (absolute): without a positioned group they escape the scroller */
+}
+@container (max-width: 479.98px) {
+  .fy-cc__grid {
+    grid-template-columns: 1fr;
+    max-width: none;
+  }
+  .fy-cc__grid .fy-cc__card {
+    max-width: none;
+  }
+}
+
+.fy-cc__card {
+  align-items: flex-start;
+  background: var(--surface-2);
+  border: var(--stroke-panel) solid var(--border);
+  border-radius: var(--radius-panel);
+  color: var(--fg);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 320px;
+  min-height: 72px;
+  min-width: 0;
+  padding: 14px 16px;
+  position: relative;
+  text-align: start;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+.fy-cc__card:hover {
+  border-color: var(--muted);
+}
+.fy-cc__card:has(:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.fy-cc__card[data-selected='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.fy-cc__card[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.fy-cc__icon {
+  color: var(--muted);
+  display: inline-flex;
+}
+.fy-cc__card[data-selected='true'] .fy-cc__icon {
+  color: var(--accent);
+}
+.fy-cc__demo {
+  align-self: stretch;
+  min-width: 0;
+}
+/* The text starts at the card's own padding edge: title over line, no dot above them. */
+.fy-cc__title {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  padding-inline-end: 24px; /* room for the check badge */
+}
+.fy-cc__line {
+  color: var(--muted);
+  font-size: calc(var(--font-size-base) - 1.5px);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.fy-cc__check {
+  align-items: center;
+  background: var(--accent);
+  border-radius: var(--radius-dot);
+  color: var(--accent-fg, var(--bg));
+  display: none;
+  height: 20px;
+  inset-block-start: 10px;
+  inset-inline-end: 10px;
+  justify-content: center;
+  position: absolute;
+  width: 20px;
+}
+.fy-cc__card[data-selected='true'] .fy-cc__check {
+  display: inline-flex;
+}
+
+@keyframes fy-cc-pop {
+  from {
+    transform: scale(0.98);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-cc__card[data-pulse='true'] {
+    animation: fy-cc-pop 160ms ease-out;
+  }
+}
+/* Motion off, by the operating system OR by Settings: no scale, and no 160ms border/fill fade either. */
+@media (prefers-reduced-motion: reduce) {
+  .fy-cc__card {
+    animation: none;
+    transition: none;
+  }
+}
+:root[data-motion='reduced'] .fy-cc__card {
+  animation: none;
+  transition: none;
+}
