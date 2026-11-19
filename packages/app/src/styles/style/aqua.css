@@ -39,7 +39,7 @@
   --stroke-panel: 1px;
   /* Soft, deep, close: a control sits just above the page, a panel floats, a popover hovers. */
   --shadow-sm: 0 1px 1px var(--shadow-sm-1), 0 1px 3px var(--shadow-sm-1);
-  --shadow-md: 0 1px 2px var(--shadow-md-1), 0 6px 18px var(--shadow-md-2);
+  --shadow-md: 0 1px 3px var(--shadow-md-1), 0 10px 26px var(--shadow-md-2);
   --shadow-lg: 0 2px 4px var(--shadow-lg-1), 0 18px 44px var(--shadow-lg-2);
   --shadow-active: inset 0 2px 3px var(--shadow-sm-1);
   --press-translate: 1px;
@@ -49,6 +49,13 @@
     color-mix(in srgb, var(--fg) 2.5%, transparent) 0 1px,
     transparent 1px 4px
   );
+  /* The same pinstripe, finer, on every panel: a panel is a sheet of the same striped material as the page. */
+  --panel-texture: repeating-linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--fg) 2%, transparent) 0 1px,
+    transparent 1px 4px
+  );
+  --panel-texture-size: auto;
   --nav-sel-shadow: var(--shadow-sm);
   --menu-radius: 10px;
   --menu-item-h: 32px;
@@ -82,16 +89,22 @@
    little ink, fading into the surface. The primary button is the accent, brightened at the top by a thin inner line. */
 :root[data-style='aqua'][data-mode='dark'],
 [data-swatch][data-style='aqua'][data-mode='dark'] {
-  --shadow-md: 0 1px 2px var(--shadow-md-1), 0 8px 22px var(--shadow-md-2);
+  --shadow-md: 0 1px 3px var(--shadow-md-1), 0 12px 30px var(--shadow-md-2);
+  /* Lit from above: a light line along a panel's top edge. */
+  --rule-inset: inset 0 1px 0 color-mix(in srgb, var(--fg) 9%, transparent);
 }
 
-:root[data-style='aqua'][data-mode='light']
-  .kt-btn:not([data-variant='primary'], [data-variant='danger'], [data-variant='ghost']) {
+:root[data-style='aqua'][data-mode='light'],
+[data-swatch][data-style='aqua'][data-mode='light'] {
+  /* Lit from above: a shaded line along a panel's bottom edge, so it reads as a raised sheet. */
+  --rule-inset: inset 0 -1px 0 color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+:root[data-style='aqua'][data-mode='light'] .kt-btn:not([data-variant='primary'], [data-variant='ghost']) {
   background-image: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 92%, var(--fg)) 100%);
 }
 
-:root[data-style='aqua'][data-mode='dark']
-  .kt-btn:not([data-variant='primary'], [data-variant='danger'], [data-variant='ghost']) {
+:root[data-style='aqua'][data-mode='dark'] .kt-btn:not([data-variant='primary'], [data-variant='ghost']) {
   background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, var(--fg)) 0%, var(--surface) 100%);
 }
 
@@ -108,7 +121,10 @@
 
 /* The field is inset (a recessed well); its focus is the halo, drawn here because the shared field rule resets `outline`. */
 :root[data-style='aqua'] .kt-input {
-  box-shadow: inset 0 1px 2px var(--shadow-sm-1);
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--fg) 5%, var(--surface)) 0%, var(--surface) 40%);
+  box-shadow:
+    inset 0 2px 3px var(--shadow-sm-1),
+    inset 0 0 0 1px color-mix(in srgb, var(--fg) 4%, transparent);
 }
 
 :root[data-style='aqua'] .kt-input:focus-visible {
