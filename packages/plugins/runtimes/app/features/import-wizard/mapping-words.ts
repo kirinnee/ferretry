@@ -28,6 +28,12 @@ export const becomes = (harness: HarnessKey, kind: ImportSingleItem | ImportName
 /** Said under a secret-looking key: it is moved, never shown. */
 export const SECRET_KEPT = 'kept in the Vault: agents use it, nobody can read it back';
 
+/** The variables that carry a GitHub account's token (the same three Logins' A8 import leaves out unless ticked). */
+export const GITHUB_TOKEN_NAMES: readonly string[] = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN'];
+
+export const GITHUB_TOKEN_SENTENCE =
+  'Not imported by default: ferrets’ `gh` uses your connected GitHub account, and a token in a login’s environment can be read by every ferret on that login.';
+
 export const HOOKS_NOT_IMPORTED = 'Not imported: Ferretry doesn’t use hooks';
 export const PROJECT_INSTRUCTIONS_STAY = 'Stay in each project; agents read them there';
 export const CONVERSATIONS_LINE = 'Conversations: already read automatically, one way. Nothing to import.';

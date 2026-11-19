@@ -62,6 +62,10 @@ export function useImportWizard(client: RuntimesClient) {
     'claude-code': new Set(),
     codex: new Set(),
   });
+  const [tickedEnv, setTickedEnv] = useState<Readonly<Record<HarnessKey, ReadonlySet<string>>>>({
+    'claude-code': new Set(),
+    codex: new Set(),
+  });
   const [names, setNames] = useState<Partial<Record<HarnessKey, string>>>({});
   const [ends, setEnds] = useState<Partial<Record<HarnessKey, ToolEnd>>>({});
   const [installing, setInstalling] = useState<HarnessKey | null>(null);
@@ -109,6 +113,15 @@ export function useImportWizard(client: RuntimesClient) {
       const next = new Set(current[harness]);
       if (on) next.delete(id);
       else next.add(id);
+      return { ...current, [harness]: next };
+    });
+  }, []);
+
+  const tickEnv = useCallback((harness: HarnessKey, name: string, on: boolean): void => {
+    setTickedEnv(current => {
+      const next = new Set(current[harness]);
+      if (on) next.add(name);
+      else next.delete(name);
       return { ...current, [harness]: next };
     });
   }, []);
@@ -164,7 +177,7 @@ export function useImportWizard(client: RuntimesClient) {
       if (models === null) return;
       const model = models[harness];
       if (nameProblem(nameOf(harness)) !== null) return;
-      const result = await changes.apply(importChange(model, left[harness], nameOf(harness)));
+      const result = await changes.apply(importChange(model, left[harness], nameOf(harness), tickedEnv[harness]));
       if (result.kind !== 'applied') return;
       const summary = result.outcome.outcome === 'executed' ? result.outcome.summary : 'Imported.';
       const unmarked = await settleSteps(harness);
@@ -173,7 +186,7 @@ export function useImportWizard(client: RuntimesClient) {
         [harness]: { kind: 'imported', sentences: resultSentences(summary), unmarked },
       }));
     },
-    [changes, left, models, nameOf, settleSteps],
+    [changes, left, models, nameOf, settleSteps, tickedEnv],
   );
 
   const skip = useCallback(
@@ -193,6 +206,8 @@ export function useImportWizard(client: RuntimesClient) {
     harnesses: HARNESSES,
     left,
     toggle,
+    tickedEnv,
+    tickEnv,
     nameOf,
     setName: (harness: HarnessKey, name: string): void => setNames(current => ({ ...current, [harness]: name })),
     ends,

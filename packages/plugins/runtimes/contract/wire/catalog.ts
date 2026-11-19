@@ -850,6 +850,11 @@ export const AccountChangeSchema = z.discriminatedUnion('kind', [
      * (a skipped `env` moves no secret). Hooks have no id: an import never takes them.
      */
     skip: z.array(ImportItemIdSchema).max(512).optional(),
+    /**
+     * The GitHub-token variables (`GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`) the person ticked: NAMES, never a value.
+     * They come in unticked, so only a name listed here is imported onto the login's environment (r9 A8's `ticked`).
+     */
+    tickedEnv: z.array(NonEmptyStringSchema).max(64).optional(),
     /** Components whose source changed since the last import that the person chose to update (O6). */
     acceptedUpdates: z.array(NonEmptyStringSchema).optional(),
     /** Add a runtime even where an identical one exists (E15 during Import again). */

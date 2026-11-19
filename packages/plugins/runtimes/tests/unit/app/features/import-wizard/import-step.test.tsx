@@ -221,3 +221,38 @@ describe('not signed in', () => {
     expect(calls.filter(call => call.route === 'GET /v1/runtimes/setup/scan').length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe('GitHub-token variables in the environment', () => {
+  const scan = scanOf({ claude: { secretKeys: ['env.ANTHROPIC_API_KEY', 'env.GITHUB_TOKEN', 'env.GH_TOKEN'] } });
+
+  it('start unticked with the reason, and ticking one sends its name as tickedEnv', async () => {
+    const calls: Call[] = [];
+    const view = await open(routes(scan), calls);
+    const root = view.container;
+    expect(root.querySelector<HTMLInputElement>('[data-found-token="GITHUB_TOKEN"] input')?.checked).toBe(false);
+    expect(text(root, '[data-found-token="GITHUB_TOKEN"]')).toContain('Not imported by default');
+    expect(text(root, '[data-found-token="GITHUB_TOKEN"]')).toContain('kept in the Vault');
+    await click(root, '[data-change-submit]');
+    await settle();
+    expect(calls.find(call => call.route === 'POST /v1/runtimes/proposals')?.body).not.toHaveProperty(
+      'change.tickedEnv',
+    );
+  });
+
+  it('a ticked one goes out by name; leaving the whole environment out turns the choice off', async () => {
+    const calls: Call[] = [];
+    const view = await open(routes(scan), calls);
+    const root = view.container;
+    await click(root, '[data-found-token="GH_TOKEN"] input');
+    await click(root, '[data-change-submit]');
+    await settle();
+    expect(calls.find(call => call.route === 'POST /v1/runtimes/proposals')?.body).toMatchObject({
+      change: { tickedEnv: ['GH_TOKEN'] },
+    });
+    const second = await open(routes(scan));
+    await click(second.container, '[data-found-item="claude-code:env"] input');
+    expect(second.container.querySelector<HTMLInputElement>('[data-found-token="GH_TOKEN"] input')?.disabled).toBe(
+      true,
+    );
+  });
+});

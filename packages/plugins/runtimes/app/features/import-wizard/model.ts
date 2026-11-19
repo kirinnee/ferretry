@@ -17,7 +17,7 @@ import {
   type ToolInstallPlan,
   type AccountChange,
 } from '../../../contract/index.ts';
-import { becomes, HARNESS_LABEL } from './mapping-words.ts';
+import { becomes, GITHUB_TOKEN_NAMES, HARNESS_LABEL } from './mapping-words.ts';
 
 export const HARNESSES: readonly HarnessKey[] = ['claude-code', 'codex'];
 
@@ -53,6 +53,8 @@ export interface FoundGroup {
   readonly items: readonly FoundItem[];
   /** Secret-looking key names the group moves into the Vault (the environment only). */
   readonly locked?: readonly string[];
+  /** Of those, the GitHub-token variables: each is its own choice, unticked until the person ticks it. */
+  readonly githubTokens?: readonly string[];
 }
 
 /** What the wizard says it does NOT take, as fixed lines. */
@@ -148,7 +150,8 @@ const groupsOf = (harness: HarnessKey, scan: HarnessScan): readonly FoundGroup[]
           becomes: becomes(harness, 'env'),
         },
       ],
-      locked: scan.secretKeys.map(secretName),
+      locked: scan.secretKeys.map(secretName).filter(name => !GITHUB_TOKEN_NAMES.includes(name)),
+      githubTokens: scan.secretKeys.map(secretName).filter(name => GITHUB_TOKEN_NAMES.includes(name)),
     });
   const profiles = scan.codexProfiles ?? [];
   if (profiles.length > 0)
@@ -206,13 +209,22 @@ export const nameProblem = (name: string): string | null => {
 };
 
 /** The `setup.import` change for one tool. */
-export function importChange(model: ToolModel, left: ReadonlySet<ImportItemId>, name: string): AccountChange {
+export function importChange(
+  model: ToolModel,
+  left: ReadonlySet<ImportItemId>,
+  name: string,
+  ticked: ReadonlySet<string> = new Set(),
+): AccountChange {
   const skip = skipList(model, left);
+  const env = model.groups.find(group => group.key === 'env');
+  // Only a token variable this scan lists, and only while the environment itself is being brought.
+  const tickedEnv = (env?.githubTokens ?? []).filter(token => ticked.has(token) && !left.has(`${model.harness}:env`));
   return {
     kind: 'setup.import',
     include: [model.harness],
     names: { [model.harness]: name.trim() },
     ...(skip.length === 0 ? {} : { skip: [...skip] }),
+    ...(tickedEnv.length === 0 ? {} : { tickedEnv }),
   };
 }
 

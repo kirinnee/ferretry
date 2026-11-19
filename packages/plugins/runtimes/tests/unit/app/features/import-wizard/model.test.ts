@@ -168,3 +168,32 @@ describe('small readings', () => {
     ]);
   });
 });
+
+describe('GitHub-token variables', () => {
+  const scan = scanOf({
+    claude: { secretKeys: ['env.ANTHROPIC_API_KEY', 'env.GITHUB_TOKEN', 'env.GH_ENTERPRISE_TOKEN'] },
+  });
+  const model = toolModel('claude-code', scan, null);
+
+  it('are their own choices, apart from the other locked keys', () => {
+    const env = model.groups.find(group => group.key === 'env');
+    expect(env?.locked).toEqual(['ANTHROPIC_API_KEY']);
+    expect(env?.githubTokens).toEqual(['GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN']);
+  });
+
+  it('are never sent until ticked, and then only by name', () => {
+    expect(importChange(model, new Set(), 'x')).not.toHaveProperty('tickedEnv');
+    expect(importChange(model, new Set(), 'x', new Set(['GITHUB_TOKEN']))).toMatchObject({
+      tickedEnv: ['GITHUB_TOKEN'],
+    });
+  });
+
+  it('a name the scan did not list, or an environment left out, sends nothing', () => {
+    expect(importChange(model, new Set(), 'x', new Set(['GH_TOKEN', 'ANTHROPIC_API_KEY']))).not.toHaveProperty(
+      'tickedEnv',
+    );
+    expect(importChange(model, new Set(['claude-code:env']), 'x', new Set(['GITHUB_TOKEN']))).not.toHaveProperty(
+      'tickedEnv',
+    );
+  });
+});

@@ -7,8 +7,10 @@ import { Lock } from 'lucide-react';
 import { useId } from 'react';
 import type { ImportItemId } from '../../../contract/index.ts';
 import type { FoundGroup, FoundItem, LeftAlone } from './model.ts';
+import { becomes } from './mapping-words.ts';
 import {
   CONVERSATIONS_LINE,
+  GITHUB_TOKEN_SENTENCE,
   HOOKS_NOT_IMPORTED,
   plural,
   PROJECT_INSTRUCTIONS_STAY,
@@ -57,6 +59,48 @@ function Row({
   );
 }
 
+/** One GitHub-token variable: its own choice, unticked until ticked (ferrets use the connected GitHub account instead). */
+function TokenRow({
+  name,
+  on,
+  disabled,
+  onChange,
+}: {
+  readonly name: string;
+  readonly on: boolean;
+  readonly disabled: boolean;
+  readonly onChange: (on: boolean) => void;
+}) {
+  const id = useId();
+  return (
+    <li className="min-w-0" data-found-token={name}>
+      <label
+        htmlFor={id}
+        className="kt-panel flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel hover:border-accent has-[input:not(:checked)]:opacity-70 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
+      >
+        <input
+          id={id}
+          type="checkbox"
+          className="mt-1 h-4 w-4 shrink-0 accent-[var(--accent)]"
+          checked={on && !disabled}
+          disabled={disabled}
+          onChange={event => onChange(event.currentTarget.checked)}
+        />
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="inline-flex items-center gap-1 text-row font-semibold text-fg">
+            <Lock size={12} aria-hidden="true" className="shrink-0 text-accent" />
+            <code className="[overflow-wrap:anywhere]">{name}</code>
+          </span>
+          <span className="text-cell text-fg">{`Becomes: ${becomes('claude-code', 'env')} (${SECRET_KEPT})`}</span>
+          <span className="text-cell text-muted" data-found-token-note="">
+            {GITHUB_TOKEN_SENTENCE}
+          </span>
+        </span>
+      </label>
+    </li>
+  );
+}
+
 function Fixed({
   name,
   title,
@@ -83,9 +127,12 @@ export interface FoundListProps {
   readonly left: ReadonlySet<ImportItemId>;
   readonly leftAlone: LeftAlone;
   readonly onToggle: (id: ImportItemId, on: boolean) => void;
+  /** The GitHub-token variables the person ticked; none until they do. */
+  readonly tickedEnv: ReadonlySet<string>;
+  readonly onTickEnv: (name: string, on: boolean) => void;
 }
 
-export function FoundList({ harness, groups, left, leftAlone, onToggle }: FoundListProps) {
+export function FoundList({ harness, groups, left, leftAlone, onToggle, tickedEnv, onTickEnv }: FoundListProps) {
   return (
     <div className="flex min-w-0 flex-col gap-4" data-found-list={harness}>
       {groups.map(group => (
@@ -119,6 +166,15 @@ export function FoundList({ harness, groups, left, leftAlone, onToggle }: FoundL
                   </span>
                 )}
               </Row>
+            ))}
+            {(group.githubTokens ?? []).map(name => (
+              <TokenRow
+                key={name}
+                name={name}
+                on={tickedEnv.has(name)}
+                disabled={group.items.some(item => item.id !== null && left.has(item.id))}
+                onChange={on => onTickEnv(name, on)}
+              />
             ))}
           </ul>
         </section>

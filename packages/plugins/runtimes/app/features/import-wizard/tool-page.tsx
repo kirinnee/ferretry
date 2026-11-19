@@ -207,6 +207,8 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
           left={left}
           leftAlone={model.leftAlone}
           onToggle={(id, on) => wizard.toggle(harness, id, on)}
+          tickedEnv={wizard.tickedEnv[harness]}
+          onTickEnv={(name, on) => wizard.tickEnv(harness, name, on)}
         />
       </section>
       <section className="flex min-w-0 flex-col gap-2" data-tool-name="">
