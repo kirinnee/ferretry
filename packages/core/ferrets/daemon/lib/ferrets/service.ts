@@ -18,6 +18,7 @@ import type { SerialExecutor } from '../ports.ts';
 import { claimConversationLease, conversationLeaseGuard } from './conversation-lease-guard.ts';
 import type { FerretLaunchLeases } from './launch-leases.ts';
 import { beforePane, type LaunchGuard, type LaunchSteps, paneOpened, paneVariables, released } from './launch-steps.ts';
+import { paneEnvironment } from './pane-env.ts';
 import type { SessionCutOffMark } from '../tokens/cut-off-mark.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../../../contract/agent-address.ts';
 import {
@@ -2722,6 +2723,10 @@ export class FerretsService implements FerretsApi {
     // The mode's own defaults come next and BEFORE the parts, so an owner's switch (a part) still overrides them.
     const env: Record<string, string> = { ...login, ...modeSwitchDefaults(mode) };
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
+    // What a plugin gives THIS pane (the Git account's ssh-agent and git settings): judged by name, refused naming the plugin.
+    const contributed = paneEnvironment(parts);
+    if (!contributed.ok) return err(contributed.error);
+    Object.assign(env, contributed.value);
     // The ferret's mode (v4 parity: the pane is handed FY_SESSION_MODE, which the wrappers and `instructions` read) goes
     // in AFTER the parts: it is the record's own fact, the same one the harness decided its question tool from
     // (`LaunchSpec.mode`), so no part or login file can make the pane say something else.

@@ -87,6 +87,12 @@ export type LaunchPart =
   /** Names and `${secret:NAME}` references only; never a value. */
   | { readonly kind: 'env'; readonly env: Readonly<Record<string, string>> }
   /**
+   * Plain variables a plugin gives THIS pane (r9 B4: the ssh-agent socket and git settings of the Git account a project
+   * is linked to). Unlike `env` they are judged at launch: a name the launch or login owns (`PATH`, `HOME`, `FY_*`, the
+   * token variables) or a `${secret…}` value refuses the launch, naming `plugin`. Values are paths and words, never secrets.
+   */
+  | { readonly kind: 'pane-env'; readonly plugin: string; readonly env: Readonly<Record<string, string>> }
+  /**
    * Where the harness squeezes its own conversation, in tokens (a login's `compactAt`, once it is a number: `auto` adds
    * nothing). The Claude harness writes it into its private settings file as `autoCompactWindow`.
    */

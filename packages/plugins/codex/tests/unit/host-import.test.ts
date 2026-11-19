@@ -19,11 +19,14 @@ function tree(
   const options: unknown[] = [];
   const config: HostImportConfig = {
     collection: () => written as never,
+    etag: async (_def, name) => (name !== undefined && written.has(name) ? `etag-${name}` : 'absent'),
     writeAsCaller: async (_def: unknown, name: string | undefined, edit: ConfigEdit, option) => {
       options.push(option);
       if (answer !== undefined) return answer;
       if (name === undefined || typeof edit !== 'string') throw new Error('a whole item text is written');
-      if (written.has(name)) return { kind: 'conflict' };
+      if (option?.ifMatch === 'absent' && written.has(name)) return { kind: 'conflict' };
+      if (option?.ifMatch !== undefined && option.ifMatch !== 'absent' && option.ifMatch !== `etag-${name}`)
+        return { kind: 'conflict' };
       written.set(name, Bun.YAML.parse(edit) as SettingsItem);
       return { kind: 'written', etag: 'e1', loosened: [] };
     },
@@ -41,7 +44,7 @@ describe('a Codex settings component the import hands over', () => {
       asText({ harness: 'codex', document: { model: 'gpt-x', sandbox_mode: 'read-only' }, flags: ['--search'] }),
     );
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toMatchObject({ ok: true });
     expect(written.get('host-codex')).toEqual({
       settings: { model: 'gpt-x', sandbox_mode: 'read-only' },
       flags: ['--search'],
@@ -58,6 +61,62 @@ describe('a Codex settings component the import hands over', () => {
     expect(written.get('mine')).toEqual({ settings: { model: 'keep' } });
   });
 
+  it('replaces its own item for an update the person accepted, pinned to the current etag', async () => {
+    const { config, written, options } = tree({ mine: { settings: { model: 'old' } } });
+
+    const result = await codexSettingsPut(config)(
+      'mine',
+      asText({ harness: 'codex', document: { model: 'new' } }),
+      undefined,
+      { replace: true },
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    expect(written.get('mine')).toEqual({ settings: { model: 'new' } });
+    expect(options).toEqual([{ ifMatch: 'etag-mine' }]);
+  });
+
+  it('an update replaces only items an import made: a profile item the person made is left exactly as it is', async () => {
+    // Arrange — the import made "mine"; the person made "profile-review" themselves; the host now has a [profiles.review].
+    const { config, written } = tree({
+      mine: { settings: { model: 'old' } },
+      'profile-review': { settings: { model: 'person-made' } },
+    });
+    const document = {
+      harness: 'codex',
+      document: { model: 'new', profiles: { review: { model: 'host', model_reasoning_effort: 'low' } } },
+    };
+
+    // Act
+    const result = await codexSettingsPut(config)('mine', asText(document), undefined, { replace: true, owned: [] });
+
+    // Assert
+    expect(written.get('mine')).toEqual({ settings: { model: 'new' } });
+    expect(written.get('profile-review')).toEqual({ settings: { model: 'person-made' } });
+    expect(result).toEqual({
+      ok: true,
+      created: ['mine'],
+      warnings: ['profile-review already exists and was not brought in by an import, so it was left as it is'],
+    });
+  });
+
+  it('an update replaces a profile item the import itself made earlier (named in owned)', async () => {
+    const { config, written } = tree({
+      mine: { settings: { model: 'old' } },
+      'profile-review': { settings: { model: 'imported' } },
+    });
+
+    const result = await codexSettingsPut(config)(
+      'mine',
+      asText({ harness: 'codex', document: { profiles: { review: { model: 'host' } } } }),
+      undefined,
+      { replace: true, owned: ['profile-review'] },
+    );
+
+    expect(written.get('profile-review')).toEqual({ settings: { model: 'host' } });
+    expect(result.ok).toBe(true);
+  });
+
   it('reports a name taken between the look and the write as taken', async () => {
     const { config } = tree({}, { kind: 'conflict' });
 
@@ -68,7 +127,7 @@ describe('a Codex settings component the import hands over', () => {
 
   it('reports a write the kernel holds as held, and a refusal in a sentence without a value', async () => {
     const held = tree({}, { kind: 'held', etag: 'e', id: 'h1', sentences: ['agents now run unsandboxed'] });
-    expect(await codexSettingsPut(held.config)('a', asText({ harness: 'codex', document: {} }))).toEqual({
+    expect(await codexSettingsPut(held.config)('a', asText({ harness: 'codex', document: {} }))).toMatchObject({
       ok: true,
       held: true,
     });
@@ -96,7 +155,7 @@ describe('what a Codex settings item never takes from an import', () => {
       asText({ harness: 'codex', document: { model: 'm', profile: 'work' } }),
     );
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: true,
       warnings: ['Not imported: profile selects a host profile that is not here; each chosen profile is its own item'],
     });
@@ -272,7 +331,7 @@ describe('Codex profiles the import chose', () => {
       asText({ harness: 'codex', document: { model: 'main', approval_policy: 'on-request', profiles } }),
     );
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toMatchObject({ ok: true });
     expect([...written.keys()].toSorted()).toEqual(['host-codex', 'profile-deep', 'profile-fast']);
     expect(written.get('host-codex')).toEqual({ settings: { model: 'main', approval_policy: 'on-request' } });
     expect(written.get('profile-fast')).toEqual({ settings: { model: 'gpt-x', model_reasoning_effort: 'low' } });
@@ -284,7 +343,7 @@ describe('Codex profiles the import chose', () => {
 
     const result = await codexSettingsPut(config)('host-codex', asText({ harness: 'codex', document: { profiles } }));
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toMatchObject({ ok: true });
     expect([...written.keys()].toSorted()).toEqual(['profile-deep', 'profile-fast']);
   });
 
@@ -325,7 +384,7 @@ describe('Codex profiles the import chose', () => {
       }),
     );
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: true,
       warnings: [
         'Not imported: profile "plain" sets neither a model nor a reasoning effort',

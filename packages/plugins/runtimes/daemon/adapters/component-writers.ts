@@ -19,12 +19,21 @@ export function componentWriters(lookup: ComponentSourceLookup, within: Within):
       if (owner === 'unavailable') return refused('the part of Ferretry that owns them is not running');
       if (owner.put === undefined) return refused('the part of Ferretry that owns them cannot take an import yet');
       try {
-        const answered = await within(owner.put(write.name, write.text, write.files));
+        const answered = await within(
+          owner.put(
+            write.name,
+            write.text,
+            write.files,
+            write.replace === true ? { replace: true, owned: write.owned ?? [] } : undefined,
+          ),
+        );
         if (answered === TIMED_OUT) return refused('the part of Ferretry that owns them did not answer in time');
         if (!answered.ok) return refused(answered.reason);
         const warnings =
           answered.warnings === undefined || answered.warnings.length === 0 ? {} : { warnings: answered.warnings };
-        return { outcome: answered.held === true ? 'held' : 'written', ...warnings };
+        const created =
+          answered.created === undefined || answered.created.length === 0 ? {} : { created: answered.created };
+        return { outcome: answered.held === true ? 'held' : 'written', ...warnings, ...created };
       } catch (error) {
         return refused(error instanceof Error && error.message.length > 0 ? error.message : 'it could not be written');
       }

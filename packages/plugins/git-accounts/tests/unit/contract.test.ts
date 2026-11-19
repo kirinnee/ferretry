@@ -148,17 +148,21 @@ describe('git-accounts manifest', () => {
   const byKey = new Map<string, (typeof manifest.actions.routes)[number]>(
     manifest.actions.routes.map(route => [route.key, route]),
   );
-  test('declares the four routes, each governed by an existing capability (no new one)', () => {
+  test('declares the six routes, each governed by an existing capability (no new one)', () => {
     expect([...byKey.keys()].sort()).toEqual([
       'DELETE /v1/git-accounts/:id',
+      'DELETE /v1/git-accounts/:id/keys/:purpose',
       'GET /v1/git-accounts',
       'GET /v1/git-accounts/github/device/:flowId',
+      'POST /v1/git-accounts/:id/keys',
       'POST /v1/git-accounts/github/device',
     ]);
     for (const route of byKey.values()) expect(route.capability?.axis).toBeDefined();
     expect(byKey.get('GET /v1/git-accounts')?.capability?.axis).toBe('use');
     for (const key of [
       'DELETE /v1/git-accounts/:id',
+      'DELETE /v1/git-accounts/:id/keys/:purpose',
+      'POST /v1/git-accounts/:id/keys',
       'POST /v1/git-accounts/github/device',
       'GET /v1/git-accounts/github/device/:flowId',
     ])
@@ -171,9 +175,9 @@ describe('git-accounts manifest', () => {
       'git account rm',
     ]);
   });
-  test('only GitHub is reached, the tokens file is private, and no secret is named', () => {
+  test('only GitHub is reached, the tokens and keys files are private, and no secret is named', () => {
     expect(manifest.permissions?.network).toEqual(['github.com', 'api.github.com']);
-    expect(manifest.privacy?.private).toEqual(['tokens.json']);
+    expect(manifest.privacy?.private).toEqual(['tokens.json', 'keys.json']);
     expect(Object.keys(manifest.permissions ?? {}).sort()).toEqual(['network', 'roots', 'spawn']);
   });
 });

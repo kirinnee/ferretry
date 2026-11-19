@@ -3,7 +3,8 @@
  *
  * It writes `config/claude-code/settings/<name>.yaml` through the kernel's config service (`ConfigPort.write`), so the
  * schema check, the refusal of a raw secret and the hold on a loosening (a launch flag that loosens the permission mode)
- * all still apply. It never replaces an item it did not make: the write is create-only (`ifMatch: 'absent'`).
+ * all still apply. It never replaces an item it did not make: the write is create-only (`ifMatch: 'absent'`). The ONE
+ * exception is an update the person accepted (`options.replace`): the item is replaced, pinned to its current etag.
  *
  * The answer is a sentence naming files, keys and rules; never a value.
  */
@@ -14,20 +15,21 @@ import { importedSettings } from './settings-document.ts';
 
 export interface HostImportPorts {
   readonly def: ConfigCollectionDef<SettingsItem>;
-  readonly config: Pick<ConfigPort, 'collection' | 'write'>;
+  readonly config: Pick<ConfigPort, 'collection' | 'write' | 'etag'>;
 }
 
 const refused = (reason: string): ComponentPutResult => ({ ok: false, reason });
 
 export function claudeSettingsPut(ports: HostImportPorts): NonNullable<ProfileComponentSource['put']> {
-  return async (name, documentText) => {
+  return async (name, documentText, _files, options) => {
     const made = importedSettings(documentText);
     if (!made.ok) return refused(made.reason);
-    if (ports.config.collection(ports.def).has(name)) {
+    const replacing = options?.replace === true && ports.config.collection(ports.def).has(name);
+    if (!replacing && ports.config.collection(ports.def).has(name)) {
       return refused('a Claude Code settings item by that name already exists; an import never replaces one');
     }
     const outcome = await ports.config.write(ports.def, name, JSON.stringify(made.item, null, 2), {
-      ifMatch: 'absent',
+      ifMatch: replacing ? await ports.config.etag(ports.def, name) : 'absent',
     });
     switch (outcome.kind) {
       case 'written':

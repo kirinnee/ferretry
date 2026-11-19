@@ -29,6 +29,20 @@ async function world(judge: boolean) {
 }
 
 describe('claudeSettingsPut over the real config writer', () => {
+  test('an update the person accepted replaces the item; a first import never does', async () => {
+    const { config, put } = await world(true);
+    await put('mine', text({ harness: 'claude', document: { model: 'opus' } }));
+
+    const refused = await put('mine', text({ harness: 'claude', document: { model: 'sonnet' } }));
+    const replaced = await put('mine', text({ harness: 'claude', document: { model: 'sonnet' } }), undefined, {
+      replace: true,
+    });
+
+    expect(refused.ok).toBe(false);
+    expect(replaced).toEqual({ ok: true });
+    expect(config.collection(DEF).get('mine')).toEqual({ settings: { model: 'sonnet' } });
+  });
+
   test('writes the file, warns what it kept out (keys only), and never the values', async () => {
     const { config, put } = await world(true);
     const answer = await put(

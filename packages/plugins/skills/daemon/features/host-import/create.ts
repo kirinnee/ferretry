@@ -15,3 +15,17 @@ export const createSkillsItem =
     if (outcome.kind === 'conflict') return { kind: 'conflict' };
     return { kind: 'refused', issues: outcome.issues };
   };
+
+/**
+ * Replaces `config/skills/<name>.yaml` for an update the person accepted, pinned to the file's etag read just before
+ * (`config.etag`): a file that moved meanwhile is a `conflict`, never an overwrite.
+ */
+export const replaceSkillsItem =
+  (config: Pick<ConfigPort, 'write' | 'etag'>) =>
+  async (name: string, text: string): Promise<SkillsItemWrite> => {
+    const outcome = await config.write(SKILLS_CONFIG, name, text, { ifMatch: await config.etag(SKILLS_CONFIG, name) });
+    if (outcome.kind === 'written') return { kind: 'written' };
+    if (outcome.kind === 'held') return { kind: 'held' };
+    if (outcome.kind === 'conflict') return { kind: 'conflict' };
+    return { kind: 'refused', issues: outcome.issues };
+  };

@@ -1,0 +1,58 @@
+import { definePlugin, route } from '@ferretry/kernel/manifest';
+import { GitAccountDisconnected, GitAccountsPort } from '@ferretry/plugin-git-accounts/contract';
+import { ProjectsPort, ProjectRemoved } from '@ferretry/plugin-projects/contract';
+import { PULLS_CACHE, PULLS_CAPS, PULLS_WORDS } from './contract/index.ts';
+
+/**
+ * PRs & CI (r9 track E): a project's pull requests and CI, inside Ferretry. E1 is the base the other units stand on: the
+ * contract, a GitHub client over `git-accounts`' api seam (ETag reads, `Link` paging, a rate budget) and the per-project
+ * cache. E1 filed no route; each later unit adds its own route declaration here and one registration line to `daemon/routes.ts`. E8 files the CI reads.
+ *
+ * NO TOKEN. This plugin names an account by id and `git-accounts` places the token on the request; nothing here can
+ * read one. It needs no network permission of its own for the same reason: it never makes the request.
+ */
+export default definePlugin({
+  id: 'pulls',
+  title: 'PRs & CI',
+  version: '5.0.0',
+  api: 5,
+  core: false,
+  kinds: ['command'],
+  words: PULLS_WORDS,
+
+  needs: { gitAccounts: GitAccountsPort, projects: ProjectsPort },
+
+  actions: {
+    routes: [
+      // E8 (CI data): a person's read of a project repository's CI. Names, statuses and times; logs are never read.
+      route('GET /v1/pulls/:project/:repo/runs', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: PULLS_CAPS.read,
+        noStore: true,
+        audit: { skip: 'a read of CI run names, statuses and times for a project repository' },
+        guard: { none: 'run, job and step names, statuses and times only; no pane, page or vault text' },
+      }),
+      route('GET /v1/pulls/:project/:repo/runs/:runId', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: PULLS_CAPS.read,
+        noStore: true,
+        audit: { skip: 'a read of one CI run’s job and step names, statuses and times' },
+        guard: { none: 'job and step names, statuses and times only; no pane, page or vault text' },
+      }),
+    ],
+  },
+
+  data: {
+    // Private code (diffs): `0600` files in `0700` folders, bounded, deleted with the project or account.
+    state: [PULLS_CACHE],
+    // A removed project or account takes its cache with it, at once (not on the next sweep).
+    subscribes: [ProjectRemoved, GitAccountDisconnected],
+  },
+
+  // Private code: no ferret reaches the cache through any root.
+  privacy: { private: ['cache'] },
+
+  permissions: { roots: [], spawn: [], network: [] },
+});

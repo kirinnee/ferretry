@@ -1,5 +1,12 @@
-import { definePort } from '@ferretry/kernel/contract';
-import type { GitAccount, GitAccountId, GitAccountKeys } from './wire.ts';
+import { definePort, defineEvent } from '@ferretry/kernel/contract';
+import { GitAccountIdSchema, type GitAccount, type GitAccountId, type GitAccountKeys } from './wire.ts';
+import { z } from 'zod';
+
+/**
+ * An account was removed (its token and record are gone). The id only, nothing else: a plugin that keeps anything for an
+ * account (the PR cache) deletes it on this, because a reconnect of the same GitHub user reuses the same id.
+ */
+export const GitAccountDisconnected = defineEvent('git-accounts.removed', z.strictObject({ id: GitAccountIdSchema }));
 
 /**
  * A call to the provider's API made WITH an account's token, by the daemon half, for another plugin's daemon half (the
@@ -58,6 +65,14 @@ export interface GitAccountsApi {
   run(account: GitAccountId, spec: GitRunSpec): Promise<GitRunResult>;
   /** Records the public halves of the keys registered for an account (so removing the account deletes them too). */
   recordKeys(account: GitAccountId, keys: GitAccountKeys): Promise<void>;
+  /**
+   * The ssh-agent socket that holds this account's own key (the one Ferretry made), started on first ask with the key
+   * loaded. `undefined` when the account has no such key (none, or the person's own key, which the host's agent holds).
+   * A path is not a secret: whoever can open the socket can ask it to sign or to authenticate, never to hand the key over.
+   */
+  agentSocket(account: GitAccountId): Promise<string | undefined>;
+  /** A `known_hosts` file pinning GitHub's published host keys (`GITHUB_HOST_KEYS`), for `UserKnownHostsFile`. */
+  knownHostsFile(): Promise<string>;
 }
 export const GitAccountsPort = definePort<GitAccountsApi>('git-accounts');
 

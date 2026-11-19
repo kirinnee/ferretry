@@ -423,9 +423,11 @@
       "name": "@ferretry/plugin-git-accounts",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/core-vault": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-projects": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
       },
@@ -586,6 +588,18 @@
         "@types/react-dom": "^19.0.0",
         "@types/react-test-renderer": "^19.0.0",
         "react-test-renderer": "^19.0.0",
+      },
+    },
+    "packages/plugins/pulls": {
+      "name": "@ferretry/plugin-pulls",
+      "version": "5.0.0",
+      "dependencies": {
+        "@ferretry/core-gate": "workspace:*",
+        "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-git-accounts": "workspace:*",
+        "@ferretry/plugin-projects": "workspace:*",
+        "@ferretry/std": "workspace:*",
+        "zod": "4.4.3",
       },
     },
     "packages/plugins/runtimes": {
@@ -920,6 +934,8 @@
     "@ferretry/plugin-packs": ["@ferretry/plugin-packs@workspace:packages/plugins/packs"],
 
     "@ferretry/plugin-projects": ["@ferretry/plugin-projects@workspace:packages/plugins/projects"],
+
+    "@ferretry/plugin-pulls": ["@ferretry/plugin-pulls@workspace:packages/plugins/pulls"],
 
     "@ferretry/plugin-runtimes": ["@ferretry/plugin-runtimes@workspace:packages/plugins/runtimes"],
 

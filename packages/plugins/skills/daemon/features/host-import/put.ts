@@ -5,7 +5,11 @@
  *
  * What the owner decides here, before the kernel's config writer decides the rest (schema, raw-secret refusal, hold):
  *  - an item is CREATED, never replaced: a name that is taken is refused ("an import never replaces a component it did not
- *    make"), and the write is pinned to "no file yet" so a file that appears in between is never overwritten;
+ *    make"), and the write is pinned to "no file yet" so a file that appears in between is never overwritten. The ONE
+ *    exception is an update the person accepted (`options.replace`): the item is then replaced, pinned to the file's
+ *    current etag (so a file that moved meanwhile is a refusal), the skills it names that are new are installed, and the
+ *    skills an import installed earlier (`options.owned`) are rewritten with the files now handed over. A skill that is
+ *    installed but was NOT brought in by an import is left exactly as it is, in a sentence;
  *  - every skill folder the item names must be a folder name a harness can load and the installed store can hold
  *    (`usableSkillName`: never a dot-folder such as `.system`, never a path), and an item names at most
  *    {@link MAX_IMPORTED_SKILLS} folders;
@@ -21,7 +25,7 @@
  * Nothing here holds a value: a skill is text, and a refusal names a skill, a path and a rule, never a file's content.
  */
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
-import type { ComponentPutFile, ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
+import type { ComponentPutFile, ComponentPutOptions, ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
 import { ITEM_NAME_PATTERN } from '@ferretry/std';
 import {
   type InstalledSkillFile,
@@ -62,7 +66,11 @@ interface SkillsInstalledStore {
    * Installs `files` (paths inside the skill) at `installed/<skill>/`, CREATE-ONLY (an existing skill is never replaced; it
    * throws `InstalledSkillExists`); throws a refusal that names the rule.
    */
-  install(skill: string, files: readonly InstalledSkillFile[], options: { readonly createOnly: true }): Promise<void>;
+  install(
+    skill: string,
+    files: readonly InstalledSkillFile[],
+    options?: { readonly createOnly?: boolean },
+  ): Promise<void>;
   /** Removes what an install of ours wrote. */
   uninstall(skill: string): Promise<void>;
 }
@@ -70,6 +78,8 @@ interface SkillsInstalledStore {
 export interface SkillsImportDeps {
   /** Whether an item of this name is in effect. */
   has(name: string): boolean;
+  /** Replaces `config/skills/<name>.yaml` as the person's accepted update, pinned to the file's etag read just before. */
+  replace(name: string, text: string): Promise<SkillsItemWrite>;
   /** Writes `config/skills/<name>.yaml` as a NEW file (`ifMatch: 'absent'`) through the kernel's config writer. */
   create(name: string, text: string): Promise<SkillsItemWrite>;
   /** Skills' own installed store: where the folders land. */
@@ -111,8 +121,14 @@ const filesOf = (skill: string, files: readonly ImportedSkillFile[]): readonly I
 
 export function skillsImportPut(
   deps: SkillsImportDeps,
-): (name: string, documentText: string, files?: readonly ImportedSkillFile[]) => Promise<ComponentPutResult> {
-  return async (name, documentText, files = []) => {
+): (
+  name: string,
+  documentText: string,
+  files?: readonly ImportedSkillFile[],
+  options?: ComponentPutOptions,
+) => Promise<ComponentPutResult> {
+  return async (name, documentText, files = [], options) => {
+    const replacing = options?.replace === true && deps.has(name);
     if (!ITEM_NAME_PATTERN.test(name) || name.length > MAX_NAME_LENGTH)
       return refuse('the name cannot be used for a skills selection');
     if (new TextEncoder().encode(documentText).byteLength > MAX_DOCUMENT_BYTES)
@@ -132,14 +148,30 @@ export function skillsImportPut(
       if (key === undefined) return refuse('the skills selection names a harness Ferretry does not know');
       text = `${JSON.stringify({ ...(document as object), harness: key }, null, 2)}\n`;
     }
-    if (deps.has(name)) return refuse(`a skills selection named "${name}" already exists, so it was not replaced`);
+    if (deps.has(name) && !replacing)
+      return refuse(`a skills selection named "${name}" already exists, so it was not replaced`);
 
     // Everything is checked before anything is written: one skill over a bound refuses the item, with the reason.
     const toInstall: { readonly skill: string; readonly files: readonly InstalledSkillFile[] }[] = [];
+    const toRewrite: { readonly skill: string; readonly files: readonly InstalledSkillFile[] }[] = [];
+    const owned = new Set(options?.owned ?? []);
     const kept: string[] = [];
     for (const skill of found.items) {
       if (await deps.store.holds(skill)) {
-        kept.push(`"${skill}" is already installed here, so it was left as it is`);
+        if (!replacing) kept.push(`"${skill}" is already installed here, so it was left as it is`);
+        else if (!owned.has(skill))
+          kept.push(
+            `"${skill}" is already installed here and was not brought in by an import, so it was left as it is`,
+          );
+        else {
+          // One an import installed: its files are rewritten with what the host has now.
+          const own = filesOf(skill, files);
+          if (own.length === 0)
+            return refuse(`the files of the skill "${skill}" were not handed over, so it was not updated`);
+          const why = installRefusal(skill, own);
+          if (why !== undefined) return refuse(`the skill "${skill}" was not updated: ${why}`);
+          toRewrite.push({ skill, files: own });
+        }
         continue;
       }
       const own = filesOf(skill, files);
@@ -171,13 +203,25 @@ export function skillsImportPut(
       }
     }
 
-    const answered = await deps.create(name, text);
+    for (const { skill, files: own } of toRewrite) {
+      try {
+        await deps.store.install(skill, own);
+      } catch (error) {
+        await undo();
+        return refuse(
+          `the skill "${skill}" was not updated: ${error instanceof Error ? error.message : 'it could not be installed'}`,
+        );
+      }
+    }
+
+    const answered = replacing ? await deps.replace(name, text) : await deps.create(name, text);
     const warnings = kept.length === 0 ? {} : { warnings: kept };
+    const created = landed.length === 0 ? {} : { created: landed };
     switch (answered.kind) {
       case 'written':
-        return { ok: true, ...warnings };
+        return { ok: true, ...warnings, ...created };
       case 'held':
-        return { ok: true, held: true, ...warnings };
+        return { ok: true, held: true, ...warnings, ...created };
       case 'conflict':
         await undo();
         return refuse(`a skills selection named "${name}" appeared meanwhile, so it was not replaced`);
