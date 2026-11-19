@@ -145,6 +145,21 @@ describe('ContextMenu', () => {
     await menu.unmount();
   });
 
+  it('draws a toggle (checked set) as a menuitemcheckbox that says whether it is on, with a check while on', async () => {
+    const menu = await openMenu({
+      items: [
+        { key: 'on', label: 'On', checked: true, onSelect: () => {} },
+        { key: 'off', label: 'Off', checked: false, onSelect: () => {} },
+        { key: 'plain', label: 'Plain', onSelect: () => {} },
+      ],
+    });
+    const rows = Array.from(menu.container.querySelectorAll<HTMLElement>('[data-menu-key]'));
+    expect(rows.map(row => row.getAttribute('role'))).toEqual(['menuitemcheckbox', 'menuitemcheckbox', 'menuitem']);
+    expect(rows.map(row => row.getAttribute('aria-checked'))).toEqual(['true', 'false', null]);
+    expect(rows.map(row => row.querySelector('[data-menu-check]') !== null)).toEqual([true, false, false]);
+    await menu.unmount();
+  });
+
   it('is a vertical menu that names itself, with one row per item', async () => {
     const menu = await openMenu();
 

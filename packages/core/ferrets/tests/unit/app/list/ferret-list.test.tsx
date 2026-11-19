@@ -2,14 +2,14 @@
  * The ferret list component. Ported from today's `sessions-bar.test.tsx` (lists by project and marks the open one,
  * titles, hides stopped until ticked, keeps the open one, narrows by kind with live counts, opens on Mine, still
  * reading / nothing running, navigates from a row), over the scripted daemon. Left out: the badge, preview, switch
- * marks, machine switcher, finder and foot places (not Ferrets'), and the ⋯ options menu (Show stopped is a tick here).
+ * marks, machine switcher, finder and foot places (not Ferrets'), and the ⋯ options menu's other rows (Show stopped is the menu's toggle here).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { RouterProvider } from '@ferretry/app/testing';
 import { deviceControls, type ModeFilter, type ScreenRef } from '@ferretry/app';
 import { FerretList } from '../../../../app/features/list/ferret-list.tsx';
 import type { FerretSummary } from '../../../../contract/index.ts';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
+import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
 import { type ListDaemon, listDaemon, summary as ferretSummary } from './support.ts';
 
 const SCREENS: readonly ScreenRef[] = [
@@ -86,6 +86,11 @@ const click = async (element: Element | null, what: string): Promise<void> => {
   await settle();
 };
 
+const options = (root: ParentNode): HTMLElement | null => root.querySelector<HTMLElement>('[data-sbar-options]');
+const menu = (): HTMLElement | null => document.body.querySelector<HTMLElement>('[data-context-menu]');
+const showStopped = (): HTMLElement | null =>
+  document.body.querySelector<HTMLElement>('[data-menu-key="show-stopped"]');
+
 const ids = (root: ParentNode): (string | null)[] =>
   [...root.querySelectorAll('[data-sbar-session]')].map(node => node.getAttribute('data-sbar-session'));
 
@@ -125,7 +130,7 @@ describe('the ferret list as a column', () => {
     expect(row('maryah-1').getAttribute('title')).toContain('Diene work — Maryah');
   });
 
-  it('S-0405 hides stopped ferrets until "Show stopped" is ticked, and says how many it is hiding', async () => {
+  it('S-0405 hides stopped ferrets until "Show stopped" is switched on in the ⋯ menu, and says how many it is hiding', async () => {
     const stopped = ferretSummary('old-1', {
       name: 'ora',
       title: 'Finished work',
@@ -135,17 +140,23 @@ describe('the ferret list as a column', () => {
     });
     const root = await draw(listDaemon([...FERRETS, stopped]));
     expect(ids(root)).not.toContain('old-1');
-    const tick = must(root.querySelector<HTMLInputElement>('[data-sbar-show-stopped] input'), 'the tick');
-    expect(root.querySelector('[data-sbar-show-stopped]')?.textContent).toBe('Show stopped(1)');
+    // The old standalone checkbox is gone: Show stopped lives only in the ⋯ menu.
+    expect(root.querySelector('[data-sbar-show-stopped]')).toBeNull();
+    expect(root.querySelector('input[type="checkbox"]')).toBeNull();
     expect(root.querySelector('[data-sbar-filter="all"] .fy-sbar__count')?.textContent).toBe('3');
 
-    await click(tick, 'Show stopped');
+    await click(options(root), 'the ⋯ button');
+    expect(showStopped()?.textContent).toContain('Show stopped(1)');
+    expect(showStopped()?.getAttribute('aria-checked')).toBe('false');
+    await click(showStopped(), 'Show stopped');
     expect(ids(root)).toContain('old-1');
-    expect(root.querySelector('[data-sbar-show-stopped]')?.textContent).toBe('Show stopped');
     expect(root.querySelector('[data-sbar-filter="all"] .fy-sbar__count')?.textContent).toBe('4');
     expect(root.querySelector('[data-sbar-session="old-1"]')?.hasAttribute('data-sbar-stopped')).toBe(true);
 
-    await click(tick, 'Show stopped');
+    await click(options(root), 'the ⋯ button');
+    expect(showStopped()?.getAttribute('aria-checked')).toBe('true');
+    expect(showStopped()?.textContent).toBe('Show stopped');
+    await click(showStopped(), 'Show stopped');
     expect(ids(root)).not.toContain('old-1');
   });
 
@@ -153,12 +164,42 @@ describe('the ferret list as a column', () => {
     const stopped = ferretSummary('old-1', { name: 'ora', title: 'Finished work', state: 'stopped', mode: 'auto' });
     const root = await draw(listDaemon([...FERRETS, stopped]));
     expect(deviceControls().snapshot().device.showStopped).toBe(false);
-    await click(root.querySelector('[data-sbar-show-stopped] input'), 'Show stopped');
+    await click(options(root), 'the ⋯ button');
+    await click(showStopped(), 'Show stopped');
     expect(deviceControls().snapshot().device.showStopped).toBe(true);
     await mounted?.unmount();
     const again = await draw(listDaemon([...FERRETS, stopped]), '/d/alpha/ferrets/hadi-1/chat', 'keep');
     expect(ids(again)).toContain('old-1');
-    expect(again.querySelector<HTMLInputElement>('[data-sbar-show-stopped] input')?.checked).toBe(true);
+    await click(options(again), 'the ⋯ button');
+    expect(showStopped()?.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('puts Mine · All · Agents and the ⋯ in ONE row, with the ⋯ last', async () => {
+    const root = await draw(listDaemon(FERRETS));
+    const row = must(root.querySelector('.fy-sbar__filters'), 'the header row');
+    expect([...row.children].map(child => child.tagName)).toEqual(['FIELDSET', 'BUTTON']);
+    expect(row.lastElementChild?.getAttribute('data-sbar-options')).toBe('');
+  });
+
+  it('opens the ⋯ from the keyboard, Esc closes it, and focus returns to the ⋯', async () => {
+    const root = await draw(listDaemon(FERRETS));
+    const button = must(options(root), 'the ⋯ button');
+    button.focus();
+    // A native button turns Enter/Space into a click, which is what opens it.
+    await click(button, 'the ⋯ button');
+    expect(menu()).not.toBeNull();
+    // The first row takes focus; a key on the menu toggles it (Enter or Space), as the menu's own contract.
+    expect(document.activeElement).toBe(showStopped());
+    await interact(() => pressKey(must(menu(), 'the menu'), 'Escape'));
+    await settle();
+    expect(menu()).toBeNull();
+    expect(document.activeElement).toBe(button);
+
+    await click(button, 'the ⋯ button');
+    await interact(() => pressKey(must(menu(), 'the menu'), ' '));
+    await settle();
+    expect(deviceControls().snapshot().device.showStopped).toBe(true);
+    expect(menu()).toBeNull();
   });
 
   it('S-0405 keeps the open ferret listed even when it has stopped', async () => {
@@ -174,7 +215,9 @@ describe('the ferret list as a column', () => {
     await mounted?.unmount();
     const away = await draw(listDaemon([stopped]), '/d/alpha/ferrets');
     expect(away.querySelector('[data-sbar-session="hadi-1"]')).toBeNull();
-    expect(away.querySelector('.fy-sbar__empty')?.textContent).toBe('No live ferrets — 1 stopped. Tick Show stopped.');
+    expect(away.querySelector('.fy-sbar__empty')?.textContent).toBe(
+      'No live ferrets — 1 stopped. Switch on Show stopped in the ⋯ menu.',
+    );
   });
 
   it('S-0405 narrows by kind with live counts, and says plainly when a kind has nothing', async () => {
