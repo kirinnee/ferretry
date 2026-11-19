@@ -55,6 +55,16 @@ describe('flattening: the daemon phase', () => {
     ]);
   });
 
+  test('two plugins whose first steps share an order sort by plugin id, whatever order they arrived in', () => {
+    const daemon: PairedDaemon = {
+      id: A,
+      name: 'Studio',
+      steps: [view('zeta', 'one', 50, 'daemon'), view('alpha', 'one', 50, 'daemon'), view('mid', 'one', 50, 'daemon')],
+    };
+    const flow = flattenFlow({ journey: 'first-time', target: A, daemons: [daemon], ledger: EMPTY_LEDGER });
+    expect(flow.daemon.map(segment => segment.plugin)).toEqual(['alpha', 'mid', 'zeta']);
+  });
+
   test('only the machine being set up, and only its daemon-side steps', () => {
     const flow = flattenFlow({
       journey: 'add-daemon',
