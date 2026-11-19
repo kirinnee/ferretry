@@ -310,10 +310,7 @@ export interface ImportOptions {
   readonly record?: ImportRecord;
   /** Secret names already in the store, so an import never overwrites one. */
   readonly existingSecrets?: readonly string[];
-  /**
-   * Held names the Vault confirmed an earlier import filed with exactly the value this scan found again, by name and that
-   * value (the host's own, which this plan already holds): such a name is reused, not skipped for `NAME_2`.
-   */
+  /** Held names the Vault confirmed an earlier import filed with this very value (name -> the host's own value): reused, not skipped. */
   readonly reusableSecrets?: ReadonlyMap<string, string>;
   /**
    * GitHub token variables of a harness's own `env` the person ticked (names only). A token that is not named here is NOT
@@ -398,7 +395,6 @@ class SecretNames {
     let name = base;
     let reused = false;
     for (let index = 2; !free(name); index += 1) {
-      // A held name an earlier import filed with this very value is the one to use again; any other value moves on to the next name.
       if (this.#taken.has(name) && this.reusable.get(name) === value) {
         reused = true;
         break;

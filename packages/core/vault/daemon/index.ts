@@ -337,6 +337,17 @@ export default implementDaemon(manifest, {
       }
     };
 
+    // The ONE place a needer's own mint is opened (a minted send and a retried import's same-value check share it): ONE
+    // reading of the store gives the entry's write identity and its value, and the entry is handed on only while the mint
+    // ledger says this needer made that very write. `undefined` for a name not held or not this needer's.
+    const openOwnMint = async (
+      neederId: string,
+      name: SecretName,
+    ): Promise<{ readonly write: string; readonly value: string } | undefined> => {
+      const opened = await vault.openEntry(name);
+      return opened !== undefined && (await mints.mintedBy(neederId, name, opened.write)) ? opened : undefined;
+    };
+
     /**
      * ONE request with a secret the needer MINTED placed on it, answered as the reply (a stream a caller reads for itself),
      * the credential masked out of it. The name must be one the ledger says THIS needer wrote the current value of; the
@@ -375,14 +386,13 @@ export default implementDaemon(manifest, {
       if (carries('host')) return { kind: 'refused' };
       // ONE reading of the store gives both the entry's write identity and its value, so what the ledger authorizes is
       // exactly what is sent: a write that lands after this read cannot swap in a value the plugin did not mint.
-      let opened: { readonly write: string; readonly value: string } | undefined;
+      let opened: { readonly value: string } | undefined;
       try {
-        opened = await vault.openEntry(secret as SecretName);
+        opened = await openOwnMint(needer.id, secret as SecretName);
       } catch {
         return { kind: 'vault_damaged' };
       }
-      if (opened === undefined || !(await mints.mintedBy(needer.id, secret as SecretName, opened.write)))
-        return { kind: 'refused' };
+      if (opened === undefined) return { kind: 'refused' };
       const value = opened.value.trim();
       if (value.length === 0) return { kind: 'secret_missing' };
       const credential = placement.scheme === undefined ? value : `${placement.scheme} ${value}`;
@@ -490,12 +500,8 @@ export default implementDaemon(manifest, {
               },
               // One boolean, decided in here: the entry must be THIS plugin's own create (the ledger's word) and equal.
               filedSame: async (name: SecretName, value: string) => {
-                const opened = await vault.openEntry(name);
-                return (
-                  opened !== undefined &&
-                  (await mints.mintedBy(needer.id, name, opened.write)) &&
-                  sameText(opened.value, value)
-                );
+                const opened = await openOwnMint(needer.id, name);
+                return opened !== undefined && sameText(opened.value, value);
               },
             }
           : {}),
