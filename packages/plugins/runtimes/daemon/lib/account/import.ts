@@ -436,10 +436,8 @@ function parsedDocument(
  * place in the file, so a JSON file is named with the fixed sentence alone.
  */
 function parseLocation(error: unknown): string {
-  if (!(error instanceof SettingsParseError) || error.line === undefined) return '';
-  return error.column === undefined
-    ? ` (line ${String(error.line)})`
-    : ` (line ${String(error.line)}, column ${String(error.column)})`;
+  if (!(error instanceof SettingsParseError) || error.line === undefined || error.column === undefined) return '';
+  return ` (line ${String(error.line)}, column ${String(error.column)})`;
 }
 
 // ── Models ───────────────────────────────────────────────────────────────────────────────────────
