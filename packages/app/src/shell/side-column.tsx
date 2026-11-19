@@ -8,15 +8,21 @@ import { PanelSlot, ScreenView } from './views.tsx';
  * drawer's list slot when the layout puts the column on the left, or in the frame's own right-hand column.
  */
 
-/** What the side column holds on this page, or `undefined` when the layout, the width or the page says it is not drawn. */
-export function useSideHolds(daemon: string | undefined, route: Route): SideHolds | undefined {
+/**
+ * What the side column holds on this page, or `undefined` when the layout, the width or the page says it is not drawn. The
+ * phone's overlay drawer (`overlay`) holds it too, whatever `wide-only` says of a column BESIDE the page: it is the list
+ * the person opened the drawer for, and the page it covers is not shown beside it.
+ */
+export function useSideHolds(daemon: string | undefined, route: Route, overlay = false): SideHolds | undefined {
   const { plan, viewport } = useShell();
   const { show, holds } = plan.side;
-  if (show === 'never' || (show === 'wide-only' && viewport === 'phone') || holds.kind === 'none') return undefined;
+  if (show === 'never' || holds.kind === 'none') return undefined;
+  if (show === 'wide-only' && viewport === 'phone' && !overlay) return undefined;
   if (daemon === undefined) return undefined;
   if (holds.kind === 'screen' && needsSubject(holds.screen.path)) return undefined; // needs a subject the route lacks
   // The page IS the screen the column holds (the ferret list on /ferrets): draw it once, in the page, not again beside it.
   if (
+    !overlay &&
     holds.kind === 'screen' &&
     route.kind === 'screen' &&
     route.screen.plugin === holds.screen.plugin &&

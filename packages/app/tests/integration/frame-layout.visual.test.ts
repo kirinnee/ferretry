@@ -579,6 +579,9 @@ describe('the left drawer collapses to a rail and opens over a phone', () => {
     try {
       const wide = await tab.evaluate(() => document.querySelector('.fy-drawer')?.getBoundingClientRect().width ?? -1);
       const mainWide = await width(tab, '.fy-main');
+      expect(await tab.locator('.fy-drawer__list [data-sbar-filter]').count(), 'Mine / All / Agents in the slot').toBe(
+        3,
+      );
       await shotOf(tab, 'v5-desktop-light-drawer-open');
       await tab.click('[data-drawer-toggle]');
       await tab.waitForSelector('.fy-drawer--rail');
@@ -607,6 +610,11 @@ describe('the left drawer collapses to a rail and opens over a phone', () => {
         const box = await tab.evaluate(() => document.querySelector('.fy-drawer')?.getBoundingClientRect());
         expect(box?.left, 'from the left edge').toBe(0);
         expect(box?.height ?? 0, 'the full height').toBeGreaterThanOrEqual(840);
+        // The same order as the wide drawer: places, then the ferret list (Mine / All / Agents and its ⋯ menu).
+        expect(
+          await tab.locator('.fy-drawer--overlay .fy-drawer__list [data-sbar-filter]').count(),
+          'the list',
+        ).toBeGreaterThan(0);
         await shotOf(tab, `v5-phone-${mode}-drawer-open`);
         await tab.click('.fy-drawer-scrim', { position: { x: 380, y: 400 } });
         expect(await tab.locator('.fy-drawer').count(), 'the scrim puts it away').toBe(0);

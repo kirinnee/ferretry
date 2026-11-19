@@ -62,7 +62,7 @@ export function Drawer({
   const { entryKey } = useRouter();
   const [collapsed, setCollapsed] = useDrawerCollapsed(plan.nav.style === 'rail');
   const [open, setOpen] = useDrawerOpen();
-  const holds = useSideHolds(daemon, route);
+  const holds = useSideHolds(daemon, route, phone);
   const panel = useRef<HTMLElement | null>(null);
   const shown = !phone || open;
   const { onKeyDown } = useDialogFocus(phone && open, panel, () => setOpen(false));
