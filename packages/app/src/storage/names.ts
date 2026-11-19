@@ -62,4 +62,6 @@ export const APP_STORAGE = {
   density: localKey(APP_OWNER, 'density'),
   /** localStorage: whether the left drawer is collapsed to its rail on this device. */
   drawer: localKey(APP_OWNER, 'drawer'),
+  /** localStorage: how wide each resizable panel is on this device (side column, drawer, settings nav). */
+  panelWidths: localKey(APP_OWNER, 'panel-widths'),
 } as const;

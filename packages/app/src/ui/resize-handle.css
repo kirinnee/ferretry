@@ -1,0 +1,65 @@
+/* THE GRAB STRIP ON A PANEL'S EDGE (ui/resize-handle.tsx): an 18px hit area around a 2px line, centred on the panel's edge.
+   The handle is a ZERO-WIDTH item that sits right where the panel's edge is (a flex sibling of the drawer and the side column, an
+   absolutely placed one beside the settings list), because the panels scroll and a child of one would be clipped and would
+   scroll away with its content. Its two pseudo-elements are the hit area and the visible line. */
+.fy-resize {
+  position: relative;
+  z-index: 5;
+  flex: none;
+  align-self: stretch;
+  width: 0;
+  outline: none;
+}
+.fy-resize::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -9px;
+  width: 18px;
+  cursor: col-resize;
+  touch-action: none;
+}
+/* The visible line: hidden until the pointer is near or the keyboard is on it, then ONE solid accent line, only on the panel in play. */
+.fy-resize::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+  pointer-events: none;
+  transition: background-color 120ms ease;
+}
+.fy-resize:hover::after,
+.fy-resize:focus-visible::after,
+html[data-panel-resizing='side'] .fy-resize--side::after,
+html[data-panel-resizing='drawer'] .fy-resize--drawer::after,
+html[data-panel-resizing='settings-nav'] .fy-resize--settings-nav::after {
+  background: var(--accent);
+}
+/* The settings list sits in a grid beside the page: its strip is placed in the gap after the column (the grid's gap is 24px). */
+.fy-settings-body > .fy-resize--settings-nav {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--fy-w-settings-nav, calc(var(--fy-text-scale, 1) * 220px)) + 12px);
+}
+/* While a drag runs the pointer owns the screen: no text is picked up on the way, and the cursor stays a resize one. */
+html[data-panel-resizing] {
+  cursor: col-resize;
+  user-select: none;
+}
+/* A phone's panels are overlays: no handle (the callers draw none; this is the belt for a window resized after). */
+@media (max-width: 767.98px) {
+  .fy-resize {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-resize::after {
+    transition: none;
+  }
+}

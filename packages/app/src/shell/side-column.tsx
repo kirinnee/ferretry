@@ -1,6 +1,7 @@
 import { needsSubject, type Route } from '../router/routes.ts';
 import type { SideHolds } from '../layout/engine.ts';
 import { useShell } from './context.tsx';
+import { ResizeHandle } from '../ui/resize-handle.tsx';
 import { PanelSlot, ScreenView } from './views.tsx';
 
 /**
@@ -44,12 +45,16 @@ export function SideBody({ daemon, holds }: { readonly daemon: string; readonly 
 
 /** The frame's right-hand column. A column the layout puts on the left is the drawer's slot instead. */
 export function RightSide({ daemon, route }: { readonly daemon: string | undefined; readonly route: Route }) {
-  const { plan } = useShell();
+  const { plan, viewport } = useShell();
   const holds = useSideHolds(daemon, route);
   if (plan.side.at !== 'right' || holds === undefined || daemon === undefined) return null;
   return (
-    <aside className="fy-side fy-side--right" data-slot="side">
-      <SideBody daemon={daemon} holds={holds} />
-    </aside>
+    <>
+      {/* The grab strip on the column's left edge; a phone has no column beside the page to resize. */}
+      {viewport === 'phone' ? null : <ResizeHandle panel="side" edge="start" label="side column" />}
+      <aside className="fy-side fy-side--right" data-slot="side">
+        <SideBody daemon={daemon} holds={holds} />
+      </aside>
+    </>
   );
 }
