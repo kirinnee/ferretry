@@ -89,11 +89,32 @@ export const HarnessScanSchema = z.strictObject({
     .strictObject({
       source: NonEmptyStringSchema,
       count: NonNegativeIntegerSchema,
+      /** How many hooks the host has. Counted so the screen can say "found N, not imported": an import never takes them. */
       hooks: NonNegativeIntegerSchema,
     })
     .optional(),
   mcpServers: z.array(NonEmptyStringSchema).readonly(),
   skills: z.array(NonEmptyStringSchema).readonly(),
+  /**
+   * Folders whose own instructions file the host knows (Claude's `~/.claude.json` `projects`). They stay in
+   * each project for agents to read there; this lists them, and nothing in them is read. `verified` is whether the
+   * file was seen to exist: Runtimes may not look inside a project folder, so it is usually `false`.
+   */
+  projectInstructions: z
+    .array(z.strictObject({ path: NonEmptyStringSchema, file: NonEmptyStringSchema, verified: z.boolean() }))
+    .readonly()
+    .optional(),
+  /** Codex's `[profiles.*]`: names and the model and effort each sets, nothing else. */
+  codexProfiles: z
+    .array(
+      z.strictObject({
+        name: NonEmptyStringSchema,
+        model: NonEmptyStringSchema.optional(),
+        effort: NonEmptyStringSchema.optional(),
+      }),
+    )
+    .readonly()
+    .optional(),
   /** Secret-looking keys BY NAME (`env.ANTHROPIC_API_KEY`). Their values never leave the machine. */
   secretKeys: z.array(NonEmptyStringSchema).readonly(),
   missingCommands: z.array(NonEmptyStringSchema).readonly(),

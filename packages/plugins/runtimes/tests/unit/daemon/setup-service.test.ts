@@ -907,6 +907,26 @@ describe('the setup.import executor', () => {
     should(configTextOf(applied[0]?.documents ?? [])).containEql('"agent": true');
   });
 
+  it('should write none of what the person skipped, and move no secret whose env was skipped', async () => {
+    // Arrange
+    const { service, applied, secrets } = world();
+
+    // Act
+    await importOnce(
+      service,
+      IMPORT({ skip: ['claude-code:skill:review', 'claude-code:instructions', 'claude-code:env'] }),
+    );
+
+    // Assert
+    const written = applied[0]?.documents ?? [];
+    const paths = written.map(document => document.path);
+    should(paths.some(path => path.includes('/skills/review'))).be.false();
+    should(paths.some(path => path.includes('/components/instructions/'))).be.false();
+    should(paths).containEql('/state/config/model.yaml');
+    should(secrets.size).equal(0);
+    for (const document of written) should(document.content).not.containEql(SECRET_VALUE);
+  });
+
   it('should publish a runtime on a login its budget holds unavailable, like every other publish', async () => {
     // Arrange: the imported login is over its daily trigger on this machine.
     const { service, applied } = world({

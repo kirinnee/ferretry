@@ -34,6 +34,7 @@
  */
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { looksSecret } from '@ferretry/std/credential-words';
+import { importItemId, importNamedItemId } from '../../../contract/index.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
 import { FLEET_STARTER_MODELS } from '../defaults.ts';
@@ -52,7 +53,6 @@ import {
   type AccountModelDocument,
   type ComponentKind,
   type Credential,
-  type HooksComponent,
   type InstructionsComponent,
   isRuntimeName,
   type LayeredProfile,
@@ -94,6 +94,17 @@ export type HostDocumentRead =
   | { readonly kind: 'too-large'; readonly source: string; readonly bytes: number }
   | { readonly kind: 'unreadable'; readonly source: string; readonly reason: string };
 
+/**
+ * A project folder the host has its own instructions file for (Claude's `~/.claude.json` `projects` keys). The
+ * instructions stay in the project, where agents read them; nothing in the folder is read here. `verified` is
+ * whether the file was seen to exist, which Runtimes can only do where the kernel serves the folder.
+ */
+export interface ProjectInstructionHint {
+  readonly path: string;
+  readonly file: string;
+  readonly verified: boolean;
+}
+
 /** One skill folder found on the host. `digest` covers the folder's whole content. */
 export interface HostSkill {
   readonly item: string;
@@ -114,8 +125,10 @@ export interface HostHarnessScan {
   readonly settings: HostDocumentRead;
   /** Claude only: `~/.claude.json`, where Claude keeps its user-scope MCP servers. */
   readonly mcp?: HostDocumentRead;
-  /** Codex only: `hooks.json`. Claude's hooks are the `hooks` block of its settings. */
+  /** Codex only: `hooks.json`. Claude's hooks are the `hooks` block of its settings. Only COUNTED: an import never takes hooks. */
   readonly hooks?: HostDocumentRead;
+  /** Claude only: project folders the host keeps instructions for. Never read, see {@link ProjectInstructionHint}. */
+  readonly projectInstructions?: readonly ProjectInstructionHint[];
   readonly skills: readonly HostSkill[];
   /** MCP commands that resolve to nothing on this machine (E8), by command name. */
   readonly missingCommands: readonly string[];
@@ -209,7 +222,6 @@ type ImportedComponent =
   | { readonly kind: 'mcp'; readonly name: string; readonly value: McpComponent }
   | { readonly kind: 'skills'; readonly name: string; readonly value: SkillsComponent }
   | { readonly kind: 'settings'; readonly name: string; readonly value: SettingsComponent }
-  | { readonly kind: 'hooks'; readonly name: string; readonly value: HooksComponent }
   | { readonly kind: 'modelSets'; readonly name: string; readonly value: ModelSetComponent };
 
 /** The value-free preview the scan route serves (§7 `/v1/fleet/setup/scan`). */
@@ -218,15 +230,26 @@ interface HarnessImportPreview {
   readonly installed: boolean;
   readonly account: HostLogin;
   readonly instructions?: { readonly name: string; readonly source: string; readonly bytes: number };
-  /** Settings found: how many, and how many hooks rode in them. */
+  /** Settings found: how many, and how many hooks the host has (counted, never imported). */
   readonly settings?: { readonly source: string; readonly count: number; readonly hooks: number };
   readonly mcpServers: readonly string[];
   readonly skills: readonly string[];
+  /** Codex's `[profiles.*]`: names, and the model and effort each sets. */
+  readonly codexProfiles: readonly CodexProfileHint[];
+  /** Folders whose own instructions the host knows; they stay in each project and are never imported. */
+  readonly projectInstructions: readonly ProjectInstructionHint[];
   /** Secret-looking keys, by NAME only (`env.ANTHROPIC_API_KEY`). */
   readonly secretKeys: readonly string[];
   readonly missingCommands: readonly string[];
   /** Sentences for anything that could not be read or imported. */
   readonly problems: readonly string[];
+}
+
+/** A Codex profile as the scan lists it: nothing but its name and the two keys the import would keep. */
+interface CodexProfileHint {
+  readonly name: string;
+  readonly model?: string;
+  readonly effort?: string;
 }
 
 interface ImportPreview {
@@ -262,6 +285,11 @@ export interface ImportPlan {
 export interface ImportOptions {
   /** The harnesses the person chose to import. Default: every installed one. */
   readonly include?: readonly HarnessKind[];
+  /**
+   * Items the person chose to leave out, as `import-items.ts` spells them (`claude-code:mcp:notes`). An item
+   * named here is never harvested: it brings no component, no file and no secret.
+   */
+  readonly skip?: readonly string[];
   /** The machine's current configuration, for Import again. */
   readonly existing?: AccountModel;
   readonly record?: ImportRecord;
@@ -529,6 +557,23 @@ export function scannedMcpServers(scan: HostHarnessScan): readonly ScannedMcpSer
   });
 }
 
+/** The most project folders the scan lists; a person with more sees the first of them. */
+const PROJECT_FOLDERS_LIMIT = 200;
+
+/**
+ * The project folders Claude keeps state for: the keys of `projects` in `~/.claude.json`. Names only — the values
+ * under each key are never looked at. Absolute paths with no control character, in the host's order, bounded.
+ */
+export function claudeProjectFolders(scan: HostHarnessScan): readonly string[] {
+  if (scan.harness !== 'claude') return [];
+  const document = parsedDocument(scan.mcp, 'json', '.claude.json', []);
+  const projects = document?.projects;
+  if (!isRecord(projects)) return [];
+  return Object.keys(projects)
+    .filter(path => path.startsWith('/') && [...path].every(character => (character.codePointAt(0) ?? 0) >= 0x20))
+    .slice(0, PROJECT_FOLDERS_LIMIT);
+}
+
 // ── One harness, read into components ────────────────────────────────────────────────────────────
 
 /** What one harness's scan turned into, before the two harnesses are reconciled. */
@@ -541,7 +586,9 @@ interface HarnessHarvest {
     readonly source: string;
     readonly count: number;
   };
-  readonly hooks?: { readonly content: string; readonly source: string; readonly count: number };
+  /** The host's hooks: where and how many, for "found N, not imported". Never a component, never their content. */
+  readonly hooks?: { readonly source: string; readonly count: number };
+  readonly codexProfiles: readonly CodexProfileHint[];
   readonly mcp: readonly {
     readonly name: string;
     readonly value: McpComponent;
@@ -573,8 +620,33 @@ const countHooks = (block: Readonly<Record<string, unknown>>): number =>
     0,
   );
 
-function harvest(scan: HostHarnessScan, names: SecretNames, secrets: ImportedSecret[]): HarnessHarvest {
+/** The wire key a harness goes by in an item id. */
+const itemHarness = (harness: HarnessKind): 'claude-code' | 'codex' => (harness === 'claude' ? 'claude-code' : 'codex');
+
+/** The profiles a `config.toml` declares: names, and the two keys an import would keep. Never anything else. */
+function codexProfilesOf(settings: Readonly<Record<string, unknown>> | undefined): CodexProfileHint[] {
+  const table = settings?.profiles;
+  if (!isRecord(table)) return [];
+  return Object.entries(table).flatMap(([name, value]) => {
+    if (name === '' || !isRecord(value)) return [];
+    const model = typeof value.model === 'string' && value.model !== '' ? value.model : undefined;
+    const effort =
+      typeof value.model_reasoning_effort === 'string' && value.model_reasoning_effort !== ''
+        ? value.model_reasoning_effort
+        : undefined;
+    return [{ name, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }];
+  });
+}
+
+function harvest(
+  scan: HostHarnessScan,
+  names: SecretNames,
+  secrets: ImportedSecret[],
+  skip: ReadonlySet<string>,
+): HarnessHarvest {
   const { harness } = scan;
+  const key = itemHarness(harness);
+  const skipped = (kind: 'instructions' | 'settings' | 'env'): boolean => skip.has(importItemId(key, kind));
   const problems: string[] = [...scan.problems];
   const secretKeys: string[] = [];
   const format = HOST_SETTINGS_FORMAT[harness];
@@ -585,7 +657,7 @@ function harvest(scan: HostHarnessScan, names: SecretNames, secrets: ImportedSec
   const instructionsProblem = unreadableReason(scan.instructions, instructionsName);
   if (instructionsProblem !== undefined) problems.push(instructionsProblem);
   const instructions =
-    scan.instructions.kind === 'text' && scan.instructions.text.trim() !== ''
+    !skipped('instructions') && scan.instructions.kind === 'text' && scan.instructions.text.trim() !== ''
       ? { text: scan.instructions.text, source: scan.instructions.source }
       : undefined;
 
@@ -595,22 +667,21 @@ function harvest(scan: HostHarnessScan, names: SecretNames, secrets: ImportedSec
   let hooks: HarnessHarvest['hooks'];
   let envImport: EnvImport | undefined;
   if (harness === 'claude') {
+    // Hooks are counted so the screen can say "found N, not imported", and dropped: Ferretry runs none of the host's.
     if (isRecord(rest.hooks) && Object.keys(rest.hooks).length > 0) {
-      hooks = {
-        content: serializeSettings({ hooks: rest.hooks }, 'json'),
-        source: scan.settings.source,
-        count: countHooks(rest.hooks),
-      };
+      hooks = { source: scan.settings.source, count: countHooks(rest.hooks) };
     }
     delete rest.hooks;
-    envImport = importEnv(rest.env, 'env.', settingsFile, names, secrets);
+    envImport = skipped('env') ? undefined : importEnv(rest.env, 'env.', settingsFile, names, secrets);
     delete rest.env;
   } else {
     delete rest.mcp_servers;
     for (const key of CODEX_PLUMBING_KEYS) delete rest[key];
     const policy = rest.shell_environment_policy;
     if (isRecord(policy) && isRecord(policy.set)) {
-      envImport = importEnv(policy.set, 'shell_environment_policy.set.', settingsFile, names, secrets);
+      envImport = skipped('env')
+        ? undefined
+        : importEnv(policy.set, 'shell_environment_policy.set.', settingsFile, names, secrets);
       const kept = Object.fromEntries(Object.entries(policy).filter(([key]) => key !== 'set'));
       if (Object.keys(kept).length === 0) delete rest.shell_environment_policy;
       else rest.shell_environment_policy = kept;
@@ -618,7 +689,6 @@ function harvest(scan: HostHarnessScan, names: SecretNames, secrets: ImportedSec
     const hooksDocument = parsedDocument(scan.hooks, 'json', 'hooks.json', problems);
     if (hooksDocument !== undefined && Object.keys(hooksDocument).length > 0 && scan.hooks !== undefined) {
       hooks = {
-        content: serializeSettings(hooksDocument, 'json'),
         source: scan.hooks.source,
         count: countHooks(isRecord(hooksDocument.hooks) ? hooksDocument.hooks : hooksDocument),
       };
@@ -631,6 +701,25 @@ function harvest(scan: HostHarnessScan, names: SecretNames, secrets: ImportedSec
     }
   }
   const env = envImport?.env ?? {};
+  // What the person chose to leave out is filtered out HERE, before the model set is derived and the file is written:
+  // a skipped profile (`<harness>:profile:<name>`) is gone from both, and skipped settings leave no default model (only the profiles still selected remain).
+  const profileTable = rest.profiles;
+  if (isRecord(profileTable)) {
+    const kept = Object.fromEntries(
+      Object.entries(profileTable).filter(([name]) => !skip.has(importNamedItemId(key, 'profile', name))),
+    );
+    if (Object.keys(kept).length === 0) delete rest.profiles;
+    else rest.profiles = kept;
+  }
+  // Skipped settings drop everything but the profiles the person kept: each is its own item and stays importable.
+  if (skipped('settings')) for (const name of Object.keys(rest)) if (name !== 'profiles') delete rest[name];
+  const modelSource: SettingsObject = {
+    ...(rest.model === undefined ? {} : { model: rest.model }),
+    ...(rest.profiles === undefined ? {} : { profiles: rest.profiles }),
+    ...(harness === 'claude' && !skipped('env') && !skipped('settings') && isRecord(parsed?.env)
+      ? { env: parsed.env }
+      : {}),
+  };
   const hasRest = Object.keys(rest).length > 0;
   const hasEnv = Object.keys(env).length > 0;
   const settings: HarnessHarvest['settings'] =
@@ -651,6 +740,7 @@ function harvest(scan: HostHarnessScan, names: SecretNames, secrets: ImportedSec
   const missing = new Set(scan.missingCommands);
   const mcpSource = harness === 'claude' ? (scan.mcp?.source ?? '.claude.json') : scan.settings.source;
   const mcp = scannedMcpServers(scan).flatMap(server => {
+    if (skip.has(importNamedItemId(key, 'mcp', server.name))) return [];
     const warnings: string[] = [];
     if (server.ignored.length > 0) {
       warnings.push(
@@ -690,6 +780,7 @@ function harvest(scan: HostHarnessScan, names: SecretNames, secrets: ImportedSec
   });
 
   const skills = scan.skills.filter(skill => {
+    if (skip.has(importNamedItemId(key, 'skill', skill.item))) return false;
     if (isUsableSkillItemName(skill.item)) return true;
     problems.push(`Skill "${skill.item}" has a folder name Ferretry cannot use, so it was not imported.`);
     return false;
@@ -700,17 +791,13 @@ function harvest(scan: HostHarnessScan, names: SecretNames, secrets: ImportedSec
     ...(instructions === undefined ? {} : { instructions }),
     ...(settings === undefined ? {} : { settings }),
     ...(hooks === undefined ? {} : { hooks }),
+    codexProfiles: harness === 'codex' ? codexProfilesOf(parsed) : [],
     mcp,
     skills,
-    modelSet: modelSetOf(harness, parsed),
+    modelSet: modelSetOf(harness, modelSource),
     secretKeys,
     problems,
-    found:
-      instructions !== undefined ||
-      settings !== undefined ||
-      hooks !== undefined ||
-      mcp.length > 0 ||
-      skills.length > 0,
+    found: instructions !== undefined || settings !== undefined || mcp.length > 0 || skills.length > 0,
   };
 }
 
@@ -734,7 +821,7 @@ const sameText = (left: string, right: string): boolean =>
 const sameJson = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
 
 /** The layer order a Default profile reads in, as §5.2 shows it. */
-const LAYER_ORDER: readonly ComponentKind[] = ['instructions', 'mcp', 'skills', 'settings', 'hooks', 'modelSets'];
+const LAYER_ORDER: readonly ComponentKind[] = ['instructions', 'mcp', 'skills', 'settings', 'modelSets'];
 
 function instructionsCandidates(harvests: readonly HarnessHarvest[]): {
   candidates: Candidate[];
@@ -895,18 +982,6 @@ function harnessCandidates(entry: HarnessHarvest): Candidate[] {
       warnings: [],
     });
   }
-  if (entry.hooks !== undefined) {
-    const name = harnessNamed(entry.harness, 'hooks');
-    const file = componentFilePath('hooks', name, 'json');
-    const value: HooksComponent = { harness: entry.harness, file };
-    candidates.push({
-      component: { kind: 'hooks', name, value },
-      files: [{ kind: 'write', path: file, content: entry.hooks.content }],
-      sources: [entry.hooks.source],
-      digestText: `${JSON.stringify(value)}\n${entry.hooks.content}`,
-      warnings: [],
-    });
-  }
   candidates.push({
     component: { kind: 'modelSets', name: harnessNamed(entry.harness, 'models'), value: entry.modelSet },
     files: [],
@@ -958,7 +1033,15 @@ function previewOf(scan: HostHarnessScan, entry: HarnessHarvest | undefined): Ha
     missingCommands: [...scan.missingCommands],
   };
   if (entry === undefined) {
-    return { ...base, mcpServers: [], skills: [], secretKeys: [], problems: [...scan.problems] };
+    return {
+      ...base,
+      mcpServers: [],
+      skills: [],
+      codexProfiles: [],
+      projectInstructions: [...(scan.projectInstructions ?? [])],
+      secretKeys: [],
+      problems: [...scan.problems],
+    };
   }
   return {
     ...base,
@@ -982,6 +1065,8 @@ function previewOf(scan: HostHarnessScan, entry: HarnessHarvest | undefined): Ha
       : {}),
     mcpServers: entry.mcp.map(server => server.name),
     skills: entry.skills.map(skill => skill.item),
+    codexProfiles: [...entry.codexProfiles],
+    projectInstructions: [...(scan.projectInstructions ?? [])],
     secretKeys: [...entry.secretKeys],
     problems: [...entry.problems],
   };
@@ -999,8 +1084,9 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   const names = new SecretNames(options.existingSecrets ?? []);
   const secrets: ImportedSecret[] = [];
   const imported = importedHarnesses(scans, options.include);
+  const skip = new Set(options.skip ?? []);
   const harvests = imported.map(harness =>
-    harvest(scans.find(scan => scan.harness === harness) as HostHarnessScan, names, secrets),
+    harvest(scans.find(scan => scan.harness === harness) as HostHarnessScan, names, secrets, skip),
   );
   const harvestOf = (harness: HarnessKind) => harvests.find(entry => entry.harness === harness);
 

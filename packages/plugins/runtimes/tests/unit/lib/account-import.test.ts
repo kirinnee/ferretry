@@ -185,14 +185,10 @@ describe('planImport — a machine with both harnesses set up', () => {
         /mcp_servers|cli_auth_credentials_store|sqlite_home|OPENAI/.test(codexFile.content),
     ).be.false();
     should(codexFile?.kind === 'write' && codexFile.content).match(/inherit = "all"/);
-    should(component(plan, 'hooks', 'claude-hooks')).deepEqual({
-      harness: 'claude',
-      file: 'components/hooks/claude-hooks.json',
-    });
-    should(component(plan, 'hooks', 'codex-hooks')).deepEqual({
-      harness: 'codex',
-      file: 'components/hooks/codex-hooks.json',
-    });
+    // Hooks are counted for the screen and never imported: no component, no file.
+    should(component(plan, 'hooks', 'claude-hooks')).be.undefined();
+    should(component(plan, 'hooks', 'codex-hooks')).be.undefined();
+    should(plan.files.some(file => file.path.startsWith('components/hooks/'))).be.false();
     should(plan.preview.harnesses[0]?.settings).deepEqual({ source: '/h/.claude/settings.json', count: 5, hooks: 1 });
   });
 
@@ -253,7 +249,6 @@ describe('planImport — a machine with both harnesses set up', () => {
           'skills/skills',
           'skills/claude-skills',
           'settings/claude-settings',
-          'hooks/claude-hooks',
           'modelSets/claude-models',
         ],
       },
@@ -265,7 +260,6 @@ describe('planImport — a machine with both harnesses set up', () => {
           'skills/skills',
           'skills/codex-skills',
           'settings/codex-settings',
-          'hooks/codex-hooks',
           'modelSets/codex-models',
         ],
       },
@@ -356,6 +350,8 @@ describe('planImport — instructions and harness choices', () => {
       missingCommands: [],
       mcpServers: [],
       skills: [],
+      codexProfiles: [],
+      projectInstructions: [],
       secretKeys: [],
       problems: [],
     });
