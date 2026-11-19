@@ -1,9 +1,11 @@
 /**
- * STEP 1: PICK A FOLDER (or a place to clone into). The explorer is the picker; on a phone it opens in a sheet so the
- * folder list gets the whole screen and the step keeps its place underneath.
+ * STEP 1: PICK A FOLDER (or a place to clone into). The explorer is the picker; the folder that is open when Next is
+ * pressed is the chosen one, so there is no separate "Use this folder" button to press first.
  */
-import { BottomSheet, useLayoutMode } from '@ferretry/app/ui';
-import { useId, useState } from 'react';
+import { ChoiceCards, StepPageFrame, type StepProgressProps } from '@ferretry/app';
+import { useLayoutMode } from '@ferretry/app/ui';
+import { FolderOpen, GitBranch } from 'lucide-react';
+import { useCallback, useId, useState } from 'react';
 import type { ProjectsClient } from '../../lib/client.ts';
 import { FolderPicker } from '../folder-explorer/folder-picker.tsx';
 import { type CreateDraft, projectFolder } from './create-project-model.ts';
@@ -11,121 +13,88 @@ import { type CreateDraft, projectFolder } from './create-project-model.ts';
 export interface FolderStepProps {
   readonly client: ProjectsClient;
   readonly draft: CreateDraft;
+  readonly progress: StepProgressProps;
   readonly onDraftChange: (draft: CreateDraft) => void;
   readonly onNext: () => void;
 }
 
 const SOURCES = [
   {
-    source: 'folder',
-    label: 'A folder on this machine',
-    detail: 'Use a folder that is already here, or make a new one.',
+    id: 'folder',
+    title: 'A folder on this machine',
+    line: 'Use a folder that is already here, or make a new one.',
+    icon: <FolderOpen size={18} aria-hidden="true" />,
   },
-  { source: 'clone', label: 'Clone a repository', detail: 'Download a repository into a folder you pick.' },
+  {
+    id: 'clone',
+    title: 'Clone a repository',
+    line: 'Download a repository into a folder you pick.',
+    icon: <GitBranch size={18} aria-hidden="true" />,
+  },
 ] as const;
 
-export function FolderStep({ client, draft, onDraftChange, onNext }: FolderStepProps) {
+export function FolderStep({ client, draft, progress, onDraftChange, onNext }: FolderStepProps) {
   const urlId = useId();
+  // On a phone the cards drop their second line, so the folder list gets the room.
   const phone = useLayoutMode() === 'drawer';
-  const [sheet, setSheet] = useState(false);
-  const chosen = projectFolder(draft);
-  const choose = (path: string): void => {
-    onDraftChange({ ...draft, folder: path });
-    setSheet(false);
-  };
-  const picker = (
-    <FolderPicker
-      client={client}
-      chooseLabel={draft.source === 'clone' ? 'Clone into this folder' : 'Use this folder'}
-      onChoose={choose}
-    />
-  );
+  // The folder open in the explorer right now. Coming back from the next page reopens where the person was.
+  const [opened, setOpened] = useState<string | null>(draft.folder);
+  const onOpened = useCallback((path: string) => setOpened(path), []);
+  // While the next folder is read the picker still shows the previous one: Next must not commit that old path.
+  const [busy, setBusy] = useState(true);
+  const target = opened === null ? null : projectFolder({ ...draft, folder: opened });
 
   return (
-    <div className="grid gap-md" data-create-step="folder">
-      <fieldset className="relative m-0 grid gap-xs border-0 p-0 sm:grid-cols-2">
-        <legend className="sr-only">Where the project comes from</legend>
-        {SOURCES.map(option => {
-          const checked = draft.source === option.source;
-          return (
-            <label
-              key={option.source}
-              data-create-source={option.source}
-              className={`flex min-h-control cursor-pointer flex-col justify-center gap-0.5 rounded-control border px-control-x py-2 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus ${
-                checked
-                  ? 'border-accent bg-accent-soft text-accent'
-                  : 'border-border bg-surface-2 text-fg hover:border-accent'
-              }`}
-            >
-              <input
-                type="radio"
-                name="create-project-source"
-                className="sr-only"
-                checked={checked}
-                onChange={() => onDraftChange({ ...draft, source: option.source })}
-              />
-              <span className="text-ui font-semibold">{option.label}</span>
-              <span className="text-meta leading-tight text-muted">{option.detail}</span>
-            </label>
-          );
-        })}
-      </fieldset>
+    <StepPageFrame
+      title={draft.source === 'clone' ? 'Where should it go?' : 'Which folder?'}
+      line={
+        draft.source === 'clone'
+          ? 'Paste the repository address, then pick the folder to clone it into.'
+          : 'Open the folder that holds your project, then press Next.'
+      }
+      progress={progress}
+      next={{
+        label: 'Next',
+        disabled: target === null || busy,
+        onClick: () => {
+          if (opened === null || busy) return;
+          onDraftChange({ ...draft, folder: opened });
+          onNext();
+        },
+      }}
+    >
+      <div className="grid max-w-[660px] gap-md" data-create-step="folder">
+        <ChoiceCards
+          label="Where the project comes from"
+          options={phone ? SOURCES.map(({ line: _line, ...rest }) => rest) : SOURCES}
+          value={draft.source}
+          onChange={id => onDraftChange({ ...draft, source: id === 'clone' ? 'clone' : 'folder' })}
+        />
 
-      {draft.source === 'clone' && (
-        <label className="grid min-w-0 gap-1 text-ui text-muted" htmlFor={urlId}>
-          Repository address
-          <input
-            id={urlId}
-            className="kt-input mono min-h-control w-full"
-            value={draft.url}
-            placeholder="https://github.com/you/project.git"
-            autoComplete="off"
-            spellCheck={false}
-            onChange={event => onDraftChange({ ...draft, url: event.target.value })}
-          />
-        </label>
-      )}
+        {draft.source === 'clone' && (
+          <label className="grid min-w-0 max-w-xl gap-1 text-ui text-muted" htmlFor={urlId}>
+            Repository address
+            <input
+              id={urlId}
+              className="kt-input mono min-h-control w-full"
+              value={draft.url}
+              placeholder="https://github.com/you/project.git"
+              autoComplete="off"
+              spellCheck={false}
+              onChange={event => onDraftChange({ ...draft, url: event.target.value })}
+            />
+          </label>
+        )}
 
-      {chosen !== null && (
-        <p className="m-0 text-meta text-muted" data-create-chosen="">
-          {draft.source === 'clone' ? 'Will be cloned to' : 'Chosen'}:{' '}
-          <span className="mono break-all text-fg">{chosen}</span>
-        </p>
-      )}
+        <FolderPicker client={client} startAt={draft.folder ?? undefined} onOpened={onOpened} onBusyChange={setBusy} />
 
-      {phone ? (
-        <>
-          <div>
-            <button type="button" className="kt-btn min-h-control" onClick={() => setSheet(true)}>
-              {draft.folder === null ? 'Choose a folder' : 'Choose a different folder'}
-            </button>
-          </div>
-          <BottomSheet
-            id="create-project-folders"
-            open={sheet}
-            onClose={() => setSheet(false)}
-            ariaLabel="Choose a folder"
-            closeLabel="Close folder list"
-            height="85dvh"
-          >
-            <div className="grid min-h-0 gap-sm overflow-y-auto p-panel">{picker}</div>
-          </BottomSheet>
-        </>
-      ) : (
-        picker
-      )}
-
-      <div>
-        <button
-          type="button"
-          className="kt-btn min-h-control"
-          data-variant="primary"
-          disabled={chosen === null}
-          onClick={onNext}
-        >
-          Next
-        </button>
+        {target !== null && (
+          <p className="m-0 text-meta text-muted" data-create-chosen="">
+            {draft.source === 'clone' ? 'Will be cloned to' : 'Chosen'}:{' '}
+            <span className="mono break-all text-fg">{target}</span>
+          </p>
+        )}
       </div>
-    </div>
+    </StepPageFrame>
   );
 }

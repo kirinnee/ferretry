@@ -98,7 +98,7 @@ describe('create a project', () => {
         };
         const open = async (query: string): Promise<void> => {
           await tab.goto(`${origin}/?theme=studio-${scheme}&${query}`);
-          await tab.waitForSelector('[data-scene-ready] .kt-panel > *', { timeout: 15_000 });
+          await tab.waitForSelector('[data-scene-ready] > *', { timeout: 15_000 });
         };
         try {
           // Before: the typed path this replaces.
@@ -125,23 +125,38 @@ describe('create a project', () => {
           await tab.locator('[data-explorer-new-folder] input').fill('.hidden');
           await shot('explorer-new-folder');
 
-          // The whole flow: pick, name, accounts (two), keys, done.
+          // The projects page: the empty state's two big cards, and the plain lists.
+          await open('stage=hub-empty');
+          await tab.waitForSelector('[data-choice="folder"]');
+          expect(await tab.locator('h1').count()).toBe(1);
+          await shot('hub-empty');
+          await open('stage=hub-list');
+          await tab.waitForSelector('[data-registered-project]');
+          await shot('hub-list');
+
+          // The up-and-down finder: at the home it says why there is no Up; below it Up and the crumbs lead back.
+          await open('stage=explorer&view=list');
+          await tab.waitForSelector('[data-explorer-fence]');
+          await shot('explorer-home-fence');
+          await open('stage=explorer&view=list&at=/home/sam/work/clients');
+          await tab.waitForSelector('[data-explorer-up]');
+          await shot('explorer-up-button');
+
+          // The whole flow, a stepper: pick, name, accounts (two), keys, done. A sheet on a desktop, a page on a phone.
           await open('stage=flow&view=list');
-          // On a phone the explorer opens in a sheet over the step.
-          if (viewport.phone) {
-            await shot('flow-folder-step');
-            await tab.getByRole('button', { name: 'Choose a folder' }).click();
-          }
           await tab.waitForSelector('[data-explorer-state="ready"]');
-          if (viewport.phone) {
-            await tab.waitForTimeout(500);
-            await shot('flow-folder-sheet');
-          }
-          await tab.getByRole('button', { name: 'Use this folder' }).click();
-          await tab.waitForSelector('[data-create-chosen]');
+          expect(await tab.locator('[data-create-sheet]').getAttribute('data-create-sheet')).toBe(
+            viewport.phone ? 'page' : 'sheet',
+          );
           await tab.waitForTimeout(500);
+          await shot('flow-folder-step');
+          await tab.locator('[data-explorer-entry="work"]').click();
+          await tab.waitForSelector('[data-explorer-crumb="/home/sam/work"]');
+          await tab.waitForTimeout(300);
           await shot('flow-folder-chosen');
           await tab.getByRole('button', { name: 'Next' }).click();
+          await tab.waitForSelector('[data-create-step="name"]');
+          await shot('flow-name');
           await tab.getByRole('button', { name: 'Create project' }).click();
           await tab.waitForSelector('[data-create-step="accounts"]');
           await tab.waitForSelector('[data-create-account="gha_202"]');
@@ -154,12 +169,17 @@ describe('create a project', () => {
           await tab.getByRole('button', { name: 'Link these accounts' }).click();
           await tab.waitForSelector('[data-create-step="keys"]');
           await shot('flow-keys-offer');
-          await tab.getByRole('button', { name: 'Set up push and signing for this account' }).click();
+          await tab.getByRole('button', { name: 'Set up push and signing' }).click();
           await tab.waitForSelector('[data-create-key-account] [role="status"]');
           await shot('flow-keys-done');
           await tab.getByRole('button', { name: 'Continue' }).click();
           await tab.waitForSelector('[data-create-step="done"]');
           await shot('flow-done');
+
+          // Clone: the same first page with the address field.
+          await open('stage=flow&view=list&source=clone');
+          await tab.waitForSelector('[data-explorer-state="ready"]');
+          await shot('flow-folder-clone');
 
           // A link to an account that no longer exists.
           await open('stage=links');

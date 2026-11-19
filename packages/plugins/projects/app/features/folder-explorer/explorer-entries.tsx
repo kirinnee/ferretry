@@ -3,7 +3,7 @@
  * order are drawn either way and only the arrangement differs.
  *
  * ONE HIGHLIGHT. The highlighted folder is the keyboard's (`aria-activedescendant` on the listbox); a pointer never
- * draws a second one. A file is shown muted and cannot be opened: the explorer picks folders.
+ * draws a second one. The explorer picks folders, so it is only ever handed folders (the daemon also lists files).
  */
 import { File, Folder, FolderGit2 } from 'lucide-react';
 import { forwardRef } from 'react';
@@ -59,7 +59,7 @@ export const ExplorerEntries = forwardRef<HTMLDivElement, ExplorerEntriesProps>(
       aria-activedescendant={active === undefined ? undefined : idFor(active)}
       data-explorer-view={view}
       className={cn(
-        'max-h-[45dvh] min-h-0 overflow-y-auto rounded-control border border-border-soft bg-surface-2 p-xs focus-visible:outline-focus focus-visible:outline-offset-focus',
+        'max-h-[min(45dvh,20rem)] min-h-0 overflow-y-auto rounded-control focus-visible:outline-focus focus-visible:outline-offset-focus',
         card
           ? 'grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] content-start gap-xs'
           : 'grid content-start gap-0.5',
@@ -82,7 +82,7 @@ export const ExplorerEntries = forwardRef<HTMLDivElement, ExplorerEntriesProps>(
             className={cn(
               'min-w-0 rounded-control border border-transparent',
               card
-                ? 'flex flex-col items-center gap-1 px-2 py-3 text-center'
+                ? 'flex flex-col items-center gap-1 border-border-soft bg-surface-2 px-2 py-3 text-center'
                 : 'flex min-h-control items-center gap-sm px-control-x py-1',
               folder ? 'cursor-pointer text-fg hover:bg-surface' : 'text-faint',
               highlighted && 'border-accent bg-accent-soft',
