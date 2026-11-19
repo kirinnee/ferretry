@@ -1,8 +1,22 @@
 import { describe, expect, test } from 'bun:test';
 import { StandInAdmission, ownerStanding } from '@ferretry/core-gate/contract/testing';
 import { testHost } from '@ferretry/kernel/testing';
+import { GitAccountDisconnected, type GitApiCall } from '@ferretry/plugin-git-accounts/contract';
 import { ProjectRemoved } from '@ferretry/plugin-projects/contract';
-import { WATCH_STATE, type WatchOverview } from '../../contract/index.ts';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import type { Log } from '@ferretry/kernel/contract';
+import {
+  PULLS_CACHE,
+  PullsConfigSchema,
+  WATCH_STATE,
+  type WatchOverview,
+  type WatchSnapshot,
+} from '../../contract/index.ts';
+import { GithubClient } from '../../daemon/adapters/github/client.ts';
+import { WatchService } from '../../daemon/features/watch/service.ts';
+import type { WatchStore } from '../../daemon/features/watch/store.ts';
+import type { PullBuzz } from '../../daemon/features/watch/words.ts';
+import { PullsCache } from '../../daemon/lib/cache/store.ts';
 import daemon from '../../daemon/index.ts';
 import { FakeGithub } from '../fixtures/fake-github/index.ts';
 
@@ -61,7 +75,15 @@ const passed = [{ status: 'completed', conclusion: 'success' }];
 
 async function boot(
   github: FakeGithub,
-  options: { projects?: unknown[]; config?: unknown; access?: boolean; buzzes?: unknown[] } = {},
+  options: {
+    projects?: unknown[];
+    config?: unknown;
+    access?: boolean;
+    buzzes?: unknown[];
+    /** Runs before each GitHub call is answered: a test holds a response here. */
+    before?: (call: GitApiCall) => Promise<void>;
+    buzz?: (buzz: unknown) => Promise<unknown>;
+  } = {},
 ) {
   const buzzes = options.buzzes ?? [];
   return await testHost({
@@ -70,6 +92,10 @@ async function boot(
     fakes: {
       gitAccounts: {
         ...github.accounts,
+        api: async (id: never, call: GitApiCall) => {
+          await options.before?.(call);
+          return await github.accounts.api(id, call);
+        },
         run: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
         recordKeys: async () => undefined,
       },
@@ -77,7 +103,7 @@ async function boot(
     },
     ...(options.access === false
       ? {}
-      : { uses: { access: { buzz: async (buzz: unknown) => (buzzes.push(buzz), 1) } } }),
+      : { uses: { access: { buzz: options.buzz ?? (async (buzz: unknown) => (buzzes.push(buzz), 1)) } } }),
     config: { 'pulls.yaml': options.config ?? { projects: { [P1]: { watch: true } } } },
   });
 }
@@ -386,5 +412,359 @@ describe('watch: live, settings and removal', () => {
     host.emit(ProjectRemoved, { id: P1 as never });
     await host.settle();
     expect(folder.raw(WATCH_STATE, P1)).toBeUndefined();
+  });
+});
+
+const P2 = '22222222-2222-4222-8222-222222222222';
+const P3 = '33333333-3333-4333-8333-333333333333';
+const P4 = '44444444-4444-4444-8444-444444444444';
+const everyone = (...ids: string[]) => ({ projects: Object.fromEntries(ids.map(id => [id, { watch: true }])) });
+
+describe('watch: one budget per account, shared by every project', () => {
+  test('Retry-After on one project’s read keeps the other project, on the same account, from asking until it passes', async () => {
+    const github = new FakeGithub();
+    servePull(github, { ci: passed });
+    github.fail(LIST, 429, { retryAfter: '120' });
+    const host = await boot(github, {
+      projects: [project(), project({ id: P2, name: 'gadgets' })],
+      config: everyone(P1, P2),
+    });
+    await host.runJob('pulls-watch');
+    expect(github.seen).toHaveLength(1);
+
+    github.clearFailure(LIST);
+    await host.clock.advance(60_000);
+    await host.runJob('pulls-watch');
+    expect(github.seen).toHaveLength(1);
+    const view = (await host.request('GET', '/v1/pulls/watch')).json<WatchOverview>();
+    expect(view.projects.map(each => each.pausedUntil)).toEqual([expect.any(String), expect.any(String)]);
+
+    // 121 s after the first answer: the project that was never asked is asked now, and it is still due (it did not lose its turn).
+    await host.clock.advance(61_000);
+    await host.runJob('pulls-watch');
+    expect(github.seen.filter(seen => seen.path === LIST).length).toBeGreaterThan(1);
+  });
+
+  test('a secondary-limit 403 (GitHub’s own words, no Retry-After) holds the account for a minute', async () => {
+    const github = new FakeGithub();
+    github.on('GET', '/repos/octo/widgets/pulls', () => ({
+      status: 403,
+      body: { message: 'You have exceeded a secondary rate limit.' },
+    }));
+    const host = await boot(github, { projects: [project(), project({ id: P2 })], config: everyone(P1, P2) });
+    await host.runJob('pulls-watch');
+    expect(github.seen).toHaveLength(1);
+  });
+
+  test('a 5xx backs the account off for longer each time in a row, and an answer ends it', async () => {
+    const real = Math.random;
+    Math.random = () => 1; // the longest of each jittered wait
+    try {
+      const github = new FakeGithub();
+      servePull(github, { ci: running });
+      const host = await boot(github);
+      await host.runJob('pulls-watch');
+      github.fail(LIST, 500);
+      const asked = () => looks(github);
+      await host.clock.advance(31_000);
+      await host.runJob('pulls-watch'); // fails: 30 s
+      expect(asked()).toBe(2);
+      await host.clock.advance(31_000);
+      await host.runJob('pulls-watch'); // free again, fails again: 60 s
+      expect(asked()).toBe(3);
+      await host.clock.advance(31_000);
+      await host.runJob('pulls-watch'); // still backing off
+      expect(asked()).toBe(3);
+      const view = (await host.request('GET', '/v1/pulls/watch')).json<WatchOverview>();
+      expect(view.projects[0]?.repos[0]?.problem).toBe('pulls_github_error');
+      await host.clock.advance(31_000);
+      github.clearFailure(LIST);
+      await host.runJob('pulls-watch');
+      expect(asked()).toBe(4);
+      // The answer cleared the backoff: the next failure waits 30 s again, not 120 s.
+      github.fail(LIST, 500);
+      await host.clock.advance(31_000);
+      await host.runJob('pulls-watch');
+      expect(asked()).toBe(5);
+      await host.clock.advance(31_000);
+      await host.runJob('pulls-watch');
+      expect(asked()).toBe(6);
+    } finally {
+      Math.random = real;
+    }
+  });
+
+  test('a long list of projects is looked at three a pass, the longest-waiting first, so GitHub is not hit all at once', async () => {
+    const github = new FakeGithub();
+    servePull(github, { ci: running });
+    const ids = [P1, P2, P3, P4];
+    const host = await boot(github, {
+      projects: ids.map(id => project({ id, name: `w${id.slice(0, 2)}` })),
+      config: everyone(...ids),
+    });
+    await host.runJob('pulls-watch');
+    expect(looks(github)).toBe(3);
+    await host.clock.advance(1_000);
+    await host.runJob('pulls-watch');
+    expect(looks(github)).toBe(4);
+  });
+});
+
+describe('watch: a look that lands after its project is gone', () => {
+  /** Boots with a baseline of CI running, then holds the next list read; `during` happens while it is held. */
+  async function held(during: (host: Awaited<ReturnType<typeof boot>>, projects: unknown[]) => Promise<void>) {
+    const github = new FakeGithub();
+    servePull(github, { ci: running });
+    const buzzes: any[] = [];
+    let armed = false;
+    let held = 0;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => (release = resolve));
+    const projects: unknown[] = [project()];
+    const host = await boot(github, {
+      buzzes,
+      projects,
+      config: { projects: { [P1]: { watch: true, notify: { ciFailed: true } } } },
+      before: async call => {
+        if (armed && call.path === LIST) {
+          held += 1;
+          await gate;
+        }
+      },
+    });
+    await host.runJob('pulls-watch');
+    const folder = host.state('pulls');
+    const baseline = folder.raw(WATCH_STATE, P1);
+    const changes = () => host.published.filter(each => each.event === 'pulls.changed').length;
+    const before = changes();
+    servePull(github, { ci: failed });
+    await host.clock.advance(31_000);
+    armed = true;
+    const pass = host.runJob('pulls-watch');
+    while (held === 0) await new Promise(resolve => setTimeout(resolve, 0));
+    await during(host, projects);
+    await host.settle();
+    release();
+    await pass;
+    return { folder, baseline, buzzes, changed: changes() - before };
+  }
+
+  test('removed: nothing is written back, nothing is sent, nobody is told', async () => {
+    const out = await held(async host => {
+      host.emit(ProjectRemoved, { id: P1 as never });
+    });
+    expect(out.folder.raw(WATCH_STATE, P1)).toBeUndefined();
+    expect(out.buzzes).toEqual([]);
+    expect(out.changed).toBe(0);
+  });
+
+  test('its account removed: the snapshot has none of its repositories, and nothing is sent', async () => {
+    const out = await held(async host => {
+      host.emit(GitAccountDisconnected, { id: 'gha_4242' as never });
+    });
+    expect(JSON.parse(out.folder.raw(WATCH_STATE, P1) ?? '{}').repos).toEqual([]);
+    expect(out.buzzes).toEqual([]);
+  });
+
+  test('unlinked from its account: the stale look changes nothing on disk and sends nothing', async () => {
+    const out = await held(async (_host, projects) => {
+      projects[0] = project({ accounts: undefined });
+    });
+    expect(out.folder.raw(WATCH_STATE, P1)).toBe(out.baseline);
+    expect(out.buzzes).toEqual([]);
+    expect(out.changed).toBe(0);
+  });
+
+  test('a project that is gone from the list altogether is not written either', async () => {
+    const out = await held(async (_host, projects) => {
+      projects.length = 0;
+    });
+    expect(out.folder.raw(WATCH_STATE, P1)).toBe(out.baseline);
+    expect(out.buzzes).toEqual([]);
+  });
+});
+
+describe('watch: many alerts at once, and a write that fails', () => {
+  /** Serves `count` open PRs, each asking the account for a review (or not), on one repository. */
+  function serveMany(
+    github: FakeGithub,
+    numbers: readonly number[],
+    options: { asked: boolean | readonly number[]; mine?: boolean },
+  ): void {
+    github.set(
+      LIST,
+      numbers.map(number => ({
+        number,
+        title: `PR ${number}`,
+        state: 'open',
+        draft: false,
+        html_url: `https://github.com/octo/widgets/pull/${number}`,
+        user: { login: options.mine === true ? 'octo-fake' : 'someone' },
+        created_at: '2026-11-01T00:00:00Z',
+        updated_at: `2026-11-02T00:00:${String(60 - (number % 60)).padStart(2, '0')}Z`,
+        head: { sha: `abcdef${number}`, ref: `b${number}` },
+        base: { ref: 'main' },
+        requested_reviewers:
+          options.asked === true || (Array.isArray(options.asked) && options.asked.includes(number))
+            ? [{ login: 'octo-fake' }]
+            : [],
+      })),
+    );
+    for (const number of numbers) {
+      github.set(`${BASE}/commits/abcdef${number}/check-runs?per_page=100`, { check_runs: [] });
+      github.set(`${BASE}/actions/runs?head_sha=abcdef${number}&per_page=50`, { workflow_runs: [] });
+      github.set(`${BASE}/pulls/${number}/reviews?per_page=100`, []);
+      github.set(`${BASE}/issues/${number}/comments?per_page=100`, []);
+    }
+  }
+  const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, at) => from + at);
+
+  test('thirty review requests after a long sleep are ONE alert that counts them; three or fewer speak one by one', async () => {
+    const github = new FakeGithub();
+    serveMany(github, range(1, 30), { asked: false });
+    const buzzes: any[] = [];
+    const host = await boot(github, { buzzes });
+    await host.runJob('pulls-watch');
+    serveMany(github, range(1, 30), { asked: true });
+    await host.clock.advance(8 * 3_600_000);
+    await host.runJob('pulls-watch');
+    expect(buzzes).toHaveLength(1);
+    expect(buzzes[0]).toMatchObject({
+      title: '30 review requests in octo/widgets',
+      kind: 'pr',
+      tag: 'pr-octo:widgets-reviewRequested',
+    });
+    expect(buzzes[0].body).toBe('PR 1 and 29 more');
+    expect(buzzes[0].eventKey.length).toBeLessThanOrEqual(400);
+
+    // Three is still three, each told by itself.
+    buzzes.length = 0;
+    serveMany(github, range(1, 30), { asked: false });
+    await host.clock.advance(STEP);
+    await host.runJob('pulls-watch');
+    serveMany(github, range(1, 30), { asked: [1, 2, 3] });
+    await host.clock.advance(STEP);
+    await host.runJob('pulls-watch');
+    expect(buzzes.map(buzz => buzz.title)).toEqual([
+      'Review requested on #1',
+      'Review requested on #2',
+      'Review requested on #3',
+    ]);
+  });
+
+  test('a failed write keeps the last valid snapshot, tells nothing, and the next look tells it once', async () => {
+    const github = new FakeGithub();
+    servePull(github, { ci: running });
+    let nowMs = Date.parse('2026-11-06T09:00:00.000Z');
+    const quiet: Log = { debug() {}, info() {}, warn() {}, error() {}, child: () => quiet };
+    const folder = new MemoryStateFolder(() => nowMs);
+    const client = new GithubClient(
+      github.accounts,
+      new PullsCache(folder.port([PULLS_CACHE]), () => nowMs, quiet),
+      () => nowMs,
+      quiet,
+    );
+    let kept: WatchSnapshot | undefined;
+    let failing = false;
+    const store = {
+      read: async () => kept,
+      write: async (_project: string, snapshot: WatchSnapshot) => {
+        if (failing) throw new Error('disk full');
+        kept = snapshot;
+      },
+      remove: async () => undefined,
+      projects: async () => [],
+    } as unknown as WatchStore;
+    const sent: PullBuzz[] = [];
+    const service = new WatchService({
+      github: client,
+      store,
+      projects: async () => [project() as never],
+      accounts: async () => [github.account],
+      config: () => PullsConfigSchema.parse({ projects: { [P1]: { watch: true } } }),
+      buzz: () => async buzz => sent.push(buzz),
+      changed: () => undefined,
+      nowMs: () => nowMs,
+      random: () => 0.5,
+      log: quiet,
+    });
+    await service.tick();
+    servePull(github, { ci: failed });
+    nowMs += 31_000;
+    failing = true;
+    await service.tick();
+    expect(sent).toEqual([]);
+    expect((await service.overview()).projects[0]?.repos[0]?.pulls[0]?.ci).toBe('running');
+    failing = false;
+    nowMs += 31_000;
+    await service.tick();
+    expect(sent.map(buzz => buzz.title)).toEqual(['CI failed on #7']);
+    expect((await service.overview()).projects[0]?.repos[0]?.pulls[0]?.ci).toBe('failing');
+  });
+
+  test('an account made to wait mid-pass: the next project is not asked, keeps what it last showed, and the status says until when', async () => {
+    const github = new FakeGithub();
+    servePull(github, { ci: passed });
+    const host = await boot(github, {
+      projects: [project(), project({ id: P2, name: 'gadgets' })],
+      config: everyone(P1, P2),
+    });
+    await host.runJob('pulls-watch');
+    github.fail(LIST, 429, { retryAfter: '120' });
+    await host.clock.advance(STEP);
+    await host.runJob('pulls-watch');
+    const view = (await host.request('GET', '/v1/pulls/watch')).json<WatchOverview>();
+    expect(github.seen.filter(seen => seen.path === LIST).length).toBe(3);
+    expect(view.projects.map(each => each.repos[0]?.pulls.length)).toEqual([1, 1]);
+    expect(view.projects.map(each => each.pausedUntil)).toEqual([expect.any(String), expect.any(String)]);
+  });
+
+  test('a pass that throws, and a push that cannot be sent, are logged and never thrown', async () => {
+    const github = new FakeGithub();
+    servePull(github, { ci: running });
+    const host = await boot(github, {
+      buzz: async () => {
+        throw new Error('push is down');
+      },
+    });
+    await host.runJob('pulls-watch');
+    servePull(github, { ci: failed });
+    await host.clock.advance(31_000);
+    await host.runJob('pulls-watch');
+    const view = (await host.request('GET', '/v1/pulls/watch')).json<WatchOverview>();
+    expect(view.projects[0]?.repos[0]?.pulls[0]?.ci).toBe('failing');
+
+    const quiet: Log = { debug() {}, info() {}, warn() {}, error() {}, child: () => quiet };
+    const service = new WatchService({
+      github: undefined as never,
+      store: undefined as never,
+      projects: async () => {
+        throw new Error('no projects');
+      },
+      accounts: async () => [],
+      config: () => undefined,
+      buzz: () => undefined,
+      changed: () => undefined,
+      nowMs: () => 0,
+      random: () => 0,
+      log: quiet,
+    });
+    await service.tick();
+  });
+
+  test('120 open own PRs seen over several looks never push the status past its cap: it answers 200 with the newest 100', async () => {
+    const github = new FakeGithub();
+    const host = await boot(github);
+    for (const from of [1, 31, 61, 91, 121]) {
+      serveMany(github, range(from, from + 29), { asked: false, mine: true });
+      await host.runJob('pulls-watch');
+      await host.clock.advance(STEP);
+    }
+    const out = await host.request('GET', '/v1/pulls/watch');
+    expect(out.status).toBe(200);
+    const pulls = out.json<WatchOverview>().projects[0]?.repos[0]?.pulls ?? [];
+    expect(pulls).toHaveLength(100);
+    expect(pulls.map(each => each.number)).toContain(150);
+    expect(JSON.parse(host.state('pulls').raw(WATCH_STATE, P1) ?? '{}').repos[0].pulls).toHaveLength(100);
   });
 });

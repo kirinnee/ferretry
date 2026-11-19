@@ -46,3 +46,33 @@ export function buzzOf(project: string, line: WatchEventLine): PullBuzz {
     kind: line.event === 'ciFailed' || line.event === 'ciPassed' ? 'ci' : 'pr',
   };
 }
+
+const SUMMARY: Readonly<Record<WatchEvent, string>> = {
+  ciFailed: 'CI failures',
+  reviewRequested: 'review requests',
+  changesRequested: 'PRs with changes requested',
+  approved: 'approvals',
+  ciPassed: 'CI passes',
+  comment: 'PRs with new comments',
+  closed: 'PRs closed',
+};
+
+/**
+ * ONE push for many lines of the same event in the same repository (a laptop that slept eight hours wakes to thirty
+ * review requests): it counts them, names the first PR's title, and opens that PR. Its tag is the repository's and the
+ * event's, so a later summary replaces an earlier one. `lines` is not empty and shares one event and one repository.
+ */
+export function summaryBuzzOf(project: string, lines: readonly WatchEventLine[]): PullBuzz {
+  const [first] = lines as readonly [WatchEventLine, ...WatchEventLine[]];
+  const { repo, number } = first.pull;
+  const slug = `${repo.owner}/${repo.name}`;
+  const title = cleanTitle(first.pull.title) || slug;
+  return {
+    tag: `pr-${repo.owner}:${repo.name}-${first.event}`,
+    title: `${lines.length} ${SUMMARY[first.event]} in ${slug}`.slice(0, TITLE_CAP),
+    body: `${title} and ${lines.length - 1} more`.slice(0, BODY_CAP),
+    url: `/pulls/${encodeURIComponent(project)}/${repoSegment(repo)}/${number}`,
+    eventKey: `pulls:${project}:summary:${first.key}:${lines.length}`.slice(0, 400),
+    kind: first.event === 'ciFailed' || first.event === 'ciPassed' ? 'ci' : 'pr',
+  };
+}

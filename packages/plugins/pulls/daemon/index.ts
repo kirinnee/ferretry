@@ -48,6 +48,7 @@ export default implementDaemon(manifest, {
       },
       changed: project => kernel.events.publish(PullsChanged, { project }),
       nowMs: () => kernel.clock.nowMs(),
+      random: () => Math.random(),
       log: kernel.log,
       jobs: kernel.jobs,
       door: configDoorOf(kernel.config),

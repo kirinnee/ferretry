@@ -15,6 +15,11 @@ import { foldReviews } from './review-fold.ts';
 
 /** How many open PRs one repository's watch looks at: the most recently updated. A bound, not a promise of all. */
 const MAX_WATCHED_PULLS = 30;
+/**
+ * How many PRs one repository's snapshot keeps: what is open now plus the own PRs an earlier look held that could not be
+ * ended yet. The snapshot's schema allows 100, so a repository holding more keeps its newest 100.
+ */
+const MAX_RETAINED_PULLS = 100;
 /** Requests made at once for one repository: the account's one connection is not a firehose. */
 const AT_ONCE = 5;
 const COMMENT_PAGES = 3;
@@ -60,13 +65,6 @@ async function objectOf(github: Reader, target: WatchTarget, path: string): Prom
   const read = await github.get({ project: target.project, account: target.account, path });
   if (read.ok) return ok(read.value.body);
   return read.error.code === PULLS_CODES.notFound ? ok({}) : err(read.error);
-}
-
-async function inBatches<T, U>(items: readonly T[], run: (item: T) => Promise<U>): Promise<U[]> {
-  const out: U[] = [];
-  for (let at = 0; at < items.length; at += AT_ONCE)
-    out.push(...(await Promise.all(items.slice(at, at + AT_ONCE).map(run))));
-  return out;
 }
 
 async function describe(
@@ -142,23 +140,33 @@ export async function observeRepo(
     0,
     MAX_WATCHED_PULLS,
   );
-  const described = await inBatches(raws, raw => describe(github, target, raw));
   const pulls: WatchedPull[] = [];
-  for (const one of described) {
-    if (!one.ok) return err(one.error);
-    if (one.value !== undefined) pulls.push(one.value);
+  // A batch at a time, and no further batch once one failed: a throttled or failing GitHub is not asked for the rest.
+  for (let at = 0; at < raws.length; at += AT_ONCE) {
+    const batch = await Promise.all(raws.slice(at, at + AT_ONCE).map(raw => describe(github, target, raw)));
+    for (const one of batch) {
+      if (!one.ok) return err(one.error);
+      if (one.value !== undefined) pulls.push(one.value);
+    }
   }
 
   // An own PR that is no longer in the list: closed, merged, or only past the first page. Ask GitHub which.
   const open = new Set(raws.map(raw => raw.number));
   const ended: Ended[] = [];
+  let failing = false;
   for (const old of previous) {
     if (open.has(old.number) || !old.mine) continue;
+    // One read that did not answer ends the asking: the rest are kept as they were and looked at again next tick.
+    if (failing) {
+      pulls.push(old);
+      continue;
+    }
     const read = await github.get({
       project: target.project,
       account: target.account,
       path: `${base(target)}/pulls/${old.number}`,
     });
+    failing = !read.ok;
     const raw = read.ok ? RawPullSchema.safeParse(read.value.body) : undefined;
     if (raw === undefined || !raw.success || raw.data.state === 'open') {
       pulls.push(old);
@@ -166,5 +174,10 @@ export async function observeRepo(
     }
     ended.push({ pull: old, merged: raw.data.merged_at !== null && raw.data.merged_at !== undefined });
   }
-  return ok({ pulls, ended });
+  // Bounded before anything is published or written: the newest PRs stay.
+  const kept =
+    pulls.length > MAX_RETAINED_PULLS
+      ? [...pulls].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, MAX_RETAINED_PULLS)
+      : pulls;
+  return ok({ pulls: kept, ended });
 }

@@ -30,7 +30,7 @@ export interface FakeSeen {
 interface FakeReply {
   readonly status: number;
   readonly body?: unknown;
-  /** The seam's header names: `etag`, `link`, `rateLimitRemaining`, `rateLimitReset`, `oauthScopes`. */
+  /** The seam's header names: `etag`, `link`, `rateLimitRemaining`, `rateLimitReset`, `retryAfter`, `oauthScopes`. */
   readonly headers?: Readonly<Record<string, string>>;
 }
 /** A handler a unit registers for a method and a path (no query). `query` is the parsed query. */
@@ -54,7 +54,7 @@ export class FakeGithub {
   readonly knownAccounts = new Set<GitAccountId>([FAKE_ACCOUNT]);
   readonly #resources = new Map<string, Resource>();
   readonly #handlers = new Map<string, FakeHandler>();
-  readonly #failures = new Map<string, number>();
+  readonly #failures = new Map<string, { status: number; headers: Readonly<Record<string, string>> }>();
   #version = 0;
 
   /** Serves `value` at `path` (query keys other than `page` and `per_page` are part of the identity). */
@@ -72,9 +72,9 @@ export class FakeGithub {
     this.#handlers.set(`${method} ${path}`, handler);
   }
 
-  /** Every call to `path` answers `status` with no body, until `clearFailure`. */
-  fail(path: string, status: number): void {
-    this.#failures.set(this.#key(path), status);
+  /** Every call to `path` answers `status` with no body, until `clearFailure`; `headers` use the seam's names (`retryAfter`). */
+  fail(path: string, status: number, headers: Readonly<Record<string, string>> = {}): void {
+    this.#failures.set(this.#key(path), { status, headers });
   }
   clearFailure(path: string): void {
     this.#failures.delete(this.#key(path));
@@ -120,6 +120,7 @@ export class FakeGithub {
       link: 'link',
       rateLimitRemaining: 'x-ratelimit-remaining',
       rateLimitReset: 'x-ratelimit-reset',
+      retryAfter: 'retry-after',
       oauthScopes: 'x-oauth-scopes',
     };
     for (const [key, value] of Object.entries(answer.headers)) out.set(wire[key] ?? key, value);
@@ -168,7 +169,12 @@ export class FakeGithub {
     if (this.remaining === 0 && call.ifNoneMatch === undefined)
       return { status: 403, body: { message: 'API rate limit exceeded' }, headers: rate(false) };
     const failure = this.#failures.get(this.#key(`${url.pathname}${url.search}`));
-    if (failure !== undefined) return { status: failure, body: { message: 'fake failure' }, headers: rate(true) };
+    if (failure !== undefined)
+      return {
+        status: failure.status,
+        body: { message: 'fake failure' },
+        headers: { ...rate(true), ...failure.headers },
+      };
     const handler = this.#handlers.get(`${call.method} ${url.pathname}`);
     if (handler !== undefined) {
       const reply = handler({ query: url.searchParams, body: call.body });
