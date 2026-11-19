@@ -1,7 +1,8 @@
 /**
  * THE FIRST-RUN STEPPER, AS DATA (pure): the six things a new machine needs before it is a working fleet, and where each
  * one stands, derived from facts the daemon itself holds. Nothing here is a progress record of ours: a step is done
- * because the machine says so (a passkey exists, the machine has a name, a login, a runtime, a ferret), so the stepper
+ * because the machine says so (a passkey exists, the machine has a name, Claude Code and Codex were looked at, a project or
+ * a conversation exists), so the stepper
  * cannot disagree with the machine and resuming after a reload needs no bookkeeping.
  *
  * A fact is `true` (it holds), `false` (it does not), `'locked'` (the machine refused the read for want of its unlock: the
@@ -9,16 +10,16 @@
  * unreadable fact is never guessed: that step is `unknown`, draws no button, and never makes the stepper appear.
  */
 
-export const STEP_IDS = ['pair', 'passkey', 'name', 'login', 'runtime', 'ferret'] as const;
+export const STEP_IDS = ['pair', 'passkey', 'name', 'claude', 'codex', 'project'] as const;
 type StepperStepId = (typeof STEP_IDS)[number];
 
 const STEP_TITLES: Readonly<Record<StepperStepId, string>> = {
   pair: 'Pair',
   passkey: 'Passkey',
   name: 'Name',
-  login: 'Login',
-  runtime: 'Runtime',
-  ferret: 'First ferret',
+  claude: 'Claude Code',
+  codex: 'Codex',
+  project: 'Project',
 };
 
 /** What each fact says; `pair` is not here: a machine this page is drawn for is paired by definition. */
@@ -39,9 +40,9 @@ export interface StepperStep {
 export const UNKNOWN_FACTS: StepperFacts = Object.freeze({
   passkey: undefined,
   name: undefined,
-  login: undefined,
-  runtime: undefined,
-  ferret: undefined,
+  claude: undefined,
+  codex: undefined,
+  project: undefined,
 });
 
 /**

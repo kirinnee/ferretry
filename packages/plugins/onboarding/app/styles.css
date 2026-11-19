@@ -1,0 +1,13 @@
+/* This plugin's app-half stylesheet. Nothing in the app half imports it: the shell loads every plugin's list through the
+   generated `packages/app/src/generated/plugin-styles.css`. */
+
+/* The first-run page and the stepper are the hosts of the shared living background (`@ferretry/app/ui`): `isolate` keeps
+   the background behind their own content and nowhere else; `relative` anchors the stepper's contained variant. */
+[data-onboarding='setup'],
+[data-first-run-stepper] {
+  isolation: isolate;
+  position: relative;
+}
+[data-first-run-stepper] {
+  overflow: hidden;
+}

@@ -3,7 +3,7 @@
  * ones done, the one to do now carrying the only highlight and the only button, the rest quiet. Each step is a list item
  * that says its state in words as well as in marks, for a reader who cannot see colour.
  */
-import { Button } from '@ferretry/app/ui';
+import { Button, LivingBackground } from '@ferretry/app/ui';
 import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { allDone, type StepperState, type StepperStep } from './stepper-model.ts';
@@ -12,6 +12,10 @@ import { allDone, type StepperState, type StepperStep } from './stepper-model.ts
 export interface StepperAction {
   readonly label: string;
   readonly run: () => void;
+  /** A second way to finish the same step (the Project step: "Continue a conversation"): a plain button beside the primary one, never a second highlight. */
+  readonly alternative?: { readonly label: string; readonly run: () => void } | undefined;
+  /** One sentence under the list that says what the choice means (the projectless words). */
+  readonly note?: string | undefined;
 }
 
 export interface StepperViewProps {
@@ -47,12 +51,16 @@ function Mark({ state, index }: { readonly state: StepperState; readonly index: 
 
 export function StepperView({ steps, action, onDismiss }: StepperViewProps): ReactNode {
   const finished = allDone(steps);
+  const current = steps.find(step => step.state === 'current');
+  /** A step with a second way through, or words to read first, is drawn as a block under the list rather than squeezed into its row. */
+  const offersChoice = action !== undefined && (action.alternative !== undefined || action.note !== undefined);
   return (
     <section
       aria-labelledby="first-run-stepper-heading"
       className="mx-auto mt-2 w-full max-w-[1320px] min-w-0 rounded-control border border-border-strong bg-surface-2 px-3 py-2"
       data-first-run-stepper={finished ? 'done' : 'open'}
     >
+      <LivingBackground fill="parent" />
       <div className="flex min-h-9 min-w-0 items-center justify-between gap-2">
         <h2 id="first-run-stepper-heading" className="m-0 text-row font-semibold text-fg">
           {finished ? 'This machine is set up' : 'Get this machine ready'}
@@ -68,7 +76,7 @@ export function StepperView({ steps, action, onDismiss }: StepperViewProps): Rea
           <li
             key={step.id}
             aria-current={step.state === 'current' ? 'step' : undefined}
-            className="flex min-h-9 min-w-0 items-center gap-2"
+            className="flex min-h-9 min-w-0 flex-wrap items-center gap-2"
             data-step={step.id}
             data-state={step.state}
           >
@@ -85,7 +93,7 @@ export function StepperView({ steps, action, onDismiss }: StepperViewProps): Rea
               {step.title}
               <span className="sr-only"> — {STATE_WORD[step.state]}</span>
             </span>
-            {step.state === 'current' && action !== undefined ? (
+            {step.state === 'current' && action !== undefined && !offersChoice ? (
               <Button size="sm" variant="primary" onClick={action.run} data-first-run-stepper-action={step.id}>
                 {action.label}
               </Button>
@@ -93,6 +101,28 @@ export function StepperView({ steps, action, onDismiss }: StepperViewProps): Rea
           </li>
         ))}
       </ol>
+      {current === undefined || action === undefined || !offersChoice ? null : (
+        <div
+          className="mt-3 flex min-w-0 flex-col gap-2 border-t border-border-strong pt-3"
+          data-first-run-stepper-choice=""
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="primary" onClick={action.run} data-first-run-stepper-action={current.id}>
+              {action.label}
+            </Button>
+            {action.alternative === undefined ? null : (
+              <Button size="sm" onClick={action.alternative.run} data-first-run-stepper-alternative={current.id}>
+                {action.alternative.label}
+              </Button>
+            )}
+          </div>
+          {action.note === undefined ? null : (
+            <p className="m-0 max-w-[70ch] text-cell text-muted" data-first-run-stepper-note="">
+              {action.note}
+            </p>
+          )}
+        </div>
+      )}
     </section>
   );
 }

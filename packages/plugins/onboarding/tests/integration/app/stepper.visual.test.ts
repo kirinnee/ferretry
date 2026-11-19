@@ -74,14 +74,15 @@ describe('the first-run stepper', () => {
         );
         const tab = await context.newPage();
         try {
-          for (const scene of ['none', 'fresh', 'login', 'done'] as const) {
+          for (const scene of ['none', 'fresh', 'claude', 'codex', 'project', 'paused', 'resumed', 'done'] as const) {
             await tab.goto(`${origin}/?theme=studio-${scheme}&case=${scene}`);
             await tab.waitForSelector('[data-scene-ready]');
             const stepper = await tab.$$('[data-first-run-stepper]');
             expect(stepper.length, `${scene}: the stepper is drawn once, or not at all`).toBe(scene === 'none' ? 0 : 1);
-            if (scene === 'fresh' || scene === 'login') {
+            if (scene !== 'none' && scene !== 'done') {
               expect(await tab.$$('[aria-current="step"]'), `${scene}: one current step`).toHaveLength(1);
               expect(await tab.$$('[data-first-run-stepper-action]'), `${scene}: one button`).toHaveLength(1);
+              expect(await tab.$$('button[data-variant="primary"]'), `${scene}: one highlight`).toHaveLength(1);
             }
             const overflow = await tab.evaluate(
               () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

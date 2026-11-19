@@ -912,7 +912,9 @@ describe('the setup.import executor', () => {
     should(paths).containEql('/state/config/model.yaml');
     should(paths).containEql('/state/fleet/assets/skills/review/SKILL.md');
     should(paths).containEql(RECORD_PATH);
-    should(paths.some(path => path.startsWith('/state/fleet/assets/components/instructions/'))).be.true();
+    // Instructions are Runtimes' own kind: the text rides in the model, never as a document beside it.
+    should(paths.some(path => path.startsWith('/state/fleet/assets/components/instructions/'))).be.false();
+    should(configTextOf(applied[0]?.documents ?? [])).containEql('Be kind.');
     should(secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
     for (const document of applied[0]?.documents ?? []) should(document.content).not.containEql(SECRET_VALUE);
     should(configTextOf(applied[0]?.documents ?? [])).containEql('"agent": true');
@@ -1079,7 +1081,7 @@ describe('the setup.import executor', () => {
     );
     should(description).containEql('Updates instructions/main from its changed source.');
     const second = applied[1]?.documents ?? [];
-    should(second.some(document => document.content === 'Be kinder.\n')).be.true();
+    should(configTextOf(second)).containEql('Be kinder.');
     should(configTextOf(second)).containEql('claude-default-2');
   });
 
