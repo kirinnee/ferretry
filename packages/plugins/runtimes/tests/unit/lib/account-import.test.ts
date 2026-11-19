@@ -468,19 +468,38 @@ describe('planImport — documents it could not use', () => {
     should(claudePreview?.problems).deepEqual([
       'scan problem',
       'CLAUDE.md at /c is 9 bytes, too large to import',
-      'settings.json at /s is not valid json (cannot parse json settings: ' +
-        (() => {
-          try {
-            JSON.parse('{not json');
-          } catch (error) {
-            return (error as Error).message;
-          }
-          return '';
-        })() +
-        '), so it was not imported',
+      'settings.json at /s is not valid json, so it was not imported',
     ]);
-    should(codexPreview?.problems.some(problem => problem.startsWith('config.toml at /t is not valid toml'))).be.true();
+    should(codexPreview?.problems).containEql(
+      'config.toml at /t is not valid toml (line 1, column 5), so it was not imported',
+    );
     should(codexPreview?.problems).containEql('hooks.json at /hk could not be read (denied)');
+  });
+
+  it('should say where a broken settings file stops and never repeat what the parser quoted from it', () => {
+    // Arrange: a credential-looking value on the broken line; both parsers quote the line in their own messages.
+    const KEY = 'sk-ant-api03-LEAKCANARY0123456789';
+    const brokenToml = `model = "gpt-6.2"\napi_key = ${KEY}\n`;
+    const brokenJson = `{"env": {"ANTHROPIC_API_KEY": "${KEY}"\n  "other": 1}}`;
+
+    // Act
+    const plan = planImport(
+      [claude({ settings: text('/s', brokenJson) }), codex({ settings: text('/t', brokenToml) })],
+      { digest },
+    );
+
+    // Assert
+    const [claudePreview, codexPreview] = plan.preview.harnesses;
+    should(codexPreview?.problems).containEql(
+      'config.toml at /t is not valid toml (line 2, column 11), so it was not imported',
+    );
+    const claudeProblem = claudePreview?.problems.find(problem => problem.startsWith('settings.json at /s')) ?? '';
+    should(claudeProblem).match(
+      /^settings\.json at \/s is not valid json( \(line \d+(, column \d+)?\))?, so it was not imported$/u,
+    );
+    const everything = JSON.stringify(plan);
+    should(everything).not.containEql('LEAKCANARY');
+    should(everything).not.containEql('api_key');
   });
 
   it('should leave out environment entries a component cannot carry, saying which', () => {

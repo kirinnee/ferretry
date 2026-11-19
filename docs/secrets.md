@@ -1962,3 +1962,16 @@ could not apply. The write it gets is **create-only**, and nothing wider:
   every import) and hands the value to `putNew`; the proposal, the route and the screen carry names only. A name already
   held is not overwritten: the planner picks the next free name (`ANTHROPIC_API_KEY_2`) from the Vault's NAME listing, and
   a race that still lands on a held name is refused in a sentence naming the secret, with nothing changed.
+- **Who may import keys.** The apply asks the CALLER for `secrets.configure` BEFORE the first write (the route's `fleet.configure`
+  does not stand in for it, and a caller with no standing fails closed): a paired device the owner denied the Vault cannot create
+  entries by importing. A passkey still to prove is asked at the apply, not at the preview. The refusal names no secret and
+  changes nothing.
+- **One create per name, and an honest failure.** A key shared by several parts (or by a new part and an accepted update) is
+  filed once. If a later create fails, the answer lists exactly the names already added (they stay) and says nothing else was
+  changed.
+- **The create is in the security log.** Each create-only write leaves a `secrets.changed` record (`detail.action:
+import-create`, `detail.plugin`, the secret's NAME as the subject; `refused` when the name was held), so what the import
+  added is not only in the generic fleet-apply record. It carries no value, digest or write identity; a log that cannot be
+  written does not undo the create.
+- **A broken host file reports where, not what.** A scan problem for a settings file that does not parse names the file and,
+  for TOML, the line and column. The parser's own message quotes the host's line, which may be a key, so it is never shown.

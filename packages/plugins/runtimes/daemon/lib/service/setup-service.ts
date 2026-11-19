@@ -117,7 +117,7 @@ import {
   type ToolInstallResult,
 } from '../../../contract/index.ts';
 import { instantFromEpochMs } from '@ferretry/std';
-import type { CallerGovernance } from '@ferretry/core-gate/contract';
+import { cap, type CallerGovernance } from '@ferretry/core-gate/contract';
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import type { ConfigText } from '../ports.ts';
@@ -372,6 +372,19 @@ interface Composed {
   readonly configWrites?: readonly ConfigWrite[];
 }
 
+/** Why this caller may not add secrets to the Vault, in words, or `undefined` when it may (or only needs a passkey the preview does not ask for yet). */
+function secretsRefusal(governance: CallerGovernance | undefined, stage: 'describe' | 'apply'): string | undefined {
+  if (governance === undefined)
+    return 'this daemon could not check whether this caller may add secrets, which is a daemon bug (update it: fy daemon update)';
+  const decision = governance.decide(cap('secrets', 'configure'));
+  if (decision.allowed) return undefined;
+  if (decision.refusal === 'step-up-required')
+    return stage === 'describe'
+      ? undefined
+      : 'adding secrets from this device needs a passkey confirmation; unlock this machine and apply again';
+  return 'this device may not add secrets to the secret store, so the keys found in your Claude Code or Codex settings cannot be imported from it';
+}
+
 // ── The service ──────────────────────────────────────────────────────────────────────────────────
 
 export class FleetSetupService {
@@ -592,8 +605,12 @@ export class FleetSetupService {
     readonly clone: AccountChangeExecutor<CloneChange>;
   } = {
     setup: {
-      describe: async change => await this.#describe(change, await this.#composeImport(change)),
-      execute: async change => await this.#execute(change, await this.#composeImport(change)),
+      describe: async (change, caller) => {
+        const composed = await this.#composeImport(change);
+        this.#assertMayFileSecrets(composed, caller, 'describe');
+        return await this.#describe(change, composed);
+      },
+      execute: async (change, caller) => await this.#execute(change, await this.#composeImport(change), caller),
     },
     clone: {
       describe: async (change, caller) =>
@@ -615,13 +632,20 @@ export class FleetSetupService {
         'what this would add changed on this machine after it was previewed; review it again',
       );
     }
+    // The Vault is written first, so the caller's right to write it is settled BEFORE the first write: a refusal here
+    // leaves nothing behind. Each name is filed once (components can share one), and a later failure says which were filed.
+    this.#assertMayFileSecrets(composed, caller, 'apply');
+    const created: string[] = [];
     for (const secret of composed.secrets) {
       try {
         await this.deps.secrets.put(secret.name, secret.value);
+        created.push(secret.name);
       } catch (error) {
         throw new FleetCatalogRefusal(
           'fleet_change_failed',
-          `the secret store could not take ${secret.name}, so nothing was changed: ${errorMessage(error)}`,
+          created.length === 0
+            ? `the secret store could not take ${secret.name}, so nothing was changed: ${errorMessage(error)}`
+            : `the secret store could not take ${secret.name}: ${errorMessage(error)}. Already added to the secret store and kept: ${created.join(', ')}. Nothing else was changed.`,
         );
       }
     }
@@ -649,6 +673,17 @@ export class FleetSetupService {
     return held === 0
       ? composed.summary
       : `${composed.summary} ${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`;
+  }
+
+  /**
+   * An import that files keys writes the Vault, so the caller needs `secrets.configure` as for any secret write (docs/grants.md):
+   * the route's `fleet.configure` does not stand in for it. A caller with no standing is refused too. Throws before anything is
+   * written; at the preview (`describe`) a passkey still to be proved is not yet a refusal, at the apply it is.
+   */
+  #assertMayFileSecrets(composed: Composed, caller: ExecutorCaller | undefined, stage: 'describe' | 'apply'): void {
+    if (composed.secrets.length === 0) return;
+    const why = secretsRefusal(caller?.governance, stage);
+    if (why !== undefined) throw new FleetCatalogRefusal('fleet_change_refused', `${why}; nothing was changed`);
   }
 
   /** One settings file through `PUT /v1/config/file`'s semantics. Answers 1 when the write was held. */
@@ -758,10 +793,13 @@ export class FleetSetupService {
     const documents = await this.#documents(reading, model, assets, [
       { path: this.#recordPath(), content: `${JSON.stringify(record, null, 2)}\n` },
     ]);
-    const secrets = [...plan.secrets, ...updates.flatMap(update => update.secrets)].map(secret => ({
-      name: secret.name,
-      value: secret.value,
-    }));
+    // One write per NAME: a key shared by several components, or carried by a new part and an accepted update, is planned
+    // once under one name (the planner hands out a name once per value), and a second create of it would answer `exists`.
+    const secrets = [
+      ...new Map(
+        [...plan.secrets, ...updates.flatMap(update => update.secrets)].map(secret => [secret.name, secret] as const),
+      ).values(),
+    ].map(secret => ({ name: secret.name, value: secret.value }));
     const runtimes = Object.keys(plan.runtimes).toSorted();
     const lines = [
       ...Object.entries(plan.credentials).map(([id, credential]) =>

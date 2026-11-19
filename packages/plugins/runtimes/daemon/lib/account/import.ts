@@ -38,7 +38,13 @@ import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
 import { FLEET_STARTER_MODELS } from '../defaults.ts';
 import type { HarnessKind } from '../manifest.ts';
-import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
+import {
+  parseSettings,
+  SettingsParseError,
+  type SettingsFormat,
+  type SettingsObject,
+  serializeSettings,
+} from '../settings.ts';
 import { HARNESS_DISPLAY_NAMES, modelHarness } from './layering.ts';
 import { componentScope, scopeFits } from './scope.ts';
 import {
@@ -394,8 +400,6 @@ function importEnv(
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
-
 /** Why a document could not be used, or `undefined` when it is simply absent or was read. */
 function unreadableReason(read: HostDocumentRead, what: string): string | undefined {
   if (read.kind === 'too-large') return `${what} at ${read.source} is ${String(read.bytes)} bytes, too large to import`;
@@ -420,9 +424,39 @@ function parsedDocument(
   try {
     return parseSettings(read.text, format);
   } catch (error) {
-    problems.push(`${what} at ${read.source} is not valid ${format} (${errorText(error)}), so it was not imported`);
+    problems.push(
+      `${what} at ${read.source} is not valid ${format}${parseLocation(error, read.text)}, so it was not imported`,
+    );
     return undefined;
   }
+}
+
+/**
+ * WHERE a settings document stopped parsing, as ` (line 3, column 7)`, or nothing. The parsers quote the offending line of the
+ * host's own file in their messages, and a host file holds API keys, so the parser's TEXT is never used: only numbers read
+ * off the error (TOML carries `line`/`column`; JSON names a character `position` or a `line N column M`), which can hold no
+ * credential. A parser that says nothing numeric leaves the file alone and the fixed sentence.
+ */
+function parseLocation(error: unknown, text: string): string {
+  const positive = (value: number | undefined): number | undefined =>
+    value !== undefined && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  let line = error instanceof SettingsParseError ? positive(error.line) : undefined;
+  let column = error instanceof SettingsParseError ? positive(error.column) : undefined;
+  if (line === undefined) {
+    const message = error instanceof Error ? error.message : '';
+    const spelled = /\bline (\d{1,9}),? column (\d{1,9})\b/iu.exec(message);
+    const position = /\bposition (\d{1,9})\b/iu.exec(message);
+    if (spelled?.[1] !== undefined && spelled[2] !== undefined) {
+      line = Number(spelled[1]);
+      column = Number(spelled[2]);
+    } else if (position?.[1] !== undefined) {
+      const before = text.slice(0, Number(position[1]));
+      line = before.split('\n').length;
+      column = before.length - before.lastIndexOf('\n');
+    }
+  }
+  if (line === undefined) return '';
+  return column === undefined ? ` (line ${String(line)})` : ` (line ${String(line)}, column ${String(column)})`;
 }
 
 // ── Models ───────────────────────────────────────────────────────────────────────────────────────

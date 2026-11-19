@@ -152,9 +152,10 @@ async function world(
       },
     }),
   );
+  const gate = new FakeGate();
   const host = await testHost({
     plugins: [instrumented, ...plugins],
-    fakes: { asks: new FakeAsks(), gate: new FakeGate() },
+    fakes: { asks: new FakeAsks(), gate },
     fetch: url => {
       reached.push(url.host);
       return Response.json({ ok: true });
@@ -167,7 +168,7 @@ async function world(
   const core = host.provided(VaultPort);
   for (const name of [GROQ, OWNED, OTHER]) await core.put(name, VALUE);
   const of = (id: string) => host.provided(VaultPort, id);
-  return { host, core, of, programs, spawned, reached, seen };
+  return { host, core, of, programs, spawned, reached, seen, gate };
 }
 
 const TENANT: Permissions = { network: ['api.groq.test'], spawn: ['echo'], secrets: [GROQ] };
@@ -777,6 +778,35 @@ describe('a plugin that declares createSecrets may create a secret and never rep
     const { core } = await world({});
     expect(await core.putNew?.('CORE_MADE_KEY' as SecretName, 'core-0123456789')).toBe('stored');
     expect(await core.putNew?.('CORE_MADE_KEY' as SecretName, 'core-other-0123')).toBe('exists');
+  });
+
+  test('records each create in the security log by NAME and plugin, never a value, a digest or a write identity', async () => {
+    const { of, gate } = await world({ runtimes: IMPORTING });
+    const VALUE_A = 'sk-ant-AUDITCANARY-0123456789';
+    const VALUE_B = 'sk-ant-AUDITCANARY-other-9876';
+    const api = of('runtimes');
+    expect(await api.putNew?.('AUDITED_KEY' as SecretName, VALUE_A)).toBe('stored');
+    expect(await api.putNew?.('AUDITED_KEY' as SecretName, VALUE_B)).toBe('exists');
+    const entries = gate.audits.filter(draft => String(draft.event) === 'secrets.changed');
+    expect(entries.map(entry => [entry.subject, entry.outcome])).toEqual([
+      ['AUDITED_KEY', 'succeeded'],
+      ['AUDITED_KEY', 'refused'],
+    ]);
+    for (const entry of entries) expect(entry.detail).toEqual({ action: 'import-create', plugin: 'runtimes' });
+    // Nothing recorded anywhere carries a value or a piece of one (nor the write's identity the ledger holds).
+    const everything = JSON.stringify(gate.audits);
+    for (const secret of [VALUE_A, VALUE_B, 'AUDITCANARY']) expect(everything).not.toContain(secret);
+  });
+
+  test('a security log that cannot be written does not undo the create', async () => {
+    const { of, core, gate } = await world({ runtimes: IMPORTING });
+    const before = gate.audits.length;
+    gate.audit = async () => {
+      throw new Error('the log is full');
+    };
+    expect(await of('runtimes').putNew?.('LOGLESS_KEY' as SecretName, 'logless-0123456789')).toBe('stored');
+    expect(await core.has('LOGLESS_KEY' as SecretName)).toBe(true);
+    expect(gate.audits.length).toBe(before);
   });
 
   test('what putNew answers cannot carry a value (a type test)', () => {

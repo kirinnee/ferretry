@@ -47,6 +47,9 @@ export class SettingsParseError extends Error {
   constructor(
     readonly format: SettingsFormat,
     readonly reason: string,
+    /** Where a TOML document stopped (1-based), when the parser said: numbers only, never the line it quoted. */
+    readonly line?: number,
+    readonly column?: number,
   ) {
     super(`cannot parse ${format} settings: ${reason}`);
     this.name = 'SettingsParseError';
@@ -63,7 +66,15 @@ export function parseSettings(text: string, format: SettingsFormat): SettingsObj
   try {
     parsed = format === 'toml' ? parseToml(text) : JSON.parse(text);
   } catch (error) {
-    throw new SettingsParseError(format, error instanceof Error ? error.message : String(error));
+    const at = error as { codeblock?: unknown; line?: unknown; column?: unknown } | null;
+    // Only smol-toml's own error says where in the DOCUMENT it stopped; a `SyntaxError` from `JSON.parse` has a `line` of the
+    // engine's own source.
+    const located = typeof at?.codeblock === 'string' && typeof at.line === 'number' && typeof at.column === 'number';
+    throw new SettingsParseError(
+      format,
+      error instanceof Error ? error.message : String(error),
+      ...(located ? [at.line as number, at.column as number] : []),
+    );
   }
   if (!isPlainObject(parsed)) {
     throw new SettingsParseError(format, 'the document root must be an object');

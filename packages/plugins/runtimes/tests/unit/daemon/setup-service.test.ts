@@ -338,6 +338,26 @@ function world(
 
 const governance = { governed: true } as CallerGovernance;
 
+/** Somebody at this machine (ungoverned), who has every right the import asks for. */
+const MACHINE: ExecutorCaller = {
+  governance: { governed: false, decide: () => ({ allowed: true, refusal: 'granted' }) } as CallerGovernance,
+  agent: false,
+  claim: () => false,
+};
+
+/** A paired device the owner has granted `fleet` to and (per `secrets`) maybe not the Vault. */
+const remoteWith = (secrets: GrantRefusal): ExecutorCaller => ({
+  governance: {
+    governed: true,
+    decide: demand => {
+      const refusal = demand.capability === 'secrets' ? secrets : 'granted';
+      return { allowed: refusal === 'granted', refusal };
+    },
+  } as CallerGovernance,
+  agent: false,
+  claim: () => false,
+});
+
 async function thrown(work: Promise<unknown>): Promise<unknown> {
   return await work.then(
     () => {
@@ -369,8 +389,8 @@ async function importOnce(
   service: FleetSetupService,
   change = IMPORT(),
 ): Promise<{ description: string; summary: string }> {
-  const description = await service.executors.setup.describe(change);
-  const summary = await service.executors.setup.execute(change);
+  const description = await service.executors.setup.describe(change, MACHINE);
+  const summary = await service.executors.setup.execute(change, MACHINE);
   return { description, summary };
 }
 
@@ -946,11 +966,11 @@ describe('the setup.import executor', () => {
 
   it('should refuse to apply anything that was not described first, or changed since', async () => {
     const { service, state } = world();
-    await catalogRefusal(service.executors.setup.execute(IMPORT()), 'fleet_change_stale');
+    await catalogRefusal(service.executors.setup.execute(IMPORT(), MACHINE), 'fleet_change_stale');
     const change = IMPORT();
-    await service.executors.setup.describe(change);
+    await service.executors.setup.describe(change, MACHINE);
     state.scans = [claudeScan({ instructions: { kind: 'text', source: '/x/CLAUDE.md', text: 'Other.\n', bytes: 7 } })];
-    await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_stale');
+    await catalogRefusal(service.executors.setup.execute(change, MACHINE), 'fleet_change_stale');
   });
 
   it('should use the names the person gave, and refuse an invalid or taken one with a suggestion', async () => {
@@ -963,7 +983,7 @@ describe('the setup.import executor', () => {
     should(configTextOf(same.applied[0]?.documents ?? [])).containEql('claude-default');
 
     const invalid = await catalogRefusal(
-      world().service.executors.setup.describe(IMPORT({ names: { 'claude-code': 'no spaces' } })),
+      world().service.executors.setup.describe(IMPORT({ names: { 'claude-code': 'no spaces' } }), MACHINE),
       'fleet_change_refused',
     );
     should(invalid.message).equal('Use only letters, digits and dashes. Use claude-default?');
@@ -980,7 +1000,7 @@ describe('the setup.import executor', () => {
       'r',
     );
     const clash = await catalogRefusal(
-      taken.service.executors.setup.describe(IMPORT({ names: { 'claude-code': 'mine' } })),
+      taken.service.executors.setup.describe(IMPORT({ names: { 'claude-code': 'mine' } }), MACHINE),
       'fleet_change_refused',
     );
     should(clash.message).equal('mine is already a runtime on studio. Use mine-2?');
@@ -989,7 +1009,7 @@ describe('the setup.import executor', () => {
   it('should import only the harnesses chosen, and say when nothing was found', async () => {
     const { service } = world();
     const refusal = await catalogRefusal(
-      service.executors.setup.describe(IMPORT({ include: [] })),
+      service.executors.setup.describe(IMPORT({ include: [] }), MACHINE),
       'fleet_change_refused',
     );
     should(refusal.message).equal('Nothing was found to import.');
@@ -1005,12 +1025,13 @@ describe('the setup.import executor', () => {
 
     // Act / Assert: the same host has nothing new.
     should(
-      ((await catalogRefusal(service.executors.setup.describe(IMPORT()), 'fleet_change_refused')) as Error).message,
+      ((await catalogRefusal(service.executors.setup.describe(IMPORT(), MACHINE), 'fleet_change_refused')) as Error)
+        .message,
     ).equal('Nothing new to import.');
 
     // An update nobody offered.
     await catalogRefusal(
-      service.executors.setup.describe(IMPORT({ acceptedUpdates: ['instructions/nope'] })),
+      service.executors.setup.describe(IMPORT({ acceptedUpdates: ['instructions/nope'] }), MACHINE),
       'fleet_change_refused',
     );
 
@@ -1041,7 +1062,7 @@ describe('the setup.import executor', () => {
         instructions: { kind: 'text', source: '/person/.codex/AGENTS.md', text: 'Codex.\n', bytes: 7 },
       }),
     ];
-    const description = await keyring.service.executors.setup.describe(change);
+    const description = await keyring.service.executors.setup.describe(change, MACHINE);
     should(description).containEql('a new Codex login that needs sign-in');
   });
 
@@ -1072,7 +1093,8 @@ describe('the setup.import executor', () => {
       throw new Error('vault damaged');
     };
     should(
-      (await catalogRefusal(unreadable.service.executors.setup.describe(IMPORT()), 'fleet_change_refused')).message,
+      (await catalogRefusal(unreadable.service.executors.setup.describe(IMPORT(), MACHINE), 'fleet_change_refused'))
+        .message,
     ).containEql('vault damaged');
 
     const full = world();
@@ -1080,10 +1102,131 @@ describe('the setup.import executor', () => {
       throw new Error('full');
     };
     const change = IMPORT();
-    await full.service.executors.setup.describe(change);
-    const failure = await catalogRefusal(full.service.executors.setup.execute(change), 'fleet_change_failed');
+    await full.service.executors.setup.describe(change, MACHINE);
+    const failure = await catalogRefusal(full.service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
     should(failure.message).equal('the secret store could not take GITHUB_TOKEN, so nothing was changed: full');
     should(full.applied).have.length(0);
+  });
+
+  it('should refuse a caller that may not write the Vault before the first write, and write nothing', async () => {
+    const { service, secrets, applied, state } = world();
+    const change = IMPORT();
+    // Describing is refused for a device with no secrets grant, so it never reaches a card.
+    const described = await catalogRefusal(
+      service.executors.setup.describe(change, remoteWith('not-granted')),
+      'fleet_change_refused',
+    );
+    should(described.message).containEql('may not add secrets');
+    should(described.message).containEql('nothing was changed');
+    // A staged change applied by that device is refused as well, ahead of any write.
+    await service.executors.setup.describe(change, MACHINE);
+    const refused = await catalogRefusal(
+      service.executors.setup.execute(change, remoteWith('not-granted')),
+      'fleet_change_refused',
+    );
+    should(refused.message).containEql('may not add secrets');
+    should(secrets.size).equal(0);
+    should(applied).have.length(0);
+    // No standing at all fails closed.
+    await catalogRefusal(
+      service.executors.setup.execute(change, { governance: undefined, agent: false, claim: () => false }),
+      'fleet_change_refused',
+    );
+    should(secrets.size).equal(0);
+    // A passkey still to prove is asked at the apply, never silently passed.
+    const stepUp = await catalogRefusal(
+      service.executors.setup.execute(change, remoteWith('step-up-required')),
+      'fleet_change_refused',
+    );
+    should(stepUp.message).containEql('passkey');
+    should(secrets.size).equal(0);
+    void state;
+  });
+
+  it('should let a device that holds the secrets grant, and somebody at the machine, import the key', async () => {
+    const { service, secrets } = world();
+    const change = IMPORT();
+    await service.executors.setup.describe(change, remoteWith('granted'));
+    await service.executors.setup.execute(change, remoteWith('granted'));
+    should(secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
+    const other = world();
+    await importOnce(other.service);
+    should(other.secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
+  });
+
+  it('should file a key a new part and an accepted update share once, so the second create is not refused', async () => {
+    // Arrange: one import is on disk (its MCP server holds the token).
+    const { service, state, applied, secrets } = world();
+    const mcp = (servers: Record<string, unknown>) => ({
+      kind: 'text' as const,
+      source: '/person/.claude.json',
+      text: JSON.stringify({ mcpServers: servers }),
+      bytes: 200,
+    });
+    state.scans = [
+      claudeScan({ mcp: mcp({ one: { command: 'one-mcp', env: { GITHUB_TOKEN: SECRET_VALUE } } }) }),
+      codexScan(),
+    ];
+    await importOnce(service);
+    const written = applied[0]?.documents ?? [];
+    for (const document of written) state.assets[document.path] = document.content;
+    state.reading = configReading(modelOfWrites(written), 'rev-2');
+
+    // Act: the first server changed (an update) and a second, new one holds the SAME token.
+    state.scans = [
+      claudeScan({
+        mcp: mcp({
+          one: { command: 'one-mcp-v2', env: { GITHUB_TOKEN: SECRET_VALUE } },
+          two: { command: 'two-mcp', env: { GITHUB_TOKEN: SECRET_VALUE } },
+        }),
+      }),
+      codexScan(),
+    ];
+    const calls: string[] = [];
+    state.putSecret = async (name, value) => {
+      calls.push(name);
+      if (secrets.has(name)) throw new Error(`already holds ${name}`);
+      secrets.set(name, value);
+    };
+    const offered = (await service.scan()).updates ?? [];
+    const accepted = offered.map(update => update.reference);
+    await importOnce(service, IMPORT({ acceptedUpdates: accepted }));
+
+    // Assert: each name was created once.
+    should(accepted.length).be.above(0);
+    should(calls).have.length(1);
+    should(calls).deepEqual([...new Set(calls)]);
+  });
+
+  it('should say exactly which keys were added when a later write fails', async () => {
+    const { service, state, applied } = world();
+    const taken = new Set<string>();
+    state.scans = [
+      claudeScan({
+        settings: {
+          kind: 'text',
+          source: '/person/.claude/settings.json',
+          text: JSON.stringify({
+            env: { GITHUB_TOKEN: SECRET_VALUE, OPENAI_API_KEY: 'sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa' },
+          }),
+          bytes: 120,
+        },
+      }),
+      codexScan(),
+    ];
+    state.putSecret = async name => {
+      if (taken.size === 1) throw new Error('the secret store is full');
+      taken.add(name);
+    };
+    const change = IMPORT();
+    await service.executors.setup.describe(change, MACHINE);
+    const failure = await catalogRefusal(service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
+    const [added] = [...taken];
+    should(failure.message).containEql('the secret store is full');
+    should(failure.message).containEql(`Already added to the secret store and kept: ${added}`);
+    should(failure.message).not.containEql('so nothing was changed');
+    should(failure.message).not.containEql(SECRET_VALUE);
+    should(applied).have.length(0);
   });
 
   it('should report an apply that failed for any other reason in its own words', async () => {
@@ -1092,8 +1235,8 @@ describe('the setup.import executor', () => {
       throw new Error('the manifest could not be written');
     };
     const change = IMPORT();
-    await service.executors.setup.describe(change);
-    const failure = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_failed');
+    await service.executors.setup.describe(change, MACHINE);
+    const failure = await catalogRefusal(service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
     should(failure.message).equal('the manifest could not be written');
   });
 
@@ -1110,7 +1253,7 @@ describe('the setup.import executor', () => {
       }),
       'r',
     );
-    const refusal = await catalogRefusal(service.executors.setup.describe(IMPORT()), 'fleet_change_refused');
+    const refusal = await catalogRefusal(service.executors.setup.describe(IMPORT(), MACHINE), 'fleet_change_refused');
     should(refusal.message).startWith('importing would leave studio with a setup it cannot read');
   });
 
@@ -1123,8 +1266,8 @@ describe('the setup.import executor', () => {
           throw build();
         };
         const change = IMPORT();
-        await service.executors.setup.describe(change);
-        return (await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_failed')).message;
+        await service.executors.setup.describe(change, MACHINE);
+        return (await catalogRefusal(service.executors.setup.execute(change, MACHINE), 'fleet_change_failed')).message;
       };
     const config = ['/state/config/model.yaml'];
     // A plain refusal AFTER the configuration landed (a source the fence refuses, a claim another apply holds).
@@ -1239,8 +1382,8 @@ describe('the setup.import executor', () => {
     });
     state.reading = configReading(broken, 'rev');
     const change = IMPORT();
-    await service.executors.setup.describe(change);
-    const refusal = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_refused');
+    await service.executors.setup.describe(change, MACHINE);
+    const refusal = await catalogRefusal(service.executors.setup.execute(change, MACHINE), 'fleet_change_refused');
     should(refusal.message).containEql('settings "bad" could not be read');
   });
 });
