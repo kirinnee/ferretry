@@ -55,6 +55,7 @@
 }
 .fy-drawer--rail .fy-drawer__bar {
   flex-direction: column;
+  gap: 8px;
 }
 .fy-drawer .fy-search {
   flex: 1;

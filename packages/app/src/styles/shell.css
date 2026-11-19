@@ -648,7 +648,7 @@
 }
 .fy-frame[data-chat-chrome] {
   --chat-head-h: 36px;
-  --chat-menu-w: 0px; /* the wide frame draws no menu button: the drawer is beside the chat */
+  --chat-menu-w: 12px; /* the wide frame draws no menu button (the drawer is beside the chat): just a margin from its edge */
 }
 @media (max-width: 767.98px) {
   .fy-frame[data-chat-chrome] {
