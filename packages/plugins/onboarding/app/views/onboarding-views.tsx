@@ -7,6 +7,7 @@
 
 export { createStepsOpener } from './steps-opener.tsx';
 export { createSetupTab, createStepsScreen } from './steps-screen.tsx';
+export { createStepperPanel } from '../features/stepper/stepper-panel.tsx';
 
 import type { DaemonlessPorts, DaemonlessScreenProps } from '@ferretry/app';
 import { browserClipboardWriter, Button } from '@ferretry/app/ui';

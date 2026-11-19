@@ -1,0 +1,118 @@
+import { describe, expect, it } from 'bun:test';
+import { StepperView } from '../../../app/features/stepper/stepper-view.tsx';
+import { deriveSteps, type StepperFacts } from '../../../app/features/stepper/stepper-model.ts';
+import { StepperHarness } from './stepper-harness.tsx';
+import { mount, must } from '../support/dom.ts';
+
+const ALL: StepperFacts = { passkey: true, name: true, login: true, runtime: true, ferret: true };
+
+describe('the stepper view', () => {
+  it('draws done / current / next with exactly one highlight and one button', async () => {
+    const ran: string[] = [];
+    const view = await mount(
+      <StepperView
+        action={{ label: 'Add a login', run: () => ran.push('go') }}
+        onDismiss={() => undefined}
+        steps={deriveSteps({ ...ALL, login: false, runtime: false, ferret: false })}
+      />,
+    );
+    const items = [...view.container.querySelectorAll('[data-step]')].map(
+      item => `${item.getAttribute('data-step')}:${item.getAttribute('data-state')}`,
+    );
+    expect(items).toEqual(['pair:done', 'passkey:done', 'name:done', 'login:current', 'runtime:next', 'ferret:next']);
+    expect(view.container.querySelectorAll('[aria-current="step"]')).toHaveLength(1);
+    const buttons = view.container.querySelectorAll('button');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]?.textContent).toBe('Add a login');
+    must(buttons[0], 'the action').click();
+    expect(ran).toEqual(['go']);
+    // State is said in words too, not only in marks.
+    expect(view.container.textContent).toContain('Login — up next');
+    expect(view.container.textContent).toContain('Runtime — later');
+    await view.unmount();
+  });
+
+  it('offers Dismiss only once every step is done', async () => {
+    const open = await mount(
+      <StepperView onDismiss={() => undefined} steps={deriveSteps({ ...ALL, ferret: false })} />,
+    );
+    expect(open.container.querySelector('[data-first-run-stepper-dismiss]')).toBeNull();
+    await open.unmount();
+    const dismissed: string[] = [];
+    const done = await mount(<StepperView onDismiss={() => dismissed.push('x')} steps={deriveSteps(ALL)} />);
+    must(done.container.querySelector<HTMLElement>('[data-first-run-stepper-dismiss]'), 'dismiss').click();
+    expect(dismissed).toEqual(['x']);
+    await done.unmount();
+  });
+});
+
+describe('the stepper on a machine', () => {
+  it('draws nothing until it knows, then draws the steps once', async () => {
+    const blank = StepperHarness.silent(StepperHarness.answering({}).storage);
+    const waiting = await mount(<blank.Component />);
+    expect(waiting.container.querySelector('[data-first-run-stepper]')).toBeNull();
+    await waiting.unmount();
+    const harness = StepperHarness.answering({ ferret: false });
+    const view = await mount(<harness.Component />);
+    await harness.settle();
+    expect(view.container.querySelectorAll('[data-first-run-stepper="open"]')).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it('resumes after a reload: the remembered steps draw at once, before any read comes back', async () => {
+    const first = StepperHarness.answering({ login: false });
+    const before = await mount(<first.Component />);
+    await first.settle();
+    expect(before.container.querySelector('[data-state="current"]')?.getAttribute('data-step')).toBe('login');
+    await before.unmount();
+
+    // A reload: new page, same storage, a machine that has not answered yet.
+    const reloaded = StepperHarness.silent(first.storage);
+    const after = await mount(<reloaded.Component />);
+    expect(after.container.querySelector('[data-state="current"]')?.getAttribute('data-step')).toBe('login');
+    await after.unmount();
+  });
+
+  it('a dismissed stepper stays away after a reload, until a step opens again', async () => {
+    const done = StepperHarness.answering({});
+    const view = await mount(<done.Component />);
+    await done.settle();
+    expect(view.container.querySelector('[data-first-run-stepper="done"]')).not.toBeNull();
+    await done.dismiss(view.container);
+    expect(view.container.querySelector('[data-first-run-stepper]')).toBeNull();
+    await view.unmount();
+
+    const reloaded = StepperHarness.answering({}, done.storage);
+    const again = await mount(<reloaded.Component />);
+    await reloaded.settle();
+    expect(again.container.querySelector('[data-first-run-stepper]')).toBeNull();
+    await again.unmount();
+
+    // A ferret is gone: a step is open again, so the stepper has something to say.
+    const reopened = StepperHarness.answering({ ferret: false }, done.storage);
+    const last = await mount(<reopened.Component />);
+    await reopened.settle();
+    expect(last.container.querySelector('[data-first-run-stepper="open"]')).not.toBeNull();
+    await last.unmount();
+  });
+
+  it('asks the machine five quiet reads on open and none by itself afterwards (no polling)', async () => {
+    const harness = StepperHarness.answering({ ferret: false });
+    const view = await mount(<harness.Component />);
+    await harness.settle();
+    expect(harness.calls()).toBe(5);
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(harness.calls()).toBe(5);
+    await view.unmount();
+  });
+
+  it('re-reads when the machine says a step changed', async () => {
+    const harness = StepperHarness.answering({ ferret: false });
+    const view = await mount(<harness.Component />);
+    await harness.settle();
+    harness.change({ ferret: true });
+    await harness.settle();
+    expect(view.container.querySelector('[data-first-run-stepper="done"]')).not.toBeNull();
+    await view.unmount();
+  });
+});

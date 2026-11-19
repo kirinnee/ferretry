@@ -1,4 +1,4 @@
-import { definePlugin, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { appAction, definePlugin, panel, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
 import {
   ONBOARDING_AUDIT,
   ONBOARDING_PROGRESS,
@@ -84,6 +84,13 @@ export default definePlugin({
       }),
       verb('onboard reset', { summary: 'forget which steps were answered and start the first run again', args: [] }),
     ],
+    // The Home stepper's buttons. Each sends the person to the place that does the job; the acts below are what those
+    // places call, named here so the stepper's reads of Access, Logins and Ferrets are a declared consumption.
+    app: [
+      appAction('first-run.passkey', { on: 'daemon', label: 'Add a passkey', calls: 'POST /v1/passkeys' }),
+      appAction('first-run.login', { on: 'daemon', label: 'Add a sign-in', calls: 'POST /v1/logins/sign-in' }),
+      appAction('first-run.ferret', { on: 'daemon', label: 'New ferret', calls: 'POST /v1/ferrets' }),
+    ],
   },
 
   ui: {
@@ -100,6 +107,8 @@ export default definePlugin({
     ],
     // The way back to the steps screen for a machine that was paired but not set up: nothing else links to it.
     settings: [settingsTab('setup', { icon: 'rocket', group: 'agents', label: 'Setup', order: 60 })],
+    // Home: the first-run stepper (Pair > Passkey > Name > Login > Runtime > First ferret) while any step is open.
+    panels: [panel('daemon.status', { id: 'first-run-stepper', order: 1 })],
   },
 
   data: {
