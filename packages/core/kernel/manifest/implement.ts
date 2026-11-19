@@ -16,6 +16,7 @@ import type {
   TransformHook,
 } from '../contract/define.ts';
 import type { DoctorFinding } from '../contract/kernel.ts';
+import type { StepHost } from '../contract/snapshot.ts';
 import type { Cancel, Clock, KernelPorts, SpawnPort, StatePort } from '../contract/ports.ts';
 import type { CallContext, MemberRouteHandler, RouteHandler } from '../contract/route.ts';
 import type { SocketAccept } from '../contract/socket.ts';
@@ -442,6 +443,8 @@ export interface PanelProps {
   readonly subject?: string;
   /** What the host just asked for, if anything. */
   readonly intent?: PanelIntent;
+  /** Set only when the onboarding shell draws the panel as a step. */
+  readonly step?: StepHost;
 }
 export type SettingsProps = {};
 export interface RendererProps {

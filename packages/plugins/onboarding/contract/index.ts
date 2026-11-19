@@ -16,6 +16,7 @@ import {
 
 export * from './wire.ts';
 export * from './slots.ts';
+export * from './step-host.ts';
 
 export const ONBOARDING_WORDS: readonly Word[] = [
   { word: 'step', means: 'one thing the first run does: find, ask or leave for later', insteadOf: [] },

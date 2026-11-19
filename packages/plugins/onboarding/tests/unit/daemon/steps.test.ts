@@ -56,7 +56,14 @@ describe('first-run step order', () => {
 describe('joining steps with progress', () => {
   test('a step nobody recorded is pending with no time', () => {
     const [first] = joinProgress(ENTRIES, undefined);
-    expect(first).toEqual({ plugin: 'claude-code', id: 'harness', title: 'Claude Code', order: 20, state: 'pending' });
+    expect(first).toEqual({
+      plugin: 'claude-code',
+      id: 'harness',
+      title: 'Claude Code',
+      order: 20,
+      side: 'daemon',
+      state: 'pending',
+    });
     expect('at' in (first ?? {})).toBe(false);
   });
 

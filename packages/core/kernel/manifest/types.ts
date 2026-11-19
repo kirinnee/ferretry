@@ -227,10 +227,17 @@ export interface InstructionDecl {
   readonly when?: InstructionWhen;
 }
 
+/** Which half a step configures: the machine (recorded on the daemon) or this browser (recorded on the device). */
+export type OnboardingSide = 'daemon' | 'client';
+
 export interface OnboardingDecl {
   readonly id: string;
   readonly title: string;
   readonly order: number;
+  /** Default `daemon`. */
+  readonly side?: OnboardingSide;
+  /** The segment title in the progress bar; default the plugin's title. */
+  readonly group?: string;
 }
 
 /**

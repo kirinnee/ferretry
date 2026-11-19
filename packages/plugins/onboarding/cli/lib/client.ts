@@ -1,4 +1,4 @@
-import { ONBOARDING_CODES, OnboardingViewSchema, StepViewSchema } from '../../contract/index.ts';
+import { ONBOARDING_CODES, OnboardingViewSchema, sideOf, StepViewSchema } from '../../contract/index.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { OnboardClient } from './ports.ts';
 
@@ -6,7 +6,9 @@ import type { OnboardClient } from './ports.ts';
 export function onboardClient(client: PluginClient): OnboardClient {
   return {
     async view() {
-      return OnboardingViewSchema.parse(await client.call('GET /v1/onboarding'));
+      const view = OnboardingViewSchema.parse(await client.call('GET /v1/onboarding'));
+      // The terminal walks the machine's steps; client steps are this browser's and never answered here.
+      return { ...view, steps: view.steps.filter(step => sideOf(step) === 'daemon') };
     },
     async record(plugin, id, answer) {
       try {

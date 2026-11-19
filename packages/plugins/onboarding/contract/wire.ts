@@ -21,11 +21,23 @@ export const StepIdSchema = z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/);
 export const StepStateSchema = z.enum(['pending', 'found', 'later', 'done', 'skipped']);
 export type StepState = z.infer<typeof StepStateSchema>;
 
+/**
+ * Which half a step configures: `daemon` (the machine; answered through this plugin's route) or `client` (this browser;
+ * answered on the device's ledger, never on the daemon). A step with no `side` (a snapshot from before r10) is `daemon`.
+ */
+export const StepSideSchema = z.enum(['daemon', 'client']);
+export type StepSide = z.infer<typeof StepSideSchema>;
+/** The side a step is on, with the old-snapshot default. */
+export const sideOf = (step: { readonly side?: StepSide | undefined }): StepSide => step.side ?? 'daemon';
+
 export const StepViewSchema = z.strictObject({
   plugin: StepPluginSchema,
   id: StepIdSchema,
   title: z.string().min(1),
   order: z.number().int(),
+  side: StepSideSchema.optional(),
+  /** The progress bar's segment title; absent means the plugin's own title. */
+  group: z.string().min(1).optional(),
   state: StepStateSchema,
   at: InstantSchema.optional(),
   /**
