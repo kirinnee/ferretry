@@ -13,6 +13,8 @@ import { gitAccountRoutes } from './routes.ts';
 import { rootRunFolder } from './adapters/run-folder.ts';
 import { accountLaunchParts } from './features/launch/parts.ts';
 import { AgentSupervisor, type RunFolder } from './features/ssh-keys/agents.ts';
+import { GhRunner } from './features/gh-run/gh-runner.ts';
+import { ghRunRoutes } from './features/gh-run/routes.ts';
 import { sshKeyRoutes } from './features/ssh-keys/routes.ts';
 import { SshKeyService } from './features/ssh-keys/service.ts';
 import { AccountBook } from './lib/accounts.ts';
@@ -32,7 +34,7 @@ export interface GitAccountsOverrides {
 export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
   return implementDaemon(manifest, {
     build: ({ needs, uses, kernel }) => {
-      const { projects } = uses;
+      const { projects, ferrets } = uses;
       const book = new AccountBook(kernel.state, needs.sealed.open(kernel.state, GIT_ACCOUNT_TOKENS), () =>
         kernel.clock.now(),
       );
@@ -73,6 +75,12 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
         () => kernel.identity.daemonName,
       );
       keys.service = keyService;
+      const gh = new GhRunner({
+        accounts: service,
+        projects: async () => (await projects.current()?.list()) ?? [],
+        workFolder: async ferret => (await ferrets.current()?.workFolder(ferret as never))?.folder,
+        audit: async draft => await needs.gate.audit(draft),
+      });
       // A ferret that was started before this daemon was keeps its socket path: bring each agent back at it.
       void service
         .list()
@@ -90,6 +98,7 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
         routes: {
           ...gitAccountRoutes(flows, service, async draft => await needs.gate.audit(draft)),
           ...sshKeyRoutes(keyService),
+          ...ghRunRoutes(gh),
         },
         hooks: {
           // A ferret in a project linked to an account pushes and signs as it (r9 B4).

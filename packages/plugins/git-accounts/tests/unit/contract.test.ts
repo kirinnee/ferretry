@@ -148,16 +148,22 @@ describe('git-accounts manifest', () => {
   const byKey = new Map<string, (typeof manifest.actions.routes)[number]>(
     manifest.actions.routes.map(route => [route.key, route]),
   );
-  test('declares the six routes, each governed by an existing capability (no new one)', () => {
+  test('declares the seven routes, each governed by an existing capability (no new one)', () => {
     expect([...byKey.keys()].sort()).toEqual([
       'DELETE /v1/git-accounts/:id',
       'DELETE /v1/git-accounts/:id/keys/:purpose',
       'GET /v1/git-accounts',
       'GET /v1/git-accounts/github/device/:flowId',
       'POST /v1/git-accounts/:id/keys',
+      'POST /v1/git-accounts/gh/run',
       'POST /v1/git-accounts/github/device',
     ]);
     for (const route of byKey.values()) expect(route.capability?.axis).toBeDefined();
+    // Ferretry's gh (B9): a ferret calls it on its own credential; a paired device needs secrets.use.
+    expect([
+      byKey.get('POST /v1/git-accounts/gh/run')?.capability?.axis,
+      byKey.get('POST /v1/git-accounts/gh/run')?.caller,
+    ]).toEqual(['use', 'any']);
     expect(byKey.get('GET /v1/git-accounts')?.capability?.axis).toBe('use');
     for (const key of [
       'DELETE /v1/git-accounts/:id',

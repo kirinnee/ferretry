@@ -6,6 +6,7 @@ import type { Word } from '@ferretry/kernel/contract';
 
 export * from './config.ts';
 export * from './files.ts';
+export * from './gh.ts';
 export * from './known-hosts.ts';
 export * from './policy.ts';
 export * from './port.ts';

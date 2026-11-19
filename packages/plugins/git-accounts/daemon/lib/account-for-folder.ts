@@ -21,6 +21,8 @@ export interface FolderAccount {
   readonly account: GitAccountId;
   /** The project the folder is in. */
   readonly project: string;
+  /** The repository the folder is inside, when the project records one (B9: where `gh` is pointed). */
+  readonly repo?: NonNullable<ProjectInfo['repos']>[number];
 }
 
 export function accountForFolder(
@@ -44,5 +46,5 @@ export function accountForFolder(
   }
   const named = repo?.account ?? project.accounts?.[0];
   if (named === undefined || !exists(named)) return undefined;
-  return { account: named as GitAccountId, project: project.id };
+  return { account: named as GitAccountId, project: project.id, ...(repo === undefined ? {} : { repo }) };
 }
