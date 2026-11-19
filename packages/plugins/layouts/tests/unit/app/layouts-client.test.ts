@@ -47,6 +47,10 @@ describe('the Layout tab’s client', () => {
     const plugin = fakePlugin({});
     const client = layoutsClient(plugin.client);
     await client.set('nav.side', 'right');
+    await client.setMany([
+      { path: 'nav.items', value: 'agenda,ferrets' },
+      { path: 'nav.hidden', value: '' },
+    ]);
     await client.switchLayout('compact');
     await client.switchTheme('dusk');
     await client.reset();
@@ -54,6 +58,17 @@ describe('the Layout tab’s client', () => {
     await client.remove('mine');
     expect(plugin.calls).toEqual([
       { route: 'PATCH /v1/layouts/current', init: { body: { changes: [{ path: 'nav.side', value: 'right' }] } } },
+      {
+        route: 'PATCH /v1/layouts/current',
+        init: {
+          body: {
+            changes: [
+              { path: 'nav.items', value: 'agenda,ferrets' },
+              { path: 'nav.hidden', value: '' },
+            ],
+          },
+        },
+      },
       { route: 'PUT /v1/layouts/current', init: { body: { layout: 'compact' } } },
       { route: 'PUT /v1/layouts/theme', init: { body: { theme: 'dusk' } } },
       { route: 'POST /v1/layouts/reset', init: undefined },

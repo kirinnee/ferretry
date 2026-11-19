@@ -143,54 +143,134 @@ describe('the Layout tab', () => {
     await settle();
     expect(script.calls).toEqual(['set phone.nav.side top']);
     expect(device.calls).toEqual(['set phone.density compact']);
-    const box = must(
-      // The phone holds the same six places as the wide bar, so the box is found by its name, not by what it reads.
-      [...view.container.querySelectorAll<HTMLInputElement>('input[aria-label]')].find(
-        input => input.getAttribute('aria-label') === 'Phone navigation items',
-      ),
-      'the phone navigation box',
-    );
-    await type(box, 'agenda');
-    const save = [...view.container.querySelectorAll('button')].filter(
-      button => button.textContent === 'Save' && !button.disabled,
-    );
-    expect(save).toHaveLength(1);
-    await interact(() => save[0]?.click());
-    await settle();
-    expect(script.calls).toEqual(['set phone.nav.side top', 'set phone.nav.items agenda']);
     await view.unmount();
   });
 
-  test('a list is saved as typed, only once it differs from what the daemon holds', async () => {
+  const list = (root: HTMLElement, path: string): HTMLElement =>
+    must(root.querySelector<HTMLElement>(`[data-layout-list="${path}"]`), `the ${path} list`);
+  const names = (root: HTMLElement, path: string): string[] =>
+    [...list(root, path).querySelectorAll<HTMLElement>('li[data-sortable-key]')].map(
+      row => row.dataset.sortableKey ?? '',
+    );
+
+  test('no list is a text box: places are rows with a grip, arrows and an eye', async () => {
     const script = scriptedLayouts();
     const view = await mount(<LayoutSettings client={script.client} />);
     await settle();
-    const box = must(view.container.querySelector<HTMLInputElement>('input[aria-label]'), 'a list box');
-    expect(box.value).toBe('ferrets, agenda, board, projects, insights, settings');
-    const save = press(view.container, 'Save');
-    expect(save.disabled).toBe(true);
-    await type(box, 'agenda, board');
-    expect(press(view.container, 'Save').disabled).toBe(false);
-    await interact(() => press(view.container, 'Save').click());
-    await settle();
-    expect(script.calls).toEqual(['set nav.items agenda, board']);
+    // The only text input left on the tab is the name a layout is saved under.
+    const texts = [...view.container.querySelectorAll<HTMLInputElement>('input[type="text"]')];
+    expect(texts.map(input => input.placeholder)).toEqual(['mine']);
+    for (const path of ['nav.items', 'top', 'panels.ferret.side', 'phone.nav.items', 'phone.top']) {
+      expect(list(view.container, path).querySelector('[data-sortable-grip]')).not.toBeNull();
+    }
+    expect(names(view.container, 'nav.items')).toEqual([
+      'ferrets',
+      'agenda',
+      'board',
+      'projects',
+      'insights',
+      'settings',
+    ]);
     await view.unmount();
   });
 
-  test('a refusal is the daemon’s sentence and its first reason, beside the row it came from', async () => {
+  test('moving a place saves the order and the hidden list together, in one change set', async () => {
     const script = scriptedLayouts();
     const view = await mount(<LayoutSettings client={script.client} />);
     await settle();
-    const box = must(view.container.querySelector<HTMLInputElement>('input[aria-label]'), 'a list box');
-    await type(box, 'agenda, ghost');
-    script.refuseWith = refusal('"ghost" is not an installed screen');
-    await interact(() => press(view.container, 'Save').click());
+    await interact(() => press(list(view.container, 'nav.items'), 'Move Ferrets down').click());
+    await settle();
+    expect(script.calls).toEqual(['set nav.items agenda,ferrets,board,projects,insights,settings + set nav.hidden ']);
+    await view.unmount();
+  });
+
+  test('the keyboard lifts, moves and drops a place: one save, on drop', async () => {
+    const script = scriptedLayouts();
+    const view = await mount(<LayoutSettings client={script.client} />);
+    await settle();
+    const grip = press(list(view.container, 'nav.items'), 'Reorder Board');
+    const key = (name: string) =>
+      interact(() => {
+        grip.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+      });
+    await key(' ');
+    await key('ArrowUp');
+    await key('ArrowUp');
+    expect(script.calls).toEqual([]);
+    await key('Enter');
+    await settle();
+    expect(script.calls).toEqual(['set nav.items board,ferrets,agenda,projects,insights,settings + set nav.hidden ']);
+    await view.unmount();
+  });
+
+  test('the eye hides a place and shows it again; Settings cannot be hidden', async () => {
+    const script = scriptedLayouts();
+    const view = await mount(<LayoutSettings client={script.client} />);
+    await settle();
+    await interact(() => press(list(view.container, 'nav.items'), 'Hide Board').click());
+    await settle();
+    expect(script.calls).toEqual([
+      'set nav.items ferrets,agenda,board,projects,insights,settings + set nav.hidden board',
+    ]);
+    const settings = press(list(view.container, 'nav.items'), 'Hide Settings');
+    expect(settings.getAttribute('aria-disabled')).toBe('true');
+    await interact(() => settings.click());
+    await settle();
+    expect(script.calls).toHaveLength(1);
+    await view.unmount();
+  });
+
+  test('a hidden place shows as hidden and its eye shows it again', async () => {
+    const script = scriptedLayouts(
+      readOf({ layout: { ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, hidden: ['board'] } } }),
+    );
+    const view = await mount(<LayoutSettings client={script.client} />);
+    await settle();
+    const row = must(list(view.container, 'nav.items').querySelector<HTMLElement>('[data-hidden]'), 'the hidden row');
+    expect(row.textContent).toContain('Board');
+    await interact(() => press(list(view.container, 'nav.items'), 'Show Board').click());
+    await settle();
+    expect(script.calls).toEqual(['set nav.items ferrets,agenda,board,projects,insights,settings + set nav.hidden ']);
+    await view.unmount();
+  });
+
+  test('the top bar and the side panels have no hidden list: what is not named is hidden', async () => {
+    const script = scriptedLayouts();
+    const view = await mount(<LayoutSettings client={script.client} />);
+    await settle();
+    expect(names(view.container, 'top')).toEqual(['daemon-picker', 'search', 'status']);
+    await interact(() => press(list(view.container, 'top'), 'Show Status').click());
+    await settle();
+    expect(script.calls).toEqual(['set top daemon-picker,search,status']);
+    await view.unmount();
+  });
+
+  test('the phone lists save their own phone keys, in either scope', async () => {
+    const script = scriptedLayouts();
+    const device = fakeDevice();
+    const view = await mount(<LayoutSettings client={script.client} device={device} />);
+    await settle();
+    await interact(() => press(list(view.container, 'phone.nav.items'), 'Hide Projects').click());
+    await settle();
+    expect(script.calls).toEqual([
+      'set phone.nav.items ferrets,agenda,board,projects,insights,settings + set phone.nav.hidden projects',
+    ]);
+    const mine = view.container.querySelectorAll<HTMLElement>('[data-layout-list="phone.top"]')[1];
+    await interact(() => press(must(mine, 'this device phone top'), 'Move Daemon picker down').click());
+    expect(device.calls).toEqual(['set phone.top search,daemon-picker']);
+    await view.unmount();
+  });
+
+  test('a refusal is the daemon’s sentence and its first reason, and the row goes back to what the daemon holds', async () => {
+    const script = scriptedLayouts();
+    const view = await mount(<LayoutSettings client={script.client} />);
+    await settle();
+    script.refuseWith = refusal('"board" is not an installed screen');
+    await interact(() => press(list(view.container, 'nav.items'), 'Hide Board').click());
     await settle();
     const alerts = [...view.container.querySelectorAll('[role="alert"]')].map(alert => alert.textContent);
-    expect(alerts).toContain('that layout cannot be used: "ghost" is not an installed screen');
-    expect(
-      must(view.container.querySelector<HTMLInputElement>('input[aria-label]'), 'the box').getAttribute('aria-invalid'),
-    ).toBe('true');
+    expect(alerts).toContain('that layout cannot be used: "board" is not an installed screen');
+    expect(list(view.container, 'nav.items').querySelector('[data-hidden]')).toBeNull();
     await view.unmount();
   });
 

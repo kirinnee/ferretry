@@ -22,6 +22,8 @@ export interface LayoutsClient {
   read(): Promise<LayoutsRead>;
   /** `fy layout set <path> <value>`: one key, as the word or the comma list the verb takes. */
   set(path: string, value: string): Promise<void>;
+  /** Several keys in ONE request, so a list and its hidden list are saved whole or not at all. */
+  setMany(changes: readonly { readonly path: string; readonly value: string }[]): Promise<void>;
   /** `fy layout use <id>`. */
   switchLayout(layout: string): Promise<void>;
   /** `fy theme use <id>`. */
@@ -44,6 +46,11 @@ export function layoutsClient(client: PluginClient): LayoutsClient {
     }),
     set: async (path, value) => {
       await client.call('PATCH /v1/layouts/current', { body: { changes: [{ path, value }] } });
+    },
+    setMany: async changes => {
+      await client.call('PATCH /v1/layouts/current', {
+        body: { changes: changes.map(({ path, value }) => ({ path, value })) },
+      });
     },
     switchLayout: async layout => {
       await client.call('PUT /v1/layouts/current', { body: { layout } });
