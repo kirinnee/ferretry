@@ -194,7 +194,7 @@ function CapabilityCard({
             only moment the warning can change what somebody does. */}
         {oneWay && entry.granted.use ? (
           <details className="text-meta leading-base text-warn" data-grant-one-way={entry.capability}>
-            <summary className="min-h-[44px] cursor-pointer leading-[44px]">
+            <summary className="min-h-[44px] cursor-pointer py-3 leading-snug">
               Switching this off cannot be undone from here
             </summary>
             <Notice tone="warn">{remoteRevokeWarning(entry.capability)}</Notice>

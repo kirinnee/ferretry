@@ -96,26 +96,26 @@ export function PairedDeviceRow({
     <SettingRow
       name={device.name}
       dataAttributes={{ 'data-paired-device': device.id }}
+      hint={
+        mine ? (
+          <span className="fy-acc-chip" data-paired-device-self="">
+            this device
+          </span>
+        ) : undefined
+      }
       control={() => (
-        <>
-          {mine ? (
-            <span className="fy-acc-chip" data-paired-device-self="">
-              this device
-            </span>
-          ) : null}
-          <button
-            type="button"
-            disabled={busy}
-            aria-describedby={describedBy}
-            data-pair-revoke-device={device.id}
-            onClick={onRevoke}
-            className="kt-btn min-h-[44px] shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
-            data-variant="danger"
-          >
-            <Trash2 size={14} aria-hidden="true" />
-            Revoke
-          </button>
-        </>
+        <button
+          type="button"
+          disabled={busy}
+          aria-describedby={describedBy}
+          data-pair-revoke-device={device.id}
+          onClick={onRevoke}
+          className="kt-btn min-h-[44px] shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
+          data-variant="danger"
+        >
+          <Trash2 size={14} aria-hidden="true" />
+          Revoke
+        </button>
       )}
     >
       <div className="fy-acc-body">
