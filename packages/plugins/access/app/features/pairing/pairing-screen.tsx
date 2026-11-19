@@ -44,7 +44,7 @@ import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
 import { browserDeviceName } from '@ferretry/app';
 import { normalizedDeviceName } from '../../lib/device-name.ts';
 import { FerretMascot, type FerretPose } from './ferret-mascot.tsx';
-import { MachineNameField } from './machine-name-field.tsx';
+import { MachineNameField, machineNameChoice } from './machine-name-field.tsx';
 import { PairScanner } from './pair-scanner.tsx';
 import {
   FirstPasskeyOffer,
@@ -827,12 +827,12 @@ function PairingFocus({
         data-variant="primary"
         data-pair-confirm=""
         onClick={() => {
-          if (sendableName === undefined) return;
-          const machine = machineName.trim();
-          if (machine === '') onPair(seed, sendableName);
-          else onPair(seed, sendableName, machine);
+          const machine = machineNameChoice(machineName);
+          if (sendableName === undefined || machine.kind === 'refused') return;
+          if (machine.kind === 'none') onPair(seed, sendableName);
+          else onPair(seed, sendableName, machine.name);
         }}
-        disabled={busy || sendableName === undefined}
+        disabled={busy || sendableName === undefined || machineNameChoice(machineName).kind === 'refused'}
       >
         {busy ? 'Pairing…' : 'Pair this device'}
       </button>

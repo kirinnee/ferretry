@@ -1,8 +1,10 @@
 import { MachineNameSchema } from '@ferretry/kernel/contract';
 import { useEffect, useRef, useState } from 'react';
-import type { ShellPluginClient } from '../client/daemon-client.ts';
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import { useRuntimeVersion, useShell } from './context.tsx';
+import { hostFileIsNamed, readHostFile, sentenceOf, writeMachineName } from './machine-name-file.ts';
+
+export { hostFileIsNamed, readHostFile } from './machine-name-file.ts';
 
 /**
  * "NAME THIS MACHINE": the short step a pairing offers when the machine it paired with has no name of the owner's.
@@ -19,41 +21,6 @@ import { useRuntimeVersion, useShell } from './context.tsx';
  * It is only offered by a pairing (`PairingInput.askName`), once per pairing and never again after a reload, and it
  * stays out of the way when it cannot tell whether the machine is named (the read was refused or failed).
  */
-
-const HOST_FILE = 'host.yaml';
-const NAME_LINE = /^name:/mu;
-
-/** Whether the machine's owner has named it (a `name` in `host.yaml`); without one it goes by its host name. */
-export const hostFileIsNamed = (file: { readonly exists: boolean; readonly text: string }): boolean =>
-  file.exists && NAME_LINE.test(file.text);
-
-/** The text a name is saved as: a JSON string is a valid YAML scalar, so no character needs its own escaping. */
-const hostFileText = (name: string): string => `name: ${JSON.stringify(name)}\n`;
-
-export interface HostFile {
-  readonly exists: boolean;
-  readonly text: string;
-  readonly etag: string;
-}
-
-export const readHostFile = async (client: ShellPluginClient, quiet = false): Promise<HostFile> => {
-  // `quiet`: a read the machine switcher makes by itself on a page load, which must never raise a passkey prompt; a refusal is the answer.
-  const answer = (await client.call('GET /v1/config/file', {
-    query: { path: HOST_FILE },
-    ...(quiet ? { quiet: true } : {}),
-  })) as Partial<HostFile> | null;
-  if (answer === null || typeof answer.etag !== 'string') throw new Error('unreadable');
-  return {
-    exists: answer.exists === true,
-    text: typeof answer.text === 'string' ? answer.text : '',
-    etag: answer.etag,
-  };
-};
-
-const sentenceOf = (cause: unknown): string => {
-  const message = cause instanceof Error ? cause.message.trim() : '';
-  return message === '' ? 'This machine did not answer.' : message;
-};
 
 interface NameThisMachineViewProps {
   /** The host name the field starts with. */
@@ -135,55 +102,35 @@ function NameThisMachineView({ initial, busy, refusal, problem, onSave, onSkip }
   );
 }
 
-/** The step for one machine just paired with: asks it whether it has a name, and offers one only when it has none. */
+/**
+ * The step for one machine just paired with: asks it whether it has a name, and offers one only when it has none. A
+ * name typed on the pair screen is saved by {@link ChosenNameSaver}, not here: while that save is waiting or running
+ * this draws nothing, and only when it failed does the step come back, with the typed name and the reason.
+ */
 export function NameThisMachine({ daemon }: { readonly daemon: string }) {
   const { runtime } = useShell();
   useRuntimeVersion(runtime);
   const client = runtime.client(daemon, 'kernel');
   const paired = runtime.daemons.get(daemon);
-  const [file, setFile] = useState<HostFile | undefined>(undefined);
+  const chosen = runtime.daemons.chosenName(daemon);
+  const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [refusal, setRefusal] = useState<string | undefined>(undefined);
-  // The name typed at pairing, once it failed to save: the field starts with it.
-  const [typedAtPairing, setTypedAtPairing] = useState<string | undefined>(undefined);
   const settle = (): void => runtime.daemons.nameSettled(daemon);
   const asked = useRef(false);
+  const chosenAtPairing = chosen !== undefined;
   useEffect(() => {
     // One look per mount, once the machine can be asked. A machine that cannot say is left alone.
-    if (client === undefined || asked.current) return;
+    if (client === undefined || asked.current || chosenAtPairing) return;
     asked.current = true;
-    const chosen = runtime.daemons.takeChosenName(daemon);
-    const parsedChoice = chosen === undefined ? undefined : MachineNameSchema.safeParse(chosen);
-    if (chosen !== undefined && parsedChoice?.success === true) {
-      const name = parsedChoice.data;
-      // Saved with the grant the pairing just made, through the same call as the step below; nothing is drawn meanwhile.
-      const fail = (cause: unknown, read: HostFile | undefined): void => {
-        setTypedAtPairing(name);
-        setProblem(`The name you chose while pairing was not saved: ${sentenceOf(cause)}`);
-        setFile(read ?? { exists: false, text: '', etag: '' });
-      };
-      void readHostFile(client).then(
-        read =>
-          client
-            .call('PUT /v1/config/file', { body: { path: HOST_FILE, text: hostFileText(name), etag: read.etag } })
-            .then(
-              () => {
-                runtime.daemons.learnMachine(daemon, name);
-                runtime.daemons.nameSettled(daemon);
-              },
-              (cause: unknown) => fail(cause, read),
-            ),
-        (cause: unknown) => fail(cause, undefined),
-      );
-      return;
-    }
     void readHostFile(client).then(
-      read => (hostFileIsNamed(read) ? runtime.daemons.nameSettled(daemon) : setFile(read)),
+      read => (hostFileIsNamed(read) ? runtime.daemons.nameSettled(daemon) : setReady(true)),
       () => runtime.daemons.nameSettled(daemon),
     );
-  }, [client, daemon, runtime]);
-  if (file === undefined || client === undefined || paired === undefined) return null;
+  }, [client, daemon, runtime, chosenAtPairing]);
+  if (client === undefined || paired === undefined) return null;
+  if (chosen === undefined ? !ready : chosen.state !== 'failed') return null;
   const save = async (typed: string): Promise<void> => {
     const parsed = MachineNameSchema.safeParse(typed);
     if (!parsed.success) {
@@ -192,10 +139,17 @@ export function NameThisMachine({ daemon }: { readonly daemon: string }) {
     }
     setProblem(undefined);
     setBusy(true);
+    // The revision is read now, never kept from an earlier look: a read that failed before must not poison this save.
+    let etag: string;
     try {
-      await client.call('PUT /v1/config/file', {
-        body: { path: HOST_FILE, text: hostFileText(parsed.data), etag: file.etag },
-      });
+      etag = (await readHostFile(client)).etag;
+    } catch (cause) {
+      setBusy(false);
+      setProblem(`This machine's current name could not be read: ${sentenceOf(cause)}`);
+      return;
+    }
+    try {
+      await writeMachineName(client, parsed.data, etag);
       runtime.daemons.learnMachine(daemon, parsed.data);
       settle();
     } catch (cause) {
@@ -205,10 +159,10 @@ export function NameThisMachine({ daemon }: { readonly daemon: string }) {
   };
   return (
     <NameThisMachineView
-      initial={typedAtPairing ?? daemonTitle(paired)}
+      initial={chosen?.name ?? daemonTitle(paired)}
       busy={busy}
       {...(refusal === undefined ? {} : { refusal })}
-      {...(problem === undefined ? {} : { problem })}
+      {...(problem === undefined && chosen?.problem === undefined ? {} : { problem: problem ?? chosen?.problem })}
       onSave={name => void save(name)}
       onSkip={settle}
     />

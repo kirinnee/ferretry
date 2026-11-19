@@ -513,6 +513,29 @@ describe('PairingScreen naming this device', () => {
     await quiet.unmount();
   });
 
+  it('says why a machine name with an invisible character cannot be used, inline, and does not pair', async () => {
+    const sent: (string | undefined)[] = [];
+    const screen = await screenWith({
+      arrival: PREFILLED,
+      onPair: async (_seed, _name, machine) => {
+        sent.push(machine);
+      },
+    });
+    const field = must(
+      screen.container.querySelector('input[data-pair-machine-name]'),
+      'the machine field',
+    ) as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, 'Studio\u200Bbox');
+    await interact(() => field.dispatchEvent(new Event('input', { bubbles: true })));
+    expect(screen.container.querySelector('[data-pair-machine-name-problem]')?.textContent).toContain('invisible');
+    const confirm = buttonNamed(screen.container, 'Pair this device');
+    expect(confirm.disabled).toBe(true);
+    await interact(() => confirm.click());
+    expect(sent).toEqual([]);
+    expect(screen.container.querySelector('input[data-pair-machine-name]')).not.toBeNull();
+    await screen.unmount();
+  });
+
   it('will not pair a device with no name', async () => {
     const sent: string[] = [];
     const screen = await screenWith({

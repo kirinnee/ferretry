@@ -53,10 +53,16 @@ interface Options {
   readonly pairing?: Partial<PairingInput>;
   /** A name this device learned earlier; the plugin list is refused when set, as when the machine is not answering. */
   readonly learned?: string;
+  /** The address the app opens at; a machine's own page unless a test says otherwise (`/onboarding` names none). */
+  readonly path?: string;
+  /** Reads of the file answer with no revision (a machine that could not read it) until the test says it recovered. */
+  readonly unreadableAtFirst?: boolean;
 }
 
 async function boot(options: Options = {}) {
-  window.history.replaceState(null, '', '/d/ws');
+  window.history.replaceState(null, '', options.path ?? '/d/ws');
+  // Until the test says the machine recovered, a machine set to `unreadableAtFirst` answers every read with no revision.
+  const machine = { recovered: options.unreadableAtFirst !== true };
   const transport = new FakeTransport((request: TransportRequest): TransportAnswer => {
     const path = request.path.split('?')[0];
     if (path === '/v1/plugins')
@@ -64,15 +70,15 @@ async function boot(options: Options = {}) {
         ? json(inventoryOf(surfaces))
         : json({ error: 'this device may not read that', code: 'forbidden' }, 403);
     if (path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
-    if (path === '/v1/config/file' && request.method === 'GET')
-      return options.readRefused === true
-        ? json({ error: 'this device may not read that', code: 'forbidden' }, 403)
-        : json({
-            path: 'host.yaml',
-            exists: options.hostFile !== undefined,
-            text: options.hostFile ?? '',
-            etag: 'e1',
-          });
+    if (path === '/v1/config/file' && request.method === 'GET') {
+      if (options.readRefused === true) return json({ error: 'this device may not read that', code: 'forbidden' }, 403);
+      return json({
+        path: 'host.yaml',
+        exists: options.hostFile !== undefined,
+        text: options.hostFile ?? '',
+        etag: machine.recovered ? 'e1' : '',
+      });
+    }
     if (path === '/v1/config/file' && request.method === 'PUT')
       return options.writeAnswer ?? json({ path: 'host.yaml', etag: 'e2', outcome: 'applied' });
     return json({ ok: true });
@@ -125,7 +131,10 @@ async function boot(options: Options = {}) {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
   };
-  return { view, list, transport, step, writes, press, typeName };
+  const recover = (): void => {
+    machine.recovered = true;
+  };
+  return { view, list, transport, step, writes, press, typeName, recover };
 }
 
 let open: Awaited<ReturnType<typeof boot>> | undefined;
@@ -187,7 +196,7 @@ describe('Name this machine', () => {
     expect(open.step()).toBeNull();
   });
 
-  test('a name typed at pairing is saved with the pair and the later step never shows', async () => {
+  test('a name typed at pairing is saved as soon as the machine answers, and the later step never shows', async () => {
     open = await boot({ pairing: { askName: true, chosenName: '  Studio box ' } });
     expect(open.writes().map(write => write.body)).toEqual([
       { path: 'host.yaml', text: 'name: "Studio box"\n', etag: 'e1' },
@@ -195,7 +204,19 @@ describe('Name this machine', () => {
     expect(open.list.get('ws')?.machine).toBe('Studio box');
     expect(open.step()).toBeNull();
     expect(open.list.namePending('ws')).toBe(false);
-    expect(open.list.takeChosenName('ws')).toBeUndefined();
+    expect(open.list.chosenName('ws')).toBeUndefined();
+  });
+
+  test('on the first-run route, which names no machine, the typed name is still written once', async () => {
+    open = await boot({ path: '/onboarding', pairing: { askName: true, chosenName: 'Studio box' } });
+    expect(window.location.pathname).not.toContain('/d/');
+    expect(open.writes().map(write => write.body)).toEqual([
+      { path: 'host.yaml', text: 'name: "Studio box"\n', etag: 'e1' },
+    ]);
+    expect(open.list.get('ws')?.machine).toBe('Studio box');
+    expect(open.list.chosenName('ws')).toBeUndefined();
+    await settle();
+    expect(open.writes()).toHaveLength(1);
   });
 
   test('a save that fails at pairing brings the later step back, with the typed name and the reason', async () => {
@@ -209,6 +230,33 @@ describe('Name this machine', () => {
       'Studio box',
     );
     expect(open.list.get('ws')?.machine).toBe(HOST);
+  });
+
+  test('a read that came back without a revision is never written with an empty one, and the retry reads fresh', async () => {
+    open = await boot({ pairing: { askName: true, chosenName: 'Studio box' }, unreadableAtFirst: true });
+    expect(open.writes()).toEqual([]);
+    expect(open.step()?.textContent).toContain('The name you chose while pairing was not saved');
+    open.recover();
+    await open.press('button[type="submit"]');
+    expect(open.writes().map(write => write.body)).toEqual([
+      { path: 'host.yaml', text: 'name: "Studio box"\n', etag: 'e1' },
+    ]);
+    expect(open.list.get('ws')?.machine).toBe('Studio box');
+    expect(open.step()).toBeNull();
+  });
+
+  test('a name with an invisible character is said inline in the step and nothing is sent', async () => {
+    open = await boot({ pairing: { askName: true } });
+    await open.typeName('Studio\u200Bbox');
+    await open.press('button[type="submit"]');
+    expect(open.step()?.querySelector('[role="alert"]')?.textContent).toContain('invisible');
+    expect(open.writes()).toEqual([]);
+  });
+
+  test('a chosen name the daemon rule refuses is kept for the step, which says why', async () => {
+    open = await boot({ pairing: { askName: true, chosenName: 'Studio\u200Bbox' } });
+    expect(open.writes()).toEqual([]);
+    expect(open.step()?.textContent).toContain('invisible');
   });
 
   test('a machine that already has a name of the owner’s is not asked', async () => {
