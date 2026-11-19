@@ -7,3 +7,9 @@ export const filesystemConfigure: CapabilityDemand = { capability: FILESYSTEM, a
 /** Audit kinds this plugin adds. */
 export const PROJECT_REGISTERED_AUDIT = policyRef('audit', 'project.registered');
 export const PROJECT_REMOVED_AUDIT = policyRef('audit', 'project.removed');
+
+/** Listing the folders under the owner's home, for the project picker: a read, so the `use` axis. */
+export const filesystemUse: CapabilityDemand = { capability: FILESYSTEM, axis: 'use' };
+
+/** Audit kind for a folder made from the picker. */
+export const PROJECT_FOLDER_CREATED_AUDIT = policyRef('audit', 'project.folder-created');

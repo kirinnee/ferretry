@@ -3,6 +3,7 @@ import { ProjectRegistered, ProjectRemoved } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { kernelFolders } from './adapters/folders.ts';
 import { kernelStore } from './adapters/store.ts';
+import { foldersRoutes } from './features/folders/index.ts';
 import type { ProjectFolders } from './lib/ports.ts';
 import { ProjectRegistry } from './lib/registry.ts';
 import { listRoute, registerRoute, removeRoute } from './lib/routes.ts';
@@ -17,9 +18,10 @@ import { listRoute, registerRoute, removeRoute } from './lib/routes.ts';
 export const implementProjects = (folders?: ProjectFolders) =>
   implementDaemon(manifest, {
     build: ({ kernel }) => {
+      const machine = folders ?? kernelFolders(kernel);
       const registry = new ProjectRegistry({
         store: kernelStore(kernel.state),
-        folders: folders ?? kernelFolders(kernel),
+        folders: machine,
         clock: kernel.clock,
         newId: () => crypto.randomUUID(),
         registered: id => kernel.events.publish(ProjectRegistered, { id }),
@@ -30,6 +32,7 @@ export const implementProjects = (folders?: ProjectFolders) =>
           'GET /v1/projects': listRoute(registry),
           'POST /v1/projects': registerRoute(registry),
           'DELETE /v1/projects/:id': removeRoute(registry),
+          ...foldersRoutes(kernel, machine),
         },
         // The folders a governed device may start a ferret in as an ordinary act (Ferrets reads this, never the registry).
         hooks: { 'launch.roots:projects': { roots: async () => (await registry.list()).map(project => project.path) } },
