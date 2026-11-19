@@ -13,10 +13,26 @@
  * - **A missing program is a warning, not a refusal.** The server's `command` is not looked up on this machine: a server
  *   whose program is not installed yet is written like any other, and a check says so later.
  * - **A refusal is a sentence** naming the file and the rule, never an environment value.
+ * - **The harness id is this plugin's own.** Runtimes names a harness `claude` or `codex`; an MCP item's `harness` is the
+ *   harness key (`claude-code`, `codex`). The write accepts Runtimes' word (and the key itself) and writes the key, so a
+ *   server that only one harness had in a dual-harness import still reads back; any other word is refused in a sentence.
+ *
+ * **The explicit MCP exception to "never run an imported command".** An MCP stdio server's `command` is the whole point of
+ * the server, so it is imported as written: it is shown to the person and ticked in the import wizard, it is not looked up
+ * on `PATH` and nothing is spawned at import. It runs only when a ferret launches with that server, and only because the
+ * person ticked it.
  */
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import type { ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
 import { ITEM_NAME_PATTERN } from '@ferretry/std';
 import type { McpConfigWrite } from './ports.ts';
+
+/** Runtimes' word for a harness, and the harness key itself, to the key an MCP item carries (own properties only). */
+const HARNESS_KEY_OF: Readonly<Record<string, HarnessKey | undefined>> = Object.assign(Object.create(null), {
+  claude: 'claude-code',
+  'claude-code': 'claude-code',
+  codex: 'codex',
+});
 
 const refused = (reason: string): ComponentPutResult => ({ ok: false, reason });
 
@@ -41,7 +57,15 @@ export function hostImportPut(
     if (config.taken(name))
       return refused(`${file} already exists, so it was left as it is: an import never replaces a server.`);
 
-    const outcome = await config.create(name, documentText);
+    const harness = (document as { harness?: unknown }).harness;
+    let text = documentText;
+    if (harness !== undefined) {
+      const key = typeof harness === 'string' ? HARNESS_KEY_OF[harness] : undefined;
+      if (key === undefined) return refused(`The server for ${file} names a harness this plugin does not know.`);
+      text = `${JSON.stringify({ ...document, harness: key }, null, 2)}\n`;
+    }
+
+    const outcome = await config.create(name, text);
     switch (outcome.kind) {
       case 'written':
         return { ok: true };

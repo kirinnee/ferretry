@@ -124,3 +124,38 @@ describe('MCP owner writes an imported server', () => {
     expect(await owner().list()).toEqual([]);
   });
 });
+
+describe('the harness id of an imported server', () => {
+  test('a Claude-only server in a dual-harness import (Runtimes says "claude") is written with the schema\'s key', async () => {
+    const { owner } = await world();
+
+    const result = await owner().put?.('claude-only', doc({ command: 'tool', harness: 'claude' }));
+
+    expect(result).toEqual({ ok: true });
+    expect(await owner().read('claude-only')).toEqual({ command: 'tool', harness: 'claude-code' });
+  });
+
+  test('a Codex-only server keeps "codex", and the schema\'s own key is accepted as it is', async () => {
+    const { owner } = await world();
+
+    await owner().put?.('codex-only', doc({ command: 'tool', harness: 'codex' }));
+    await owner().put?.('already-key', doc({ url: 'https://docs.example.test/mcp', harness: 'claude-code' }));
+
+    expect(await owner().read('codex-only')).toEqual({ command: 'tool', harness: 'codex' });
+    expect(await owner().read('already-key')).toEqual({
+      url: 'https://docs.example.test/mcp',
+      harness: 'claude-code',
+    });
+  });
+
+  test('a harness word nobody knows is refused in a sentence and writes nothing', async () => {
+    const { owner } = await world();
+
+    const unknown = await owner().put?.('odd', doc({ command: 'tool', harness: 'vim' }));
+    const inherited = await owner().put?.('proto', doc({ command: 'tool', harness: 'constructor' }));
+    const notText = await owner().put?.('number', doc({ command: 'tool', harness: 7 }));
+
+    for (const result of [unknown, inherited, notText]) expect(result?.ok).toBe(false);
+    expect(await owner().list()).toEqual([]);
+  });
+});
