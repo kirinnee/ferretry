@@ -138,6 +138,8 @@ export interface FoundListProps {
   readonly updates: readonly UpdateItem[];
   readonly declined: ReadonlySet<string>;
   readonly onTakeUpdate: (reference: string, on: boolean) => void;
+  /** The fixed "Conversations" line. A plugin's own page for conversations draws its own, so the kit's pages turn it off. */
+  readonly showConversations?: boolean;
 }
 
 export function FoundList({
@@ -151,6 +153,7 @@ export function FoundList({
   updates,
   declined,
   onTakeUpdate,
+  showConversations = true,
 }: FoundListProps) {
   return (
     <div className="flex min-w-0 flex-col gap-4" data-found-list={harness}>
@@ -242,9 +245,11 @@ export function FoundList({
             {PROJECT_INSTRUCTIONS_STAY}
           </Fixed>
         ) : null}
-        <Fixed name="conversations" title="Conversations">
-          {CONVERSATIONS_LINE.replace(/^Conversations: /u, '')}
-        </Fixed>
+        {showConversations ? (
+          <Fixed name="conversations" title="Conversations">
+            {CONVERSATIONS_LINE.replace(/^Conversations: /u, '')}
+          </Fixed>
+        ) : null}
       </ul>
     </div>
   );

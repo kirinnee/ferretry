@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import type { CloneReview } from '../../../contract/index.ts';
-import { AGENT_CONTROL_KINDS, AGENT_CONTROL_WORDS } from '../../../app/features/fleet/machine/agent-control-words.ts';
 import {
   controlsText,
   copyChange,
@@ -124,14 +123,6 @@ describe('export settings: the zip', () => {
 
   it('crc32 matches the published check value', () => {
     expect(crc32(new TextEncoder().encode('123456789'))).toBe(0xcbf43926);
-  });
-});
-
-describe('agent controls', () => {
-  it('words every switch the machine has, with the safety sentences kept in full', () => {
-    expect(AGENT_CONTROL_KINDS).toEqual(['terminals', 'browsers', 'files', 'ferretrySettings', 'pageScripts']);
-    for (const kind of AGENT_CONTROL_KINDS) expect(AGENT_CONTROL_WORDS[kind].detail.length).toBeGreaterThan(10);
-    expect(AGENT_CONTROL_WORDS.pageScripts.detail).toContain('sign-ins');
   });
 });
 

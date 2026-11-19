@@ -7,6 +7,7 @@
 
 import { daemonOfClient, usePairedDaemons } from '@ferretry/app';
 import { type ReadPress, readPress } from '@ferretry/app/ui';
+import type { StepHost } from '@ferretry/kernel/contract';
 import type { AppComponent, SettingsProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { MachineView } from '../../contract/index.ts';
@@ -68,8 +69,11 @@ export const machineNameShown = (
 };
 
 /** One Settings tab: the machine read, and the tab inside it. */
-export const machineSettingsView = (client: LiveRuntimesClient, Tab: MachineTab): AppComponent<SettingsProps> =>
-  function MachineSettings() {
+export const machineSettingsView = (
+  client: LiveRuntimesClient,
+  Tab: MachineTab,
+): AppComponent<SettingsProps & { readonly step?: StepHost }> =>
+  function MachineSettings({ step }: { readonly step?: StepHost }) {
     const { read, reload, press } = useMachineView(client);
     const machine = read.kind === 'ready' ? read.machine : read.kind === 'checking' ? read.last : null;
     // The name follows the machine's LIVE name (the paired record every rename and every plugin-list read updates), not the
@@ -95,6 +99,7 @@ export const machineSettingsView = (client: LiveRuntimesClient, Tab: MachineTab)
           checking={read.kind === 'checking'}
           onRetry={reload}
           onRefresh={reload}
+          {...(step === undefined ? {} : { step })}
           // Edit as YAML over the kernel's `/v1/config/file` (D2 #3).
           renderFileEditor={editor => <ConfigFileEditor client={client} {...editor} />}
         />

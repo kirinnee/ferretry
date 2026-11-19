@@ -1,12 +1,12 @@
 /**
  * Where a machine's setup moves between machines: **Export settings** (a zip of its configuration files, no secrets) and
  * **Copy settings from another machine**, as a Settings tab; and the same Copy as the first run's "Start from…" step,
- * where the person picks a fresh setup or a copy of another machine's.
+ * where the person picks "Start fresh" or "Copy from another machine" (two cards, never full width).
  */
 
-import { RadioChoices } from '@ferretry/app/ui';
-import type { AppComponent, SettingsProps } from '@ferretry/kernel/manifest';
-import { useState } from 'react';
+import { ChoiceCards } from '@ferretry/app';
+import type { AppComponent, PanelProps, SettingsProps } from '@ferretry/kernel/manifest';
+import { useEffect, useState } from 'react';
 import { CopySettings } from '../features/fleet/setup/copy-settings.tsx';
 import { ExportSettings } from '../features/fleet/setup/export-settings.tsx';
 import { useAccountChanges } from '../features/fleet/shell/apply-change-panel.tsx';
@@ -32,15 +32,24 @@ function TransferTab({ client, machineName, machine }: MachineTabProps) {
   );
 }
 
-/** The first run's "Start from…" step. */
-function StartStep({ client, machineName, machine }: MachineTabProps) {
+/** The first run's "Start fresh / Copy from another machine" page. */
+function StartStep({ client, machineName, machine, step }: MachineTabProps) {
   const changes = useAccountChanges({ client });
   const [start, setStart] = useState<'fresh' | 'clone'>('fresh');
   const [unmarked, setUnmarked] = useState(false);
+  // Under the setup flow the page decides at once: it always shows (the person may copy or start fresh).
+  useEffect(() => {
+    step?.ready();
+  }, [step]);
   // A copy that landed completes this step through onboarding, the way the steps screen's Done does; if that answer is
   // not saved the person is told, and can press Done on the step themselves.
   const markDone = (): void => {
     setUnmarked(false);
+    // Drawn as a step, the host records the answer (and moves on); drawn alone, the page answers onboarding itself.
+    if (step !== undefined) {
+      step.done();
+      return;
+    }
     void client
       .call('POST /v1/onboarding/steps/:plugin/:stepId', {
         params: { plugin: 'runtimes', stepId: 'start' },
@@ -50,19 +59,16 @@ function StartStep({ client, machineName, machine }: MachineTabProps) {
   };
   return (
     <div className="flex min-w-0 flex-col gap-4" data-onboarding-step-body="start">
-      <RadioChoices
-        legend="Start from"
-        legendHidden
-        name="onboarding-start"
+      <ChoiceCards
+        label="Start from"
         value={start}
-        onChoose={setStart}
+        onChange={id => setStart(id === 'clone' ? 'clone' : 'fresh')}
         options={[
-          { id: 'fresh', title: 'A fresh setup', detail: 'Walk through each step.' },
+          { id: 'fresh', title: 'Start fresh', line: 'Walk through each step.' },
           {
             id: 'clone',
-            title: 'Copy settings from another machine',
-            detail:
-              'Copy the Warden, learning, voice, agent controls, profiles and runtimes. Secrets and login tokens are never copied.',
+            title: 'Copy from another machine',
+            line: 'Warden, learning, voice, agent controls, profiles and runtimes. Never secrets or logins.',
           },
         ]}
       />
@@ -89,5 +95,5 @@ function StartStep({ client, machineName, machine }: MachineTabProps) {
 export const createTransferSettings = (client: LiveRuntimesClient): AppComponent<SettingsProps> =>
   machineSettingsView(client, props => <TransferTab {...props} />);
 
-export const createStartStep = (client: LiveRuntimesClient): AppComponent<SettingsProps> =>
+export const createStartStep = (client: LiveRuntimesClient): AppComponent<PanelProps> =>
   machineSettingsView(client, props => <StartStep {...props} />);

@@ -1,3 +1,4 @@
+import type { StepHost } from '@ferretry/kernel/contract';
 import type { FileEditorProps } from '../profiles/profile-editor.tsx';
 import type { MachineView } from '../../../../contract/index.ts';
 import type { LiveRuntimesClient } from '../../../lib/client.ts';
@@ -18,6 +19,8 @@ export interface MachineTabProps {
   readonly onRetry: () => void;
   /** Read the machine again after a change that moved what it says about itself (its default runtime). */
   readonly onRefresh?: () => void;
+  /** Set only when the onboarding shell draws this tab as a step: the page tells the host what it decided. */
+  readonly step?: StepHost;
   /** The editor for a config file, drawn by whoever owns it; absent: a profile's file is named but not editable here. */
   readonly renderFileEditor?: (editor: FileEditorProps) => import('react').ReactNode;
 }

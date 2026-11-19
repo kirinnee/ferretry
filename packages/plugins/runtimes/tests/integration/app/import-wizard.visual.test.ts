@@ -174,6 +174,12 @@ const CASES: readonly Case[] = [
     expectNo: ['Hooks (5) · '],
   },
   {
+    name: 'retry-same-runtime',
+    view: 'retry',
+    expectText: ['A runtime named claude-default already uses this setup, so no second one is added.'],
+    expectNo: ['Runtime name'],
+  },
+  {
     name: 'signed-out',
     view: 'signin',
     expectText: ['not signed in', 'Sign in now, or import first and sign in after.'],

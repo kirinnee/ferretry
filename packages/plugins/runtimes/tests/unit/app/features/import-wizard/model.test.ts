@@ -9,8 +9,8 @@ import {
   stepsSettledBy,
   toolModel,
   versionOf,
-} from '../../../../../app/features/import-wizard/model.ts';
-import { toolHeadline } from '../../../../../app/features/import-wizard/mapping-words.ts';
+} from '../../../../../app/features/import-kit/model.ts';
+import { toolHeadline } from '../../../../../app/features/import-kit/mapping-words.ts';
 import { ImportItemIdSchema } from '../../../../../contract/index.ts';
 import { CLAUDE_FULL, CODEX_FULL, scanOf } from './scans.ts';
 
@@ -164,7 +164,6 @@ describe('small readings', () => {
     expect(stepsSettledBy('codex').map(step => `${step.plugin}.${step.stepId}`)).toEqual([
       'codex.harness',
       'logins.login',
-      'runtimes.runtimes',
     ]);
   });
 });

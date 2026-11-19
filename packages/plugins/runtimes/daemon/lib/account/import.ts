@@ -36,7 +36,7 @@ import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contra
 import { looksSecret } from '@ferretry/std/credential-words';
 import { GITHUB_TOKEN_NAMES, maskedVariableName, nameLooksLikeKey } from '@ferretry/plugin-logins/contract';
 import { importItemId, importNamedItemId } from '../../../contract/index.ts';
-import { harnessNamed, keepScope, ownMcpItem } from './import-scope.ts';
+import { harnessNamed } from './import-scope.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
 import { FLEET_STARTER_MODELS } from '../defaults.ts';
@@ -49,21 +49,16 @@ import {
   serializeSettings,
 } from '../settings.ts';
 import { HARNESS_DISPLAY_NAMES, modelHarness } from './layering.ts';
-import { componentScope, scopeFits } from './scope.ts';
 import { secretNameAt } from './secret-names.ts';
 import {
   type AccountModel,
-  type AccountModelDocument,
   type ComponentKind,
   type Credential,
   type InstructionsComponent,
-  isRuntimeName,
   type LayeredProfile,
   type LayerReferenceText,
   type McpComponent,
   type ModelSetComponent,
-  parseAccountModel,
-  parseLayerReference,
   type Runtime,
   type SettingsComponent,
   type SkillsComponent,
@@ -146,7 +141,7 @@ const HOST_SETTINGS_FORMAT: Readonly<Record<HarnessKind, SettingsFormat>> = {
 };
 
 /** What each harness calls its instructions document. */
-const HOST_INSTRUCTIONS_NAME: Readonly<Record<HarnessKind, string>> = {
+export const HOST_INSTRUCTIONS_NAME: Readonly<Record<HarnessKind, string>> = {
   claude: 'CLAUDE.md',
   codex: 'AGENTS.md',
 };
@@ -154,7 +149,7 @@ const HOST_INSTRUCTIONS_NAME: Readonly<Record<HarnessKind, string>> = {
 // ── What comes out ───────────────────────────────────────────────────────────────────────────────
 
 /** A file the setup executor writes into the asset tree, relative to `<FY_HOME>/fleet/assets`. */
-type ImportFile =
+export type ImportFile =
   | { readonly kind: 'write'; readonly path: string; readonly content: string }
   /** A whole folder copied from the host (a skill). `from` is absolute. */
   | { readonly kind: 'copy-directory'; readonly path: string; readonly from: string };
@@ -163,7 +158,7 @@ type ImportFile =
  * One value moved into Ferretry's secret store. THE ONLY place a value travels; it is never in a
  * preview, a note, a warning, a record or a component.
  */
-interface ImportedSecret {
+export interface ImportedSecret {
   readonly name: string;
   readonly value: string;
   /** Where it was found, as `<reference> · <key>` — names only. */
@@ -173,13 +168,13 @@ interface ImportedSecret {
 }
 
 /** A sentence about one harness's import, for the result screen (E4–E9). */
-interface ImportNote {
+export interface ImportNote {
   readonly harness: HarnessKind;
   readonly text: string;
 }
 
 /** What one import made a component from, so Import again can tell whether its source changed. */
-interface ImportRecordEntry {
+export interface ImportRecordEntry {
   readonly sources: readonly string[];
   readonly digest: string;
   /**
@@ -210,7 +205,7 @@ export interface ImportRecord {
 export const EMPTY_IMPORT_RECORD: ImportRecord = { version: 1, components: {} };
 
 /** One component whose source changed since the last import (O6). Offered, never applied. */
-interface ImportUpdate {
+export interface ImportUpdate {
   readonly reference: LayerReferenceText;
   readonly sources: readonly string[];
   /** The component as the source says now, and the files it needs. */
@@ -223,7 +218,7 @@ interface ImportUpdate {
 }
 
 /** A runtime the import did not create because one already uses that login and profile (E15). */
-interface ImportDuplicate {
+export interface ImportDuplicate {
   readonly harness: HarnessKind;
   readonly existing: string;
   /** The name it would have had, so "Add another anyway" can create it. */
@@ -239,7 +234,7 @@ export type ImportedComponent =
   | { readonly kind: 'modelSets'; readonly name: string; readonly value: ModelSetComponent };
 
 /** The value-free preview the scan route serves (§7 `/v1/fleet/setup/scan`). */
-interface HarnessImportPreview {
+export interface HarnessImportPreview {
   readonly harness: HarnessKind;
   readonly installed: boolean;
   readonly account: HostLogin;
@@ -266,7 +261,7 @@ interface CodexProfileHint {
   readonly effort?: string;
 }
 
-interface ImportPreview {
+export interface ImportPreview {
   readonly harnesses: readonly HarnessImportPreview[];
   /**
    * Whether `CLAUDE.md` and `AGENTS.md` say the same thing: `undefined` unless both were found.
@@ -327,7 +322,7 @@ export interface ImportOptions {
 // ── Names ────────────────────────────────────────────────────────────────────────────────────────
 
 /** The names an import gives what it makes. */
-const IMPORT_NAMES = {
+export const IMPORT_NAMES = {
   /** One generic instructions component, when `CLAUDE.md` and `AGENTS.md` match (E9). */
   sharedInstructions: 'main',
   /** The profile that matches the person's setup. */
@@ -343,7 +338,7 @@ const IMPORT_NAMES = {
  * setup was found, before any `-2` a clash adds. Exported because help text names it as the example,
  * and an example spelled by hand drifted to a name no import ever created.
  */
-const importedRuntimeName = (harness: HarnessKind, profile: string): string => harnessNamed(harness, profile);
+export const importedRuntimeName = (harness: HarnessKind, profile: string): string => harnessNamed(harness, profile);
 
 /** The asset-tree path of a component's file (§5.3). */
 export const componentFilePath = (kind: ComponentKind, name: string, extension: string): string =>
@@ -375,7 +370,7 @@ const secretNameOf = (variable: string): string => {
 };
 
 /** Hands out secret names, once per value, never one the store already holds. */
-class SecretNames {
+export class SecretNames {
   readonly #taken: Set<string>;
   readonly #byName = new Map<string, string>();
 
@@ -567,11 +562,17 @@ export function declaredModelIds(settings: SettingsObject): readonly string[] {
   return found;
 }
 
+/** The starter model set: the one model a harness starts with when nothing names another. */
+const starterModelSet = (harness: HarnessKind): ModelSetComponent => ({
+  models: [FLEET_STARTER_MODELS[harness]],
+  default: FLEET_STARTER_MODELS[harness],
+});
+
 /** The model set a harness's settings imply: the models it names for that harness, or the starter. */
 function modelSetOf(harness: HarnessKind, settings: SettingsObject | undefined): ModelSetComponent {
   const named = declaredModelIds(settings ?? {}).filter(id => modelHarness(id) === harness);
   const [first] = named;
-  if (first === undefined) return { models: [FLEET_STARTER_MODELS[harness]], default: FLEET_STARTER_MODELS[harness] };
+  if (first === undefined) return starterModelSet(harness);
   return { models: [...named], default: first };
 }
 
@@ -650,7 +651,7 @@ export function claudeProjectFolders(scan: HostHarnessScan): readonly string[] {
 // ── One harness, read into components ────────────────────────────────────────────────────────────
 
 /** What one harness's scan turned into, before the two harnesses are reconciled. */
-interface HarnessHarvest {
+export interface HarnessHarvest {
   readonly harness: HarnessKind;
   readonly instructions?: { readonly text: string; readonly source: string };
   readonly settings?: {
@@ -717,7 +718,7 @@ function codexProfilesOf(settings: Readonly<Record<string, unknown>> | undefined
   });
 }
 
-function harvest(
+export function harvest(
   scan: HostHarnessScan,
   names: SecretNames,
   secrets: ImportedSecret[],
@@ -726,7 +727,8 @@ function harvest(
 ): HarnessHarvest {
   const { harness } = scan;
   const key = itemHarness(harness);
-  const skipped = (kind: 'instructions' | 'settings' | 'env'): boolean => skip.has(importItemId(key, kind));
+  const skipped = (kind: 'instructions' | 'settings' | 'env' | 'model-set'): boolean =>
+    skip.has(importItemId(key, kind));
   const problems: string[] = [...scan.problems];
   const secretKeys: string[] = [];
   const format = HOST_SETTINGS_FORMAT[harness];
@@ -782,7 +784,7 @@ function harvest(
   }
   const env = envImport?.env ?? {};
   // What the person chose to leave out is filtered out HERE, before the model set is derived and the file is written:
-  // a skipped profile (`<harness>:profile:<name>`) is gone from both, and skipped settings leave no default model (only the profiles still selected remain).
+  // a skipped profile (`<harness>:profile:<name>`) is gone from both. Skipped settings no longer decide the model set; `<harness>:model-set` does.
   const profileTable = rest.profiles;
   if (isRecord(profileTable)) {
     const kept = Object.fromEntries(
@@ -791,12 +793,14 @@ function harvest(
     if (Object.keys(kept).length === 0) delete rest.profiles;
     else rest.profiles = kept;
   }
+  // The model set is its own choice (`<harness>:model-set`): the model the settings name is read before skipped settings drop it.
+  const namedModel = rest.model;
   // Skipped settings drop everything but the profiles the person kept: each is its own item and stays importable.
   if (skipped('settings')) for (const name of Object.keys(rest)) if (name !== 'profiles') delete rest[name];
   const modelSource: SettingsObject = {
-    ...(rest.model === undefined ? {} : { model: rest.model }),
+    ...(namedModel === undefined || skipped('model-set') ? {} : { model: namedModel }),
     ...(rest.profiles === undefined ? {} : { profiles: rest.profiles }),
-    ...(harness === 'claude' && !skipped('env') && !skipped('settings') && isRecord(parsed?.env)
+    ...(harness === 'claude' && !skipped('env') && !skipped('model-set') && isRecord(parsed?.env)
       ? { env: parsed.env }
       : {}),
   };
@@ -906,7 +910,7 @@ export interface Candidate {
   readonly without?: (omit: ReadonlySet<string>) => Candidate;
 }
 
-const referenceOf = (kind: ComponentKind, name: string): LayerReferenceText => `${kind}/${name}`;
+export const referenceOf = (kind: ComponentKind, name: string): LayerReferenceText => `${kind}/${name}`;
 
 const sameText = (left: string, right: string): boolean =>
   left.replace(/\r\n/gu, '\n').trimEnd() === right.replace(/\r\n/gu, '\n').trimEnd();
@@ -914,9 +918,9 @@ const sameText = (left: string, right: string): boolean =>
 const sameJson = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
 
 /** The layer order a Default profile reads in, as §5.2 shows it. */
-const LAYER_ORDER: readonly ComponentKind[] = ['instructions', 'mcp', 'skills', 'settings', 'modelSets'];
+export const LAYER_ORDER: readonly ComponentKind[] = ['instructions', 'mcp', 'skills', 'settings', 'modelSets'];
 
-function instructionsCandidates(harvests: readonly HarnessHarvest[]): {
+export function instructionsCandidates(harvests: readonly HarnessHarvest[]): {
   candidates: Candidate[];
   identical?: boolean;
 } {
@@ -962,7 +966,7 @@ function instructionsCandidates(harvests: readonly HarnessHarvest[]): {
   };
 }
 
-function mcpCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candidate[]; notes: ImportNote[] } {
+export function mcpCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candidate[]; notes: ImportNote[] } {
   const notes: ImportNote[] = [];
   const byName = new Map<string, { harness: HarnessKind; server: HarnessHarvest['mcp'][number] }[]>();
   for (const entry of harvests) {
@@ -1001,7 +1005,10 @@ function mcpCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candi
   return { candidates, notes };
 }
 
-function skillsCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candidate[]; notes: ImportNote[] } {
+export function skillsCandidates(harvests: readonly HarnessHarvest[]): {
+  candidates: Candidate[];
+  notes: ImportNote[];
+} {
   const notes: ImportNote[] = [];
   const store = new Map<string, HostSkill>();
   const shared: string[] = [];
@@ -1077,7 +1084,7 @@ function skillsCandidates(harvests: readonly HarnessHarvest[]): { candidates: Ca
   return { candidates, notes };
 }
 
-function harnessCandidates(entry: HarnessHarvest): Candidate[] {
+export function harnessCandidates(entry: HarnessHarvest): Candidate[] {
   const candidates: Candidate[] = [];
   if (entry.settings !== undefined) {
     const { value, content, source } = entry.settings;
@@ -1100,11 +1107,11 @@ function harnessCandidates(entry: HarnessHarvest): Candidate[] {
 }
 
 /** What a harness's login becomes: a pointer to the person's own (`host`), or an empty slot. */
-function credentialOf(harness: HarnessKind, login: HostLogin): Credential {
+export function credentialOf(harness: HarnessKind, login: HostLogin): Credential {
   return login.state === 'not-shareable' ? { harness, store: 'ferretry' } : { harness, store: 'host' };
 }
 
-function loginNote(harness: HarnessKind, login: HostLogin): string {
+export function loginNote(harness: HarnessKind, login: HostLogin): string {
   const label = HARNESS_DISPLAY_NAMES[harness];
   const own = harness === 'claude' ? 'claude' : 'codex';
   const who = login.email === undefined ? 'your login' : login.email;
@@ -1122,374 +1129,4 @@ function loginNote(harness: HarnessKind, login: HostLogin): string {
     default:
       return `Your ${label} login can't be shared in place (${login.reason ?? 'it is not kept in a file'}), so this login needs its own sign-in.`;
   }
-}
-
-/** The installed harnesses a scan list should import, in a stable order. */
-const importedHarnesses = (scans: readonly HostHarnessScan[], include?: readonly HarnessKind[]): HarnessKind[] =>
-  (['claude', 'codex'] as const).filter(
-    harness =>
-      scans.some(scan => scan.harness === harness && scan.command !== undefined) &&
-      (include === undefined || include.includes(harness)),
-  );
-
-function previewOf(scan: HostHarnessScan, entry: HarnessHarvest | undefined): HarnessImportPreview {
-  const base = {
-    harness: scan.harness,
-    installed: scan.command !== undefined,
-    account: scan.login,
-    missingCommands: [...scan.missingCommands],
-  };
-  if (entry === undefined) {
-    return {
-      ...base,
-      mcpServers: [],
-      skills: [],
-      codexProfiles: [],
-      projectInstructions: [...(scan.projectInstructions ?? [])],
-      secretKeys: [],
-      problems: [...scan.problems],
-    };
-  }
-  return {
-    ...base,
-    ...(scan.instructions.kind === 'text' && entry.instructions !== undefined
-      ? {
-          instructions: {
-            name: HOST_INSTRUCTIONS_NAME[scan.harness],
-            source: scan.instructions.source,
-            bytes: scan.instructions.bytes,
-          },
-        }
-      : {}),
-    ...(entry.settings !== undefined || entry.hooks !== undefined
-      ? {
-          settings: {
-            source: entry.settings?.source ?? entry.hooks?.source ?? scan.settings.source,
-            count: entry.settings?.count ?? 0,
-            hooks: entry.hooks?.count ?? 0,
-          },
-        }
-      : {}),
-    mcpServers: entry.mcp.map(server => server.name),
-    skills: entry.skills.map(skill => skill.item),
-    codexProfiles: [...entry.codexProfiles],
-    projectInstructions: [...(scan.projectInstructions ?? [])],
-    secretKeys: [...entry.secretKeys, ...entry.gatedKeys],
-    problems: [...entry.problems],
-  };
-}
-
-/**
- * Plan an import of the given harnesses' setups (§4.3 steps 2–4, Import again).
- *
- * Total: a document that cannot be read becomes a problem sentence in the preview and the rest of
- * the harness still imports.
- */
-export function planImport(scans: readonly HostHarnessScan[], options: ImportOptions): ImportPlan {
-  const existing = options.existing;
-  const record = options.record ?? EMPTY_IMPORT_RECORD;
-  const names = new SecretNames(options.existingSecrets ?? [], options.reusableSecrets);
-  const secrets: ImportedSecret[] = [];
-  const imported = importedHarnesses(scans, options.include);
-  const skip = new Set(options.skip ?? []);
-  const ticked = new Set(options.tickedEnv ?? []);
-  const harvests = imported.map(harness =>
-    harvest(scans.find(scan => scan.harness === harness) as HostHarnessScan, names, secrets, skip, ticked),
-  );
-  const harvestOf = (harness: HarnessKind) => harvests.find(entry => entry.harness === harness);
-
-  const instructions = instructionsCandidates(harvests);
-  const mcp = mcpCandidates(harvests);
-  const skills = skillsCandidates(harvests);
-  const candidates = [
-    ...instructions.candidates,
-    ...mcp.candidates,
-    ...skills.candidates,
-    ...harvests.flatMap(harnessCandidates),
-  ];
-
-  const notes: ImportNote[] = [];
-  for (const entry of harvests) {
-    const scan = scans.find(each => each.harness === entry.harness) as HostHarnessScan;
-    notes.push({ harness: entry.harness, text: loginNote(entry.harness, scan.login) });
-    if (entry.secretKeys.length > 0) {
-      notes.push({
-        harness: entry.harness,
-        text: `${String(entry.secretKeys.length)} secret value${entry.secretKeys.length === 1 ? '' : 's'} went to Ferretry's secret store and ${entry.secretKeys.length === 1 ? 'is' : 'are'} never shown: ${entry.secretKeys.join(', ')}.`,
-      });
-    }
-  }
-  for (const scan of scans) {
-    if (scan.command === undefined) {
-      notes.push({
-        harness: scan.harness,
-        text: `${HARNESS_DISPLAY_NAMES[scan.harness]} isn't installed · Install later in Settings.`,
-      });
-    }
-  }
-  if (instructions.identical !== undefined) {
-    notes.push({
-      harness: 'codex',
-      text: instructions.identical
-        ? 'Instructions: same as your CLAUDE.md · one shared copy.'
-        : 'Instructions: different from your CLAUDE.md · kept separately.',
-    });
-  }
-  notes.push(...mcp.notes, ...skills.notes);
-
-  // Import again: keep what is new, offer what changed, leave what the person made alone.
-  const components: ImportedComponent[] = [];
-  const files: ImportFile[] = [];
-  const keptSecrets = new Set<string>();
-  const updates: ImportUpdate[] = [];
-  const warnings: Record<string, readonly string[]> = {};
-  const recordEntries: Record<string, ImportRecordEntry> = { ...record.components };
-  const added: LayerReferenceText[] = [];
-  const taken = (kind: ComponentKind, name: string): boolean =>
-    existing?.components[kind][name] !== undefined || components.some(item => item.kind === kind && item.name === name);
-  const secretsOf = (candidate: Candidate): ImportedSecret[] => {
-    const referenced = new Set(secretReferencesIn(JSON.stringify(candidate.component.value)));
-    return secrets.filter(secret => referenced.has(secret.name));
-  };
-  for (const original of candidates) {
-    const candidate = ownMcpItem(original, existing);
-    const { kind, name } = candidate.component;
-    const reference = referenceOf(kind, name);
-    const previous = record.components[reference];
-    // What an earlier import left out is not compared: only what it imported can have changed.
-    const comparable =
-      previous?.left !== undefined && previous.left.length > 0 && candidate.without !== undefined
-        ? candidate.without(new Set(previous.left))
-        : candidate;
-    const digest = options.digest(comparable.digestText);
-    if (existing?.components[kind][name] !== undefined && previous !== undefined) {
-      if (previous.digest !== digest) {
-        const left = [...new Set([...(previous.left ?? []), ...(candidate.left ?? [])])];
-        updates.push({
-          reference,
-          ...(left.length === 0 ? {} : { left }),
-          sources: comparable.sources,
-          component: keepScope(comparable.component, existing),
-          files: comparable.files,
-          secrets: secretsOf(comparable),
-          digest,
-        });
-      }
-      continue;
-    }
-    // A name the person already used for something of their own: the import takes the next free one.
-    const free = freeName(name, candidate_ => taken(kind, candidate_));
-    const component = { ...candidate.component, name: free } as ImportedComponent;
-    const renamedFiles =
-      free === name
-        ? candidate.files
-        : candidate.files.map(file =>
-            file.kind === 'write' && file.path.startsWith(`components/${kind}/${name}.`)
-              ? { ...file, path: file.path.replace(`/${name}.`, `/${free}.`) }
-              : file,
-          );
-    const value = component.value as { file?: string };
-    if (free !== name && value.file !== undefined) {
-      (component as { value: { file?: string } }).value = {
-        ...value,
-        file: value.file.replace(`/${name}.`, `/${free}.`),
-      };
-    }
-    components.push(component);
-    files.push(...renamedFiles);
-    for (const secret of secretsOf(candidate)) keptSecrets.add(secret.name);
-    const freeReference = referenceOf(kind, free);
-    added.push(freeReference);
-    recordEntries[freeReference] = {
-      sources: candidate.sources,
-      digest,
-      ...(candidate.left === undefined ? {} : { left: [...candidate.left] }),
-    };
-    if (candidate.warnings.length > 0) warnings[freeReference] = candidate.warnings;
-  }
-
-  // The profiles: ONE PER IMPORTED HARNESS (P7 — a profile is Generic, Claude only or Codex only,
-  // never both), each holding the generic parts and that harness's own. Import again extends the
-  // profile an earlier import made for a harness, or makes one for a harness imported for the first
-  // time. A record written before P7 names one shared profile, which is extended as it always was.
-  const anyFound = harvests.some(entry => entry.found);
-  const profiles: Record<string, LayeredProfile> = {};
-  const ordered = (layers: readonly LayerReferenceText[]): LayerReferenceText[] =>
-    [...layers].sort(
-      (left, right) =>
-        LAYER_ORDER.indexOf(left.slice(0, left.indexOf('/')) as ComponentKind) -
-        LAYER_ORDER.indexOf(right.slice(0, right.indexOf('/')) as ComponentKind),
-    );
-  const componentAt = (reference: string): unknown => {
-    const parsed = parseLayerReference(reference);
-    if (parsed?.kind !== 'component') return undefined;
-    const made = components.find(item => item.kind === parsed.componentKind && item.name === parsed.name);
-    return made === undefined ? existing?.components[parsed.componentKind][parsed.name] : made.value;
-  };
-  const fitsOn = (harness: HarnessKind) => (reference: LayerReferenceText) =>
-    scopeFits(
-      componentScope(reference.slice(0, reference.indexOf('/')) as ComponentKind, componentAt(reference)),
-      harness,
-    );
-  const profileOf: Partial<Record<HarnessKind, string>> = {};
-  // A harness an earlier import already brought in: its login has had its `env` already, so a repeat adds none (r9 A8).
-  const importedBefore = new Set<HarnessKind>();
-  for (const harness of imported) {
-    const known = record.profiles?.[harness] ?? record.profile;
-    if (known !== undefined && existing?.profiles[known] !== undefined) {
-      profileOf[harness] = known;
-      importedBefore.add(harness);
-    }
-  }
-  for (const known of new Set(Object.values(profileOf))) {
-    const on = imported.filter(harness => profileOf[harness] === known);
-    const current = (existing as AccountModel).profiles[known];
-    const before = current?.layers ?? [];
-    const fresh = added.filter(
-      reference => !before.includes(reference) && on.some(harness => fitsOn(harness)(reference)),
-    );
-    if (fresh.length > 0) profiles[known] = { ...current, layers: [...before, ...ordered(fresh)] };
-  }
-  for (const harness of imported) {
-    if (profileOf[harness] !== undefined) continue;
-    // A harness imported for the first time: what an earlier import made that fits it, then what is new.
-    const earlier = Object.keys(record.components).filter(
-      reference => !added.includes(reference as LayerReferenceText) && componentAt(reference) !== undefined,
-    ) as LayerReferenceText[];
-    const fitting = [...earlier, ...added].filter(fitsOn(harness));
-    // Something found now, or something an earlier import found, is a Default; only model sets is a
-    // Starter. Never empty: the harness's model set is always new or recorded.
-    const found = anyFound || fitting.some(reference => !reference.startsWith('modelSets/'));
-    const layers = ordered(fitting);
-    const wanted = importedRuntimeName(harness, found ? IMPORT_NAMES.defaultProfile : IMPORT_NAMES.starterProfile);
-    const name = freeName(
-      wanted,
-      candidate => existing?.profiles[candidate] !== undefined || profiles[candidate] !== undefined,
-    );
-    profiles[name] = { layers };
-    profileOf[harness] = name;
-    if (!found) {
-      notes.push({
-        harness,
-        text: 'Nothing found. A plain Starter profile with only a model set. You can add to it later.',
-      });
-    }
-  }
-
-  // Credentials and runtimes.
-  const credentials: Record<string, Credential> = {};
-  const runtimes: Record<string, Runtime> = {};
-  const duplicates: ImportDuplicate[] = [];
-  const loginEnvs: ImportedLoginEnv[] = [];
-  for (const harness of imported) {
-    const scan = scans.find(each => each.harness === harness) as HostHarnessScan;
-    const wanted = credentialOf(harness, scan.login);
-    const reuse =
-      wanted.store === 'host'
-        ? Object.entries(existing?.credentials ?? {}).find(
-            ([, credential]) => credential.harness === harness && credential.store === 'host',
-          )?.[0]
-        : undefined;
-    const credentialId =
-      reuse ?? freeName(harnessNamed(harness, 'you'), candidate => existing?.credentials[candidate] !== undefined);
-    if (reuse === undefined) credentials[credentialId] = wanted;
-    const env = importedBefore.has(harness) ? undefined : harvestOf(harness)?.loginEnv;
-    if (env !== undefined) {
-      // An unticked GitHub token never got here: it was left out of the harvest, before any secret was claimed.
-      for (const entry of env.minted) keptSecrets.add(entry.secretName);
-      loginEnvs.push({ harness, login: credentialId, plain: env.plain, minted: env.minted });
-    }
-    const profileName = profileOf[harness];
-    if (profileName === undefined) continue;
-    const suggested = freeName(
-      profileName.startsWith(`${harness}-`) ? profileName : importedRuntimeName(harness, profileName),
-      candidate => existing?.runtimes[candidate] !== undefined || runtimes[candidate] !== undefined,
-    );
-    const twin = Object.entries(existing?.runtimes ?? {}).find(
-      ([, runtime]) => runtime.credential === credentialId && runtime.profile === profileName,
-    )?.[0];
-    if (twin !== undefined && !(options.addDuplicates ?? []).includes(harness)) {
-      duplicates.push({ harness, existing: twin, suggested });
-      continue;
-    }
-    if (!isRuntimeName(suggested)) continue;
-    runtimes[suggested] = { credential: credentialId, profile: profileName, agent: true };
-  }
-
-  const recordedProfiles: Partial<Record<HarnessKind, string>> = { ...record.profiles, ...profileOf };
-
-  const preview: ImportPreview = {
-    harnesses: scans.map(scan => previewOf(scan, harvestOf(scan.harness))),
-    ...(instructions.identical === undefined ? {} : { instructionsIdentical: instructions.identical }),
-  };
-
-  return {
-    preview,
-    imported,
-    credentials,
-    components,
-    profiles,
-    runtimes,
-    files,
-    secrets: secrets.filter(secret => keptSecrets.has(secret.name)),
-    loginEnvs,
-    warnings,
-    notes,
-    updates,
-    duplicates,
-    record: {
-      version: 1,
-      components: recordEntries,
-      ...(record.profile === undefined ? {} : { profile: record.profile }),
-      ...(Object.keys(recordedProfiles).length === 0 ? {} : { profiles: recordedProfiles }),
-    },
-  };
-}
-
-/** A configuration to import into when the machine has none yet. */
-const EMPTY_MODEL: AccountModelDocument = { version: 1 };
-
-/**
- * The configuration after an import: what is there, plus what the plan adds, plus each offered
- * update the person ACCEPTED (O6 — an update is never applied unless named here). Parsed, so a plan
- * that would make an invalid document is refused here rather than written.
- */
-export function mergeImport(
-  existing: AccountModel | undefined,
-  plan: ImportPlan,
-  acceptedUpdates: readonly LayerReferenceText[] = [],
-): AccountModel {
-  const base = (existing ?? parseAccountModel(EMPTY_MODEL)) as AccountModel;
-  const components = Object.fromEntries(
-    Object.entries(base.components).map(([kind, entries]) => [kind, { ...entries }]),
-  ) as Record<ComponentKind, Record<string, unknown>>;
-  const accepted = plan.updates.filter(update => acceptedUpdates.includes(update.reference));
-  for (const component of [...plan.components, ...accepted.map(update => update.component)]) {
-    components[component.kind][component.name] = component.value;
-  }
-  return parseAccountModel({
-    ...base,
-    credentials: { ...base.credentials, ...plan.credentials },
-    components,
-    profiles: { ...base.profiles, ...plan.profiles },
-    runtimes: { ...base.runtimes, ...plan.runtimes },
-  });
-}
-
-/** The record after an import, including each accepted update's new digest. */
-export function mergeImportRecord(plan: ImportPlan, acceptedUpdates: readonly LayerReferenceText[] = []): ImportRecord {
-  const components: Record<string, ImportRecordEntry> = { ...plan.record.components };
-  for (const update of plan.updates) {
-    if (acceptedUpdates.includes(update.reference)) {
-      components[update.reference] = {
-        sources: update.sources,
-        digest: update.digest,
-        ...(update.left === undefined ? {} : { left: update.left }),
-        ...(plan.record.components[update.reference]?.owned === undefined
-          ? {}
-          : { owned: plan.record.components[update.reference]?.owned }),
-      };
-    }
-  }
-  return { ...plan.record, components };
 }

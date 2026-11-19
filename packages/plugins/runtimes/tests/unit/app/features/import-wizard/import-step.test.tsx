@@ -144,9 +144,79 @@ describe('everything found', () => {
     const steps = calls.filter(call => call.route === 'POST /v1/onboarding/steps/:plugin/:stepId');
     expect(
       steps
-        .map(step => `${step.params?.['plugin']}.${step.params?.['stepId']}:${(step.body as { state: string }).state}`)
+        .map(step => `${step.params?.plugin}.${step.params?.stepId}:${(step.body as { state: string }).state}`)
         .sort(),
-    ).toEqual(['claude-code.harness:found', 'logins.login:found', 'runtimes.runtimes:done']);
+    ).toEqual(['claude-code.harness:found', 'logins.login:found']);
+  });
+
+  it('a retry on an import that already made its runtime asks for no new name and imports on that runtime', async () => {
+    const calls: Call[] = [];
+    const view = await open(
+      routes(
+        scanOf({
+          claude: CLAUDE_FULL,
+          duplicates: [{ harness: 'claude-code', existing: 'claude-default', suggested: 'claude-default-2' }],
+        }),
+      ),
+      calls,
+    );
+    const root = view.container;
+    expect(root.querySelector('[data-runtime-name]')).toBeNull();
+    expect(text(root, '[data-duplicate-note]')).toBe(
+      'A runtime named claude-default already uses this setup, so no second one is added.',
+    );
+    expect(root.querySelector<HTMLButtonElement>('[data-change-submit]')?.disabled).toBe(false);
+    await click(root, '[data-change-submit]');
+    await settle();
+    expect(calls.find(call => call.route === 'POST /v1/runtimes/proposals')?.body).toMatchObject({
+      change: { kind: 'setup.import', include: ['claude-code'] },
+    });
+    expect(text(root, '[data-import-answer]')).toContain('Claude Code is set up');
+  });
+
+  it('Go back after a first apply reads the scan again: the runtime it made is known, so no name is asked for or sent', async () => {
+    const calls: Call[] = [];
+    let applied = false;
+    const view = await open(
+      routes(scanOf({ claude: CLAUDE_FULL }), {
+        // The machine reports the runtime only AFTER the import committed it.
+        'GET /v1/runtimes/setup/scan': () =>
+          scanOf({
+            claude: CLAUDE_FULL,
+            duplicates: applied
+              ? [{ harness: 'claude-code', existing: 'work-claude', suggested: 'work-claude-2' }]
+              : [],
+          }),
+        [APPLY]: () => {
+          applied = true;
+          return { outcome: 'executed', executor: 'setup', summary: SENTENCES };
+        },
+      }),
+      calls,
+    );
+    const root = view.container;
+    const name = must(root.querySelector<HTMLInputElement>('[data-runtime-name]'), 'name');
+    await interact(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(name, 'work-claude');
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(root, '[data-change-submit]');
+    await settle();
+    expect(text(root, '[data-import-answer]')).toContain('Claude Code is set up');
+    await click(root, '[data-tool-reopen="claude-code"]');
+    await settle();
+    expect(root.querySelector('[data-runtime-name]')).toBeNull();
+    expect(text(root, '[data-duplicate-note]')).toBe(
+      'A runtime named work-claude already uses this setup, so no second one is added.',
+    );
+    expect(root.querySelector<HTMLButtonElement>('[data-change-submit]')?.disabled).toBe(false);
+    await click(root, '[data-change-submit]');
+    await settle();
+    const proposals = calls.filter(call => call.route === 'POST /v1/runtimes/proposals');
+    expect(proposals).toHaveLength(2);
+    expect(proposals[0]?.body).toMatchObject({ change: { names: { 'claude-code': 'work-claude' } } });
+    const retry = must(proposals[1], 'the retry proposal').body as { change: Record<string, unknown> };
+    expect(retry.change).not.toHaveProperty('names');
   });
 
   it('Next goes to Codex; its profiles are choices; Finish says where each ended', async () => {

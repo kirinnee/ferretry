@@ -20,6 +20,8 @@ export const becomes = (harness: HarnessKey, kind: ImportSingleItem | ImportName
       return harness === 'claude-code' ? 'Claude settings' : 'Codex settings';
     case 'env':
       return 'This login’s environment';
+    case 'model-set':
+      return 'A model set: the models your settings name';
     case 'profile':
       return 'A Codex settings item: its model and effort only';
   }

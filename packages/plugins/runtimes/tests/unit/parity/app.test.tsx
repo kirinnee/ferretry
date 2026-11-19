@@ -642,32 +642,33 @@ describe('the Model sets tab', () => {
 });
 
 describe('the machine-setup views the half builds (the first run’s steps and Export settings)', () => {
-  it('S-0024 Agent controls draws the five switches and the default runtime, and Save appears once one is flipped', async () => {
+  it('S-0024 the Start page draws two cards (never full width), only for its own step; the old steps are gone', async () => {
     await at('/d/d1/onboarding/steps');
     const half = app.build?.({ manifest, client: daemon(LISTED) });
+    // r10 O8: "Bring your setup", "Name your runtimes" and "Agent controls" are no longer first-run steps.
+    expect(Object.keys(half?.panels ?? {}).filter(id => id.startsWith('onboarding-'))).toEqual(['onboarding-start']);
+    expect((manifest.onboarding ?? []).map(step => step.id)).toEqual(['start']);
     const root = await draw<PanelProps>(
-      half?.panels['onboarding-controls'],
-      { subject: 'runtimes.controls' } as PanelProps,
-      r => r.querySelector('[data-default-runtime]') !== null,
-      'the Agent controls step drew its switches and the default runtime',
+      half?.panels['onboarding-start'],
+      { subject: 'runtimes.start' } as PanelProps,
+      r => r.querySelector('[data-choice]') !== null,
+      'the Start step drew its two cards',
     );
-    expect(root.querySelectorAll('[data-switch-row]').length).toBe(5);
-    expect(text(root, '[data-setup-section="agent-control"] h4')).toBe('What agents may control');
-    expect(root.querySelector('[data-change-submit]')).toBeNull();
-    const ferretry = must(
-      root.querySelector('[data-switch-row="Ferretry settings"] [role="switch"]'),
-      'the Ferretry settings switch',
-    );
-    expect(ferretry.getAttribute('aria-checked')).toBe('false');
-    await click(ferretry);
-    expect(ferretry.getAttribute('aria-checked')).toBe('true');
-    expect(text(root, '[data-change-submit]')).toBe('Save what agents may control');
+    const cards = [...root.querySelectorAll('[data-choice]')];
+    expect(cards.map(card => card.getAttribute('data-choice'))).toEqual(['fresh', 'clone']);
+    expect(cards.map(card => card.getAttribute('data-selected'))).toEqual(['true', 'false']);
+    // Nothing animates for the card chosen by default; only a card the person chooses plays it.
+    expect(root.querySelector('[data-pulse="true"]')).toBeNull();
+    await click(must(root.querySelector('[data-choice="clone"] input'), 'the copy card'));
+    expect(root.querySelector('[data-choice="clone"]')?.getAttribute('data-selected')).toBe('true');
+    expect(root.querySelector('[data-choice="fresh"]')?.getAttribute('data-selected')).toBe('false');
+    expect(root.querySelector('[data-pulse="true"]')?.getAttribute('data-choice')).toBe('clone');
     // The step draws only for its own subject.
     await view?.unmount();
     view = null;
     const other = await draw<PanelProps>(
-      half?.panels['onboarding-controls'],
-      { subject: 'runtimes.start' } as PanelProps,
+      half?.panels['onboarding-start'],
+      { subject: 'runtimes.import' } as PanelProps,
       () => true,
       'a step that is not its own draws nothing',
     );
@@ -694,16 +695,16 @@ describe('the machine-setup views the half builds (the first run’s steps and E
             ],
           },
           'GET /v1/config/file': (call: Call) => ({
-            path: call.query?.['path'],
+            path: call.query?.path,
             exists: true,
-            text: `# ${call.query?.['path']}\n`,
+            text: `# ${call.query?.path}\n`,
             etag: 'e',
             issues: [],
           }),
         }),
       });
       const root = await draw<SettingsProps>(
-        half?.settings['transfer'],
+        half?.settings.transfer,
         {},
         r => r.querySelector('[data-export-run]') !== null,
         'the Export & copy tab drew Export settings',
@@ -731,7 +732,7 @@ describe('the machine-setup views the half builds (the first run’s steps and E
     await at('/d/d1/settings/runtimes/transfer');
     const half = app.build?.({ manifest, client: daemon(LISTED) });
     const root = await draw<SettingsProps>(
-      half?.settings['transfer'],
+      half?.settings.transfer,
       {},
       r => r.querySelector('[data-copy-source]') !== null,
       'the Export & copy tab drew the Copy source step',

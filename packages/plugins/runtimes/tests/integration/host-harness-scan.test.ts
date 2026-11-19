@@ -10,7 +10,7 @@ import should from 'should';
 import { HostHarnessScanner, type HostHarnessScanDeps } from '../../daemon/adapters/host-harness-scan.ts';
 import type { HostFiles } from '../../daemon/adapters/ports.ts';
 import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
-import { planImport } from '../../daemon/lib/account/import.ts';
+import { planImport } from '../../daemon/lib/account/import-plan.ts';
 import { nodeHostFiles } from './support/node-host.ts';
 
 const created: string[] = [];

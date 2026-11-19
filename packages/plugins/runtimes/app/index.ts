@@ -7,7 +7,7 @@ import { lazyComponent } from './lazy.ts';
 import { MACHINES_SECTION } from './features/fleet/shell/machine-route.ts';
 
 type SettingsView = 'runtimes-settings' | 'profiles-settings' | 'model-sets-settings' | 'agents-settings';
-type StepView = 'setup-transfer' | 'agent-controls-step';
+type StepView = 'setup-transfer';
 
 /**
  * A view module (React), loaded on first use. The specifier is a Vite dynamic-import variable (`./views/*.tsx`).
@@ -28,6 +28,14 @@ const stepView = (name: StepView, factory: string, client: LiveRuntimesClient): 
     ((await loadView(name))[factory] as (client: LiveRuntimesClient) => AppComponent<SettingsProps>)(client),
   );
 
+/** The first-run Start page: a panel, so it is handed the setup flow's `step` host. */
+const startPanel = (client: LiveRuntimesClient): AppComponent<PanelProps> =>
+  lazyComponent<PanelProps>(async () =>
+    ((await loadView('setup-transfer')).createStartStep as (client: LiveRuntimesClient) => AppComponent<PanelProps>)(
+      client,
+    ),
+  );
+
 const pickerView = (client: RuntimesClient): AppComponent<PanelProps> =>
   lazyComponent<PanelProps>(async () =>
     ((await loadView('runtime-picker')).createRuntimePicker as (client: RuntimesClient) => AppComponent<PanelProps>)(
@@ -35,11 +43,10 @@ const pickerView = (client: RuntimesClient): AppComponent<PanelProps> =>
     ),
   );
 
-/** The import wizard's step body: its module loads when the step is first drawn. */
-const importStep = (client: LiveRuntimesClient): AppComponent<PanelProps> =>
-  lazyComponent<PanelProps>(
-    async () =>
-      (await import('./features/import-wizard/import-step.tsx')).createImportStep(client) as AppComponent<PanelProps>,
+/** The import wizard (Settings › Import): its module loads when the tab is first drawn. */
+const importWizard = (client: LiveRuntimesClient): AppComponent<SettingsProps> =>
+  lazyComponent<SettingsProps>(async () =>
+    (await import('./features/import-wizard/import-step.tsx')).createImportStep(client),
   );
 
 const accountPanel = (
@@ -69,6 +76,7 @@ export default provideToShell(
         runtimes: settingsView('runtimes-settings', 'createRuntimesSettings', client),
         profiles: settingsView('profiles-settings', 'createProfilesSettings', client),
         'model-sets': settingsView('model-sets-settings', 'createModelSetsSettings', client),
+        import: importWizard(client),
         agents: settingsView('agents-settings', 'createAgentsSettings', client),
         transfer: stepView('setup-transfer', 'createTransferSettings', client),
       },
@@ -76,22 +84,8 @@ export default provideToShell(
         'runtime-picker': pickerView(client),
         'new-ferret-account': accountPanel(client, 'createNewFerretAccountPanel'),
         'move-account': accountPanel(client, 'createMoveAccountPanel'),
-        // The first-run step's body: the runtimes view, only for its own step.
-        'onboarding-step': forSubject(
-          'runtimes.runtimes',
-          settingsView('runtimes-settings', 'createRuntimesSettings', client) as AppComponent<PanelProps>,
-        ),
-        // "Bring your setup": the import wizard (A10).
-        'onboarding-import': forSubject('runtimes.import', importStep(client)),
-        // v4's "Start from…" and "Agent controls" steps.
-        'onboarding-start': forSubject(
-          'runtimes.start',
-          stepView('setup-transfer', 'createStartStep', client) as AppComponent<PanelProps>,
-        ),
-        'onboarding-controls': forSubject(
-          'runtimes.controls',
-          stepView('agent-controls-step', 'createAgentControlsStep', client) as AppComponent<PanelProps>,
-        ),
+        // The first-run "Start fresh / Copy from another machine" page, only for its own step.
+        'onboarding-start': forSubject('runtimes.start', startPanel(client)),
       },
     }),
   }),

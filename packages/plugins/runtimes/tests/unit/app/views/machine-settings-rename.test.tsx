@@ -7,7 +7,7 @@ import { machine } from '../features/fleet/account-support.ts';
 import { interact, mount, type Mounted } from '../../support/dom.ts';
 
 /**
- * The setup rail's "Name your runtimes" step draws the machine settings host: when the machine is renamed while the step
+ * A machine-setup view draws the machine settings host: when the machine is renamed while the view
  * is open, the words follow the NEW name (the one the header reads from the paired list), not the host name read first.
  */
 

@@ -1,54 +1,20 @@
 /**
- * The import wizard's state: the scan and each tool's version (read again after an install or a sign-in), what the person
+ * The import wizard's state: the scan and each tool's version (the kit's shared read, read again after an install or a sign-in), what the person
  * left out and named, what an install or an import answered. Everything reaches the daemon through the client the shell
  * handed over; nothing here holds a value, a token or a path.
  */
-import { isStepUpRefusal } from '@ferretry/app/ui';
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { readMemory, rememberInAddress } from './wizard-memory.ts';
-import {
-  type ImportItemId,
-  type SetupScan,
-  SetupScanSchema,
-  ToolInstallResultSchema,
-  type ToolInstallOutcome,
-} from '../../../contract/index.ts';
+import { type ImportItemId, ToolInstallResultSchema, type ToolInstallOutcome } from '../../../contract/index.ts';
 import type { RuntimesClient } from '../../lib/client.ts';
-import { useAccountChanges } from '../fleet/shell/apply-change-panel.tsx';
 import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
-import {
-  resultSentences,
-  HARNESSES,
-  importChange,
-  nameProblem,
-  stepsSettledBy,
-  type ToolModel,
-  toolModel,
-  versionOf,
-} from './model.ts';
+import { HARNESSES, importChange, nameProblem, stepsSettledBy } from '../import-kit/model.ts';
+import { useApplyImport } from '../import-kit/use-apply-import.ts';
+import { useScan } from '../import-kit/use-harness-scan.ts';
 
-/** The daemon's own words for an import that has nothing it does not already hold. */
-const NOTHING_NEW = /nothing new to import/iu;
-
-const SCAN_ROUTE = 'GET /v1/runtimes/setup/scan' as const;
 const INSTALL_ROUTE = 'POST /v1/runtimes/machine/tools/install' as const;
 const STEP_ROUTE = 'POST /v1/onboarding/steps/:plugin/:stepId' as const;
-const UPDATE_ROUTE: Readonly<Record<HarnessKey, string>> = {
-  'claude-code': 'GET /v1/claude-code/update',
-  codex: 'GET /v1/codex/update',
-};
-
-type Read =
-  | { readonly kind: 'reading' }
-  /** The machine wants a passkey before it shows the setup; nothing asks until the person presses the button. */
-  | { readonly kind: 'confirm' }
-  | { readonly kind: 'failed'; readonly sentence: string }
-  | {
-      readonly kind: 'ready';
-      readonly scan: SetupScan;
-      readonly versions: Readonly<Record<HarnessKey, string | null>>;
-    };
 
 /** How a tool ended: brought in (with the daemon's sentences) or left alone. */
 export type ToolEnd =
@@ -64,7 +30,8 @@ const installSentence = (outcome: ToolInstallOutcome): string => {
 };
 
 export function useImportWizard(client: RuntimesClient) {
-  const [read, setRead] = useState<Read>({ kind: 'reading' });
+  // The scan is the kit's: read once per client and shared, read again here on opening (the machine as it is now).
+  const { read, models, look, rescan } = useScan(client, { run: 'settings-import', refresh: true });
   // What a reload keeps (the address): the open tool, the names, what was left out, the ticked tokens.
   const [remembered] = useState(() => readMemory(globalThis.location?.search ?? ''));
   const [tool, setTool] = useState(remembered.tool);
@@ -84,49 +51,7 @@ export function useImportWizard(client: RuntimesClient) {
   const [finished, setFinished] = useState(remembered.finished);
   const [installing, setInstalling] = useState<HarnessKey | null>(null);
   const [installNote, setInstallNote] = useState<Partial<Record<HarnessKey, string>>>({});
-  const changes = useAccountChanges({ client });
-  const generation = useRef(0);
-
-  /**
-   * Reads the scan and each tool's version. `quiet` is a read nobody asked for (the step opening, a re-read after an
-   * install): it never raises a passkey prompt, and a machine that wants one is answered with the button below. A press
-   * (`quiet` false) is the person's own act and may ask.
-   */
-  const scan = useCallback(
-    async (quiet = true): Promise<void> => {
-      generation.current += 1;
-      const mine = generation.current;
-      try {
-        const [answer, claude, codex] = await Promise.all([
-          // A press (`quiet: false`) is the person's own act and opens the shell's passkey prompt; a read nobody asked for never does.
-          client.call(SCAN_ROUTE, { quiet }),
-          client.call(UPDATE_ROUTE['claude-code'], { quiet: true }).catch(() => null),
-          client.call(UPDATE_ROUTE.codex, { quiet: true }).catch(() => null),
-        ]);
-        if (mine !== generation.current) return;
-        const parsed = SetupScanSchema.safeParse(answer);
-        if (!parsed.success && quiet) {
-          setRead({ kind: 'confirm' });
-          return;
-        }
-        setRead({
-          kind: 'ready',
-          scan: SetupScanSchema.parse(answer),
-          versions: { 'claude-code': versionOf(claude), codex: versionOf(codex) },
-        });
-      } catch (error) {
-        if (mine !== generation.current) return;
-        // The real shape of "this machine wants a passkey for that": a 403 `grant_step_up_required`. Read quietly, it waits for a press.
-        if (quiet && isStepUpRefusal(error)) setRead({ kind: 'confirm' });
-        else setRead({ kind: 'failed', sentence: changeRefusalSentence(error) });
-      }
-    },
-    [client],
-  );
-
-  useEffect(() => {
-    void scan();
-  }, [scan]);
+  const { changes, apply } = useApplyImport(client);
 
   useEffect(() => {
     rememberInAddress({
@@ -139,17 +64,6 @@ export function useImportWizard(client: RuntimesClient) {
       finished,
     });
   }, [tool, names, left, tickedEnv, declined, ends, finished]);
-
-  const models = useMemo<Readonly<Record<HarnessKey, ToolModel>> | null>(
-    () =>
-      read.kind === 'ready'
-        ? {
-            'claude-code': toolModel('claude-code', read.scan, read.versions['claude-code']),
-            codex: toolModel('codex', read.scan, read.versions.codex),
-          }
-        : null,
-    [read],
-  );
 
   const toggle = useCallback((harness: HarnessKey, id: ImportItemId, on: boolean): void => {
     setLeft(current => {
@@ -196,14 +110,14 @@ export function useImportWizard(client: RuntimesClient) {
           [harness]: outcome === undefined ? 'Nothing was installed.' : installSentence(outcome),
         }));
         // The person just pressed Install: this re-read is theirs too, and may ask for the passkey.
-        await scan(false);
+        await rescan(false);
       } catch (error) {
         setInstallNote(current => ({ ...current, [harness]: changeRefusalSentence(error) }));
       } finally {
         setInstalling(null);
       }
     },
-    [client, scan],
+    [client, rescan],
   );
 
   /** The old first-run steps this tool settles; a failure is told, never blocks. Answers whether any could not be marked. */
@@ -229,23 +143,17 @@ export function useImportWizard(client: RuntimesClient) {
     async (harness: HarnessKey): Promise<void> => {
       if (models === null) return;
       const model = models[harness];
-      if (nameProblem(nameOf(harness)) !== null) return;
-      const result = await changes.apply(
+      // A retry on the same import has its runtime already: the name is not asked for again.
+      if (model.duplicateOf === null && nameProblem(nameOf(harness)) !== null) return;
+      const applied = await apply(
         importChange(model, left[harness], nameOf(harness), tickedEnv[harness], declined[harness]),
+        model.label,
       );
-      // The daemon says "Nothing new to import." when everything is already in (the only change was an update the person left
-      // unticked). That is not a failure to show: the tool is set up as it was, and each unticked update says so.
-      const alreadyIn = result.kind === 'refused' && NOTHING_NEW.test(result.sentence);
-      if (result.kind !== 'applied' && !alreadyIn) return;
-      if (alreadyIn) changes.clear();
-      const summary =
-        result.kind === 'applied' && result.outcome.outcome === 'executed'
-          ? result.outcome.summary
-          : alreadyIn
-            ? `Nothing new to bring in from ${model.label}: it is already set up.`
-            : 'Imported.';
+      if (applied === null) return;
+      // The machine now holds this runtime: read the scan again so a Go back sees it (and asks for no new name). It is the person's own press.
+      void rescan(false);
       const unmarked = await settleSteps(harness);
-      const told = resultSentences(summary);
+      const told = applied.sentences;
       // What happened to each changed source, in words: the daemon names an accepted one; an unticked one is said here.
       const updated = model.updates
         .filter(
@@ -260,19 +168,24 @@ export function useImportWizard(client: RuntimesClient) {
         [harness]: { kind: 'imported', sentences: [...told, ...updated, ...kept], unmarked },
       }));
     },
-    [changes, left, models, nameOf, settleSteps, tickedEnv, declined],
+    [apply, left, models, nameOf, rescan, settleSteps, tickedEnv, declined],
   );
 
   const skip = useCallback(
     (harness: HarnessKey): void => setEnds(current => ({ ...current, [harness]: { kind: 'skipped' } })),
     [],
   );
-  const reopen = useCallback((harness: HarnessKey): void => {
-    setEnds(current => {
-      const { [harness]: _gone, ...rest } = current;
-      return rest;
-    });
-  }, []);
+  const reopen = useCallback(
+    (harness: HarnessKey): void => {
+      setEnds(current => {
+        const { [harness]: _gone, ...rest } = current;
+        return rest;
+      });
+      // Reopened, the page shows the machine as it is now, not the scan from before the import.
+      void rescan(false);
+    },
+    [rescan],
+  );
 
   return {
     read,
@@ -297,9 +210,9 @@ export function useImportWizard(client: RuntimesClient) {
     bringIn,
     skip,
     reopen,
-    rescan: scan,
+    rescan,
     /** The person's own press: may ask for the passkey. */
-    look: () => scan(false),
+    look,
     changes,
   };
 }
