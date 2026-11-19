@@ -101,9 +101,17 @@ const itemId = (id: () => string): ImportItemId | null => {
   return parsed.success ? parsed.data : null;
 };
 
-const groupsOf = (harness: HarnessKey, scan: HarnessScan): readonly FoundGroup[] => {
+/**
+ * What the host holds for this tool, as choices. A thing already brought in whose source has CHANGED is offered once, in the
+ * "Changed since" group, so it is not listed a second time here as if it were new (`updated` are those references).
+ */
+const groupsOf = (harness: HarnessKey, scan: HarnessScan, updated: readonly string[]): readonly FoundGroup[] => {
   const groups: FoundGroup[] = [];
-  if (scan.instructions !== undefined)
+  const refreshed = (kind: 'instructions' | 'mcp' | 'skills', name?: string): boolean =>
+    updated.some(reference =>
+      name === undefined ? reference.startsWith(`${kind}/`) : reference === `${kind}/${name}`,
+    );
+  if (scan.instructions !== undefined && !refreshed('instructions'))
     groups.push({
       key: 'instructions',
       title: 'Instructions',
@@ -115,21 +123,23 @@ const groupsOf = (harness: HarnessKey, scan: HarnessScan): readonly FoundGroup[]
         },
       ],
     });
-  if (scan.mcpServers.length > 0)
+  const mcpNew = scan.mcpServers.filter(name => !refreshed('mcp', name));
+  if (mcpNew.length > 0)
     groups.push({
       key: 'mcp',
       title: 'MCP servers',
-      items: scan.mcpServers.map(name => ({
+      items: mcpNew.map(name => ({
         id: itemId(() => importNamedItemId(harness, 'mcp', name)),
         label: name,
         becomes: becomes(harness, 'mcp'),
       })),
     });
-  if (scan.skills.length > 0)
+  const skillsNew = scan.skills.filter(name => !refreshed('skills', name));
+  if (skillsNew.length > 0)
     groups.push({
       key: 'skill',
       title: 'Skills',
-      items: scan.skills.map(name => ({
+      items: skillsNew.map(name => ({
         id: itemId(() => importNamedItemId(harness, 'skill', name)),
         label: name,
         becomes: becomes(harness, 'skill'),
@@ -187,13 +197,20 @@ export function toolModel(harness: HarnessKey, scan: SetupScan, version: string 
   const tool = scan.tools.find(entry => entry.harness === harness);
   const installed = found?.installed ?? tool?.installed ?? false;
   const signedIn = found !== undefined && SIGNED_IN.has(found.account.state);
-  const groups = found === undefined ? [] : groupsOf(harness, found);
   // An update belongs to the tool whose own files it is read from (the scan names each source by its path).
   const home = harness === 'claude-code' ? '.claude' : '.codex';
   const ownSources = [found?.instructions?.source, found?.settings?.source];
   const updates = scan.updates
     .filter(update => update.sources.some(source => ownSources.includes(source) || source.includes(home)))
     .map(update => ({ reference: update.reference, sources: [...update.sources] }));
+  const groups =
+    found === undefined
+      ? []
+      : groupsOf(
+          harness,
+          found,
+          updates.map(update => update.reference),
+        );
   const suggested = scan.runtimes.find(entry => entry.harness === harness)?.name;
   return {
     harness,

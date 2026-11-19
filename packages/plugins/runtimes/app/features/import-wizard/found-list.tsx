@@ -176,7 +176,9 @@ export function FoundList({
                 onChange={on => onTakeUpdate(update.reference, on)}
                 plain
               >
-                <Badge tone="accent">Update</Badge>
+                <span className="self-start">
+                  <Badge tone="accent">Update</Badge>
+                </span>
               </Row>
             ))}
           </ul>

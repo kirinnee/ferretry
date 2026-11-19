@@ -135,6 +135,7 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
   const invalid = nameProblem(name);
   const end = wizard.ends[harness];
   const taking = counts(model, left);
+  const refreshing = model.updates.filter(update => !wizard.declined[harness].has(update.reference)).length;
   const stage = model.stage === 'needs-sign-in' && signedHere ? 'ready' : model.stage;
 
   if (end !== undefined)
@@ -263,9 +264,14 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
         </Button>
       </ChangeApplyPanel>
       <p className="m-0 text-cell text-muted" data-import-count="">
-        {taking.left === 0
-          ? `Bringing ${plural(taking.taken, 'item')}.`
-          : `Bringing ${plural(taking.taken, 'item')}, leaving out ${String(taking.left)}.`}
+        {[
+          `Bringing ${plural(taking.taken, 'item')}`,
+          refreshing === 0 ? null : `refreshing ${plural(refreshing, 'changed source')}`,
+          taking.left === 0 ? null : `leaving out ${String(taking.left)}`,
+        ]
+          .filter(part => part !== null)
+          .join(', ')}
+        .
       </p>
     </div>
   );

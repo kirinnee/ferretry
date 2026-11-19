@@ -420,3 +420,21 @@ describe('a re-import whose source changed', () => {
     expect(text(root, '[data-import-answer]')).toContain('instructions/claude kept as it was.');
   });
 });
+
+describe('a changed source is listed once', () => {
+  it('not again as a new item, and the footer counts it as refreshed', async () => {
+    const scan = {
+      ...scanOf({ claude: CLAUDE_FULL }),
+      updates: [
+        { reference: 'instructions/claude', sources: ['~/.claude/CLAUDE.md'] },
+        { reference: 'skills/review', sources: ['~/.claude/skills/review'] },
+      ],
+    };
+    const view = await open(routes(scan));
+    const root = view.container;
+    expect(root.querySelector('[data-found-group="instructions"]')).toBeNull();
+    expect(root.querySelector('[data-found-item="claude-code:skill:review"]')).toBeNull();
+    expect(root.querySelector('[data-found-item="claude-code:skill:release-notes"]')).not.toBeNull();
+    expect(text(root, '[data-import-count]')).toBe('Bringing 5 items, refreshing 2 changed sources.');
+  });
+});
