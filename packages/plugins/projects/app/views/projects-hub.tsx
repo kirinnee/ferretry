@@ -25,11 +25,13 @@
  * refusal, and that is the whole protocol between this component and its caller.
  */
 
-import type { RegisterProjectRequest } from '../../contract/index.ts';
+import type { ProjectsConnectAccount, RegisterProjectRequest } from '../../contract/index.ts';
 import { FolderOpen, Plus, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import type { RecentProjectOption } from '../lib/discoveries.ts';
 import type { ProjectsSlice } from '../lib/projects-store.ts';
+import { CreateProjectFlow } from '../features/create-project/create-project-flow.tsx';
+import type { ProjectsClient } from '../lib/client.ts';
 import { AddProjectForm } from './add-project-form.tsx';
 import { ProjectDiscoveries } from './project-discoveries.tsx';
 import { ProjectProvenance } from './project-provenance.tsx';
@@ -66,6 +68,13 @@ interface ProjectsHubProps {
    */
   readonly onNavigate?: (to: string) => void;
   readonly now: number;
+  /**
+   * The daemon's client. Given, "Add project" opens the Create-a-project flow (explorer, GitHub accounts, keys); without
+   * it the plain form below is drawn, which is what the suites and harness frames that have no daemon mount.
+   */
+  readonly client?: ProjectsClient;
+  /** Git accounts' connect card for the flow, when this machine has it. */
+  readonly connectAccount?: ProjectsConnectAccount;
   /** Whether the add form starts open (a caller that came to add a project: the first-run stepper's "Create a project"). */
   readonly initiallyOpen?: boolean;
 }
@@ -115,6 +124,8 @@ export function ProjectsHub({
   projectHref,
   onNavigate,
   now,
+  client,
+  connectAccount,
   initiallyOpen = false,
 }: ProjectsHubProps) {
   const [draft, setDraft] = useState<ProjectRegistrationDraft>(emptyProjectRegistrationDraft);
@@ -164,13 +175,25 @@ export function ProjectsHub({
         </div>
         {open && (
           <div id={FORM_ID}>
-            <AddProjectForm
-              draft={draft}
-              onDraftChange={setDraft}
-              onSubmit={submit}
-              onCancel={() => setOpen(false)}
-              status={status}
-            />
+            {client === undefined ? (
+              <AddProjectForm
+                draft={draft}
+                onDraftChange={setDraft}
+                onSubmit={submit}
+                onCancel={() => setOpen(false)}
+                status={status}
+              />
+            ) : (
+              <CreateProjectFlow
+                client={client}
+                {...(connectAccount === undefined ? {} : { connectAccount })}
+                status={status}
+                onRegister={onRegister}
+                onClose={() => setOpen(false)}
+                {...(projectHref === undefined ? {} : { projectHref })}
+                {...(onNavigate === undefined ? {} : { onNavigate })}
+              />
+            )}
           </div>
         )}
       </div>

@@ -39,8 +39,8 @@ export type ConnectState =
 
 export interface DeviceFlowOptions {
   readonly client: GitAccountsClient;
-  /** Called once when GitHub has approved the code and the daemon holds the account. */
-  readonly onConnected: () => void;
+  /** Called once, with the account's id, when GitHub has approved the code and the daemon holds the account. */
+  readonly onConnected: (accountId: string) => void;
   /** Milliseconds to wait before the next poll, from the seconds the daemon asked for. Tests shorten it. */
   readonly pollDelay?: (seconds: number) => number;
   /** The clock. Tests and screenshots pin it. */
@@ -63,7 +63,7 @@ export function useDeviceFlow({ client, onConnected, pollDelay = s => s * SECOND
   const settle = useCallback((flow: GitDeviceFlow, status: GitDeviceFlowStatus) => {
     if (status.status === 'done') {
       setState({ step: 'done', login: status.login });
-      connected.current();
+      connected.current(status.accountId);
     } else if (status.status === 'expired') setState({ step: 'expired' });
     else if (status.status === 'denied') setState({ step: 'denied' });
     else

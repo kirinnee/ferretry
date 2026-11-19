@@ -10,7 +10,7 @@ import { useDeviceFlow } from './use-device-flow.ts';
 
 export interface ConnectPanelProps {
   readonly client: GitAccountsClient;
-  readonly onConnected: () => void;
+  readonly onConnected: (accountId: string) => void;
   readonly pollDelay?: (seconds: number) => number;
   readonly now?: () => number;
   /** How many accounts are connected, to say "another". */

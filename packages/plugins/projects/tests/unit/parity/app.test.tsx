@@ -100,14 +100,14 @@ describe('app parity', () => {
     await page.unmount();
   });
 
-  test('S-0222 S-0318 the project page draws provenance, board, ferrets and files; the registry page its form and discoveries', async () => {
+  test('S-0222 S-0318 the project page draws provenance, board, ferrets and files; the registry page its create flow and discoveries', async () => {
     const detail = await mount(
       routed(<ProjectDetailPage client={scripted(ROUTES)} daemon="workstation" projectId={PROJECT.id} />),
     );
     await settled(detail, c => c.querySelector('[data-project-agents="ready"]') !== null, 'the ferret list');
     expect(
       [...detail.container.querySelectorAll('section[aria-label]')].map(node => node.getAttribute('aria-label')),
-    ).toEqual(['Provenance', 'Board', 'Active ferrets', 'Files of this project’s ferrets']);
+    ).toEqual(['Provenance', 'GitHub accounts', 'Board', 'Active ferrets', 'Files of this project’s ferrets']);
     await detail.unmount();
 
     const hub = await mount(routed(<ProjectsPage client={scripted(ROUTES)} daemon="workstation" />));
@@ -117,7 +117,7 @@ describe('app parity', () => {
         clickEvent(),
       ),
     );
-    expect(hub.container.querySelector('form[aria-label="Register a project"]')).not.toBeNull();
+    expect(hub.container.querySelector('section[aria-label="Create a project"]')).not.toBeNull();
     await hub.unmount();
   });
 

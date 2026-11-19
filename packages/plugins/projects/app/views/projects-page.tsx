@@ -15,10 +15,14 @@
  * nothing else.
  */
 
-import { useRouter } from '@ferretry/app';
+import { useAppHook, useRouter } from '@ferretry/app';
 import { useNow } from '@ferretry/app/ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { RegisterProjectRequest } from '../../contract/index.ts';
+import {
+  isProjectsConnectAccount,
+  PROJECTS_CONNECT_ACCOUNT_HOOK,
+  type RegisterProjectRequest,
+} from '../../contract/index.ts';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
 import { type ProjectsClient, reasonOf } from '../lib/client.ts';
 import { discoveriesFrom } from '../lib/discoveries.ts';
@@ -34,6 +38,9 @@ export function ProjectsPage({ client, daemon }: { readonly client: ProjectsClie
   const { navigate } = useRouter();
   const now = useNow();
   const slice = useProjectsSlice(store);
+  // Git accounts' connect card, if this machine has that plugin: read here so the flow below is handed what it draws.
+  const provided = useAppHook(daemon, PROJECTS_CONNECT_ACCOUNT_HOOK);
+  const connectAccount = isProjectsConnectAccount(provided) ? provided : undefined;
   const [ferrets, setFerrets] = useState<{
     readonly rows: readonly FerretRow[] | null;
     readonly error: string | null;
@@ -118,6 +125,8 @@ export function ProjectsPage({ client, daemon }: { readonly client: ProjectsClie
       projectHref={projectId => projectPath(daemon, projectId)}
       onNavigate={navigate}
       now={now}
+      client={client}
+      {...(connectAccount === undefined ? {} : { connectAccount })}
       initiallyOpen={typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('add') === '1'}
     />
   );
