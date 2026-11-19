@@ -545,7 +545,7 @@ A ferret started on a login launches with that login's environment, and an agent
   - **Names that look like a key are not repeated** in a skipped or refused sentence.
   - **It runs once per harness.** Runtimes' setup apply calls it after the secrets are filed and the login is in effect, with the
     names of the keys that apply filed; "Import again" of a harness an earlier import already brought in adds no variables and
-    files no key for them. The person's ticked GitHub-token names (`tickedEnv`) travel as `ticked`.
+    files no key for them. The person's ticked GitHub-token names (`tickedEnv`) travel as `ticked`; a GitHub token that is not ticked (or when none are) is left out BEFORE any secret is filed, so it reaches neither the Vault nor a component nor the login.
     A reserved variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …) is skipped, and `GH_TOKEN`, `GITHUB_TOKEN` and
     `GH_ENTERPRISE_TOKEN` come in only when the person ticks them: a token in a login's environment can be read by every ferret on
     that login.

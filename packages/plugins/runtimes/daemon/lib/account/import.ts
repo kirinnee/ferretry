@@ -299,8 +299,8 @@ export interface ImportOptions {
   /** Secret names already in the store, so an import never overwrites one. */
   readonly existingSecrets?: readonly string[];
   /**
-   * GitHub token variables the person ticked (names only). Unticked, one is neither bound to the login nor kept in the Vault
-   * for it (r9 A8).
+   * GitHub token variables of a harness's own `env` the person ticked (names only). A token that is not named here is NOT
+   * imported: no secret is filed for it and nothing reaches a component or the login (r9 A8). Absent: none is imported.
    */
   readonly tickedEnv?: readonly string[];
   /** Harnesses whose duplicate runtime should be created anyway ("Add another anyway"). */
@@ -392,6 +392,8 @@ interface EnvImport {
   readonly env: Record<string, string>;
   readonly secretKeys: string[];
   readonly dropped: string[];
+  /** GitHub token variables left out until ticked, by NAME: the scan still lists them so the person can tick one. */
+  readonly gated: string[];
   /** The variables as host text (no secret-looking value): what a login's environment takes as plain text (r9 A8). */
   readonly plain: LoginEnvPlain[];
   /** The variables whose value went to the Vault, by the secret's NAME: what a login's environment binds a reference to. */
@@ -429,8 +431,10 @@ function importEnv(
   from: string,
   names: SecretNames,
   secrets: ImportedSecret[],
+  /** Given for a harness's own `env`: a GitHub token variable not named here is left out before any secret is filed. */
+  ticked?: ReadonlySet<string>,
 ): EnvImport {
-  const result: EnvImport = { env: {}, secretKeys: [], dropped: [], plain: [], minted: [] };
+  const result: EnvImport = { env: {}, secretKeys: [], dropped: [], gated: [], plain: [], minted: [] };
   if (!isRecord(env)) return result;
   for (const [variable, raw] of Object.entries(env)) {
     if (typeof raw !== 'string' && typeof raw !== 'number' && typeof raw !== 'boolean') {
@@ -438,6 +442,11 @@ function importEnv(
       continue;
     }
     const value = String(raw);
+    if (ticked !== undefined && isGithubTokenName(variable) && !ticked.has(variable)) {
+      result.dropped.push(`${keyPrefix}${variable} (a GitHub token: not imported unless you tick it)`);
+      result.gated.push(`${keyPrefix}${variable}`);
+      continue;
+    }
     if ((RESERVED_ENV_NAMES as readonly string[]).includes(variable)) {
       result.dropped.push(`${keyPrefix}${variable} (Ferretry sets it for each runtime)`);
       continue;
@@ -638,6 +647,8 @@ interface HarnessHarvest {
   readonly skills: readonly HostSkill[];
   readonly modelSet: ModelSetComponent;
   readonly secretKeys: readonly string[];
+  /** GitHub token variables left out until ticked (names only): listed by the scan, never filed. */
+  readonly gatedKeys: readonly string[];
   /** The harness's own `env` for its login (r9 A8), when it has any and the person did not leave it out. */
   readonly loginEnv?: { readonly plain: readonly LoginEnvPlain[]; readonly minted: readonly LoginEnvMinted[] };
   readonly problems: readonly string[];
@@ -685,6 +696,7 @@ function harvest(
   names: SecretNames,
   secrets: ImportedSecret[],
   skip: ReadonlySet<string>,
+  ticked: ReadonlySet<string>,
 ): HarnessHarvest {
   const { harness } = scan;
   const key = itemHarness(harness);
@@ -714,7 +726,7 @@ function harvest(
       hooks = { source: scan.settings.source, count: countHooks(rest.hooks) };
     }
     delete rest.hooks;
-    envImport = skipped('env') ? undefined : importEnv(rest.env, 'env.', settingsFile, names, secrets);
+    envImport = skipped('env') ? undefined : importEnv(rest.env, 'env.', settingsFile, names, secrets, ticked);
     delete rest.env;
   } else {
     delete rest.mcp_servers;
@@ -723,7 +735,7 @@ function harvest(
     if (isRecord(policy) && isRecord(policy.set)) {
       envImport = skipped('env')
         ? undefined
-        : importEnv(policy.set, 'shell_environment_policy.set.', settingsFile, names, secrets);
+        : importEnv(policy.set, 'shell_environment_policy.set.', settingsFile, names, secrets, ticked);
       const kept = Object.fromEntries(Object.entries(policy).filter(([key]) => key !== 'set'));
       if (Object.keys(kept).length === 0) delete rest.shell_environment_policy;
       else rest.shell_environment_policy = kept;
@@ -838,6 +850,7 @@ function harvest(
     skills,
     modelSet: modelSetOf(harness, modelSource),
     secretKeys,
+    gatedKeys: envImport?.gated ?? [],
     ...(envImport === undefined || (envImport.plain.length === 0 && envImport.minted.length === 0)
       ? {}
       : { loginEnv: { plain: envImport.plain, minted: envImport.minted } }),
@@ -1116,7 +1129,7 @@ function previewOf(scan: HostHarnessScan, entry: HarnessHarvest | undefined): Ha
     skills: entry.skills.map(skill => skill.item),
     codexProfiles: [...entry.codexProfiles],
     projectInstructions: [...(scan.projectInstructions ?? [])],
-    secretKeys: [...entry.secretKeys],
+    secretKeys: [...entry.secretKeys, ...entry.gatedKeys],
     problems: [...entry.problems],
   };
 }
@@ -1134,8 +1147,9 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   const secrets: ImportedSecret[] = [];
   const imported = importedHarnesses(scans, options.include);
   const skip = new Set(options.skip ?? []);
+  const ticked = new Set(options.tickedEnv ?? []);
   const harvests = imported.map(harness =>
-    harvest(scans.find(scan => scan.harness === harness) as HostHarnessScan, names, secrets, skip),
+    harvest(scans.find(scan => scan.harness === harness) as HostHarnessScan, names, secrets, skip, ticked),
   );
   const harvestOf = (harness: HarnessKind) => harvests.find(entry => entry.harness === harness);
 
@@ -1310,7 +1324,6 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   const runtimes: Record<string, Runtime> = {};
   const duplicates: ImportDuplicate[] = [];
   const loginEnvs: ImportedLoginEnv[] = [];
-  const ticked = new Set(options.tickedEnv ?? []);
   for (const harness of imported) {
     const scan = scans.find(each => each.harness === harness) as HostHarnessScan;
     const wanted = credentialOf(harness, scan.login);
@@ -1325,9 +1338,8 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     if (reuse === undefined) credentials[credentialId] = wanted;
     const env = importedBefore.has(harness) ? undefined : harvestOf(harness)?.loginEnv;
     if (env !== undefined) {
-      // A GitHub token the person did not tick is neither bound to the login nor filed for it.
-      const filed = env.minted.filter(entry => !isGithubTokenName(entry.name) || ticked.has(entry.name));
-      for (const entry of filed) keptSecrets.add(entry.secretName);
+      // An unticked GitHub token never got here: it was left out of the harvest, before any secret was claimed.
+      for (const entry of env.minted) keptSecrets.add(entry.secretName);
       loginEnvs.push({ harness, login: credentialId, plain: env.plain, minted: env.minted });
     }
     const profileName = profileOf[harness];

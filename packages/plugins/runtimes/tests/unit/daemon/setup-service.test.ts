@@ -91,7 +91,7 @@ const claudeScan = (overrides: Partial<HostHarnessScan> = {}): HostHarnessScan =
   settings: {
     kind: 'text',
     source: '/person/.claude/settings.json',
-    text: JSON.stringify({ theme: 'dark', env: { GITHUB_TOKEN: SECRET_VALUE } }),
+    text: JSON.stringify({ theme: 'dark', env: { ANTHROPIC_API_KEY: SECRET_VALUE } }),
     bytes: 80,
   },
   mcp: { kind: 'absent', source: '/person/.claude.json' },
@@ -424,7 +424,7 @@ describe('scan', () => {
     should(claude?.instructions?.name).equal('CLAUDE.md');
     should(claude?.settings?.source).equal('/person/.claude/settings.json');
     should(claude?.skills).deepEqual(['review']);
-    should(claude?.secretKeys).deepEqual(['env.GITHUB_TOKEN']);
+    should(claude?.secretKeys).deepEqual(['env.ANTHROPIC_API_KEY']);
     should(JSON.stringify(scan)).not.containEql(SECRET_VALUE);
     should(scan.runtimes).deepEqual([{ harness: 'claude-code', name: 'claude-default', profile: 'claude-default' }]);
     should(scan.updates).deepEqual([]);
@@ -915,7 +915,7 @@ describe('the setup.import executor', () => {
     // Instructions are Runtimes' own kind: the text rides in the model, never as a document beside it.
     should(paths.some(path => path.startsWith('/state/fleet/assets/components/instructions/'))).be.false();
     should(configTextOf(applied[0]?.documents ?? [])).containEql('Be kind.');
-    should(secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
+    should(secrets.get('ANTHROPIC_API_KEY')).equal(SECRET_VALUE);
     for (const document of applied[0]?.documents ?? []) should(document.content).not.containEql(SECRET_VALUE);
     should(configTextOf(applied[0]?.documents ?? [])).containEql('"agent": true');
   });
@@ -1137,7 +1137,7 @@ describe('the setup.import executor', () => {
     const change = IMPORT();
     await full.service.executors.setup.describe(change, MACHINE);
     const failure = await catalogRefusal(full.service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
-    should(failure.message).equal('the secret store could not take GITHUB_TOKEN, so nothing was changed: full');
+    should(failure.message).equal('the secret store could not take ANTHROPIC_API_KEY, so nothing was changed: full');
     should(full.applied).have.length(0);
   });
 
@@ -1183,10 +1183,10 @@ describe('the setup.import executor', () => {
     const change = IMPORT();
     await service.executors.setup.describe(change, remoteWith('granted'));
     await service.executors.setup.execute(change, remoteWith('granted'));
-    should(secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
+    should(secrets.get('ANTHROPIC_API_KEY')).equal(SECRET_VALUE);
     const other = world();
     await importOnce(other.service);
-    should(other.secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
+    should(other.secrets.get('ANTHROPIC_API_KEY')).equal(SECRET_VALUE);
   });
 
   it('should file a key a new part and an accepted update share once, so the second create is not refused', async () => {
@@ -1242,7 +1242,7 @@ describe('the setup.import executor', () => {
           kind: 'text',
           source: '/person/.claude/settings.json',
           text: JSON.stringify({
-            env: { GITHUB_TOKEN: SECRET_VALUE, OPENAI_API_KEY: 'sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa' },
+            env: { ANTHROPIC_API_KEY: SECRET_VALUE, OPENAI_API_KEY: 'sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa' },
           }),
           bytes: 120,
         },
@@ -4084,6 +4084,43 @@ describe('the setup.import executor adds the harness env to the login the apply 
     const none = world();
     none.state.scans = envScan();
     should((await importOnce(none.service)).summary).equal('studio is ready · 1 runtime created: claude-default.');
+  });
+
+  const GITHUB_SETTINGS = JSON.stringify({
+    env: { GITHUB_TOKEN: SECRET_VALUE, GH_TOKEN: SECRET_VALUE, ANTHROPIC_BASE_URL: 'https://gateway.example.test' },
+  });
+  const githubScan = (): HostHarnessScan[] => [
+    claudeScan({
+      settings: { kind: 'text', source: '/person/.claude/settings.json', text: GITHUB_SETTINGS, bytes: 80 },
+    }),
+    codexScan(),
+  ];
+
+  it('should file no secret and bind nothing for a GitHub token that is not ticked, whether tickedEnv is absent or empty', async () => {
+    for (const change of [IMPORT(), IMPORT({ tickedEnv: [] } as never)]) {
+      const fake = fakePort();
+      const w = world({ overrides: { loginEnvImport: fake.port } });
+      fake.watch(w.applied);
+      w.state.scans = githubScan();
+      await importOnce(w.service, change);
+      should([...w.secrets.keys()]).eql([]);
+      should(fake.asked[0]?.request.minted).eql([]);
+      should(fake.asked[0]?.request.plain.map(variable => variable.name)).eql(['ANTHROPIC_BASE_URL']);
+      should(JSON.stringify(w.applied)).not.containEql('GITHUB_TOKEN');
+      should(JSON.stringify(w.applied)).not.containEql(SECRET_VALUE);
+    }
+  });
+
+  it('should file and bind the one GitHub token the person ticked, and no other', async () => {
+    const fake = fakePort();
+    const w = world({ overrides: { loginEnvImport: fake.port } });
+    fake.watch(w.applied);
+    w.state.scans = githubScan();
+    await importOnce(w.service, IMPORT({ tickedEnv: ['GITHUB_TOKEN'] } as never));
+    should([...w.secrets.keys()]).eql(['GITHUB_TOKEN']);
+    should(w.secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
+    should(fake.asked[0]?.request.minted).eql([{ name: 'GITHUB_TOKEN', secretName: 'GITHUB_TOKEN' }]);
+    should(fake.asked[0]?.request.ticked).eql(['GITHUB_TOKEN']);
   });
 
   it('should ask the port nothing when the person left the env out', async () => {

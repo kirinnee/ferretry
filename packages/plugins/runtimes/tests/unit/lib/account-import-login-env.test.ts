@@ -57,10 +57,31 @@ describe('planImport — the harness env for the login (r9 A8)', () => {
     for (const minted of env?.minted ?? []) should(filed).containEql(minted.secretName);
   });
 
-  it('should still name an unticked GitHub token, so the login port is what leaves it out with its sentence', () => {
-    const plan = planImport([claude(SETTINGS)], { digest });
+  it('should file no key and bind nothing for a GitHub token that is not ticked, and still list its name for the scan', () => {
+    for (const plan of [
+      planImport([claude(SETTINGS)], { digest }),
+      planImport([claude(SETTINGS)], { digest, tickedEnv: [] }),
+    ]) {
+      should(plan.secrets.map(secret => secret.name)).eql(['ANTHROPIC_API_KEY']);
+      should(plan.loginEnvs[0]?.minted.map(entry => entry.name)).eql(['ANTHROPIC_API_KEY']);
+      should(JSON.stringify(plan.components)).not.containEql('GITHUB_TOKEN');
+      should(plan.preview.harnesses[0]?.secretKeys).containEql('env.GITHUB_TOKEN');
+    }
+  });
+
+  it('should file and bind a GitHub token that is ticked, and no other that is not', () => {
+    const plan = planImport([claude(SETTINGS)], { digest, tickedEnv: ['GITHUB_TOKEN'] });
+    should(plan.secrets.map(secret => secret.name).sort()).eql(['ANTHROPIC_API_KEY', 'GITHUB_TOKEN']);
     should(plan.loginEnvs[0]?.minted.map(entry => entry.name)).containEql('GITHUB_TOKEN');
-    should(plan.loginEnvs[0]?.plain.map(entry => entry.name)).not.containEql('CLAUDE_CONFIG_DIR');
+    // Another token name, unticked, stays out.
+    const other = planImport(
+      [claude({ env: { GH_TOKEN: 'ghp_placeholder000000000000000000', GITHUB_TOKEN: FAKE_KEY } })],
+      {
+        digest,
+        tickedEnv: ['GITHUB_TOKEN'],
+      },
+    );
+    should(other.secrets.map(secret => secret.name)).eql(['GITHUB_TOKEN']);
   });
 
   it('should bring in no env when the person left the env item out', () => {
