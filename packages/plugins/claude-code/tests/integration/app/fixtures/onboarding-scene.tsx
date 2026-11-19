@@ -3,7 +3,7 @@
  * plain stand-in for the step frame (the real frame is O4's; this one only gives the page a title, a body and a footer so
  * the page can be looked at). Nothing reads a network. Every name, path and command below is made up.
  *
- *   ?page=installed|sign-in|import-choice|permission|permission-auto   ?theme=<family>-<mode>
+ *   ?page=installed|sign-in|import-choice|permission|permission-auto|installed-manual   ?theme=<family>-<mode>
  */
 import { createRoot } from 'react-dom/client';
 import '../../../../app/features/onboarding/onboarding.css';
@@ -18,6 +18,7 @@ const page = params.get('page') ?? 'installed';
 
 const TITLES: Record<string, string> = {
   installed: 'Install Claude Code',
+  'installed-manual': 'Install Claude Code',
   'sign-in': 'Sign in to Claude',
   'import-choice': 'What to bring over',
   permission: 'Permissions',
@@ -33,7 +34,14 @@ const table: Record<string, unknown> = {
         harness: 'claude-code',
         label: 'Claude Code',
         installed: false,
-        install: { kind: 'runnable', command: 'npm install --global @fake/claude-code' },
+        install:
+          page === 'installed-manual'
+            ? {
+                kind: 'no-package-manager',
+                reason: 'No package manager was found on this machine.',
+                manualCommand: 'curl -fsSL https://example.invalid/install | sh',
+              }
+            : { kind: 'runnable', command: 'npm install --global @fake/claude-code' },
       },
     ],
   },
@@ -89,7 +97,7 @@ const signIn = (
 );
 
 const body =
-  page === 'installed' ? (
+  page === 'installed' || page === 'installed-manual' ? (
     <InstalledPage client={client} step={step} />
   ) : page === 'sign-in' ? (
     signIn

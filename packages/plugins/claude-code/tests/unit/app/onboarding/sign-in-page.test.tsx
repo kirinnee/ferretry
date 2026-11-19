@@ -72,14 +72,15 @@ describe('the sign-in page', () => {
     expect(run.events).toEqual(['ready', 'busy:Sign in to Claude to continue', 'busy:null', 'done']);
   });
 
-  it('does not hold Next on a page that has no panel to sign in with (nothing here could free it)', async () => {
+  it('holds Next (never records a sign-in with no login) when there is no panel to sign in with; Later and Skip stay', async () => {
     const { run } = await open(null);
-    expect(run.events).toEqual(['ready']);
+    expect(run.events).toEqual(['ready', 'busy:Sign in to Claude to continue']);
+    expect(run.events).not.toContain('done');
   });
 
   it('shows itself, saying where to sign in, when no plugin fills the slot', async () => {
     const { view, run } = await open(null);
-    expect(run.events).toEqual(['ready']);
+    expect(run.events).toEqual(['ready', 'busy:Sign in to Claude to continue']);
     expect(view.container.querySelector('[data-sign-in-missing]')?.textContent).toContain('Settings › Logins');
   });
 

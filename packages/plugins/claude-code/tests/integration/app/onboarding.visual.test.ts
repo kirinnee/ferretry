@@ -29,7 +29,7 @@ const VIEWPORTS = [
   { name: 'phone-390', width: 390, height: 844, phone: true },
   { name: 'desktop-1280', width: 1_280, height: 800, phone: false },
 ] as const;
-const PAGES = ['installed', 'sign-in', 'import-choice', 'permission'] as const;
+const PAGES = ['installed', 'installed-manual', 'sign-in', 'import-choice', 'permission'] as const;
 
 let browser: Browser;
 let directory = '';
@@ -125,16 +125,28 @@ describe('the Claude segment pages', () => {
           await context.close();
         }, 60_000);
 
-  it('permission: the current value is the selected card, and the real flag is named', async () => {
-    const context = await newContext(VIEWPORTS[1], 'light');
-    const tab = await open(context, 'permission', 'light');
-    expect(await tab.locator('input[value="skip"]').isChecked()).toBe(true);
-    expect(await tab.locator('.cc-step').innerText()).toContain('--dangerously-skip-permissions');
-    await tab.locator('[data-choice="auto"]').click();
-    await tab.waitForTimeout(400);
-    expect(await tab.locator('[data-demo="permission-auto"]').count()).toBe(1);
-    if (shotsDir !== '')
-      await tab.screenshot({ fullPage: true, path: join(shotsDir, 'permission-auto-desktop-1280-light.png') });
-    await context.close();
-  }, 60_000);
+  for (const viewport of VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`permission: the current value is the selected card, the real flag is named, and a pick offers Use and Keep at ${viewport.name}, ${mode}`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'permission', mode);
+        expect(await tab.locator('input[value="skip"]').isChecked()).toBe(true);
+        expect(await tab.locator('.cc-step').innerText()).toContain('--dangerously-skip-permissions');
+        await tab.locator('[data-choice="auto"]').click();
+        await tab.waitForTimeout(400);
+        expect(await tab.locator('[data-demo="permission-auto"]').count()).toBe(1);
+        // The pick holds Next until "Use …" or "Keep …": both are on screen, each a 44px target inside the screen.
+        for (const label of ['Use Auto mode', 'Keep Skip permissions']) {
+          const box = await tab.getByRole('button', { name: label }).boundingBox();
+          expect(box?.height).toBeGreaterThanOrEqual(44);
+          expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
+        }
+        expect(await tab.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+        if (shotsDir !== '')
+          await tab.screenshot({
+            fullPage: true,
+            path: join(shotsDir, `permission-pick-${viewport.name}-${mode}.png`),
+          });
+        await context.close();
+      }, 60_000);
 });

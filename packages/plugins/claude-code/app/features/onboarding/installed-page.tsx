@@ -64,52 +64,76 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
     [step],
   );
 
+  /** Claude turned up: the success this page waits for if it is holding Next, otherwise nothing to show. */
+  const markFound = useCallback((): void => {
+    setRead({ kind: 'found' });
+    if (holding.current) {
+      holding.current = false;
+      step?.busy(null);
+      step?.done();
+    } else decide(false);
+  }, [decide, step]);
+
+  /** Reads the installer's plan; says whether Claude is on the machine, still missing (`plan`), or could not be read. */
   const readPlan = useCallback(
-    async (quiet: boolean): Promise<void> => {
+    async (quiet: boolean): Promise<'found' | 'plan' | 'unread'> => {
       try {
         const scan = ScanToolsSchema.parse(await client.call(SCAN, { quiet }));
         const tool = scan.tools.find(entry => entry.harness === 'claude-code');
         if (tool === undefined || tool.installed) {
-          setRead({ kind: 'found' });
-          if (holding.current) {
-            // It turned up while the page was open (the install ran after all): that is the success this page waits for.
-            holding.current = false;
-            step?.busy(null);
-            step?.done();
-          } else decide(false);
-        } else {
-          setRead({ kind: 'plan', plan: tool.install });
-          decide(true);
+          markFound();
+          return 'found';
         }
+        setRead({ kind: 'plan', plan: tool.install });
+        decide(true);
+        return 'plan';
       } catch (error) {
         if (quiet && isStepUpRefusal(error)) setRead({ kind: 'confirm' });
         else setRead({ kind: 'failed', sentence: sentenceOf(error) });
         decide(true);
+        return 'unread';
       }
     },
-    [client, decide, step],
+    [client, decide, markFound],
   );
+
+  /** Where the binary stands, from the update view; an unreadable view is "not known to be installed". */
+  const isLocated = useCallback(async (): Promise<boolean> => {
+    try {
+      return LocationSchema.parse(await client.call(UPDATE, { quiet: true })).location.state === 'located';
+    } catch {
+      return false;
+    }
+  }, [client]);
 
   useEffect(() => {
     let alive = true;
     void (async () => {
-      try {
-        const view = LocationSchema.parse(await client.call(UPDATE, { quiet: true }));
-        if (!alive) return;
-        if (view.location.state === 'located') {
-          setRead({ kind: 'found' });
-          decide(false);
-          return;
-        }
-      } catch {
-        // An unreadable version view is not "installed": the plan below says what is on the machine.
+      const located = await isLocated();
+      if (!alive) return;
+      if (located) {
+        setRead({ kind: 'found' });
+        decide(false);
+        return;
       }
-      if (alive) await readPlan(true);
+      await readPlan(true);
     })();
     return () => {
       alive = false;
     };
-  }, [client, decide, readPlan]);
+  }, [decide, isLocated, readPlan]);
+
+  /** The person installed it themselves (or the manual command ran): look again with the same detection. */
+  const checkAgain = async (): Promise<void> => {
+    setNote(null);
+    setWorking(true);
+    try {
+      if (await isLocated()) markFound();
+      else if ((await readPlan(true)) === 'plan') setNote('Claude Code is still not on this machine.');
+    } finally {
+      setWorking(false);
+    }
+  };
 
   const install = async (shown: string): Promise<void> => {
     setNote(null);
@@ -146,6 +170,8 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
   };
 
   if (read.kind === 'reading' || read.kind === 'found') return null;
+  // The way out of a manual command: after a refused auto install, or when there is no package manager to run it.
+  const canCheckAgain = read.kind === 'plan' && (read.plan.kind === 'no-package-manager' || note !== null);
   const shownCommand = read.kind === 'plan' && read.plan.kind === 'runnable' ? read.plan.command : '';
   return (
     <div className="cc-step" data-onboarding-step="claude-code.installed">
@@ -193,6 +219,13 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
           {note}
         </p>
       )}
+      {canCheckAgain ? (
+        <div className="cc-actions">
+          <Button disabled={working} onClick={() => void checkAgain()}>
+            {working ? 'Checking…' : 'Check again'}
+          </Button>
+        </div>
+      ) : null}
       <InstalledDemo />
     </div>
   );

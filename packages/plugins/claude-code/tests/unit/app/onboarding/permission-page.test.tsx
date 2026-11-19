@@ -120,7 +120,13 @@ describe('the permission page', () => {
       text: FILE.replace('permissionMode: skip', 'permissionMode: auto'),
       etag: 'e1',
     });
-    expect(run.events).toEqual(['ready', 'busy:Saving…', 'done', 'busy:null']);
+    expect(run.events).toEqual([
+      'ready',
+      'busy:Press “Use …” or “Keep …” to continue',
+      'busy:Saving…',
+      'done',
+      'busy:null',
+    ]);
   });
 
   it('writes nothing on a pick: it shows the full consequence of Skip, and only the explicit confirm writes', async () => {
@@ -140,18 +146,25 @@ describe('the permission page', () => {
     expect(warning).toContain('run every command without asking you, including deleting files');
     expect(warning).toContain('--dangerously-skip-permissions');
     expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
-    expect(run.events).toEqual(['ready']);
+    // The pick differs from the saved mode: Next is held, so it cannot record done over the old mode.
+    expect(run.events).toEqual(['ready', 'busy:Press “Use …” or “Keep …” to continue']);
     await confirm(view);
     await settle();
     expect(calls.filter(call => call.route === 'PUT /v1/config/file')).toHaveLength(1);
-    expect(run.events).toEqual(['ready', 'busy:Saving…', 'done', 'busy:null']);
+    expect(run.events).toEqual([
+      'ready',
+      'busy:Press “Use …” or “Keep …” to continue',
+      'busy:Saving…',
+      'done',
+      'busy:null',
+    ]);
     // Written: nothing left to confirm.
     expect(view.container.querySelector('[data-permission-confirm]')).toBeNull();
   });
 
   it('writes nothing when the arrow keys move over the cards, and moving back withdraws the pick', async () => {
     const calls: Call[] = [];
-    const { view } = await open(
+    const { view, run } = await open(
       {
         'GET /v1/config/file': { path: 'harness-claude-code.yaml', text: FILE, etag: 'e1', exists: true },
         'PUT /v1/config/file': { path: 'harness-claude-code.yaml', etag: 'e2', outcome: 'applied' },
@@ -171,6 +184,8 @@ describe('the permission page', () => {
     expect(view.container.querySelector('[data-permission-consequence="auto"]')).not.toBeNull();
     await key('ArrowRight'); // auto -> skip: back to the saved one
     await settle();
+    // The hold came with the pick and goes with it.
+    expect(run.events).toEqual(['ready', 'busy:Press “Use …” or “Keep …” to continue', 'busy:null']);
     expect(view.container.querySelector('[data-permission-confirm]')).toBeNull();
     expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
   });
@@ -191,6 +206,35 @@ describe('the permission page', () => {
       'That file changed since you read it.',
     );
     expect(run.events).not.toContain('done');
+    // Refused: the pick is still unwritten, so Next is held again (never left free to record the old mode as done).
+    expect(run.events).toEqual([
+      'ready',
+      'busy:Press “Use …” or “Keep …” to continue',
+      'busy:Saving…',
+      'busy:Press “Use …” or “Keep …” to continue',
+    ]);
+  });
+
+  it('holds Next while a pick differs, and "Keep …" drops the pick, writes nothing and says done', async () => {
+    const calls: Call[] = [];
+    const { view, run } = await open(
+      {
+        'GET /v1/config/file': { path: 'harness-claude-code.yaml', text: FILE, etag: 'e1', exists: true },
+        'PUT /v1/config/file': { path: 'harness-claude-code.yaml', etag: 'e2', outcome: 'applied' },
+      },
+      calls,
+    );
+    // Nothing picked yet: Next is free (the saved mode is what the daemon runs).
+    expect(run.events).toEqual(['ready']);
+    await select(view, 'auto');
+    expect(run.events).toEqual(['ready', 'busy:Press “Use …” or “Keep …” to continue']);
+    const keep = [...view.container.querySelectorAll('button')].find(b => b.textContent === 'Keep Skip permissions');
+    await interact(() => must(keep, 'the keep button').click());
+    await settle();
+    expect(run.events).toEqual(['ready', 'busy:Press “Use …” or “Keep …” to continue', 'busy:null', 'done']);
+    expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
+    expect((view.container.querySelector('input[value="skip"]') as HTMLInputElement).checked).toBe(true);
+    expect(view.container.querySelector('[data-permission-confirm]')).toBeNull();
   });
 });
 

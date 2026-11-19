@@ -24,6 +24,11 @@
   padding: 12px;
   white-space: pre-wrap;
 }
+.cc-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 .cc-actions {
   align-items: center;
   display: flex;

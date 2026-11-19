@@ -189,6 +189,59 @@ describe('the install page', () => {
     );
   });
 
+  it('checks again from the manual command (no package manager) and is done once Claude is found', async () => {
+    let installed = false;
+    const { view, run } = await open({
+      'GET /v1/claude-code/update': () => update(installed ? located : absent),
+      'GET /v1/runtimes/setup/scan': scan({
+        installed: false,
+        install: { kind: 'no-package-manager', reason: 'No package manager found.', manualCommand: 'curl x | sh' },
+      }),
+    });
+    const check = () => [...view.container.querySelectorAll('button')].find(b => b.textContent === 'Check again');
+    expect(run.events).toEqual(['ready', 'busy:Install Claude Code to continue']);
+    // Still missing: it says so, stays held, and offers the check again.
+    await interact(() => must(check(), 'the check button').click());
+    await settle();
+    expect(view.container.textContent).toContain('Claude Code is still not on this machine.');
+    expect(run.events).not.toContain('done');
+    // Installed by hand meanwhile: found, the hold is released and done is said.
+    installed = true;
+    await interact(() => must(check(), 'the check button').click());
+    await settle();
+    expect(run.events).toEqual(['ready', 'busy:Install Claude Code to continue', 'busy:null', 'done']);
+    expect(view.container.textContent).toBe('');
+  });
+
+  it('checks again after a failed install (the manual fallback) and is done once Claude is found', async () => {
+    let installed = false;
+    const { view, run } = await open({
+      'GET /v1/claude-code/update': () => update(installed ? located : absent),
+      'GET /v1/runtimes/setup/scan': RUNNABLE,
+      'POST /v1/runtimes/machine/tools/install': {
+        outcomes: [
+          {
+            harness: 'claude-code',
+            outcome: 'failed',
+            cause: 'failed',
+            reason: 'The installer exited with 1.',
+            manualCommand: 'npm i -g @fake/claude',
+            output: [],
+          },
+        ],
+      },
+    });
+    const byText = (text: string) => [...view.container.querySelectorAll('button')].find(b => b.textContent === text);
+    // Before any failure there is nothing to check again: the install button is the way forward.
+    expect(byText('Check again')).toBeUndefined();
+    await interact(() => must(byText('Install Claude Code'), 'the install button').click());
+    await settle();
+    installed = true;
+    await interact(() => must(byText('Check again'), 'the check button').click());
+    await settle();
+    expect(run.events.slice(-2)).toEqual(['busy:null', 'done']);
+  });
+
   it('waits for a press before asking for the passkey that shows the plan', async () => {
     const stepUp = Object.assign(new Error('step up'), { status: 403, code: 'grant_step_up_required' });
     const calls: Call[] = [];

@@ -8,7 +8,9 @@
  * is the person's own choice.
  *
  * A pick is NOT a write: moving over the cards (arrow keys included) only selects. The page then says in full what the
- * selected mode means and offers one explicit "Use …" button; only that press writes.
+ * selected mode means and offers one explicit "Use …" button; only that press writes. While a pick differs from the
+ * saved mode the page holds `busy`, so the shell's Next cannot record "done" over a daemon still on the old mode: the
+ * person either presses "Use …" (writes, then done) or "Keep …" (done, no write), or moves back to the saved card.
  *
  * When the route does not show the file (its text is WITHHELD because it holds a secret or does not parse, or the YAML
  * does not read), the page shows the mode as unknown, writes nothing, and says where to change it at the machine.
@@ -46,6 +48,9 @@ const CONSEQUENCE: Readonly<Record<Mode, { readonly button: string; readonly tex
   },
 };
 
+/** The press that drops a pick and keeps what the daemon already runs. */
+const KEEP: Readonly<Record<Mode, string>> = { auto: 'Keep Auto mode', skip: 'Keep Skip permissions' };
+
 const OPTIONS: readonly ChoiceOption[] = [
   { id: 'auto', title: 'Auto mode', line: 'Claude asks before anything risky.' },
   {
@@ -54,6 +59,9 @@ const OPTIONS: readonly ChoiceOption[] = [
     line: 'Claude runs every command without asking you, including deleting files. This is Claude’s --dangerously-skip-permissions. Fastest, and only safe on a machine you would let it wipe.',
   },
 ];
+
+/** Why Next is locked while a pick has not been written or dropped. */
+const HOLD = 'Press “Use …” or “Keep …” to continue';
 
 /** The comment the route answers in place of a text it will not show (kernel `withheldComment`). */
 const WITHHELD = /^# ‹hidden›: the text of this file is not shown because/u;
@@ -97,6 +105,8 @@ export function PermissionPage({ client, step }: StepPageProps<ClaudeCodeClient>
   const [note, setNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const file = useRef<Loaded | null>(null);
+  /** Whether the page has told the shell to hold Next (`null`: unknown, the next sync says it again). */
+  const holding = useRef<boolean | null>(false);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -127,6 +137,26 @@ export function PermissionPage({ client, step }: StepPageProps<ClaudeCodeClient>
     void load();
   }, [load]);
 
+  // Hold Next while a pick differs from the saved mode; release it when the pick is written, kept or withdrawn. A save in
+  // flight owns `busy` itself ("Saving…"); the sync runs again when it ends, whichever way it went (a refused save leaves
+  // the pick unwritten, so the hold comes back).
+  useEffect(() => {
+    if (saving || mode === null) return;
+    const want = mode !== 'unknown' && picked !== null && picked !== mode;
+    if (holding.current === want) return;
+    holding.current = want;
+    step?.busy(want ? HOLD : null);
+  }, [saving, mode, picked, step]);
+
+  const keep = (): void => {
+    if (mode === null || mode === 'unknown') return;
+    setNote(null);
+    setPicked(mode);
+    holding.current = false;
+    step?.busy(null);
+    step?.done();
+  };
+
   const choose = async (next: Mode): Promise<void> => {
     setNote(null);
     if (file.current === null) {
@@ -135,6 +165,7 @@ export function PermissionPage({ client, step }: StepPageProps<ClaudeCodeClient>
     }
     const loaded = file.current;
     setSaving(true);
+    holding.current = null;
     step?.busy('Saving…');
     try {
       const text = withPermissionMode(loaded.text, next);
@@ -149,7 +180,6 @@ export function PermissionPage({ client, step }: StepPageProps<ClaudeCodeClient>
       file.current = null; // moved under us or refused: read it fresh on the next pick
     } finally {
       setSaving(false);
-      step?.busy(null);
     }
   };
 
@@ -171,13 +201,18 @@ export function PermissionPage({ client, step }: StepPageProps<ClaudeCodeClient>
           />
           <PermissionDemo mode={picked ?? mode} />
           {picked !== null && picked !== mode ? (
-            <div className="cc-actions" data-permission-confirm="">
+            <div className="cc-confirm" data-permission-confirm="">
               <p className="cc-step__line" role="note" data-permission-consequence={picked}>
                 {CONSEQUENCE[picked].text} Nothing is saved until you press the button.
               </p>
-              <Button variant="primary" disabled={saving} onClick={() => void choose(picked)}>
-                {CONSEQUENCE[picked].button}
-              </Button>
+              <div className="cc-actions">
+                <Button variant="primary" disabled={saving} onClick={() => void choose(picked)}>
+                  {CONSEQUENCE[picked].button}
+                </Button>
+                <Button disabled={saving} onClick={keep}>
+                  {KEEP[mode]}
+                </Button>
+              </div>
             </div>
           ) : null}
         </>

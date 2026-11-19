@@ -20,10 +20,12 @@ export function SignInPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
   const told = useRef(false);
 
   useEffect(() => {
-    // No panel to ask: show the page (it says where to sign in) instead of leaving it under the loading cover.
+    // No panel to ask: show the page (it says where to sign in) instead of leaving it under the loading cover, and hold
+    // Next: nobody has signed in, and the shell records the default on Next as done (O1 rule 5). Later and Skip stay.
     if (available || told.current) return;
     told.current = true;
     step?.ready();
+    step?.busy(HOLD);
   }, [available, step]);
 
   return (
