@@ -177,9 +177,9 @@ describe('the layout previews', () => {
           const preview = previewOf(tab, row).first();
           await preview.scrollIntoViewIfNeeded();
           const slug = row.toLowerCase().replaceAll(' ', '-');
-          // The choice rows hold the first frame until 48%, then the shared crossfade brings the second one in until 54%
-          // (setting-preview.css `fy-sp-after`): 51% is the middle of that fade. The list slides between 18% and 42%.
-          const middle = row === 'Navigation items' ? 0.3 : 0.51;
+          // The choice rows keep the first frame underneath while the second fades in over it from 18% to 54%
+          // (setting-preview.css `fy-sp-after`): 36% is the middle of that fade. The list slides between 18% and 64%.
+          const middle = row === 'Navigation items' ? 0.4 : 0.36;
           for (const [frame, at] of [
             ['f1', 0.05],
             ['f2', middle],
@@ -226,6 +226,43 @@ describe('the layout previews', () => {
       }
     });
   }
+
+  it('hiding a Navigation item plays once and the frame is at rest 3 s later with nothing still running', async () => {
+    const { tab, close } = await open(VARIANTS[0]);
+    try {
+      const frame = previewOf(tab, 'Navigation items').first();
+      // Let every frame finish the play the setup gave it, so this one is measured from its own start.
+      await tab.waitForFunction(
+        () => document.querySelector('[data-setting-preview][data-sp-state="playing"]') === null,
+      );
+      await tab.locator('button[aria-label^="Hide "]').first().click();
+      expect(await frame.getAttribute('data-sp-state')).toBe('playing');
+      // The list scene switches its layers' own animation off, so only the primitive's clock can end this play.
+      await tab.waitForFunction(
+        () =>
+          [...document.querySelectorAll('[data-setting-row="Navigation items"] [data-setting-preview]')].every(
+            node => node.getAttribute('data-sp-state') === 'still',
+          ),
+        undefined,
+        { timeout: LOOP + 2_000 },
+      );
+      await tab.waitForTimeout(3_000 - LOOP > 0 ? 3_000 - LOOP : 0);
+      expect(await frame.getAttribute('data-sp-state')).toBe('still');
+      expect(
+        await frame.evaluate(node => node.getAnimations({ subtree: true }).length),
+        'nothing in the frame is still animating after it rests',
+      ).toBe(0);
+      // Frames scrolled off-screen hold their play (paused, by design); none anywhere is RUNNING.
+      expect(
+        await tab.evaluate(
+          () => document.getAnimations().filter(animation => animation.playState === 'running').length,
+        ),
+        'nothing on the page is running',
+      ).toBe(0);
+    } finally {
+      await close();
+    }
+  });
 
   it('a hidden tab pauses every loop', async () => {
     const { tab, close } = await open(VARIANTS[0]);

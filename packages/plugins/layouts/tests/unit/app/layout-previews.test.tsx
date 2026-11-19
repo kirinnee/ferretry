@@ -3,6 +3,7 @@
  * before → the word now" and shows only the final frame when motion is off, a replay follows a new choice, and the
  * navigation list draws five rows in their final order.
  */
+import { SETTING_PREVIEW_PLAY_MS } from '@ferretry/app';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { LayoutPreview } from '../../../app/features/layout/previews/layout-preview.tsx';
@@ -157,6 +158,19 @@ describe('the previews', () => {
   test('the navigation list is one still frame when motion is reduced', async () => {
     document.documentElement.dataset.motion = 'reduced';
     mounted = await mount(<NavListPreview items={[]} label="Items" />);
+    expect(frame(mounted.container).getAttribute('data-sp-state')).toBe('still');
+    expect(mounted.container.querySelectorAll('.fy-ls-nrow').length).toBe(5);
+  });
+
+  test("hiding a navigation item plays once and rests on the primitive's own timer (the list scene never fires animationend)", async () => {
+    mounted = await mount(<NavListPreview items={['ferrets', 'agenda', 'board', 'projects']} label="Items" />);
+    expect(frame(mounted.container).getAttribute('data-sp-state')).toBe('still');
+    await mounted.render(<NavListPreview items={['ferrets', 'agenda', 'board']} label="Items" />);
+    expect(frame(mounted.container).getAttribute('data-sp-state')).toBe('playing');
+    // No animationend is dispatched: the list scene switches its layers' own animation off in the stylesheet.
+    await interact(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, SETTING_PREVIEW_PLAY_MS + 150));
+    });
     expect(frame(mounted.container).getAttribute('data-sp-state')).toBe('still');
     expect(mounted.container.querySelectorAll('.fy-ls-nrow').length).toBe(5);
   });

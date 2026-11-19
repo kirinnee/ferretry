@@ -1,12 +1,12 @@
 /**
  * The setting preview: it RESTS on the selected value (never blank, never a loop), plays ONE movement when the value
- * changes and goes back to rest on `animationend`, shows the final frame under reduced motion, pauses a movement in a
+ * changes and goes back to rest when its own timer (not an `animationend`) runs out, shows the final frame under reduced motion, pauses a movement in a
  * hidden tab, draws a skeleton for a lazy scene, and has a slot in the row.
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { lazy } from 'react';
-import { SettingPreview } from '../../../src/compose/setting-preview.tsx';
+import { SETTING_PREVIEW_PLAY_MS, SettingPreview } from '../../../src/compose/setting-preview.tsx';
 import { SettingGroup, SettingRow, SettingRowGrid } from '../../../src/compose/setting-row.tsx';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
@@ -17,9 +17,11 @@ const frameOf = (container: HTMLElement): HTMLElement =>
 const stateOf = (container: HTMLElement): string | null => frameOf(container).getAttribute('data-sp-state');
 const scenesIn = (container: HTMLElement): string[] =>
   [...container.querySelectorAll('[data-scene]')].map(node => node.getAttribute('data-scene') ?? '');
-const endMovement = async (container: HTMLElement): Promise<void> => {
-  const layer = must(container.querySelector('.fy-sp__layer--after'), 'the after layer');
-  await interact(() => layer.dispatchEvent(new Event('animationend', { bubbles: true })));
+/** Let the movement's own timer run out (real time: the primitive owns the clock, whatever a scene does to its layers). */
+const waitForRest = async (): Promise<void> => {
+  await interact(async () => {
+    await new Promise<void>(resolve => setTimeout(resolve, SETTING_PREVIEW_PLAY_MS + 150));
+  });
 };
 
 const setVisibility = async (state: 'visible' | 'hidden'): Promise<void> => {
@@ -57,16 +59,42 @@ describe('SettingPreview', () => {
     expect(scenesIn(mounted.container)).toEqual(['right']);
   });
 
-  it('should play before then after ONCE when the value changes, then rest (one animationend)', async () => {
+  it('should play before then after ONCE when the value changes, then rest when its timer runs out', async () => {
     mounted = await mount(preview('right'));
     await mounted.render(preview('left-rail'));
     expect(stateOf(mounted.container)).toBe('playing');
     expect(scenesIn(mounted.container)).toEqual(['left', 'left-rail']);
-    await endMovement(mounted.container);
+    expect(stateOf(mounted.container)).toBe('playing');
+    await waitForRest();
     expect(stateOf(mounted.container)).toBe('still');
-    // It rests on the selected value, and a second animationend changes nothing: it does not loop.
+    // It rests on the selected value and does not start again by itself: it does not loop.
     expect(scenesIn(mounted.container)).toEqual(['left-rail']);
-    await endMovement(mounted.container);
+    await waitForRest();
+    expect(stateOf(mounted.container)).toBe('still');
+  });
+
+  it('should rest on its timer even when the scene never animates its layers (no animationend ever fires)', async () => {
+    mounted = await mount(preview('right'));
+    await mounted.render(preview('left-rail'));
+    // No stylesheet is loaded here and no animationend is dispatched: only the primitive's own clock can end the play.
+    expect(stateOf(mounted.container)).toBe('playing');
+    await waitForRest();
+    expect(stateOf(mounted.container)).toBe('still');
+    expect(scenesIn(mounted.container)).toEqual(['left-rail']);
+  });
+
+  it('should hold its timer while paused and restart it for a new value', async () => {
+    mounted = await mount(preview('right'));
+    await mounted.render(preview('left-rail'));
+    await setVisibility('hidden');
+    // A hidden tab holds the movement however long it stays hidden.
+    await interact(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, SETTING_PREVIEW_PLAY_MS + 150));
+    });
+    expect(stateOf(mounted.container)).toBe('paused');
+    await setVisibility('visible');
+    expect(stateOf(mounted.container)).toBe('playing');
+    await waitForRest();
     expect(stateOf(mounted.container)).toBe('still');
   });
 

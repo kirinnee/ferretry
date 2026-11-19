@@ -104,21 +104,28 @@ const seek = async (tab: Page, ms: number): Promise<void> => {
   }, ms);
 };
 
-/** The two layers take turns: at no point of the movement are both visible, so a label never lands on another. */
-const expectNeverOverlapping = async (tab: Page): Promise<void> => {
-  for (let step = 0; step <= 100; step += 1) {
-    await seek(tab, (PLAY_MS * step) / 100);
-    const worst = await tab.evaluate(() =>
-      Math.max(
+/**
+ * Every frame is covered by something at every 16 ms of the play: the layers are stacked and each is opaque in itself,
+ * so the covered share is 1 - (1 - before) * (1 - after), and below 1 the frame shows its bare background (an empty frame).
+ */
+const expectNeverEmpty = async (tab: Page): Promise<void> => {
+  let lowest = 1;
+  for (let at = 0; at <= PLAY_MS; at += 16) {
+    await seek(tab, at);
+    const covered = await tab.evaluate(() =>
+      Math.min(
         ...[...document.querySelectorAll('[data-setting-preview]')].map(frame => {
-          const layer = (kind: string) =>
-            Number(getComputedStyle(frame.querySelector(`.fy-sp__layer--${kind}`) as Element).opacity);
-          return Math.min(layer('before'), layer('after'));
+          const opacity = (kind: string) => {
+            const layer = frame.querySelector(`.fy-sp__layer--${kind}`);
+            return layer === null ? 0 : Number(getComputedStyle(layer).opacity);
+          };
+          return 1 - (1 - opacity('before')) * (1 - opacity('after'));
         }),
       ),
     );
-    expect(worst).toBe(0);
+    lowest = Math.min(lowest, covered);
   }
+  expect(lowest, 'no frame is ever empty during the play').toBe(1);
 };
 
 /** The length of the one movement (`--sp-loop`). */
@@ -161,13 +168,13 @@ describe('the Look previews', () => {
         await frameOf(tab, 'Motion').scrollIntoViewIfNeeded();
         await seek(tab, 0);
         await shotOf(tab, variant, 'look-t0-before');
-        await seek(tab, PLAY_MS * 0.39);
+        await seek(tab, PLAY_MS * 0.3);
         await shotOf(tab, variant, 'look-mid-fade');
+        await seek(tab, 630);
+        await shotOf(tab, variant, 'look-mid-630ms');
         await seek(tab, PLAY_MS * 0.45);
-        await shotOf(tab, variant, 'look-mid-fade-gap');
-        await seek(tab, PLAY_MS * 0.51);
         await shotOf(tab, variant, 'look-mid-fade-in');
-        await expectNeverOverlapping(tab);
+        await expectNeverEmpty(tab);
         await seek(tab, PLAY_MS * 0.7);
         await shotOf(tab, variant, 'look-final');
         expect(problems).toEqual([]);

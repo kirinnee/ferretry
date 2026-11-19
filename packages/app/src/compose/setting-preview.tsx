@@ -9,9 +9,11 @@
  *
  *   - It RESTS on the selected value (`after` only): the frame is never blank and never loops. Repeating does not
  *     help (owner, !A565), so there is no loop at all.
- *   - When `value` changes it plays once, as two layers taking turns (`setting-preview.css`): `before` fades out, then
- *     `after` in, never both at once, so no label lands on another. When the movement ends (`animationend`) it returns to
- *     rest. Choosing a value answers with the movement; opening the tab does not.
+ *   - When `value` changes it plays once (`setting-preview.css`): `before` stays fully opaque underneath while `after`
+ *     fades in over it, and `before` is dropped only once `after` is fully opaque, so the frame is never empty. The end
+ *     of the movement is a TIMER this file owns (`SETTING_PREVIEW_PLAY_MS`), not an `animationend` of the scene: a scene
+ *     is free to restyle or disable its layers' own animation and the frame still returns to rest. A pause (hidden tab,
+ *     off-screen) holds the timer where it is. Choosing a value answers with the movement; opening the tab does not.
  *   - Until its content has mounted (a lazy scene) it draws a SKELETON of the same size, not an empty box.
  *   - `fit="contain"` draws a scene authored at `sceneSize` scaled to whatever box it is given.
  *   - It pauses a movement while the tab is hidden (`useDocumentVisible`) or the frame is scrolled off-screen
@@ -30,7 +32,7 @@ import { cn } from '../ui/lib/class-names.ts';
 import { useMotionAllowed } from '../ui/use-motion-allowed.ts';
 import './setting-preview.css';
 
-/** The length of the one movement, in milliseconds (also `--sp-loop` in the stylesheet). */
+/** The length of the one movement, in milliseconds (also `--sp-loop` in the stylesheet): the timer that ends it. */
 export const SETTING_PREVIEW_PLAY_MS = 1400;
 
 /** `still` (resting on the final state), `playing` (the one movement), or `paused` (it, in a hidden tab or off-screen). */
@@ -143,7 +145,18 @@ export function SettingPreview({
   }
   const moving = canMove && playing;
   const state: SettingPreviewState = !moving ? 'still' : visible ? 'playing' : 'paused';
-  const rest = () => setPlaying(false);
+  // The movement's own clock: how much of THIS value's movement has played, so a pause holds it and a new value restarts it.
+  const played = useRef({ value, ms: 0 });
+  useEffect(() => {
+    if (played.current.value !== value) played.current = { value, ms: 0 };
+    if (state !== 'playing') return undefined;
+    const startedAt = performance.now();
+    const timer = setTimeout(() => setPlaying(false), Math.max(0, SETTING_PREVIEW_PLAY_MS - played.current.ms));
+    return () => {
+      clearTimeout(timer);
+      played.current = { value, ms: played.current.ms + (performance.now() - startedAt) };
+    };
+  }, [state, value]);
   const scale = useContainScale(frame, sceneSize, fit === 'contain');
   const stageStyle: CSSProperties | undefined =
     fit === 'contain'
@@ -169,14 +182,7 @@ export function SettingPreview({
       >
         <Suspense fallback={<SceneSkeleton />}>
           {!moving ? null : <div className="fy-sp__layer fy-sp__layer--before">{before}</div>}
-          <div
-            className="fy-sp__layer fy-sp__layer--after"
-            onAnimationEnd={event => {
-              if (event.target === event.currentTarget) rest();
-            }}
-          >
-            {after}
-          </div>
+          <div className="fy-sp__layer fy-sp__layer--after">{after}</div>
         </Suspense>
       </div>
     </div>
