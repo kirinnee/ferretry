@@ -1,8 +1,13 @@
-import { useRouter } from '@ferretry/app';
+import { useAppHook, useRouter } from '@ferretry/app';
 import { Loading, RouteLink } from '@ferretry/app/ui';
-import { ArrowLeft, Bot, FolderTree, KanbanSquare, LayoutList, UserRound } from 'lucide-react';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import { type ProjectInfo, ProjectInfoSchema } from '../../contract/index.ts';
+import { ArrowLeft, Bot, FolderTree, GitPullRequest, KanbanSquare, LayoutList, UserRound } from 'lucide-react';
+import { createElement, type ReactNode, useEffect, useMemo, useState } from 'react';
+import {
+  isProjectsInsights,
+  type ProjectInfo,
+  ProjectInfoSchema,
+  PROJECTS_INSIGHTS_HOOK,
+} from '../../contract/index.ts';
 import type { ProjectsClient } from '../lib/client.ts';
 import { reasonOf } from '../lib/client.ts';
 import {
@@ -78,6 +83,9 @@ function ProjectDetailView({
     read.ferrets === null ? (read.failure === null ? 'unread' : 'failed') : read.failure === null ? 'ready' : 'stale';
   const set = useMemo(() => (read.ferrets === null ? [] : projectFerrets(project.path, read.ferrets)), [project, read]);
   const active = useMemo(() => activeProjectFerrets(set), [set]);
+  // What another plugin tells about this project (PRs & CI, today), if one is installed on this daemon.
+  const provided = useAppHook(daemon, PROJECTS_INSIGHTS_HOOK);
+  const insights = isProjectsInsights(provided) ? provided : undefined;
   return (
     <main
       className="grid h-full min-h-0 content-start gap-panel overflow-y-auto p-panel"
@@ -122,6 +130,14 @@ function ProjectDetailView({
           <Section icon={<KanbanSquare className="text-muted" size={16} aria-hidden="true" />} title="Board">
             <ProjectBoardSwitch client={client} projectId={project.id} />
           </Section>
+          {insights !== undefined && (
+            <Section
+              icon={<GitPullRequest className="text-muted" size={16} aria-hidden="true" />}
+              title={insights.title}
+            >
+              {createElement(insights.panel as never, { project: project.id, daemon })}
+            </Section>
+          )}
         </div>
         <div className="grid gap-panel">
           <Section icon={<Bot className="text-muted" size={16} aria-hidden="true" />} title="Active ferrets">
