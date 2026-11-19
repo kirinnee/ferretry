@@ -218,6 +218,89 @@ describe('handOver, what is in effect', () => {
   });
 });
 
+describe('handOver, a written component the owner keeps out of effect', () => {
+  // A profile-only Codex import: the owner takes the profile items and writes no main settings item, yet answers "written".
+  const asked = parseAccountModel({
+    version: 1,
+    components: { settings: { 'codex-settings': { harness: 'codex', file: 'settings/codex-settings.toml' } } },
+    profiles: { default: { layers: ['settings/codex-settings'] } },
+  });
+  const owners = (rebuilds: string[][]): OwnedComponents => ({
+    writes: [
+      {
+        kind: 'settings',
+        name: 'codex-settings',
+        reference: 'settings/codex-settings',
+        harness: 'codex',
+        file: 'codex/settings/codex-settings.yaml',
+        text: '{}',
+      },
+    ],
+    rebuild: async outcome => {
+      rebuilds.push([...outcome.refused]);
+      return {
+        model: parseAccountModel({ version: 1, profiles: { default: { layers: [] } } }),
+        documents: [{ path: 'profiles/default.yaml', content: '{"contents":[]}', mode: 0o600, expect: 'absent' }],
+      };
+    },
+  });
+
+  it('should compose the saved profile files without the layer that names it', async () => {
+    // Arrange
+    const rebuilds: string[][] = [];
+    const writer: ComponentWriter = { put: async () => ({ outcome: 'written' }) };
+    const documents = [
+      {
+        path: 'profiles/default.yaml',
+        content: '{"contents":["settings/codex-settings"]}',
+        mode: 0o600,
+        expect: 'absent',
+      },
+    ];
+
+    // Act
+    const answer = await handOver({
+      writer,
+      owners: owners(rebuilds),
+      applied: { model: asked, documents },
+      secretValues: [],
+      inEffect: async () => MODEL,
+    });
+
+    // Assert
+    should(rebuilds).eql([['settings/codex-settings']]);
+    should(answer.applied.documents.map(document => document.content)).eql(['{"contents":[]}']);
+    should(answer.applied.model.profiles.default?.layers).eql([]);
+  });
+
+  it('should keep a held component in the saved profile files', async () => {
+    // Arrange
+    const rebuilds: string[][] = [];
+    const writer: ComponentWriter = { put: async () => ({ outcome: 'held' }) };
+    const documents = [
+      {
+        path: 'profiles/default.yaml',
+        content: '{"contents":["settings/codex-settings"]}',
+        mode: 0o600,
+        expect: 'absent',
+      },
+    ];
+
+    // Act
+    const answer = await handOver({
+      writer,
+      owners: owners(rebuilds),
+      applied: { model: asked, documents },
+      secretValues: [],
+      inEffect: async () => MODEL,
+    });
+
+    // Assert
+    should(rebuilds).eql([[]]);
+    should(answer.sentences).containEql('Held until you confirm: codex/settings/codex-settings.yaml.');
+  });
+});
+
 describe('handOver, hidden files', () => {
   it('should say the hidden files that were not handed over, once the owner took the component', async () => {
     // Arrange

@@ -134,21 +134,44 @@ export async function handOver(input: {
   // The fleet is built from what the owners report in effect, never from what the import asked for: a held component
   // is not in effect yet, an owner may have written less than it was given, and a prior version stays active.
   const taken = owners.writes.filter(write => !left.has(write.reference));
-  const effective =
+  const reported =
     taken.length === 0
+      ? undefined
+      : await input.inEffect().catch((error: unknown) => {
+          throw new FleetCatalogRefusal(
+            'fleet_change_failed',
+            `what is now in effect could not be read (${error instanceof Error ? error.message : String(error)}), so no runtime was generated${written.length === 0 ? '' : `; ${configurationLanded(written)}`}`,
+          );
+        });
+  const effective =
+    reported === undefined
       ? rebuilt.model
       : withEffective(
           rebuilt.model,
-          await input.inEffect().catch((error: unknown) => {
-            throw new FleetCatalogRefusal(
-              'fleet_change_failed',
-              `what is now in effect could not be read (${error instanceof Error ? error.message : String(error)}), so no runtime was generated${written.length === 0 ? '' : `; ${configurationLanded(written)}`}`,
-            );
-          }),
+          reported,
           taken.map(({ kind, name }) => ({ kind, name })),
         );
+  // An owner may answer "written" for a document and keep the component itself out of effect (Codex's settings for a
+  // profile-only import writes only the profile items). The saved profile files must not name what is not in effect either,
+  // or the next reload fails on the missing item: they are composed again with it left out. A HELD one stays in the files
+  // (confirming it completes them).
+  const vanished =
+    reported === undefined
+      ? []
+      : taken.filter(
+          write => !heldReferences.has(write.reference) && reported.components[write.kind][write.name] === undefined,
+        );
+  const documents =
+    vanished.length === 0
+      ? rebuilt.documents
+      : (
+          await owners.rebuild({
+            refused: new Set([...left, ...vanished.map(write => write.reference)]),
+            held: heldReferences,
+          })
+        ).documents;
   return {
-    applied: { model: effective, documents: rebuilt.documents },
+    applied: { model: effective, documents },
     landed: written,
     sentences: [
       ...(written.length === 0 ? [] : [`Written by the parts that own them: ${written.join(', ')}.`]),
