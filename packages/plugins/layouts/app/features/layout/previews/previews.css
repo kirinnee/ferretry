@@ -370,17 +370,3 @@
     animation-play-state: paused;
   }
 }
-
-/* ---- the caption under a frame: what a word does not change --------------- */
-.fy-ls-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-width: 100%;
-  width: 160px;
-}
-.fy-ls-caption {
-  color: var(--muted);
-  font-size: 0.6875rem;
-  line-height: 1.25;
-}

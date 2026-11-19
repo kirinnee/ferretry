@@ -162,3 +162,37 @@ export function resolveCurrent(
     theme: themes.get(selection.theme) ?? DEFAULT_THEME,
   };
 }
+
+/**
+ * The navigation words the shell still draws: the left side bar or the bottom bar, a rail or an open list. `right`,
+ * `top` and `bar` draw what `left` and `list` draw, and Settings no longer offers them.
+ */
+const NAV_SIDES: readonly string[] = ['left', 'bottom'];
+const NAV_STYLES: readonly string[] = ['rail', 'list'];
+
+/**
+ * A layout copied to a name of its own, with a navigation word the shell does not draw read as the one it does (the
+ * default `left` and `list`): a saved copy never carries a choice Settings cannot show or change. The order of the
+ * places is kept, and a key the layout did not set for a phone stays unset.
+ */
+export function normalizeNav(layout: Layout): Layout {
+  const side = (word: string): Layout['nav']['side'] => (NAV_SIDES.includes(word) ? (word as 'left') : 'left');
+  const style = (word: string): Layout['nav']['style'] => (NAV_STYLES.includes(word) ? (word as 'list') : 'list');
+  const phoneNav = layout.phone?.nav;
+  const phone =
+    layout.phone === undefined || phoneNav === undefined
+      ? layout.phone
+      : {
+          ...layout.phone,
+          nav: {
+            ...phoneNav,
+            ...(phoneNav.side === undefined ? {} : { side: side(phoneNav.side) }),
+            ...(phoneNav.style === undefined ? {} : { style: style(phoneNav.style) }),
+          },
+        };
+  return {
+    ...layout,
+    nav: { ...layout.nav, side: side(layout.nav.side), style: style(layout.nav.style) },
+    ...(phone === undefined ? {} : { phone }),
+  };
+}

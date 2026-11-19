@@ -25,6 +25,26 @@ describe('the layout settings', () => {
     }
   });
 
+  test('only what the shell draws is offered: no right or top side, no bar style', () => {
+    const offered = (path: string): string[] =>
+      LAYOUT_SETTINGS.flatMap(setting =>
+        setting.kind === 'choice' && setting.path === path ? setting.options.map(o => o.id) : [],
+      );
+    for (const path of ['nav.side', 'phone.nav.side']) expect(offered(path)).toEqual(['left', 'bottom']);
+    expect(offered('nav.style')).toEqual(['rail', 'list']);
+    expect(offered('phone.nav.style')).toEqual([]); // a phone's side bar is always the shut drawer: no style to choose
+  });
+
+  test('a saved word that is no longer offered reads as the choice the shell draws it as', () => {
+    // The built-in default still says `top` and `bar`; the shell draws them as the left side bar, opened.
+    expect(choiceOf(DEFAULT_LAYOUT, 'nav.side')).toBe('left');
+    expect(choiceOf(DEFAULT_LAYOUT, 'nav.style')).toBe('list');
+    const right = { ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'right' as const } };
+    expect(choiceOf(right, 'nav.side')).toBe('left');
+    expect(choiceOf({ ...right, phone: { nav: { side: 'top' } } }, 'phone.nav.side')).toBe('left');
+    expect(choiceOf(COMPACT_LAYOUT, 'nav.style')).toBe('rail');
+  });
+
   test('a choice and a list are read from the layout they are asked of', () => {
     expect(choiceOf(DEFAULT_LAYOUT, 'density')).toBe('comfortable');
     expect(choiceOf(COMPACT_LAYOUT, 'density')).toBe('compact');
@@ -45,19 +65,12 @@ describe('the layout settings', () => {
 
   test('every phone key has a row, named `phone.*` as `fy layout set` takes it', () => {
     const phone = LAYOUT_SETTINGS.filter(setting => setting.path.startsWith('phone.')).map(setting => setting.path);
-    expect(phone).toEqual([
-      'phone.nav.side',
-      'phone.nav.style',
-      'phone.side.show',
-      'phone.density',
-      'phone.nav.items',
-      'phone.top',
-    ]);
+    expect(phone).toEqual(['phone.nav.side', 'phone.side.show', 'phone.density', 'phone.nav.items', 'phone.top']);
   });
 
   test('a phone key is what the layout sets for a phone, else what the wide layout holds', () => {
     expect(choiceOf(DEFAULT_LAYOUT, 'phone.nav.side')).toBe('bottom');
-    expect(choiceOf(DEFAULT_LAYOUT, 'nav.side')).toBe('top');
+    expect(choiceOf(DEFAULT_LAYOUT, 'nav.side')).toBe('left');
     expect(listOf(DEFAULT_LAYOUT, 'phone.nav.items')).toEqual([
       'ferrets',
       'agenda',
@@ -67,8 +80,7 @@ describe('the layout settings', () => {
       'settings',
     ]);
     const bare = LayoutSchema.parse({ id: 'bare', nav: { side: 'right', style: 'bar', items: ['agenda'] } });
-    expect(choiceOf(bare, 'phone.nav.side')).toBe('right');
-    expect(choiceOf(bare, 'phone.nav.style')).toBe('bar');
+    expect(choiceOf(bare, 'phone.nav.side')).toBe('left');
     expect(choiceOf(bare, 'phone.side.show')).toBe('never');
     expect(choiceOf(bare, 'phone.density')).toBe('comfortable');
     expect(listOf(bare, 'phone.nav.items')).toEqual(['agenda']);
@@ -76,10 +88,9 @@ describe('the layout settings', () => {
     const phone = LayoutSchema.parse({
       id: 'p',
       nav: { side: 'left', items: [] },
-      phone: { nav: { side: 'top', style: 'list' }, side: { show: 'always' }, density: 'compact', top: ['search'] },
+      phone: { nav: { side: 'bottom', style: 'list' }, side: { show: 'always' }, density: 'compact', top: ['search'] },
     });
-    expect(choiceOf(phone, 'phone.nav.side')).toBe('top');
-    expect(choiceOf(phone, 'phone.nav.style')).toBe('list');
+    expect(choiceOf(phone, 'phone.nav.side')).toBe('bottom');
     expect(choiceOf(phone, 'phone.side.show')).toBe('always');
     expect(choiceOf(phone, 'phone.density')).toBe('compact');
     expect(listOf(phone, 'phone.top')).toEqual(['search']);

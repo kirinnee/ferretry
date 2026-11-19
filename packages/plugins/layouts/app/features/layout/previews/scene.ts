@@ -6,12 +6,13 @@
  *
  * A preview shows ONLY what the live shell draws today (`packages/app/src/shell/frame.tsx`, `drawer.tsx`,
  * `drawer-nav.tsx`) and never geometry it does not have: the menu is always the left drawer, so a word that the shell
- * draws the same as another draws the same picture here, and `captionFor` says so in words.
- *   - side `left`, `right`, `top`: the left drawer, nothing else. `bottom`: the drawer AND a bar of places under the page.
- *   - style `rail`: the drawer starts as a slim icon rail. `bar` and `list`: it starts open, icon and name. (`bar` and
- *     `list` draw the same today.)
- *   - on a phone the drawer is shut behind a menu button, so a phone's side `left`/`right`/`top` and every phone style
- *     draw the same; only side `bottom` adds the bar of places.
+ * draws the same as another draws the same picture here.
+ *   - side `left`: the left drawer, nothing else. `bottom`: the drawer AND a bar of places under the page. (`right` and
+ *     `top` are not offered: they draw what `left` draws.)
+ *   - style `rail`: the drawer starts as a slim icon rail. `list`: it starts open, icon and name. (`bar` is not offered:
+ *     it draws what `list` draws.)
+ *   - on a phone the drawer is shut behind a menu button, so a phone's side `left` draws the menu button alone;
+ *     only side `bottom` adds the bar of places. A phone has no style row.
  */
 import type { ChoiceSetting } from '../../../lib/layout-model.ts';
 
@@ -54,7 +55,7 @@ const density = (word: string): Density => (word === 'compact' ? 'compact' : 'co
 export function stateFor(path: ChoiceSetting['path'], word: string): MiniShellState {
   const phone = path.startsWith('phone.');
   const key = phone ? path.slice('phone.'.length) : path;
-  // A phone's drawer is shut behind its menu button, whatever the style.
+  // A phone's drawer is shut behind its menu button.
   const base: MiniShellState = {
     ...NEUTRAL,
     device: phone ? 'phone' : 'wide',
@@ -64,7 +65,7 @@ export function stateFor(path: ChoiceSetting['path'], word: string): MiniShellSt
     case 'nav.side':
       return { ...base, bottom: word === 'bottom' };
     case 'nav.style':
-      return phone ? base : { ...base, drawer: word === 'rail' ? 'rail' : 'open' };
+      return { ...base, drawer: word === 'rail' ? 'rail' : 'open' };
     case 'side.show':
       // `wide-only` shows the column on a wide screen and not on a narrow one; `always` shows it on both.
       return phone
@@ -75,21 +76,6 @@ export function stateFor(path: ChoiceSetting['path'], word: string): MiniShellSt
     default:
       return base;
   }
-}
-
-/**
- * The line under a preview when the word the shell draws is the same as another's, or draws nothing new. `undefined`
- * where the picture already says it.
- */
-export function captionFor(path: ChoiceSetting['path'], word: string): string | undefined {
-  const phone = path.startsWith('phone.');
-  const key = phone ? path.slice('phone.'.length) : path;
-  if (key === 'nav.side' && (word === 'right' || word === 'top'))
-    return phone ? 'Looks the same as Left today.' : 'Looks the same as Left today: the menu is drawn on the left.';
-  if (key === 'nav.style' && phone) return 'No visible change on a phone today.';
-  if (key === 'nav.style' && word === 'bar') return 'Looks the same as List today.';
-  if (key === 'nav.style' && word === 'list') return 'Looks the same as Bar today.';
-  return undefined;
 }
 
 /** The word the loop starts from: the one before `word` in the list, wrapping round. */

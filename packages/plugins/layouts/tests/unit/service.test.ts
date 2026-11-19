@@ -104,6 +104,50 @@ describe('layouts service', () => {
     expect(saved.nav.side).toBe('bottom');
   });
 
+  test('save reads a navigation word the shell does not draw as the default, and keeps the order', async () => {
+    const items = ['settings', 'agenda', 'ferrets'];
+    const { service, tree } = make({
+      'layout.yaml': {
+        overrides: { nav: { side: 'right', style: 'bar', items }, phone: { nav: { side: 'top', style: 'bar' } } },
+      },
+    });
+    expect((await service.save('mine')).ok).toBe(true);
+    const saved = LayoutSchema.parse(Bun.YAML.parse(tree.calls[0]?.edit as string));
+    expect([saved.nav.side, saved.nav.style, saved.nav.items]).toEqual(['left', 'list', items]);
+    expect([saved.phone?.nav?.side, saved.phone?.nav?.style]).toEqual(['left', 'list']);
+    // The round trip: the saved copy, read back and used, shows the default words with the order intact.
+    const again = make({
+      'layouts/mine': Bun.YAML.parse(tree.calls[0]?.edit as string) as Record<string, unknown>,
+      'layout.yaml': { layout: 'mine' },
+    });
+    const now = again.service.current().layout;
+    expect([now.nav.side, now.nav.style, now.nav.items]).toEqual(['left', 'list', items]);
+    expect([now.phone?.nav?.side, now.phone?.nav?.style]).toEqual(['left', 'list']);
+  });
+
+  test('save keeps a drawn phone side, a phone with no nav, and a layout with no phone', async () => {
+    const kept = make({
+      'layout.yaml': { overrides: { nav: { side: 'bottom', style: 'rail' }, phone: { nav: { side: 'bottom' } } } },
+    });
+    await kept.service.save('mine');
+    const saved = LayoutSchema.parse(Bun.YAML.parse(kept.tree.calls[0]?.edit as string));
+    expect([saved.nav.side, saved.nav.style, saved.phone?.nav?.side, saved.phone?.nav?.style]).toEqual([
+      'bottom',
+      'rail',
+      'bottom',
+      undefined,
+    ]);
+    const phoneOnly = make({ 'layout.yaml': { overrides: { phone: { density: 'compact' } } } });
+    await phoneOnly.service.save('mine');
+    expect(LayoutSchema.parse(Bun.YAML.parse(phoneOnly.tree.calls[0]?.edit as string)).phone?.density).toBe('compact');
+    const bare = make({
+      'layouts/b': { ...COMPACT_LAYOUT, id: 'b', phone: undefined },
+      'layout.yaml': { layout: 'b' },
+    });
+    await bare.service.save('c');
+    expect(LayoutSchema.parse(Bun.YAML.parse(bare.tree.calls[0]?.edit as string)).phone).toBeUndefined();
+  });
+
   test('save refuses a name already taken, built-in or saved', async () => {
     const { service } = make({ 'layouts/mine': { ...DEFAULT_LAYOUT, id: 'mine' } });
     for (const id of ['default', 'mine']) {
