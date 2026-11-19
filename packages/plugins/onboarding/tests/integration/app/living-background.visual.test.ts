@@ -9,7 +9,8 @@
  *  - the stars layer (viewport fill only): 17 still stars, three shooting streaks one every 6-11 s on staggered delays,
  *    still under reduced motion (stars drawn, streaks never), paused with a hidden tab;
  *  - the content does not move: its bounding boxes are the same with and without the background;
- *  - text keeps >= 4.5:1 over the brightest frame of the background.
+ *  - text keeps >= 4.5:1 over the brightest frame of the background, and every line of text on the REAL rendered scene
+ *    (the pixels under its glyphs, stars and a streak at its peak included) keeps >= 4.5:1, light and dark, phone and desktop.
  *
  * Set `FY_LIVING_BG_SHOTS_DIR` to keep `<viewport>-<scheme>-<scene>-t0|t3|before.png` (phone 390 and desktop 1280, light and
  * dark; `t0` is the first frame, `t3` the frame three seconds in, `streak` 4.5 s in, a shooting star mid-flight) and `<...>-reduced.png`.
@@ -448,11 +449,157 @@ describe('The living background', () => {
         expect(read.starPeak, 'the streak peak is read from the real animation').toBeGreaterThan(0);
         const star = over(channels(read.star), read.starPeak, glow);
         expect(contrast(channels(read.fg), star), 'text on a streak, worst frame').toBeGreaterThanOrEqual(4.5);
-        expect(contrast(channels(read.muted), star), 'muted text on a streak, worst frame').toBeGreaterThanOrEqual(3);
+        // Muted text over the real stars and streaks is measured on the rendered scene below, against 4.5:1, not modelled here.
         const worst = over(channels(read.dot), read.peak, glow);
         expect(read.peak, 'the breathing peak is read from the real animation').toBeGreaterThan(0);
         expect(contrast(channels(read.fg), worst), 'text on a dot, worst frame').toBeGreaterThanOrEqual(4.5);
         expect(contrast(channels(read.muted), worst), 'muted text on a dot, worst frame').toBeGreaterThanOrEqual(3);
+      } finally {
+        await close();
+      }
+    });
+
+  /**
+   * THE REAL RENDERED SCENE, not a model. Every line of text the page paints in --fg or --muted is found in the DOM, then
+   * the page is screenshotted twice at the same frame, with its text and with the glyphs made transparent. The pixels
+   * the glyphs fully cover (the "ink", where the first picture is the text colour) are looked up in the second picture:
+   * that is the real background under the real letters (glow, cards, grid dots, stars and a streak together), and its
+   * worst contrast against the text colour must be >= 4.5:1. The frames are the awkward ones: the phone grid at its
+   * breathing peak, and each streak at its brightest (a delay + 1.5 % of its 28 s loop). The shot with the sky hidden is only for
+   * the failure message, to say whether the sky or something else pushed the ratio down.
+   */
+  for (const variant of VARIANTS)
+    it(`${variant.name}: every line of text keeps 4.5:1 over the real scene, stars and a streak at its peak included`, async () => {
+      const { tab, close } = await open(SCENES[0] as Scene, variant);
+      try {
+        const lines = await tab.evaluate(() => {
+          const probe = (value: string): string => {
+            const node = document.createElement('i');
+            node.style.color = value;
+            document.body.append(node);
+            const resolved = getComputedStyle(node).color;
+            node.remove();
+            return resolved;
+          };
+          const wanted = new Map([
+            [probe('var(--fg)'), 'fg'],
+            [probe('var(--muted)'), 'muted'],
+          ]);
+          const found: { kind: string; color: string; text: string; x: number; y: number; w: number; h: number }[] = [];
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+            const parent = node.parentElement as Element;
+            if (!(node.textContent ?? '').trim() || parent.closest('[data-living-background], script, style, .sr-only'))
+              continue;
+            const color = getComputedStyle(parent).color;
+            const kind = wanted.get(color);
+            if (kind === undefined) continue;
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            for (const rect of range.getClientRects())
+              if (rect.width > 0 && rect.height > 0)
+                found.push({
+                  kind,
+                  color,
+                  text: (node.textContent ?? '').trim().slice(0, 24),
+                  x: rect.x,
+                  y: rect.y,
+                  w: rect.width,
+                  h: rect.height,
+                });
+          }
+          return found;
+        });
+        expect(
+          lines.filter(line => line.kind === 'muted').length,
+          'the scene has muted copy to measure',
+        ).toBeGreaterThan(2);
+        expect(lines.filter(line => line.kind === 'fg').length, 'the scene has body copy to measure').toBeGreaterThan(
+          2,
+        );
+        const scale = variant.phone ? 2 : 1;
+        const hide = await tab.addStyleTag({
+          content:
+            'body *:not([data-living-background]):not([data-living-background] *){-webkit-text-fill-color:transparent!important;text-shadow:none!important}',
+        });
+        const frame = async (at: number, hideSky: boolean): Promise<{ inked: Buffer; bare: Buffer }> => {
+          await tab.evaluate(
+            ({ time, hidden }) => {
+              for (const animation of document.getAnimations()) {
+                animation.pause();
+                animation.currentTime = time;
+              }
+              const sky = document.querySelector('.fy-lb-sky') as HTMLElement | null;
+              if (sky) sky.style.display = hidden ? 'none' : '';
+            },
+            { time: at, hidden: hideSky },
+          );
+          await hide.evaluate(node => ((node as HTMLStyleElement).disabled = true));
+          const inked = await tab.screenshot({ type: 'png' });
+          await hide.evaluate(node => ((node as HTMLStyleElement).disabled = false));
+          const bare = await tab.screenshot({ type: 'png' });
+          return { inked, bare };
+        };
+        const worst = async (at: number, hideSky: boolean): Promise<{ ratio: number; where: string }> => {
+          const { inked, bare } = await frame(at, hideSky);
+          return await tab.evaluate(
+            async ({ a, b, boxes, factor }) => {
+              const draw = async (data: string) => {
+                const image = await createImageBitmap(await (await fetch(`data:image/png;base64,${data}`)).blob());
+                const canvas = document.createElement('canvas');
+                canvas.width = image.width;
+                canvas.height = image.height;
+                const context = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D;
+                context.drawImage(image, 0, 0);
+                return { image, context };
+              };
+              const [withText, without] = [await draw(a), await draw(b)];
+              const lin = (channel: number): number => {
+                const c = channel / 255;
+                return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+              };
+              const lum = (r: number, g: number, bl: number): number =>
+                0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(bl);
+              let low = { ratio: Infinity, where: 'no ink found' };
+              for (const box of boxes) {
+                const [tr = 0, tg = 0, tb = 0] = (box.color.match(/-?\d*\.?\d+/gu) ?? []).map(Number);
+                const text = lum(tr, tg, tb);
+                const x0 = Math.max(0, Math.floor(box.x * factor));
+                const y0 = Math.max(0, Math.floor(box.y * factor));
+                const w = Math.min(withText.image.width - x0, Math.ceil(box.w * factor));
+                const h = Math.min(withText.image.height - y0, Math.ceil(box.h * factor));
+                if (w <= 0 || h <= 0) continue;
+                const top = withText.context.getImageData(x0, y0, w, h).data;
+                const under = without.context.getImageData(x0, y0, w, h).data;
+                for (let index = 0; index < top.length; index += 4) {
+                  // Fully covered by a glyph: the picture with text is the text colour there.
+                  const near =
+                    Math.abs((top[index] as number) - tr) +
+                      Math.abs((top[index + 1] as number) - tg) +
+                      Math.abs((top[index + 2] as number) - tb) <=
+                    6;
+                  if (!near) continue;
+                  const back = lum(under[index] as number, under[index + 1] as number, under[index + 2] as number);
+                  const ratio = (Math.max(text, back) + 0.05) / (Math.min(text, back) + 0.05);
+                  if (ratio < low.ratio)
+                    low = {
+                      ratio,
+                      where: `${box.kind} "${box.text}" at ${Math.round(box.x + ((index / 4) % w) / factor)},${Math.round(box.y + Math.floor(index / 4 / w) / factor)}`,
+                    };
+                }
+              }
+              return low;
+            },
+            { a: inked.toString('base64'), b: bare.toString('base64'), boxes: lines, factor: scale },
+          );
+        };
+        // t = 3.5 s: the grid at its breathing peak. 4.42, 13.42, 21.42 s: streak a, b, c at their brightest.
+        // The breathing peak is held to 4.5:1 on a phone only: the desktop grid keeps its original 3:1 dot budget (above).
+        for (const at of variant.phone ? [0, 3_500, 4_420, 13_420, 21_420] : [0, 4_420, 13_420, 21_420]) {
+          const [real, base] = [await worst(at, false), await worst(at, true)];
+          const detail = `t=${at} ms: ${real.ratio.toFixed(2)} with the sky (${real.where}); ${base.ratio.toFixed(2)} with the sky hidden (${base.where})`;
+          expect(real.ratio, detail).toBeGreaterThanOrEqual(4.5);
+        }
       } finally {
         await close();
       }

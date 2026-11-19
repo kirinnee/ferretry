@@ -167,6 +167,40 @@
 .fy-lb[data-live][data-paused] .fy-lb-streak {
   animation-play-state: paused;
 }
+/* A phone's copy runs edge to edge, so the radial thinning above leaves stars and streaks right behind the muted lines
+   (4.40:1 measured, below 4.5). On a narrow screen the sky lives only in the band under where the page's content ends, and the
+   streaks are moved into that band. A page tall enough to scroll can still carry a line through the band for a moment. */
+@media (max-width: 640px) {
+  /* The same goes for the grid: a dot under a muted glyph took the copy under 4.5:1 at the top of a breath, so on a phone
+     the breath is softer (same name, same movement, a fainter peak). */
+  @keyframes fy-lb-breathe {
+    0%,
+    100% {
+      opacity: 0.04;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.1;
+      transform: scale(1.04);
+    }
+  }
+  .fy-lb-sky {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0 74%, #000 88%);
+    mask-image: linear-gradient(to bottom, transparent 0 74%, #000 88%);
+  }
+  .fy-lb-streak-a {
+    left: 6%;
+    top: 82%;
+  }
+  .fy-lb-streak-b {
+    left: 52%;
+    top: 86%;
+  }
+  .fy-lb-streak-c {
+    left: 28%;
+    top: 84%;
+  }
+}
 @keyframes fy-lb-shoot {
   0% {
     opacity: 0;
